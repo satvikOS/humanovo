@@ -1,0 +1,231 @@
+"""
+Hypothesis Generation Lambda Handler
+
+Generates biomedical hypotheses using AWS Bedrock (Claude) with RAG.
+"""
+
+import json
+import os
+from datetime import datetime
+from typing import Any, Dict, List
+from uuid import uuid4
+
+import boto3
+from aws_lambda_powertools import Logger, Tracer, Metrics
+from aws_lambda_powertools.event_handler import APIGatewayHttpResolver
+from aws_lambda_powertools.utilities.typing import LambdaContext
+
+logger = Logger()
+tracer = Tracer()
+metrics = Metrics()
+
+app = APIGatewayHttpResolver()
+
+# AWS Clients
+bedrock_runtime = boto3.client("bedrock-runtime")
+dynamodb = boto3.resource("dynamodb")
+
+# Configuration
+BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "anthropic.claude-3-5-sonnet-20241022-v2:0")
+HYPOTHESES_TABLE = os.environ.get("HYPOTHESES_TABLE", "genup-dev-hypotheses")
+EVIDENCE_TABLE = os.environ.get("EVIDENCE_TABLE", "genup-dev-evidence")
+
+
+@tracer.capture_method
+def invoke_bedrock(prompt: str, max_tokens: int = 2000) -> str:
+    """Invoke AWS Bedrock with Claude model."""
+    body = {
+        "anthropic_version": "bedrock-2023-05-31",
+        "max_tokens": max_tokens,
+        "temperature": 0.7,
+        "messages": [
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
+        "system": """You are a biomedical research assistant specialized in generating novel,
+scientifically grounded hypotheses. Your hypotheses should be:
+1. Testable and specific
+2. Based on provided evidence
+3. Novel but plausible
+4. Include a clear mechanism
+5. Reference supporting evidence
+
+Format each hypothesis with:
+- HYPOTHESIS: Clear statement
+- MECHANISM: Proposed biological mechanism
+- RATIONALE: Evidence-based reasoning
+- CONFIDENCE: Low/Medium/High
+"""
+    }
+
+    response = bedrock_runtime.invoke_model(
+        modelId=BEDROCK_MODEL_ID,
+        contentType="application/json",
+        accept="application/json",
+        body=json.dumps(body)
+    )
+
+    response_body = json.loads(response["body"].read())
+    return response_body["content"][0]["text"]
+
+
+@tracer.capture_method
+def retrieve_evidence(query: str, project_id: str = None, limit: int = 10) -> List[Dict]:
+    """Retrieve relevant evidence from DynamoDB."""
+    table = dynamodb.Table(EVIDENCE_TABLE)
+
+    # Simple scan with filter (in production, use OpenSearch for vector search)
+    scan_params = {"Limit": limit * 2}
+
+    if project_id:
+        scan_params["FilterExpression"] = "project_id = :pid"
+        scan_params["ExpressionAttributeValues"] = {":pid": project_id}
+
+    response = table.scan(**scan_params)
+    items = response.get("Items", [])
+
+    # Basic relevance scoring (in production, use embeddings)
+    query_terms = set(query.lower().split())
+    scored_items = []
+
+    for item in items:
+        content = item.get("content", "").lower()
+        title = item.get("title", "").lower()
+        score = sum(1 for term in query_terms if term in content or term in title)
+        if score > 0:
+            scored_items.append((score, item))
+
+    scored_items.sort(key=lambda x: x[0], reverse=True)
+    return [item for _, item in scored_items[:limit]]
+
+
+@tracer.capture_method
+def parse_hypotheses(response_text: str) -> List[Dict]:
+    """Parse LLM response into structured hypotheses."""
+    hypotheses = []
+    current = {}
+
+    for line in response_text.split("\n"):
+        line = line.strip()
+        if line.startswith("HYPOTHESIS:"):
+            if current.get("statement"):
+                hypotheses.append(current)
+            current = {"statement": line.replace("HYPOTHESIS:", "").strip()}
+        elif line.startswith("MECHANISM:"):
+            current["mechanism"] = line.replace("MECHANISM:", "").strip()
+        elif line.startswith("RATIONALE:"):
+            current["rationale"] = line.replace("RATIONALE:", "").strip()
+        elif line.startswith("CONFIDENCE:"):
+            conf = line.replace("CONFIDENCE:", "").strip().lower()
+            current["confidence_score"] = {"low": 0.3, "medium": 0.6, "high": 0.85}.get(conf, 0.5)
+        elif current and line and "statement" in current:
+            # Continue previous field
+            if "rationale" in current:
+                current["rationale"] += " " + line
+            elif "mechanism" in current:
+                current["mechanism"] += " " + line
+            else:
+                current["statement"] += " " + line
+
+    if current.get("statement"):
+        hypotheses.append(current)
+
+    return hypotheses
+
+
+@tracer.capture_method
+def save_hypothesis(hypothesis: Dict, project_id: str, evidence_ids: List[str]) -> Dict:
+    """Save hypothesis to DynamoDB."""
+    table = dynamodb.Table(HYPOTHESES_TABLE)
+
+    now = datetime.utcnow().isoformat()
+    hypothesis_id = str(uuid4())
+
+    item = {
+        "id": hypothesis_id,
+        "project_id": project_id,
+        "statement": hypothesis.get("statement", ""),
+        "mechanism": hypothesis.get("mechanism", ""),
+        "rationale": hypothesis.get("rationale", ""),
+        "confidence_score": hypothesis.get("confidence_score", 0.5),
+        "novelty_score": hypothesis.get("novelty_score", 0.5),
+        "status": "generated",
+        "evidence_ids": evidence_ids,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    table.put_item(Item=item)
+    return item
+
+
+@app.post("/api/v1/hypotheses/generate")
+@tracer.capture_method
+def generate_hypotheses():
+    """Generate hypotheses based on a research query."""
+    body = app.current_event.json_body or {}
+
+    query = body.get("query", "")
+    project_id = body.get("project_id", "")
+    max_hypotheses = min(body.get("max_hypotheses", 5), 10)
+    focus_entities = body.get("focus_entities", [])
+
+    if not query:
+        return {"error": "Query is required"}, 400
+
+    logger.info("Generating hypotheses", query=query[:100], project_id=project_id)
+    metrics.add_metric(name="HypothesisGenerationRequests", unit="Count", value=1)
+
+    # Retrieve relevant evidence
+    evidence = retrieve_evidence(query, project_id, limit=15)
+    evidence_ids = [e.get("id", "") for e in evidence]
+
+    # Build prompt with evidence
+    evidence_text = "\n".join([
+        f"- [{e.get('source_type', 'unknown')}] {e.get('title', 'Untitled')}: {e.get('content', '')[:300]}"
+        for e in evidence[:10]
+    ])
+
+    entities_text = ""
+    if focus_entities:
+        entities_text = f"\nFocus on these entities: {', '.join(focus_entities)}"
+
+    prompt = f"""Research Question: {query}
+{entities_text}
+
+Available Evidence:
+{evidence_text if evidence_text else "No specific evidence available. Generate hypotheses based on general biomedical knowledge."}
+
+Generate {max_hypotheses} novel, testable hypotheses that address the research question.
+Each hypothesis should propose a specific mechanism and cite the relevant evidence."""
+
+    # Generate with Bedrock
+    response_text = invoke_bedrock(prompt, max_tokens=3000)
+
+    # Parse response
+    hypotheses_data = parse_hypotheses(response_text)
+
+    # Save hypotheses
+    saved_hypotheses = []
+    for h in hypotheses_data[:max_hypotheses]:
+        h["novelty_score"] = 0.6  # Default novelty score
+        saved = save_hypothesis(h, project_id, evidence_ids)
+        saved_hypotheses.append(saved)
+
+    metrics.add_metric(name="HypothesesGenerated", unit="Count", value=len(saved_hypotheses))
+
+    return {
+        "hypotheses": saved_hypotheses,
+        "evidence_used": len(evidence),
+        "query": query,
+    }
+
+
+@logger.inject_lambda_context
+@tracer.capture_lambda_handler
+@metrics.log_metrics(capture_cold_start_metric=True)
+def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
+    """Lambda handler entry point."""
+    return app.resolve(event, context)
