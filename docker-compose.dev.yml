@@ -1,0 +1,34 @@
+version: '3.8'
+
+# Development override - run with: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+services:
+  postgres:
+    ports:
+      - "5432:5432"
+
+  redis:
+    ports:
+      - "6379:6379"
+
+  neo4j:
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+
+  backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    volumes:
+      - ./backend/app:/app/app:ro
+    environment:
+      - DEBUG=true
+      - LOG_LEVEL=DEBUG
+      - LOG_FORMAT=console
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # Don't build frontend in dev - use npm run dev instead
+  frontend:
+    profiles:
+      - production
