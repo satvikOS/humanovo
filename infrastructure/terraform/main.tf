@@ -19,14 +19,15 @@ terraform {
     }
   }
 
-  backend "s3" {
-    # Configure in backend.hcl or via CLI
-    # bucket         = "genup-terraform-state"
-    # key            = "infrastructure/terraform.tfstate"
-    # region         = "us-east-1"
-    # dynamodb_table = "genup-terraform-locks"
-    # encrypt        = true
-  }
+  # Using local backend for initial deployment
+  # Migrate to S3 backend after bootstrap
+  # backend "s3" {
+  #   bucket         = "genup-terraform-state"
+  #   key            = "infrastructure/terraform.tfstate"
+  #   region         = "us-east-1"
+  #   dynamodb_table = "genup-terraform-locks"
+  #   encrypt        = true
+  # }
 }
 
 provider "aws" {
