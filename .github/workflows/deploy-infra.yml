@@ -16,6 +16,11 @@ on:
           - dev
           - staging
           - prod
+      cleanup:
+        description: 'Clean up orphaned resources before deploy'
+        required: false
+        default: 'true'
+        type: boolean
 
 env:
   AWS_REGION: us-east-1
@@ -39,6 +44,72 @@ jobs:
 
       - name: Verify AWS Identity
         run: aws sts get-caller-identity
+
+      - name: Cleanup Orphaned Resources
+        if: ${{ github.event.inputs.cleanup != 'false' }}
+        continue-on-error: true
+        run: |
+          echo "Cleaning up orphaned resources from previous failed deployments..."
+
+          # Delete orphaned IAM roles (ignore errors if they don't exist or can't be deleted)
+          for role in genup-dev-lambda-execution genup-dev-api-gateway genup-dev-deployment; do
+            echo "Attempting to delete role: $role"
+            # First delete inline policies
+            aws iam list-role-policies --role-name $role 2>/dev/null | jq -r '.PolicyNames[]' | while read policy; do
+              aws iam delete-role-policy --role-name $role --policy-name $policy 2>/dev/null || true
+            done
+            # Then detach managed policies
+            aws iam list-attached-role-policies --role-name $role 2>/dev/null | jq -r '.AttachedPolicies[].PolicyArn' | while read policy; do
+              aws iam detach-role-policy --role-name $role --policy-arn $policy 2>/dev/null || true
+            done
+            # Finally delete the role
+            aws iam delete-role --role-name $role 2>/dev/null || true
+          done
+
+          # Delete orphaned KMS alias
+          aws kms delete-alias --alias-name alias/genup-dev 2>/dev/null || true
+
+          # Delete orphaned CloudWatch log groups
+          for log_group in /aws/apigateway/genup-dev-api; do
+            aws logs delete-log-group --log-group-name $log_group 2>/dev/null || true
+          done
+
+          # Delete orphaned CloudFront function
+          FUNCTION_ETAG=$(aws cloudfront describe-function --name genup-dev-spa-routing 2>/dev/null | jq -r '.ETag') || true
+          if [ -n "$FUNCTION_ETAG" ] && [ "$FUNCTION_ETAG" != "null" ]; then
+            aws cloudfront delete-function --name genup-dev-spa-routing --if-match $FUNCTION_ETAG 2>/dev/null || true
+          fi
+
+          # Delete orphaned CloudFront OAC
+          OAC_ID=$(aws cloudfront list-origin-access-controls 2>/dev/null | jq -r '.OriginAccessControlList.Items[] | select(.Name=="genup-dev-frontend-oac") | .Id') || true
+          if [ -n "$OAC_ID" ] && [ "$OAC_ID" != "null" ]; then
+            OAC_ETAG=$(aws cloudfront get-origin-access-control --id $OAC_ID 2>/dev/null | jq -r '.ETag') || true
+            aws cloudfront delete-origin-access-control --id $OAC_ID --if-match $OAC_ETAG 2>/dev/null || true
+          fi
+
+          # Delete orphaned WAF WebACL
+          WAF_ID=$(aws wafv2 list-web-acls --scope CLOUDFRONT --region us-east-1 2>/dev/null | jq -r '.WebACLs[] | select(.Name=="genup-dev-waf") | .Id') || true
+          if [ -n "$WAF_ID" ] && [ "$WAF_ID" != "null" ]; then
+            WAF_ARN=$(aws wafv2 list-web-acls --scope CLOUDFRONT --region us-east-1 2>/dev/null | jq -r '.WebACLs[] | select(.Name=="genup-dev-waf") | .ARN') || true
+            WAF_TOKEN=$(aws wafv2 get-web-acl --name genup-dev-waf --scope CLOUDFRONT --id $WAF_ID --region us-east-1 2>/dev/null | jq -r '.LockToken') || true
+            aws wafv2 delete-web-acl --name genup-dev-waf --scope CLOUDFRONT --id $WAF_ID --lock-token $WAF_TOKEN --region us-east-1 2>/dev/null || true
+          fi
+
+          # Delete orphaned SQS queues
+          for queue_name in genup-dev-simulation-dlq genup-dev-simulation-queue; do
+            QUEUE_URL=$(aws sqs get-queue-url --queue-name $queue_name 2>/dev/null | jq -r '.QueueUrl') || true
+            if [ -n "$QUEUE_URL" ] && [ "$QUEUE_URL" != "null" ]; then
+              aws sqs delete-queue --queue-url $QUEUE_URL 2>/dev/null || true
+            fi
+          done
+
+          echo "Cleanup complete (errors are expected for non-existent resources)"
+
+      - name: Wait for IAM propagation
+        if: ${{ github.event.inputs.cleanup != 'false' }}
+        run: |
+          echo "Waiting 30 seconds for IAM/resource deletions to propagate..."
+          sleep 30
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
@@ -67,4 +138,3 @@ jobs:
           echo "| CloudFront Domain | $(terraform output -raw cloudfront_domain_name 2>/dev/null || echo 'N/A') |" >> $GITHUB_STEP_SUMMARY
           echo "| API Gateway URL | $(terraform output -raw api_gateway_stage_url 2>/dev/null || echo 'N/A') |" >> $GITHUB_STEP_SUMMARY
           echo "| Frontend Bucket | $(terraform output -raw frontend_bucket_name 2>/dev/null || echo 'N/A') |" >> $GITHUB_STEP_SUMMARY
-# Trigger deployment
