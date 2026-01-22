@@ -203,6 +203,7 @@ module "lambda" {
   suffix              = local.suffix
   environment         = var.environment
   aws_region          = var.aws_region
+  account_id          = data.aws_caller_identity.current.account_id
   kms_key_arn         = aws_kms_key.main.arn
   secrets_arn         = aws_secretsmanager_secret.api_keys.arn
   lambda_role_arn     = module.iam.lambda_execution_role_arn

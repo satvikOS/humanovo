@@ -16,6 +16,11 @@ variable "aws_region" {
   type = string
 }
 
+variable "account_id" {
+  type        = string
+  description = "AWS Account ID"
+}
+
 variable "kms_key_arn" {
   type = string
 }
@@ -302,7 +307,7 @@ resource "aws_lambda_permission" "api_gateway" {
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.functions[each.key].function_name
   principal     = "apigateway.amazonaws.com"
-  source_arn    = "arn:aws:execute-api:${var.aws_region}:*:*/*/*"
+  source_arn    = "arn:aws:execute-api:${var.aws_region}:${var.account_id}:*/*/*"
 }
 
 # ==================== SQS Queue for Async Processing ====================
