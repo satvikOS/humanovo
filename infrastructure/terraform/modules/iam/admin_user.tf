@@ -4,7 +4,7 @@
 variable "create_admin_user" {
   description = "Whether to create the admin IAM user"
   type        = bool
-  default     = true
+  default     = false  # Disabled by default - use existing IAM user
 }
 
 variable "admin_user_name" {

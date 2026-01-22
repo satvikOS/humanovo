@@ -287,7 +287,8 @@ resource "aws_cloudwatch_log_group" "lambda_logs" {
 
   name              = "/aws/lambda/${var.name_prefix}-${each.key}"
   retention_in_days = var.environment == "prod" ? 90 : 14
-  kms_key_id        = var.kms_key_arn
+  # Using default encryption to avoid KMS permission complexity
+  # kms_key_id        = var.kms_key_arn
 
   tags = {
     Name     = "${var.name_prefix}-${each.key}-logs"

@@ -93,11 +93,19 @@ resource "aws_iam_user_policy" "genup_admin_full" {
     Statement = [
       # Full access to GenUp resources (scoped by naming convention)
       {
-        Sid    = "GenUpLambda"
+        Sid    = "GenUpLambdaFunctions"
         Effect = "Allow"
         Action = ["lambda:*"]
         Resource = [
-          "arn:aws:lambda:*:*:function:genup-*",
+          "arn:aws:lambda:*:*:function:genup-*"
+        ]
+      },
+      {
+        Sid    = "GenUpLambdaLayers"
+        Effect = "Allow"
+        Action = ["lambda:*"]
+        Resource = [
+          "arn:aws:lambda:*:*:layer:genup-*",
           "arn:aws:lambda:*:*:layer:genup-*:*"
         ]
       },
@@ -112,7 +120,8 @@ resource "aws_iam_user_policy" "genup_admin_full" {
           "lambda:UpdateEventSourceMapping",
           "lambda:ListFunctions",
           "lambda:ListLayers",
-          "lambda:GetAccountSettings"
+          "lambda:GetAccountSettings",
+          "lambda:PublishLayerVersion"
         ]
         Resource = "*"
       },

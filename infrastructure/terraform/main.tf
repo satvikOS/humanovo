@@ -106,6 +106,42 @@ resource "aws_kms_key" "main" {
           "kms:GenerateDataKey*"
         ]
         Resource = "*"
+      },
+      {
+        Sid    = "Allow CloudWatch Logs to use the key"
+        Effect = "Allow"
+        Principal = {
+          Service = "logs.${var.aws_region}.amazonaws.com"
+        }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = "*"
+        Condition = {
+          ArnLike = {
+            "kms:EncryptionContext:aws:logs:arn" = "arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:*"
+          }
+        }
+      },
+      {
+        Sid    = "Allow DynamoDB to use the key"
+        Effect = "Allow"
+        Principal = {
+          Service = "dynamodb.amazonaws.com"
+        }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey",
+          "kms:CreateGrant"
+        ]
+        Resource = "*"
       }
     ]
   })
@@ -147,7 +183,8 @@ resource "aws_secretsmanager_secret_version" "api_keys" {
 resource "aws_cloudwatch_log_group" "main" {
   name              = "/aws/genup/${var.environment}"
   retention_in_days = var.log_retention_days
-  kms_key_id        = aws_kms_key.main.arn
+  # Using default encryption to avoid KMS permission complexity
+  # kms_key_id        = aws_kms_key.main.arn
 
   tags = {
     Name = "${local.name_prefix}-logs"

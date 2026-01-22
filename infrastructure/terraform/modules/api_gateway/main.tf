@@ -47,7 +47,8 @@ resource "aws_apigatewayv2_api" "main" {
   description   = "GenUp Biomedical Discovery Platform API"
 
   cors_configuration {
-    allow_credentials = true
+    # allow_credentials cannot be true when allow_origins contains "*"
+    allow_credentials = contains(var.cors_allowed_origins, "*") ? false : true
     allow_headers     = ["Content-Type", "Authorization", "X-Request-ID", "X-Api-Key"]
     allow_methods     = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
     allow_origins     = var.cors_allowed_origins

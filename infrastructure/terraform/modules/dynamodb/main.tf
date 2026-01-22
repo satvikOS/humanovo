@@ -47,8 +47,9 @@ resource "aws_dynamodb_table" "projects" {
   }
 
   server_side_encryption {
-    enabled     = true
-    kms_key_arn = var.kms_key_arn
+    enabled = true
+    # Using AWS managed encryption to avoid kms:CreateGrant permission requirement
+    # kms_key_arn = var.kms_key_arn
   }
 
   point_in_time_recovery {
@@ -102,8 +103,9 @@ resource "aws_dynamodb_table" "hypotheses" {
   }
 
   server_side_encryption {
-    enabled     = true
-    kms_key_arn = var.kms_key_arn
+    enabled = true
+    # Using AWS managed encryption to avoid kms:CreateGrant permission requirement
+    # kms_key_arn = var.kms_key_arn
   }
 
   point_in_time_recovery {
@@ -157,8 +159,9 @@ resource "aws_dynamodb_table" "evidence" {
   }
 
   server_side_encryption {
-    enabled     = true
-    kms_key_arn = var.kms_key_arn
+    enabled = true
+    # Using AWS managed encryption to avoid kms:CreateGrant permission requirement
+    # kms_key_arn = var.kms_key_arn
   }
 
   point_in_time_recovery {
@@ -224,8 +227,9 @@ resource "aws_dynamodb_table" "simulations" {
   }
 
   server_side_encryption {
-    enabled     = true
-    kms_key_arn = var.kms_key_arn
+    enabled = true
+    # Using AWS managed encryption to avoid kms:CreateGrant permission requirement
+    # kms_key_arn = var.kms_key_arn
   }
 
   point_in_time_recovery {
@@ -268,8 +272,9 @@ resource "aws_dynamodb_table" "knowledge_metadata" {
   }
 
   server_side_encryption {
-    enabled     = true
-    kms_key_arn = var.kms_key_arn
+    enabled = true
+    # Using AWS managed encryption to avoid kms:CreateGrant permission requirement
+    # kms_key_arn = var.kms_key_arn
   }
 
   tags = {
@@ -324,8 +329,9 @@ resource "aws_dynamodb_table" "agent_tasks" {
   }
 
   server_side_encryption {
-    enabled     = true
-    kms_key_arn = var.kms_key_arn
+    enabled = true
+    # Using AWS managed encryption to avoid kms:CreateGrant permission requirement
+    # kms_key_arn = var.kms_key_arn
   }
 
   tags = {
