@@ -210,6 +210,27 @@ jobs:
 
           echo "Placeholder artifacts uploaded successfully to $BUCKET"
 
+          # Store bucket name for verification step
+          echo "ARTIFACTS_BUCKET=$BUCKET" >> $GITHUB_ENV
+
+      - name: Verify Lambda Artifacts Exist
+        run: |
+          echo "Verifying artifacts in bucket: $ARTIFACTS_BUCKET"
+
+          # Wait for S3 eventual consistency
+          sleep 5
+
+          # Verify layer files exist
+          echo "Checking lambda layers..."
+          aws s3 ls s3://$ARTIFACTS_BUCKET/lambda-layers/dependencies.zip || { echo "ERROR: dependencies.zip not found"; exit 1; }
+          aws s3 ls s3://$ARTIFACTS_BUCKET/lambda-layers/scipy.zip || { echo "ERROR: scipy.zip not found"; exit 1; }
+
+          # Verify at least one function file exists
+          echo "Checking lambda functions..."
+          aws s3 ls s3://$ARTIFACTS_BUCKET/lambda-functions/api_core.zip || { echo "ERROR: api_core.zip not found"; exit 1; }
+
+          echo "All required artifacts verified successfully"
+
       - name: Terraform Plan - Phase 2
         working-directory: infrastructure/terraform
         run: terraform plan -var-file=environments/dev.tfvars -out=tfplan
