@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { FiSearch, FiZoomIn, FiZoomOut, FiMaximize } from 'react-icons/fi'
 import { api, Entity } from '../services/api'
@@ -8,7 +8,7 @@ export default function KnowledgeGraph() {
   const [selectedEntity, setSelectedEntity] = useState<Entity | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
-  const { data: searchResults, isLoading: isSearching } = useQuery({
+  const { data: searchResults } = useQuery({
     queryKey: ['entities', 'search', searchQuery],
     queryFn: () => api.searchEntities(searchQuery, { limit: 20 }),
     enabled: searchQuery.length >= 2,

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { FiPlus, FiFolder, FiTrash2, FiEdit2, FiX } from 'react-icons/fi'
+import { FiPlus, FiFolder, FiX } from 'react-icons/fi'
 import { api, ProjectCreate, Project } from '../services/api'
 
 function CreateProjectModal({ onClose }: { onClose: () => void }) {
