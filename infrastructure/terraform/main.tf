@@ -291,6 +291,7 @@ module "cloudfront" {
   }
 
   name_prefix           = local.name_prefix
+  suffix                = local.suffix
   environment           = var.environment
   frontend_bucket_id    = module.s3.frontend_bucket_id
   frontend_bucket_arn   = module.s3.frontend_bucket_arn

@@ -13,6 +13,11 @@ variable "name_prefix" {
   type = string
 }
 
+variable "suffix" {
+  type        = string
+  description = "Random suffix for unique resource names"
+}
+
 variable "environment" {
   type = string
 }
@@ -66,7 +71,7 @@ locals {
 # ==================== Origin Access Control ====================
 
 resource "aws_cloudfront_origin_access_control" "frontend" {
-  name                              = "${var.name_prefix}-frontend-oac"
+  name                              = "${var.name_prefix}-frontend-oac-${var.suffix}"
   description                       = "OAC for GenUp frontend S3 bucket"
   origin_access_control_origin_type = "s3"
   signing_behavior                  = "always"
@@ -106,7 +111,7 @@ resource "aws_s3_bucket_policy" "frontend" {
 resource "aws_wafv2_web_acl" "main" {
   count = var.waf_enabled ? 1 : 0
 
-  name        = "${var.name_prefix}-waf"
+  name        = "${var.name_prefix}-waf-${var.suffix}"
   description = "WAF for GenUp CloudFront distribution"
   scope       = "CLOUDFRONT"
 
@@ -361,7 +366,7 @@ resource "aws_cloudfront_distribution" "main" {
 # ==================== CloudFront Function for SPA Routing ====================
 
 resource "aws_cloudfront_function" "spa_routing" {
-  name    = "${var.name_prefix}-spa-routing"
+  name    = "${var.name_prefix}-spa-routing-${var.suffix}"
   runtime = "cloudfront-js-2.0"
   comment = "Handles SPA routing for React app"
   publish = true
