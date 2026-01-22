@@ -175,44 +175,40 @@ jobs:
           terraform apply -auto-approve tfplan || true
 
       - name: Upload Placeholder Lambda Artifacts
-        working-directory: infrastructure/terraform
         run: |
-          # Get the artifacts bucket name from terraform output
-          BUCKET=$(terraform output -raw artifacts_bucket_name 2>/dev/null || echo "")
+          # Find the artifacts bucket using AWS CLI directly (avoid terraform wrapper issues)
+          echo "Searching for artifacts bucket..."
+          BUCKET=$(aws s3api list-buckets --query "Buckets[?contains(Name, 'genup-dev-artifacts')].Name | [0]" --output text)
 
-          if [ -z "$BUCKET" ]; then
-            # Fallback: find the most recent bucket
-            BUCKET=$(aws s3 ls | grep genup-dev-artifacts | sort -r | head -1 | awk '{print $3}')
-          fi
-
-          if [ -n "$BUCKET" ]; then
-            echo "Found artifacts bucket: $BUCKET"
-
-            # Create a minimal valid Lambda layer zip
-            mkdir -p /tmp/lambda-layer/python
-            echo "# Placeholder" > /tmp/lambda-layer/python/__init__.py
-            cd /tmp/lambda-layer && zip -r ../dependencies.zip python/
-            cd /tmp/lambda-layer && zip -r ../scipy.zip python/
-
-            # Upload placeholder layers
-            aws s3 cp /tmp/dependencies.zip s3://$BUCKET/lambda-layers/dependencies.zip
-            aws s3 cp /tmp/scipy.zip s3://$BUCKET/lambda-layers/scipy.zip
-
-            # Create placeholder function zips
-            mkdir -p /tmp/lambda-func
-            echo "def handler(event, context): return {'statusCode': 200, 'body': 'placeholder'}" > /tmp/lambda-func/handler.py
-            cd /tmp/lambda-func && zip -r ../function.zip handler.py
-
-            # Upload placeholder functions
-            for func in api_core projects hypotheses evidence knowledge hypothesis_generation agent_orchestrator search_agent embeddings simulation simulation_worker ingestion pubmed_fetcher clinical_trials_fetcher; do
-              aws s3 cp /tmp/function.zip s3://$BUCKET/lambda-functions/$func.zip
-            done
-
-            echo "Placeholder artifacts uploaded successfully to $BUCKET"
-          else
+          # Validate bucket name (must not be empty or 'None')
+          if [ -z "$BUCKET" ] || [ "$BUCKET" = "None" ] || [ "$BUCKET" = "null" ]; then
             echo "ERROR: No artifacts bucket found"
             exit 1
           fi
+
+          echo "Found artifacts bucket: $BUCKET"
+
+          # Create a minimal valid Lambda layer zip
+          mkdir -p /tmp/lambda-layer/python
+          echo "# Placeholder" > /tmp/lambda-layer/python/__init__.py
+          cd /tmp/lambda-layer && zip -r ../dependencies.zip python/
+          cd /tmp/lambda-layer && zip -r ../scipy.zip python/
+
+          # Upload placeholder layers
+          aws s3 cp /tmp/dependencies.zip s3://$BUCKET/lambda-layers/dependencies.zip
+          aws s3 cp /tmp/scipy.zip s3://$BUCKET/lambda-layers/scipy.zip
+
+          # Create placeholder function zips
+          mkdir -p /tmp/lambda-func
+          echo "def handler(event, context): return {'statusCode': 200, 'body': 'placeholder'}" > /tmp/lambda-func/handler.py
+          cd /tmp/lambda-func && zip -r ../function.zip handler.py
+
+          # Upload placeholder functions
+          for func in api_core projects hypotheses evidence knowledge hypothesis_generation agent_orchestrator search_agent embeddings simulation simulation_worker ingestion pubmed_fetcher clinical_trials_fetcher; do
+            aws s3 cp /tmp/function.zip s3://$BUCKET/lambda-functions/$func.zip
+          done
+
+          echo "Placeholder artifacts uploaded successfully to $BUCKET"
 
       - name: Terraform Plan - Phase 2
         working-directory: infrastructure/terraform
