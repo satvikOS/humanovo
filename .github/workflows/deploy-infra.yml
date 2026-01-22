@@ -175,9 +175,15 @@ jobs:
           terraform apply -auto-approve tfplan || true
 
       - name: Upload Placeholder Lambda Artifacts
+        working-directory: infrastructure/terraform
         run: |
-          # Find the artifacts bucket
-          BUCKET=$(aws s3 ls | grep genup-dev-artifacts | awk '{print $3}' | head -1)
+          # Get the artifacts bucket name from terraform output
+          BUCKET=$(terraform output -raw artifacts_bucket_name 2>/dev/null || echo "")
+
+          if [ -z "$BUCKET" ]; then
+            # Fallback: find the most recent bucket
+            BUCKET=$(aws s3 ls | grep genup-dev-artifacts | sort -r | head -1 | awk '{print $3}')
+          fi
 
           if [ -n "$BUCKET" ]; then
             echo "Found artifacts bucket: $BUCKET"
@@ -202,9 +208,10 @@ jobs:
               aws s3 cp /tmp/function.zip s3://$BUCKET/lambda-functions/$func.zip
             done
 
-            echo "Placeholder artifacts uploaded successfully"
+            echo "Placeholder artifacts uploaded successfully to $BUCKET"
           else
-            echo "No artifacts bucket found yet"
+            echo "ERROR: No artifacts bucket found"
+            exit 1
           fi
 
       - name: Terraform Plan - Phase 2
