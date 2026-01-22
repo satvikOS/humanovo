@@ -174,19 +174,24 @@ jobs:
           # First apply - this will create S3 buckets and may fail on Lambda layers
           terraform apply -auto-approve tfplan || true
 
-      - name: Upload Placeholder Lambda Artifacts
+      - name: Get Artifacts Bucket from Terraform State
+        id: get-bucket
+        working-directory: infrastructure/terraform
         run: |
-          # Find the artifacts bucket using AWS CLI directly (avoid terraform wrapper issues)
-          echo "Searching for artifacts bucket..."
-          BUCKET=$(aws s3api list-buckets --query "Buckets[?contains(Name, 'genup-dev-artifacts')].Name | [0]" --output text)
+          # Get the bucket name from terraform state (most reliable source)
+          BUCKET=$(terraform state show 'module.s3.aws_s3_bucket.artifacts' 2>/dev/null | grep -E '^\s+id\s+=' | awk -F'"' '{print $2}')
 
-          # Validate bucket name (must not be empty or 'None')
-          if [ -z "$BUCKET" ] || [ "$BUCKET" = "None" ] || [ "$BUCKET" = "null" ]; then
-            echo "ERROR: No artifacts bucket found"
+          if [ -z "$BUCKET" ]; then
+            echo "ERROR: Could not get artifacts bucket from terraform state"
             exit 1
           fi
 
-          echo "Found artifacts bucket: $BUCKET"
+          echo "Artifacts bucket from terraform state: $BUCKET"
+          echo "ARTIFACTS_BUCKET=$BUCKET" >> $GITHUB_ENV
+
+      - name: Upload Placeholder Lambda Artifacts
+        run: |
+          echo "Uploading to bucket: $ARTIFACTS_BUCKET"
 
           # Create a minimal valid Lambda layer zip
           mkdir -p /tmp/lambda-layer/python
@@ -195,8 +200,8 @@ jobs:
           cd /tmp/lambda-layer && zip -r ../scipy.zip python/
 
           # Upload placeholder layers
-          aws s3 cp /tmp/dependencies.zip s3://$BUCKET/lambda-layers/dependencies.zip
-          aws s3 cp /tmp/scipy.zip s3://$BUCKET/lambda-layers/scipy.zip
+          aws s3 cp /tmp/dependencies.zip s3://$ARTIFACTS_BUCKET/lambda-layers/dependencies.zip
+          aws s3 cp /tmp/scipy.zip s3://$ARTIFACTS_BUCKET/lambda-layers/scipy.zip
 
           # Create placeholder function zips
           mkdir -p /tmp/lambda-func
@@ -205,13 +210,10 @@ jobs:
 
           # Upload placeholder functions
           for func in api_core projects hypotheses evidence knowledge hypothesis_generation agent_orchestrator search_agent embeddings simulation simulation_worker ingestion pubmed_fetcher clinical_trials_fetcher; do
-            aws s3 cp /tmp/function.zip s3://$BUCKET/lambda-functions/$func.zip
+            aws s3 cp /tmp/function.zip s3://$ARTIFACTS_BUCKET/lambda-functions/$func.zip
           done
 
-          echo "Placeholder artifacts uploaded successfully to $BUCKET"
-
-          # Store bucket name for verification step
-          echo "ARTIFACTS_BUCKET=$BUCKET" >> $GITHUB_ENV
+          echo "Placeholder artifacts uploaded successfully to $ARTIFACTS_BUCKET"
 
       - name: Verify Lambda Artifacts Exist
         run: |
