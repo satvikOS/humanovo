@@ -179,7 +179,8 @@ jobs:
         working-directory: infrastructure/terraform
         run: |
           # Get the bucket name from terraform state (most reliable source)
-          BUCKET=$(terraform state show 'module.s3.aws_s3_bucket.artifacts' 2>/dev/null | grep -E '^\s+id\s+=' | awk -F'"' '{print $2}')
+          # Use 'bucket' field and head -1 to ensure single line output
+          BUCKET=$(terraform state show 'module.s3.aws_s3_bucket.artifacts' 2>/dev/null | grep -E '^\s+bucket\s+=' | head -1 | sed 's/.*= "\([^"]*\)".*/\1/')
 
           if [ -z "$BUCKET" ]; then
             echo "ERROR: Could not get artifacts bucket from terraform state"
