@@ -309,21 +309,23 @@ resource "aws_apigatewayv2_stage" "main" {
   name        = var.environment
   auto_deploy = true
 
-  access_log_settings {
-    destination_arn = aws_cloudwatch_log_group.api_gateway.arn
-    format = jsonencode({
-      requestId         = "$context.requestId"
-      ip                = "$context.identity.sourceIp"
-      requestTime       = "$context.requestTime"
-      httpMethod        = "$context.httpMethod"
-      routeKey          = "$context.routeKey"
-      status            = "$context.status"
-      protocol          = "$context.protocol"
-      responseLength    = "$context.responseLength"
-      integrationError  = "$context.integrationErrorMessage"
-      integrationLatency = "$context.integrationLatency"
-    })
-  }
+  # Access logging disabled - requires logs:CreateLogDelivery permission
+  # Uncomment and grant permission to enable access logging
+  # access_log_settings {
+  #   destination_arn = aws_cloudwatch_log_group.api_gateway.arn
+  #   format = jsonencode({
+  #     requestId         = "$context.requestId"
+  #     ip                = "$context.identity.sourceIp"
+  #     requestTime       = "$context.requestTime"
+  #     httpMethod        = "$context.httpMethod"
+  #     routeKey          = "$context.routeKey"
+  #     status            = "$context.status"
+  #     protocol          = "$context.protocol"
+  #     responseLength    = "$context.responseLength"
+  #     integrationError  = "$context.integrationErrorMessage"
+  #     integrationLatency = "$context.integrationLatency"
+  #   })
+  # }
 
   default_route_settings {
     throttling_burst_limit = 2000

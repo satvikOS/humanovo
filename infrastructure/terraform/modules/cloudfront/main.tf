@@ -345,11 +345,13 @@ resource "aws_cloudfront_distribution" "main" {
     minimum_protocol_version       = local.use_custom_domain ? "TLSv1.2_2021" : "TLSv1"
   }
 
-  logging_config {
-    include_cookies = false
-    bucket          = "${var.frontend_bucket_id}.s3.amazonaws.com"
-    prefix          = "cloudfront-logs/"
-  }
+  # Logging disabled - would require S3 bucket ACL which is a security concern
+  # Enable logging by creating a dedicated log bucket with ACLs enabled
+  # logging_config {
+  #   include_cookies = false
+  #   bucket          = "${var.frontend_bucket_id}.s3.amazonaws.com"
+  #   prefix          = "cloudfront-logs/"
+  # }
 
   tags = {
     Name = "${var.name_prefix}-distribution"
