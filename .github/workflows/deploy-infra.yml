@@ -240,25 +240,15 @@ jobs:
 
           # Upload placeholder functions with correct module structure
           for func in api_core projects hypotheses evidence knowledge hypothesis_generation agent_orchestrator search_agent embeddings simulation simulation_worker ingestion pubmed_fetcher clinical_trials_fetcher; do
-            echo "import json
+            cat > /tmp/lambda-func/handlers/$func.py << 'PYEOF'
+          import json
 
-def handler(event, context):
-    '''Placeholder handler for $func'''
-    path = event.get('rawPath', event.get('path', '/'))
-
-    if path == '/health':
-        return {
-            'statusCode': 200,
-            'headers': {'Content-Type': 'application/json'},
-            'body': json.dumps({'status': 'healthy', 'service': 'genup-$func'})
-        }
-
-    return {
-        'statusCode': 200,
-        'headers': {'Content-Type': 'application/json'},
-        'body': json.dumps({'message': 'GenUp $func API', 'status': 'placeholder'})
-    }
-" > /tmp/lambda-func/handlers/$func.py
+          def handler(event, context):
+              path = event.get('rawPath', event.get('path', '/'))
+              if path == '/health':
+                  return {'statusCode': 200, 'headers': {'Content-Type': 'application/json'}, 'body': json.dumps({'status': 'healthy'})}
+              return {'statusCode': 200, 'headers': {'Content-Type': 'application/json'}, 'body': json.dumps({'message': 'GenUp API'})}
+          PYEOF
             cd /tmp/lambda-func && zip -r ../$func.zip handlers/
             aws s3 cp /tmp/$func.zip s3://$ARTIFACTS_BUCKET/lambda-functions/$func.zip
           done
