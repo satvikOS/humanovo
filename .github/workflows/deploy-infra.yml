@@ -53,6 +53,28 @@ jobs:
           echo "Cleaning up orphaned resources..."
           echo "=========================================="
 
+          # Delete orphaned Lambda functions
+          echo "Deleting Lambda functions..."
+          for func in api_core projects hypotheses evidence knowledge hypothesis_generation agent_orchestrator search_agent embeddings simulation simulation_worker ingestion pubmed_fetcher clinical_trials_fetcher; do
+            aws lambda delete-function --function-name "genup-dev-$func" 2>/dev/null || true
+          done
+
+          # Delete orphaned Lambda layers (all versions)
+          echo "Deleting Lambda layers..."
+          for layer in genup-dev-dependencies genup-dev-scipy; do
+            versions=$(aws lambda list-layer-versions --layer-name "$layer" --query 'LayerVersions[].Version' --output text 2>/dev/null) || true
+            for version in $versions; do
+              aws lambda delete-layer-version --layer-name "$layer" --version-number "$version" 2>/dev/null || true
+            done
+          done
+
+          # Delete orphaned API Gateway APIs
+          echo "Deleting API Gateway APIs..."
+          for api_id in $(aws apigatewayv2 get-apis --query 'Items[?starts_with(Name, `genup-`)].ApiId' --output text 2>/dev/null); do
+            echo "Deleting API: $api_id"
+            aws apigatewayv2 delete-api --api-id "$api_id" 2>/dev/null || true
+          done
+
           # Delete orphaned DynamoDB tables
           echo "Deleting DynamoDB tables..."
           for table in genup-dev-projects genup-dev-hypotheses genup-dev-evidence genup-dev-simulations genup-dev-knowledge-metadata genup-dev-agent-tasks; do
@@ -137,6 +159,13 @@ jobs:
             aws secretsmanager delete-secret --secret-id "$secret" --force-delete-without-recovery 2>/dev/null || true
           done
 
+          # Delete orphaned S3 buckets (except terraform state)
+          echo "Deleting S3 buckets..."
+          for bucket in $(aws s3api list-buckets --query 'Buckets[?starts_with(Name, `genup-dev-`)].Name' --output text 2>/dev/null); do
+            echo "Deleting bucket: $bucket"
+            aws s3 rb "s3://$bucket" --force 2>/dev/null || true
+          done
+
           echo "=========================================="
           echo "Cleanup complete!"
           echo "=========================================="
@@ -144,8 +173,8 @@ jobs:
       - name: Wait for resource deletion
         if: ${{ github.event.inputs.cleanup != 'false' }}
         run: |
-          echo "Waiting 60 seconds for resources to be fully deleted..."
-          sleep 60
+          echo "Waiting 90 seconds for resources to be fully deleted..."
+          sleep 90
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
@@ -204,14 +233,34 @@ jobs:
           aws s3 cp /tmp/dependencies.zip s3://$ARTIFACTS_BUCKET/lambda-layers/dependencies.zip
           aws s3 cp /tmp/scipy.zip s3://$ARTIFACTS_BUCKET/lambda-layers/scipy.zip
 
-          # Create placeholder function zips
-          mkdir -p /tmp/lambda-func
-          echo "def handler(event, context): return {'statusCode': 200, 'body': 'placeholder'}" > /tmp/lambda-func/handler.py
-          cd /tmp/lambda-func && zip -r ../function.zip handler.py
+          # Create placeholder function zips with proper module structure
+          # Terraform expects handler path like "handlers.api_core.handler"
+          mkdir -p /tmp/lambda-func/handlers
+          touch /tmp/lambda-func/handlers/__init__.py
 
-          # Upload placeholder functions
+          # Upload placeholder functions with correct module structure
           for func in api_core projects hypotheses evidence knowledge hypothesis_generation agent_orchestrator search_agent embeddings simulation simulation_worker ingestion pubmed_fetcher clinical_trials_fetcher; do
-            aws s3 cp /tmp/function.zip s3://$ARTIFACTS_BUCKET/lambda-functions/$func.zip
+            echo "import json
+
+def handler(event, context):
+    '''Placeholder handler for $func'''
+    path = event.get('rawPath', event.get('path', '/'))
+
+    if path == '/health':
+        return {
+            'statusCode': 200,
+            'headers': {'Content-Type': 'application/json'},
+            'body': json.dumps({'status': 'healthy', 'service': 'genup-$func'})
+        }
+
+    return {
+        'statusCode': 200,
+        'headers': {'Content-Type': 'application/json'},
+        'body': json.dumps({'message': 'GenUp $func API', 'status': 'placeholder'})
+    }
+" > /tmp/lambda-func/handlers/$func.py
+            cd /tmp/lambda-func && zip -r ../$func.zip handlers/
+            aws s3 cp /tmp/$func.zip s3://$ARTIFACTS_BUCKET/lambda-functions/$func.zip
           done
 
           echo "Placeholder artifacts uploaded successfully to $ARTIFACTS_BUCKET"
