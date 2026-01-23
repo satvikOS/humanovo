@@ -59,6 +59,13 @@ jobs:
             aws lambda delete-function --function-name "genup-dev-$func" 2>/dev/null || true
           done
 
+          # Delete orphaned Lambda event source mappings
+          echo "Deleting Lambda event source mappings..."
+          for uuid in $(aws lambda list-event-source-mappings --query 'EventSourceMappings[?starts_with(FunctionArn, `arn:aws:lambda:us-east-1:`) && contains(FunctionArn, `genup-dev-`)].UUID' --output text 2>/dev/null); do
+            echo "Deleting event source mapping: $uuid"
+            aws lambda delete-event-source-mapping --uuid "$uuid" 2>/dev/null || true
+          done
+
           # Delete orphaned Lambda layers (all versions)
           echo "Deleting Lambda layers..."
           for layer in genup-dev-dependencies genup-dev-scipy; do
