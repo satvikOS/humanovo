@@ -1,183 +1,288 @@
-import { useQuery } from '@tanstack/react-query'
-import { FiZap, FiFileText, FiActivity, FiClock } from 'react-icons/fi'
-import { api } from '../services/api'
+import { Link } from 'react-router-dom'
+import {
+  FiFolder,
+  FiZap,
+  FiActivity,
+  FiDatabase,
+  FiClock,
+  FiArrowRight,
+  FiFileText,
+  FiCheckCircle,
+  FiRefreshCw
+} from 'react-icons/fi'
+import clsx from 'clsx'
+import { useWorkspace } from '../contexts/WorkspaceContext'
 
-interface StatCardProps {
-  title: string
+interface StatCard {
+  label: string
   value: string | number
-  icon: React.ComponentType<{ className?: string }>
   change?: string
-  changeType?: 'positive' | 'negative' | 'neutral'
+  trend?: 'up' | 'down' | 'neutral'
+  icon: typeof FiFolder
+  color: string
 }
 
-function StatCard({ title, value, icon: Icon, change, changeType = 'neutral' }: StatCardProps) {
+const stats: StatCard[] = [
+  { label: 'Active Projects', value: 12, change: '+2 this week', trend: 'up', icon: FiFolder, color: 'primary' },
+  { label: 'Hypotheses', value: 48, change: '+8 this week', trend: 'up', icon: FiZap, color: 'warning' },
+  { label: 'Running Simulations', value: 3, change: '2 queued', trend: 'neutral', icon: FiActivity, color: 'success' },
+  { label: 'Evidence Items', value: '2.4k', change: '+124 this week', trend: 'up', icon: FiDatabase, color: 'info' },
+]
+
+const recentActivity = [
+  { id: 1, type: 'hypothesis', action: 'created', title: 'BRCA1 pathway inhibition hypothesis', project: 'Breast Cancer Study', time: '2 hours ago', status: 'draft' },
+  { id: 2, type: 'simulation', action: 'completed', title: 'Monte Carlo simulation #47', project: 'Drug Response Modeling', time: '4 hours ago', status: 'success' },
+  { id: 3, type: 'evidence', action: 'ingested', title: '23 new papers from PubMed', project: 'TP53 Research', time: '6 hours ago', status: 'info' },
+  { id: 4, type: 'hypothesis', action: 'validated', title: 'MDM2-p53 interaction model', project: 'TP53 Research', time: '1 day ago', status: 'success' },
+  { id: 5, type: 'project', action: 'created', title: 'Immunotherapy Response Prediction', project: null, time: '2 days ago', status: 'info' },
+]
+
+const quickActions = [
+  { label: 'New Project', icon: FiFolder, href: '/projects', color: 'bg-primary-500/20 text-primary-400' },
+  { label: 'New Hypothesis', icon: FiZap, href: '/hypotheses', color: 'bg-warning-500/20 text-warning-400' },
+  { label: 'Run Simulation', icon: FiActivity, href: '/simulations', color: 'bg-success-500/20 text-success-400' },
+  { label: 'Import Evidence', icon: FiDatabase, href: '/evidence', color: 'bg-primary-500/20 text-primary-400' },
+]
+
+function StatCardComponent({ stat }: { stat: StatCard }) {
   return (
-    <div className="card">
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="text-secondary-400 text-sm font-medium">{title}</p>
-          <p className="text-2xl font-bold text-white mt-1">{value}</p>
-          {change && (
-            <p className={`text-sm mt-1 ${
-              changeType === 'positive' ? 'text-green-400' :
-              changeType === 'negative' ? 'text-red-400' :
-              'text-secondary-400'
-            }`}>
-              {change}
-            </p>
-          )}
+    <div className="card hover:border-[var(--color-border-strong)] transition-colors">
+      <div className="flex items-start justify-between mb-2">
+        <div className={clsx(
+          'w-8 h-8 rounded flex items-center justify-center',
+          stat.color === 'primary' && 'bg-primary-500/20 text-primary-400',
+          stat.color === 'warning' && 'bg-warning-500/20 text-warning-400',
+          stat.color === 'success' && 'bg-success-500/20 text-success-400',
+          stat.color === 'info' && 'bg-primary-500/20 text-primary-400',
+        )}>
+          <stat.icon className="w-4 h-4" />
         </div>
-        <div className="p-3 bg-primary-600/20 rounded-lg">
-          <Icon className="w-6 h-6 text-primary-400" />
-        </div>
+        {stat.trend && (
+          <span className={clsx(
+            'text-xxs px-1.5 py-0.5 rounded',
+            stat.trend === 'up' && 'bg-success-500/20 text-success-400',
+            stat.trend === 'down' && 'bg-error-500/20 text-error-400',
+            stat.trend === 'neutral' && 'bg-[var(--color-border)] text-[var(--color-text-muted)]',
+          )}>
+            {stat.trend === 'up' ? '+' : stat.trend === 'down' ? '-' : ''}{stat.change}
+          </span>
+        )}
       </div>
+      <div className="text-2xl font-semibold mb-0.5">{stat.value}</div>
+      <div className="text-xs text-[var(--color-text-muted)]">{stat.label}</div>
     </div>
   )
 }
 
-interface RecentHypothesis {
-  id: string
-  statement: string
-  confidence_score: number
-  status: string
-  created_at: string
-}
-
-function RecentHypothesesList() {
-  const { data: hypotheses, isLoading } = useQuery({
-    queryKey: ['hypotheses', 'recent'],
-    queryFn: () => api.getHypotheses({ page: 1, page_size: 5 }),
-  })
-
-  if (isLoading) {
-    return (
-      <div className="space-y-3">
-        {[1, 2, 3].map((i) => (
-          <div key={i} className="animate-pulse bg-secondary-700 h-20 rounded-lg" />
-        ))}
-      </div>
-    )
+function ActivityItem({ activity }: { activity: typeof recentActivity[0] }) {
+  const icons = {
+    hypothesis: FiZap,
+    simulation: FiActivity,
+    evidence: FiDatabase,
+    project: FiFolder,
   }
-
-  const items = hypotheses?.items || []
+  const Icon = icons[activity.type as keyof typeof icons] || FiFileText
 
   return (
-    <div className="space-y-3">
-      {items.length === 0 ? (
-        <p className="text-secondary-400 text-center py-8">No hypotheses yet</p>
-      ) : (
-        items.map((hypothesis: RecentHypothesis) => (
-          <div key={hypothesis.id} className="p-4 bg-secondary-800/50 rounded-lg border border-secondary-700 hover:border-secondary-600 transition-colors">
-            <p className="text-white font-medium line-clamp-2">{hypothesis.statement}</p>
-            <div className="flex items-center justify-between mt-2">
-              <div className="flex items-center space-x-3">
-                <span className={`badge ${
-                  hypothesis.status === 'validated' ? 'badge-success' :
-                  hypothesis.status === 'active' ? 'badge-info' :
-                  'badge-warning'
-                }`}>
-                  {hypothesis.status}
-                </span>
-                <span className="text-secondary-400 text-sm">
-                  {Math.round(hypothesis.confidence_score * 100)}% confidence
-                </span>
-              </div>
-              <span className="text-secondary-500 text-xs">
-                {new Date(hypothesis.created_at).toLocaleDateString()}
-              </span>
-            </div>
-          </div>
-        ))
+    <div className="flex items-start gap-3 py-2">
+      <div className={clsx(
+        'w-7 h-7 rounded flex items-center justify-center flex-shrink-0',
+        activity.type === 'hypothesis' && 'bg-warning-500/20 text-warning-400',
+        activity.type === 'simulation' && 'bg-success-500/20 text-success-400',
+        activity.type === 'evidence' && 'bg-primary-500/20 text-primary-400',
+        activity.type === 'project' && 'bg-primary-500/20 text-primary-400',
+      )}>
+        <Icon className="w-3.5 h-3.5" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="text-xs font-medium truncate">{activity.title}</div>
+        <div className="flex items-center gap-2 text-xxs text-[var(--color-text-muted)]">
+          {activity.project && <span>{activity.project}</span>}
+          <span>{activity.time}</span>
+        </div>
+      </div>
+      {activity.status && (
+        <span className={clsx(
+          'text-xxs px-1.5 py-0.5 rounded flex-shrink-0',
+          activity.status === 'success' && 'bg-success-500/20 text-success-400',
+          activity.status === 'draft' && 'bg-[var(--color-border)] text-[var(--color-text-muted)]',
+          activity.status === 'info' && 'bg-primary-500/20 text-primary-400',
+        )}>
+          {activity.action}
+        </span>
       )}
     </div>
   )
 }
 
-export default function Dashboard() {
-  const { data: projects } = useQuery({
-    queryKey: ['projects', 'count'],
-    queryFn: () => api.getProjects({ page: 1, page_size: 1 }),
-  })
+function KnowledgeGraphPreview() {
+  return (
+    <div className="card h-full">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-medium">Knowledge Graph</h3>
+        <Link to="/knowledge" className="text-xs text-primary-400 hover:text-primary-300 flex items-center gap-1">
+          Open <FiArrowRight className="w-3 h-3" />
+        </Link>
+      </div>
+      <div className="aspect-video bg-[var(--color-bg)] rounded-lg flex items-center justify-center relative overflow-hidden">
+        <svg className="w-full h-full" viewBox="0 0 200 120">
+          <line x1="100" y1="60" x2="50" y2="30" stroke="rgba(6, 182, 212, 0.3)" strokeWidth="1" />
+          <line x1="100" y1="60" x2="150" y2="30" stroke="rgba(6, 182, 212, 0.3)" strokeWidth="1" />
+          <line x1="100" y1="60" x2="50" y2="90" stroke="rgba(6, 182, 212, 0.3)" strokeWidth="1" />
+          <line x1="100" y1="60" x2="150" y2="90" stroke="rgba(6, 182, 212, 0.3)" strokeWidth="1" />
+          <line x1="50" y1="30" x2="150" y2="30" stroke="rgba(6, 182, 212, 0.2)" strokeWidth="1" />
+          <circle cx="100" cy="60" r="12" fill="#06b6d4" />
+          <circle cx="50" cy="30" r="8" fill="#8b5cf6" />
+          <circle cx="150" cy="30" r="8" fill="#8b5cf6" />
+          <circle cx="50" cy="90" r="8" fill="#10b981" />
+          <circle cx="150" cy="90" r="8" fill="#f97316" />
+          <text x="100" y="85" textAnchor="middle" className="text-xxs fill-[var(--color-text-muted)]">TP53</text>
+          <text x="50" y="18" textAnchor="middle" className="text-xxs fill-[var(--color-text-muted)]">MDM2</text>
+          <text x="150" y="18" textAnchor="middle" className="text-xxs fill-[var(--color-text-muted)]">BRCA1</text>
+        </svg>
+        <div className="absolute bottom-2 left-2 flex items-center gap-2 text-xxs text-[var(--color-text-muted)]">
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-primary-500" /> Genes</span>
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-molecular-protein" /> Proteins</span>
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-molecular-drug" /> Drugs</span>
+        </div>
+      </div>
+    </div>
+  )
+}
 
-  const { data: hypotheses } = useQuery({
-    queryKey: ['hypotheses', 'count'],
-    queryFn: () => api.getHypotheses({ page: 1, page_size: 1 }),
-  })
+function ActiveSimulations() {
+  const simulations = [
+    { id: 1, name: 'Drug Efficacy Monte Carlo', progress: 67, status: 'running' },
+    { id: 2, name: 'Pathway Analysis #23', progress: 89, status: 'running' },
+    { id: 3, name: 'Protein Interaction Sim', progress: 100, status: 'completed' },
+  ]
 
   return (
-    <div className="p-8">
-      {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-white">Dashboard</h1>
-        <p className="text-secondary-400 mt-1">Overview of your biomedical discovery platform</p>
+    <div className="card h-full">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-medium">Active Simulations</h3>
+        <Link to="/simulations" className="text-xs text-primary-400 hover:text-primary-300 flex items-center gap-1">
+          View All <FiArrowRight className="w-3 h-3" />
+        </Link>
       </div>
-
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <StatCard
-          title="Active Projects"
-          value={projects?.total || 0}
-          icon={FiFileText}
-        />
-        <StatCard
-          title="Hypotheses Generated"
-          value={hypotheses?.total || 0}
-          icon={FiZap}
-        />
-        <StatCard
-          title="Simulations Run"
-          value={0}
-          icon={FiActivity}
-        />
-        <StatCard
-          title="Last Update"
-          value="Just now"
-          icon={FiClock}
-        />
-      </div>
-
-      {/* Content Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* Recent Hypotheses */}
-        <div className="card">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-white">Recent Hypotheses</h2>
-            <a href="/hypotheses" className="text-primary-400 text-sm hover:underline">
-              View all
-            </a>
+      <div className="space-y-3">
+        {simulations.map(sim => (
+          <div key={sim.id} className="p-2 bg-[var(--color-bg)] rounded">
+            <div className="flex items-center justify-between text-xs mb-1.5">
+              <span className="font-medium truncate">{sim.name}</span>
+              {sim.status === 'completed' ? (
+                <FiCheckCircle className="w-3.5 h-3.5 text-success-400 flex-shrink-0" />
+              ) : (
+                <FiRefreshCw className="w-3.5 h-3.5 text-primary-400 animate-spin flex-shrink-0" />
+              )}
+            </div>
+            <div className="h-1.5 bg-[var(--color-border)] rounded-full overflow-hidden">
+              <div
+                className={clsx(
+                  'h-full rounded-full transition-all',
+                  sim.status === 'completed' ? 'bg-success-500' : 'bg-primary-500'
+                )}
+                style={{ width: `${sim.progress}%` }}
+              />
+            </div>
+            <div className="text-xxs text-[var(--color-text-muted)] mt-1">{sim.progress}% complete</div>
           </div>
-          <RecentHypothesesList />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+export default function Dashboard() {
+  const { addTab } = useWorkspace()
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-semibold">Dashboard</h1>
+          <p className="text-xs text-[var(--color-text-muted)] mt-0.5">Welcome back. Here's what's happening with your research.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {quickActions.map(action => (
+            <Link
+              key={action.label}
+              to={action.href}
+              className={clsx('btn btn-sm', action.color)}
+            >
+              <action.icon className="w-3.5 h-3.5" />
+              {action.label}
+            </Link>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-4 gap-3">
+        {stats.map(stat => (
+          <StatCardComponent key={stat.label} stat={stat} />
+        ))}
+      </div>
+
+      <div className="grid grid-cols-3 gap-4">
+        <div className="col-span-2 card">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-medium">Recent Activity</h3>
+            <button className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] flex items-center gap-1">
+              <FiClock className="w-3 h-3" />
+              View Timeline
+            </button>
+          </div>
+          <div className="divide-y divide-[var(--color-border)]">
+            {recentActivity.map(activity => (
+              <ActivityItem key={activity.id} activity={activity} />
+            ))}
+          </div>
         </div>
 
-        {/* Quick Actions */}
-        <div className="card">
-          <h2 className="text-lg font-semibold text-white mb-4">Quick Actions</h2>
-          <div className="space-y-3">
-            <button className="w-full p-4 bg-primary-600/20 border border-primary-600/30 rounded-lg text-left hover:bg-primary-600/30 transition-colors">
-              <h3 className="font-medium text-primary-400">Generate Hypotheses</h3>
-              <p className="text-secondary-400 text-sm mt-1">
-                Use AI to generate new biomedical hypotheses
-              </p>
+        <div className="row-span-2">
+          <ActiveSimulations />
+        </div>
+
+        <div className="col-span-2">
+          <KnowledgeGraphPreview />
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-medium">Recent Projects</h3>
+          <Link to="/projects" className="text-xs text-primary-400 hover:text-primary-300 flex items-center gap-1">
+            View All <FiArrowRight className="w-3 h-3" />
+          </Link>
+        </div>
+        <div className="grid grid-cols-4 gap-3">
+          {[
+            { name: 'TP53 Mutation Research', hypotheses: 12, evidence: 234, status: 'active' },
+            { name: 'Breast Cancer Biomarkers', hypotheses: 8, evidence: 156, status: 'active' },
+            { name: 'Drug Response Modeling', hypotheses: 15, evidence: 312, status: 'active' },
+            { name: 'Immunotherapy Targets', hypotheses: 5, evidence: 89, status: 'draft' },
+          ].map(project => (
+            <button
+              key={project.name}
+              onClick={() => addTab({ type: 'project', title: project.name })}
+              className="p-3 bg-[var(--color-bg)] rounded-lg border border-[var(--color-border)] hover:border-[var(--color-border-strong)] text-left transition-colors"
+            >
+              <div className="flex items-center gap-2 mb-2">
+                <FiFolder className="w-4 h-4 text-primary-400" />
+                <span className={clsx(
+                  'text-xxs px-1.5 py-0.5 rounded',
+                  project.status === 'active' ? 'bg-success-500/20 text-success-400' : 'bg-[var(--color-border)] text-[var(--color-text-muted)]'
+                )}>
+                  {project.status}
+                </span>
+              </div>
+              <div className="text-sm font-medium truncate mb-1">{project.name}</div>
+              <div className="flex items-center gap-3 text-xxs text-[var(--color-text-muted)]">
+                <span>{project.hypotheses} hypotheses</span>
+                <span>{project.evidence} evidence</span>
+              </div>
             </button>
-            <button className="w-full p-4 bg-secondary-800/50 border border-secondary-700 rounded-lg text-left hover:bg-secondary-800 transition-colors">
-              <h3 className="font-medium text-white">New Project</h3>
-              <p className="text-secondary-400 text-sm mt-1">
-                Create a new research project
-              </p>
-            </button>
-            <button className="w-full p-4 bg-secondary-800/50 border border-secondary-700 rounded-lg text-left hover:bg-secondary-800 transition-colors">
-              <h3 className="font-medium text-white">Run Simulation</h3>
-              <p className="text-secondary-400 text-sm mt-1">
-                Execute Monte Carlo simulation
-              </p>
-            </button>
-            <button className="w-full p-4 bg-secondary-800/50 border border-secondary-700 rounded-lg text-left hover:bg-secondary-800 transition-colors">
-              <h3 className="font-medium text-white">Explore Knowledge Graph</h3>
-              <p className="text-secondary-400 text-sm mt-1">
-                Browse biomedical entities and relationships
-              </p>
-            </button>
-          </div>
+          ))}
         </div>
       </div>
     </div>

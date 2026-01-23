@@ -2,16 +2,43 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --color-bg: #0f172a;
-  --color-surface: #1e293b;
-  --color-border: #334155;
-  --color-text: #f1f5f9;
-  --color-text-muted: #94a3b8;
-  --color-primary: #0ea5e9;
+/* Dark theme (OLED Black) - Default */
+:root,
+.dark {
+  --color-bg: #000000;
+  --color-bg-elevated: #0a0a0a;
+  --color-surface: #111111;
+  --color-surface-elevated: #141414;
+  --color-border: #1f1f1f;
+  --color-border-strong: #2a2a2a;
+  --color-text: #e5e5e5;
+  --color-text-secondary: #a3a3a3;
+  --color-text-muted: #737373;
+  --color-primary: #06b6d4;
+  --color-primary-hover: #22d3ee;
   --color-success: #22c55e;
-  --color-warning: #f59e0b;
+  --color-warning: #eab308;
   --color-error: #ef4444;
+  color-scheme: dark;
+}
+
+/* Light theme (Blunt Grey/White) */
+.light {
+  --color-bg: #f5f5f5;
+  --color-bg-elevated: #fafafa;
+  --color-surface: #ffffff;
+  --color-surface-elevated: #ffffff;
+  --color-border: #e5e5e5;
+  --color-border-strong: #d4d4d4;
+  --color-text: #171717;
+  --color-text-secondary: #404040;
+  --color-text-muted: #737373;
+  --color-primary: #0891b2;
+  --color-primary-hover: #0e7490;
+  --color-success: #16a34a;
+  --color-warning: #ca8a04;
+  --color-error: #dc2626;
+  color-scheme: light;
 }
 
 * {
@@ -27,71 +54,295 @@ body,
 }
 
 body {
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
   background-color: var(--color-bg);
   color: var(--color-text);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
-/* Custom scrollbar */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+/* Custom scrollbar - Dark */
+.dark ::-webkit-scrollbar,
+:root ::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
 }
 
-::-webkit-scrollbar-track {
-  background: var(--color-surface);
+.dark ::-webkit-scrollbar-track,
+:root ::-webkit-scrollbar-track {
+  background: #0a0a0a;
 }
 
-::-webkit-scrollbar-thumb {
-  background: var(--color-border);
-  border-radius: 4px;
+.dark ::-webkit-scrollbar-thumb,
+:root ::-webkit-scrollbar-thumb {
+  background: #2a2a2a;
+  border-radius: 3px;
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: var(--color-text-muted);
+.dark ::-webkit-scrollbar-thumb:hover,
+:root ::-webkit-scrollbar-thumb:hover {
+  background: #3a3a3a;
+}
+
+/* Custom scrollbar - Light */
+.light ::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.light ::-webkit-scrollbar-track {
+  background: #f5f5f5;
+}
+
+.light ::-webkit-scrollbar-thumb {
+  background: #d4d4d4;
+  border-radius: 3px;
+}
+
+.light ::-webkit-scrollbar-thumb:hover {
+  background: #a3a3a3;
+}
+
+/* Selection colors */
+.dark ::selection {
+  background-color: rgba(6, 182, 212, 0.3);
+  color: #ffffff;
+}
+
+.light ::selection {
+  background-color: rgba(8, 145, 178, 0.2);
+  color: #171717;
+}
+
+/* Focus visible styles */
+*:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
 }
 
 /* Utility classes */
 @layer components {
+  /* Cards */
   .card {
-    @apply bg-secondary-800 rounded-lg border border-secondary-700 p-4;
+    @apply rounded-lg border p-4 transition-colors;
+    background-color: var(--color-surface);
+    border-color: var(--color-border);
   }
 
+  .card-elevated {
+    @apply rounded-lg border p-4 shadow-lg transition-colors;
+    background-color: var(--color-surface-elevated);
+    border-color: var(--color-border);
+  }
+
+  /* Buttons */
   .btn {
-    @apply px-4 py-2 rounded-lg font-medium transition-colors duration-200;
+    @apply px-3 py-1.5 rounded-md font-medium text-sm transition-all duration-150 inline-flex items-center justify-center gap-1.5;
   }
 
   .btn-primary {
-    @apply bg-primary-600 text-white hover:bg-primary-700;
+    @apply bg-primary-600 text-white hover:bg-primary-500 active:bg-primary-700;
   }
 
   .btn-secondary {
-    @apply bg-secondary-700 text-secondary-100 hover:bg-secondary-600;
+    background-color: var(--color-surface-elevated);
+    border: 1px solid var(--color-border);
+    color: var(--color-text);
   }
 
+  .btn-secondary:hover {
+    background-color: var(--color-border);
+  }
+
+  .btn-ghost {
+    @apply bg-transparent hover:bg-white/5 text-current;
+  }
+
+  .btn-danger {
+    @apply bg-error-600 text-white hover:bg-error-500;
+  }
+
+  .btn-sm {
+    @apply px-2 py-1 text-xs;
+  }
+
+  .btn-lg {
+    @apply px-4 py-2 text-base;
+  }
+
+  .btn-icon {
+    @apply p-1.5 rounded-md;
+  }
+
+  /* Inputs */
   .input {
-    @apply bg-secondary-900 border border-secondary-700 rounded-lg px-3 py-2 text-secondary-100 placeholder-secondary-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent;
+    @apply rounded-md px-3 py-1.5 text-sm transition-colors;
+    background-color: var(--color-bg);
+    border: 1px solid var(--color-border);
+    color: var(--color-text);
   }
 
+  .input::placeholder {
+    color: var(--color-text-muted);
+  }
+
+  .input:focus {
+    @apply outline-none ring-2 ring-primary-500/50 border-primary-500;
+  }
+
+  /* Badges */
   .badge {
-    @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium;
+    @apply inline-flex items-center px-1.5 py-0.5 rounded text-xxs font-medium;
   }
 
   .badge-success {
-    @apply bg-green-900/50 text-green-400 border border-green-700;
+    @apply bg-success-500/20 text-success-400 border border-success-500/30;
   }
 
   .badge-warning {
-    @apply bg-yellow-900/50 text-yellow-400 border border-yellow-700;
+    @apply bg-warning-500/20 text-warning-400 border border-warning-500/30;
   }
 
   .badge-error {
-    @apply bg-red-900/50 text-red-400 border border-red-700;
+    @apply bg-error-500/20 text-error-400 border border-error-500/30;
   }
 
   .badge-info {
-    @apply bg-blue-900/50 text-blue-400 border border-blue-700;
+    @apply bg-primary-500/20 text-primary-400 border border-primary-500/30;
   }
+
+  .badge-neutral {
+    background-color: var(--color-border);
+    color: var(--color-text-secondary);
+  }
+
+  /* Tabs */
+  .tab {
+    @apply px-3 py-1.5 text-sm font-medium transition-colors rounded-t-md;
+    color: var(--color-text-muted);
+    border-bottom: 2px solid transparent;
+  }
+
+  .tab:hover {
+    color: var(--color-text-secondary);
+    background-color: var(--color-border);
+  }
+
+  .tab-active {
+    color: var(--color-primary);
+    border-bottom-color: var(--color-primary);
+    background-color: var(--color-surface);
+  }
+
+  /* Tooltips */
+  .tooltip {
+    @apply absolute z-50 px-2 py-1 text-xs rounded shadow-lg pointer-events-none;
+    background-color: var(--color-surface-elevated);
+    border: 1px solid var(--color-border);
+    color: var(--color-text);
+  }
+
+  /* Dividers */
+  .divider {
+    @apply h-px w-full;
+    background-color: var(--color-border);
+  }
+
+  .divider-vertical {
+    @apply w-px h-full;
+    background-color: var(--color-border);
+  }
+
+  /* Status indicators */
+  .status-dot {
+    @apply w-2 h-2 rounded-full;
+  }
+
+  .status-online {
+    @apply bg-success-500;
+  }
+
+  .status-offline {
+    @apply bg-light-500;
+  }
+
+  .status-busy {
+    @apply bg-warning-500;
+  }
+
+  .status-error {
+    @apply bg-error-500;
+  }
+
+  /* Molecular colors for 3D viz */
+  .mol-dna {
+    color: #3b82f6;
+  }
+
+  .mol-rna {
+    color: #f97316;
+  }
+
+  .mol-protein {
+    color: #8b5cf6;
+  }
+
+  .mol-drug {
+    color: #10b981;
+  }
+
+  .mol-pathway {
+    color: #ec4899;
+  }
+
+  /* Grid background for workbench */
+  .grid-bg {
+    background-image:
+      linear-gradient(rgba(6, 182, 212, 0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(6, 182, 212, 0.03) 1px, transparent 1px);
+    background-size: 20px 20px;
+  }
+
+  /* Glow effects */
+  .glow {
+    box-shadow: 0 0 20px rgba(6, 182, 212, 0.3);
+  }
+
+  .glow-sm {
+    box-shadow: 0 0 10px rgba(6, 182, 212, 0.2);
+  }
+}
+
+/* Animations */
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 5px rgba(6, 182, 212, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(6, 182, 212, 0.5);
+  }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+/* 3D Canvas container */
+.canvas-container {
+  @apply relative w-full h-full;
+  background: radial-gradient(ellipse at center, var(--color-bg-elevated) 0%, var(--color-bg) 100%);
+}
+
+/* Code blocks */
+code {
+  @apply font-mono text-xs px-1 py-0.5 rounded;
+  background-color: var(--color-bg);
+}
+
+pre {
+  @apply font-mono text-xs p-3 rounded-lg overflow-x-auto;
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
 }
