@@ -96,3 +96,11 @@ dmypy.json
 
 # Chroma
 chroma/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+*.tfplan
+tfplan
