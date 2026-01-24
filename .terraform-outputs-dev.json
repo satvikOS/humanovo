@@ -1,0 +1,20 @@
+{
+  "frontend_bucket_name": {
+    "value": "genup-dev-frontend-c9e63c1c"
+  },
+  "cloudfront_distribution_id": {
+    "value": "EEEU95AGGLYDA"
+  },
+  "cloudfront_domain_name": {
+    "value": "dor50hj2bet56.cloudfront.net"
+  },
+  "data_bucket_name": {
+    "value": "genup-dev-data-c9e63c1c"
+  },
+  "api_gateway_endpoint": {
+    "value": "https://ki0rxpv9nk.execute-api.us-east-1.amazonaws.com"
+  },
+  "api_gateway_stage_url": {
+    "value": "https://ki0rxpv9nk.execute-api.us-east-1.amazonaws.com/dev"
+  }
+}
