@@ -19,9 +19,24 @@ import {
   FiInfo,
   FiCrosshair,
   FiSearch,
-  FiTarget
+  FiTarget,
+  FiDatabase,
+  FiCpu,
+  FiActivity,
+  FiPlay,
+  FiPause
 } from 'react-icons/fi'
 import clsx from 'clsx'
+
+// Import Master Human Library
+import {
+  masterLibraryTree,
+  libraryStats,
+  searchElements,
+  findElementById,
+  LibraryTreeNode,
+  BiologicalElement as MasterLibraryElement
+} from '../data/MasterHumanLibraryIndex'
 
 // ==================== COMPREHENSIVE BIOLOGICAL DATA MODEL ====================
 
@@ -1647,14 +1662,318 @@ function PropertiesPanel({ component }: { component: BiologicalComponent | null 
   )
 }
 
+// ==================== MASTER HUMAN LIBRARY COMPONENTS ====================
+
+function MasterLibraryTree({
+  nodes,
+  onSelect,
+  selectedId,
+  expandedNodes,
+  onToggleExpand,
+  depth = 0
+}: {
+  nodes: LibraryTreeNode[]
+  onSelect: (id: string) => void
+  selectedId: string | null
+  expandedNodes: Set<string>
+  onToggleExpand: (id: string) => void
+  depth?: number
+}) {
+  return (
+    <div className="space-y-0.5">
+      {nodes.map(node => {
+        const isExpanded = expandedNodes.has(node.id)
+        const hasChildren = node.children && node.children.length > 0
+        const isSelected = selectedId === node.id
+
+        return (
+          <div key={node.id}>
+            <div
+              onClick={() => {
+                if (node.type === 'element') {
+                  onSelect(node.id)
+                } else if (hasChildren) {
+                  onToggleExpand(node.id)
+                }
+              }}
+              style={{ paddingLeft: `${depth * 12 + 4}px` }}
+              className={clsx(
+                'flex items-center gap-1.5 py-1 px-2 rounded text-xs cursor-pointer transition-colors',
+                isSelected
+                  ? 'bg-primary-500/20 text-primary-400'
+                  : 'hover:bg-[var(--color-surface)] text-[var(--color-text-secondary)]',
+                node.type === 'category' && 'font-medium text-[var(--color-text)]'
+              )}
+            >
+              {hasChildren ? (
+                <button className="p-0.5">
+                  {isExpanded ? (
+                    <FiChevronDown className="w-3 h-3" />
+                  ) : (
+                    <FiChevronRight className="w-3 h-3" />
+                  )}
+                </button>
+              ) : (
+                <span className="w-4" />
+              )}
+              {node.type === 'category' && node.color && (
+                <span
+                  className="w-2 h-2 rounded-full"
+                  style={{ backgroundColor: node.color }}
+                />
+              )}
+              <span className="truncate flex-1">{node.name}</span>
+              {node.elementCount !== undefined && (
+                <span className="text-xxs text-[var(--color-text-muted)]">
+                  {node.elementCount}
+                </span>
+              )}
+            </div>
+            {isExpanded && hasChildren && (
+              <MasterLibraryTree
+                nodes={node.children!}
+                onSelect={onSelect}
+                selectedId={selectedId}
+                expandedNodes={expandedNodes}
+                onToggleExpand={onToggleExpand}
+                depth={depth + 1}
+              />
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function MasterLibraryDetails({ element }: { element: MasterLibraryElement | null }) {
+  const [activeTab, setActiveTab] = useState<'info' | 'simulation' | 'interactions'>('info')
+
+  if (!element) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-[var(--color-text-muted)] text-xs p-4">
+        <FiDatabase className="w-8 h-8 mb-3 opacity-50" />
+        <span className="text-center">Select an element from the Master Human Library to view details</span>
+        <div className="mt-4 text-xxs">
+          <div className="text-center mb-2">Library Statistics:</div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+            <span>Total Elements:</span>
+            <span className="text-primary-400">{libraryStats.totalElements}</span>
+            <span>Categories:</span>
+            <span className="text-primary-400">{libraryStats.categories}</span>
+            <span>AI-Ready:</span>
+            <span className="text-green-400">{libraryStats.aiSimulationReady}</span>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="h-full flex flex-col">
+      {/* Header */}
+      <div className="p-3 border-b border-[var(--color-border)]">
+        <div className="flex items-center gap-2 mb-1">
+          {element.aiSimulationReady && (
+            <FiCpu className="w-3.5 h-3.5 text-green-400" title="AI Simulation Ready" />
+          )}
+          <span className="text-sm font-medium">{element.name}</span>
+        </div>
+        <div className="flex items-center gap-2 text-xxs text-[var(--color-text-muted)]">
+          <span className="badge badge-primary">{element.category.replace(/_/g, ' ')}</span>
+          <span>• {element.subcategory}</span>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-1 px-3 pt-2 border-b border-[var(--color-border)]">
+        {(['info', 'simulation', 'interactions'] as const).map(tab => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={clsx(
+              'px-2 py-1 text-xxs capitalize border-b-2 transition-colors',
+              activeTab === tab
+                ? 'border-primary-500 text-primary-400'
+                : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
+            )}
+          >
+            {tab}
+          </button>
+        ))}
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto p-3 space-y-3 text-xs">
+        {activeTab === 'info' && (
+          <>
+            <div>
+              <div className="text-xxs text-[var(--color-text-muted)] uppercase tracking-wider mb-1">Description</div>
+              <p className="text-[var(--color-text-secondary)] leading-relaxed">{element.description}</p>
+            </div>
+
+            <div>
+              <div className="text-xxs text-[var(--color-text-muted)] uppercase tracking-wider mb-1">Location</div>
+              <div className="flex flex-wrap gap-1">
+                {element.location.map((loc: string) => (
+                  <span key={loc} className="badge badge-neutral">{loc}</span>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <div className="text-xxs text-[var(--color-text-muted)] uppercase tracking-wider mb-1">Functions</div>
+              <ul className="space-y-1">
+                {element.functions.map((fn: string) => (
+                  <li key={fn} className="flex items-start gap-1.5">
+                    <span className="text-primary-400 mt-0.5">•</span>
+                    <span className="text-[var(--color-text-secondary)]">{fn}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {element.diseaseLinks.length > 0 && (
+              <div>
+                <div className="text-xxs text-[var(--color-text-muted)] uppercase tracking-wider mb-1">Disease Links</div>
+                <div className="flex flex-wrap gap-1">
+                  {element.diseaseLinks.map((disease: string) => (
+                    <span key={disease} className="badge" style={{ backgroundColor: '#ef444430', color: '#ef4444' }}>
+                      {disease}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {element.drugTargets.length > 0 && (
+              <div>
+                <div className="text-xxs text-[var(--color-text-muted)] uppercase tracking-wider mb-1">Drug Targets</div>
+                <div className="flex flex-wrap gap-1">
+                  {element.drugTargets.map((drug: string) => (
+                    <span key={drug} className="badge" style={{ backgroundColor: '#10b98130', color: '#10b981' }}>
+                      {drug}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        {activeTab === 'simulation' && (
+          <>
+            <div className="bg-[var(--color-surface)] rounded-lg p-3">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xxs text-[var(--color-text-muted)] uppercase tracking-wider">Simulation Parameters</span>
+                {element.aiSimulationReady ? (
+                  <span className="badge" style={{ backgroundColor: '#22c55e30', color: '#22c55e' }}>AI Ready</span>
+                ) : (
+                  <span className="badge badge-neutral">Not Ready</span>
+                )}
+              </div>
+              <div className="space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-[var(--color-text-muted)]">Baseline:</span>
+                  <span>{element.simulationParams.baselineValue} {element.simulationParams.unit}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[var(--color-text-muted)]">Range:</span>
+                  <span>{element.simulationParams.minValue} - {element.simulationParams.maxValue}</span>
+                </div>
+                {element.simulationParams.halfLife && (
+                  <div className="flex justify-between">
+                    <span className="text-[var(--color-text-muted)]">Half-life:</span>
+                    <span>{element.simulationParams.halfLife}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <div className="text-xxs text-[var(--color-text-muted)] uppercase tracking-wider mb-2">AI Simulation Controls</div>
+              <div className="space-y-2">
+                <div>
+                  <label className="text-xxs text-[var(--color-text-muted)]">Target Value</label>
+                  <input
+                    type="range"
+                    min={element.simulationParams.minValue}
+                    max={element.simulationParams.maxValue}
+                    defaultValue={element.simulationParams.baselineValue}
+                    className="w-full"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <button className="btn btn-sm btn-primary flex-1">
+                    <FiPlay className="w-3 h-3" />
+                    Run Simulation
+                  </button>
+                  <button className="btn btn-sm btn-secondary">
+                    <FiPause className="w-3 h-3" />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-[var(--color-surface)] rounded-lg p-3">
+              <div className="text-xxs text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Cure/Prevention Score Impact</div>
+              <div className="text-center py-4 text-[var(--color-text-muted)]">
+                <FiActivity className="w-6 h-6 mx-auto mb-2 opacity-50" />
+                <span className="text-xxs">Run simulation to calculate impact</span>
+              </div>
+            </div>
+          </>
+        )}
+
+        {activeTab === 'interactions' && (
+          <>
+            <div>
+              <div className="text-xxs text-[var(--color-text-muted)] uppercase tracking-wider mb-1">Molecular Interactions</div>
+              <div className="flex flex-wrap gap-1">
+                {element.interactions.map((int: string) => (
+                  <span key={int} className="badge badge-neutral">{int}</span>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ==================== MAIN WORKBENCH COMPONENT ====================
+
 export default function Workbench() {
   const [components, setComponents] = useState<BiologicalComponent[]>(biologicalStructures)
+  const [leftPanelTab, setLeftPanelTab] = useState<'structures' | 'library'>('structures')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [showGrid, setShowGrid] = useState(true)
   const [showLabels, setShowLabels] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
 
+  // Master Library state
+  const [librarySearchTerm, setLibrarySearchTerm] = useState('')
+  const [selectedLibraryId, setSelectedLibraryId] = useState<string | null>(null)
+  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set(['molecular_level', 'cellular_level']))
+
   const selectedComponent = components.find(c => c.id === selectedId) || null
+  const selectedLibraryElement = selectedLibraryId ? findElementById(selectedLibraryId) ?? null : null
+
+  // Library search results
+  const librarySearchResults = librarySearchTerm.length > 2 ? searchElements(librarySearchTerm) : []
+
+  const toggleLibraryNode = (id: string) => {
+    setExpandedNodes(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+      return next
+    })
+  }
 
   const toggleVisibility = (id: string) => {
     setComponents(prev =>
@@ -1666,33 +1985,120 @@ export default function Workbench() {
 
   return (
     <div className="flex h-full">
-      {/* Left panel - Component Tree */}
-      <div className="w-64 border-r border-[var(--color-border)] bg-[var(--color-bg-elevated)] flex flex-col">
-        <div className="p-3 border-b border-[var(--color-border)]">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="text-sm font-medium">Biological Structures</h3>
-            <span className="text-xxs text-[var(--color-text-muted)]">{visibleCount} visible</span>
-          </div>
-          <div className="relative">
-            <FiSearch className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--color-text-muted)]" />
-            <input
-              type="text"
-              placeholder="Search structures..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="input w-full text-xs pl-7"
-            />
-          </div>
+      {/* Left panel - Component Tree / Master Library */}
+      <div className="w-72 border-r border-[var(--color-border)] bg-[var(--color-bg-elevated)] flex flex-col">
+        {/* Tab switcher */}
+        <div className="flex border-b border-[var(--color-border)]">
+          <button
+            onClick={() => setLeftPanelTab('structures')}
+            className={clsx(
+              'flex-1 px-3 py-2 text-xs font-medium transition-colors border-b-2',
+              leftPanelTab === 'structures'
+                ? 'border-primary-500 text-primary-400 bg-primary-500/10'
+                : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
+            )}
+          >
+            <FiTarget className="w-3.5 h-3.5 inline mr-1.5" />
+            Structures
+          </button>
+          <button
+            onClick={() => setLeftPanelTab('library')}
+            className={clsx(
+              'flex-1 px-3 py-2 text-xs font-medium transition-colors border-b-2',
+              leftPanelTab === 'library'
+                ? 'border-primary-500 text-primary-400 bg-primary-500/10'
+                : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
+            )}
+          >
+            <FiDatabase className="w-3.5 h-3.5 inline mr-1.5" />
+            Master Library
+          </button>
         </div>
-        <div className="flex-1 overflow-y-auto p-2">
-          <ComponentTree
-            components={components}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
-            onToggleVisibility={toggleVisibility}
-            searchTerm={searchTerm}
-          />
-        </div>
+
+        {leftPanelTab === 'structures' ? (
+          <>
+            <div className="p-3 border-b border-[var(--color-border)]">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-medium">Disease Structures</h3>
+                <span className="text-xxs text-[var(--color-text-muted)]">{visibleCount} visible</span>
+              </div>
+              <div className="relative">
+                <FiSearch className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--color-text-muted)]" />
+                <input
+                  type="text"
+                  placeholder="Search structures..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="input w-full text-xs pl-7"
+                />
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto p-2">
+              <ComponentTree
+                components={components}
+                selectedId={selectedId}
+                onSelect={setSelectedId}
+                onToggleVisibility={toggleVisibility}
+                searchTerm={searchTerm}
+              />
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="p-3 border-b border-[var(--color-border)]">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-medium">Master Human Library</h3>
+                <span className="text-xxs text-green-400">{libraryStats.totalElements} elements</span>
+              </div>
+              <div className="relative">
+                <FiSearch className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--color-text-muted)]" />
+                <input
+                  type="text"
+                  placeholder="Search all elements..."
+                  value={librarySearchTerm}
+                  onChange={(e) => setLibrarySearchTerm(e.target.value)}
+                  className="input w-full text-xs pl-7"
+                />
+              </div>
+              {librarySearchTerm.length > 0 && librarySearchTerm.length < 3 && (
+                <div className="text-xxs text-[var(--color-text-muted)] mt-1">Type 3+ characters to search</div>
+              )}
+            </div>
+            <div className="flex-1 overflow-y-auto p-2">
+              {librarySearchResults.length > 0 ? (
+                <div className="space-y-0.5">
+                  <div className="text-xxs text-[var(--color-text-muted)] px-2 py-1">
+                    {librarySearchResults.length} results found
+                  </div>
+                  {librarySearchResults.slice(0, 50).map(elem => (
+                    <div
+                      key={elem.id}
+                      onClick={() => setSelectedLibraryId(elem.id)}
+                      className={clsx(
+                        'flex items-center gap-2 py-1.5 px-2 rounded text-xs cursor-pointer transition-colors',
+                        selectedLibraryId === elem.id
+                          ? 'bg-primary-500/20 text-primary-400'
+                          : 'hover:bg-[var(--color-surface)] text-[var(--color-text-secondary)]'
+                      )}
+                    >
+                      {elem.aiSimulationReady && <FiCpu className="w-3 h-3 text-green-400" />}
+                      <span className="truncate flex-1">{elem.name}</span>
+                      <span className="text-xxs text-[var(--color-text-muted)]">{elem.category.split('_')[0]}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <MasterLibraryTree
+                  nodes={masterLibraryTree}
+                  onSelect={setSelectedLibraryId}
+                  selectedId={selectedLibraryId}
+                  expandedNodes={expandedNodes}
+                  onToggleExpand={toggleLibraryNode}
+                />
+              )}
+            </div>
+          </>
+        )}
       </div>
 
       {/* Main viewport */}
@@ -1754,18 +2160,33 @@ export default function Workbench() {
         </div>
       </div>
 
-      {/* Right panel - Properties */}
-      <div className="w-72 border-l border-[var(--color-border)] bg-[var(--color-bg-elevated)] flex flex-col">
+      {/* Right panel - Properties / Library Details */}
+      <div className="w-80 border-l border-[var(--color-border)] bg-[var(--color-bg-elevated)] flex flex-col">
         <div className="p-3 border-b border-[var(--color-border)]">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-medium">Properties</h3>
-            <button className="p-1 hover:bg-[var(--color-surface)] rounded transition-colors">
-              <FiSettings className="w-3.5 h-3.5" />
-            </button>
+            <h3 className="text-sm font-medium">
+              {leftPanelTab === 'library' ? 'Element Details' : 'Properties'}
+            </h3>
+            <div className="flex items-center gap-1">
+              {leftPanelTab === 'library' && selectedLibraryElement && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-400">
+                  {selectedLibraryElement.aiSimulationReady ? 'AI Ready' : 'Manual'}
+                </span>
+              )}
+              <button className="p-1 hover:bg-[var(--color-surface)] rounded transition-colors">
+                <FiSettings className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto p-3">
-          <PropertiesPanel component={selectedComponent} />
+        <div className="flex-1 overflow-y-auto">
+          {leftPanelTab === 'library' ? (
+            <MasterLibraryDetails element={selectedLibraryElement} />
+          ) : (
+            <div className="p-3">
+              <PropertiesPanel component={selectedComponent} />
+            </div>
+          )}
         </div>
       </div>
     </div>
