@@ -7,6 +7,11 @@ import { organicMolecules, inorganicComponents, organelles } from './MasterHuman
 import { cellTypes } from './MasterHumanLibrary3'
 import { tissues, organs, organSystems } from './MasterHumanLibrary4'
 import { metabolicPathways, signalingPathways } from './MasterHumanLibrary5'
+import { bulkElements, electrolyticElements, traceElements, fluidCompartments, allElementsAndFluids } from './MasterHumanLibrary6'
+import { ectodermalCells, mesodermalCells, endodermalCells, extendedCellOntology } from './MasterHumanLibrary7'
+import { completeSkeleton, neurocranium, viscerocranium, auditoryOssicles, vertebralColumn, thoracicCage, pectoralGirdle, upperLimb, pelvicGirdle, lowerLimb } from './MasterHumanLibrary8'
+import { completeMuscularSystem, headNeckMuscles, thoraxAbdomenMuscles, upperLimbMuscles, lowerLimbMuscles } from './MasterHumanLibrary9'
+import { cranialNerves, spinalPlexuses, epithelialTissues, connectiveTissues, muscleTissues, nervousTissues, allNervousSystemDetails, allHistologicalTissues, allLibrary10Elements } from './MasterHumanLibrary10'
 
 // ==================== TREE STRUCTURE FOR NAVIGATION ====================
 export interface LibraryTreeNode {
@@ -33,25 +38,61 @@ export const allBiologicalElements: BiologicalElement[] = [
   ...organs,
   ...organSystems,
   ...metabolicPathways,
-  ...signalingPathways
+  ...signalingPathways,
+  // Library 6 - Elemental Matrix & Fluids
+  ...allElementsAndFluids,
+  // Library 7 - Extended Cell Ontology by Germ Layer
+  ...extendedCellOntology,
+  // Library 8 - Complete Skeletal System (206 bones)
+  ...completeSkeleton,
+  // Library 9 - Myological System (muscles)
+  ...completeMuscularSystem,
+  // Library 10 - Nervous System Details & Histological Tissues
+  ...allLibrary10Elements
 ]
 
 // Library statistics
 export const libraryStats = {
   totalElements: allBiologicalElements.length,
-  categories: 12,
+  categories: 18,
+  // Library 1 - Core Molecular
   geneticElements: geneticMaterial.length,
   rnaElements: rnaElements.length,
   proteins: proteinsEnzymes.length,
+  // Library 2 - Chemical Components
   organicMolecules: organicMolecules.length,
   inorganicComponents: inorganicComponents.length,
   organelles: organelles.length,
+  // Library 3 - Cell Types
   cellTypes: cellTypes.length,
+  // Library 4 - Tissues & Organs
   tissues: tissues.length,
   organs: organs.length,
   organSystems: organSystems.length,
+  // Library 5 - Pathways
   metabolicPathways: metabolicPathways.length,
   signalingPathways: signalingPathways.length,
+  // Library 6 - Elemental Matrix
+  bulkElements: bulkElements.length,
+  electrolyticElements: electrolyticElements.length,
+  traceElements: traceElements.length,
+  fluidCompartments: fluidCompartments.length,
+  // Library 7 - Extended Cell Ontology
+  ectodermalCells: ectodermalCells.length,
+  mesodermalCells: mesodermalCells.length,
+  endodermalCells: endodermalCells.length,
+  // Library 8 - Skeletal System
+  skeletalBones: completeSkeleton.length,
+  // Library 9 - Muscular System
+  muscles: completeMuscularSystem.length,
+  // Library 10 - Nervous System & Histology
+  cranialNerves: cranialNerves.length,
+  spinalPlexuses: spinalPlexuses.length,
+  epithelialTissues: epithelialTissues.length,
+  connectiveTissues: connectiveTissues.length,
+  muscleTissues: muscleTissues.length,
+  nervousTissues: nervousTissues.length,
+  // AI Simulation Ready
   aiSimulationReady: allBiologicalElements.filter(e => e.aiSimulationReady).length
 }
 
@@ -148,6 +189,20 @@ export const masterLibraryTree: LibraryTreeNode[] = [
           { id: 'trace_elements', name: 'Trace Elements', type: 'subcategory', children: inorganicComponents.filter(e => e.subcategory === 'Trace Elements').map(e => ({ id: e.id, name: e.name, type: 'element' as const })) },
           { id: 'gases', name: 'Gases', type: 'subcategory', children: inorganicComponents.filter(e => e.subcategory === 'Gases').map(e => ({ id: e.id, name: e.name, type: 'element' as const })) }
         ]
+      },
+      {
+        id: 'elemental_matrix',
+        name: 'Elemental Matrix',
+        type: 'subcategory',
+        icon: '⚛️',
+        description: 'Bulk elements, electrolytes, trace elements, and fluid compartments',
+        elementCount: allElementsAndFluids.length,
+        children: [
+          { id: 'bulk_elements', name: 'Bulk Elements (O, C, H, N, Ca, P)', type: 'subcategory', children: bulkElements.map(e => ({ id: e.id, name: e.name, type: 'element' as const })) },
+          { id: 'electrolytic_elements', name: 'Electrolytic Elements (K, S, Na, Cl, Mg)', type: 'subcategory', children: electrolyticElements.map(e => ({ id: e.id, name: e.name, type: 'element' as const })) },
+          { id: 'trace_elements_extended', name: 'Trace Elements (Fe, Zn, Cu, I, Mn, Se, Mo, Cr, Co, F)', type: 'subcategory', children: traceElements.map(e => ({ id: e.id, name: e.name, type: 'element' as const })) },
+          { id: 'fluid_compartments', name: 'Fluid Compartments (ICF, ECF, Transcellular)', type: 'subcategory', children: fluidCompartments.map(e => ({ id: e.id, name: e.name, type: 'element' as const })) }
+        ]
       }
     ]
   },
@@ -190,6 +245,19 @@ export const masterLibraryTree: LibraryTreeNode[] = [
           { id: 'stem_cells', name: 'Stem Cells', type: 'subcategory', children: cellTypes.filter(e => e.subcategory === 'Stem Cells').map(e => ({ id: e.id, name: e.name, type: 'element' as const })) },
           { id: 'germ_cells', name: 'Germ Cells', type: 'subcategory', children: cellTypes.filter(e => e.subcategory === 'Germ Cells').map(e => ({ id: e.id, name: e.name, type: 'element' as const })) },
           { id: 'sensory_cells', name: 'Sensory Cells', type: 'subcategory', children: cellTypes.filter(e => e.subcategory?.includes('Sensory')).map(e => ({ id: e.id, name: e.name, type: 'element' as const })) }
+        ]
+      },
+      {
+        id: 'cell_ontology_germ_layer',
+        name: 'Cell Ontology by Germ Layer',
+        type: 'subcategory',
+        icon: '🧬',
+        description: 'Comprehensive cell types organized by embryonic origin',
+        elementCount: extendedCellOntology.length,
+        children: [
+          { id: 'ectodermal_cells', name: 'Ectodermal Lineage', type: 'subcategory', children: ectodermalCells.map(e => ({ id: e.id, name: e.name, type: 'element' as const })) },
+          { id: 'mesodermal_cells', name: 'Mesodermal Lineage', type: 'subcategory', children: mesodermalCells.map(e => ({ id: e.id, name: e.name, type: 'element' as const })) },
+          { id: 'endodermal_cells', name: 'Endodermal Lineage', type: 'subcategory', children: endodermalCells.map(e => ({ id: e.id, name: e.name, type: 'element' as const })) }
         ]
       }
     ]
@@ -241,6 +309,161 @@ export const masterLibraryTree: LibraryTreeNode[] = [
         description: 'Complete organ system organization',
         elementCount: organSystems.length,
         children: organSystems.map(e => ({ id: e.id, name: e.name, type: 'element' as const }))
+      }
+    ]
+  },
+  {
+    id: 'skeletal_system',
+    name: '🦴 Skeletal System (206 Bones)',
+    type: 'category',
+    description: 'Complete skeletal system including axial and appendicular skeleton',
+    color: '#F5F5DC',
+    children: [
+      {
+        id: 'axial_skeleton',
+        name: 'Axial Skeleton (80 bones)',
+        type: 'subcategory',
+        icon: '🦴',
+        description: 'Skull, vertebral column, and thoracic cage',
+        elementCount: neurocranium.length + viscerocranium.length + auditoryOssicles.length + vertebralColumn.length + thoracicCage.length,
+        children: [
+          { id: 'neurocranium', name: 'Neurocranium (8)', type: 'subcategory', children: neurocranium.map(e => ({ id: e.id, name: e.name, type: 'element' as const })) },
+          { id: 'viscerocranium', name: 'Viscerocranium (14)', type: 'subcategory', children: viscerocranium.map(e => ({ id: e.id, name: e.name, type: 'element' as const })) },
+          { id: 'auditory_ossicles', name: 'Auditory Ossicles (6)', type: 'subcategory', children: auditoryOssicles.map(e => ({ id: e.id, name: e.name, type: 'element' as const })) },
+          { id: 'vertebral_column', name: 'Vertebral Column (26)', type: 'subcategory', children: vertebralColumn.map(e => ({ id: e.id, name: e.name, type: 'element' as const })) },
+          { id: 'thoracic_cage', name: 'Thoracic Cage (25)', type: 'subcategory', children: thoracicCage.map(e => ({ id: e.id, name: e.name, type: 'element' as const })) }
+        ]
+      },
+      {
+        id: 'appendicular_skeleton',
+        name: 'Appendicular Skeleton (126 bones)',
+        type: 'subcategory',
+        icon: '💪',
+        description: 'Limb bones and girdles',
+        elementCount: pectoralGirdle.length + upperLimb.length + pelvicGirdle.length + lowerLimb.length,
+        children: [
+          { id: 'pectoral_girdle', name: 'Pectoral Girdle (4)', type: 'subcategory', children: pectoralGirdle.map(e => ({ id: e.id, name: e.name, type: 'element' as const })) },
+          { id: 'upper_limb_bones', name: 'Upper Limb (60)', type: 'subcategory', children: upperLimb.map(e => ({ id: e.id, name: e.name, type: 'element' as const })) },
+          { id: 'pelvic_girdle', name: 'Pelvic Girdle (2)', type: 'subcategory', children: pelvicGirdle.map(e => ({ id: e.id, name: e.name, type: 'element' as const })) },
+          { id: 'lower_limb_bones', name: 'Lower Limb (60)', type: 'subcategory', children: lowerLimb.map(e => ({ id: e.id, name: e.name, type: 'element' as const })) }
+        ]
+      }
+    ]
+  },
+  {
+    id: 'muscular_system',
+    name: '💪 Muscular System',
+    type: 'category',
+    description: 'Major skeletal muscles of the human body',
+    color: '#CD5C5C',
+    children: [
+      {
+        id: 'head_neck_muscles',
+        name: 'Head & Neck Muscles',
+        type: 'subcategory',
+        icon: '🗣️',
+        description: 'Facial expression, mastication, and neck muscles',
+        elementCount: headNeckMuscles.length,
+        children: headNeckMuscles.map(e => ({ id: e.id, name: e.name, type: 'element' as const }))
+      },
+      {
+        id: 'thorax_abdomen_muscles',
+        name: 'Thorax & Abdomen Muscles',
+        type: 'subcategory',
+        icon: '🫁',
+        description: 'Respiratory and abdominal wall muscles',
+        elementCount: thoraxAbdomenMuscles.length,
+        children: thoraxAbdomenMuscles.map(e => ({ id: e.id, name: e.name, type: 'element' as const }))
+      },
+      {
+        id: 'upper_limb_muscles',
+        name: 'Upper Limb Muscles',
+        type: 'subcategory',
+        icon: '💪',
+        description: 'Shoulder, arm, and forearm muscles',
+        elementCount: upperLimbMuscles.length,
+        children: upperLimbMuscles.map(e => ({ id: e.id, name: e.name, type: 'element' as const }))
+      },
+      {
+        id: 'lower_limb_muscles',
+        name: 'Lower Limb Muscles',
+        type: 'subcategory',
+        icon: '🦵',
+        description: 'Hip, thigh, and leg muscles',
+        elementCount: lowerLimbMuscles.length,
+        children: lowerLimbMuscles.map(e => ({ id: e.id, name: e.name, type: 'element' as const }))
+      }
+    ]
+  },
+  {
+    id: 'nervous_system_details',
+    name: '🧠 Nervous System Details',
+    type: 'category',
+    description: 'Cranial nerves and spinal plexuses',
+    color: '#FFD700',
+    children: [
+      {
+        id: 'cranial_nerves',
+        name: 'Cranial Nerves (12 pairs)',
+        type: 'subcategory',
+        icon: '🧠',
+        description: 'All 12 cranial nerve pairs with functions and pathology',
+        elementCount: cranialNerves.length,
+        children: cranialNerves.map(e => ({ id: e.id, name: e.name, type: 'element' as const }))
+      },
+      {
+        id: 'spinal_plexuses',
+        name: 'Spinal Plexuses & Major Nerves',
+        type: 'subcategory',
+        icon: '⚡',
+        description: 'Cervical, brachial, lumbar, and sacral plexuses',
+        elementCount: spinalPlexuses.length,
+        children: spinalPlexuses.map(e => ({ id: e.id, name: e.name, type: 'element' as const }))
+      }
+    ]
+  },
+  {
+    id: 'histological_tissues',
+    name: '🔬 Histological Tissues',
+    type: 'category',
+    description: 'Comprehensive tissue classification at the microscopic level',
+    color: '#DDA0DD',
+    children: [
+      {
+        id: 'epithelial_tissues',
+        name: 'Epithelial Tissues',
+        type: 'subcategory',
+        icon: '🧫',
+        description: 'Simple, stratified, and transitional epithelia',
+        elementCount: epithelialTissues.length,
+        children: epithelialTissues.map(e => ({ id: e.id, name: e.name, type: 'element' as const }))
+      },
+      {
+        id: 'connective_tissues',
+        name: 'Connective Tissues',
+        type: 'subcategory',
+        icon: '🕸️',
+        description: 'Loose, dense, cartilage, bone, blood, and lymph',
+        elementCount: connectiveTissues.length,
+        children: connectiveTissues.map(e => ({ id: e.id, name: e.name, type: 'element' as const }))
+      },
+      {
+        id: 'muscle_tissues',
+        name: 'Muscle Tissues',
+        type: 'subcategory',
+        icon: '💪',
+        description: 'Skeletal, cardiac, and smooth muscle',
+        elementCount: muscleTissues.length,
+        children: muscleTissues.map(e => ({ id: e.id, name: e.name, type: 'element' as const }))
+      },
+      {
+        id: 'nervous_tissues',
+        name: 'Nervous Tissues',
+        type: 'subcategory',
+        icon: '⚡',
+        description: 'Gray matter, white matter, and peripheral nerves',
+        elementCount: nervousTissues.length,
+        children: nervousTissues.map(e => ({ id: e.id, name: e.name, type: 'element' as const }))
       }
     ]
   },
