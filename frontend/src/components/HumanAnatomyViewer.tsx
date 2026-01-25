@@ -12,9 +12,6 @@ import {
   FiUser,
   FiMessageSquare,
   FiSend,
-  FiChevronRight,
-  FiChevronDown,
-  FiSearch,
   FiCrosshair,
   FiActivity,
   FiHeart,
@@ -137,7 +134,7 @@ const anatomyLayers: AnatomyLayerConfig[] = [
     name: 'Integumentary (Skin)',
     color: '#FFDAB9',
     icon: <FiUser className="w-3.5 h-3.5" />,
-    elements: allHistologicalTissues.filter(t => t.subcategory?.includes('Epithelial'))
+    elements: allHistologicalTissues.filter((t: BiologicalElement) => t.subcategory?.includes('Epithelial'))
   }
 ]
 
@@ -476,7 +473,7 @@ export default function HumanAnatomyViewer({ className, onElementSelect }: Human
     setIsDragging(false)
   }
 
-  const handleClick = (e: React.MouseEvent) => {
+  const handleClick = (_e: React.MouseEvent) => {
     if (hoveredPoint) {
       setSelectedPoint(hoveredPoint.point)
       setShowAiPanel(true)

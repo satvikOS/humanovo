@@ -583,5 +583,43 @@ export {
   organs,
   organSystems,
   metabolicPathways,
-  signalingPathways
+  signalingPathways,
+  // Library 6 - Elemental Matrix
+  bulkElements,
+  electrolyticElements,
+  traceElements,
+  fluidCompartments,
+  allElementsAndFluids,
+  // Library 7 - Extended Cell Ontology
+  ectodermalCells,
+  mesodermalCells,
+  endodermalCells,
+  extendedCellOntology,
+  // Library 8 - Skeletal System
+  neurocranium,
+  viscerocranium,
+  auditoryOssicles,
+  vertebralColumn,
+  thoracicCage,
+  pectoralGirdle,
+  upperLimb,
+  pelvicGirdle,
+  lowerLimb,
+  completeSkeleton,
+  // Library 9 - Muscular System
+  headNeckMuscles,
+  thoraxAbdomenMuscles,
+  upperLimbMuscles,
+  lowerLimbMuscles,
+  completeMuscularSystem,
+  // Library 10 - Nervous System & Histology
+  cranialNerves,
+  spinalPlexuses,
+  epithelialTissues,
+  connectiveTissues,
+  muscleTissues,
+  nervousTissues,
+  allNervousSystemDetails,
+  allHistologicalTissues,
+  allLibrary10Elements
 }
