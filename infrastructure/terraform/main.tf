@@ -343,6 +343,11 @@ output "data_bucket_name" {
   value       = module.s3.data_bucket_name
 }
 
+output "artifacts_bucket_name" {
+  description = "S3 bucket for build artifacts"
+  value       = module.s3.artifacts_bucket_name
+}
+
 output "lambda_function_names" {
   description = "Lambda function names"
   value       = module.lambda.function_names
