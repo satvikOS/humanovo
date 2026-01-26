@@ -9,6 +9,7 @@ import KnowledgeGraph from './pages/KnowledgeGraph'
 import Simulations from './pages/Simulations'
 import Evidence from './pages/Evidence'
 import Workbench from './pages/Workbench'
+import HumanAnatomy from './pages/HumanAnatomy'
 import Settings from './pages/Settings'
 
 // Placeholder pages for routes not yet fully implemented
@@ -37,6 +38,7 @@ function App() {
         <Route path="hypotheses/:hypothesisId" element={<HypothesisDetail />} />
         <Route path="simulations" element={<Simulations />} />
         <Route path="workbench" element={<Workbench />} />
+        <Route path="anatomy" element={<HumanAnatomy />} />
         <Route path="notebook" element={<PlaceholderPage title="Research Notebook" />} />
         <Route path="agents" element={<PlaceholderPage title="Multi-Agent Research" />} />
         <Route path="timeline" element={<PlaceholderPage title="Discovery Timeline" />} />
