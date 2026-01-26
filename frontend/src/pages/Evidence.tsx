@@ -21,7 +21,6 @@ import clsx from 'clsx'
 // Import evidence repository
 import {
   evidenceRepository,
-  repositoryMetadata,
   searchEvidence,
   getEvidenceStats,
   type EvidenceItem
@@ -369,7 +368,7 @@ export default function Evidence() {
               {searchQuery && ` for "${searchQuery}"`}
             </span>
             <span className="text-[var(--color-text-muted)]">
-              Repository: <span className="font-medium text-primary-400">{repositoryMetadata.totalItems.toLocaleString()}</span> items
+              Repository: <span className="font-medium text-primary-400">{stats.total.toLocaleString()}</span> items
             </span>
           </div>
           <div className="flex items-center gap-3 text-[var(--color-text-muted)]">
