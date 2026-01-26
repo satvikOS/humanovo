@@ -368,6 +368,66 @@ jobs:
         working-directory: infrastructure/terraform
         run: terraform apply -auto-approve tfplan
 
+      - name: Get Terraform Outputs
+        id: tf-outputs
+        working-directory: infrastructure/terraform
+        run: |
+          echo "FRONTEND_BUCKET=$(terraform output -raw frontend_bucket_name 2>/dev/null || echo '')" >> $GITHUB_ENV
+          echo "CLOUDFRONT_DOMAIN=$(terraform output -raw cloudfront_domain_name 2>/dev/null || echo '')" >> $GITHUB_ENV
+          echo "CLOUDFRONT_ID=$(terraform output -raw cloudfront_distribution_id 2>/dev/null || echo '')" >> $GITHUB_ENV
+          echo "API_GATEWAY_URL=$(terraform output -raw api_gateway_stage_url 2>/dev/null || echo '')" >> $GITHUB_ENV
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Frontend Dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build Frontend
+        working-directory: frontend
+        env:
+          VITE_API_URL: ${{ env.API_GATEWAY_URL }}
+        run: npm run build
+
+      - name: Deploy Frontend to S3
+        if: env.FRONTEND_BUCKET != ''
+        run: |
+          echo "Deploying frontend to bucket: $FRONTEND_BUCKET"
+          aws s3 sync frontend/dist/ s3://$FRONTEND_BUCKET/ \
+            --delete \
+            --cache-control "public, max-age=31536000, immutable" \
+            --exclude "index.html" \
+            --exclude "*.json"
+
+          # Upload index.html and json files with shorter cache
+          aws s3 cp frontend/dist/index.html s3://$FRONTEND_BUCKET/index.html \
+            --cache-control "public, max-age=0, must-revalidate" \
+            --content-type "text/html"
+
+          # Upload any JSON config files
+          for json_file in frontend/dist/*.json; do
+            if [ -f "$json_file" ]; then
+              aws s3 cp "$json_file" "s3://$FRONTEND_BUCKET/$(basename $json_file)" \
+                --cache-control "public, max-age=0, must-revalidate" \
+                --content-type "application/json"
+            fi
+          done
+
+          echo "Frontend deployed successfully"
+
+      - name: Invalidate CloudFront Cache
+        if: env.CLOUDFRONT_ID != ''
+        run: |
+          echo "Invalidating CloudFront distribution: $CLOUDFRONT_ID"
+          aws cloudfront create-invalidation \
+            --distribution-id $CLOUDFRONT_ID \
+            --paths "/*"
+
       - name: Get Outputs
         working-directory: infrastructure/terraform
         run: |
