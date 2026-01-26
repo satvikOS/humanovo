@@ -28,9 +28,6 @@ import {
 } from 'react-icons/fi'
 import clsx from 'clsx'
 
-// Import 3D Human Anatomy Viewer
-import HumanAnatomyViewer from '../components/HumanAnatomyViewer'
-
 // Import Master Human Library
 import {
   masterLibraryTree,
@@ -1986,16 +1983,6 @@ export default function Workbench() {
 
   const visibleCount = components.filter(c => c.visible).length
 
-  // State for anatomy viewer
-  const [showAnatomyViewer, setShowAnatomyViewer] = useState(true)
-
-  const handleAnatomyElementSelect = (element: MasterLibraryElement | null) => {
-    if (element) {
-      setSelectedLibraryId(element.id)
-      setLeftPanelTab('library')
-    }
-  }
-
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Main Workbench Area */}
@@ -2204,34 +2191,6 @@ export default function Workbench() {
           )}
         </div>
       </div>
-      </div>
-
-      {/* 3D Human Anatomy Viewer Section */}
-      <div className="border-t border-[var(--color-border)]">
-        <button
-          onClick={() => setShowAnatomyViewer(!showAnatomyViewer)}
-          className="w-full flex items-center justify-between px-4 py-2 bg-[var(--color-bg-elevated)] hover:bg-[var(--color-surface)] transition-colors"
-        >
-          <div className="flex items-center gap-2">
-            <FiActivity className="w-4 h-4 text-primary-400" />
-            <span className="text-sm font-medium">3D Human Anatomy Viewer</span>
-            <span className="text-xxs text-[var(--color-text-muted)] px-2 py-0.5 bg-[var(--color-surface)] rounded">
-              Connected to Master Library
-            </span>
-          </div>
-          <FiChevronDown className={clsx(
-            'w-4 h-4 transition-transform',
-            showAnatomyViewer ? 'rotate-180' : ''
-          )} />
-        </button>
-
-        {showAnatomyViewer && (
-          <div className="p-4 bg-[var(--color-bg)]">
-            <HumanAnatomyViewer
-              onElementSelect={handleAnatomyElementSelect}
-            />
-          </div>
-        )}
       </div>
     </div>
   )

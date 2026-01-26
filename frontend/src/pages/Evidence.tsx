@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import {
   FiDatabase,
   FiSearch,
@@ -12,69 +12,20 @@ import {
   FiAlertCircle,
   FiCalendar,
   FiUser,
-  FiMoreVertical
+  FiMoreVertical,
+  FiBookOpen,
+  FiAward
 } from 'react-icons/fi'
 import clsx from 'clsx'
 
-interface EvidenceItem {
-  id: string
-  title: string
-  source: string
-  type: 'paper' | 'trial' | 'dataset' | 'patent'
-  status: 'pending' | 'verified' | 'disputed'
-  date: string
-  authors?: string[]
-  abstract?: string
-  tags: string[]
-  citations?: number
-  relevanceScore: number
-}
-
-const mockEvidence: EvidenceItem[] = [
-  {
-    id: '1',
-    title: 'TP53 mutations in human cancers: functional selection and impact on cancer prognosis and outcomes',
-    source: 'Nature Reviews Cancer',
-    type: 'paper',
-    status: 'verified',
-    date: '2024-03-15',
-    authors: ['Dr. Smith J.', 'Dr. Johnson M.', 'Dr. Williams K.'],
-    abstract: 'This comprehensive review examines the landscape of TP53 mutations across various cancer types, their functional consequences, and clinical implications...',
-    tags: ['TP53', 'mutations', 'prognosis'],
-    citations: 245,
-    relevanceScore: 0.95,
-  },
-  {
-    id: '2',
-    title: 'Phase III Trial of Nutlin-3a in MDM2-Amplified Tumors',
-    source: 'ClinicalTrials.gov',
-    type: 'trial',
-    status: 'pending',
-    date: '2024-02-20',
-    tags: ['MDM2', 'Nutlin-3a', 'clinical trial'],
-    relevanceScore: 0.88,
-  },
-  {
-    id: '3',
-    title: 'TCGA Pan-Cancer Analysis of TP53 Pathway Alterations',
-    source: 'GEO Database',
-    type: 'dataset',
-    status: 'verified',
-    date: '2024-01-10',
-    tags: ['TCGA', 'genomics', 'pathway'],
-    relevanceScore: 0.92,
-  },
-  {
-    id: '4',
-    title: 'Novel p53 Reactivation Compound with Enhanced Selectivity',
-    source: 'USPTO',
-    type: 'patent',
-    status: 'disputed',
-    date: '2023-12-05',
-    tags: ['drug discovery', 'small molecule', 'patent'],
-    relevanceScore: 0.75,
-  },
-]
+// Import evidence repository
+import {
+  evidenceRepository,
+  repositoryMetadata,
+  searchEvidence,
+  getEvidenceStats,
+  type EvidenceItem
+} from '../data/evidence/evidenceRepository'
 
 const typeIcons: Record<EvidenceItem['type'], typeof FiFileText> = {
   paper: FiFileText,
@@ -230,10 +181,18 @@ function EvidenceDetail({ item }: { item: EvidenceItem | null }) {
       <div className="p-4 border-b border-[var(--color-border)]">
         <div className="flex items-start justify-between mb-3">
           <h2 className="text-lg font-medium leading-tight">{item.title}</h2>
-          <button className="btn btn-sm btn-secondary">
-            <FiExternalLink className="w-3 h-3" />
-            View Source
-          </button>
+          {item.sourceUrl && (
+            <a
+              href={item.sourceUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn-sm btn-secondary"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <FiExternalLink className="w-3 h-3" />
+              View Source
+            </a>
+          )}
         </div>
         <div className="flex items-center gap-4 text-xs text-[var(--color-text-muted)]">
           <div className="flex items-center gap-1">
@@ -321,20 +280,30 @@ function EvidenceDetail({ item }: { item: EvidenceItem | null }) {
 }
 
 export default function Evidence() {
-  const [evidence] = useState<EvidenceItem[]>(mockEvidence)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [filterType, setFilterType] = useState<string>('all')
   const [filterStatus, setFilterStatus] = useState<string>('all')
+  const [page, setPage] = useState(1)
+  const pageSize = 50
 
-  const selectedItem = evidence.find(e => e.id === selectedId) || null
+  const stats = useMemo(() => getEvidenceStats(), [])
 
-  const filteredEvidence = evidence.filter(item => {
-    if (filterType !== 'all' && item.type !== filterType) return false
-    if (filterStatus !== 'all' && item.status !== filterStatus) return false
-    if (searchQuery && !item.title.toLowerCase().includes(searchQuery.toLowerCase())) return false
-    return true
-  })
+  const selectedItem = evidenceRepository.find(e => e.id === selectedId) || null
+
+  const filteredEvidence = useMemo(() => {
+    return searchEvidence(searchQuery, {
+      type: filterType !== 'all' ? [filterType as EvidenceItem['type']] : undefined,
+      status: filterStatus !== 'all' ? [filterStatus as EvidenceItem['status']] : undefined
+    })
+  }, [searchQuery, filterType, filterStatus])
+
+  const paginatedEvidence = useMemo(() => {
+    const start = (page - 1) * pageSize
+    return filteredEvidence.slice(start, start + pageSize)
+  }, [filteredEvidence, page])
+
+  const totalPages = Math.ceil(filteredEvidence.length / pageSize)
 
   return (
     <div className="flex h-full">
@@ -392,10 +361,29 @@ export default function Evidence() {
           </div>
         </div>
 
+        {/* Stats bar */}
+        <div className="px-4 py-2 bg-[var(--color-surface)] border-b border-[var(--color-border)] flex items-center justify-between text-xs">
+          <div className="flex items-center gap-4">
+            <span className="text-[var(--color-text-muted)]">
+              <span className="font-medium text-[var(--color-text)]">{filteredEvidence.length.toLocaleString()}</span> results
+              {searchQuery && ` for "${searchQuery}"`}
+            </span>
+            <span className="text-[var(--color-text-muted)]">
+              Repository: <span className="font-medium text-primary-400">{repositoryMetadata.totalItems.toLocaleString()}</span> items
+            </span>
+          </div>
+          <div className="flex items-center gap-3 text-[var(--color-text-muted)]">
+            <span><FiFileText className="inline w-3 h-3 mr-1" />{stats.byType.paper || 0} papers</span>
+            <span><FiDatabase className="inline w-3 h-3 mr-1" />{stats.byType.trial || 0} trials</span>
+            <span><FiBookOpen className="inline w-3 h-3 mr-1" />{stats.byType.dataset || 0} datasets</span>
+            <span><FiAward className="inline w-3 h-3 mr-1" />{stats.byType.patent || 0} patents</span>
+          </div>
+        </div>
+
         {/* Evidence list */}
         <div className="flex-1 overflow-y-auto p-4">
           <div className="grid gap-3">
-            {filteredEvidence.map(item => (
+            {paginatedEvidence.map(item => (
               <EvidenceCard
                 key={item.id}
                 item={item}
@@ -404,6 +392,29 @@ export default function Evidence() {
               />
             ))}
           </div>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-center gap-2 mt-4 pt-4 border-t border-[var(--color-border)]">
+              <button
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={page === 1}
+                className="btn btn-sm btn-secondary disabled:opacity-50"
+              >
+                Previous
+              </button>
+              <span className="text-sm text-[var(--color-text-muted)]">
+                Page {page} of {totalPages}
+              </span>
+              <button
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages}
+                className="btn btn-sm btn-secondary disabled:opacity-50"
+              >
+                Next
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
