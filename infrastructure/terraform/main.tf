@@ -154,6 +154,12 @@ resource "aws_kms_key" "main" {
 resource "aws_kms_alias" "main" {
   name          = "alias/${local.name_prefix}"
   target_key_id = aws_kms_key.main.key_id
+
+  lifecycle {
+    create_before_destroy = false
+    # If alias already exists, just update it to point to our key
+    ignore_changes = []
+  }
 }
 
 # Secrets Manager for API keys

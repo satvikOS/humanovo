@@ -114,9 +114,27 @@ jobs:
             aws iam delete-role --role-name $role 2>/dev/null || true
           done
 
-          # Delete orphaned KMS alias
+          # Delete orphaned KMS alias (with retry)
           echo "Deleting KMS alias..."
-          aws kms delete-alias --alias-name alias/genup-dev 2>/dev/null || true
+          for i in 1 2 3; do
+            if aws kms delete-alias --alias-name alias/genup-dev 2>&1; then
+              echo "KMS alias deleted successfully"
+              break
+            else
+              echo "KMS alias deletion attempt $i failed or alias doesn't exist, retrying..."
+              sleep 5
+            fi
+          done
+
+          # Also try to delete any KMS keys with genup-dev tag (schedule for deletion)
+          echo "Scheduling KMS keys for deletion..."
+          for key_id in $(aws kms list-keys --query 'Keys[].KeyId' --output text 2>/dev/null); do
+            KEY_DESC=$(aws kms describe-key --key-id "$key_id" 2>/dev/null | jq -r '.KeyMetadata.Description // ""')
+            if [[ "$KEY_DESC" == *"genup-dev"* ]] || [[ "$KEY_DESC" == *"GenUp dev"* ]]; then
+              echo "Found genup key: $key_id"
+              aws kms schedule-key-deletion --key-id "$key_id" --pending-window-in-days 7 2>/dev/null || true
+            fi
+          done
 
           # Delete orphaned SQS queues
           echo "Deleting SQS queues..."
@@ -183,10 +201,72 @@ jobs:
           echo "Waiting 90 seconds for resources to be fully deleted..."
           sleep 90
 
+      - name: Verify critical resources deleted
+        if: ${{ github.event.inputs.cleanup != 'false' }}
+        continue-on-error: true
+        run: |
+          echo "Verifying critical resources were deleted..."
+          ERRORS=0
+
+          # Check KMS alias
+          if aws kms describe-key --key-id alias/genup-dev 2>/dev/null; then
+            echo "WARNING: KMS alias alias/genup-dev still exists, attempting force delete..."
+            aws kms delete-alias --alias-name alias/genup-dev || true
+            sleep 10
+          fi
+
+          # Check IAM roles
+          for role in genup-dev-lambda-execution genup-dev-api-gateway genup-dev-deployment; do
+            if aws iam get-role --role-name $role 2>/dev/null; then
+              echo "WARNING: IAM role $role still exists, force deleting..."
+              # Delete all inline policies
+              for policy in $(aws iam list-role-policies --role-name $role 2>/dev/null | jq -r '.PolicyNames[]' 2>/dev/null); do
+                aws iam delete-role-policy --role-name $role --policy-name "$policy" 2>/dev/null || true
+              done
+              # Detach all managed policies
+              for policy in $(aws iam list-attached-role-policies --role-name $role 2>/dev/null | jq -r '.AttachedPolicies[].PolicyArn' 2>/dev/null); do
+                aws iam detach-role-policy --role-name $role --policy-arn "$policy" 2>/dev/null || true
+              done
+              # Delete role
+              aws iam delete-role --role-name $role || true
+              sleep 5
+            fi
+          done
+
+          # Check DynamoDB tables
+          for table in genup-dev-projects genup-dev-hypotheses genup-dev-evidence genup-dev-simulations genup-dev-knowledge-metadata genup-dev-agent-tasks; do
+            if aws dynamodb describe-table --table-name $table 2>/dev/null; then
+              echo "WARNING: DynamoDB table $table still exists, waiting for deletion..."
+              aws dynamodb wait table-not-exists --table-name $table 2>/dev/null || true
+            fi
+          done
+
+          echo "Verification complete"
+
+      - name: Clear stale terraform state after cleanup
+        if: ${{ github.event.inputs.cleanup != 'false' }}
+        working-directory: infrastructure/terraform
+        run: |
+          echo "Clearing stale terraform state since cleanup was run..."
+          rm -rf .terraform terraform.tfstate terraform.tfstate.backup .terraform.lock.hcl
+          echo "State cleared - terraform will create fresh resources"
+
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Cache Terraform State
+        id: cache-terraform
+        uses: actions/cache@v4
+        with:
+          path: |
+            infrastructure/terraform/.terraform
+            infrastructure/terraform/terraform.tfstate
+            infrastructure/terraform/terraform.tfstate.backup
+          key: terraform-state-dev-v2
+          restore-keys: |
+            terraform-state-dev-
 
       - name: Terraform Init
         working-directory: infrastructure/terraform
