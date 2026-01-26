@@ -145,6 +145,29 @@ jobs:
             fi
           done
 
+          # Delete ALL orphaned CloudFront distributions with genup prefix (MUST be done before OACs)
+          echo "Disabling and deleting CloudFront distributions..."
+          for dist in $(aws cloudfront list-distributions 2>/dev/null | jq -r '.DistributionList.Items[]? | select(.Comment | contains("GenUp")) | .Id' 2>/dev/null); do
+            echo "Processing distribution: $dist"
+            ETAG=$(aws cloudfront get-distribution --id "$dist" 2>/dev/null | jq -r '.ETag') || true
+            STATUS=$(aws cloudfront get-distribution --id "$dist" 2>/dev/null | jq -r '.Distribution.DistributionConfig.Enabled') || true
+            if [ "$STATUS" = "true" ]; then
+              echo "Disabling distribution: $dist"
+              CONFIG=$(aws cloudfront get-distribution-config --id "$dist" 2>/dev/null)
+              ETAG_CONFIG=$(echo "$CONFIG" | jq -r '.ETag')
+              DIST_CONFIG=$(echo "$CONFIG" | jq '.DistributionConfig.Enabled = false')
+              echo "$DIST_CONFIG" | jq '.DistributionConfig' > /tmp/dist-config.json
+              aws cloudfront update-distribution --id "$dist" --distribution-config file:///tmp/dist-config.json --if-match "$ETAG_CONFIG" 2>/dev/null || true
+              echo "Waiting for distribution to disable..."
+              sleep 30
+            fi
+            # Try to delete (will fail if not fully disabled, which is ok)
+            ETAG=$(aws cloudfront get-distribution --id "$dist" 2>/dev/null | jq -r '.ETag') || true
+            if [ -n "$ETAG" ] && [ "$ETAG" != "null" ]; then
+              aws cloudfront delete-distribution --id "$dist" --if-match "$ETAG" 2>/dev/null || echo "Distribution $dist not yet deletable (may need more time to disable)"
+            fi
+          done
+
           # Delete ALL orphaned CloudFront functions with genup prefix
           echo "Deleting CloudFront functions..."
           for func_name in $(aws cloudfront list-functions 2>/dev/null | jq -r '.FunctionList.Items[]? | select(.Name | startswith("genup-")) | .Name' 2>/dev/null); do
@@ -155,7 +178,7 @@ jobs:
             fi
           done
 
-          # Delete ALL orphaned CloudFront OACs with genup prefix
+          # Delete ALL orphaned CloudFront OACs with genup prefix (after distributions are deleted)
           echo "Deleting CloudFront OACs..."
           for oac in $(aws cloudfront list-origin-access-controls 2>/dev/null | jq -r '.OriginAccessControlList.Items[]? | select(.Name | startswith("genup-")) | .Id' 2>/dev/null); do
             echo "Deleting OAC: $oac"

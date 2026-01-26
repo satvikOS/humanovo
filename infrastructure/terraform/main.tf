@@ -59,8 +59,12 @@ provider "aws" {
 }
 
 # Random suffix for unique resource names
+# Using keepers ensures consistency across runs for the same environment
 resource "random_id" "suffix" {
   byte_length = 4
+  keepers = {
+    environment = var.environment
+  }
 }
 
 locals {
