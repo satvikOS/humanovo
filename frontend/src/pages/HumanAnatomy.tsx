@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, Suspense } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import {
   FiRotateCw,
   FiZoomIn,
@@ -6,22 +6,15 @@ import {
   FiEye,
   FiEyeOff,
   FiInfo,
-  FiLayers,
   FiMaximize2,
   FiMinimize2,
   FiUser,
-  FiMessageSquare,
-  FiSend,
   FiCrosshair,
-  FiActivity,
-  FiHeart,
-  FiCpu,
   FiSearch,
   FiChevronRight,
   FiChevronDown,
   FiPlay,
   FiPause,
-  FiSettings,
   FiDownload,
   FiBookOpen
 } from 'react-icons/fi'
@@ -224,13 +217,13 @@ function Anatomy3DViewer({
   zoom,
   onRotationChange,
   selectedElement,
-  onElementSelect,
+  onElementSelect: _onElementSelect,
   layerOpacities
 }: Anatomy3DViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [lastMouse, setLastMouse] = useState({ x: 0, y: 0 })
-  const [hoveredElement, setHoveredElement] = useState<AnatomyElement | null>(null)
+  const [hoveredElement, _setHoveredElement] = useState<AnatomyElement | null>(null)
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 })
 
   // Draw anatomy visualization
@@ -286,7 +279,6 @@ function Anatomy3DViewer({
 
       // Apply 3D rotation effect
       const cosY = Math.cos(rotation.y)
-      const depth = Math.sin(rotation.y) * 0.3
 
       ctx.save()
       ctx.globalAlpha = opacity
@@ -486,7 +478,7 @@ function drawBodyOutline(ctx: CanvasRenderingContext2D, cx: number, headY: numbe
   ctx.stroke()
 }
 
-function drawSkeletalSystem(ctx: CanvasRenderingContext2D, cx: number, headY: number, bw: number, bh: number, hr: number, color: string, cosY: number, selected: AnatomyElement | null) {
+function drawSkeletalSystem(ctx: CanvasRenderingContext2D, cx: number, headY: number, bw: number, bh: number, hr: number, color: string, _cosY: number, _selected: AnatomyElement | null) {
   ctx.strokeStyle = color
   ctx.fillStyle = color + '40'
   ctx.lineWidth = 2
@@ -625,7 +617,7 @@ function drawSkeletalSystem(ctx: CanvasRenderingContext2D, cx: number, headY: nu
   ctx.stroke()
 }
 
-function drawMuscularSystem(ctx: CanvasRenderingContext2D, cx: number, headY: number, bw: number, bh: number, hr: number, color: string, cosY: number, selected: AnatomyElement | null) {
+function drawMuscularSystem(ctx: CanvasRenderingContext2D, cx: number, headY: number, bw: number, bh: number, hr: number, color: string, _cosY: number, _selected: AnatomyElement | null) {
   ctx.fillStyle = color + '60'
   ctx.strokeStyle = color
   ctx.lineWidth = 1
@@ -705,7 +697,7 @@ function drawMuscularSystem(ctx: CanvasRenderingContext2D, cx: number, headY: nu
   ctx.fill()
 }
 
-function drawNervousSystem(ctx: CanvasRenderingContext2D, cx: number, headY: number, bw: number, bh: number, hr: number, color: string, cosY: number) {
+function drawNervousSystem(ctx: CanvasRenderingContext2D, cx: number, headY: number, bw: number, bh: number, hr: number, color: string, _cosY: number) {
   ctx.strokeStyle = color
   ctx.fillStyle = color + '80'
   ctx.lineWidth = 2
@@ -767,7 +759,7 @@ function drawNervousSystem(ctx: CanvasRenderingContext2D, cx: number, headY: num
   ctx.stroke()
 }
 
-function drawCirculatorySystem(ctx: CanvasRenderingContext2D, cx: number, headY: number, bw: number, bh: number, hr: number, color: string, cosY: number) {
+function drawCirculatorySystem(ctx: CanvasRenderingContext2D, cx: number, headY: number, bw: number, bh: number, hr: number, _color: string, _cosY: number) {
   // Arteries in red
   ctx.strokeStyle = '#DC143C'
   ctx.lineWidth = 2
@@ -842,7 +834,7 @@ function drawCirculatorySystem(ctx: CanvasRenderingContext2D, cx: number, headY:
   ctx.setLineDash([])
 }
 
-function drawRespiratorySystem(ctx: CanvasRenderingContext2D, cx: number, headY: number, bw: number, bh: number, hr: number, color: string, cosY: number) {
+function drawRespiratorySystem(ctx: CanvasRenderingContext2D, cx: number, headY: number, bw: number, bh: number, hr: number, color: string, _cosY: number) {
   ctx.strokeStyle = color
   ctx.fillStyle = color + '50'
   ctx.lineWidth = 2
@@ -917,7 +909,7 @@ function drawRespiratorySystem(ctx: CanvasRenderingContext2D, cx: number, headY:
   ctx.stroke()
 }
 
-function drawDigestiveSystem(ctx: CanvasRenderingContext2D, cx: number, headY: number, bw: number, bh: number, hr: number, color: string, cosY: number) {
+function drawDigestiveSystem(ctx: CanvasRenderingContext2D, cx: number, headY: number, bw: number, bh: number, hr: number, color: string, _cosY: number) {
   ctx.strokeStyle = color
   ctx.fillStyle = color + '50'
   ctx.lineWidth = 2
@@ -986,7 +978,7 @@ function drawDigestiveSystem(ctx: CanvasRenderingContext2D, cx: number, headY: n
   ctx.lineWidth = 2
 }
 
-function drawLymphaticSystem(ctx: CanvasRenderingContext2D, cx: number, headY: number, bw: number, bh: number, hr: number, color: string, cosY: number) {
+function drawLymphaticSystem(ctx: CanvasRenderingContext2D, cx: number, headY: number, bw: number, bh: number, hr: number, color: string, _cosY: number) {
   ctx.strokeStyle = color
   ctx.fillStyle = color + '60'
   ctx.lineWidth = 1
@@ -1040,7 +1032,7 @@ function drawLymphaticSystem(ctx: CanvasRenderingContext2D, cx: number, headY: n
   ctx.setLineDash([])
 }
 
-function drawUrinarySystem(ctx: CanvasRenderingContext2D, cx: number, headY: number, bw: number, bh: number, hr: number, color: string, cosY: number) {
+function drawUrinarySystem(ctx: CanvasRenderingContext2D, cx: number, headY: number, bw: number, bh: number, hr: number, color: string, _cosY: number) {
   ctx.strokeStyle = color
   ctx.fillStyle = color + '60'
   ctx.lineWidth = 2
@@ -1083,7 +1075,7 @@ function drawUrinarySystem(ctx: CanvasRenderingContext2D, cx: number, headY: num
   ctx.stroke()
 }
 
-function drawEndocrineSystem(ctx: CanvasRenderingContext2D, cx: number, headY: number, bw: number, bh: number, hr: number, color: string, cosY: number) {
+function drawEndocrineSystem(ctx: CanvasRenderingContext2D, cx: number, headY: number, bw: number, bh: number, hr: number, color: string, _cosY: number) {
   ctx.strokeStyle = color
   ctx.fillStyle = color + '70'
   ctx.lineWidth = 2
