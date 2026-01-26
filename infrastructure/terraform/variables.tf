@@ -172,9 +172,9 @@ variable "cloudfront_price_class" {
 }
 
 variable "waf_enabled" {
-  description = "Enable AWS WAF on CloudFront"
+  description = "Enable AWS WAF on CloudFront (disabled by default to avoid orphaned resources)"
   type        = bool
-  default     = true
+  default     = false
 }
 
 # ==================== DynamoDB ====================

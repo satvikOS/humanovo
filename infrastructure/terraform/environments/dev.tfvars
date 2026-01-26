@@ -24,7 +24,7 @@ jwt_audience         = []
 
 # CloudFront
 cloudfront_price_class = "PriceClass_100"
-waf_enabled            = true
+waf_enabled            = false  # Disabled to reduce complexity and prevent orphaned WAF resources
 
 # DynamoDB
 dynamodb_billing_mode = "PAY_PER_REQUEST"

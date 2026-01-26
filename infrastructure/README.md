@@ -95,11 +95,22 @@ cd ../..
 | Bedrock (Claude) | $100-1000 |
 | **Total** | **$455-2,030** |
 
+## Current Active Deployment
+
+As of January 2026, the active infrastructure uses:
+
+| Component | ID | URL |
+|-----------|-----|-----|
+| CloudFront | EME87J10GPMET | https://d1866viaihf5o.cloudfront.net |
+| S3 Frontend | genup-dev-frontend-c9e63c1c | S3 website hosting enabled |
+
+**Note**: WAF is disabled by default to simplify deployment and prevent orphaned resources.
+
 ## Security
 
 - All data encrypted at rest (KMS)
 - TLS 1.3 for data in transit
 - IAM least-privilege policies
 - VPC endpoints for private access
-- WAF on CloudFront
+- WAF optional (disabled by default for dev)
 - Secrets in AWS Secrets Manager
