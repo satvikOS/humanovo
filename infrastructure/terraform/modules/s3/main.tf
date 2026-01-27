@@ -20,6 +20,7 @@ variable "kms_key_arn" {
 
 resource "aws_s3_bucket" "frontend" {
   bucket = "${var.name_prefix}-frontend-${var.suffix}"
+  force_destroy = true
 
   tags = {
     Name = "${var.name_prefix}-frontend"
@@ -69,6 +70,7 @@ resource "aws_s3_bucket_cors_configuration" "frontend" {
 
 resource "aws_s3_bucket" "data" {
   bucket = "${var.name_prefix}-data-${var.suffix}"
+  force_destroy = true
 
   tags = {
     Name = "${var.name_prefix}-data"
@@ -139,6 +141,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "data" {
 
 resource "aws_s3_bucket" "artifacts" {
   bucket = "${var.name_prefix}-artifacts-${var.suffix}"
+  force_destroy = true
 
   tags = {
     Name = "${var.name_prefix}-artifacts"
