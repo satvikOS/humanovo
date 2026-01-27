@@ -155,17 +155,48 @@ jobs:
               echo "Disabling distribution: $dist"
               CONFIG=$(aws cloudfront get-distribution-config --id "$dist" 2>/dev/null)
               ETAG_CONFIG=$(echo "$CONFIG" | jq -r '.ETag')
-              DIST_CONFIG=$(echo "$CONFIG" | jq '.DistributionConfig.Enabled = false')
-              echo "$DIST_CONFIG" | jq '.DistributionConfig' > /tmp/dist-config.json
+              DIST_CONFIG=$(echo "$CONFIG" | jq '
+                .DistributionConfig
+                | .Enabled = false
+                | .DefaultCacheBehavior.FunctionAssociations = {"Quantity":0,"Items":[]}
+                | .CacheBehaviors = (if .CacheBehaviors.Items then
+                    .CacheBehaviors
+                    | .Items = (.Items | map(.FunctionAssociations = {"Quantity":0,"Items":[]}))
+                    | .Quantity = (.Items | length)
+                  else
+                    .CacheBehaviors
+                  end)
+              ')
+              echo "$DIST_CONFIG" > /tmp/dist-config.json
               aws cloudfront update-distribution --id "$dist" --distribution-config file:///tmp/dist-config.json --if-match "$ETAG_CONFIG" 2>/dev/null || true
               echo "Waiting for distribution to disable..."
-              sleep 30
+              for i in {1..10}; do
+                CURRENT_STATUS=$(aws cloudfront get-distribution --id "$dist" 2>/dev/null | jq -r '.Distribution.Status') || true
+                CURRENT_ENABLED=$(aws cloudfront get-distribution --id "$dist" 2>/dev/null | jq -r '.Distribution.DistributionConfig.Enabled') || true
+                if [ "$CURRENT_STATUS" = "Deployed" ] && [ "$CURRENT_ENABLED" = "false" ]; then
+                  echo "Distribution $dist is disabled."
+                  break
+                fi
+                echo "Waiting for distribution $dist to disable (attempt $i)..."
+                sleep 30
+              done
             fi
             # Try to delete (will fail if not fully disabled, which is ok)
             ETAG=$(aws cloudfront get-distribution --id "$dist" 2>/dev/null | jq -r '.ETag') || true
             if [ -n "$ETAG" ] && [ "$ETAG" != "null" ]; then
               aws cloudfront delete-distribution --id "$dist" --if-match "$ETAG" 2>/dev/null || echo "Distribution $dist not yet deletable (may need more time to disable)"
             fi
+          done
+
+          echo "Waiting for CloudFront distributions to be deleted..."
+          for i in {1..10}; do
+            REMAINING_DISTS=$(aws cloudfront list-distributions 2>/dev/null | jq -r '.DistributionList.Items[]? | select(.Comment | contains("GenUp")) | .Id' 2>/dev/null) || true
+            if [ -z "$REMAINING_DISTS" ]; then
+              echo "All GenUp distributions deleted."
+              break
+            fi
+            echo "Distributions still deleting (attempt $i)..."
+            sleep 30
           done
 
           # Delete ALL orphaned CloudFront functions with genup prefix
@@ -211,6 +242,14 @@ jobs:
           echo "Deleting S3 buckets..."
           for bucket in $(aws s3api list-buckets --query 'Buckets[?starts_with(Name, `genup-dev-`)].Name' --output text 2>/dev/null); do
             echo "Deleting bucket: $bucket"
+            VERSIONS=$(aws s3api list-object-versions --bucket "$bucket" --query 'Versions[].{Key:Key,VersionId:VersionId}' --output json 2>/dev/null) || true
+            if [ -n "$VERSIONS" ] && [ "$VERSIONS" != "[]" ]; then
+              aws s3api delete-objects --bucket "$bucket" --delete "{\"Objects\": $VERSIONS}" 2>/dev/null || true
+            fi
+            MARKERS=$(aws s3api list-object-versions --bucket "$bucket" --query 'DeleteMarkers[].{Key:Key,VersionId:VersionId}' --output json 2>/dev/null) || true
+            if [ -n "$MARKERS" ] && [ "$MARKERS" != "[]" ]; then
+              aws s3api delete-objects --bucket "$bucket" --delete "{\"Objects\": $MARKERS}" 2>/dev/null || true
+            fi
             aws s3 rb "s3://$bucket" --force 2>/dev/null || true
           done
 

@@ -62,7 +62,6 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          pip install ruff pytest pytest-asyncio pytest-cov
           pip install -r backend/requirements.txt
 
       - name: Lint Python
