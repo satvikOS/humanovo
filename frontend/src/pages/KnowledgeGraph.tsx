@@ -1,12 +1,146 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { FiSearch, FiZoomIn, FiZoomOut, FiMaximize } from 'react-icons/fi'
+import {
+  FiSearch, FiZoomIn, FiZoomOut, FiMaximize, FiFilter,
+  FiDownload, FiShare2, FiLayers, FiEye, FiEyeOff,
+  FiChevronRight, FiChevronDown, FiExternalLink, FiX,
+  FiInfo, FiAlertCircle, FiCheckCircle, FiBook
+} from 'react-icons/fi'
 import { api, Entity } from '../services/api'
+
+// Entity type colors and configurations
+const ENTITY_COLORS = {
+  gene: { bg: '#3B82F6', border: '#1D4ED8', text: 'Gene' },
+  protein: { bg: '#8B5CF6', border: '#6D28D9', text: 'Protein' },
+  disease: { bg: '#EF4444', border: '#B91C1C', text: 'Disease' },
+  drug: { bg: '#10B981', border: '#047857', text: 'Drug' },
+  pathway: { bg: '#F59E0B', border: '#B45309', text: 'Pathway' },
+  biomarker: { bg: '#EC4899', border: '#BE185D', text: 'Biomarker' },
+  adc: { bg: '#06B6D4', border: '#0891B2', text: 'ADC' },
+  antigen: { bg: '#14B8A6', border: '#0D9488', text: 'Antigen' },
+  cell_type: { bg: '#6366F1', border: '#4338CA', text: 'Cell Type' },
+  mutation: { bg: '#F97316', border: '#C2410C', text: 'Mutation' },
+}
+
+// Relation type configurations
+const RELATION_TYPES = {
+  treats: { color: '#10B981', label: 'Treats' },
+  targets: { color: '#3B82F6', label: 'Targets' },
+  inhibits: { color: '#EF4444', label: 'Inhibits' },
+  activates: { color: '#22C55E', label: 'Activates' },
+  causes: { color: '#F97316', label: 'Causes' },
+  associates: { color: '#8B5CF6', label: 'Associates' },
+  expresses: { color: '#EC4899', label: 'Expresses' },
+  resistance: { color: '#F59E0B', label: 'Resistance' },
+  modulates: { color: '#06B6D4', label: 'Modulates' },
+  biomarker_of: { color: '#14B8A6', label: 'Biomarker Of' },
+}
+
+// Context categories
+const CONTEXT_CATEGORIES = [
+  { id: 'drug_context', label: 'Drug/Treatment', color: '#10B981' },
+  { id: 'indication_context', label: 'Disease/Indication', color: '#EF4444' },
+  { id: 'resistance_context', label: 'Resistance', color: '#F59E0B' },
+  { id: 'biomarker_context', label: 'Biomarker', color: '#EC4899' },
+  { id: 'outcome_context', label: 'Clinical Outcome', color: '#3B82F6' },
+  { id: 'mechanism_context', label: 'Mechanism', color: '#8B5CF6' },
+]
+
+// Confidence levels
+const CONFIDENCE_LEVELS = [
+  { id: 'very_high', label: 'Very High (>0.8)', min: 0.8, color: '#22C55E' },
+  { id: 'high', label: 'High (0.6-0.8)', min: 0.6, color: '#3B82F6' },
+  { id: 'moderate', label: 'Moderate (0.4-0.6)', min: 0.4, color: '#F59E0B' },
+  { id: 'low', label: 'Low (<0.4)', min: 0, color: '#EF4444' },
+]
+
+interface GraphNode {
+  id: string
+  label: string
+  type: string
+  x?: number
+  y?: number
+  confidence?: number
+  sources?: number
+  metadata?: Record<string, any>
+}
+
+interface GraphEdge {
+  id: string
+  source: string
+  target: string
+  relation: string
+  confidence: number
+  evidenceCount: number
+  evidence?: Array<{
+    text: string
+    source: string
+    confidence: number
+  }>
+}
+
+interface FilterState {
+  entityTypes: string[]
+  relationTypes: string[]
+  contexts: string[]
+  minConfidence: number
+  showOrphans: boolean
+}
 
 export default function KnowledgeGraph() {
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedEntity, setSelectedEntity] = useState<Entity | null>(null)
+  const [selectedEdge, setSelectedEdge] = useState<GraphEdge | null>(null)
+  const [showFilters, setShowFilters] = useState(true)
+  const [showEvidencePanel, setShowEvidencePanel] = useState(false)
+  const [expandedSections, setExpandedSections] = useState({
+    entityTypes: true,
+    relationTypes: true,
+    contexts: false,
+    confidence: true,
+  })
+  const [filters, setFilters] = useState<FilterState>({
+    entityTypes: Object.keys(ENTITY_COLORS),
+    relationTypes: Object.keys(RELATION_TYPES),
+    contexts: [],
+    minConfidence: 0,
+    showOrphans: false,
+  })
+  const [zoom, setZoom] = useState(1)
+  const [pan, setPan] = useState({ x: 0, y: 0 })
   const containerRef = useRef<HTMLDivElement>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+
+  // Mock graph data (in production, this comes from API)
+  const [graphData] = useState<{ nodes: GraphNode[], edges: GraphEdge[] }>({
+    nodes: [
+      { id: '1', label: 'BRCA1', type: 'gene', confidence: 0.95, sources: 150 },
+      { id: '2', label: 'Breast Cancer', type: 'disease', confidence: 0.92, sources: 500 },
+      { id: '3', label: 'Trastuzumab', type: 'drug', confidence: 0.88, sources: 300 },
+      { id: '4', label: 'HER2', type: 'biomarker', confidence: 0.90, sources: 400 },
+      { id: '5', label: 'PI3K-AKT Pathway', type: 'pathway', confidence: 0.85, sources: 200 },
+      { id: '6', label: 'T-DXd', type: 'adc', confidence: 0.87, sources: 120 },
+      { id: '7', label: 'HER2 Antigen', type: 'antigen', confidence: 0.89, sources: 250 },
+      { id: '8', label: 'MCF-7', type: 'cell_type', confidence: 0.82, sources: 180 },
+    ],
+    edges: [
+      { id: 'e1', source: '1', target: '2', relation: 'causes', confidence: 0.85, evidenceCount: 45, evidence: [
+        { text: 'BRCA1 mutations significantly increase breast cancer risk...', source: 'NEJM 2023', confidence: 0.92 },
+        { text: 'Germline BRCA1 variants associated with hereditary breast cancer...', source: 'Nature Genetics', confidence: 0.88 },
+      ]},
+      { id: 'e2', source: '3', target: '2', relation: 'treats', confidence: 0.92, evidenceCount: 120, evidence: [
+        { text: 'Trastuzumab significantly improves outcomes in HER2+ breast cancer...', source: 'JCO 2022', confidence: 0.95 },
+      ]},
+      { id: 'e3', source: '3', target: '4', relation: 'targets', confidence: 0.95, evidenceCount: 200, evidence: [
+        { text: 'Trastuzumab binds to the extracellular domain of HER2...', source: 'Cell', confidence: 0.98 },
+      ]},
+      { id: 'e4', source: '4', target: '5', relation: 'activates', confidence: 0.78, evidenceCount: 30, evidence: [] },
+      { id: 'e5', source: '6', target: '7', relation: 'targets', confidence: 0.91, evidenceCount: 80, evidence: [] },
+      { id: 'e6', source: '6', target: '2', relation: 'treats', confidence: 0.88, evidenceCount: 60, evidence: [] },
+      { id: 'e7', source: '4', target: '2', relation: 'biomarker_of', confidence: 0.93, evidenceCount: 150, evidence: [] },
+      { id: 'e8', source: '8', target: '4', relation: 'expresses', confidence: 0.80, evidenceCount: 25, evidence: [] },
+    ],
+  })
 
   const { data: searchResults } = useQuery({
     queryKey: ['entities', 'search', searchQuery],
@@ -25,60 +159,329 @@ export default function KnowledgeGraph() {
     queryFn: () => api.getGraphStats(),
   })
 
+  // Filter graph data based on current filters
+  const filteredGraph = useMemo(() => {
+    const visibleNodes = graphData.nodes.filter(node => {
+      if (!filters.entityTypes.includes(node.type)) return false
+      if (node.confidence && node.confidence < filters.minConfidence) return false
+      return true
+    })
+    const visibleNodeIds = new Set(visibleNodes.map(n => n.id))
+
+    const visibleEdges = graphData.edges.filter(edge => {
+      if (!visibleNodeIds.has(edge.source) || !visibleNodeIds.has(edge.target)) return false
+      if (!filters.relationTypes.includes(edge.relation)) return false
+      if (edge.confidence < filters.minConfidence) return false
+      return true
+    })
+
+    return { nodes: visibleNodes, edges: visibleEdges }
+  }, [graphData, filters])
+
+  // Position nodes in a force-directed layout (simplified)
+  const positionedNodes = useMemo(() => {
+    const centerX = 400
+    const centerY = 300
+    const radius = 200
+
+    return filteredGraph.nodes.map((node, i) => {
+      const angle = (2 * Math.PI * i) / filteredGraph.nodes.length
+      return {
+        ...node,
+        x: centerX + radius * Math.cos(angle),
+        y: centerY + radius * Math.sin(angle),
+      }
+    })
+  }, [filteredGraph.nodes])
+
+  // Draw the graph
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    // Set canvas size
+    canvas.width = canvas.offsetWidth * window.devicePixelRatio
+    canvas.height = canvas.offsetHeight * window.devicePixelRatio
+    ctx.scale(window.devicePixelRatio, window.devicePixelRatio)
+
+    // Clear canvas
+    ctx.fillStyle = '#0f172a'
+    ctx.fillRect(0, 0, canvas.offsetWidth, canvas.offsetHeight)
+
+    // Apply zoom and pan
+    ctx.save()
+    ctx.translate(pan.x, pan.y)
+    ctx.scale(zoom, zoom)
+
+    // Draw edges
+    filteredGraph.edges.forEach(edge => {
+      const sourceNode = positionedNodes.find(n => n.id === edge.source)
+      const targetNode = positionedNodes.find(n => n.id === edge.target)
+      if (!sourceNode || !targetNode) return
+
+      const relationConfig = RELATION_TYPES[edge.relation as keyof typeof RELATION_TYPES]
+      const color = relationConfig?.color || '#64748b'
+      const alpha = Math.max(0.3, edge.confidence)
+
+      ctx.beginPath()
+      ctx.moveTo(sourceNode.x!, sourceNode.y!)
+      ctx.lineTo(targetNode.x!, targetNode.y!)
+      ctx.strokeStyle = color
+      ctx.globalAlpha = alpha
+      ctx.lineWidth = selectedEdge?.id === edge.id ? 3 : 1.5
+      ctx.stroke()
+      ctx.globalAlpha = 1
+
+      // Draw arrow
+      const angle = Math.atan2(targetNode.y! - sourceNode.y!, targetNode.x! - sourceNode.x!)
+      const arrowSize = 8
+      const arrowX = targetNode.x! - 25 * Math.cos(angle)
+      const arrowY = targetNode.y! - 25 * Math.sin(angle)
+
+      ctx.beginPath()
+      ctx.moveTo(arrowX, arrowY)
+      ctx.lineTo(
+        arrowX - arrowSize * Math.cos(angle - Math.PI / 6),
+        arrowY - arrowSize * Math.sin(angle - Math.PI / 6)
+      )
+      ctx.lineTo(
+        arrowX - arrowSize * Math.cos(angle + Math.PI / 6),
+        arrowY - arrowSize * Math.sin(angle + Math.PI / 6)
+      )
+      ctx.closePath()
+      ctx.fillStyle = color
+      ctx.fill()
+    })
+
+    // Draw nodes
+    positionedNodes.forEach(node => {
+      const entityConfig = ENTITY_COLORS[node.type as keyof typeof ENTITY_COLORS]
+      const bgColor = entityConfig?.bg || '#64748b'
+      const borderColor = entityConfig?.border || '#475569'
+      const isSelected = selectedEntity?.id === node.id
+
+      // Node circle
+      ctx.beginPath()
+      ctx.arc(node.x!, node.y!, isSelected ? 28 : 22, 0, 2 * Math.PI)
+      ctx.fillStyle = bgColor
+      ctx.fill()
+      ctx.strokeStyle = isSelected ? '#ffffff' : borderColor
+      ctx.lineWidth = isSelected ? 3 : 2
+      ctx.stroke()
+
+      // Node label
+      ctx.fillStyle = '#ffffff'
+      ctx.font = 'bold 11px Inter, system-ui, sans-serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      const label = node.label.length > 8 ? node.label.slice(0, 7) + '...' : node.label
+      ctx.fillText(label, node.x!, node.y!)
+
+      // Confidence indicator
+      if (node.confidence) {
+        const confLevel = CONFIDENCE_LEVELS.find(l => node.confidence! >= l.min)
+        if (confLevel) {
+          ctx.beginPath()
+          ctx.arc(node.x! + 18, node.y! - 18, 6, 0, 2 * Math.PI)
+          ctx.fillStyle = confLevel.color
+          ctx.fill()
+        }
+      }
+    })
+
+    ctx.restore()
+  }, [filteredGraph, positionedNodes, zoom, pan, selectedEntity, selectedEdge])
+
+  // Handle canvas click
+  const handleCanvasClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    const rect = canvas.getBoundingClientRect()
+    const x = (e.clientX - rect.left - pan.x) / zoom
+    const y = (e.clientY - rect.top - pan.y) / zoom
+
+    // Check if clicked on a node
+    for (const node of positionedNodes) {
+      const dist = Math.sqrt((x - node.x!) ** 2 + (y - node.y!) ** 2)
+      if (dist < 25) {
+        setSelectedEntity({
+          id: node.id,
+          name: node.label,
+          entity_type: node.type,
+        } as Entity)
+        setSelectedEdge(null)
+        return
+      }
+    }
+
+    // Check if clicked on an edge
+    for (const edge of filteredGraph.edges) {
+      const sourceNode = positionedNodes.find(n => n.id === edge.source)
+      const targetNode = positionedNodes.find(n => n.id === edge.target)
+      if (!sourceNode || !targetNode) continue
+
+      const dist = pointToLineDistance(x, y, sourceNode.x!, sourceNode.y!, targetNode.x!, targetNode.y!)
+      if (dist < 10) {
+        setSelectedEdge(edge)
+        setShowEvidencePanel(true)
+        return
+      }
+    }
+
+    // Clicked on empty space
+    setSelectedEntity(null)
+    setSelectedEdge(null)
+  }, [positionedNodes, filteredGraph.edges, zoom, pan])
+
+  // Helper function for point-to-line distance
+  function pointToLineDistance(px: number, py: number, x1: number, y1: number, x2: number, y2: number) {
+    const A = px - x1
+    const B = py - y1
+    const C = x2 - x1
+    const D = y2 - y1
+    const dot = A * C + B * D
+    const lenSq = C * C + D * D
+    let param = -1
+    if (lenSq !== 0) param = dot / lenSq
+    let xx, yy
+    if (param < 0) { xx = x1; yy = y1 }
+    else if (param > 1) { xx = x2; yy = y2 }
+    else { xx = x1 + param * C; yy = y1 + param * D }
+    return Math.sqrt((px - xx) ** 2 + (py - yy) ** 2)
+  }
+
+  const toggleSection = (section: keyof typeof expandedSections) => {
+    setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }))
+  }
+
+  const toggleEntityType = (type: string) => {
+    setFilters(prev => ({
+      ...prev,
+      entityTypes: prev.entityTypes.includes(type)
+        ? prev.entityTypes.filter(t => t !== type)
+        : [...prev.entityTypes, type]
+    }))
+  }
+
+  const toggleRelationType = (type: string) => {
+    setFilters(prev => ({
+      ...prev,
+      relationTypes: prev.relationTypes.includes(type)
+        ? prev.relationTypes.filter(t => t !== type)
+        : [...prev.relationTypes, type]
+    }))
+  }
+
+  const toggleContext = (context: string) => {
+    setFilters(prev => ({
+      ...prev,
+      contexts: prev.contexts.includes(context)
+        ? prev.contexts.filter(c => c !== context)
+        : [...prev.contexts, context]
+    }))
+  }
+
+  const getConfidenceBadge = (confidence: number) => {
+    const level = CONFIDENCE_LEVELS.find(l => confidence >= l.min)
+    return (
+      <span
+        className="px-2 py-0.5 rounded text-xs font-medium"
+        style={{ backgroundColor: level?.color + '20', color: level?.color }}
+      >
+        {(confidence * 100).toFixed(0)}%
+      </span>
+    )
+  }
+
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-full flex flex-col bg-secondary-950">
       {/* Header */}
-      <div className="p-6 border-b border-secondary-700">
-        <div className="flex items-center justify-between mb-4">
+      <div className="p-4 border-b border-secondary-800 bg-secondary-900">
+        <div className="flex items-center justify-between mb-3">
           <div>
-            <h1 className="text-2xl font-bold text-white">Knowledge Graph</h1>
+            <h1 className="text-xl font-bold text-white">Knowledge Graph Explorer</h1>
             <p className="text-secondary-400 text-sm">
-              Explore biomedical entities and relationships
+              Interactive visualization with evidence drill-down
             </p>
           </div>
-          {stats && (
-            <div className="flex space-x-6 text-sm">
-              <div>
-                <span className="text-secondary-400">Entities: </span>
-                <span className="text-white font-medium">{stats.total_entities.toLocaleString()}</span>
+          <div className="flex items-center space-x-4">
+            {stats && (
+              <div className="flex space-x-4 text-sm mr-4">
+                <div className="flex items-center space-x-1">
+                  <div className="w-2 h-2 bg-primary-500 rounded-full"></div>
+                  <span className="text-secondary-400">Entities:</span>
+                  <span className="text-white font-medium">{stats.total_entities?.toLocaleString() || filteredGraph.nodes.length}</span>
+                </div>
+                <div className="flex items-center space-x-1">
+                  <div className="w-2 h-2 bg-emerald-500 rounded-full"></div>
+                  <span className="text-secondary-400">Relations:</span>
+                  <span className="text-white font-medium">{stats.total_relations?.toLocaleString() || filteredGraph.edges.length}</span>
+                </div>
               </div>
-              <div>
-                <span className="text-secondary-400">Relations: </span>
-                <span className="text-white font-medium">{stats.total_relations.toLocaleString()}</span>
-              </div>
-            </div>
-          )}
+            )}
+            <button
+              onClick={() => setShowFilters(!showFilters)}
+              className={`p-2 rounded-lg transition-colors ${showFilters ? 'bg-primary-600 text-white' : 'bg-secondary-800 text-secondary-400 hover:text-white'}`}
+            >
+              <FiFilter className="w-5 h-5" />
+            </button>
+            <button className="p-2 bg-secondary-800 rounded-lg text-secondary-400 hover:text-white">
+              <FiDownload className="w-5 h-5" />
+            </button>
+            <button className="p-2 bg-secondary-800 rounded-lg text-secondary-400 hover:text-white">
+              <FiShare2 className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Search */}
-        <div className="relative">
-          <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-secondary-400 w-5 h-5" />
+        <div className="relative max-w-xl">
+          <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-secondary-400 w-4 h-4" />
           <input
             type="text"
-            className="input w-full pl-10"
-            placeholder="Search entities (genes, proteins, diseases, drugs...)"
+            className="w-full bg-secondary-800 border border-secondary-700 rounded-lg py-2 pl-10 pr-4 text-white text-sm placeholder-secondary-500 focus:outline-none focus:border-primary-500"
+            placeholder="Search genes, proteins, diseases, drugs, pathways..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-secondary-400 hover:text-white"
+            >
+              <FiX className="w-4 h-4" />
+            </button>
+          )}
         </div>
 
         {/* Search Results Dropdown */}
         {searchQuery.length >= 2 && searchResults && searchResults.length > 0 && (
-          <div className="absolute z-10 mt-1 w-full max-w-2xl bg-secondary-800 border border-secondary-700 rounded-lg shadow-xl max-h-80 overflow-auto">
+          <div className="absolute z-20 mt-1 w-full max-w-xl bg-secondary-800 border border-secondary-700 rounded-lg shadow-xl max-h-72 overflow-auto">
             {searchResults.map((entity) => (
               <button
                 key={entity.id}
-                className="w-full px-4 py-3 text-left hover:bg-secondary-700 transition-colors flex items-center justify-between"
+                className="w-full px-4 py-2.5 text-left hover:bg-secondary-700 transition-colors flex items-center justify-between"
                 onClick={() => {
                   setSelectedEntity(entity)
                   setSearchQuery('')
                 }}
               >
-                <div>
-                  <p className="text-white font-medium">{entity.name}</p>
-                  <p className="text-secondary-400 text-sm">{entity.entity_type}</p>
+                <div className="flex items-center space-x-3">
+                  <div
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold"
+                    style={{ backgroundColor: ENTITY_COLORS[entity.entity_type as keyof typeof ENTITY_COLORS]?.bg || '#64748b' }}
+                  >
+                    {entity.name.slice(0, 2)}
+                  </div>
+                  <div>
+                    <p className="text-white font-medium text-sm">{entity.name}</p>
+                    <p className="text-secondary-400 text-xs capitalize">{entity.entity_type}</p>
+                  </div>
                 </div>
-                <span className="badge badge-info text-xs">{entity.entity_type}</span>
               </button>
             ))}
           </div>
@@ -86,95 +489,426 @@ export default function KnowledgeGraph() {
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex">
-        {/* Graph Visualization */}
-        <div className="flex-1 relative bg-secondary-950" ref={containerRef}>
-          {selectedEntity && neighborhood ? (
-            <div className="absolute inset-0 flex items-center justify-center">
-              {/* Simple visualization placeholder */}
-              <div className="text-center">
-                <div className="w-24 h-24 mx-auto mb-4 bg-primary-600/30 rounded-full flex items-center justify-center border-2 border-primary-500">
-                  <span className="text-white font-bold text-lg">{selectedEntity.name.slice(0, 3)}</span>
-                </div>
-                <h3 className="text-white font-semibold">{selectedEntity.name}</h3>
-                <p className="text-secondary-400 text-sm">{selectedEntity.entity_type}</p>
-                <p className="text-secondary-500 text-xs mt-2">
-                  {neighborhood.entities.length} connected entities
-                </p>
-                <p className="text-secondary-500 text-xs">
-                  {neighborhood.relations.length} relationships
-                </p>
+      <div className="flex-1 flex overflow-hidden">
+        {/* Filters Panel */}
+        {showFilters && (
+          <div className="w-64 border-r border-secondary-800 bg-secondary-900 overflow-y-auto">
+            <div className="p-3">
+              <h3 className="text-sm font-semibold text-white mb-3 flex items-center">
+                <FiLayers className="w-4 h-4 mr-2" />
+                Filters & Layers
+              </h3>
+
+              {/* Entity Types */}
+              <div className="mb-4">
+                <button
+                  onClick={() => toggleSection('entityTypes')}
+                  className="w-full flex items-center justify-between text-sm text-secondary-300 hover:text-white py-1"
+                >
+                  <span>Entity Types</span>
+                  {expandedSections.entityTypes ? <FiChevronDown className="w-4 h-4" /> : <FiChevronRight className="w-4 h-4" />}
+                </button>
+                {expandedSections.entityTypes && (
+                  <div className="mt-2 space-y-1">
+                    {Object.entries(ENTITY_COLORS).map(([type, config]) => (
+                      <label key={type} className="flex items-center space-x-2 py-1 cursor-pointer group">
+                        <input
+                          type="checkbox"
+                          checked={filters.entityTypes.includes(type)}
+                          onChange={() => toggleEntityType(type)}
+                          className="rounded border-secondary-600 text-primary-600 focus:ring-primary-500"
+                        />
+                        <div
+                          className="w-3 h-3 rounded-full"
+                          style={{ backgroundColor: config.bg }}
+                        />
+                        <span className="text-sm text-secondary-300 group-hover:text-white capitalize">
+                          {config.text}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Relation Types */}
+              <div className="mb-4">
+                <button
+                  onClick={() => toggleSection('relationTypes')}
+                  className="w-full flex items-center justify-between text-sm text-secondary-300 hover:text-white py-1"
+                >
+                  <span>Relation Types</span>
+                  {expandedSections.relationTypes ? <FiChevronDown className="w-4 h-4" /> : <FiChevronRight className="w-4 h-4" />}
+                </button>
+                {expandedSections.relationTypes && (
+                  <div className="mt-2 space-y-1">
+                    {Object.entries(RELATION_TYPES).map(([type, config]) => (
+                      <label key={type} className="flex items-center space-x-2 py-1 cursor-pointer group">
+                        <input
+                          type="checkbox"
+                          checked={filters.relationTypes.includes(type)}
+                          onChange={() => toggleRelationType(type)}
+                          className="rounded border-secondary-600 text-primary-600 focus:ring-primary-500"
+                        />
+                        <div
+                          className="w-3 h-0.5 rounded"
+                          style={{ backgroundColor: config.color }}
+                        />
+                        <span className="text-sm text-secondary-300 group-hover:text-white">
+                          {config.label}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Context Toggles */}
+              <div className="mb-4">
+                <button
+                  onClick={() => toggleSection('contexts')}
+                  className="w-full flex items-center justify-between text-sm text-secondary-300 hover:text-white py-1"
+                >
+                  <span>Context Categories</span>
+                  {expandedSections.contexts ? <FiChevronDown className="w-4 h-4" /> : <FiChevronRight className="w-4 h-4" />}
+                </button>
+                {expandedSections.contexts && (
+                  <div className="mt-2 space-y-1">
+                    {CONTEXT_CATEGORIES.map((ctx) => (
+                      <label key={ctx.id} className="flex items-center space-x-2 py-1 cursor-pointer group">
+                        <input
+                          type="checkbox"
+                          checked={filters.contexts.includes(ctx.id)}
+                          onChange={() => toggleContext(ctx.id)}
+                          className="rounded border-secondary-600 text-primary-600 focus:ring-primary-500"
+                        />
+                        <div
+                          className="w-3 h-3 rounded"
+                          style={{ backgroundColor: ctx.color }}
+                        />
+                        <span className="text-sm text-secondary-300 group-hover:text-white">
+                          {ctx.label}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Confidence Threshold */}
+              <div className="mb-4">
+                <button
+                  onClick={() => toggleSection('confidence')}
+                  className="w-full flex items-center justify-between text-sm text-secondary-300 hover:text-white py-1"
+                >
+                  <span>Confidence Threshold</span>
+                  {expandedSections.confidence ? <FiChevronDown className="w-4 h-4" /> : <FiChevronRight className="w-4 h-4" />}
+                </button>
+                {expandedSections.confidence && (
+                  <div className="mt-2">
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={filters.minConfidence * 100}
+                      onChange={(e) => setFilters(prev => ({ ...prev, minConfidence: parseInt(e.target.value) / 100 }))}
+                      className="w-full h-2 bg-secondary-700 rounded-lg appearance-none cursor-pointer"
+                    />
+                    <div className="flex justify-between text-xs text-secondary-400 mt-1">
+                      <span>0%</span>
+                      <span className="text-primary-400">{(filters.minConfidence * 100).toFixed(0)}%</span>
+                      <span>100%</span>
+                    </div>
+                    <div className="mt-2 space-y-1">
+                      {CONFIDENCE_LEVELS.map((level) => (
+                        <div key={level.id} className="flex items-center space-x-2 text-xs">
+                          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: level.color }} />
+                          <span className="text-secondary-400">{level.label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
-          ) : (
-            <div className="absolute inset-0 flex items-center justify-center text-secondary-500">
-              Search for an entity to visualize its neighborhood
-            </div>
-          )}
+          </div>
+        )}
+
+        {/* Graph Canvas */}
+        <div className="flex-1 relative" ref={containerRef}>
+          <canvas
+            ref={canvasRef}
+            className="w-full h-full cursor-grab active:cursor-grabbing"
+            onClick={handleCanvasClick}
+            style={{ width: '100%', height: '100%' }}
+          />
 
           {/* Zoom Controls */}
           <div className="absolute bottom-4 right-4 flex flex-col space-y-2">
-            <button className="p-2 bg-secondary-800 rounded-lg hover:bg-secondary-700 text-secondary-400 hover:text-white">
+            <button
+              onClick={() => setZoom(z => Math.min(2, z + 0.1))}
+              className="p-2 bg-secondary-800 rounded-lg hover:bg-secondary-700 text-secondary-400 hover:text-white transition-colors"
+            >
               <FiZoomIn className="w-5 h-5" />
             </button>
-            <button className="p-2 bg-secondary-800 rounded-lg hover:bg-secondary-700 text-secondary-400 hover:text-white">
+            <button
+              onClick={() => setZoom(z => Math.max(0.5, z - 0.1))}
+              className="p-2 bg-secondary-800 rounded-lg hover:bg-secondary-700 text-secondary-400 hover:text-white transition-colors"
+            >
               <FiZoomOut className="w-5 h-5" />
             </button>
-            <button className="p-2 bg-secondary-800 rounded-lg hover:bg-secondary-700 text-secondary-400 hover:text-white">
+            <button
+              onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }}
+              className="p-2 bg-secondary-800 rounded-lg hover:bg-secondary-700 text-secondary-400 hover:text-white transition-colors"
+            >
               <FiMaximize className="w-5 h-5" />
             </button>
           </div>
+
+          {/* Legend */}
+          <div className="absolute top-4 left-4 bg-secondary-900/90 backdrop-blur-sm rounded-lg p-3 max-w-xs">
+            <h4 className="text-xs font-semibold text-secondary-300 mb-2">Legend</h4>
+            <div className="grid grid-cols-2 gap-1">
+              {Object.entries(ENTITY_COLORS).slice(0, 6).map(([type, config]) => (
+                <div key={type} className="flex items-center space-x-1.5">
+                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: config.bg }} />
+                  <span className="text-xs text-secondary-400">{config.text}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Stats */}
+          <div className="absolute top-4 right-4 bg-secondary-900/90 backdrop-blur-sm rounded-lg px-3 py-2">
+            <div className="flex items-center space-x-4 text-xs">
+              <span className="text-secondary-400">
+                Showing: <span className="text-white font-medium">{filteredGraph.nodes.length}</span> nodes
+              </span>
+              <span className="text-secondary-400">
+                <span className="text-white font-medium">{filteredGraph.edges.length}</span> edges
+              </span>
+            </div>
+          </div>
         </div>
 
-        {/* Details Panel */}
-        {selectedEntity && (
-          <div className="w-80 border-l border-secondary-700 p-4 overflow-auto">
-            <h2 className="text-lg font-semibold text-white mb-4">Entity Details</h2>
-
-            <div className="space-y-4">
-              <div>
-                <label className="text-secondary-400 text-sm">Name</label>
-                <p className="text-white">{selectedEntity.name}</p>
-              </div>
-
-              <div>
-                <label className="text-secondary-400 text-sm">Type</label>
-                <p className="text-white">{selectedEntity.entity_type}</p>
-              </div>
-
-              {selectedEntity.description && (
-                <div>
-                  <label className="text-secondary-400 text-sm">Description</label>
-                  <p className="text-secondary-300 text-sm">{selectedEntity.description}</p>
-                </div>
-              )}
-
-              {selectedEntity.aliases && selectedEntity.aliases.length > 0 && (
-                <div>
-                  <label className="text-secondary-400 text-sm">Aliases</label>
-                  <div className="flex flex-wrap gap-1 mt-1">
-                    {selectedEntity.aliases.map((alias, i) => (
-                      <span key={i} className="badge badge-info text-xs">{alias}</span>
-                    ))}
+        {/* Entity/Edge Details Panel */}
+        {(selectedEntity || selectedEdge) && (
+          <div className="w-80 border-l border-secondary-800 bg-secondary-900 overflow-y-auto">
+            <div className="p-4">
+              {selectedEntity && !selectedEdge && (
+                <>
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-lg font-semibold text-white">Entity Details</h2>
+                    <button
+                      onClick={() => setSelectedEntity(null)}
+                      className="text-secondary-400 hover:text-white"
+                    >
+                      <FiX className="w-5 h-5" />
+                    </button>
                   </div>
-                </div>
-              )}
 
-              {neighborhood && neighborhood.relations.length > 0 && (
-                <div>
-                  <label className="text-secondary-400 text-sm mb-2 block">
-                    Relationships ({neighborhood.relations.length})
-                  </label>
-                  <div className="space-y-2 max-h-64 overflow-auto">
-                    {neighborhood.relations.slice(0, 20).map((rel, i) => (
-                      <div key={i} className="p-2 bg-secondary-800 rounded text-sm">
-                        <span className="text-primary-400">{rel.source_name}</span>
-                        <span className="text-secondary-400 mx-2">{rel.relation_type}</span>
-                        <span className="text-primary-400">{rel.target_name}</span>
+                  <div className="flex items-center space-x-3 mb-4">
+                    <div
+                      className="w-12 h-12 rounded-full flex items-center justify-center text-white text-lg font-bold"
+                      style={{ backgroundColor: ENTITY_COLORS[selectedEntity.entity_type as keyof typeof ENTITY_COLORS]?.bg || '#64748b' }}
+                    >
+                      {selectedEntity.name.slice(0, 2)}
+                    </div>
+                    <div>
+                      <h3 className="text-white font-semibold">{selectedEntity.name}</h3>
+                      <p className="text-secondary-400 text-sm capitalize">{selectedEntity.entity_type}</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    {selectedEntity.description && (
+                      <div>
+                        <label className="text-secondary-400 text-xs font-medium">Description</label>
+                        <p className="text-secondary-300 text-sm mt-1">{selectedEntity.description}</p>
                       </div>
-                    ))}
+                    )}
+
+                    <div>
+                      <label className="text-secondary-400 text-xs font-medium">Confidence</label>
+                      <div className="mt-1">
+                        {getConfidenceBadge(0.92)}
+                      </div>
+                    </div>
+
+                    {selectedEntity.aliases && selectedEntity.aliases.length > 0 && (
+                      <div>
+                        <label className="text-secondary-400 text-xs font-medium">Aliases</label>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {selectedEntity.aliases.map((alias, i) => (
+                            <span key={i} className="px-2 py-0.5 bg-secondary-800 rounded text-xs text-secondary-300">
+                              {alias}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="text-secondary-400 text-xs font-medium">External Links</label>
+                      <div className="flex flex-wrap gap-2 mt-1">
+                        <a href="#" className="flex items-center space-x-1 text-xs text-primary-400 hover:text-primary-300">
+                          <FiExternalLink className="w-3 h-3" />
+                          <span>PubMed</span>
+                        </a>
+                        <a href="#" className="flex items-center space-x-1 text-xs text-primary-400 hover:text-primary-300">
+                          <FiExternalLink className="w-3 h-3" />
+                          <span>UniProt</span>
+                        </a>
+                        <a href="#" className="flex items-center space-x-1 text-xs text-primary-400 hover:text-primary-300">
+                          <FiExternalLink className="w-3 h-3" />
+                          <span>DrugBank</span>
+                        </a>
+                      </div>
+                    </div>
+
+                    {neighborhood && neighborhood.relations && neighborhood.relations.length > 0 && (
+                      <div>
+                        <label className="text-secondary-400 text-xs font-medium mb-2 block">
+                          Relationships ({neighborhood.relations.length})
+                        </label>
+                        <div className="space-y-2 max-h-48 overflow-auto">
+                          {neighborhood.relations.slice(0, 10).map((rel, i) => (
+                            <div key={i} className="p-2 bg-secondary-800 rounded text-xs">
+                              <div className="flex items-center justify-between">
+                                <span className="text-primary-400">{rel.source_name}</span>
+                                <span className="text-secondary-500 mx-1">→</span>
+                                <span className="text-primary-400">{rel.target_name}</span>
+                              </div>
+                              <div className="flex items-center justify-between mt-1">
+                                <span className="text-secondary-400">{rel.relation_type}</span>
+                                {getConfidenceBadge(rel.confidence || 0.7)}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
-                </div>
+                </>
+              )}
+
+              {selectedEdge && (
+                <>
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-lg font-semibold text-white">Relationship Evidence</h2>
+                    <button
+                      onClick={() => { setSelectedEdge(null); setShowEvidencePanel(false) }}
+                      className="text-secondary-400 hover:text-white"
+                    >
+                      <FiX className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  <div className="bg-secondary-800 rounded-lg p-3 mb-4">
+                    <div className="flex items-center justify-center space-x-2 text-sm">
+                      <span className="text-primary-400 font-medium">
+                        {positionedNodes.find(n => n.id === selectedEdge.source)?.label}
+                      </span>
+                      <div className="flex items-center space-x-1">
+                        <div
+                          className="w-8 h-0.5 rounded"
+                          style={{ backgroundColor: RELATION_TYPES[selectedEdge.relation as keyof typeof RELATION_TYPES]?.color }}
+                        />
+                        <span className="text-secondary-400 text-xs">
+                          {RELATION_TYPES[selectedEdge.relation as keyof typeof RELATION_TYPES]?.label}
+                        </span>
+                        <div
+                          className="w-8 h-0.5 rounded"
+                          style={{ backgroundColor: RELATION_TYPES[selectedEdge.relation as keyof typeof RELATION_TYPES]?.color }}
+                        />
+                      </div>
+                      <span className="text-primary-400 font-medium">
+                        {positionedNodes.find(n => n.id === selectedEdge.target)?.label}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 mb-4">
+                    <div className="bg-secondary-800 rounded p-2 text-center">
+                      <p className="text-secondary-400 text-xs">Confidence</p>
+                      <p className="text-white font-semibold">{(selectedEdge.confidence * 100).toFixed(0)}%</p>
+                    </div>
+                    <div className="bg-secondary-800 rounded p-2 text-center">
+                      <p className="text-secondary-400 text-xs">Evidence</p>
+                      <p className="text-white font-semibold">{selectedEdge.evidenceCount}</p>
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="text-secondary-400 text-xs font-medium">Supporting Evidence</label>
+                      <FiBook className="w-4 h-4 text-secondary-500" />
+                    </div>
+                    <div className="space-y-2">
+                      {selectedEdge.evidence && selectedEdge.evidence.length > 0 ? (
+                        selectedEdge.evidence.map((ev, i) => (
+                          <div key={i} className="bg-secondary-800 rounded-lg p-3">
+                            <p className="text-secondary-300 text-sm mb-2">"{ev.text}"</p>
+                            <div className="flex items-center justify-between">
+                              <span className="text-primary-400 text-xs">{ev.source}</span>
+                              {getConfidenceBadge(ev.confidence)}
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="bg-secondary-800 rounded-lg p-3 text-center">
+                          <FiInfo className="w-5 h-5 text-secondary-500 mx-auto mb-1" />
+                          <p className="text-secondary-400 text-xs">Evidence details not loaded</p>
+                          <button className="text-primary-400 text-xs mt-1 hover:underline">
+                            Load evidence
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="mt-4">
+                    <label className="text-secondary-400 text-xs font-medium mb-2 block">Confidence Breakdown</label>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-secondary-400">Source Quality</span>
+                        <div className="flex items-center space-x-2">
+                          <div className="w-24 h-1.5 bg-secondary-700 rounded-full overflow-hidden">
+                            <div className="h-full bg-emerald-500 rounded-full" style={{ width: '85%' }} />
+                          </div>
+                          <span className="text-secondary-300">0.85</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-secondary-400">Citation Score</span>
+                        <div className="flex items-center space-x-2">
+                          <div className="w-24 h-1.5 bg-secondary-700 rounded-full overflow-hidden">
+                            <div className="h-full bg-blue-500 rounded-full" style={{ width: '72%' }} />
+                          </div>
+                          <span className="text-secondary-300">0.72</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-secondary-400">Claim Strength</span>
+                        <div className="flex items-center space-x-2">
+                          <div className="w-24 h-1.5 bg-secondary-700 rounded-full overflow-hidden">
+                            <div className="h-full bg-purple-500 rounded-full" style={{ width: '90%' }} />
+                          </div>
+                          <span className="text-secondary-300">0.90</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-secondary-400">Model Certainty</span>
+                        <div className="flex items-center space-x-2">
+                          <div className="w-24 h-1.5 bg-secondary-700 rounded-full overflow-hidden">
+                            <div className="h-full bg-amber-500 rounded-full" style={{ width: '78%' }} />
+                          </div>
+                          <span className="text-secondary-300">0.78</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </>
               )}
             </div>
           </div>
