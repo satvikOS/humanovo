@@ -2,9 +2,9 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   FiSearch, FiZoomIn, FiZoomOut, FiMaximize, FiFilter,
-  FiDownload, FiShare2, FiLayers, FiEye, FiEyeOff,
+  FiDownload, FiShare2, FiLayers,
   FiChevronRight, FiChevronDown, FiExternalLink, FiX,
-  FiInfo, FiAlertCircle, FiCheckCircle, FiBook
+  FiInfo, FiBook
 } from 'react-icons/fi'
 import { api, Entity } from '../services/api'
 
@@ -92,7 +92,7 @@ export default function KnowledgeGraph() {
   const [selectedEntity, setSelectedEntity] = useState<Entity | null>(null)
   const [selectedEdge, setSelectedEdge] = useState<GraphEdge | null>(null)
   const [showFilters, setShowFilters] = useState(true)
-  const [showEvidencePanel, setShowEvidencePanel] = useState(false)
+  const [_showEvidencePanel, setShowEvidencePanel] = useState(false)
   const [expandedSections, setExpandedSections] = useState({
     entityTypes: true,
     relationTypes: true,

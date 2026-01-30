@@ -21,10 +21,10 @@ chromadb==0.4.22
 faiss-cpu==1.7.4
 
 # AI/ML
-langchain==0.1.6
-langchain-openai==0.0.5
-langchain-community==0.0.19
-langgraph==0.0.26
+langchain==0.1.20
+langchain-openai==0.0.8
+langchain-community==0.0.38
+langgraph==0.0.38
 openai==1.12.0
 tiktoken==0.5.2
 sentence-transformers==2.3.1
