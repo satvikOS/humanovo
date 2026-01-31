@@ -25,6 +25,7 @@ class AgentType(str, Enum):
     VERIFICATION = "verification"
     SIMULATION = "simulation"
     REPORTING = "reporting"
+    INGESTION = "ingestion"
 
 
 class AgentStatus(str, Enum):
