@@ -182,10 +182,15 @@ class PubMedSource(LiteratureSource):
         logger.info(f"PubMed search: {query}, max_results={max_results}")
 
         # Mock results for demonstration
+        # Use query hash to generate deterministic IDs for consistent URLs
+        query_hash = hashlib.md5(query.encode()).hexdigest()
         records = []
         for i in range(min(max_results, 5)):
+            # Generate deterministic PMID from query hash + index
+            pmid_base = int(query_hash[:8], 16) % 90000000 + 10000000
+            pmid = f"{pmid_base + i}"
             record = LiteratureRecord(
-                record_id=f"pubmed_{i}_{hashlib.md5(query.encode()).hexdigest()[:8]}",
+                record_id=f"pubmed_{i}_{query_hash[:8]}",
                 source_type=SourceType.PUBMED,
                 title=f"Research on {query} - Study {i+1}",
                 abstract=f"This study investigates {query} in the context of biomedical research. "
@@ -193,10 +198,10 @@ class PubMedSource(LiteratureSource):
                 authors=[f"Author {j}" for j in range(1, 4)],
                 publication_date=date(2024, 1, i + 1),
                 journal="Journal of Biomedical Research",
-                pmid=f"3{i}000000",
+                pmid=pmid,
                 keywords=[query, "biomedical", "research"],
                 citations=10 * (i + 1),
-                url=f"https://pubmed.ncbi.nlm.nih.gov/3{i}000000/"
+                url=f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
             )
             records.append(record)
 
@@ -283,20 +288,24 @@ class PatentSource(LiteratureSource):
         """
         logger.info(f"Patent search: {query}, offices={self.offices}")
 
-        # Mock results
+        # Mock results - use query hash for deterministic patent numbers
+        query_hash = hashlib.md5(query.encode()).hexdigest()
         records = []
         for i in range(min(max_results, 3)):
+            # Generate deterministic patent number from query hash + index
+            patent_base = int(query_hash[:8], 16) % 9000000 + 11000000
+            patent_num = f"US{patent_base + i}"
             record = LiteratureRecord(
-                record_id=f"patent_{i}_{hashlib.md5(query.encode()).hexdigest()[:8]}",
+                record_id=f"patent_{i}_{query_hash[:8]}",
                 source_type=SourceType.PATENT,
                 title=f"Method and composition for {query}",
                 abstract=f"This invention relates to novel methods and compositions "
                         f"for {query} in therapeutic applications.",
                 authors=[f"Inventor {j}" for j in range(1, 3)],
                 publication_date=date(2024, 6, i + 1),
-                patent_number=f"US{11000000 + i}",
+                patent_number=patent_num,
                 keywords=[query, "therapeutic", "composition"],
-                url=f"https://patents.google.com/patent/US{11000000 + i}",
+                url=f"https://patents.google.com/patent/{patent_num}",
                 metadata={
                     "assignee": f"Pharma Corp {i+1}",
                     "filing_date": "2023-01-15",
@@ -383,23 +392,27 @@ class ClinicalTrialsSource(LiteratureSource):
         """
         logger.info(f"ClinicalTrials.gov search: {query}")
 
-        # Mock results
+        # Mock results - use query hash for deterministic NCT IDs
+        query_hash = hashlib.md5(query.encode()).hexdigest()
         records = []
         phases = ["Phase 1", "Phase 2", "Phase 3"]
         statuses = ["Recruiting", "Completed", "Active, not recruiting"]
 
         for i in range(min(max_results, 4)):
+            # Generate deterministic NCT ID from query hash + index
+            nct_base = int(query_hash[:8], 16) % 9000000 + 1000000
+            nct_id = f"NCT{nct_base + i:08d}"
             record = LiteratureRecord(
-                record_id=f"ct_{i}_{hashlib.md5(query.encode()).hexdigest()[:8]}",
+                record_id=f"ct_{i}_{query_hash[:8]}",
                 source_type=SourceType.CLINICAL_TRIAL,
                 title=f"A Study of {query} in Adult Patients",
                 abstract=f"This is a {phases[i % 3]} clinical trial evaluating {query} "
                         f"for treatment of relevant conditions.",
                 authors=["Principal Investigator"],
                 publication_date=date(2024, 3, i + 1),
-                nct_id=f"NCT0{5000000 + i}",
+                nct_id=nct_id,
                 keywords=[query, "clinical trial", phases[i % 3]],
-                url=f"https://clinicaltrials.gov/study/NCT0{5000000 + i}",
+                url=f"https://clinicaltrials.gov/study/{nct_id}",
                 metadata={
                     "phase": phases[i % 3],
                     "status": statuses[i % 3],
@@ -481,21 +494,25 @@ class PrePrintSource(LiteratureSource):
         """
         logger.info(f"Preprint search: {query}, servers={self.servers}")
 
-        # Mock results
+        # Mock results - use query hash for deterministic DOIs and URLs
+        query_hash = hashlib.md5(query.encode()).hexdigest()
         records = []
         for i in range(min(max_results, 3)):
             server = self.servers[i % len(self.servers)]
+            # Generate deterministic DOI from query hash + index
+            doi_base = int(query_hash[:8], 16) % 900000 + 100000
+            doi = f"10.1101/2024.01.01.{doi_base + i}"
             record = LiteratureRecord(
-                record_id=f"preprint_{i}_{hashlib.md5(query.encode()).hexdigest()[:8]}",
+                record_id=f"preprint_{i}_{query_hash[:8]}",
                 source_type=SourceType.PREPRINT,
                 title=f"Preprint: Novel findings on {query}",
                 abstract=f"We report preliminary findings regarding {query}. "
                         f"This preprint has not yet been peer-reviewed.",
                 authors=[f"Author {j}" for j in range(1, 5)],
                 publication_date=date(2024, 11, i + 1),
-                doi=f"10.1101/2024.11.{i+1:02d}.{600000 + i}",
+                doi=doi,
                 keywords=[query, "preprint", server],
-                url=f"https://www.{server}.org/content/10.1101/2024.11.{i+1:02d}.{600000 + i}",
+                url=f"https://www.{server}.org/content/{doi}",
                 journal=server,
                 metadata={
                     "server": server,
