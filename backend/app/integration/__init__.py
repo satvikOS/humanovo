@@ -28,7 +28,13 @@ from app.integration.provenance_tracker import (
     ProvenanceTracker,
     ProvenanceRecord,
     ProvenanceChain,
+    ProvenanceStorage,
+    InMemoryProvenanceStorage,
     get_provenance_tracker,
+)
+from app.integration.postgres_provenance_storage import (
+    PostgresProvenanceStorage,
+    get_postgres_provenance_storage,
 )
 
 __all__ = [
@@ -52,5 +58,10 @@ __all__ = [
     "ProvenanceTracker",
     "ProvenanceRecord",
     "ProvenanceChain",
+    "ProvenanceStorage",
+    "InMemoryProvenanceStorage",
     "get_provenance_tracker",
+    # PostgreSQL Provenance Storage
+    "PostgresProvenanceStorage",
+    "get_postgres_provenance_storage",
 ]

@@ -36,9 +36,17 @@ from app.agents.ingestion.state_manager import (
     AgentStateTracker,
     Checkpoint,
     CheckpointType,
+    StateStorage,
+    FileStateStorage,
+    InMemoryStateStorage,
     get_state_manager,
     initialize_state_manager,
     shutdown_state_manager,
+)
+from app.agents.ingestion.redis_state_storage import (
+    RedisStateStorage,
+    get_redis_state_storage,
+    close_redis_state_storage,
 )
 
 __all__ = [
@@ -73,7 +81,14 @@ __all__ = [
     "AgentStateTracker",
     "Checkpoint",
     "CheckpointType",
+    "StateStorage",
+    "FileStateStorage",
+    "InMemoryStateStorage",
     "get_state_manager",
     "initialize_state_manager",
     "shutdown_state_manager",
+    # Redis State Storage
+    "RedisStateStorage",
+    "get_redis_state_storage",
+    "close_redis_state_storage",
 ]
