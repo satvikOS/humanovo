@@ -5,14 +5,15 @@ Defines the base classes and interfaces for all GenUp agents.
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
-from app.core.logging import get_logger, LoggerMixin
+from app.core.logging import LoggerMixin
 
 
 class AgentType(str, Enum):
@@ -42,13 +43,13 @@ class AgentContext(BaseModel):
     """Shared context passed between agents."""
 
     session_id: UUID = Field(default_factory=uuid4)
-    project_id: Optional[UUID] = None
+    project_id: UUID | None = None
     query: str = ""
-    entities: List[str] = Field(default_factory=list)
-    evidence: List[Dict[str, Any]] = Field(default_factory=list)
-    hypotheses: List[Dict[str, Any]] = Field(default_factory=list)
-    graph_facts: List[Dict[str, Any]] = Field(default_factory=list)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    entities: list[str] = Field(default_factory=list)
+    evidence: list[dict[str, Any]] = Field(default_factory=list)
+    hypotheses: list[dict[str, Any]] = Field(default_factory=list)
+    graph_facts: list[dict[str, Any]] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
     iteration: int = 0
     max_iterations: int = 10
 
@@ -59,22 +60,22 @@ class AgentStep(BaseModel):
     step_id: UUID = Field(default_factory=uuid4)
     agent_type: AgentType
     action: str
-    input_data: Dict[str, Any] = Field(default_factory=dict)
-    output_data: Dict[str, Any] = Field(default_factory=dict)
-    tool_calls: List[str] = Field(default_factory=list)
+    input_data: dict[str, Any] = Field(default_factory=dict)
+    output_data: dict[str, Any] = Field(default_factory=dict)
+    tool_calls: list[str] = Field(default_factory=list)
     duration_ms: int = 0
     timestamp: datetime = Field(default_factory=datetime.utcnow)
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class AgentResult(BaseModel):
     """Result from an agent execution."""
 
     success: bool
-    data: Dict[str, Any] = Field(default_factory=dict)
-    steps: List[AgentStep] = Field(default_factory=list)
-    error: Optional[str] = None
-    context: Optional[AgentContext] = None
+    data: dict[str, Any] = Field(default_factory=dict)
+    steps: list[AgentStep] = Field(default_factory=list)
+    error: str | None = None
+    context: AgentContext | None = None
 
 
 class Tool(BaseModel):
@@ -82,8 +83,8 @@ class Tool(BaseModel):
 
     name: str
     description: str
-    parameters: Dict[str, Any] = Field(default_factory=dict)
-    handler: Optional[Callable] = Field(default=None, exclude=True)
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    handler: Callable | None = Field(default=None, exclude=True)
 
     class Config:
         arbitrary_types_allowed = True
@@ -107,8 +108,8 @@ class BaseAgent(ABC, LoggerMixin):
         self.max_iterations = max_iterations
         self.timeout_seconds = timeout_seconds
         self.status = AgentStatus.IDLE
-        self.tools: Dict[str, Tool] = {}
-        self.steps: List[AgentStep] = []
+        self.tools: dict[str, Tool] = {}
+        self.steps: list[AgentStep] = []
         self._setup_tools()
 
     def _setup_tools(self) -> None:
@@ -146,11 +147,11 @@ class BaseAgent(ABC, LoggerMixin):
     def record_step(
         self,
         action: str,
-        input_data: Dict[str, Any] = None,
-        output_data: Dict[str, Any] = None,
-        tool_calls: List[str] = None,
+        input_data: dict[str, Any] = None,
+        output_data: dict[str, Any] = None,
+        tool_calls: list[str] = None,
         duration_ms: int = 0,
-        error: Optional[str] = None,
+        error: str | None = None,
     ) -> AgentStep:
         """Record a step in the agent's execution."""
         step = AgentStep(
@@ -185,8 +186,8 @@ class BaseAgent(ABC, LoggerMixin):
     async def run(
         self,
         query: str,
-        context: Optional[AgentContext] = None,
-        progress_callback: Optional[Callable] = None,
+        context: AgentContext | None = None,
+        progress_callback: Callable | None = None,
         **kwargs,
     ) -> AgentResult:
         """Run the agent with the given query.
@@ -260,9 +261,9 @@ class AgentOrchestrator(LoggerMixin):
     """
 
     def __init__(self):
-        self.agents: Dict[AgentType, BaseAgent] = {}
-        self.context: Optional[AgentContext] = None
-        self.history: List[AgentStep] = []
+        self.agents: dict[AgentType, BaseAgent] = {}
+        self.context: AgentContext | None = None
+        self.history: list[AgentStep] = []
 
     def register_agent(self, agent: BaseAgent) -> None:
         """Register an agent for orchestration."""
@@ -293,7 +294,7 @@ class AgentOrchestrator(LoggerMixin):
     async def run_pipeline(
         self,
         query: str,
-        pipeline: List[AgentType],
+        pipeline: list[AgentType],
         **kwargs,
     ) -> AgentResult:
         """Run a pipeline of agents sequentially."""

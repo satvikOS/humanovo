@@ -20,10 +20,10 @@ Provides:
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional, Tuple, Any, Set
+from typing import Any
 
-from .transformer_ner import BiomedicalEntity, EntityType
 from .relation_extractor import BiomedicalRelation, RelationType
+from .transformer_ner import BiomedicalEntity, EntityType
 
 logger = logging.getLogger(__name__)
 
@@ -86,18 +86,19 @@ class DomainRelationType(str, Enum):
 @dataclass
 class DomainRelation:
     """Represents a domain-specific biomedical relation."""
+
     source: BiomedicalEntity
     relation_type: DomainRelationType
     target: BiomedicalEntity
     confidence: float
     evidence_text: str
     evidence_weight: float = 1.0
-    provenance: Dict[str, Any] = field(default_factory=dict)
-    ontology_mapping: Optional[str] = None  # e.g., "RO:0002212" for RO ontology
+    provenance: dict[str, Any] = field(default_factory=dict)
+    ontology_mapping: str | None = None  # e.g., "RO:0002212" for RO ontology
     bidirectional: bool = False
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "source": self.source.to_dict(),
             "relation_type": self.relation_type.value,
@@ -108,16 +109,12 @@ class DomainRelation:
             "provenance": self.provenance,
             "ontology_mapping": self.ontology_mapping,
             "bidirectional": self.bidirectional,
-            "metadata": self.metadata
+            "metadata": self.metadata,
         }
 
-    def to_triple(self) -> Tuple[str, str, str]:
+    def to_triple(self) -> tuple[str, str, str]:
         """Return as (source, relation, target) triple."""
-        return (
-            self.source.text,
-            self.relation_type.value,
-            self.target.text
-        )
+        return (self.source.text, self.relation_type.value, self.target.text)
 
     def to_cypher(self) -> str:
         """Generate Cypher query for Neo4j."""
@@ -153,91 +150,99 @@ class DomainRelationEncoder:
             "object_types": {EntityType.DISEASE},
             "source_relations": {RelationType.TREATS},
             "ontology": "RO:0002606",  # treats
-            "bidirectional": False
+            "bidirectional": False,
         },
         DomainRelationType.DRUG_MECHANISM_GENE: {
             "subject_types": {EntityType.DRUG},
             "object_types": {EntityType.GENE},
-            "source_relations": {RelationType.MECHANISM, RelationType.TARGETS, RelationType.INHIBITS},
+            "source_relations": {
+                RelationType.MECHANISM,
+                RelationType.TARGETS,
+                RelationType.INHIBITS,
+            },
             "ontology": "RO:0002434",  # interacts with
-            "bidirectional": False
+            "bidirectional": False,
         },
         DomainRelationType.DRUG_MECHANISM_PATHWAY: {
             "subject_types": {EntityType.DRUG},
             "object_types": {EntityType.PATHWAY},
-            "source_relations": {RelationType.MECHANISM, RelationType.INHIBITS, RelationType.ACTIVATES},
+            "source_relations": {
+                RelationType.MECHANISM,
+                RelationType.INHIBITS,
+                RelationType.ACTIVATES,
+            },
             "ontology": "RO:0002448",  # directly regulates activity of
-            "bidirectional": False
+            "bidirectional": False,
         },
         DomainRelationType.DRUG_TARGETS_PROTEIN: {
             "subject_types": {EntityType.DRUG},
             "object_types": {EntityType.PROTEIN, EntityType.ANTIGEN},
             "source_relations": {RelationType.TARGETS, RelationType.BINDS},
             "ontology": "RO:0002436",  # molecularly interacts with
-            "bidirectional": False
+            "bidirectional": False,
         },
         DomainRelationType.ADC_TARGETS_ANTIGEN: {
             "subject_types": {EntityType.ADC},
             "object_types": {EntityType.ANTIGEN, EntityType.PROTEIN},
             "source_relations": {RelationType.TARGETS, RelationType.BINDS},
             "ontology": "RO:0002436",
-            "bidirectional": False
+            "bidirectional": False,
         },
         DomainRelationType.BIOMARKER_MODULATES_OUTCOME: {
             "subject_types": {EntityType.BIOMARKER, EntityType.GENE, EntityType.PROTEIN},
             "object_types": {EntityType.DISEASE},
             "source_relations": {RelationType.MODULATES, RelationType.BIOMARKER_OF},
             "ontology": "RO:0002211",  # regulates
-            "bidirectional": False
+            "bidirectional": False,
         },
         DomainRelationType.BIOMARKER_PREDICTS_RESPONSE: {
             "subject_types": {EntityType.BIOMARKER, EntityType.GENE},
             "object_types": {EntityType.DRUG, EntityType.ADC},
             "source_relations": {RelationType.BIOMARKER_OF, RelationType.MODULATES},
             "ontology": None,
-            "bidirectional": False
+            "bidirectional": False,
         },
         DomainRelationType.GENE_ASSOCIATES_DISEASE: {
             "subject_types": {EntityType.GENE},
             "object_types": {EntityType.DISEASE},
             "source_relations": {RelationType.ASSOCIATES, RelationType.CAUSES},
             "ontology": "RO:0002200",  # has phenotype
-            "bidirectional": False
+            "bidirectional": False,
         },
         DomainRelationType.MUTATION_CONFERS_RESISTANCE: {
             "subject_types": {EntityType.MUTATION, EntityType.GENE},
             "object_types": {EntityType.DRUG, EntityType.ADC},
             "source_relations": {RelationType.RESISTANCE},
             "ontology": None,
-            "bidirectional": False
+            "bidirectional": False,
         },
         DomainRelationType.PROTEIN_INTERACTS_PROTEIN: {
             "subject_types": {EntityType.PROTEIN},
             "object_types": {EntityType.PROTEIN},
             "source_relations": {RelationType.INTERACTS, RelationType.BINDS},
             "ontology": "RO:0002436",
-            "bidirectional": True
+            "bidirectional": True,
         },
         DomainRelationType.CELL_EXPRESSES_GENE: {
             "subject_types": {EntityType.CELL_TYPE, EntityType.CELL_LINE},
             "object_types": {EntityType.GENE, EntityType.PROTEIN, EntityType.BIOMARKER},
             "source_relations": {RelationType.EXPRESSES},
             "ontology": "RO:0002292",  # expresses
-            "bidirectional": False
+            "bidirectional": False,
         },
         DomainRelationType.DRUG_INHIBITS_PROTEIN: {
             "subject_types": {EntityType.DRUG},
             "object_types": {EntityType.PROTEIN, EntityType.GENE},
             "source_relations": {RelationType.INHIBITS},
             "ontology": "RO:0002449",  # directly negatively regulates
-            "bidirectional": False
+            "bidirectional": False,
         },
         DomainRelationType.PATHWAY_INVOLVED_IN_DISEASE: {
             "subject_types": {EntityType.PATHWAY},
             "object_types": {EntityType.DISEASE},
             "source_relations": {RelationType.ASSOCIATES, RelationType.CAUSES},
             "ontology": "RO:0002331",  # involved in
-            "bidirectional": False
+            "bidirectional": False,
         },
     }
 
@@ -259,14 +264,14 @@ class DomainRelationEncoder:
         "in_vitro": 0.4,
         "in_silico": 0.3,
         "expert_opinion": 0.25,
-        "default": 0.5
+        "default": 0.5,
     }
 
     def __init__(
         self,
         confidence_threshold: float = 0.5,
         require_valid_schema: bool = True,
-        include_ontology: bool = True
+        include_ontology: bool = True,
     ):
         """
         Initialize the domain relation encoder.
@@ -283,10 +288,8 @@ class DomainRelationEncoder:
         logger.info("DomainRelationEncoder initialized")
 
     def encode_relations(
-        self,
-        relations: List[BiomedicalRelation],
-        evidence_context: Optional[str] = None
-    ) -> List[DomainRelation]:
+        self, relations: list[BiomedicalRelation], evidence_context: str | None = None
+    ) -> list[DomainRelation]:
         """
         Encode generic relations into domain-specific typed relations.
 
@@ -307,10 +310,8 @@ class DomainRelationEncoder:
         return encoded
 
     def _encode_single_relation(
-        self,
-        relation: BiomedicalRelation,
-        evidence_context: Optional[str]
-    ) -> Optional[DomainRelation]:
+        self, relation: BiomedicalRelation, evidence_context: str | None
+    ) -> DomainRelation | None:
         """Encode a single relation."""
         # Find matching domain relation type
         domain_type = self._find_domain_type(relation)
@@ -328,10 +329,7 @@ class DomainRelationEncoder:
         schema = self.RELATION_SCHEMA.get(domain_type, {})
 
         # Calculate evidence weight
-        evidence_weight = self._calculate_evidence_weight(
-            relation.evidence_text,
-            evidence_context
-        )
+        evidence_weight = self._calculate_evidence_weight(relation.evidence_text, evidence_context)
 
         # Get ontology mapping
         ontology = schema.get("ontology") if self.include_ontology else None
@@ -341,7 +339,7 @@ class DomainRelationEncoder:
             "source_relation": relation.predicate.value,
             "source_model": relation.source_model,
             "assertion_type": relation.assertion_type,
-            "evidence_text": relation.evidence_text[:500]  # Truncate
+            "evidence_text": relation.evidence_text[:500],  # Truncate
         }
 
         return DomainRelation(
@@ -354,15 +352,10 @@ class DomainRelationEncoder:
             provenance=provenance,
             ontology_mapping=ontology,
             bidirectional=schema.get("bidirectional", False),
-            metadata={
-                "original_predicate": relation.predicate.value
-            }
+            metadata={"original_predicate": relation.predicate.value},
         )
 
-    def _find_domain_type(
-        self,
-        relation: BiomedicalRelation
-    ) -> Optional[DomainRelationType]:
+    def _find_domain_type(self, relation: BiomedicalRelation) -> DomainRelationType | None:
         """Find matching domain relation type for a relation."""
         subject_type = relation.subject.entity_type
         object_type = relation.object.entity_type
@@ -380,10 +373,7 @@ class DomainRelationEncoder:
 
         return None
 
-    def _generic_mapping(
-        self,
-        relation: BiomedicalRelation
-    ) -> Optional[DomainRelationType]:
+    def _generic_mapping(self, relation: BiomedicalRelation) -> DomainRelationType | None:
         """Create generic domain mapping when no schema matches."""
         predicate = relation.predicate
 
@@ -400,11 +390,7 @@ class DomainRelationEncoder:
 
         return generic_map.get(predicate)
 
-    def _calculate_evidence_weight(
-        self,
-        evidence_text: str,
-        context: Optional[str]
-    ) -> float:
+    def _calculate_evidence_weight(self, evidence_text: str, context: str | None) -> float:
         """Calculate evidence weight based on source quality."""
         text = (evidence_text + " " + (context or "")).lower()
 
@@ -429,10 +415,8 @@ class DomainRelationEncoder:
         return self.EVIDENCE_WEIGHTS["default"]
 
     def encode_adc_relations(
-        self,
-        text: str,
-        entities: List[BiomedicalEntity]
-    ) -> List[DomainRelation]:
+        self, text: str, entities: list[BiomedicalEntity]
+    ) -> list[DomainRelation]:
         """
         Extract ADC-specific relations from text.
 
@@ -449,8 +433,7 @@ class DomainRelationEncoder:
         # Find ADC entities
         adc_entities = [e for e in entities if e.entity_type == EntityType.ADC]
         antigen_entities = [
-            e for e in entities
-            if e.entity_type in {EntityType.ANTIGEN, EntityType.PROTEIN}
+            e for e in entities if e.entity_type in {EntityType.ANTIGEN, EntityType.PROTEIN}
         ]
 
         # ADC-Antigen relations
@@ -468,17 +451,14 @@ class DomainRelationEncoder:
                             evidence_weight=0.7,
                             provenance={"extraction_method": "adc_pattern"},
                             ontology_mapping="RO:0002436",
-                            bidirectional=False
+                            bidirectional=False,
                         )
                         relations.append(relation)
                         break
 
         return relations
 
-    def validate_relation(
-        self,
-        relation: DomainRelation
-    ) -> Tuple[bool, List[str]]:
+    def validate_relation(self, relation: DomainRelation) -> tuple[bool, list[str]]:
         """
         Validate a domain relation against schema.
 
@@ -512,16 +492,12 @@ class DomainRelationEncoder:
         # Check confidence
         if relation.confidence < self.confidence_threshold:
             issues.append(
-                f"Confidence {relation.confidence} below threshold "
-                f"{self.confidence_threshold}"
+                f"Confidence {relation.confidence} below threshold {self.confidence_threshold}"
             )
 
         return len(issues) == 0, issues
 
-    def get_relation_statistics(
-        self,
-        relations: List[DomainRelation]
-    ) -> Dict[str, Any]:
+    def get_relation_statistics(self, relations: list[DomainRelation]) -> dict[str, Any]:
         """
         Calculate statistics for a set of relations.
 
@@ -534,14 +510,11 @@ class DomainRelationEncoder:
         stats = {
             "total_relations": len(relations),
             "relation_types": {},
-            "entity_types": {
-                "subjects": {},
-                "objects": {}
-            },
+            "entity_types": {"subjects": {}, "objects": {}},
             "avg_confidence": 0.0,
             "avg_evidence_weight": 0.0,
             "bidirectional_count": 0,
-            "ontology_mapped_count": 0
+            "ontology_mapped_count": 0,
         }
 
         if not relations:
@@ -558,10 +531,8 @@ class DomainRelationEncoder:
             # Count entity types
             st = rel.source.entity_type.value
             ot = rel.target.entity_type.value
-            stats["entity_types"]["subjects"][st] = \
-                stats["entity_types"]["subjects"].get(st, 0) + 1
-            stats["entity_types"]["objects"][ot] = \
-                stats["entity_types"]["objects"].get(ot, 0) + 1
+            stats["entity_types"]["subjects"][st] = stats["entity_types"]["subjects"].get(st, 0) + 1
+            stats["entity_types"]["objects"][ot] = stats["entity_types"]["objects"].get(ot, 0) + 1
 
             # Collect metrics
             confidences.append(rel.confidence)
@@ -577,10 +548,7 @@ class DomainRelationEncoder:
 
         return stats
 
-    def export_to_rdf(
-        self,
-        relations: List[DomainRelation]
-    ) -> str:
+    def export_to_rdf(self, relations: list[DomainRelation]) -> str:
         """
         Export relations to RDF/Turtle format.
 
@@ -594,7 +562,7 @@ class DomainRelationEncoder:
             "@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .",
             "@prefix obo: <http://purl.obolibrary.org/obo/> .",
             "@prefix genup: <http://genup.io/ontology/> .",
-            ""
+            "",
         ]
 
         for i, rel in enumerate(relations):
@@ -602,11 +570,11 @@ class DomainRelationEncoder:
             target_id = f"genup:entity_{i}_t"
 
             # Source entity
-            lines.append(f'{source_id} a genup:{rel.source.entity_type.value} ;')
+            lines.append(f"{source_id} a genup:{rel.source.entity_type.value} ;")
             lines.append(f'    rdfs:label "{rel.source.text}" .')
 
             # Target entity
-            lines.append(f'{target_id} a genup:{rel.target.entity_type.value} ;')
+            lines.append(f"{target_id} a genup:{rel.target.entity_type.value} ;")
             lines.append(f'    rdfs:label "{rel.target.text}" .')
 
             # Relation
@@ -614,7 +582,7 @@ class DomainRelationEncoder:
             if rel.ontology_mapping:
                 predicate = f"obo:{rel.ontology_mapping.replace(':', '_')}"
 
-            lines.append(f'{source_id} {predicate} {target_id} .')
+            lines.append(f"{source_id} {predicate} {target_id} .")
             lines.append("")
 
         return "\n".join(lines)
@@ -622,9 +590,8 @@ class DomainRelationEncoder:
 
 # Convenience function
 def encode_relations(
-    relations: List[BiomedicalRelation],
-    evidence_context: Optional[str] = None
-) -> List[DomainRelation]:
+    relations: list[BiomedicalRelation], evidence_context: str | None = None
+) -> list[DomainRelation]:
     """Quick relation encoding using default encoder."""
     encoder = DomainRelationEncoder()
     return encoder.encode_relations(relations, evidence_context)

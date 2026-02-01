@@ -5,24 +5,33 @@ Production-ready persistent storage for provenance data using PostgreSQL.
 """
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
-from uuid import UUID
+from typing import Any
 
-from sqlalchemy import Column, DateTime, Enum, Float, ForeignKey, Index, String, Text
-from sqlalchemy import select, delete, and_
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID as PGUUID
+from sqlalchemy import (
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    and_,
+    select,
+)
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import relationship
 
-from app.core.database import async_session_factory, Base
-from app.core.logging import get_logger
 from app.agents.ingestion.base import SourceType
+from app.core.database import Base, async_session_factory
+from app.core.logging import get_logger
 from app.integration.provenance_tracker import (
-    ProvenanceStorage,
-    ProvenanceRecord,
+    DataQualityLevel,
     ProvenanceEvent,
     ProvenanceEventType,
-    DataQualityLevel,
+    ProvenanceRecord,
+    ProvenanceStorage,
 )
 
 logger = get_logger(__name__)
@@ -53,9 +62,7 @@ class ProvenanceRecordModel(Base):
         cascade="all, delete-orphan",
     )
 
-    __table_args__ = (
-        Index("ix_provenance_records_source_created", "source_type", "created_at"),
-    )
+    __table_args__ = (Index("ix_provenance_records_source_created", "source_type", "created_at"),)
 
     def to_domain(self) -> ProvenanceRecord:
         """Convert to domain object."""
@@ -212,7 +219,7 @@ class PostgresProvenanceStorage(ProvenanceStorage):
                 record_id=record.record_id,
             )
 
-    async def get_record(self, record_id: str) -> Optional[ProvenanceRecord]:
+    async def get_record(self, record_id: str) -> ProvenanceRecord | None:
         """Retrieve a provenance record by ID."""
         async with self.session_factory() as session:
             model = await session.get(ProvenanceRecordModel, record_id)
@@ -242,14 +249,12 @@ class PostgresProvenanceStorage(ProvenanceStorage):
     async def get_events(
         self,
         record_id: str,
-        event_types: Optional[List[ProvenanceEventType]] = None,
+        event_types: list[ProvenanceEventType] | None = None,
         limit: int = 100,
-    ) -> List[ProvenanceEvent]:
+    ) -> list[ProvenanceEvent]:
         """Retrieve events for a record with optional filtering."""
         async with self.session_factory() as session:
-            query = select(ProvenanceEventModel).where(
-                ProvenanceEventModel.record_id == record_id
-            )
+            query = select(ProvenanceEventModel).where(ProvenanceEventModel.record_id == record_id)
 
             if event_types:
                 type_values = [t.value for t in event_types]
@@ -266,7 +271,7 @@ class PostgresProvenanceStorage(ProvenanceStorage):
         self,
         record_id: str,
         depth: int = 10,
-    ) -> List[ProvenanceRecord]:
+    ) -> list[ProvenanceRecord]:
         """
         Get the lineage (ancestors) of a record.
 
@@ -304,7 +309,7 @@ class PostgresProvenanceStorage(ProvenanceStorage):
         self,
         record_id: str,
         depth: int = 10,
-    ) -> List[ProvenanceRecord]:
+    ) -> list[ProvenanceRecord]:
         """
         Get all records derived from this record.
 
@@ -354,26 +359,22 @@ class PostgresProvenanceStorage(ProvenanceStorage):
 
     async def query_records(
         self,
-        source_type: Optional[SourceType] = None,
-        quality_level: Optional[DataQualityLevel] = None,
-        created_after: Optional[datetime] = None,
-        created_before: Optional[datetime] = None,
+        source_type: SourceType | None = None,
+        quality_level: DataQualityLevel | None = None,
+        created_after: datetime | None = None,
+        created_before: datetime | None = None,
         limit: int = 100,
         offset: int = 0,
-    ) -> List[ProvenanceRecord]:
+    ) -> list[ProvenanceRecord]:
         """Query records with various filters."""
         async with self.session_factory() as session:
             query = select(ProvenanceRecordModel)
 
             conditions = []
             if source_type:
-                conditions.append(
-                    ProvenanceRecordModel.source_type == source_type.value
-                )
+                conditions.append(ProvenanceRecordModel.source_type == source_type.value)
             if quality_level:
-                conditions.append(
-                    ProvenanceRecordModel.quality_level == quality_level.value
-                )
+                conditions.append(ProvenanceRecordModel.quality_level == quality_level.value)
             if created_after:
                 conditions.append(ProvenanceRecordModel.created_at >= created_after)
             if created_before:
@@ -383,9 +384,7 @@ class PostgresProvenanceStorage(ProvenanceStorage):
                 query = query.where(and_(*conditions))
 
             query = (
-                query.order_by(ProvenanceRecordModel.created_at.desc())
-                .limit(limit)
-                .offset(offset)
+                query.order_by(ProvenanceRecordModel.created_at.desc()).limit(limit).offset(offset)
             )
 
             result = await session.execute(query)
@@ -395,22 +394,20 @@ class PostgresProvenanceStorage(ProvenanceStorage):
 
     async def query_events(
         self,
-        event_type: Optional[ProvenanceEventType] = None,
-        agent_id: Optional[str] = None,
-        timestamp_after: Optional[datetime] = None,
-        timestamp_before: Optional[datetime] = None,
+        event_type: ProvenanceEventType | None = None,
+        agent_id: str | None = None,
+        timestamp_after: datetime | None = None,
+        timestamp_before: datetime | None = None,
         limit: int = 100,
         offset: int = 0,
-    ) -> List[ProvenanceEvent]:
+    ) -> list[ProvenanceEvent]:
         """Query events with various filters."""
         async with self.session_factory() as session:
             query = select(ProvenanceEventModel)
 
             conditions = []
             if event_type:
-                conditions.append(
-                    ProvenanceEventModel.event_type == event_type.value
-                )
+                conditions.append(ProvenanceEventModel.event_type == event_type.value)
             if agent_id:
                 conditions.append(ProvenanceEventModel.agent_id == agent_id)
             if timestamp_after:
@@ -422,9 +419,7 @@ class PostgresProvenanceStorage(ProvenanceStorage):
                 query = query.where(and_(*conditions))
 
             query = (
-                query.order_by(ProvenanceEventModel.timestamp.desc())
-                .limit(limit)
-                .offset(offset)
+                query.order_by(ProvenanceEventModel.timestamp.desc()).limit(limit).offset(offset)
             )
 
             result = await session.execute(query)
@@ -432,19 +427,15 @@ class PostgresProvenanceStorage(ProvenanceStorage):
 
             return [m.to_domain() for m in models]
 
-    async def get_stats(self) -> Dict[str, Any]:
+    async def get_stats(self) -> dict[str, Any]:
         """Get storage statistics."""
         async with self.session_factory() as session:
             # Count records
-            record_count_result = await session.execute(
-                select(ProvenanceRecordModel).count()
-            )
+            record_count_result = await session.execute(select(ProvenanceRecordModel).count())
             record_count = record_count_result.scalar() or 0
 
             # Count events
-            event_count_result = await session.execute(
-                select(ProvenanceEventModel).count()
-            )
+            event_count_result = await session.execute(select(ProvenanceEventModel).count())
             event_count = event_count_result.scalar() or 0
 
             # Events by type

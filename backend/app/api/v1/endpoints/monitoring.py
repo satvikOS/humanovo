@@ -10,8 +10,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any, Dict, List, Optional
-from uuid import UUID
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -53,7 +52,7 @@ class MetricPoint:
 
     timestamp: datetime
     value: float
-    labels: Dict[str, str] = field(default_factory=dict)
+    labels: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -63,14 +62,16 @@ class MetricSeries:
     name: str
     description: str
     unit: str
-    points: List[MetricPoint] = field(default_factory=list)
+    points: list[MetricPoint] = field(default_factory=list)
 
-    def add_point(self, value: float, labels: Optional[Dict[str, str]] = None) -> None:
-        self.points.append(MetricPoint(
-            timestamp=datetime.utcnow(),
-            value=value,
-            labels=labels or {},
-        ))
+    def add_point(self, value: float, labels: dict[str, str] | None = None) -> None:
+        self.points.append(
+            MetricPoint(
+                timestamp=datetime.utcnow(),
+                value=value,
+                labels=labels or {},
+            )
+        )
         # Keep only last hour of data
         cutoff = datetime.utcnow() - timedelta(hours=1)
         self.points = [p for p in self.points if p.timestamp > cutoff]
@@ -82,8 +83,8 @@ class HealthCheckResult(BaseModel):
     component: str
     status: HealthStatus
     latency_ms: float
-    message: Optional[str] = None
-    details: Dict[str, Any] = Field(default_factory=dict)
+    message: str | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
     last_check: datetime
 
 
@@ -92,15 +93,15 @@ class SystemHealthResponse(BaseModel):
 
     status: HealthStatus
     timestamp: datetime
-    components: List[HealthCheckResult]
-    summary: Dict[str, int]
+    components: list[HealthCheckResult]
+    summary: dict[str, int]
 
 
 class MetricsResponse(BaseModel):
     """Metrics response."""
 
     timestamp: datetime
-    metrics: Dict[str, Any]
+    metrics: dict[str, Any]
 
 
 class AgentMetrics(BaseModel):
@@ -112,22 +113,22 @@ class AgentMetrics(BaseModel):
     records_per_minute: float
     error_rate: float
     average_latency_ms: float
-    last_activity: Optional[datetime]
+    last_activity: datetime | None
     uptime_seconds: float
-    rate_limit_status: Dict[str, Any]
+    rate_limit_status: dict[str, Any]
 
 
 class IngestionMetricsResponse(BaseModel):
     """Ingestion system metrics."""
 
     timestamp: datetime
-    agents: List[AgentMetrics]
+    agents: list[AgentMetrics]
     queue_depth: int
     active_jobs: int
     completed_jobs_24h: int
     failed_jobs_24h: int
     total_records_indexed_24h: int
-    throughput: Dict[str, float]
+    throughput: dict[str, float]
 
 
 class PerformanceMetrics(BaseModel):
@@ -154,10 +155,10 @@ class MetricsCollector:
     """
 
     def __init__(self):
-        self._metrics: Dict[str, MetricSeries] = {}
-        self._counters: Dict[str, int] = defaultdict(int)
-        self._gauges: Dict[str, float] = {}
-        self._histograms: Dict[str, List[float]] = defaultdict(list)
+        self._metrics: dict[str, MetricSeries] = {}
+        self._counters: dict[str, int] = defaultdict(int)
+        self._gauges: dict[str, float] = {}
+        self._histograms: dict[str, list[float]] = defaultdict(list)
 
         # Initialize common metrics
         self._init_metrics()
@@ -185,19 +186,23 @@ class MetricsCollector:
                 unit=unit,
             )
 
-    def increment(self, metric: str, value: float = 1, labels: Optional[Dict[str, str]] = None) -> None:
+    def increment(
+        self, metric: str, value: float = 1, labels: dict[str, str] | None = None
+    ) -> None:
         """Increment a counter metric."""
         self._counters[metric] += int(value)
         if metric in self._metrics:
             self._metrics[metric].add_point(self._counters[metric], labels)
 
-    def set_gauge(self, metric: str, value: float, labels: Optional[Dict[str, str]] = None) -> None:
+    def set_gauge(self, metric: str, value: float, labels: dict[str, str] | None = None) -> None:
         """Set a gauge metric."""
         self._gauges[metric] = value
         if metric in self._metrics:
             self._metrics[metric].add_point(value, labels)
 
-    def observe_histogram(self, metric: str, value: float, labels: Optional[Dict[str, str]] = None) -> None:
+    def observe_histogram(
+        self, metric: str, value: float, labels: dict[str, str] | None = None
+    ) -> None:
         """Record a histogram observation."""
         self._histograms[metric].append(value)
         # Keep only last 1000 observations
@@ -223,7 +228,7 @@ class MetricsCollector:
         index = int(len(values) * percentile / 100)
         return values[min(index, len(values) - 1)]
 
-    def get_all_metrics(self) -> Dict[str, Any]:
+    def get_all_metrics(self) -> dict[str, Any]:
         """Get all current metrics."""
         return {
             "counters": dict(self._counters),
@@ -253,10 +258,10 @@ class HealthChecker:
     """
 
     def __init__(self):
-        self._last_results: Dict[str, HealthCheckResult] = {}
+        self._last_results: dict[str, HealthCheckResult] = {}
         self._check_interval = 30  # seconds
         self._running = False
-        self._task: Optional[asyncio.Task] = None
+        self._task: asyncio.Task | None = None
 
     async def check_component(self, component: ComponentType) -> HealthCheckResult:
         """Check health of a specific component."""
@@ -307,12 +312,15 @@ class HealthChecker:
         """Check RAG service health."""
         try:
             from app.integration.rag_connector import get_rag_connector
+
             connector = get_rag_connector()
             health = await connector.health_check()
 
             return HealthCheckResult(
                 component="rag_service",
-                status=HealthStatus.HEALTHY if health["status"] == "healthy" else HealthStatus.DEGRADED,
+                status=HealthStatus.HEALTHY
+                if health["status"] == "healthy"
+                else HealthStatus.DEGRADED,
                 latency_ms=0,
                 details=health,
                 last_check=datetime.utcnow(),
@@ -330,6 +338,7 @@ class HealthChecker:
         """Check vector store health."""
         try:
             from app.knowledge.vector_store import VectorStore
+
             store = VectorStore()
             await store.health_check()
 
@@ -352,6 +361,7 @@ class HealthChecker:
         """Check graph store health."""
         try:
             from app.knowledge.graph_store import GraphStore
+
             store = GraphStore()
             await store.health_check()
 
@@ -374,6 +384,7 @@ class HealthChecker:
         """Check ingestion orchestrator health."""
         try:
             from app.agents.ingestion.scheduler import get_scheduler
+
             scheduler = get_scheduler()
             stats = scheduler.get_queue_stats()
 
@@ -397,6 +408,7 @@ class HealthChecker:
         """Check scheduler health."""
         try:
             from app.agents.ingestion.scheduler import get_scheduler
+
             scheduler = get_scheduler()
             stats = scheduler.get_queue_stats()
 
@@ -438,15 +450,12 @@ class HealthChecker:
                 last_check=datetime.utcnow(),
             )
 
-    async def check_all(self) -> List[HealthCheckResult]:
+    async def check_all(self) -> list[HealthCheckResult]:
         """Check all components."""
-        tasks = [
-            self.check_component(component)
-            for component in ComponentType
-        ]
+        tasks = [self.check_component(component) for component in ComponentType]
         return await asyncio.gather(*tasks)
 
-    def get_last_results(self) -> Dict[str, HealthCheckResult]:
+    def get_last_results(self) -> dict[str, HealthCheckResult]:
         """Get last check results."""
         return self._last_results.copy()
 
@@ -565,20 +574,24 @@ async def get_ingestion_metrics(
     # Calculate agent metrics
     agents = []
     for source_type in SourceType:
-        agents.append(AgentMetrics(
-            agent_type=source_type.value,
-            status="idle",
-            total_records_processed=metrics_collector.get_counter(f"agent_{source_type.value}_records"),
-            records_per_minute=0.0,
-            error_rate=0.0,
-            average_latency_ms=0.0,
-            last_activity=None,
-            uptime_seconds=0.0,
-            rate_limit_status={
-                "remaining": 100,
-                "reset_at": None,
-            },
-        ))
+        agents.append(
+            AgentMetrics(
+                agent_type=source_type.value,
+                status="idle",
+                total_records_processed=metrics_collector.get_counter(
+                    f"agent_{source_type.value}_records"
+                ),
+                records_per_minute=0.0,
+                error_rate=0.0,
+                average_latency_ms=0.0,
+                last_activity=None,
+                uptime_seconds=0.0,
+                rate_limit_status={
+                    "remaining": 100,
+                    "reset_at": None,
+                },
+            )
+        )
 
     # Calculate job statistics
     now = datetime.utcnow()
@@ -586,11 +599,13 @@ async def get_ingestion_metrics(
 
     active_jobs = sum(1 for j in _ingestion_jobs.values() if j["status"] == "running")
     completed_24h = sum(
-        1 for j in _ingestion_jobs.values()
+        1
+        for j in _ingestion_jobs.values()
         if j["status"] == "completed" and j.get("completed_at") and j["completed_at"] > day_ago
     )
     failed_24h = sum(
-        1 for j in _ingestion_jobs.values()
+        1
+        for j in _ingestion_jobs.values()
         if j["status"] == "failed" and j.get("completed_at") and j["completed_at"] > day_ago
     )
 
@@ -603,6 +618,7 @@ async def get_ingestion_metrics(
     # Get queue depth
     try:
         from app.agents.ingestion.scheduler import get_scheduler
+
         queue_stats = get_scheduler().get_queue_stats()
         queue_depth = queue_stats.get("pending", 0)
     except Exception:
@@ -642,11 +658,11 @@ async def get_performance_metrics(
 @router.get("/metrics/rag")
 async def get_rag_metrics(
     db: AsyncSession = Depends(get_db),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Get RAG-specific metrics."""
     try:
-        from app.integration.rag_connector import get_rag_connector
         from app.integration.graph_connector import get_graph_connector
+        from app.integration.rag_connector import get_rag_connector
 
         rag_stats = get_rag_connector().get_stats()
         graph_stats = get_graph_connector().get_stats()
@@ -657,7 +673,9 @@ async def get_rag_metrics(
             "graph_updates": graph_stats,
             "query_stats": {
                 "total_queries": metrics_collector.get_counter("rag_queries_total"),
-                "avg_latency_ms": metrics_collector.get_histogram_percentile("rag_query_latency", 50),
+                "avg_latency_ms": metrics_collector.get_histogram_percentile(
+                    "rag_query_latency", 50
+                ),
             },
         }
     except Exception as e:
@@ -669,8 +687,8 @@ async def record_metric(
     metric_name: str,
     value: float,
     metric_type: str = Query(default="gauge", pattern="^(counter|gauge|histogram)$"),
-    labels: Optional[Dict[str, str]] = None,
-) -> Dict[str, str]:
+    labels: dict[str, str] | None = None,
+) -> dict[str, str]:
     """Record a custom metric."""
     if metric_type == "counter":
         metrics_collector.increment(metric_name, value, labels)
@@ -683,7 +701,7 @@ async def record_metric(
 
 
 @router.get("/ready")
-async def readiness_check() -> Dict[str, Any]:
+async def readiness_check() -> dict[str, Any]:
     """
     Kubernetes-style readiness probe.
 
@@ -705,7 +723,7 @@ async def readiness_check() -> Dict[str, Any]:
 
 
 @router.get("/live")
-async def liveness_check() -> Dict[str, Any]:
+async def liveness_check() -> dict[str, Any]:
     """
     Kubernetes-style liveness probe.
 

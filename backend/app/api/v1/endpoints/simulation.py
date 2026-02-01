@@ -6,15 +6,15 @@ Run and manage Monte Carlo simulations.
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
 from app.core.config import settings
+from app.core.database import get_db
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -62,7 +62,7 @@ class ParameterDistribution(BaseModel):
 
     name: str
     distribution: DistributionType
-    params: Dict[str, float] = Field(
+    params: dict[str, float] = Field(
         ...,
         description="Distribution parameters (e.g., {'mean': 0.5, 'std': 0.1} for normal)",
     )
@@ -71,19 +71,19 @@ class ParameterDistribution(BaseModel):
 class SimulationCreate(BaseModel):
     """Schema for creating a simulation."""
 
-    hypothesis_id: Optional[UUID] = None
+    hypothesis_id: UUID | None = None
     project_id: UUID
     name: str = Field(..., min_length=3, max_length=255)
-    description: Optional[str] = None
+    description: str | None = None
     simulation_type: SimulationType
-    parameters: List[ParameterDistribution]
+    parameters: list[ParameterDistribution]
     iterations: int = Field(
         default=settings.SIMULATION_DEFAULT_ITERATIONS,
         ge=100,
         le=settings.SIMULATION_MAX_ITERATIONS,
     )
-    seed: Optional[int] = Field(None, description="Random seed for reproducibility")
-    custom_model: Optional[str] = Field(
+    seed: int | None = Field(None, description="Random seed for reproducibility")
+    custom_model: str | None = Field(
         None,
         description="Custom Python code for simulation (type=custom only)",
     )
@@ -100,7 +100,7 @@ class OutcomeMetric(BaseModel):
     ci_upper: float  # 95% CI upper bound
     min: float
     max: float
-    percentiles: Dict[str, float] = Field(
+    percentiles: dict[str, float] = Field(
         default_factory=dict,
         description="Percentile values (e.g., {'25': 0.3, '75': 0.7})",
     )
@@ -110,27 +110,27 @@ class SimulationResponse(BaseModel):
     """Schema for simulation response."""
 
     id: UUID
-    hypothesis_id: Optional[UUID]
+    hypothesis_id: UUID | None
     project_id: UUID
     name: str
-    description: Optional[str]
+    description: str | None
     simulation_type: SimulationType
     status: SimulationStatus
     iterations: int
     iterations_completed: int
-    seed: Optional[int]
-    parameters: List[ParameterDistribution]
-    outcomes: List[OutcomeMetric]
-    summary: Optional[str]
-    runtime_seconds: Optional[float]
+    seed: int | None
+    parameters: list[ParameterDistribution]
+    outcomes: list[OutcomeMetric]
+    summary: str | None
+    runtime_seconds: float | None
     created_at: datetime
-    completed_at: Optional[datetime]
+    completed_at: datetime | None
 
 
 class SimulationListResponse(BaseModel):
     """Schema for paginated simulation list."""
 
-    items: List[SimulationResponse]
+    items: list[SimulationResponse]
     total: int
     page: int
     page_size: int
@@ -260,7 +260,7 @@ def _update_progress(simulation_id: UUID, completed: int) -> None:
         _simulations[simulation_id].iterations_completed = completed
 
 
-def _generate_summary(outcomes: List[OutcomeMetric]) -> str:
+def _generate_summary(outcomes: list[OutcomeMetric]) -> str:
     """Generate a human-readable summary of simulation outcomes."""
     if not outcomes:
         return "No outcomes recorded."
@@ -276,9 +276,9 @@ def _generate_summary(outcomes: List[OutcomeMetric]) -> str:
 
 @router.get("", response_model=SimulationListResponse)
 async def list_simulations(
-    project_id: Optional[UUID] = None,
-    hypothesis_id: Optional[UUID] = None,
-    status: Optional[SimulationStatus] = None,
+    project_id: UUID | None = None,
+    hypothesis_id: UUID | None = None,
+    status: SimulationStatus | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -358,8 +358,8 @@ async def delete_simulation(
     logger.info("Simulation deleted", simulation_id=str(simulation_id))
 
 
-@router.get("/types", response_model=List[Dict[str, Any]])
-async def list_simulation_types() -> List[Dict[str, Any]]:
+@router.get("/types", response_model=list[dict[str, Any]])
+async def list_simulation_types() -> list[dict[str, Any]]:
     """List available simulation types with descriptions."""
     return [
         {

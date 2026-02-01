@@ -7,13 +7,13 @@ Supports semantic, sentence, and fixed-size chunking with overlap.
 
 import re
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from pydantic import BaseModel
 
-from app.core.logging import get_logger, LoggerMixin
+from app.core.logging import LoggerMixin, get_logger
 
 logger = get_logger(__name__)
 
@@ -61,22 +61,22 @@ class DocumentChunk(BaseModel):
 
     # Source document info
     document_id: str
-    document_title: Optional[str] = None
+    document_title: str | None = None
 
     # Chunk metadata
-    metadata: Dict[str, Any] = {}
-    token_count: Optional[int] = None
+    metadata: dict[str, Any] = {}
+    token_count: int | None = None
 
     # Context
-    header: Optional[str] = None
-    section: Optional[str] = None
+    header: str | None = None
+    section: str | None = None
 
 
 class ChunkingResult(BaseModel):
     """Result of chunking a document."""
 
     document_id: str
-    chunks: List[DocumentChunk]
+    chunks: list[DocumentChunk]
     total_chunks: int
     total_chars: int
     strategy_used: ChunkingStrategy
@@ -93,8 +93,8 @@ class BaseChunker(ABC, LoggerMixin):
         self,
         text: str,
         document_id: str,
-        metadata: Dict[str, Any] = None,
-    ) -> List[DocumentChunk]:
+        metadata: dict[str, Any] = None,
+    ) -> list[DocumentChunk]:
         """Chunk a document into smaller pieces."""
         pass
 
@@ -106,8 +106,8 @@ class FixedSizeChunker(BaseChunker):
         self,
         text: str,
         document_id: str,
-        metadata: Dict[str, Any] = None,
-    ) -> List[DocumentChunk]:
+        metadata: dict[str, Any] = None,
+    ) -> list[DocumentChunk]:
         """Chunk by fixed character size."""
         chunks = []
         metadata = metadata or {}
@@ -124,7 +124,7 @@ class FixedSizeChunker(BaseChunker):
             if end < text_length:
                 # Look for space within last 50 chars
                 for i in range(end, max(start, end - 50), -1):
-                    if text[i] == ' ':
+                    if text[i] == " ":
                         end = i
                         break
 
@@ -159,8 +159,8 @@ class SentenceChunker(BaseChunker):
         self,
         text: str,
         document_id: str,
-        metadata: Dict[str, Any] = None,
-    ) -> List[DocumentChunk]:
+        metadata: dict[str, Any] = None,
+    ) -> list[DocumentChunk]:
         """Chunk by grouping sentences."""
         chunks = []
         metadata = metadata or {}
@@ -178,7 +178,7 @@ class SentenceChunker(BaseChunker):
             # Get sentences for this chunk
             end_idx = min(i + self.config.sentences_per_chunk, len(sentences))
             chunk_sentences = sentences[i:end_idx]
-            chunk_text = ' '.join(chunk_sentences)
+            chunk_text = " ".join(chunk_sentences)
 
             # Find character positions
             start_char = text.find(chunk_sentences[0]) if chunk_sentences else 0
@@ -205,10 +205,10 @@ class SentenceChunker(BaseChunker):
 
         return chunks
 
-    def _split_sentences(self, text: str) -> List[str]:
+    def _split_sentences(self, text: str) -> list[str]:
         """Split text into sentences."""
         # Simple sentence splitting
-        pattern = r'(?<=[.!?])\s+'
+        pattern = r"(?<=[.!?])\s+"
         sentences = re.split(pattern, text)
         return [s.strip() for s in sentences if s.strip()]
 
@@ -220,14 +220,14 @@ class ParagraphChunker(BaseChunker):
         self,
         text: str,
         document_id: str,
-        metadata: Dict[str, Any] = None,
-    ) -> List[DocumentChunk]:
+        metadata: dict[str, Any] = None,
+    ) -> list[DocumentChunk]:
         """Chunk by paragraphs."""
         chunks = []
         metadata = metadata or {}
 
         # Split by double newlines
-        paragraphs = re.split(r'\n\s*\n', text)
+        paragraphs = re.split(r"\n\s*\n", text)
         paragraphs = [p.strip() for p in paragraphs if p.strip()]
 
         current_chunk = []
@@ -240,7 +240,7 @@ class ParagraphChunker(BaseChunker):
 
             # If adding this paragraph exceeds max size, save current chunk
             if current_length + para_length > self.config.max_chunk_size and current_chunk:
-                chunk_text = '\n\n'.join(current_chunk)
+                chunk_text = "\n\n".join(current_chunk)
                 end_char = start_char + len(chunk_text)
 
                 chunks.append(
@@ -266,7 +266,7 @@ class ParagraphChunker(BaseChunker):
 
         # Save remaining
         if current_chunk:
-            chunk_text = '\n\n'.join(current_chunk)
+            chunk_text = "\n\n".join(current_chunk)
             if len(chunk_text) >= self.config.min_chunk_size:
                 chunks.append(
                     DocumentChunk(
@@ -304,8 +304,8 @@ class RecursiveChunker(BaseChunker):
         self,
         text: str,
         document_id: str,
-        metadata: Dict[str, Any] = None,
-    ) -> List[DocumentChunk]:
+        metadata: dict[str, Any] = None,
+    ) -> list[DocumentChunk]:
         """Chunk recursively using multiple separators."""
         metadata = metadata or {}
 
@@ -343,8 +343,8 @@ class RecursiveChunker(BaseChunker):
     def _recursive_split(
         self,
         text: str,
-        separators: List[str],
-    ) -> List[str]:
+        separators: list[str],
+    ) -> list[str]:
         """Recursively split text using separators."""
         if not separators:
             return [text] if text.strip() else []
@@ -369,7 +369,7 @@ class RecursiveChunker(BaseChunker):
 
         return chunks
 
-    def _merge_chunks(self, chunks: List[str]) -> List[str]:
+    def _merge_chunks(self, chunks: list[str]) -> list[str]:
         """Merge small chunks and add overlap."""
         if not chunks:
             return []
@@ -386,12 +386,12 @@ class RecursiveChunker(BaseChunker):
                 current_length += chunk_length + 1  # +1 for separator
             else:
                 if current:
-                    merged.append(' '.join(current))
+                    merged.append(" ".join(current))
 
                 # Start new chunk, possibly with overlap
                 if self.config.chunk_overlap > 0 and current:
                     # Include last part of previous chunk as overlap
-                    overlap_text = ' '.join(current)[-self.config.chunk_overlap:]
+                    overlap_text = " ".join(current)[-self.config.chunk_overlap :]
                     current = [overlap_text, chunk]
                     current_length = len(overlap_text) + chunk_length + 1
                 else:
@@ -400,7 +400,7 @@ class RecursiveChunker(BaseChunker):
 
         # Add remaining
         if current:
-            merged.append(' '.join(current))
+            merged.append(" ".join(current))
 
         # Filter by min size
         return [c for c in merged if len(c) >= self.config.min_chunk_size]
@@ -421,8 +421,8 @@ class SemanticChunker(BaseChunker):
         self,
         text: str,
         document_id: str,
-        metadata: Dict[str, Any] = None,
-    ) -> List[DocumentChunk]:
+        metadata: dict[str, Any] = None,
+    ) -> list[DocumentChunk]:
         """Chunk based on semantic similarity."""
         metadata = metadata or {}
 
@@ -453,9 +453,9 @@ class SemanticChunker(BaseChunker):
         fallback = SentenceChunker(self.config)
         return fallback.chunk(text, document_id, metadata)
 
-    def _split_sentences(self, text: str) -> List[str]:
+    def _split_sentences(self, text: str) -> list[str]:
         """Split text into sentences."""
-        pattern = r'(?<=[.!?])\s+'
+        pattern = r"(?<=[.!?])\s+"
         sentences = re.split(pattern, text)
         return [s.strip() for s in sentences if s.strip()]
 
@@ -470,12 +470,12 @@ class DocumentChunker(LoggerMixin):
 
     def __init__(
         self,
-        config: Optional[ChunkingConfig] = None,
+        config: ChunkingConfig | None = None,
         embedding_pipeline=None,
     ):
         self.config = config or ChunkingConfig()
         self._embedding_pipeline = embedding_pipeline
-        self._chunkers: Dict[ChunkingStrategy, BaseChunker] = {}
+        self._chunkers: dict[ChunkingStrategy, BaseChunker] = {}
         self._initialize_chunkers()
 
     def _initialize_chunkers(self) -> None:
@@ -495,9 +495,9 @@ class DocumentChunker(LoggerMixin):
         self,
         text: str,
         document_id: str,
-        title: Optional[str] = None,
-        metadata: Dict[str, Any] = None,
-        strategy: Optional[ChunkingStrategy] = None,
+        title: str | None = None,
+        metadata: dict[str, Any] = None,
+        strategy: ChunkingStrategy | None = None,
     ) -> ChunkingResult:
         """
         Chunk a document into smaller pieces.
@@ -560,9 +560,9 @@ class DocumentChunker(LoggerMixin):
 
     def chunk_batch(
         self,
-        documents: List[Dict[str, Any]],
-        strategy: Optional[ChunkingStrategy] = None,
-    ) -> List[ChunkingResult]:
+        documents: list[dict[str, Any]],
+        strategy: ChunkingStrategy | None = None,
+    ) -> list[ChunkingResult]:
         """
         Chunk multiple documents.
 
@@ -588,23 +588,23 @@ class DocumentChunker(LoggerMixin):
     def _preprocess_text(self, text: str) -> str:
         """Preprocess text before chunking."""
         # Normalize whitespace
-        text = re.sub(r'\s+', ' ', text)
-        text = re.sub(r'\n\s*\n', '\n\n', text)
+        text = re.sub(r"\s+", " ", text)
+        text = re.sub(r"\n\s*\n", "\n\n", text)
 
         # Remove control characters
-        text = ''.join(c for c in text if c.isprintable() or c in '\n\t')
+        text = "".join(c for c in text if c.isprintable() or c in "\n\t")
 
         return text.strip()
 
-    def _extract_headers(self, text: str) -> List[Tuple[int, str]]:
+    def _extract_headers(self, text: str) -> list[tuple[int, str]]:
         """Extract section headers from text."""
         headers = []
 
         # Match common header patterns
         patterns = [
-            r'^#+\s+(.+)$',  # Markdown headers
-            r'^([A-Z][A-Z\s]+)$',  # ALL CAPS HEADERS
-            r'^(\d+\.?\s+[A-Z].+)$',  # Numbered sections
+            r"^#+\s+(.+)$",  # Markdown headers
+            r"^([A-Z][A-Z\s]+)$",  # ALL CAPS HEADERS
+            r"^(\d+\.?\s+[A-Z].+)$",  # Numbered sections
         ]
 
         for pattern in patterns:
@@ -617,10 +617,10 @@ class DocumentChunker(LoggerMixin):
 
     def _postprocess_chunks(
         self,
-        chunks: List[DocumentChunk],
-        title: Optional[str],
-        headers: List[Tuple[int, str]],
-    ) -> List[DocumentChunk]:
+        chunks: list[DocumentChunk],
+        title: str | None,
+        headers: list[tuple[int, str]],
+    ) -> list[DocumentChunk]:
         """Post-process chunks with context."""
         for chunk in chunks:
             # Set document title
@@ -651,15 +651,15 @@ class DocumentChunker(LoggerMixin):
             Recommended ChunkingStrategy
         """
         # Check for structured content
-        if re.search(r'^#+\s', text, re.MULTILINE):
+        if re.search(r"^#+\s", text, re.MULTILINE):
             return ChunkingStrategy.PARAGRAPH  # Markdown-like
 
         # Check for code
-        if re.search(r'```|def |class |function ', text):
+        if re.search(r"```|def |class |function ", text):
             return ChunkingStrategy.RECURSIVE
 
         # Check for scientific content (long paragraphs)
-        paragraphs = text.split('\n\n')
+        paragraphs = text.split("\n\n")
         avg_para_length = sum(len(p) for p in paragraphs) / max(len(paragraphs), 1)
 
         if avg_para_length > 500:
@@ -669,10 +669,10 @@ class DocumentChunker(LoggerMixin):
 
 
 # Global chunker instance
-_chunker: Optional[DocumentChunker] = None
+_chunker: DocumentChunker | None = None
 
 
-def init_chunker(config: Optional[ChunkingConfig] = None) -> None:
+def init_chunker(config: ChunkingConfig | None = None) -> None:
     """Initialize the global document chunker."""
     global _chunker
     _chunker = DocumentChunker(config)

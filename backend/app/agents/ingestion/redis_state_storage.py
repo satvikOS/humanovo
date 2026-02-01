@@ -5,14 +5,13 @@ Production-ready distributed state storage for agent checkpointing using Redis.
 """
 
 import asyncio
-from typing import List, Optional
 
 import redis.asyncio as redis
 from redis.asyncio.connection import ConnectionPool
 
+from app.agents.ingestion.state_manager import StateStorage
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.agents.ingestion.state_manager import StateStorage
 
 logger = get_logger(__name__)
 
@@ -34,9 +33,9 @@ class RedisStateStorage(StateStorage):
 
     def __init__(
         self,
-        redis_url: Optional[str] = None,
+        redis_url: str | None = None,
         key_prefix: str = "genup:checkpoints:",
-        ttl_seconds: Optional[int] = 86400 * 7,  # 7 days default
+        ttl_seconds: int | None = 86400 * 7,  # 7 days default
         max_connections: int = 10,
     ):
         """
@@ -53,8 +52,8 @@ class RedisStateStorage(StateStorage):
         self.ttl_seconds = ttl_seconds
         self.max_connections = max_connections
 
-        self._pool: Optional[ConnectionPool] = None
-        self._client: Optional[redis.Redis] = None
+        self._pool: ConnectionPool | None = None
+        self._client: redis.Redis | None = None
 
         self.logger = logger
 
@@ -112,7 +111,7 @@ class RedisStateStorage(StateStorage):
             )
             raise
 
-    async def load(self, key: str) -> Optional[bytes]:
+    async def load(self, key: str) -> bytes | None:
         """
         Load data from Redis.
 
@@ -173,7 +172,7 @@ class RedisStateStorage(StateStorage):
             )
             raise
 
-    async def list_keys(self, prefix: str) -> List[str]:
+    async def list_keys(self, prefix: str) -> list[str]:
         """
         List all keys with a given prefix.
 
@@ -201,7 +200,7 @@ class RedisStateStorage(StateStorage):
                 for key in partial_keys:
                     # Remove our prefix to return clean key
                     key_str = key.decode("utf-8") if isinstance(key, bytes) else key
-                    clean_key = key_str[len(self.key_prefix):]
+                    clean_key = key_str[len(self.key_prefix) :]
                     keys.append(clean_key)
 
                 if cursor == 0:
@@ -245,7 +244,7 @@ class RedisStateStorage(StateStorage):
             )
             raise
 
-    async def get_ttl(self, key: str) -> Optional[int]:
+    async def get_ttl(self, key: str) -> int | None:
         """
         Get remaining TTL for a key.
 
@@ -269,7 +268,7 @@ class RedisStateStorage(StateStorage):
             )
             return None
 
-    async def extend_ttl(self, key: str, seconds: Optional[int] = None) -> bool:
+    async def extend_ttl(self, key: str, seconds: int | None = None) -> bool:
         """
         Extend the TTL of a key.
 
@@ -474,7 +473,7 @@ class RedisStateStorage(StateStorage):
 
 
 # Global instance
-_redis_storage: Optional[RedisStateStorage] = None
+_redis_storage: RedisStateStorage | None = None
 
 
 def get_redis_state_storage() -> RedisStateStorage:

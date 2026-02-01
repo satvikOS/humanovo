@@ -22,25 +22,21 @@ Entity Types:
 """
 
 import logging
+import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional, Tuple, Any
 from functools import lru_cache
-import re
+from typing import Any
 
 import torch
-from transformers import (
-    AutoTokenizer,
-    AutoModelForTokenClassification,
-    pipeline,
-    Pipeline
-)
+from transformers import Pipeline, pipeline
 
 logger = logging.getLogger(__name__)
 
 
 class EntityType(str, Enum):
     """Biomedical entity types."""
+
     GENE = "gene"
     DISEASE = "disease"
     DRUG = "drug"
@@ -62,19 +58,20 @@ class EntityType(str, Enum):
 @dataclass
 class BiomedicalEntity:
     """Represents an extracted biomedical entity."""
+
     text: str
     entity_type: EntityType
     start: int
     end: int
     confidence: float
-    normalized_id: Optional[str] = None
-    canonical_name: Optional[str] = None
-    aliases: List[str] = field(default_factory=list)
+    normalized_id: str | None = None
+    canonical_name: str | None = None
+    aliases: list[str] = field(default_factory=list)
     source_model: str = ""
     context_window: str = ""
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "text": self.text,
             "entity_type": self.entity_type.value,
@@ -86,7 +83,7 @@ class BiomedicalEntity:
             "aliases": self.aliases,
             "source_model": self.source_model,
             "context_window": self.context_window,
-            "metadata": self.metadata
+            "metadata": self.metadata,
         }
 
 
@@ -102,17 +99,17 @@ class TransformerNER:
         "biobert": {
             "model_name": "dmis-lab/biobert-base-cased-v1.2",
             "ner_model": "dmis-lab/biobert-v1.1-pubmed-base-cased",
-            "entity_mapping": {}
+            "entity_mapping": {},
         },
         "pubmedbert": {
             "model_name": "microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract-fulltext",
             "ner_model": "microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract-fulltext",
-            "entity_mapping": {}
+            "entity_mapping": {},
         },
         "scibert": {
             "model_name": "allenai/scibert_scivocab_cased",
             "ner_model": "allenai/scibert_scivocab_cased",
-            "entity_mapping": {}
+            "entity_mapping": {},
         },
         "bionlp": {
             "model_name": "dmis-lab/biobert-large-cased-v1.1-squad",
@@ -134,59 +131,59 @@ class TransformerNER:
                 "Pathological_formation": EntityType.DISEASE,
                 "Simple_chemical": EntityType.CHEMICAL,
                 "Tissue": EntityType.CELL_TYPE,
-            }
-        }
+            },
+        },
     }
 
     # Regex patterns for entity recognition fallback
     ENTITY_PATTERNS = {
         EntityType.GENE: [
-            r'\b[A-Z][A-Z0-9]{1,10}\b',  # Gene symbols like BRCA1, TP53
-            r'\b[A-Z][a-z]+[0-9]+\b',  # Gene names like Myc2
-            r'\bp\.[A-Z][0-9]+[A-Z]\b',  # Protein mutations
+            r"\b[A-Z][A-Z0-9]{1,10}\b",  # Gene symbols like BRCA1, TP53
+            r"\b[A-Z][a-z]+[0-9]+\b",  # Gene names like Myc2
+            r"\bp\.[A-Z][0-9]+[A-Z]\b",  # Protein mutations
         ],
         EntityType.DRUG: [
-            r'\b\w+(?:mab|nib|lib|zumab|ximab|umab|tinib|ciclib)\b',  # MAbs and small molecules
-            r'\b\w+(?:platin|taxel|rubicin|mycin|statin)\b',  # Chemotherapy drugs
-            r'\bADC[-\s]?\d*\b',  # ADC references
+            r"\b\w+(?:mab|nib|lib|zumab|ximab|umab|tinib|ciclib)\b",  # MAbs and small molecules
+            r"\b\w+(?:platin|taxel|rubicin|mycin|statin)\b",  # Chemotherapy drugs
+            r"\bADC[-\s]?\d*\b",  # ADC references
         ],
         EntityType.DISEASE: [
-            r'\b\w+(?:oma|emia|itis|osis|pathy|plasia)\b',  # Disease suffixes
-            r'\b(?:cancer|carcinoma|lymphoma|leukemia|melanoma|sarcoma)\b',
-            r'\b(?:syndrome|disorder|disease|deficiency)\b',
+            r"\b\w+(?:oma|emia|itis|osis|pathy|plasia)\b",  # Disease suffixes
+            r"\b(?:cancer|carcinoma|lymphoma|leukemia|melanoma|sarcoma)\b",
+            r"\b(?:syndrome|disorder|disease|deficiency)\b",
         ],
         EntityType.MUTATION: [
-            r'\b[A-Z][0-9]+[A-Z]\b',  # Amino acid changes
-            r'\bc\.[0-9]+[ACGT]>[ACGT]\b',  # Nucleotide changes
-            r'\b(?:deletion|insertion|mutation|variant|polymorphism)\b',
+            r"\b[A-Z][0-9]+[A-Z]\b",  # Amino acid changes
+            r"\bc\.[0-9]+[ACGT]>[ACGT]\b",  # Nucleotide changes
+            r"\b(?:deletion|insertion|mutation|variant|polymorphism)\b",
         ],
         EntityType.PATHWAY: [
-            r'\b\w+(?:\s+pathway|\s+signaling|\s+cascade)\b',
-            r'\b(?:MAPK|PI3K|AKT|mTOR|Wnt|Notch|Hedgehog|NF-κB|JAK-STAT)\b',
+            r"\b\w+(?:\s+pathway|\s+signaling|\s+cascade)\b",
+            r"\b(?:MAPK|PI3K|AKT|mTOR|Wnt|Notch|Hedgehog|NF-κB|JAK-STAT)\b",
         ],
         EntityType.BIOMARKER: [
-            r'\b(?:HER2|EGFR|PD-L1|Ki-67|CEA|CA-125|PSA|AFP)\b',
-            r'\b\w+(?:\s+expression|\s+level|\s+status)\b',
+            r"\b(?:HER2|EGFR|PD-L1|Ki-67|CEA|CA-125|PSA|AFP)\b",
+            r"\b\w+(?:\s+expression|\s+level|\s+status)\b",
         ],
         EntityType.ADC: [
-            r'\b(?:antibody-drug\s+conjugate|ADC)\b',
-            r'\b\w+(?:vedotin|tuxetan|ozogamicin|mertansine|deruxtecan)\b',
+            r"\b(?:antibody-drug\s+conjugate|ADC)\b",
+            r"\b\w+(?:vedotin|tuxetan|ozogamicin|mertansine|deruxtecan)\b",
         ],
         EntityType.ANTIGEN: [
-            r'\b(?:CD[0-9]+|HLA-[A-Z]+)\b',
-            r'\b\w+(?:\s+antigen|\s+receptor)\b',
+            r"\b(?:CD[0-9]+|HLA-[A-Z]+)\b",
+            r"\b\w+(?:\s+antigen|\s+receptor)\b",
         ],
     }
 
     def __init__(
         self,
         model_name: str = "bionlp",
-        device: Optional[str] = None,
+        device: str | None = None,
         use_gpu: bool = True,
         batch_size: int = 8,
         max_length: int = 512,
         confidence_threshold: float = 0.5,
-        use_patterns: bool = True
+        use_patterns: bool = True,
     ):
         """
         Initialize the transformer NER.
@@ -215,17 +212,15 @@ class TransformerNER:
             self.device = "cpu"
 
         # Initialize model
-        self._ner_pipeline: Optional[Pipeline] = None
+        self._ner_pipeline: Pipeline | None = None
         self._tokenizer = None
         self._model = None
         self._initialized = False
 
         # Compile regex patterns
-        self._compiled_patterns: Dict[EntityType, List[re.Pattern]] = {}
+        self._compiled_patterns: dict[EntityType, list[re.Pattern]] = {}
         for entity_type, patterns in self.ENTITY_PATTERNS.items():
-            self._compiled_patterns[entity_type] = [
-                re.compile(p, re.IGNORECASE) for p in patterns
-            ]
+            self._compiled_patterns[entity_type] = [re.compile(p, re.IGNORECASE) for p in patterns]
 
         logger.info(f"TransformerNER initialized with model: {model_name}, device: {self.device}")
 
@@ -244,7 +239,7 @@ class TransformerNER:
                 model=config["ner_model"],
                 tokenizer=config["ner_model"],
                 device=0 if self.device == "cuda" else -1,
-                aggregation_strategy="simple"
+                aggregation_strategy="simple",
             )
 
             self._initialized = True
@@ -254,11 +249,7 @@ class TransformerNER:
             logger.warning(f"Failed to load transformer model: {e}. Using pattern-based fallback.")
             self._initialized = True  # Mark as initialized to avoid retry
 
-    def extract_entities(
-        self,
-        text: str,
-        context_window_size: int = 50
-    ) -> List[BiomedicalEntity]:
+    def extract_entities(self, text: str, context_window_size: int = 50) -> list[BiomedicalEntity]:
         """
         Extract biomedical entities from text.
 
@@ -300,10 +291,8 @@ class TransformerNER:
         return entities
 
     def _extract_with_transformer(
-        self,
-        text: str,
-        context_window_size: int
-    ) -> List[BiomedicalEntity]:
+        self, text: str, context_window_size: int
+    ) -> list[BiomedicalEntity]:
         """Extract entities using transformer model."""
         entities = []
 
@@ -342,7 +331,7 @@ class TransformerNER:
                         confidence=result["score"],
                         source_model=self.model_name,
                         context_window=context,
-                        metadata={"raw_label": entity_label}
+                        metadata={"raw_label": entity_label},
                     )
                     entities.append(entity)
 
@@ -351,11 +340,7 @@ class TransformerNER:
 
         return entities
 
-    def _extract_with_patterns(
-        self,
-        text: str,
-        context_window_size: int
-    ) -> List[BiomedicalEntity]:
+    def _extract_with_patterns(self, text: str, context_window_size: int) -> list[BiomedicalEntity]:
         """Extract entities using regex patterns."""
         entities = []
 
@@ -383,13 +368,13 @@ class TransformerNER:
                         confidence=0.7,  # Pattern-based confidence
                         source_model="pattern",
                         context_window=context,
-                        metadata={"pattern": pattern.pattern}
+                        metadata={"pattern": pattern.pattern},
                     )
                     entities.append(entity)
 
         return entities
 
-    def _map_entity_type(self, label: str) -> Optional[EntityType]:
+    def _map_entity_type(self, label: str) -> EntityType | None:
         """Map model output label to EntityType."""
         config = self.MODEL_CONFIGS.get(self.model_name, {})
         entity_mapping = config.get("entity_mapping", {})
@@ -425,7 +410,7 @@ class TransformerNER:
 
         return None
 
-    def _chunk_text(self, text: str) -> List[Tuple[int, str]]:
+    def _chunk_text(self, text: str) -> list[tuple[int, str]]:
         """Chunk text for processing long documents."""
         chunks = []
 
@@ -433,7 +418,7 @@ class TransformerNER:
             return [(0, text)]
 
         # Split by sentences/paragraphs
-        sentences = re.split(r'(?<=[.!?])\s+', text)
+        sentences = re.split(r"(?<=[.!?])\s+", text)
 
         current_chunk = ""
         current_start = 0
@@ -453,10 +438,8 @@ class TransformerNER:
         return chunks
 
     def _post_process_entities(
-        self,
-        entities: List[BiomedicalEntity],
-        text: str
-    ) -> List[BiomedicalEntity]:
+        self, entities: list[BiomedicalEntity], text: str
+    ) -> list[BiomedicalEntity]:
         """Post-process extracted entities."""
         processed = []
 
@@ -476,22 +459,24 @@ class TransformerNER:
         # Remove duplicates (same text and overlapping spans)
         return self._deduplicate_entities(processed)
 
-    def _validate_entity_type(
-        self,
-        entity: BiomedicalEntity,
-        text: str
-    ) -> BiomedicalEntity:
+    def _validate_entity_type(self, entity: BiomedicalEntity, text: str) -> BiomedicalEntity:
         """Validate and potentially correct entity type based on context."""
         context = entity.context_window.lower()
         entity_text = entity.text.lower()
 
         # ADC detection
         if any(adc in context for adc in ["antibody-drug", "conjugate", "adc", "payload"]):
-            if any(suffix in entity_text for suffix in ["vedotin", "tuxetan", "ozogamicin", "mertansine", "deruxtecan"]):
+            if any(
+                suffix in entity_text
+                for suffix in ["vedotin", "tuxetan", "ozogamicin", "mertansine", "deruxtecan"]
+            ):
                 entity.entity_type = EntityType.ADC
 
         # Biomarker detection
-        if any(marker in context for marker in ["marker", "expression", "level", "positive", "negative", "status"]):
+        if any(
+            marker in context
+            for marker in ["marker", "expression", "level", "positive", "negative", "status"]
+        ):
             if entity.entity_type == EntityType.GENE or entity.entity_type == EntityType.PROTEIN:
                 entity.entity_type = EntityType.BIOMARKER
 
@@ -502,10 +487,7 @@ class TransformerNER:
 
         return entity
 
-    def _deduplicate_entities(
-        self,
-        entities: List[BiomedicalEntity]
-    ) -> List[BiomedicalEntity]:
+    def _deduplicate_entities(self, entities: list[BiomedicalEntity]) -> list[BiomedicalEntity]:
         """Remove duplicate entities."""
         seen = set()
         unique = []
@@ -519,10 +501,8 @@ class TransformerNER:
         return unique
 
     def batch_extract(
-        self,
-        texts: List[str],
-        context_window_size: int = 50
-    ) -> List[List[BiomedicalEntity]]:
+        self, texts: list[str], context_window_size: int = 50
+    ) -> list[list[BiomedicalEntity]]:
         """
         Extract entities from multiple texts in batch.
 
@@ -549,7 +529,7 @@ def get_default_ner() -> TransformerNER:
     return TransformerNER()
 
 
-def extract_entities(text: str) -> List[BiomedicalEntity]:
+def extract_entities(text: str) -> list[BiomedicalEntity]:
     """Quick entity extraction using default NER."""
     ner = get_default_ner()
     return ner.extract_entities(text)

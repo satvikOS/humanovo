@@ -5,8 +5,7 @@ Verifies hypotheses and claims against the knowledge graph,
 identifies contradictions, and checks factual accuracy.
 """
 
-from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import UUID
 
 from app.agents.base import (
@@ -29,8 +28,8 @@ class VerificationResult:
         claim: str,
         verified: bool,
         confidence: float,
-        supporting_evidence: List[Dict[str, Any]] = None,
-        contradicting_evidence: List[Dict[str, Any]] = None,
+        supporting_evidence: list[dict[str, Any]] = None,
+        contradicting_evidence: list[dict[str, Any]] = None,
         explanation: str = "",
     ):
         self.claim = claim
@@ -40,7 +39,7 @@ class VerificationResult:
         self.contradicting_evidence = contradicting_evidence or []
         self.explanation = explanation
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "claim": self.claim,
             "verified": self.verified,
@@ -148,15 +147,17 @@ class VerificationAgent(BaseAgent):
                 if r.contradicting_evidence:
                     contradictions.extend(r.contradicting_evidence)
 
-            verification_results.append({
-                "hypothesis": h_text,
-                "verified": confidence > 0.5,
-                "confidence": confidence,
-                "claims_verified": verified_count,
-                "total_claims": total_claims,
-                "claim_details": [r.to_dict() for r in claim_results],
-                "contradictions": contradictions,
-            })
+            verification_results.append(
+                {
+                    "hypothesis": h_text,
+                    "verified": confidence > 0.5,
+                    "confidence": confidence,
+                    "claims_verified": verified_count,
+                    "total_claims": total_claims,
+                    "claim_details": [r.to_dict() for r in claim_results],
+                    "contradictions": contradictions,
+                }
+            )
 
         duration_ms = int((time.time() - start_time) * 1000)
 
@@ -178,7 +179,7 @@ class VerificationAgent(BaseAgent):
             },
         )
 
-    async def verify(self, hypothesis_id: UUID) -> Dict[str, Any]:
+    async def verify(self, hypothesis_id: UUID) -> dict[str, Any]:
         """Verify a specific hypothesis by ID.
 
         Args:
@@ -195,14 +196,12 @@ class VerificationAgent(BaseAgent):
 
         hypothesis = _hypotheses[hypothesis_id]
 
-        context = AgentContext(
-            hypotheses=[{"statement": hypothesis.statement}]
-        )
+        context = AgentContext(hypotheses=[{"statement": hypothesis.statement}])
 
         result = await self.execute(context=context)
         return result.data
 
-    async def _extract_claims(self, text: str) -> List[str]:
+    async def _extract_claims(self, text: str) -> list[str]:
         """Extract verifiable claims from text.
 
         Uses simple heuristics and patterns to identify claims.
@@ -215,12 +214,25 @@ class VerificationAgent(BaseAgent):
 
         # Identify sentences that look like claims
         claim_indicators = [
-            "causes", "leads to", "results in",
-            "inhibits", "activates", "regulates",
-            "increases", "decreases", "reduces",
-            "associated with", "linked to", "related to",
-            "treats", "prevents", "cures",
-            "is a", "are", "has", "have",
+            "causes",
+            "leads to",
+            "results in",
+            "inhibits",
+            "activates",
+            "regulates",
+            "increases",
+            "decreases",
+            "reduces",
+            "associated with",
+            "linked to",
+            "related to",
+            "treats",
+            "prevents",
+            "cures",
+            "is a",
+            "are",
+            "has",
+            "have",
         ]
 
         for sentence in sentences:
@@ -250,8 +262,7 @@ class VerificationAgent(BaseAgent):
 
         # Find supporting evidence
         supporting = [
-            f for f in related_facts
-            if not any(c["fact_id"] == f.get("id") for c in contradictions)
+            f for f in related_facts if not any(c["fact_id"] == f.get("id") for c in contradictions)
         ]
 
         # Compute confidence
@@ -266,9 +277,7 @@ class VerificationAgent(BaseAgent):
             confidence = 0.5
             verified = True  # Assume true if no contradictions
 
-        explanation = self._generate_explanation(
-            claim, supporting, contradictions
-        )
+        explanation = self._generate_explanation(claim, supporting, contradictions)
 
         return VerificationResult(
             claim=claim,
@@ -282,7 +291,7 @@ class VerificationAgent(BaseAgent):
     async def _query_knowledge_graph(
         self,
         claim: str,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Query knowledge graph for facts related to the claim."""
         from app.knowledge.graph_store import get_graph_store
 
@@ -303,22 +312,22 @@ class VerificationAgent(BaseAgent):
 
             for result in results:
                 # Get neighborhood
-                neighborhood = await store.get_neighborhood(
-                    result.id, depth=1, limit=10
-                )
+                neighborhood = await store.get_neighborhood(result.id, depth=1, limit=10)
                 if neighborhood:
                     for relation in neighborhood.relations:
-                        related_facts.append({
-                            "id": relation.id,
-                            "source": relation.source_name,
-                            "relation": relation.relation_type,
-                            "target": relation.target_name,
-                            "confidence": relation.confidence,
-                        })
+                        related_facts.append(
+                            {
+                                "id": relation.id,
+                                "source": relation.source_name,
+                                "relation": relation.relation_type,
+                                "target": relation.target_name,
+                                "confidence": relation.confidence,
+                            }
+                        )
 
         return related_facts
 
-    def _extract_entities(self, text: str) -> List[str]:
+    def _extract_entities(self, text: str) -> list[str]:
         """Extract potential entity names from text.
 
         Simple extraction using capitalized words and known patterns.
@@ -328,15 +337,15 @@ class VerificationAgent(BaseAgent):
         entities = []
 
         # Find capitalized words/phrases
-        capitalized = re.findall(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b', text)
+        capitalized = re.findall(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b", text)
         entities.extend(capitalized)
 
         # Find gene-like patterns (uppercase with numbers)
-        gene_patterns = re.findall(r'\b[A-Z]+\d*\b', text)
+        gene_patterns = re.findall(r"\b[A-Z]+\d*\b", text)
         entities.extend([g for g in gene_patterns if len(g) >= 2])
 
         # Find drug-like patterns (lowercase ending in -ib, -ab, -mab)
-        drug_patterns = re.findall(r'\b\w+(?:mab|nib|lib|zumab|ximab)\b', text, re.IGNORECASE)
+        drug_patterns = re.findall(r"\b\w+(?:mab|nib|lib|zumab|ximab)\b", text, re.IGNORECASE)
         entities.extend(drug_patterns)
 
         # Deduplicate
@@ -347,8 +356,8 @@ class VerificationAgent(BaseAgent):
     async def _check_contradiction(
         self,
         claim: str,
-        related_facts: List[Dict[str, Any]],
-    ) -> List[Dict[str, Any]]:
+        related_facts: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
         """Check if claim contradicts known facts."""
         contradictions = []
 
@@ -368,33 +377,35 @@ class VerificationAgent(BaseAgent):
             for pos, neg in opposing_pairs:
                 # If claim says X activates Y but fact says X inhibits Y
                 if pos in claim_lower and relation == neg:
-                    contradictions.append({
-                        "fact_id": fact.get("id"),
-                        "fact": f"{fact['source']} {fact['relation']} {fact['target']}",
-                        "reason": f"Claim suggests '{pos}' but evidence shows '{neg}'",
-                    })
+                    contradictions.append(
+                        {
+                            "fact_id": fact.get("id"),
+                            "fact": f"{fact['source']} {fact['relation']} {fact['target']}",
+                            "reason": f"Claim suggests '{pos}' but evidence shows '{neg}'",
+                        }
+                    )
                 elif neg in claim_lower and relation == pos:
-                    contradictions.append({
-                        "fact_id": fact.get("id"),
-                        "fact": f"{fact['source']} {fact['relation']} {fact['target']}",
-                        "reason": f"Claim suggests '{neg}' but evidence shows '{pos}'",
-                    })
+                    contradictions.append(
+                        {
+                            "fact_id": fact.get("id"),
+                            "fact": f"{fact['source']} {fact['relation']} {fact['target']}",
+                            "reason": f"Claim suggests '{neg}' but evidence shows '{pos}'",
+                        }
+                    )
 
         return contradictions
 
     def _generate_explanation(
         self,
         claim: str,
-        supporting: List[Dict[str, Any]],
-        contradictions: List[Dict[str, Any]],
+        supporting: list[dict[str, Any]],
+        contradictions: list[dict[str, Any]],
     ) -> str:
         """Generate human-readable explanation of verification."""
         parts = []
 
         if supporting:
-            parts.append(
-                f"Found {len(supporting)} supporting facts in knowledge graph."
-            )
+            parts.append(f"Found {len(supporting)} supporting facts in knowledge graph.")
 
         if contradictions:
             parts.append(
@@ -409,7 +420,7 @@ class VerificationAgent(BaseAgent):
 
     def _generate_summary(
         self,
-        verification_results: List[Dict[str, Any]],
+        verification_results: list[dict[str, Any]],
     ) -> str:
         """Generate summary of all verification results."""
         total = len(verification_results)
@@ -417,6 +428,5 @@ class VerificationAgent(BaseAgent):
         contradictions = sum(len(v["contradictions"]) for v in verification_results)
 
         return (
-            f"Verified {verified}/{total} hypotheses. "
-            f"Found {contradictions} total contradictions."
+            f"Verified {verified}/{total} hypotheses. Found {contradictions} total contradictions."
         )

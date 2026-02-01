@@ -6,23 +6,21 @@ capabilities for ingestion agents.
 """
 
 import asyncio
-import json
+import gzip
 import hashlib
-import os
-from dataclasses import dataclass, field, asdict
-from datetime import datetime, timedelta
+import json
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Generic, List, Optional, TypeVar, Callable
+from typing import Any, Optional, TypeVar
 from uuid import UUID, uuid4
-import pickle
-import gzip
 
 from app.agents.ingestion.base import (
-    IngestionState,
-    IngestionStatus,
     IngestionMetrics,
     IngestionRecord,
+    IngestionStatus,
     SourceType,
 )
 from app.core.logging import get_logger
@@ -35,11 +33,11 @@ T = TypeVar("T")
 class CheckpointType(str, Enum):
     """Types of checkpoints."""
 
-    MANUAL = "manual"       # User-triggered checkpoint
-    PERIODIC = "periodic"   # Scheduled checkpoint
-    MILESTONE = "milestone" # After significant progress
-    ERROR = "error"         # Before error handling
-    SHUTDOWN = "shutdown"   # During graceful shutdown
+    MANUAL = "manual"  # User-triggered checkpoint
+    PERIODIC = "periodic"  # Scheduled checkpoint
+    MILESTONE = "milestone"  # After significant progress
+    ERROR = "error"  # Before error handling
+    SHUTDOWN = "shutdown"  # During graceful shutdown
 
 
 @dataclass
@@ -51,15 +49,15 @@ class Checkpoint:
     agent_type: SourceType
     checkpoint_type: CheckpointType
     timestamp: datetime
-    state: Dict[str, Any]
-    metrics: Dict[str, Any]
-    processed_ids: List[str]
-    cursor: Optional[str]  # For pagination/resumption
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    state: dict[str, Any]
+    metrics: dict[str, Any]
+    processed_ids: list[str]
+    cursor: str | None  # For pagination/resumption
+    metadata: dict[str, Any] = field(default_factory=dict)
     compressed: bool = False
-    checksum: Optional[str] = None
+    checksum: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert checkpoint to dictionary."""
         return {
             "checkpoint_id": str(self.checkpoint_id),
@@ -77,7 +75,7 @@ class Checkpoint:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "Checkpoint":
+    def from_dict(cls, data: dict[str, Any]) -> "Checkpoint":
         """Create checkpoint from dictionary."""
         return cls(
             checkpoint_id=UUID(data["checkpoint_id"]),
@@ -103,14 +101,14 @@ class AgentStateSnapshot:
     agent_type: SourceType
     status: IngestionStatus
     query: str
-    config: Dict[str, Any]
+    config: dict[str, Any]
     metrics: IngestionMetrics
-    records: List[IngestionRecord]
+    records: list[IngestionRecord]
     processed_ids: set
-    cursor: Optional[str]
+    cursor: str | None
     error_count: int
-    last_error: Optional[str]
-    started_at: Optional[datetime]
+    last_error: str | None
+    started_at: datetime | None
     updated_at: datetime
     checkpoint_version: int = 1
 
@@ -125,13 +123,13 @@ class StateStorage:
     async def save(self, key: str, data: bytes) -> None:
         raise NotImplementedError
 
-    async def load(self, key: str) -> Optional[bytes]:
+    async def load(self, key: str) -> bytes | None:
         raise NotImplementedError
 
     async def delete(self, key: str) -> bool:
         raise NotImplementedError
 
-    async def list_keys(self, prefix: str) -> List[str]:
+    async def list_keys(self, prefix: str) -> list[str]:
         raise NotImplementedError
 
     async def exists(self, key: str) -> bool:
@@ -162,7 +160,7 @@ class FileStateStorage(StateStorage):
             f.write(data)
         temp_path.rename(path)
 
-    async def load(self, key: str) -> Optional[bytes]:
+    async def load(self, key: str) -> bytes | None:
         """Load data from file."""
         path = self._key_to_path(key)
         if not path.exists():
@@ -178,7 +176,7 @@ class FileStateStorage(StateStorage):
             return True
         return False
 
-    async def list_keys(self, prefix: str) -> List[str]:
+    async def list_keys(self, prefix: str) -> list[str]:
         """List all keys with given prefix."""
         keys = []
         safe_prefix = prefix.replace("/", "_").replace("\\", "_")
@@ -195,12 +193,12 @@ class InMemoryStateStorage(StateStorage):
     """In-memory state storage for development/testing."""
 
     def __init__(self):
-        self._storage: Dict[str, bytes] = {}
+        self._storage: dict[str, bytes] = {}
 
     async def save(self, key: str, data: bytes) -> None:
         self._storage[key] = data
 
-    async def load(self, key: str) -> Optional[bytes]:
+    async def load(self, key: str) -> bytes | None:
         return self._storage.get(key)
 
     async def delete(self, key: str) -> bool:
@@ -209,7 +207,7 @@ class InMemoryStateStorage(StateStorage):
             return True
         return False
 
-    async def list_keys(self, prefix: str) -> List[str]:
+    async def list_keys(self, prefix: str) -> list[str]:
         return [k for k in self._storage.keys() if k.startswith(prefix)]
 
     async def exists(self, key: str) -> bool:
@@ -231,7 +229,7 @@ class AgentStateManager:
 
     def __init__(
         self,
-        storage: Optional[StateStorage] = None,
+        storage: StateStorage | None = None,
         checkpoint_interval_seconds: int = 60,
         max_checkpoints_per_agent: int = 5,
         compress_checkpoints: bool = True,
@@ -251,14 +249,14 @@ class AgentStateManager:
         self.compress = compress_checkpoints
 
         # Tracked agents
-        self._agents: Dict[UUID, "AgentStateTracker"] = {}
+        self._agents: dict[UUID, AgentStateTracker] = {}
 
         # Checkpoint scheduling
         self._running = False
-        self._checkpoint_task: Optional[asyncio.Task] = None
+        self._checkpoint_task: asyncio.Task | None = None
 
         # State change listeners
-        self._listeners: List[Callable[[UUID, Dict[str, Any]], None]] = []
+        self._listeners: list[Callable[[UUID, dict[str, Any]], None]] = []
 
         self.logger = logger
 
@@ -266,7 +264,7 @@ class AgentStateManager:
         self,
         agent_id: UUID,
         agent_type: SourceType,
-        initial_state: Optional[Dict[str, Any]] = None,
+        initial_state: dict[str, Any] | None = None,
     ) -> "AgentStateTracker":
         """
         Start tracking an agent's state.
@@ -307,12 +305,12 @@ class AgentStateManager:
 
     def add_listener(
         self,
-        callback: Callable[[UUID, Dict[str, Any]], None],
+        callback: Callable[[UUID, dict[str, Any]], None],
     ) -> None:
         """Add a state change listener."""
         self._listeners.append(callback)
 
-    def _notify_listeners(self, agent_id: UUID, state: Dict[str, Any]) -> None:
+    def _notify_listeners(self, agent_id: UUID, state: dict[str, Any]) -> None:
         """Notify all listeners of state change."""
         for listener in self._listeners:
             try:
@@ -348,8 +346,8 @@ class AgentStateManager:
         self,
         agent_id: UUID,
         checkpoint_type: CheckpointType = CheckpointType.MANUAL,
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> Optional[Checkpoint]:
+        metadata: dict[str, Any] | None = None,
+    ) -> Checkpoint | None:
         """
         Create a checkpoint for an agent.
 
@@ -403,8 +401,8 @@ class AgentStateManager:
     async def restore_checkpoint(
         self,
         agent_id: UUID,
-        checkpoint_id: Optional[UUID] = None,
-    ) -> Optional[Checkpoint]:
+        checkpoint_id: UUID | None = None,
+    ) -> Checkpoint | None:
         """
         Restore an agent from a checkpoint.
 
@@ -479,7 +477,7 @@ class AgentStateManager:
 
         return checkpoint
 
-    async def list_checkpoints(self, agent_id: UUID) -> List[Dict[str, Any]]:
+    async def list_checkpoints(self, agent_id: UUID) -> list[dict[str, Any]]:
         """List all checkpoints for an agent."""
         keys = await self.storage.list_keys(f"agent_{agent_id}_")
         checkpoints = []
@@ -488,13 +486,15 @@ class AgentStateManager:
             data = await self.storage.load(key)
             if data:
                 checkpoint = self._deserialize_checkpoint(data)
-                checkpoints.append({
-                    "checkpoint_id": str(checkpoint.checkpoint_id),
-                    "checkpoint_type": checkpoint.checkpoint_type.value,
-                    "timestamp": checkpoint.timestamp.isoformat(),
-                    "cursor": checkpoint.cursor,
-                    "processed_count": len(checkpoint.processed_ids),
-                })
+                checkpoints.append(
+                    {
+                        "checkpoint_id": str(checkpoint.checkpoint_id),
+                        "checkpoint_type": checkpoint.checkpoint_type.value,
+                        "timestamp": checkpoint.timestamp.isoformat(),
+                        "cursor": checkpoint.cursor,
+                        "processed_count": len(checkpoint.processed_ids),
+                    }
+                )
 
         # Sort by timestamp descending
         checkpoints.sort(key=lambda x: x["timestamp"], reverse=True)
@@ -524,7 +524,7 @@ class AgentStateManager:
         # Sort by timestamp descending and remove oldest
         checkpoints_with_keys.sort(key=lambda x: x[0], reverse=True)
 
-        for _, key in checkpoints_with_keys[self.max_checkpoints:]:
+        for _, key in checkpoints_with_keys[self.max_checkpoints :]:
             await self.storage.delete(key)
             self.logger.debug("Old checkpoint deleted", key=key)
 
@@ -602,34 +602,34 @@ class AgentStateTracker:
         agent_id: UUID,
         agent_type: SourceType,
         manager: AgentStateManager,
-        initial_state: Optional[Dict[str, Any]] = None,
+        initial_state: dict[str, Any] | None = None,
     ):
         self.agent_id = agent_id
         self.agent_type = agent_type
         self.manager = manager
 
         # State
-        self._state: Dict[str, Any] = initial_state or {}
-        self._metrics: Dict[str, Any] = {}
+        self._state: dict[str, Any] = initial_state or {}
+        self._metrics: dict[str, Any] = {}
         self.processed_ids: set = set()
-        self.cursor: Optional[str] = None
+        self.cursor: str | None = None
 
         # Tracking
         self._dirty = False
-        self._last_checkpoint_time: Optional[datetime] = None
+        self._last_checkpoint_time: datetime | None = None
         self._changes_since_checkpoint = 0
 
         self.logger = logger
 
-    def get_state(self) -> Dict[str, Any]:
+    def get_state(self) -> dict[str, Any]:
         """Get current state."""
         return self._state.copy()
 
-    def get_metrics(self) -> Dict[str, Any]:
+    def get_metrics(self) -> dict[str, Any]:
         """Get current metrics."""
         return self._metrics.copy()
 
-    def update_state(self, updates: Dict[str, Any]) -> None:
+    def update_state(self, updates: dict[str, Any]) -> None:
         """Update state with new values."""
         self._state.update(updates)
         self._dirty = True
@@ -641,7 +641,7 @@ class AgentStateTracker:
         self._state["status"] = status.value
         self._dirty = True
 
-    def update_metrics(self, metrics: Dict[str, Any]) -> None:
+    def update_metrics(self, metrics: dict[str, Any]) -> None:
         """Update metrics."""
         self._metrics.update(metrics)
 
@@ -702,10 +702,10 @@ class TransactionalStateUpdate:
 
     def __init__(self, tracker: AgentStateTracker):
         self.tracker = tracker
-        self._original_state: Dict[str, Any] = {}
-        self._original_metrics: Dict[str, Any] = {}
+        self._original_state: dict[str, Any] = {}
+        self._original_metrics: dict[str, Any] = {}
         self._original_processed: set = set()
-        self._original_cursor: Optional[str] = None
+        self._original_cursor: str | None = None
 
     async def __aenter__(self) -> "TransactionalStateUpdate":
         """Capture original state."""
@@ -734,7 +734,7 @@ class TransactionalStateUpdate:
 
 
 # Global state manager instance
-_state_manager: Optional[AgentStateManager] = None
+_state_manager: AgentStateManager | None = None
 
 
 def get_state_manager() -> AgentStateManager:

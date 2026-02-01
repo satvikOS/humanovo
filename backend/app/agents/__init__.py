@@ -6,26 +6,26 @@ Includes controller, search, extraction, reasoning, verification,
 simulation, reporting, and ingestion agents.
 """
 
-from app.agents.base import BaseAgent, AgentContext, AgentResult, AgentType
+from app.agents.base import AgentContext, AgentResult, AgentType, BaseAgent
 from app.agents.controller import ControllerAgent
-from app.agents.search_agent import SearchAgent
-from app.agents.verification_agent import VerificationAgent
 from app.agents.hypothesis_agent import HypothesisGenerationAgent
 
 # Ingestion agents
 from app.agents.ingestion import (
+    ClinicalTrialsIngestionAgent,
+    CustomDocumentIngestionAgent,
     IngestionAgent,
     IngestionConfig,
-    IngestionState,
     IngestionMetrics,
+    IngestionOrchestrator,
+    IngestionState,
     IngestionStatus,
-    PubMedIngestionAgent,
-    ClinicalTrialsIngestionAgent,
     PatentsIngestionAgent,
     PreprintIngestionAgent,
-    CustomDocumentIngestionAgent,
-    IngestionOrchestrator,
+    PubMedIngestionAgent,
 )
+from app.agents.search_agent import SearchAgent
+from app.agents.verification_agent import VerificationAgent
 
 __all__ = [
     # Base

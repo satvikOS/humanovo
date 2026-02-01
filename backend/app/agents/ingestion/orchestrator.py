@@ -6,31 +6,30 @@ from various biomedical sources.
 """
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any
 from uuid import uuid4
 
 from app.agents.ingestion.base import (
     IngestionAgent,
     IngestionConfig,
     IngestionMetrics,
-    IngestionRecord,
     IngestionState,
-    IngestionStatus,
     SourceType,
 )
-from app.agents.ingestion.pubmed_agent import PubMedIngestionAgent, PubMedConfig
 from app.agents.ingestion.clinical_trials_agent import (
-    ClinicalTrialsIngestionAgent,
     ClinicalTrialsConfig,
+    ClinicalTrialsIngestionAgent,
 )
-from app.agents.ingestion.patents_agent import PatentsIngestionAgent, PatentsConfig
-from app.agents.ingestion.preprint_agent import PreprintIngestionAgent, PreprintConfig
 from app.agents.ingestion.custom_document_agent import (
-    CustomDocumentIngestionAgent,
     CustomDocumentConfig,
+    CustomDocumentIngestionAgent,
 )
+from app.agents.ingestion.patents_agent import PatentsConfig, PatentsIngestionAgent
+from app.agents.ingestion.preprint_agent import PreprintConfig, PreprintIngestionAgent
+from app.agents.ingestion.pubmed_agent import PubMedConfig, PubMedIngestionAgent
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -50,9 +49,9 @@ class OrchestratorMetrics:
     total_bytes_downloaded: int = 0
     sources_completed: int = 0
     sources_failed: int = 0
-    start_time: Optional[datetime] = None
-    end_time: Optional[datetime] = None
-    source_metrics: Dict[str, IngestionMetrics] = field(default_factory=dict)
+    start_time: datetime | None = None
+    end_time: datetime | None = None
+    source_metrics: dict[str, IngestionMetrics] = field(default_factory=dict)
 
     @property
     def duration_seconds(self) -> float:
@@ -73,7 +72,7 @@ class OrchestratorMetrics:
         self.total_api_calls += metrics.api_calls_made
         self.total_bytes_downloaded += metrics.bytes_downloaded
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "total_records_fetched": self.total_records_fetched,
             "total_records_processed": self.total_records_processed,
@@ -86,9 +85,7 @@ class OrchestratorMetrics:
             "sources_completed": self.sources_completed,
             "sources_failed": self.sources_failed,
             "duration_seconds": self.duration_seconds,
-            "source_metrics": {
-                k: v.to_dict() for k, v in self.source_metrics.items()
-            },
+            "source_metrics": {k: v.to_dict() for k, v in self.source_metrics.items()},
         }
 
 
@@ -106,7 +103,7 @@ class IngestionOrchestrator:
 
     def __init__(
         self,
-        sources: Optional[List[SourceType]] = None,
+        sources: list[SourceType] | None = None,
         parallel: bool = True,
         max_concurrent: int = 3,
     ):
@@ -127,17 +124,17 @@ class IngestionOrchestrator:
         self.parallel = parallel
         self.max_concurrent = max_concurrent
 
-        self._agents: Dict[SourceType, IngestionAgent] = {}
+        self._agents: dict[SourceType, IngestionAgent] = {}
         self._metrics = OrchestratorMetrics()
-        self._seen_hashes: Set[str] = set()
-        self._progress_callback: Optional[Callable] = None
+        self._seen_hashes: set[str] = set()
+        self._progress_callback: Callable | None = None
 
         self.logger = logger
 
     def _create_agent(
         self,
         source_type: SourceType,
-        config: Optional[IngestionConfig] = None,
+        config: IngestionConfig | None = None,
     ) -> IngestionAgent:
         """Create an agent for the given source type."""
         agent_map = {
@@ -194,7 +191,7 @@ class IngestionOrchestrator:
         extract_entities: bool = True,
         extract_relations: bool = True,
         index_to_stores: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Run ingestion from all configured sources.
 
@@ -263,7 +260,7 @@ class IngestionOrchestrator:
             "results": results,
         }
 
-    async def _run_parallel(self) -> Dict[str, Any]:
+    async def _run_parallel(self) -> dict[str, Any]:
         """Run agents in parallel with concurrency limit."""
         semaphore = asyncio.Semaphore(self.max_concurrent)
         results = {}
@@ -272,10 +269,7 @@ class IngestionOrchestrator:
             async with semaphore:
                 return await self._run_agent(source_type)
 
-        tasks = [
-            run_with_semaphore(source_type)
-            for source_type in self.sources
-        ]
+        tasks = [run_with_semaphore(source_type) for source_type in self.sources]
 
         agent_results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -293,7 +287,7 @@ class IngestionOrchestrator:
 
         return results
 
-    async def _run_sequential(self) -> Dict[str, Any]:
+    async def _run_sequential(self) -> dict[str, Any]:
         """Run agents sequentially."""
         results = {}
 
@@ -312,7 +306,7 @@ class IngestionOrchestrator:
 
         return results
 
-    async def _run_agent(self, source_type: SourceType) -> Dict[str, Any]:
+    async def _run_agent(self, source_type: SourceType) -> dict[str, Any]:
         """Run a single agent and collect results."""
         agent = self._agents.get(source_type)
         if not agent:
@@ -322,8 +316,10 @@ class IngestionOrchestrator:
 
         # Set up progress callback
         if self._progress_callback:
+
             def agent_progress(state: IngestionState):
                 self._progress_callback(source_type.value, state)
+
             agent.set_progress_callback(agent_progress)
 
         try:
@@ -363,8 +359,8 @@ class IngestionOrchestrator:
         self,
         source_type: SourceType,
         query: str,
-        config: Optional[IngestionConfig] = None,
-    ) -> Dict[str, Any]:
+        config: IngestionConfig | None = None,
+    ) -> dict[str, Any]:
         """
         Ingest from a single specific source.
 
@@ -392,7 +388,7 @@ class IngestionOrchestrator:
         self,
         content: bytes,
         filename: str,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> str:
         """
         Add a custom document for ingestion.
@@ -417,7 +413,7 @@ class IngestionOrchestrator:
         """Get current aggregated metrics."""
         return self._metrics
 
-    def get_agent(self, source_type: SourceType) -> Optional[IngestionAgent]:
+    def get_agent(self, source_type: SourceType) -> IngestionAgent | None:
         """Get a specific agent instance."""
         return self._agents.get(source_type)
 
@@ -436,9 +432,9 @@ class IngestionOrchestrator:
 # Convenience function
 async def quick_ingest(
     query: str,
-    sources: Optional[List[str]] = None,
+    sources: list[str] | None = None,
     max_results: int = 50,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Quick ingestion from multiple sources.
 
@@ -458,7 +454,7 @@ async def quick_ingest(
         "preprint": SourceType.PREPRINT,
     }
 
-    for source_name in (sources or ["pubmed", "clinical_trials"]):
+    for source_name in sources or ["pubmed", "clinical_trials"]:
         if source_name in source_map:
             source_types.append(source_map[source_name])
 

@@ -5,36 +5,36 @@ Provides seamless integration between ingestion agents and RAG infrastructure
 including vector store indexing, knowledge graph updates, and provenance tracking.
 """
 
-from app.integration.rag_connector import (
-    RAGConnector,
-    IndexingConfig,
-    IndexingResult,
-    get_rag_connector,
-)
 from app.integration.graph_connector import (
     GraphConnector,
     GraphUpdateConfig,
     GraphUpdateResult,
     get_graph_connector,
 )
-from app.integration.realtime_indexer import (
-    RealtimeIndexer,
-    IndexUpdate,
-    IndexUpdateType,
-    ConsistencyLevel,
-    get_realtime_indexer,
-)
-from app.integration.provenance_tracker import (
-    ProvenanceTracker,
-    ProvenanceRecord,
-    ProvenanceChain,
-    ProvenanceStorage,
-    InMemoryProvenanceStorage,
-    get_provenance_tracker,
-)
 from app.integration.postgres_provenance_storage import (
     PostgresProvenanceStorage,
     get_postgres_provenance_storage,
+)
+from app.integration.provenance_tracker import (
+    InMemoryProvenanceStorage,
+    ProvenanceChain,
+    ProvenanceRecord,
+    ProvenanceStorage,
+    ProvenanceTracker,
+    get_provenance_tracker,
+)
+from app.integration.rag_connector import (
+    IndexingConfig,
+    IndexingResult,
+    RAGConnector,
+    get_rag_connector,
+)
+from app.integration.realtime_indexer import (
+    ConsistencyLevel,
+    IndexUpdate,
+    IndexUpdateType,
+    RealtimeIndexer,
+    get_realtime_indexer,
 )
 
 __all__ = [

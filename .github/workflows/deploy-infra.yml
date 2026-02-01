@@ -5,6 +5,9 @@ on:
     branches:
       - main
       - 'claude/*'
+    paths:
+      - 'infrastructure/**'
+      - '.github/workflows/deploy-infra.yml'
   workflow_dispatch:
     inputs:
       environment:
@@ -16,10 +19,10 @@ on:
           - dev
           - staging
           - prod
-      cleanup:
-        description: 'Clean up orphaned resources before deploy'
+      destroy_first:
+        description: 'Run terraform destroy before apply (CAUTION)'
         required: false
-        default: 'true'
+        default: false
         type: boolean
 
 env:
@@ -30,6 +33,7 @@ jobs:
   deploy:
     name: Deploy Infrastructure
     runs-on: ubuntu-latest
+    timeout-minutes: 30  # Prevent infinite hangs
 
     steps:
       - name: Checkout
@@ -45,352 +49,90 @@ jobs:
       - name: Verify AWS Identity
         run: aws sts get-caller-identity
 
-      - name: Cleanup Orphaned Resources
-        if: ${{ github.event.inputs.cleanup != 'false' }}
-        continue-on-error: true
-        run: |
-          echo "=========================================="
-          echo "Cleaning up orphaned resources..."
-          echo "=========================================="
-
-          # Delete orphaned Lambda functions
-          echo "Deleting Lambda functions..."
-          for func in api_core projects hypotheses evidence knowledge hypothesis_generation agent_orchestrator search_agent embeddings simulation simulation_worker ingestion pubmed_fetcher clinical_trials_fetcher; do
-            aws lambda delete-function --function-name "genup-dev-$func" 2>/dev/null || true
-          done
-
-          # Delete orphaned Lambda event source mappings
-          echo "Deleting Lambda event source mappings..."
-          for uuid in $(aws lambda list-event-source-mappings --query 'EventSourceMappings[?starts_with(FunctionArn, `arn:aws:lambda:us-east-1:`) && contains(FunctionArn, `genup-dev-`)].UUID' --output text 2>/dev/null); do
-            echo "Deleting event source mapping: $uuid"
-            aws lambda delete-event-source-mapping --uuid "$uuid" 2>/dev/null || true
-          done
-
-          # Delete orphaned Lambda layers (all versions)
-          echo "Deleting Lambda layers..."
-          for layer in genup-dev-dependencies genup-dev-scipy; do
-            versions=$(aws lambda list-layer-versions --layer-name "$layer" --query 'LayerVersions[].Version' --output text 2>/dev/null) || true
-            for version in $versions; do
-              aws lambda delete-layer-version --layer-name "$layer" --version-number "$version" 2>/dev/null || true
-            done
-          done
-
-          # Delete orphaned API Gateway APIs
-          echo "Deleting API Gateway APIs..."
-          for api_id in $(aws apigatewayv2 get-apis --query 'Items[?starts_with(Name, `genup-`)].ApiId' --output text 2>/dev/null); do
-            echo "Deleting API: $api_id"
-            aws apigatewayv2 delete-api --api-id "$api_id" 2>/dev/null || true
-          done
-
-          # Delete orphaned DynamoDB tables
-          echo "Deleting DynamoDB tables..."
-          for table in genup-dev-projects genup-dev-hypotheses genup-dev-evidence genup-dev-simulations genup-dev-knowledge-metadata genup-dev-agent-tasks; do
-            aws dynamodb delete-table --table-name $table 2>/dev/null || true
-          done
-
-          # Delete orphaned CloudWatch log groups
-          echo "Deleting CloudWatch log groups..."
-          for log_group in /aws/genup/dev /aws/apigateway/genup-dev-api; do
-            aws logs delete-log-group --log-group-name $log_group 2>/dev/null || true
-          done
-
-          # Delete Lambda function log groups
-          for func in api_core projects hypotheses evidence knowledge hypothesis_generation agent_orchestrator search_agent embeddings simulation simulation_worker ingestion pubmed_fetcher clinical_trials_fetcher; do
-            aws logs delete-log-group --log-group-name "/aws/lambda/genup-dev-$func" 2>/dev/null || true
-          done
-
-          # Delete orphaned IAM roles
-          echo "Deleting IAM roles..."
-          for role in genup-dev-lambda-execution genup-dev-api-gateway genup-dev-deployment; do
-            # Delete inline policies
-            for policy in $(aws iam list-role-policies --role-name $role 2>/dev/null | jq -r '.PolicyNames[]' 2>/dev/null); do
-              aws iam delete-role-policy --role-name $role --policy-name "$policy" 2>/dev/null || true
-            done
-            # Detach managed policies
-            for policy in $(aws iam list-attached-role-policies --role-name $role 2>/dev/null | jq -r '.AttachedPolicies[].PolicyArn' 2>/dev/null); do
-              aws iam detach-role-policy --role-name $role --policy-arn "$policy" 2>/dev/null || true
-            done
-            # Delete role
-            aws iam delete-role --role-name $role 2>/dev/null || true
-          done
-
-          # Delete orphaned KMS alias (with retry)
-          echo "Deleting KMS alias..."
-          for i in 1 2 3; do
-            if aws kms delete-alias --alias-name alias/genup-dev 2>&1; then
-              echo "KMS alias deleted successfully"
-              break
-            else
-              echo "KMS alias deletion attempt $i failed or alias doesn't exist, retrying..."
-              sleep 5
-            fi
-          done
-
-          # Also try to delete any KMS keys with genup-dev tag (schedule for deletion)
-          echo "Scheduling KMS keys for deletion..."
-          for key_id in $(aws kms list-keys --query 'Keys[].KeyId' --output text 2>/dev/null); do
-            KEY_DESC=$(aws kms describe-key --key-id "$key_id" 2>/dev/null | jq -r '.KeyMetadata.Description // ""')
-            if [[ "$KEY_DESC" == *"genup-dev"* ]] || [[ "$KEY_DESC" == *"GenUp dev"* ]]; then
-              echo "Found genup key: $key_id"
-              aws kms schedule-key-deletion --key-id "$key_id" --pending-window-in-days 7 2>/dev/null || true
-            fi
-          done
-
-          # Delete orphaned SQS queues
-          echo "Deleting SQS queues..."
-          for queue_name in genup-dev-simulation-dlq genup-dev-simulation-queue; do
-            QUEUE_URL=$(aws sqs get-queue-url --queue-name $queue_name 2>/dev/null | jq -r '.QueueUrl') || true
-            if [ -n "$QUEUE_URL" ] && [ "$QUEUE_URL" != "null" ]; then
-              aws sqs delete-queue --queue-url "$QUEUE_URL" 2>/dev/null || true
-            fi
-          done
-
-          # Delete ALL orphaned CloudFront distributions with genup prefix (MUST be done before OACs)
-          echo "Disabling and deleting CloudFront distributions..."
-          for dist in $(aws cloudfront list-distributions 2>/dev/null | jq -r '.DistributionList.Items[]? | select(.Comment | contains("GenUp")) | .Id' 2>/dev/null); do
-            echo "Processing distribution: $dist"
-            ETAG=$(aws cloudfront get-distribution --id "$dist" 2>/dev/null | jq -r '.ETag') || true
-            STATUS=$(aws cloudfront get-distribution --id "$dist" 2>/dev/null | jq -r '.Distribution.DistributionConfig.Enabled') || true
-            if [ "$STATUS" = "true" ]; then
-              echo "Disabling distribution: $dist"
-              CONFIG=$(aws cloudfront get-distribution-config --id "$dist" 2>/dev/null)
-              ETAG_CONFIG=$(echo "$CONFIG" | jq -r '.ETag')
-              DIST_CONFIG=$(echo "$CONFIG" | jq '.DistributionConfig.Enabled = false')
-              echo "$DIST_CONFIG" | jq '.DistributionConfig' > /tmp/dist-config.json
-              aws cloudfront update-distribution --id "$dist" --distribution-config file:///tmp/dist-config.json --if-match "$ETAG_CONFIG" 2>/dev/null || true
-              echo "Waiting for distribution to disable..."
-              sleep 30
-            fi
-            # Try to delete (will fail if not fully disabled, which is ok)
-            ETAG=$(aws cloudfront get-distribution --id "$dist" 2>/dev/null | jq -r '.ETag') || true
-            if [ -n "$ETAG" ] && [ "$ETAG" != "null" ]; then
-              aws cloudfront delete-distribution --id "$dist" --if-match "$ETAG" 2>/dev/null || echo "Distribution $dist not yet deletable (may need more time to disable)"
-            fi
-          done
-
-          # Delete ALL orphaned CloudFront functions with genup prefix
-          echo "Deleting CloudFront functions..."
-          for func_name in $(aws cloudfront list-functions 2>/dev/null | jq -r '.FunctionList.Items[]? | select(.Name | startswith("genup-")) | .Name' 2>/dev/null); do
-            echo "Deleting function: $func_name"
-            ETAG=$(aws cloudfront describe-function --name "$func_name" 2>/dev/null | jq -r '.ETag') || true
-            if [ -n "$ETAG" ] && [ "$ETAG" != "null" ]; then
-              aws cloudfront delete-function --name "$func_name" --if-match "$ETAG" 2>/dev/null || true
-            fi
-          done
-
-          # Delete ALL orphaned CloudFront OACs with genup prefix (after distributions are deleted)
-          echo "Deleting CloudFront OACs..."
-          for oac in $(aws cloudfront list-origin-access-controls 2>/dev/null | jq -r '.OriginAccessControlList.Items[]? | select(.Name | startswith("genup-")) | .Id' 2>/dev/null); do
-            echo "Deleting OAC: $oac"
-            ETAG=$(aws cloudfront get-origin-access-control --id "$oac" 2>/dev/null | jq -r '.ETag') || true
-            if [ -n "$ETAG" ] && [ "$ETAG" != "null" ]; then
-              aws cloudfront delete-origin-access-control --id "$oac" --if-match "$ETAG" 2>/dev/null || true
-            fi
-          done
-
-          # Delete ALL orphaned WAF WebACLs with genup prefix
-          echo "Deleting WAF WebACLs..."
-          for waf in $(aws wafv2 list-web-acls --scope CLOUDFRONT --region us-east-1 2>/dev/null | jq -r '.WebACLs[]? | select(.Name | startswith("genup-")) | "\(.Name)|\(.Id)"' 2>/dev/null); do
-            WAF_NAME=$(echo $waf | cut -d'|' -f1)
-            WAF_ID=$(echo $waf | cut -d'|' -f2)
-            echo "Deleting WAF: $WAF_NAME"
-            TOKEN=$(aws wafv2 get-web-acl --name "$WAF_NAME" --scope CLOUDFRONT --id "$WAF_ID" --region us-east-1 2>/dev/null | jq -r '.LockToken') || true
-            if [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ]; then
-              aws wafv2 delete-web-acl --name "$WAF_NAME" --scope CLOUDFRONT --id "$WAF_ID" --lock-token "$TOKEN" --region us-east-1 2>/dev/null || true
-            fi
-          done
-
-          # Delete orphaned Secrets Manager secrets
-          echo "Deleting Secrets Manager secrets..."
-          for secret in $(aws secretsmanager list-secrets 2>/dev/null | jq -r '.SecretList[]? | select(.Name | startswith("genup-dev-api-keys")) | .ARN' 2>/dev/null); do
-            echo "Deleting secret: $secret"
-            aws secretsmanager delete-secret --secret-id "$secret" --force-delete-without-recovery 2>/dev/null || true
-          done
-
-          # Delete orphaned S3 buckets (except terraform state)
-          echo "Deleting S3 buckets..."
-          for bucket in $(aws s3api list-buckets --query 'Buckets[?starts_with(Name, `genup-dev-`)].Name' --output text 2>/dev/null); do
-            echo "Deleting bucket: $bucket"
-            aws s3 rb "s3://$bucket" --force 2>/dev/null || true
-          done
-
-          echo "=========================================="
-          echo "Cleanup complete!"
-          echo "=========================================="
-
-      - name: Wait for resource deletion
-        if: ${{ github.event.inputs.cleanup != 'false' }}
-        run: |
-          echo "Waiting 90 seconds for resources to be fully deleted..."
-          sleep 90
-
-      - name: Verify critical resources deleted
-        if: ${{ github.event.inputs.cleanup != 'false' }}
-        continue-on-error: true
-        run: |
-          echo "Verifying critical resources were deleted..."
-          ERRORS=0
-
-          # Check KMS alias
-          if aws kms describe-key --key-id alias/genup-dev 2>/dev/null; then
-            echo "WARNING: KMS alias alias/genup-dev still exists, attempting force delete..."
-            aws kms delete-alias --alias-name alias/genup-dev || true
-            sleep 10
-          fi
-
-          # Check IAM roles
-          for role in genup-dev-lambda-execution genup-dev-api-gateway genup-dev-deployment; do
-            if aws iam get-role --role-name $role 2>/dev/null; then
-              echo "WARNING: IAM role $role still exists, force deleting..."
-              # Delete all inline policies
-              for policy in $(aws iam list-role-policies --role-name $role 2>/dev/null | jq -r '.PolicyNames[]' 2>/dev/null); do
-                aws iam delete-role-policy --role-name $role --policy-name "$policy" 2>/dev/null || true
-              done
-              # Detach all managed policies
-              for policy in $(aws iam list-attached-role-policies --role-name $role 2>/dev/null | jq -r '.AttachedPolicies[].PolicyArn' 2>/dev/null); do
-                aws iam detach-role-policy --role-name $role --policy-arn "$policy" 2>/dev/null || true
-              done
-              # Delete role
-              aws iam delete-role --role-name $role || true
-              sleep 5
-            fi
-          done
-
-          # Check DynamoDB tables
-          for table in genup-dev-projects genup-dev-hypotheses genup-dev-evidence genup-dev-simulations genup-dev-knowledge-metadata genup-dev-agent-tasks; do
-            if aws dynamodb describe-table --table-name $table 2>/dev/null; then
-              echo "WARNING: DynamoDB table $table still exists, waiting for deletion..."
-              aws dynamodb wait table-not-exists --table-name $table 2>/dev/null || true
-            fi
-          done
-
-          echo "Verification complete"
-
-      - name: Clear stale terraform state after cleanup
-        if: ${{ github.event.inputs.cleanup != 'false' }}
-        working-directory: infrastructure/terraform
-        run: |
-          echo "Clearing stale terraform state since cleanup was run..."
-          rm -rf .terraform terraform.tfstate terraform.tfstate.backup .terraform.lock.hcl
-          echo "State cleared - terraform will create fresh resources"
-
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
 
-      - name: Cache Terraform State
-        id: cache-terraform
-        if: ${{ github.event.inputs.cleanup == 'false' }}
-        uses: actions/cache@v4
-        with:
-          path: |
-            infrastructure/terraform/.terraform
-            infrastructure/terraform/terraform.tfstate
-            infrastructure/terraform/terraform.tfstate.backup
-          key: terraform-state-dev-v2
-          restore-keys: |
-            terraform-state-dev-
-
       - name: Terraform Init
         working-directory: infrastructure/terraform
         run: terraform init
 
-      - name: Create Placeholder Lambda Artifacts
+      - name: Terraform Destroy (if requested)
+        if: ${{ github.event.inputs.destroy_first == 'true' }}
         working-directory: infrastructure/terraform
         run: |
-          # Get the artifacts bucket name from terraform output or construct it
-          # For now, we'll upload after the S3 bucket is created
-          echo "Lambda artifacts will be created after S3 bucket exists"
+          echo "⚠️ Running terraform destroy..."
+          terraform destroy -auto-approve -var-file=environments/dev.tfvars || true
+          echo "Destroy completed. Waiting 30s for AWS propagation..."
+          sleep 30
 
-      - name: Terraform Plan
-        working-directory: infrastructure/terraform
-        run: terraform plan -var-file=environments/dev.tfvars -out=tfplan
-
-      - name: Terraform Apply - Phase 1 (Infrastructure without Lambda)
-        working-directory: infrastructure/terraform
-        continue-on-error: true
-        run: |
-          # First apply - this will create S3 buckets and may fail on Lambda layers
-          terraform apply -auto-approve tfplan || true
-
-      - name: Get Artifacts Bucket from Terraform State
-        id: get-bucket
+      - name: Get Artifacts Bucket Name
+        id: bucket
         working-directory: infrastructure/terraform
         run: |
-          # Get the bucket name from terraform state (most reliable source)
-          # Use 'bucket' field and head -1 to ensure single line output
-          BUCKET=$(terraform state show 'module.s3.aws_s3_bucket.artifacts' 2>/dev/null | grep -E '^\s+bucket\s+=' | head -1 | sed 's/.*= "\([^"]*\)".*/\1/')
-
-          if [ -z "$BUCKET" ]; then
-            echo "ERROR: Could not get artifacts bucket from terraform state"
-            exit 1
-          fi
-
-          echo "Artifacts bucket from terraform state: $BUCKET"
+          # Determine the artifacts bucket name from tfvars
+          ENV="${{ github.event.inputs.environment || 'dev' }}"
+          BUCKET="genup-${ENV}-artifacts-$(aws sts get-caller-identity --query Account --output text)"
           echo "ARTIFACTS_BUCKET=$BUCKET" >> $GITHUB_ENV
+          echo "bucket=$BUCKET" >> $GITHUB_OUTPUT
+
+      - name: Ensure S3 Artifacts Bucket Exists
+        run: |
+          # Create bucket if it doesn't exist (for Lambda artifacts)
+          if ! aws s3api head-bucket --bucket "$ARTIFACTS_BUCKET" 2>/dev/null; then
+            echo "Creating artifacts bucket: $ARTIFACTS_BUCKET"
+            aws s3api create-bucket --bucket "$ARTIFACTS_BUCKET" --region $AWS_REGION \
+              --create-bucket-configuration LocationConstraint=$AWS_REGION 2>/dev/null || \
+            aws s3api create-bucket --bucket "$ARTIFACTS_BUCKET" --region $AWS_REGION 2>/dev/null || true
+          fi
 
       - name: Upload Placeholder Lambda Artifacts
         run: |
-          echo "Uploading to bucket: $ARTIFACTS_BUCKET"
+          echo "Uploading placeholder Lambda artifacts to $ARTIFACTS_BUCKET"
 
           # Create a minimal valid Lambda layer zip
           mkdir -p /tmp/lambda-layer/python
           echo "# Placeholder" > /tmp/lambda-layer/python/__init__.py
           cd /tmp/lambda-layer && zip -r ../dependencies.zip python/
-          cd /tmp/lambda-layer && zip -r ../scipy.zip python/
+          cp /tmp/dependencies.zip /tmp/scipy.zip
 
           # Upload placeholder layers
-          aws s3 cp /tmp/dependencies.zip s3://$ARTIFACTS_BUCKET/lambda-layers/dependencies.zip
-          aws s3 cp /tmp/scipy.zip s3://$ARTIFACTS_BUCKET/lambda-layers/scipy.zip
+          aws s3 cp /tmp/dependencies.zip "s3://$ARTIFACTS_BUCKET/lambda-layers/dependencies.zip" || true
+          aws s3 cp /tmp/scipy.zip "s3://$ARTIFACTS_BUCKET/lambda-layers/scipy.zip" || true
 
-          # Create placeholder function zips with proper module structure
-          # Terraform expects handler path like "handlers.api_core.handler"
+          # Create placeholder function zips
           mkdir -p /tmp/lambda-func/handlers
           touch /tmp/lambda-func/handlers/__init__.py
 
-          # Upload placeholder functions with correct module structure
           for func in api_core projects hypotheses evidence knowledge hypothesis_generation agent_orchestrator search_agent embeddings simulation simulation_worker ingestion pubmed_fetcher clinical_trials_fetcher; do
             cat > /tmp/lambda-func/handlers/$func.py << 'PYEOF'
-          import json
+import json
 
-          def handler(event, context):
-              path = event.get('rawPath', event.get('path', '/'))
-              if path == '/health':
-                  return {'statusCode': 200, 'headers': {'Content-Type': 'application/json'}, 'body': json.dumps({'status': 'healthy'})}
-              return {'statusCode': 200, 'headers': {'Content-Type': 'application/json'}, 'body': json.dumps({'message': 'GenUp API'})}
-          PYEOF
+def handler(event, context):
+    path = event.get('rawPath', event.get('path', '/'))
+    if path == '/health':
+        return {'statusCode': 200, 'headers': {'Content-Type': 'application/json'}, 'body': json.dumps({'status': 'healthy'})}
+    return {'statusCode': 200, 'headers': {'Content-Type': 'application/json'}, 'body': json.dumps({'message': 'GenUp API'})}
+PYEOF
             cd /tmp/lambda-func && zip -r ../$func.zip handlers/
-            aws s3 cp /tmp/$func.zip s3://$ARTIFACTS_BUCKET/lambda-functions/$func.zip
+            aws s3 cp /tmp/$func.zip "s3://$ARTIFACTS_BUCKET/lambda-functions/$func.zip" || true
           done
 
-          echo "Placeholder artifacts uploaded successfully to $ARTIFACTS_BUCKET"
+          echo "✅ Placeholder artifacts uploaded"
 
-      - name: Verify Lambda Artifacts Exist
+      - name: Terraform Plan
+        working-directory: infrastructure/terraform
         run: |
-          echo "Verifying artifacts in bucket: $ARTIFACTS_BUCKET"
+          terraform plan \
+            -var-file=environments/dev.tfvars \
+            -out=tfplan \
+            -input=false
 
-          # Wait for S3 eventual consistency
-          sleep 5
-
-          # Verify layer files exist
-          echo "Checking lambda layers..."
-          aws s3 ls s3://$ARTIFACTS_BUCKET/lambda-layers/dependencies.zip || { echo "ERROR: dependencies.zip not found"; exit 1; }
-          aws s3 ls s3://$ARTIFACTS_BUCKET/lambda-layers/scipy.zip || { echo "ERROR: scipy.zip not found"; exit 1; }
-
-          # Verify at least one function file exists
-          echo "Checking lambda functions..."
-          aws s3 ls s3://$ARTIFACTS_BUCKET/lambda-functions/api_core.zip || { echo "ERROR: api_core.zip not found"; exit 1; }
-
-          echo "All required artifacts verified successfully"
-
-      - name: Terraform Plan - Phase 2
+      - name: Terraform Apply
         working-directory: infrastructure/terraform
-        run: terraform plan -var-file=environments/dev.tfvars -out=tfplan
-
-      - name: Terraform Apply - Phase 2 (Complete)
-        working-directory: infrastructure/terraform
-        run: terraform apply -auto-approve tfplan
+        run: |
+          terraform apply -auto-approve tfplan
 
       - name: Get Terraform Outputs
         id: tf-outputs
@@ -422,43 +164,36 @@ jobs:
         if: env.FRONTEND_BUCKET != ''
         run: |
           echo "Deploying frontend to bucket: $FRONTEND_BUCKET"
-          aws s3 sync frontend/dist/ s3://$FRONTEND_BUCKET/ \
+
+          # Sync assets with long cache
+          aws s3 sync frontend/dist/ "s3://$FRONTEND_BUCKET/" \
             --delete \
             --cache-control "public, max-age=31536000, immutable" \
             --exclude "index.html" \
             --exclude "*.json"
 
-          # Upload index.html and json files with shorter cache
-          aws s3 cp frontend/dist/index.html s3://$FRONTEND_BUCKET/index.html \
+          # Upload index.html with no-cache
+          aws s3 cp frontend/dist/index.html "s3://$FRONTEND_BUCKET/index.html" \
             --cache-control "public, max-age=0, must-revalidate" \
             --content-type "text/html"
 
-          # Upload any JSON config files
-          for json_file in frontend/dist/*.json; do
-            if [ -f "$json_file" ]; then
-              aws s3 cp "$json_file" "s3://$FRONTEND_BUCKET/$(basename $json_file)" \
-                --cache-control "public, max-age=0, must-revalidate" \
-                --content-type "application/json"
-            fi
-          done
-
-          echo "Frontend deployed successfully"
+          echo "✅ Frontend deployed"
 
       - name: Invalidate CloudFront Cache
         if: env.CLOUDFRONT_ID != ''
         run: |
-          echo "Invalidating CloudFront distribution: $CLOUDFRONT_ID"
           aws cloudfront create-invalidation \
-            --distribution-id $CLOUDFRONT_ID \
+            --distribution-id "$CLOUDFRONT_ID" \
             --paths "/*"
+          echo "✅ CloudFront cache invalidated"
 
-      - name: Get Outputs
+      - name: Summary
         working-directory: infrastructure/terraform
         run: |
-          echo "## Deployment Outputs" >> $GITHUB_STEP_SUMMARY
+          echo "## 🚀 Deployment Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Resource | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| CloudFront Domain | $(terraform output -raw cloudfront_domain_name 2>/dev/null || echo 'N/A') |" >> $GITHUB_STEP_SUMMARY
-          echo "| API Gateway URL | $(terraform output -raw api_gateway_stage_url 2>/dev/null || echo 'N/A') |" >> $GITHUB_STEP_SUMMARY
+          echo "| CloudFront | $(terraform output -raw cloudfront_domain_name 2>/dev/null || echo 'N/A') |" >> $GITHUB_STEP_SUMMARY
+          echo "| API Gateway | $(terraform output -raw api_gateway_stage_url 2>/dev/null || echo 'N/A') |" >> $GITHUB_STEP_SUMMARY
           echo "| Frontend Bucket | $(terraform output -raw frontend_bucket_name 2>/dev/null || echo 'N/A') |" >> $GITHUB_STEP_SUMMARY

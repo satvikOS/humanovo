@@ -6,28 +6,33 @@ Includes scheduling, state management, and checkpointing capabilities.
 """
 
 from app.agents.ingestion.base import (
-    IngestionAgent,
-    IngestionConfig,
-    IngestionState,
-    IngestionMetrics,
-    IngestionStatus,
-    SourceType,
-    IngestionRecord,
     ExtractedEntity,
     ExtractedRelation,
+    IngestionAgent,
+    IngestionConfig,
+    IngestionMetrics,
+    IngestionRecord,
+    IngestionState,
+    IngestionStatus,
+    SourceType,
 )
-from app.agents.ingestion.pubmed_agent import PubMedIngestionAgent
 from app.agents.ingestion.clinical_trials_agent import ClinicalTrialsIngestionAgent
-from app.agents.ingestion.patents_agent import PatentsIngestionAgent
-from app.agents.ingestion.preprint_agent import PreprintIngestionAgent
 from app.agents.ingestion.custom_document_agent import CustomDocumentIngestionAgent
 from app.agents.ingestion.orchestrator import IngestionOrchestrator
+from app.agents.ingestion.patents_agent import PatentsIngestionAgent
+from app.agents.ingestion.preprint_agent import PreprintIngestionAgent
+from app.agents.ingestion.pubmed_agent import PubMedIngestionAgent
+from app.agents.ingestion.redis_state_storage import (
+    RedisStateStorage,
+    close_redis_state_storage,
+    get_redis_state_storage,
+)
 from app.agents.ingestion.scheduler import (
     AgentScheduler,
     ScheduledIngestionJob,
     TaskPriority,
-    get_scheduler,
     get_job_scheduler,
+    get_scheduler,
     initialize_schedulers,
     shutdown_schedulers,
 )
@@ -36,17 +41,12 @@ from app.agents.ingestion.state_manager import (
     AgentStateTracker,
     Checkpoint,
     CheckpointType,
-    StateStorage,
     FileStateStorage,
     InMemoryStateStorage,
+    StateStorage,
     get_state_manager,
     initialize_state_manager,
     shutdown_state_manager,
-)
-from app.agents.ingestion.redis_state_storage import (
-    RedisStateStorage,
-    get_redis_state_storage,
-    close_redis_state_storage,
 )
 
 __all__ = [

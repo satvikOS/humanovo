@@ -5,7 +5,6 @@ Data models for Monte Carlo simulations.
 """
 
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
@@ -42,7 +41,7 @@ class DistributionConfig(BaseModel):
 
     name: str
     distribution: DistributionType
-    params: Dict[str, float] = Field(default_factory=dict)
+    params: dict[str, float] = Field(default_factory=dict)
 
     class Config:
         use_enum_values = True
@@ -52,11 +51,11 @@ class SimulationConfig(BaseModel):
     """Configuration for a simulation run."""
 
     simulation_type: SimulationType
-    parameters: List[DistributionConfig]
+    parameters: list[DistributionConfig]
     iterations: int = 1000
-    seed: Optional[int] = None
-    custom_model: Optional[str] = None
-    outcomes: List[str] = Field(default_factory=lambda: ["result"])
+    seed: int | None = None
+    custom_model: str | None = None
+    outcomes: list[str] = Field(default_factory=lambda: ["result"])
 
     class Config:
         use_enum_values = True
@@ -73,10 +72,10 @@ class OutcomeMetric(BaseModel):
     ci_upper: float
     min: float
     max: float
-    percentiles: Dict[str, float] = Field(default_factory=dict)
+    percentiles: dict[str, float] = Field(default_factory=dict)
 
     @classmethod
-    def from_samples(cls, name: str, samples: List[float]) -> "OutcomeMetric":
+    def from_samples(cls, name: str, samples: list[float]) -> "OutcomeMetric":
         """Create OutcomeMetric from a list of samples."""
         import numpy as np
 
@@ -106,7 +105,7 @@ class SimulationResult(BaseModel):
 
     id: UUID = Field(default_factory=uuid4)
     config: SimulationConfig
-    outcomes: List[OutcomeMetric]
+    outcomes: list[OutcomeMetric]
     iterations_completed: int
     runtime_seconds: float
-    raw_samples: Optional[Dict[str, List[float]]] = None
+    raw_samples: dict[str, list[float]] | None = None

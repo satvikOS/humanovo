@@ -13,12 +13,12 @@ Combines all scoring components for comprehensive edge confidence:
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Any
 
-from .source_quality import SourceQualityAnalyzer, SourceQuality, EvidenceLevel
 from .citation_analyzer import CitationAnalyzer, CitationMetrics
-from .claim_classifier import ClaimClassifier, ClaimClassification, ClaimStrength
-from .provenance_tracker import ProvenanceTracker, ProvenanceRecord, ProvenanceEventType
+from .claim_classifier import ClaimClassification, ClaimClassifier
+from .provenance_tracker import ProvenanceEventType, ProvenanceRecord, ProvenanceTracker
+from .source_quality import SourceQuality, SourceQualityAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -26,74 +26,78 @@ logger = logging.getLogger(__name__)
 @dataclass
 class SourceQualityScore:
     """Source quality component of confidence."""
+
     source_id: str
     quality: SourceQuality
     weight: float
     contribution: float
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "source_id": self.source_id,
             "quality": self.quality.to_dict(),
             "weight": self.weight,
-            "contribution": self.contribution
+            "contribution": self.contribution,
         }
 
 
 @dataclass
 class CitationScore:
     """Citation component of confidence."""
+
     metrics: CitationMetrics
     weight: float
     contribution: float
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "metrics": self.metrics.to_dict(),
             "weight": self.weight,
-            "contribution": self.contribution
+            "contribution": self.contribution,
         }
 
 
 @dataclass
 class EvidenceProvenance:
     """Provenance component of confidence."""
+
     record: ProvenanceRecord
     source_count: int
     validation_status: bool
     contribution: float
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "record": self.record.to_dict(),
             "source_count": self.source_count,
             "validation_status": self.validation_status,
-            "contribution": self.contribution
+            "contribution": self.contribution,
         }
 
 
 @dataclass
 class EdgeScore:
     """Complete confidence score for a knowledge graph edge."""
+
     edge_id: str
     source_entity: str
     target_entity: str
     relation_type: str
     final_score: float
-    source_quality_scores: List[SourceQualityScore] = field(default_factory=list)
-    citation_score: Optional[CitationScore] = None
-    claim_classification: Optional[ClaimClassification] = None
+    source_quality_scores: list[SourceQualityScore] = field(default_factory=list)
+    citation_score: CitationScore | None = None
+    claim_classification: ClaimClassification | None = None
     co_occurrence_score: float = 0.0
     model_certainty: float = 0.0
-    provenance: Optional[EvidenceProvenance] = None
-    component_weights: Dict[str, float] = field(default_factory=dict)
-    component_contributions: Dict[str, float] = field(default_factory=dict)
+    provenance: EvidenceProvenance | None = None
+    component_weights: dict[str, float] = field(default_factory=dict)
+    component_contributions: dict[str, float] = field(default_factory=dict)
     confidence_level: str = "moderate"  # low, moderate, high, very_high
     evidence_count: int = 0
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
     timestamp: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "edge_id": self.edge_id,
             "source_entity": self.source_entity,
@@ -102,7 +106,9 @@ class EdgeScore:
             "final_score": self.final_score,
             "source_quality_scores": [s.to_dict() for s in self.source_quality_scores],
             "citation_score": self.citation_score.to_dict() if self.citation_score else None,
-            "claim_classification": self.claim_classification.to_dict() if self.claim_classification else None,
+            "claim_classification": self.claim_classification.to_dict()
+            if self.claim_classification
+            else None,
             "co_occurrence_score": self.co_occurrence_score,
             "model_certainty": self.model_certainty,
             "provenance": self.provenance.to_dict() if self.provenance else None,
@@ -111,7 +117,7 @@ class EdgeScore:
             "confidence_level": self.confidence_level,
             "evidence_count": self.evidence_count,
             "metadata": self.metadata,
-            "timestamp": self.timestamp
+            "timestamp": self.timestamp,
         }
 
     def get_explanation(self) -> str:
@@ -121,9 +127,7 @@ class EdgeScore:
         if self.component_contributions:
             parts.append("\nScore breakdown:")
             for component, contribution in sorted(
-                self.component_contributions.items(),
-                key=lambda x: x[1],
-                reverse=True
+                self.component_contributions.items(), key=lambda x: x[1], reverse=True
             ):
                 parts.append(f"  - {component}: {contribution:.2f}")
 
@@ -157,7 +161,7 @@ class ConfidenceScorer:
         "claim_type": 0.20,
         "co_occurrence": 0.10,
         "model_certainty": 0.15,
-        "provenance": 0.10
+        "provenance": 0.10,
     }
 
     # Confidence level thresholds
@@ -166,16 +170,16 @@ class ConfidenceScorer:
         0.6: "high",
         0.4: "moderate",
         0.2: "low",
-        0.0: "very_low"
+        0.0: "very_low",
     }
 
     def __init__(
         self,
-        weights: Optional[Dict[str, float]] = None,
-        source_quality_analyzer: Optional[SourceQualityAnalyzer] = None,
-        citation_analyzer: Optional[CitationAnalyzer] = None,
-        claim_classifier: Optional[ClaimClassifier] = None,
-        provenance_tracker: Optional[ProvenanceTracker] = None
+        weights: dict[str, float] | None = None,
+        source_quality_analyzer: SourceQualityAnalyzer | None = None,
+        citation_analyzer: CitationAnalyzer | None = None,
+        claim_classifier: ClaimClassifier | None = None,
+        provenance_tracker: ProvenanceTracker | None = None,
     ):
         """
         Initialize the confidence scorer.
@@ -207,10 +211,10 @@ class ConfidenceScorer:
         source_entity: str,
         target_entity: str,
         relation_type: str,
-        evidence_sources: List[Dict[str, Any]],
-        evidence_text: Optional[str] = None,
+        evidence_sources: list[dict[str, Any]],
+        evidence_text: str | None = None,
         model_confidence: float = 0.5,
-        co_occurrence_count: int = 1
+        co_occurrence_count: int = 1,
     ) -> EdgeScore:
         """
         Calculate comprehensive confidence score for an edge.
@@ -241,16 +245,18 @@ class ConfidenceScorer:
                     abstract=source.get("abstract"),
                     journal=source.get("journal"),
                     publication_year=source.get("year"),
-                    citation_count=source.get("citations")
+                    citation_count=source.get("citations"),
                 )
                 weight = 1.0 / len(evidence_sources)
                 contribution = quality.quality_score * weight
-                source_quality_scores.append(SourceQualityScore(
-                    source_id=source.get("id", ""),
-                    quality=quality,
-                    weight=weight,
-                    contribution=contribution
-                ))
+                source_quality_scores.append(
+                    SourceQualityScore(
+                        source_id=source.get("id", ""),
+                        quality=quality,
+                        weight=weight,
+                        contribution=contribution,
+                    )
+                )
 
             avg_source_quality = sum(s.contribution for s in source_quality_scores)
             component_scores["source_quality"] = avg_source_quality
@@ -263,15 +269,11 @@ class ConfidenceScorer:
             avg_year = sum(s.get("year", 2020) for s in evidence_sources) // len(evidence_sources)
 
             metrics = self.citation_analyzer.analyze(
-                source_id=edge_id,
-                total_citations=total_citations,
-                publication_year=avg_year
+                source_id=edge_id, total_citations=total_citations, publication_year=avg_year
             )
             cite_contribution = metrics.get_citation_score()
             citation_score = CitationScore(
-                metrics=metrics,
-                weight=self.weights["citation"],
-                contribution=cite_contribution
+                metrics=metrics, weight=self.weights["citation"], contribution=cite_contribution
             )
             component_scores["citation"] = cite_contribution
             contributions["citation"] = cite_contribution * self.weights["citation"]
@@ -299,8 +301,7 @@ class ConfidenceScorer:
         if not provenance_record:
             # Create new record
             provenance_record = self.provenance_tracker.create_record(
-                entity_id=edge_id,
-                initial_confidence=0.5
+                entity_id=edge_id, initial_confidence=0.5
             )
 
             # Record extraction event
@@ -308,7 +309,7 @@ class ConfidenceScorer:
                 entity_id=edge_id,
                 event_type=ProvenanceEventType.RELATION_EXTRACTION,
                 action=f"Extracted relation: {source_entity} -> {relation_type} -> {target_entity}",
-                confidence_delta=model_confidence - 0.5
+                confidence_delta=model_confidence - 0.5,
             )
 
         # Add contributing sources
@@ -317,12 +318,14 @@ class ConfidenceScorer:
             if source_id:
                 self.provenance_tracker.add_contributing_source(edge_id, source_id)
 
-        provenance_score = self._calculate_provenance_score(provenance_record, len(evidence_sources))
+        provenance_score = self._calculate_provenance_score(
+            provenance_record, len(evidence_sources)
+        )
         provenance = EvidenceProvenance(
             record=provenance_record,
             source_count=len(evidence_sources),
             validation_status=provenance_record.is_validated,
-            contribution=provenance_score
+            contribution=provenance_score,
         )
         component_scores["provenance"] = provenance_score
         contributions["provenance"] = provenance_score * self.weights["provenance"]
@@ -350,7 +353,7 @@ class ConfidenceScorer:
             component_contributions=contributions,
             confidence_level=confidence_level,
             evidence_count=len(evidence_sources),
-            timestamp=datetime.utcnow().isoformat()
+            timestamp=datetime.utcnow().isoformat(),
         )
 
     def _calculate_co_occurrence_score(self, count: int) -> float:
@@ -359,13 +362,10 @@ class ConfidenceScorer:
             return 0.0
         # Logarithmic scale: 1->0.3, 5->0.6, 10->0.75, 50->0.9, 100->1.0
         import math
+
         return min(1.0, 0.3 + 0.3 * math.log10(count + 1))
 
-    def _calculate_provenance_score(
-        self,
-        record: ProvenanceRecord,
-        source_count: int
-    ) -> float:
+    def _calculate_provenance_score(self, record: ProvenanceRecord, source_count: int) -> float:
         """Calculate provenance score."""
         score = 0.5  # Base
 
@@ -385,18 +385,12 @@ class ConfidenceScorer:
 
     def _get_confidence_level(self, score: float) -> str:
         """Get confidence level from score."""
-        for threshold, level in sorted(
-            self.CONFIDENCE_LEVELS.items(),
-            reverse=True
-        ):
+        for threshold, level in sorted(self.CONFIDENCE_LEVELS.items(), reverse=True):
             if score >= threshold:
                 return level
         return "very_low"
 
-    def batch_score(
-        self,
-        edges: List[Dict[str, Any]]
-    ) -> List[EdgeScore]:
+    def batch_score(self, edges: list[dict[str, Any]]) -> list[EdgeScore]:
         """
         Score multiple edges.
 
@@ -416,17 +410,13 @@ class ConfidenceScorer:
                 evidence_sources=edge.get("sources", []),
                 evidence_text=edge.get("evidence_text"),
                 model_confidence=edge.get("model_confidence", 0.5),
-                co_occurrence_count=edge.get("co_occurrence", 1)
+                co_occurrence_count=edge.get("co_occurrence", 1),
             )
             results.append(score)
         return results
 
     def recalculate_with_validation(
-        self,
-        edge_score: EdgeScore,
-        validator: str,
-        is_valid: bool,
-        comments: Optional[str] = None
+        self, edge_score: EdgeScore, validator: str, is_valid: bool, comments: str | None = None
     ) -> EdgeScore:
         """
         Recalculate score after validation.
@@ -442,10 +432,7 @@ class ConfidenceScorer:
         """
         # Record validation
         self.provenance_tracker.record_validation(
-            entity_id=edge_score.edge_id,
-            validator=validator,
-            is_valid=is_valid,
-            comments=comments
+            entity_id=edge_score.edge_id, validator=validator, is_valid=is_valid, comments=comments
         )
 
         # Adjust score
@@ -467,15 +454,12 @@ class ConfidenceScorer:
             "validator": validator,
             "is_valid": is_valid,
             "comments": comments,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
 
         return edge_score
 
-    def get_score_summary(
-        self,
-        scores: List[EdgeScore]
-    ) -> Dict[str, Any]:
+    def get_score_summary(self, scores: list[EdgeScore]) -> dict[str, Any]:
         """
         Get summary statistics for a set of scores.
 
@@ -494,10 +478,7 @@ class ConfidenceScorer:
         # Component averages
         component_avgs = {}
         for component in self.weights.keys():
-            values = [
-                s.component_contributions.get(component, 0)
-                for s in scores
-            ]
+            values = [s.component_contributions.get(component, 0) for s in scores]
             component_avgs[component] = sum(values) / len(values)
 
         return {
@@ -506,25 +487,16 @@ class ConfidenceScorer:
             "min_confidence": min(final_scores),
             "max_confidence": max(final_scores),
             "confidence_level_distribution": {
-                level: confidence_levels.count(level)
-                for level in set(confidence_levels)
+                level: confidence_levels.count(level) for level in set(confidence_levels)
             },
             "component_averages": component_avgs,
             "validated_count": sum(
-                1 for s in scores
-                if s.provenance and s.provenance.validation_status
+                1 for s in scores if s.provenance and s.provenance.validation_status
             ),
-            "high_confidence_count": sum(
-                1 for s in scores
-                if s.final_score >= 0.7
-            )
+            "high_confidence_count": sum(1 for s in scores if s.final_score >= 0.7),
         }
 
-    def export_scores(
-        self,
-        scores: List[EdgeScore],
-        format: str = "dict"
-    ) -> Any:
+    def export_scores(self, scores: list[EdgeScore], format: str = "dict") -> Any:
         """
         Export scores in various formats.
 
@@ -541,36 +513,49 @@ class ConfidenceScorer:
         elif format == "csv":
             import csv
             import io
+
             output = io.StringIO()
             writer = csv.writer(output)
 
             # Header
-            writer.writerow([
-                "edge_id", "source", "target", "relation",
-                "final_score", "confidence_level", "evidence_count"
-            ])
+            writer.writerow(
+                [
+                    "edge_id",
+                    "source",
+                    "target",
+                    "relation",
+                    "final_score",
+                    "confidence_level",
+                    "evidence_count",
+                ]
+            )
 
             # Data
             for s in scores:
-                writer.writerow([
-                    s.edge_id, s.source_entity, s.target_entity,
-                    s.relation_type, s.final_score, s.confidence_level,
-                    s.evidence_count
-                ])
+                writer.writerow(
+                    [
+                        s.edge_id,
+                        s.source_entity,
+                        s.target_entity,
+                        s.relation_type,
+                        s.final_score,
+                        s.confidence_level,
+                        s.evidence_count,
+                    ]
+                )
 
             return output.getvalue()
 
         elif format == "json":
             import json
+
             return json.dumps([s.to_dict() for s in scores], indent=2)
 
         return [s.to_dict() for s in scores]
 
 
 # Factory function
-def create_scorer(
-    preset: str = "default"
-) -> ConfidenceScorer:
+def create_scorer(preset: str = "default") -> ConfidenceScorer:
     """
     Create a confidence scorer with preset configuration.
 
@@ -588,7 +573,7 @@ def create_scorer(
             "claim_type": 0.15,
             "co_occurrence": 0.05,
             "model_certainty": 0.10,
-            "provenance": 0.10
+            "provenance": 0.10,
         },
         "model_focused": {
             "source_quality": 0.20,
@@ -596,7 +581,7 @@ def create_scorer(
             "claim_type": 0.15,
             "co_occurrence": 0.10,
             "model_certainty": 0.35,
-            "provenance": 0.10
+            "provenance": 0.10,
         },
         "balanced": {
             "source_quality": 0.20,
@@ -604,8 +589,8 @@ def create_scorer(
             "claim_type": 0.20,
             "co_occurrence": 0.10,
             "model_certainty": 0.20,
-            "provenance": 0.10
-        }
+            "provenance": 0.10,
+        },
     }
 
     weights = presets.get(preset, presets["default"])
@@ -614,13 +599,11 @@ def create_scorer(
 
 # Convenience function
 def score_edge(
-    source: str,
-    target: str,
-    relation: str,
-    evidence_sources: List[Dict[str, Any]]
+    source: str, target: str, relation: str, evidence_sources: list[dict[str, Any]]
 ) -> EdgeScore:
     """Quick edge scoring using default scorer."""
     import hashlib
+
     edge_id = hashlib.md5(f"{source}_{relation}_{target}".encode()).hexdigest()[:12]
     scorer = create_scorer()
     return scorer.score_edge(
@@ -628,5 +611,5 @@ def score_edge(
         source_entity=source,
         target_entity=target,
         relation_type=relation,
-        evidence_sources=evidence_sources
+        evidence_sources=evidence_sources,
     )

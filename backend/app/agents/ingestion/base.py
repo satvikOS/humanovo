@@ -9,31 +9,23 @@ import asyncio
 import hashlib
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import Enum
 from typing import (
     Any,
-    AsyncIterator,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Set,
     TypeVar,
-    Generic,
 )
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
 from app.agents.base import (
-    BaseAgent,
-    AgentType,
-    AgentStatus,
     AgentContext,
     AgentResult,
-    AgentStep,
+    AgentType,
+    BaseAgent,
     Tool,
 )
 from app.core.logging import get_logger
@@ -45,6 +37,7 @@ T = TypeVar("T")
 
 class IngestionStatus(str, Enum):
     """Status of an ingestion operation."""
+
     PENDING = "pending"
     FETCHING = "fetching"
     PROCESSING = "processing"
@@ -58,6 +51,7 @@ class IngestionStatus(str, Enum):
 
 class SourceType(str, Enum):
     """Types of data sources for ingestion."""
+
     PUBMED = "pubmed"
     CLINICAL_TRIALS = "clinical_trials"
     PATENTS = "patents"
@@ -70,6 +64,7 @@ class SourceType(str, Enum):
 @dataclass
 class IngestionMetrics:
     """Metrics for tracking ingestion performance."""
+
     records_fetched: int = 0
     records_processed: int = 0
     records_indexed: int = 0
@@ -80,8 +75,8 @@ class IngestionMetrics:
     api_calls_made: int = 0
     bytes_downloaded: int = 0
     rate_limit_hits: int = 0
-    start_time: Optional[datetime] = None
-    end_time: Optional[datetime] = None
+    start_time: datetime | None = None
+    end_time: datetime | None = None
 
     @property
     def duration_seconds(self) -> float:
@@ -96,7 +91,7 @@ class IngestionMetrics:
             return 0.0
         return self.records_processed / self.duration_seconds
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "records_fetched": self.records_fetched,
             "records_processed": self.records_processed,
@@ -118,9 +113,9 @@ class IngestionConfig(BaseModel):
 
     # Query parameters
     query: str = ""
-    keywords: List[str] = Field(default_factory=list)
-    date_from: Optional[datetime] = None
-    date_to: Optional[datetime] = None
+    keywords: list[str] = Field(default_factory=list)
+    date_from: datetime | None = None
+    date_to: datetime | None = None
 
     # Fetch limits
     max_results: int = 1000
@@ -146,31 +141,32 @@ class IngestionConfig(BaseModel):
 
     # Filtering
     min_abstract_length: int = 50
-    required_fields: List[str] = Field(default_factory=lambda: ["title", "abstract"])
-    language_filter: List[str] = Field(default_factory=lambda: ["en"])
+    required_fields: list[str] = Field(default_factory=lambda: ["title", "abstract"])
+    language_filter: list[str] = Field(default_factory=lambda: ["en"])
 
     # Metadata
-    project_id: Optional[UUID] = None
-    tags: List[str] = Field(default_factory=list)
+    project_id: UUID | None = None
+    tags: list[str] = Field(default_factory=list)
     priority: int = 5  # 1-10, higher = more important
 
 
 @dataclass
 class IngestionRecord:
     """A record fetched during ingestion."""
+
     record_id: str
     source_type: SourceType
     source_id: str  # ID from the source (e.g., PMID, NCT ID)
     title: str
-    abstract: Optional[str] = None
-    full_text: Optional[str] = None
-    authors: List[str] = field(default_factory=list)
-    publication_date: Optional[datetime] = None
-    url: Optional[str] = None
-    doi: Optional[str] = None
-    keywords: List[str] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    content_hash: Optional[str] = None
+    abstract: str | None = None
+    full_text: str | None = None
+    authors: list[str] = field(default_factory=list)
+    publication_date: datetime | None = None
+    url: str | None = None
+    doi: str | None = None
+    keywords: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    content_hash: str | None = None
     fetched_at: datetime = field(default_factory=datetime.utcnow)
 
     def compute_content_hash(self) -> str:
@@ -188,7 +184,7 @@ class IngestionRecord:
             parts.append(self.full_text)
         return "\n\n".join(parts)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "record_id": self.record_id,
             "source_type": self.source_type.value,
@@ -196,7 +192,9 @@ class IngestionRecord:
             "title": self.title,
             "abstract": self.abstract,
             "authors": self.authors,
-            "publication_date": self.publication_date.isoformat() if self.publication_date else None,
+            "publication_date": self.publication_date.isoformat()
+            if self.publication_date
+            else None,
             "url": self.url,
             "doi": self.doi,
             "keywords": self.keywords,
@@ -209,19 +207,20 @@ class IngestionRecord:
 @dataclass
 class IngestionState:
     """State tracking for resumable ingestion."""
+
     job_id: str
     source_type: SourceType
     config: IngestionConfig
     status: IngestionStatus = IngestionStatus.PENDING
     metrics: IngestionMetrics = field(default_factory=IngestionMetrics)
-    last_cursor: Optional[str] = None  # For pagination
-    last_record_id: Optional[str] = None
-    processed_ids: Set[str] = field(default_factory=set)
-    error_message: Optional[str] = None
+    last_cursor: str | None = None  # For pagination
+    last_record_id: str | None = None
+    processed_ids: set[str] = field(default_factory=set)
+    error_message: str | None = None
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime = field(default_factory=datetime.utcnow)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "job_id": self.job_id,
             "source_type": self.source_type.value,
@@ -255,38 +254,44 @@ class IngestionAgent(BaseAgent, ABC):
 
     def __init__(
         self,
-        config: Optional[IngestionConfig] = None,
+        config: IngestionConfig | None = None,
         max_iterations: int = 100,
         timeout_seconds: int = 3600,  # 1 hour default
     ):
         super().__init__(max_iterations=max_iterations, timeout_seconds=timeout_seconds)
         self.config = config or IngestionConfig()
-        self.state: Optional[IngestionState] = None
+        self.state: IngestionState | None = None
         self._last_request_time: float = 0
         self._rate_limit_delay: float = 1.0 / self.config.requests_per_second
-        self._seen_hashes: Set[str] = set()
-        self._progress_callback: Optional[Callable[[IngestionState], None]] = None
+        self._seen_hashes: set[str] = set()
+        self._progress_callback: Callable[[IngestionState], None] | None = None
 
     def _setup_tools(self) -> None:
         """Set up tools for ingestion agent."""
-        self.register_tool(Tool(
-            name="fetch_records",
-            description="Fetch records from the data source",
-            parameters={"query": "str", "max_results": "int"},
-            handler=self._fetch_records_tool,
-        ))
-        self.register_tool(Tool(
-            name="process_record",
-            description="Process a single record (extraction, enrichment)",
-            parameters={"record": "IngestionRecord"},
-            handler=self._process_record_tool,
-        ))
-        self.register_tool(Tool(
-            name="index_record",
-            description="Index a record to vector and graph stores",
-            parameters={"record": "IngestionRecord"},
-            handler=self._index_record_tool,
-        ))
+        self.register_tool(
+            Tool(
+                name="fetch_records",
+                description="Fetch records from the data source",
+                parameters={"query": "str", "max_results": "int"},
+                handler=self._fetch_records_tool,
+            )
+        )
+        self.register_tool(
+            Tool(
+                name="process_record",
+                description="Process a single record (extraction, enrichment)",
+                parameters={"record": "IngestionRecord"},
+                handler=self._process_record_tool,
+            )
+        )
+        self.register_tool(
+            Tool(
+                name="index_record",
+                description="Index a record to vector and graph stores",
+                parameters={"record": "IngestionRecord"},
+                handler=self._index_record_tool,
+            )
+        )
 
     async def _rate_limit(self) -> None:
         """Apply rate limiting between API calls."""
@@ -309,7 +314,7 @@ class IngestionAgent(BaseAgent, ABC):
             except Exception as e:
                 last_error = e
                 if attempt < self.config.max_retries - 1:
-                    delay = self.config.retry_delay_seconds * (2 ** attempt)
+                    delay = self.config.retry_delay_seconds * (2**attempt)
                     self.logger.warning(
                         "Retry attempt",
                         attempt=attempt + 1,
@@ -326,7 +331,7 @@ class IngestionAgent(BaseAgent, ABC):
         offset: int = 0,
         limit: int = 100,
         **kwargs,
-    ) -> tuple[List[IngestionRecord], Optional[str]]:
+    ) -> tuple[list[IngestionRecord], str | None]:
         """
         Fetch a batch of records from the source.
 
@@ -342,7 +347,7 @@ class IngestionAgent(BaseAgent, ABC):
         pass
 
     @abstractmethod
-    async def fetch_by_id(self, source_id: str) -> Optional[IngestionRecord]:
+    async def fetch_by_id(self, source_id: str) -> IngestionRecord | None:
         """
         Fetch a specific record by its source ID.
 
@@ -358,7 +363,7 @@ class IngestionAgent(BaseAgent, ABC):
         self,
         query: str,
         max_results: int = 100,
-    ) -> List[IngestionRecord]:
+    ) -> list[IngestionRecord]:
         """Tool handler for fetching records."""
         records = []
         cursor = None
@@ -418,7 +423,7 @@ class IngestionAgent(BaseAgent, ABC):
     async def _extract_entities(
         self,
         record: IngestionRecord,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Extract biomedical entities from record text."""
         try:
             from app.nlp.pipeline import NLPPipeline
@@ -445,7 +450,7 @@ class IngestionAgent(BaseAgent, ABC):
     async def _extract_relations(
         self,
         record: IngestionRecord,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Extract relations between entities."""
         try:
             from app.nlp.relation_extractor import RelationExtractor
@@ -517,7 +522,9 @@ class IngestionAgent(BaseAgent, ABC):
                     "title": record.title,
                     "url": record.url,
                     "authors": record.authors,
-                    "publication_date": record.publication_date.isoformat() if record.publication_date else None,
+                    "publication_date": record.publication_date.isoformat()
+                    if record.publication_date
+                    else None,
                     "doi": record.doi,
                     "keywords": record.keywords,
                     "content_hash": record.content_hash,
@@ -533,7 +540,7 @@ class IngestionAgent(BaseAgent, ABC):
     ) -> None:
         """Index entities and relations to graph store."""
         try:
-            from app.knowledge.graph_store import get_graph_store, Entity, Relation
+            from app.knowledge.graph_store import Entity, Relation, get_graph_store
 
             store = get_graph_store()
             entities = record.metadata.get("entities", [])

@@ -6,10 +6,10 @@ Manage and interact with AI agents.
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -48,7 +48,7 @@ class AgentTaskCreate(BaseModel):
     project_id: UUID
     task_type: str = Field(..., description="Type of task to perform")
     query: str = Field(..., min_length=5, max_length=2000)
-    context: Dict[str, Any] = Field(default_factory=dict)
+    context: dict[str, Any] = Field(default_factory=dict)
     max_iterations: int = Field(default=10, ge=1, le=50)
     timeout_seconds: int = Field(default=120, ge=30, le=600)
 
@@ -59,9 +59,9 @@ class AgentStepLog(BaseModel):
     step_number: int
     agent_type: AgentType
     action: str
-    input_summary: Optional[str]
-    output_summary: Optional[str]
-    tool_calls: List[str] = Field(default_factory=list)
+    input_summary: str | None
+    output_summary: str | None
+    tool_calls: list[str] = Field(default_factory=list)
     duration_ms: int
     timestamp: datetime
 
@@ -77,18 +77,18 @@ class AgentTaskResponse(BaseModel):
     progress: float = Field(..., ge=0, le=1)
     current_step: int
     max_iterations: int
-    result: Optional[Dict[str, Any]]
-    error: Optional[str]
-    steps: List[AgentStepLog]
-    started_at: Optional[datetime]
-    completed_at: Optional[datetime]
+    result: dict[str, Any] | None
+    error: str | None
+    steps: list[AgentStepLog]
+    started_at: datetime | None
+    completed_at: datetime | None
     created_at: datetime
 
 
 class AgentTaskListResponse(BaseModel):
     """Schema for paginated agent task list."""
 
-    items: List[AgentTaskResponse]
+    items: list[AgentTaskResponse]
     total: int
     page: int
     page_size: int
@@ -100,7 +100,7 @@ class AgentCapabilities(BaseModel):
     agent_type: AgentType
     name: str
     description: str
-    available_tools: List[str]
+    available_tools: list[str]
     max_parallel: int
 
 
@@ -108,7 +108,7 @@ class SearchAgentRequest(BaseModel):
     """Request for search agent."""
 
     query: str = Field(..., min_length=3, max_length=500)
-    sources: List[str] = Field(
+    sources: list[str] = Field(
         default=["google", "pubmed"],
         description="Search sources to use",
     )
@@ -121,7 +121,7 @@ class SearchResult(BaseModel):
 
     title: str
     url: str
-    snippet: Optional[str]
+    snippet: str | None
     source: str
     relevance_score: float
 
@@ -130,8 +130,8 @@ class SearchAgentResponse(BaseModel):
     """Response from search agent."""
 
     query: str
-    results: List[SearchResult]
-    sources_searched: List[str]
+    results: list[SearchResult]
+    sources_searched: list[str]
     total_results: int
 
 
@@ -232,8 +232,8 @@ def _update_task_progress(task_id: UUID, progress: float, step: AgentStepLog) ->
 
 @router.get("/tasks", response_model=AgentTaskListResponse)
 async def list_agent_tasks(
-    project_id: Optional[UUID] = None,
-    status: Optional[AgentStatus] = None,
+    project_id: UUID | None = None,
+    status: AgentStatus | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -325,8 +325,8 @@ async def run_search_agent(
     )
 
 
-@router.get("/capabilities", response_model=List[AgentCapabilities])
-async def list_agent_capabilities() -> List[AgentCapabilities]:
+@router.get("/capabilities", response_model=list[AgentCapabilities])
+async def list_agent_capabilities() -> list[AgentCapabilities]:
     """List all available agent types and their capabilities."""
     return [
         AgentCapabilities(

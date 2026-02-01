@@ -6,13 +6,13 @@ Handles embedding generation, chunking, and index management.
 """
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Callable
-from uuid import UUID, uuid4
+from typing import Any
 
-from app.agents.ingestion.base import IngestionRecord, SourceType
+from app.agents.ingestion.base import IngestionRecord
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -49,14 +49,23 @@ class IndexingConfig:
     chunk_size: int = 512
     chunk_overlap: int = 50
     include_metadata: bool = True
-    metadata_fields: List[str] = field(default_factory=lambda: [
-        "source_type", "source_id", "title", "authors", "date",
-        "entities", "doi", "pmid", "url"
-    ])
+    metadata_fields: list[str] = field(
+        default_factory=lambda: [
+            "source_type",
+            "source_id",
+            "title",
+            "authors",
+            "date",
+            "entities",
+            "doi",
+            "pmid",
+            "url",
+        ]
+    )
     batch_size: int = 50
     max_retries: int = 3
     collection_name: str = "genup_documents"
-    namespace: Optional[str] = None
+    namespace: str | None = None
 
 
 @dataclass
@@ -68,9 +77,9 @@ class IndexingResult:
     chunks_created: int
     vectors_stored: int
     metadata_stored: bool
-    error: Optional[str] = None
+    error: str | None = None
     duration_ms: float = 0.0
-    embedding_model: Optional[str] = None
+    embedding_model: str | None = None
 
 
 @dataclass
@@ -80,7 +89,7 @@ class ChunkedDocument:
     chunk_id: str
     record_id: str
     content: str
-    metadata: Dict[str, Any]
+    metadata: dict[str, Any]
     chunk_index: int
     total_chunks: int
     start_char: int
@@ -101,7 +110,7 @@ class RAGConnector:
 
     def __init__(
         self,
-        config: Optional[IndexingConfig] = None,
+        config: IndexingConfig | None = None,
     ):
         """
         Initialize the RAG connector.
@@ -117,7 +126,7 @@ class RAGConnector:
         self._vector_store = None
 
         # Callbacks
-        self._on_indexed: List[Callable[[IndexingResult], None]] = []
+        self._on_indexed: list[Callable[[IndexingResult], None]] = []
 
         # Statistics
         self._stats = {
@@ -132,7 +141,7 @@ class RAGConnector:
     async def _get_chunker(self):
         """Lazy-load the document chunker."""
         if self._chunker is None:
-            from app.rag.chunker import DocumentChunker, ChunkingConfig
+            from app.rag.chunker import ChunkingConfig, DocumentChunker
 
             chunker_config = ChunkingConfig(
                 strategy=self.config.chunking_strategy.value,
@@ -146,7 +155,7 @@ class RAGConnector:
     async def _get_embedder(self):
         """Lazy-load the embedding pipeline."""
         if self._embedder is None:
-            from app.rag.embeddings import EmbeddingPipeline, EmbeddingConfig
+            from app.rag.embeddings import EmbeddingConfig, EmbeddingPipeline
 
             embed_config = EmbeddingConfig(
                 model_name=self.config.embedding_model.value,
@@ -185,7 +194,7 @@ class RAGConnector:
     async def index_record(
         self,
         record: IngestionRecord,
-        config: Optional[IndexingConfig] = None,
+        config: IndexingConfig | None = None,
     ) -> IndexingResult:
         """
         Index a single ingestion record.
@@ -321,10 +330,10 @@ class RAGConnector:
 
     async def index_batch(
         self,
-        records: List[IngestionRecord],
-        config: Optional[IndexingConfig] = None,
-        progress_callback: Optional[Callable[[int, int], None]] = None,
-    ) -> List[IndexingResult]:
+        records: list[IngestionRecord],
+        config: IndexingConfig | None = None,
+        progress_callback: Callable[[int, int], None] | None = None,
+    ) -> list[IndexingResult]:
         """
         Index a batch of records.
 
@@ -350,10 +359,10 @@ class RAGConnector:
 
     async def index_batch_parallel(
         self,
-        records: List[IngestionRecord],
-        config: Optional[IndexingConfig] = None,
+        records: list[IngestionRecord],
+        config: IndexingConfig | None = None,
         max_concurrent: int = 5,
-    ) -> List[IndexingResult]:
+    ) -> list[IndexingResult]:
         """
         Index a batch of records in parallel.
 
@@ -399,7 +408,7 @@ class RAGConnector:
 
         return "\n\n".join(parts)
 
-    def _build_metadata(self, record: IngestionRecord) -> Dict[str, Any]:
+    def _build_metadata(self, record: IngestionRecord) -> dict[str, Any]:
         """Build metadata dictionary for indexing."""
         metadata = {
             "source_type": record.source_type.value,
@@ -423,8 +432,7 @@ class RAGConnector:
         if record.entities:
             # Store first 50 entities
             metadata["entities"] = [
-                {"text": e.text, "type": e.entity_type}
-                for e in record.entities[:50]
+                {"text": e.text, "type": e.entity_type} for e in record.entities[:50]
             ]
 
         if record.keywords:
@@ -446,9 +454,7 @@ class RAGConnector:
             vector_store = await self._get_vector_store()
 
             # Delete all chunks for this record
-            await vector_store.delete_by_metadata(
-                filter_dict={"source_id": record_id}
-            )
+            await vector_store.delete_by_metadata(filter_dict={"source_id": record_id})
 
             self.logger.info("Record deleted from vector store", record_id=record_id)
             return True
@@ -464,7 +470,7 @@ class RAGConnector:
     async def update_record(
         self,
         record: IngestionRecord,
-        config: Optional[IndexingConfig] = None,
+        config: IndexingConfig | None = None,
     ) -> IndexingResult:
         """
         Update a record in the vector store.
@@ -488,8 +494,8 @@ class RAGConnector:
         self,
         query: str,
         top_k: int = 10,
-        filters: Optional[Dict[str, Any]] = None,
-    ) -> List[Dict[str, Any]]:
+        filters: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
         """
         Search the vector store.
 
@@ -516,15 +522,16 @@ class RAGConnector:
 
         return results
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get indexing statistics."""
         return {
             **self._stats,
             "last_indexed_at": self._stats["last_indexed_at"].isoformat()
-            if self._stats["last_indexed_at"] else None,
+            if self._stats["last_indexed_at"]
+            else None,
         }
 
-    async def health_check(self) -> Dict[str, Any]:
+    async def health_check(self) -> dict[str, Any]:
         """Check connector health."""
         health = {
             "status": "healthy",
@@ -551,10 +558,10 @@ class RAGConnector:
 
 
 # Global connector instance
-_rag_connector: Optional[RAGConnector] = None
+_rag_connector: RAGConnector | None = None
 
 
-def get_rag_connector(config: Optional[IndexingConfig] = None) -> RAGConnector:
+def get_rag_connector(config: IndexingConfig | None = None) -> RAGConnector:
     """Get the global RAG connector instance."""
     global _rag_connector
     if _rag_connector is None:
@@ -563,10 +570,10 @@ def get_rag_connector(config: Optional[IndexingConfig] = None) -> RAGConnector:
 
 
 async def index_ingestion_records(
-    records: List[IngestionRecord],
+    records: list[IngestionRecord],
     parallel: bool = True,
     max_concurrent: int = 5,
-) -> List[IndexingResult]:
+) -> list[IndexingResult]:
     """
     Convenience function to index ingestion records.
 

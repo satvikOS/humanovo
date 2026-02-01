@@ -7,10 +7,10 @@ hybrid search, and context retrieval.
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,10 +24,10 @@ router = APIRouter()
 class RetrievalMode(str, Enum):
     """Retrieval mode for RAG queries."""
 
-    VECTOR = "vector"           # Semantic similarity only
-    KEYWORD = "keyword"         # Keyword/BM25 only
-    GRAPH = "graph"             # Knowledge graph traversal only
-    HYBRID = "hybrid"           # Combination of vector + keyword
+    VECTOR = "vector"  # Semantic similarity only
+    KEYWORD = "keyword"  # Keyword/BM25 only
+    GRAPH = "graph"  # Knowledge graph traversal only
+    HYBRID = "hybrid"  # Combination of vector + keyword
     HYBRID_GRAPH = "hybrid_graph"  # All three combined
 
 
@@ -43,15 +43,15 @@ class RerankerType(str, Enum):
 class SourceFilter(BaseModel):
     """Filters for source documents."""
 
-    source_types: Optional[List[str]] = Field(
+    source_types: list[str] | None = Field(
         default=None,
         description="Filter by source type (pubmed, clinical_trials, etc.)",
     )
-    date_from: Optional[datetime] = None
-    date_to: Optional[datetime] = None
-    authors: Optional[List[str]] = None
-    keywords: Optional[List[str]] = None
-    min_confidence: Optional[float] = Field(default=None, ge=0, le=1)
+    date_from: datetime | None = None
+    date_to: datetime | None = None
+    authors: list[str] | None = None
+    keywords: list[str] | None = None
+    min_confidence: float | None = Field(default=None, ge=0, le=1)
 
 
 class RAGQueryRequest(BaseModel):
@@ -61,7 +61,7 @@ class RAGQueryRequest(BaseModel):
     mode: RetrievalMode = Field(default=RetrievalMode.HYBRID)
     top_k: int = Field(default=10, ge=1, le=100)
     reranker: RerankerType = Field(default=RerankerType.CROSS_ENCODER)
-    filters: Optional[SourceFilter] = None
+    filters: SourceFilter | None = None
     include_entities: bool = Field(default=True)
     include_relations: bool = Field(default=False)
     include_context: bool = Field(default=True)
@@ -77,12 +77,12 @@ class RetrievedChunk(BaseModel):
     content: str
     relevance_score: float
     source_type: str
-    title: Optional[str]
-    url: Optional[str]
-    date: Optional[datetime]
+    title: str | None
+    url: str | None
+    date: datetime | None
     chunk_index: int
     total_chunks: int
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class RetrievedEntity(BaseModel):
@@ -93,7 +93,7 @@ class RetrievedEntity(BaseModel):
     entity_type: str
     confidence: float
     occurrences: int
-    source_records: List[str]
+    source_records: list[str]
 
 
 class RetrievedRelation(BaseModel):
@@ -112,12 +112,12 @@ class RAGQueryResponse(BaseModel):
     query_id: UUID
     query: str
     mode: RetrievalMode
-    chunks: List[RetrievedChunk]
-    entities: Optional[List[RetrievedEntity]] = None
-    relations: Optional[List[RetrievedRelation]] = None
+    chunks: list[RetrievedChunk]
+    entities: list[RetrievedEntity] | None = None
+    relations: list[RetrievedRelation] | None = None
     total_results: int
     processing_time_ms: float
-    reranker_used: Optional[str]
+    reranker_used: str | None
 
 
 class ContextRequest(BaseModel):
@@ -134,7 +134,7 @@ class ContextResponse(BaseModel):
     """Response with prepared LLM context."""
 
     context: str
-    sources: List[Dict[str, Any]]
+    sources: list[dict[str, Any]]
     token_count: int
     truncated: bool
     query: str
@@ -145,7 +145,7 @@ class SimilarDocumentsRequest(BaseModel):
 
     document_id: str = Field(..., description="ID of the source document")
     top_k: int = Field(default=5, ge=1, le=50)
-    source_types: Optional[List[str]] = None
+    source_types: list[str] | None = None
     exclude_same_source: bool = True
 
 
@@ -153,24 +153,24 @@ class SimilarDocumentsResponse(BaseModel):
     """Response with similar documents."""
 
     source_document_id: str
-    similar_documents: List[Dict[str, Any]]
+    similar_documents: list[dict[str, Any]]
 
 
 class GraphContextRequest(BaseModel):
     """Request for graph-based context."""
 
-    entity_ids: List[str] = Field(..., min_length=1, max_length=10)
+    entity_ids: list[str] = Field(..., min_length=1, max_length=10)
     depth: int = Field(default=2, ge=1, le=5)
     include_properties: bool = True
-    relation_types: Optional[List[str]] = None
+    relation_types: list[str] | None = None
 
 
 class GraphContextResponse(BaseModel):
     """Response with graph context."""
 
-    entities: List[Dict[str, Any]]
-    relations: List[Dict[str, Any]]
-    paths: List[List[str]]
+    entities: list[dict[str, Any]]
+    relations: list[dict[str, Any]]
+    paths: list[list[str]]
     total_entities: int
     total_relations: int
 
@@ -196,8 +196,8 @@ async def rag_query(
     query_id = uuid4()
 
     try:
-        from app.rag.service import RAGService
         from app.rag.retriever import RetrievalConfig
+        from app.rag.service import RAGService
 
         # Build retrieval config
         config = RetrievalConfig(
@@ -231,8 +231,7 @@ async def rag_query(
                 source_type=r.metadata.get("source_type", "unknown"),
                 title=r.metadata.get("title"),
                 url=r.metadata.get("url"),
-                date=datetime.fromisoformat(r.metadata["date"])
-                if r.metadata.get("date") else None,
+                date=datetime.fromisoformat(r.metadata["date"]) if r.metadata.get("date") else None,
                 chunk_index=r.metadata.get("chunk_index", 0),
                 total_chunks=r.metadata.get("total_chunks", 1),
                 metadata=r.metadata,
@@ -442,12 +441,12 @@ async def get_graph_context(
 @router.get("/stats")
 async def get_rag_stats(
     db: AsyncSession = Depends(get_db),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Get RAG system statistics."""
     try:
-        from app.rag.service import RAGService
-        from app.integration.rag_connector import get_rag_connector
         from app.integration.graph_connector import get_graph_connector
+        from app.integration.rag_connector import get_rag_connector
+        from app.rag.service import RAGService
 
         rag_service = RAGService()
         rag_connector = get_rag_connector()
@@ -465,7 +464,7 @@ async def get_rag_stats(
 
 
 @router.get("/health")
-async def rag_health_check() -> Dict[str, Any]:
+async def rag_health_check() -> dict[str, Any]:
     """Check RAG system health."""
     health = {
         "status": "healthy",
@@ -475,6 +474,7 @@ async def rag_health_check() -> Dict[str, Any]:
 
     try:
         from app.integration.rag_connector import get_rag_connector
+
         rag_health = await get_rag_connector().health_check()
         health["components"]["rag_connector"] = rag_health
         if rag_health["status"] != "healthy":
@@ -485,6 +485,7 @@ async def rag_health_check() -> Dict[str, Any]:
 
     try:
         from app.integration.graph_connector import get_graph_connector
+
         graph_health = await get_graph_connector().health_check()
         health["components"]["graph_connector"] = graph_health
         if graph_health["status"] != "healthy":
@@ -500,7 +501,7 @@ async def rag_health_check() -> Dict[str, Any]:
 async def clear_rag_cache(
     cache_type: str = Query(default="all", pattern="^(all|embeddings|entities|results)$"),
     db: AsyncSession = Depends(get_db),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Clear RAG caches."""
     logger.info("Cache clear requested", cache_type=cache_type)
 
@@ -509,17 +510,20 @@ async def clear_rag_cache(
 
         if cache_type in ["all", "embeddings"]:
             from app.rag.embeddings import EmbeddingPipeline
+
             embedder = EmbeddingPipeline()
             embedder.clear_cache()
             cleared["embeddings"] = True
 
         if cache_type in ["all", "entities"]:
             from app.integration.graph_connector import get_graph_connector
+
             get_graph_connector().clear_cache()
             cleared["entities"] = True
 
         if cache_type in ["all", "results"]:
             from app.rag.service import RAGService
+
             rag_service = RAGService()
             await rag_service.clear_cache()
             cleared["results"] = True

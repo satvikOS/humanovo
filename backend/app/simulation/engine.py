@@ -6,11 +6,12 @@ Core simulation engine supporting various biomedical simulation types.
 
 import asyncio
 import time
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
 
 import numpy as np
-from scipy import stats
 
+from app.core.config import settings
+from app.core.logging import LoggerMixin, get_logger
 from app.simulation.models import (
     DistributionConfig,
     DistributionType,
@@ -18,8 +19,6 @@ from app.simulation.models import (
     SimulationConfig,
     SimulationType,
 )
-from app.core.config import settings
-from app.core.logging import get_logger, LoggerMixin
 
 logger = get_logger(__name__)
 
@@ -40,10 +39,10 @@ class MonteCarloEngine(LoggerMixin):
     def __init__(
         self,
         simulation_type: SimulationType = SimulationType.CLINICAL_OUTCOME,
-        parameters: List[DistributionConfig] = None,
+        parameters: list[DistributionConfig] = None,
         iterations: int = 1000,
-        seed: Optional[int] = None,
-        custom_model: Optional[str] = None,
+        seed: int | None = None,
+        custom_model: str | None = None,
     ):
         self.simulation_type = simulation_type
         self.parameters = parameters or []
@@ -120,7 +119,7 @@ class MonteCarloEngine(LoggerMixin):
         else:
             raise ValueError(f"Unknown distribution: {config.distribution}")
 
-    def _sample_parameters(self) -> Dict[str, float]:
+    def _sample_parameters(self) -> dict[str, float]:
         """Sample all parameters once."""
         return {
             param.name: float(self._sample_distribution(param, size=1)[0])
@@ -129,8 +128,8 @@ class MonteCarloEngine(LoggerMixin):
 
     async def run(
         self,
-        progress_callback: Optional[Callable[[int], None]] = None,
-    ) -> List[OutcomeMetric]:
+        progress_callback: Callable[[int], None] | None = None,
+    ) -> list[OutcomeMetric]:
         """Run the Monte Carlo simulation.
 
         Args:
@@ -151,15 +150,13 @@ class MonteCarloEngine(LoggerMixin):
         model_func = self._get_model_function()
 
         # Run iterations
-        results: Dict[str, List[float]] = {}
+        results: dict[str, list[float]] = {}
         batch_size = min(100, self.iterations)
 
         for i in range(0, self.iterations, batch_size):
             # Run batch
             batch_end = min(i + batch_size, self.iterations)
-            batch_results = await self._run_batch(
-                model_func, i, batch_end
-            )
+            batch_results = await self._run_batch(model_func, i, batch_end)
 
             # Aggregate results
             for key, values in batch_results.items():
@@ -176,10 +173,7 @@ class MonteCarloEngine(LoggerMixin):
                 await asyncio.sleep(0)
 
         # Compute outcome metrics
-        outcomes = [
-            OutcomeMetric.from_samples(name, samples)
-            for name, samples in results.items()
-        ]
+        outcomes = [OutcomeMetric.from_samples(name, samples) for name, samples in results.items()]
 
         elapsed = time.time() - start_time
         self.logger.info(
@@ -196,9 +190,9 @@ class MonteCarloEngine(LoggerMixin):
         model_func: Callable,
         start: int,
         end: int,
-    ) -> Dict[str, List[float]]:
+    ) -> dict[str, list[float]]:
         """Run a batch of iterations."""
-        results: Dict[str, List[float]] = {}
+        results: dict[str, list[float]] = {}
 
         for _ in range(start, end):
             # Sample parameters
@@ -234,7 +228,7 @@ class MonteCarloEngine(LoggerMixin):
 
         return models.get(self.simulation_type, self._clinical_outcome_model)
 
-    def _clinical_outcome_model(self, params: Dict[str, float]) -> Dict[str, float]:
+    def _clinical_outcome_model(self, params: dict[str, float]) -> dict[str, float]:
         """Model for clinical outcome prediction.
 
         Simulates treatment outcomes based on efficacy and patient variability.
@@ -263,7 +257,7 @@ class MonteCarloEngine(LoggerMixin):
             "risk_reduction": baseline_risk - treatment_risk,
         }
 
-    def _epidemiological_model(self, params: Dict[str, float]) -> Dict[str, float]:
+    def _epidemiological_model(self, params: dict[str, float]) -> dict[str, float]:
         """Simple SIR epidemiological model.
 
         Simulates disease spread in a population.
@@ -303,7 +297,7 @@ class MonteCarloEngine(LoggerMixin):
             "r0": beta / gamma,
         }
 
-    def _dose_response_model(self, params: Dict[str, float]) -> Dict[str, float]:
+    def _dose_response_model(self, params: dict[str, float]) -> dict[str, float]:
         """Hill equation dose-response model.
 
         Simulates drug effect as a function of dose.
@@ -320,7 +314,7 @@ class MonteCarloEngine(LoggerMixin):
         hill = params.get("hill", 1.0)
 
         # Hill equation
-        effect = emax * (dose ** hill) / (ec50 ** hill + dose ** hill)
+        effect = emax * (dose**hill) / (ec50**hill + dose**hill)
 
         # Add measurement noise
         noise = self._rng.normal(0, 0.05)
@@ -332,7 +326,7 @@ class MonteCarloEngine(LoggerMixin):
             "occupancy": dose / (ec50 + dose),
         }
 
-    def _pathway_dynamics_model(self, params: Dict[str, float]) -> Dict[str, float]:
+    def _pathway_dynamics_model(self, params: dict[str, float]) -> dict[str, float]:
         """Simplified pathway dynamics model.
 
         Simulates signaling pathway activation levels.
@@ -365,7 +359,7 @@ class MonteCarloEngine(LoggerMixin):
             "fold_change": observed / max(0.01, input_signal),
         }
 
-    def _drug_interaction_model(self, params: Dict[str, float]) -> Dict[str, float]:
+    def _drug_interaction_model(self, params: dict[str, float]) -> dict[str, float]:
         """Drug-drug interaction model.
 
         Simulates combined effect of two drugs.
@@ -405,7 +399,7 @@ class MonteCarloEngine(LoggerMixin):
             "interaction_index": observed / max(0.01, additive_effect),
         }
 
-    def _survival_analysis_model(self, params: Dict[str, float]) -> Dict[str, float]:
+    def _survival_analysis_model(self, params: dict[str, float]) -> dict[str, float]:
         """Survival time model using Weibull distribution.
 
         Simulates time-to-event outcomes.
@@ -437,7 +431,7 @@ class MonteCarloEngine(LoggerMixin):
             "event": 1 - censored,
         }
 
-    def _custom_model(self, params: Dict[str, float]) -> Dict[str, float]:
+    def _custom_model(self, params: dict[str, float]) -> dict[str, float]:
         """Execute custom user-defined model.
 
         Warning: Executes arbitrary code - use with caution in production.
@@ -463,8 +457,8 @@ class MonteCarloEngine(LoggerMixin):
 
 async def run_simulation(
     config: SimulationConfig,
-    progress_callback: Optional[Callable[[int], None]] = None,
-) -> List[OutcomeMetric]:
+    progress_callback: Callable[[int], None] | None = None,
+) -> list[OutcomeMetric]:
     """Convenience function to run a simulation from config."""
     engine = MonteCarloEngine(
         simulation_type=config.simulation_type,

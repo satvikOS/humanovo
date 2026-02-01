@@ -5,8 +5,8 @@ This module initializes the FastAPI application with all routes,
 middleware, and event handlers for the GenUp platform.
 """
 
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 
 from app.api import router as api_router
 from app.core.config import settings
-from app.core.logging import setup_logging, get_logger
+from app.core.logging import get_logger, setup_logging
 
 logger = get_logger(__name__)
 
@@ -27,11 +27,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Initialize database connections
     from app.core.database import init_db
+
     await init_db()
 
     # Initialize knowledge stores
-    from app.knowledge.vector_store import init_vector_store
     from app.knowledge.graph_store import init_graph_store
+    from app.knowledge.vector_store import init_vector_store
+
     await init_vector_store()
     await init_graph_store()
 
@@ -44,6 +46,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Cleanup connections
     from app.core.database import close_db
+
     await close_db()
 
     logger.info("GenUp Backend shutdown complete")

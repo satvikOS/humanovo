@@ -10,18 +10,19 @@ Handles incremental updates to literature data:
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Set
+from datetime import datetime
 from enum import Enum
+from typing import Any
 
-from .sources import LiteratureRecord, LiteratureSource, SourceType
-from .snapshots import SnapshotManager, DataSnapshot
+from .snapshots import SnapshotManager
+from .sources import LiteratureRecord, LiteratureSource
 
 logger = logging.getLogger(__name__)
 
 
 class UpdateType(str, Enum):
     """Types of updates."""
+
     FULL = "full"  # Complete refresh
     INCREMENTAL = "incremental"  # Only new/changed
     DELTA = "delta"  # Minimal changes
@@ -29,6 +30,7 @@ class UpdateType(str, Enum):
 
 class ChangeType(str, Enum):
     """Types of changes."""
+
     ADDED = "added"
     MODIFIED = "modified"
     REMOVED = "removed"
@@ -38,41 +40,43 @@ class ChangeType(str, Enum):
 @dataclass
 class RecordChange:
     """A change to a record."""
+
     record_id: str
     change_type: ChangeType
-    old_record: Optional[LiteratureRecord] = None
-    new_record: Optional[LiteratureRecord] = None
-    changed_fields: List[str] = field(default_factory=list)
+    old_record: LiteratureRecord | None = None
+    new_record: LiteratureRecord | None = None
+    changed_fields: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "record_id": self.record_id,
             "change_type": self.change_type.value,
             "old_record": self.old_record.to_dict() if self.old_record else None,
             "new_record": self.new_record.to_dict() if self.new_record else None,
-            "changed_fields": self.changed_fields
+            "changed_fields": self.changed_fields,
         }
 
 
 @dataclass
 class UpdateResult:
     """Result of an update operation."""
+
     update_id: str
     update_type: UpdateType
     started_at: str
-    completed_at: Optional[str] = None
+    completed_at: str | None = None
     success: bool = False
     total_records: int = 0
     added_count: int = 0
     modified_count: int = 0
     removed_count: int = 0
     unchanged_count: int = 0
-    errors: List[str] = field(default_factory=list)
-    changes: List[RecordChange] = field(default_factory=list)
-    new_snapshot_id: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    errors: list[str] = field(default_factory=list)
+    changes: list[RecordChange] = field(default_factory=list)
+    new_snapshot_id: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "update_id": self.update_id,
             "update_type": self.update_type.value,
@@ -87,7 +91,7 @@ class UpdateResult:
             "errors": self.errors,
             "changes": [c.to_dict() for c in self.changes],
             "new_snapshot_id": self.new_snapshot_id,
-            "metadata": self.metadata
+            "metadata": self.metadata,
         }
 
 
@@ -104,9 +108,9 @@ class UpdateManager:
 
     def __init__(
         self,
-        snapshot_manager: Optional[SnapshotManager] = None,
+        snapshot_manager: SnapshotManager | None = None,
         auto_snapshot: bool = True,
-        track_history: bool = True
+        track_history: bool = True,
     ):
         """
         Initialize update manager.
@@ -121,9 +125,9 @@ class UpdateManager:
         self.track_history = track_history
 
         # Update tracking
-        self._update_history: List[UpdateResult] = []
-        self._last_update: Optional[datetime] = None
-        self._current_records: Dict[str, LiteratureRecord] = {}
+        self._update_history: list[UpdateResult] = []
+        self._last_update: datetime | None = None
+        self._current_records: dict[str, LiteratureRecord] = {}
 
         logger.info("UpdateManager initialized")
 
@@ -133,7 +137,7 @@ class UpdateManager:
         query: str,
         update_type: UpdateType = UpdateType.INCREMENTAL,
         max_records: int = 1000,
-        date_from: Optional[datetime] = None
+        date_from: datetime | None = None,
     ) -> UpdateResult:
         """
         Run an update from a source.
@@ -149,12 +153,11 @@ class UpdateManager:
             UpdateResult
         """
         import hashlib
+
         update_id = f"update_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{hashlib.md5(query.encode()).hexdigest()[:6]}"
 
         result = UpdateResult(
-            update_id=update_id,
-            update_type=update_type,
-            started_at=datetime.utcnow().isoformat()
+            update_id=update_id, update_type=update_type, started_at=datetime.utcnow().isoformat()
         )
 
         try:
@@ -165,7 +168,7 @@ class UpdateManager:
             new_records = await source.search(
                 query=query,
                 max_results=max_records,
-                date_from=date_from.date() if date_from else None
+                date_from=date_from.date() if date_from else None,
             )
 
             result.total_records = len(new_records)
@@ -197,8 +200,8 @@ class UpdateManager:
                     query_info={
                         "query": query,
                         "source": source.source_type.value,
-                        "update_type": update_type.value
-                    }
+                        "update_type": update_type.value,
+                    },
                 )
                 result.new_snapshot_id = snapshot.metadata.snapshot_id
 
@@ -218,10 +221,8 @@ class UpdateManager:
         return result
 
     def _calculate_changes(
-        self,
-        new_records: List[LiteratureRecord],
-        update_type: UpdateType
-    ) -> List[RecordChange]:
+        self, new_records: list[LiteratureRecord], update_type: UpdateType
+    ) -> list[RecordChange]:
         """Calculate changes between current and new records."""
         changes = []
         new_ids = {r.record_id for r in new_records}
@@ -230,20 +231,22 @@ class UpdateManager:
 
         # Added records
         for record_id in new_ids - current_ids:
-            changes.append(RecordChange(
-                record_id=record_id,
-                change_type=ChangeType.ADDED,
-                new_record=new_map[record_id]
-            ))
+            changes.append(
+                RecordChange(
+                    record_id=record_id, change_type=ChangeType.ADDED, new_record=new_map[record_id]
+                )
+            )
 
         # Removed records (only for full updates)
         if update_type == UpdateType.FULL:
             for record_id in current_ids - new_ids:
-                changes.append(RecordChange(
-                    record_id=record_id,
-                    change_type=ChangeType.REMOVED,
-                    old_record=self._current_records[record_id]
-                ))
+                changes.append(
+                    RecordChange(
+                        record_id=record_id,
+                        change_type=ChangeType.REMOVED,
+                        old_record=self._current_records[record_id],
+                    )
+                )
 
         # Modified records
         for record_id in new_ids & current_ids:
@@ -252,37 +255,32 @@ class UpdateManager:
 
             if old_record.get_content_hash() != new_record.get_content_hash():
                 changed_fields = self._find_changed_fields(old_record, new_record)
-                changes.append(RecordChange(
-                    record_id=record_id,
-                    change_type=ChangeType.MODIFIED,
-                    old_record=old_record,
-                    new_record=new_record,
-                    changed_fields=changed_fields
-                ))
+                changes.append(
+                    RecordChange(
+                        record_id=record_id,
+                        change_type=ChangeType.MODIFIED,
+                        old_record=old_record,
+                        new_record=new_record,
+                        changed_fields=changed_fields,
+                    )
+                )
             else:
-                changes.append(RecordChange(
-                    record_id=record_id,
-                    change_type=ChangeType.UNCHANGED
-                ))
+                changes.append(RecordChange(record_id=record_id, change_type=ChangeType.UNCHANGED))
 
         return changes
 
-    def _find_changed_fields(
-        self,
-        old: LiteratureRecord,
-        new: LiteratureRecord
-    ) -> List[str]:
+    def _find_changed_fields(self, old: LiteratureRecord, new: LiteratureRecord) -> list[str]:
         """Find which fields changed between records."""
         changed = []
-        fields = ['title', 'abstract', 'authors', 'keywords', 'citations']
+        fields = ["title", "abstract", "authors", "keywords", "citations"]
 
-        for field in fields:
-            if getattr(old, field, None) != getattr(new, field, None):
-                changed.append(field)
+        for field_name in fields:
+            if getattr(old, field_name, None) != getattr(new, field_name, None):
+                changed.append(field_name)
 
         return changed
 
-    def _apply_changes(self, changes: List[RecordChange]):
+    def _apply_changes(self, changes: list[RecordChange]):
         """Apply changes to current records."""
         for change in changes:
             if change.change_type == ChangeType.ADDED:
@@ -294,21 +292,15 @@ class UpdateManager:
             elif change.change_type == ChangeType.REMOVED:
                 self._current_records.pop(change.record_id, None)
 
-    def get_current_records(self) -> List[LiteratureRecord]:
+    def get_current_records(self) -> list[LiteratureRecord]:
         """Get all current records."""
         return list(self._current_records.values())
 
-    def get_update_history(
-        self,
-        limit: int = 10
-    ) -> List[UpdateResult]:
+    def get_update_history(self, limit: int = 10) -> list[UpdateResult]:
         """Get recent update history."""
         return self._update_history[-limit:]
 
-    def restore_from_snapshot(
-        self,
-        snapshot_id: str
-    ) -> bool:
+    def restore_from_snapshot(self, snapshot_id: str) -> bool:
         """
         Restore state from a snapshot.
 
@@ -322,18 +314,16 @@ class UpdateManager:
         if not snapshot:
             return False
 
-        self._current_records = {
-            r.record_id: r for r in snapshot.records
-        }
+        self._current_records = {r.record_id: r for r in snapshot.records}
 
         logger.info(f"Restored {len(self._current_records)} records from {snapshot_id}")
         return True
 
-    def get_statistics(self) -> Dict[str, Any]:
+    def get_statistics(self) -> dict[str, Any]:
         """Get manager statistics."""
         return {
             "current_record_count": len(self._current_records),
             "last_update": self._last_update.isoformat() if self._last_update else None,
             "update_count": len(self._update_history),
-            "auto_snapshot": self.auto_snapshot
+            "auto_snapshot": self.auto_snapshot,
         }

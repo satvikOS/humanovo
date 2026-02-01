@@ -11,15 +11,15 @@ Resolves ambiguous entity mentions using:
 
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any, Tuple
 from enum import Enum
-import re
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 class DisambiguationMethod(str, Enum):
     """Methods used for disambiguation."""
+
     CONTEXT = "context"
     TYPE_CONSTRAINT = "type_constraint"
     COOCCURRENCE = "cooccurrence"
@@ -32,36 +32,38 @@ class DisambiguationMethod(str, Enum):
 @dataclass
 class DisambiguationCandidate:
     """A candidate entity for disambiguation."""
+
     entity_id: str
     entity_name: str
     entity_type: str
     score: float = 0.0
-    evidence: List[str] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    evidence: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "entity_id": self.entity_id,
             "entity_name": self.entity_name,
             "entity_type": self.entity_type,
             "score": self.score,
             "evidence": self.evidence,
-            "metadata": self.metadata
+            "metadata": self.metadata,
         }
 
 
 @dataclass
 class DisambiguationResult:
     """Result of entity disambiguation."""
-    mention: str
-    candidates: List[DisambiguationCandidate] = field(default_factory=list)
-    selected: Optional[DisambiguationCandidate] = None
-    confidence: float = 0.0
-    method_used: Optional[DisambiguationMethod] = None
-    ambiguous: bool = True
-    metadata: Dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    mention: str
+    candidates: list[DisambiguationCandidate] = field(default_factory=list)
+    selected: DisambiguationCandidate | None = None
+    confidence: float = 0.0
+    method_used: DisambiguationMethod | None = None
+    ambiguous: bool = True
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
         return {
             "mention": self.mention,
             "candidates": [c.to_dict() for c in self.candidates],
@@ -69,7 +71,7 @@ class DisambiguationResult:
             "confidence": self.confidence,
             "method_used": self.method_used.value if self.method_used else None,
             "ambiguous": self.ambiguous,
-            "metadata": self.metadata
+            "metadata": self.metadata,
         }
 
 
@@ -92,19 +94,19 @@ class Disambiguator:
                 entity_id="HGNC:3430",
                 entity_name="ERBB2",
                 entity_type="gene",
-                metadata={"description": "erb-b2 receptor tyrosine kinase 2"}
+                metadata={"description": "erb-b2 receptor tyrosine kinase 2"},
             ),
             DisambiguationCandidate(
                 entity_id="MESH:D018931",
                 entity_name="HER2 Receptor",
                 entity_type="protein",
-                metadata={"description": "HER2 protein receptor"}
+                metadata={"description": "HER2 protein receptor"},
             ),
             DisambiguationCandidate(
                 entity_id="biomarker:HER2",
                 entity_name="HER2 Status",
                 entity_type="biomarker",
-                metadata={"description": "HER2 expression status"}
+                metadata={"description": "HER2 expression status"},
             ),
         ],
         "egfr": [
@@ -112,13 +114,13 @@ class Disambiguator:
                 entity_id="HGNC:3236",
                 entity_name="EGFR",
                 entity_type="gene",
-                metadata={"description": "epidermal growth factor receptor gene"}
+                metadata={"description": "epidermal growth factor receptor gene"},
             ),
             DisambiguationCandidate(
                 entity_id="UNIPROT:P00533",
                 entity_name="EGFR Protein",
                 entity_type="protein",
-                metadata={"description": "EGFR protein"}
+                metadata={"description": "EGFR protein"},
             ),
         ],
         "pd-1": [
@@ -126,13 +128,13 @@ class Disambiguator:
                 entity_id="HGNC:8760",
                 entity_name="PDCD1",
                 entity_type="gene",
-                metadata={"description": "programmed cell death 1 gene"}
+                metadata={"description": "programmed cell death 1 gene"},
             ),
             DisambiguationCandidate(
                 entity_id="UNIPROT:Q15116",
                 entity_name="PD-1 Protein",
                 entity_type="protein",
-                metadata={"description": "PD-1 immune checkpoint protein"}
+                metadata={"description": "PD-1 immune checkpoint protein"},
             ),
         ],
         "pd-l1": [
@@ -140,13 +142,13 @@ class Disambiguator:
                 entity_id="HGNC:17635",
                 entity_name="CD274",
                 entity_type="gene",
-                metadata={"description": "CD274 gene encoding PD-L1"}
+                metadata={"description": "CD274 gene encoding PD-L1"},
             ),
             DisambiguationCandidate(
                 entity_id="biomarker:PDL1",
                 entity_name="PD-L1 Expression",
                 entity_type="biomarker",
-                metadata={"description": "PD-L1 expression biomarker"}
+                metadata={"description": "PD-L1 expression biomarker"},
             ),
         ],
         "brca": [
@@ -154,13 +156,13 @@ class Disambiguator:
                 entity_id="HGNC:1100",
                 entity_name="BRCA1",
                 entity_type="gene",
-                metadata={"description": "BRCA1 DNA repair associated"}
+                metadata={"description": "BRCA1 DNA repair associated"},
             ),
             DisambiguationCandidate(
                 entity_id="HGNC:1101",
                 entity_name="BRCA2",
                 entity_type="gene",
-                metadata={"description": "BRCA2 DNA repair associated"}
+                metadata={"description": "BRCA2 DNA repair associated"},
             ),
         ],
         "er": [
@@ -168,19 +170,19 @@ class Disambiguator:
                 entity_id="HGNC:3467",
                 entity_name="ESR1",
                 entity_type="gene",
-                metadata={"description": "estrogen receptor 1 gene"}
+                metadata={"description": "estrogen receptor 1 gene"},
             ),
             DisambiguationCandidate(
                 entity_id="biomarker:ER",
                 entity_name="Estrogen Receptor Status",
                 entity_type="biomarker",
-                metadata={"description": "ER expression status"}
+                metadata={"description": "ER expression status"},
             ),
             DisambiguationCandidate(
                 entity_id="GO:0005783",
                 entity_name="Endoplasmic Reticulum",
                 entity_type="cellular_component",
-                metadata={"description": "endoplasmic reticulum organelle"}
+                metadata={"description": "endoplasmic reticulum organelle"},
             ),
         ],
         "pr": [
@@ -188,19 +190,19 @@ class Disambiguator:
                 entity_id="HGNC:8910",
                 entity_name="PGR",
                 entity_type="gene",
-                metadata={"description": "progesterone receptor gene"}
+                metadata={"description": "progesterone receptor gene"},
             ),
             DisambiguationCandidate(
                 entity_id="biomarker:PR",
                 entity_name="Progesterone Receptor Status",
                 entity_type="biomarker",
-                metadata={"description": "PR expression status"}
+                metadata={"description": "PR expression status"},
             ),
             DisambiguationCandidate(
                 entity_id="clinical:PR",
                 entity_name="Partial Response",
                 entity_type="clinical_outcome",
-                metadata={"description": "partial response to treatment"}
+                metadata={"description": "partial response to treatment"},
             ),
         ],
         "met": [
@@ -208,13 +210,13 @@ class Disambiguator:
                 entity_id="HGNC:7029",
                 entity_name="MET",
                 entity_type="gene",
-                metadata={"description": "MET proto-oncogene"}
+                metadata={"description": "MET proto-oncogene"},
             ),
             DisambiguationCandidate(
                 entity_id="CHEBI:16044",
                 entity_name="Methionine",
                 entity_type="amino_acid",
-                metadata={"description": "amino acid methionine (Met)"}
+                metadata={"description": "amino acid methionine (Met)"},
             ),
         ],
     }
@@ -222,57 +224,110 @@ class Disambiguator:
     # Context keywords for disambiguation
     CONTEXT_KEYWORDS = {
         "gene": [
-            "gene", "mutation", "expression", "amplification", "deletion",
-            "variant", "polymorphism", "allele", "genotype", "sequencing",
-            "transcript", "mRNA", "promoter", "exon", "intron"
+            "gene",
+            "mutation",
+            "expression",
+            "amplification",
+            "deletion",
+            "variant",
+            "polymorphism",
+            "allele",
+            "genotype",
+            "sequencing",
+            "transcript",
+            "mRNA",
+            "promoter",
+            "exon",
+            "intron",
         ],
         "protein": [
-            "protein", "receptor", "kinase", "enzyme", "phosphorylation",
-            "binding", "activation", "inhibition", "structure", "domain",
-            "antibody", "immunoblot", "western blot"
+            "protein",
+            "receptor",
+            "kinase",
+            "enzyme",
+            "phosphorylation",
+            "binding",
+            "activation",
+            "inhibition",
+            "structure",
+            "domain",
+            "antibody",
+            "immunoblot",
+            "western blot",
         ],
         "drug": [
-            "drug", "treatment", "therapy", "dose", "dosage", "mg",
-            "administered", "efficacy", "response", "resistance",
-            "approved", "clinical trial", "phase"
+            "drug",
+            "treatment",
+            "therapy",
+            "dose",
+            "dosage",
+            "mg",
+            "administered",
+            "efficacy",
+            "response",
+            "resistance",
+            "approved",
+            "clinical trial",
+            "phase",
         ],
         "disease": [
-            "disease", "cancer", "tumor", "carcinoma", "patient",
-            "diagnosis", "prognosis", "survival", "metastatic",
-            "stage", "grade"
+            "disease",
+            "cancer",
+            "tumor",
+            "carcinoma",
+            "patient",
+            "diagnosis",
+            "prognosis",
+            "survival",
+            "metastatic",
+            "stage",
+            "grade",
         ],
         "biomarker": [
-            "biomarker", "marker", "expression", "status", "positive",
-            "negative", "level", "IHC", "FISH", "test", "assay",
-            "predictive", "prognostic", "diagnostic"
+            "biomarker",
+            "marker",
+            "expression",
+            "status",
+            "positive",
+            "negative",
+            "level",
+            "IHC",
+            "FISH",
+            "test",
+            "assay",
+            "predictive",
+            "prognostic",
+            "diagnostic",
         ],
         "pathway": [
-            "pathway", "signaling", "cascade", "activation", "downstream",
-            "upstream", "network", "regulation"
+            "pathway",
+            "signaling",
+            "cascade",
+            "activation",
+            "downstream",
+            "upstream",
+            "network",
+            "regulation",
         ],
         "clinical_outcome": [
-            "response", "outcome", "survival", "remission", "progression",
-            "RECIST", "criteria"
+            "response",
+            "outcome",
+            "survival",
+            "remission",
+            "progression",
+            "RECIST",
+            "criteria",
         ],
     }
 
     # Domain-specific disambiguation rules
     DOMAIN_RULES = {
         # In oncology context, prefer gene/biomarker interpretations
-        "oncology": {
-            "prefer_types": ["gene", "biomarker", "drug"],
-            "context_boost": 0.2
-        },
+        "oncology": {"prefer_types": ["gene", "biomarker", "drug"], "context_boost": 0.2},
         # In pharmacology context, prefer drug interpretations
-        "pharmacology": {
-            "prefer_types": ["drug", "protein"],
-            "context_boost": 0.2
-        },
+        "pharmacology": {"prefer_types": ["drug", "protein"], "context_boost": 0.2},
         # In molecular biology, prefer gene/protein
-        "molecular_biology": {
-            "prefer_types": ["gene", "protein", "pathway"],
-            "context_boost": 0.2
-        },
+        "molecular_biology": {"prefer_types": ["gene", "protein", "pathway"], "context_boost": 0.2},
     }
 
     def __init__(
@@ -280,7 +335,7 @@ class Disambiguator:
         context_window: int = 100,
         confidence_threshold: float = 0.6,
         use_popularity: bool = True,
-        domain: Optional[str] = None
+        domain: str | None = None,
     ):
         """
         Initialize the disambiguator.
@@ -302,8 +357,8 @@ class Disambiguator:
         self,
         mention: str,
         context: str,
-        candidates: Optional[List[DisambiguationCandidate]] = None,
-        type_hint: Optional[str] = None
+        candidates: list[DisambiguationCandidate] | None = None,
+        type_hint: str | None = None,
     ) -> DisambiguationResult:
         """
         Disambiguate an entity mention.
@@ -337,9 +392,7 @@ class Disambiguator:
             return result
 
         # Score candidates
-        scored_candidates = self._score_candidates(
-            result.candidates, context, type_hint
-        )
+        scored_candidates = self._score_candidates(result.candidates, context, type_hint)
 
         # Sort by score
         scored_candidates.sort(key=lambda x: x.score, reverse=True)
@@ -365,7 +418,7 @@ class Disambiguator:
 
         return result
 
-    def _get_candidates(self, mention: str) -> List[DisambiguationCandidate]:
+    def _get_candidates(self, mention: str) -> list[DisambiguationCandidate]:
         """Get candidates for a mention."""
         key = mention.lower().strip()
 
@@ -379,7 +432,7 @@ class Disambiguator:
                     entity_type=c.entity_type,
                     score=c.score,
                     evidence=c.evidence.copy(),
-                    metadata=c.metadata.copy()
+                    metadata=c.metadata.copy(),
                 )
                 for c in self.AMBIGUOUS_TERMS[key]
             ]
@@ -394,7 +447,7 @@ class Disambiguator:
                     entity_type=c.entity_type,
                     score=c.score,
                     evidence=c.evidence.copy(),
-                    metadata=c.metadata.copy()
+                    metadata=c.metadata.copy(),
                 )
                 for c in self.AMBIGUOUS_TERMS[key_no_hyphen]
             ]
@@ -402,11 +455,8 @@ class Disambiguator:
         return []
 
     def _score_candidates(
-        self,
-        candidates: List[DisambiguationCandidate],
-        context: str,
-        type_hint: Optional[str]
-    ) -> List[DisambiguationCandidate]:
+        self, candidates: list[DisambiguationCandidate], context: str, type_hint: str | None
+    ) -> list[DisambiguationCandidate]:
         """Score candidates based on context and constraints."""
         context_lower = context.lower()
 
@@ -453,10 +503,8 @@ class Disambiguator:
         return candidates
 
     def batch_disambiguate(
-        self,
-        mentions: List[Tuple[str, str]],
-        type_hints: Optional[List[str]] = None
-    ) -> List[DisambiguationResult]:
+        self, mentions: list[tuple[str, str]], type_hints: list[str] | None = None
+    ) -> list[DisambiguationResult]:
         """
         Disambiguate multiple mentions.
 
@@ -476,11 +524,7 @@ class Disambiguator:
 
         return results
 
-    def add_ambiguous_term(
-        self,
-        term: str,
-        candidates: List[DisambiguationCandidate]
-    ):
+    def add_ambiguous_term(self, term: str, candidates: list[DisambiguationCandidate]):
         """
         Add an ambiguous term with its candidates.
 
@@ -491,7 +535,7 @@ class Disambiguator:
         key = term.lower().strip()
         self.AMBIGUOUS_TERMS[key] = candidates
 
-    def get_ambiguity_info(self, mention: str) -> Dict[str, Any]:
+    def get_ambiguity_info(self, mention: str) -> dict[str, Any]:
         """
         Get information about ambiguity for a mention.
 
@@ -509,10 +553,10 @@ class Disambiguator:
             "is_ambiguous": len(candidates) > 1,
             "candidate_count": len(candidates),
             "candidate_types": list(set(c.entity_type for c in candidates)),
-            "candidates": [c.to_dict() for c in candidates]
+            "candidates": [c.to_dict() for c in candidates],
         }
 
-    def get_statistics(self) -> Dict[str, Any]:
+    def get_statistics(self) -> dict[str, Any]:
         """Get disambiguator statistics."""
         all_types = set()
         for candidates in self.AMBIGUOUS_TERMS.values():
@@ -524,12 +568,12 @@ class Disambiguator:
             "entity_types_covered": list(all_types),
             "context_keyword_types": list(self.CONTEXT_KEYWORDS.keys()),
             "domain": self.domain,
-            "confidence_threshold": self.confidence_threshold
+            "confidence_threshold": self.confidence_threshold,
         }
 
 
 # Convenience functions
-def disambiguate(mention: str, context: str, type_hint: Optional[str] = None) -> DisambiguationResult:
+def disambiguate(mention: str, context: str, type_hint: str | None = None) -> DisambiguationResult:
     """Quick disambiguation using default disambiguator."""
     disambiguator = Disambiguator()
     return disambiguator.disambiguate(mention, context, type_hint=type_hint)

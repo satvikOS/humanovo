@@ -7,11 +7,10 @@ Real-time updates for ingestion progress, agent status, and indexing events.
 import asyncio
 import json
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
-from pydantic import BaseModel
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.core.logging import get_logger
 
@@ -32,12 +31,12 @@ class IngestionWSManager:
 
     def __init__(self):
         # Active connections by channel
-        self.job_connections: Dict[UUID, Set[WebSocket]] = {}
-        self.global_connections: Set[WebSocket] = set()
-        self.agent_connections: Dict[str, Set[WebSocket]] = {}
+        self.job_connections: dict[UUID, set[WebSocket]] = {}
+        self.global_connections: set[WebSocket] = set()
+        self.agent_connections: dict[str, set[WebSocket]] = {}
 
         # Event buffers for replay
-        self._event_buffer: Dict[UUID, List[Dict]] = {}
+        self._event_buffer: dict[UUID, list[dict]] = {}
         self._max_buffer_size = 100
 
     async def connect_job(self, websocket: WebSocket, job_id: UUID) -> None:
@@ -56,11 +55,13 @@ class IngestionWSManager:
         )
 
         # Send connection confirmation
-        await websocket.send_json({
-            "type": "connected",
-            "job_id": str(job_id),
-            "timestamp": datetime.utcnow().isoformat(),
-        })
+        await websocket.send_json(
+            {
+                "type": "connected",
+                "job_id": str(job_id),
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+        )
 
         # Replay buffered events
         if job_id in self._event_buffer:
@@ -77,11 +78,13 @@ class IngestionWSManager:
             connections=len(self.global_connections),
         )
 
-        await websocket.send_json({
-            "type": "connected",
-            "channel": "global",
-            "timestamp": datetime.utcnow().isoformat(),
-        })
+        await websocket.send_json(
+            {
+                "type": "connected",
+                "channel": "global",
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+        )
 
     async def connect_agent(self, websocket: WebSocket, agent_type: str) -> None:
         """Connect to a specific agent's updates."""
@@ -98,11 +101,13 @@ class IngestionWSManager:
             connections=len(self.agent_connections[agent_type]),
         )
 
-        await websocket.send_json({
-            "type": "connected",
-            "agent_type": agent_type,
-            "timestamp": datetime.utcnow().isoformat(),
-        })
+        await websocket.send_json(
+            {
+                "type": "connected",
+                "agent_type": agent_type,
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+        )
 
     def disconnect_job(self, websocket: WebSocket, job_id: UUID) -> None:
         """Disconnect from a job's updates."""
@@ -125,7 +130,7 @@ class IngestionWSManager:
                 del self.agent_connections[agent_type]
         logger.info("WebSocket disconnected from agent", agent_type=agent_type)
 
-    async def broadcast_job_update(self, job_id: UUID, update: Dict[str, Any]) -> None:
+    async def broadcast_job_update(self, job_id: UUID, update: dict[str, Any]) -> None:
         """Broadcast update to all connections watching a job."""
         event = {
             "type": "job_update",
@@ -154,13 +159,15 @@ class IngestionWSManager:
                 self.disconnect_job(ws, job_id)
 
         # Also send to global subscribers
-        await self.broadcast_global({
-            "type": "job_progress",
-            "job_id": str(job_id),
-            **update,
-        })
+        await self.broadcast_global(
+            {
+                "type": "job_progress",
+                "job_id": str(job_id),
+                **update,
+            }
+        )
 
-    async def broadcast_global(self, update: Dict[str, Any]) -> None:
+    async def broadcast_global(self, update: dict[str, Any]) -> None:
         """Broadcast update to all global connections."""
         event = {
             "timestamp": datetime.utcnow().isoformat(),
@@ -177,7 +184,7 @@ class IngestionWSManager:
         for ws in disconnected:
             self.disconnect_global(ws)
 
-    async def broadcast_agent_update(self, agent_type: str, update: Dict[str, Any]) -> None:
+    async def broadcast_agent_update(self, agent_type: str, update: dict[str, Any]) -> None:
         """Broadcast update to connections watching an agent."""
         event = {
             "type": "agent_update",
@@ -205,36 +212,42 @@ class IngestionWSManager:
         records_fetched: int,
         records_processed: int,
         records_indexed: int,
-        current_source: Optional[str] = None,
-        message: Optional[str] = None,
+        current_source: str | None = None,
+        message: str | None = None,
     ) -> None:
         """Send a structured progress update."""
-        await self.broadcast_job_update(job_id, {
-            "status": status,
-            "progress": progress,
-            "metrics": {
-                "records_fetched": records_fetched,
-                "records_processed": records_processed,
-                "records_indexed": records_indexed,
+        await self.broadcast_job_update(
+            job_id,
+            {
+                "status": status,
+                "progress": progress,
+                "metrics": {
+                    "records_fetched": records_fetched,
+                    "records_processed": records_processed,
+                    "records_indexed": records_indexed,
+                },
+                "current_source": current_source,
+                "message": message,
             },
-            "current_source": current_source,
-            "message": message,
-        })
+        )
 
     async def send_record_indexed(
         self,
         job_id: UUID,
         record_id: str,
         source_type: str,
-        title: Optional[str] = None,
+        title: str | None = None,
     ) -> None:
         """Send notification when a record is indexed."""
-        await self.broadcast_job_update(job_id, {
-            "event": "record_indexed",
-            "record_id": record_id,
-            "source_type": source_type,
-            "title": title,
-        })
+        await self.broadcast_job_update(
+            job_id,
+            {
+                "event": "record_indexed",
+                "record_id": record_id,
+                "source_type": source_type,
+                "title": title,
+            },
+        )
 
     async def send_entity_extracted(
         self,
@@ -244,44 +257,53 @@ class IngestionWSManager:
         confidence: float,
     ) -> None:
         """Send notification when an entity is extracted."""
-        await self.broadcast_job_update(job_id, {
-            "event": "entity_extracted",
-            "entity": {
-                "text": entity_text,
-                "type": entity_type,
-                "confidence": confidence,
+        await self.broadcast_job_update(
+            job_id,
+            {
+                "event": "entity_extracted",
+                "entity": {
+                    "text": entity_text,
+                    "type": entity_type,
+                    "confidence": confidence,
+                },
             },
-        })
+        )
 
     async def send_error(
         self,
         job_id: UUID,
         error: str,
-        source: Optional[str] = None,
+        source: str | None = None,
         recoverable: bool = True,
     ) -> None:
         """Send error notification."""
-        await self.broadcast_job_update(job_id, {
-            "event": "error",
-            "error": error,
-            "source": source,
-            "recoverable": recoverable,
-        })
+        await self.broadcast_job_update(
+            job_id,
+            {
+                "event": "error",
+                "error": error,
+                "source": source,
+                "recoverable": recoverable,
+            },
+        )
 
     async def send_job_completed(
         self,
         job_id: UUID,
-        metrics: Dict[str, Any],
+        metrics: dict[str, Any],
         duration_seconds: float,
     ) -> None:
         """Send job completion notification."""
-        await self.broadcast_job_update(job_id, {
-            "event": "completed",
-            "status": "completed",
-            "progress": 1.0,
-            "metrics": metrics,
-            "duration_seconds": duration_seconds,
-        })
+        await self.broadcast_job_update(
+            job_id,
+            {
+                "event": "completed",
+                "status": "completed",
+                "progress": 1.0,
+                "metrics": metrics,
+                "duration_seconds": duration_seconds,
+            },
+        )
 
         # Clean up buffer after a delay
         asyncio.create_task(self._cleanup_buffer(job_id, delay=300))
@@ -291,16 +313,12 @@ class IngestionWSManager:
         await asyncio.sleep(delay)
         self._event_buffer.pop(job_id, None)
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get connection statistics."""
         return {
             "global_connections": len(self.global_connections),
-            "job_connections": {
-                str(k): len(v) for k, v in self.job_connections.items()
-            },
-            "agent_connections": {
-                k: len(v) for k, v in self.agent_connections.items()
-            },
+            "job_connections": {str(k): len(v) for k, v in self.job_connections.items()},
+            "agent_connections": {k: len(v) for k, v in self.agent_connections.items()},
             "buffered_jobs": len(self._event_buffer),
         }
 
@@ -334,21 +352,26 @@ async def job_websocket(
 
             # Handle client messages
             if message.get("type") == "ping":
-                await websocket.send_json({
-                    "type": "pong",
-                    "timestamp": datetime.utcnow().isoformat(),
-                })
+                await websocket.send_json(
+                    {
+                        "type": "pong",
+                        "timestamp": datetime.utcnow().isoformat(),
+                    }
+                )
             elif message.get("type") == "subscribe_entities":
                 # Client wants entity extraction updates
                 pass  # Already included in job updates
             elif message.get("type") == "get_status":
                 # Client requests current status
                 from app.api.v1.endpoints.ingestion import _ingestion_jobs
+
                 if job_id in _ingestion_jobs:
-                    await websocket.send_json({
-                        "type": "status",
-                        "job": _ingestion_jobs[job_id],
-                    })
+                    await websocket.send_json(
+                        {
+                            "type": "status",
+                            "job": _ingestion_jobs[job_id],
+                        }
+                    )
 
     except WebSocketDisconnect:
         manager.disconnect_job(websocket, job_id)
@@ -375,23 +398,24 @@ async def global_ingestion_websocket(
             message = json.loads(data)
 
             if message.get("type") == "ping":
-                await websocket.send_json({
-                    "type": "pong",
-                    "timestamp": datetime.utcnow().isoformat(),
-                })
+                await websocket.send_json(
+                    {
+                        "type": "pong",
+                        "timestamp": datetime.utcnow().isoformat(),
+                    }
+                )
             elif message.get("type") == "get_stats":
                 from app.api.v1.endpoints.ingestion import _ingestion_jobs
 
-                running_jobs = [
-                    j for j in _ingestion_jobs.values()
-                    if j["status"] == "running"
-                ]
+                running_jobs = [j for j in _ingestion_jobs.values() if j["status"] == "running"]
 
-                await websocket.send_json({
-                    "type": "stats",
-                    "active_jobs": len(running_jobs),
-                    "connection_stats": manager.get_stats(),
-                })
+                await websocket.send_json(
+                    {
+                        "type": "stats",
+                        "active_jobs": len(running_jobs),
+                        "connection_stats": manager.get_stats(),
+                    }
+                )
 
     except WebSocketDisconnect:
         manager.disconnect_global(websocket)
@@ -419,10 +443,12 @@ async def agent_websocket(
             message = json.loads(data)
 
             if message.get("type") == "ping":
-                await websocket.send_json({
-                    "type": "pong",
-                    "timestamp": datetime.utcnow().isoformat(),
-                })
+                await websocket.send_json(
+                    {
+                        "type": "pong",
+                        "timestamp": datetime.utcnow().isoformat(),
+                    }
+                )
 
     except WebSocketDisconnect:
         manager.disconnect_agent(websocket, agent_type)
@@ -435,8 +461,8 @@ async def broadcast_ingestion_progress(
     job_id: UUID,
     status: str,
     progress: float,
-    metrics: Dict[str, int],
-    current_source: Optional[str] = None,
+    metrics: dict[str, int],
+    current_source: str | None = None,
 ) -> None:
     """Broadcast ingestion progress update."""
     await manager.send_progress_update(
@@ -452,7 +478,7 @@ async def broadcast_ingestion_progress(
 
 async def broadcast_ingestion_complete(
     job_id: UUID,
-    metrics: Dict[str, Any],
+    metrics: dict[str, Any],
     duration_seconds: float,
 ) -> None:
     """Broadcast ingestion completion."""
@@ -462,7 +488,7 @@ async def broadcast_ingestion_complete(
 async def broadcast_ingestion_error(
     job_id: UUID,
     error: str,
-    source: Optional[str] = None,
+    source: str | None = None,
 ) -> None:
     """Broadcast ingestion error."""
     await manager.send_error(job_id, error, source)
@@ -471,13 +497,16 @@ async def broadcast_ingestion_error(
 async def broadcast_agent_status_change(
     agent_type: str,
     status: str,
-    details: Optional[Dict[str, Any]] = None,
+    details: dict[str, Any] | None = None,
 ) -> None:
     """Broadcast agent status change."""
-    await manager.broadcast_agent_update(agent_type, {
-        "status": status,
-        "details": details or {},
-    })
+    await manager.broadcast_agent_update(
+        agent_type,
+        {
+            "status": status,
+            "details": details or {},
+        },
+    )
 
 
 def get_ws_manager() -> IngestionWSManager:

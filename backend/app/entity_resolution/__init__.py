@@ -18,22 +18,22 @@ Features:
 - Cross-reference resolution
 """
 
-from .resolver import EntityResolver, ResolvedEntity, ResolutionResult
+from .canonical_ids import CanonicalID, CanonicalIDManager
+from .disambiguation import DisambiguationResult, Disambiguator
+from .resolver import EntityResolver, ResolutionResult, ResolvedEntity
+from .synonym_manager import SynonymEntry, SynonymManager
 from .vocabulary_mapper import VocabularyMapper, VocabularySource
-from .synonym_manager import SynonymManager, SynonymEntry
-from .disambiguation import Disambiguator, DisambiguationResult
-from .canonical_ids import CanonicalIDManager, CanonicalID
 
 __all__ = [
-    'EntityResolver',
-    'ResolvedEntity',
-    'ResolutionResult',
-    'VocabularyMapper',
-    'VocabularySource',
-    'SynonymManager',
-    'SynonymEntry',
-    'Disambiguator',
-    'DisambiguationResult',
-    'CanonicalIDManager',
-    'CanonicalID',
+    "EntityResolver",
+    "ResolvedEntity",
+    "ResolutionResult",
+    "VocabularyMapper",
+    "VocabularySource",
+    "SynonymManager",
+    "SynonymEntry",
+    "Disambiguator",
+    "DisambiguationResult",
+    "CanonicalIDManager",
+    "CanonicalID",
 ]

@@ -6,14 +6,15 @@ control for ingestion agents.
 """
 
 import asyncio
+import heapq
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import IntEnum
-from typing import Any, Callable, Coroutine, Dict, List, Optional, Set
+from typing import Any
 from uuid import UUID, uuid4
-import heapq
 
-from app.agents.ingestion.base import IngestionAgent, SourceType, IngestionStatus
+from app.agents.ingestion.base import SourceType
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -23,10 +24,10 @@ class TaskPriority(IntEnum):
     """Priority levels for ingestion tasks (lower = higher priority)."""
 
     CRITICAL = 0  # System-critical updates
-    HIGH = 1      # User-requested real-time ingestion
-    NORMAL = 2    # Scheduled background ingestion
-    LOW = 3       # Bulk/batch processing
-    IDLE = 4      # Low-priority cleanup tasks
+    HIGH = 1  # User-requested real-time ingestion
+    NORMAL = 2  # Scheduled background ingestion
+    LOW = 3  # Bulk/batch processing
+    IDLE = 4  # Low-priority cleanup tasks
 
 
 @dataclass(order=True)
@@ -38,8 +39,8 @@ class ScheduledTask:
     task_id: UUID = field(compare=False)
     agent_type: SourceType = field(compare=False)
     query: str = field(compare=False)
-    config: Dict[str, Any] = field(default_factory=dict, compare=False)
-    callback: Optional[Callable] = field(default=None, compare=False)
+    config: dict[str, Any] = field(default_factory=dict, compare=False)
+    callback: Callable | None = field(default=None, compare=False)
     retries: int = field(default=0, compare=False)
     max_retries: int = field(default=3, compare=False)
     created_at: datetime = field(default_factory=datetime.utcnow, compare=False)
@@ -65,9 +66,9 @@ class RateLimitState:
 
     minute_requests: int = 0
     hour_requests: int = 0
-    last_request_time: Optional[datetime] = None
-    minute_window_start: Optional[datetime] = None
-    hour_window_start: Optional[datetime] = None
+    last_request_time: datetime | None = None
+    minute_window_start: datetime | None = None
+    hour_window_start: datetime | None = None
 
     def reset_minute_window(self) -> None:
         self.minute_requests = 0
@@ -123,7 +124,7 @@ class AgentScheduler:
         self,
         max_concurrent_tasks: int = 5,
         max_concurrent_per_source: int = 2,
-        rate_limits: Optional[Dict[SourceType, RateLimitConfig]] = None,
+        rate_limits: dict[SourceType, RateLimitConfig] | None = None,
     ):
         """
         Initialize the scheduler.
@@ -138,28 +139,26 @@ class AgentScheduler:
         self.rate_limits = rate_limits or self.DEFAULT_RATE_LIMITS
 
         # Priority queue (heap)
-        self._queue: List[ScheduledTask] = []
+        self._queue: list[ScheduledTask] = []
 
         # Task tracking
-        self._pending_tasks: Dict[UUID, ScheduledTask] = {}
-        self._running_tasks: Dict[UUID, ScheduledTask] = {}
-        self._completed_tasks: Dict[UUID, ScheduledTask] = {}
-        self._failed_tasks: Dict[UUID, ScheduledTask] = {}
+        self._pending_tasks: dict[UUID, ScheduledTask] = {}
+        self._running_tasks: dict[UUID, ScheduledTask] = {}
+        self._completed_tasks: dict[UUID, ScheduledTask] = {}
+        self._failed_tasks: dict[UUID, ScheduledTask] = {}
 
         # Per-source tracking
-        self._source_running: Dict[SourceType, Set[UUID]] = {
-            st: set() for st in SourceType
-        }
-        self._rate_state: Dict[SourceType, RateLimitState] = {
+        self._source_running: dict[SourceType, set[UUID]] = {st: set() for st in SourceType}
+        self._rate_state: dict[SourceType, RateLimitState] = {
             st: RateLimitState() for st in SourceType
         }
 
         # Deduplication
-        self._task_hashes: Set[str] = set()
+        self._task_hashes: set[str] = set()
 
         # Control
         self._running = False
-        self._processor_task: Optional[asyncio.Task] = None
+        self._processor_task: asyncio.Task | None = None
         self._semaphore = asyncio.Semaphore(max_concurrent_tasks)
 
         self.logger = logger
@@ -174,8 +173,8 @@ class AgentScheduler:
         query: str,
         priority: TaskPriority = TaskPriority.NORMAL,
         delay_seconds: float = 0,
-        config: Optional[Dict[str, Any]] = None,
-        callback: Optional[Callable[[ScheduledTask, Any], Coroutine]] = None,
+        config: dict[str, Any] | None = None,
+        callback: Callable[[ScheduledTask, Any], Coroutine] | None = None,
         deduplicate: bool = True,
         max_retries: int = 3,
     ) -> UUID:
@@ -234,9 +233,9 @@ class AgentScheduler:
 
     async def schedule_batch(
         self,
-        tasks: List[Dict[str, Any]],
+        tasks: list[dict[str, Any]],
         default_priority: TaskPriority = TaskPriority.NORMAL,
-    ) -> List[UUID]:
+    ) -> list[UUID]:
         """
         Schedule multiple tasks at once.
 
@@ -320,12 +319,16 @@ class AgentScheduler:
         now = datetime.utcnow()
 
         # Reset windows if expired
-        if state.minute_window_start is None or \
-           (now - state.minute_window_start).total_seconds() >= 60:
+        if (
+            state.minute_window_start is None
+            or (now - state.minute_window_start).total_seconds() >= 60
+        ):
             state.reset_minute_window()
 
-        if state.hour_window_start is None or \
-           (now - state.hour_window_start).total_seconds() >= 3600:
+        if (
+            state.hour_window_start is None
+            or (now - state.hour_window_start).total_seconds() >= 3600
+        ):
             state.reset_hour_window()
 
         # Check minute limit
@@ -506,7 +509,7 @@ class AgentScheduler:
             if task.retries < task.max_retries:
                 task.retries += 1
                 # Exponential backoff
-                delay = 2 ** task.retries * 5  # 10s, 20s, 40s
+                delay = 2**task.retries * 5  # 10s, 20s, 40s
                 task.scheduled_time = datetime.utcnow() + timedelta(seconds=delay)
 
                 heapq.heappush(self._queue, task)
@@ -530,7 +533,7 @@ class AgentScheduler:
                     retries=task.retries,
                 )
 
-    def get_queue_stats(self) -> Dict[str, Any]:
+    def get_queue_stats(self) -> dict[str, Any]:
         """Get current queue statistics."""
         priority_counts = {p.name: 0 for p in TaskPriority}
         source_counts = {st.value: 0 for st in SourceType}
@@ -552,7 +555,7 @@ class AgentScheduler:
             },
         }
 
-    def get_task_status(self, task_id: UUID) -> Optional[Dict[str, Any]]:
+    def get_task_status(self, task_id: UUID) -> dict[str, Any] | None:
         """Get status of a specific task."""
         if task_id in self._pending_tasks:
             task = self._pending_tasks[task_id]
@@ -602,13 +605,13 @@ class ScheduledIngestionJob:
     def __init__(
         self,
         scheduler: AgentScheduler,
-        job_id: Optional[UUID] = None,
+        job_id: UUID | None = None,
     ):
         self.scheduler = scheduler
         self.job_id = job_id or uuid4()
-        self._jobs: Dict[UUID, Dict[str, Any]] = {}
+        self._jobs: dict[UUID, dict[str, Any]] = {}
         self._running = False
-        self._job_task: Optional[asyncio.Task] = None
+        self._job_task: asyncio.Task | None = None
         self.logger = logger
 
     async def add_recurring_job(
@@ -617,7 +620,7 @@ class ScheduledIngestionJob:
         query: str,
         interval_seconds: int,
         priority: TaskPriority = TaskPriority.LOW,
-        config: Optional[Dict[str, Any]] = None,
+        config: dict[str, Any] | None = None,
         start_immediately: bool = True,
     ) -> UUID:
         """
@@ -643,8 +646,9 @@ class ScheduledIngestionJob:
             "priority": priority,
             "config": config or {},
             "last_run": None,
-            "next_run": datetime.utcnow() if start_immediately else \
-                       datetime.utcnow() + timedelta(seconds=interval_seconds),
+            "next_run": datetime.utcnow()
+            if start_immediately
+            else datetime.utcnow() + timedelta(seconds=interval_seconds),
             "enabled": True,
             "run_count": 0,
         }
@@ -738,7 +742,7 @@ class ScheduledIngestionJob:
                 self.logger.error("Job processor error", error=str(e))
                 await asyncio.sleep(5)
 
-    def get_job_status(self, job_id: UUID) -> Optional[Dict[str, Any]]:
+    def get_job_status(self, job_id: UUID) -> dict[str, Any] | None:
         """Get status of a recurring job."""
         if job_id in self._jobs:
             job = self._jobs[job_id]
@@ -754,14 +758,14 @@ class ScheduledIngestionJob:
             }
         return None
 
-    def list_jobs(self) -> List[Dict[str, Any]]:
+    def list_jobs(self) -> list[dict[str, Any]]:
         """List all recurring jobs."""
         return [self.get_job_status(job_id) for job_id in self._jobs]
 
 
 # Global scheduler instance
-_scheduler: Optional[AgentScheduler] = None
-_job_scheduler: Optional[ScheduledIngestionJob] = None
+_scheduler: AgentScheduler | None = None
+_job_scheduler: ScheduledIngestionJob | None = None
 
 
 def get_scheduler() -> AgentScheduler:

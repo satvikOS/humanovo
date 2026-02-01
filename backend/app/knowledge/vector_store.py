@@ -5,15 +5,14 @@ Manages vector embeddings for semantic search using ChromaDB/FAISS.
 Supports retrieval-augmented generation (RAG) workflows.
 """
 
-import asyncio
-from typing import Any, Dict, List, Optional
-from uuid import UUID, uuid4
+from typing import Any, Optional
+from uuid import uuid4
 
 import numpy as np
 from pydantic import BaseModel
 
 from app.core.config import settings
-from app.core.logging import get_logger, LoggerMixin
+from app.core.logging import LoggerMixin, get_logger
 
 logger = get_logger(__name__)
 
@@ -26,8 +25,8 @@ class EmbeddingDocument(BaseModel):
 
     id: str
     content: str
-    embedding: Optional[List[float]] = None
-    metadata: Dict[str, Any] = {}
+    embedding: list[float] | None = None
+    metadata: dict[str, Any] = {}
 
 
 class SearchResult(BaseModel):
@@ -36,7 +35,7 @@ class SearchResult(BaseModel):
     id: str
     content: str
     score: float
-    metadata: Dict[str, Any] = {}
+    metadata: dict[str, Any] = {}
 
 
 class VectorStore(LoggerMixin):
@@ -51,8 +50,8 @@ class VectorStore(LoggerMixin):
         self._embeddings_model = None
         self._collection = None
         # In-memory fallback for development
-        self._documents: Dict[str, EmbeddingDocument] = {}
-        self._embeddings: Dict[str, np.ndarray] = {}
+        self._documents: dict[str, EmbeddingDocument] = {}
+        self._embeddings: dict[str, np.ndarray] = {}
 
     async def initialize(self) -> None:
         """Initialize the vector store and embedding model."""
@@ -111,9 +110,7 @@ class VectorStore(LoggerMixin):
         try:
             from sentence_transformers import SentenceTransformer
 
-            self._embeddings_model = SentenceTransformer(
-                settings.VECTOR_EMBEDDING_MODEL
-            )
+            self._embeddings_model = SentenceTransformer(settings.VECTOR_EMBEDDING_MODEL)
             self.logger.info(
                 "Embedding model loaded",
                 model=settings.VECTOR_EMBEDDING_MODEL,
@@ -121,7 +118,7 @@ class VectorStore(LoggerMixin):
         except ImportError:
             self.logger.warning("sentence-transformers not installed")
 
-    def _compute_embedding(self, text: str) -> List[float]:
+    def _compute_embedding(self, text: str) -> list[float]:
         """Compute embedding for text."""
         if self._embeddings_model is None:
             # Return random embedding for development
@@ -133,8 +130,8 @@ class VectorStore(LoggerMixin):
     async def add_document(
         self,
         content: str,
-        metadata: Dict[str, Any] = None,
-        doc_id: Optional[str] = None,
+        metadata: dict[str, Any] = None,
+        doc_id: str | None = None,
     ) -> str:
         """Add a document to the vector store.
 
@@ -175,8 +172,8 @@ class VectorStore(LoggerMixin):
 
     async def add_documents(
         self,
-        documents: List[Dict[str, Any]],
-    ) -> List[str]:
+        documents: list[dict[str, Any]],
+    ) -> list[str]:
         """Add multiple documents to the vector store.
 
         Args:
@@ -201,9 +198,9 @@ class VectorStore(LoggerMixin):
         self,
         query: str,
         limit: int = 10,
-        filters: Optional[Dict[str, Any]] = None,
+        filters: dict[str, Any] | None = None,
         min_score: float = 0.0,
-    ) -> List[SearchResult]:
+    ) -> list[SearchResult]:
         """Search for similar documents.
 
         Args:
@@ -239,9 +236,7 @@ class VectorStore(LoggerMixin):
                     )
         else:
             # In-memory search
-            search_results = await self._in_memory_search(
-                query_embedding, limit, min_score
-            )
+            search_results = await self._in_memory_search(query_embedding, limit, min_score)
 
         self.logger.debug(
             "Search completed",
@@ -253,10 +248,10 @@ class VectorStore(LoggerMixin):
 
     async def _in_memory_search(
         self,
-        query_embedding: List[float],
+        query_embedding: list[float],
         limit: int,
         min_score: float,
-    ) -> List[SearchResult]:
+    ) -> list[SearchResult]:
         """Perform in-memory similarity search."""
         if not self._embeddings:
             return []
@@ -290,7 +285,7 @@ class VectorStore(LoggerMixin):
 
         return results
 
-    async def get_document(self, doc_id: str) -> Optional[EmbeddingDocument]:
+    async def get_document(self, doc_id: str) -> EmbeddingDocument | None:
         """Get a document by ID."""
         if self._collection is not None:
             results = self._collection.get(ids=[doc_id])
@@ -318,7 +313,7 @@ class VectorStore(LoggerMixin):
         self.logger.debug("Document deleted", doc_id=doc_id)
         return True
 
-    async def get_stats(self) -> Dict[str, Any]:
+    async def get_stats(self) -> dict[str, Any]:
         """Get vector store statistics."""
         if self._collection is not None:
             count = self._collection.count()
@@ -349,8 +344,8 @@ def get_vector_store() -> VectorStore:
 async def search_vectors(
     query: str,
     limit: int = 10,
-    filters: Optional[Dict[str, Any]] = None,
-) -> List[SearchResult]:
+    filters: dict[str, Any] | None = None,
+) -> list[SearchResult]:
     """Search the vector store."""
     store = get_vector_store()
     return await store.search(query, limit, filters)
@@ -359,7 +354,7 @@ async def search_vectors(
 async def find_similar(
     embedding_id: str,
     limit: int = 10,
-) -> List[SearchResult]:
+) -> list[SearchResult]:
     """Find documents similar to a given document."""
     store = get_vector_store()
     doc = await store.get_document(embedding_id)

@@ -6,21 +6,27 @@ embedding, retrieval, reranking, and context preparation for LLM queries.
 Connected to multiple ingestion agents for continuous data acquisition.
 """
 
-import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 from pydantic import BaseModel
 
-from app.core.config import settings
-from app.core.logging import get_logger, LoggerMixin
+from app.core.logging import LoggerMixin, get_logger
+from app.rag.chunker import (
+    ChunkingConfig,
+    DocumentChunker,
+)
 from app.rag.embeddings import (
     EmbeddingModel,
     EmbeddingPipeline,
-    get_embedding_pipeline,
-    init_embedding_pipeline,
+)
+from app.rag.reranker import (
+    Reranker,
+    RerankerConfig,
+    RerankerModel,
+    RerankerOutput,
 )
 from app.rag.retriever import (
     HybridRetriever,
@@ -29,18 +35,6 @@ from app.rag.retriever import (
     RetrievalStrategy,
     RetrievedChunk,
     SourceType,
-)
-from app.rag.reranker import (
-    Reranker,
-    RerankerConfig,
-    RerankerModel,
-    RerankerOutput,
-)
-from app.rag.chunker import (
-    ChunkingConfig,
-    ChunkingStrategy,
-    DocumentChunker,
-    DocumentChunk,
 )
 
 logger = get_logger(__name__)
@@ -111,10 +105,10 @@ class IndexedDocument(BaseModel):
     """A document indexed in the RAG system."""
 
     id: str
-    title: Optional[str] = None
+    title: str | None = None
     content: str
     source: SourceType
-    metadata: Dict[str, Any] = {}
+    metadata: dict[str, Any] = {}
 
     # Indexing info
     indexed_at: datetime
@@ -127,11 +121,11 @@ class RAGContext(BaseModel):
 
     query: str
     context_text: str
-    chunks: List[RetrievedChunk]
+    chunks: list[RetrievedChunk]
     total_tokens: int
 
     # Source attribution
-    sources: List[Dict[str, Any]] = []
+    sources: list[dict[str, Any]] = []
 
     # Statistics
     retrieval_time_ms: float = 0.0
@@ -144,7 +138,7 @@ class RAGQueryResult(BaseModel):
     query: str
     context: RAGContext
     retrieval_result: RetrievalResult
-    rerank_result: Optional[RerankerOutput] = None
+    rerank_result: RerankerOutput | None = None
 
     # Timing
     total_time_ms: float = 0.0
@@ -164,16 +158,16 @@ class RAGService(LoggerMixin):
     continuous data acquisition and indexing.
     """
 
-    def __init__(self, config: Optional[RAGConfig] = None):
+    def __init__(self, config: RAGConfig | None = None):
         self.config = config or RAGConfig()
-        self._embedding_pipeline: Optional[EmbeddingPipeline] = None
-        self._retriever: Optional[HybridRetriever] = None
-        self._reranker: Optional[Reranker] = None
-        self._chunker: Optional[DocumentChunker] = None
+        self._embedding_pipeline: EmbeddingPipeline | None = None
+        self._retriever: HybridRetriever | None = None
+        self._reranker: Reranker | None = None
+        self._chunker: DocumentChunker | None = None
         self._initialized = False
 
         # Index tracking
-        self._indexed_documents: Dict[str, IndexedDocument] = {}
+        self._indexed_documents: dict[str, IndexedDocument] = {}
         self._index_stats = {
             "total_documents": 0,
             "total_chunks": 0,
@@ -201,8 +195,8 @@ class RAGService(LoggerMixin):
 
         # Initialize retriever
         try:
-            from app.knowledge.vector_store import get_vector_store
             from app.knowledge.graph_store import get_graph_store
+            from app.knowledge.vector_store import get_vector_store
 
             vector_store = None
             graph_store = None
@@ -257,7 +251,7 @@ class RAGService(LoggerMixin):
     async def query(
         self,
         query: str,
-        config_override: Optional[RAGConfig] = None,
+        config_override: RAGConfig | None = None,
     ) -> RAGQueryResult:
         """
         Execute a RAG query.
@@ -308,7 +302,7 @@ class RAGService(LoggerMixin):
         # Prepare context
         context = self._prepare_context(
             query=query,
-            chunks=final_chunks[:config.top_k],
+            chunks=final_chunks[: config.top_k],
             max_tokens=config.max_context_tokens,
             include_metadata=config.include_metadata,
         )
@@ -327,9 +321,9 @@ class RAGService(LoggerMixin):
         self,
         content: str,
         document_id: str,
-        title: Optional[str] = None,
+        title: str | None = None,
         source: SourceType = SourceType.CUSTOM,
-        metadata: Dict[str, Any] = None,
+        metadata: dict[str, Any] = None,
     ) -> IndexedDocument:
         """
         Index a document for RAG retrieval.
@@ -416,8 +410,8 @@ class RAGService(LoggerMixin):
 
     async def index_batch(
         self,
-        documents: List[Dict[str, Any]],
-    ) -> List[IndexedDocument]:
+        documents: list[dict[str, Any]],
+    ) -> list[IndexedDocument]:
         """
         Index multiple documents.
 
@@ -480,16 +474,16 @@ class RAGService(LoggerMixin):
         self.logger.info("Document deleted", document_id=document_id)
         return True
 
-    def _extract_entities(self, query: str) -> List[str]:
+    def _extract_entities(self, query: str) -> list[str]:
         """Extract potential entities from query."""
         import re
 
         # Simple extraction - words that might be entities
-        words = re.split(r'[,\s]+', query)
+        words = re.split(r"[,\s]+", query)
         entities = []
 
         for word in words:
-            word = word.strip('?.,!;:')
+            word = word.strip("?.,!;:")
             # Keep capitalized words or longer words
             if len(word) > 3 and (word[0].isupper() or len(word) > 5):
                 entities.append(word)
@@ -499,7 +493,7 @@ class RAGService(LoggerMixin):
     def _prepare_context(
         self,
         query: str,
-        chunks: List[RetrievedChunk],
+        chunks: list[RetrievedChunk],
         max_tokens: int,
         include_metadata: bool,
     ) -> RAGContext:
@@ -526,12 +520,14 @@ class RAGService(LoggerMixin):
                 context_parts.append(chunk.content)
 
             # Track source
-            sources.append({
-                "id": chunk.id,
-                "source": chunk.source.value,
-                "title": chunk.metadata.get("document_title"),
-                "score": chunk.score,
-            })
+            sources.append(
+                {
+                    "id": chunk.id,
+                    "source": chunk.source.value,
+                    "title": chunk.metadata.get("document_title"),
+                    "score": chunk.score,
+                }
+            )
 
             total_tokens += chunk_tokens
 
@@ -540,12 +536,12 @@ class RAGService(LoggerMixin):
         return RAGContext(
             query=query,
             context_text=context_text,
-            chunks=chunks[:len(context_parts)],
+            chunks=chunks[: len(context_parts)],
             total_tokens=total_tokens,
             sources=sources,
         )
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get RAG service statistics."""
         stats = {
             "initialized": self._initialized,
@@ -555,23 +551,19 @@ class RAGService(LoggerMixin):
                 "models": self._embedding_pipeline.available_models
                 if self._embedding_pipeline
                 else [],
-                "cache": self._embedding_pipeline.cache_stats
-                if self._embedding_pipeline
-                else {},
+                "cache": self._embedding_pipeline.cache_stats if self._embedding_pipeline else {},
             },
             "retrieval": {
                 "strategy": self.config.retrieval_strategy.value,
             },
             "reranking": {
                 "enabled": self.config.enable_reranking,
-                "model": self.config.reranker_model.value
-                if self.config.enable_reranking
-                else None,
+                "model": self.config.reranker_model.value if self.config.enable_reranking else None,
             },
         }
         return stats
 
-    async def health_check(self) -> Dict[str, Any]:
+    async def health_check(self) -> dict[str, Any]:
         """Check health of RAG components."""
         health = {
             "status": "healthy",
@@ -604,7 +596,7 @@ class RAGService(LoggerMixin):
         return health
 
 
-async def init_rag_service(config: Optional[RAGConfig] = None) -> None:
+async def init_rag_service(config: RAGConfig | None = None) -> None:
     """Initialize the global RAG service."""
     global _rag_service
     _rag_service = RAGService(config)

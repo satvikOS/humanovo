@@ -5,10 +5,11 @@ Monte Carlo simulation runs and results.
 """
 
 from enum import Enum as PyEnum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from sqlalchemy import Column, DateTime, Enum, Float, ForeignKey, Integer, String, Text
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import relationship
 
 from app.models.base import BaseModel
@@ -120,12 +121,14 @@ class Simulation(BaseModel):
     def start(self) -> None:
         """Mark simulation as started."""
         from datetime import datetime
+
         self.status = SimulationStatus.RUNNING
         self.started_at = datetime.utcnow()
 
-    def complete(self, outcomes: Dict[str, Any]) -> None:
+    def complete(self, outcomes: dict[str, Any]) -> None:
         """Mark simulation as completed with outcomes."""
         from datetime import datetime
+
         self.status = SimulationStatus.COMPLETED
         self.completed_at = datetime.utcnow()
         self.outcomes = outcomes
@@ -139,6 +142,7 @@ class Simulation(BaseModel):
     def fail(self, error_message: str) -> None:
         """Mark simulation as failed."""
         from datetime import datetime
+
         self.status = SimulationStatus.FAILED
         self.completed_at = datetime.utcnow()
         self.error_message = error_message
@@ -150,6 +154,7 @@ class Simulation(BaseModel):
     def cancel(self) -> None:
         """Mark simulation as cancelled."""
         from datetime import datetime
+
         self.status = SimulationStatus.CANCELLED
         self.completed_at = datetime.utcnow()
 

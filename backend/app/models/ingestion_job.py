@@ -6,10 +6,11 @@ Tracks data ingestion jobs from various scientific sources.
 
 from datetime import datetime
 from enum import Enum as PyEnum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from sqlalchemy import Column, DateTime, Enum, Float, ForeignKey, Integer, String, Text
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID as PGUUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import relationship
 
 from app.models.base import BaseModel
@@ -147,7 +148,7 @@ class IngestionJob(BaseModel):
         self.status = IngestionJobStatus.QUEUED
         self.queued_at = datetime.utcnow()
 
-    def start_fetching(self, worker_id: Optional[str] = None) -> None:
+    def start_fetching(self, worker_id: str | None = None) -> None:
         """Mark job as fetching data."""
         self.status = IngestionJobStatus.FETCHING
         self.worker_id = worker_id
@@ -181,7 +182,7 @@ class IngestionJob(BaseModel):
             delta = self.completed_at - self.started_at
             self.runtime_seconds = delta.total_seconds()
 
-    def fail(self, error_message: str, error_details: Optional[Dict] = None) -> None:
+    def fail(self, error_message: str, error_details: dict | None = None) -> None:
         """Mark job as failed."""
         self.status = IngestionJobStatus.FAILED
         self.completed_at = datetime.utcnow()
@@ -200,12 +201,12 @@ class IngestionJob(BaseModel):
 
     def update_progress(
         self,
-        found: Optional[int] = None,
-        fetched: Optional[int] = None,
-        processed: Optional[int] = None,
-        indexed: Optional[int] = None,
-        skipped: Optional[int] = None,
-        failed: Optional[int] = None,
+        found: int | None = None,
+        fetched: int | None = None,
+        processed: int | None = None,
+        indexed: int | None = None,
+        skipped: int | None = None,
+        failed: int | None = None,
     ) -> None:
         """Update job progress counts."""
         if found is not None:
@@ -230,11 +231,13 @@ class IngestionJob(BaseModel):
         """Add a failed item to the list."""
         if self.failed_items is None:
             self.failed_items = []
-        self.failed_items.append({
-            "item_id": item_id,
-            "reason": reason,
-            "timestamp": datetime.utcnow().isoformat(),
-        })
+        self.failed_items.append(
+            {
+                "item_id": item_id,
+                "reason": reason,
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+        )
         self.items_failed = (self.items_failed or 0) + 1
 
     def is_terminal(self) -> bool:
@@ -246,7 +249,7 @@ class IngestionJob(BaseModel):
             IngestionJobStatus.CANCELLED,
         )
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get job statistics."""
         return {
             "items_found": self.items_found,

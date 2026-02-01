@@ -10,17 +10,18 @@ Analyzes citation patterns and metrics:
 """
 
 import logging
+import math
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Optional, Any
 from enum import Enum
-import math
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 class CitationType(str, Enum):
     """Types of citations."""
+
     SUPPORTING = "supporting"  # Cites as supporting evidence
     CONTRASTING = "contrasting"  # Cites as contradicting evidence
     BACKGROUND = "background"  # General background citation
@@ -33,6 +34,7 @@ class CitationType(str, Enum):
 @dataclass
 class CitationMetrics:
     """Citation metrics for a source."""
+
     source_id: str
     total_citations: int = 0
     citations_per_year: float = 0.0
@@ -40,14 +42,14 @@ class CitationMetrics:
     self_citation_rate: float = 0.0
     field_normalized_score: float = 0.0
     h_index_contribution: float = 0.0
-    top_citing_journals: List[str] = field(default_factory=list)
+    top_citing_journals: list[str] = field(default_factory=list)
     citation_trend: str = "stable"  # increasing, decreasing, stable
     highly_cited: bool = False
     influential_citations: int = 0  # Citations from high-impact sources
-    citation_contexts: Dict[str, int] = field(default_factory=dict)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    citation_contexts: dict[str, int] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "source_id": self.source_id,
             "total_citations": self.total_citations,
@@ -61,7 +63,7 @@ class CitationMetrics:
             "highly_cited": self.highly_cited,
             "influential_citations": self.influential_citations,
             "citation_contexts": self.citation_contexts,
-            "metadata": self.metadata
+            "metadata": self.metadata,
         }
 
     def get_citation_score(self) -> float:
@@ -81,21 +83,24 @@ class CitationMetrics:
         # Penalty for high self-citation
         self_citation_penalty = max(0, (self.self_citation_rate - 0.2) * 0.5)
 
-        return min(1.0, max(0, base_score + normalized_boost + influential_boost - self_citation_penalty))
+        return min(
+            1.0, max(0, base_score + normalized_boost + influential_boost - self_citation_penalty)
+        )
 
 
 @dataclass
 class CitingSource:
     """Information about a citing source."""
+
     source_id: str
     title: str
-    authors: List[str] = field(default_factory=list)
+    authors: list[str] = field(default_factory=list)
     journal: str = ""
     year: int = 0
     citation_type: CitationType = CitationType.UNKNOWN
     citation_context: str = ""
     is_influential: bool = False
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class CitationAnalyzer:
@@ -120,23 +125,19 @@ class CitationAnalyzer:
         "clinical_medicine": 3.5,
         "neuroscience": 4.2,
         "cardiology": 3.8,
-        "general": 4.0
+        "general": 4.0,
     }
 
     # Thresholds for "highly cited"
     HIGHLY_CITED_THRESHOLDS = {
-        1: 50,    # 1 year old: 50+ citations
-        2: 80,    # 2 years: 80+
-        3: 100,   # 3 years: 100+
-        5: 150,   # 5 years: 150+
+        1: 50,  # 1 year old: 50+ citations
+        2: 80,  # 2 years: 80+
+        3: 100,  # 3 years: 100+
+        5: 150,  # 5 years: 150+
         10: 300,  # 10 years: 300+
     }
 
-    def __init__(
-        self,
-        default_field: str = "general",
-        self_citation_threshold: float = 0.3
-    ):
+    def __init__(self, default_field: str = "general", self_citation_threshold: float = 0.3):
         """
         Initialize the citation analyzer.
 
@@ -154,10 +155,10 @@ class CitationAnalyzer:
         source_id: str,
         total_citations: int,
         publication_year: int,
-        authors: Optional[List[str]] = None,
-        citing_sources: Optional[List[CitingSource]] = None,
-        field: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        authors: list[str] | None = None,
+        citing_sources: list[CitingSource] | None = None,
+        field: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> CitationMetrics:
         """
         Analyze citation metrics for a source.
@@ -196,7 +197,8 @@ class CitationAnalyzer:
             if authors:
                 authors_lower = {a.lower() for a in authors}
                 self_citations = sum(
-                    1 for cs in citing_sources
+                    1
+                    for cs in citing_sources
                     if any(a.lower() in authors_lower for a in cs.authors)
                 )
                 self_citation_rate = self_citations / len(citing_sources) if citing_sources else 0
@@ -215,9 +217,7 @@ class CitationAnalyzer:
                 if cs.journal:
                     journal_counts[cs.journal] = journal_counts.get(cs.journal, 0) + 1
             top_journals = sorted(
-                journal_counts.keys(),
-                key=lambda j: journal_counts[j],
-                reverse=True
+                journal_counts.keys(), key=lambda j: journal_counts[j], reverse=True
             )[:5]
 
         # Determine if highly cited
@@ -246,7 +246,7 @@ class CitationAnalyzer:
             highly_cited=highly_cited,
             influential_citations=influential_citations,
             citation_contexts=citation_contexts,
-            metadata=metadata or {}
+            metadata=metadata or {},
         )
 
     def _is_highly_cited(self, citations: int, age: int) -> bool:
@@ -257,10 +257,8 @@ class CitationAnalyzer:
         return citations >= 300
 
     def analyze_co_citation(
-        self,
-        source_ids: List[str],
-        citation_matrix: Dict[str, List[str]]
-    ) -> Dict[str, Any]:
+        self, source_ids: list[str], citation_matrix: dict[str, list[str]]
+    ) -> dict[str, Any]:
         """
         Analyze co-citation patterns.
 
@@ -293,18 +291,14 @@ class CitationAnalyzer:
         return {
             "co_citation_pairs": co_citation_counts,
             "clusters": clusters,
-            "most_co_cited": sorted(
-                co_citation_counts.items(),
-                key=lambda x: x[1],
-                reverse=True
-            )[:10]
+            "most_co_cited": sorted(co_citation_counts.items(), key=lambda x: x[1], reverse=True)[
+                :10
+            ],
         }
 
     def _find_co_citation_clusters(
-        self,
-        source_ids: List[str],
-        co_citations: Dict[str, int]
-    ) -> List[List[str]]:
+        self, source_ids: list[str], co_citations: dict[str, int]
+    ) -> list[list[str]]:
         """Find clusters of co-cited papers."""
         # Simple connected components
         if not co_citations:
@@ -341,10 +335,7 @@ class CitationAnalyzer:
 
         return clusters
 
-    def calculate_citation_score(
-        self,
-        metrics: CitationMetrics
-    ) -> float:
+    def calculate_citation_score(self, metrics: CitationMetrics) -> float:
         """
         Calculate a single citation-based score.
 
@@ -356,10 +347,7 @@ class CitationAnalyzer:
         """
         return metrics.get_citation_score()
 
-    def batch_analyze(
-        self,
-        sources: List[Dict[str, Any]]
-    ) -> List[CitationMetrics]:
+    def batch_analyze(self, sources: list[dict[str, Any]]) -> list[CitationMetrics]:
         """
         Analyze multiple sources.
 
@@ -377,15 +365,12 @@ class CitationAnalyzer:
                 publication_year=source.get("year", datetime.now().year),
                 authors=source.get("authors"),
                 field=source.get("field"),
-                metadata=source.get("metadata")
+                metadata=source.get("metadata"),
             )
             results.append(metrics)
         return results
 
-    def compare_citation_impact(
-        self,
-        metrics_list: List[CitationMetrics]
-    ) -> Dict[str, Any]:
+    def compare_citation_impact(self, metrics_list: list[CitationMetrics]) -> dict[str, Any]:
         """
         Compare citation impact across sources.
 
@@ -409,16 +394,13 @@ class CitationAnalyzer:
             "max_citations": max(total_cites),
             "average_field_normalized": sum(normalized) / len(normalized),
             "highly_cited_count": highly_cited,
-            "highly_cited_rate": highly_cited / len(metrics_list)
+            "highly_cited_rate": highly_cited / len(metrics_list),
         }
 
 
 # Convenience function
 def analyze_citations(
-    source_id: str,
-    citations: int,
-    year: int,
-    field: Optional[str] = None
+    source_id: str, citations: int, year: int, field: str | None = None
 ) -> CitationMetrics:
     """Quick citation analysis."""
     analyzer = CitationAnalyzer()

@@ -5,15 +5,12 @@ Specialized agent for ingesting custom documents including PDFs, Word docs,
 and other file formats uploaded by users.
 """
 
-import asyncio
 import hashlib
 import io
 import mimetypes
-import os
-import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Any, BinaryIO, Dict, List, Optional, Tuple, Union
+from typing import Any, BinaryIO
 
 import aiohttp
 
@@ -32,7 +29,7 @@ class CustomDocumentConfig(IngestionConfig):
     """Configuration specific to custom document ingestion."""
 
     # Supported file types
-    supported_types: List[str] = [
+    supported_types: list[str] = [
         "application/pdf",
         "application/msword",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -62,7 +59,7 @@ class CustomDocumentConfig(IngestionConfig):
 
     # Storage settings
     store_original: bool = True
-    storage_path: Optional[str] = None
+    storage_path: str | None = None
 
 
 class DocumentParser:
@@ -75,7 +72,7 @@ class DocumentParser:
         extract_tables: bool = True,
         ocr_enabled: bool = True,
         ocr_language: str = "eng",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Parse PDF document.
 
@@ -121,10 +118,12 @@ class DocumentParser:
                 if not page_text.strip() and ocr_enabled:
                     page_text = await DocumentParser._ocr_page(page, ocr_language)
 
-                result["pages"].append({
-                    "page_num": page_num + 1,
-                    "text": page_text,
-                })
+                result["pages"].append(
+                    {
+                        "page_num": page_num + 1,
+                        "text": page_text,
+                    }
+                )
                 full_text.append(page_text)
 
                 # Extract tables if enabled
@@ -147,7 +146,7 @@ class DocumentParser:
         return result
 
     @staticmethod
-    async def _parse_pdf_fallback(content: bytes) -> Dict[str, Any]:
+    async def _parse_pdf_fallback(content: bytes) -> dict[str, Any]:
         """Fallback PDF parser using pdfplumber or basic extraction."""
         try:
             import pdfplumber
@@ -165,19 +164,23 @@ class DocumentParser:
                 full_text = []
                 for page_num, page in enumerate(pdf.pages):
                     text = page.extract_text() or ""
-                    result["pages"].append({
-                        "page_num": page_num + 1,
-                        "text": text,
-                    })
+                    result["pages"].append(
+                        {
+                            "page_num": page_num + 1,
+                            "text": text,
+                        }
+                    )
                     full_text.append(text)
 
                     # Extract tables
                     tables = page.extract_tables()
                     for table in tables:
-                        result["tables"].append({
-                            "page": page_num + 1,
-                            "data": table,
-                        })
+                        result["tables"].append(
+                            {
+                                "page": page_num + 1,
+                                "data": table,
+                            }
+                        )
 
                 result["text"] = "\n\n".join(full_text)
 
@@ -191,6 +194,7 @@ class DocumentParser:
     async def _ocr_page(page: Any, language: str) -> str:
         """OCR a PDF page using Tesseract."""
         try:
+            import fitz  # PyMuPDF - imported here for standalone use
             import pytesseract
             from PIL import Image
 
@@ -210,24 +214,26 @@ class DocumentParser:
             return ""
 
     @staticmethod
-    async def _extract_tables_from_page(page: Any) -> List[Dict[str, Any]]:
+    async def _extract_tables_from_page(page: Any) -> list[dict[str, Any]]:
         """Extract tables from a PDF page."""
         tables = []
         try:
             # Use PyMuPDF's table detection
             tabs = page.find_tables()
             for i, tab in enumerate(tabs):
-                tables.append({
-                    "page": page.number + 1,
-                    "table_num": i + 1,
-                    "data": tab.extract(),
-                })
+                tables.append(
+                    {
+                        "page": page.number + 1,
+                        "table_num": i + 1,
+                        "data": tab.extract(),
+                    }
+                )
         except Exception as e:
             logger.warning("Table extraction failed", error=str(e))
         return tables
 
     @staticmethod
-    async def _extract_images_from_page(page: Any) -> List[Dict[str, Any]]:
+    async def _extract_images_from_page(page: Any) -> list[dict[str, Any]]:
         """Extract images from a PDF page."""
         images = []
         try:
@@ -235,19 +241,21 @@ class DocumentParser:
             for img_index, img in enumerate(image_list):
                 xref = img[0]
                 base_image = page.parent.extract_image(xref)
-                images.append({
-                    "page": page.number + 1,
-                    "image_num": img_index + 1,
-                    "width": base_image.get("width"),
-                    "height": base_image.get("height"),
-                    "format": base_image.get("ext"),
-                })
+                images.append(
+                    {
+                        "page": page.number + 1,
+                        "image_num": img_index + 1,
+                        "width": base_image.get("width"),
+                        "height": base_image.get("height"),
+                        "format": base_image.get("ext"),
+                    }
+                )
         except Exception as e:
             logger.warning("Image extraction failed", error=str(e))
         return images
 
     @staticmethod
-    async def parse_docx(content: bytes) -> Dict[str, Any]:
+    async def parse_docx(content: bytes) -> dict[str, Any]:
         """Parse Word document."""
         try:
             from docx import Document
@@ -285,10 +293,12 @@ class DocumentParser:
                 for row in table.rows:
                     row_data = [cell.text for cell in row.cells]
                     table_data.append(row_data)
-                result["tables"].append({
-                    "table_num": table_idx + 1,
-                    "data": table_data,
-                })
+                result["tables"].append(
+                    {
+                        "table_num": table_idx + 1,
+                        "data": table_data,
+                    }
+                )
 
             result["text"] = "\n\n".join(full_text)
             return result
@@ -301,7 +311,7 @@ class DocumentParser:
             return {"text": "", "metadata": {}, "error": str(e)}
 
     @staticmethod
-    async def parse_text(content: bytes, encoding: str = "utf-8") -> Dict[str, Any]:
+    async def parse_text(content: bytes, encoding: str = "utf-8") -> dict[str, Any]:
         """Parse plain text or markdown."""
         try:
             text = content.decode(encoding)
@@ -327,7 +337,7 @@ class DocumentParser:
             return {"text": "", "metadata": {}, "error": "Failed to decode text"}
 
     @staticmethod
-    async def parse_html(content: bytes) -> Dict[str, Any]:
+    async def parse_html(content: bytes) -> dict[str, Any]:
         """Parse HTML document."""
         try:
             from bs4 import BeautifulSoup
@@ -379,19 +389,19 @@ class CustomDocumentIngestionAgent(IngestionAgent):
 
     def __init__(
         self,
-        config: Optional[CustomDocumentConfig] = None,
+        config: CustomDocumentConfig | None = None,
         **kwargs,
     ):
         config = config or CustomDocumentConfig()
         super().__init__(config=config, **kwargs)
         self.doc_config: CustomDocumentConfig = config
-        self._documents: List[Dict[str, Any]] = []  # Queue of documents to process
+        self._documents: list[dict[str, Any]] = []  # Queue of documents to process
 
     def add_document(
         self,
-        content: Union[bytes, BinaryIO, str, Path],
+        content: bytes | BinaryIO | str | Path,
         filename: str,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> str:
         """
         Add a document to the ingestion queue.
@@ -429,22 +439,24 @@ class CustomDocumentIngestionAgent(IngestionAgent):
         if mime_type not in self.doc_config.supported_types:
             raise ValueError(f"Unsupported file type: {mime_type}")
 
-        self._documents.append({
-            "id": doc_id,
-            "content": doc_bytes,
-            "filename": filename,
-            "mime_type": mime_type,
-            "metadata": metadata or {},
-            "size": len(doc_bytes),
-        })
+        self._documents.append(
+            {
+                "id": doc_id,
+                "content": doc_bytes,
+                "filename": filename,
+                "mime_type": mime_type,
+                "metadata": metadata or {},
+                "size": len(doc_bytes),
+            }
+        )
 
         return doc_id
 
     def add_document_from_url(
         self,
         url: str,
-        filename: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        filename: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """
         Add a document URL to fetch and process.
@@ -454,13 +466,15 @@ class CustomDocumentIngestionAgent(IngestionAgent):
             filename: Optional filename override
             metadata: Optional additional metadata
         """
-        self._documents.append({
-            "url": url,
-            "filename": filename or url.split("/")[-1],
-            "metadata": metadata or {},
-        })
+        self._documents.append(
+            {
+                "url": url,
+                "filename": filename or url.split("/")[-1],
+                "metadata": metadata or {},
+            }
+        )
 
-    async def _fetch_url_document(self, doc_info: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    async def _fetch_url_document(self, doc_info: dict[str, Any]) -> dict[str, Any] | None:
         """Fetch a document from URL."""
         url = doc_info.get("url")
         if not url:
@@ -494,7 +508,7 @@ class CustomDocumentIngestionAgent(IngestionAgent):
                 self.logger.error("Failed to fetch document", url=url, error=str(e))
                 return None
 
-    async def _parse_document(self, doc_info: Dict[str, Any]) -> Dict[str, Any]:
+    async def _parse_document(self, doc_info: dict[str, Any]) -> dict[str, Any]:
         """Parse a document based on its MIME type."""
         content = doc_info["content"]
         mime_type = doc_info.get("mime_type", "")
@@ -517,7 +531,7 @@ class CustomDocumentIngestionAgent(IngestionAgent):
             # Try text parsing as fallback
             return await DocumentParser.parse_text(content)
 
-    def _chunk_text(self, text: str) -> List[Dict[str, Any]]:
+    def _chunk_text(self, text: str) -> list[dict[str, Any]]:
         """Split text into chunks for processing."""
         chunks = []
         chunk_size = self.doc_config.chunk_size
@@ -543,12 +557,14 @@ class CustomDocumentIngestionAgent(IngestionAgent):
                         break
 
             chunk_text = text[start:end]
-            chunks.append({
-                "chunk_num": chunk_num,
-                "text": chunk_text,
-                "start": start,
-                "end": end,
-            })
+            chunks.append(
+                {
+                    "chunk_num": chunk_num,
+                    "text": chunk_text,
+                    "start": start,
+                    "end": end,
+                }
+            )
 
             start = end - overlap
             chunk_num += 1
@@ -557,8 +573,8 @@ class CustomDocumentIngestionAgent(IngestionAgent):
 
     def _document_to_record(
         self,
-        doc_info: Dict[str, Any],
-        parsed: Dict[str, Any],
+        doc_info: dict[str, Any],
+        parsed: dict[str, Any],
     ) -> IngestionRecord:
         """Convert parsed document to IngestionRecord."""
         doc_id = doc_info["id"]
@@ -616,7 +632,7 @@ class CustomDocumentIngestionAgent(IngestionAgent):
         offset: int = 0,
         limit: int = 100,
         **kwargs,
-    ) -> Tuple[List[IngestionRecord], Optional[str]]:
+    ) -> tuple[list[IngestionRecord], str | None]:
         """
         Process queued documents.
 
@@ -632,7 +648,7 @@ class CustomDocumentIngestionAgent(IngestionAgent):
             Tuple of (records, next_cursor)
         """
         records = []
-        docs_to_process = self._documents[offset:offset + limit]
+        docs_to_process = self._documents[offset : offset + limit]
 
         for doc_info in docs_to_process:
             try:
@@ -669,14 +685,14 @@ class CustomDocumentIngestionAgent(IngestionAgent):
                 self.state.metrics.records_failed += 1
 
         # Clear processed documents
-        self._documents = self._documents[offset + limit:]
+        self._documents = self._documents[offset + limit :]
 
         # Determine next cursor
         next_cursor = str(offset + len(records)) if self._documents else None
 
         return records, next_cursor
 
-    async def fetch_by_id(self, source_id: str) -> Optional[IngestionRecord]:
+    async def fetch_by_id(self, source_id: str) -> IngestionRecord | None:
         """
         Fetch a specific document by ID.
 
@@ -696,7 +712,7 @@ class CustomDocumentIngestionAgent(IngestionAgent):
 
         return None
 
-    def get_supported_types(self) -> List[str]:
+    def get_supported_types(self) -> list[str]:
         """Get list of supported MIME types."""
         return self.doc_config.supported_types.copy()
 

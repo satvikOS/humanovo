@@ -5,7 +5,7 @@ Provides base classes and mixins for all ORM models.
 """
 
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import Column, DateTime, func
@@ -54,7 +54,7 @@ class BaseModel(Base, UUIDMixin, TimestampMixin):
 
     __abstract__ = True
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert model to dictionary."""
         result = {}
         for column in self.__table__.columns:
@@ -66,8 +66,8 @@ class BaseModel(Base, UUIDMixin, TimestampMixin):
             result[column.name] = value
         return result
 
-    def update_from_dict(self, data: Dict[str, Any]) -> None:
+    def update_from_dict(self, data: dict[str, Any]) -> None:
         """Update model from dictionary."""
         for key, value in data.items():
-            if hasattr(self, key) and key not in ('id', 'created_at'):
+            if hasattr(self, key) and key not in ("id", "created_at"):
                 setattr(self, key, value)

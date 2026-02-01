@@ -6,9 +6,8 @@ decomposes complex queries, and aggregates results.
 """
 
 import asyncio
-from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional
-from uuid import UUID
+from collections.abc import Callable
+from typing import Any
 
 from app.agents.base import (
     AgentContext,
@@ -24,13 +23,13 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 
-class TaskPlan(Dict):
+class TaskPlan(dict):
     """A plan for executing a complex task."""
 
     def __init__(
         self,
-        tasks: List[Dict[str, Any]],
-        parallel_groups: List[List[int]] = None,
+        tasks: list[dict[str, Any]],
+        parallel_groups: list[list[int]] = None,
     ):
         super().__init__()
         self["tasks"] = tasks
@@ -61,8 +60,8 @@ class ControllerAgent(BaseAgent):
             max_iterations=max_iterations or settings.AGENT_MAX_ITERATIONS,
             timeout_seconds=timeout_seconds or settings.AGENT_TIMEOUT_SECONDS,
         )
-        self.sub_agents: Dict[AgentType, BaseAgent] = {}
-        self._progress_callback: Optional[Callable] = None
+        self.sub_agents: dict[AgentType, BaseAgent] = {}
+        self._progress_callback: Callable | None = None
 
     def _setup_tools(self) -> None:
         """Set up controller-specific tools."""
@@ -97,7 +96,7 @@ class ControllerAgent(BaseAgent):
         self,
         query: str = None,
         context: AgentContext = None,
-        progress_callback: Optional[Callable] = None,
+        progress_callback: Callable | None = None,
         **kwargs,
     ) -> AgentResult:
         """Execute the controller's orchestration logic.
@@ -160,16 +159,12 @@ class ControllerAgent(BaseAgent):
 
             else:
                 # Multiple tasks - execute in parallel
-                tasks_coros = [
-                    self._execute_sub_task(task, context) for task in group_tasks
-                ]
+                tasks_coros = [self._execute_sub_task(task, context) for task in group_tasks]
                 results = await asyncio.gather(*tasks_coros, return_exceptions=True)
 
                 for task, result in zip(group_tasks, results):
                     if isinstance(result, Exception):
-                        all_results[task["id"]] = AgentResult(
-                            success=False, error=str(result)
-                        )
+                        all_results[task["id"]] = AgentResult(success=False, error=str(result))
                     else:
                         all_results[task["id"]] = result
 
@@ -220,48 +215,58 @@ class ControllerAgent(BaseAgent):
         query_lower = query.lower()
 
         # Always start with search for evidence
-        tasks.append({
-            "id": f"task_{task_id}",
-            "type": "search",
-            "agent": AgentType.SEARCH,
-            "description": "Search for relevant evidence",
-            "params": {"query": query, "max_results": 10},
-        })
+        tasks.append(
+            {
+                "id": f"task_{task_id}",
+                "type": "search",
+                "agent": AgentType.SEARCH,
+                "description": "Search for relevant evidence",
+                "params": {"query": query, "max_results": 10},
+            }
+        )
         task_id += 1
 
         # Add extraction if query involves specific entities
         if any(kw in query_lower for kw in ["gene", "protein", "drug", "disease", "pathway"]):
-            tasks.append({
-                "id": f"task_{task_id}",
-                "type": "extraction",
-                "agent": AgentType.EXTRACTION,
-                "description": "Extract biomedical entities",
-                "params": {"query": query},
-            })
+            tasks.append(
+                {
+                    "id": f"task_{task_id}",
+                    "type": "extraction",
+                    "agent": AgentType.EXTRACTION,
+                    "description": "Extract biomedical entities",
+                    "params": {"query": query},
+                }
+            )
             task_id += 1
 
         # Add reasoning for hypothesis generation
-        if any(kw in query_lower for kw in ["hypothesis", "suggest", "propose", "mechanism", "why"]):
-            tasks.append({
-                "id": f"task_{task_id}",
-                "type": "reasoning",
-                "agent": AgentType.REASONING,
-                "description": "Generate hypotheses",
-                "params": {"query": query},
-                "depends_on": ["task_0"],  # Depends on search results
-            })
+        if any(
+            kw in query_lower for kw in ["hypothesis", "suggest", "propose", "mechanism", "why"]
+        ):
+            tasks.append(
+                {
+                    "id": f"task_{task_id}",
+                    "type": "reasoning",
+                    "agent": AgentType.REASONING,
+                    "description": "Generate hypotheses",
+                    "params": {"query": query},
+                    "depends_on": ["task_0"],  # Depends on search results
+                }
+            )
             task_id += 1
 
         # Add verification if making claims
         if tasks and any(t["type"] == "reasoning" for t in tasks):
-            tasks.append({
-                "id": f"task_{task_id}",
-                "type": "verification",
-                "agent": AgentType.VERIFICATION,
-                "description": "Verify generated hypotheses",
-                "params": {},
-                "depends_on": [f"task_{task_id - 1}"],
-            })
+            tasks.append(
+                {
+                    "id": f"task_{task_id}",
+                    "type": "verification",
+                    "agent": AgentType.VERIFICATION,
+                    "description": "Verify generated hypotheses",
+                    "params": {},
+                    "depends_on": [f"task_{task_id - 1}"],
+                }
+            )
             task_id += 1
 
         # Determine parallel groups based on dependencies
@@ -277,8 +282,8 @@ class ControllerAgent(BaseAgent):
 
     def _compute_parallel_groups(
         self,
-        tasks: List[Dict[str, Any]],
-    ) -> List[List[int]]:
+        tasks: list[dict[str, Any]],
+    ) -> list[list[int]]:
         """Compute which tasks can be run in parallel."""
         groups = []
         completed = set()
@@ -305,7 +310,7 @@ class ControllerAgent(BaseAgent):
 
     async def _execute_sub_task(
         self,
-        task: Dict[str, Any],
+        task: dict[str, Any],
         context: AgentContext,
     ) -> AgentResult:
         """Execute a single sub-task using the appropriate agent."""
@@ -341,9 +346,9 @@ class ControllerAgent(BaseAgent):
 
     def _create_agent(self, agent_type: AgentType) -> BaseAgent:
         """Create an agent instance on-demand."""
+        from app.agents.hypothesis_agent import HypothesisGenerationAgent
         from app.agents.search_agent import SearchAgent
         from app.agents.verification_agent import VerificationAgent
-        from app.agents.hypothesis_agent import HypothesisGenerationAgent
 
         agent_classes = {
             AgentType.SEARCH: SearchAgent,
@@ -361,7 +366,7 @@ class ControllerAgent(BaseAgent):
     def _update_context(
         self,
         context: AgentContext,
-        results: Dict[str, AgentResult],
+        results: dict[str, AgentResult],
     ) -> AgentContext:
         """Update shared context with results from completed tasks."""
         for task_id, result in results.items():
@@ -388,7 +393,7 @@ class ControllerAgent(BaseAgent):
 
     async def _aggregate_results(
         self,
-        results: Dict[str, AgentResult],
+        results: dict[str, AgentResult],
         context: AgentContext,
     ) -> AgentResult:
         """Aggregate results from all sub-agents into final output."""
@@ -425,7 +430,7 @@ class ControllerAgent(BaseAgent):
             context=context,
         )
 
-    def _generate_summary(self, data: Dict[str, Any]) -> str:
+    def _generate_summary(self, data: dict[str, Any]) -> str:
         """Generate a human-readable summary of the results."""
         parts = []
 
@@ -444,7 +449,7 @@ class ControllerAgent(BaseAgent):
         self,
         task_type: str,
         context: AgentContext,
-    ) -> List[AgentType]:
+    ) -> list[AgentType]:
         """Select which agents to use for a given task type."""
         agent_mapping = {
             "search": [AgentType.SEARCH],

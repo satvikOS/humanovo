@@ -4,13 +4,12 @@ WebSocket API Endpoints
 Real-time communication for live updates on agents, simulations, and more.
 """
 
-import asyncio
 import json
 from datetime import datetime
-from typing import Any, Dict, Optional, Set
+from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from app.core.logging import get_logger
@@ -24,15 +23,15 @@ class ConnectionManager:
 
     def __init__(self):
         # Active connections by channel
-        self.active_connections: Dict[str, Set[WebSocket]] = {}
+        self.active_connections: dict[str, set[WebSocket]] = {}
         # Connection metadata
-        self.connection_metadata: Dict[WebSocket, Dict[str, Any]] = {}
+        self.connection_metadata: dict[WebSocket, dict[str, Any]] = {}
 
     async def connect(
         self,
         websocket: WebSocket,
         channel: str,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """Accept a new WebSocket connection."""
         await websocket.accept()
@@ -61,14 +60,14 @@ class ConnectionManager:
 
         logger.info("WebSocket disconnected", channel=channel)
 
-    async def send_personal(self, websocket: WebSocket, message: Dict[str, Any]) -> None:
+    async def send_personal(self, websocket: WebSocket, message: dict[str, Any]) -> None:
         """Send a message to a specific connection."""
         try:
             await websocket.send_json(message)
         except Exception as e:
             logger.error("Failed to send message", error=str(e))
 
-    async def broadcast(self, channel: str, message: Dict[str, Any]) -> None:
+    async def broadcast(self, channel: str, message: dict[str, Any]) -> None:
         """Broadcast a message to all connections in a channel."""
         if channel not in self.active_connections:
             return
@@ -97,7 +96,7 @@ class WSMessage(BaseModel):
     """WebSocket message format."""
 
     type: str
-    payload: Dict[str, Any]
+    payload: dict[str, Any]
     timestamp: datetime = None
 
     def __init__(self, **data):
@@ -269,7 +268,7 @@ async def global_websocket(
 # Helper functions for broadcasting from other modules
 
 
-async def broadcast_task_update(task_id: UUID, update: Dict[str, Any]) -> None:
+async def broadcast_task_update(task_id: UUID, update: dict[str, Any]) -> None:
     """Broadcast an update for a specific task."""
     channel = f"task:{task_id}"
     await manager.broadcast(
@@ -278,7 +277,7 @@ async def broadcast_task_update(task_id: UUID, update: Dict[str, Any]) -> None:
     )
 
 
-async def broadcast_simulation_update(simulation_id: UUID, update: Dict[str, Any]) -> None:
+async def broadcast_simulation_update(simulation_id: UUID, update: dict[str, Any]) -> None:
     """Broadcast an update for a specific simulation."""
     channel = f"simulation:{simulation_id}"
     await manager.broadcast(
@@ -287,7 +286,7 @@ async def broadcast_simulation_update(simulation_id: UUID, update: Dict[str, Any
     )
 
 
-async def broadcast_project_update(project_id: UUID, update: Dict[str, Any]) -> None:
+async def broadcast_project_update(project_id: UUID, update: dict[str, Any]) -> None:
     """Broadcast an update for a specific project."""
     channel = f"project:{project_id}"
     await manager.broadcast(
@@ -296,7 +295,7 @@ async def broadcast_project_update(project_id: UUID, update: Dict[str, Any]) -> 
     )
 
 
-async def broadcast_global_update(update: Dict[str, Any]) -> None:
+async def broadcast_global_update(update: dict[str, Any]) -> None:
     """Broadcast a global system update."""
     await manager.broadcast(
         "global",

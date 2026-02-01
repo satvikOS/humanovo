@@ -8,13 +8,13 @@ for comprehensive biomedical information retrieval.
 import asyncio
 import re
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 from pydantic import BaseModel
 
-from app.core.logging import get_logger, LoggerMixin
+from app.core.logging import LoggerMixin, get_logger
 
 logger = get_logger(__name__)
 
@@ -62,10 +62,10 @@ class RetrievalConfig:
     keyword_limit: int = 20
 
     # Filters
-    source_types: Optional[List[SourceType]] = None
-    date_from: Optional[str] = None
-    date_to: Optional[str] = None
-    entity_types: Optional[List[str]] = None
+    source_types: list[SourceType] | None = None
+    date_from: str | None = None
+    date_to: str | None = None
+    entity_types: list[str] | None = None
 
 
 class RetrievedChunk(BaseModel):
@@ -75,17 +75,17 @@ class RetrievedChunk(BaseModel):
     content: str
     score: float
     source: SourceType
-    metadata: Dict[str, Any] = {}
+    metadata: dict[str, Any] = {}
 
     # Retrieval provenance
     retrieval_method: str = "unknown"
-    vector_score: Optional[float] = None
-    graph_score: Optional[float] = None
-    keyword_score: Optional[float] = None
+    vector_score: float | None = None
+    graph_score: float | None = None
+    keyword_score: float | None = None
 
     # Entity mentions
-    entities: List[str] = []
-    relations: List[str] = []
+    entities: list[str] = []
+    relations: list[str] = []
 
 
 class RetrievalResult(BaseModel):
@@ -93,7 +93,7 @@ class RetrievalResult(BaseModel):
 
     query: str
     strategy: RetrievalStrategy
-    chunks: List[RetrievedChunk]
+    chunks: list[RetrievedChunk]
     total_found: int
 
     # Search statistics
@@ -113,7 +113,7 @@ class BaseRetriever(ABC, LoggerMixin):
         self,
         query: str,
         config: RetrievalConfig,
-    ) -> List[RetrievedChunk]:
+    ) -> list[RetrievedChunk]:
         """Retrieve relevant chunks for a query."""
         pass
 
@@ -129,7 +129,7 @@ class VectorRetriever(BaseRetriever):
         self,
         query: str,
         config: RetrievalConfig,
-    ) -> List[RetrievedChunk]:
+    ) -> list[RetrievedChunk]:
         """Retrieve using vector similarity."""
         if not self._vector_store or not self._embedding_pipeline:
             self.logger.warning("Vector retriever not fully initialized")
@@ -173,7 +173,7 @@ class VectorRetriever(BaseRetriever):
             self.logger.error("Vector retrieval failed", error=str(e))
             return []
 
-    def _build_filters(self, config: RetrievalConfig) -> Optional[Dict[str, Any]]:
+    def _build_filters(self, config: RetrievalConfig) -> dict[str, Any] | None:
         """Build metadata filters from config."""
         filters = {}
 
@@ -191,7 +191,7 @@ class VectorRetriever(BaseRetriever):
 
         return filters if filters else None
 
-    def _infer_source(self, metadata: Dict[str, Any]) -> SourceType:
+    def _infer_source(self, metadata: dict[str, Any]) -> SourceType:
         """Infer source type from metadata."""
         source = metadata.get("source", "custom")
         try:
@@ -210,7 +210,7 @@ class GraphRetriever(BaseRetriever):
         self,
         query: str,
         config: RetrievalConfig,
-    ) -> List[RetrievedChunk]:
+    ) -> list[RetrievedChunk]:
         """Retrieve using graph traversal."""
         try:
             from app.knowledge.graph_store import get_graph_store
@@ -267,21 +267,21 @@ class GraphRetriever(BaseRetriever):
 
             # Sort by score and limit
             chunks.sort(key=lambda x: x.score, reverse=True)
-            return chunks[:config.graph_limit]
+            return chunks[: config.graph_limit]
 
         except Exception as e:
             self.logger.error("Graph retrieval failed", error=str(e))
             return []
 
-    async def _extract_query_entities(self, query: str) -> List[str]:
+    async def _extract_query_entities(self, query: str) -> list[str]:
         """Extract potential entity names from query."""
         # Simple extraction - split by common delimiters and filter
-        words = re.split(r'[,\s]+', query)
+        words = re.split(r"[,\s]+", query)
 
         # Filter for potential entity names (capitalized or longer words)
         entities = []
         for word in words:
-            word = word.strip('?.,!;:')
+            word = word.strip("?.,!;:")
             if len(word) > 2:
                 entities.append(word)
 
@@ -304,9 +304,7 @@ class GraphRetriever(BaseRetriever):
             lines.append("")
             lines.append("Relationships:")
             for rel in neighborhood.relations[:10]:
-                lines.append(
-                    f"  - {rel.source_name} --[{rel.relation_type}]--> {rel.target_name}"
-                )
+                lines.append(f"  - {rel.source_name} --[{rel.relation_type}]--> {rel.target_name}")
 
         return "\n".join(lines)
 
@@ -333,13 +331,13 @@ class KeywordRetriever(BaseRetriever):
 
     def __init__(self, index=None):
         self._index = index
-        self._documents: Dict[str, Dict[str, Any]] = {}
+        self._documents: dict[str, dict[str, Any]] = {}
 
     async def retrieve(
         self,
         query: str,
         config: RetrievalConfig,
-    ) -> List[RetrievedChunk]:
+    ) -> list[RetrievedChunk]:
         """Retrieve using keyword matching."""
         try:
             # Tokenize query
@@ -349,7 +347,7 @@ class KeywordRetriever(BaseRetriever):
                 return []
 
             # Simple BM25-style scoring
-            scored_docs: List[Tuple[str, float, Dict]] = []
+            scored_docs: list[tuple[str, float, dict]] = []
 
             for doc_id, doc in self._documents.items():
                 score = self._compute_bm25_score(
@@ -362,7 +360,7 @@ class KeywordRetriever(BaseRetriever):
 
             # Sort and limit
             scored_docs.sort(key=lambda x: x[1], reverse=True)
-            scored_docs = scored_docs[:config.keyword_limit]
+            scored_docs = scored_docs[: config.keyword_limit]
 
             # Convert to chunks
             chunks = []
@@ -385,28 +383,66 @@ class KeywordRetriever(BaseRetriever):
             self.logger.error("Keyword retrieval failed", error=str(e))
             return []
 
-    def _tokenize(self, text: str) -> List[str]:
+    def _tokenize(self, text: str) -> list[str]:
         """Tokenize text into terms."""
         # Simple tokenization
         text = text.lower()
-        tokens = re.findall(r'\b\w+\b', text)
+        tokens = re.findall(r"\b\w+\b", text)
 
         # Remove stopwords
         stopwords = {
-            'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to',
-            'for', 'of', 'with', 'by', 'from', 'is', 'are', 'was', 'were',
-            'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did',
-            'will', 'would', 'could', 'should', 'may', 'might', 'must',
-            'this', 'that', 'these', 'those', 'what', 'which', 'who', 'whom',
+            "the",
+            "a",
+            "an",
+            "and",
+            "or",
+            "but",
+            "in",
+            "on",
+            "at",
+            "to",
+            "for",
+            "of",
+            "with",
+            "by",
+            "from",
+            "is",
+            "are",
+            "was",
+            "were",
+            "be",
+            "been",
+            "being",
+            "have",
+            "has",
+            "had",
+            "do",
+            "does",
+            "did",
+            "will",
+            "would",
+            "could",
+            "should",
+            "may",
+            "might",
+            "must",
+            "this",
+            "that",
+            "these",
+            "those",
+            "what",
+            "which",
+            "who",
+            "whom",
         }
 
         return [t for t in tokens if t not in stopwords and len(t) > 2]
 
     def _compute_bm25_score(
         self,
-        query_terms: List[str],
+        query_terms: list[str],
         content: str,
-        term_freqs: Dict[str, int],
+        term_freqs: dict[str, int],
     ) -> float:
         """Compute BM25-style relevance score."""
         k1 = 1.5
@@ -424,9 +460,7 @@ class KeywordRetriever(BaseRetriever):
             if tf > 0:
                 # Simplified BM25 formula
                 idf = 1.0  # Would need corpus stats for proper IDF
-                tf_component = (tf * (k1 + 1)) / (
-                    tf + k1 * (1 - b + b * (doc_len / avg_doc_len))
-                )
+                tf_component = (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * (doc_len / avg_doc_len)))
                 score += idf * tf_component
 
         # Normalize
@@ -435,7 +469,7 @@ class KeywordRetriever(BaseRetriever):
 
         return score
 
-    def _infer_source(self, metadata: Dict[str, Any]) -> SourceType:
+    def _infer_source(self, metadata: dict[str, Any]) -> SourceType:
         """Infer source type from metadata."""
         source = metadata.get("source", "custom")
         try:
@@ -447,7 +481,7 @@ class KeywordRetriever(BaseRetriever):
         self,
         doc_id: str,
         content: str,
-        metadata: Dict[str, Any] = None,
+        metadata: dict[str, Any] = None,
     ) -> None:
         """Add a document to the keyword index."""
         terms = self._tokenize(content)
@@ -492,7 +526,7 @@ class HybridRetriever(LoggerMixin):
     async def retrieve(
         self,
         query: str,
-        config: Optional[RetrievalConfig] = None,
+        config: RetrievalConfig | None = None,
     ) -> RetrievalResult:
         """
         Retrieve relevant content using hybrid search.
@@ -569,7 +603,7 @@ class HybridRetriever(LoggerMixin):
 
         # Apply final ranking and limit
         all_chunks = self._rank_results(all_chunks, config)
-        final_chunks = all_chunks[:config.top_k]
+        final_chunks = all_chunks[: config.top_k]
 
         search_time = (time.time() - start_time) * 1000
 
@@ -586,14 +620,14 @@ class HybridRetriever(LoggerMixin):
 
     def _merge_results(
         self,
-        vector_chunks: List[RetrievedChunk],
-        graph_chunks: List[RetrievedChunk],
-        keyword_chunks: List[RetrievedChunk],
+        vector_chunks: list[RetrievedChunk],
+        graph_chunks: list[RetrievedChunk],
+        keyword_chunks: list[RetrievedChunk],
         config: RetrievalConfig,
-    ) -> List[RetrievedChunk]:
+    ) -> list[RetrievedChunk]:
         """Merge results from different retrievers."""
         # Use dict to deduplicate by content hash
-        merged: Dict[str, RetrievedChunk] = {}
+        merged: dict[str, RetrievedChunk] = {}
 
         # Process vector results
         for chunk in vector_chunks:
@@ -616,9 +650,7 @@ class HybridRetriever(LoggerMixin):
                 merged[key].graph_score = chunk.graph_score
                 merged[key].score += chunk.score * config.graph_weight
                 # Merge entities
-                merged[key].entities = list(
-                    set(merged[key].entities + chunk.entities)
-                )
+                merged[key].entities = list(set(merged[key].entities + chunk.entities))
 
         # Process keyword results
         for chunk in keyword_chunks:
@@ -639,19 +671,21 @@ class HybridRetriever(LoggerMixin):
 
     def _rank_results(
         self,
-        chunks: List[RetrievedChunk],
+        chunks: list[RetrievedChunk],
         config: RetrievalConfig,
-    ) -> List[RetrievedChunk]:
+    ) -> list[RetrievedChunk]:
         """Rank merged results by final score."""
         # Apply boosting for multi-source hits
         for chunk in chunks:
-            sources_hit = sum([
-                1 if chunk.vector_score else 0,
-                1 if chunk.graph_score else 0,
-                1 if chunk.keyword_score else 0,
-            ])
+            sources_hit = sum(
+                [
+                    1 if chunk.vector_score else 0,
+                    1 if chunk.graph_score else 0,
+                    1 if chunk.keyword_score else 0,
+                ]
+            )
             if sources_hit > 1:
-                chunk.score *= (1 + 0.1 * sources_hit)
+                chunk.score *= 1 + 0.1 * sources_hit
 
         # Sort by score
         chunks.sort(key=lambda x: x.score, reverse=True)
@@ -665,7 +699,7 @@ class HybridRetriever(LoggerMixin):
         self,
         doc_id: str,
         content: str,
-        metadata: Dict[str, Any] = None,
+        metadata: dict[str, Any] = None,
     ) -> None:
         """Add a document to the keyword index."""
         self._keyword_retriever.add_document(doc_id, content, metadata)

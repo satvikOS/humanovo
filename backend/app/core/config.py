@@ -6,7 +6,6 @@ Supports environment variables and .env files.
 """
 
 from functools import lru_cache
-from typing import List, Optional
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -33,9 +32,7 @@ class Settings(BaseSettings):
     PORT: int = 8000
 
     # CORS
-    CORS_ORIGINS: List[str] = Field(
-        default=["http://localhost:3000", "http://localhost:5173"]
-    )
+    CORS_ORIGINS: list[str] = Field(default=["http://localhost:3000", "http://localhost:5173"])
 
     # Database (PostgreSQL)
     DATABASE_URL: str = "postgresql+asyncpg://genup:genup@localhost:5432/genup"
@@ -57,18 +54,18 @@ class Settings(BaseSettings):
     VECTOR_EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
 
     # OpenAI / LLM
-    OPENAI_API_KEY: Optional[SecretStr] = None
+    OPENAI_API_KEY: SecretStr | None = None
     OPENAI_MODEL: str = "gpt-4-turbo-preview"
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
 
     # Search APIs
-    GOOGLE_API_KEY: Optional[SecretStr] = None
-    GOOGLE_CSE_ID: Optional[str] = None
-    BRAVE_API_KEY: Optional[SecretStr] = None
+    GOOGLE_API_KEY: SecretStr | None = None
+    GOOGLE_CSE_ID: str | None = None
+    BRAVE_API_KEY: SecretStr | None = None
 
     # PubMed / Data Sources
     PUBMED_EMAIL: str = "genup@example.com"
-    PUBMED_API_KEY: Optional[SecretStr] = None
+    PUBMED_API_KEY: SecretStr | None = None
     PUBMED_RATE_LIMIT: int = 10  # requests per second
 
     # Celery
@@ -99,7 +96,7 @@ class Settings(BaseSettings):
         return self.NEO4J_PASSWORD.get_secret_value()
 
     @property
-    def openai_api_key_value(self) -> Optional[str]:
+    def openai_api_key_value(self) -> str | None:
         """Get OpenAI API key value."""
         return self.OPENAI_API_KEY.get_secret_value() if self.OPENAI_API_KEY else None
 

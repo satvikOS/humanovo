@@ -6,16 +6,16 @@ RESTful API for managing ingestion agents, jobs, and scheduling.
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks, UploadFile, File
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agents.ingestion.base import SourceType
 from app.core.database import get_db
 from app.core.logging import get_logger
-from app.agents.ingestion.base import SourceType, IngestionStatus
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -34,7 +34,7 @@ class IngestionJobCreate(BaseModel):
     """Request to create an ingestion job."""
 
     query: str = Field(..., min_length=3, max_length=500)
-    sources: List[str] = Field(
+    sources: list[str] = Field(
         default=["pubmed"],
         description="Data sources to ingest from",
     )
@@ -44,7 +44,7 @@ class IngestionJobCreate(BaseModel):
     extract_relations: bool = True
     index_to_stores: bool = True
     schedule_delay_seconds: int = Field(default=0, ge=0, le=86400)
-    config: Optional[Dict[str, Any]] = None
+    config: dict[str, Any] | None = None
 
 
 class IngestionJobResponse(BaseModel):
@@ -52,7 +52,7 @@ class IngestionJobResponse(BaseModel):
 
     job_id: UUID
     query: str
-    sources: List[str]
+    sources: list[str]
     status: str
     priority: str
     progress: float
@@ -62,16 +62,16 @@ class IngestionJobResponse(BaseModel):
     records_failed: int
     entities_extracted: int
     relations_extracted: int
-    started_at: Optional[datetime]
-    completed_at: Optional[datetime]
+    started_at: datetime | None
+    completed_at: datetime | None
     created_at: datetime
-    error: Optional[str]
+    error: str | None
 
 
 class IngestionJobListResponse(BaseModel):
     """Paginated list of ingestion jobs."""
 
-    items: List[IngestionJobResponse]
+    items: list[IngestionJobResponse]
     total: int
     page: int
     page_size: int
@@ -81,7 +81,7 @@ class RecurringJobCreate(BaseModel):
     """Request to create a recurring ingestion job."""
 
     query: str = Field(..., min_length=3, max_length=500)
-    sources: List[str] = Field(default=["pubmed"])
+    sources: list[str] = Field(default=["pubmed"])
     interval_hours: int = Field(default=24, ge=1, le=720)
     priority: IngestionPriority = Field(default=IngestionPriority.LOW)
     max_results_per_source: int = Field(default=50, ge=1, le=500)
@@ -93,12 +93,12 @@ class RecurringJobResponse(BaseModel):
 
     job_id: UUID
     query: str
-    sources: List[str]
+    sources: list[str]
     interval_hours: int
     priority: str
     enabled: bool
-    last_run: Optional[datetime]
-    next_run: Optional[datetime]
+    last_run: datetime | None
+    next_run: datetime | None
     run_count: int
     created_at: datetime
 
@@ -108,9 +108,9 @@ class AgentStatusResponse(BaseModel):
 
     agent_type: str
     status: str
-    current_query: Optional[str]
+    current_query: str | None
     records_processed: int
-    last_activity: Optional[datetime]
+    last_activity: datetime | None
     rate_limit_remaining: int
     errors_count: int
 
@@ -119,24 +119,24 @@ class SourceConfigUpdate(BaseModel):
     """Configuration update for a data source."""
 
     source_type: str
-    rate_limit_per_minute: Optional[int] = Field(default=None, ge=1, le=100)
-    rate_limit_per_hour: Optional[int] = Field(default=None, ge=1, le=5000)
-    max_concurrent: Optional[int] = Field(default=None, ge=1, le=10)
+    rate_limit_per_minute: int | None = Field(default=None, ge=1, le=100)
+    rate_limit_per_hour: int | None = Field(default=None, ge=1, le=5000)
+    max_concurrent: int | None = Field(default=None, ge=1, le=10)
     enabled: bool = True
 
 
 class DocumentUpload(BaseModel):
     """Metadata for document upload."""
 
-    title: Optional[str] = None
-    authors: Optional[List[str]] = None
-    keywords: Optional[List[str]] = None
-    metadata: Optional[Dict[str, Any]] = None
+    title: str | None = None
+    authors: list[str] | None = None
+    keywords: list[str] | None = None
+    metadata: dict[str, Any] | None = None
 
 
 # In-memory storage for jobs
-_ingestion_jobs: Dict[UUID, dict] = {}
-_recurring_jobs: Dict[UUID, dict] = {}
+_ingestion_jobs: dict[UUID, dict] = {}
+_recurring_jobs: dict[UUID, dict] = {}
 
 
 @router.post("/jobs", response_model=IngestionJobResponse, status_code=202)
@@ -214,6 +214,7 @@ async def _delayed_ingestion_job(
 ) -> None:
     """Execute ingestion job after delay."""
     import asyncio
+
     await asyncio.sleep(delay_seconds)
     await _execute_ingestion_job(job_id, config)
 
@@ -227,8 +228,8 @@ async def _execute_ingestion_job(job_id: UUID, config: IngestionJobCreate) -> No
     job["started_at"] = datetime.utcnow()
 
     try:
-        from app.agents.ingestion.orchestrator import IngestionOrchestrator
         from app.agents.ingestion.base import SourceType
+        from app.agents.ingestion.orchestrator import IngestionOrchestrator
 
         # Convert source strings to SourceType enums
         source_types = [SourceType(s) for s in config.sources]
@@ -247,7 +248,9 @@ async def _execute_ingestion_job(job_id: UUID, config: IngestionJobCreate) -> No
             job["entities_extracted"] = state.metrics.entities_extracted
             job["relations_extracted"] = state.metrics.relations_extracted
             if state.metrics.records_indexed > 0:
-                job["progress"] = min(0.95, state.metrics.records_indexed / config.max_results_per_source)
+                job["progress"] = min(
+                    0.95, state.metrics.records_indexed / config.max_results_per_source
+                )
 
         orchestrator.set_progress_callback(progress_callback)
 
@@ -287,8 +290,8 @@ async def _execute_ingestion_job(job_id: UUID, config: IngestionJobCreate) -> No
 
 @router.get("/jobs", response_model=IngestionJobListResponse)
 async def list_ingestion_jobs(
-    status: Optional[str] = None,
-    source: Optional[str] = None,
+    status: str | None = None,
+    source: str | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -334,7 +337,7 @@ async def get_ingestion_job(
 async def cancel_ingestion_job(
     job_id: UUID,
     db: AsyncSession = Depends(get_db),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Cancel a running or pending ingestion job."""
     if job_id not in _ingestion_jobs:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -428,9 +431,8 @@ async def create_recurring_job(
 
     # Register with scheduler
     try:
-        from app.agents.ingestion.scheduler import get_job_scheduler, get_scheduler
         from app.agents.ingestion.base import SourceType
-        from app.agents.ingestion.scheduler import TaskPriority
+        from app.agents.ingestion.scheduler import TaskPriority, get_job_scheduler
 
         priority_map = {
             "critical": TaskPriority.CRITICAL,
@@ -459,10 +461,10 @@ async def create_recurring_job(
     return RecurringJobResponse(**job_data)
 
 
-@router.get("/recurring", response_model=List[RecurringJobResponse])
+@router.get("/recurring", response_model=list[RecurringJobResponse])
 async def list_recurring_jobs(
     db: AsyncSession = Depends(get_db),
-) -> List[RecurringJobResponse]:
+) -> list[RecurringJobResponse]:
     """List all recurring ingestion jobs."""
     return [RecurringJobResponse(**j) for j in _recurring_jobs.values()]
 
@@ -471,7 +473,7 @@ async def list_recurring_jobs(
 async def delete_recurring_job(
     job_id: UUID,
     db: AsyncSession = Depends(get_db),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Delete a recurring job."""
     if job_id not in _recurring_jobs:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -509,10 +511,10 @@ async def toggle_recurring_job(
     return RecurringJobResponse(**job)
 
 
-@router.get("/agents/status", response_model=List[AgentStatusResponse])
+@router.get("/agents/status", response_model=list[AgentStatusResponse])
 async def get_agents_status(
     db: AsyncSession = Depends(get_db),
-) -> List[AgentStatusResponse]:
+) -> list[AgentStatusResponse]:
     """Get status of all ingestion agents."""
     statuses = []
 
@@ -535,12 +537,12 @@ async def get_agents_status(
 @router.post("/documents/upload")
 async def upload_document(
     file: UploadFile = File(...),
-    title: Optional[str] = None,
-    authors: Optional[str] = None,
-    keywords: Optional[str] = None,
+    title: str | None = None,
+    authors: str | None = None,
+    keywords: str | None = None,
     background_tasks: BackgroundTasks = None,
     db: AsyncSession = Depends(get_db),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Upload a custom document for ingestion.
 
@@ -596,9 +598,9 @@ async def _process_uploaded_document(
     doc_id: str,
     content: bytes,
     filename: str,
-    title: Optional[str],
-    authors: List[str],
-    keywords: List[str],
+    title: str | None,
+    authors: list[str],
+    keywords: list[str],
 ) -> None:
     """Process an uploaded document."""
     try:
@@ -624,21 +626,23 @@ async def _process_uploaded_document(
 @router.get("/sources")
 async def list_available_sources(
     db: AsyncSession = Depends(get_db),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """List available data sources and their configurations."""
     sources = []
 
     for source_type in SourceType:
-        sources.append({
-            "type": source_type.value,
-            "name": source_type.name.replace("_", " ").title(),
-            "description": _get_source_description(source_type),
-            "enabled": True,
-            "rate_limits": {
-                "per_minute": 30,
-                "per_hour": 1000,
-            },
-        })
+        sources.append(
+            {
+                "type": source_type.value,
+                "name": source_type.name.replace("_", " ").title(),
+                "description": _get_source_description(source_type),
+                "enabled": True,
+                "rate_limits": {
+                    "per_minute": 30,
+                    "per_hour": 1000,
+                },
+            }
+        )
 
     return {"sources": sources}
 
@@ -660,7 +664,7 @@ async def update_source_config(
     source_type: str,
     config: SourceConfigUpdate,
     db: AsyncSession = Depends(get_db),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Update configuration for a data source."""
     logger.info("Updating source config", source_type=source_type)
 
@@ -682,7 +686,7 @@ async def update_source_config(
 @router.get("/queue/stats")
 async def get_queue_stats(
     db: AsyncSession = Depends(get_db),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Get ingestion queue statistics."""
     try:
         from app.agents.ingestion.scheduler import get_scheduler

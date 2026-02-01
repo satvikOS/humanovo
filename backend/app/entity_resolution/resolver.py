@@ -17,13 +17,12 @@ Provides end-to-end entity resolution with:
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Optional, Any, Tuple
-import hashlib
+from typing import Any
 
-from .vocabulary_mapper import VocabularyMapper, VocabularyEntry, MappingResult, VocabularySource
-from .synonym_manager import SynonymManager, SynonymEntry
-from .disambiguation import Disambiguator, DisambiguationResult
-from .canonical_ids import CanonicalIDManager, CanonicalID, IDNamespace
+from .canonical_ids import CanonicalID, CanonicalIDManager, IDNamespace
+from .disambiguation import DisambiguationResult, Disambiguator
+from .synonym_manager import SynonymManager
+from .vocabulary_mapper import VocabularyEntry, VocabularyMapper, VocabularySource
 
 logger = logging.getLogger(__name__)
 
@@ -31,19 +30,20 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ResolvedEntity:
     """Represents a fully resolved entity."""
+
     original_mention: str
-    canonical_id: Optional[CanonicalID] = None
+    canonical_id: CanonicalID | None = None
     canonical_name: str = ""
     entity_type: str = ""
     confidence: float = 0.0
-    vocabulary_entries: List[VocabularyEntry] = field(default_factory=list)
-    synonyms: List[str] = field(default_factory=list)
-    cross_references: Dict[str, List[str]] = field(default_factory=dict)
-    disambiguation_info: Optional[DisambiguationResult] = None
-    resolution_steps: List[str] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    vocabulary_entries: list[VocabularyEntry] = field(default_factory=list)
+    synonyms: list[str] = field(default_factory=list)
+    cross_references: dict[str, list[str]] = field(default_factory=dict)
+    disambiguation_info: DisambiguationResult | None = None
+    resolution_steps: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "original_mention": self.original_mention,
             "canonical_id": self.canonical_id.to_dict() if self.canonical_id else None,
@@ -53,12 +53,14 @@ class ResolvedEntity:
             "vocabulary_entries": [e.to_dict() for e in self.vocabulary_entries],
             "synonyms": self.synonyms,
             "cross_references": self.cross_references,
-            "disambiguation_info": self.disambiguation_info.to_dict() if self.disambiguation_info else None,
+            "disambiguation_info": self.disambiguation_info.to_dict()
+            if self.disambiguation_info
+            else None,
             "resolution_steps": self.resolution_steps,
-            "metadata": self.metadata
+            "metadata": self.metadata,
         }
 
-    def get_best_external_id(self, namespace: Optional[str] = None) -> Optional[str]:
+    def get_best_external_id(self, namespace: str | None = None) -> str | None:
         """Get best external identifier."""
         if namespace and namespace in self.cross_references:
             refs = self.cross_references[namespace]
@@ -76,19 +78,20 @@ class ResolvedEntity:
 @dataclass
 class ResolutionResult:
     """Result of entity resolution process."""
-    entities: List[ResolvedEntity] = field(default_factory=list)
-    unresolved: List[str] = field(default_factory=list)
-    statistics: Dict[str, Any] = field(default_factory=dict)
+
+    entities: list[ResolvedEntity] = field(default_factory=list)
+    unresolved: list[str] = field(default_factory=list)
+    statistics: dict[str, Any] = field(default_factory=dict)
     processing_time_ms: float = 0.0
     timestamp: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "entities": [e.to_dict() for e in self.entities],
             "unresolved": self.unresolved,
             "statistics": self.statistics,
             "processing_time_ms": self.processing_time_ms,
-            "timestamp": self.timestamp
+            "timestamp": self.timestamp,
         }
 
 
@@ -106,11 +109,11 @@ class EntityResolver:
 
     def __init__(
         self,
-        enabled_vocabularies: Optional[List[VocabularySource]] = None,
+        enabled_vocabularies: list[VocabularySource] | None = None,
         enable_disambiguation: bool = True,
         enable_synonym_expansion: bool = True,
         confidence_threshold: float = 0.5,
-        domain: Optional[str] = None
+        domain: str | None = None,
     ):
         """
         Initialize the entity resolver.
@@ -129,24 +132,19 @@ class EntityResolver:
 
         # Initialize components
         self.vocabulary_mapper = VocabularyMapper(
-            enabled_sources=enabled_vocabularies,
-            use_fuzzy_matching=True,
-            fuzzy_threshold=0.8
+            enabled_sources=enabled_vocabularies, use_fuzzy_matching=True, fuzzy_threshold=0.8
         )
 
-        self.synonym_manager = SynonymManager(
-            enable_normalization=True,
-            case_sensitive=False
-        )
+        self.synonym_manager = SynonymManager(enable_normalization=True, case_sensitive=False)
 
-        self.disambiguator = Disambiguator(
-            confidence_threshold=confidence_threshold,
-            domain=domain
-        ) if enable_disambiguation else None
+        self.disambiguator = (
+            Disambiguator(confidence_threshold=confidence_threshold, domain=domain)
+            if enable_disambiguation
+            else None
+        )
 
         self.id_manager = CanonicalIDManager(
-            default_namespace=IDNamespace.GENUP,
-            enable_versioning=True
+            default_namespace=IDNamespace.GENUP, enable_versioning=True
         )
 
         logger.info(f"EntityResolver initialized, domain: {domain}")
@@ -154,9 +152,9 @@ class EntityResolver:
     def resolve(
         self,
         mention: str,
-        context: Optional[str] = None,
-        entity_type: Optional[str] = None,
-        preferred_vocabulary: Optional[VocabularySource] = None
+        context: str | None = None,
+        entity_type: str | None = None,
+        preferred_vocabulary: VocabularySource | None = None,
     ) -> ResolvedEntity:
         """
         Resolve an entity mention.
@@ -186,14 +184,14 @@ class EntityResolver:
 
         # Step 3: Map to vocabularies
         mapping_result = self.vocabulary_mapper.map_entity(
-            normalized,
-            entity_type=entity_type,
-            preferred_source=preferred_vocabulary
+            normalized, entity_type=entity_type, preferred_source=preferred_vocabulary
         )
 
         if mapping_result.entries:
             result.vocabulary_entries = mapping_result.entries
-            steps.append(f"Vocabulary match: {mapping_result.match_type} ({len(mapping_result.entries)} entries)")
+            steps.append(
+                f"Vocabulary match: {mapping_result.match_type} ({len(mapping_result.entries)} entries)"
+            )
 
             # Use best match
             if mapping_result.best_match:
@@ -208,9 +206,7 @@ class EntityResolver:
         if self.enable_disambiguation and len(mapping_result.entries) > 1:
             context_text = context or mention
             disambiguation_result = self.disambiguator.disambiguate(
-                mention=normalized,
-                context=context_text,
-                type_hint=entity_type
+                mention=normalized, context=context_text, type_hint=entity_type
             )
 
             result.disambiguation_info = disambiguation_result
@@ -239,8 +235,8 @@ class EntityResolver:
                     entity_type=result.entity_type,
                     metadata={
                         "original_mention": mention,
-                        "resolution_confidence": result.confidence
-                    }
+                        "resolution_confidence": result.confidence,
+                    },
                 )
 
                 # Register cross-references
@@ -250,7 +246,7 @@ class EntityResolver:
                             external_namespace=namespace,
                             external_id=ext_id,
                             canonical_id=canonical_id,
-                            confidence=result.confidence
+                            confidence=result.confidence,
                         )
 
             result.canonical_id = canonical_id
@@ -264,10 +260,7 @@ class EntityResolver:
             result.canonical_id = self.id_manager.generate_id(
                 entity_name=normalized,
                 entity_type=result.entity_type,
-                metadata={
-                    "original_mention": mention,
-                    "unmatched": True
-                }
+                metadata={"original_mention": mention, "unmatched": True},
             )
             steps.append(f"Generated ID (no match): {result.canonical_id.get_curie()}")
 
@@ -278,9 +271,9 @@ class EntityResolver:
 
     def batch_resolve(
         self,
-        mentions: List[str],
-        contexts: Optional[List[str]] = None,
-        entity_types: Optional[List[str]] = None
+        mentions: list[str],
+        contexts: list[str] | None = None,
+        entity_types: list[str] | None = None,
     ) -> ResolutionResult:
         """
         Resolve multiple entity mentions.
@@ -294,14 +287,13 @@ class EntityResolver:
             ResolutionResult
         """
         import time
+
         start_time = time.time()
 
         contexts = contexts or [None] * len(mentions)
         entity_types = entity_types or [None] * len(mentions)
 
-        result = ResolutionResult(
-            timestamp=datetime.utcnow().isoformat()
-        )
+        result = ResolutionResult(timestamp=datetime.utcnow().isoformat())
 
         resolved_count = 0
         unresolved_count = 0
@@ -334,14 +326,14 @@ class EntityResolver:
             "resolution_rate": resolved_count / total if total > 0 else 0,
             "average_confidence": confidence_sum / total if total > 0 else 0,
             "entity_types": self._count_types(result.entities),
-            "vocabulary_sources": self._count_sources(result.entities)
+            "vocabulary_sources": self._count_sources(result.entities),
         }
 
         result.processing_time_ms = (time.time() - start_time) * 1000
 
         return result
 
-    def _count_types(self, entities: List[ResolvedEntity]) -> Dict[str, int]:
+    def _count_types(self, entities: list[ResolvedEntity]) -> dict[str, int]:
         """Count entity types."""
         counts = {}
         for entity in entities:
@@ -349,7 +341,7 @@ class EntityResolver:
             counts[etype] = counts.get(etype, 0) + 1
         return counts
 
-    def _count_sources(self, entities: List[ResolvedEntity]) -> Dict[str, int]:
+    def _count_sources(self, entities: list[ResolvedEntity]) -> dict[str, int]:
         """Count vocabulary sources."""
         counts = {}
         for entity in entities:
@@ -358,11 +350,7 @@ class EntityResolver:
                 counts[source] = counts.get(source, 0) + 1
         return counts
 
-    def resolve_from_text(
-        self,
-        text: str,
-        entities: List[Dict[str, Any]]
-    ) -> List[ResolvedEntity]:
+    def resolve_from_text(self, text: str, entities: list[dict[str, Any]]) -> list[ResolvedEntity]:
         """
         Resolve entities extracted from text.
 
@@ -386,11 +374,7 @@ class EntityResolver:
             context_end = min(len(text), end + 100)
             context = text[context_start:context_end]
 
-            resolved = self.resolve(
-                mention=mention,
-                context=context,
-                entity_type=entity_type
-            )
+            resolved = self.resolve(mention=mention, context=context, entity_type=entity_type)
 
             # Add position info
             resolved.metadata["start"] = start
@@ -400,7 +384,7 @@ class EntityResolver:
 
         return results
 
-    def get_resolver_info(self) -> Dict[str, Any]:
+    def get_resolver_info(self) -> dict[str, Any]:
         """Get resolver configuration info."""
         return {
             "vocabulary_mapper": self.vocabulary_mapper.get_statistics(),
@@ -411,16 +395,13 @@ class EntityResolver:
                 "confidence_threshold": self.confidence_threshold,
                 "disambiguation_enabled": self.enable_disambiguation,
                 "synonym_expansion_enabled": self.enable_synonym_expansion,
-                "domain": self.domain
-            }
+                "domain": self.domain,
+            },
         }
 
 
 # Factory function
-def create_resolver(
-    preset: str = "default",
-    domain: Optional[str] = None
-) -> EntityResolver:
+def create_resolver(preset: str = "default", domain: str | None = None) -> EntityResolver:
     """
     Create an entity resolver with preset configuration.
 
@@ -435,25 +416,25 @@ def create_resolver(
         "default": {
             "enable_disambiguation": True,
             "enable_synonym_expansion": True,
-            "confidence_threshold": 0.5
+            "confidence_threshold": 0.5,
         },
         "oncology": {
             "enable_disambiguation": True,
             "enable_synonym_expansion": True,
             "confidence_threshold": 0.6,
-            "domain": "oncology"
+            "domain": "oncology",
         },
         "pharmacology": {
             "enable_disambiguation": True,
             "enable_synonym_expansion": True,
             "confidence_threshold": 0.6,
-            "domain": "pharmacology"
+            "domain": "pharmacology",
         },
         "strict": {
             "enable_disambiguation": True,
             "enable_synonym_expansion": True,
-            "confidence_threshold": 0.8
-        }
+            "confidence_threshold": 0.8,
+        },
     }
 
     config = presets.get(preset, presets["default"])
@@ -465,9 +446,7 @@ def create_resolver(
 
 # Convenience functions
 def resolve_entity(
-    mention: str,
-    context: Optional[str] = None,
-    entity_type: Optional[str] = None
+    mention: str, context: str | None = None, entity_type: str | None = None
 ) -> ResolvedEntity:
     """Quick entity resolution using default resolver."""
     resolver = create_resolver()
@@ -475,8 +454,7 @@ def resolve_entity(
 
 
 def batch_resolve_entities(
-    mentions: List[str],
-    contexts: Optional[List[str]] = None
+    mentions: list[str], contexts: list[str] | None = None
 ) -> ResolutionResult:
     """Quick batch resolution using default resolver."""
     resolver = create_resolver()

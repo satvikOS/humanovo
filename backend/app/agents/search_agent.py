@@ -5,9 +5,7 @@ Searches multiple sources (web, PubMed, databases) for relevant evidence.
 """
 
 import asyncio
-from datetime import datetime
-from typing import Any, Dict, List, Optional
-from urllib.parse import quote_plus
+from typing import Any
 
 import httpx
 
@@ -34,7 +32,7 @@ class SearchResult:
         snippet: str = "",
         source: str = "web",
         relevance_score: float = 0.5,
-        metadata: Dict[str, Any] = None,
+        metadata: dict[str, Any] = None,
     ):
         self.title = title
         self.url = url
@@ -43,7 +41,7 @@ class SearchResult:
         self.relevance_score = relevance_score
         self.metadata = metadata or {}
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "title": self.title,
             "url": self.url,
@@ -156,7 +154,7 @@ class SearchAgent(BaseAgent):
         results = await asyncio.gather(*search_tasks, return_exceptions=True)
 
         # Aggregate results
-        all_results: List[SearchResult] = []
+        all_results: list[SearchResult] = []
         errors = []
 
         for i, result in enumerate(results):
@@ -202,10 +200,10 @@ class SearchAgent(BaseAgent):
     async def search(
         self,
         query: str,
-        sources: List[str] = None,
+        sources: list[str] = None,
         max_results: int = 10,
         include_snippets: bool = True,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Convenience method for direct search."""
         result = await self.execute(
             query=query,
@@ -219,7 +217,7 @@ class SearchAgent(BaseAgent):
         self,
         query: str,
         max_results: int = 10,
-    ) -> List[SearchResult]:
+    ) -> list[SearchResult]:
         """Generic web search - tries Google, then Brave."""
         try:
             return await self._google_search(query, max_results)
@@ -234,7 +232,7 @@ class SearchAgent(BaseAgent):
         self,
         query: str,
         max_results: int = 10,
-    ) -> List[SearchResult]:
+    ) -> list[SearchResult]:
         """Search using Google Custom Search API."""
         api_key = settings.GOOGLE_API_KEY
         cse_id = settings.GOOGLE_CSE_ID
@@ -278,7 +276,7 @@ class SearchAgent(BaseAgent):
         self,
         query: str,
         max_results: int = 10,
-    ) -> List[SearchResult]:
+    ) -> list[SearchResult]:
         """Search using Brave Search API."""
         api_key = settings.BRAVE_API_KEY
 
@@ -323,7 +321,7 @@ class SearchAgent(BaseAgent):
         self,
         query: str,
         max_results: int = 10,
-    ) -> List[SearchResult]:
+    ) -> list[SearchResult]:
         """Search PubMed using E-utilities API."""
         base_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 
@@ -408,7 +406,7 @@ class SearchAgent(BaseAgent):
         self,
         query: str,
         max_results: int = 10,
-    ) -> List[SearchResult]:
+    ) -> list[SearchResult]:
         """Search ClinicalTrials.gov API."""
         url = "https://clinicaltrials.gov/api/v2/studies"
         params = {

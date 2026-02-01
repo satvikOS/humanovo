@@ -6,16 +6,15 @@ indexing, graph updates, and entity resolution.
 """
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Tuple, Callable
-from uuid import UUID, uuid4
+from typing import Any
+from uuid import uuid4
 
 from app.agents.ingestion.base import (
     IngestionRecord,
-    ExtractedEntity,
-    ExtractedRelation,
     SourceType,
 )
 from app.core.logging import get_logger
@@ -26,10 +25,10 @@ logger = get_logger(__name__)
 class UpdateMode(str, Enum):
     """How to handle existing entities/relations."""
 
-    CREATE_ONLY = "create_only"      # Only create new, skip existing
-    UPDATE = "update"                 # Update existing, create new
-    MERGE = "merge"                   # Merge properties with existing
-    REPLACE = "replace"               # Replace existing completely
+    CREATE_ONLY = "create_only"  # Only create new, skip existing
+    UPDATE = "update"  # Update existing, create new
+    MERGE = "merge"  # Merge properties with existing
+    REPLACE = "replace"  # Replace existing completely
 
 
 class ConflictResolution(str, Enum):
@@ -63,9 +62,9 @@ class EntityUpdate:
     entity_id: str
     entity_type: str
     canonical_name: str
-    aliases: List[str] = field(default_factory=list)
-    properties: Dict[str, Any] = field(default_factory=dict)
-    external_ids: Dict[str, str] = field(default_factory=dict)
+    aliases: list[str] = field(default_factory=list)
+    properties: dict[str, Any] = field(default_factory=dict)
+    external_ids: dict[str, str] = field(default_factory=dict)
     confidence: float = 1.0
     source_id: str = ""
     source_type: SourceType = SourceType.PUBMED
@@ -78,7 +77,7 @@ class RelationUpdate:
     source_entity_id: str
     target_entity_id: str
     relation_type: str
-    properties: Dict[str, Any] = field(default_factory=dict)
+    properties: dict[str, Any] = field(default_factory=dict)
     confidence: float = 1.0
     evidence_text: str = ""
     source_id: str = ""
@@ -97,7 +96,7 @@ class GraphUpdateResult:
     relations_created: int
     relations_updated: int
     source_edges_created: int
-    errors: List[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
     duration_ms: float = 0.0
 
 
@@ -115,7 +114,7 @@ class GraphConnector:
 
     def __init__(
         self,
-        config: Optional[GraphUpdateConfig] = None,
+        config: GraphUpdateConfig | None = None,
     ):
         """
         Initialize the graph connector.
@@ -131,10 +130,10 @@ class GraphConnector:
         self._nlp_pipeline = None
 
         # Callbacks
-        self._on_updated: List[Callable[[GraphUpdateResult], None]] = []
+        self._on_updated: list[Callable[[GraphUpdateResult], None]] = []
 
         # Cache for entity resolution
-        self._entity_cache: Dict[str, str] = {}  # normalized_name -> entity_id
+        self._entity_cache: dict[str, str] = {}  # normalized_name -> entity_id
 
         # Statistics
         self._stats = {
@@ -191,7 +190,7 @@ class GraphConnector:
     async def update_from_record(
         self,
         record: IngestionRecord,
-        config: Optional[GraphUpdateConfig] = None,
+        config: GraphUpdateConfig | None = None,
     ) -> GraphUpdateResult:
         """
         Update the knowledge graph from an ingestion record.
@@ -287,9 +286,9 @@ class GraphConnector:
             self._stats["last_updated_at"] = datetime.utcnow()
 
             if result.errors:
-                result.success = len(result.errors) < (
-                    len(entity_updates) + len(relation_updates)
-                ) / 2
+                result.success = (
+                    len(result.errors) < (len(entity_updates) + len(relation_updates)) / 2
+                )
 
             self.logger.info(
                 "Graph updated from record",
@@ -319,7 +318,7 @@ class GraphConnector:
     def _prepare_entity_updates(
         self,
         record: IngestionRecord,
-    ) -> List[EntityUpdate]:
+    ) -> list[EntityUpdate]:
         """Prepare entity updates from a record."""
         updates = []
 
@@ -331,13 +330,13 @@ class GraphConnector:
                 entity_id=entity.entity_id or str(uuid4()),
                 entity_type=entity.entity_type,
                 canonical_name=entity.text,
-                aliases=entity.aliases if hasattr(entity, 'aliases') else [],
+                aliases=entity.aliases if hasattr(entity, "aliases") else [],
                 properties={
                     "start_char": entity.start_char,
                     "end_char": entity.end_char,
                     "context": entity.context[:500] if entity.context else "",
                 },
-                external_ids=entity.external_ids if hasattr(entity, 'external_ids') else {},
+                external_ids=entity.external_ids if hasattr(entity, "external_ids") else {},
                 confidence=entity.confidence,
                 source_id=record.source_id,
                 source_type=record.source_type,
@@ -349,8 +348,8 @@ class GraphConnector:
     def _prepare_relation_updates(
         self,
         record: IngestionRecord,
-        entity_id_map: Dict[str, str],
-    ) -> List[RelationUpdate]:
+        entity_id_map: dict[str, str],
+    ) -> list[RelationUpdate]:
         """Prepare relation updates from a record."""
         updates = []
 
@@ -423,7 +422,7 @@ class GraphConnector:
     async def _resolve_entity(
         self,
         update: EntityUpdate,
-    ) -> Optional[str]:
+    ) -> str | None:
         """Attempt to resolve entity to existing graph entity."""
         # Check cache first
         normalized = update.canonical_name.lower().strip()
@@ -537,7 +536,7 @@ class GraphConnector:
 
     def _resolve_conflict(
         self,
-        existing: Dict[str, Any],
+        existing: dict[str, Any],
         update: RelationUpdate,
         resolution: ConflictResolution,
     ) -> bool:
@@ -564,7 +563,7 @@ class GraphConnector:
     async def _create_source_edges(
         self,
         record: IngestionRecord,
-        entity_id_map: Dict[str, str],
+        entity_id_map: dict[str, str],
         graph_store,
     ) -> int:
         """Create edges linking entities to their source document."""
@@ -603,10 +602,10 @@ class GraphConnector:
 
     async def update_batch(
         self,
-        records: List[IngestionRecord],
-        config: Optional[GraphUpdateConfig] = None,
-        progress_callback: Optional[Callable[[int, int], None]] = None,
-    ) -> List[GraphUpdateResult]:
+        records: list[IngestionRecord],
+        config: GraphUpdateConfig | None = None,
+        progress_callback: Callable[[int, int], None] | None = None,
+    ) -> list[GraphUpdateResult]:
         """
         Update graph from a batch of records.
 
@@ -632,10 +631,10 @@ class GraphConnector:
 
     async def update_batch_parallel(
         self,
-        records: List[IngestionRecord],
-        config: Optional[GraphUpdateConfig] = None,
+        records: list[IngestionRecord],
+        config: GraphUpdateConfig | None = None,
         max_concurrent: int = 3,
-    ) -> List[GraphUpdateResult]:
+    ) -> list[GraphUpdateResult]:
         """
         Update graph from records in parallel.
 
@@ -656,7 +655,7 @@ class GraphConnector:
         tasks = [update_with_semaphore(record) for record in records]
         return await asyncio.gather(*tasks)
 
-    async def delete_source_data(self, source_id: str) -> Dict[str, int]:
+    async def delete_source_data(self, source_id: str) -> dict[str, int]:
         """
         Delete all graph data from a specific source.
 
@@ -679,16 +678,17 @@ class GraphConnector:
 
         return deleted
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get update statistics."""
         return {
             **self._stats,
             "last_updated_at": self._stats["last_updated_at"].isoformat()
-            if self._stats["last_updated_at"] else None,
+            if self._stats["last_updated_at"]
+            else None,
             "entity_cache_size": len(self._entity_cache),
         }
 
-    async def health_check(self) -> Dict[str, Any]:
+    async def health_check(self) -> dict[str, Any]:
         """Check connector health."""
         health = {
             "status": "healthy",
@@ -712,10 +712,10 @@ class GraphConnector:
 
 
 # Global connector instance
-_graph_connector: Optional[GraphConnector] = None
+_graph_connector: GraphConnector | None = None
 
 
-def get_graph_connector(config: Optional[GraphUpdateConfig] = None) -> GraphConnector:
+def get_graph_connector(config: GraphUpdateConfig | None = None) -> GraphConnector:
     """Get the global graph connector instance."""
     global _graph_connector
     if _graph_connector is None:
@@ -724,10 +724,10 @@ def get_graph_connector(config: Optional[GraphUpdateConfig] = None) -> GraphConn
 
 
 async def update_graph_from_records(
-    records: List[IngestionRecord],
+    records: list[IngestionRecord],
     parallel: bool = True,
     max_concurrent: int = 3,
-) -> List[GraphUpdateResult]:
+) -> list[GraphUpdateResult]:
     """
     Convenience function to update graph from records.
 

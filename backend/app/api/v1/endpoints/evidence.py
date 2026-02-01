@@ -6,7 +6,6 @@ Manage evidence items (papers, trials, data) in GenUp.
 
 from datetime import datetime
 from enum import Enum
-from typing import List, Optional
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -39,24 +38,24 @@ class EvidenceCreate(BaseModel):
     project_id: UUID
     title: str = Field(..., min_length=5, max_length=500)
     source_type: EvidenceSource
-    source_id: Optional[str] = Field(None, description="External ID (e.g., PMID, NCT number)")
-    source_url: Optional[HttpUrl] = None
-    abstract: Optional[str] = None
-    full_text: Optional[str] = None
-    authors: List[str] = Field(default_factory=list)
-    publication_date: Optional[datetime] = None
-    entities: List[str] = Field(default_factory=list, description="Extracted entities")
-    tags: List[str] = Field(default_factory=list)
+    source_id: str | None = Field(None, description="External ID (e.g., PMID, NCT number)")
+    source_url: HttpUrl | None = None
+    abstract: str | None = None
+    full_text: str | None = None
+    authors: list[str] = Field(default_factory=list)
+    publication_date: datetime | None = None
+    entities: list[str] = Field(default_factory=list, description="Extracted entities")
+    tags: list[str] = Field(default_factory=list)
 
 
 class EvidenceSearchRequest(BaseModel):
     """Schema for searching evidence."""
 
     query: str = Field(..., min_length=2, max_length=500)
-    source_types: List[EvidenceSource] = Field(default_factory=list)
-    date_from: Optional[datetime] = None
-    date_to: Optional[datetime] = None
-    entities: List[str] = Field(default_factory=list)
+    source_types: list[EvidenceSource] = Field(default_factory=list)
+    date_from: datetime | None = None
+    date_to: datetime | None = None
+    entities: list[str] = Field(default_factory=list)
     semantic_search: bool = Field(default=True, description="Use vector similarity search")
     limit: int = Field(default=20, ge=1, le=100)
 
@@ -65,19 +64,19 @@ class EvidenceResponse(BaseModel):
     """Schema for evidence response."""
 
     id: UUID
-    project_id: Optional[UUID]
+    project_id: UUID | None
     title: str
     source_type: EvidenceSource
-    source_id: Optional[str]
-    source_url: Optional[str]
-    abstract: Optional[str]
-    snippet: Optional[str]
-    authors: List[str]
-    publication_date: Optional[datetime]
-    entities: List[str]
-    tags: List[str]
-    relevance_score: Optional[float]
-    embedding_id: Optional[str]
+    source_id: str | None
+    source_url: str | None
+    abstract: str | None
+    snippet: str | None
+    authors: list[str]
+    publication_date: datetime | None
+    entities: list[str]
+    tags: list[str]
+    relevance_score: float | None
+    embedding_id: str | None
     created_at: datetime
     updated_at: datetime
 
@@ -85,7 +84,7 @@ class EvidenceResponse(BaseModel):
 class EvidenceListResponse(BaseModel):
     """Schema for paginated evidence list."""
 
-    items: List[EvidenceResponse]
+    items: list[EvidenceResponse]
     total: int
     page: int
     page_size: int
@@ -94,7 +93,7 @@ class EvidenceListResponse(BaseModel):
 class EvidenceSearchResponse(BaseModel):
     """Schema for evidence search results."""
 
-    items: List[EvidenceResponse]
+    items: list[EvidenceResponse]
     total: int
     query: str
     search_type: str
@@ -160,7 +159,9 @@ async def search_evidence(
             query=request.query,
             limit=request.limit,
             filters={
-                "source_types": [s.value for s in request.source_types] if request.source_types else None,
+                "source_types": [s.value for s in request.source_types]
+                if request.source_types
+                else None,
                 "entities": request.entities if request.entities else None,
             },
         )
@@ -169,11 +170,11 @@ async def search_evidence(
         # Keyword search in stored evidence
         query_lower = request.query.lower()
         results = [
-            e for e in _evidence.values()
-            if query_lower in e.title.lower()
-            or (e.abstract and query_lower in e.abstract.lower())
+            e
+            for e in _evidence.values()
+            if query_lower in e.title.lower() or (e.abstract and query_lower in e.abstract.lower())
         ]
-        results = results[:request.limit]
+        results = results[: request.limit]
         search_type = "keyword"
 
     return EvidenceSearchResponse(
@@ -186,8 +187,8 @@ async def search_evidence(
 
 @router.get("", response_model=EvidenceListResponse)
 async def list_evidence(
-    project_id: Optional[UUID] = None,
-    source_type: Optional[EvidenceSource] = None,
+    project_id: UUID | None = None,
+    source_type: EvidenceSource | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -244,12 +245,12 @@ async def delete_evidence(
     logger.info("Evidence deleted", evidence_id=str(evidence_id))
 
 
-@router.get("/{evidence_id}/related", response_model=List[EvidenceResponse])
+@router.get("/{evidence_id}/related", response_model=list[EvidenceResponse])
 async def get_related_evidence(
     evidence_id: UUID,
     limit: int = Query(10, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
-) -> List[EvidenceResponse]:
+) -> list[EvidenceResponse]:
     """Get evidence items related to a specific evidence item.
 
     Uses vector similarity to find semantically related evidence.

@@ -6,10 +6,11 @@ Tracks tasks executed by various AI agents in the system.
 
 from datetime import datetime
 from enum import Enum as PyEnum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from sqlalchemy import Column, DateTime, Enum, Float, ForeignKey, Integer, String, Text
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID as PGUUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import relationship
 
 from app.models.base import BaseModel
@@ -137,14 +138,14 @@ class AgentTask(BaseModel):
         self.status = AgentTaskStatus.QUEUED
         self.queued_at = datetime.utcnow()
 
-    def start(self, agent_id: str, worker_id: Optional[str] = None) -> None:
+    def start(self, agent_id: str, worker_id: str | None = None) -> None:
         """Mark task as started."""
         self.status = AgentTaskStatus.RUNNING
         self.agent_id = agent_id
         self.worker_id = worker_id
         self.started_at = datetime.utcnow()
 
-    def complete(self, output_data: Dict[str, Any]) -> None:
+    def complete(self, output_data: dict[str, Any]) -> None:
         """Mark task as completed."""
         self.status = AgentTaskStatus.COMPLETED
         self.completed_at = datetime.utcnow()
@@ -155,7 +156,7 @@ class AgentTask(BaseModel):
             delta = self.completed_at - self.started_at
             self.runtime_seconds = delta.total_seconds()
 
-    def fail(self, error_message: str, error_details: Optional[Dict] = None) -> None:
+    def fail(self, error_message: str, error_details: dict | None = None) -> None:
         """Mark task as failed."""
         self.status = AgentTaskStatus.FAILED
         self.completed_at = datetime.utcnow()
@@ -205,7 +206,4 @@ class AgentTask(BaseModel):
 
     def can_retry(self) -> bool:
         """Check if task can be retried."""
-        return (
-            self.status == AgentTaskStatus.FAILED
-            and self.retry_count < self.max_retries
-        )
+        return self.status == AgentTaskStatus.FAILED and self.retry_count < self.max_retries

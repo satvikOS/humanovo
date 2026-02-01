@@ -7,11 +7,11 @@ Generates biomedical hypotheses using AWS Bedrock (Claude) with RAG.
 import json
 import os
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any
 from uuid import uuid4
 
 import boto3
-from aws_lambda_powertools import Logger, Tracer, Metrics
+from aws_lambda_powertools import Logger, Metrics, Tracer
 from aws_lambda_powertools.event_handler import APIGatewayHttpResolver
 from aws_lambda_powertools.utilities.typing import LambdaContext
 
@@ -38,12 +38,7 @@ def invoke_bedrock(prompt: str, max_tokens: int = 2000) -> str:
         "anthropic_version": "bedrock-2023-05-31",
         "max_tokens": max_tokens,
         "temperature": 0.7,
-        "messages": [
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
+        "messages": [{"role": "user", "content": prompt}],
         "system": """You are a biomedical research assistant specialized in generating novel,
 scientifically grounded hypotheses. Your hypotheses should be:
 1. Testable and specific
@@ -57,14 +52,14 @@ Format each hypothesis with:
 - MECHANISM: Proposed biological mechanism
 - RATIONALE: Evidence-based reasoning
 - CONFIDENCE: Low/Medium/High
-"""
+""",
     }
 
     response = bedrock_runtime.invoke_model(
         modelId=BEDROCK_MODEL_ID,
         contentType="application/json",
         accept="application/json",
-        body=json.dumps(body)
+        body=json.dumps(body),
     )
 
     response_body = json.loads(response["body"].read())
@@ -72,7 +67,7 @@ Format each hypothesis with:
 
 
 @tracer.capture_method
-def retrieve_evidence(query: str, project_id: str = None, limit: int = 10) -> List[Dict]:
+def retrieve_evidence(query: str, project_id: str = None, limit: int = 10) -> list[dict]:
     """Retrieve relevant evidence from DynamoDB."""
     table = dynamodb.Table(EVIDENCE_TABLE)
 
@@ -102,7 +97,7 @@ def retrieve_evidence(query: str, project_id: str = None, limit: int = 10) -> Li
 
 
 @tracer.capture_method
-def parse_hypotheses(response_text: str) -> List[Dict]:
+def parse_hypotheses(response_text: str) -> list[dict]:
     """Parse LLM response into structured hypotheses."""
     hypotheses = []
     current = {}
@@ -136,7 +131,7 @@ def parse_hypotheses(response_text: str) -> List[Dict]:
 
 
 @tracer.capture_method
-def save_hypothesis(hypothesis: Dict, project_id: str, evidence_ids: List[str]) -> Dict:
+def save_hypothesis(hypothesis: dict, project_id: str, evidence_ids: list[str]) -> dict:
     """Save hypothesis to DynamoDB."""
     table = dynamodb.Table(HYPOTHESES_TABLE)
 
@@ -183,10 +178,12 @@ def generate_hypotheses():
     evidence_ids = [e.get("id", "") for e in evidence]
 
     # Build prompt with evidence
-    evidence_text = "\n".join([
-        f"- [{e.get('source_type', 'unknown')}] {e.get('title', 'Untitled')}: {e.get('content', '')[:300]}"
-        for e in evidence[:10]
-    ])
+    evidence_text = "\n".join(
+        [
+            f"- [{e.get('source_type', 'unknown')}] {e.get('title', 'Untitled')}: {e.get('content', '')[:300]}"
+            for e in evidence[:10]
+        ]
+    )
 
     entities_text = ""
     if focus_entities:
@@ -226,6 +223,6 @@ Each hypothesis should propose a specific mechanism and cite the relevant eviden
 @logger.inject_lambda_context
 @tracer.capture_lambda_handler
 @metrics.log_metrics(capture_cold_start_metric=True)
-def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
+def handler(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
     """Lambda handler entry point."""
     return app.resolve(event, context)

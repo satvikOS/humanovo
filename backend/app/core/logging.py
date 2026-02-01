@@ -6,7 +6,6 @@ Structured logging with structlog for JSON output and rich console formatting.
 
 import logging
 import sys
-from typing import Any
 
 import structlog
 

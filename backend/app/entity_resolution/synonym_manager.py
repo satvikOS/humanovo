@@ -12,14 +12,15 @@ Manages synonyms for biomedical entities:
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Any, Tuple
 from enum import Enum
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 class SynonymType(str, Enum):
     """Types of synonyms."""
+
     EXACT = "exact"  # Exact synonym
     RELATED = "related"  # Related term
     BROADER = "broader"  # More general term
@@ -39,15 +40,16 @@ class SynonymType(str, Enum):
 @dataclass
 class SynonymEntry:
     """Represents a synonym entry."""
+
     term: str
     synonym_type: SynonymType
-    source: Optional[str] = None
+    source: str | None = None
     language: str = "en"
     confidence: float = 1.0
-    context: Optional[str] = None  # Domain context
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    context: str | None = None  # Domain context
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "term": self.term,
             "synonym_type": self.synonym_type.value,
@@ -55,31 +57,32 @@ class SynonymEntry:
             "language": self.language,
             "confidence": self.confidence,
             "context": self.context,
-            "metadata": self.metadata
+            "metadata": self.metadata,
         }
 
 
 @dataclass
 class SynonymCluster:
     """A cluster of synonymous terms."""
-    canonical_term: str
-    synonyms: List[SynonymEntry] = field(default_factory=list)
-    entity_type: Optional[str] = None
-    identifiers: Dict[str, str] = field(default_factory=dict)
 
-    def get_all_terms(self) -> Set[str]:
+    canonical_term: str
+    synonyms: list[SynonymEntry] = field(default_factory=list)
+    entity_type: str | None = None
+    identifiers: dict[str, str] = field(default_factory=dict)
+
+    def get_all_terms(self) -> set[str]:
         """Get all terms in cluster."""
         terms = {self.canonical_term}
         terms.update(s.term for s in self.synonyms)
         return terms
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "canonical_term": self.canonical_term,
             "synonyms": [s.to_dict() for s in self.synonyms],
             "entity_type": self.entity_type,
             "identifiers": self.identifiers,
-            "all_terms": list(self.get_all_terms())
+            "all_terms": list(self.get_all_terms()),
         }
 
 
@@ -107,7 +110,6 @@ class SynonymManager:
         "ALK": ["Anaplastic Lymphoma Kinase"],
         "ROS1": ["ROS Proto-Oncogene 1"],
         "MET": ["Mesenchymal Epithelial Transition factor"],
-
         # Drugs
         "ADC": ["Antibody-Drug Conjugate", "antibody drug conjugate"],
         "mAb": ["monoclonal antibody", "MAb", "MoAb"],
@@ -115,7 +117,6 @@ class SynonymManager:
         "PD-1": ["Programmed Death 1", "PD1", "PDCD1"],
         "PD-L1": ["Programmed Death Ligand 1", "PDL1", "CD274"],
         "CTLA-4": ["Cytotoxic T-Lymphocyte Antigen 4", "CTLA4", "CD152"],
-
         # Diseases
         "NSCLC": ["Non-Small Cell Lung Cancer", "non-small cell lung carcinoma"],
         "SCLC": ["Small Cell Lung Cancer", "small cell lung carcinoma"],
@@ -128,7 +129,6 @@ class SynonymManager:
         "ALL": ["Acute Lymphoblastic Leukemia", "acute lymphocytic leukemia"],
         "NHL": ["Non-Hodgkin Lymphoma", "non-Hodgkin's lymphoma"],
         "DLBCL": ["Diffuse Large B-Cell Lymphoma"],
-
         # Clinical terms
         "OS": ["Overall Survival"],
         "PFS": ["Progression-Free Survival"],
@@ -144,7 +144,6 @@ class SynonymManager:
         "DLT": ["Dose-Limiting Toxicity"],
         "MTD": ["Maximum Tolerated Dose"],
         "RP2D": ["Recommended Phase 2 Dose"],
-
         # Pathways
         "PI3K": ["Phosphatidylinositol 3-Kinase", "PI3-K", "phosphoinositide 3-kinase"],
         "mTOR": ["Mammalian Target of Rapamycin", "mechanistic target of rapamycin"],
@@ -153,7 +152,6 @@ class SynonymManager:
         "MEK": ["MAPK/ERK Kinase", "MAP2K"],
         "RAF": ["Rapidly Accelerated Fibrosarcoma"],
         "RAS": ["Rat Sarcoma"],
-
         # Biomarkers
         "IHC": ["Immunohistochemistry"],
         "FISH": ["Fluorescence In Situ Hybridization"],
@@ -169,55 +167,53 @@ class SynonymManager:
     # Spelling variants and normalization rules
     NORMALIZATION_RULES = [
         # British/American spelling
-        (r'tumour', 'tumor'),
-        (r'colour', 'color'),
-        (r'haemoglobin', 'hemoglobin'),
-        (r'oestrogen', 'estrogen'),
-        (r'leukaemia', 'leukemia'),
-        (r'anaemia', 'anemia'),
-        (r'paediatric', 'pediatric'),
-        (r'foetus', 'fetus'),
-        (r'coeliac', 'celiac'),
-        (r'diarrhoea', 'diarrhea'),
-        (r'oedema', 'edema'),
-        (r'behaviour', 'behavior'),
-        (r'favour', 'favor'),
-        (r'honour', 'honor'),
-        (r'defence', 'defense'),
-        (r'licence', 'license'),
-        (r'practise', 'practice'),
-        (r'analyse', 'analyze'),
-        (r'catalyse', 'catalyze'),
-        (r'organise', 'organize'),
-        (r'recognise', 'recognize'),
-        (r'metre', 'meter'),
-        (r'litre', 'liter'),
-        (r'centre', 'center'),
-        (r'fibre', 'fiber'),
-
+        (r"tumour", "tumor"),
+        (r"colour", "color"),
+        (r"haemoglobin", "hemoglobin"),
+        (r"oestrogen", "estrogen"),
+        (r"leukaemia", "leukemia"),
+        (r"anaemia", "anemia"),
+        (r"paediatric", "pediatric"),
+        (r"foetus", "fetus"),
+        (r"coeliac", "celiac"),
+        (r"diarrhoea", "diarrhea"),
+        (r"oedema", "edema"),
+        (r"behaviour", "behavior"),
+        (r"favour", "favor"),
+        (r"honour", "honor"),
+        (r"defence", "defense"),
+        (r"licence", "license"),
+        (r"practise", "practice"),
+        (r"analyse", "analyze"),
+        (r"catalyse", "catalyze"),
+        (r"organise", "organize"),
+        (r"recognise", "recognize"),
+        (r"metre", "meter"),
+        (r"litre", "liter"),
+        (r"centre", "center"),
+        (r"fibre", "fiber"),
         # Common variations
-        (r'non-small[\s-]?cell', 'non-small cell'),
-        (r'non[\s-]?hodgkin', 'non-hodgkin'),
-        (r'anti[\s-]?body', 'antibody'),
-        (r'intra[\s-]?venous', 'intravenous'),
-        (r'sub[\s-]?cutaneous', 'subcutaneous'),
-        (r'immuno[\s-]?therapy', 'immunotherapy'),
-        (r'chemo[\s-]?therapy', 'chemotherapy'),
-        (r'radio[\s-]?therapy', 'radiotherapy'),
-
+        (r"non-small[\s-]?cell", "non-small cell"),
+        (r"non[\s-]?hodgkin", "non-hodgkin"),
+        (r"anti[\s-]?body", "antibody"),
+        (r"intra[\s-]?venous", "intravenous"),
+        (r"sub[\s-]?cutaneous", "subcutaneous"),
+        (r"immuno[\s-]?therapy", "immunotherapy"),
+        (r"chemo[\s-]?therapy", "chemotherapy"),
+        (r"radio[\s-]?therapy", "radiotherapy"),
         # Greek letters
-        (r'α', 'alpha'),
-        (r'β', 'beta'),
-        (r'γ', 'gamma'),
-        (r'δ', 'delta'),
-        (r'κ', 'kappa'),
+        (r"α", "alpha"),
+        (r"β", "beta"),
+        (r"γ", "gamma"),
+        (r"δ", "delta"),
+        (r"κ", "kappa"),
     ]
 
     def __init__(
         self,
-        custom_synonyms: Optional[Dict[str, List[str]]] = None,
+        custom_synonyms: dict[str, list[str]] | None = None,
         enable_normalization: bool = True,
-        case_sensitive: bool = False
+        case_sensitive: bool = False,
     ):
         """
         Initialize the synonym manager.
@@ -231,9 +227,9 @@ class SynonymManager:
         self.case_sensitive = case_sensitive
 
         # Build synonym index
-        self._synonym_to_canonical: Dict[str, str] = {}
-        self._canonical_to_synonyms: Dict[str, Set[str]] = {}
-        self._clusters: Dict[str, SynonymCluster] = {}
+        self._synonym_to_canonical: dict[str, str] = {}
+        self._canonical_to_synonyms: dict[str, set[str]] = {}
+        self._clusters: dict[str, SynonymCluster] = {}
 
         # Load built-in abbreviations
         self._load_abbreviations()
@@ -266,7 +262,7 @@ class SynonymManager:
                 self._synonym_to_canonical[exp_key] = canonical
                 self._canonical_to_synonyms[canonical].add(exp_key)
 
-    def _load_custom_synonyms(self, synonyms: Dict[str, List[str]]):
+    def _load_custom_synonyms(self, synonyms: dict[str, list[str]]):
         """Load custom synonyms."""
         for canonical, syn_list in synonyms.items():
             can_key = canonical if self.case_sensitive else canonical.lower()
@@ -299,7 +295,7 @@ class SynonymManager:
 
         return result
 
-    def get_canonical(self, term: str) -> Optional[str]:
+    def get_canonical(self, term: str) -> str | None:
         """
         Get canonical form of a term.
 
@@ -323,11 +319,7 @@ class SynonymManager:
 
         return None
 
-    def get_synonyms(
-        self,
-        term: str,
-        include_types: Optional[List[SynonymType]] = None
-    ) -> Set[str]:
+    def get_synonyms(self, term: str, include_types: list[SynonymType] | None = None) -> set[str]:
         """
         Get all synonyms for a term.
 
@@ -347,7 +339,7 @@ class SynonymManager:
 
         return synonyms
 
-    def expand_query(self, query: str) -> List[str]:
+    def expand_query(self, query: str) -> list[str]:
         """
         Expand a query with synonyms.
 
@@ -376,10 +368,7 @@ class SynonymManager:
         return list(set(variations))
 
     def add_synonym(
-        self,
-        canonical: str,
-        synonym: str,
-        synonym_type: SynonymType = SynonymType.EXACT
+        self, canonical: str, synonym: str, synonym_type: SynonymType = SynonymType.EXACT
     ):
         """
         Add a synonym mapping.
@@ -404,9 +393,9 @@ class SynonymManager:
     def create_cluster(
         self,
         canonical: str,
-        synonyms: List[SynonymEntry],
-        entity_type: Optional[str] = None,
-        identifiers: Optional[Dict[str, str]] = None
+        synonyms: list[SynonymEntry],
+        entity_type: str | None = None,
+        identifiers: dict[str, str] | None = None,
     ) -> SynonymCluster:
         """
         Create a synonym cluster.
@@ -424,7 +413,7 @@ class SynonymManager:
             canonical_term=canonical,
             synonyms=synonyms,
             entity_type=entity_type,
-            identifiers=identifiers or {}
+            identifiers=identifiers or {},
         )
 
         # Index the cluster
@@ -437,7 +426,7 @@ class SynonymManager:
 
         return cluster
 
-    def get_cluster(self, term: str) -> Optional[SynonymCluster]:
+    def get_cluster(self, term: str) -> SynonymCluster | None:
         """
         Get the synonym cluster for a term.
 
@@ -472,7 +461,7 @@ class SynonymManager:
 
         return canonical1 == canonical2
 
-    def detect_abbreviation(self, text: str) -> List[Tuple[str, str]]:
+    def detect_abbreviation(self, text: str) -> list[tuple[str, str]]:
         """
         Detect abbreviations in text.
 
@@ -485,7 +474,7 @@ class SynonymManager:
         found = []
 
         for abbrev in self.ABBREVIATIONS.keys():
-            pattern = re.compile(r'\b' + re.escape(abbrev) + r'\b', re.IGNORECASE)
+            pattern = re.compile(r"\b" + re.escape(abbrev) + r"\b", re.IGNORECASE)
             for match in pattern.finditer(text):
                 found.append((match.group(), match.start()))
 
@@ -504,7 +493,7 @@ class SynonymManager:
         result = text
 
         for abbrev, expansions in self.ABBREVIATIONS.items():
-            pattern = re.compile(r'\b' + re.escape(abbrev) + r'\b')
+            pattern = re.compile(r"\b" + re.escape(abbrev) + r"\b")
             # Replace with first expansion
             if expansions:
                 replacement = f"{abbrev} ({expansions[0]})"
@@ -512,7 +501,7 @@ class SynonymManager:
 
         return result
 
-    def get_statistics(self) -> Dict[str, Any]:
+    def get_statistics(self) -> dict[str, Any]:
         """Get manager statistics."""
         return {
             "total_mappings": len(self._synonym_to_canonical),
@@ -520,18 +509,18 @@ class SynonymManager:
             "total_clusters": len(self._clusters),
             "builtin_abbreviations": len(self.ABBREVIATIONS),
             "normalization_enabled": self.enable_normalization,
-            "normalization_rules": len(self.NORMALIZATION_RULES)
+            "normalization_rules": len(self.NORMALIZATION_RULES),
         }
 
 
 # Convenience functions
-def get_canonical(term: str) -> Optional[str]:
+def get_canonical(term: str) -> str | None:
     """Get canonical form using default manager."""
     manager = SynonymManager()
     return manager.get_canonical(term)
 
 
-def get_synonyms(term: str) -> Set[str]:
+def get_synonyms(term: str) -> set[str]:
     """Get synonyms using default manager."""
     manager = SynonymManager()
     return manager.get_synonyms(term)

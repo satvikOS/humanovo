@@ -8,15 +8,14 @@ Manages versioned snapshots of literature data:
 - Track changes over time
 """
 
-import logging
+import gzip
 import hashlib
 import json
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Optional, Any, Set
 from pathlib import Path
-import pickle
-import gzip
+from typing import Any
 
 from .sources import LiteratureRecord
 
@@ -26,19 +25,20 @@ logger = logging.getLogger(__name__)
 @dataclass
 class SnapshotMetadata:
     """Metadata for a snapshot."""
+
     snapshot_id: str
     created_at: str
     description: str
     record_count: int
-    source_types: List[str]
-    query_info: Dict[str, Any] = field(default_factory=dict)
-    selection_criteria: Dict[str, Any] = field(default_factory=dict)
+    source_types: list[str]
+    query_info: dict[str, Any] = field(default_factory=dict)
+    selection_criteria: dict[str, Any] = field(default_factory=dict)
     content_hash: str = ""
-    parent_snapshot_id: Optional[str] = None
-    tags: List[str] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    parent_snapshot_id: str | None = None
+    tags: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "snapshot_id": self.snapshot_id,
             "created_at": self.created_at,
@@ -50,25 +50,26 @@ class SnapshotMetadata:
             "content_hash": self.content_hash,
             "parent_snapshot_id": self.parent_snapshot_id,
             "tags": self.tags,
-            "metadata": self.metadata
+            "metadata": self.metadata,
         }
 
 
 @dataclass
 class DataSnapshot:
     """A snapshot of literature data."""
-    metadata: SnapshotMetadata
-    records: List[LiteratureRecord] = field(default_factory=list)
-    record_ids: Set[str] = field(default_factory=set)
 
-    def to_dict(self) -> Dict[str, Any]:
+    metadata: SnapshotMetadata
+    records: list[LiteratureRecord] = field(default_factory=list)
+    record_ids: set[str] = field(default_factory=set)
+
+    def to_dict(self) -> dict[str, Any]:
         return {
             "metadata": self.metadata.to_dict(),
             "records": [r.to_dict() for r in self.records],
-            "record_ids": list(self.record_ids)
+            "record_ids": list(self.record_ids),
         }
 
-    def get_record(self, record_id: str) -> Optional[LiteratureRecord]:
+    def get_record(self, record_id: str) -> LiteratureRecord | None:
         """Get a specific record by ID."""
         for record in self.records:
             if record.record_id == record_id:
@@ -79,21 +80,22 @@ class DataSnapshot:
 @dataclass
 class SnapshotDiff:
     """Difference between two snapshots."""
+
     from_snapshot_id: str
     to_snapshot_id: str
-    added_records: List[str]
-    removed_records: List[str]
-    modified_records: List[str]
-    summary: Dict[str, Any] = field(default_factory=dict)
+    added_records: list[str]
+    removed_records: list[str]
+    modified_records: list[str]
+    summary: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "from_snapshot_id": self.from_snapshot_id,
             "to_snapshot_id": self.to_snapshot_id,
             "added_records": self.added_records,
             "removed_records": self.removed_records,
             "modified_records": self.modified_records,
-            "summary": self.summary
+            "summary": self.summary,
         }
 
 
@@ -109,10 +111,7 @@ class SnapshotManager:
     """
 
     def __init__(
-        self,
-        storage_path: Optional[str] = None,
-        compress: bool = True,
-        max_snapshots: int = 100
+        self, storage_path: str | None = None, compress: bool = True, max_snapshots: int = 100
     ):
         """
         Initialize snapshot manager.
@@ -127,9 +126,9 @@ class SnapshotManager:
         self.max_snapshots = max_snapshots
 
         # In-memory storage
-        self._snapshots: Dict[str, DataSnapshot] = {}
-        self._metadata_index: Dict[str, SnapshotMetadata] = {}
-        self._timeline: List[str] = []  # Ordered list of snapshot IDs
+        self._snapshots: dict[str, DataSnapshot] = {}
+        self._metadata_index: dict[str, SnapshotMetadata] = {}
+        self._timeline: list[str] = []  # Ordered list of snapshot IDs
 
         # Create storage directory if needed
         if self.storage_path:
@@ -139,12 +138,12 @@ class SnapshotManager:
 
     def create_snapshot(
         self,
-        records: List[LiteratureRecord],
+        records: list[LiteratureRecord],
         description: str,
-        query_info: Optional[Dict[str, Any]] = None,
-        selection_criteria: Optional[Dict[str, Any]] = None,
-        parent_snapshot_id: Optional[str] = None,
-        tags: Optional[List[str]] = None
+        query_info: dict[str, Any] | None = None,
+        selection_criteria: dict[str, Any] | None = None,
+        parent_snapshot_id: str | None = None,
+        tags: list[str] | None = None,
     ) -> DataSnapshot:
         """
         Create a new snapshot.
@@ -181,14 +180,12 @@ class SnapshotManager:
             selection_criteria=selection_criteria or {},
             content_hash=content_hash,
             parent_snapshot_id=parent_snapshot_id,
-            tags=tags or []
+            tags=tags or [],
         )
 
         # Create snapshot
         snapshot = DataSnapshot(
-            metadata=metadata,
-            records=records,
-            record_ids={r.record_id for r in records}
+            metadata=metadata, records=records, record_ids={r.record_id for r in records}
         )
 
         # Store
@@ -207,7 +204,7 @@ class SnapshotManager:
 
         return snapshot
 
-    def get_snapshot(self, snapshot_id: str) -> Optional[DataSnapshot]:
+    def get_snapshot(self, snapshot_id: str) -> DataSnapshot | None:
         """
         Get a snapshot by ID.
 
@@ -228,10 +225,8 @@ class SnapshotManager:
         return None
 
     def list_snapshots(
-        self,
-        tags: Optional[List[str]] = None,
-        limit: int = 50
-    ) -> List[SnapshotMetadata]:
+        self, tags: list[str] | None = None, limit: int = 50
+    ) -> list[SnapshotMetadata]:
         """
         List available snapshots.
 
@@ -246,21 +241,14 @@ class SnapshotManager:
 
         # Filter by tags
         if tags:
-            metadata_list = [
-                m for m in metadata_list
-                if any(t in m.tags for t in tags)
-            ]
+            metadata_list = [m for m in metadata_list if any(t in m.tags for t in tags)]
 
         # Sort by creation time (newest first)
         metadata_list.sort(key=lambda m: m.created_at, reverse=True)
 
         return metadata_list[:limit]
 
-    def compare_snapshots(
-        self,
-        from_snapshot_id: str,
-        to_snapshot_id: str
-    ) -> Optional[SnapshotDiff]:
+    def compare_snapshots(self, from_snapshot_id: str, to_snapshot_id: str) -> SnapshotDiff | None:
         """
         Compare two snapshots.
 
@@ -298,7 +286,7 @@ class SnapshotManager:
             "added_count": len(added),
             "removed_count": len(removed),
             "modified_count": len(modified),
-            "unchanged_count": len(common) - len(modified)
+            "unchanged_count": len(common) - len(modified),
         }
 
         return SnapshotDiff(
@@ -307,10 +295,10 @@ class SnapshotManager:
             added_records=list(added),
             removed_records=list(removed),
             modified_records=modified,
-            summary=summary
+            summary=summary,
         )
 
-    def get_latest_snapshot(self) -> Optional[DataSnapshot]:
+    def get_latest_snapshot(self) -> DataSnapshot | None:
         """Get the most recent snapshot."""
         if not self._timeline:
             return None
@@ -344,10 +332,7 @@ class SnapshotManager:
         logger.info(f"Deleted snapshot {snapshot_id}")
         return True
 
-    def get_snapshot_lineage(
-        self,
-        snapshot_id: str
-    ) -> List[SnapshotMetadata]:
+    def get_snapshot_lineage(self, snapshot_id: str) -> list[SnapshotMetadata]:
         """
         Get lineage (ancestry) of a snapshot.
 
@@ -381,13 +366,13 @@ class SnapshotManager:
         data = snapshot.to_dict()
 
         if self.compress:
-            with gzip.open(filepath, 'wt', encoding='utf-8') as f:
+            with gzip.open(filepath, "wt", encoding="utf-8") as f:
                 json.dump(data, f)
         else:
-            with open(filepath, 'w', encoding='utf-8') as f:
+            with open(filepath, "w", encoding="utf-8") as f:
                 json.dump(data, f)
 
-    def _load_snapshot(self, snapshot_id: str) -> Optional[DataSnapshot]:
+    def _load_snapshot(self, snapshot_id: str) -> DataSnapshot | None:
         """Load snapshot from storage."""
         if not self.storage_path:
             return None
@@ -400,22 +385,18 @@ class SnapshotManager:
 
         try:
             if self.compress:
-                with gzip.open(filepath, 'rt', encoding='utf-8') as f:
+                with gzip.open(filepath, "rt", encoding="utf-8") as f:
                     data = json.load(f)
             else:
-                with open(filepath, 'r', encoding='utf-8') as f:
+                with open(filepath, encoding="utf-8") as f:
                     data = json.load(f)
 
             # Reconstruct snapshot
             metadata = SnapshotMetadata(**data["metadata"])
-            records = [
-                LiteratureRecord(**r) for r in data["records"]
-            ]
+            records = [LiteratureRecord(**r) for r in data["records"]]
 
             snapshot = DataSnapshot(
-                metadata=metadata,
-                records=records,
-                record_ids=set(data["record_ids"])
+                metadata=metadata, records=records, record_ids=set(data["record_ids"])
             )
 
             # Cache in memory
@@ -434,11 +415,7 @@ class SnapshotManager:
             oldest_id = self._timeline.pop(0)
             self.delete_snapshot(oldest_id)
 
-    def export_snapshot(
-        self,
-        snapshot_id: str,
-        format: str = "json"
-    ) -> Optional[str]:
+    def export_snapshot(self, snapshot_id: str, format: str = "json") -> str | None:
         """
         Export snapshot to string.
 
@@ -459,40 +436,49 @@ class SnapshotManager:
         elif format == "csv":
             import csv
             import io
+
             output = io.StringIO()
             writer = csv.writer(output)
 
             # Header
-            writer.writerow([
-                "record_id", "source_type", "title", "authors",
-                "publication_date", "journal", "pmid", "doi"
-            ])
+            writer.writerow(
+                [
+                    "record_id",
+                    "source_type",
+                    "title",
+                    "authors",
+                    "publication_date",
+                    "journal",
+                    "pmid",
+                    "doi",
+                ]
+            )
 
             # Data
             for record in snapshot.records:
-                writer.writerow([
-                    record.record_id,
-                    record.source_type.value,
-                    record.title,
-                    "; ".join(record.authors),
-                    record.publication_date,
-                    record.journal,
-                    record.pmid,
-                    record.doi
-                ])
+                writer.writerow(
+                    [
+                        record.record_id,
+                        record.source_type.value,
+                        record.title,
+                        "; ".join(record.authors),
+                        record.publication_date,
+                        record.journal,
+                        record.pmid,
+                        record.doi,
+                    ]
+                )
 
             return output.getvalue()
 
         return None
 
-    def get_statistics(self) -> Dict[str, Any]:
+    def get_statistics(self) -> dict[str, Any]:
         """Get manager statistics."""
         return {
             "total_snapshots": len(self._metadata_index),
             "in_memory": len(self._snapshots),
-            "total_records": sum(
-                m.record_count for m in self._metadata_index.values()
-            ),
+            "total_records": sum(m.record_count for m in self._metadata_index.values()),
             "storage_path": str(self.storage_path) if self.storage_path else None,
-            "max_snapshots": self.max_snapshots
+            "max_snapshots": self.max_snapshots,
         }

@@ -5,16 +5,14 @@ Orchestrates the data ingestion process from multiple sources.
 """
 
 import asyncio
-from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
 from uuid import uuid4
 
 from pydantic import BaseModel
 
-from app.ingestion.sources import DataSource, DataRecord, get_source
+from app.core.logging import LoggerMixin, get_logger
 from app.ingestion.extractors import EntityExtractor, RelationExtractor
-from app.core.config import settings
-from app.core.logging import get_logger, LoggerMixin
+from app.ingestion.sources import DataRecord, DataSource, get_source
 
 logger = get_logger(__name__)
 
@@ -23,7 +21,7 @@ class IngestionTask(BaseModel):
     """Configuration for an ingestion task."""
 
     id: str
-    sources: List[str]
+    sources: list[str]
     query: str
     max_results_per_source: int = 100
     extract_entities: bool = True
@@ -42,7 +40,7 @@ class IngestionResult(BaseModel):
     documents_indexed: int
     graph_nodes_added: int
     graph_edges_added: int
-    errors: List[str]
+    errors: list[str]
     duration_seconds: float
 
 
@@ -59,7 +57,7 @@ class IngestionPipeline(LoggerMixin):
     def __init__(self):
         self.entity_extractor = EntityExtractor(use_nlp=True)
         self.relation_extractor = RelationExtractor()
-        self._sources: Dict[str, DataSource] = {}
+        self._sources: dict[str, DataSource] = {}
 
     def _get_source(self, name: str) -> DataSource:
         """Get or create a data source."""
@@ -70,7 +68,7 @@ class IngestionPipeline(LoggerMixin):
     async def run(
         self,
         task: IngestionTask,
-        progress_callback: Optional[Callable[[str, float], None]] = None,
+        progress_callback: Callable[[str, float], None] | None = None,
     ) -> IngestionResult:
         """Run the ingestion pipeline.
 
@@ -137,6 +135,7 @@ class IngestionPipeline(LoggerMixin):
                     entities = record.metadata.get("entities", [])
                     if entities:
                         from app.ingestion.extractors import ExtractedEntity
+
                         entity_objs = [ExtractedEntity(**e) for e in entities]
                         relations = self.relation_extractor.extract(record.content, entity_objs)
                         record.metadata["relations"] = [r.dict() for r in relations]
@@ -204,7 +203,7 @@ class IngestionPipeline(LoggerMixin):
     async def _fetch_from_sources(
         self,
         task: IngestionTask,
-    ) -> List[DataRecord]:
+    ) -> list[DataRecord]:
         """Fetch data from all configured sources."""
         all_records = []
 
@@ -219,7 +218,7 @@ class IngestionPipeline(LoggerMixin):
                         max_results=task.max_results_per_source,
                     )
                 )
-            except ValueError as e:
+            except ValueError:
                 self.logger.warning(f"Unknown source: {source_name}")
                 continue
 
@@ -239,8 +238,8 @@ class IngestionPipeline(LoggerMixin):
 
     async def _index_to_vector_store(
         self,
-        records: List[DataRecord],
-        errors: List[str],
+        records: list[DataRecord],
+        errors: list[str],
     ) -> int:
         """Index records to the vector store."""
         try:
@@ -263,7 +262,9 @@ class IngestionPipeline(LoggerMixin):
                         "title": record.title,
                         "url": record.url,
                         "authors": record.authors,
-                        "publication_date": record.publication_date.isoformat() if record.publication_date else None,
+                        "publication_date": record.publication_date.isoformat()
+                        if record.publication_date
+                        else None,
                         "entities": [e.get("text") for e in record.metadata.get("entities", [])],
                     },
                     doc_id=f"{record.source}:{record.source_id}",
@@ -276,12 +277,12 @@ class IngestionPipeline(LoggerMixin):
 
     async def _index_to_graph_store(
         self,
-        records: List[DataRecord],
-        errors: List[str],
+        records: list[DataRecord],
+        errors: list[str],
     ) -> tuple[int, int]:
         """Add entities and relations to the knowledge graph."""
         try:
-            from app.knowledge.graph_store import get_graph_store, Entity, Relation
+            from app.knowledge.graph_store import Entity, Relation, get_graph_store
 
             store = get_graph_store()
         except RuntimeError:
@@ -348,7 +349,7 @@ class IngestionPipeline(LoggerMixin):
 # Convenience function
 async def ingest(
     query: str,
-    sources: List[str] = None,
+    sources: list[str] = None,
     max_results: int = 100,
 ) -> IngestionResult:
     """Run a quick ingestion task.

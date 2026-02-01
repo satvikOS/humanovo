@@ -5,18 +5,17 @@ Multi-model embedding pipeline supporting various embedding models
 for biomedical text processing with caching and batch processing.
 """
 
-import asyncio
 import hashlib
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Optional
 
 import numpy as np
 from pydantic import BaseModel
 
 from app.core.config import settings
-from app.core.logging import get_logger, LoggerMixin
+from app.core.logging import LoggerMixin, get_logger
 
 logger = get_logger(__name__)
 
@@ -81,10 +80,10 @@ class EmbeddingResult(BaseModel):
     """Result of embedding operation."""
 
     text: str
-    embedding: List[float]
+    embedding: list[float]
     model: str
     dimension: int
-    metadata: Dict[str, Any] = {}
+    metadata: dict[str, Any] = {}
 
 
 class BaseEmbedder(ABC, LoggerMixin):
@@ -100,12 +99,12 @@ class BaseEmbedder(ABC, LoggerMixin):
         pass
 
     @abstractmethod
-    async def embed(self, text: str) -> List[float]:
+    async def embed(self, text: str) -> list[float]:
         """Embed a single text."""
         pass
 
     @abstractmethod
-    async def embed_batch(self, texts: List[str]) -> List[List[float]]:
+    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
         """Embed a batch of texts."""
         pass
 
@@ -144,7 +143,7 @@ class SentenceTransformerEmbedder(BaseEmbedder):
             self.logger.error("sentence-transformers not installed")
             raise
 
-    async def embed(self, text: str) -> List[float]:
+    async def embed(self, text: str) -> list[float]:
         """Embed a single text."""
         if not self._initialized:
             await self.initialize()
@@ -156,7 +155,7 @@ class SentenceTransformerEmbedder(BaseEmbedder):
         )
         return embedding.tolist()
 
-    async def embed_batch(self, texts: List[str]) -> List[List[float]]:
+    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
         """Embed a batch of texts."""
         if not self._initialized:
             await self.initialize()
@@ -200,7 +199,7 @@ class OpenAIEmbedder(BaseEmbedder):
             self.logger.error("openai package not installed")
             raise
 
-    async def embed(self, text: str) -> List[float]:
+    async def embed(self, text: str) -> list[float]:
         """Embed a single text using OpenAI."""
         if not self._initialized:
             await self.initialize()
@@ -211,7 +210,7 @@ class OpenAIEmbedder(BaseEmbedder):
         )
         return response.data[0].embedding
 
-    async def embed_batch(self, texts: List[str]) -> List[List[float]]:
+    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
         """Embed a batch of texts using OpenAI."""
         if not self._initialized:
             await self.initialize()
@@ -236,16 +235,16 @@ class EmbeddingCache:
     """Simple in-memory cache for embeddings."""
 
     def __init__(self, max_size: int = 10000):
-        self._cache: Dict[str, List[float]] = {}
+        self._cache: dict[str, list[float]] = {}
         self._max_size = max_size
-        self._access_order: List[str] = []
+        self._access_order: list[str] = []
 
     def _get_key(self, text: str, model: str) -> str:
         """Generate cache key."""
         content = f"{model}:{text}"
         return hashlib.md5(content.encode()).hexdigest()
 
-    def get(self, text: str, model: str) -> Optional[List[float]]:
+    def get(self, text: str, model: str) -> list[float] | None:
         """Get cached embedding."""
         key = self._get_key(text, model)
         if key in self._cache:
@@ -255,7 +254,7 @@ class EmbeddingCache:
             return self._cache[key]
         return None
 
-    def set(self, text: str, model: str, embedding: List[float]) -> None:
+    def set(self, text: str, model: str, embedding: list[float]) -> None:
         """Cache an embedding."""
         key = self._get_key(text, model)
 
@@ -293,13 +292,13 @@ class EmbeddingPipeline(LoggerMixin):
         cache_size: int = 10000,
     ):
         self._default_model = default_model
-        self._embedders: Dict[EmbeddingModel, BaseEmbedder] = {}
+        self._embedders: dict[EmbeddingModel, BaseEmbedder] = {}
         self._cache = EmbeddingCache(cache_size) if cache_enabled else None
         self._initialized = False
 
     async def initialize(
         self,
-        models: Optional[List[EmbeddingModel]] = None,
+        models: list[EmbeddingModel] | None = None,
     ) -> None:
         """Initialize the embedding pipeline with specified models."""
         if self._initialized:
@@ -341,8 +340,8 @@ class EmbeddingPipeline(LoggerMixin):
 
     def _get_embedder(
         self,
-        model: Optional[EmbeddingModel] = None,
-    ) -> Optional[BaseEmbedder]:
+        model: EmbeddingModel | None = None,
+    ) -> BaseEmbedder | None:
         """Get embedder for specified or default model."""
         model = model or self._default_model
         return self._embedders.get(model)
@@ -350,7 +349,7 @@ class EmbeddingPipeline(LoggerMixin):
     async def embed(
         self,
         text: str,
-        model: Optional[EmbeddingModel] = None,
+        model: EmbeddingModel | None = None,
         use_cache: bool = True,
     ) -> EmbeddingResult:
         """
@@ -407,10 +406,10 @@ class EmbeddingPipeline(LoggerMixin):
 
     async def embed_batch(
         self,
-        texts: List[str],
-        model: Optional[EmbeddingModel] = None,
+        texts: list[str],
+        model: EmbeddingModel | None = None,
         use_cache: bool = True,
-    ) -> List[EmbeddingResult]:
+    ) -> list[EmbeddingResult]:
         """
         Embed a batch of texts efficiently.
 
@@ -423,8 +422,8 @@ class EmbeddingPipeline(LoggerMixin):
             List of EmbeddingResult objects
         """
         model = model or self._default_model
-        results: List[EmbeddingResult] = [None] * len(texts)
-        texts_to_embed: List[tuple[int, str]] = []
+        results: list[EmbeddingResult] = [None] * len(texts)
+        texts_to_embed: list[tuple[int, str]] = []
 
         # Check cache for each text
         for i, text in enumerate(texts):
@@ -476,8 +475,8 @@ class EmbeddingPipeline(LoggerMixin):
     async def embed_for_retrieval(
         self,
         query: str,
-        model: Optional[EmbeddingModel] = None,
-    ) -> List[float]:
+        model: EmbeddingModel | None = None,
+    ) -> list[float]:
         """
         Embed a query for retrieval (returns just the vector).
 
@@ -491,7 +490,7 @@ class EmbeddingPipeline(LoggerMixin):
         result = await self.embed(query, model=model)
         return result.embedding
 
-    def get_dimension(self, model: Optional[EmbeddingModel] = None) -> int:
+    def get_dimension(self, model: EmbeddingModel | None = None) -> int:
         """Get embedding dimension for a model."""
         model = model or self._default_model
         embedder = self._get_embedder(model)
@@ -500,12 +499,12 @@ class EmbeddingPipeline(LoggerMixin):
         return 384  # Default fallback dimension
 
     @property
-    def available_models(self) -> List[str]:
+    def available_models(self) -> list[str]:
         """Get list of initialized models."""
         return [m.value for m in self._embedders.keys()]
 
     @property
-    def cache_stats(self) -> Dict[str, Any]:
+    def cache_stats(self) -> dict[str, Any]:
         """Get cache statistics."""
         if self._cache:
             return {
@@ -521,7 +520,7 @@ class EmbeddingPipeline(LoggerMixin):
 
 
 async def init_embedding_pipeline(
-    models: Optional[List[EmbeddingModel]] = None,
+    models: list[EmbeddingModel] | None = None,
 ) -> None:
     """Initialize the global embedding pipeline."""
     global _embedding_pipeline

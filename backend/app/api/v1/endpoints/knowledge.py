@@ -6,8 +6,7 @@ Query and explore the biomedical knowledge graph.
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
-from uuid import UUID, uuid4
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -59,10 +58,10 @@ class EntityResponse(BaseModel):
     id: str
     name: str
     entity_type: EntityType
-    aliases: List[str] = Field(default_factory=list)
-    description: Optional[str] = None
-    external_ids: Dict[str, str] = Field(default_factory=dict)
-    properties: Dict[str, Any] = Field(default_factory=dict)
+    aliases: list[str] = Field(default_factory=list)
+    description: str | None = None
+    external_ids: dict[str, str] = Field(default_factory=dict)
+    properties: dict[str, Any] = Field(default_factory=dict)
     source_count: int = 0
 
 
@@ -79,15 +78,15 @@ class RelationResponse(BaseModel):
     relation_type: RelationType
     confidence: float = Field(..., ge=0, le=1)
     evidence_count: int = 0
-    source_references: List[str] = Field(default_factory=list)
+    source_references: list[str] = Field(default_factory=list)
 
 
 class GraphNeighborhood(BaseModel):
     """Schema for a neighborhood subgraph."""
 
     center_entity: EntityResponse
-    entities: List[EntityResponse]
-    relations: List[RelationResponse]
+    entities: list[EntityResponse]
+    relations: list[RelationResponse]
     depth: int
 
 
@@ -96,7 +95,7 @@ class PathResponse(BaseModel):
 
     source: EntityResponse
     target: EntityResponse
-    path: List[RelationResponse]
+    path: list[RelationResponse]
     path_length: int
     path_confidence: float
 
@@ -109,7 +108,7 @@ class GraphQueryRequest(BaseModel):
         description="Cypher query to execute",
         max_length=2000,
     )
-    parameters: Dict[str, Any] = Field(default_factory=dict)
+    parameters: dict[str, Any] = Field(default_factory=dict)
     limit: int = Field(default=100, ge=1, le=1000)
 
 
@@ -118,18 +117,18 @@ class GraphStatsResponse(BaseModel):
 
     total_entities: int
     total_relations: int
-    entity_counts: Dict[str, int]
-    relation_counts: Dict[str, int]
+    entity_counts: dict[str, int]
+    relation_counts: dict[str, int]
     last_updated: datetime
 
 
-@router.get("/entities/search", response_model=List[EntityResponse])
+@router.get("/entities/search", response_model=list[EntityResponse])
 async def search_entities(
     query: str = Query(..., min_length=2),
-    entity_types: Optional[List[EntityType]] = Query(None),
+    entity_types: list[EntityType] | None = Query(None),
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-) -> List[EntityResponse]:
+) -> list[EntityResponse]:
     """Search for entities by name or alias."""
     logger.info("Searching entities", query=query, types=entity_types)
 
@@ -164,7 +163,7 @@ async def get_entity(
 async def get_entity_neighbors(
     entity_id: str,
     depth: int = Query(1, ge=1, le=3),
-    relation_types: Optional[List[RelationType]] = Query(None),
+    relation_types: list[RelationType] | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ) -> GraphNeighborhood:
@@ -186,12 +185,12 @@ async def get_entity_neighbors(
     return neighborhood
 
 
-@router.get("/relations/between", response_model=List[RelationResponse])
+@router.get("/relations/between", response_model=list[RelationResponse])
 async def get_relations_between(
     source_id: str,
     target_id: str,
     db: AsyncSession = Depends(get_db),
-) -> List[RelationResponse]:
+) -> list[RelationResponse]:
     """Get all relations between two entities."""
     from app.knowledge.graph_store import get_relations_between as graph_relations
 
@@ -200,14 +199,14 @@ async def get_relations_between(
     return relations
 
 
-@router.get("/paths", response_model=List[PathResponse])
+@router.get("/paths", response_model=list[PathResponse])
 async def find_paths(
     source_id: str,
     target_id: str,
     max_length: int = Query(4, ge=2, le=6),
     limit: int = Query(5, ge=1, le=20),
     db: AsyncSession = Depends(get_db),
-) -> List[PathResponse]:
+) -> list[PathResponse]:
     """Find paths between two entities in the knowledge graph.
 
     This is useful for discovering indirect connections and
@@ -232,11 +231,11 @@ async def find_paths(
     return paths
 
 
-@router.post("/query", response_model=Dict[str, Any])
+@router.post("/query", response_model=dict[str, Any])
 async def execute_graph_query(
     request: GraphQueryRequest,
     db: AsyncSession = Depends(get_db),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Execute a custom Cypher query against the knowledge graph.
 
     Note: Only read queries are allowed for safety.
@@ -274,13 +273,13 @@ async def get_graph_stats(
     return stats
 
 
-@router.get("/entity-types", response_model=List[str])
-async def list_entity_types() -> List[str]:
+@router.get("/entity-types", response_model=list[str])
+async def list_entity_types() -> list[str]:
     """List all available entity types."""
     return [t.value for t in EntityType]
 
 
-@router.get("/relation-types", response_model=List[str])
-async def list_relation_types() -> List[str]:
+@router.get("/relation-types", response_model=list[str])
+async def list_relation_types() -> list[str]:
     """List all available relation types."""
     return [r.value for r in RelationType]

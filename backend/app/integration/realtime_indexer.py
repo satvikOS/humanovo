@@ -6,14 +6,15 @@ write-ahead logging, and transactional semantics.
 """
 
 import asyncio
-from collections import deque
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from enum import Enum
-from typing import Any, Callable, Deque, Dict, List, Optional, Set
-from uuid import UUID, uuid4
 import hashlib
 import json
+from collections import deque
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+from typing import Any
+from uuid import UUID, uuid4
 
 from app.agents.ingestion.base import IngestionRecord, SourceType
 from app.core.logging import get_logger
@@ -33,9 +34,9 @@ class IndexUpdateType(str, Enum):
 class ConsistencyLevel(str, Enum):
     """Consistency level for updates."""
 
-    EVENTUAL = "eventual"        # Fire and forget
-    CONFIRMED = "confirmed"      # Wait for acknowledgment
-    STRICT = "strict"            # Wait for all replicas
+    EVENTUAL = "eventual"  # Fire and forget
+    CONFIRMED = "confirmed"  # Wait for acknowledgment
+    STRICT = "strict"  # Wait for all replicas
     TRANSACTIONAL = "transactional"  # All-or-nothing
 
 
@@ -57,15 +58,15 @@ class IndexUpdate:
     update_type: IndexUpdateType
     record_id: str
     source_type: SourceType
-    data: Dict[str, Any]
+    data: dict[str, Any]
     consistency: ConsistencyLevel
     timestamp: datetime
     status: UpdateStatus = UpdateStatus.PENDING
     retries: int = 0
-    error: Optional[str] = None
-    applied_at: Optional[datetime] = None
+    error: str | None = None
+    applied_at: datetime | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "update_id": str(self.update_id),
             "update_type": self.update_type.value,
@@ -96,11 +97,11 @@ class TransactionContext:
     """Context for a transaction."""
 
     transaction_id: UUID
-    updates: List[IndexUpdate]
+    updates: list[IndexUpdate]
     started_at: datetime
     consistency: ConsistencyLevel
     status: str = "active"
-    applied_updates: List[UUID] = field(default_factory=list)
+    applied_updates: list[UUID] = field(default_factory=list)
 
 
 class WriteAheadLog:
@@ -112,7 +113,7 @@ class WriteAheadLog:
 
     def __init__(self, max_entries: int = 10000):
         self.max_entries = max_entries
-        self._log: Deque[WriteAheadLogEntry] = deque(maxlen=max_entries)
+        self._log: deque[WriteAheadLogEntry] = deque(maxlen=max_entries)
         self._sequence: int = 0
         self._lock = asyncio.Lock()
 
@@ -147,7 +148,7 @@ class WriteAheadLog:
                     return True
             return False
 
-    async def get_uncommitted(self) -> List[WriteAheadLogEntry]:
+    async def get_uncommitted(self) -> list[WriteAheadLogEntry]:
         """Get all uncommitted entries for recovery."""
         async with self._lock:
             return [e for e in self._log if not e.committed]
@@ -205,18 +206,18 @@ class RealtimeIndexer:
         self._graph_connector = None
 
         # Update buffers
-        self._pending_updates: Deque[IndexUpdate] = deque()
-        self._processing_updates: Dict[UUID, IndexUpdate] = {}
+        self._pending_updates: deque[IndexUpdate] = deque()
+        self._processing_updates: dict[UUID, IndexUpdate] = {}
 
         # Transaction management
-        self._transactions: Dict[UUID, TransactionContext] = {}
+        self._transactions: dict[UUID, TransactionContext] = {}
 
         # Event streaming
-        self._subscribers: List[Callable[[IndexUpdate], None]] = []
+        self._subscribers: list[Callable[[IndexUpdate], None]] = []
 
         # Control
         self._running = False
-        self._flush_task: Optional[asyncio.Task] = None
+        self._flush_task: asyncio.Task | None = None
         self._lock = asyncio.Lock()
 
         # Statistics
@@ -234,6 +235,7 @@ class RealtimeIndexer:
         """Lazy-load RAG connector."""
         if self._rag_connector is None:
             from app.integration.rag_connector import get_rag_connector
+
             self._rag_connector = get_rag_connector()
         return self._rag_connector
 
@@ -241,6 +243,7 @@ class RealtimeIndexer:
         """Lazy-load graph connector."""
         if self._graph_connector is None:
             from app.integration.graph_connector import get_graph_connector
+
             self._graph_connector = get_graph_connector()
         return self._graph_connector
 
@@ -309,10 +312,10 @@ class RealtimeIndexer:
 
     async def enqueue_batch(
         self,
-        records: List[IngestionRecord],
+        records: list[IngestionRecord],
         update_type: IndexUpdateType = IndexUpdateType.UPSERT,
         consistency: ConsistencyLevel = ConsistencyLevel.CONFIRMED,
-    ) -> List[UUID]:
+    ) -> list[UUID]:
         """Enqueue multiple updates."""
         update_ids = []
         for record in records:
@@ -419,7 +422,7 @@ class RealtimeIndexer:
 
             return True
 
-        except Exception as e:
+        except Exception:
             # Rollback
             await self._rollback_transaction(txn)
             raise
@@ -536,7 +539,7 @@ class RealtimeIndexer:
 
             # Retry if allowed
             if update.retries < self.max_retries:
-                await asyncio.sleep(self.retry_delay * (2 ** update.retries))
+                await asyncio.sleep(self.retry_delay * (2**update.retries))
                 return await self._process_update(update)
 
             return False
@@ -544,7 +547,7 @@ class RealtimeIndexer:
         finally:
             self._processing_updates.pop(update.update_id, None)
 
-    def _serialize_record(self, record: IngestionRecord) -> Dict[str, Any]:
+    def _serialize_record(self, record: IngestionRecord) -> dict[str, Any]:
         """Serialize an ingestion record for storage."""
         return {
             "source_id": record.source_id,
@@ -557,7 +560,9 @@ class RealtimeIndexer:
             "doi": record.doi,
             "pmid": record.pmid,
             "url": record.url,
-            "publication_date": record.publication_date.isoformat() if record.publication_date else None,
+            "publication_date": record.publication_date.isoformat()
+            if record.publication_date
+            else None,
             "entities": [
                 {
                     "text": e.text,
@@ -581,7 +586,7 @@ class RealtimeIndexer:
 
     def _deserialize_record(
         self,
-        data: Dict[str, Any],
+        data: dict[str, Any],
         source_type: SourceType,
     ) -> IngestionRecord:
         """Deserialize a record from storage."""
@@ -620,7 +625,8 @@ class RealtimeIndexer:
             pmid=data.get("pmid"),
             url=data.get("url"),
             publication_date=datetime.fromisoformat(data["publication_date"])
-            if data.get("publication_date") else None,
+            if data.get("publication_date")
+            else None,
             entities=entities,
             relations=relations,
         )
@@ -689,7 +695,7 @@ class RealtimeIndexer:
 
         return processed
 
-    async def get_update_status(self, update_id: UUID) -> Optional[Dict[str, Any]]:
+    async def get_update_status(self, update_id: UUID) -> dict[str, Any] | None:
         """Get the status of an update."""
         # Check processing
         if update_id in self._processing_updates:
@@ -704,7 +710,7 @@ class RealtimeIndexer:
 
         return None
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get indexer statistics."""
         return {
             **self._stats,
@@ -742,7 +748,7 @@ class RealtimeIndexer:
 
 
 # Global indexer instance
-_realtime_indexer: Optional[RealtimeIndexer] = None
+_realtime_indexer: RealtimeIndexer | None = None
 
 
 def get_realtime_indexer() -> RealtimeIndexer:

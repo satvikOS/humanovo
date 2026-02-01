@@ -6,14 +6,14 @@ processing pipelines to RAG storage. Provides audit trail and
 traceability for all data transformations.
 """
 
-import asyncio
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set
-from uuid import UUID, uuid4
 import hashlib
 import json
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+from typing import Any
+from uuid import UUID, uuid4
 
 from app.agents.ingestion.base import SourceType
 from app.core.logging import get_logger
@@ -24,25 +24,25 @@ logger = get_logger(__name__)
 class ProvenanceEventType(str, Enum):
     """Types of provenance events."""
 
-    INGESTION = "ingestion"           # Initial data ingestion
-    EXTRACTION = "extraction"         # Entity/relation extraction
-    TRANSFORMATION = "transformation" # Data transformation
-    ENRICHMENT = "enrichment"         # Data enrichment
-    INDEXING = "indexing"             # Vector/graph indexing
-    RETRIEVAL = "retrieval"           # Data retrieval
-    AGGREGATION = "aggregation"       # Data aggregation
-    DERIVATION = "derivation"         # Derived data creation
-    DELETION = "deletion"             # Data deletion
-    UPDATE = "update"                 # Data update
+    INGESTION = "ingestion"  # Initial data ingestion
+    EXTRACTION = "extraction"  # Entity/relation extraction
+    TRANSFORMATION = "transformation"  # Data transformation
+    ENRICHMENT = "enrichment"  # Data enrichment
+    INDEXING = "indexing"  # Vector/graph indexing
+    RETRIEVAL = "retrieval"  # Data retrieval
+    AGGREGATION = "aggregation"  # Data aggregation
+    DERIVATION = "derivation"  # Derived data creation
+    DELETION = "deletion"  # Data deletion
+    UPDATE = "update"  # Data update
 
 
 class DataQualityLevel(str, Enum):
     """Quality level of data."""
 
-    HIGH = "high"           # Peer-reviewed, verified
-    MEDIUM = "medium"       # Curated but not verified
-    LOW = "low"             # Raw, unverified
-    DERIVED = "derived"     # Computed/derived data
+    HIGH = "high"  # Peer-reviewed, verified
+    MEDIUM = "medium"  # Curated but not verified
+    LOW = "low"  # Raw, unverified
+    DERIVED = "derived"  # Computed/derived data
 
 
 @dataclass
@@ -54,16 +54,16 @@ class ProvenanceEvent:
     record_id: str
     source_type: SourceType
     timestamp: datetime
-    agent_id: Optional[str] = None
+    agent_id: str | None = None
     operation: str = ""
-    input_records: List[str] = field(default_factory=list)
-    output_records: List[str] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    data_hash: Optional[str] = None
+    input_records: list[str] = field(default_factory=list)
+    output_records: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    data_hash: str | None = None
     quality_level: DataQualityLevel = DataQualityLevel.MEDIUM
     confidence: float = 1.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "event_id": str(self.event_id),
             "event_type": self.event_type.value,
@@ -90,15 +90,15 @@ class ProvenanceRecord:
     original_source: str
     created_at: datetime
     last_updated: datetime
-    events: List[ProvenanceEvent] = field(default_factory=list)
-    lineage: List[str] = field(default_factory=list)  # Parent record IDs
-    derived_records: List[str] = field(default_factory=list)
+    events: list[ProvenanceEvent] = field(default_factory=list)
+    lineage: list[str] = field(default_factory=list)  # Parent record IDs
+    derived_records: list[str] = field(default_factory=list)
     quality_level: DataQualityLevel = DataQualityLevel.MEDIUM
     version: int = 1
-    current_hash: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    current_hash: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "record_id": self.record_id,
             "source_type": self.source_type.value,
@@ -122,13 +122,13 @@ class ProvenanceChain:
     chain_id: UUID
     root_record_id: str
     leaf_record_id: str
-    path: List[ProvenanceEvent]
+    path: list[ProvenanceEvent]
     total_transformations: int
     earliest_timestamp: datetime
     latest_timestamp: datetime
     confidence: float  # Cumulative confidence
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "chain_id": str(self.chain_id),
             "root_record_id": self.root_record_id,
@@ -149,7 +149,7 @@ class ProvenanceStorage:
     async def save_record(self, record: ProvenanceRecord) -> None:
         raise NotImplementedError
 
-    async def get_record(self, record_id: str) -> Optional[ProvenanceRecord]:
+    async def get_record(self, record_id: str) -> ProvenanceRecord | None:
         raise NotImplementedError
 
     async def save_event(self, event: ProvenanceEvent) -> None:
@@ -158,15 +158,15 @@ class ProvenanceStorage:
     async def get_events(
         self,
         record_id: str,
-        event_types: Optional[List[ProvenanceEventType]] = None,
+        event_types: list[ProvenanceEventType] | None = None,
         limit: int = 100,
-    ) -> List[ProvenanceEvent]:
+    ) -> list[ProvenanceEvent]:
         raise NotImplementedError
 
-    async def get_lineage(self, record_id: str, depth: int = 10) -> List[ProvenanceRecord]:
+    async def get_lineage(self, record_id: str, depth: int = 10) -> list[ProvenanceRecord]:
         raise NotImplementedError
 
-    async def get_derived(self, record_id: str, depth: int = 10) -> List[ProvenanceRecord]:
+    async def get_derived(self, record_id: str, depth: int = 10) -> list[ProvenanceRecord]:
         raise NotImplementedError
 
 
@@ -174,13 +174,13 @@ class InMemoryProvenanceStorage(ProvenanceStorage):
     """In-memory provenance storage for development."""
 
     def __init__(self):
-        self._records: Dict[str, ProvenanceRecord] = {}
-        self._events: Dict[str, List[ProvenanceEvent]] = {}
+        self._records: dict[str, ProvenanceRecord] = {}
+        self._events: dict[str, list[ProvenanceEvent]] = {}
 
     async def save_record(self, record: ProvenanceRecord) -> None:
         self._records[record.record_id] = record
 
-    async def get_record(self, record_id: str) -> Optional[ProvenanceRecord]:
+    async def get_record(self, record_id: str) -> ProvenanceRecord | None:
         return self._records.get(record_id)
 
     async def save_event(self, event: ProvenanceEvent) -> None:
@@ -191,9 +191,9 @@ class InMemoryProvenanceStorage(ProvenanceStorage):
     async def get_events(
         self,
         record_id: str,
-        event_types: Optional[List[ProvenanceEventType]] = None,
+        event_types: list[ProvenanceEventType] | None = None,
         limit: int = 100,
-    ) -> List[ProvenanceEvent]:
+    ) -> list[ProvenanceEvent]:
         events = self._events.get(record_id, [])
 
         if event_types:
@@ -202,7 +202,7 @@ class InMemoryProvenanceStorage(ProvenanceStorage):
         events.sort(key=lambda e: e.timestamp, reverse=True)
         return events[:limit]
 
-    async def get_lineage(self, record_id: str, depth: int = 10) -> List[ProvenanceRecord]:
+    async def get_lineage(self, record_id: str, depth: int = 10) -> list[ProvenanceRecord]:
         result = []
         visited = set()
         queue = [record_id]
@@ -220,7 +220,7 @@ class InMemoryProvenanceStorage(ProvenanceStorage):
 
         return result
 
-    async def get_derived(self, record_id: str, depth: int = 10) -> List[ProvenanceRecord]:
+    async def get_derived(self, record_id: str, depth: int = 10) -> list[ProvenanceRecord]:
         result = []
         visited = set()
         queue = [record_id]
@@ -254,7 +254,7 @@ class ProvenanceTracker:
 
     def __init__(
         self,
-        storage: Optional[ProvenanceStorage] = None,
+        storage: ProvenanceStorage | None = None,
         auto_record: bool = True,
     ):
         """
@@ -268,7 +268,7 @@ class ProvenanceTracker:
         self.auto_record = auto_record
 
         # Event listeners
-        self._listeners: List[Callable[[ProvenanceEvent], None]] = []
+        self._listeners: list[Callable[[ProvenanceEvent], None]] = []
 
         # Statistics
         self._stats = {
@@ -307,7 +307,7 @@ class ProvenanceTracker:
         original_source: str,
         agent_id: str,
         data: Any,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
         quality_level: DataQualityLevel = DataQualityLevel.MEDIUM,
     ) -> ProvenanceRecord:
         """
@@ -384,10 +384,10 @@ class ProvenanceTracker:
         record_id: str,
         source_type: SourceType,
         agent_id: str,
-        extracted_items: List[Dict[str, Any]],
+        extracted_items: list[dict[str, Any]],
         extraction_type: str,
         confidence: float = 1.0,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> ProvenanceEvent:
         """
         Record an extraction event (entities, relations, etc.).
@@ -413,7 +413,9 @@ class ProvenanceTracker:
             agent_id=agent_id,
             operation=f"extract_{extraction_type}",
             input_records=[record_id],
-            output_records=[f"{record_id}_{extraction_type}_{i}" for i in range(len(extracted_items))],
+            output_records=[
+                f"{record_id}_{extraction_type}_{i}" for i in range(len(extracted_items))
+            ],
             metadata={
                 "extraction_type": extraction_type,
                 "item_count": len(extracted_items),
@@ -440,13 +442,13 @@ class ProvenanceTracker:
 
     async def record_transformation(
         self,
-        input_record_ids: List[str],
+        input_record_ids: list[str],
         output_record_id: str,
         source_type: SourceType,
         transformation_type: str,
-        agent_id: Optional[str] = None,
+        agent_id: str | None = None,
         confidence: float = 1.0,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> ProvenanceEvent:
         """
         Record a data transformation.
@@ -521,7 +523,7 @@ class ProvenanceTracker:
         source_type: SourceType,
         index_type: str,
         indexed_items: int,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> ProvenanceEvent:
         """
         Record an indexing event.
@@ -574,7 +576,7 @@ class ProvenanceTracker:
         query: str,
         retrieval_method: str,
         confidence: float = 1.0,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> ProvenanceEvent:
         """
         Record a retrieval event.
@@ -615,16 +617,16 @@ class ProvenanceTracker:
 
         return event
 
-    async def get_provenance(self, record_id: str) -> Optional[ProvenanceRecord]:
+    async def get_provenance(self, record_id: str) -> ProvenanceRecord | None:
         """Get full provenance record for a data item."""
         return await self.storage.get_record(record_id)
 
     async def get_events(
         self,
         record_id: str,
-        event_types: Optional[List[ProvenanceEventType]] = None,
+        event_types: list[ProvenanceEventType] | None = None,
         limit: int = 100,
-    ) -> List[ProvenanceEvent]:
+    ) -> list[ProvenanceEvent]:
         """Get events for a record."""
         return await self.storage.get_events(record_id, event_types, limit)
 
@@ -632,7 +634,7 @@ class ProvenanceTracker:
         self,
         record_id: str,
         depth: int = 10,
-    ) -> List[ProvenanceRecord]:
+    ) -> list[ProvenanceRecord]:
         """Get complete lineage (ancestors) of a record."""
         return await self.storage.get_lineage(record_id, depth)
 
@@ -640,7 +642,7 @@ class ProvenanceTracker:
         self,
         record_id: str,
         depth: int = 10,
-    ) -> List[ProvenanceRecord]:
+    ) -> list[ProvenanceRecord]:
         """Get all records derived from this record."""
         return await self.storage.get_derived(record_id, depth)
 
@@ -688,10 +690,7 @@ class ProvenanceTracker:
             cumulative_confidence *= event.confidence
 
         # Count transformations
-        transformations = sum(
-            1 for e in path
-            if e.event_type == ProvenanceEventType.TRANSFORMATION
-        )
+        transformations = sum(1 for e in path if e.event_type == ProvenanceEventType.TRANSFORMATION)
 
         return ProvenanceChain(
             chain_id=uuid4(),
@@ -704,7 +703,7 @@ class ProvenanceTracker:
             confidence=cumulative_confidence,
         )
 
-    async def verify_integrity(self, record_id: str, data: Any) -> Dict[str, Any]:
+    async def verify_integrity(self, record_id: str, data: Any) -> dict[str, Any]:
         """
         Verify data integrity against recorded provenance.
 
@@ -744,9 +743,9 @@ class ProvenanceTracker:
     async def generate_audit_trail(
         self,
         record_id: str,
-        start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None,
-    ) -> List[Dict[str, Any]]:
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
+    ) -> list[dict[str, Any]]:
         """
         Generate audit trail for a record.
 
@@ -769,24 +768,26 @@ class ProvenanceTracker:
         # Format as audit trail
         trail = []
         for event in events:
-            trail.append({
-                "timestamp": event.timestamp.isoformat(),
-                "event_type": event.event_type.value,
-                "operation": event.operation,
-                "agent_id": event.agent_id,
-                "confidence": event.confidence,
-                "metadata": event.metadata,
-            })
+            trail.append(
+                {
+                    "timestamp": event.timestamp.isoformat(),
+                    "event_type": event.event_type.value,
+                    "operation": event.operation,
+                    "agent_id": event.agent_id,
+                    "confidence": event.confidence,
+                    "metadata": event.metadata,
+                }
+            )
 
         return trail
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get tracker statistics."""
         return self._stats.copy()
 
 
 # Global tracker instance
-_provenance_tracker: Optional[ProvenanceTracker] = None
+_provenance_tracker: ProvenanceTracker | None = None
 
 
 def get_provenance_tracker() -> ProvenanceTracker:

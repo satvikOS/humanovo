@@ -5,7 +5,6 @@ Manage research projects/sessions in GenUp.
 """
 
 from datetime import datetime
-from typing import List, Optional
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -24,20 +23,20 @@ class ProjectCreate(BaseModel):
     """Schema for creating a new project."""
 
     name: str = Field(..., min_length=1, max_length=255)
-    description: Optional[str] = Field(None, max_length=2000)
-    disease_focus: Optional[str] = Field(None, description="Primary disease/condition focus")
-    research_question: Optional[str] = Field(None, description="Main research question")
-    tags: List[str] = Field(default_factory=list)
+    description: str | None = Field(None, max_length=2000)
+    disease_focus: str | None = Field(None, description="Primary disease/condition focus")
+    research_question: str | None = Field(None, description="Main research question")
+    tags: list[str] = Field(default_factory=list)
 
 
 class ProjectUpdate(BaseModel):
     """Schema for updating a project."""
 
-    name: Optional[str] = Field(None, min_length=1, max_length=255)
-    description: Optional[str] = Field(None, max_length=2000)
-    disease_focus: Optional[str] = None
-    research_question: Optional[str] = None
-    tags: Optional[List[str]] = None
+    name: str | None = Field(None, min_length=1, max_length=255)
+    description: str | None = Field(None, max_length=2000)
+    disease_focus: str | None = None
+    research_question: str | None = None
+    tags: list[str] | None = None
 
 
 class ProjectResponse(BaseModel):
@@ -45,10 +44,10 @@ class ProjectResponse(BaseModel):
 
     id: UUID
     name: str
-    description: Optional[str]
-    disease_focus: Optional[str]
-    research_question: Optional[str]
-    tags: List[str]
+    description: str | None
+    disease_focus: str | None
+    research_question: str | None
+    tags: list[str]
     hypothesis_count: int
     evidence_count: int
     created_at: datetime
@@ -58,7 +57,7 @@ class ProjectResponse(BaseModel):
 class ProjectListResponse(BaseModel):
     """Schema for paginated project list."""
 
-    items: List[ProjectResponse]
+    items: list[ProjectResponse]
     total: int
     page: int
     page_size: int
@@ -103,7 +102,7 @@ async def create_project(
 async def list_projects(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    search: Optional[str] = None,
+    search: str | None = None,
     db: AsyncSession = Depends(get_db),
 ) -> ProjectListResponse:
     """List all projects with pagination."""
@@ -113,7 +112,8 @@ async def list_projects(
     if search:
         search_lower = search.lower()
         items = [
-            p for p in items
+            p
+            for p in items
             if search_lower in p.name.lower()
             or (p.description and search_lower in p.description.lower())
         ]

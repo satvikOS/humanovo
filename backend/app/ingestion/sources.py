@@ -5,14 +5,15 @@ Connectors for various biomedical data sources.
 """
 
 from abc import ABC, abstractmethod
-from datetime import datetime, timedelta
-from typing import Any, AsyncIterator, Dict, List, Optional
+from collections.abc import AsyncIterator
+from datetime import datetime
+from typing import Any
 
 import httpx
 from pydantic import BaseModel
 
 from app.core.config import settings
-from app.core.logging import get_logger, LoggerMixin
+from app.core.logging import LoggerMixin, get_logger
 
 logger = get_logger(__name__)
 
@@ -24,11 +25,11 @@ class DataRecord(BaseModel):
     source_id: str
     title: str
     content: str
-    abstract: Optional[str] = None
-    authors: List[str] = []
-    publication_date: Optional[datetime] = None
-    url: Optional[str] = None
-    metadata: Dict[str, Any] = {}
+    abstract: str | None = None
+    authors: list[str] = []
+    publication_date: datetime | None = None
+    url: str | None = None
+    metadata: dict[str, Any] = {}
 
 
 class DataSource(ABC, LoggerMixin):
@@ -44,9 +45,9 @@ class DataSource(ABC, LoggerMixin):
         self,
         query: str,
         max_results: int = 100,
-        date_from: Optional[datetime] = None,
-        date_to: Optional[datetime] = None,
-    ) -> List[DataRecord]:
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+    ) -> list[DataRecord]:
         """Fetch records from the data source."""
         pass
 
@@ -79,9 +80,9 @@ class PubMedSource(DataSource):
         self,
         query: str,
         max_results: int = 100,
-        date_from: Optional[datetime] = None,
-        date_to: Optional[datetime] = None,
-    ) -> List[DataRecord]:
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+    ) -> list[DataRecord]:
         """Fetch articles from PubMed."""
         self.logger.info("Fetching from PubMed", query=query[:50], max_results=max_results)
 
@@ -129,15 +130,15 @@ class PubMedSource(DataSource):
 
     async def _fetch_article_details(
         self,
-        pmids: List[str],
-    ) -> List[DataRecord]:
+        pmids: list[str],
+    ) -> list[DataRecord]:
         """Fetch detailed information for articles."""
         records = []
 
         # Fetch in batches of 200
         batch_size = 200
         for i in range(0, len(pmids), batch_size):
-            batch = pmids[i:i + batch_size]
+            batch = pmids[i : i + batch_size]
 
             params = {
                 "db": "pubmed",
@@ -189,7 +190,9 @@ class PubMedSource(DataSource):
                         # Handle various date formats
                         for fmt in ["%Y %b %d", "%Y %b", "%Y"]:
                             try:
-                                pub_date = datetime.strptime(pub_date_str[:len(fmt.replace("%", ""))], fmt)
+                                pub_date = datetime.strptime(
+                                    pub_date_str[: len(fmt.replace("%", ""))], fmt
+                                )
                                 break
                             except ValueError:
                                 continue
@@ -229,9 +232,9 @@ class ClinicalTrialsSource(DataSource):
         self,
         query: str,
         max_results: int = 100,
-        date_from: Optional[datetime] = None,
-        date_to: Optional[datetime] = None,
-    ) -> List[DataRecord]:
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+    ) -> list[DataRecord]:
         """Fetch trials from ClinicalTrials.gov."""
         self.logger.info("Fetching from ClinicalTrials.gov", query=query[:50])
 
@@ -243,7 +246,9 @@ class ClinicalTrialsSource(DataSource):
 
         # Add date filters
         if date_from:
-            params["filter.advanced"] = f"AREA[StartDate]RANGE[{date_from.strftime('%m/%d/%Y')},MAX]"
+            params["filter.advanced"] = (
+                f"AREA[StartDate]RANGE[{date_from.strftime('%m/%d/%Y')},MAX]"
+            )
 
         try:
             response = await self.http_client.get(self.base_url, params=params)
@@ -319,7 +324,7 @@ class DrugBankSource(DataSource):
         query: str,
         max_results: int = 100,
         **kwargs,
-    ) -> List[DataRecord]:
+    ) -> list[DataRecord]:
         """Fetch drug information.
 
         Note: Actual implementation would require DrugBank API access.
@@ -342,7 +347,7 @@ class ReactomeSource(DataSource):
         query: str,
         max_results: int = 100,
         **kwargs,
-    ) -> List[DataRecord]:
+    ) -> list[DataRecord]:
         """Fetch pathway information from Reactome."""
         self.logger.info("Fetching from Reactome", query=query[:50])
 

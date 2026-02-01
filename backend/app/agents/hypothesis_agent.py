@@ -5,7 +5,7 @@ Generates and ranks hypotheses using RAG and LLM reasoning.
 """
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import UUID, uuid4
 
 from app.agents.base import (
@@ -31,8 +31,8 @@ class GeneratedHypothesis:
         rationale: str = "",
         confidence_score: float = 0.5,
         novelty_score: float = 0.5,
-        supporting_evidence: List[Dict[str, Any]] = None,
-        entities: List[str] = None,
+        supporting_evidence: list[dict[str, Any]] = None,
+        entities: list[str] = None,
     ):
         self.id = uuid4()
         self.statement = statement
@@ -44,7 +44,7 @@ class GeneratedHypothesis:
         self.entities = entities or []
         self.created_at = datetime.utcnow()
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": str(self.id),
             "statement": self.statement,
@@ -208,9 +208,9 @@ class HypothesisGenerationAgent(BaseAgent):
         self,
         query: str,
         project_id: UUID = None,
-        focus_entities: List[str] = None,
+        focus_entities: list[str] = None,
         max_hypotheses: int = 5,
-    ) -> List[GeneratedHypothesis]:
+    ) -> list[GeneratedHypothesis]:
         """Generate hypotheses for a query.
 
         Args:
@@ -259,7 +259,7 @@ class HypothesisGenerationAgent(BaseAgent):
         self,
         query: str,
         limit: int = 20,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Retrieve relevant evidence from vector store."""
         try:
             from app.knowledge.vector_store import get_vector_store
@@ -283,8 +283,8 @@ class HypothesisGenerationAgent(BaseAgent):
     async def _query_graph(
         self,
         query: str,
-        entities: List[str] = None,
-    ) -> List[Dict[str, Any]]:
+        entities: list[str] = None,
+    ) -> list[dict[str, Any]]:
         """Query knowledge graph for relevant relationships."""
         try:
             from app.knowledge.graph_store import get_graph_store
@@ -304,21 +304,21 @@ class HypothesisGenerationAgent(BaseAgent):
 
             for entity in results:
                 # Get neighborhood
-                neighborhood = await store.get_neighborhood(
-                    entity.id, depth=1, limit=10
-                )
+                neighborhood = await store.get_neighborhood(entity.id, depth=1, limit=10)
                 if neighborhood:
                     for relation in neighborhood.relations:
-                        facts.append({
-                            "source": relation.source_name,
-                            "relation": relation.relation_type,
-                            "target": relation.target_name,
-                            "confidence": relation.confidence,
-                        })
+                        facts.append(
+                            {
+                                "source": relation.source_name,
+                                "relation": relation.relation_type,
+                                "target": relation.target_name,
+                                "confidence": relation.confidence,
+                            }
+                        )
 
         return facts
 
-    def _extract_terms(self, text: str) -> List[str]:
+    def _extract_terms(self, text: str) -> list[str]:
         """Extract key terms from text for graph querying."""
         import re
 
@@ -326,27 +326,25 @@ class HypothesisGenerationAgent(BaseAgent):
         terms = []
 
         # Capitalized words
-        terms.extend(re.findall(r'\b[A-Z][a-z]+\b', text))
+        terms.extend(re.findall(r"\b[A-Z][a-z]+\b", text))
 
         # Gene-like patterns
-        terms.extend(re.findall(r'\b[A-Z]{2,}[0-9]*\b', text))
+        terms.extend(re.findall(r"\b[A-Z]{2,}[0-9]*\b", text))
 
         return list(set(terms))[:10]
 
     async def _generate_hypotheses(
         self,
         query: str,
-        evidence: List[Dict[str, Any]],
-        graph_facts: List[Dict[str, Any]],
+        evidence: list[dict[str, Any]],
+        graph_facts: list[dict[str, Any]],
         max_hypotheses: int = 5,
-    ) -> List[GeneratedHypothesis]:
+    ) -> list[GeneratedHypothesis]:
         """Generate hypotheses using available evidence and facts."""
         hypotheses = []
 
         # Try to use LLM if available
-        llm_hypotheses = await self._generate_with_llm(
-            query, evidence, graph_facts, max_hypotheses
-        )
+        llm_hypotheses = await self._generate_with_llm(query, evidence, graph_facts, max_hypotheses)
         if llm_hypotheses:
             return llm_hypotheses
 
@@ -360,10 +358,10 @@ class HypothesisGenerationAgent(BaseAgent):
     async def _generate_with_llm(
         self,
         query: str,
-        evidence: List[Dict[str, Any]],
-        graph_facts: List[Dict[str, Any]],
+        evidence: list[dict[str, Any]],
+        graph_facts: list[dict[str, Any]],
         max_hypotheses: int = 5,
-    ) -> List[GeneratedHypothesis]:
+    ) -> list[GeneratedHypothesis]:
         """Generate hypotheses using LLM."""
         if not settings.openai_api_key_value:
             return []
@@ -374,12 +372,9 @@ class HypothesisGenerationAgent(BaseAgent):
             client = AsyncOpenAI(api_key=settings.openai_api_key_value)
 
             # Build context from evidence and facts
-            evidence_text = "\n".join(
-                f"- {e.get('content', '')[:200]}" for e in evidence[:10]
-            )
+            evidence_text = "\n".join(f"- {e.get('content', '')[:200]}" for e in evidence[:10])
             facts_text = "\n".join(
-                f"- {f['source']} {f['relation']} {f['target']}"
-                for f in graph_facts[:10]
+                f"- {f['source']} {f['relation']} {f['target']}" for f in graph_facts[:10]
             )
 
             prompt = f"""Based on the following research question and available evidence, generate {max_hypotheses} novel, testable hypotheses.
@@ -430,8 +425,8 @@ RATIONALE: [why this hypothesis is plausible]
     def _parse_llm_response(
         self,
         response: str,
-        evidence: List[Dict[str, Any]],
-    ) -> List[GeneratedHypothesis]:
+        evidence: list[dict[str, Any]],
+    ) -> list[GeneratedHypothesis]:
         """Parse LLM response into hypothesis objects."""
         hypotheses = []
 
@@ -483,10 +478,10 @@ RATIONALE: [why this hypothesis is plausible]
     def _generate_template_hypotheses(
         self,
         query: str,
-        evidence: List[Dict[str, Any]],
-        graph_facts: List[Dict[str, Any]],
+        evidence: list[dict[str, Any]],
+        graph_facts: list[dict[str, Any]],
         max_hypotheses: int = 5,
-    ) -> List[GeneratedHypothesis]:
+    ) -> list[GeneratedHypothesis]:
         """Generate hypotheses using templates when LLM is unavailable."""
         hypotheses = []
 
@@ -516,7 +511,7 @@ RATIONALE: [why this hypothesis is plausible]
                 GeneratedHypothesis(
                     statement=statement,
                     mechanism=f"{source} {relation} {target}",
-                    rationale=f"Based on known relationship in knowledge graph.",
+                    rationale="Based on known relationship in knowledge graph.",
                     supporting_evidence=evidence[:3],
                     entities=[source, target],
                 )
@@ -524,7 +519,7 @@ RATIONALE: [why this hypothesis is plausible]
 
         # If still need more, generate from evidence
         if len(hypotheses) < max_hypotheses and evidence:
-            for e in evidence[:max_hypotheses - len(hypotheses)]:
+            for e in evidence[: max_hypotheses - len(hypotheses)]:
                 content = e.get("content", "")[:200]
                 hypotheses.append(
                     GeneratedHypothesis(
@@ -540,8 +535,8 @@ RATIONALE: [why this hypothesis is plausible]
     async def _score_hypothesis(
         self,
         hypothesis: GeneratedHypothesis,
-        evidence: List[Dict[str, Any]],
-        graph_facts: List[Dict[str, Any]],
+        evidence: list[dict[str, Any]],
+        graph_facts: list[dict[str, Any]],
     ) -> GeneratedHypothesis:
         """Score a hypothesis for confidence and novelty."""
         # Confidence: Based on supporting evidence and graph alignment

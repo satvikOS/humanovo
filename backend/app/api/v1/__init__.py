@@ -7,17 +7,17 @@ Aggregates all v1 API endpoints.
 from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
-    hypotheses,
-    evidence,
-    knowledge,
-    simulation,
     agents,
-    projects,
-    websocket,
-    rag,
+    evidence,
+    hypotheses,
     ingestion,
     ingestion_ws,
+    knowledge,
     monitoring,
+    projects,
+    rag,
+    simulation,
+    websocket,
 )
 
 router = APIRouter()

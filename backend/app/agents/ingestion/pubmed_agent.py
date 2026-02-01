@@ -5,12 +5,10 @@ Specialized agent for ingesting biomedical literature from PubMed/MEDLINE
 using NCBI E-utilities API.
 """
 
-import asyncio
 import hashlib
 import xml.etree.ElementTree as ET
-from datetime import datetime, date
-from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urlencode
+from datetime import date, datetime
+from typing import Any
 
 import aiohttp
 
@@ -18,10 +16,8 @@ from app.agents.ingestion.base import (
     IngestionAgent,
     IngestionConfig,
     IngestionRecord,
-    IngestionState,
     SourceType,
 )
-from app.core.config import settings
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -31,13 +27,13 @@ class PubMedConfig(IngestionConfig):
     """Configuration specific to PubMed ingestion."""
 
     # NCBI API settings
-    api_key: Optional[str] = None
-    email: Optional[str] = None  # Required by NCBI
+    api_key: str | None = None
+    email: str | None = None  # Required by NCBI
 
     # PubMed-specific filters
-    publication_types: List[str] = []  # e.g., ["Journal Article", "Review"]
-    mesh_terms: List[str] = []
-    journals: List[str] = []
+    publication_types: list[str] = []  # e.g., ["Journal Article", "Review"]
+    mesh_terms: list[str] = []
+    journals: list[str] = []
 
     # Date range
     date_type: str = "pdat"  # pdat (publication), edat (entrez), mdat (modification)
@@ -67,13 +63,13 @@ class PubMedIngestionAgent(IngestionAgent):
 
     def __init__(
         self,
-        config: Optional[PubMedConfig] = None,
+        config: PubMedConfig | None = None,
         **kwargs,
     ):
         config = config or PubMedConfig()
         super().__init__(config=config, **kwargs)
         self.pubmed_config: PubMedConfig = config
-        self._session: Optional[aiohttp.ClientSession] = None
+        self._session: aiohttp.ClientSession | None = None
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create HTTP session."""
@@ -92,7 +88,7 @@ class PubMedIngestionAgent(IngestionAgent):
         query: str,
         retstart: int = 0,
         retmax: int = 100,
-    ) -> Dict[str, str]:
+    ) -> dict[str, str]:
         """Build ESearch parameters."""
         params = {
             "db": "pubmed",
@@ -130,7 +126,7 @@ class PubMedIngestionAgent(IngestionAgent):
         query: str,
         retstart: int = 0,
         retmax: int = 100,
-    ) -> Tuple[List[str], int, Optional[str], Optional[str]]:
+    ) -> tuple[list[str], int, str | None, str | None]:
         """
         Execute ESearch to find PMIDs.
 
@@ -164,10 +160,10 @@ class PubMedIngestionAgent(IngestionAgent):
 
     async def _efetch(
         self,
-        pmids: List[str],
-        webenv: Optional[str] = None,
-        query_key: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        pmids: list[str],
+        webenv: str | None = None,
+        query_key: str | None = None,
+    ) -> list[dict[str, Any]]:
         """
         Execute EFetch to retrieve article details.
 
@@ -213,7 +209,7 @@ class PubMedIngestionAgent(IngestionAgent):
             self.logger.error("EFetch failed", error=str(e))
             raise
 
-    def _parse_pubmed_xml(self, xml_content: str) -> List[Dict[str, Any]]:
+    def _parse_pubmed_xml(self, xml_content: str) -> list[dict[str, Any]]:
         """Parse PubMed XML response into article dictionaries."""
         articles = []
 
@@ -230,7 +226,7 @@ class PubMedIngestionAgent(IngestionAgent):
 
         return articles
 
-    def _parse_article(self, article_elem: ET.Element) -> Optional[Dict[str, Any]]:
+    def _parse_article(self, article_elem: ET.Element) -> dict[str, Any] | None:
         """Parse a single PubmedArticle element."""
         try:
             medline = article_elem.find("MedlineCitation")
@@ -367,9 +363,18 @@ class PubMedIngestionAgent(IngestionAgent):
             return 1
 
         month_map = {
-            "jan": 1, "feb": 2, "mar": 3, "apr": 4,
-            "may": 5, "jun": 6, "jul": 7, "aug": 8,
-            "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+            "jan": 1,
+            "feb": 2,
+            "mar": 3,
+            "apr": 4,
+            "may": 5,
+            "jun": 6,
+            "jul": 7,
+            "aug": 8,
+            "sep": 9,
+            "oct": 10,
+            "nov": 11,
+            "dec": 12,
         }
 
         try:
@@ -379,7 +384,7 @@ class PubMedIngestionAgent(IngestionAgent):
 
     def _article_to_record(
         self,
-        article: Dict[str, Any],
+        article: dict[str, Any],
     ) -> IngestionRecord:
         """Convert article dictionary to IngestionRecord."""
         pmid = article["pmid"]
@@ -392,10 +397,9 @@ class PubMedIngestionAgent(IngestionAgent):
             title=article.get("title", ""),
             abstract=article.get("abstract"),
             authors=article.get("authors", []),
-            publication_date=datetime.combine(
-                article["publication_date"],
-                datetime.min.time()
-            ) if article.get("publication_date") else None,
+            publication_date=datetime.combine(article["publication_date"], datetime.min.time())
+            if article.get("publication_date")
+            else None,
             url=f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
             doi=article.get("doi"),
             keywords=article.get("keywords", []) + article.get("mesh_terms", []),
@@ -414,7 +418,7 @@ class PubMedIngestionAgent(IngestionAgent):
         offset: int = 0,
         limit: int = 100,
         **kwargs,
-    ) -> Tuple[List[IngestionRecord], Optional[str]]:
+    ) -> tuple[list[IngestionRecord], str | None]:
         """
         Fetch a batch of PubMed records.
 
@@ -458,7 +462,7 @@ class PubMedIngestionAgent(IngestionAgent):
 
         return records, next_cursor
 
-    async def fetch_by_id(self, source_id: str) -> Optional[IngestionRecord]:
+    async def fetch_by_id(self, source_id: str) -> IngestionRecord | None:
         """
         Fetch a specific PubMed article by PMID.
 
@@ -484,32 +488,26 @@ class PubMedIngestionAgent(IngestionAgent):
         # Add publication type filters
         if self.pubmed_config.publication_types:
             pt_filter = " OR ".join(
-                f'"{pt}"[Publication Type]'
-                for pt in self.pubmed_config.publication_types
+                f'"{pt}"[Publication Type]' for pt in self.pubmed_config.publication_types
             )
             query_parts.append(f"({pt_filter})")
 
         # Add MeSH term filters
         if self.pubmed_config.mesh_terms:
             mesh_filter = " OR ".join(
-                f'"{term}"[MeSH Terms]'
-                for term in self.pubmed_config.mesh_terms
+                f'"{term}"[MeSH Terms]' for term in self.pubmed_config.mesh_terms
             )
             query_parts.append(f"({mesh_filter})")
 
         # Add journal filters
         if self.pubmed_config.journals:
-            journal_filter = " OR ".join(
-                f'"{j}"[Journal]'
-                for j in self.pubmed_config.journals
-            )
+            journal_filter = " OR ".join(f'"{j}"[Journal]' for j in self.pubmed_config.journals)
             query_parts.append(f"({journal_filter})")
 
         # Add language filter
         if self.pubmed_config.language_filter:
             lang_filter = " OR ".join(
-                f"{lang}[Language]"
-                for lang in self.pubmed_config.language_filter
+                f"{lang}[Language]" for lang in self.pubmed_config.language_filter
             )
             query_parts.append(f"({lang_filter})")
 
@@ -519,7 +517,7 @@ class PubMedIngestionAgent(IngestionAgent):
         self,
         pmid: str,
         max_results: int = 20,
-    ) -> List[IngestionRecord]:
+    ) -> list[IngestionRecord]:
         """
         Fetch articles related to a given PMID using ELink.
 
@@ -578,7 +576,7 @@ class PubMedIngestionAgent(IngestionAgent):
         self,
         pmid: str,
         max_results: int = 50,
-    ) -> List[IngestionRecord]:
+    ) -> list[IngestionRecord]:
         """
         Fetch articles that cite a given PMID.
 

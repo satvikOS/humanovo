@@ -5,10 +5,10 @@ Research project/session model.
 """
 
 from enum import Enum as PyEnum
-from typing import List, Optional
 
 from sqlalchemy import Column, Enum, ForeignKey, Integer, String, Text
-from sqlalchemy.dialects.postgresql import ARRAY, UUID as PGUUID
+from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import relationship
 
 from app.models.base import BaseModel

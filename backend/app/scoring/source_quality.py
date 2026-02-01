@@ -15,13 +15,14 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Optional, Any
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 class EvidenceLevel(str, Enum):
     """Evidence hierarchy levels."""
+
     SYSTEMATIC_REVIEW = "systematic_review"  # Level 1a
     RCT = "rct"  # Level 1b - Randomized Controlled Trial
     COHORT_PROSPECTIVE = "cohort_prospective"  # Level 2a
@@ -37,6 +38,7 @@ class EvidenceLevel(str, Enum):
 
 class JournalTier(str, Enum):
     """Journal quality tiers."""
+
     TOP_TIER = "top_tier"  # Nature, Science, Cell, NEJM, Lancet, JAMA
     HIGH_IMPACT = "high_impact"  # IF > 10
     MEDIUM_IMPACT = "medium_impact"  # IF 5-10
@@ -47,6 +49,7 @@ class JournalTier(str, Enum):
 
 class SourceType(str, Enum):
     """Types of evidence sources."""
+
     JOURNAL_ARTICLE = "journal_article"
     REVIEW_ARTICLE = "review_article"
     CLINICAL_TRIAL = "clinical_trial"
@@ -65,23 +68,24 @@ class SourceType(str, Enum):
 @dataclass
 class SourceQuality:
     """Represents source quality assessment."""
+
     source_id: str
     source_type: SourceType
     evidence_level: EvidenceLevel
     journal_tier: JournalTier
     quality_score: float  # 0-1
-    impact_factor: Optional[float] = None
-    citation_count: Optional[int] = None
-    publication_year: Optional[int] = None
+    impact_factor: float | None = None
+    citation_count: int | None = None
+    publication_year: int | None = None
     peer_reviewed: bool = True
     retracted: bool = False
     has_corrections: bool = False
-    sample_size: Optional[int] = None
-    study_quality_score: Optional[float] = None
+    sample_size: int | None = None
+    study_quality_score: float | None = None
     replication_status: str = "unknown"  # replicated, not_replicated, partial, unknown
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "source_id": self.source_id,
             "source_type": self.source_type.value,
@@ -97,7 +101,7 @@ class SourceQuality:
             "sample_size": self.sample_size,
             "study_quality_score": self.study_quality_score,
             "replication_status": self.replication_status,
-            "metadata": self.metadata
+            "metadata": self.metadata,
         }
 
 
@@ -122,7 +126,6 @@ class SourceQualityAnalyzer:
         "jama": {"tier": JournalTier.TOP_TIER, "if": 56.0},
         "bmj": {"tier": JournalTier.HIGH_IMPACT, "if": 39.0},
         "annals of internal medicine": {"tier": JournalTier.HIGH_IMPACT, "if": 39.0},
-
         # Oncology
         "journal of clinical oncology": {"tier": JournalTier.TOP_TIER, "if": 45.0},
         "jco": {"tier": JournalTier.TOP_TIER, "if": 45.0},
@@ -131,7 +134,6 @@ class SourceQualityAnalyzer:
         "cancer discovery": {"tier": JournalTier.TOP_TIER, "if": 38.0},
         "cancer cell": {"tier": JournalTier.TOP_TIER, "if": 38.0},
         "clinical cancer research": {"tier": JournalTier.HIGH_IMPACT, "if": 13.0},
-
         # Basic Science
         "nature": {"tier": JournalTier.TOP_TIER, "if": 64.0},
         "science": {"tier": JournalTier.TOP_TIER, "if": 56.0},
@@ -140,11 +142,9 @@ class SourceQualityAnalyzer:
         "nature biotechnology": {"tier": JournalTier.TOP_TIER, "if": 46.0},
         "nature communications": {"tier": JournalTier.HIGH_IMPACT, "if": 16.0},
         "pnas": {"tier": JournalTier.HIGH_IMPACT, "if": 12.0},
-
         # Drug/Pharmacology
         "nature reviews drug discovery": {"tier": JournalTier.TOP_TIER, "if": 84.0},
         "clinical pharmacology and therapeutics": {"tier": JournalTier.HIGH_IMPACT, "if": 7.0},
-
         # Preprints
         "biorxiv": {"tier": JournalTier.PREPRINT, "if": 0.0},
         "medrxiv": {"tier": JournalTier.PREPRINT, "if": 0.0},
@@ -178,36 +178,29 @@ class SourceQualityAnalyzer:
 
     # Study design keywords
     STUDY_TYPE_PATTERNS = {
-        EvidenceLevel.SYSTEMATIC_REVIEW: [
-            r'systematic\s+review', r'meta-?analysis', r'cochrane'
-        ],
+        EvidenceLevel.SYSTEMATIC_REVIEW: [r"systematic\s+review", r"meta-?analysis", r"cochrane"],
         EvidenceLevel.RCT: [
-            r'randomized\s+controlled', r'randomised\s+controlled',
-            r'\brct\b', r'double-?blind', r'placebo-?controlled'
+            r"randomized\s+controlled",
+            r"randomised\s+controlled",
+            r"\brct\b",
+            r"double-?blind",
+            r"placebo-?controlled",
         ],
         EvidenceLevel.COHORT_PROSPECTIVE: [
-            r'prospective\s+cohort', r'prospective\s+study',
-            r'longitudinal\s+study'
+            r"prospective\s+cohort",
+            r"prospective\s+study",
+            r"longitudinal\s+study",
         ],
         EvidenceLevel.COHORT_RETROSPECTIVE: [
-            r'retrospective\s+cohort', r'retrospective\s+study',
-            r'retrospective\s+analysis'
+            r"retrospective\s+cohort",
+            r"retrospective\s+study",
+            r"retrospective\s+analysis",
         ],
-        EvidenceLevel.CASE_CONTROL: [
-            r'case-?control', r'matched\s+cohort'
-        ],
-        EvidenceLevel.CASE_SERIES: [
-            r'case\s+series', r'case\s+studies'
-        ],
-        EvidenceLevel.CASE_REPORT: [
-            r'case\s+report', r'single\s+patient'
-        ],
-        EvidenceLevel.IN_VITRO: [
-            r'in\s+vitro', r'cell\s+line', r'cell\s+culture'
-        ],
-        EvidenceLevel.IN_SILICO: [
-            r'in\s+silico', r'computational', r'bioinformatic'
-        ],
+        EvidenceLevel.CASE_CONTROL: [r"case-?control", r"matched\s+cohort"],
+        EvidenceLevel.CASE_SERIES: [r"case\s+series", r"case\s+studies"],
+        EvidenceLevel.CASE_REPORT: [r"case\s+report", r"single\s+patient"],
+        EvidenceLevel.IN_VITRO: [r"in\s+vitro", r"cell\s+line", r"cell\s+culture"],
+        EvidenceLevel.IN_SILICO: [r"in\s+silico", r"computational", r"bioinformatic"],
     }
 
     def __init__(
@@ -216,7 +209,7 @@ class SourceQualityAnalyzer:
         citation_weight: float = 0.1,
         evidence_weight: float = 0.4,
         venue_weight: float = 0.3,
-        replication_weight: float = 0.1
+        replication_weight: float = 0.1,
     ):
         """
         Initialize the source quality analyzer.
@@ -237,22 +230,20 @@ class SourceQualityAnalyzer:
         # Compile patterns
         self._study_patterns = {}
         for level, patterns in self.STUDY_TYPE_PATTERNS.items():
-            self._study_patterns[level] = [
-                re.compile(p, re.IGNORECASE) for p in patterns
-            ]
+            self._study_patterns[level] = [re.compile(p, re.IGNORECASE) for p in patterns]
 
         logger.info("SourceQualityAnalyzer initialized")
 
     def analyze(
         self,
         source_id: str,
-        title: Optional[str] = None,
-        abstract: Optional[str] = None,
-        journal: Optional[str] = None,
-        publication_year: Optional[int] = None,
-        citation_count: Optional[int] = None,
-        source_type: Optional[SourceType] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        title: str | None = None,
+        abstract: str | None = None,
+        journal: str | None = None,
+        publication_year: int | None = None,
+        citation_count: int | None = None,
+        source_type: SourceType | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> SourceQuality:
         """
         Analyze source quality.
@@ -287,7 +278,7 @@ class SourceQualityAnalyzer:
             journal_tier=journal_tier,
             publication_year=publication_year,
             citation_count=citation_count,
-            source_type=source_type
+            source_type=source_type,
         )
 
         # Check for red flags
@@ -306,7 +297,7 @@ class SourceQualityAnalyzer:
             peer_reviewed=journal_tier != JournalTier.PREPRINT,
             retracted=retracted,
             has_corrections=has_corrections,
-            metadata=metadata or {}
+            metadata=metadata or {},
         )
 
     def _detect_evidence_level(self, text: str) -> EvidenceLevel:
@@ -329,10 +320,7 @@ class SourceQualityAnalyzer:
 
         return EvidenceLevel.UNKNOWN
 
-    def _get_journal_info(
-        self,
-        journal: Optional[str]
-    ) -> tuple:
+    def _get_journal_info(self, journal: str | None) -> tuple:
         """Get journal tier and impact factor."""
         if not journal:
             return JournalTier.UNKNOWN, None
@@ -354,11 +342,7 @@ class SourceQualityAnalyzer:
 
         return JournalTier.UNKNOWN, None
 
-    def _detect_source_type(
-        self,
-        journal: Optional[str],
-        text: str
-    ) -> SourceType:
+    def _detect_source_type(self, journal: str | None, text: str) -> SourceType:
         """Detect source type."""
         if journal:
             journal_lower = journal.lower()
@@ -380,9 +364,9 @@ class SourceQualityAnalyzer:
         self,
         evidence_level: EvidenceLevel,
         journal_tier: JournalTier,
-        publication_year: Optional[int],
-        citation_count: Optional[int],
-        source_type: SourceType
+        publication_year: int | None,
+        citation_count: int | None,
+        source_type: SourceType,
     ) -> float:
         """Calculate overall quality score."""
         scores = []
@@ -410,6 +394,7 @@ class SourceQualityAnalyzer:
         if citation_count is not None:
             # Logarithmic scale for citations
             import math
+
             citation_score = min(1.0, math.log10(citation_count + 1) / 4)
             scores.append(citation_score)
             weights.append(self.citation_weight)
@@ -423,11 +408,7 @@ class SourceQualityAnalyzer:
 
         return weighted_sum / total_weight
 
-    def _check_retracted(
-        self,
-        text: str,
-        metadata: Optional[Dict]
-    ) -> bool:
+    def _check_retracted(self, text: str, metadata: dict | None) -> bool:
         """Check if source is retracted."""
         if metadata and metadata.get("retracted"):
             return True
@@ -435,16 +416,13 @@ class SourceQualityAnalyzer:
             return True
         return False
 
-    def _check_corrections(self, metadata: Optional[Dict]) -> bool:
+    def _check_corrections(self, metadata: dict | None) -> bool:
         """Check if source has corrections."""
         if metadata and metadata.get("has_corrections"):
             return True
         return False
 
-    def batch_analyze(
-        self,
-        sources: List[Dict[str, Any]]
-    ) -> List[SourceQuality]:
+    def batch_analyze(self, sources: list[dict[str, Any]]) -> list[SourceQuality]:
         """
         Analyze multiple sources.
 
@@ -464,15 +442,12 @@ class SourceQualityAnalyzer:
                 publication_year=source.get("year"),
                 citation_count=source.get("citations"),
                 source_type=source.get("source_type"),
-                metadata=source.get("metadata")
+                metadata=source.get("metadata"),
             )
             results.append(quality)
         return results
 
-    def compare_sources(
-        self,
-        sources: List[SourceQuality]
-    ) -> Dict[str, Any]:
+    def compare_sources(self, sources: list[SourceQuality]) -> dict[str, Any]:
         """
         Compare quality of multiple sources.
 
@@ -501,25 +476,21 @@ class SourceQualityAnalyzer:
             "best_source": {
                 "id": best_source.source_id,
                 "quality_score": best_source.quality_score,
-                "evidence_level": best_source.evidence_level.value
+                "evidence_level": best_source.evidence_level.value,
             },
-            "evidence_level_distribution": {
-                level: levels.count(level) for level in set(levels)
-            },
-            "journal_tier_distribution": {
-                tier: tiers.count(tier) for tier in set(tiers)
-            },
+            "evidence_level_distribution": {level: levels.count(level) for level in set(levels)},
+            "journal_tier_distribution": {tier: tiers.count(tier) for tier in set(tiers)},
             "retracted_count": sum(1 for s in sources if s.retracted),
-            "peer_reviewed_count": sum(1 for s in sources if s.peer_reviewed)
+            "peer_reviewed_count": sum(1 for s in sources if s.peer_reviewed),
         }
 
 
 # Convenience function
 def analyze_source_quality(
     source_id: str,
-    title: Optional[str] = None,
-    abstract: Optional[str] = None,
-    journal: Optional[str] = None
+    title: str | None = None,
+    abstract: str | None = None,
+    journal: str | None = None,
 ) -> SourceQuality:
     """Quick source quality analysis."""
     analyzer = SourceQualityAnalyzer()

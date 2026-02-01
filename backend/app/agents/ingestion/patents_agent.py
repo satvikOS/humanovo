@@ -5,11 +5,9 @@ Specialized agent for ingesting patent data from USPTO PatentsView API
 and other patent databases.
 """
 
-import asyncio
 import hashlib
-import json
-from datetime import datetime, date
-from typing import Any, Dict, List, Optional, Tuple
+from datetime import datetime
+from typing import Any
 
 import aiohttp
 
@@ -28,21 +26,21 @@ class PatentsConfig(IngestionConfig):
     """Configuration specific to patent ingestion."""
 
     # Patent office selection
-    patent_offices: List[str] = ["USPTO"]  # USPTO, EPO, WIPO
+    patent_offices: list[str] = ["USPTO"]  # USPTO, EPO, WIPO
 
     # Patent type filters
-    patent_types: List[str] = []  # utility, design, plant, reissue
+    patent_types: list[str] = []  # utility, design, plant, reissue
 
     # CPC classification filters (Cooperative Patent Classification)
-    cpc_sections: List[str] = []  # A, B, C, D, E, F, G, H (A=Human necessities, C=Chemistry)
-    cpc_classes: List[str] = []  # Specific CPC classes like A61K (Medical preparations)
+    cpc_sections: list[str] = []  # A, B, C, D, E, F, G, H (A=Human necessities, C=Chemistry)
+    cpc_classes: list[str] = []  # Specific CPC classes like A61K (Medical preparations)
 
     # Assignee filters
-    assignee_types: List[str] = []  # Individual, Corporation, Government
-    assignee_names: List[str] = []
+    assignee_types: list[str] = []  # Individual, Corporation, Government
+    assignee_names: list[str] = []
 
     # Inventor filters
-    inventor_countries: List[str] = []
+    inventor_countries: list[str] = []
 
     # Citation filters
     min_citations: int = 0
@@ -101,13 +99,13 @@ class PatentsIngestionAgent(IngestionAgent):
 
     def __init__(
         self,
-        config: Optional[PatentsConfig] = None,
+        config: PatentsConfig | None = None,
         **kwargs,
     ):
         config = config or PatentsConfig()
         super().__init__(config=config, **kwargs)
         self.patents_config: PatentsConfig = config
-        self._session: Optional[aiohttp.ClientSession] = None
+        self._session: aiohttp.ClientSession | None = None
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create HTTP session."""
@@ -121,81 +119,87 @@ class PatentsIngestionAgent(IngestionAgent):
         if self._session and not self._session.closed:
             await self._session.close()
 
-    def _build_query(self, search_query: str) -> Dict[str, Any]:
+    def _build_query(self, search_query: str) -> dict[str, Any]:
         """Build PatentsView API query."""
         # Build query criteria
         criteria = []
 
         # Full-text search on title and abstract
         if search_query:
-            criteria.append({
-                "_or": [
-                    {"_text_any": {"patent_title": search_query}},
-                    {"_text_any": {"patent_abstract": search_query}},
-                ]
-            })
+            criteria.append(
+                {
+                    "_or": [
+                        {"_text_any": {"patent_title": search_query}},
+                        {"_text_any": {"patent_abstract": search_query}},
+                    ]
+                }
+            )
 
         # Patent type filter
         if self.patents_config.patent_types:
-            criteria.append({
-                "_or": [
-                    {"patent_type": pt}
-                    for pt in self.patents_config.patent_types
-                ]
-            })
+            criteria.append(
+                {"_or": [{"patent_type": pt} for pt in self.patents_config.patent_types]}
+            )
 
         # CPC section filter (biomedical is typically A61, C07, C12)
         if self.patents_config.cpc_sections:
-            criteria.append({
-                "_or": [
-                    {"cpc_section_id": section}
-                    for section in self.patents_config.cpc_sections
-                ]
-            })
+            criteria.append(
+                {
+                    "_or": [
+                        {"cpc_section_id": section} for section in self.patents_config.cpc_sections
+                    ]
+                }
+            )
 
         # CPC class filter
         if self.patents_config.cpc_classes:
-            criteria.append({
-                "_or": [
-                    {"_begins": {"cpc_subgroup_id": cls}}
-                    for cls in self.patents_config.cpc_classes
-                ]
-            })
+            criteria.append(
+                {
+                    "_or": [
+                        {"_begins": {"cpc_subgroup_id": cls}}
+                        for cls in self.patents_config.cpc_classes
+                    ]
+                }
+            )
 
         # Assignee name filter
         if self.patents_config.assignee_names:
-            criteria.append({
-                "_or": [
-                    {"_contains": {"assignee_organization": name}}
-                    for name in self.patents_config.assignee_names
-                ]
-            })
+            criteria.append(
+                {
+                    "_or": [
+                        {"_contains": {"assignee_organization": name}}
+                        for name in self.patents_config.assignee_names
+                    ]
+                }
+            )
 
         # Inventor country filter
         if self.patents_config.inventor_countries:
-            criteria.append({
-                "_or": [
-                    {"inventor_country": country}
-                    for country in self.patents_config.inventor_countries
-                ]
-            })
+            criteria.append(
+                {
+                    "_or": [
+                        {"inventor_country": country}
+                        for country in self.patents_config.inventor_countries
+                    ]
+                }
+            )
 
         # Date range filter
         date_field = "app_date" if self.patents_config.use_application_date else "patent_date"
         if self.patents_config.date_from:
-            criteria.append({
-                "_gte": {date_field: self.patents_config.date_from.strftime("%Y-%m-%d")}
-            })
+            criteria.append(
+                {"_gte": {date_field: self.patents_config.date_from.strftime("%Y-%m-%d")}}
+            )
         if self.patents_config.date_to:
-            criteria.append({
-                "_lte": {date_field: self.patents_config.date_to.strftime("%Y-%m-%d")}
-            })
+            criteria.append(
+                {"_lte": {date_field: self.patents_config.date_to.strftime("%Y-%m-%d")}}
+            )
 
         # Citation filter
         if self.patents_config.min_citations > 0:
-            criteria.append({
-                "_gte": {"patent_num_cited_by_us_patents": self.patents_config.min_citations}
-            })
+            criteria.append(
+                {"_gte": {"patent_num_cited_by_us_patents": self.patents_config.min_citations}}
+            )
 
         # Combine criteria
         if len(criteria) == 0:
@@ -212,7 +216,7 @@ class PatentsIngestionAgent(IngestionAgent):
         query: str,
         page: int = 1,
         per_page: int = 100,
-    ) -> Tuple[List[Dict[str, Any]], int]:
+    ) -> tuple[list[dict[str, Any]], int]:
         """
         Search for patents using PatentsView API.
 
@@ -260,7 +264,7 @@ class PatentsIngestionAgent(IngestionAgent):
             self.logger.error("PatentsView API error", error=str(e))
             raise
 
-    def _parse_date(self, date_str: Optional[str]) -> Optional[datetime]:
+    def _parse_date(self, date_str: str | None) -> datetime | None:
         """Parse date string from API response."""
         if not date_str:
             return None
@@ -271,7 +275,7 @@ class PatentsIngestionAgent(IngestionAgent):
 
     def _patent_to_record(
         self,
-        patent: Dict[str, Any],
+        patent: dict[str, Any],
     ) -> IngestionRecord:
         """Convert API patent response to IngestionRecord."""
         patent_number = patent.get("patent_number", "")
@@ -361,7 +365,7 @@ class PatentsIngestionAgent(IngestionAgent):
         offset: int = 0,
         limit: int = 100,
         **kwargs,
-    ) -> Tuple[List[IngestionRecord], Optional[str]]:
+    ) -> tuple[list[IngestionRecord], str | None]:
         """
         Fetch a batch of patents.
 
@@ -404,7 +408,7 @@ class PatentsIngestionAgent(IngestionAgent):
 
         return records, next_cursor
 
-    async def fetch_by_id(self, source_id: str) -> Optional[IngestionRecord]:
+    async def fetch_by_id(self, source_id: str) -> IngestionRecord | None:
         """
         Fetch a specific patent by patent number.
 
@@ -450,7 +454,7 @@ class PatentsIngestionAgent(IngestionAgent):
         self,
         assignee_name: str,
         max_results: int = 100,
-    ) -> List[IngestionRecord]:
+    ) -> list[IngestionRecord]:
         """
         Fetch patents by assignee name.
 
@@ -474,7 +478,7 @@ class PatentsIngestionAgent(IngestionAgent):
         self,
         cpc_class: str,
         max_results: int = 100,
-    ) -> List[IngestionRecord]:
+    ) -> list[IngestionRecord]:
         """
         Fetch patents by CPC classification.
 
@@ -505,7 +509,7 @@ class PatentsIngestionAgent(IngestionAgent):
         self,
         patent_number: str,
         max_results: int = 50,
-    ) -> List[IngestionRecord]:
+    ) -> list[IngestionRecord]:
         """
         Fetch patents that cite a given patent.
 

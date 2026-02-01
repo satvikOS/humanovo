@@ -5,10 +5,9 @@ Specialized agent for ingesting clinical trial data from ClinicalTrials.gov
 using their public API v2.
 """
 
-import asyncio
 import hashlib
-from datetime import datetime, date
-from typing import Any, Dict, List, Optional, Tuple
+from datetime import datetime
+from typing import Any
 
 import aiohttp
 
@@ -27,33 +26,33 @@ class ClinicalTrialsConfig(IngestionConfig):
     """Configuration specific to ClinicalTrials.gov ingestion."""
 
     # Study status filters
-    status_filter: List[str] = []  # RECRUITING, COMPLETED, ACTIVE_NOT_RECRUITING, etc.
+    status_filter: list[str] = []  # RECRUITING, COMPLETED, ACTIVE_NOT_RECRUITING, etc.
 
     # Phase filters
-    phase_filter: List[str] = []  # PHASE1, PHASE2, PHASE3, PHASE4, NA
+    phase_filter: list[str] = []  # PHASE1, PHASE2, PHASE3, PHASE4, NA
 
     # Study type filters
-    study_type_filter: List[str] = []  # INTERVENTIONAL, OBSERVATIONAL, etc.
+    study_type_filter: list[str] = []  # INTERVENTIONAL, OBSERVATIONAL, etc.
 
     # Intervention type filters
-    intervention_type_filter: List[str] = []  # DRUG, DEVICE, BIOLOGICAL, etc.
+    intervention_type_filter: list[str] = []  # DRUG, DEVICE, BIOLOGICAL, etc.
 
     # Geographic filters
-    country_filter: List[str] = []
-    state_filter: List[str] = []
+    country_filter: list[str] = []
+    state_filter: list[str] = []
 
     # Sponsor filters
-    sponsor_filter: List[str] = []
-    funder_type_filter: List[str] = []  # NIH, INDUSTRY, OTHER
+    sponsor_filter: list[str] = []
+    funder_type_filter: list[str] = []  # NIH, INDUSTRY, OTHER
 
     # Results availability
-    has_results: Optional[bool] = None
+    has_results: bool | None = None
 
     # Age group filters
-    age_group_filter: List[str] = []  # CHILD, ADULT, OLDER_ADULT
+    age_group_filter: list[str] = []  # CHILD, ADULT, OLDER_ADULT
 
     # Sex filters
-    sex_filter: Optional[str] = None  # ALL, FEMALE, MALE
+    sex_filter: str | None = None  # ALL, FEMALE, MALE
 
     # Sort options
     sort_by: str = "LastUpdatePostDate"  # StudyFirstPostDate, LastUpdatePostDate, etc.
@@ -121,13 +120,13 @@ class ClinicalTrialsIngestionAgent(IngestionAgent):
 
     def __init__(
         self,
-        config: Optional[ClinicalTrialsConfig] = None,
+        config: ClinicalTrialsConfig | None = None,
         **kwargs,
     ):
         config = config or ClinicalTrialsConfig()
         super().__init__(config=config, **kwargs)
         self.ct_config: ClinicalTrialsConfig = config
-        self._session: Optional[aiohttp.ClientSession] = None
+        self._session: aiohttp.ClientSession | None = None
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create HTTP session."""
@@ -144,9 +143,9 @@ class ClinicalTrialsIngestionAgent(IngestionAgent):
     def _build_query_params(
         self,
         query: str,
-        page_token: Optional[str] = None,
+        page_token: str | None = None,
         page_size: int = 100,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Build API query parameters."""
         params = {
             "format": "json",
@@ -180,9 +179,7 @@ class ClinicalTrialsIngestionAgent(IngestionAgent):
 
         # Geographic filters
         if self.ct_config.country_filter:
-            params["filter.geo"] = ",".join(
-                f"country:{c}" for c in self.ct_config.country_filter
-            )
+            params["filter.geo"] = ",".join(f"country:{c}" for c in self.ct_config.country_filter)
 
         # Age group filter
         if self.ct_config.age_group_filter:
@@ -205,7 +202,9 @@ class ClinicalTrialsIngestionAgent(IngestionAgent):
             if "filter.lastUpdatePostDate" in params:
                 params["filter.lastUpdatePostDate"] += self.ct_config.date_to.strftime("%Y-%m-%d")
             else:
-                params["filter.lastUpdatePostDate"] = f"_{self.ct_config.date_to.strftime('%Y-%m-%d')}"
+                params["filter.lastUpdatePostDate"] = (
+                    f"_{self.ct_config.date_to.strftime('%Y-%m-%d')}"
+                )
 
         # Sorting
         params["sort"] = f"{self.ct_config.sort_by}:{self.ct_config.sort_order}"
@@ -215,9 +214,9 @@ class ClinicalTrialsIngestionAgent(IngestionAgent):
     async def _search_studies(
         self,
         query: str,
-        page_token: Optional[str] = None,
+        page_token: str | None = None,
         page_size: int = 100,
-    ) -> Tuple[List[Dict[str, Any]], Optional[str], int]:
+    ) -> tuple[list[dict[str, Any]], str | None, int]:
         """
         Search for clinical trials.
 
@@ -247,7 +246,7 @@ class ClinicalTrialsIngestionAgent(IngestionAgent):
             self.logger.error("ClinicalTrials.gov API error", error=str(e))
             raise
 
-    def _parse_date(self, date_info: Optional[Dict[str, Any]]) -> Optional[datetime]:
+    def _parse_date(self, date_info: dict[str, Any] | None) -> datetime | None:
         """Parse date from API response."""
         if not date_info:
             return None
@@ -270,7 +269,7 @@ class ClinicalTrialsIngestionAgent(IngestionAgent):
 
     def _extract_nested_value(
         self,
-        data: Dict[str, Any],
+        data: dict[str, Any],
         *keys: str,
         default: Any = None,
     ) -> Any:
@@ -287,7 +286,7 @@ class ClinicalTrialsIngestionAgent(IngestionAgent):
 
     def _study_to_record(
         self,
-        study: Dict[str, Any],
+        study: dict[str, Any],
     ) -> IngestionRecord:
         """Convert API study response to IngestionRecord."""
         protocol = study.get("protocolSection", {})
@@ -323,20 +322,24 @@ class ClinicalTrialsIngestionAgent(IngestionAgent):
         # Extract interventions
         interventions = []
         for intervention in arms_module.get("interventions", []):
-            interventions.append({
-                "name": intervention.get("name"),
-                "type": intervention.get("type"),
-                "description": intervention.get("description"),
-            })
+            interventions.append(
+                {
+                    "name": intervention.get("name"),
+                    "type": intervention.get("type"),
+                    "description": intervention.get("description"),
+                }
+            )
 
         # Extract outcomes
         primary_outcomes = []
         for outcome in outcomes_module.get("primaryOutcomes", []):
-            primary_outcomes.append({
-                "measure": outcome.get("measure"),
-                "description": outcome.get("description"),
-                "time_frame": outcome.get("timeFrame"),
-            })
+            primary_outcomes.append(
+                {
+                    "measure": outcome.get("measure"),
+                    "description": outcome.get("description"),
+                    "time_frame": outcome.get("timeFrame"),
+                }
+            )
 
         # Extract sponsor info
         lead_sponsor = sponsor_module.get("leadSponsor", {})
@@ -345,12 +348,14 @@ class ClinicalTrialsIngestionAgent(IngestionAgent):
         # Extract locations
         locations = []
         for location in contacts_module.get("locations", []):
-            locations.append({
-                "facility": location.get("facility"),
-                "city": location.get("city"),
-                "state": location.get("state"),
-                "country": location.get("country"),
-            })
+            locations.append(
+                {
+                    "facility": location.get("facility"),
+                    "city": location.get("city"),
+                    "state": location.get("state"),
+                    "country": location.get("country"),
+                }
+            )
 
         # Extract eligibility
         eligibility = {
@@ -404,7 +409,7 @@ class ClinicalTrialsIngestionAgent(IngestionAgent):
         offset: int = 0,
         limit: int = 100,
         **kwargs,
-    ) -> Tuple[List[IngestionRecord], Optional[str]]:
+    ) -> tuple[list[IngestionRecord], str | None]:
         """
         Fetch a batch of clinical trials.
 
@@ -441,7 +446,7 @@ class ClinicalTrialsIngestionAgent(IngestionAgent):
 
         return records, next_token
 
-    async def fetch_by_id(self, source_id: str) -> Optional[IngestionRecord]:
+    async def fetch_by_id(self, source_id: str) -> IngestionRecord | None:
         """
         Fetch a specific clinical trial by NCT ID.
 
@@ -483,7 +488,7 @@ class ClinicalTrialsIngestionAgent(IngestionAgent):
         self,
         condition: str,
         max_results: int = 100,
-    ) -> List[IngestionRecord]:
+    ) -> list[IngestionRecord]:
         """
         Fetch trials for a specific condition.
 
@@ -502,9 +507,9 @@ class ClinicalTrialsIngestionAgent(IngestionAgent):
     async def fetch_by_intervention(
         self,
         intervention: str,
-        intervention_type: Optional[str] = None,
+        intervention_type: str | None = None,
         max_results: int = 100,
-    ) -> List[IngestionRecord]:
+    ) -> list[IngestionRecord]:
         """
         Fetch trials for a specific intervention.
 
@@ -527,7 +532,7 @@ class ClinicalTrialsIngestionAgent(IngestionAgent):
         self,
         query: str,
         max_results: int = 100,
-    ) -> List[IngestionRecord]:
+    ) -> list[IngestionRecord]:
         """
         Fetch currently recruiting trials.
 

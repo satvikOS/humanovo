@@ -6,11 +6,10 @@ User authentication and authorization model.
 
 from datetime import datetime
 from enum import Enum as PyEnum
-from typing import List, Optional
 from uuid import UUID
 
 from sqlalchemy import Boolean, Column, DateTime, Enum, Integer, String, Text
-from sqlalchemy.dialects.postgresql import ARRAY, UUID as PGUUID
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import relationship
 
 from app.models.base import BaseModel

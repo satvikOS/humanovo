@@ -9,21 +9,20 @@ Connectors for various biomedical literature sources:
 - FDA/EMA documents
 """
 
+import hashlib
 import logging
-import asyncio
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime, date
+from datetime import date
 from enum import Enum
-from typing import Dict, List, Optional, Any, AsyncIterator
-import re
-import hashlib
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 class SourceType(str, Enum):
     """Types of literature sources."""
+
     PUBMED = "pubmed"
     PATENT = "patent"
     CLINICAL_TRIAL = "clinical_trial"
@@ -36,33 +35,36 @@ class SourceType(str, Enum):
 @dataclass
 class LiteratureRecord:
     """Represents a literature record."""
+
     record_id: str
     source_type: SourceType
     title: str
-    abstract: Optional[str] = None
-    full_text: Optional[str] = None
-    authors: List[str] = field(default_factory=list)
-    publication_date: Optional[date] = None
-    journal: Optional[str] = None
-    doi: Optional[str] = None
-    pmid: Optional[str] = None
-    patent_number: Optional[str] = None
-    nct_id: Optional[str] = None  # ClinicalTrials.gov ID
-    keywords: List[str] = field(default_factory=list)
-    mesh_terms: List[str] = field(default_factory=list)
+    abstract: str | None = None
+    full_text: str | None = None
+    authors: list[str] = field(default_factory=list)
+    publication_date: date | None = None
+    journal: str | None = None
+    doi: str | None = None
+    pmid: str | None = None
+    patent_number: str | None = None
+    nct_id: str | None = None  # ClinicalTrials.gov ID
+    keywords: list[str] = field(default_factory=list)
+    mesh_terms: list[str] = field(default_factory=list)
     citations: int = 0
-    url: Optional[str] = None
+    url: str | None = None
     language: str = "en"
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "record_id": self.record_id,
             "source_type": self.source_type.value,
             "title": self.title,
             "abstract": self.abstract,
             "authors": self.authors,
-            "publication_date": self.publication_date.isoformat() if self.publication_date else None,
+            "publication_date": self.publication_date.isoformat()
+            if self.publication_date
+            else None,
             "journal": self.journal,
             "doi": self.doi,
             "pmid": self.pmid,
@@ -73,7 +75,7 @@ class LiteratureRecord:
             "citations": self.citations,
             "url": self.url,
             "language": self.language,
-            "metadata": self.metadata
+            "metadata": self.metadata,
         }
 
     def get_text(self) -> str:
@@ -97,28 +99,17 @@ class LiteratureSource(ABC):
     """Abstract base class for literature sources."""
 
     @abstractmethod
-    async def search(
-        self,
-        query: str,
-        max_results: int = 100,
-        **kwargs
-    ) -> List[LiteratureRecord]:
+    async def search(self, query: str, max_results: int = 100, **kwargs) -> list[LiteratureRecord]:
         """Search for records."""
         pass
 
     @abstractmethod
-    async def fetch(
-        self,
-        record_id: str
-    ) -> Optional[LiteratureRecord]:
+    async def fetch(self, record_id: str) -> LiteratureRecord | None:
         """Fetch a specific record."""
         pass
 
     @abstractmethod
-    async def fetch_batch(
-        self,
-        record_ids: List[str]
-    ) -> List[LiteratureRecord]:
+    async def fetch_batch(self, record_ids: list[str]) -> list[LiteratureRecord]:
         """Fetch multiple records."""
         pass
 
@@ -136,9 +127,9 @@ class PubMedSource(LiteratureSource):
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
-        email: Optional[str] = None,
-        rate_limit: float = 3.0  # requests per second
+        api_key: str | None = None,
+        email: str | None = None,
+        rate_limit: float = 3.0,  # requests per second
     ):
         """
         Initialize PubMed source.
@@ -161,10 +152,10 @@ class PubMedSource(LiteratureSource):
         self,
         query: str,
         max_results: int = 100,
-        date_from: Optional[date] = None,
-        date_to: Optional[date] = None,
-        **kwargs
-    ) -> List[LiteratureRecord]:
+        date_from: date | None = None,
+        date_to: date | None = None,
+        **kwargs,
+    ) -> list[LiteratureRecord]:
         """
         Search PubMed.
 
@@ -192,25 +183,22 @@ class PubMedSource(LiteratureSource):
             record = LiteratureRecord(
                 record_id=f"pubmed_{i}_{query_hash[:8]}",
                 source_type=SourceType.PUBMED,
-                title=f"Research on {query} - Study {i+1}",
+                title=f"Research on {query} - Study {i + 1}",
                 abstract=f"This study investigates {query} in the context of biomedical research. "
-                        f"Our findings suggest significant implications for understanding {query}.",
+                f"Our findings suggest significant implications for understanding {query}.",
                 authors=[f"Author {j}" for j in range(1, 4)],
                 publication_date=date(2024, 1, i + 1),
                 journal="Journal of Biomedical Research",
                 pmid=pmid,
                 keywords=[query, "biomedical", "research"],
                 citations=10 * (i + 1),
-                url=f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
+                url=f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
             )
             records.append(record)
 
         return records
 
-    async def fetch(
-        self,
-        record_id: str
-    ) -> Optional[LiteratureRecord]:
+    async def fetch(self, record_id: str) -> LiteratureRecord | None:
         """Fetch a specific PubMed record."""
         # Mock implementation
         if record_id.startswith("pubmed_"):
@@ -219,14 +207,11 @@ class PubMedSource(LiteratureSource):
                 source_type=SourceType.PUBMED,
                 title=f"Article {record_id}",
                 abstract="Abstract content...",
-                publication_date=date(2024, 1, 1)
+                publication_date=date(2024, 1, 1),
             )
         return None
 
-    async def fetch_batch(
-        self,
-        record_ids: List[str]
-    ) -> List[LiteratureRecord]:
+    async def fetch_batch(self, record_ids: list[str]) -> list[LiteratureRecord]:
         """Fetch multiple records."""
         results = []
         for rid in record_ids:
@@ -245,11 +230,7 @@ class PatentSource(LiteratureSource):
         WIPO = "wipo"
         ALL = "all"
 
-    def __init__(
-        self,
-        offices: Optional[List[PatentOffice]] = None,
-        api_key: Optional[str] = None
-    ):
+    def __init__(self, offices: list[PatentOffice] | None = None, api_key: str | None = None):
         """
         Initialize patent source.
 
@@ -268,11 +249,11 @@ class PatentSource(LiteratureSource):
         self,
         query: str,
         max_results: int = 100,
-        date_from: Optional[date] = None,
-        date_to: Optional[date] = None,
-        patent_type: Optional[str] = None,  # utility, design, plant
-        **kwargs
-    ) -> List[LiteratureRecord]:
+        date_from: date | None = None,
+        date_to: date | None = None,
+        patent_type: str | None = None,  # utility, design, plant
+        **kwargs,
+    ) -> list[LiteratureRecord]:
         """
         Search patent databases.
 
@@ -300,27 +281,24 @@ class PatentSource(LiteratureSource):
                 source_type=SourceType.PATENT,
                 title=f"Method and composition for {query}",
                 abstract=f"This invention relates to novel methods and compositions "
-                        f"for {query} in therapeutic applications.",
+                f"for {query} in therapeutic applications.",
                 authors=[f"Inventor {j}" for j in range(1, 3)],
                 publication_date=date(2024, 6, i + 1),
                 patent_number=patent_num,
                 keywords=[query, "therapeutic", "composition"],
                 url=f"https://patents.google.com/patent/{patent_num}",
                 metadata={
-                    "assignee": f"Pharma Corp {i+1}",
+                    "assignee": f"Pharma Corp {i + 1}",
                     "filing_date": "2023-01-15",
                     "patent_type": "utility",
-                    "claims_count": 20 + i
-                }
+                    "claims_count": 20 + i,
+                },
             )
             records.append(record)
 
         return records
 
-    async def fetch(
-        self,
-        record_id: str
-    ) -> Optional[LiteratureRecord]:
+    async def fetch(self, record_id: str) -> LiteratureRecord | None:
         """Fetch a specific patent."""
         if record_id.startswith("patent_"):
             return LiteratureRecord(
@@ -329,14 +307,11 @@ class PatentSource(LiteratureSource):
                 title=f"Patent {record_id}",
                 abstract="Patent abstract...",
                 publication_date=date(2024, 1, 1),
-                metadata={"patent_type": "utility"}
+                metadata={"patent_type": "utility"},
             )
         return None
 
-    async def fetch_batch(
-        self,
-        record_ids: List[str]
-    ) -> List[LiteratureRecord]:
+    async def fetch_batch(self, record_ids: list[str]) -> list[LiteratureRecord]:
         """Fetch multiple patents."""
         results = []
         for rid in record_ids:
@@ -351,11 +326,7 @@ class ClinicalTrialsSource(LiteratureSource):
 
     BASE_URL = "https://clinicaltrials.gov/api/v2"
 
-    def __init__(
-        self,
-        include_results: bool = True,
-        include_terminated: bool = False
-    ):
+    def __init__(self, include_results: bool = True, include_terminated: bool = False):
         """
         Initialize ClinicalTrials.gov source.
 
@@ -374,10 +345,10 @@ class ClinicalTrialsSource(LiteratureSource):
         self,
         query: str,
         max_results: int = 100,
-        status: Optional[List[str]] = None,  # recruiting, completed, etc.
-        phase: Optional[List[str]] = None,  # Phase 1, Phase 2, etc.
-        **kwargs
-    ) -> List[LiteratureRecord]:
+        status: list[str] | None = None,  # recruiting, completed, etc.
+        phase: list[str] | None = None,  # Phase 1, Phase 2, etc.
+        **kwargs,
+    ) -> list[LiteratureRecord]:
         """
         Search ClinicalTrials.gov.
 
@@ -407,7 +378,7 @@ class ClinicalTrialsSource(LiteratureSource):
                 source_type=SourceType.CLINICAL_TRIAL,
                 title=f"A Study of {query} in Adult Patients",
                 abstract=f"This is a {phases[i % 3]} clinical trial evaluating {query} "
-                        f"for treatment of relevant conditions.",
+                f"for treatment of relevant conditions.",
                 authors=["Principal Investigator"],
                 publication_date=date(2024, 3, i + 1),
                 nct_id=nct_id,
@@ -417,18 +388,15 @@ class ClinicalTrialsSource(LiteratureSource):
                     "phase": phases[i % 3],
                     "status": statuses[i % 3],
                     "enrollment": 100 + i * 50,
-                    "sponsor": f"Research Institution {i+1}",
-                    "primary_outcome": "Efficacy endpoint"
-                }
+                    "sponsor": f"Research Institution {i + 1}",
+                    "primary_outcome": "Efficacy endpoint",
+                },
             )
             records.append(record)
 
         return records
 
-    async def fetch(
-        self,
-        record_id: str
-    ) -> Optional[LiteratureRecord]:
+    async def fetch(self, record_id: str) -> LiteratureRecord | None:
         """Fetch a specific clinical trial."""
         if record_id.startswith("ct_") or record_id.startswith("NCT"):
             return LiteratureRecord(
@@ -436,14 +404,11 @@ class ClinicalTrialsSource(LiteratureSource):
                 source_type=SourceType.CLINICAL_TRIAL,
                 title=f"Clinical Trial {record_id}",
                 abstract="Trial description...",
-                nct_id=record_id if record_id.startswith("NCT") else None
+                nct_id=record_id if record_id.startswith("NCT") else None,
             )
         return None
 
-    async def fetch_batch(
-        self,
-        record_ids: List[str]
-    ) -> List[LiteratureRecord]:
+    async def fetch_batch(self, record_ids: list[str]) -> list[LiteratureRecord]:
         """Fetch multiple trials."""
         results = []
         for rid in record_ids:
@@ -458,7 +423,7 @@ class PrePrintSource(LiteratureSource):
 
     def __init__(
         self,
-        servers: Optional[List[str]] = None  # biorxiv, medrxiv
+        servers: list[str] | None = None,  # biorxiv, medrxiv
     ):
         """
         Initialize preprint source.
@@ -476,10 +441,10 @@ class PrePrintSource(LiteratureSource):
         self,
         query: str,
         max_results: int = 100,
-        date_from: Optional[date] = None,
-        date_to: Optional[date] = None,
-        **kwargs
-    ) -> List[LiteratureRecord]:
+        date_from: date | None = None,
+        date_to: date | None = None,
+        **kwargs,
+    ) -> list[LiteratureRecord]:
         """
         Search preprint servers.
 
@@ -507,27 +472,20 @@ class PrePrintSource(LiteratureSource):
                 source_type=SourceType.PREPRINT,
                 title=f"Preprint: Novel findings on {query}",
                 abstract=f"We report preliminary findings regarding {query}. "
-                        f"This preprint has not yet been peer-reviewed.",
+                f"This preprint has not yet been peer-reviewed.",
                 authors=[f"Author {j}" for j in range(1, 5)],
                 publication_date=date(2024, 11, i + 1),
                 doi=doi,
                 keywords=[query, "preprint", server],
                 url=f"https://www.{server}.org/content/{doi}",
                 journal=server,
-                metadata={
-                    "server": server,
-                    "version": 1,
-                    "peer_reviewed": False
-                }
+                metadata={"server": server, "version": 1, "peer_reviewed": False},
             )
             records.append(record)
 
         return records
 
-    async def fetch(
-        self,
-        record_id: str
-    ) -> Optional[LiteratureRecord]:
+    async def fetch(self, record_id: str) -> LiteratureRecord | None:
         """Fetch a specific preprint."""
         if record_id.startswith("preprint_"):
             return LiteratureRecord(
@@ -535,14 +493,11 @@ class PrePrintSource(LiteratureSource):
                 source_type=SourceType.PREPRINT,
                 title=f"Preprint {record_id}",
                 abstract="Preprint abstract...",
-                metadata={"peer_reviewed": False}
+                metadata={"peer_reviewed": False},
             )
         return None
 
-    async def fetch_batch(
-        self,
-        record_ids: List[str]
-    ) -> List[LiteratureRecord]:
+    async def fetch_batch(self, record_ids: list[str]) -> list[LiteratureRecord]:
         """Fetch multiple preprints."""
         results = []
         for rid in record_ids:
@@ -553,10 +508,7 @@ class PrePrintSource(LiteratureSource):
 
 
 # Factory function
-def create_source(
-    source_type: SourceType,
-    **kwargs
-) -> LiteratureSource:
+def create_source(source_type: SourceType, **kwargs) -> LiteratureSource:
     """
     Create a literature source.
 

@@ -5,10 +5,9 @@ Specialized agent for ingesting preprints from bioRxiv and medRxiv
 using their public API.
 """
 
-import asyncio
 import hashlib
-from datetime import datetime, date, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from datetime import date, datetime, timedelta
+from typing import Any
 
 import aiohttp
 
@@ -27,10 +26,10 @@ class PreprintConfig(IngestionConfig):
     """Configuration specific to preprint ingestion."""
 
     # Server selection
-    servers: List[str] = ["biorxiv", "medrxiv"]
+    servers: list[str] = ["biorxiv", "medrxiv"]
 
     # Subject area filters (bioRxiv categories)
-    subject_areas: List[str] = []
+    subject_areas: list[str] = []
     # Examples: biochemistry, bioinformatics, cancer_biology, cell_biology,
     # clinical_trials, developmental_biology, epidemiology, genetics,
     # genomics, immunology, microbiology, molecular_biology, neuroscience,
@@ -40,7 +39,7 @@ class PreprintConfig(IngestionConfig):
     latest_version_only: bool = True
 
     # Publication status filter
-    published_filter: Optional[bool] = None  # None=all, True=published, False=not published
+    published_filter: bool | None = None  # None=all, True=published, False=not published
 
     # Sort options
     sort_by: str = "date"  # date, relevance_score
@@ -66,13 +65,13 @@ class PreprintIngestionAgent(IngestionAgent):
 
     def __init__(
         self,
-        config: Optional[PreprintConfig] = None,
+        config: PreprintConfig | None = None,
         **kwargs,
     ):
         config = config or PreprintConfig()
         super().__init__(config=config, **kwargs)
         self.preprint_config: PreprintConfig = config
-        self._session: Optional[aiohttp.ClientSession] = None
+        self._session: aiohttp.ClientSession | None = None
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create HTTP session."""
@@ -92,7 +91,7 @@ class PreprintIngestionAgent(IngestionAgent):
         start_date: date,
         end_date: date,
         cursor: int = 0,
-    ) -> Tuple[List[Dict[str, Any]], int]:
+    ) -> tuple[list[dict[str, Any]], int]:
         """
         Fetch preprints by date range.
 
@@ -144,7 +143,7 @@ class PreprintIngestionAgent(IngestionAgent):
         server: str,
         rows: int = 100,
         offset: int = 0,
-    ) -> Tuple[List[Dict[str, Any]], int]:
+    ) -> tuple[list[dict[str, Any]], int]:
         """
         Search preprints via CrossRef API.
 
@@ -188,7 +187,7 @@ class PreprintIngestionAgent(IngestionAgent):
             self.logger.error("CrossRef API error", error=str(e))
             raise
 
-    def _parse_date(self, date_str: Optional[str]) -> Optional[datetime]:
+    def _parse_date(self, date_str: str | None) -> datetime | None:
         """Parse date string from API response."""
         if not date_str:
             return None
@@ -200,7 +199,7 @@ class PreprintIngestionAgent(IngestionAgent):
             except ValueError:
                 return None
 
-    def _parse_crossref_date(self, date_parts: Optional[List[List[int]]]) -> Optional[datetime]:
+    def _parse_crossref_date(self, date_parts: list[list[int]] | None) -> datetime | None:
         """Parse CrossRef date format [[year, month, day]]."""
         if not date_parts or not date_parts[0]:
             return None
@@ -215,7 +214,7 @@ class PreprintIngestionAgent(IngestionAgent):
 
     def _biorxiv_to_record(
         self,
-        preprint: Dict[str, Any],
+        preprint: dict[str, Any],
         server: str,
     ) -> IngestionRecord:
         """Convert bioRxiv/medRxiv API response to IngestionRecord."""
@@ -263,7 +262,7 @@ class PreprintIngestionAgent(IngestionAgent):
 
     def _crossref_to_record(
         self,
-        item: Dict[str, Any],
+        item: dict[str, Any],
     ) -> IngestionRecord:
         """Convert CrossRef API response to IngestionRecord."""
         doi = item.get("DOI", "")
@@ -280,6 +279,7 @@ class PreprintIngestionAgent(IngestionAgent):
         # Clean up HTML tags if present
         if abstract:
             import re
+
             abstract = re.sub(r"<[^>]+>", "", abstract)
 
         # Extract authors
@@ -335,7 +335,7 @@ class PreprintIngestionAgent(IngestionAgent):
         offset: int = 0,
         limit: int = 100,
         **kwargs,
-    ) -> Tuple[List[IngestionRecord], Optional[str]]:
+    ) -> tuple[list[IngestionRecord], str | None]:
         """
         Fetch a batch of preprints.
 
@@ -426,7 +426,7 @@ class PreprintIngestionAgent(IngestionAgent):
 
         return records, next_cursor
 
-    async def fetch_by_id(self, source_id: str) -> Optional[IngestionRecord]:
+    async def fetch_by_id(self, source_id: str) -> IngestionRecord | None:
         """
         Fetch a specific preprint by DOI.
 
@@ -484,7 +484,7 @@ class PreprintIngestionAgent(IngestionAgent):
         self,
         days: int = 7,
         max_results: int = 100,
-    ) -> List[IngestionRecord]:
+    ) -> list[IngestionRecord]:
         """
         Fetch preprints from the last N days.
 
@@ -512,7 +512,7 @@ class PreprintIngestionAgent(IngestionAgent):
         self,
         category: str,
         max_results: int = 100,
-    ) -> List[IngestionRecord]:
+    ) -> list[IngestionRecord]:
         """
         Fetch preprints by subject category.
 
@@ -535,7 +535,7 @@ class PreprintIngestionAgent(IngestionAgent):
     async def fetch_published_versions(
         self,
         doi: str,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """
         Check if a preprint has been published in a peer-reviewed journal.
 

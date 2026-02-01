@@ -5,11 +5,10 @@ NLP-based extraction of biomedical entities and relationships.
 """
 
 import re
-from typing import Any, Dict, List, Optional, Set, Tuple
 
 from pydantic import BaseModel
 
-from app.core.logging import get_logger, LoggerMixin
+from app.core.logging import LoggerMixin, get_logger
 
 logger = get_logger(__name__)
 
@@ -22,7 +21,7 @@ class ExtractedEntity(BaseModel):
     start: int
     end: int
     confidence: float = 1.0
-    normalized_id: Optional[str] = None
+    normalized_id: str | None = None
 
 
 class ExtractedRelation(BaseModel):
@@ -32,7 +31,7 @@ class ExtractedRelation(BaseModel):
     predicate: str
     object: ExtractedEntity
     confidence: float = 1.0
-    source_text: Optional[str] = None
+    source_text: str | None = None
 
 
 class EntityExtractor(LoggerMixin):
@@ -42,9 +41,12 @@ class EntityExtractor(LoggerMixin):
     """
 
     # Common entity patterns
-    GENE_PATTERN = re.compile(r'\b[A-Z][A-Z0-9]{1,10}\b')
-    DRUG_PATTERN = re.compile(r'\b\w+(?:mab|nib|lib|zumab|ximab|tinib|ciclib)\b', re.IGNORECASE)
-    DISEASE_PATTERN = re.compile(r'\b(?:cancer|carcinoma|tumor|tumour|melanoma|leukemia|lymphoma|syndrome|disease)\b', re.IGNORECASE)
+    GENE_PATTERN = re.compile(r"\b[A-Z][A-Z0-9]{1,10}\b")
+    DRUG_PATTERN = re.compile(r"\b\w+(?:mab|nib|lib|zumab|ximab|tinib|ciclib)\b", re.IGNORECASE)
+    DISEASE_PATTERN = re.compile(
+        r"\b(?:cancer|carcinoma|tumor|tumour|melanoma|leukemia|lymphoma|syndrome|disease)\b",
+        re.IGNORECASE,
+    )
 
     def __init__(self, use_nlp: bool = True):
         self.use_nlp = use_nlp
@@ -58,6 +60,7 @@ class EntityExtractor(LoggerMixin):
 
         try:
             import spacy
+
             # Try to load scispaCy biomedical model
             try:
                 self._nlp_model = spacy.load("en_core_sci_sm")
@@ -72,7 +75,7 @@ class EntityExtractor(LoggerMixin):
         except ImportError:
             self.logger.warning("spaCy not installed, using pattern matching only")
 
-    def extract(self, text: str) -> List[ExtractedEntity]:
+    def extract(self, text: str) -> list[ExtractedEntity]:
         """Extract entities from text."""
         entities = []
 
@@ -94,7 +97,7 @@ class EntityExtractor(LoggerMixin):
 
         return unique_entities
 
-    def _extract_with_nlp(self, text: str) -> List[ExtractedEntity]:
+    def _extract_with_nlp(self, text: str) -> list[ExtractedEntity]:
         """Extract entities using NLP model."""
         entities = []
         doc = self._nlp_model(text)
@@ -127,7 +130,7 @@ class EntityExtractor(LoggerMixin):
 
         return entities
 
-    def _extract_with_patterns(self, text: str) -> List[ExtractedEntity]:
+    def _extract_with_patterns(self, text: str) -> list[ExtractedEntity]:
         """Extract entities using regex patterns."""
         entities = []
 
@@ -210,8 +213,8 @@ class RelationExtractor(LoggerMixin):
     def extract(
         self,
         text: str,
-        entities: Optional[List[ExtractedEntity]] = None,
-    ) -> List[ExtractedRelation]:
+        entities: list[ExtractedEntity] | None = None,
+    ) -> list[ExtractedRelation]:
         """Extract relations from text.
 
         Args:
@@ -232,7 +235,7 @@ class RelationExtractor(LoggerMixin):
 
         # Find relations between pairs of entities
         for i, entity1 in enumerate(entities):
-            for entity2 in entities[i + 1:]:
+            for entity2 in entities[i + 1 :]:
                 # Find relation between these entities
                 relation = self._find_relation(text, text_lower, entity1, entity2)
                 if relation:
@@ -246,7 +249,7 @@ class RelationExtractor(LoggerMixin):
         text_lower: str,
         entity1: ExtractedEntity,
         entity2: ExtractedEntity,
-    ) -> Optional[ExtractedRelation]:
+    ) -> ExtractedRelation | None:
         """Find relation between two entities."""
         # Get text between entities
         start = min(entity1.end, entity2.end)

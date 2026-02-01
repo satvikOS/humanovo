@@ -9,12 +9,11 @@ import asyncio
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel
 
 from app.core.config import settings
-from app.core.logging import get_logger, LoggerMixin
+from app.core.logging import LoggerMixin, get_logger
 from app.rag.retriever import RetrievedChunk
 
 logger = get_logger(__name__)
@@ -76,7 +75,7 @@ class RerankerOutput(BaseModel):
     """Output from reranking operation."""
 
     query: str
-    results: List[RerankedResult]
+    results: list[RerankedResult]
     total_reranked: int
     model_used: str
     rerank_time_ms: float
@@ -98,8 +97,8 @@ class BaseReranker(ABC, LoggerMixin):
     async def compute_relevance(
         self,
         query: str,
-        chunks: List[RetrievedChunk],
-    ) -> List[float]:
+        chunks: list[RetrievedChunk],
+    ) -> list[float]:
         """Compute relevance scores for chunks."""
         pass
 
@@ -132,8 +131,8 @@ class CrossEncoderReranker(BaseReranker):
     async def compute_relevance(
         self,
         query: str,
-        chunks: List[RetrievedChunk],
-    ) -> List[float]:
+        chunks: list[RetrievedChunk],
+    ) -> list[float]:
         """Compute relevance using cross-encoder."""
         if not self._initialized:
             await self.initialize()
@@ -186,8 +185,8 @@ class LLMReranker(BaseReranker):
     async def compute_relevance(
         self,
         query: str,
-        chunks: List[RetrievedChunk],
-    ) -> List[float]:
+        chunks: list[RetrievedChunk],
+    ) -> list[float]:
         """Compute relevance using LLM."""
         if not self._initialized:
             await self.initialize()
@@ -248,8 +247,8 @@ class SimpleReranker(BaseReranker):
     async def compute_relevance(
         self,
         query: str,
-        chunks: List[RetrievedChunk],
-    ) -> List[float]:
+        chunks: list[RetrievedChunk],
+    ) -> list[float]:
         """Compute relevance using simple heuristics."""
         query_terms = set(query.lower().split())
         scores = []
@@ -286,9 +285,9 @@ class Reranker(LoggerMixin):
     factors like recency, source quality, and entity coverage.
     """
 
-    def __init__(self, config: Optional[RerankerConfig] = None):
+    def __init__(self, config: RerankerConfig | None = None):
         self.config = config or RerankerConfig()
-        self._base_reranker: Optional[BaseReranker] = None
+        self._base_reranker: BaseReranker | None = None
         self._initialized = False
 
     async def initialize(self) -> None:
@@ -322,8 +321,8 @@ class Reranker(LoggerMixin):
     async def rerank(
         self,
         query: str,
-        chunks: List[RetrievedChunk],
-        query_entities: Optional[List[str]] = None,
+        chunks: list[RetrievedChunk],
+        query_entities: list[str] | None = None,
     ) -> RerankerOutput:
         """
         Rerank retrieved chunks using multi-factor scoring.
@@ -361,7 +360,7 @@ class Reranker(LoggerMixin):
         entity_scores = self._compute_entity_coverage_scores(chunks, query_entities or [])
 
         # Combine scores
-        results: List[RerankedResult] = []
+        results: list[RerankedResult] = []
         for i, chunk in enumerate(chunks):
             relevance = relevance_scores[i]
             recency = recency_scores[i]
@@ -417,8 +416,8 @@ class Reranker(LoggerMixin):
 
     def _compute_recency_scores(
         self,
-        chunks: List[RetrievedChunk],
-    ) -> List[float]:
+        chunks: list[RetrievedChunk],
+    ) -> list[float]:
         """Compute recency scores based on publication date."""
         from datetime import datetime
 
@@ -450,8 +449,8 @@ class Reranker(LoggerMixin):
 
     def _compute_source_quality_scores(
         self,
-        chunks: List[RetrievedChunk],
-    ) -> List[float]:
+        chunks: list[RetrievedChunk],
+    ) -> list[float]:
         """Compute source quality scores."""
         source_quality = {
             "pubmed": 0.9,
@@ -464,7 +463,7 @@ class Reranker(LoggerMixin):
 
         scores = []
         for chunk in chunks:
-            source = chunk.source.value if hasattr(chunk.source, 'value') else str(chunk.source)
+            source = chunk.source.value if hasattr(chunk.source, "value") else str(chunk.source)
             score = source_quality.get(source, 0.5)
 
             # Boost for citations
@@ -480,9 +479,9 @@ class Reranker(LoggerMixin):
 
     def _compute_entity_coverage_scores(
         self,
-        chunks: List[RetrievedChunk],
-        query_entities: List[str],
-    ) -> List[float]:
+        chunks: list[RetrievedChunk],
+        query_entities: list[str],
+    ) -> list[float]:
         """Compute entity coverage scores."""
         if not query_entities:
             return [0.5] * len(chunks)
@@ -509,8 +508,8 @@ class Reranker(LoggerMixin):
 
     def _apply_diversity_filter(
         self,
-        results: List[RerankedResult],
-    ) -> List[RerankedResult]:
+        results: list[RerankedResult],
+    ) -> list[RerankedResult]:
         """Filter results for diversity (reduce redundancy)."""
         if not results:
             return results
@@ -553,10 +552,10 @@ class Reranker(LoggerMixin):
 
 
 # Global reranker instance
-_reranker: Optional[Reranker] = None
+_reranker: Reranker | None = None
 
 
-async def init_reranker(config: Optional[RerankerConfig] = None) -> None:
+async def init_reranker(config: RerankerConfig | None = None) -> None:
     """Initialize the global reranker."""
     global _reranker
     _reranker = Reranker(config)

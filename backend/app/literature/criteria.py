@@ -10,11 +10,11 @@ Defines and applies selection criteria:
 """
 
 import logging
-import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
-from typing import Dict, List, Optional, Any, Callable, Set
+from typing import Any
 
 from .sources import LiteratureRecord, SourceType
 
@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 class CriterionType(str, Enum):
     """Types of selection criteria."""
+
     DATE_RANGE = "date_range"
     LANGUAGE = "language"
     SOURCE_TYPE = "source_type"
@@ -40,59 +41,62 @@ class CriterionType(str, Enum):
 @dataclass
 class Criterion:
     """A single selection criterion."""
+
     criterion_type: CriterionType
     name: str
     description: str
-    parameters: Dict[str, Any] = field(default_factory=dict)
+    parameters: dict[str, Any] = field(default_factory=dict)
     required: bool = True  # Required for inclusion
     weight: float = 1.0  # For weighted scoring
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "criterion_type": self.criterion_type.value,
             "name": self.name,
             "description": self.description,
             "parameters": self.parameters,
             "required": self.required,
-            "weight": self.weight
+            "weight": self.weight,
         }
 
 
 @dataclass
 class CriterionResult:
     """Result of applying a criterion."""
+
     criterion_name: str
     passed: bool
     reason: str
     score: float = 1.0  # 0-1, 1 = fully passed
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "criterion_name": self.criterion_name,
             "passed": self.passed,
             "reason": self.reason,
-            "score": self.score
+            "score": self.score,
         }
 
 
 @dataclass
 class SelectionResult:
     """Result of selection process for a record."""
+
     record_id: str
     included: bool
-    inclusion_results: List[CriterionResult] = field(default_factory=list)
-    exclusion_results: List[CriterionResult] = field(default_factory=list)
+    inclusion_results: list[CriterionResult] = field(default_factory=list)
+    exclusion_results: list[CriterionResult] = field(default_factory=list)
     overall_score: float = 0.0
     decision_reason: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "record_id": self.record_id,
             "included": self.included,
             "inclusion_results": [r.to_dict() for r in self.inclusion_results],
             "exclusion_results": [r.to_dict() for r in self.exclusion_results],
             "overall_score": self.overall_score,
-            "decision_reason": self.decision_reason
+            "decision_reason": self.decision_reason,
         }
 
 
@@ -106,8 +110,8 @@ class InclusionCriteria:
 
     def __init__(self):
         """Initialize inclusion criteria."""
-        self.criteria: List[Criterion] = []
-        self._evaluators: Dict[CriterionType, Callable] = {}
+        self.criteria: list[Criterion] = []
+        self._evaluators: dict[CriterionType, Callable] = {}
         self._setup_evaluators()
 
     def _setup_evaluators(self):
@@ -124,114 +128,104 @@ class InclusionCriteria:
         }
 
     def add_date_range(
-        self,
-        start_date: Optional[date] = None,
-        end_date: Optional[date] = None,
-        required: bool = True
+        self, start_date: date | None = None, end_date: date | None = None, required: bool = True
     ):
         """Add date range criterion."""
-        self.criteria.append(Criterion(
-            criterion_type=CriterionType.DATE_RANGE,
-            name="Date Range",
-            description=f"Publication date between {start_date} and {end_date}",
-            parameters={"start_date": start_date, "end_date": end_date},
-            required=required
-        ))
+        self.criteria.append(
+            Criterion(
+                criterion_type=CriterionType.DATE_RANGE,
+                name="Date Range",
+                description=f"Publication date between {start_date} and {end_date}",
+                parameters={"start_date": start_date, "end_date": end_date},
+                required=required,
+            )
+        )
 
-    def add_language(
-        self,
-        languages: List[str],
-        required: bool = True
-    ):
+    def add_language(self, languages: list[str], required: bool = True):
         """Add language criterion."""
-        self.criteria.append(Criterion(
-            criterion_type=CriterionType.LANGUAGE,
-            name="Language",
-            description=f"Language must be one of: {languages}",
-            parameters={"languages": languages},
-            required=required
-        ))
+        self.criteria.append(
+            Criterion(
+                criterion_type=CriterionType.LANGUAGE,
+                name="Language",
+                description=f"Language must be one of: {languages}",
+                parameters={"languages": languages},
+                required=required,
+            )
+        )
 
-    def add_source_types(
-        self,
-        source_types: List[SourceType],
-        required: bool = True
-    ):
+    def add_source_types(self, source_types: list[SourceType], required: bool = True):
         """Add source type criterion."""
-        self.criteria.append(Criterion(
-            criterion_type=CriterionType.SOURCE_TYPE,
-            name="Source Type",
-            description=f"Source type must be one of: {[s.value for s in source_types]}",
-            parameters={"source_types": source_types},
-            required=required
-        ))
+        self.criteria.append(
+            Criterion(
+                criterion_type=CriterionType.SOURCE_TYPE,
+                name="Source Type",
+                description=f"Source type must be one of: {[s.value for s in source_types]}",
+                parameters={"source_types": source_types},
+                required=required,
+            )
+        )
 
     def add_keyword_requirement(
         self,
-        keywords: List[str],
+        keywords: list[str],
         match_any: bool = True,
         case_sensitive: bool = False,
-        required: bool = True
+        required: bool = True,
     ):
         """Add keyword presence criterion."""
         mode = "any" if match_any else "all"
-        self.criteria.append(Criterion(
-            criterion_type=CriterionType.KEYWORD_PRESENCE,
-            name="Required Keywords",
-            description=f"Must contain {mode} of: {keywords}",
-            parameters={
-                "keywords": keywords,
-                "match_any": match_any,
-                "case_sensitive": case_sensitive
-            },
-            required=required
-        ))
+        self.criteria.append(
+            Criterion(
+                criterion_type=CriterionType.KEYWORD_PRESENCE,
+                name="Required Keywords",
+                description=f"Must contain {mode} of: {keywords}",
+                parameters={
+                    "keywords": keywords,
+                    "match_any": match_any,
+                    "case_sensitive": case_sensitive,
+                },
+                required=required,
+            )
+        )
 
-    def add_minimum_citations(
-        self,
-        min_citations: int,
-        required: bool = False
-    ):
+    def add_minimum_citations(self, min_citations: int, required: bool = False):
         """Add minimum citation criterion."""
-        self.criteria.append(Criterion(
-            criterion_type=CriterionType.CITATION_COUNT,
-            name="Minimum Citations",
-            description=f"Must have at least {min_citations} citations",
-            parameters={"min_citations": min_citations},
-            required=required
-        ))
+        self.criteria.append(
+            Criterion(
+                criterion_type=CriterionType.CITATION_COUNT,
+                name="Minimum Citations",
+                description=f"Must have at least {min_citations} citations",
+                parameters={"min_citations": min_citations},
+                required=required,
+            )
+        )
 
-    def add_journal_list(
-        self,
-        journals: List[str],
-        include: bool = True,
-        required: bool = False
-    ):
+    def add_journal_list(self, journals: list[str], include: bool = True, required: bool = False):
         """Add journal list criterion."""
         mode = "include" if include else "exclude"
-        self.criteria.append(Criterion(
-            criterion_type=CriterionType.JOURNAL_LIST,
-            name="Journal List",
-            description=f"Journal must be in list (mode: {mode})",
-            parameters={"journals": journals, "include": include},
-            required=required
-        ))
+        self.criteria.append(
+            Criterion(
+                criterion_type=CriterionType.JOURNAL_LIST,
+                name="Journal List",
+                description=f"Journal must be in list (mode: {mode})",
+                parameters={"journals": journals, "include": include},
+                required=required,
+            )
+        )
 
-    def add_study_design(
-        self,
-        designs: List[str],
-        required: bool = False
-    ):
+    def add_study_design(self, designs: list[str], required: bool = False):
         """Add study design criterion."""
-        self.criteria.append(Criterion(
-            criterion_type=CriterionType.STUDY_DESIGN,
-            name="Study Design",
-            description=f"Study design must be one of: {designs}",
-            parameters={"designs": designs},
-            required=required
-        ))
+        self.criteria.append(
+            Criterion(
+                criterion_type=CriterionType.STUDY_DESIGN,
+                name="Study Design",
+                description=f"Study design must be one of: {designs}",
+                parameters={"designs": designs},
+                required=required,
+            )
+        )
 
-    def evaluate(self, record: LiteratureRecord) -> List[CriterionResult]:
+    def evaluate(self, record: LiteratureRecord) -> list[CriterionResult]:
         """
         Evaluate a record against all inclusion criteria.
 
@@ -248,17 +242,13 @@ class InclusionCriteria:
                 result = evaluator(record, criterion)
             else:
                 result = CriterionResult(
-                    criterion_name=criterion.name,
-                    passed=True,
-                    reason="No evaluator available"
+                    criterion_name=criterion.name, passed=True, reason="No evaluator available"
                 )
             results.append(result)
         return results
 
     def _evaluate_date_range(
-        self,
-        record: LiteratureRecord,
-        criterion: Criterion
+        self, record: LiteratureRecord, criterion: Criterion
     ) -> CriterionResult:
         """Evaluate date range criterion."""
         start_date = criterion.parameters.get("start_date")
@@ -267,10 +257,7 @@ class InclusionCriteria:
 
         if pub_date is None:
             return CriterionResult(
-                criterion_name=criterion.name,
-                passed=False,
-                reason="No publication date",
-                score=0.0
+                criterion_name=criterion.name, passed=False, reason="No publication date", score=0.0
             )
 
         if start_date and pub_date < start_date:
@@ -278,7 +265,7 @@ class InclusionCriteria:
                 criterion_name=criterion.name,
                 passed=False,
                 reason=f"Publication date {pub_date} before {start_date}",
-                score=0.0
+                score=0.0,
             )
 
         if end_date and pub_date > end_date:
@@ -286,21 +273,14 @@ class InclusionCriteria:
                 criterion_name=criterion.name,
                 passed=False,
                 reason=f"Publication date {pub_date} after {end_date}",
-                score=0.0
+                score=0.0,
             )
 
         return CriterionResult(
-            criterion_name=criterion.name,
-            passed=True,
-            reason="Within date range",
-            score=1.0
+            criterion_name=criterion.name, passed=True, reason="Within date range", score=1.0
         )
 
-    def _evaluate_language(
-        self,
-        record: LiteratureRecord,
-        criterion: Criterion
-    ) -> CriterionResult:
+    def _evaluate_language(self, record: LiteratureRecord, criterion: Criterion) -> CriterionResult:
         """Evaluate language criterion."""
         allowed = criterion.parameters.get("languages", ["en"])
         if record.language.lower() in [l.lower() for l in allowed]:
@@ -308,19 +288,17 @@ class InclusionCriteria:
                 criterion_name=criterion.name,
                 passed=True,
                 reason=f"Language {record.language} is allowed",
-                score=1.0
+                score=1.0,
             )
         return CriterionResult(
             criterion_name=criterion.name,
             passed=False,
             reason=f"Language {record.language} not in {allowed}",
-            score=0.0
+            score=0.0,
         )
 
     def _evaluate_source_type(
-        self,
-        record: LiteratureRecord,
-        criterion: Criterion
+        self, record: LiteratureRecord, criterion: Criterion
     ) -> CriterionResult:
         """Evaluate source type criterion."""
         allowed = criterion.parameters.get("source_types", [])
@@ -329,19 +307,17 @@ class InclusionCriteria:
                 criterion_name=criterion.name,
                 passed=True,
                 reason=f"Source type {record.source_type.value} is allowed",
-                score=1.0
+                score=1.0,
             )
         return CriterionResult(
             criterion_name=criterion.name,
             passed=False,
             reason=f"Source type {record.source_type.value} not allowed",
-            score=0.0
+            score=0.0,
         )
 
     def _evaluate_keyword_presence(
-        self,
-        record: LiteratureRecord,
-        criterion: Criterion
+        self, record: LiteratureRecord, criterion: Criterion
     ) -> CriterionResult:
         """Evaluate keyword presence criterion."""
         keywords = criterion.parameters.get("keywords", [])
@@ -366,13 +342,11 @@ class InclusionCriteria:
             criterion_name=criterion.name,
             passed=passed,
             reason=f"Matched {len(matches)}/{len(keywords)} keywords",
-            score=score
+            score=score,
         )
 
     def _evaluate_publication_type(
-        self,
-        record: LiteratureRecord,
-        criterion: Criterion
+        self, record: LiteratureRecord, criterion: Criterion
     ) -> CriterionResult:
         """Evaluate publication type criterion."""
         # Simplified - would need more metadata in real implementation
@@ -380,13 +354,11 @@ class InclusionCriteria:
             criterion_name=criterion.name,
             passed=True,
             reason="Publication type check passed",
-            score=1.0
+            score=1.0,
         )
 
     def _evaluate_citation_count(
-        self,
-        record: LiteratureRecord,
-        criterion: Criterion
+        self, record: LiteratureRecord, criterion: Criterion
     ) -> CriterionResult:
         """Evaluate citation count criterion."""
         min_citations = criterion.parameters.get("min_citations", 0)
@@ -395,19 +367,17 @@ class InclusionCriteria:
                 criterion_name=criterion.name,
                 passed=True,
                 reason=f"Citations {record.citations} >= {min_citations}",
-                score=1.0
+                score=1.0,
             )
         return CriterionResult(
             criterion_name=criterion.name,
             passed=False,
             reason=f"Citations {record.citations} < {min_citations}",
-            score=record.citations / min_citations if min_citations > 0 else 0
+            score=record.citations / min_citations if min_citations > 0 else 0,
         )
 
     def _evaluate_journal_list(
-        self,
-        record: LiteratureRecord,
-        criterion: Criterion
+        self, record: LiteratureRecord, criterion: Criterion
     ) -> CriterionResult:
         """Evaluate journal list criterion."""
         journals = criterion.parameters.get("journals", [])
@@ -418,7 +388,7 @@ class InclusionCriteria:
                 criterion_name=criterion.name,
                 passed=not include_mode,  # Pass if exclude mode
                 reason="No journal specified",
-                score=0.5
+                score=0.5,
             )
 
         journal_lower = record.journal.lower()
@@ -436,13 +406,11 @@ class InclusionCriteria:
             criterion_name=criterion.name,
             passed=passed,
             reason=reason,
-            score=1.0 if passed else 0.0
+            score=1.0 if passed else 0.0,
         )
 
     def _evaluate_study_design(
-        self,
-        record: LiteratureRecord,
-        criterion: Criterion
+        self, record: LiteratureRecord, criterion: Criterion
     ) -> CriterionResult:
         """Evaluate study design criterion."""
         designs = criterion.parameters.get("designs", [])
@@ -454,14 +422,14 @@ class InclusionCriteria:
                     criterion_name=criterion.name,
                     passed=True,
                     reason=f"Study design '{design}' found",
-                    score=1.0
+                    score=1.0,
                 )
 
         return CriterionResult(
             criterion_name=criterion.name,
             passed=False,
             reason="No matching study design found",
-            score=0.0
+            score=0.0,
         )
 
 
@@ -474,60 +442,61 @@ class ExclusionCriteria:
 
     def __init__(self):
         """Initialize exclusion criteria."""
-        self.criteria: List[Criterion] = []
+        self.criteria: list[Criterion] = []
 
-    def add_keyword_exclusion(
-        self,
-        keywords: List[str],
-        case_sensitive: bool = False
-    ):
+    def add_keyword_exclusion(self, keywords: list[str], case_sensitive: bool = False):
         """Add keyword exclusion criterion."""
-        self.criteria.append(Criterion(
-            criterion_type=CriterionType.KEYWORD_ABSENCE,
-            name="Excluded Keywords",
-            description=f"Must NOT contain: {keywords}",
-            parameters={
-                "keywords": keywords,
-                "case_sensitive": case_sensitive
-            },
-            required=True
-        ))
+        self.criteria.append(
+            Criterion(
+                criterion_type=CriterionType.KEYWORD_ABSENCE,
+                name="Excluded Keywords",
+                description=f"Must NOT contain: {keywords}",
+                parameters={"keywords": keywords, "case_sensitive": case_sensitive},
+                required=True,
+            )
+        )
 
     def add_retracted_exclusion(self):
         """Add retracted paper exclusion."""
-        self.criteria.append(Criterion(
-            criterion_type=CriterionType.CUSTOM,
-            name="Retracted Papers",
-            description="Exclude retracted papers",
-            parameters={"check": "retracted"},
-            required=True
-        ))
+        self.criteria.append(
+            Criterion(
+                criterion_type=CriterionType.CUSTOM,
+                name="Retracted Papers",
+                description="Exclude retracted papers",
+                parameters={"check": "retracted"},
+                required=True,
+            )
+        )
 
     def add_non_human_exclusion(self):
         """Add non-human studies exclusion."""
-        self.criteria.append(Criterion(
-            criterion_type=CriterionType.KEYWORD_ABSENCE,
-            name="Non-Human Studies",
-            description="Exclude animal-only studies",
-            parameters={
-                "keywords": ["mouse model only", "rat study", "in vitro only"],
-                "case_sensitive": False
-            },
-            required=True
-        ))
+        self.criteria.append(
+            Criterion(
+                criterion_type=CriterionType.KEYWORD_ABSENCE,
+                name="Non-Human Studies",
+                description="Exclude animal-only studies",
+                parameters={
+                    "keywords": ["mouse model only", "rat study", "in vitro only"],
+                    "case_sensitive": False,
+                },
+                required=True,
+            )
+        )
 
     def add_review_exclusion(self, exclude: bool = False):
         """Add review article exclusion (optional)."""
         if exclude:
-            self.criteria.append(Criterion(
-                criterion_type=CriterionType.PUBLICATION_TYPE,
-                name="Review Articles",
-                description="Exclude review articles",
-                parameters={"exclude_types": ["review", "systematic review"]},
-                required=True
-            ))
+            self.criteria.append(
+                Criterion(
+                    criterion_type=CriterionType.PUBLICATION_TYPE,
+                    name="Review Articles",
+                    description="Exclude review articles",
+                    parameters={"exclude_types": ["review", "systematic review"]},
+                    required=True,
+                )
+            )
 
-    def evaluate(self, record: LiteratureRecord) -> List[CriterionResult]:
+    def evaluate(self, record: LiteratureRecord) -> list[CriterionResult]:
         """
         Evaluate a record against all exclusion criteria.
 
@@ -550,30 +519,36 @@ class ExclusionCriteria:
 
                 found = [k for k in search_keywords if k in search_text]
                 if found:
-                    results.append(CriterionResult(
-                        criterion_name=criterion.name,
-                        passed=True,  # True = should exclude
-                        reason=f"Found excluded keywords: {found}",
-                        score=1.0
-                    ))
+                    results.append(
+                        CriterionResult(
+                            criterion_name=criterion.name,
+                            passed=True,  # True = should exclude
+                            reason=f"Found excluded keywords: {found}",
+                            score=1.0,
+                        )
+                    )
                 else:
-                    results.append(CriterionResult(
-                        criterion_name=criterion.name,
-                        passed=False,  # False = keep
-                        reason="No excluded keywords found",
-                        score=0.0
-                    ))
+                    results.append(
+                        CriterionResult(
+                            criterion_name=criterion.name,
+                            passed=False,  # False = keep
+                            reason="No excluded keywords found",
+                            score=0.0,
+                        )
+                    )
 
             elif criterion.criterion_type == CriterionType.CUSTOM:
                 check = criterion.parameters.get("check")
                 if check == "retracted":
                     is_retracted = "retract" in text or record.metadata.get("retracted", False)
-                    results.append(CriterionResult(
-                        criterion_name=criterion.name,
-                        passed=is_retracted,
-                        reason="Retracted" if is_retracted else "Not retracted",
-                        score=1.0 if is_retracted else 0.0
-                    ))
+                    results.append(
+                        CriterionResult(
+                            criterion_name=criterion.name,
+                            passed=is_retracted,
+                            reason="Retracted" if is_retracted else "Not retracted",
+                            score=1.0 if is_retracted else 0.0,
+                        )
+                    )
 
         return results
 
@@ -590,8 +565,8 @@ class SelectionEngine:
 
     def __init__(
         self,
-        inclusion_criteria: Optional[InclusionCriteria] = None,
-        exclusion_criteria: Optional[ExclusionCriteria] = None
+        inclusion_criteria: InclusionCriteria | None = None,
+        exclusion_criteria: ExclusionCriteria | None = None,
     ):
         """
         Initialize selection engine.
@@ -633,12 +608,9 @@ class SelectionEngine:
         result.inclusion_results = inclusion_results
 
         # Check required criteria
-        required_criteria = [
-            c for c in self.inclusion_criteria.criteria if c.required
-        ]
+        required_criteria = [c for c in self.inclusion_criteria.criteria if c.required]
         required_results = [
-            r for r in inclusion_results
-            if r.criterion_name in [c.name for c in required_criteria]
+            r for r in inclusion_results if r.criterion_name in [c.name for c in required_criteria]
         ]
 
         all_required_passed = all(r.passed for r in required_results)
@@ -650,12 +622,9 @@ class SelectionEngine:
             return result
 
         # Step 3: Calculate overall score
-        total_weight = sum(
-            c.weight for c in self.inclusion_criteria.criteria
-        )
+        total_weight = sum(c.weight for c in self.inclusion_criteria.criteria)
         weighted_score = sum(
-            r.score * c.weight
-            for r, c in zip(inclusion_results, self.inclusion_criteria.criteria)
+            r.score * c.weight for r, c in zip(inclusion_results, self.inclusion_criteria.criteria)
         )
         result.overall_score = weighted_score / total_weight if total_weight > 0 else 0
 
@@ -664,10 +633,7 @@ class SelectionEngine:
 
         return result
 
-    def batch_select(
-        self,
-        records: List[LiteratureRecord]
-    ) -> Dict[str, Any]:
+    def batch_select(self, records: list[LiteratureRecord]) -> dict[str, Any]:
         """
         Apply selection to multiple records.
 
@@ -697,7 +663,5 @@ class SelectionEngine:
             "inclusion_rate": len(included) / len(records) if records else 0,
             "results": [r.to_dict() for r in results],
             "included_records": included,
-            "exclusion_reasons": {
-                r.record_id: reason for r, reason in excluded
-            }
+            "exclusion_reasons": {r.record_id: reason for r, reason in excluded},
         }

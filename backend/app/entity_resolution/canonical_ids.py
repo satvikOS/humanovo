@@ -8,19 +8,20 @@ Manages canonical identifiers for biomedical entities:
 - Namespace handling
 """
 
-import logging
 import hashlib
+import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Optional, Any, Set
 from enum import Enum
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 class IDNamespace(str, Enum):
     """ID namespaces for different entity sources."""
+
     GENUP = "genup"  # Internal GenUp IDs
     UMLS = "umls"
     MESH = "mesh"
@@ -43,15 +44,16 @@ class IDNamespace(str, Enum):
 @dataclass
 class CanonicalID:
     """Represents a canonical identifier."""
+
     namespace: IDNamespace
     identifier: str
-    version: Optional[str] = None
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
+    version: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
     status: str = "active"  # active, deprecated, merged
-    merged_into: Optional[str] = None
-    cross_references: Dict[str, List[str]] = field(default_factory=dict)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    merged_into: str | None = None
+    cross_references: dict[str, list[str]] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def get_curie(self) -> str:
         """Get CURIE format (namespace:id)."""
@@ -61,7 +63,7 @@ class CanonicalID:
         """Get URI format."""
         return f"{base_url}/{self.namespace.value}/{self.identifier}"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "namespace": self.namespace.value,
             "identifier": self.identifier,
@@ -72,7 +74,7 @@ class CanonicalID:
             "status": self.status,
             "merged_into": self.merged_into,
             "cross_references": self.cross_references,
-            "metadata": self.metadata
+            "metadata": self.metadata,
         }
 
     def __hash__(self):
@@ -87,15 +89,16 @@ class CanonicalID:
 @dataclass
 class IDMapping:
     """Mapping between external and canonical IDs."""
+
     external_namespace: str
     external_id: str
     canonical_id: CanonicalID
     confidence: float = 1.0
     mapping_source: str = ""
-    mapping_date: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    mapping_date: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "external_namespace": self.external_namespace,
             "external_id": self.external_id,
@@ -103,7 +106,7 @@ class IDMapping:
             "confidence": self.confidence,
             "mapping_source": self.mapping_source,
             "mapping_date": self.mapping_date,
-            "metadata": self.metadata
+            "metadata": self.metadata,
         }
 
 
@@ -136,9 +139,7 @@ class CanonicalIDManager:
     }
 
     def __init__(
-        self,
-        default_namespace: IDNamespace = IDNamespace.GENUP,
-        enable_versioning: bool = True
+        self, default_namespace: IDNamespace = IDNamespace.GENUP, enable_versioning: bool = True
     ):
         """
         Initialize the canonical ID manager.
@@ -151,9 +152,9 @@ class CanonicalIDManager:
         self.enable_versioning = enable_versioning
 
         # ID storage
-        self._ids: Dict[str, CanonicalID] = {}  # curie -> CanonicalID
-        self._mappings: Dict[str, List[IDMapping]] = {}  # external -> mappings
-        self._reverse_mappings: Dict[str, Set[str]] = {}  # canonical -> externals
+        self._ids: dict[str, CanonicalID] = {}  # curie -> CanonicalID
+        self._mappings: dict[str, list[IDMapping]] = {}  # external -> mappings
+        self._reverse_mappings: dict[str, set[str]] = {}  # canonical -> externals
 
         logger.info(f"CanonicalIDManager initialized, default namespace: {default_namespace}")
 
@@ -161,8 +162,8 @@ class CanonicalIDManager:
         self,
         entity_name: str,
         entity_type: str,
-        namespace: Optional[IDNamespace] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        namespace: IDNamespace | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> CanonicalID:
         """
         Generate a new canonical ID.
@@ -196,10 +197,7 @@ class CanonicalIDManager:
             created_at=now,
             updated_at=now,
             status="active",
-            metadata=metadata or {
-                "entity_name": entity_name,
-                "entity_type": entity_type
-            }
+            metadata=metadata or {"entity_name": entity_name, "entity_type": entity_type},
         )
 
         # Store
@@ -212,11 +210,11 @@ class CanonicalIDManager:
         self,
         external_namespace: str,
         external_id: str,
-        canonical_id: Optional[CanonicalID] = None,
-        entity_name: Optional[str] = None,
-        entity_type: Optional[str] = None,
+        canonical_id: CanonicalID | None = None,
+        entity_name: str | None = None,
+        entity_type: str | None = None,
         confidence: float = 1.0,
-        source: str = ""
+        source: str = "",
     ) -> CanonicalID:
         """
         Register an external ID and map to canonical.
@@ -248,7 +246,7 @@ class CanonicalIDManager:
             canonical_id=canonical_id,
             confidence=confidence,
             mapping_source=source,
-            mapping_date=datetime.utcnow().isoformat()
+            mapping_date=datetime.utcnow().isoformat(),
         )
 
         # Store mapping
@@ -271,11 +269,7 @@ class CanonicalIDManager:
 
         return canonical_id
 
-    def get_canonical(
-        self,
-        external_namespace: str,
-        external_id: str
-    ) -> Optional[CanonicalID]:
+    def get_canonical(self, external_namespace: str, external_id: str) -> CanonicalID | None:
         """
         Get canonical ID for an external ID.
 
@@ -296,7 +290,7 @@ class CanonicalIDManager:
         best = max(mappings, key=lambda m: m.confidence)
         return best.canonical_id
 
-    def get_by_curie(self, curie: str) -> Optional[CanonicalID]:
+    def get_by_curie(self, curie: str) -> CanonicalID | None:
         """
         Get canonical ID by CURIE.
 
@@ -308,10 +302,7 @@ class CanonicalIDManager:
         """
         return self._ids.get(curie)
 
-    def get_cross_references(
-        self,
-        canonical_id: CanonicalID
-    ) -> Dict[str, List[str]]:
+    def get_cross_references(self, canonical_id: CanonicalID) -> dict[str, list[str]]:
         """
         Get all cross-references for a canonical ID.
 
@@ -324,7 +315,7 @@ class CanonicalIDManager:
         curie = canonical_id.get_curie()
         external_keys = self._reverse_mappings.get(curie, set())
 
-        refs: Dict[str, List[str]] = {}
+        refs: dict[str, list[str]] = {}
         for key in external_keys:
             namespace, ext_id = key.split(":", 1)
             if namespace not in refs:
@@ -333,12 +324,7 @@ class CanonicalIDManager:
 
         return refs
 
-    def merge_ids(
-        self,
-        source_id: CanonicalID,
-        target_id: CanonicalID,
-        reason: str = ""
-    ):
+    def merge_ids(self, source_id: CanonicalID, target_id: CanonicalID, reason: str = ""):
         """
         Merge one canonical ID into another.
 
@@ -375,17 +361,11 @@ class CanonicalIDManager:
         if source_curie in self._reverse_mappings:
             if target_curie not in self._reverse_mappings:
                 self._reverse_mappings[target_curie] = set()
-            self._reverse_mappings[target_curie].update(
-                self._reverse_mappings[source_curie]
-            )
+            self._reverse_mappings[target_curie].update(self._reverse_mappings[source_curie])
 
         logger.info(f"Merged {source_curie} into {target_curie}")
 
-    def deprecate_id(
-        self,
-        canonical_id: CanonicalID,
-        reason: str = ""
-    ):
+    def deprecate_id(self, canonical_id: CanonicalID, reason: str = ""):
         """
         Deprecate a canonical ID.
 
@@ -397,11 +377,7 @@ class CanonicalIDManager:
         canonical_id.updated_at = datetime.utcnow().isoformat()
         canonical_id.metadata["deprecation_reason"] = reason
 
-    def get_external_url(
-        self,
-        namespace: IDNamespace,
-        identifier: str
-    ) -> Optional[str]:
+    def get_external_url(self, namespace: IDNamespace, identifier: str) -> str | None:
         """
         Get external URL for an ID.
 
@@ -417,10 +393,7 @@ class CanonicalIDManager:
             return f"{base_url}/{identifier}"
         return None
 
-    def normalize_id(
-        self,
-        raw_id: str
-    ) -> Optional[tuple]:
+    def normalize_id(self, raw_id: str) -> tuple | None:
         """
         Normalize a raw ID string to (namespace, id).
 
@@ -450,10 +423,7 @@ class CanonicalIDManager:
 
         return None
 
-    def batch_resolve(
-        self,
-        ids: List[str]
-    ) -> Dict[str, Optional[CanonicalID]]:
+    def batch_resolve(self, ids: list[str]) -> dict[str, CanonicalID | None]:
         """
         Resolve multiple IDs to canonical IDs.
 
@@ -479,7 +449,7 @@ class CanonicalIDManager:
 
         return results
 
-    def get_statistics(self) -> Dict[str, Any]:
+    def get_statistics(self) -> dict[str, Any]:
         """Get manager statistics."""
         namespace_counts = {}
         status_counts = {"active": 0, "deprecated": 0, "merged": 0}
@@ -494,12 +464,10 @@ class CanonicalIDManager:
             "total_mappings": sum(len(m) for m in self._mappings.values()),
             "ids_by_namespace": namespace_counts,
             "ids_by_status": status_counts,
-            "external_namespaces": len(set(
-                k.split(":")[0] for k in self._mappings.keys()
-            ))
+            "external_namespaces": len(set(k.split(":")[0] for k in self._mappings.keys())),
         }
 
-    def export_mappings(self) -> List[Dict[str, Any]]:
+    def export_mappings(self) -> list[dict[str, Any]]:
         """Export all mappings."""
         mappings = []
         for mapping_list in self._mappings.values():
@@ -509,16 +477,13 @@ class CanonicalIDManager:
 
 
 # Convenience functions
-def generate_canonical_id(
-    entity_name: str,
-    entity_type: str
-) -> CanonicalID:
+def generate_canonical_id(entity_name: str, entity_type: str) -> CanonicalID:
     """Generate a canonical ID using default manager."""
     manager = CanonicalIDManager()
     return manager.generate_id(entity_name, entity_type)
 
 
-def resolve_to_canonical(raw_id: str) -> Optional[CanonicalID]:
+def resolve_to_canonical(raw_id: str) -> CanonicalID | None:
     """Resolve an ID to canonical using default manager."""
     manager = CanonicalIDManager()
     normalized = manager.normalize_id(raw_id)

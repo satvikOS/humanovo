@@ -6,13 +6,13 @@ Supports entity/relationship storage, graph queries, and path finding.
 """
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 from uuid import uuid4
 
 from pydantic import BaseModel
 
 from app.core.config import settings
-from app.core.logging import get_logger, LoggerMixin
+from app.core.logging import LoggerMixin, get_logger
 
 logger = get_logger(__name__)
 
@@ -26,10 +26,10 @@ class Entity(BaseModel):
     id: str
     name: str
     entity_type: str
-    aliases: List[str] = []
-    description: Optional[str] = None
-    external_ids: Dict[str, str] = {}
-    properties: Dict[str, Any] = {}
+    aliases: list[str] = []
+    description: str | None = None
+    external_ids: dict[str, str] = {}
+    properties: dict[str, Any] = {}
     source_count: int = 0
 
 
@@ -46,15 +46,15 @@ class Relation(BaseModel):
     relation_type: str
     confidence: float = 1.0
     evidence_count: int = 0
-    source_references: List[str] = []
+    source_references: list[str] = []
 
 
 class GraphNeighborhood(BaseModel):
     """Subgraph around an entity."""
 
     center_entity: Entity
-    entities: List[Entity]
-    relations: List[Relation]
+    entities: list[Entity]
+    relations: list[Relation]
     depth: int
 
 
@@ -63,7 +63,7 @@ class GraphPath(BaseModel):
 
     source: Entity
     target: Entity
-    path: List[Relation]
+    path: list[Relation]
     path_length: int
     path_confidence: float
 
@@ -79,9 +79,9 @@ class GraphStore(LoggerMixin):
         self._initialized = False
         self._driver = None
         # In-memory fallback for development
-        self._entities: Dict[str, Entity] = {}
-        self._relations: Dict[str, Relation] = {}
-        self._adjacency: Dict[str, List[str]] = {}  # entity_id -> list of relation_ids
+        self._entities: dict[str, Entity] = {}
+        self._relations: dict[str, Relation] = {}
+        self._adjacency: dict[str, list[str]] = {}  # entity_id -> list of relation_ids
 
     async def initialize(self) -> None:
         """Initialize the graph store connection."""
@@ -199,7 +199,7 @@ class GraphStore(LoggerMixin):
         )
         return relation.id
 
-    async def get_entity(self, entity_id: str) -> Optional[Entity]:
+    async def get_entity(self, entity_id: str) -> Entity | None:
         """Get an entity by ID."""
         if self._driver:
             async with self._driver.session() as session:
@@ -226,9 +226,9 @@ class GraphStore(LoggerMixin):
     async def search_entities(
         self,
         query: str,
-        entity_types: Optional[List[str]] = None,
+        entity_types: list[str] | None = None,
         limit: int = 20,
-    ) -> List[Entity]:
+    ) -> list[Entity]:
         """Search for entities by name or alias."""
         query_lower = query.lower()
 
@@ -281,9 +281,9 @@ class GraphStore(LoggerMixin):
         self,
         entity_id: str,
         depth: int = 1,
-        relation_types: Optional[List[str]] = None,
+        relation_types: list[str] | None = None,
         limit: int = 50,
-    ) -> Optional[GraphNeighborhood]:
+    ) -> GraphNeighborhood | None:
         """Get the neighborhood subgraph around an entity."""
         center = await self.get_entity(entity_id)
         if not center:
@@ -368,7 +368,7 @@ class GraphStore(LoggerMixin):
         self,
         source_id: str,
         target_id: str,
-    ) -> List[Relation]:
+    ) -> list[Relation]:
         """Get all relations between two entities."""
         if self._driver:
             async with self._driver.session() as session:
@@ -396,7 +396,8 @@ class GraphStore(LoggerMixin):
                 return relations
         else:
             return [
-                rel for rel in self._relations.values()
+                rel
+                for rel in self._relations.values()
                 if (rel.source_id == source_id and rel.target_id == target_id)
                 or (rel.source_id == target_id and rel.target_id == source_id)
             ]
@@ -407,7 +408,7 @@ class GraphStore(LoggerMixin):
         target_id: str,
         max_length: int = 4,
         limit: int = 5,
-    ) -> List[GraphPath]:
+    ) -> list[GraphPath]:
         """Find paths between two entities."""
         source = await self.get_entity(source_id)
         target = await self.get_entity(target_id)
@@ -505,9 +506,9 @@ class GraphStore(LoggerMixin):
     async def execute_query(
         self,
         query: str,
-        parameters: Dict[str, Any] = None,
+        parameters: dict[str, Any] = None,
         limit: int = 100,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Execute a custom Cypher query."""
         if not self._driver:
             return []
@@ -521,7 +522,7 @@ class GraphStore(LoggerMixin):
                     break
             return records
 
-    async def get_stats(self) -> Dict[str, Any]:
+    async def get_stats(self) -> dict[str, Any]:
         """Get knowledge graph statistics."""
         if self._driver:
             async with self._driver.session() as session:
@@ -575,15 +576,15 @@ def get_graph_store() -> GraphStore:
 # Convenience functions for API endpoints
 async def search_entities(
     query: str,
-    entity_types: Optional[List[str]] = None,
+    entity_types: list[str] | None = None,
     limit: int = 20,
-) -> List[Entity]:
+) -> list[Entity]:
     """Search entities in the graph."""
     store = get_graph_store()
     return await store.search_entities(query, entity_types, limit)
 
 
-async def get_entity(entity_id: str) -> Optional[Entity]:
+async def get_entity(entity_id: str) -> Entity | None:
     """Get an entity by ID."""
     store = get_graph_store()
     return await store.get_entity(entity_id)
@@ -592,15 +593,15 @@ async def get_entity(entity_id: str) -> Optional[Entity]:
 async def get_neighborhood(
     entity_id: str,
     depth: int = 1,
-    relation_types: Optional[List[str]] = None,
+    relation_types: list[str] | None = None,
     limit: int = 50,
-) -> Optional[GraphNeighborhood]:
+) -> GraphNeighborhood | None:
     """Get neighborhood around an entity."""
     store = get_graph_store()
     return await store.get_neighborhood(entity_id, depth, relation_types, limit)
 
 
-async def get_relations_between(source_id: str, target_id: str) -> List[Relation]:
+async def get_relations_between(source_id: str, target_id: str) -> list[Relation]:
     """Get relations between two entities."""
     store = get_graph_store()
     return await store.get_relations_between(source_id, target_id)
@@ -611,7 +612,7 @@ async def find_paths(
     target_id: str,
     max_length: int = 4,
     limit: int = 5,
-) -> List[GraphPath]:
+) -> list[GraphPath]:
     """Find paths between entities."""
     store = get_graph_store()
     return await store.find_paths(source_id, target_id, max_length, limit)
@@ -619,15 +620,15 @@ async def find_paths(
 
 async def execute_query(
     query: str,
-    parameters: Dict[str, Any] = None,
+    parameters: dict[str, Any] = None,
     limit: int = 100,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Execute custom Cypher query."""
     store = get_graph_store()
     return await store.execute_query(query, parameters, limit)
 
 
-async def get_stats() -> Dict[str, Any]:
+async def get_stats() -> dict[str, Any]:
     """Get graph statistics."""
     store = get_graph_store()
     return await store.get_stats()

@@ -4,12 +4,11 @@ Hypothesis Model
 AI-generated and user-defined hypothesis model.
 """
 
-import json
 from enum import Enum as PyEnum
-from typing import Any, Dict, List, Optional
 
 from sqlalchemy import Column, Enum, Float, ForeignKey, Integer, String, Text
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID as PGUUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import relationship
 
 from app.models.base import BaseModel

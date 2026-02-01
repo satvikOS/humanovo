@@ -6,10 +6,9 @@ Manage AI-generated hypotheses in GenUp.
 
 from datetime import datetime
 from enum import Enum
-from typing import List, Optional
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -45,7 +44,7 @@ class EvidenceReference(BaseModel):
     evidence_id: UUID
     evidence_type: EvidenceType
     relevance_score: float = Field(..., ge=0, le=1)
-    snippet: Optional[str] = None
+    snippet: str | None = None
 
 
 class HypothesisCreate(BaseModel):
@@ -53,8 +52,8 @@ class HypothesisCreate(BaseModel):
 
     project_id: UUID
     statement: str = Field(..., min_length=10, max_length=2000)
-    mechanism: Optional[str] = Field(None, description="Proposed mechanism")
-    tags: List[str] = Field(default_factory=list)
+    mechanism: str | None = Field(None, description="Proposed mechanism")
+    tags: list[str] = Field(default_factory=list)
 
 
 class HypothesisGenerate(BaseModel):
@@ -62,19 +61,19 @@ class HypothesisGenerate(BaseModel):
 
     project_id: UUID
     query: str = Field(..., min_length=5, max_length=1000, description="Research question or topic")
-    focus_entities: List[str] = Field(default_factory=list, description="Entities to focus on")
+    focus_entities: list[str] = Field(default_factory=list, description="Entities to focus on")
     max_hypotheses: int = Field(default=5, ge=1, le=20)
 
 
 class HypothesisUpdate(BaseModel):
     """Schema for updating a hypothesis."""
 
-    statement: Optional[str] = Field(None, min_length=10, max_length=2000)
-    mechanism: Optional[str] = None
-    rationale: Optional[str] = None
-    status: Optional[HypothesisStatus] = None
-    tags: Optional[List[str]] = None
-    user_notes: Optional[str] = None
+    statement: str | None = Field(None, min_length=10, max_length=2000)
+    mechanism: str | None = None
+    rationale: str | None = None
+    status: HypothesisStatus | None = None
+    tags: list[str] | None = None
+    user_notes: str | None = None
 
 
 class SimulationResult(BaseModel):
@@ -93,17 +92,17 @@ class HypothesisResponse(BaseModel):
     id: UUID
     project_id: UUID
     statement: str
-    mechanism: Optional[str]
-    rationale: Optional[str]
+    mechanism: str | None
+    rationale: str | None
     status: HypothesisStatus
     confidence_score: float
     novelty_score: float
-    evidence_refs: List[EvidenceReference]
+    evidence_refs: list[EvidenceReference]
     contradiction_count: int
     supporting_count: int
-    simulation_results: Optional[SimulationResult]
-    tags: List[str]
-    user_notes: Optional[str]
+    simulation_results: SimulationResult | None
+    tags: list[str]
+    user_notes: str | None
     version: int
     created_at: datetime
     updated_at: datetime
@@ -112,7 +111,7 @@ class HypothesisResponse(BaseModel):
 class HypothesisListResponse(BaseModel):
     """Schema for paginated hypothesis list."""
 
-    items: List[HypothesisResponse]
+    items: list[HypothesisResponse]
     total: int
     page: int
     page_size: int
@@ -257,8 +256,8 @@ async def get_generation_status(task_id: UUID) -> dict:
 
 @router.get("", response_model=HypothesisListResponse)
 async def list_hypotheses(
-    project_id: Optional[UUID] = None,
-    status: Optional[HypothesisStatus] = None,
+    project_id: UUID | None = None,
+    status: HypothesisStatus | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     sort_by: str = Query("updated_at", pattern="^(updated_at|confidence_score|novelty_score)$"),
