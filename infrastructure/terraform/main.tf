@@ -19,15 +19,15 @@ terraform {
     }
   }
 
-  # Using local backend for initial deployment
-  # Migrate to S3 backend after bootstrap
-  # backend "s3" {
-  #   bucket         = "genup-terraform-state"
-  #   key            = "infrastructure/terraform.tfstate"
-  #   region         = "us-east-1"
-  #   dynamodb_table = "genup-terraform-locks"
-  #   encrypt        = true
-  # }
+  # S3 backend for remote state management
+  # This enables consistent state across CI/CD runs
+  backend "s3" {
+    bucket         = "genup-terraform-state"
+    key            = "infrastructure/terraform.tfstate"
+    region         = "us-east-1"
+    dynamodb_table = "genup-terraform-locks"
+    encrypt        = true
+  }
 }
 
 provider "aws" {

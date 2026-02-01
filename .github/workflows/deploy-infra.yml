@@ -13,15 +13,17 @@ on:
 env:
   AWS_REGION: us-east-1
   TERRAFORM_VERSION: '1.5.7'
-  # Fixed bucket names - consistent across all deployments
-  ARTIFACTS_BUCKET: genup-artifacts-bucket
-  FRONTEND_BUCKET: genup-frontend-bucket
+  # Terraform state infrastructure
+  TF_STATE_BUCKET: genup-terraform-state
+  TF_LOCK_TABLE: genup-terraform-locks
+  # Environment suffix for resource names
+  ENVIRONMENT: dev
 
 jobs:
   deploy-infra:
     name: Deploy Infrastructure
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -37,27 +39,149 @@ jobs:
       - name: Verify AWS Identity
         run: aws sts get-caller-identity
 
-      - name: Setup S3 Buckets
+      - name: Setup Terraform State Infrastructure
         run: |
-          # Create artifacts bucket if needed
-          aws s3api head-bucket --bucket "$ARTIFACTS_BUCKET" 2>/dev/null || \
-            aws s3api create-bucket --bucket "$ARTIFACTS_BUCKET" --region $AWS_REGION 2>/dev/null || true
+          # Create terraform state bucket if it doesn't exist
+          if ! aws s3api head-bucket --bucket "$TF_STATE_BUCKET" 2>/dev/null; then
+            echo "Creating Terraform state bucket: $TF_STATE_BUCKET"
+            aws s3api create-bucket --bucket "$TF_STATE_BUCKET" --region "$AWS_REGION"
 
-          # Create frontend bucket if needed
-          aws s3api head-bucket --bucket "$FRONTEND_BUCKET" 2>/dev/null || \
-            aws s3api create-bucket --bucket "$FRONTEND_BUCKET" --region $AWS_REGION 2>/dev/null || true
+            # Enable versioning
+            aws s3api put-bucket-versioning --bucket "$TF_STATE_BUCKET" \
+              --versioning-configuration Status=Enabled
 
-          echo "S3 buckets ready"
+            # Enable encryption
+            aws s3api put-bucket-encryption --bucket "$TF_STATE_BUCKET" \
+              --server-side-encryption-configuration '{
+                "Rules": [{"ApplyServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}]
+              }'
 
-      - name: Upload Lambda Placeholders
+            # Block public access
+            aws s3api put-public-access-block --bucket "$TF_STATE_BUCKET" \
+              --public-access-block-configuration '{
+                "BlockPublicAcls": true,
+                "IgnorePublicAcls": true,
+                "BlockPublicPolicy": true,
+                "RestrictPublicBuckets": true
+              }'
+          fi
+
+          # Create DynamoDB table for state locking if it doesn't exist
+          if ! aws dynamodb describe-table --table-name "$TF_LOCK_TABLE" 2>/dev/null; then
+            echo "Creating Terraform lock table: $TF_LOCK_TABLE"
+            aws dynamodb create-table \
+              --table-name "$TF_LOCK_TABLE" \
+              --attribute-definitions AttributeName=LockID,AttributeType=S \
+              --key-schema AttributeName=LockID,KeyType=HASH \
+              --billing-mode PAY_PER_REQUEST \
+              --tags Key=Purpose,Value="Terraform state locking"
+
+            # Wait for table to be active
+            aws dynamodb wait table-exists --table-name "$TF_LOCK_TABLE"
+          fi
+
+          echo "Terraform state infrastructure ready"
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Terraform Init
+        working-directory: infrastructure/terraform
         run: |
-          # Create minimal placeholder for Lambda functions
+          terraform init \
+            -backend-config="bucket=$TF_STATE_BUCKET" \
+            -backend-config="key=infrastructure/terraform.tfstate" \
+            -backend-config="region=$AWS_REGION" \
+            -backend-config="dynamodb_table=$TF_LOCK_TABLE" \
+            -backend-config="encrypt=true"
+
+      - name: Import Existing Resources
+        working-directory: infrastructure/terraform
+        continue-on-error: true
+        run: |
+          # This step imports any existing AWS resources into Terraform state
+          # It runs with continue-on-error since resources may not exist or already be in state
+
+          echo "Attempting to import existing resources into Terraform state..."
+
+          # Import KMS alias (if exists)
+          terraform import -var-file=environments/dev.tfvars \
+            'aws_kms_alias.main' 'alias/genup-dev' 2>/dev/null || true
+
+          # Import main CloudWatch log group
+          terraform import -var-file=environments/dev.tfvars \
+            'aws_cloudwatch_log_group.main' '/aws/genup/dev' 2>/dev/null || true
+
+          # Import API Gateway log group
+          terraform import -var-file=environments/dev.tfvars \
+            'module.api_gateway.aws_cloudwatch_log_group.api_gateway' '/aws/apigateway/genup-dev-api' 2>/dev/null || true
+
+          # Import DynamoDB tables
+          for table in projects hypotheses evidence simulations knowledge-metadata agent-tasks; do
+            terraform import -var-file=environments/dev.tfvars \
+              "module.dynamodb.aws_dynamodb_table.${table//-/_}" "genup-dev-${table}" 2>/dev/null || true
+          done
+
+          # Import IAM roles
+          terraform import -var-file=environments/dev.tfvars \
+            'module.iam.aws_iam_role.lambda_execution' 'genup-dev-lambda-execution' 2>/dev/null || true
+          terraform import -var-file=environments/dev.tfvars \
+            'module.iam.aws_iam_role.api_gateway' 'genup-dev-api-gateway' 2>/dev/null || true
+          terraform import -var-file=environments/dev.tfvars \
+            'module.iam.aws_iam_role.deployment' 'genup-dev-deployment' 2>/dev/null || true
+
+          # Import Lambda CloudWatch log groups
+          for fn in api_core projects hypotheses evidence knowledge hypothesis_generation agent_orchestrator search_agent embeddings simulation simulation_worker ingestion pubmed_fetcher clinical_trials_fetcher; do
+            terraform import -var-file=environments/dev.tfvars \
+              "module.lambda.aws_cloudwatch_log_group.lambda_logs[\"${fn}\"]" "/aws/lambda/genup-dev-${fn}" 2>/dev/null || true
+          done
+
+          # Import SQS queues
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          terraform import -var-file=environments/dev.tfvars \
+            'module.lambda.aws_sqs_queue.simulation_dlq' "https://sqs.${AWS_REGION}.amazonaws.com/${AWS_ACCOUNT_ID}/genup-dev-simulation-dlq" 2>/dev/null || true
+          terraform import -var-file=environments/dev.tfvars \
+            'module.lambda.aws_sqs_queue.simulation_queue' "https://sqs.${AWS_REGION}.amazonaws.com/${AWS_ACCOUNT_ID}/genup-dev-simulation-queue" 2>/dev/null || true
+
+          echo "Resource import complete (errors above are expected for resources that don't exist or are already imported)"
+
+      - name: Terraform Plan - S3 Buckets First
+        working-directory: infrastructure/terraform
+        run: |
+          # First, create just the S3 buckets so we can upload Lambda layers
+          terraform plan \
+            -var-file=environments/dev.tfvars \
+            -target=module.s3 \
+            -out=tfplan-s3 \
+            -input=false
+
+      - name: Terraform Apply - S3 Buckets
+        working-directory: infrastructure/terraform
+        run: terraform apply -auto-approve tfplan-s3
+
+      - name: Get Artifacts Bucket Name
+        id: get-bucket
+        working-directory: infrastructure/terraform
+        run: |
+          ARTIFACTS_BUCKET=$(terraform output -raw artifacts_bucket_name 2>/dev/null || echo "genup-${ENVIRONMENT}-artifacts-${ENVIRONMENT}")
+          echo "ARTIFACTS_BUCKET=$ARTIFACTS_BUCKET" >> $GITHUB_OUTPUT
+          echo "Artifacts bucket: $ARTIFACTS_BUCKET"
+
+      - name: Upload Lambda Layer Placeholders
+        run: |
+          ARTIFACTS_BUCKET="${{ steps.get-bucket.outputs.ARTIFACTS_BUCKET }}"
+
+          # Create minimal placeholder for Lambda layers
           mkdir -p /tmp/lambda/python
           echo "# placeholder" > /tmp/lambda/python/__init__.py
           cd /tmp/lambda && zip -r ../layer.zip python/
 
-          # Upload placeholder layer
-          aws s3 cp /tmp/layer.zip "s3://$ARTIFACTS_BUCKET/lambda-layers/dependencies.zip" || true
+          # Upload both required layers
+          echo "Uploading Lambda layers to s3://$ARTIFACTS_BUCKET/"
+          aws s3 cp /tmp/layer.zip "s3://$ARTIFACTS_BUCKET/lambda-layers/dependencies.zip"
+          aws s3 cp /tmp/layer.zip "s3://$ARTIFACTS_BUCKET/lambda-layers/scipy.zip"
 
           # Create placeholder function
           mkdir -p /tmp/func/handlers
@@ -68,32 +192,39 @@ jobs:
           EOF
           cd /tmp/func && zip -r ../function.zip handlers/
 
-          # Upload placeholder functions
-          for fn in api_core projects hypotheses evidence knowledge simulation ingestion; do
-            aws s3 cp /tmp/function.zip "s3://$ARTIFACTS_BUCKET/lambda-functions/$fn.zip" || true
+          # Upload placeholder functions for all Lambda functions
+          for fn in api_core projects hypotheses evidence knowledge simulation simulation_worker ingestion hypothesis_generation agent_orchestrator search_agent embeddings pubmed_fetcher clinical_trials_fetcher; do
+            aws s3 cp /tmp/function.zip "s3://$ARTIFACTS_BUCKET/lambda-functions/$fn.zip"
           done
 
-          echo "Lambda placeholders uploaded"
+          echo "Lambda placeholders uploaded successfully"
 
-      - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TERRAFORM_VERSION }}
-
-      - name: Terraform Init
+      - name: Terraform Plan - Full Infrastructure
         working-directory: infrastructure/terraform
-        run: terraform init
+        run: |
+          terraform plan \
+            -var-file=environments/dev.tfvars \
+            -out=tfplan \
+            -input=false
 
-      - name: Terraform Plan
-        working-directory: infrastructure/terraform
-        run: terraform plan -var-file=environments/dev.tfvars -out=tfplan -input=false
-
-      - name: Terraform Apply
+      - name: Terraform Apply - Full Infrastructure
         working-directory: infrastructure/terraform
         run: terraform apply -auto-approve tfplan
 
+      - name: Get Outputs
+        id: outputs
+        working-directory: infrastructure/terraform
+        run: |
+          echo "CLOUDFRONT_DOMAIN=$(terraform output -raw cloudfront_domain_name 2>/dev/null || echo 'N/A')" >> $GITHUB_OUTPUT
+          echo "API_ENDPOINT=$(terraform output -raw api_gateway_endpoint 2>/dev/null || echo 'N/A')" >> $GITHUB_OUTPUT
+          echo "FRONTEND_BUCKET=$(terraform output -raw frontend_bucket_name 2>/dev/null || echo 'N/A')" >> $GITHUB_OUTPUT
+
       - name: Summary
         run: |
-          echo "## Infrastructure Deployed" >> $GITHUB_STEP_SUMMARY
-          echo "- Artifacts: s3://$ARTIFACTS_BUCKET/" >> $GITHUB_STEP_SUMMARY
-          echo "- Frontend: s3://$FRONTEND_BUCKET/" >> $GITHUB_STEP_SUMMARY
+          echo "## Infrastructure Deployed Successfully" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Resources" >> $GITHUB_STEP_SUMMARY
+          echo "- **CloudFront**: ${{ steps.outputs.outputs.CLOUDFRONT_DOMAIN }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **API Gateway**: ${{ steps.outputs.outputs.API_ENDPOINT }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Frontend Bucket**: ${{ steps.outputs.outputs.FRONTEND_BUCKET }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Artifacts Bucket**: ${{ steps.get-bucket.outputs.ARTIFACTS_BUCKET }}" >> $GITHUB_STEP_SUMMARY
