@@ -14,6 +14,10 @@ from app.api.v1.endpoints import (
     agents,
     projects,
     websocket,
+    rag,
+    ingestion,
+    ingestion_ws,
+    monitoring,
 )
 
 router = APIRouter()
@@ -26,3 +30,9 @@ router.include_router(knowledge.router, prefix="/knowledge", tags=["knowledge"])
 router.include_router(simulation.router, prefix="/simulation", tags=["simulation"])
 router.include_router(agents.router, prefix="/agents", tags=["agents"])
 router.include_router(websocket.router, prefix="/ws", tags=["websocket"])
+
+# New RAG and Ingestion endpoints
+router.include_router(rag.router, prefix="/rag", tags=["rag"])
+router.include_router(ingestion.router, prefix="/ingestion", tags=["ingestion"])
+router.include_router(ingestion_ws.router, prefix="/ws/ingestion", tags=["ingestion-websocket"])
+router.include_router(monitoring.router, prefix="/monitoring", tags=["monitoring"])
