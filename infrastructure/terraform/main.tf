@@ -58,18 +58,12 @@ provider "aws" {
   }
 }
 
-# Random suffix for unique resource names
-# Using keepers ensures consistency across runs for the same environment
-resource "random_id" "suffix" {
-  byte_length = 4
-  keepers = {
-    environment = var.environment
-  }
-}
-
+# Fixed suffix for consistent resource names across deployments
+# Using environment-based suffix instead of random to ensure bucket names stay the same
 locals {
   name_prefix = "genup-${var.environment}"
-  suffix      = random_id.suffix.hex
+  # Fixed suffix based on environment - ensures same bucket names every deployment
+  suffix      = var.environment
 
   common_tags = {
     Project     = "GenUp"
@@ -185,7 +179,7 @@ resource "aws_secretsmanager_secret_version" "api_keys" {
     GOOGLE_API_KEY     = var.google_api_key
     BRAVE_API_KEY      = var.brave_api_key
     PUBMED_API_KEY     = var.pubmed_api_key
-    JWT_SECRET         = var.jwt_secret != "" ? var.jwt_secret : random_id.suffix.hex
+    JWT_SECRET         = var.jwt_secret != "" ? var.jwt_secret : "genup-jwt-${var.environment}-secret"
   })
 }
 

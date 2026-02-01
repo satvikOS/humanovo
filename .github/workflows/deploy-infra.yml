@@ -9,31 +9,19 @@ on:
       - 'infrastructure/**'
       - '.github/workflows/deploy-infra.yml'
   workflow_dispatch:
-    inputs:
-      environment:
-        description: 'Environment to deploy'
-        required: true
-        default: 'dev'
-        type: choice
-        options:
-          - dev
-          - staging
-          - prod
-      destroy_first:
-        description: 'Run terraform destroy before apply (CAUTION)'
-        required: false
-        default: false
-        type: boolean
 
 env:
   AWS_REGION: us-east-1
   TERRAFORM_VERSION: '1.5.7'
+  # Fixed bucket names - consistent across all deployments
+  ARTIFACTS_BUCKET: genup-artifacts-bucket
+  FRONTEND_BUCKET: genup-frontend-bucket
 
 jobs:
-  deploy:
+  deploy-infra:
     name: Deploy Infrastructure
     runs-on: ubuntu-latest
-    timeout-minutes: 30  # Prevent infinite hangs
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
@@ -49,6 +37,44 @@ jobs:
       - name: Verify AWS Identity
         run: aws sts get-caller-identity
 
+      - name: Setup S3 Buckets
+        run: |
+          # Create artifacts bucket if needed
+          aws s3api head-bucket --bucket "$ARTIFACTS_BUCKET" 2>/dev/null || \
+            aws s3api create-bucket --bucket "$ARTIFACTS_BUCKET" --region $AWS_REGION 2>/dev/null || true
+
+          # Create frontend bucket if needed
+          aws s3api head-bucket --bucket "$FRONTEND_BUCKET" 2>/dev/null || \
+            aws s3api create-bucket --bucket "$FRONTEND_BUCKET" --region $AWS_REGION 2>/dev/null || true
+
+          echo "S3 buckets ready"
+
+      - name: Upload Lambda Placeholders
+        run: |
+          # Create minimal placeholder for Lambda functions
+          mkdir -p /tmp/lambda/python
+          echo "# placeholder" > /tmp/lambda/python/__init__.py
+          cd /tmp/lambda && zip -r ../layer.zip python/
+
+          # Upload placeholder layer
+          aws s3 cp /tmp/layer.zip "s3://$ARTIFACTS_BUCKET/lambda-layers/dependencies.zip" || true
+
+          # Create placeholder function
+          mkdir -p /tmp/func/handlers
+          cat > /tmp/func/handlers/main.py << 'EOF'
+          import json
+          def handler(event, context):
+              return {'statusCode': 200, 'body': json.dumps({'status': 'ok'})}
+          EOF
+          cd /tmp/func && zip -r ../function.zip handlers/
+
+          # Upload placeholder functions
+          for fn in api_core projects hypotheses evidence knowledge simulation ingestion; do
+            aws s3 cp /tmp/function.zip "s3://$ARTIFACTS_BUCKET/lambda-functions/$fn.zip" || true
+          done
+
+          echo "Lambda placeholders uploaded"
+
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
         with:
@@ -58,142 +84,16 @@ jobs:
         working-directory: infrastructure/terraform
         run: terraform init
 
-      - name: Terraform Destroy (if requested)
-        if: ${{ github.event.inputs.destroy_first == 'true' }}
-        working-directory: infrastructure/terraform
-        run: |
-          echo "⚠️ Running terraform destroy..."
-          terraform destroy -auto-approve -var-file=environments/dev.tfvars || true
-          echo "Destroy completed. Waiting 30s for AWS propagation..."
-          sleep 30
-
-      - name: Get Artifacts Bucket Name
-        id: bucket
-        working-directory: infrastructure/terraform
-        run: |
-          # Determine the artifacts bucket name from tfvars
-          ENV="${{ github.event.inputs.environment || 'dev' }}"
-          BUCKET="genup-${ENV}-artifacts-$(aws sts get-caller-identity --query Account --output text)"
-          echo "ARTIFACTS_BUCKET=$BUCKET" >> $GITHUB_ENV
-          echo "bucket=$BUCKET" >> $GITHUB_OUTPUT
-
-      - name: Ensure S3 Artifacts Bucket Exists
-        run: |
-          # Create bucket if it doesn't exist (for Lambda artifacts)
-          if ! aws s3api head-bucket --bucket "$ARTIFACTS_BUCKET" 2>/dev/null; then
-            echo "Creating artifacts bucket: $ARTIFACTS_BUCKET"
-            aws s3api create-bucket --bucket "$ARTIFACTS_BUCKET" --region $AWS_REGION \
-              --create-bucket-configuration LocationConstraint=$AWS_REGION 2>/dev/null || \
-            aws s3api create-bucket --bucket "$ARTIFACTS_BUCKET" --region $AWS_REGION 2>/dev/null || true
-          fi
-
-      - name: Upload Placeholder Lambda Artifacts
-        run: |
-          echo "Uploading placeholder Lambda artifacts to $ARTIFACTS_BUCKET"
-
-          # Create a minimal valid Lambda layer zip
-          mkdir -p /tmp/lambda-layer/python
-          echo "# Placeholder" > /tmp/lambda-layer/python/__init__.py
-          cd /tmp/lambda-layer && zip -r ../dependencies.zip python/
-          cp /tmp/dependencies.zip /tmp/scipy.zip
-
-          # Upload placeholder layers
-          aws s3 cp /tmp/dependencies.zip "s3://$ARTIFACTS_BUCKET/lambda-layers/dependencies.zip" || true
-          aws s3 cp /tmp/scipy.zip "s3://$ARTIFACTS_BUCKET/lambda-layers/scipy.zip" || true
-
-          # Create placeholder function zips
-          mkdir -p /tmp/lambda-func/handlers
-          touch /tmp/lambda-func/handlers/__init__.py
-
-          for func in api_core projects hypotheses evidence knowledge hypothesis_generation agent_orchestrator search_agent embeddings simulation simulation_worker ingestion pubmed_fetcher clinical_trials_fetcher; do
-            cat > /tmp/lambda-func/handlers/$func.py << 'PYEOF'
-import json
-
-def handler(event, context):
-    path = event.get('rawPath', event.get('path', '/'))
-    if path == '/health':
-        return {'statusCode': 200, 'headers': {'Content-Type': 'application/json'}, 'body': json.dumps({'status': 'healthy'})}
-    return {'statusCode': 200, 'headers': {'Content-Type': 'application/json'}, 'body': json.dumps({'message': 'GenUp API'})}
-PYEOF
-            cd /tmp/lambda-func && zip -r ../$func.zip handlers/
-            aws s3 cp /tmp/$func.zip "s3://$ARTIFACTS_BUCKET/lambda-functions/$func.zip" || true
-          done
-
-          echo "✅ Placeholder artifacts uploaded"
-
       - name: Terraform Plan
         working-directory: infrastructure/terraform
-        run: |
-          terraform plan \
-            -var-file=environments/dev.tfvars \
-            -out=tfplan \
-            -input=false
+        run: terraform plan -var-file=environments/dev.tfvars -out=tfplan -input=false
 
       - name: Terraform Apply
         working-directory: infrastructure/terraform
-        run: |
-          terraform apply -auto-approve tfplan
-
-      - name: Get Terraform Outputs
-        id: tf-outputs
-        working-directory: infrastructure/terraform
-        run: |
-          echo "FRONTEND_BUCKET=$(terraform output -raw frontend_bucket_name 2>/dev/null || echo '')" >> $GITHUB_ENV
-          echo "CLOUDFRONT_DOMAIN=$(terraform output -raw cloudfront_domain_name 2>/dev/null || echo '')" >> $GITHUB_ENV
-          echo "CLOUDFRONT_ID=$(terraform output -raw cloudfront_distribution_id 2>/dev/null || echo '')" >> $GITHUB_ENV
-          echo "API_GATEWAY_URL=$(terraform output -raw api_gateway_stage_url 2>/dev/null || echo '')" >> $GITHUB_ENV
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install Frontend Dependencies
-        working-directory: frontend
-        run: npm ci
-
-      - name: Build Frontend
-        working-directory: frontend
-        env:
-          VITE_API_URL: ${{ env.API_GATEWAY_URL }}
-        run: npm run build
-
-      - name: Deploy Frontend to S3
-        if: env.FRONTEND_BUCKET != ''
-        run: |
-          echo "Deploying frontend to bucket: $FRONTEND_BUCKET"
-
-          # Sync assets with long cache
-          aws s3 sync frontend/dist/ "s3://$FRONTEND_BUCKET/" \
-            --delete \
-            --cache-control "public, max-age=31536000, immutable" \
-            --exclude "index.html" \
-            --exclude "*.json"
-
-          # Upload index.html with no-cache
-          aws s3 cp frontend/dist/index.html "s3://$FRONTEND_BUCKET/index.html" \
-            --cache-control "public, max-age=0, must-revalidate" \
-            --content-type "text/html"
-
-          echo "✅ Frontend deployed"
-
-      - name: Invalidate CloudFront Cache
-        if: env.CLOUDFRONT_ID != ''
-        run: |
-          aws cloudfront create-invalidation \
-            --distribution-id "$CLOUDFRONT_ID" \
-            --paths "/*"
-          echo "✅ CloudFront cache invalidated"
+        run: terraform apply -auto-approve tfplan
 
       - name: Summary
-        working-directory: infrastructure/terraform
         run: |
-          echo "## 🚀 Deployment Complete" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Resource | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| CloudFront | $(terraform output -raw cloudfront_domain_name 2>/dev/null || echo 'N/A') |" >> $GITHUB_STEP_SUMMARY
-          echo "| API Gateway | $(terraform output -raw api_gateway_stage_url 2>/dev/null || echo 'N/A') |" >> $GITHUB_STEP_SUMMARY
-          echo "| Frontend Bucket | $(terraform output -raw frontend_bucket_name 2>/dev/null || echo 'N/A') |" >> $GITHUB_STEP_SUMMARY
+          echo "## Infrastructure Deployed" >> $GITHUB_STEP_SUMMARY
+          echo "- Artifacts: s3://$ARTIFACTS_BUCKET/" >> $GITHUB_STEP_SUMMARY
+          echo "- Frontend: s3://$FRONTEND_BUCKET/" >> $GITHUB_STEP_SUMMARY
