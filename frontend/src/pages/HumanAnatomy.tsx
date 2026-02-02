@@ -223,7 +223,7 @@ function Anatomy3DViewer({
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [lastMouse, setLastMouse] = useState({ x: 0, y: 0 })
-  const [hoveredElement, _setHoveredElement] = useState<AnatomyElement | null>(null)
+  const [hoveredElement] = useState<AnatomyElement | null>(null)
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 })
 
   // Draw anatomy visualization

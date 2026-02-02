@@ -1202,7 +1202,6 @@ function Canvas3D({ components, selectedId, onSelect: _onSelect }: {
         return acc
       }, {} as Record<string, BiologicalComponent[]>)
 
-      let globalIndex = 0
       Object.entries(categoryGroups).forEach(([_category, comps], categoryIndex) => {
         const categoryAngle = (categoryIndex / Object.keys(categoryGroups).length) * Math.PI * 2
         const categoryRadius = 180 * zoom
@@ -1280,8 +1279,6 @@ function Canvas3D({ components, selectedId, onSelect: _onSelect }: {
           ctx.textAlign = 'center'
           const shortName = component.name.length > 15 ? component.name.slice(0, 15) + '...' : component.name
           ctx.fillText(shortName, x, y + size + 12)
-
-          globalIndex++
         })
       })
 

@@ -322,6 +322,38 @@ export default function HumanAnatomyViewer({ className, onElementSelect }: Human
     }
   }, [rotation, zoom])
 
+  // Draw body outline helper
+  const drawBodyOutline = useCallback((ctx: CanvasRenderingContext2D, width: number, height: number, color: string) => {
+    const centerX = width / 2
+    const scale = Math.min(width, height) * 0.35 * zoom
+
+    ctx.strokeStyle = color
+    ctx.lineWidth = 2
+    ctx.setLineDash([5, 5])
+
+    // Simple body outline
+    ctx.beginPath()
+
+    // Head
+    ctx.ellipse(centerX, height * 0.1, scale * 0.15, scale * 0.18, 0, 0, Math.PI * 2)
+    ctx.stroke()
+
+    // Torso
+    ctx.beginPath()
+    ctx.moveTo(centerX - scale * 0.25, height * 0.18)
+    ctx.lineTo(centerX - scale * 0.35, height * 0.25)
+    ctx.lineTo(centerX - scale * 0.30, height * 0.45)
+    ctx.lineTo(centerX - scale * 0.20, height * 0.52)
+    ctx.lineTo(centerX + scale * 0.20, height * 0.52)
+    ctx.lineTo(centerX + scale * 0.30, height * 0.45)
+    ctx.lineTo(centerX + scale * 0.35, height * 0.25)
+    ctx.lineTo(centerX + scale * 0.25, height * 0.18)
+    ctx.closePath()
+    ctx.stroke()
+
+    ctx.setLineDash([])
+  }, [zoom])
+
   // Draw the anatomy visualization
   useEffect(() => {
     const canvas = canvasRef.current
@@ -393,39 +425,7 @@ export default function HumanAnatomyViewer({ className, onElementSelect }: Human
         ctx.fillText(point.name, x, y - size - 8)
       }
     })
-  }, [visiblePoints, rotation, zoom, sex, hoveredPoint, selectedPoint, project3D, showAiPanel])
-
-  // Draw body outline helper
-  const drawBodyOutline = (ctx: CanvasRenderingContext2D, width: number, height: number, color: string) => {
-    const centerX = width / 2
-    const scale = Math.min(width, height) * 0.35 * zoom
-
-    ctx.strokeStyle = color
-    ctx.lineWidth = 2
-    ctx.setLineDash([5, 5])
-
-    // Simple body outline
-    ctx.beginPath()
-
-    // Head
-    ctx.ellipse(centerX, height * 0.1, scale * 0.15, scale * 0.18, 0, 0, Math.PI * 2)
-    ctx.stroke()
-
-    // Torso
-    ctx.beginPath()
-    ctx.moveTo(centerX - scale * 0.25, height * 0.18)
-    ctx.lineTo(centerX - scale * 0.35, height * 0.25)
-    ctx.lineTo(centerX - scale * 0.30, height * 0.45)
-    ctx.lineTo(centerX - scale * 0.20, height * 0.52)
-    ctx.lineTo(centerX + scale * 0.20, height * 0.52)
-    ctx.lineTo(centerX + scale * 0.30, height * 0.45)
-    ctx.lineTo(centerX + scale * 0.35, height * 0.25)
-    ctx.lineTo(centerX + scale * 0.25, height * 0.18)
-    ctx.closePath()
-    ctx.stroke()
-
-    ctx.setLineDash([])
-  }
+  }, [visiblePoints, rotation, zoom, sex, hoveredPoint, selectedPoint, project3D, showAiPanel, drawBodyOutline])
 
   // Mouse interaction handlers
   const handleMouseDown = (e: React.MouseEvent) => {

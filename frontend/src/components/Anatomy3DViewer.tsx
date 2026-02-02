@@ -101,7 +101,8 @@ const SYSTEM_NAMES: Record<AnatomySystem, string> = {
  * Currently using placeholder models - will load actual BP3D models when available
  * @internal Reserved for use when BP3D models are loaded
  */
-// @ts-expect-error Reserved for future use
+// @ts-expect-error Reserved for future use - uncomment when BP3D models are integrated
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function AnatomyModelLoader({
   url,
   system,
@@ -756,7 +757,8 @@ export default function Anatomy3DViewer({
   )
 }
 
-// Preload helper for GLTF models
+// Preload helper for GLTF models - exported utility
+// eslint-disable-next-line react-refresh/only-export-components
 export function preloadAnatomyModel(url: string): void {
   useGLTF.preload(url)
 }

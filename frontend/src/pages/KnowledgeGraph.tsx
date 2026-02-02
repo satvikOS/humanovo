@@ -62,7 +62,7 @@ interface GraphNode {
   y?: number
   confidence?: number
   sources?: number
-  metadata?: Record<string, any>
+  metadata?: Record<string, unknown>
 }
 
 interface GraphEdge {
@@ -92,7 +92,7 @@ export default function KnowledgeGraph() {
   const [selectedEntity, setSelectedEntity] = useState<Entity | null>(null)
   const [selectedEdge, setSelectedEdge] = useState<GraphEdge | null>(null)
   const [showFilters, setShowFilters] = useState(true)
-  const [_showEvidencePanel, setShowEvidencePanel] = useState(false)
+  const [, setShowEvidencePanel] = useState(false)
   const [expandedSections, setExpandedSections] = useState({
     entityTypes: true,
     relationTypes: true,
