@@ -26,11 +26,11 @@ variable "kms_key_arn" {
 #   /exports/      - Generated reports/exports
 
 resource "aws_s3_bucket" "main" {
-  bucket        = "genup-${var.environment}"
+  bucket        = "genup-${var.environment}-${var.suffix}"
   force_destroy = var.environment != "prod"
 
   tags = {
-    Name        = "genup-${var.environment}"
+    Name        = "genup-${var.environment}-${var.suffix}"
     Purpose     = "Unified storage for GenUp platform"
     Environment = var.environment
   }

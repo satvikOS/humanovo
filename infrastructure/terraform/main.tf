@@ -58,12 +58,15 @@ provider "aws" {
   }
 }
 
-# Fixed suffix for consistent resource names across deployments
-# Using environment-based suffix instead of random to ensure bucket names stay the same
+# Random suffix for globally unique S3 bucket names
+resource "random_id" "bucket_suffix" {
+  byte_length = 4
+}
+
 locals {
   name_prefix = "genup-${var.environment}"
-  # Fixed suffix based on environment - ensures same bucket names every deployment
-  suffix      = var.environment
+  # Random suffix ensures globally unique bucket names
+  suffix      = random_id.bucket_suffix.hex
 
   common_tags = {
     Project     = "GenUp"

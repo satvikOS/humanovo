@@ -9,8 +9,7 @@ on:
 
 env:
   AWS_REGION: us-east-1
-  # Unified bucket with prefix-based organization
-  GENUP_BUCKET: genup-dev
+  ENVIRONMENT: dev
   FRONTEND_PREFIX: frontend
   ARTIFACTS_PREFIX: artifacts
 
@@ -100,41 +99,30 @@ jobs:
           name: frontend-dist
           path: frontend/dist
 
-      - name: Create unified S3 bucket if needed
+      - name: Discover GenUp bucket
+        id: bucket
         run: |
-          # Create unified bucket if it doesn't exist
-          if ! aws s3api head-bucket --bucket "$GENUP_BUCKET" 2>/dev/null; then
-            echo "Creating unified bucket: $GENUP_BUCKET"
-            aws s3api create-bucket --bucket "$GENUP_BUCKET" --region $AWS_REGION
+          # Find the GenUp unified bucket (pattern: genup-{env}-{suffix})
+          GENUP_BUCKET=$(aws s3api list-buckets --query "Buckets[?starts_with(Name, 'genup-${ENVIRONMENT}-')].Name | [0]" --output text)
 
-            # Enable versioning
-            aws s3api put-bucket-versioning --bucket "$GENUP_BUCKET" \
-              --versioning-configuration Status=Enabled
-
-            # Enable encryption
-            aws s3api put-bucket-encryption --bucket "$GENUP_BUCKET" \
-              --server-side-encryption-configuration '{
-                "Rules": [{"ApplyServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}]
-              }'
-
-            # Block public access
-            aws s3api put-public-access-block --bucket "$GENUP_BUCKET" \
-              --public-access-block-configuration '{
-                "BlockPublicAcls": true,
-                "IgnorePublicAcls": true,
-                "BlockPublicPolicy": true,
-                "RestrictPublicBuckets": true
-              }'
+          if [ -z "$GENUP_BUCKET" ] || [ "$GENUP_BUCKET" = "None" ]; then
+            echo "ERROR: GenUp bucket not found. Run the infrastructure deployment first."
+            echo "Expected bucket pattern: genup-${ENVIRONMENT}-*"
+            exit 1
           fi
-          echo "Unified bucket ready: $GENUP_BUCKET"
+
+          echo "GENUP_BUCKET=$GENUP_BUCKET" >> $GITHUB_OUTPUT
+          echo "Found bucket: $GENUP_BUCKET"
 
       - name: Deploy Frontend to S3
         run: |
+          GENUP_BUCKET="${{ steps.bucket.outputs.GENUP_BUCKET }}"
           aws s3 sync frontend/dist/ "s3://$GENUP_BUCKET/$FRONTEND_PREFIX/" --delete
           echo "Frontend deployed to s3://$GENUP_BUCKET/$FRONTEND_PREFIX/"
 
       - name: Summary
         run: |
+          GENUP_BUCKET="${{ steps.bucket.outputs.GENUP_BUCKET }}"
           echo "## Deployment Complete" >> $GITHUB_STEP_SUMMARY
           echo "- Unified Bucket: s3://$GENUP_BUCKET/" >> $GITHUB_STEP_SUMMARY
           echo "- Frontend: s3://$GENUP_BUCKET/$FRONTEND_PREFIX/" >> $GITHUB_STEP_SUMMARY
