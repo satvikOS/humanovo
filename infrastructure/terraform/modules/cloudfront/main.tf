@@ -158,6 +158,11 @@ resource "aws_cloudfront_distribution" "main" {
     default_ttl            = 86400
     max_ttl                = 31536000
     compress               = true
+
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = aws_cloudfront_function.spa_routing.arn
+    }
   }
 
   # API behavior - /api/* goes to API Gateway
@@ -259,6 +264,35 @@ resource "aws_wafv2_web_acl" "main" {
   tags = {
     Name = "${var.name_prefix}-waf"
   }
+}
+
+# ==================== CloudFront Function for SPA ====================
+
+resource "aws_cloudfront_function" "spa_routing" {
+  name    = "${var.name_prefix}-spa-routing-${var.suffix}"
+  runtime = "cloudfront-js-2.0"
+  comment = "SPA routing for React app"
+  publish = true
+  code    = <<-EOF
+    function handler(event) {
+      var request = event.request;
+      var uri = request.uri;
+
+      // If URI has extension, serve as-is
+      if (uri.includes('.')) {
+        return request;
+      }
+
+      // API requests pass through
+      if (uri.startsWith('/api/') || uri === '/health') {
+        return request;
+      }
+
+      // All other requests serve index.html
+      request.uri = '/index.html';
+      return request;
+    }
+  EOF
 }
 
 # ==================== Outputs ====================
