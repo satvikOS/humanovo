@@ -39,6 +39,23 @@ variable "jwt_audience" {
   default = []
 }
 
+# Static list of functions that need API Gateway integrations
+# This must be defined statically so Terraform can determine for_each keys at plan time
+locals {
+  api_integrated_functions = toset([
+    "api_core",
+    "projects",
+    "hypotheses",
+    "evidence",
+    "knowledge",
+    "hypothesis_generation",
+    "agent_orchestrator",
+    "search_agent",
+    "embeddings",
+    "simulation"
+  ])
+}
+
 # ==================== HTTP API ====================
 
 resource "aws_apigatewayv2_api" "main" {
@@ -80,14 +97,11 @@ resource "aws_apigatewayv2_authorizer" "jwt" {
 # ==================== Lambda Integrations ====================
 
 resource "aws_apigatewayv2_integration" "lambda" {
-  for_each = {
-    for k, v in var.lambda_invoke_arns : k => v
-    if !contains(["simulation_worker", "ingestion", "pubmed_fetcher", "clinical_trials_fetcher"], k)
-  }
+  for_each = local.api_integrated_functions
 
   api_id                 = aws_apigatewayv2_api.main.id
   integration_type       = "AWS_PROXY"
-  integration_uri        = each.value
+  integration_uri        = var.lambda_invoke_arns[each.key]
   integration_method     = "POST"
   payload_format_version = "2.0"
   timeout_milliseconds   = 30000
