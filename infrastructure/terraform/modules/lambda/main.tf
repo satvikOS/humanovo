@@ -423,10 +423,6 @@ resource "aws_cloudwatch_event_rule" "full_ingestion" {
   name                = "${var.name_prefix}-full-ingestion"
   description         = "Trigger full knowledge base ingestion every 4 hours"
   schedule_expression = "rate(4 hours)"
-
-  tags = {
-    Name = "${var.name_prefix}-full-ingestion"
-  }
 }
 
 resource "aws_cloudwatch_event_target" "full_ingestion" {
@@ -452,10 +448,6 @@ resource "aws_cloudwatch_event_rule" "priority_ingestion" {
   name                = "${var.name_prefix}-priority-ingestion"
   description         = "Trigger priority PubMed ingestion every hour"
   schedule_expression = "rate(1 hour)"
-
-  tags = {
-    Name = "${var.name_prefix}-priority-ingestion"
-  }
 }
 
 resource "aws_cloudwatch_event_target" "priority_ingestion" {
@@ -486,10 +478,6 @@ resource "aws_cloudwatch_event_rule" "clinical_trials_daily" {
   name                = "${var.name_prefix}-clinical-trials-daily"
   description         = "Daily ClinicalTrials.gov ingestion"
   schedule_expression = "cron(0 6 * * ? *)"  # 6 AM UTC daily
-
-  tags = {
-    Name = "${var.name_prefix}-clinical-trials-daily"
-  }
 }
 
 resource "aws_cloudwatch_event_target" "clinical_trials_daily" {
@@ -522,10 +510,6 @@ resource "aws_cloudwatch_event_rule" "embeddings_batch" {
   name                = "${var.name_prefix}-embeddings-batch"
   description         = "Re-process failed embeddings every 6 hours"
   schedule_expression = "rate(6 hours)"
-
-  tags = {
-    Name = "${var.name_prefix}-embeddings-batch"
-  }
 }
 
 resource "aws_cloudwatch_event_target" "embeddings_batch" {

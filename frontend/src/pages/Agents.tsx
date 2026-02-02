@@ -467,7 +467,7 @@ export default function Agents() {
               </div>
 
               {/* Result */}
-              {selectedTask.result && (
+              {selectedTask.result != null ? (
                 <div className="mb-6">
                   <h3 className="text-sm font-medium mb-3">Result</h3>
                   <div className="card bg-success-500/5 border-success-500/30">
@@ -476,7 +476,7 @@ export default function Agents() {
                     </pre>
                   </div>
                 </div>
-              )}
+              ) : null}
             </div>
           ) : (
             <div className="flex items-center justify-center h-full">

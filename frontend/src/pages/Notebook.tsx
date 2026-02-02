@@ -411,11 +411,11 @@ export default function Notebook() {
               onChange={(e) => updateNodeContent(node.id, e.target.value)}
               onClick={(e) => e.stopPropagation()}
             />
-            {node.metadata?.title && (
+            {node.metadata?.title ? (
               <div className="text-xs text-[var(--color-text-muted)]">
                 {String(node.metadata.title)}
               </div>
-            )}
+            ) : null}
           </div>
         )
 
@@ -439,11 +439,11 @@ export default function Notebook() {
             <div className="flex items-center gap-2 mb-2">
               <FiZap className="w-4 h-4 text-warning-400" />
               <span className="text-xs font-semibold text-warning-400">Hypothesis</span>
-              {node.metadata?.status && (
+              {node.metadata?.status ? (
                 <span className="text-xxs px-1.5 py-0.5 rounded bg-warning-500/20 text-warning-300">
-                  {node.metadata.status as string}
+                  {String(node.metadata.status)}
                 </span>
-              )}
+              ) : null}
             </div>
             <input
               type="text"
