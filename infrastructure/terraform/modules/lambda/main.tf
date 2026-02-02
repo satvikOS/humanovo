@@ -203,6 +203,35 @@ locals {
       memory      = 1024
       timeout     = 120
     }
+
+    # New continuous ingestion functions
+    brave_search_fetcher = {
+      description = "Brave Search API fetcher with rate limiting"
+      handler     = "handlers.brave_search_fetcher.handler"
+      memory      = 512
+      timeout     = 60
+    }
+
+    embeddings_generator = {
+      description = "Vector embeddings generation pipeline"
+      handler     = "handlers.embeddings_generator.handler"
+      memory      = 1024
+      timeout     = 120
+    }
+
+    rag_retrieval = {
+      description = "RAG retrieval with caching"
+      handler     = "handlers.rag_retrieval.handler"
+      memory      = 1024
+      timeout     = 30
+    }
+
+    ingestion_scheduler = {
+      description = "Scheduled ingestion orchestrator"
+      handler     = "handlers.ingestion_scheduler.handler"
+      memory      = 512
+      timeout     = 300
+    }
   }
 }
 
@@ -351,6 +380,173 @@ resource "aws_lambda_event_source_mapping" "simulation_queue" {
   batch_size       = 1
 }
 
+# ==================== Embeddings Queue ====================
+
+resource "aws_sqs_queue" "embeddings_queue" {
+  name                       = "${var.name_prefix}-embeddings-queue"
+  visibility_timeout_seconds = 130  # Slightly higher than Lambda timeout
+  message_retention_seconds  = 86400
+  receive_wait_time_seconds  = 10
+
+  kms_master_key_id = var.kms_key_arn
+
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.embeddings_dlq.arn
+    maxReceiveCount     = 3
+  })
+
+  tags = {
+    Name = "${var.name_prefix}-embeddings-queue"
+  }
+}
+
+resource "aws_sqs_queue" "embeddings_dlq" {
+  name = "${var.name_prefix}-embeddings-dlq"
+
+  kms_master_key_id = var.kms_key_arn
+
+  tags = {
+    Name = "${var.name_prefix}-embeddings-dlq"
+  }
+}
+
+resource "aws_lambda_event_source_mapping" "embeddings_queue" {
+  event_source_arn = aws_sqs_queue.embeddings_queue.arn
+  function_name    = aws_lambda_function.functions["embeddings_generator"].arn
+  batch_size       = 10  # Process multiple embeddings per invocation
+}
+
+# ==================== EventBridge Scheduled Ingestion ====================
+
+# Full ingestion every 4 hours
+resource "aws_cloudwatch_event_rule" "full_ingestion" {
+  name                = "${var.name_prefix}-full-ingestion"
+  description         = "Trigger full knowledge base ingestion every 4 hours"
+  schedule_expression = "rate(4 hours)"
+
+  tags = {
+    Name = "${var.name_prefix}-full-ingestion"
+  }
+}
+
+resource "aws_cloudwatch_event_target" "full_ingestion" {
+  rule      = aws_cloudwatch_event_rule.full_ingestion.name
+  target_id = "IngestionScheduler"
+  arn       = aws_lambda_function.functions["ingestion_scheduler"].arn
+
+  input = jsonencode({
+    schedule_type = "full"
+  })
+}
+
+resource "aws_lambda_permission" "eventbridge_full_ingestion" {
+  statement_id  = "AllowEventBridgeFullIngestion"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.functions["ingestion_scheduler"].function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.full_ingestion.arn
+}
+
+# High-priority ingestion every hour (PubMed only)
+resource "aws_cloudwatch_event_rule" "priority_ingestion" {
+  name                = "${var.name_prefix}-priority-ingestion"
+  description         = "Trigger priority PubMed ingestion every hour"
+  schedule_expression = "rate(1 hour)"
+
+  tags = {
+    Name = "${var.name_prefix}-priority-ingestion"
+  }
+}
+
+resource "aws_cloudwatch_event_target" "priority_ingestion" {
+  rule      = aws_cloudwatch_event_rule.priority_ingestion.name
+  target_id = "PubMedFetcher"
+  arn       = aws_lambda_function.functions["pubmed_fetcher"].arn
+
+  input = jsonencode({
+    queries = [
+      "cancer immunotherapy 2024",
+      "CRISPR gene therapy clinical"
+    ]
+    max_results      = 50
+    extract_entities = true
+  })
+}
+
+resource "aws_lambda_permission" "eventbridge_priority_ingestion" {
+  statement_id  = "AllowEventBridgePriorityIngestion"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.functions["pubmed_fetcher"].function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.priority_ingestion.arn
+}
+
+# Daily clinical trials update
+resource "aws_cloudwatch_event_rule" "clinical_trials_daily" {
+  name                = "${var.name_prefix}-clinical-trials-daily"
+  description         = "Daily ClinicalTrials.gov ingestion"
+  schedule_expression = "cron(0 6 * * ? *)"  # 6 AM UTC daily
+
+  tags = {
+    Name = "${var.name_prefix}-clinical-trials-daily"
+  }
+}
+
+resource "aws_cloudwatch_event_target" "clinical_trials_daily" {
+  rule      = aws_cloudwatch_event_rule.clinical_trials_daily.name
+  target_id = "ClinicalTrialsFetcher"
+  arn       = aws_lambda_function.functions["clinical_trials_fetcher"].arn
+
+  input = jsonencode({
+    conditions = [
+      "cancer",
+      "gene therapy",
+      "immunotherapy",
+      "CAR-T"
+    ]
+    max_results      = 100
+    extract_entities = true
+  })
+}
+
+resource "aws_lambda_permission" "eventbridge_clinical_trials" {
+  statement_id  = "AllowEventBridgeClinicalTrials"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.functions["clinical_trials_fetcher"].function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.clinical_trials_daily.arn
+}
+
+# Embeddings batch re-processing (for any failed embeddings)
+resource "aws_cloudwatch_event_rule" "embeddings_batch" {
+  name                = "${var.name_prefix}-embeddings-batch"
+  description         = "Re-process failed embeddings every 6 hours"
+  schedule_expression = "rate(6 hours)"
+
+  tags = {
+    Name = "${var.name_prefix}-embeddings-batch"
+  }
+}
+
+resource "aws_cloudwatch_event_target" "embeddings_batch" {
+  rule      = aws_cloudwatch_event_rule.embeddings_batch.name
+  target_id = "EmbeddingsBatch"
+  arn       = aws_lambda_function.functions["embeddings_generator"].arn
+
+  input = jsonencode({
+    batch_mode = true
+    limit      = 100
+  })
+}
+
+resource "aws_lambda_permission" "eventbridge_embeddings_batch" {
+  statement_id  = "AllowEventBridgeEmbeddingsBatch"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.functions["embeddings_generator"].function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.embeddings_batch.arn
+}
+
 # ==================== Outputs ====================
 
 output "function_arns" {
@@ -379,4 +575,14 @@ output "layer_arns" {
 output "simulation_queue_url" {
   description = "SQS queue URL for simulations"
   value       = aws_sqs_queue.simulation_queue.url
+}
+
+output "embeddings_queue_url" {
+  description = "SQS queue URL for embeddings generation"
+  value       = aws_sqs_queue.embeddings_queue.url
+}
+
+output "embeddings_queue_arn" {
+  description = "SQS queue ARN for embeddings generation"
+  value       = aws_sqs_queue.embeddings_queue.arn
 }

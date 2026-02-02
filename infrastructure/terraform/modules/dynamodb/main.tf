@@ -339,6 +339,212 @@ resource "aws_dynamodb_table" "agent_tasks" {
   }
 }
 
+# ==================== Knowledge Base Table ====================
+
+resource "aws_dynamodb_table" "knowledge" {
+  name         = "${var.name_prefix}-knowledge"
+  billing_mode = var.billing_mode
+  hash_key     = "id"
+
+  attribute {
+    name = "id"
+    type = "S"
+  }
+
+  attribute {
+    name = "content_hash"
+    type = "S"
+  }
+
+  attribute {
+    name = "source"
+    type = "S"
+  }
+
+  attribute {
+    name = "created_at"
+    type = "S"
+  }
+
+  attribute {
+    name = "embedding_status"
+    type = "S"
+  }
+
+  # Hash index for deduplication
+  global_secondary_index {
+    name            = "hash-index"
+    hash_key        = "content_hash"
+    projection_type = "KEYS_ONLY"
+  }
+
+  # Source index for filtering by source
+  global_secondary_index {
+    name            = "source-created_at-index"
+    hash_key        = "source"
+    range_key       = "created_at"
+    projection_type = "ALL"
+  }
+
+  # Embedding status index for batch processing
+  global_secondary_index {
+    name            = "embedding_status-index"
+    hash_key        = "embedding_status"
+    range_key       = "created_at"
+    projection_type = "KEYS_ONLY"
+  }
+
+  server_side_encryption {
+    enabled = true
+  }
+
+  point_in_time_recovery {
+    enabled = var.environment == "prod"
+  }
+
+  tags = {
+    Name = "${var.name_prefix}-knowledge"
+  }
+}
+
+# ==================== Embeddings Table ====================
+
+resource "aws_dynamodb_table" "embeddings" {
+  name         = "${var.name_prefix}-embeddings"
+  billing_mode = var.billing_mode
+  hash_key     = "id"
+
+  attribute {
+    name = "id"
+    type = "S"
+  }
+
+  attribute {
+    name = "source"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name            = "source-index"
+    hash_key        = "source"
+    projection_type = "KEYS_ONLY"
+  }
+
+  server_side_encryption {
+    enabled = true
+  }
+
+  tags = {
+    Name = "${var.name_prefix}-embeddings"
+  }
+}
+
+# ==================== Ingestion Checkpoints Table ====================
+
+resource "aws_dynamodb_table" "ingestion_checkpoints" {
+  name         = "${var.name_prefix}-ingestion-checkpoints"
+  billing_mode = var.billing_mode
+  hash_key     = "source"
+  range_key    = "query_hash"
+
+  attribute {
+    name = "source"
+    type = "S"
+  }
+
+  attribute {
+    name = "query_hash"
+    type = "S"
+  }
+
+  server_side_encryption {
+    enabled = true
+  }
+
+  tags = {
+    Name = "${var.name_prefix}-ingestion-checkpoints"
+  }
+}
+
+# ==================== Rate Limits Table ====================
+
+resource "aws_dynamodb_table" "rate_limits" {
+  name         = "${var.name_prefix}-rate-limits"
+  billing_mode = var.billing_mode
+  hash_key     = "limit_type"
+  range_key    = "period"
+
+  attribute {
+    name = "limit_type"
+    type = "S"
+  }
+
+  attribute {
+    name = "period"
+    type = "S"
+  }
+
+  ttl {
+    attribute_name = "ttl"
+    enabled        = true
+  }
+
+  server_side_encryption {
+    enabled = true
+  }
+
+  tags = {
+    Name = "${var.name_prefix}-rate-limits"
+  }
+}
+
+# ==================== RAG Cache Table ====================
+
+resource "aws_dynamodb_table" "rag_cache" {
+  name         = "${var.name_prefix}-rag-cache"
+  billing_mode = var.billing_mode
+  hash_key     = "cache_key"
+
+  attribute {
+    name = "cache_key"
+    type = "S"
+  }
+
+  ttl {
+    attribute_name = "expires_at"
+    enabled        = true
+  }
+
+  server_side_encryption {
+    enabled = true
+  }
+
+  tags = {
+    Name = "${var.name_prefix}-rag-cache"
+  }
+}
+
+# ==================== Ingestion State Table ====================
+
+resource "aws_dynamodb_table" "ingestion_state" {
+  name         = "${var.name_prefix}-ingestion-state"
+  billing_mode = var.billing_mode
+  hash_key     = "source"
+
+  attribute {
+    name = "source"
+    type = "S"
+  }
+
+  server_side_encryption {
+    enabled = true
+  }
+
+  tags = {
+    Name = "${var.name_prefix}-ingestion-state"
+  }
+}
+
 # ==================== Outputs ====================
 
 output "projects_table_name" {
@@ -387,4 +593,52 @@ output "agent_tasks_table_name" {
 
 output "agent_tasks_table_arn" {
   value = aws_dynamodb_table.agent_tasks.arn
+}
+
+output "knowledge_table_name" {
+  value = aws_dynamodb_table.knowledge.name
+}
+
+output "knowledge_table_arn" {
+  value = aws_dynamodb_table.knowledge.arn
+}
+
+output "embeddings_table_name" {
+  value = aws_dynamodb_table.embeddings.name
+}
+
+output "embeddings_table_arn" {
+  value = aws_dynamodb_table.embeddings.arn
+}
+
+output "ingestion_checkpoints_table_name" {
+  value = aws_dynamodb_table.ingestion_checkpoints.name
+}
+
+output "ingestion_checkpoints_table_arn" {
+  value = aws_dynamodb_table.ingestion_checkpoints.arn
+}
+
+output "rate_limits_table_name" {
+  value = aws_dynamodb_table.rate_limits.name
+}
+
+output "rate_limits_table_arn" {
+  value = aws_dynamodb_table.rate_limits.arn
+}
+
+output "rag_cache_table_name" {
+  value = aws_dynamodb_table.rag_cache.name
+}
+
+output "rag_cache_table_arn" {
+  value = aws_dynamodb_table.rag_cache.arn
+}
+
+output "ingestion_state_table_name" {
+  value = aws_dynamodb_table.ingestion_state.name
+}
+
+output "ingestion_state_table_arn" {
+  value = aws_dynamodb_table.ingestion_state.arn
 }
