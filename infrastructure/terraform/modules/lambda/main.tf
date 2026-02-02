@@ -88,8 +88,12 @@ locals {
     HYPOTHESES_TABLE           = var.hypotheses_table_name
     EVIDENCE_TABLE             = var.evidence_table_name
     SIMULATIONS_TABLE          = var.simulations_table_name
-    DATA_BUCKET                = var.data_bucket_name
-    ARTIFACTS_BUCKET           = var.artifacts_bucket_name
+    # Unified bucket with prefix-based organization
+    GENUP_BUCKET               = var.data_bucket_name
+    DATA_PREFIX                = "data"
+    ARTIFACTS_PREFIX           = "artifacts"
+    UPLOADS_PREFIX             = "uploads"
+    EXPORTS_PREFIX             = "exports"
     BEDROCK_MODEL_ID           = var.bedrock_model_id
     BEDROCK_EMBEDDING_MODEL_ID = var.bedrock_embedding_model_id
     LOG_LEVEL                  = var.environment == "prod" ? "INFO" : "DEBUG"
@@ -209,7 +213,7 @@ resource "aws_lambda_layer_version" "dependencies" {
   description         = "GenUp Python dependencies"
   compatible_runtimes = ["python3.11"]
   s3_bucket           = var.artifacts_bucket_name
-  s3_key              = "lambda-layers/dependencies.zip"
+  s3_key              = "artifacts/lambda-layers/dependencies.zip"
 
   lifecycle {
     create_before_destroy = true
@@ -221,7 +225,7 @@ resource "aws_lambda_layer_version" "scipy" {
   description         = "NumPy and SciPy for simulations"
   compatible_runtimes = ["python3.11"]
   s3_bucket           = var.artifacts_bucket_name
-  s3_key              = "lambda-layers/scipy.zip"
+  s3_key              = "artifacts/lambda-layers/scipy.zip"
 
   lifecycle {
     create_before_destroy = true
@@ -242,7 +246,7 @@ resource "aws_lambda_function" "functions" {
   memory_size   = each.value.memory
 
   s3_bucket = var.artifacts_bucket_name
-  s3_key    = "lambda-functions/${each.key}.zip"
+  s3_key    = "artifacts/lambda-functions/${each.key}.zip"
 
   layers = each.key == "simulation" || each.key == "simulation_worker" ? [
     aws_lambda_layer_version.dependencies.arn,

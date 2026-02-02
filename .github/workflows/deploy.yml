@@ -9,9 +9,9 @@ on:
 
 env:
   AWS_REGION: us-east-1
-  # Fixed bucket names - these stay consistent across all deployments
-  FRONTEND_BUCKET: genup-frontend-bucket
-  ARTIFACTS_BUCKET: genup-artifacts-bucket
+  ENVIRONMENT: dev
+  FRONTEND_PREFIX: frontend
+  ARTIFACTS_PREFIX: artifacts
 
 jobs:
   lint:
@@ -99,25 +99,31 @@ jobs:
           name: frontend-dist
           path: frontend/dist
 
-      - name: Create S3 buckets if needed
+      - name: Discover GenUp bucket
+        id: bucket
         run: |
-          # Create frontend bucket if it doesn't exist
-          aws s3api head-bucket --bucket "$FRONTEND_BUCKET" 2>/dev/null || \
-            aws s3api create-bucket --bucket "$FRONTEND_BUCKET" --region $AWS_REGION 2>/dev/null || true
+          # Find the GenUp unified bucket (pattern: genup-{env}-{suffix})
+          GENUP_BUCKET=$(aws s3api list-buckets --query "Buckets[?starts_with(Name, 'genup-${ENVIRONMENT}-')].Name | [0]" --output text)
 
-          # Create artifacts bucket if it doesn't exist
-          aws s3api head-bucket --bucket "$ARTIFACTS_BUCKET" 2>/dev/null || \
-            aws s3api create-bucket --bucket "$ARTIFACTS_BUCKET" --region $AWS_REGION 2>/dev/null || true
+          if [ -z "$GENUP_BUCKET" ] || [ "$GENUP_BUCKET" = "None" ]; then
+            echo "ERROR: GenUp bucket not found. Run the infrastructure deployment first."
+            echo "Expected bucket pattern: genup-${ENVIRONMENT}-*"
+            exit 1
+          fi
 
-          echo "Buckets ready"
+          echo "GENUP_BUCKET=$GENUP_BUCKET" >> $GITHUB_OUTPUT
+          echo "Found bucket: $GENUP_BUCKET"
 
       - name: Deploy Frontend to S3
         run: |
-          aws s3 sync frontend/dist/ "s3://$FRONTEND_BUCKET/" --delete
-          echo "Frontend deployed to s3://$FRONTEND_BUCKET/"
+          GENUP_BUCKET="${{ steps.bucket.outputs.GENUP_BUCKET }}"
+          aws s3 sync frontend/dist/ "s3://$GENUP_BUCKET/$FRONTEND_PREFIX/" --delete
+          echo "Frontend deployed to s3://$GENUP_BUCKET/$FRONTEND_PREFIX/"
 
       - name: Summary
         run: |
+          GENUP_BUCKET="${{ steps.bucket.outputs.GENUP_BUCKET }}"
           echo "## Deployment Complete" >> $GITHUB_STEP_SUMMARY
-          echo "- Frontend: s3://$FRONTEND_BUCKET/" >> $GITHUB_STEP_SUMMARY
-          echo "- Artifacts: s3://$ARTIFACTS_BUCKET/" >> $GITHUB_STEP_SUMMARY
+          echo "- Unified Bucket: s3://$GENUP_BUCKET/" >> $GITHUB_STEP_SUMMARY
+          echo "- Frontend: s3://$GENUP_BUCKET/$FRONTEND_PREFIX/" >> $GITHUB_STEP_SUMMARY
+          echo "- Artifacts: s3://$GENUP_BUCKET/$ARTIFACTS_PREFIX/" >> $GITHUB_STEP_SUMMARY

@@ -58,12 +58,15 @@ provider "aws" {
   }
 }
 
-# Fixed suffix for consistent resource names across deployments
-# Using environment-based suffix instead of random to ensure bucket names stay the same
+# Random suffix for globally unique S3 bucket names
+resource "random_id" "bucket_suffix" {
+  byte_length = 4
+}
+
 locals {
   name_prefix = "genup-${var.environment}"
-  # Fixed suffix based on environment - ensures same bucket names every deployment
-  suffix      = var.environment
+  # Random suffix ensures globally unique bucket names
+  suffix      = random_id.bucket_suffix.hex
 
   common_tags = {
     Project     = "GenUp"
@@ -207,9 +210,7 @@ module "iam" {
   secrets_arn    = aws_secretsmanager_secret.api_keys.arn
 
   s3_bucket_arns = [
-    module.s3.frontend_bucket_arn,
-    module.s3.data_bucket_arn,
-    module.s3.artifacts_bucket_arn,
+    module.s3.bucket_arn,
   ]
 
   dynamodb_table_arns = [
@@ -331,19 +332,25 @@ output "api_gateway_stage_url" {
   value       = module.api_gateway.stage_url
 }
 
+output "bucket_name" {
+  description = "Unified S3 bucket for all GenUp storage"
+  value       = module.s3.bucket_name
+}
+
+# Legacy outputs for backward compatibility
 output "frontend_bucket_name" {
-  description = "S3 bucket for frontend assets"
-  value       = module.s3.frontend_bucket_name
+  description = "S3 bucket for frontend assets (prefix: frontend/)"
+  value       = module.s3.bucket_name
 }
 
 output "data_bucket_name" {
-  description = "S3 bucket for data storage"
-  value       = module.s3.data_bucket_name
+  description = "S3 bucket for data storage (prefix: data/)"
+  value       = module.s3.bucket_name
 }
 
 output "artifacts_bucket_name" {
-  description = "S3 bucket for build artifacts"
-  value       = module.s3.artifacts_bucket_name
+  description = "S3 bucket for build artifacts (prefix: artifacts/)"
+  value       = module.s3.bucket_name
 }
 
 output "lambda_function_names" {

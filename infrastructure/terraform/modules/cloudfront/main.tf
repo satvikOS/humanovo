@@ -91,7 +91,8 @@ data "aws_iam_policy_document" "frontend_bucket_policy" {
     }
 
     actions   = ["s3:GetObject"]
-    resources = ["${var.frontend_bucket_arn}/*"]
+    # Allow access to frontend/ prefix in unified bucket
+    resources = ["${var.frontend_bucket_arn}/frontend/*"]
 
     condition {
       test     = "StringEquals"
@@ -211,11 +212,12 @@ resource "aws_cloudfront_distribution" "main" {
 
   aliases = local.use_custom_domain ? [var.domain_name] : []
 
-  # S3 Origin for Frontend
+  # S3 Origin for Frontend (using frontend/ prefix in unified bucket)
   origin {
     domain_name              = var.frontend_bucket_domain
     origin_id                = local.s3_origin_id
     origin_access_control_id = aws_cloudfront_origin_access_control.frontend.id
+    origin_path              = "/frontend"
   }
 
   # API Gateway Origin
