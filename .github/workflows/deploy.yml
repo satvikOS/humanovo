@@ -117,7 +117,21 @@ jobs:
       - name: Deploy Frontend to S3
         run: |
           GENUP_BUCKET="${{ steps.bucket.outputs.GENUP_BUCKET }}"
-          aws s3 sync frontend/dist/ "s3://$GENUP_BUCKET/$FRONTEND_PREFIX/" --delete
+          # Force re-upload with SSE-S3 encryption (AES256) to ensure CloudFront can read objects
+          # Using --exact-timestamps to force re-upload even if content matches
+          aws s3 rm "s3://$GENUP_BUCKET/$FRONTEND_PREFIX/" --recursive || true
+          aws s3 sync frontend/dist/ "s3://$GENUP_BUCKET/$FRONTEND_PREFIX/" \
+            --sse AES256 \
+            --cache-control "public, max-age=31536000, immutable" \
+            --exclude "index.html" \
+            --exclude "*.json"
+          # Upload HTML and JSON with no-cache for SPA routing
+          aws s3 sync frontend/dist/ "s3://$GENUP_BUCKET/$FRONTEND_PREFIX/" \
+            --sse AES256 \
+            --cache-control "no-cache, no-store, must-revalidate" \
+            --exclude "*" \
+            --include "index.html" \
+            --include "*.json"
           echo "Frontend deployed to s3://$GENUP_BUCKET/$FRONTEND_PREFIX/"
 
       - name: Invalidate CloudFront Cache
