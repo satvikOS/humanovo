@@ -120,10 +120,49 @@ jobs:
           aws s3 sync frontend/dist/ "s3://$GENUP_BUCKET/$FRONTEND_PREFIX/" --delete
           echo "Frontend deployed to s3://$GENUP_BUCKET/$FRONTEND_PREFIX/"
 
+      - name: Invalidate CloudFront Cache
+        id: invalidate
+        run: |
+          # Find the CloudFront distribution for GenUp
+          DISTRIBUTION_ID=$(aws cloudfront list-distributions \
+            --query "DistributionList.Items[?Origins.Items[?contains(DomainName, 'genup-${ENVIRONMENT}')]].Id | [0]" \
+            --output text)
+
+          if [ -z "$DISTRIBUTION_ID" ] || [ "$DISTRIBUTION_ID" = "None" ]; then
+            echo "WARNING: CloudFront distribution not found, skipping invalidation"
+            echo "CLOUDFRONT_URL=N/A" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "Invalidating CloudFront cache for distribution: $DISTRIBUTION_ID"
+          INVALIDATION_ID=$(aws cloudfront create-invalidation \
+            --distribution-id "$DISTRIBUTION_ID" \
+            --paths "/*" \
+            --query "Invalidation.Id" \
+            --output text)
+
+          echo "Created invalidation: $INVALIDATION_ID"
+
+          # Get the CloudFront domain
+          CLOUDFRONT_DOMAIN=$(aws cloudfront get-distribution \
+            --id "$DISTRIBUTION_ID" \
+            --query "Distribution.DomainName" \
+            --output text)
+
+          echo "CLOUDFRONT_URL=https://$CLOUDFRONT_DOMAIN" >> $GITHUB_OUTPUT
+          echo "DISTRIBUTION_ID=$DISTRIBUTION_ID" >> $GITHUB_OUTPUT
+
       - name: Summary
         run: |
           GENUP_BUCKET="${{ steps.bucket.outputs.GENUP_BUCKET }}"
+          CLOUDFRONT_URL="${{ steps.invalidate.outputs.CLOUDFRONT_URL }}"
           echo "## Deployment Complete" >> $GITHUB_STEP_SUMMARY
-          echo "- Unified Bucket: s3://$GENUP_BUCKET/" >> $GITHUB_STEP_SUMMARY
-          echo "- Frontend: s3://$GENUP_BUCKET/$FRONTEND_PREFIX/" >> $GITHUB_STEP_SUMMARY
-          echo "- Artifacts: s3://$GENUP_BUCKET/$ARTIFACTS_PREFIX/" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Storage" >> $GITHUB_STEP_SUMMARY
+          echo "- Unified Bucket: \`s3://$GENUP_BUCKET/\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Frontend: \`s3://$GENUP_BUCKET/$FRONTEND_PREFIX/\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Live URL" >> $GITHUB_STEP_SUMMARY
+          echo "- **Site**: $CLOUDFRONT_URL" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "CloudFront cache invalidated - changes should be live within 1-2 minutes." >> $GITHUB_STEP_SUMMARY
