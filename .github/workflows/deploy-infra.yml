@@ -279,12 +279,7 @@ jobs:
         run: |
           echo "## Infrastructure Deployed Successfully" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Unified Storage" >> $GITHUB_STEP_SUMMARY
-          echo "- **Bucket**: ${{ steps.outputs.outputs.BUCKET_NAME }}" >> $GITHUB_STEP_SUMMARY
-          echo "  - Frontend: \`/frontend/\`" >> $GITHUB_STEP_SUMMARY
-          echo "  - Data: \`/data/\`" >> $GITHUB_STEP_SUMMARY
-          echo "  - Artifacts: \`/artifacts/\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Services" >> $GITHUB_STEP_SUMMARY
-          echo "- **CloudFront**: ${{ steps.outputs.outputs.CLOUDFRONT_DOMAIN }}" >> $GITHUB_STEP_SUMMARY
+          echo "### Resources" >> $GITHUB_STEP_SUMMARY
+          echo "- **S3 Bucket**: ${{ steps.outputs.outputs.BUCKET_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **CloudFront**: https://${{ steps.outputs.outputs.CLOUDFRONT_DOMAIN }}" >> $GITHUB_STEP_SUMMARY
           echo "- **API Gateway**: ${{ steps.outputs.outputs.API_ENDPOINT }}" >> $GITHUB_STEP_SUMMARY

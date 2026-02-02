@@ -10,47 +10,11 @@ on:
 env:
   AWS_REGION: us-east-1
   ENVIRONMENT: dev
-  FRONTEND_PREFIX: frontend
-  ARTIFACTS_PREFIX: artifacts
 
 jobs:
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-
-      - name: Install ruff
-        run: pip install ruff
-
-      - name: Lint Python
-        run: ruff check backend/ || true
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install and lint frontend
-        working-directory: frontend
-        run: |
-          npm ci
-          npm run lint || true
-
   build:
-    name: Build
+    name: Build Frontend
     runs-on: ubuntu-latest
-    needs: lint
     timeout-minutes: 10
 
     steps:
@@ -63,7 +27,7 @@ jobs:
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Build Frontend
+      - name: Build
         working-directory: frontend
         run: |
           npm ci
@@ -74,109 +38,73 @@ jobs:
         with:
           name: frontend-dist
           path: frontend/dist
-          retention-days: 3
+          retention-days: 1
 
   deploy:
     name: Deploy
     runs-on: ubuntu-latest
     needs: build
     timeout-minutes: 10
-    if: github.event_name == 'push'
 
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Configure AWS Credentials
+      - name: Configure AWS
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Download frontend artifact
+      - name: Download artifact
         uses: actions/download-artifact@v4
         with:
           name: frontend-dist
-          path: frontend/dist
+          path: dist
 
-      - name: Discover GenUp bucket
+      - name: Find bucket
         id: bucket
         run: |
-          # Find the GenUp unified bucket (pattern: genup-{env}-{suffix})
-          GENUP_BUCKET=$(aws s3api list-buckets --query "Buckets[?starts_with(Name, 'genup-${ENVIRONMENT}-')].Name | [0]" --output text)
-
-          if [ -z "$GENUP_BUCKET" ] || [ "$GENUP_BUCKET" = "None" ]; then
-            echo "ERROR: GenUp bucket not found. Run the infrastructure deployment first."
-            echo "Expected bucket pattern: genup-${ENVIRONMENT}-*"
+          BUCKET=$(aws s3api list-buckets --query "Buckets[?starts_with(Name, 'genup-${ENVIRONMENT}-')].Name | [0]" --output text)
+          if [ -z "$BUCKET" ] || [ "$BUCKET" = "None" ]; then
+            echo "ERROR: Bucket not found"
             exit 1
           fi
+          echo "BUCKET=$BUCKET" >> $GITHUB_OUTPUT
+          echo "Found bucket: $BUCKET"
 
-          echo "GENUP_BUCKET=$GENUP_BUCKET" >> $GITHUB_OUTPUT
-          echo "Found bucket: $GENUP_BUCKET"
-
-      - name: Deploy Frontend to S3
+      - name: Deploy to S3
         run: |
-          GENUP_BUCKET="${{ steps.bucket.outputs.GENUP_BUCKET }}"
-          # Force re-upload with SSE-S3 encryption (AES256) to ensure CloudFront can read objects
-          # Using --exact-timestamps to force re-upload even if content matches
-          aws s3 rm "s3://$GENUP_BUCKET/$FRONTEND_PREFIX/" --recursive || true
-          aws s3 sync frontend/dist/ "s3://$GENUP_BUCKET/$FRONTEND_PREFIX/" \
-            --sse AES256 \
-            --cache-control "public, max-age=31536000, immutable" \
-            --exclude "index.html" \
-            --exclude "*.json"
-          # Upload HTML and JSON with no-cache for SPA routing
-          aws s3 sync frontend/dist/ "s3://$GENUP_BUCKET/$FRONTEND_PREFIX/" \
-            --sse AES256 \
-            --cache-control "no-cache, no-store, must-revalidate" \
-            --exclude "*" \
-            --include "index.html" \
-            --include "*.json"
-          echo "Frontend deployed to s3://$GENUP_BUCKET/$FRONTEND_PREFIX/"
+          BUCKET="${{ steps.bucket.outputs.BUCKET }}"
 
-      - name: Invalidate CloudFront Cache
-        id: invalidate
+          # Clear bucket and upload fresh
+          aws s3 rm "s3://$BUCKET" --recursive
+          aws s3 sync dist/ "s3://$BUCKET/" --sse AES256
+
+          echo "Deployed to s3://$BUCKET/"
+
+      - name: Invalidate CloudFront
+        id: cloudfront
         run: |
-          # Find the CloudFront distribution for GenUp
-          DISTRIBUTION_ID=$(aws cloudfront list-distributions \
+          # Find distribution
+          DIST_ID=$(aws cloudfront list-distributions \
             --query "DistributionList.Items[?Origins.Items[?contains(DomainName, 'genup-${ENVIRONMENT}')]].Id | [0]" \
             --output text)
 
-          if [ -z "$DISTRIBUTION_ID" ] || [ "$DISTRIBUTION_ID" = "None" ]; then
-            echo "WARNING: CloudFront distribution not found, skipping invalidation"
-            echo "CLOUDFRONT_URL=N/A" >> $GITHUB_OUTPUT
+          if [ -z "$DIST_ID" ] || [ "$DIST_ID" = "None" ]; then
+            echo "No CloudFront distribution found"
             exit 0
           fi
 
-          echo "Invalidating CloudFront cache for distribution: $DISTRIBUTION_ID"
-          INVALIDATION_ID=$(aws cloudfront create-invalidation \
-            --distribution-id "$DISTRIBUTION_ID" \
-            --paths "/*" \
-            --query "Invalidation.Id" \
-            --output text)
+          # Invalidate cache
+          aws cloudfront create-invalidation --distribution-id "$DIST_ID" --paths "/*"
 
-          echo "Created invalidation: $INVALIDATION_ID"
-
-          # Get the CloudFront domain
-          CLOUDFRONT_DOMAIN=$(aws cloudfront get-distribution \
-            --id "$DISTRIBUTION_ID" \
-            --query "Distribution.DomainName" \
-            --output text)
-
-          echo "CLOUDFRONT_URL=https://$CLOUDFRONT_DOMAIN" >> $GITHUB_OUTPUT
-          echo "DISTRIBUTION_ID=$DISTRIBUTION_ID" >> $GITHUB_OUTPUT
+          # Get URL
+          DOMAIN=$(aws cloudfront get-distribution --id "$DIST_ID" --query "Distribution.DomainName" --output text)
+          echo "URL=https://$DOMAIN" >> $GITHUB_OUTPUT
+          echo "Invalidated distribution: $DIST_ID"
 
       - name: Summary
         run: |
-          GENUP_BUCKET="${{ steps.bucket.outputs.GENUP_BUCKET }}"
-          CLOUDFRONT_URL="${{ steps.invalidate.outputs.CLOUDFRONT_URL }}"
           echo "## Deployment Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Storage" >> $GITHUB_STEP_SUMMARY
-          echo "- Unified Bucket: \`s3://$GENUP_BUCKET/\`" >> $GITHUB_STEP_SUMMARY
-          echo "- Frontend: \`s3://$GENUP_BUCKET/$FRONTEND_PREFIX/\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Live URL" >> $GITHUB_STEP_SUMMARY
-          echo "- **Site**: $CLOUDFRONT_URL" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "CloudFront cache invalidated - changes should be live within 1-2 minutes." >> $GITHUB_STEP_SUMMARY
+          echo "- Bucket: \`${{ steps.bucket.outputs.BUCKET }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- URL: ${{ steps.cloudfront.outputs.URL }}" >> $GITHUB_STEP_SUMMARY
