@@ -48,10 +48,10 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "main" {
 
   rule {
     apply_server_side_encryption_by_default {
-      kms_master_key_id = var.kms_key_arn
-      sse_algorithm     = "aws:kms"
+      # Using SSE-S3 (AES-256) instead of KMS for CloudFront compatibility
+      # CloudFront OAC cannot decrypt KMS-encrypted objects without complex key policies
+      sse_algorithm = "AES256"
     }
-    bucket_key_enabled = true
   }
 }
 
