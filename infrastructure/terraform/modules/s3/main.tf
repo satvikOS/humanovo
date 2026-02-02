@@ -1,5 +1,5 @@
-# GenUp S3 Module - Unified Bucket Configuration
-# Single bucket with prefix-based organization for simplicity and cost efficiency
+# GenUp S3 Module - Simplified Single Bucket
+# No prefixes, no complexity - just works
 
 variable "name_prefix" {
   type = string
@@ -14,16 +14,11 @@ variable "environment" {
 }
 
 variable "kms_key_arn" {
-  type = string
+  type    = string
+  default = ""
 }
 
-# ==================== Single Unified Bucket ====================
-# Structure:
-#   /frontend/     - Static website assets (React build)
-#   /data/         - Data lake (raw/processed ingestion data)
-#   /artifacts/    - Lambda code, layers, build artifacts
-#   /uploads/      - User uploads
-#   /exports/      - Generated reports/exports
+# ==================== Single Frontend Bucket ====================
 
 resource "aws_s3_bucket" "main" {
   bucket        = "genup-${var.environment}-${var.suffix}"
@@ -31,7 +26,7 @@ resource "aws_s3_bucket" "main" {
 
   tags = {
     Name        = "genup-${var.environment}-${var.suffix}"
-    Purpose     = "Unified storage for GenUp platform"
+    Purpose     = "GenUp frontend and assets"
     Environment = var.environment
   }
 }
@@ -43,15 +38,14 @@ resource "aws_s3_bucket_versioning" "main" {
   }
 }
 
+# SSE-S3 encryption - works with CloudFront OAC without KMS complexity
 resource "aws_s3_bucket_server_side_encryption_configuration" "main" {
   bucket = aws_s3_bucket.main.id
 
   rule {
     apply_server_side_encryption_by_default {
-      kms_master_key_id = var.kms_key_arn
-      sse_algorithm     = "aws:kms"
+      sse_algorithm = "AES256"
     }
-    bucket_key_enabled = true
   }
 }
 
@@ -76,89 +70,22 @@ resource "aws_s3_bucket_cors_configuration" "main" {
   }
 }
 
-resource "aws_s3_bucket_lifecycle_configuration" "main" {
-  bucket = aws_s3_bucket.main.id
-
-  # Data prefix - transition to cheaper storage over time
-  rule {
-    id     = "data-lifecycle"
-    status = "Enabled"
-
-    filter {
-      prefix = "data/"
-    }
-
-    transition {
-      days          = 90
-      storage_class = "STANDARD_IA"
-    }
-
-    transition {
-      days          = 180
-      storage_class = "GLACIER"
-    }
-
-    noncurrent_version_transition {
-      noncurrent_days = 30
-      storage_class   = "STANDARD_IA"
-    }
-
-    noncurrent_version_expiration {
-      noncurrent_days = 365
-    }
-  }
-
-  # Exports - expire after 30 days
-  rule {
-    id     = "exports-cleanup"
-    status = "Enabled"
-
-    filter {
-      prefix = "exports/"
-    }
-
-    expiration {
-      days = 30
-    }
-  }
-
-  # Uploads - transition to IA after 30 days
-  rule {
-    id     = "uploads-lifecycle"
-    status = "Enabled"
-
-    filter {
-      prefix = "uploads/"
-    }
-
-    transition {
-      days          = 30
-      storage_class = "STANDARD_IA"
-    }
-  }
-}
-
 # ==================== Outputs ====================
-# Maintain backward compatibility with existing module references
 
 output "bucket_id" {
-  description = "Main bucket ID"
-  value       = aws_s3_bucket.main.id
+  value = aws_s3_bucket.main.id
 }
 
 output "bucket_arn" {
-  description = "Main bucket ARN"
-  value       = aws_s3_bucket.main.arn
+  value = aws_s3_bucket.main.arn
 }
 
 output "bucket_name" {
-  description = "Main bucket name"
-  value       = aws_s3_bucket.main.bucket
+  value = aws_s3_bucket.main.bucket
 }
 
 output "bucket_regional_domain" {
-  description = "Main bucket regional domain name"
-  value       = aws_s3_bucket.main.bucket_regional_domain_name
+  value = aws_s3_bucket.main.bucket_regional_domain_name
 }
 
 # Legacy outputs for backward compatibility
