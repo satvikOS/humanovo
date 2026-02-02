@@ -1,4 +1,5 @@
-# GenUp S3 Module - Bucket Configuration
+# GenUp S3 Module - Unified Bucket Configuration
+# Single bucket with prefix-based organization for simplicity and cost efficiency
 
 variable "name_prefix" {
   type = string
@@ -16,76 +17,34 @@ variable "kms_key_arn" {
   type = string
 }
 
-# ==================== Frontend Bucket ====================
+# ==================== Single Unified Bucket ====================
+# Structure:
+#   /frontend/     - Static website assets (React build)
+#   /data/         - Data lake (raw/processed ingestion data)
+#   /artifacts/    - Lambda code, layers, build artifacts
+#   /uploads/      - User uploads
+#   /exports/      - Generated reports/exports
 
-resource "aws_s3_bucket" "frontend" {
-  bucket = "${var.name_prefix}-frontend-${var.suffix}"
-  force_destroy = true
+resource "aws_s3_bucket" "main" {
+  bucket        = "genup-${var.environment}"
+  force_destroy = var.environment != "prod"
 
   tags = {
-    Name = "${var.name_prefix}-frontend"
+    Name        = "genup-${var.environment}"
+    Purpose     = "Unified storage for GenUp platform"
+    Environment = var.environment
   }
 }
 
-resource "aws_s3_bucket_versioning" "frontend" {
-  bucket = aws_s3_bucket.frontend.id
+resource "aws_s3_bucket_versioning" "main" {
+  bucket = aws_s3_bucket.main.id
   versioning_configuration {
     status = "Enabled"
   }
 }
 
-resource "aws_s3_bucket_server_side_encryption_configuration" "frontend" {
-  bucket = aws_s3_bucket.frontend.id
-
-  rule {
-    apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
-    }
-    bucket_key_enabled = true
-  }
-}
-
-resource "aws_s3_bucket_public_access_block" "frontend" {
-  bucket = aws_s3_bucket.frontend.id
-
-  block_public_acls       = true
-  block_public_policy     = true
-  ignore_public_acls      = true
-  restrict_public_buckets = true
-}
-
-resource "aws_s3_bucket_cors_configuration" "frontend" {
-  bucket = aws_s3_bucket.frontend.id
-
-  cors_rule {
-    allowed_headers = ["*"]
-    allowed_methods = ["GET", "HEAD"]
-    allowed_origins = ["*"]
-    expose_headers  = ["ETag"]
-    max_age_seconds = 3600
-  }
-}
-
-# ==================== Data Bucket ====================
-
-resource "aws_s3_bucket" "data" {
-  bucket = "${var.name_prefix}-data-${var.suffix}"
-  force_destroy = true
-
-  tags = {
-    Name = "${var.name_prefix}-data"
-  }
-}
-
-resource "aws_s3_bucket_versioning" "data" {
-  bucket = aws_s3_bucket.data.id
-  versioning_configuration {
-    status = "Enabled"
-  }
-}
-
-resource "aws_s3_bucket_server_side_encryption_configuration" "data" {
-  bucket = aws_s3_bucket.data.id
+resource "aws_s3_bucket_server_side_encryption_configuration" "main" {
+  bucket = aws_s3_bucket.main.id
 
   rule {
     apply_server_side_encryption_by_default {
@@ -96,8 +55,8 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "data" {
   }
 }
 
-resource "aws_s3_bucket_public_access_block" "data" {
-  bucket = aws_s3_bucket.data.id
+resource "aws_s3_bucket_public_access_block" "main" {
+  bucket = aws_s3_bucket.main.id
 
   block_public_acls       = true
   block_public_policy     = true
@@ -105,15 +64,28 @@ resource "aws_s3_bucket_public_access_block" "data" {
   restrict_public_buckets = true
 }
 
-resource "aws_s3_bucket_lifecycle_configuration" "data" {
-  bucket = aws_s3_bucket.data.id
+resource "aws_s3_bucket_cors_configuration" "main" {
+  bucket = aws_s3_bucket.main.id
 
+  cors_rule {
+    allowed_headers = ["*"]
+    allowed_methods = ["GET", "HEAD"]
+    allowed_origins = ["*"]
+    expose_headers  = ["ETag"]
+    max_age_seconds = 3600
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "main" {
+  bucket = aws_s3_bucket.main.id
+
+  # Data prefix - transition to cheaper storage over time
   rule {
-    id     = "transition-to-ia"
+    id     = "data-lifecycle"
     status = "Enabled"
 
     filter {
-      prefix = ""
+      prefix = "data/"
     }
 
     transition {
@@ -135,85 +107,97 @@ resource "aws_s3_bucket_lifecycle_configuration" "data" {
       noncurrent_days = 365
     }
   }
-}
 
-# ==================== Artifacts Bucket ====================
-
-resource "aws_s3_bucket" "artifacts" {
-  bucket = "${var.name_prefix}-artifacts-${var.suffix}"
-  force_destroy = true
-
-  tags = {
-    Name = "${var.name_prefix}-artifacts"
-  }
-}
-
-resource "aws_s3_bucket_versioning" "artifacts" {
-  bucket = aws_s3_bucket.artifacts.id
-  versioning_configuration {
-    status = "Enabled"
-  }
-}
-
-resource "aws_s3_bucket_server_side_encryption_configuration" "artifacts" {
-  bucket = aws_s3_bucket.artifacts.id
-
+  # Exports - expire after 30 days
   rule {
-    apply_server_side_encryption_by_default {
-      kms_master_key_id = var.kms_key_arn
-      sse_algorithm     = "aws:kms"
+    id     = "exports-cleanup"
+    status = "Enabled"
+
+    filter {
+      prefix = "exports/"
     }
-    bucket_key_enabled = true
+
+    expiration {
+      days = 30
+    }
   }
-}
 
-resource "aws_s3_bucket_public_access_block" "artifacts" {
-  bucket = aws_s3_bucket.artifacts.id
+  # Uploads - transition to IA after 30 days
+  rule {
+    id     = "uploads-lifecycle"
+    status = "Enabled"
 
-  block_public_acls       = true
-  block_public_policy     = true
-  ignore_public_acls      = true
-  restrict_public_buckets = true
+    filter {
+      prefix = "uploads/"
+    }
+
+    transition {
+      days          = 30
+      storage_class = "STANDARD_IA"
+    }
+  }
 }
 
 # ==================== Outputs ====================
+# Maintain backward compatibility with existing module references
 
+output "bucket_id" {
+  description = "Main bucket ID"
+  value       = aws_s3_bucket.main.id
+}
+
+output "bucket_arn" {
+  description = "Main bucket ARN"
+  value       = aws_s3_bucket.main.arn
+}
+
+output "bucket_name" {
+  description = "Main bucket name"
+  value       = aws_s3_bucket.main.bucket
+}
+
+output "bucket_regional_domain" {
+  description = "Main bucket regional domain name"
+  value       = aws_s3_bucket.main.bucket_regional_domain_name
+}
+
+# Legacy outputs for backward compatibility
 output "frontend_bucket_id" {
-  value = aws_s3_bucket.frontend.id
+  value = aws_s3_bucket.main.id
 }
 
 output "frontend_bucket_arn" {
-  value = aws_s3_bucket.frontend.arn
+  value = aws_s3_bucket.main.arn
 }
 
 output "frontend_bucket_name" {
-  value = aws_s3_bucket.frontend.bucket
+  value = aws_s3_bucket.main.bucket
 }
 
 output "frontend_bucket_regional_domain" {
-  value = aws_s3_bucket.frontend.bucket_regional_domain_name
+  value = aws_s3_bucket.main.bucket_regional_domain_name
 }
 
 output "data_bucket_id" {
-  value = aws_s3_bucket.data.id
+  value = aws_s3_bucket.main.id
 }
 
 output "data_bucket_arn" {
-  value = aws_s3_bucket.data.arn
+  value = aws_s3_bucket.main.arn
 }
 
 output "data_bucket_name" {
-  value = aws_s3_bucket.data.bucket
+  value = aws_s3_bucket.main.bucket
 }
 
 output "artifacts_bucket_id" {
-  value = aws_s3_bucket.artifacts.id
+  value = aws_s3_bucket.main.id
 }
 
 output "artifacts_bucket_arn" {
-  value = aws_s3_bucket.artifacts.arn
+  value = aws_s3_bucket.main.arn
 }
 
 output "artifacts_bucket_name" {
-  value = aws_s3_bucket.artifacts.bucket
+  value = aws_s3_bucket.main.bucket
 }

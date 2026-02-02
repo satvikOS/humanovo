@@ -161,27 +161,27 @@ jobs:
         working-directory: infrastructure/terraform
         run: terraform apply -auto-approve tfplan-s3
 
-      - name: Get Artifacts Bucket Name
+      - name: Get Unified Bucket Name
         id: get-bucket
         working-directory: infrastructure/terraform
         run: |
-          ARTIFACTS_BUCKET=$(terraform output -raw artifacts_bucket_name 2>/dev/null || echo "genup-${ENVIRONMENT}-artifacts-${ENVIRONMENT}")
-          echo "ARTIFACTS_BUCKET=$ARTIFACTS_BUCKET" >> $GITHUB_OUTPUT
-          echo "Artifacts bucket: $ARTIFACTS_BUCKET"
+          GENUP_BUCKET=$(terraform output -raw bucket_name 2>/dev/null || echo "genup-${ENVIRONMENT}")
+          echo "GENUP_BUCKET=$GENUP_BUCKET" >> $GITHUB_OUTPUT
+          echo "Unified bucket: $GENUP_BUCKET"
 
       - name: Upload Lambda Layer Placeholders
         run: |
-          ARTIFACTS_BUCKET="${{ steps.get-bucket.outputs.ARTIFACTS_BUCKET }}"
+          GENUP_BUCKET="${{ steps.get-bucket.outputs.GENUP_BUCKET }}"
 
           # Create minimal placeholder for Lambda layers
           mkdir -p /tmp/lambda/python
           echo "# placeholder" > /tmp/lambda/python/__init__.py
           cd /tmp/lambda && zip -r ../layer.zip python/
 
-          # Upload both required layers
-          echo "Uploading Lambda layers to s3://$ARTIFACTS_BUCKET/"
-          aws s3 cp /tmp/layer.zip "s3://$ARTIFACTS_BUCKET/lambda-layers/dependencies.zip"
-          aws s3 cp /tmp/layer.zip "s3://$ARTIFACTS_BUCKET/lambda-layers/scipy.zip"
+          # Upload both required layers to artifacts/ prefix
+          echo "Uploading Lambda layers to s3://$GENUP_BUCKET/artifacts/"
+          aws s3 cp /tmp/layer.zip "s3://$GENUP_BUCKET/artifacts/lambda-layers/dependencies.zip"
+          aws s3 cp /tmp/layer.zip "s3://$GENUP_BUCKET/artifacts/lambda-layers/scipy.zip"
 
           # Create placeholder function
           mkdir -p /tmp/func/handlers
@@ -194,7 +194,7 @@ jobs:
 
           # Upload placeholder functions for all Lambda functions
           for fn in api_core projects hypotheses evidence knowledge simulation simulation_worker ingestion hypothesis_generation agent_orchestrator search_agent embeddings pubmed_fetcher clinical_trials_fetcher; do
-            aws s3 cp /tmp/function.zip "s3://$ARTIFACTS_BUCKET/lambda-functions/$fn.zip"
+            aws s3 cp /tmp/function.zip "s3://$GENUP_BUCKET/artifacts/lambda-functions/$fn.zip"
           done
 
           echo "Lambda placeholders uploaded successfully"
@@ -217,14 +217,18 @@ jobs:
         run: |
           echo "CLOUDFRONT_DOMAIN=$(terraform output -raw cloudfront_domain_name 2>/dev/null || echo 'N/A')" >> $GITHUB_OUTPUT
           echo "API_ENDPOINT=$(terraform output -raw api_gateway_endpoint 2>/dev/null || echo 'N/A')" >> $GITHUB_OUTPUT
-          echo "FRONTEND_BUCKET=$(terraform output -raw frontend_bucket_name 2>/dev/null || echo 'N/A')" >> $GITHUB_OUTPUT
+          echo "BUCKET_NAME=$(terraform output -raw bucket_name 2>/dev/null || echo 'N/A')" >> $GITHUB_OUTPUT
 
       - name: Summary
         run: |
           echo "## Infrastructure Deployed Successfully" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Resources" >> $GITHUB_STEP_SUMMARY
+          echo "### Unified Storage" >> $GITHUB_STEP_SUMMARY
+          echo "- **Bucket**: ${{ steps.outputs.outputs.BUCKET_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "  - Frontend: \`/frontend/\`" >> $GITHUB_STEP_SUMMARY
+          echo "  - Data: \`/data/\`" >> $GITHUB_STEP_SUMMARY
+          echo "  - Artifacts: \`/artifacts/\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Services" >> $GITHUB_STEP_SUMMARY
           echo "- **CloudFront**: ${{ steps.outputs.outputs.CLOUDFRONT_DOMAIN }}" >> $GITHUB_STEP_SUMMARY
           echo "- **API Gateway**: ${{ steps.outputs.outputs.API_ENDPOINT }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Frontend Bucket**: ${{ steps.outputs.outputs.FRONTEND_BUCKET }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Artifacts Bucket**: ${{ steps.get-bucket.outputs.ARTIFACTS_BUCKET }}" >> $GITHUB_STEP_SUMMARY

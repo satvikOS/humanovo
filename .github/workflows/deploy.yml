@@ -9,9 +9,10 @@ on:
 
 env:
   AWS_REGION: us-east-1
-  # Fixed bucket names - these stay consistent across all deployments
-  FRONTEND_BUCKET: genup-frontend-bucket
-  ARTIFACTS_BUCKET: genup-artifacts-bucket
+  # Unified bucket with prefix-based organization
+  GENUP_BUCKET: genup-dev
+  FRONTEND_PREFIX: frontend
+  ARTIFACTS_PREFIX: artifacts
 
 jobs:
   lint:
@@ -99,25 +100,42 @@ jobs:
           name: frontend-dist
           path: frontend/dist
 
-      - name: Create S3 buckets if needed
+      - name: Create unified S3 bucket if needed
         run: |
-          # Create frontend bucket if it doesn't exist
-          aws s3api head-bucket --bucket "$FRONTEND_BUCKET" 2>/dev/null || \
-            aws s3api create-bucket --bucket "$FRONTEND_BUCKET" --region $AWS_REGION 2>/dev/null || true
+          # Create unified bucket if it doesn't exist
+          if ! aws s3api head-bucket --bucket "$GENUP_BUCKET" 2>/dev/null; then
+            echo "Creating unified bucket: $GENUP_BUCKET"
+            aws s3api create-bucket --bucket "$GENUP_BUCKET" --region $AWS_REGION
 
-          # Create artifacts bucket if it doesn't exist
-          aws s3api head-bucket --bucket "$ARTIFACTS_BUCKET" 2>/dev/null || \
-            aws s3api create-bucket --bucket "$ARTIFACTS_BUCKET" --region $AWS_REGION 2>/dev/null || true
+            # Enable versioning
+            aws s3api put-bucket-versioning --bucket "$GENUP_BUCKET" \
+              --versioning-configuration Status=Enabled
 
-          echo "Buckets ready"
+            # Enable encryption
+            aws s3api put-bucket-encryption --bucket "$GENUP_BUCKET" \
+              --server-side-encryption-configuration '{
+                "Rules": [{"ApplyServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}]
+              }'
+
+            # Block public access
+            aws s3api put-public-access-block --bucket "$GENUP_BUCKET" \
+              --public-access-block-configuration '{
+                "BlockPublicAcls": true,
+                "IgnorePublicAcls": true,
+                "BlockPublicPolicy": true,
+                "RestrictPublicBuckets": true
+              }'
+          fi
+          echo "Unified bucket ready: $GENUP_BUCKET"
 
       - name: Deploy Frontend to S3
         run: |
-          aws s3 sync frontend/dist/ "s3://$FRONTEND_BUCKET/" --delete
-          echo "Frontend deployed to s3://$FRONTEND_BUCKET/"
+          aws s3 sync frontend/dist/ "s3://$GENUP_BUCKET/$FRONTEND_PREFIX/" --delete
+          echo "Frontend deployed to s3://$GENUP_BUCKET/$FRONTEND_PREFIX/"
 
       - name: Summary
         run: |
           echo "## Deployment Complete" >> $GITHUB_STEP_SUMMARY
-          echo "- Frontend: s3://$FRONTEND_BUCKET/" >> $GITHUB_STEP_SUMMARY
-          echo "- Artifacts: s3://$ARTIFACTS_BUCKET/" >> $GITHUB_STEP_SUMMARY
+          echo "- Unified Bucket: s3://$GENUP_BUCKET/" >> $GITHUB_STEP_SUMMARY
+          echo "- Frontend: s3://$GENUP_BUCKET/$FRONTEND_PREFIX/" >> $GITHUB_STEP_SUMMARY
+          echo "- Artifacts: s3://$GENUP_BUCKET/$ARTIFACTS_PREFIX/" >> $GITHUB_STEP_SUMMARY
