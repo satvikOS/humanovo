@@ -101,51 +101,73 @@ jobs:
         working-directory: infrastructure/terraform
         continue-on-error: true
         run: |
-          # This step imports any existing AWS resources into Terraform state
-          # It runs with continue-on-error since resources may not exist or already be in state
+          # This step imports existing AWS resources into Terraform state
+          # We check if each resource is already in state before importing
 
-          echo "Attempting to import existing resources into Terraform state..."
+          echo "Importing existing resources into Terraform state..."
 
-          # Import KMS alias (if exists)
-          terraform import -var-file=environments/dev.tfvars \
-            'aws_kms_alias.main' 'alias/genup-dev' 2>/dev/null || true
+          # Helper function to import if not already in state
+          import_if_missing() {
+            local resource_addr="$1"
+            local resource_id="$2"
 
-          # Import main CloudWatch log group
-          terraform import -var-file=environments/dev.tfvars \
-            'aws_cloudwatch_log_group.main' '/aws/genup/dev' 2>/dev/null || true
+            # Check if resource is already in state
+            if terraform state show "$resource_addr" >/dev/null 2>&1; then
+              echo "✓ $resource_addr already in state"
+              return 0
+            fi
 
-          # Import API Gateway log group
-          terraform import -var-file=environments/dev.tfvars \
-            'module.api_gateway.aws_cloudwatch_log_group.api_gateway' '/aws/apigateway/genup-dev-api' 2>/dev/null || true
+            # Try to import
+            echo "Importing $resource_addr..."
+            if terraform import -var-file=environments/dev.tfvars "$resource_addr" "$resource_id" 2>&1; then
+              echo "✓ Imported $resource_addr"
+            else
+              echo "⚠ Could not import $resource_addr (may not exist)"
+            fi
+          }
+
+          # Get AWS Account ID
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
+          # Get KMS key ID if it exists
+          KMS_KEY_ID=$(aws kms list-aliases --query "Aliases[?AliasName=='alias/genup-dev'].TargetKeyId | [0]" --output text 2>/dev/null || echo "")
+          if [ -n "$KMS_KEY_ID" ] && [ "$KMS_KEY_ID" != "None" ]; then
+            import_if_missing 'aws_kms_key.main' "$KMS_KEY_ID"
+            import_if_missing 'aws_kms_alias.main' 'alias/genup-dev'
+          fi
+
+          # Import CloudWatch log groups
+          import_if_missing 'aws_cloudwatch_log_group.main' '/aws/genup/dev'
+          import_if_missing 'module.api_gateway.aws_cloudwatch_log_group.api_gateway' '/aws/apigateway/genup-dev-api'
 
           # Import DynamoDB tables
           for table in projects hypotheses evidence simulations knowledge-metadata agent-tasks; do
-            terraform import -var-file=environments/dev.tfvars \
-              "module.dynamodb.aws_dynamodb_table.${table//-/_}" "genup-dev-${table}" 2>/dev/null || true
+            tf_name="${table//-/_}"
+            import_if_missing "module.dynamodb.aws_dynamodb_table.${tf_name}" "genup-dev-${table}"
           done
 
           # Import IAM roles
-          terraform import -var-file=environments/dev.tfvars \
-            'module.iam.aws_iam_role.lambda_execution' 'genup-dev-lambda-execution' 2>/dev/null || true
-          terraform import -var-file=environments/dev.tfvars \
-            'module.iam.aws_iam_role.api_gateway' 'genup-dev-api-gateway' 2>/dev/null || true
-          terraform import -var-file=environments/dev.tfvars \
-            'module.iam.aws_iam_role.deployment' 'genup-dev-deployment' 2>/dev/null || true
+          import_if_missing 'module.iam.aws_iam_role.lambda_execution' 'genup-dev-lambda-execution'
+          import_if_missing 'module.iam.aws_iam_role.api_gateway' 'genup-dev-api-gateway'
+          import_if_missing 'module.iam.aws_iam_role.deployment' 'genup-dev-deployment'
 
           # Import Lambda CloudWatch log groups
           for fn in api_core projects hypotheses evidence knowledge hypothesis_generation agent_orchestrator search_agent embeddings simulation simulation_worker ingestion pubmed_fetcher clinical_trials_fetcher; do
-            terraform import -var-file=environments/dev.tfvars \
-              "module.lambda.aws_cloudwatch_log_group.lambda_logs[\"${fn}\"]" "/aws/lambda/genup-dev-${fn}" 2>/dev/null || true
+            import_if_missing "module.lambda.aws_cloudwatch_log_group.lambda_logs[\"${fn}\"]" "/aws/lambda/genup-dev-${fn}"
           done
 
           # Import SQS queues
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          terraform import -var-file=environments/dev.tfvars \
-            'module.lambda.aws_sqs_queue.simulation_dlq' "https://sqs.${AWS_REGION}.amazonaws.com/${AWS_ACCOUNT_ID}/genup-dev-simulation-dlq" 2>/dev/null || true
-          terraform import -var-file=environments/dev.tfvars \
-            'module.lambda.aws_sqs_queue.simulation_queue' "https://sqs.${AWS_REGION}.amazonaws.com/${AWS_ACCOUNT_ID}/genup-dev-simulation-queue" 2>/dev/null || true
+          import_if_missing 'module.lambda.aws_sqs_queue.simulation_dlq' "https://sqs.${AWS_REGION}.amazonaws.com/${AWS_ACCOUNT_ID}/genup-dev-simulation-dlq"
+          import_if_missing 'module.lambda.aws_sqs_queue.simulation_queue' "https://sqs.${AWS_REGION}.amazonaws.com/${AWS_ACCOUNT_ID}/genup-dev-simulation-queue"
 
-          echo "Resource import complete (errors above are expected for resources that don't exist or are already imported)"
+          # Import S3 bucket if it exists (check for genup-dev-* pattern)
+          EXISTING_BUCKET=$(aws s3api list-buckets --query "Buckets[?starts_with(Name, 'genup-dev-')].Name | [0]" --output text 2>/dev/null || echo "")
+          if [ -n "$EXISTING_BUCKET" ] && [ "$EXISTING_BUCKET" != "None" ]; then
+            import_if_missing 'module.s3.aws_s3_bucket.main' "$EXISTING_BUCKET"
+          fi
+
+          echo ""
+          echo "Resource import complete. Continuing with deployment..."
 
       - name: Terraform Plan - S3 Buckets First
         working-directory: infrastructure/terraform
