@@ -1,9 +1,7 @@
 import { useState } from 'react'
 import {
   FiSearch,
-  FiFilter,
   FiCalendar,
-  FiUser,
   FiDatabase,
   FiZap,
   FiFileText,
@@ -11,7 +9,6 @@ import {
   FiExternalLink,
   FiBookmark,
   FiClock,
-  FiX,
   FiSliders
 } from 'react-icons/fi'
 import clsx from 'clsx'
@@ -373,12 +370,12 @@ export default function Search() {
                               {result.date}
                             </span>
                           )}
-                          {result.metadata?.citations && (
-                            <span>{result.metadata.citations} citations</span>
+                          {result.metadata?.citations !== undefined && (
+                            <span>{String(result.metadata.citations)} citations</span>
                           )}
                           {result.metadata?.confidence !== undefined && (
                             <span>
-                              Confidence: {Math.round((result.metadata.confidence as number) * 100)}%
+                              Confidence: {Math.round(Number(result.metadata.confidence) * 100)}%
                             </span>
                           )}
                         </div>

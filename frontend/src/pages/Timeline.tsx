@@ -5,15 +5,11 @@ import {
   FiDatabase,
   FiActivity,
   FiCheckCircle,
-  FiAlertCircle,
   FiClock,
-  FiFilter,
   FiCalendar,
-  FiChevronDown,
   FiRefreshCw,
   FiUser,
-  FiMessageSquare,
-  FiGitBranch
+  FiMessageSquare
 } from 'react-icons/fi'
 import clsx from 'clsx'
 
@@ -399,17 +395,17 @@ export default function Timeline() {
                             <div className="flex items-center gap-3 mt-2 text-xs">
                               {event.metadata.confidence !== undefined && (
                                 <span className="text-warning-400">
-                                  Confidence: {Math.round((event.metadata.confidence as number) * 100)}%
+                                  Confidence: {Math.round(Number(event.metadata.confidence) * 100)}%
                                 </span>
                               )}
                               {event.metadata.count !== undefined && (
                                 <span className="text-primary-400">
-                                  {event.metadata.count} items
+                                  {String(event.metadata.count)} items
                                 </span>
                               )}
                               {event.metadata.iterations !== undefined && (
                                 <span className="text-success-400">
-                                  {event.metadata.iterations.toLocaleString()} iterations
+                                  {Number(event.metadata.iterations).toLocaleString()} iterations
                                 </span>
                               )}
                             </div>

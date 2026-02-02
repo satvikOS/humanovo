@@ -9,14 +9,9 @@ import {
   FiPlay,
   FiPause,
   FiRefreshCw,
-  FiChevronRight,
-  FiSettings,
   FiActivity,
-  FiDatabase,
   FiFileText,
-  FiGitBranch,
-  FiMessageSquare,
-  FiTarget
+  FiGitBranch
 } from 'react-icons/fi'
 import clsx from 'clsx'
 
@@ -477,7 +472,7 @@ export default function Agents() {
                   <h3 className="text-sm font-medium mb-3">Result</h3>
                   <div className="card bg-success-500/5 border-success-500/30">
                     <pre className="text-xs overflow-x-auto">
-                      {JSON.stringify(selectedTask.result, null, 2)}
+                      {JSON.stringify(selectedTask.result as Record<string, unknown>, null, 2)}
                     </pre>
                   </div>
                 </div>

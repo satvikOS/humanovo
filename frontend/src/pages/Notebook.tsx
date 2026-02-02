@@ -2,21 +2,16 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import {
   FiMove,
   FiType,
-  FiSquare,
-  FiCircle,
   FiArrowRight,
-  FiImage,
   FiTrash2,
   FiZoomIn,
   FiZoomOut,
   FiMaximize2,
   FiPlus,
-  FiLink,
   FiFileText,
   FiDatabase,
   FiZap,
-  FiSave,
-  FiDownload
+  FiSave
 } from 'react-icons/fi'
 import clsx from 'clsx'
 
@@ -195,7 +190,7 @@ export default function Notebook() {
     })
   }, [nodes, selectedTool, zoom])
 
-  const handleNodeMouseUp = useCallback((e: React.MouseEvent, nodeId: string) => {
+  const handleNodeMouseUp = useCallback((_e: React.MouseEvent, nodeId: string) => {
     if (connectingFrom && connectingFrom !== nodeId) {
       const newConnection: Connection = {
         id: `conn-${Date.now()}`,
@@ -416,9 +411,9 @@ export default function Notebook() {
               onChange={(e) => updateNodeContent(node.id, e.target.value)}
               onClick={(e) => e.stopPropagation()}
             />
-            {node.metadata && (
+            {node.metadata?.title && (
               <div className="text-xs text-[var(--color-text-muted)]">
-                {node.metadata.title as string}
+                {String(node.metadata.title)}
               </div>
             )}
           </div>
