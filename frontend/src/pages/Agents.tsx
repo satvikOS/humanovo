@@ -102,111 +102,7 @@ const agentConfigs: AgentConfig[] = [
   },
 ]
 
-// Mock tasks
-const mockTasks: AgentTask[] = [
-  {
-    id: '1',
-    type: 'controller',
-    name: 'Analyze TP53 mutation effects',
-    description: 'Comprehensive analysis of TP53 mutations in cancer progression',
-    status: 'running',
-    progress: 65,
-    startTime: new Date(Date.now() - 30 * 60 * 1000),
-    steps: [
-      {
-        id: 's1',
-        name: 'Search literature for TP53 mutations',
-        status: 'completed',
-        agent: 'search',
-        startTime: new Date(Date.now() - 30 * 60 * 1000),
-        endTime: new Date(Date.now() - 25 * 60 * 1000),
-        output: 'Found 156 relevant papers'
-      },
-      {
-        id: 's2',
-        name: 'Extract mutation data',
-        status: 'completed',
-        agent: 'extraction',
-        startTime: new Date(Date.now() - 25 * 60 * 1000),
-        endTime: new Date(Date.now() - 15 * 60 * 1000),
-        output: 'Extracted 42 unique mutations'
-      },
-      {
-        id: 's3',
-        name: 'Generate hypotheses',
-        status: 'running',
-        agent: 'reasoning',
-        startTime: new Date(Date.now() - 15 * 60 * 1000),
-      },
-      {
-        id: 's4',
-        name: 'Verify hypotheses',
-        status: 'pending',
-        agent: 'verification',
-      },
-      {
-        id: 's5',
-        name: 'Run pathway simulations',
-        status: 'pending',
-        agent: 'simulation',
-      },
-    ]
-  },
-  {
-    id: '2',
-    type: 'search',
-    name: 'BRCA1 drug interactions search',
-    description: 'Search for drug interactions affecting BRCA1 pathway',
-    status: 'completed',
-    progress: 100,
-    startTime: new Date(Date.now() - 60 * 60 * 1000),
-    endTime: new Date(Date.now() - 45 * 60 * 1000),
-    steps: [
-      {
-        id: 's1',
-        name: 'Query PubMed',
-        status: 'completed',
-        agent: 'search',
-        output: '89 papers found'
-      },
-      {
-        id: 's2',
-        name: 'Query ClinicalTrials',
-        status: 'completed',
-        agent: 'search',
-        output: '23 trials found'
-      },
-    ],
-    result: { papers: 89, trials: 23, entities: 156 }
-  },
-  {
-    id: '3',
-    type: 'verification',
-    name: 'Validate MDM2 inhibitor hypothesis',
-    description: 'Check evidence supporting MDM2 inhibitor efficacy',
-    status: 'failed',
-    progress: 40,
-    startTime: new Date(Date.now() - 2 * 60 * 60 * 1000),
-    endTime: new Date(Date.now() - 90 * 60 * 1000),
-    steps: [
-      {
-        id: 's1',
-        name: 'Collect supporting evidence',
-        status: 'completed',
-        agent: 'search',
-        output: '12 supporting papers'
-      },
-      {
-        id: 's2',
-        name: 'Check for contradictions',
-        status: 'failed',
-        agent: 'verification',
-        output: 'Error: Timeout connecting to knowledge graph'
-      },
-    ],
-    error: 'Task failed due to knowledge graph connection timeout'
-  },
-]
+// Tasks fetched from API (empty by default)
 
 const newTaskTemplates = [
   { name: 'Literature Review', type: 'search' as AgentType, description: 'Search and summarize literature on a topic' },
@@ -216,8 +112,8 @@ const newTaskTemplates = [
 ]
 
 export default function Agents() {
-  const [tasks, setTasks] = useState<AgentTask[]>(mockTasks)
-  const [selectedTask, setSelectedTask] = useState<AgentTask | null>(mockTasks[0])
+  const [tasks, setTasks] = useState<AgentTask[]>([])
+  const [selectedTask, setSelectedTask] = useState<AgentTask | null>(null)
   const [showNewTask, setShowNewTask] = useState(false)
   const [newTaskQuery, setNewTaskQuery] = useState('')
   const [selectedTemplate, setSelectedTemplate] = useState(newTaskTemplates[0])
@@ -308,7 +204,13 @@ export default function Agents() {
             </h3>
           </div>
           <div className="divide-y divide-[var(--color-border)]">
-            {tasks.map(task => {
+            {tasks.length === 0 ? (
+              <div className="p-8 text-center text-[var(--color-text-muted)]">
+                <FiCpu className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                <p className="text-sm">No active tasks</p>
+                <p className="text-xs mt-1">Create a new task to get started</p>
+              </div>
+            ) : tasks.map(task => {
               const config = agentConfigs.find(c => c.type === task.type)
               const Icon = config?.icon || FiCpu
               return (

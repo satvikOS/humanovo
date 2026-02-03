@@ -27,57 +27,7 @@ interface SearchResult {
 type EntityType = 'all' | 'evidence' | 'hypothesis' | 'project' | 'gene' | 'protein' | 'drug'
 type SearchMode = 'hybrid' | 'semantic' | 'keyword'
 
-// Mock search results
-const mockResults: SearchResult[] = [
-  {
-    id: '1',
-    type: 'evidence',
-    title: 'TP53 mutations and their role in cancer progression',
-    snippet: 'The tumor protein p53 (TP53) gene is the most frequently mutated gene in human cancers. Mutations in TP53 lead to loss of tumor suppressor function and can result in gain of oncogenic properties...',
-    source: 'PubMed - PMID: 32145678',
-    date: '2024-01-15',
-    relevance: 0.95,
-    metadata: { citations: 234, authors: ['Smith J', 'Chen W'] }
-  },
-  {
-    id: '2',
-    type: 'hypothesis',
-    title: 'MDM2 inhibitors restore wild-type p53 function in tumors',
-    snippet: 'Our hypothesis proposes that small molecule inhibitors of MDM2 can effectively restore p53 tumor suppressor activity in cancers with wild-type TP53...',
-    date: '2024-02-20',
-    relevance: 0.88,
-    metadata: { confidence: 0.78, status: 'testing', project: 'TP53 Research' }
-  },
-  {
-    id: '3',
-    type: 'evidence',
-    title: 'BRCA1/BRCA2 interactions with the DNA damage response pathway',
-    snippet: 'BRCA1 and BRCA2 are critical components of the homologous recombination DNA repair pathway. Their interaction with RAD51 and other repair proteins...',
-    source: 'Nature Reviews Cancer',
-    date: '2023-11-08',
-    relevance: 0.82,
-    metadata: { citations: 567, authors: ['Johnson M', 'Williams K'] }
-  },
-  {
-    id: '4',
-    type: 'project',
-    title: 'Breast Cancer Biomarker Discovery',
-    snippet: 'A comprehensive research project investigating novel biomarkers for early breast cancer detection and treatment response prediction...',
-    date: '2024-01-01',
-    relevance: 0.75,
-    metadata: { hypotheses: 8, evidence: 156, status: 'active' }
-  },
-  {
-    id: '5',
-    type: 'evidence',
-    title: 'Clinical trials of PARP inhibitors in BRCA-mutated cancers',
-    snippet: 'Phase III clinical trial results demonstrate significant progression-free survival benefit for PARP inhibitor treatment in patients with BRCA1/2 mutations...',
-    source: 'NEJM',
-    date: '2023-09-22',
-    relevance: 0.71,
-    metadata: { citations: 890, trialId: 'NCT02987543' }
-  },
-]
+// Search results fetched from API (empty by default)
 
 const entityTypes: { value: EntityType; label: string; icon: typeof FiDatabase }[] = [
   { value: 'all', label: 'All Types', icon: FiSearch },
@@ -95,23 +45,18 @@ export default function Search() {
   const [entityType, setEntityType] = useState<EntityType>('all')
   const [dateRange, setDateRange] = useState<{ from: string; to: string }>({ from: '', to: '' })
   const [minRelevance, setMinRelevance] = useState(0)
-  const [results, setResults] = useState<SearchResult[]>(mockResults)
+  const [results, setResults] = useState<SearchResult[]>([])
   const [isSearching, setIsSearching] = useState(false)
   const [showFilters, setShowFilters] = useState(true)
-  const [savedSearches] = useState(['TP53 mutations', 'BRCA1 pathway', 'drug resistance'])
+  const [savedSearches] = useState<string[]>([])
 
   const handleSearch = async () => {
     if (!query.trim()) return
     setIsSearching(true)
-    // Simulate API call
+    // TODO: Integrate with actual search API
     await new Promise(resolve => setTimeout(resolve, 500))
-    // Filter mock results based on filters
-    let filtered = mockResults.filter(r => {
-      if (entityType !== 'all' && r.type !== entityType) return false
-      if (r.relevance < minRelevance / 100) return false
-      return true
-    })
-    setResults(filtered)
+    // Results will be populated from API
+    setResults([])
     setIsSearching(false)
   }
 

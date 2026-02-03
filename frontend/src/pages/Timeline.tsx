@@ -28,115 +28,7 @@ interface TimelineEvent {
 type FilterType = 'all' | 'project' | 'hypothesis' | 'evidence' | 'simulation' | 'milestone'
 type TimeRange = 'today' | 'week' | 'month' | 'all'
 
-// Mock timeline data
-const mockEvents: TimelineEvent[] = [
-  {
-    id: '1',
-    type: 'hypothesis',
-    action: 'created',
-    title: 'BRCA1 pathway inhibition hypothesis',
-    description: 'Proposed new mechanism for synthetic lethality in BRCA1-mutated tumors',
-    project: 'Breast Cancer Study',
-    user: 'Dr. Smith',
-    timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000), // 2 hours ago
-    metadata: { confidence: 0.72 }
-  },
-  {
-    id: '2',
-    type: 'simulation',
-    action: 'completed',
-    title: 'Monte Carlo simulation #47',
-    description: 'Drug efficacy prediction completed with 95% confidence interval',
-    project: 'Drug Response Modeling',
-    user: 'System',
-    timestamp: new Date(Date.now() - 4 * 60 * 60 * 1000),
-    metadata: { iterations: 10000, runtime: '2h 34m' }
-  },
-  {
-    id: '3',
-    type: 'evidence',
-    action: 'ingested',
-    title: '23 new papers from PubMed',
-    description: 'Automated ingestion of TP53-related publications from the past week',
-    project: 'TP53 Research',
-    user: 'System',
-    timestamp: new Date(Date.now() - 6 * 60 * 60 * 1000),
-    metadata: { sources: ['PubMed'], count: 23 }
-  },
-  {
-    id: '4',
-    type: 'hypothesis',
-    action: 'validated',
-    title: 'MDM2-p53 interaction model',
-    description: 'Hypothesis confirmed with supporting evidence from 3 independent studies',
-    project: 'TP53 Research',
-    user: 'Dr. Chen',
-    timestamp: new Date(Date.now() - 24 * 60 * 60 * 1000), // 1 day ago
-    metadata: { supportingEvidence: 12, confidence: 0.91 }
-  },
-  {
-    id: '5',
-    type: 'project',
-    action: 'created',
-    title: 'Immunotherapy Response Prediction',
-    description: 'New project to predict patient response to checkpoint inhibitors',
-    user: 'Dr. Williams',
-    timestamp: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000), // 2 days ago
-  },
-  {
-    id: '6',
-    type: 'milestone',
-    action: 'completed',
-    title: 'Phase 1 Data Collection Complete',
-    description: 'All patient samples collected and processed for the breast cancer biomarker study',
-    project: 'Breast Cancer Study',
-    user: 'Dr. Smith',
-    timestamp: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
-  },
-  {
-    id: '7',
-    type: 'simulation',
-    action: 'started',
-    title: 'Protein folding simulation',
-    description: 'Large-scale molecular dynamics simulation initiated',
-    project: 'Drug Response Modeling',
-    user: 'Dr. Johnson',
-    timestamp: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000),
-    metadata: { estimatedRuntime: '48h' }
-  },
-  {
-    id: '8',
-    type: 'evidence',
-    action: 'ingested',
-    title: '156 clinical trial results added',
-    description: 'Bulk import from ClinicalTrials.gov for PARP inhibitor studies',
-    project: 'Breast Cancer Study',
-    user: 'System',
-    timestamp: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
-    metadata: { sources: ['ClinicalTrials.gov'], count: 156 }
-  },
-  {
-    id: '9',
-    type: 'hypothesis',
-    action: 'rejected',
-    title: 'ERK inhibitor synergy hypothesis',
-    description: 'Insufficient evidence to support the proposed mechanism',
-    project: 'Drug Response Modeling',
-    user: 'Dr. Chen',
-    timestamp: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000),
-    metadata: { contradictingEvidence: 5 }
-  },
-  {
-    id: '10',
-    type: 'comment',
-    action: 'created',
-    title: 'Review comment on BRCA pathway analysis',
-    description: 'Suggested additional validation experiments for the proposed mechanism',
-    project: 'Breast Cancer Study',
-    user: 'Dr. Williams',
-    timestamp: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
-  },
-]
+// Timeline events fetched from API (empty by default)
 
 const filterOptions: { value: FilterType; label: string; icon: typeof FiFolder }[] = [
   { value: 'all', label: 'All Activity', icon: FiClock },
@@ -211,7 +103,7 @@ export default function Timeline() {
   const [filterType, setFilterType] = useState<FilterType>('all')
   const [timeRange, setTimeRange] = useState<TimeRange>('all')
   const [selectedProject, setSelectedProject] = useState<string>('all')
-  const [events] = useState<TimelineEvent[]>(mockEvents)
+  const [events] = useState<TimelineEvent[]>([])
 
   // Get unique projects
   const projects = ['all', ...new Set(events.filter(e => e.project).map(e => e.project!))]
