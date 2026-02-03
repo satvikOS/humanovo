@@ -75,11 +75,9 @@ jobs:
         run: |
           BUCKET="${{ steps.bucket.outputs.BUCKET }}"
 
-          # Sync frontend files - preserve artifacts folder (Lambda packages)
-          aws s3 sync dist/ "s3://$BUCKET/" \
-            --sse AES256 \
-            --delete \
-            --exclude "artifacts/*"
+          # Sync frontend files WITHOUT --delete to preserve Lambda artifacts
+          # The --delete flag with --exclude doesn't protect excluded files from deletion
+          aws s3 sync dist/ "s3://$BUCKET/" --sse AES256
 
           echo "Deployed to s3://$BUCKET/"
 
