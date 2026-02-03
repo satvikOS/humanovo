@@ -75,9 +75,11 @@ jobs:
         run: |
           BUCKET="${{ steps.bucket.outputs.BUCKET }}"
 
-          # Clear bucket and upload fresh
-          aws s3 rm "s3://$BUCKET" --recursive
-          aws s3 sync dist/ "s3://$BUCKET/" --sse AES256
+          # Sync frontend files - preserve artifacts folder (Lambda packages)
+          aws s3 sync dist/ "s3://$BUCKET/" \
+            --sse AES256 \
+            --delete \
+            --exclude "artifacts/*"
 
           echo "Deployed to s3://$BUCKET/"
 
