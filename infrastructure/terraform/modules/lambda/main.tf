@@ -417,119 +417,32 @@ resource "aws_lambda_event_source_mapping" "embeddings_queue" {
 }
 
 # ==================== EventBridge Scheduled Ingestion ====================
+# NOTE: EventBridge rules temporarily disabled due to IAM permission issue
+# (events:TagResource not allowed). Enable when IAM permissions are updated.
+# For now, ingestion can be triggered manually via Lambda console or API.
 
+# TODO: Re-enable when IAM user has events:TagResource permission
 # Full ingestion every 4 hours
-resource "aws_cloudwatch_event_rule" "full_ingestion" {
-  name                = "${var.name_prefix}-full-ingestion"
-  description         = "Trigger full knowledge base ingestion every 4 hours"
-  schedule_expression = "rate(4 hours)"
-}
-
-resource "aws_cloudwatch_event_target" "full_ingestion" {
-  rule      = aws_cloudwatch_event_rule.full_ingestion.name
-  target_id = "IngestionScheduler"
-  arn       = aws_lambda_function.functions["ingestion_scheduler"].arn
-
-  input = jsonencode({
-    schedule_type = "full"
-  })
-}
-
-resource "aws_lambda_permission" "eventbridge_full_ingestion" {
-  statement_id  = "AllowEventBridgeFullIngestion"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.functions["ingestion_scheduler"].function_name
-  principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.full_ingestion.arn
-}
-
-# High-priority ingestion every hour (PubMed only)
-resource "aws_cloudwatch_event_rule" "priority_ingestion" {
-  name                = "${var.name_prefix}-priority-ingestion"
-  description         = "Trigger priority PubMed ingestion every hour"
-  schedule_expression = "rate(1 hour)"
-}
-
-resource "aws_cloudwatch_event_target" "priority_ingestion" {
-  rule      = aws_cloudwatch_event_rule.priority_ingestion.name
-  target_id = "PubMedFetcher"
-  arn       = aws_lambda_function.functions["pubmed_fetcher"].arn
-
-  input = jsonencode({
-    queries = [
-      "cancer immunotherapy 2024",
-      "CRISPR gene therapy clinical"
-    ]
-    max_results      = 50
-    extract_entities = true
-  })
-}
-
-resource "aws_lambda_permission" "eventbridge_priority_ingestion" {
-  statement_id  = "AllowEventBridgePriorityIngestion"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.functions["pubmed_fetcher"].function_name
-  principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.priority_ingestion.arn
-}
-
-# Daily clinical trials update
-resource "aws_cloudwatch_event_rule" "clinical_trials_daily" {
-  name                = "${var.name_prefix}-clinical-trials-daily"
-  description         = "Daily ClinicalTrials.gov ingestion"
-  schedule_expression = "cron(0 6 * * ? *)"  # 6 AM UTC daily
-}
-
-resource "aws_cloudwatch_event_target" "clinical_trials_daily" {
-  rule      = aws_cloudwatch_event_rule.clinical_trials_daily.name
-  target_id = "ClinicalTrialsFetcher"
-  arn       = aws_lambda_function.functions["clinical_trials_fetcher"].arn
-
-  input = jsonencode({
-    conditions = [
-      "cancer",
-      "gene therapy",
-      "immunotherapy",
-      "CAR-T"
-    ]
-    max_results      = 100
-    extract_entities = true
-  })
-}
-
-resource "aws_lambda_permission" "eventbridge_clinical_trials" {
-  statement_id  = "AllowEventBridgeClinicalTrials"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.functions["clinical_trials_fetcher"].function_name
-  principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.clinical_trials_daily.arn
-}
-
-# Embeddings batch re-processing (for any failed embeddings)
-resource "aws_cloudwatch_event_rule" "embeddings_batch" {
-  name                = "${var.name_prefix}-embeddings-batch"
-  description         = "Re-process failed embeddings every 6 hours"
-  schedule_expression = "rate(6 hours)"
-}
-
-resource "aws_cloudwatch_event_target" "embeddings_batch" {
-  rule      = aws_cloudwatch_event_rule.embeddings_batch.name
-  target_id = "EmbeddingsBatch"
-  arn       = aws_lambda_function.functions["embeddings_generator"].arn
-
-  input = jsonencode({
-    batch_mode = true
-    limit      = 100
-  })
-}
-
-resource "aws_lambda_permission" "eventbridge_embeddings_batch" {
-  statement_id  = "AllowEventBridgeEmbeddingsBatch"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.functions["embeddings_generator"].function_name
-  principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.embeddings_batch.arn
-}
+# resource "aws_cloudwatch_event_rule" "full_ingestion" {
+#   name                = "${var.name_prefix}-full-ingestion"
+#   description         = "Trigger full knowledge base ingestion every 4 hours"
+#   schedule_expression = "rate(4 hours)"
+# }
+#
+# resource "aws_cloudwatch_event_target" "full_ingestion" {
+#   rule      = aws_cloudwatch_event_rule.full_ingestion.name
+#   target_id = "IngestionScheduler"
+#   arn       = aws_lambda_function.functions["ingestion_scheduler"].arn
+#   input = jsonencode({ schedule_type = "full" })
+# }
+#
+# resource "aws_lambda_permission" "eventbridge_full_ingestion" {
+#   statement_id  = "AllowEventBridgeFullIngestion"
+#   action        = "lambda:InvokeFunction"
+#   function_name = aws_lambda_function.functions["ingestion_scheduler"].function_name
+#   principal     = "events.amazonaws.com"
+#   source_arn    = aws_cloudwatch_event_rule.full_ingestion.arn
+# }
 
 # ==================== Outputs ====================
 

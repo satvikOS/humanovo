@@ -249,7 +249,7 @@ jobs:
           cd /tmp/func && zip -r ../function.zip handlers/
 
           # Upload placeholder functions for all Lambda functions
-          for fn in api_core projects hypotheses evidence knowledge simulation simulation_worker ingestion hypothesis_generation agent_orchestrator search_agent embeddings pubmed_fetcher clinical_trials_fetcher; do
+          for fn in api_core projects hypotheses evidence knowledge simulation simulation_worker ingestion hypothesis_generation agent_orchestrator search_agent embeddings pubmed_fetcher clinical_trials_fetcher brave_search_fetcher embeddings_generator rag_retrieval ingestion_scheduler; do
             aws s3 cp /tmp/function.zip "s3://$GENUP_BUCKET/artifacts/lambda-functions/$fn.zip"
           done
 
