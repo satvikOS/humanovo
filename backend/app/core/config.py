@@ -58,6 +58,30 @@ class Settings(BaseSettings):
     OPENAI_MODEL: str = "gpt-4-turbo-preview"
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
 
+    # Anthropic Claude
+    ANTHROPIC_API_KEY: SecretStr | None = None
+    ANTHROPIC_MODEL: str = "claude-sonnet-4-20250514"
+
+    # Together AI (for open-source models like Llama)
+    TOGETHER_API_KEY: SecretStr | None = None
+    TOGETHER_MODEL: str = "meta-llama/Llama-3.3-70B-Instruct-Turbo"
+
+    # Groq (fast inference for open-source models)
+    GROQ_API_KEY: SecretStr | None = None
+    GROQ_MODEL: str = "llama-3.3-70b-versatile"
+
+    # AWS Bedrock (for Llama Maverick and other models)
+    AWS_ACCESS_KEY_ID: SecretStr | None = None
+    AWS_SECRET_ACCESS_KEY: SecretStr | None = None
+    AWS_REGION: str = "us-east-1"
+    BEDROCK_MODEL: str = "meta.llama3-3-70b-instruct-v1:0"  # or us.meta.llama4-maverick-17b-instruct-v1:0
+
+    # Discovery Service Configuration
+    DISCOVERY_LLM_PROVIDER: str = "bedrock"  # openai, anthropic, together, groq, bedrock
+    DISCOVERY_MAX_EVIDENCE_CHUNKS: int = 50
+    DISCOVERY_MAX_GRAPH_PATHS: int = 100
+    DISCOVERY_MIN_CONFIDENCE: float = 0.3
+
     # Search APIs
     GOOGLE_API_KEY: SecretStr | None = None
     GOOGLE_CSE_ID: str | None = None
@@ -99,6 +123,36 @@ class Settings(BaseSettings):
     def openai_api_key_value(self) -> str | None:
         """Get OpenAI API key value."""
         return self.OPENAI_API_KEY.get_secret_value() if self.OPENAI_API_KEY else None
+
+    @property
+    def anthropic_api_key_value(self) -> str | None:
+        """Get Anthropic API key value."""
+        return self.ANTHROPIC_API_KEY.get_secret_value() if self.ANTHROPIC_API_KEY else None
+
+    @property
+    def together_api_key_value(self) -> str | None:
+        """Get Together API key value."""
+        return self.TOGETHER_API_KEY.get_secret_value() if self.TOGETHER_API_KEY else None
+
+    @property
+    def groq_api_key_value(self) -> str | None:
+        """Get Groq API key value."""
+        return self.GROQ_API_KEY.get_secret_value() if self.GROQ_API_KEY else None
+
+    @property
+    def brave_api_key_value(self) -> str | None:
+        """Get Brave API key value."""
+        return self.BRAVE_API_KEY.get_secret_value() if self.BRAVE_API_KEY else None
+
+    @property
+    def aws_access_key_value(self) -> str | None:
+        """Get AWS access key value."""
+        return self.AWS_ACCESS_KEY_ID.get_secret_value() if self.AWS_ACCESS_KEY_ID else None
+
+    @property
+    def aws_secret_key_value(self) -> str | None:
+        """Get AWS secret key value."""
+        return self.AWS_SECRET_ACCESS_KEY.get_secret_value() if self.AWS_SECRET_ACCESS_KEY else None
 
 
 @lru_cache

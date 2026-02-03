@@ -464,3 +464,39 @@ async def start_24_7_ingestion(callback=None) -> None:
     service = get_brave_service()
     ingestion = HealthcareDataIngestionService(service)
     await ingestion.start(callback)
+
+
+async def search_healthcare_data(
+    query: str,
+    max_results: int = 10,
+) -> list[dict]:
+    """
+    Search for healthcare data using Brave Search.
+
+    Convenience function for the disease discovery service.
+
+    Args:
+        query: Search query
+        max_results: Maximum number of results to return
+
+    Returns:
+        List of search results as dictionaries
+    """
+    try:
+        service = get_brave_service()
+        results = await service.search_healthcare(query, count=max_results)
+
+        return [
+            {
+                "title": r.title,
+                "url": r.url,
+                "description": r.description,
+                "source": r.source,
+                "published_date": r.published_date,
+                "relevance_score": r.relevance_score,
+            }
+            for r in results
+        ]
+    except Exception:
+        # Return empty list on error to not block discovery
+        return []

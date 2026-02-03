@@ -8,6 +8,7 @@ from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
     agents,
+    discovery,
     evidence,
     hypotheses,
     ingestion,
@@ -36,3 +37,6 @@ router.include_router(rag.router, prefix="/rag", tags=["rag"])
 router.include_router(ingestion.router, prefix="/ingestion", tags=["ingestion"])
 router.include_router(ingestion_ws.router, prefix="/ws/ingestion", tags=["ingestion-websocket"])
 router.include_router(monitoring.router, prefix="/monitoring", tags=["monitoring"])
+
+# Disease Discovery endpoint
+router.include_router(discovery.router)
