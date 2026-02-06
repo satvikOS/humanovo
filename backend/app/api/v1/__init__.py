@@ -8,6 +8,7 @@ from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
     agents,
+    auth,
     discovery,
     evidence,
     hypotheses,
@@ -24,6 +25,7 @@ from app.api.v1.endpoints import (
 router = APIRouter()
 
 # Include endpoint routers
+router.include_router(auth.router, prefix="/auth", tags=["auth"])
 router.include_router(projects.router, prefix="/projects", tags=["projects"])
 router.include_router(hypotheses.router, prefix="/hypotheses", tags=["hypotheses"])
 router.include_router(evidence.router, prefix="/evidence", tags=["evidence"])
