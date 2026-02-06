@@ -1,7 +1,7 @@
 """
 Evidence API Endpoints
 
-Manage evidence items (papers, trials, data) in GenUp.
+Manage evidence items (papers, trials, data) in GenUp with SQLAlchemy persistence.
 """
 
 from datetime import datetime
@@ -10,10 +10,12 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, HttpUrl
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.logging import get_logger
+from app.models.evidence import Evidence, EvidenceSource as EvidenceSourceModel
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -30,12 +32,13 @@ class EvidenceSource(str, Enum):
     PATHWAY_DATABASE = "pathway_database"
     WEB_SEARCH = "web_search"
     USER_UPLOAD = "user_upload"
+    PATENT = "patent"
 
 
 class EvidenceCreate(BaseModel):
     """Schema for creating evidence manually."""
 
-    project_id: UUID
+    project_id: UUID | None = None
     title: str = Field(..., min_length=5, max_length=500)
     source_type: EvidenceSource
     source_id: str | None = Field(None, description="External ID (e.g., PMID, NCT number)")
@@ -80,6 +83,9 @@ class EvidenceResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    class Config:
+        from_attributes = True
+
 
 class EvidenceListResponse(BaseModel):
     """Schema for paginated evidence list."""
@@ -99,8 +105,26 @@ class EvidenceSearchResponse(BaseModel):
     search_type: str
 
 
-# In-memory storage
-_evidence: dict = {}
+def evidence_to_response(e: Evidence) -> EvidenceResponse:
+    """Convert an Evidence model to an EvidenceResponse."""
+    return EvidenceResponse(
+        id=e.id,
+        project_id=e.project_id,
+        title=e.title,
+        source_type=EvidenceSource(e.source_type.value),
+        source_id=e.source_id,
+        source_url=e.source_url,
+        abstract=e.abstract,
+        snippet=e.snippet or (e.abstract[:300] if e.abstract else None),
+        authors=e.authors or [],
+        publication_date=e.publication_date,
+        entities=e.entities or [],
+        tags=e.tags or [],
+        relevance_score=e.relevance_score,
+        embedding_id=e.embedding_id,
+        created_at=e.created_at,
+        updated_at=e.updated_at,
+    )
 
 
 @router.post("", response_model=EvidenceResponse, status_code=201)
@@ -111,32 +135,29 @@ async def create_evidence(
     """Create a new evidence item manually."""
     logger.info("Creating new evidence", title=evidence.title[:50])
 
-    evidence_id = uuid4()
-    now = datetime.utcnow()
-
-    evidence_data = EvidenceResponse(
-        id=evidence_id,
+    db_evidence = Evidence(
+        id=uuid4(),
         project_id=evidence.project_id,
         title=evidence.title,
-        source_type=evidence.source_type,
+        source_type=EvidenceSourceModel(evidence.source_type.value),
         source_id=evidence.source_id,
         source_url=str(evidence.source_url) if evidence.source_url else None,
         abstract=evidence.abstract,
+        full_text=evidence.full_text,
         snippet=evidence.abstract[:300] if evidence.abstract else None,
         authors=evidence.authors,
         publication_date=evidence.publication_date,
         entities=evidence.entities,
         tags=evidence.tags,
-        relevance_score=None,
-        embedding_id=None,
-        created_at=now,
-        updated_at=now,
+        ingested_by="user",
     )
 
-    _evidence[evidence_id] = evidence_data
-    logger.info("Evidence created", evidence_id=str(evidence_id))
+    db.add(db_evidence)
+    await db.commit()
+    await db.refresh(db_evidence)
 
-    return evidence_data
+    logger.info("Evidence created", evidence_id=str(db_evidence.id))
+    return evidence_to_response(db_evidence)
 
 
 @router.post("/search", response_model=EvidenceSearchResponse)
@@ -153,36 +174,76 @@ async def search_evidence(
 
     if request.semantic_search:
         # Use vector store for semantic search
-        from app.knowledge.vector_store import search_vectors
+        try:
+            from app.knowledge.vector_store import search_vectors
 
-        results = await search_vectors(
-            query=request.query,
-            limit=request.limit,
-            filters={
-                "source_types": [s.value for s in request.source_types]
-                if request.source_types
-                else None,
-                "entities": request.entities if request.entities else None,
-            },
-        )
-        search_type = "semantic"
+            vector_results = await search_vectors(
+                query=request.query,
+                limit=request.limit,
+                filters={
+                    "source_types": [s.value for s in request.source_types]
+                    if request.source_types
+                    else None,
+                    "entities": request.entities if request.entities else None,
+                },
+            )
+
+            # Fetch evidence from database using IDs from vector search
+            if vector_results:
+                evidence_ids = [r.id for r in vector_results]
+                query = select(Evidence).where(Evidence.id.in_(evidence_ids))
+                result = await db.execute(query)
+                evidence_items = result.scalars().all()
+                items = [evidence_to_response(e) for e in evidence_items]
+            else:
+                items = []
+
+            search_type = "semantic"
+        except Exception as e:
+            logger.warning(f"Semantic search failed, falling back to keyword: {e}")
+            # Fall back to keyword search
+            items, search_type = await _keyword_search(db, request)
     else:
-        # Keyword search in stored evidence
-        query_lower = request.query.lower()
-        results = [
-            e
-            for e in _evidence.values()
-            if query_lower in e.title.lower() or (e.abstract and query_lower in e.abstract.lower())
-        ]
-        results = results[: request.limit]
-        search_type = "keyword"
+        items, search_type = await _keyword_search(db, request)
 
     return EvidenceSearchResponse(
-        items=results,
-        total=len(results),
+        items=items,
+        total=len(items),
         query=request.query,
         search_type=search_type,
     )
+
+
+async def _keyword_search(
+    db: AsyncSession, request: EvidenceSearchRequest
+) -> tuple[list[EvidenceResponse], str]:
+    """Perform keyword search in database."""
+    query_lower = f"%{request.query.lower()}%"
+
+    query = select(Evidence).where(
+        or_(
+            Evidence.title.ilike(query_lower),
+            Evidence.abstract.ilike(query_lower),
+        )
+    )
+
+    # Apply source type filter
+    if request.source_types:
+        source_values = [EvidenceSourceModel(s.value) for s in request.source_types]
+        query = query.where(Evidence.source_type.in_(source_values))
+
+    # Apply date filters
+    if request.date_from:
+        query = query.where(Evidence.publication_date >= request.date_from)
+    if request.date_to:
+        query = query.where(Evidence.publication_date <= request.date_to)
+
+    query = query.limit(request.limit)
+
+    result = await db.execute(query)
+    evidence_items = result.scalars().all()
+
+    return [evidence_to_response(e) for e in evidence_items], "keyword"
 
 
 @router.get("", response_model=EvidenceListResponse)
@@ -194,26 +255,38 @@ async def list_evidence(
     db: AsyncSession = Depends(get_db),
 ) -> EvidenceListResponse:
     """List evidence items with filtering and pagination."""
-    items = list(_evidence.values())
+    # Build base query
+    query = select(Evidence)
 
-    # Filter by project
+    # Apply filters
     if project_id:
-        items = [e for e in items if e.project_id == project_id]
-
-    # Filter by source type
+        query = query.where(Evidence.project_id == project_id)
     if source_type:
-        items = [e for e in items if e.source_type == source_type]
+        query = query.where(Evidence.source_type == EvidenceSourceModel(source_type.value))
+
+    # Get total count
+    count_query = select(func.count()).select_from(Evidence)
+    if project_id:
+        count_query = count_query.where(Evidence.project_id == project_id)
+    if source_type:
+        count_query = count_query.where(Evidence.source_type == EvidenceSourceModel(source_type.value))
+
+    total_result = await db.execute(count_query)
+    total = total_result.scalar() or 0
 
     # Sort by date
-    items.sort(key=lambda x: x.updated_at, reverse=True)
+    query = query.order_by(desc(Evidence.updated_at))
 
     # Paginate
-    total = len(items)
-    start = (page - 1) * page_size
-    end = start + page_size
+    offset = (page - 1) * page_size
+    query = query.offset(offset).limit(page_size)
+
+    # Execute
+    result = await db.execute(query)
+    evidence_items = result.scalars().all()
 
     return EvidenceListResponse(
-        items=items[start:end],
+        items=[evidence_to_response(e) for e in evidence_items],
         total=total,
         page=page,
         page_size=page_size,
@@ -226,10 +299,48 @@ async def get_evidence(
     db: AsyncSession = Depends(get_db),
 ) -> EvidenceResponse:
     """Get a specific evidence item by ID."""
-    if evidence_id not in _evidence:
+    query = select(Evidence).where(Evidence.id == evidence_id)
+    result = await db.execute(query)
+    evidence = result.scalar_one_or_none()
+
+    if not evidence:
         raise HTTPException(status_code=404, detail="Evidence not found")
 
-    return _evidence[evidence_id]
+    return evidence_to_response(evidence)
+
+
+@router.patch("/{evidence_id}", response_model=EvidenceResponse)
+async def update_evidence(
+    evidence_id: UUID,
+    title: str | None = None,
+    abstract: str | None = None,
+    tags: list[str] | None = None,
+    entities: list[str] | None = None,
+    db: AsyncSession = Depends(get_db),
+) -> EvidenceResponse:
+    """Update an evidence item."""
+    query = select(Evidence).where(Evidence.id == evidence_id)
+    result = await db.execute(query)
+    evidence = result.scalar_one_or_none()
+
+    if not evidence:
+        raise HTTPException(status_code=404, detail="Evidence not found")
+
+    if title is not None:
+        evidence.title = title
+    if abstract is not None:
+        evidence.abstract = abstract
+        evidence.snippet = abstract[:300] if abstract else None
+    if tags is not None:
+        evidence.tags = tags
+    if entities is not None:
+        evidence.entities = entities
+
+    await db.commit()
+    await db.refresh(evidence)
+
+    logger.info("Evidence updated", evidence_id=str(evidence_id))
+    return evidence_to_response(evidence)
 
 
 @router.delete("/{evidence_id}", status_code=204)
@@ -238,10 +349,15 @@ async def delete_evidence(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     """Delete an evidence item."""
-    if evidence_id not in _evidence:
+    query = select(Evidence).where(Evidence.id == evidence_id)
+    result = await db.execute(query)
+    evidence = result.scalar_one_or_none()
+
+    if not evidence:
         raise HTTPException(status_code=404, detail="Evidence not found")
 
-    del _evidence[evidence_id]
+    await db.delete(evidence)
+    await db.commit()
     logger.info("Evidence deleted", evidence_id=str(evidence_id))
 
 
@@ -255,20 +371,85 @@ async def get_related_evidence(
 
     Uses vector similarity to find semantically related evidence.
     """
-    if evidence_id not in _evidence:
+    query = select(Evidence).where(Evidence.id == evidence_id)
+    result = await db.execute(query)
+    evidence = result.scalar_one_or_none()
+
+    if not evidence:
         raise HTTPException(status_code=404, detail="Evidence not found")
 
-    evidence = _evidence[evidence_id]
+    # If no embedding, return evidence with similar entities
+    if not evidence.embedding_id:
+        if evidence.entities:
+            # Find evidence with overlapping entities
+            related_query = (
+                select(Evidence)
+                .where(Evidence.id != evidence_id)
+                .where(Evidence.entities.overlap(evidence.entities))
+                .limit(limit)
+            )
+            related_result = await db.execute(related_query)
+            related = related_result.scalars().all()
+            return [evidence_to_response(e) for e in related]
+        return []
 
     # Use vector store to find similar
-    from app.knowledge.vector_store import find_similar
+    try:
+        from app.knowledge.vector_store import find_similar
 
-    related = await find_similar(
-        embedding_id=evidence.embedding_id,
-        limit=limit + 1,  # Include extra to filter out self
-    )
+        similar_ids = await find_similar(
+            embedding_id=evidence.embedding_id,
+            limit=limit + 1,  # Include extra to filter out self
+        )
 
-    # Filter out the source evidence
-    related = [r for r in related if r.id != evidence_id][:limit]
+        # Filter out self and fetch from database
+        similar_ids = [sid for sid in similar_ids if sid != evidence_id][:limit]
 
-    return related
+        if similar_ids:
+            related_query = select(Evidence).where(Evidence.id.in_(similar_ids))
+            related_result = await db.execute(related_query)
+            related = related_result.scalars().all()
+            return [evidence_to_response(e) for e in related]
+    except Exception as e:
+        logger.warning(f"Vector similarity search failed: {e}")
+
+    return []
+
+
+@router.post("/bulk", response_model=list[EvidenceResponse], status_code=201)
+async def bulk_create_evidence(
+    items: list[EvidenceCreate],
+    db: AsyncSession = Depends(get_db),
+) -> list[EvidenceResponse]:
+    """Bulk create evidence items."""
+    logger.info(f"Bulk creating {len(items)} evidence items")
+
+    created = []
+    for item in items:
+        db_evidence = Evidence(
+            id=uuid4(),
+            project_id=item.project_id,
+            title=item.title,
+            source_type=EvidenceSourceModel(item.source_type.value),
+            source_id=item.source_id,
+            source_url=str(item.source_url) if item.source_url else None,
+            abstract=item.abstract,
+            full_text=item.full_text,
+            snippet=item.abstract[:300] if item.abstract else None,
+            authors=item.authors,
+            publication_date=item.publication_date,
+            entities=item.entities,
+            tags=item.tags,
+            ingested_by="bulk_upload",
+        )
+        db.add(db_evidence)
+        created.append(db_evidence)
+
+    await db.commit()
+
+    # Refresh all items
+    for e in created:
+        await db.refresh(e)
+
+    logger.info(f"Bulk created {len(created)} evidence items")
+    return [evidence_to_response(e) for e in created]

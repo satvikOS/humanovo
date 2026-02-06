@@ -1,7 +1,7 @@
 """
 Hypotheses API Endpoints
 
-Manage AI-generated hypotheses in GenUp.
+Manage AI-generated hypotheses in GenUp with SQLAlchemy persistence.
 """
 
 from datetime import datetime
@@ -10,10 +10,18 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
 from app.core.logging import get_logger
+from app.models.hypothesis import (
+    EvidenceReference as EvidenceReferenceModel,
+    EvidenceType as EvidenceTypeModel,
+    Hypothesis,
+    HypothesisStatus as HypothesisStatusModel,
+)
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -38,7 +46,7 @@ class EvidenceType(str, Enum):
     NEUTRAL = "neutral"
 
 
-class EvidenceReference(BaseModel):
+class EvidenceReferenceSchema(BaseModel):
     """Reference to supporting/contradicting evidence."""
 
     evidence_id: UUID
@@ -76,7 +84,7 @@ class HypothesisUpdate(BaseModel):
     user_notes: str | None = None
 
 
-class SimulationResult(BaseModel):
+class SimulationResultSchema(BaseModel):
     """Simulation results attached to a hypothesis."""
 
     simulation_id: UUID
@@ -97,15 +105,18 @@ class HypothesisResponse(BaseModel):
     status: HypothesisStatus
     confidence_score: float
     novelty_score: float
-    evidence_refs: list[EvidenceReference]
+    evidence_refs: list[EvidenceReferenceSchema]
     contradiction_count: int
     supporting_count: int
-    simulation_results: SimulationResult | None
+    simulation_results: SimulationResultSchema | None
     tags: list[str]
     user_notes: str | None
     version: int
     created_at: datetime
     updated_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 class HypothesisListResponse(BaseModel):
@@ -125,9 +136,52 @@ class GenerationTaskResponse(BaseModel):
     message: str
 
 
-# In-memory storage for development
-_hypotheses: dict = {}
+# In-memory storage for generation tasks (can be moved to Redis later)
 _generation_tasks: dict = {}
+
+
+def hypothesis_to_response(h: Hypothesis) -> HypothesisResponse:
+    """Convert a Hypothesis model to a HypothesisResponse."""
+    evidence_refs = []
+    for ref in h.evidence_refs:
+        evidence_refs.append(
+            EvidenceReferenceSchema(
+                evidence_id=ref.evidence_id,
+                evidence_type=EvidenceType(ref.evidence_type.value),
+                relevance_score=ref.relevance_score,
+                snippet=ref.snippet,
+            )
+        )
+
+    simulation_results = None
+    if h.simulation_results:
+        simulation_results = SimulationResultSchema(
+            simulation_id=UUID(h.simulation_results["simulation_id"]),
+            outcome_probability=h.simulation_results["outcome_probability"],
+            confidence_interval=tuple(h.simulation_results["confidence_interval"]),
+            iterations=h.simulation_results["iterations"],
+            summary=h.simulation_results["summary"],
+        )
+
+    return HypothesisResponse(
+        id=h.id,
+        project_id=h.project_id,
+        statement=h.statement,
+        mechanism=h.mechanism,
+        rationale=h.rationale,
+        status=HypothesisStatus(h.status.value),
+        confidence_score=h.confidence_score,
+        novelty_score=h.novelty_score,
+        evidence_refs=evidence_refs,
+        contradiction_count=h.contradiction_count,
+        supporting_count=h.supporting_count,
+        simulation_results=simulation_results,
+        tags=h.tags or [],
+        user_notes=h.user_notes,
+        version=h.version,
+        created_at=h.created_at,
+        updated_at=h.updated_at,
+    )
 
 
 @router.post("", response_model=HypothesisResponse, status_code=201)
@@ -138,33 +192,27 @@ async def create_hypothesis(
     """Create a new hypothesis manually."""
     logger.info("Creating new hypothesis", project_id=str(hypothesis.project_id))
 
-    hypothesis_id = uuid4()
-    now = datetime.utcnow()
-
-    hypothesis_data = HypothesisResponse(
-        id=hypothesis_id,
+    db_hypothesis = Hypothesis(
+        id=uuid4(),
         project_id=hypothesis.project_id,
         statement=hypothesis.statement,
         mechanism=hypothesis.mechanism,
-        rationale=None,
-        status=HypothesisStatus.DRAFT,
+        status=HypothesisStatusModel.DRAFT,
         confidence_score=0.0,
         novelty_score=0.0,
-        evidence_refs=[],
-        contradiction_count=0,
         supporting_count=0,
-        simulation_results=None,
+        contradiction_count=0,
         tags=hypothesis.tags,
-        user_notes=None,
         version=1,
-        created_at=now,
-        updated_at=now,
+        generated_by="user",
     )
 
-    _hypotheses[hypothesis_id] = hypothesis_data
-    logger.info("Hypothesis created", hypothesis_id=str(hypothesis_id))
+    db.add(db_hypothesis)
+    await db.commit()
+    await db.refresh(db_hypothesis)
 
-    return hypothesis_data
+    logger.info("Hypothesis created", hypothesis_id=str(db_hypothesis.id))
+    return hypothesis_to_response(db_hypothesis)
 
 
 @router.post("/generate", response_model=GenerationTaskResponse, status_code=202)
@@ -211,8 +259,9 @@ async def generate_hypotheses(
 
 async def _run_hypothesis_generation(task_id: UUID, request: HypothesisGenerate) -> None:
     """Background task for hypothesis generation."""
-    logger.info("Running hypothesis generation", task_id=str(task_id))
+    from app.core.database import async_session_factory
 
+    logger.info("Running hypothesis generation", task_id=str(task_id))
     _generation_tasks[task_id]["status"] = "running"
 
     try:
@@ -227,10 +276,32 @@ async def _run_hypothesis_generation(task_id: UUID, request: HypothesisGenerate)
             max_hypotheses=request.max_hypotheses,
         )
 
-        # Store generated hypotheses
-        for h in hypotheses:
-            _hypotheses[h.id] = h
-            _generation_tasks[task_id]["hypotheses_generated"] += 1
+        # Store generated hypotheses in database
+        async with async_session_factory() as db:
+            for h in hypotheses:
+                db_hypothesis = Hypothesis(
+                    id=h.id if hasattr(h, "id") else uuid4(),
+                    project_id=request.project_id,
+                    statement=h.statement if hasattr(h, "statement") else str(h),
+                    mechanism=getattr(h, "mechanism", None),
+                    rationale=getattr(h, "rationale", None),
+                    status=HypothesisStatusModel.ACTIVE,
+                    confidence_score=getattr(h, "confidence_score", 0.5),
+                    novelty_score=getattr(h, "novelty_score", 0.5),
+                    supporting_count=0,
+                    contradiction_count=0,
+                    tags=getattr(h, "tags", []),
+                    version=1,
+                    generated_by="ai",
+                    generation_context={
+                        "query": request.query,
+                        "focus_entities": request.focus_entities,
+                    },
+                )
+                db.add(db_hypothesis)
+                _generation_tasks[task_id]["hypotheses_generated"] += 1
+
+            await db.commit()
 
         _generation_tasks[task_id]["status"] = "completed"
         logger.info(
@@ -264,27 +335,39 @@ async def list_hypotheses(
     db: AsyncSession = Depends(get_db),
 ) -> HypothesisListResponse:
     """List hypotheses with filtering and pagination."""
-    items = list(_hypotheses.values())
+    # Build base query
+    query = select(Hypothesis).options(selectinload(Hypothesis.evidence_refs))
 
-    # Filter by project
+    # Apply filters
     if project_id:
-        items = [h for h in items if h.project_id == project_id]
-
-    # Filter by status
+        query = query.where(Hypothesis.project_id == project_id)
     if status:
-        items = [h for h in items if h.status == status]
+        query = query.where(Hypothesis.status == HypothesisStatusModel(status.value))
 
-    # Sort
-    reverse = True
-    items.sort(key=lambda x: getattr(x, sort_by), reverse=reverse)
+    # Get total count
+    count_query = select(func.count()).select_from(Hypothesis)
+    if project_id:
+        count_query = count_query.where(Hypothesis.project_id == project_id)
+    if status:
+        count_query = count_query.where(Hypothesis.status == HypothesisStatusModel(status.value))
 
-    # Paginate
-    total = len(items)
-    start = (page - 1) * page_size
-    end = start + page_size
+    total_result = await db.execute(count_query)
+    total = total_result.scalar() or 0
+
+    # Apply sorting
+    sort_column = getattr(Hypothesis, sort_by)
+    query = query.order_by(desc(sort_column))
+
+    # Apply pagination
+    offset = (page - 1) * page_size
+    query = query.offset(offset).limit(page_size)
+
+    # Execute query
+    result = await db.execute(query)
+    hypotheses = result.scalars().all()
 
     return HypothesisListResponse(
-        items=items[start:end],
+        items=[hypothesis_to_response(h) for h in hypotheses],
         total=total,
         page=page,
         page_size=page_size,
@@ -297,10 +380,18 @@ async def get_hypothesis(
     db: AsyncSession = Depends(get_db),
 ) -> HypothesisResponse:
     """Get a specific hypothesis by ID."""
-    if hypothesis_id not in _hypotheses:
+    query = (
+        select(Hypothesis)
+        .options(selectinload(Hypothesis.evidence_refs))
+        .where(Hypothesis.id == hypothesis_id)
+    )
+    result = await db.execute(query)
+    hypothesis = result.scalar_one_or_none()
+
+    if not hypothesis:
         raise HTTPException(status_code=404, detail="Hypothesis not found")
 
-    return _hypotheses[hypothesis_id]
+    return hypothesis_to_response(hypothesis)
 
 
 @router.patch("/{hypothesis_id}", response_model=HypothesisResponse)
@@ -310,37 +401,41 @@ async def update_hypothesis(
     db: AsyncSession = Depends(get_db),
 ) -> HypothesisResponse:
     """Update a hypothesis."""
-    if hypothesis_id not in _hypotheses:
+    query = (
+        select(Hypothesis)
+        .options(selectinload(Hypothesis.evidence_refs))
+        .where(Hypothesis.id == hypothesis_id)
+    )
+    result = await db.execute(query)
+    hypothesis = result.scalar_one_or_none()
+
+    if not hypothesis:
         raise HTTPException(status_code=404, detail="Hypothesis not found")
 
-    hypothesis = _hypotheses[hypothesis_id]
     update_data = update.model_dump(exclude_unset=True)
 
-    # Create updated version
-    updated = HypothesisResponse(
-        id=hypothesis.id,
-        project_id=hypothesis.project_id,
-        statement=update_data.get("statement", hypothesis.statement),
-        mechanism=update_data.get("mechanism", hypothesis.mechanism),
-        rationale=update_data.get("rationale", hypothesis.rationale),
-        status=update_data.get("status", hypothesis.status),
-        confidence_score=hypothesis.confidence_score,
-        novelty_score=hypothesis.novelty_score,
-        evidence_refs=hypothesis.evidence_refs,
-        contradiction_count=hypothesis.contradiction_count,
-        supporting_count=hypothesis.supporting_count,
-        simulation_results=hypothesis.simulation_results,
-        tags=update_data.get("tags", hypothesis.tags),
-        user_notes=update_data.get("user_notes", hypothesis.user_notes),
-        version=hypothesis.version + 1,
-        created_at=hypothesis.created_at,
-        updated_at=datetime.utcnow(),
-    )
+    # Apply updates
+    if "statement" in update_data:
+        hypothesis.statement = update_data["statement"]
+    if "mechanism" in update_data:
+        hypothesis.mechanism = update_data["mechanism"]
+    if "rationale" in update_data:
+        hypothesis.rationale = update_data["rationale"]
+    if "status" in update_data:
+        hypothesis.status = HypothesisStatusModel(update_data["status"].value)
+    if "tags" in update_data:
+        hypothesis.tags = update_data["tags"]
+    if "user_notes" in update_data:
+        hypothesis.user_notes = update_data["user_notes"]
 
-    _hypotheses[hypothesis_id] = updated
-    logger.info("Hypothesis updated", hypothesis_id=str(hypothesis_id), version=updated.version)
+    # Increment version
+    hypothesis.version = (hypothesis.version or 0) + 1
 
-    return updated
+    await db.commit()
+    await db.refresh(hypothesis)
+
+    logger.info("Hypothesis updated", hypothesis_id=str(hypothesis_id), version=hypothesis.version)
+    return hypothesis_to_response(hypothesis)
 
 
 @router.delete("/{hypothesis_id}", status_code=204)
@@ -349,10 +444,15 @@ async def delete_hypothesis(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     """Delete a hypothesis."""
-    if hypothesis_id not in _hypotheses:
+    query = select(Hypothesis).where(Hypothesis.id == hypothesis_id)
+    result = await db.execute(query)
+    hypothesis = result.scalar_one_or_none()
+
+    if not hypothesis:
         raise HTTPException(status_code=404, detail="Hypothesis not found")
 
-    del _hypotheses[hypothesis_id]
+    await db.delete(hypothesis)
+    await db.commit()
     logger.info("Hypothesis deleted", hypothesis_id=str(hypothesis_id))
 
 
@@ -367,16 +467,22 @@ async def verify_hypothesis(
     This updates the hypothesis with supporting/contradicting evidence
     and recalculates confidence scores.
     """
-    if hypothesis_id not in _hypotheses:
-        raise HTTPException(status_code=404, detail="Hypothesis not found")
+    query = (
+        select(Hypothesis)
+        .options(selectinload(Hypothesis.evidence_refs))
+        .where(Hypothesis.id == hypothesis_id)
+    )
+    result = await db.execute(query)
+    hypothesis = result.scalar_one_or_none()
 
-    hypothesis = _hypotheses[hypothesis_id]
+    if not hypothesis:
+        raise HTTPException(status_code=404, detail="Hypothesis not found")
 
     # Queue verification task
     background_tasks.add_task(_verify_hypothesis_task, hypothesis_id)
 
     logger.info("Hypothesis verification queued", hypothesis_id=str(hypothesis_id))
-    return hypothesis
+    return hypothesis_to_response(hypothesis)
 
 
 async def _verify_hypothesis_task(hypothesis_id: UUID) -> None:
@@ -385,3 +491,50 @@ async def _verify_hypothesis_task(hypothesis_id: UUID) -> None:
 
     agent = VerificationAgent()
     await agent.verify(hypothesis_id)
+
+
+@router.post("/{hypothesis_id}/add-evidence", response_model=HypothesisResponse)
+async def add_evidence_reference(
+    hypothesis_id: UUID,
+    evidence_ref: EvidenceReferenceSchema,
+    db: AsyncSession = Depends(get_db),
+) -> HypothesisResponse:
+    """Add an evidence reference to a hypothesis."""
+    query = (
+        select(Hypothesis)
+        .options(selectinload(Hypothesis.evidence_refs))
+        .where(Hypothesis.id == hypothesis_id)
+    )
+    result = await db.execute(query)
+    hypothesis = result.scalar_one_or_none()
+
+    if not hypothesis:
+        raise HTTPException(status_code=404, detail="Hypothesis not found")
+
+    # Create evidence reference
+    ref = EvidenceReferenceModel(
+        id=uuid4(),
+        hypothesis_id=hypothesis_id,
+        evidence_id=evidence_ref.evidence_id,
+        evidence_type=EvidenceTypeModel(evidence_ref.evidence_type.value),
+        relevance_score=evidence_ref.relevance_score,
+        snippet=evidence_ref.snippet,
+    )
+
+    db.add(ref)
+
+    # Update counts
+    if evidence_ref.evidence_type == EvidenceType.SUPPORTING:
+        hypothesis.supporting_count += 1
+    elif evidence_ref.evidence_type == EvidenceType.CONTRADICTING:
+        hypothesis.contradiction_count += 1
+
+    await db.commit()
+    await db.refresh(hypothesis)
+
+    logger.info(
+        "Evidence reference added",
+        hypothesis_id=str(hypothesis_id),
+        evidence_id=str(evidence_ref.evidence_id),
+    )
+    return hypothesis_to_response(hypothesis)

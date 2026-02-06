@@ -6,23 +6,14 @@ import ProjectDetail from './pages/ProjectDetail'
 import Hypotheses from './pages/Hypotheses'
 import HypothesisDetail from './pages/HypothesisDetail'
 import KnowledgeGraph from './pages/KnowledgeGraph'
-import Simulations from './pages/Simulations'
 import Evidence from './pages/Evidence'
 import Workbench from './pages/Workbench'
 import HumanAnatomy from './pages/HumanAnatomy'
 import Settings from './pages/Settings'
-
-// Placeholder pages for routes not yet fully implemented
-function PlaceholderPage({ title }: { title: string }) {
-  return (
-    <div className="flex items-center justify-center h-full">
-      <div className="text-center">
-        <h1 className="text-xl font-semibold mb-2">{title}</h1>
-        <p className="text-sm text-[var(--color-text-muted)]">Coming soon</p>
-      </div>
-    </div>
-  )
-}
+import Notebook from './pages/Notebook'
+import Search from './pages/Search'
+import Timeline from './pages/Timeline'
+import Agents from './pages/Agents'
 
 function App() {
   return (
@@ -36,13 +27,13 @@ function App() {
         <Route path="knowledge" element={<KnowledgeGraph />} />
         <Route path="hypotheses" element={<Hypotheses />} />
         <Route path="hypotheses/:hypothesisId" element={<HypothesisDetail />} />
-        <Route path="simulations" element={<Simulations />} />
+        <Route path="simulations" element={<Navigate to="/agents" replace />} />
         <Route path="workbench" element={<Workbench />} />
         <Route path="anatomy" element={<HumanAnatomy />} />
-        <Route path="notebook" element={<PlaceholderPage title="Research Notebook" />} />
-        <Route path="agents" element={<PlaceholderPage title="Multi-Agent Research" />} />
-        <Route path="timeline" element={<PlaceholderPage title="Discovery Timeline" />} />
-        <Route path="search" element={<PlaceholderPage title="Search" />} />
+        <Route path="notebook" element={<Notebook />} />
+        <Route path="agents" element={<Agents />} />
+        <Route path="timeline" element={<Timeline />} />
+        <Route path="search" element={<Search />} />
         <Route path="settings" element={<Settings />} />
       </Route>
     </Routes>

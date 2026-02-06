@@ -1,7 +1,7 @@
 """
 Ingestion Agent Management API Endpoints
 
-RESTful API for managing ingestion agents, jobs, and scheduling.
+RESTful API for managing ingestion agents, jobs, and scheduling with SQLAlchemy persistence.
 """
 
 from datetime import datetime
@@ -11,11 +11,17 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.ingestion.base import SourceType
 from app.core.database import get_db
 from app.core.logging import get_logger
+from app.models.ingestion_job import (
+    IngestionJob,
+    IngestionJobStatus as IngestionJobStatusModel,
+    IngestionSource as IngestionSourceModel,
+)
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -33,6 +39,7 @@ class IngestionPriority(str, Enum):
 class IngestionJobCreate(BaseModel):
     """Request to create an ingestion job."""
 
+    name: str = Field(default="Ingestion Job", min_length=3, max_length=255)
     query: str = Field(..., min_length=3, max_length=500)
     sources: list[str] = Field(
         default=["pubmed"],
@@ -44,6 +51,7 @@ class IngestionJobCreate(BaseModel):
     extract_relations: bool = True
     index_to_stores: bool = True
     schedule_delay_seconds: int = Field(default=0, ge=0, le=86400)
+    project_id: UUID | None = None
     config: dict[str, Any] | None = None
 
 
@@ -51,6 +59,7 @@ class IngestionJobResponse(BaseModel):
     """Response for an ingestion job."""
 
     job_id: UUID
+    name: str
     query: str
     sources: list[str]
     status: str
@@ -66,6 +75,9 @@ class IngestionJobResponse(BaseModel):
     completed_at: datetime | None
     created_at: datetime
     error: str | None
+
+    class Config:
+        from_attributes = True
 
 
 class IngestionJobListResponse(BaseModel):
@@ -125,18 +137,48 @@ class SourceConfigUpdate(BaseModel):
     enabled: bool = True
 
 
-class DocumentUpload(BaseModel):
-    """Metadata for document upload."""
+def map_source_to_model(source: str) -> IngestionSourceModel:
+    """Map source string to model enum."""
+    mapping = {
+        "pubmed": IngestionSourceModel.PUBMED,
+        "clinical_trials": IngestionSourceModel.CLINICAL_TRIALS,
+        "biorxiv": IngestionSourceModel.BIORXIV,
+        "medrxiv": IngestionSourceModel.MEDRXIV,
+        "arxiv": IngestionSourceModel.ARXIV,
+        "patents": IngestionSourceModel.PATENT_USPTO,
+        "preprint": IngestionSourceModel.BIORXIV,
+        "custom_document": IngestionSourceModel.FILE_UPLOAD,
+    }
+    return mapping.get(source.lower(), IngestionSourceModel.PUBMED)
 
-    title: str | None = None
-    authors: list[str] | None = None
-    keywords: list[str] | None = None
-    metadata: dict[str, Any] | None = None
 
+def job_to_response(job: IngestionJob) -> IngestionJobResponse:
+    """Convert IngestionJob model to response."""
+    sources = []
+    if job.source:
+        sources = [job.source.value]
+    if job.source_config and "sources" in job.source_config:
+        sources = job.source_config["sources"]
 
-# In-memory storage for jobs
-_ingestion_jobs: dict[UUID, dict] = {}
-_recurring_jobs: dict[UUID, dict] = {}
+    return IngestionJobResponse(
+        job_id=job.id,
+        name=job.name,
+        query=job.query or "",
+        sources=sources,
+        status=job.status.value,
+        priority=job.source_config.get("priority", "normal") if job.source_config else "normal",
+        progress=job.progress,
+        records_fetched=job.items_fetched,
+        records_processed=job.items_processed,
+        records_indexed=job.items_indexed,
+        records_failed=job.items_failed,
+        entities_extracted=job.source_config.get("entities_extracted", 0) if job.source_config else 0,
+        relations_extracted=job.source_config.get("relations_extracted", 0) if job.source_config else 0,
+        started_at=job.started_at,
+        completed_at=job.completed_at,
+        created_at=job.created_at,
+        error=job.error_message,
+    )
 
 
 @router.post("/jobs", response_model=IngestionJobResponse, status_code=202)
@@ -145,20 +187,13 @@ async def create_ingestion_job(
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ) -> IngestionJobResponse:
-    """
-    Create and start a new ingestion job.
-
-    The job will run in the background and can be monitored via the status endpoint.
-    """
+    """Create and start a new ingestion job."""
     logger.info(
         "Creating ingestion job",
         query=job.query[:50],
         sources=job.sources,
         priority=job.priority.value,
     )
-
-    job_id = uuid4()
-    now = datetime.utcnow()
 
     # Validate sources
     valid_sources = {s.value for s in SourceType}
@@ -169,42 +204,51 @@ async def create_ingestion_job(
                 detail=f"Invalid source type: {source}. Valid types: {list(valid_sources)}",
             )
 
-    job_data = {
-        "job_id": job_id,
-        "query": job.query,
-        "sources": job.sources,
-        "status": "pending",
-        "priority": job.priority.value,
-        "progress": 0.0,
-        "records_fetched": 0,
-        "records_processed": 0,
-        "records_indexed": 0,
-        "records_failed": 0,
-        "entities_extracted": 0,
-        "relations_extracted": 0,
-        "started_at": None,
-        "completed_at": None,
-        "created_at": now,
-        "error": None,
-        "config": job.config or {},
-    }
+    db_job = IngestionJob(
+        id=uuid4(),
+        name=job.name,
+        query=job.query,
+        source=map_source_to_model(job.sources[0]) if job.sources else IngestionSourceModel.PUBMED,
+        source_config={
+            "sources": job.sources,
+            "priority": job.priority.value,
+            "max_results_per_source": job.max_results_per_source,
+            "extract_entities": job.extract_entities,
+            "extract_relations": job.extract_relations,
+            "index_to_stores": job.index_to_stores,
+            "entities_extracted": 0,
+            "relations_extracted": 0,
+            "config": job.config or {},
+        },
+        status=IngestionJobStatusModel.PENDING,
+        progress=0.0,
+        items_found=0,
+        items_fetched=0,
+        items_processed=0,
+        items_indexed=0,
+        items_failed=0,
+        target_project_id=job.project_id,
+        auto_process=1 if job.extract_entities else 0,
+        auto_index=1 if job.index_to_stores else 0,
+    )
 
-    _ingestion_jobs[job_id] = job_data
+    db.add(db_job)
+    await db.commit()
+    await db.refresh(db_job)
 
     # Schedule execution
     if job.schedule_delay_seconds > 0:
         background_tasks.add_task(
             _delayed_ingestion_job,
-            job_id,
+            db_job.id,
             job,
             job.schedule_delay_seconds,
         )
     else:
-        background_tasks.add_task(_execute_ingestion_job, job_id, job)
+        background_tasks.add_task(_execute_ingestion_job, db_job.id, job)
 
-    logger.info("Ingestion job created", job_id=str(job_id))
-
-    return IngestionJobResponse(**job_data)
+    logger.info("Ingestion job created", job_id=str(db_job.id))
+    return job_to_response(db_job)
 
 
 async def _delayed_ingestion_job(
@@ -221,71 +265,67 @@ async def _delayed_ingestion_job(
 
 async def _execute_ingestion_job(job_id: UUID, config: IngestionJobCreate) -> None:
     """Execute an ingestion job in the background."""
+    from app.core.database import async_session_factory
+
     logger.info("Executing ingestion job", job_id=str(job_id))
 
-    job = _ingestion_jobs[job_id]
-    job["status"] = "running"
-    job["started_at"] = datetime.utcnow()
+    async with async_session_factory() as db:
+        query = select(IngestionJob).where(IngestionJob.id == job_id)
+        result = await db.execute(query)
+        job = result.scalar_one_or_none()
 
-    try:
-        from app.agents.ingestion.base import SourceType
-        from app.agents.ingestion.orchestrator import IngestionOrchestrator
+        if not job:
+            logger.error("Job not found", job_id=str(job_id))
+            return
 
-        # Convert source strings to SourceType enums
-        source_types = [SourceType(s) for s in config.sources]
+        job.start_fetching(worker_id="background")
+        await db.commit()
 
-        orchestrator = IngestionOrchestrator(
-            sources=source_types,
-            parallel=True,
-        )
+        try:
+            from app.agents.ingestion.base import SourceType
+            from app.agents.ingestion.orchestrator import IngestionOrchestrator
 
-        # Set progress callback
-        def progress_callback(source: str, state):
-            job["records_fetched"] = state.metrics.records_fetched
-            job["records_processed"] = state.metrics.records_processed
-            job["records_indexed"] = state.metrics.records_indexed
-            job["records_failed"] = state.metrics.records_failed
-            job["entities_extracted"] = state.metrics.entities_extracted
-            job["relations_extracted"] = state.metrics.relations_extracted
-            if state.metrics.records_indexed > 0:
-                job["progress"] = min(
-                    0.95, state.metrics.records_indexed / config.max_results_per_source
-                )
+            # Convert source strings to SourceType enums
+            source_types = [SourceType(s) for s in config.sources]
 
-        orchestrator.set_progress_callback(progress_callback)
+            orchestrator = IngestionOrchestrator(
+                sources=source_types,
+                parallel=True,
+            )
 
-        result = await orchestrator.ingest(
-            query=config.query,
-            max_results_per_source=config.max_results_per_source,
-            extract_entities=config.extract_entities,
-            extract_relations=config.extract_relations,
-            index_to_stores=config.index_to_stores,
-        )
+            result = await orchestrator.ingest(
+                query=config.query,
+                max_results_per_source=config.max_results_per_source,
+                extract_entities=config.extract_entities,
+                extract_relations=config.extract_relations,
+                index_to_stores=config.index_to_stores,
+            )
 
-        job["status"] = "completed"
-        job["progress"] = 1.0
-        job["completed_at"] = datetime.utcnow()
+            # Update final metrics
+            metrics = result.get("metrics", {})
+            job.items_found = metrics.get("total_records_found", 0)
+            job.items_fetched = metrics.get("total_records_fetched", 0)
+            job.items_processed = metrics.get("total_records_processed", 0)
+            job.items_indexed = metrics.get("total_records_indexed", 0)
+            job.items_failed = metrics.get("total_records_failed", 0)
 
-        # Update final metrics
-        metrics = result.get("metrics", {})
-        job["records_fetched"] = metrics.get("total_records_fetched", 0)
-        job["records_processed"] = metrics.get("total_records_processed", 0)
-        job["records_indexed"] = metrics.get("total_records_indexed", 0)
-        job["records_failed"] = metrics.get("total_records_failed", 0)
-        job["entities_extracted"] = metrics.get("total_entities_extracted", 0)
-        job["relations_extracted"] = metrics.get("total_relations_extracted", 0)
+            if job.source_config:
+                job.source_config["entities_extracted"] = metrics.get("total_entities_extracted", 0)
+                job.source_config["relations_extracted"] = metrics.get("total_relations_extracted", 0)
 
-        logger.info(
-            "Ingestion job completed",
-            job_id=str(job_id),
-            records_indexed=job["records_indexed"],
-        )
+            job.complete()
+            await db.commit()
 
-    except Exception as e:
-        logger.error("Ingestion job failed", job_id=str(job_id), error=str(e))
-        job["status"] = "failed"
-        job["error"] = str(e)
-        job["completed_at"] = datetime.utcnow()
+            logger.info(
+                "Ingestion job completed",
+                job_id=str(job_id),
+                records_indexed=job.items_indexed,
+            )
+
+        except Exception as e:
+            logger.error("Ingestion job failed", job_id=str(job_id), error=str(e))
+            job.fail(str(e))
+            await db.commit()
 
 
 @router.get("/jobs", response_model=IngestionJobListResponse)
@@ -297,24 +337,44 @@ async def list_ingestion_jobs(
     db: AsyncSession = Depends(get_db),
 ) -> IngestionJobListResponse:
     """List ingestion jobs with filtering and pagination."""
-    items = list(_ingestion_jobs.values())
+    query = select(IngestionJob)
 
     # Apply filters
     if status:
-        items = [j for j in items if j["status"] == status]
+        try:
+            status_enum = IngestionJobStatusModel(status)
+            query = query.where(IngestionJob.status == status_enum)
+        except ValueError:
+            pass
     if source:
-        items = [j for j in items if source in j["sources"]]
+        query = query.where(IngestionJob.source == map_source_to_model(source))
+
+    # Get total count
+    count_query = select(func.count()).select_from(IngestionJob)
+    if status:
+        try:
+            status_enum = IngestionJobStatusModel(status)
+            count_query = count_query.where(IngestionJob.status == status_enum)
+        except ValueError:
+            pass
+    if source:
+        count_query = count_query.where(IngestionJob.source == map_source_to_model(source))
+
+    total_result = await db.execute(count_query)
+    total = total_result.scalar() or 0
 
     # Sort by created_at descending
-    items.sort(key=lambda x: x["created_at"], reverse=True)
+    query = query.order_by(desc(IngestionJob.created_at))
 
     # Paginate
-    total = len(items)
-    start = (page - 1) * page_size
-    end = start + page_size
+    offset = (page - 1) * page_size
+    query = query.offset(offset).limit(page_size)
+
+    result = await db.execute(query)
+    jobs = result.scalars().all()
 
     return IngestionJobListResponse(
-        items=[IngestionJobResponse(**j) for j in items[start:end]],
+        items=[job_to_response(j) for j in jobs],
         total=total,
         page=page,
         page_size=page_size,
@@ -327,10 +387,14 @@ async def get_ingestion_job(
     db: AsyncSession = Depends(get_db),
 ) -> IngestionJobResponse:
     """Get a specific ingestion job by ID."""
-    if job_id not in _ingestion_jobs:
+    query = select(IngestionJob).where(IngestionJob.id == job_id)
+    result = await db.execute(query)
+    job = result.scalar_one_or_none()
+
+    if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    return IngestionJobResponse(**_ingestion_jobs[job_id])
+    return job_to_response(job)
 
 
 @router.post("/jobs/{job_id}/cancel")
@@ -339,22 +403,23 @@ async def cancel_ingestion_job(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Cancel a running or pending ingestion job."""
-    if job_id not in _ingestion_jobs:
+    query = select(IngestionJob).where(IngestionJob.id == job_id)
+    result = await db.execute(query)
+    job = result.scalar_one_or_none()
+
+    if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    job = _ingestion_jobs[job_id]
-
-    if job["status"] not in ["pending", "running"]:
+    if job.is_terminal():
         raise HTTPException(
             status_code=400,
-            detail=f"Cannot cancel job in status: {job['status']}",
+            detail=f"Cannot cancel job in status: {job.status.value}",
         )
 
-    job["status"] = "cancelled"
-    job["completed_at"] = datetime.utcnow()
+    job.cancel()
+    await db.commit()
 
     logger.info("Ingestion job cancelled", job_id=str(job_id))
-
     return {"status": "cancelled", "job_id": str(job_id)}
 
 
@@ -365,37 +430,68 @@ async def retry_ingestion_job(
     db: AsyncSession = Depends(get_db),
 ) -> IngestionJobResponse:
     """Retry a failed ingestion job."""
-    if job_id not in _ingestion_jobs:
+    query = select(IngestionJob).where(IngestionJob.id == job_id)
+    result = await db.execute(query)
+    job = result.scalar_one_or_none()
+
+    if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    job = _ingestion_jobs[job_id]
-
-    if job["status"] != "failed":
+    if job.status != IngestionJobStatusModel.FAILED:
         raise HTTPException(
             status_code=400,
-            detail=f"Cannot retry job in status: {job['status']}",
+            detail=f"Cannot retry job in status: {job.status.value}",
         )
 
     # Reset job state
-    job["status"] = "pending"
-    job["progress"] = 0.0
-    job["error"] = None
-    job["started_at"] = None
-    job["completed_at"] = None
+    job.status = IngestionJobStatusModel.PENDING
+    job.progress = 0.0
+    job.error_message = None
+    job.started_at = None
+    job.completed_at = None
+    job.items_fetched = 0
+    job.items_processed = 0
+    job.items_indexed = 0
+    job.items_failed = 0
+
+    await db.commit()
+    await db.refresh(job)
 
     # Create config from stored job
     config = IngestionJobCreate(
-        query=job["query"],
-        sources=job["sources"],
-        priority=IngestionPriority(job["priority"]),
-        config=job.get("config"),
+        name=job.name,
+        query=job.query or "",
+        sources=job.source_config.get("sources", ["pubmed"]) if job.source_config else ["pubmed"],
+        priority=IngestionPriority(job.source_config.get("priority", "normal")) if job.source_config else IngestionPriority.NORMAL,
+        max_results_per_source=job.source_config.get("max_results_per_source", 100) if job.source_config else 100,
+        extract_entities=job.source_config.get("extract_entities", True) if job.source_config else True,
+        extract_relations=job.source_config.get("extract_relations", True) if job.source_config else True,
+        index_to_stores=job.source_config.get("index_to_stores", True) if job.source_config else True,
+        config=job.source_config.get("config") if job.source_config else None,
     )
 
     background_tasks.add_task(_execute_ingestion_job, job_id, config)
 
     logger.info("Ingestion job retry scheduled", job_id=str(job_id))
+    return job_to_response(job)
 
-    return IngestionJobResponse(**job)
+
+@router.delete("/jobs/{job_id}", status_code=204)
+async def delete_ingestion_job(
+    job_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Delete an ingestion job."""
+    query = select(IngestionJob).where(IngestionJob.id == job_id)
+    result = await db.execute(query)
+    job = result.scalar_one_or_none()
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    await db.delete(job)
+    await db.commit()
+    logger.info("Ingestion job deleted", job_id=str(job_id))
 
 
 @router.post("/recurring", response_model=RecurringJobResponse)
@@ -410,55 +506,46 @@ async def create_recurring_job(
         interval_hours=job.interval_hours,
     )
 
-    job_id = uuid4()
     now = datetime.utcnow()
 
-    job_data = {
-        "job_id": job_id,
-        "query": job.query,
-        "sources": job.sources,
-        "interval_hours": job.interval_hours,
-        "priority": job.priority.value,
-        "enabled": job.enabled,
-        "last_run": None,
-        "next_run": now if job.enabled else None,
-        "run_count": 0,
-        "created_at": now,
-        "max_results": job.max_results_per_source,
-    }
+    db_job = IngestionJob(
+        id=uuid4(),
+        name=f"Recurring: {job.query[:30]}",
+        query=job.query,
+        source=map_source_to_model(job.sources[0]) if job.sources else IngestionSourceModel.PUBMED,
+        source_config={
+            "sources": job.sources,
+            "priority": job.priority.value,
+            "max_results_per_source": job.max_results_per_source,
+            "interval_hours": job.interval_hours,
+            "enabled": job.enabled,
+            "run_count": 0,
+        },
+        status=IngestionJobStatusModel.PENDING,
+        is_scheduled=1 if job.enabled else 0,
+        schedule_cron=f"0 */{job.interval_hours} * * *",
+        next_run_at=now if job.enabled else None,
+        target_project_id=None,
+    )
 
-    _recurring_jobs[job_id] = job_data
+    db.add(db_job)
+    await db.commit()
+    await db.refresh(db_job)
 
-    # Register with scheduler
-    try:
-        from app.agents.ingestion.base import SourceType
-        from app.agents.ingestion.scheduler import TaskPriority, get_job_scheduler
+    logger.info("Recurring job created", job_id=str(db_job.id))
 
-        priority_map = {
-            "critical": TaskPriority.CRITICAL,
-            "high": TaskPriority.HIGH,
-            "normal": TaskPriority.NORMAL,
-            "low": TaskPriority.LOW,
-        }
-
-        job_scheduler = get_job_scheduler()
-
-        for source in job.sources:
-            await job_scheduler.add_recurring_job(
-                agent_type=SourceType(source),
-                query=job.query,
-                interval_seconds=job.interval_hours * 3600,
-                priority=priority_map.get(job.priority.value, TaskPriority.NORMAL),
-                config={"max_results": job.max_results_per_source},
-                start_immediately=job.enabled,
-            )
-
-    except Exception as e:
-        logger.warning("Failed to register with scheduler", error=str(e))
-
-    logger.info("Recurring job created", job_id=str(job_id))
-
-    return RecurringJobResponse(**job_data)
+    return RecurringJobResponse(
+        job_id=db_job.id,
+        query=db_job.query or "",
+        sources=job.sources,
+        interval_hours=job.interval_hours,
+        priority=job.priority.value,
+        enabled=job.enabled,
+        last_run=db_job.last_run_at,
+        next_run=db_job.next_run_at,
+        run_count=0,
+        created_at=db_job.created_at,
+    )
 
 
 @router.get("/recurring", response_model=list[RecurringJobResponse])
@@ -466,7 +553,29 @@ async def list_recurring_jobs(
     db: AsyncSession = Depends(get_db),
 ) -> list[RecurringJobResponse]:
     """List all recurring ingestion jobs."""
-    return [RecurringJobResponse(**j) for j in _recurring_jobs.values()]
+    query = select(IngestionJob).where(IngestionJob.is_scheduled == 1)
+    result = await db.execute(query)
+    jobs = result.scalars().all()
+
+    responses = []
+    for job in jobs:
+        config = job.source_config or {}
+        responses.append(
+            RecurringJobResponse(
+                job_id=job.id,
+                query=job.query or "",
+                sources=config.get("sources", []),
+                interval_hours=config.get("interval_hours", 24),
+                priority=config.get("priority", "normal"),
+                enabled=bool(job.is_scheduled),
+                last_run=job.last_run_at,
+                next_run=job.next_run_at,
+                run_count=config.get("run_count", 0),
+                created_at=job.created_at,
+            )
+        )
+
+    return responses
 
 
 @router.delete("/recurring/{job_id}")
@@ -475,13 +584,20 @@ async def delete_recurring_job(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Delete a recurring job."""
-    if job_id not in _recurring_jobs:
+    query = select(IngestionJob).where(
+        IngestionJob.id == job_id,
+        IngestionJob.is_scheduled == 1,
+    )
+    result = await db.execute(query)
+    job = result.scalar_one_or_none()
+
+    if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    del _recurring_jobs[job_id]
+    await db.delete(job)
+    await db.commit()
 
     logger.info("Recurring job deleted", job_id=str(job_id))
-
     return {"status": "deleted", "job_id": str(job_id)}
 
 
@@ -491,24 +607,45 @@ async def toggle_recurring_job(
     db: AsyncSession = Depends(get_db),
 ) -> RecurringJobResponse:
     """Enable or disable a recurring job."""
-    if job_id not in _recurring_jobs:
+    query = select(IngestionJob).where(
+        IngestionJob.id == job_id,
+        IngestionJob.is_scheduled == 1,
+    )
+    result = await db.execute(query)
+    job = result.scalar_one_or_none()
+
+    if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    job = _recurring_jobs[job_id]
-    job["enabled"] = not job["enabled"]
+    enabled = not bool(job.is_scheduled)
+    job.is_scheduled = 1 if enabled else 0
 
-    if job["enabled"]:
-        job["next_run"] = datetime.utcnow()
+    if enabled:
+        job.next_run_at = datetime.utcnow()
     else:
-        job["next_run"] = None
+        job.next_run_at = None
 
-    logger.info(
-        "Recurring job toggled",
-        job_id=str(job_id),
-        enabled=job["enabled"],
+    if job.source_config:
+        job.source_config["enabled"] = enabled
+
+    await db.commit()
+    await db.refresh(job)
+
+    config = job.source_config or {}
+    logger.info("Recurring job toggled", job_id=str(job_id), enabled=enabled)
+
+    return RecurringJobResponse(
+        job_id=job.id,
+        query=job.query or "",
+        sources=config.get("sources", []),
+        interval_hours=config.get("interval_hours", 24),
+        priority=config.get("priority", "normal"),
+        enabled=enabled,
+        last_run=job.last_run_at,
+        next_run=job.next_run_at,
+        run_count=config.get("run_count", 0),
+        created_at=job.created_at,
     )
-
-    return RecurringJobResponse(**job)
 
 
 @router.get("/agents/status", response_model=list[AgentStatusResponse])
@@ -522,7 +659,7 @@ async def get_agents_status(
         statuses.append(
             AgentStatusResponse(
                 agent_type=source_type.value,
-                status="idle",  # Would be populated from actual agent state
+                status="idle",
                 current_query=None,
                 records_processed=0,
                 last_activity=None,
@@ -543,11 +680,7 @@ async def upload_document(
     background_tasks: BackgroundTasks = None,
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """
-    Upload a custom document for ingestion.
-
-    Supports PDF, TXT, DOCX, and other common formats.
-    """
+    """Upload a custom document for ingestion."""
     logger.info("Document upload received", filename=file.filename)
 
     # Validate file type
@@ -571,14 +704,30 @@ async def upload_document(
     authors_list = [a.strip() for a in authors.split(",")] if authors else []
     keywords_list = [k.strip() for k in keywords.split(",")] if keywords else []
 
-    # Create document ID
-    doc_id = str(uuid4())
+    # Create ingestion job for the document
+    db_job = IngestionJob(
+        id=uuid4(),
+        name=f"Document: {title or file.filename}",
+        source=IngestionSourceModel.FILE_UPLOAD,
+        source_config={
+            "filename": file.filename,
+            "title": title,
+            "authors": authors_list,
+            "keywords": keywords_list,
+            "content_type": file.content_type,
+            "size_bytes": len(content),
+        },
+        status=IngestionJobStatusModel.PENDING,
+    )
+
+    db.add(db_job)
+    await db.commit()
 
     # Process in background
     if background_tasks:
         background_tasks.add_task(
             _process_uploaded_document,
-            doc_id,
+            str(db_job.id),
             content,
             file.filename,
             title,
@@ -587,7 +736,7 @@ async def upload_document(
         )
 
     return {
-        "document_id": doc_id,
+        "document_id": str(db_job.id),
         "filename": file.filename,
         "size_bytes": len(content),
         "status": "processing",
@@ -603,6 +752,8 @@ async def _process_uploaded_document(
     keywords: list[str],
 ) -> None:
     """Process an uploaded document."""
+    from app.core.database import async_session_factory
+
     try:
         from app.agents.ingestion.orchestrator import IngestionOrchestrator
 
@@ -617,10 +768,27 @@ async def _process_uploaded_document(
             },
         )
 
+        # Update job status
+        async with async_session_factory() as db:
+            query = select(IngestionJob).where(IngestionJob.id == UUID(doc_id))
+            result = await db.execute(query)
+            job = result.scalar_one_or_none()
+            if job:
+                job.complete()
+                await db.commit()
+
         logger.info("Document processed", doc_id=doc_id)
 
     except Exception as e:
         logger.error("Document processing failed", doc_id=doc_id, error=str(e))
+
+        async with async_session_factory() as db:
+            query = select(IngestionJob).where(IngestionJob.id == UUID(doc_id))
+            result = await db.execute(query)
+            job = result.scalar_one_or_none()
+            if job:
+                job.fail(str(e))
+                await db.commit()
 
 
 @router.get("/sources")
@@ -674,8 +842,6 @@ async def update_source_config(
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Invalid source type: {source_type}")
 
-    # Would update actual configuration here
-
     return {
         "status": "updated",
         "source_type": source_type,
@@ -688,18 +854,26 @@ async def get_queue_stats(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Get ingestion queue statistics."""
-    try:
-        from app.agents.ingestion.scheduler import get_scheduler
+    # Get counts by status
+    stats = {}
+    for status in IngestionJobStatusModel:
+        count_query = select(func.count()).select_from(IngestionJob).where(IngestionJob.status == status)
+        result = await db.execute(count_query)
+        stats[status.value] = result.scalar() or 0
 
-        scheduler = get_scheduler()
-        return scheduler.get_queue_stats()
+    # Get totals
+    totals_query = select(
+        func.sum(IngestionJob.items_indexed).label("total_indexed"),
+        func.sum(IngestionJob.items_failed).label("total_failed"),
+    )
+    result = await db.execute(totals_query)
+    row = result.first()
 
-    except Exception as e:
-        logger.error("Failed to get queue stats", error=str(e))
-        return {
-            "pending": 0,
-            "running": 0,
-            "completed": 0,
-            "failed": 0,
-            "error": str(e),
-        }
+    return {
+        "pending": stats.get("pending", 0),
+        "running": stats.get("fetching", 0) + stats.get("processing", 0) + stats.get("indexing", 0),
+        "completed": stats.get("completed", 0) + stats.get("partial", 0),
+        "failed": stats.get("failed", 0),
+        "total_indexed": row.total_indexed or 0 if row else 0,
+        "total_failed": row.total_failed or 0 if row else 0,
+    }

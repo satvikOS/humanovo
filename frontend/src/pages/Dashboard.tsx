@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   FiFolder,
@@ -22,20 +23,24 @@ interface StatCard {
   color: string
 }
 
-const stats: StatCard[] = [
-  { label: 'Active Projects', value: 12, change: '+2 this week', trend: 'up', icon: FiFolder, color: 'primary' },
-  { label: 'Hypotheses', value: 48, change: '+8 this week', trend: 'up', icon: FiZap, color: 'warning' },
-  { label: 'Running Simulations', value: 3, change: '2 queued', trend: 'neutral', icon: FiActivity, color: 'success' },
-  { label: 'Evidence Items', value: '2.4k', change: '+124 this week', trend: 'up', icon: FiDatabase, color: 'info' },
+// Stats fetched from API - initially empty
+const defaultStats: StatCard[] = [
+  { label: 'Active Projects', value: 0, change: '', trend: 'neutral', icon: FiFolder, color: 'primary' },
+  { label: 'Hypotheses', value: 0, change: '', trend: 'neutral', icon: FiZap, color: 'warning' },
+  { label: 'Running Simulations', value: 0, change: '', trend: 'neutral', icon: FiActivity, color: 'success' },
+  { label: 'Evidence Items', value: 0, change: '', trend: 'neutral', icon: FiDatabase, color: 'info' },
 ]
 
-const recentActivity = [
-  { id: 1, type: 'hypothesis', action: 'created', title: 'BRCA1 pathway inhibition hypothesis', project: 'Breast Cancer Study', time: '2 hours ago', status: 'draft' },
-  { id: 2, type: 'simulation', action: 'completed', title: 'Monte Carlo simulation #47', project: 'Drug Response Modeling', time: '4 hours ago', status: 'success' },
-  { id: 3, type: 'evidence', action: 'ingested', title: '23 new papers from PubMed', project: 'TP53 Research', time: '6 hours ago', status: 'info' },
-  { id: 4, type: 'hypothesis', action: 'validated', title: 'MDM2-p53 interaction model', project: 'TP53 Research', time: '1 day ago', status: 'success' },
-  { id: 5, type: 'project', action: 'created', title: 'Immunotherapy Response Prediction', project: null, time: '2 days ago', status: 'info' },
-]
+// Activity fetched from API
+interface ActivityItem {
+  id: number
+  type: 'hypothesis' | 'simulation' | 'evidence' | 'project'
+  action: string
+  title: string
+  project: string | null
+  time: string
+  status: string
+}
 
 const quickActions = [
   { label: 'New Project', icon: FiFolder, href: '/projects', color: 'bg-primary-500/20 text-primary-400' },
@@ -74,7 +79,7 @@ function StatCardComponent({ stat }: { stat: StatCard }) {
   )
 }
 
-function ActivityItem({ activity }: { activity: typeof recentActivity[0] }) {
+function ActivityItemComponent({ activity }: { activity: ActivityItem }) {
   const icons = {
     hypothesis: FiZap,
     simulation: FiActivity,
@@ -150,13 +155,14 @@ function KnowledgeGraphPreview() {
   )
 }
 
-function ActiveSimulations() {
-  const simulations = [
-    { id: 1, name: 'Drug Efficacy Monte Carlo', progress: 67, status: 'running' },
-    { id: 2, name: 'Pathway Analysis #23', progress: 89, status: 'running' },
-    { id: 3, name: 'Protein Interaction Sim', progress: 100, status: 'completed' },
-  ]
+interface Simulation {
+  id: number
+  name: string
+  progress: number
+  status: 'running' | 'completed' | 'queued'
+}
 
+function ActiveSimulations({ simulations = [] }: { simulations?: Simulation[] }) {
   return (
     <div className="card h-full">
       <div className="flex items-center justify-between mb-3">
@@ -166,7 +172,11 @@ function ActiveSimulations() {
         </Link>
       </div>
       <div className="space-y-3">
-        {simulations.map(sim => (
+        {simulations.length === 0 ? (
+          <div className="text-center py-4 text-[var(--color-text-muted)] text-xs">
+            No active simulations
+          </div>
+        ) : simulations.map(sim => (
           <div key={sim.id} className="p-2 bg-[var(--color-bg)] rounded">
             <div className="flex items-center justify-between text-xs mb-1.5">
               <span className="font-medium truncate">{sim.name}</span>
@@ -193,8 +203,22 @@ function ActiveSimulations() {
   )
 }
 
+interface Project {
+  id: string
+  name: string
+  hypotheses: number
+  evidence: number
+  status: 'active' | 'draft' | 'completed'
+}
+
 export default function Dashboard() {
   const { addTab } = useWorkspace()
+
+  // State for data fetched from API (empty by default)
+  const [stats] = useState<StatCard[]>(defaultStats)
+  const [recentActivity] = useState<ActivityItem[]>([])
+  const [simulations] = useState<Simulation[]>([])
+  const [projects] = useState<Project[]>([])
 
   return (
     <div className="p-4 space-y-4">
@@ -227,20 +251,24 @@ export default function Dashboard() {
         <div className="col-span-2 card">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-medium">Recent Activity</h3>
-            <button className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] flex items-center gap-1">
+            <Link to="/timeline" className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] flex items-center gap-1">
               <FiClock className="w-3 h-3" />
               View Timeline
-            </button>
+            </Link>
           </div>
           <div className="divide-y divide-[var(--color-border)]">
-            {recentActivity.map(activity => (
-              <ActivityItem key={activity.id} activity={activity} />
+            {recentActivity.length === 0 ? (
+              <div className="text-center py-4 text-[var(--color-text-muted)] text-xs">
+                No recent activity
+              </div>
+            ) : recentActivity.map(activity => (
+              <ActivityItemComponent key={activity.id} activity={activity} />
             ))}
           </div>
         </div>
 
         <div className="row-span-2">
-          <ActiveSimulations />
+          <ActiveSimulations simulations={simulations} />
         </div>
 
         <div className="col-span-2">
@@ -256,14 +284,17 @@ export default function Dashboard() {
           </Link>
         </div>
         <div className="grid grid-cols-4 gap-3">
-          {[
-            { name: 'TP53 Mutation Research', hypotheses: 12, evidence: 234, status: 'active' },
-            { name: 'Breast Cancer Biomarkers', hypotheses: 8, evidence: 156, status: 'active' },
-            { name: 'Drug Response Modeling', hypotheses: 15, evidence: 312, status: 'active' },
-            { name: 'Immunotherapy Targets', hypotheses: 5, evidence: 89, status: 'draft' },
-          ].map(project => (
+          {projects.length === 0 ? (
+            <div className="col-span-4 text-center py-8 text-[var(--color-text-muted)]">
+              <FiFolder className="w-8 h-8 mx-auto mb-2 opacity-50" />
+              <p className="text-sm">No projects yet</p>
+              <Link to="/projects" className="text-xs text-primary-400 hover:text-primary-300 mt-1 inline-block">
+                Create your first project
+              </Link>
+            </div>
+          ) : projects.map(project => (
             <button
-              key={project.name}
+              key={project.id}
               onClick={() => addTab({ type: 'project', title: project.name })}
               className="p-3 bg-[var(--color-bg)] rounded-lg border border-[var(--color-border)] hover:border-[var(--color-border-strong)] text-left transition-colors"
             >

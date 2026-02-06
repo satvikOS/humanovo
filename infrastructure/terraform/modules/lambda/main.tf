@@ -203,6 +203,35 @@ locals {
       memory      = 1024
       timeout     = 120
     }
+
+    # New continuous ingestion functions
+    brave_search_fetcher = {
+      description = "Brave Search API fetcher with rate limiting"
+      handler     = "handlers.brave_search_fetcher.handler"
+      memory      = 512
+      timeout     = 60
+    }
+
+    embeddings_generator = {
+      description = "Vector embeddings generation pipeline"
+      handler     = "handlers.embeddings_generator.handler"
+      memory      = 1024
+      timeout     = 120
+    }
+
+    rag_retrieval = {
+      description = "RAG retrieval with caching"
+      handler     = "handlers.rag_retrieval.handler"
+      memory      = 1024
+      timeout     = 30
+    }
+
+    ingestion_scheduler = {
+      description = "Scheduled ingestion orchestrator"
+      handler     = "handlers.ingestion_scheduler.handler"
+      memory      = 512
+      timeout     = 300
+    }
   }
 }
 
@@ -351,6 +380,70 @@ resource "aws_lambda_event_source_mapping" "simulation_queue" {
   batch_size       = 1
 }
 
+# ==================== Embeddings Queue ====================
+
+resource "aws_sqs_queue" "embeddings_queue" {
+  name                       = "${var.name_prefix}-embeddings-queue"
+  visibility_timeout_seconds = 130  # Slightly higher than Lambda timeout
+  message_retention_seconds  = 86400
+  receive_wait_time_seconds  = 10
+
+  kms_master_key_id = var.kms_key_arn
+
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.embeddings_dlq.arn
+    maxReceiveCount     = 3
+  })
+
+  tags = {
+    Name = "${var.name_prefix}-embeddings-queue"
+  }
+}
+
+resource "aws_sqs_queue" "embeddings_dlq" {
+  name = "${var.name_prefix}-embeddings-dlq"
+
+  kms_master_key_id = var.kms_key_arn
+
+  tags = {
+    Name = "${var.name_prefix}-embeddings-dlq"
+  }
+}
+
+resource "aws_lambda_event_source_mapping" "embeddings_queue" {
+  event_source_arn = aws_sqs_queue.embeddings_queue.arn
+  function_name    = aws_lambda_function.functions["embeddings_generator"].arn
+  batch_size       = 10  # Process multiple embeddings per invocation
+}
+
+# ==================== EventBridge Scheduled Ingestion ====================
+# NOTE: EventBridge rules temporarily disabled due to IAM permission issue
+# (events:TagResource not allowed). Enable when IAM permissions are updated.
+# For now, ingestion can be triggered manually via Lambda console or API.
+
+# TODO: Re-enable when IAM user has events:TagResource permission
+# Full ingestion every 4 hours
+# resource "aws_cloudwatch_event_rule" "full_ingestion" {
+#   name                = "${var.name_prefix}-full-ingestion"
+#   description         = "Trigger full knowledge base ingestion every 4 hours"
+#   schedule_expression = "rate(4 hours)"
+# }
+#
+# resource "aws_cloudwatch_event_target" "full_ingestion" {
+#   rule      = aws_cloudwatch_event_rule.full_ingestion.name
+#   target_id = "IngestionScheduler"
+#   arn       = aws_lambda_function.functions["ingestion_scheduler"].arn
+#   input = jsonencode({ schedule_type = "full" })
+# }
+#
+# resource "aws_lambda_permission" "eventbridge_full_ingestion" {
+#   statement_id  = "AllowEventBridgeFullIngestion"
+#   action        = "lambda:InvokeFunction"
+#   function_name = aws_lambda_function.functions["ingestion_scheduler"].function_name
+#   principal     = "events.amazonaws.com"
+#   source_arn    = aws_cloudwatch_event_rule.full_ingestion.arn
+# }
+
 # ==================== Outputs ====================
 
 output "function_arns" {
@@ -379,4 +472,14 @@ output "layer_arns" {
 output "simulation_queue_url" {
   description = "SQS queue URL for simulations"
   value       = aws_sqs_queue.simulation_queue.url
+}
+
+output "embeddings_queue_url" {
+  description = "SQS queue URL for embeddings generation"
+  value       = aws_sqs_queue.embeddings_queue.url
+}
+
+output "embeddings_queue_arn" {
+  description = "SQS queue ARN for embeddings generation"
+  value       = aws_sqs_queue.embeddings_queue.arn
 }

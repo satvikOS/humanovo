@@ -75,8 +75,8 @@ jobs:
         run: |
           BUCKET="${{ steps.bucket.outputs.BUCKET }}"
 
-          # Clear bucket and upload fresh
-          aws s3 rm "s3://$BUCKET" --recursive
+          # Sync frontend files WITHOUT --delete to preserve Lambda artifacts
+          # The --delete flag with --exclude doesn't protect excluded files from deletion
           aws s3 sync dist/ "s3://$BUCKET/" --sse AES256
 
           echo "Deployed to s3://$BUCKET/"

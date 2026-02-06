@@ -39,12 +39,17 @@ const statusConfig: Record<EvidenceItem['status'], { icon: typeof FiCheckCircle;
   disputed: { icon: FiAlertCircle, color: 'text-error-400', label: 'Disputed' },
 }
 
+interface IngestionItem {
+  id: number
+  source: string
+  status: 'processing' | 'queued' | 'completed'
+  progress: number
+  items: number
+}
+
 function IngestionQueue() {
-  const [queue] = useState([
-    { id: 1, source: 'PubMed', status: 'processing', progress: 67, items: 124 },
-    { id: 2, source: 'ClinicalTrials.gov', status: 'queued', progress: 0, items: 45 },
-    { id: 3, source: 'bioRxiv', status: 'completed', progress: 100, items: 89 },
-  ])
+  // Queue data fetched from API (empty by default)
+  const [queue] = useState<IngestionItem[]>([])
 
   return (
     <div className="card">
@@ -56,7 +61,11 @@ function IngestionQueue() {
         </button>
       </div>
       <div className="space-y-2">
-        {queue.map(item => (
+        {queue.length === 0 ? (
+          <div className="text-center py-4 text-[var(--color-text-muted)] text-xs">
+            No active ingestion jobs
+          </div>
+        ) : queue.map(item => (
           <div key={item.id} className="flex items-center gap-3 p-2 bg-[var(--color-bg)] rounded">
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between text-xs mb-1">

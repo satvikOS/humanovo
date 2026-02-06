@@ -111,35 +111,10 @@ export default function KnowledgeGraph() {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
-  // Mock graph data (in production, this comes from API)
+  // Graph data fetched from API (empty by default)
   const [graphData] = useState<{ nodes: GraphNode[], edges: GraphEdge[] }>({
-    nodes: [
-      { id: '1', label: 'BRCA1', type: 'gene', confidence: 0.95, sources: 150 },
-      { id: '2', label: 'Breast Cancer', type: 'disease', confidence: 0.92, sources: 500 },
-      { id: '3', label: 'Trastuzumab', type: 'drug', confidence: 0.88, sources: 300 },
-      { id: '4', label: 'HER2', type: 'biomarker', confidence: 0.90, sources: 400 },
-      { id: '5', label: 'PI3K-AKT Pathway', type: 'pathway', confidence: 0.85, sources: 200 },
-      { id: '6', label: 'T-DXd', type: 'adc', confidence: 0.87, sources: 120 },
-      { id: '7', label: 'HER2 Antigen', type: 'antigen', confidence: 0.89, sources: 250 },
-      { id: '8', label: 'MCF-7', type: 'cell_type', confidence: 0.82, sources: 180 },
-    ],
-    edges: [
-      { id: 'e1', source: '1', target: '2', relation: 'causes', confidence: 0.85, evidenceCount: 45, evidence: [
-        { text: 'BRCA1 mutations significantly increase breast cancer risk...', source: 'NEJM 2023', confidence: 0.92 },
-        { text: 'Germline BRCA1 variants associated with hereditary breast cancer...', source: 'Nature Genetics', confidence: 0.88 },
-      ]},
-      { id: 'e2', source: '3', target: '2', relation: 'treats', confidence: 0.92, evidenceCount: 120, evidence: [
-        { text: 'Trastuzumab significantly improves outcomes in HER2+ breast cancer...', source: 'JCO 2022', confidence: 0.95 },
-      ]},
-      { id: 'e3', source: '3', target: '4', relation: 'targets', confidence: 0.95, evidenceCount: 200, evidence: [
-        { text: 'Trastuzumab binds to the extracellular domain of HER2...', source: 'Cell', confidence: 0.98 },
-      ]},
-      { id: 'e4', source: '4', target: '5', relation: 'activates', confidence: 0.78, evidenceCount: 30, evidence: [] },
-      { id: 'e5', source: '6', target: '7', relation: 'targets', confidence: 0.91, evidenceCount: 80, evidence: [] },
-      { id: 'e6', source: '6', target: '2', relation: 'treats', confidence: 0.88, evidenceCount: 60, evidence: [] },
-      { id: 'e7', source: '4', target: '2', relation: 'biomarker_of', confidence: 0.93, evidenceCount: 150, evidence: [] },
-      { id: 'e8', source: '8', target: '4', relation: 'expresses', confidence: 0.80, evidenceCount: 25, evidence: [] },
-    ],
+    nodes: [],
+    edges: [],
   })
 
   const { data: searchResults } = useQuery({
@@ -728,12 +703,14 @@ export default function KnowledgeGraph() {
                       </div>
                     )}
 
-                    <div>
-                      <label className="text-secondary-400 text-xs font-medium">Confidence</label>
-                      <div className="mt-1">
-                        {getConfidenceBadge(0.92)}
+                    {selectedEntity.properties?.confidence !== undefined && (
+                      <div>
+                        <label className="text-secondary-400 text-xs font-medium">Confidence</label>
+                        <div className="mt-1">
+                          {getConfidenceBadge(Number(selectedEntity.properties.confidence))}
+                        </div>
                       </div>
-                    </div>
+                    )}
 
                     {selectedEntity.aliases && selectedEntity.aliases.length > 0 && (
                       <div>
@@ -869,43 +846,8 @@ export default function KnowledgeGraph() {
 
                   <div className="mt-4">
                     <label className="text-secondary-400 text-xs font-medium mb-2 block">Confidence Breakdown</label>
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-secondary-400">Source Quality</span>
-                        <div className="flex items-center space-x-2">
-                          <div className="w-24 h-1.5 bg-secondary-700 rounded-full overflow-hidden">
-                            <div className="h-full bg-emerald-500 rounded-full" style={{ width: '85%' }} />
-                          </div>
-                          <span className="text-secondary-300">0.85</span>
-                        </div>
-                      </div>
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-secondary-400">Citation Score</span>
-                        <div className="flex items-center space-x-2">
-                          <div className="w-24 h-1.5 bg-secondary-700 rounded-full overflow-hidden">
-                            <div className="h-full bg-blue-500 rounded-full" style={{ width: '72%' }} />
-                          </div>
-                          <span className="text-secondary-300">0.72</span>
-                        </div>
-                      </div>
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-secondary-400">Claim Strength</span>
-                        <div className="flex items-center space-x-2">
-                          <div className="w-24 h-1.5 bg-secondary-700 rounded-full overflow-hidden">
-                            <div className="h-full bg-purple-500 rounded-full" style={{ width: '90%' }} />
-                          </div>
-                          <span className="text-secondary-300">0.90</span>
-                        </div>
-                      </div>
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-secondary-400">Model Certainty</span>
-                        <div className="flex items-center space-x-2">
-                          <div className="w-24 h-1.5 bg-secondary-700 rounded-full overflow-hidden">
-                            <div className="h-full bg-amber-500 rounded-full" style={{ width: '78%' }} />
-                          </div>
-                          <span className="text-secondary-300">0.78</span>
-                        </div>
-                      </div>
+                    <div className="text-center text-secondary-400 text-xs py-4">
+                      No confidence breakdown available
                     </div>
                   </div>
                 </>
