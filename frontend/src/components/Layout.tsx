@@ -32,14 +32,13 @@ const mainNavItems = [
   { to: '/evidence', icon: FiDatabase, label: 'Evidence', shortcut: '3' },
   { to: '/knowledge', icon: FiShare2, label: 'Knowledge', shortcut: '4' },
   { to: '/hypotheses', icon: FiZap, label: 'Hypotheses', shortcut: '5' },
-  { to: '/simulations', icon: FiActivity, label: 'Simulations', shortcut: '6' },
+  { to: '/agents', icon: FiActivity, label: 'Discovery', shortcut: '6' },
   { to: '/workbench', icon: FiBox, label: 'Workbench', shortcut: '7' },
   { to: '/anatomy', icon: FiUser, label: '3D Anatomy', shortcut: '8' },
 ]
 
 const secondaryNavItems = [
   { to: '/notebook', icon: FiBook, label: 'Notebook' },
-  { to: '/agents', icon: FiUsers, label: 'Agents' },
   { to: '/timeline', icon: FiClock, label: 'Timeline' },
   { to: '/search', icon: FiSearch, label: 'Search' },
 ]

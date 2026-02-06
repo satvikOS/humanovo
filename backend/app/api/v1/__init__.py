@@ -15,9 +15,9 @@ from app.api.v1.endpoints import (
     ingestion_ws,
     knowledge,
     monitoring,
+    orchestrator,
     projects,
     rag,
-    simulation,
     websocket,
 )
 
@@ -28,7 +28,6 @@ router.include_router(projects.router, prefix="/projects", tags=["projects"])
 router.include_router(hypotheses.router, prefix="/hypotheses", tags=["hypotheses"])
 router.include_router(evidence.router, prefix="/evidence", tags=["evidence"])
 router.include_router(knowledge.router, prefix="/knowledge", tags=["knowledge"])
-router.include_router(simulation.router, prefix="/simulation", tags=["simulation"])
 router.include_router(agents.router, prefix="/agents", tags=["agents"])
 router.include_router(websocket.router, prefix="/ws", tags=["websocket"])
 
@@ -40,3 +39,6 @@ router.include_router(monitoring.router, prefix="/monitoring", tags=["monitoring
 
 # Disease Discovery endpoint
 router.include_router(discovery.router)
+
+# Parallel Discovery Orchestrator (replaces simulation)
+router.include_router(orchestrator.router)
