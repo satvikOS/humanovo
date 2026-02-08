@@ -1,4 +1,4 @@
-name: Deploy GenUp
+name: Deploy Humanovo
 
 on:
   push:
@@ -94,13 +94,21 @@ jobs:
             exit 0
           fi
 
-          # Invalidate cache
-          aws cloudfront create-invalidation --distribution-id "$DIST_ID" --paths "/*"
+          # Invalidate cache and wait for propagation
+          INVALIDATION_ID=$(aws cloudfront create-invalidation \
+            --distribution-id "$DIST_ID" \
+            --paths "/*" \
+            --query "Invalidation.Id" --output text)
+
+          echo "Waiting for CloudFront invalidation $INVALIDATION_ID to complete..."
+          aws cloudfront wait invalidation-completed \
+            --distribution-id "$DIST_ID" \
+            --id "$INVALIDATION_ID"
 
           # Get URL
           DOMAIN=$(aws cloudfront get-distribution --id "$DIST_ID" --query "Distribution.DomainName" --output text)
           echo "URL=https://$DOMAIN" >> $GITHUB_OUTPUT
-          echo "Invalidated distribution: $DIST_ID"
+          echo "Invalidation $INVALIDATION_ID complete. Live at https://$DOMAIN"
 
       - name: Summary
         run: |
