@@ -4,7 +4,7 @@ import {
   FiHome,
   FiFolder,
   FiZap,
-  FiShare2,
+
   FiActivity,
   FiSettings,
   FiDatabase,
@@ -30,11 +30,10 @@ const mainNavItems = [
   { to: '/dashboard', icon: FiHome, label: 'Dashboard', shortcut: '1' },
   { to: '/projects', icon: FiFolder, label: 'Projects', shortcut: '2' },
   { to: '/evidence', icon: FiDatabase, label: 'Evidence', shortcut: '3' },
-  { to: '/knowledge', icon: FiShare2, label: 'Knowledge', shortcut: '4' },
-  { to: '/hypotheses', icon: FiZap, label: 'Hypotheses', shortcut: '5' },
-  { to: '/agents', icon: FiActivity, label: 'Discovery', shortcut: '6' },
-  { to: '/workbench', icon: FiBox, label: 'Workbench', shortcut: '7' },
-  { to: '/anatomy', icon: FiUser, label: '3D Anatomy', shortcut: '8' },
+  { to: '/hypotheses', icon: FiZap, label: 'Hypotheses', shortcut: '4' },
+  { to: '/agents', icon: FiActivity, label: 'Discovery', shortcut: '5' },
+  { to: '/workbench', icon: FiBox, label: 'Workbench', shortcut: '6' },
+  { to: '/anatomy', icon: FiUser, label: '3D Anatomy', shortcut: '7' },
 ]
 
 const secondaryNavItems = [
@@ -163,9 +162,9 @@ export default function Layout() {
         <div className="h-10 flex items-center px-3 border-b border-[var(--color-border)]">
           <div className="flex items-center gap-2">
             <div className="w-6 h-6 bg-gradient-to-br from-primary-400 to-primary-600 rounded flex items-center justify-center">
-              <span className="text-white font-bold text-xs">G</span>
+              <span className="text-white font-bold text-xs">H</span>
             </div>
-            <span className="text-sm font-semibold text-[var(--color-text)]">GenUp</span>
+            <span className="text-sm font-semibold text-[var(--color-text)]">Humanovo</span>
             <span className="badge badge-info ml-auto">v0.1</span>
           </div>
         </div>

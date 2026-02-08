@@ -1,5 +1,5 @@
 """
-GenUp API v1 Router
+Humanovo API v1 Router
 
 Aggregates all v1 API endpoints.
 """

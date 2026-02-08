@@ -1,5 +1,5 @@
 """
-GenUp API Router
+Humanovo API Router
 
 Central router aggregating all API endpoints.
 """

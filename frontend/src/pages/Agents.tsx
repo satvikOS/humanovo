@@ -13,7 +13,11 @@ import {
   FiSettings,
   FiChevronDown,
   FiChevronUp,
-  FiAward
+  FiAward,
+  FiFileText,
+  FiPlus,
+  FiX,
+  FiDownload,
 } from 'react-icons/fi'
 import clsx from 'clsx'
 
@@ -31,6 +35,12 @@ interface OrchestratorStats {
   current_best_confidence: number
   runtime_seconds: number
   agents_by_role: Record<string, number>
+  models_active?: string[]
+  token_pool_stats?: {
+    global_tokens_used: number
+    requests_per_model: Record<string, number>
+    errors_per_model: Record<string, number>
+  }
   learning_stats: {
     total_explored: number
     low_value_paths: number
@@ -47,7 +57,14 @@ interface Hypothesis {
   confidence: number
   model_used: string
   validated: boolean
+  external_factors?: Array<Record<string, string>>
   created_at?: string
+}
+
+interface ExternalFactor {
+  name: string
+  category: 'nutrient' | 'chemical' | 'drug' | 'compound' | 'element'
+  interaction: string
 }
 
 interface DiscoveryConfig {
@@ -56,9 +73,17 @@ interface DiscoveryConfig {
   focusEntities: string[]
   maxAgents: number
   targetConfidence: number
+  externalFactors: ExternalFactor[]
 }
 
-// Agent configurations for display
+// Model configurations for display
+const modelInfo = [
+  { id: 'llama_maverick', name: 'Llama Maverick', color: 'bg-blue-500', desc: 'Fast exploration' },
+  { id: 'deepseek_r1', name: 'DeepSeek R1', color: 'bg-yellow-500', desc: 'Deep reasoning' },
+  { id: 'kimi_25', name: 'Kimi 2.5', color: 'bg-purple-500', desc: 'Long-context analysis' },
+  { id: 'gpt_oss_120b', name: 'GPT OSS 120B', color: 'bg-green-500', desc: 'Large-parameter reasoning' },
+]
+
 const agentRoles = [
   {
     role: 'explorer' as AgentRole,
@@ -87,7 +112,7 @@ const agentRoles = [
   {
     role: 'synthesizer' as AgentRole,
     name: 'Synthesizer Agents',
-    description: 'Combine findings into unified hypotheses',
+    description: 'Combine findings with Kimi 2.5 long context',
     icon: FiLayers,
     color: 'text-purple-400 bg-purple-500/20',
     percentage: 10,
@@ -110,6 +135,8 @@ const discoveryTypes = [
   { value: 'drug_repurposing', label: 'Drug Repurposing', description: 'Existing drugs for new uses' },
 ]
 
+const factorCategories = ['nutrient', 'chemical', 'drug', 'compound', 'element'] as const
+
 const API_BASE = '/api/v1'
 
 export default function Agents() {
@@ -119,6 +146,10 @@ export default function Agents() {
   const [hypotheses, setHypotheses] = useState<Hypothesis[]>([])
   const [selectedHypothesis, setSelectedHypothesis] = useState<Hypothesis | null>(null)
 
+  // Paper generation
+  const [generatingPaper, setGeneratingPaper] = useState(false)
+  const [paperMarkdown, setPaperMarkdown] = useState<string | null>(null)
+
   // Configuration
   const [config, setConfig] = useState<DiscoveryConfig>({
     disease: '',
@@ -126,9 +157,16 @@ export default function Agents() {
     focusEntities: [],
     maxAgents: 1000,
     targetConfidence: 0.95,
+    externalFactors: [],
   })
   const [focusEntityInput, setFocusEntityInput] = useState('')
   const [showConfig, setShowConfig] = useState(true)
+  const [showFactors, setShowFactors] = useState(false)
+
+  // External factor input
+  const [factorName, setFactorName] = useState('')
+  const [factorCategory, setFactorCategory] = useState<ExternalFactor['category']>('nutrient')
+  const [factorInteraction, setFactorInteraction] = useState('')
 
   // WebSocket connection
   const wsRef = useRef<WebSocket | null>(null)
@@ -142,7 +180,6 @@ export default function Agents() {
 
       ws.onopen = () => {
         setWsConnected(true)
-        console.log('WebSocket connected')
       }
 
       ws.onmessage = (event) => {
@@ -163,10 +200,9 @@ export default function Agents() {
 
             case 'hypothesis':
               setHypotheses(prev => {
-                // Add new hypothesis at the beginning, avoid duplicates
                 const exists = prev.some(h => h.id === message.data.id)
                 if (exists) return prev
-                return [message.data, ...prev].slice(0, 100) // Keep last 100
+                return [message.data, ...prev].slice(0, 100)
               })
               break
 
@@ -185,13 +221,10 @@ export default function Agents() {
 
       ws.onclose = () => {
         setWsConnected(false)
-        // Reconnect after 3 seconds
         setTimeout(connectWebSocket, 3000)
       }
 
-      ws.onerror = (error) => {
-        console.error('WebSocket error:', error)
-      }
+      ws.onerror = () => {}
 
       wsRef.current = ws
     }
@@ -240,6 +273,7 @@ export default function Agents() {
           discovery_type: config.discoveryType,
           max_agents: config.maxAgents,
           target_confidence: config.targetConfidence,
+          external_factors: config.externalFactors,
         }),
       })
 
@@ -247,6 +281,7 @@ export default function Agents() {
         setState('running')
         setShowConfig(false)
         setHypotheses([])
+        setPaperMarkdown(null)
       } else {
         const error = await response.json()
         alert(`Failed to start: ${error.detail}`)
@@ -260,9 +295,7 @@ export default function Agents() {
   const pauseDiscovery = useCallback(async () => {
     try {
       const response = await fetch(`${API_BASE}/orchestrator/pause`, { method: 'POST' })
-      if (response.ok) {
-        setState('paused')
-      }
+      if (response.ok) setState('paused')
     } catch (e) {
       console.error('Failed to pause:', e)
     }
@@ -271,9 +304,7 @@ export default function Agents() {
   const resumeDiscovery = useCallback(async () => {
     try {
       const response = await fetch(`${API_BASE}/orchestrator/resume`, { method: 'POST' })
-      if (response.ok) {
-        setState('running')
-      }
+      if (response.ok) setState('running')
     } catch (e) {
       console.error('Failed to resume:', e)
     }
@@ -282,13 +313,41 @@ export default function Agents() {
   const stopDiscovery = useCallback(async () => {
     try {
       const response = await fetch(`${API_BASE}/orchestrator/stop`, { method: 'POST' })
-      if (response.ok) {
-        setState('stopping')
-      }
+      if (response.ok) setState('stopping')
     } catch (e) {
       console.error('Failed to stop:', e)
     }
   }, [])
+
+  const generatePaper = useCallback(async () => {
+    setGeneratingPaper(true)
+    try {
+      const response = await fetch(`${API_BASE}/orchestrator/generate-paper/markdown`, { method: 'POST' })
+      if (response.ok) {
+        const text = await response.text()
+        setPaperMarkdown(text)
+      } else {
+        const error = await response.json()
+        alert(`Paper generation failed: ${error.detail}`)
+      }
+    } catch (e) {
+      console.error('Failed to generate paper:', e)
+      alert('Failed to generate paper')
+    } finally {
+      setGeneratingPaper(false)
+    }
+  }, [])
+
+  const downloadPaper = useCallback(() => {
+    if (!paperMarkdown) return
+    const blob = new Blob([paperMarkdown], { type: 'text/markdown' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `humanovo-research-${config.disease.replace(/\s+/g, '-').toLowerCase()}-${new Date().toISOString().split('T')[0]}.md`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [paperMarkdown, config.disease])
 
   const addFocusEntity = useCallback(() => {
     if (focusEntityInput.trim() && !config.focusEntities.includes(focusEntityInput.trim())) {
@@ -304,6 +363,28 @@ export default function Agents() {
     setConfig(prev => ({
       ...prev,
       focusEntities: prev.focusEntities.filter(e => e !== entity),
+    }))
+  }, [])
+
+  const addExternalFactor = useCallback(() => {
+    if (factorName.trim()) {
+      setConfig(prev => ({
+        ...prev,
+        externalFactors: [...prev.externalFactors, {
+          name: factorName.trim(),
+          category: factorCategory,
+          interaction: factorInteraction.trim(),
+        }],
+      }))
+      setFactorName('')
+      setFactorInteraction('')
+    }
+  }, [factorName, factorCategory, factorInteraction])
+
+  const removeExternalFactor = useCallback((index: number) => {
+    setConfig(prev => ({
+      ...prev,
+      externalFactors: prev.externalFactors.filter((_, i) => i !== index),
     }))
   }, [])
 
@@ -342,7 +423,7 @@ export default function Agents() {
             <div>
               <h1 className="text-xl font-semibold">Parallel Discovery Agents</h1>
               <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
-                {stats?.total_agents || 0} agents • Llama Maverick + DeepSeek R1 via AWS Bedrock
+                {stats?.total_agents || 0} agents across 4 models — Llama Maverick + DeepSeek R1 + Kimi 2.5 + GPT OSS 120B
               </p>
             </div>
           </div>
@@ -356,6 +437,22 @@ export default function Agents() {
               <div className={clsx('w-2 h-2 rounded-full', wsConnected ? 'bg-green-500' : 'bg-red-500')} />
               {wsConnected ? 'Live' : 'Disconnected'}
             </div>
+
+            {/* Generate Paper Button */}
+            {(state === 'idle' || state === 'paused') && hypotheses.length > 0 && (
+              <button
+                onClick={generatePaper}
+                disabled={generatingPaper}
+                className="btn bg-purple-500 text-white hover:bg-purple-600 disabled:opacity-50"
+              >
+                {generatingPaper ? (
+                  <FiRefreshCw className="w-4 h-4 animate-spin" />
+                ) : (
+                  <FiFileText className="w-4 h-4" />
+                )}
+                {generatingPaper ? 'Generating...' : 'Generate Paper'}
+              </button>
+            )}
 
             {/* Control Buttons */}
             {state === 'idle' && (
@@ -503,10 +600,79 @@ export default function Agents() {
                             className="hover:text-red-400"
                             disabled={state !== 'idle'}
                           >
-                            ×
+                            <FiX className="w-3 h-3" />
                           </button>
                         </span>
                       ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* External Factors */}
+                <div>
+                  <button
+                    onClick={() => setShowFactors(!showFactors)}
+                    className="text-xs text-[var(--color-text-muted)] flex items-center gap-1 mb-1"
+                  >
+                    {showFactors ? <FiChevronUp className="w-3 h-3" /> : <FiChevronDown className="w-3 h-3" />}
+                    External Factors ({config.externalFactors.length})
+                  </button>
+
+                  {showFactors && (
+                    <div className="space-y-2 p-2 bg-[var(--color-bg)] rounded border border-[var(--color-border)]">
+                      <input
+                        type="text"
+                        value={factorName}
+                        onChange={(e) => setFactorName(e.target.value)}
+                        placeholder="Factor name (e.g., Vitamin D)"
+                        className="w-full px-2 py-1.5 bg-[var(--color-bg-elevated)] border border-[var(--color-border)] rounded text-xs"
+                        disabled={state !== 'idle'}
+                      />
+                      <select
+                        value={factorCategory}
+                        onChange={(e) => setFactorCategory(e.target.value as ExternalFactor['category'])}
+                        className="w-full px-2 py-1.5 bg-[var(--color-bg-elevated)] border border-[var(--color-border)] rounded text-xs"
+                        disabled={state !== 'idle'}
+                      >
+                        {factorCategories.map(cat => (
+                          <option key={cat} value={cat}>{cat.charAt(0).toUpperCase() + cat.slice(1)}</option>
+                        ))}
+                      </select>
+                      <input
+                        type="text"
+                        value={factorInteraction}
+                        onChange={(e) => setFactorInteraction(e.target.value)}
+                        placeholder="Known interaction (optional)"
+                        className="w-full px-2 py-1.5 bg-[var(--color-bg-elevated)] border border-[var(--color-border)] rounded text-xs"
+                        disabled={state !== 'idle'}
+                      />
+                      <button
+                        onClick={addExternalFactor}
+                        className="btn btn-sm w-full bg-[var(--color-border)] text-xs"
+                        disabled={state !== 'idle' || !factorName.trim()}
+                      >
+                        <FiPlus className="w-3 h-3" /> Add Factor
+                      </button>
+
+                      {config.externalFactors.length > 0 && (
+                        <div className="space-y-1 mt-2 max-h-32 overflow-y-auto">
+                          {config.externalFactors.map((factor, i) => (
+                            <div key={i} className="flex items-center justify-between text-xs py-1 px-1.5 bg-[var(--color-bg-elevated)] rounded">
+                              <span>
+                                <span className="font-medium">{factor.name}</span>
+                                <span className="text-[var(--color-text-muted)] ml-1">({factor.category})</span>
+                              </span>
+                              <button
+                                onClick={() => removeExternalFactor(i)}
+                                className="text-red-400 hover:text-red-300"
+                                disabled={state !== 'idle'}
+                              >
+                                <FiX className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -607,11 +773,27 @@ export default function Agents() {
 
               {/* High Confidence Discoveries */}
               <div className="mt-2 flex items-center justify-between text-sm">
-                <span className="text-[var(--color-text-muted)]">High Confidence (≥70%)</span>
+                <span className="text-[var(--color-text-muted)]">High Confidence</span>
                 <span className="text-green-400 font-bold">{stats.high_confidence_discoveries}</span>
               </div>
             </div>
           )}
+
+          {/* Active Models */}
+          <div className="p-3 border-b border-[var(--color-border)]">
+            <h3 className="text-xs font-medium text-[var(--color-text-muted)] uppercase mb-3">
+              Active Models
+            </h3>
+            <div className="space-y-2">
+              {modelInfo.map(model => (
+                <div key={model.id} className="flex items-center gap-2 text-xs">
+                  <div className={clsx('w-2 h-2 rounded-full', model.color)} />
+                  <span className="flex-1">{model.name}</span>
+                  <span className="text-[var(--color-text-muted)]">{model.desc}</span>
+                </div>
+              ))}
+            </div>
+          </div>
 
           {/* Learning Stats */}
           {stats?.learning_stats && (
@@ -673,9 +855,36 @@ export default function Agents() {
           </div>
         </div>
 
-        {/* Main Content - Hypotheses */}
+        {/* Main Content - Hypotheses or Paper */}
         <div className="flex-1 overflow-y-auto">
-          {hypotheses.length > 0 ? (
+          {/* Paper View */}
+          {paperMarkdown ? (
+            <div className="p-4">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-sm font-medium text-[var(--color-text-muted)] uppercase">
+                  Generated Research Paper
+                </h2>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={downloadPaper}
+                    className="btn btn-sm bg-purple-500/20 text-purple-400"
+                  >
+                    <FiDownload className="w-3.5 h-3.5" />
+                    Download Markdown
+                  </button>
+                  <button
+                    onClick={() => setPaperMarkdown(null)}
+                    className="btn btn-sm bg-[var(--color-border)]"
+                  >
+                    Back to Hypotheses
+                  </button>
+                </div>
+              </div>
+              <div className="card p-6 prose prose-invert max-w-none">
+                <pre className="whitespace-pre-wrap text-sm font-mono leading-relaxed">{paperMarkdown}</pre>
+              </div>
+            </div>
+          ) : hypotheses.length > 0 ? (
             <div className="p-4 space-y-3">
               <h2 className="text-sm font-medium text-[var(--color-text-muted)] uppercase">
                 Discovered Hypotheses ({hypotheses.length})
@@ -722,6 +931,11 @@ export default function Agents() {
                             Validated
                           </span>
                         )}
+                        {hypothesis.external_factors && hypothesis.external_factors.length > 0 && (
+                          <span className="text-xxs px-1.5 py-0.5 bg-purple-500/20 text-purple-400 rounded">
+                            +{hypothesis.external_factors.length} factors
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -754,7 +968,7 @@ export default function Agents() {
         </div>
 
         {/* Right Panel - Hypothesis Detail */}
-        {selectedHypothesis && (
+        {selectedHypothesis && !paperMarkdown && (
           <div className="w-96 border-l border-[var(--color-border)] overflow-y-auto">
             <div className="p-4">
               <div className="flex items-start justify-between mb-4">
@@ -774,7 +988,7 @@ export default function Agents() {
                   onClick={() => setSelectedHypothesis(null)}
                   className="text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
                 >
-                  ×
+                  <FiX className="w-4 h-4" />
                 </button>
               </div>
 
@@ -803,6 +1017,21 @@ export default function Agents() {
                     {selectedHypothesis.model_used}
                   </span>
                 </div>
+
+                {selectedHypothesis.external_factors && selectedHypothesis.external_factors.length > 0 && (
+                  <div>
+                    <h4 className="text-xs font-medium text-[var(--color-text-muted)] uppercase mb-1">
+                      External Factor Interactions
+                    </h4>
+                    <div className="space-y-1">
+                      {selectedHypothesis.external_factors.map((factor, i) => (
+                        <div key={i} className="text-xs p-1.5 bg-purple-500/10 border border-purple-500/20 rounded">
+                          {typeof factor === 'string' ? factor : JSON.stringify(factor)}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {selectedHypothesis.validated && (
                   <div className="p-3 bg-green-500/10 border border-green-500/30 rounded">

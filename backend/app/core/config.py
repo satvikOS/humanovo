@@ -1,5 +1,5 @@
 """
-GenUp Configuration Module
+Humanovo Configuration Module
 
 Centralized configuration management using Pydantic Settings.
 Supports environment variables and .env files.
@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     )
 
     # Application
-    APP_NAME: str = "GenUp"
+    APP_NAME: str = "Humanovo"
     VERSION: str = "0.1.0"
     DEBUG: bool = False
     ENVIRONMENT: str = "development"
@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     CORS_ORIGINS: list[str] = Field(default=["http://localhost:3000", "http://localhost:5173"])
 
     # Database (PostgreSQL)
-    DATABASE_URL: str = "postgresql+asyncpg://genup:genup@localhost:5432/genup"
+    DATABASE_URL: str = "postgresql+asyncpg://humanovo:humanovo@localhost:5432/humanovo"
     DATABASE_POOL_SIZE: int = 10
     DATABASE_MAX_OVERFLOW: int = 20
 
@@ -74,13 +74,30 @@ class Settings(BaseSettings):
     AWS_ACCESS_KEY_ID: SecretStr | None = None
     AWS_SECRET_ACCESS_KEY: SecretStr | None = None
     AWS_REGION: str = "us-east-1"
-    BEDROCK_MODEL: str = "meta.llama3-3-70b-instruct-v1:0"  # or us.meta.llama4-maverick-17b-instruct-v1:0
+    BEDROCK_MODEL: str = "meta.llama3-3-70b-instruct-v1:0"
+
+    # Kimi 2.5 (Moonshot AI)
+    KIMI_API_KEY: SecretStr | None = None
+    KIMI_BASE_URL: str = "https://api.moonshot.cn/v1"
+    KIMI_MODEL: str = "kimi-2.5"
+
+    # GPT OSS 120B (open-source GPT via Together)
+    GPT_OSS_API_KEY: SecretStr | None = None
+    GPT_OSS_BASE_URL: str = "https://api.together.xyz/v1"
+    GPT_OSS_MODEL: str = "nvidia/Llama-3.1-Nemotron-70B-Instruct-HF"
 
     # Discovery Service Configuration
-    DISCOVERY_LLM_PROVIDER: str = "bedrock"  # openai, anthropic, together, groq, bedrock
+    DISCOVERY_LLM_PROVIDER: str = "bedrock"  # openai, anthropic, together, groq, bedrock, kimi, gpt_oss
     DISCOVERY_MAX_EVIDENCE_CHUNKS: int = 50
     DISCOVERY_MAX_GRAPH_PATHS: int = 100
     DISCOVERY_MIN_CONFIDENCE: float = 0.3
+
+    # Parallel Token Pool Management
+    TOKEN_POOL_MAX_CONCURRENT_REQUESTS: int = 200  # per model
+    TOKEN_POOL_MAX_TOKENS_PER_MINUTE: int = 2_000_000  # total across all models
+    TOKEN_POOL_RETRY_BACKOFF_BASE: float = 1.5
+    TOKEN_POOL_RETRY_MAX_ATTEMPTS: int = 5
+    TOKEN_POOL_AGENT_BATCH_SIZE: int = 50  # agents per dispatch batch
 
     # Search APIs
     GOOGLE_API_KEY: SecretStr | None = None
@@ -88,7 +105,7 @@ class Settings(BaseSettings):
     BRAVE_API_KEY: SecretStr | None = None
 
     # PubMed / Data Sources
-    PUBMED_EMAIL: str = "genup@example.com"
+    PUBMED_EMAIL: str = "humanovo@example.com"
     PUBMED_API_KEY: SecretStr | None = None
     PUBMED_RATE_LIMIT: int = 10  # requests per second
 
@@ -153,6 +170,16 @@ class Settings(BaseSettings):
     def aws_secret_key_value(self) -> str | None:
         """Get AWS secret key value."""
         return self.AWS_SECRET_ACCESS_KEY.get_secret_value() if self.AWS_SECRET_ACCESS_KEY else None
+
+    @property
+    def kimi_api_key_value(self) -> str | None:
+        """Get Kimi API key value."""
+        return self.KIMI_API_KEY.get_secret_value() if self.KIMI_API_KEY else None
+
+    @property
+    def gpt_oss_api_key_value(self) -> str | None:
+        """Get GPT OSS API key value."""
+        return self.GPT_OSS_API_KEY.get_secret_value() if self.GPT_OSS_API_KEY else None
 
 
 @lru_cache

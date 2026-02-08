@@ -120,35 +120,43 @@ function ActivityItemComponent({ activity }: { activity: ActivityItem }) {
   )
 }
 
-function KnowledgeGraphPreview() {
+function DiscoveryStatus() {
   return (
     <div className="card h-full">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-medium">Knowledge Graph</h3>
-        <Link to="/knowledge" className="text-xs text-primary-400 hover:text-primary-300 flex items-center gap-1">
+        <h3 className="text-sm font-medium">Discovery Engine</h3>
+        <Link to="/agents" className="text-xs text-primary-400 hover:text-primary-300 flex items-center gap-1">
           Open <FiArrowRight className="w-3 h-3" />
         </Link>
       </div>
-      <div className="aspect-video bg-[var(--color-bg)] rounded-lg flex items-center justify-center relative overflow-hidden">
-        <svg className="w-full h-full" viewBox="0 0 200 120">
-          <line x1="100" y1="60" x2="50" y2="30" stroke="rgba(6, 182, 212, 0.3)" strokeWidth="1" />
-          <line x1="100" y1="60" x2="150" y2="30" stroke="rgba(6, 182, 212, 0.3)" strokeWidth="1" />
-          <line x1="100" y1="60" x2="50" y2="90" stroke="rgba(6, 182, 212, 0.3)" strokeWidth="1" />
-          <line x1="100" y1="60" x2="150" y2="90" stroke="rgba(6, 182, 212, 0.3)" strokeWidth="1" />
-          <line x1="50" y1="30" x2="150" y2="30" stroke="rgba(6, 182, 212, 0.2)" strokeWidth="1" />
-          <circle cx="100" cy="60" r="12" fill="#06b6d4" />
-          <circle cx="50" cy="30" r="8" fill="#8b5cf6" />
-          <circle cx="150" cy="30" r="8" fill="#8b5cf6" />
-          <circle cx="50" cy="90" r="8" fill="#10b981" />
-          <circle cx="150" cy="90" r="8" fill="#f97316" />
-          <text x="100" y="85" textAnchor="middle" className="text-xxs fill-[var(--color-text-muted)]">TP53</text>
-          <text x="50" y="18" textAnchor="middle" className="text-xxs fill-[var(--color-text-muted)]">MDM2</text>
-          <text x="150" y="18" textAnchor="middle" className="text-xxs fill-[var(--color-text-muted)]">BRCA1</text>
-        </svg>
-        <div className="absolute bottom-2 left-2 flex items-center gap-2 text-xxs text-[var(--color-text-muted)]">
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-primary-500" /> Genes</span>
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-molecular-protein" /> Proteins</span>
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-molecular-drug" /> Drugs</span>
+      <div className="space-y-3">
+        <div className="grid grid-cols-2 gap-2">
+          <div className="p-2 bg-[var(--color-bg)] rounded text-center">
+            <div className="text-xs text-[var(--color-text-muted)]">Models</div>
+            <div className="text-sm font-bold mt-0.5">4 Active</div>
+          </div>
+          <div className="p-2 bg-[var(--color-bg)] rounded text-center">
+            <div className="text-xs text-[var(--color-text-muted)]">Max Agents</div>
+            <div className="text-sm font-bold mt-0.5">10,000</div>
+          </div>
+        </div>
+        <div className="space-y-1.5 text-xs">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-blue-500" />
+            <span className="text-[var(--color-text-muted)]">Llama Maverick</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-yellow-500" />
+            <span className="text-[var(--color-text-muted)]">DeepSeek R1</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-purple-500" />
+            <span className="text-[var(--color-text-muted)]">Kimi 2.5</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-green-500" />
+            <span className="text-[var(--color-text-muted)]">GPT OSS 120B</span>
+          </div>
         </div>
       </div>
     </div>
@@ -272,7 +280,7 @@ export default function Dashboard() {
         </div>
 
         <div className="col-span-2">
-          <KnowledgeGraphPreview />
+          <DiscoveryStatus />
         </div>
       </div>
 
