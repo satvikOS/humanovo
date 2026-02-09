@@ -1,8 +1,8 @@
 """
-GenUp Backend - Main FastAPI Application
+Humanovo Backend - Main FastAPI Application
 
 This module initializes the FastAPI application with all routes,
-middleware, and event handlers for the GenUp platform.
+middleware, and event handlers for the Humanovo platform.
 """
 
 from collections.abc import AsyncGenerator
@@ -23,7 +23,7 @@ logger = get_logger(__name__)
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan handler for startup and shutdown events."""
     # Startup
-    logger.info("Starting GenUp Backend", version=settings.VERSION)
+    logger.info("Starting Humanovo Backend", version=settings.VERSION)
 
     # Initialize database connections
     from app.core.database import init_db
@@ -37,19 +37,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await init_vector_store()
     await init_graph_store()
 
-    logger.info("GenUp Backend started successfully")
+    logger.info("Humanovo Backend started successfully")
 
     yield
 
     # Shutdown
-    logger.info("Shutting down GenUp Backend")
+    logger.info("Shutting down Humanovo Backend")
 
     # Cleanup connections
     from app.core.database import close_db
 
     await close_db()
 
-    logger.info("GenUp Backend shutdown complete")
+    logger.info("Humanovo Backend shutdown complete")
 
 
 def create_app() -> FastAPI:
@@ -57,7 +57,7 @@ def create_app() -> FastAPI:
     setup_logging()
 
     app = FastAPI(
-        title="GenUp API",
+        title="humanovo API",
         description="Biomedical Discovery Platform API",
         version=settings.VERSION,
         docs_url="/api/docs",
@@ -86,7 +86,7 @@ def create_app() -> FastAPI:
             content={
                 "status": "healthy",
                 "version": settings.VERSION,
-                "service": "genup-backend",
+                "service": "humanovo-backend",
             }
         )
 

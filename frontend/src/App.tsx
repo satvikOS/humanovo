@@ -5,7 +5,7 @@ import Projects from './pages/Projects'
 import ProjectDetail from './pages/ProjectDetail'
 import Hypotheses from './pages/Hypotheses'
 import HypothesisDetail from './pages/HypothesisDetail'
-import KnowledgeGraph from './pages/KnowledgeGraph'
+
 import Evidence from './pages/Evidence'
 import Workbench from './pages/Workbench'
 import HumanAnatomy from './pages/HumanAnatomy'
@@ -24,7 +24,7 @@ function App() {
         <Route path="projects" element={<Projects />} />
         <Route path="projects/:projectId" element={<ProjectDetail />} />
         <Route path="evidence" element={<Evidence />} />
-        <Route path="knowledge" element={<KnowledgeGraph />} />
+
         <Route path="hypotheses" element={<Hypotheses />} />
         <Route path="hypotheses/:hypothesisId" element={<HypothesisDetail />} />
         <Route path="simulations" element={<Navigate to="/agents" replace />} />

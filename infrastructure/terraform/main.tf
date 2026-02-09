@@ -218,6 +218,9 @@ module "iam" {
     module.dynamodb.hypotheses_table_arn,
     module.dynamodb.evidence_table_arn,
     module.dynamodb.simulations_table_arn,
+    module.dynamodb.agent_tasks_table_arn,
+    module.dynamodb.knowledge_table_arn,
+    module.dynamodb.knowledge_metadata_table_arn,
   ]
 }
 
@@ -256,6 +259,7 @@ module "lambda" {
   hypotheses_table_name  = module.dynamodb.hypotheses_table_name
   evidence_table_name    = module.dynamodb.evidence_table_name
   simulations_table_name = module.dynamodb.simulations_table_name
+  agent_tasks_table_name = module.dynamodb.agent_tasks_table_name
 
   # S3 buckets
   data_bucket_name      = module.s3.data_bucket_name

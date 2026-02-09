@@ -307,6 +307,49 @@ resource "aws_apigatewayv2_route" "agents_search" {
   authorizer_id      = var.enable_jwt_auth ? aws_apigatewayv2_authorizer.jwt[0].id : null
 }
 
+# Orchestrator Routes (Discovery UI)
+resource "aws_apigatewayv2_route" "orchestrator_status" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "GET /api/v1/orchestrator/status"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda["agent_orchestrator"].id}"
+}
+
+resource "aws_apigatewayv2_route" "orchestrator_start" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /api/v1/orchestrator/start"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda["agent_orchestrator"].id}"
+}
+
+resource "aws_apigatewayv2_route" "orchestrator_pause" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /api/v1/orchestrator/pause"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda["agent_orchestrator"].id}"
+}
+
+resource "aws_apigatewayv2_route" "orchestrator_resume" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /api/v1/orchestrator/resume"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda["agent_orchestrator"].id}"
+}
+
+resource "aws_apigatewayv2_route" "orchestrator_stop" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /api/v1/orchestrator/stop"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda["agent_orchestrator"].id}"
+}
+
+resource "aws_apigatewayv2_route" "orchestrator_health" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "GET /api/v1/orchestrator/health"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda["agent_orchestrator"].id}"
+}
+
+resource "aws_apigatewayv2_route" "orchestrator_paper" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /api/v1/orchestrator/generate-paper/markdown"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda["agent_orchestrator"].id}"
+}
+
 # Embeddings
 resource "aws_apigatewayv2_route" "embeddings_create" {
   api_id             = aws_apigatewayv2_api.main.id

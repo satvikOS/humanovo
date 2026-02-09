@@ -2,14 +2,16 @@
 Discovery Orchestrator API Endpoints
 
 WebSocket-enabled API for controlling the parallel discovery system
-with start/pause/stop controls and real-time updates.
+with start/pause/stop controls, real-time updates, external factor
+simulation, and research paper generation.
 """
 
 import asyncio
 import json
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
 from app.core.logging import get_logger
@@ -56,13 +58,21 @@ manager = ConnectionManager()
 _current_orchestrator: Optional[DiscoveryOrchestrator] = None
 
 
+class ExternalFactor(BaseModel):
+    """An external factor (nutrient, chemical, drug, compound, element)."""
+    name: str
+    category: str  # nutrient, chemical, drug, compound, element
+    interaction: str = ""  # description of known interaction
+
+
 class StartDiscoveryRequest(BaseModel):
     """Request to start discovery."""
     disease: str
     focus_entities: list[str] = []
-    discovery_type: str = "cure"  # cure, prevention, treatment
+    discovery_type: str = "cure"  # cure, prevention, treatment, biomarker, drug_repurposing
     max_agents: int = 1000
     target_confidence: float = 0.95
+    external_factors: list[ExternalFactor] = []
 
 
 class DiscoveryStatusResponse(BaseModel):
@@ -78,8 +88,10 @@ async def start_discovery_endpoint(request: StartDiscoveryRequest):
     """
     Start a new parallel discovery process.
 
-    This launches thousands of agents to explore biological pathways
-    and discover potential cures/treatments for the specified disease.
+    Launches agents across Llama Maverick, DeepSeek R1, Kimi 2.5, and GPT OSS 120B
+    to explore biological pathways and discover potential cures/treatments.
+    External factors (nutrients, chemicals, drugs, compounds, elements) are simulated
+    alongside biological interactions.
     """
     global _current_orchestrator
 
@@ -105,9 +117,12 @@ async def start_discovery_endpoint(request: StartDiscoveryRequest):
                 "data": {
                     "id": hypothesis.id,
                     "title": hypothesis.title,
+                    "description": hypothesis.description,
                     "confidence": hypothesis.confidence,
                     "mechanism": hypothesis.mechanism,
                     "model_used": hypothesis.model_used,
+                    "external_factors": hypothesis.external_factors,
+                    "validated": hypothesis.validated,
                 }
             })
 
@@ -122,12 +137,16 @@ async def start_discovery_endpoint(request: StartDiscoveryRequest):
             on_stats_update=on_stats_update,
         )
 
+        # Convert external factors to dicts
+        ext_factors = [f.model_dump() for f in request.external_factors] if request.external_factors else None
+
         # Start discovery in background
         asyncio.create_task(
             _current_orchestrator.start(
                 disease=request.disease,
                 focus_entities=request.focus_entities if request.focus_entities else None,
                 discovery_type=request.discovery_type,
+                external_factors=ext_factors,
             )
         )
 
@@ -136,7 +155,12 @@ async def start_discovery_endpoint(request: StartDiscoveryRequest):
             "disease": request.disease,
             "max_agents": request.max_agents,
             "target_confidence": request.target_confidence,
-            "message": f"Discovery started for {request.disease} with {request.max_agents} agents",
+            "models": ["llama_maverick", "deepseek_r1", "kimi_25", "gpt_oss_120b"],
+            "external_factors_count": len(request.external_factors),
+            "message": (
+                f"Discovery started for {request.disease} with {request.max_agents} agents "
+                f"across 4 models, {len(request.external_factors)} external factors"
+            ),
         }
 
     except Exception as e:
@@ -226,6 +250,7 @@ async def get_discovery_status():
 
     return DiscoveryStatusResponse(
         state=_current_orchestrator.state.value,
+        disease=_current_orchestrator._disease,
         stats=stats,
         top_hypotheses=[
             {
@@ -236,6 +261,7 @@ async def get_discovery_status():
                 "confidence": h.confidence,
                 "model_used": h.model_used,
                 "validated": h.validated,
+                "external_factors": h.external_factors,
             }
             for h in hypotheses
         ],
@@ -270,6 +296,7 @@ async def get_hypotheses(
                 "confidence": h.confidence,
                 "contributing_agents": h.contributing_agents,
                 "model_used": h.model_used,
+                "external_factors": h.external_factors,
                 "created_at": h.created_at.isoformat(),
                 "validated": h.validated,
             }
@@ -277,6 +304,104 @@ async def get_hypotheses(
         ],
         "total": len(hypotheses),
     }
+
+
+@router.post("/generate-paper")
+async def generate_research_paper():
+    """
+    Generate a fully formatted research paper from the current discovery results.
+
+    The paper includes:
+    - Title, Abstract, Introduction, Methods, Results, Discussion, Conclusion
+    - Tables: hypothesis rankings, model performance, external factors
+    - Figures: pipeline flowchart, confidence distribution, mechanism diagrams (Mermaid)
+    - References and citations
+    - External factors analysis
+
+    Call this after discovery reaches target confidence or after manual stop.
+    """
+    global _current_orchestrator
+
+    if not _current_orchestrator:
+        raise HTTPException(status_code=400, detail="No discovery data available. Run a discovery first.")
+
+    hypotheses = _current_orchestrator.get_hypotheses(min_confidence=0.0, limit=100)
+    if not hypotheses:
+        raise HTTPException(status_code=400, detail="No hypotheses found. Run discovery first.")
+
+    stats = _current_orchestrator.get_stats()
+
+    from app.services.paper_generation_service import get_paper_service
+    paper_service = get_paper_service()
+
+    hyp_dicts = [
+        {
+            "id": h.id,
+            "title": h.title,
+            "description": h.description,
+            "mechanism": h.mechanism,
+            "confidence": h.confidence,
+            "model_used": h.model_used,
+            "validated": h.validated,
+            "external_factors": h.external_factors,
+        }
+        for h in hypotheses
+    ]
+
+    paper = await paper_service.generate_paper(
+        disease=_current_orchestrator._disease or "Unknown",
+        discovery_type="cure",
+        hypotheses=hyp_dicts,
+        stats=stats.model_dump(),
+        external_factors=_current_orchestrator._external_factors,
+    )
+
+    return paper.to_dict()
+
+
+@router.post("/generate-paper/markdown")
+async def generate_research_paper_markdown():
+    """
+    Generate a research paper in Markdown format for direct viewing/export.
+    """
+    global _current_orchestrator
+
+    if not _current_orchestrator:
+        raise HTTPException(status_code=400, detail="No discovery data available.")
+
+    hypotheses = _current_orchestrator.get_hypotheses(min_confidence=0.0, limit=100)
+    if not hypotheses:
+        raise HTTPException(status_code=400, detail="No hypotheses found.")
+
+    stats = _current_orchestrator.get_stats()
+
+    from app.services.paper_generation_service import get_paper_service
+    paper_service = get_paper_service()
+
+    hyp_dicts = [
+        {
+            "id": h.id,
+            "title": h.title,
+            "description": h.description,
+            "mechanism": h.mechanism,
+            "confidence": h.confidence,
+            "model_used": h.model_used,
+            "validated": h.validated,
+            "external_factors": h.external_factors,
+        }
+        for h in hypotheses
+    ]
+
+    paper = await paper_service.generate_paper(
+        disease=_current_orchestrator._disease or "Unknown",
+        discovery_type="cure",
+        hypotheses=hyp_dicts,
+        stats=stats.model_dump(),
+        external_factors=_current_orchestrator._external_factors,
+    )
+
+    markdown = paper_service.paper_to_markdown(paper)
+    return PlainTextResponse(content=markdown, media_type="text/markdown")
 
 
 @router.get("/learning-stats")
@@ -290,6 +415,62 @@ async def get_learning_stats():
     return _current_orchestrator.memory.get_stats()
 
 
+@router.get("/token-pool-stats")
+async def get_token_pool_stats():
+    """Get token pool statistics across all models."""
+    global _current_orchestrator
+
+    if not _current_orchestrator:
+        return {"error": "No orchestrator initialized"}
+
+    return _current_orchestrator.token_pool.get_stats()
+
+
+@router.get("/health")
+async def orchestrator_health():
+    """
+    Health check for the AI pipeline.
+    Reports which models are available and ready.
+    """
+    global _current_orchestrator
+
+    models_status = {
+        "llama_maverick": False,
+        "deepseek_r1": False,
+        "kimi_25": False,
+        "gpt_oss_120b": False,
+    }
+
+    if _current_orchestrator and _current_orchestrator.llm._initialized:
+        llm = _current_orchestrator.llm
+        if llm._bedrock_client:
+            models_status["llama_maverick"] = True
+            models_status["deepseek_r1"] = True
+        if llm._kimi_client:
+            models_status["kimi_25"] = True
+        if llm._gpt_oss_client:
+            models_status["gpt_oss_120b"] = True
+    else:
+        # Check config for available credentials
+        from app.core.config import settings
+        if settings.aws_access_key_value and settings.aws_secret_key_value:
+            models_status["llama_maverick"] = True
+            models_status["deepseek_r1"] = True
+        if settings.kimi_api_key_value:
+            models_status["kimi_25"] = True
+        if settings.gpt_oss_api_key_value or settings.together_api_key_value:
+            models_status["gpt_oss_120b"] = True
+
+    active_count = sum(1 for v in models_status.values() if v)
+
+    return {
+        "status": "healthy" if active_count > 0 else "no_models",
+        "models": models_status,
+        "active_model_count": active_count,
+        "orchestrator_initialized": _current_orchestrator is not None,
+    }
+
+
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """
@@ -299,6 +480,7 @@ async def websocket_endpoint(websocket: WebSocket):
     - hypothesis: New hypothesis discovered
     - stats: Updated statistics
     - state_change: State changed (running/paused/stopped)
+    - paper_ready: Research paper generation complete
     """
     await manager.connect(websocket)
 
@@ -324,10 +506,9 @@ async def websocket_endpoint(websocket: WebSocket):
             try:
                 data = await asyncio.wait_for(
                     websocket.receive_text(),
-                    timeout=30.0,  # Ping every 30 seconds
+                    timeout=30.0,
                 )
 
-                # Handle client messages
                 message = json.loads(data)
 
                 if message.get("type") == "ping":
@@ -342,7 +523,6 @@ async def websocket_endpoint(websocket: WebSocket):
                         })
 
             except asyncio.TimeoutError:
-                # Send ping to keep connection alive
                 await websocket.send_json({"type": "ping"})
 
     except WebSocketDisconnect:
@@ -357,9 +537,5 @@ async def websocket_endpoint(websocket: WebSocket):
 async def run_simulation(request: StartDiscoveryRequest):
     """
     Run a disease simulation through the orchestrator.
-
-    This integrates the simulation functionality directly into the agent system,
-    using parallel agents to simulate disease progression and treatment outcomes.
     """
-    # This replaces the separate simulation section
     return await start_discovery_endpoint(request)
