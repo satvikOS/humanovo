@@ -2,13 +2,15 @@
 Agent Orchestrator Lambda Handler - Multi-model AI discovery system.
 
 Handles the /orchestrator/* endpoints for the discovery page.
-Uses AWS Bedrock for AI model calls and DynamoDB for state persistence.
-Supports async background processing via Lambda self-invocation.
+Uses AWS Bedrock Converse API for unified multi-model calls.
+4 models run in parallel with different roles to avoid token bottlenecks.
+Model identities are never exposed to the frontend (unbiasing).
 """
 
 import json
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
@@ -34,11 +36,40 @@ lambda_client = boto3.client("lambda")
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "dev")
 AGENT_TASKS_TABLE = os.environ.get("AGENT_TASKS_TABLE", f"genup-{ENVIRONMENT}-agent-tasks")
 HYPOTHESES_TABLE = os.environ.get("HYPOTHESES_TABLE", f"genup-{ENVIRONMENT}-hypotheses")
-BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "anthropic.claude-3-5-sonnet-20241022-v2:0")
 FUNCTION_NAME = os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "")
 
 # Discovery task key (single active discovery)
 DISCOVERY_TASK_KEY = "active-discovery"
+
+# ============== Model Configuration ==============
+# Each model is assigned a specific role. Model IDs are NEVER sent to frontend.
+# Using Bedrock Converse API for unified interface across all providers.
+
+AGENT_MODELS = {
+    "explorer": {
+        "model_id": "meta.llama4-maverick-17b-instruct-v1:0",
+        "max_tokens": 2000,
+        "temperature": 0.8,  # Higher creativity for exploration
+    },
+    "reasoner": {
+        "model_id": "deepseek.r1-v1:0",
+        "max_tokens": 2000,
+        "temperature": 0.3,  # Lower for rigorous reasoning
+    },
+    "synthesizer": {
+        "model_id": "moonshotai.kimi-k2.5",
+        "max_tokens": 2000,
+        "temperature": 0.5,  # Balanced for synthesis
+    },
+    "critic": {
+        "model_id": "openai.gpt-oss-120b-1:0",
+        "max_tokens": 2000,
+        "temperature": 0.4,  # Precise for critique
+    },
+}
+
+# For paper generation, use the synthesizer model
+PAPER_MODEL = AGENT_MODELS["synthesizer"]["model_id"]
 
 # ============== System Prompts ==============
 
@@ -73,16 +104,20 @@ Return valid JSON:
 
 ROLE_PROMPTS = {
     "explorer": """You are an EXPLORER agent. Find NOVEL pathways and relationships others might miss.
-Focus on: unconventional connections, cross-domain relationships, recently discovered pathways, emerging therapeutic modalities.""",
+Focus on: unconventional connections, cross-domain relationships, recently discovered pathways, emerging therapeutic modalities.
+Think creatively. Look at what others overlook. Connect disparate fields.""",
 
     "reasoner": """You are a REASONER agent. Provide rigorous step-by-step causal reasoning.
-Focus on: complete causal chains, identifying assumptions, finding logical flaws, evaluating link strength.""",
+Focus on: complete causal chains, identifying assumptions, finding logical flaws, evaluating link strength.
+Be thorough and precise. Every claim needs a logical foundation.""",
 
     "synthesizer": """You are a SYNTHESIZER agent. Integrate findings into unified hypotheses.
-Focus on: common themes, complementary mechanisms, combination therapies, comprehensive disease models.""",
+Focus on: common themes, complementary mechanisms, combination therapies, comprehensive disease models.
+Find the bigger picture. Connect separate findings into coherent theories.""",
 
     "critic": """You are a CRITIC agent. Identify weaknesses, risks, and potential failures.
-Focus on: counter-arguments, side effects, drug resistance, manufacturing challenges, regulatory hurdles.""",
+Focus on: counter-arguments, side effects, drug resistance, manufacturing challenges, regulatory hurdles.
+Be constructively critical. Every strong hypothesis needs rigorous scrutiny.""",
 }
 
 
@@ -138,35 +173,33 @@ def update_discovery_state(updates: dict):
     )
 
 
-def invoke_bedrock(prompt: str, system_prompt: str, max_tokens: int = 2000) -> str:
-    """Invoke Bedrock model."""
-    body = {
-        "anthropic_version": "bedrock-2023-05-31",
-        "max_tokens": max_tokens,
-        "temperature": 0.7,
-        "messages": [{"role": "user", "content": prompt}],
-        "system": system_prompt,
-    }
-
+def converse_bedrock(model_id: str, prompt: str, system_prompt: str,
+                     max_tokens: int = 2000, temperature: float = 0.7) -> str:
+    """Invoke a Bedrock model using the Converse API (unified across all providers)."""
     try:
-        response = bedrock_runtime.invoke_model(
-            modelId=BEDROCK_MODEL_ID,
-            contentType="application/json",
-            accept="application/json",
-            body=json.dumps(body),
+        response = bedrock_runtime.converse(
+            modelId=model_id,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [{"text": prompt}],
+                }
+            ],
+            system=[{"text": system_prompt}],
+            inferenceConfig={
+                "maxTokens": max_tokens,
+                "temperature": temperature,
+            },
         )
-        response_body = json.loads(response["body"].read())
-        return response_body["content"][0]["text"]
+        return response["output"]["message"]["content"][0]["text"]
     except Exception as e:
-        logger.error(f"Bedrock invocation failed: {e}")
+        logger.error(f"Bedrock converse failed for model: {e}")
         raise
 
 
 def parse_hypothesis_json(text: str) -> dict | None:
     """Extract JSON hypothesis from LLM response text."""
-    # Try to find JSON block
     try:
-        # Look for JSON in the text
         start = text.find("{")
         end = text.rfind("}") + 1
         if start >= 0 and end > start:
@@ -192,24 +225,59 @@ def parse_hypothesis_json(text: str) -> dict | None:
     return None
 
 
+def run_single_agent(role: str, prompt: str, system_prompt: str) -> dict | None:
+    """Run a single agent with its assigned model. Returns hypothesis or None."""
+    model_config = AGENT_MODELS[role]
+    try:
+        response_text = converse_bedrock(
+            model_id=model_config["model_id"],
+            prompt=prompt,
+            system_prompt=system_prompt,
+            max_tokens=model_config["max_tokens"],
+            temperature=model_config["temperature"],
+        )
+        hypothesis_data = parse_hypothesis_json(response_text)
+        if hypothesis_data and hypothesis_data.get("has_hypothesis", False):
+            return {
+                "id": str(uuid4()),
+                "title": hypothesis_data.get("title", "Untitled"),
+                "description": hypothesis_data.get("description", ""),
+                "mechanism": hypothesis_data.get("mechanism", ""),
+                "confidence": float(hypothesis_data.get("confidence", 0.5)),
+                "validated": False,
+                "external_factors": hypothesis_data.get("external_factors", []),
+                "evidence_summary": hypothesis_data.get("evidence_summary", []),
+                "risks": hypothesis_data.get("risks", []),
+                "novelty_score": float(hypothesis_data.get("novelty_score", 0.5)),
+                "role": role,  # Only role stored, never model name
+                "created_at": datetime.utcnow().isoformat(),
+            }
+    except Exception as e:
+        logger.error(f"Agent {role} failed: {e}")
+    return None
+
+
 # ============== Async Discovery Worker ==============
 
 def run_discovery_worker(config: dict):
-    """Run the actual AI discovery process. Called via async Lambda invocation."""
+    """Run the actual AI discovery process. Called via async Lambda invocation.
+
+    All 4 models run IN PARALLEL each round using ThreadPoolExecutor.
+    Each model has its own role and token budget — no shared token pool.
+    """
     disease = config.get("disease", "")
     discovery_type = config.get("discovery_type", "cure")
     focus_entities = config.get("focus_entities", [])
     external_factors = config.get("external_factors", [])
     max_agents = min(config.get("max_agents", 10), 20)  # Cap for Lambda
 
-    logger.info(f"Starting discovery for: {disease}", disease=disease)
+    logger.info(f"Starting parallel discovery for: {disease}", disease=disease)
 
     start_time = time.time()
     hypotheses = []
     paths_explored = 0
 
-    # Run multiple rounds of agent exploration
-    roles = ["explorer", "reasoner", "synthesizer", "critic"]
+    roles = list(AGENT_MODELS.keys())  # explorer, reasoner, synthesizer, critic
     num_rounds = min(max_agents // len(roles), 5)  # Up to 5 rounds
 
     for round_num in range(num_rounds):
@@ -224,81 +292,85 @@ def run_discovery_worker(config: dict):
             time.sleep(5)
             continue
 
-        for role in roles:
-            # Check status again
-            state = get_discovery_state()
-            if state and state.get("status") in ["stopping", "stopped"]:
-                break
+        # Build prompts for this round
+        focus_str = f"\nFocus entities: {', '.join(focus_entities)}" if focus_entities else ""
+        factors_str = ""
+        if external_factors:
+            factors_str = "\nExternal factors to consider:\n" + "\n".join(
+                f"- {f.get('name', '')} ({f.get('category', '')}): {f.get('interaction', 'analyze interaction')}"
+                for f in external_factors
+            )
 
-            system_prompt = f"{MASTER_PROMPT}\n\n---\n\n{ROLE_PROMPTS.get(role, '')}"
+        # Context from previous hypotheses for this round
+        prev_context = ""
+        if hypotheses:
+            top_3 = sorted(hypotheses, key=lambda x: x["confidence"], reverse=True)[:3]
+            prev_context = "\n\nPrevious high-confidence findings to build on:\n" + "\n".join(
+                f"- {h['title']} (confidence: {h['confidence']:.0%}): {h['description'][:150]}"
+                for h in top_3
+            )
 
-            focus_str = f"\nFocus entities: {', '.join(focus_entities)}" if focus_entities else ""
-            factors_str = ""
-            if external_factors:
-                factors_str = "\nExternal factors to consider:\n" + "\n".join(
-                    f"- {f.get('name', '')} ({f.get('category', '')}): {f.get('interaction', 'analyze interaction')}"
-                    for f in external_factors
-                )
+        # Run all 4 agents IN PARALLEL using ThreadPoolExecutor
+        futures = {}
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            for role in roles:
+                # Check status before submitting
+                state = get_discovery_state()
+                if state and state.get("status") in ["stopping", "stopped"]:
+                    break
 
-            prompt = f"""Investigate {disease} for {discovery_type} discovery.
+                system_prompt = f"{MASTER_PROMPT}\n\n---\n\n{ROLE_PROMPTS[role]}"
+
+                prompt = f"""Investigate {disease} for {discovery_type} discovery.
 {focus_str}
 {factors_str}
+{prev_context}
 
-Round {round_num + 1}, Role: {role}
+Round {round_num + 1}, Agent role: {role}
 Generate a novel hypothesis about potential {discovery_type} approaches for {disease}.
 Consider all biological levels and external factor interactions.
 
 Return your findings as a JSON object with: has_hypothesis, title, description, mechanism, confidence (0-1), evidence_summary (list), risks (list), validation_steps (list), novelty_score (0-1)."""
 
-            try:
-                response_text = invoke_bedrock(prompt, system_prompt, max_tokens=2000)
+                future = executor.submit(run_single_agent, role, prompt, system_prompt)
+                futures[future] = role
+
+            # Collect results as they complete
+            for future in as_completed(futures):
+                role = futures[future]
                 paths_explored += 1
+                try:
+                    hypothesis = future.result()
+                    if hypothesis:
+                        hypotheses.append(hypothesis)
+                        metrics.add_metric(name="HypothesesDiscovered", unit="Count", value=1)
+                except Exception as e:
+                    logger.error(f"Agent {role} round {round_num} failed: {e}")
 
-                hypothesis_data = parse_hypothesis_json(response_text)
-                if hypothesis_data and hypothesis_data.get("has_hypothesis", False):
-                    h = {
-                        "id": str(uuid4()),
-                        "title": hypothesis_data.get("title", "Untitled"),
-                        "description": hypothesis_data.get("description", ""),
-                        "mechanism": hypothesis_data.get("mechanism", ""),
-                        "confidence": float(hypothesis_data.get("confidence", 0.5)),
-                        "validated": False,
-                        "external_factors": hypothesis_data.get("external_factors", []),
-                        "evidence_summary": hypothesis_data.get("evidence_summary", []),
-                        "risks": hypothesis_data.get("risks", []),
-                        "created_at": datetime.utcnow().isoformat(),
-                    }
-                    hypotheses.append(h)
-
-                    # Update state with partial results
-                    elapsed = time.time() - start_time
-                    sorted_h = sorted(hypotheses, key=lambda x: x["confidence"], reverse=True)
-                    update_discovery_state({
-                        "status": "running",
-                        "hypotheses": sorted_h[:50],
-                        "stats": {
-                            "total_agents": len(roles) * num_rounds,
-                            "active_agents": len(roles),
-                            "hypotheses_found": len(hypotheses),
-                            "paths_explored": paths_explored,
-                            "high_confidence_discoveries": sum(1 for h in hypotheses if h["confidence"] >= 0.7),
-                            "current_best_confidence": max((h["confidence"] for h in hypotheses), default=0),
-                            "runtime_seconds": int(elapsed),
-                            "learning_stats": {
-                                "total_explored": paths_explored,
-                                "low_value_paths": sum(1 for h in hypotheses if h["confidence"] < 0.4),
-                                "high_value_paths": sum(1 for h in hypotheses if h["confidence"] >= 0.7),
-                                "avg_relation_score": sum(h["confidence"] for h in hypotheses) / len(hypotheses) if hypotheses else 0,
-                            },
-                        },
-                    })
-
-                    metrics.add_metric(name="HypothesesDiscovered", unit="Count", value=1)
-
-            except Exception as e:
-                logger.error(f"Agent {role} round {round_num} failed: {e}")
-                paths_explored += 1
-                continue
+        # Update state with partial results after each round
+        elapsed = time.time() - start_time
+        sorted_h = sorted(hypotheses, key=lambda x: x["confidence"], reverse=True)
+        update_discovery_state({
+            "status": "running",
+            "hypotheses": sorted_h[:50],
+            "stats": {
+                "total_agents": 4,  # Always 4 parallel agents
+                "active_agents": 4 if round_num < num_rounds - 1 else 0,
+                "hypotheses_found": len(hypotheses),
+                "paths_explored": paths_explored,
+                "high_confidence_discoveries": sum(1 for h in hypotheses if h["confidence"] >= 0.7),
+                "current_best_confidence": max((h["confidence"] for h in hypotheses), default=0),
+                "runtime_seconds": int(elapsed),
+                "current_round": round_num + 1,
+                "total_rounds": num_rounds,
+                "learning_stats": {
+                    "total_explored": paths_explored,
+                    "low_value_paths": sum(1 for h in hypotheses if h["confidence"] < 0.4),
+                    "high_value_paths": sum(1 for h in hypotheses if h["confidence"] >= 0.7),
+                    "avg_relation_score": sum(h["confidence"] for h in hypotheses) / len(hypotheses) if hypotheses else 0,
+                },
+            },
+        })
 
     # Mark as completed
     elapsed = time.time() - start_time
@@ -307,13 +379,15 @@ Return your findings as a JSON object with: has_hypothesis, title, description, 
         "status": "idle",
         "hypotheses": sorted_h[:50],
         "stats": {
-            "total_agents": paths_explored,
+            "total_agents": 4,
             "active_agents": 0,
             "hypotheses_found": len(hypotheses),
             "paths_explored": paths_explored,
             "high_confidence_discoveries": sum(1 for h in hypotheses if h["confidence"] >= 0.7),
             "current_best_confidence": max((h["confidence"] for h in hypotheses), default=0),
             "runtime_seconds": int(elapsed),
+            "current_round": num_rounds,
+            "total_rounds": num_rounds,
             "learning_stats": {
                 "total_explored": paths_explored,
                 "low_value_paths": sum(1 for h in hypotheses if h["confidence"] < 0.4),
@@ -323,7 +397,7 @@ Return your findings as a JSON object with: has_hypothesis, title, description, 
         },
     })
 
-    # Also save top hypotheses to the hypotheses table
+    # Save top hypotheses to the hypotheses table
     hyp_table = dynamodb.Table(HYPOTHESES_TABLE)
     for h in sorted_h[:10]:
         try:
@@ -355,7 +429,7 @@ Return your findings as a JSON object with: has_hypothesis, title, description, 
 @app.get("/api/v1/orchestrator/status")
 @tracer.capture_method
 def get_status():
-    """Get current orchestrator status."""
+    """Get current orchestrator status. Never exposes model identities."""
     state = get_discovery_state()
     if not state:
         return {
@@ -364,17 +438,23 @@ def get_status():
             "top_hypotheses": [],
         }
 
+    # Strip any model info from hypotheses before sending to frontend
+    safe_hypotheses = []
+    for h in (state.get("hypotheses", []) or [])[:20]:
+        safe_h = {k: v for k, v in h.items() if k not in ("model_used", "model_id", "role")}
+        safe_hypotheses.append(safe_h)
+
     return serialize({
         "state": state.get("status", "idle"),
         "stats": state.get("stats"),
-        "top_hypotheses": state.get("hypotheses", [])[:20],
+        "top_hypotheses": safe_hypotheses,
     })
 
 
 @app.post("/api/v1/orchestrator/start")
 @tracer.capture_method
 def start_discovery():
-    """Start a new discovery process."""
+    """Start a new discovery process with 4 parallel agents."""
     body = app.current_event.json_body or {}
 
     disease = body.get("disease", "")
@@ -399,13 +479,15 @@ def start_discovery():
         "config": config,
         "hypotheses": [],
         "stats": {
-            "total_agents": 0,
-            "active_agents": 0,
+            "total_agents": 4,
+            "active_agents": 4,
             "hypotheses_found": 0,
             "paths_explored": 0,
             "high_confidence_discoveries": 0,
             "current_best_confidence": Decimal("0"),
             "runtime_seconds": 0,
+            "current_round": 0,
+            "total_rounds": 0,
             "learning_stats": {
                 "total_explored": 0,
                 "low_value_paths": 0,
@@ -439,7 +521,7 @@ def start_discovery():
             logger.error(f"Synchronous fallback also failed: {e2}")
             update_discovery_state({"status": "idle"})
 
-    return {"status": "started", "disease": disease}
+    return {"status": "started", "disease": disease, "agents": 4}
 
 
 @app.post("/api/v1/orchestrator/pause")
@@ -457,7 +539,6 @@ def resume_discovery():
     state = get_discovery_state()
     if state and state.get("config"):
         update_discovery_state({"status": "running"})
-        # Re-invoke worker
         try:
             lambda_client.invoke(
                 FunctionName=FUNCTION_NAME,
@@ -478,7 +559,6 @@ def resume_discovery():
 def stop_discovery():
     """Stop the discovery process."""
     update_discovery_state({"status": "stopping"})
-    # The worker checks status and will stop
     time.sleep(1)
     update_discovery_state({"status": "idle"})
     return {"status": "idle"}
@@ -487,33 +567,26 @@ def stop_discovery():
 @app.get("/api/v1/orchestrator/health")
 @tracer.capture_method
 def health_check():
-    """Check AI model connectivity."""
-    models_status = {
-        "bedrock": False,
-    }
+    """Check AI model connectivity. Returns count only — never exposes model names."""
+    connected = 0
+    total = len(AGENT_MODELS)
 
-    try:
-        # Quick test call to Bedrock
-        response = bedrock_runtime.invoke_model(
-            modelId=BEDROCK_MODEL_ID,
-            contentType="application/json",
-            accept="application/json",
-            body=json.dumps({
-                "anthropic_version": "bedrock-2023-05-31",
-                "max_tokens": 10,
-                "messages": [{"role": "user", "content": "test"}],
-            }),
-        )
-        models_status["bedrock"] = True
-    except Exception as e:
-        logger.warning(f"Bedrock health check failed: {e}")
+    # Test each model with a minimal call
+    for role, model_config in AGENT_MODELS.items():
+        try:
+            bedrock_runtime.converse(
+                modelId=model_config["model_id"],
+                messages=[{"role": "user", "content": [{"text": "hi"}]}],
+                inferenceConfig={"maxTokens": 5, "temperature": 0.1},
+            )
+            connected += 1
+        except Exception as e:
+            logger.warning(f"Health check failed for agent {role}: {e}")
 
-    connected = sum(models_status.values())
     return {
-        "status": "healthy" if connected > 0 else "no_models",
-        "models": models_status,
+        "status": "healthy" if connected == total else "partial" if connected > 0 else "no_models",
         "connected_count": connected,
-        "total_models": len(models_status),
+        "total_models": total,
     }
 
 
@@ -529,7 +602,6 @@ def generate_paper():
     config = state.get("config", {})
     disease = config.get("disease", "Unknown Disease")
 
-    # Build prompt for paper generation
     hyp_summaries = []
     for i, h in enumerate(hypotheses[:10], 1):
         hyp_summaries.append(
@@ -559,7 +631,13 @@ Be thorough, scientific, and cite real biomedical concepts. Format as proper Mar
     system_prompt = "You are a biomedical research paper writer. Write detailed, scientifically rigorous papers."
 
     try:
-        paper_text = invoke_bedrock(prompt, system_prompt, max_tokens=4000)
+        paper_text = converse_bedrock(
+            model_id=PAPER_MODEL,
+            prompt=prompt,
+            system_prompt=system_prompt,
+            max_tokens=4000,
+            temperature=0.5,
+        )
         return Response(
             status_code=200,
             body=paper_text,
@@ -578,7 +656,6 @@ def create_agent_task():
     """Create an agent task (alternative endpoint)."""
     body = app.current_event.json_body or {}
     task_id = str(uuid4())
-
     return {"id": task_id, "status": "queued"}
 
 

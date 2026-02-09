@@ -230,7 +230,9 @@ resource "aws_iam_role_policy" "lambda_bedrock" {
           "arn:aws:bedrock:${var.aws_region}::foundation-model/amazon.*",
           "arn:aws:bedrock:${var.aws_region}::foundation-model/cohere.*",
           "arn:aws:bedrock:${var.aws_region}::foundation-model/meta.*",
-          "arn:aws:bedrock:${var.aws_region}::foundation-model/deepseek.*"
+          "arn:aws:bedrock:${var.aws_region}::foundation-model/deepseek.*",
+          "arn:aws:bedrock:${var.aws_region}::foundation-model/moonshotai.*",
+          "arn:aws:bedrock:${var.aws_region}::foundation-model/openai.*"
         ]
       },
       {

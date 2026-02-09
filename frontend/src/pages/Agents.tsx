@@ -50,7 +50,6 @@ interface Hypothesis {
   description: string
   mechanism: string
   confidence: number
-  model_used: string
   validated: boolean
   external_factors?: Array<Record<string, string>>
   created_at?: string
@@ -92,6 +91,8 @@ export default function Agents() {
 
   // AI pipeline connection status (real check, not mock)
   const [aiConnected, setAiConnected] = useState<boolean | null>(null)
+  const [connectedAgents, setConnectedAgents] = useState(0)
+  const [totalAgents, setTotalAgents] = useState(4)
 
   // Paper generation
   const [generatingPaper, setGeneratingPaper] = useState(false)
@@ -141,6 +142,24 @@ export default function Agents() {
     } catch {
       setAiConnected(false)
     }
+  }, [])
+
+  // Check AI health on mount (returns connected count, never model names)
+  useEffect(() => {
+    const checkHealth = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/orchestrator/health`)
+        if (response.ok) {
+          const data = await response.json()
+          setConnectedAgents(data.connected_count || 0)
+          setTotalAgents(data.total_models || 4)
+          setAiConnected(data.connected_count > 0)
+        }
+      } catch {
+        // Health check failed, status polling will still set aiConnected
+      }
+    }
+    checkHealth()
   }, [])
 
   // Poll for updates — persists across navigation (backend keeps running)
@@ -322,7 +341,7 @@ export default function Agents() {
             <div>
               <h1 className="text-xl font-semibold">Discovery</h1>
               <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
-                {stats?.total_agents || 0} parallel agents &middot; multi-model pipeline
+                4 parallel agents &middot; multi-model pipeline
               </p>
             </div>
           </div>
@@ -339,7 +358,7 @@ export default function Agents() {
                 aiConnected === null ? 'bg-yellow-500 animate-pulse' :
                 aiConnected ? 'bg-green-500' : 'bg-red-500'
               )} />
-              {aiConnected === null ? 'Connecting...' : aiConnected ? 'AI Connected' : 'AI Disconnected'}
+              {aiConnected === null ? 'Connecting...' : aiConnected ? `${connectedAgents}/${totalAgents} Agents` : 'AI Disconnected'}
             </div>
 
             {/* Generate Paper Button */}
