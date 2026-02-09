@@ -128,9 +128,12 @@ resource "aws_cloudfront_distribution" "main" {
   }
 
   # API Gateway Origin
+  # origin_path adds the stage name so CloudFront requests are properly routed:
+  # /api/v1/projects → API Gateway receives /{stage}/api/v1/projects
   origin {
     domain_name = replace(replace(var.api_gateway_endpoint, "https://", ""), "/", "")
     origin_id   = local.api_origin_id
+    origin_path = "/${var.environment}"
 
     custom_origin_config {
       http_port              = 80

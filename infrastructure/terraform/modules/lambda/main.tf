@@ -61,6 +61,11 @@ variable "artifacts_bucket_name" {
   type = string
 }
 
+variable "agent_tasks_table_name" {
+  type    = string
+  default = ""
+}
+
 variable "bedrock_model_id" {
   type = string
 }
@@ -88,6 +93,7 @@ locals {
     HYPOTHESES_TABLE           = var.hypotheses_table_name
     EVIDENCE_TABLE             = var.evidence_table_name
     SIMULATIONS_TABLE          = var.simulations_table_name
+    AGENT_TASKS_TABLE          = var.agent_tasks_table_name != "" ? var.agent_tasks_table_name : "${var.name_prefix}-agent-tasks"
     # Unified bucket with prefix-based organization
     GENUP_BUCKET               = var.data_bucket_name
     DATA_PREFIX                = "data"

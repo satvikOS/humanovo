@@ -228,7 +228,9 @@ resource "aws_iam_role_policy" "lambda_bedrock" {
         Resource = [
           "arn:aws:bedrock:${var.aws_region}::foundation-model/anthropic.*",
           "arn:aws:bedrock:${var.aws_region}::foundation-model/amazon.*",
-          "arn:aws:bedrock:${var.aws_region}::foundation-model/cohere.*"
+          "arn:aws:bedrock:${var.aws_region}::foundation-model/cohere.*",
+          "arn:aws:bedrock:${var.aws_region}::foundation-model/meta.*",
+          "arn:aws:bedrock:${var.aws_region}::foundation-model/deepseek.*"
         ]
       },
       {
