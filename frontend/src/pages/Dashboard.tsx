@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import {
   FiFolder,
@@ -121,6 +121,20 @@ function ActivityItemComponent({ activity }: { activity: ActivityItem }) {
 }
 
 function DiscoveryStatus() {
+  const [connected, setConnected] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    const check = async () => {
+      try {
+        const res = await fetch('/api/v1/orchestrator/status')
+        setConnected(res.ok)
+      } catch {
+        setConnected(false)
+      }
+    }
+    check()
+  }, [])
+
   return (
     <div className="card h-full">
       <div className="flex items-center justify-between mb-3">
@@ -132,8 +146,13 @@ function DiscoveryStatus() {
       <div className="space-y-3">
         <div className="grid grid-cols-2 gap-2">
           <div className="p-2 bg-[var(--color-bg)] rounded text-center">
-            <div className="text-xs text-[var(--color-text-muted)]">Models</div>
-            <div className="text-sm font-bold mt-0.5">4 Active</div>
+            <div className="text-xs text-[var(--color-text-muted)]">Pipeline</div>
+            <div className={clsx(
+              'text-sm font-bold mt-0.5',
+              connected === null ? 'text-yellow-400' : connected ? 'text-green-400' : 'text-red-400'
+            )}>
+              {connected === null ? 'Checking...' : connected ? 'Connected' : 'Offline'}
+            </div>
           </div>
           <div className="p-2 bg-[var(--color-bg)] rounded text-center">
             <div className="text-xs text-[var(--color-text-muted)]">Max Agents</div>
@@ -142,20 +161,20 @@ function DiscoveryStatus() {
         </div>
         <div className="space-y-1.5 text-xs">
           <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-blue-500" />
-            <span className="text-[var(--color-text-muted)]">Llama Maverick</span>
+            <span className={clsx('w-2 h-2 rounded-full', connected ? 'bg-green-500' : 'bg-gray-500')} />
+            <span className="text-[var(--color-text-muted)]">Multi-model reasoning</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-yellow-500" />
-            <span className="text-[var(--color-text-muted)]">DeepSeek R1</span>
+            <span className={clsx('w-2 h-2 rounded-full', connected ? 'bg-green-500' : 'bg-gray-500')} />
+            <span className="text-[var(--color-text-muted)]">Parallel exploration</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-purple-500" />
-            <span className="text-[var(--color-text-muted)]">Kimi 2.5</span>
+            <span className={clsx('w-2 h-2 rounded-full', connected ? 'bg-green-500' : 'bg-gray-500')} />
+            <span className="text-[var(--color-text-muted)]">External factor simulation</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-green-500" />
-            <span className="text-[var(--color-text-muted)]">GPT OSS 120B</span>
+            <span className={clsx('w-2 h-2 rounded-full', connected ? 'bg-green-500' : 'bg-gray-500')} />
+            <span className="text-[var(--color-text-muted)]">Research paper generation</span>
           </div>
         </div>
       </div>

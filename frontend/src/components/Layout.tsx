@@ -164,7 +164,7 @@ export default function Layout() {
             <div className="w-6 h-6 bg-gradient-to-br from-primary-400 to-primary-600 rounded flex items-center justify-center">
               <span className="text-white font-bold text-xs">H</span>
             </div>
-            <span className="text-sm font-semibold text-[var(--color-text)]">Humanovo</span>
+            <span className="text-sm font-semibold text-[var(--color-text)]">humanovo</span>
             <span className="badge badge-info ml-auto">v0.1</span>
           </div>
         </div>

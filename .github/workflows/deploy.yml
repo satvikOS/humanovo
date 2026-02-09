@@ -1,4 +1,4 @@
-name: Deploy Humanovo
+name: Deploy humanovo
 
 on:
   push:
@@ -75,39 +75,31 @@ jobs:
         run: |
           BUCKET="${{ steps.bucket.outputs.BUCKET }}"
 
-          # Upload index.html with no-cache so browsers always revalidate
-          # This is critical: without it, browsers serve stale cached versions
+          # 1. Upload index.html with no-cache so browsers ALWAYS revalidate
           aws s3 cp dist/index.html "s3://$BUCKET/index.html" \
             --sse AES256 \
             --cache-control "no-cache, no-store, must-revalidate" \
             --content-type "text/html"
 
-          # Upload hashed assets with long cache (filenames change per build)
+          # 2. Upload hashed assets with immutable cache (filenames change per build)
           if [ -d dist/assets ]; then
             aws s3 sync dist/assets/ "s3://$BUCKET/assets/" \
               --sse AES256 \
               --cache-control "public, max-age=31536000, immutable"
           fi
 
-          # Sync remaining files (favicon, manifest, etc.) without --delete
+          # 3. Sync remaining files (favicon, manifest, etc.)
           aws s3 sync dist/ "s3://$BUCKET/" \
             --sse AES256 \
             --cache-control "no-cache" \
             --exclude "index.html" \
             --exclude "assets/*"
 
-          # Verify index.html was uploaded with correct headers
-          echo "Verifying deployment..."
-          aws s3api head-object --bucket "$BUCKET" --key "index.html" \
-            --query '{CacheControl: CacheControl, LastModified: LastModified, ContentLength: ContentLength}' \
-            --output table
-
           echo "Deployed to s3://$BUCKET/"
 
-      - name: Invalidate CloudFront
+      - name: Invalidate CloudFront and wait
         id: cloudfront
         run: |
-          # Find distribution
           DIST_ID=$(aws cloudfront list-distributions \
             --query "DistributionList.Items[?Origins.Items[?contains(DomainName, 'genup-${ENVIRONMENT}')]].Id | [0]" \
             --output text)
@@ -117,21 +109,46 @@ jobs:
             exit 0
           fi
 
-          # Invalidate cache and wait for propagation
+          echo "DIST_ID=$DIST_ID" >> $GITHUB_OUTPUT
+
+          # Create invalidation for ALL paths
           INVALIDATION_ID=$(aws cloudfront create-invalidation \
             --distribution-id "$DIST_ID" \
             --paths "/*" \
             --query "Invalidation.Id" --output text)
 
-          echo "Waiting for CloudFront invalidation $INVALIDATION_ID to complete..."
+          echo "Waiting for invalidation $INVALIDATION_ID to propagate..."
           aws cloudfront wait invalidation-completed \
             --distribution-id "$DIST_ID" \
             --id "$INVALIDATION_ID"
+          echo "Invalidation complete."
 
-          # Get URL
           DOMAIN=$(aws cloudfront get-distribution --id "$DIST_ID" --query "Distribution.DomainName" --output text)
           echo "URL=https://$DOMAIN" >> $GITHUB_OUTPUT
-          echo "Invalidation $INVALIDATION_ID complete. Live at https://$DOMAIN"
+
+      - name: Verify deployment
+        run: |
+          BUCKET="${{ steps.bucket.outputs.BUCKET }}"
+          URL="${{ steps.cloudfront.outputs.URL }}"
+
+          # Verify S3 headers
+          echo "=== S3 index.html headers ==="
+          aws s3api head-object --bucket "$BUCKET" --key "index.html" \
+            --query '{CacheControl: CacheControl, ContentLength: ContentLength, LastModified: LastModified}' \
+            --output table
+
+          # Verify CloudFront is serving fresh content
+          if [ -n "$URL" ]; then
+            echo ""
+            echo "=== CloudFront response headers ==="
+            curl -sI "$URL" | grep -iE '(cache-control|x-cache|age|content-type|last-modified)' || true
+            echo ""
+            echo "=== Deployed title ==="
+            curl -s "$URL" | grep -oP '(?<=<title>).*(?=</title>)' || true
+          fi
+
+          echo ""
+          echo "Live at: $URL"
 
       - name: Summary
         run: |
@@ -139,3 +156,5 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- Bucket: \`${{ steps.bucket.outputs.BUCKET }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- URL: ${{ steps.cloudfront.outputs.URL }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Cache-Control: \`no-cache, no-store, must-revalidate\` on index.html" >> $GITHUB_STEP_SUMMARY
+          echo "- CloudFront invalidation: completed" >> $GITHUB_STEP_SUMMARY

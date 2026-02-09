@@ -57,7 +57,7 @@ def create_app() -> FastAPI:
     setup_logging()
 
     app = FastAPI(
-        title="Humanovo API",
+        title="humanovo API",
         description="Biomedical Discovery Platform API",
         version=settings.VERSION,
         docs_url="/api/docs",

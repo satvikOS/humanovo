@@ -29,6 +29,7 @@ from pydantic import BaseModel
 
 from app.core.config import settings
 from app.core.logging import LoggerMixin, get_logger
+from app.agents.prompts import get_agent_prompt, MASTER_DISCOVERY_PROMPT
 
 logger = get_logger(__name__)
 
@@ -448,34 +449,32 @@ class MultiModelLLM:
         """
         Run all four models in parallel on the same prompt.
         Returns dict mapping model name to response.
+        Uses comprehensive system prompts from prompts.py.
         """
-        system_prompt = (
-            "You are a biomedical research AI specialized in discovering disease cures "
-            "and prevention strategies. Analyze the given data carefully and provide "
-            "logical, evidence-based reasoning. Be thorough and precise."
-        )
         full_prompt = f"{context}\n\n{prompt}" if context else prompt
 
         tasks = {}
         if self._bedrock_client:
             tasks["llama_maverick"] = self.generate(
-                ModelType.LLAMA_MAVERICK, full_prompt, system_prompt, temperature=0.4,
+                ModelType.LLAMA_MAVERICK, full_prompt,
+                get_agent_prompt("explorer", include_master=True),
+                temperature=0.4,
             )
             tasks["deepseek_r1"] = self.generate(
                 ModelType.DEEPSEEK_R1, full_prompt,
-                system_prompt + "\nProvide deep logical reasoning with step-by-step analysis.",
+                get_agent_prompt("reasoner", include_master=True),
                 temperature=0.2,
             )
         if self._kimi_client:
             tasks["kimi_25"] = self.generate(
                 ModelType.KIMI_25, full_prompt,
-                system_prompt + "\nLeverage your long-context ability to analyze all connections.",
+                get_agent_prompt("synthesizer", include_master=True),
                 temperature=0.3,
             )
         if self._gpt_oss_client:
             tasks["gpt_oss_120b"] = self.generate(
                 ModelType.GPT_OSS_120B, full_prompt,
-                system_prompt + "\nUse your large parameter count for nuanced analysis.",
+                get_agent_prompt("critic", include_master=True),
                 temperature=0.3,
             )
 
@@ -587,8 +586,11 @@ Provide:
 
 Return as JSON with keys: has_hypothesis, title, description, mechanism, confidence, validation_steps, external_factor_interactions"""
 
+            # Use full system prompt from prompts.py (role-specific + master)
+            system_prompt = get_agent_prompt(self.role.value, include_master=True)
+
             try:
-                response = await self.llm.generate(self.model, prompt)
+                response = await self.llm.generate(self.model, prompt, system_prompt=system_prompt)
                 hypothesis = self._parse_hypothesis(response, disease, path, external_factors)
                 if hypothesis:
                     hypotheses.append(hypothesis)

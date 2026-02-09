@@ -426,6 +426,51 @@ async def get_token_pool_stats():
     return _current_orchestrator.token_pool.get_stats()
 
 
+@router.get("/health")
+async def orchestrator_health():
+    """
+    Health check for the AI pipeline.
+    Reports which models are available and ready.
+    """
+    global _current_orchestrator
+
+    models_status = {
+        "llama_maverick": False,
+        "deepseek_r1": False,
+        "kimi_25": False,
+        "gpt_oss_120b": False,
+    }
+
+    if _current_orchestrator and _current_orchestrator.llm._initialized:
+        llm = _current_orchestrator.llm
+        if llm._bedrock_client:
+            models_status["llama_maverick"] = True
+            models_status["deepseek_r1"] = True
+        if llm._kimi_client:
+            models_status["kimi_25"] = True
+        if llm._gpt_oss_client:
+            models_status["gpt_oss_120b"] = True
+    else:
+        # Check config for available credentials
+        from app.core.config import settings
+        if settings.aws_access_key_value and settings.aws_secret_key_value:
+            models_status["llama_maverick"] = True
+            models_status["deepseek_r1"] = True
+        if settings.kimi_api_key_value:
+            models_status["kimi_25"] = True
+        if settings.gpt_oss_api_key_value or settings.together_api_key_value:
+            models_status["gpt_oss_120b"] = True
+
+    active_count = sum(1 for v in models_status.values() if v)
+
+    return {
+        "status": "healthy" if active_count > 0 else "no_models",
+        "models": models_status,
+        "active_model_count": active_count,
+        "orchestrator_initialized": _current_orchestrator is not None,
+    }
+
+
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """

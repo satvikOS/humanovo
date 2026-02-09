@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     )
 
     # Application
-    APP_NAME: str = "Humanovo"
+    APP_NAME: str = "humanovo"
     VERSION: str = "0.1.0"
     DEBUG: bool = False
     ENVIRONMENT: str = "development"
