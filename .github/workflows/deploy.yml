@@ -75,9 +75,32 @@ jobs:
         run: |
           BUCKET="${{ steps.bucket.outputs.BUCKET }}"
 
-          # Sync frontend files WITHOUT --delete to preserve Lambda artifacts
-          # The --delete flag with --exclude doesn't protect excluded files from deletion
-          aws s3 sync dist/ "s3://$BUCKET/" --sse AES256
+          # Upload index.html with no-cache so browsers always revalidate
+          # This is critical: without it, browsers serve stale cached versions
+          aws s3 cp dist/index.html "s3://$BUCKET/index.html" \
+            --sse AES256 \
+            --cache-control "no-cache, no-store, must-revalidate" \
+            --content-type "text/html"
+
+          # Upload hashed assets with long cache (filenames change per build)
+          if [ -d dist/assets ]; then
+            aws s3 sync dist/assets/ "s3://$BUCKET/assets/" \
+              --sse AES256 \
+              --cache-control "public, max-age=31536000, immutable"
+          fi
+
+          # Sync remaining files (favicon, manifest, etc.) without --delete
+          aws s3 sync dist/ "s3://$BUCKET/" \
+            --sse AES256 \
+            --cache-control "no-cache" \
+            --exclude "index.html" \
+            --exclude "assets/*"
+
+          # Verify index.html was uploaded with correct headers
+          echo "Verifying deployment..."
+          aws s3api head-object --bucket "$BUCKET" --key "index.html" \
+            --query '{CacheControl: CacheControl, LastModified: LastModified, ContentLength: ContentLength}' \
+            --output table
 
           echo "Deployed to s3://$BUCKET/"
 
