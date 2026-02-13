@@ -1,4 +1,5 @@
-import { createContext, useContext, useState, ReactNode, useCallback } from 'react'
+import { createContext, useContext, useState, ReactNode, useCallback, useEffect } from 'react'
+import { persistGet, persistSet } from '../utils/persistence'
 
 export interface WorkspaceTab {
   id: string
@@ -20,14 +21,25 @@ interface WorkspaceContextType {
 
 const WorkspaceContext = createContext<WorkspaceContextType | undefined>(undefined)
 
-let tabCounter = 0
+let tabCounter = persistGet<number>('tab-counter', 0)
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
-  const [tabs, setTabs] = useState<WorkspaceTab[]>([])
-  const [activeTabId, setActiveTabId] = useState<string | null>(null)
+  const [tabs, setTabs] = useState<WorkspaceTab[]>(() => persistGet<WorkspaceTab[]>('workspace-tabs', []))
+  const [activeTabId, setActiveTabId] = useState<string | null>(() => persistGet<string | null>('workspace-active-tab', null))
+
+  // Persist tabs and active tab whenever they change
+  useEffect(() => {
+    persistSet('workspace-tabs', tabs)
+  }, [tabs])
+
+  useEffect(() => {
+    persistSet('workspace-active-tab', activeTabId)
+  }, [activeTabId])
 
   const addTab = useCallback((tab: Omit<WorkspaceTab, 'id'>) => {
-    const id = `tab-${++tabCounter}-${Date.now()}`
+    tabCounter++
+    persistSet('tab-counter', tabCounter)
+    const id = `tab-${tabCounter}-${Date.now()}`
     const newTab: WorkspaceTab = { ...tab, id }
     setTabs(prev => [...prev, newTab])
     setActiveTabId(id)

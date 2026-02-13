@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import {
   FiFolder,
@@ -13,6 +13,8 @@ import {
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import { useWorkspace } from '../contexts/WorkspaceContext'
+import { persistGet, getActivityLog, type ActivityEntry } from '../utils/persistence'
+import type { EvidenceItem } from '../data/evidence/evidenceRepository'
 
 interface StatCard {
   label: string
@@ -23,23 +25,16 @@ interface StatCard {
   color: string
 }
 
-// Stats fetched from API - initially empty
-const defaultStats: StatCard[] = [
-  { label: 'Active Projects', value: 0, change: '', trend: 'neutral', icon: FiFolder, color: 'primary' },
-  { label: 'Hypotheses', value: 0, change: '', trend: 'neutral', icon: FiZap, color: 'warning' },
-  { label: 'Running Simulations', value: 0, change: '', trend: 'neutral', icon: FiActivity, color: 'success' },
-  { label: 'Evidence Items', value: 0, change: '', trend: 'neutral', icon: FiDatabase, color: 'info' },
-]
-
-// Activity fetched from API
-interface ActivityItem {
-  id: number
-  type: 'hypothesis' | 'simulation' | 'evidence' | 'project'
-  action: string
-  title: string
-  project: string | null
-  time: string
-  status: string
+interface LocalProject {
+  id: string
+  name: string
+  description?: string
+  disease_focus?: string
+  hypothesis_count: number
+  evidence_count: number
+  status: 'active' | 'draft' | 'completed'
+  created_at: string
+  updated_at: string
 }
 
 const quickActions = [
@@ -62,7 +57,7 @@ function StatCardComponent({ stat }: { stat: StatCard }) {
         )}>
           <stat.icon className="w-4 h-4" />
         </div>
-        {stat.trend && (
+        {stat.trend && stat.change && (
           <span className={clsx(
             'text-xxs px-1.5 py-0.5 rounded',
             stat.trend === 'up' && 'bg-success-500/20 text-success-400',
@@ -79,14 +74,26 @@ function StatCardComponent({ stat }: { stat: StatCard }) {
   )
 }
 
-function ActivityItemComponent({ activity }: { activity: ActivityItem }) {
-  const icons = {
+function ActivityItemComponent({ activity }: { activity: ActivityEntry }) {
+  const icons: Record<string, typeof FiZap> = {
     hypothesis: FiZap,
     simulation: FiActivity,
     evidence: FiDatabase,
     project: FiFolder,
+    notebook: FiFileText,
+    discovery: FiZap,
   }
-  const Icon = icons[activity.type as keyof typeof icons] || FiFileText
+  const Icon = icons[activity.type] || FiFileText
+
+  const timeAgo = useMemo(() => {
+    const diff = Date.now() - new Date(activity.timestamp).getTime()
+    const mins = Math.floor(diff / 60000)
+    if (mins < 60) return `${mins}m ago`
+    const hrs = Math.floor(mins / 60)
+    if (hrs < 24) return `${hrs}h ago`
+    const days = Math.floor(hrs / 24)
+    return `${days}d ago`
+  }, [activity.timestamp])
 
   return (
     <div className="flex items-start gap-3 py-2">
@@ -96,6 +103,8 @@ function ActivityItemComponent({ activity }: { activity: ActivityItem }) {
         activity.type === 'simulation' && 'bg-success-500/20 text-success-400',
         activity.type === 'evidence' && 'bg-primary-500/20 text-primary-400',
         activity.type === 'project' && 'bg-primary-500/20 text-primary-400',
+        activity.type === 'notebook' && 'bg-purple-500/20 text-purple-400',
+        activity.type === 'discovery' && 'bg-warning-500/20 text-warning-400',
       )}>
         <Icon className="w-3.5 h-3.5" />
       </div>
@@ -103,36 +112,47 @@ function ActivityItemComponent({ activity }: { activity: ActivityItem }) {
         <div className="text-xs font-medium truncate">{activity.title}</div>
         <div className="flex items-center gap-2 text-xxs text-[var(--color-text-muted)]">
           {activity.project && <span>{activity.project}</span>}
-          <span>{activity.time}</span>
+          <span>{timeAgo}</span>
         </div>
       </div>
-      {activity.status && (
-        <span className={clsx(
-          'text-xxs px-1.5 py-0.5 rounded flex-shrink-0',
-          activity.status === 'success' && 'bg-success-500/20 text-success-400',
-          activity.status === 'draft' && 'bg-[var(--color-border)] text-[var(--color-text-muted)]',
-          activity.status === 'info' && 'bg-primary-500/20 text-primary-400',
-        )}>
-          {activity.action}
-        </span>
-      )}
+      <span className={clsx(
+        'text-xxs px-1.5 py-0.5 rounded flex-shrink-0',
+        (activity.action === 'completed' || activity.action === 'validated') && 'bg-success-500/20 text-success-400',
+        activity.action === 'created' && 'bg-primary-500/20 text-primary-400',
+        activity.action === 'updated' && 'bg-[var(--color-border)] text-[var(--color-text-muted)]',
+        activity.action === 'started' && 'bg-warning-500/20 text-warning-400',
+        activity.action === 'imported' && 'bg-primary-500/20 text-primary-400',
+      )}>
+        {activity.action}
+      </span>
     </div>
   )
 }
 
 function DiscoveryStatus() {
   const [connected, setConnected] = useState<boolean | null>(null)
+  const [discoveryState, setDiscoveryState] = useState<string>('idle')
+  const [hypothesesFound, setHypothesesFound] = useState(0)
 
   useEffect(() => {
     const check = async () => {
       try {
         const res = await fetch('/api/v1/orchestrator/status')
-        setConnected(res.ok)
+        if (res.ok) {
+          setConnected(true)
+          const data = await res.json()
+          setDiscoveryState(data.state || 'idle')
+          setHypothesesFound(data.stats?.hypotheses_found || 0)
+        } else {
+          setConnected(false)
+        }
       } catch {
         setConnected(false)
       }
     }
     check()
+    const interval = setInterval(check, 30000)
+    return () => clearInterval(interval)
   }, [])
 
   return (
@@ -155,22 +175,33 @@ function DiscoveryStatus() {
             </div>
           </div>
           <div className="p-2 bg-[var(--color-bg)] rounded text-center">
-            <div className="text-xs text-[var(--color-text-muted)]">Max Agents</div>
-            <div className="text-sm font-bold mt-0.5">10,000</div>
+            <div className="text-xs text-[var(--color-text-muted)]">Status</div>
+            <div className={clsx(
+              'text-sm font-bold mt-0.5',
+              discoveryState === 'running' ? 'text-green-400' : 'text-[var(--color-text-muted)]'
+            )}>
+              {discoveryState === 'running' ? 'Running' : discoveryState === 'paused' ? 'Paused' : 'Idle'}
+            </div>
           </div>
         </div>
+        {hypothesesFound > 0 && (
+          <div className="p-2 bg-[var(--color-bg)] rounded text-center">
+            <div className="text-xs text-[var(--color-text-muted)]">AI Hypotheses Found</div>
+            <div className="text-lg font-bold text-warning-400 mt-0.5">{hypothesesFound}</div>
+          </div>
+        )}
         <div className="space-y-1.5 text-xs">
           <div className="flex items-center gap-2">
             <span className={clsx('w-2 h-2 rounded-full', connected ? 'bg-green-500' : 'bg-gray-500')} />
-            <span className="text-[var(--color-text-muted)]">Multi-model reasoning</span>
+            <span className="text-[var(--color-text-muted)]">Multi-model reasoning (4 models)</span>
           </div>
           <div className="flex items-center gap-2">
             <span className={clsx('w-2 h-2 rounded-full', connected ? 'bg-green-500' : 'bg-gray-500')} />
-            <span className="text-[var(--color-text-muted)]">Parallel exploration</span>
+            <span className="text-[var(--color-text-muted)]">Parallel MCP context sharding</span>
           </div>
           <div className="flex items-center gap-2">
             <span className={clsx('w-2 h-2 rounded-full', connected ? 'bg-green-500' : 'bg-gray-500')} />
-            <span className="text-[var(--color-text-muted)]">External factor simulation</span>
+            <span className="text-[var(--color-text-muted)]">Genomics & bioinformatics analysis</span>
           </div>
           <div className="flex items-center gap-2">
             <span className={clsx('w-2 h-2 rounded-full', connected ? 'bg-green-500' : 'bg-gray-500')} />
@@ -182,14 +213,13 @@ function DiscoveryStatus() {
   )
 }
 
-interface Simulation {
-  id: number
-  name: string
-  progress: number
-  status: 'running' | 'completed' | 'queued'
-}
+function ActiveSimulations() {
+  // Read running simulations from local store
+  const simulations = useMemo(() => {
+    const sims = persistGet<Array<{id: string; name: string; progress: number; status: string}>>('simulations', [])
+    return sims.filter(s => s.status === 'running' || s.status === 'queued')
+  }, [])
 
-function ActiveSimulations({ simulations = [] }: { simulations?: Simulation[] }) {
   return (
     <div className="card h-full">
       <div className="flex items-center justify-between mb-3">
@@ -230,22 +260,33 @@ function ActiveSimulations({ simulations = [] }: { simulations?: Simulation[] })
   )
 }
 
-interface Project {
-  id: string
-  name: string
-  hypotheses: number
-  evidence: number
-  status: 'active' | 'draft' | 'completed'
-}
-
 export default function Dashboard() {
   const { addTab } = useWorkspace()
 
-  // State for data fetched from API (empty by default)
-  const [stats] = useState<StatCard[]>(defaultStats)
-  const [recentActivity] = useState<ActivityItem[]>([])
-  const [simulations] = useState<Simulation[]>([])
-  const [projects] = useState<Project[]>([])
+  // Compute stats dynamically from persisted data
+  const stats = useMemo<StatCard[]>(() => {
+    const projects = persistGet<LocalProject[]>('projects', [])
+    const evidence = persistGet<EvidenceItem[]>('evidence', [])
+    const hypotheses = persistGet<Array<{id: string}>>('hypotheses', [])
+    const simulations = persistGet<Array<{id: string; status: string}>>('simulations', [])
+    const runningSimulations = simulations.filter(s => s.status === 'running')
+
+    return [
+      { label: 'Active Projects', value: projects.filter(p => p.status === 'active').length, icon: FiFolder, color: 'primary' },
+      { label: 'Hypotheses', value: hypotheses.length, icon: FiZap, color: 'warning' },
+      { label: 'Running Simulations', value: runningSimulations.length, icon: FiActivity, color: 'success' },
+      { label: 'Evidence Items', value: evidence.length, icon: FiDatabase, color: 'info' },
+    ]
+  }, [])
+
+  // Fetch recent activity from persistent activity log
+  const recentActivity = useMemo(() => getActivityLog().slice(0, 10), [])
+
+  // Fetch recent projects from persistent store
+  const projects = useMemo(() => {
+    const all = persistGet<LocalProject[]>('projects', [])
+    return all.slice(0, 8)
+  }, [])
 
   return (
     <div className="p-4 space-y-4">
@@ -286,7 +327,7 @@ export default function Dashboard() {
           <div className="divide-y divide-[var(--color-border)]">
             {recentActivity.length === 0 ? (
               <div className="text-center py-4 text-[var(--color-text-muted)] text-xs">
-                No recent activity
+                No recent activity — start a discovery or create a project
               </div>
             ) : recentActivity.map(activity => (
               <ActivityItemComponent key={activity.id} activity={activity} />
@@ -295,7 +336,7 @@ export default function Dashboard() {
         </div>
 
         <div className="row-span-2">
-          <ActiveSimulations simulations={simulations} />
+          <ActiveSimulations />
         </div>
 
         <div className="col-span-2">
@@ -336,8 +377,8 @@ export default function Dashboard() {
               </div>
               <div className="text-sm font-medium truncate mb-1">{project.name}</div>
               <div className="flex items-center gap-3 text-xxs text-[var(--color-text-muted)]">
-                <span>{project.hypotheses} hypotheses</span>
-                <span>{project.evidence} evidence</span>
+                <span>{project.hypothesis_count} hypotheses</span>
+                <span>{project.evidence_count} evidence</span>
               </div>
             </button>
           ))}
