@@ -27,10 +27,24 @@ metrics = Metrics()
 
 app = APIGatewayHttpResolver()
 
-# AWS Clients
-dynamodb = boto3.resource("dynamodb")
-bedrock_runtime = boto3.client("bedrock-runtime")
-lambda_client = boto3.client("lambda")
+# AWS Clients — defensive init to prevent cold start crashes
+try:
+    dynamodb = boto3.resource("dynamodb")
+except Exception as _e:
+    logger.error(f"DynamoDB init failed: {_e}")
+    dynamodb = None
+
+try:
+    bedrock_runtime = boto3.client("bedrock-runtime")
+except Exception as _e:
+    logger.error(f"Bedrock init failed: {_e}")
+    bedrock_runtime = None
+
+try:
+    lambda_client = boto3.client("lambda")
+except Exception as _e:
+    logger.error(f"Lambda client init failed: {_e}")
+    lambda_client = None
 
 # Configuration
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "dev")
@@ -190,6 +204,8 @@ def serialize(item: dict) -> dict:
 
 
 def get_task_table():
+    if dynamodb is None:
+        raise RuntimeError("DynamoDB not initialized")
     return dynamodb.Table(AGENT_TASKS_TABLE)
 
 
@@ -233,6 +249,8 @@ def update_discovery_state(updates: dict):
 def converse_bedrock(model_id: str, prompt: str, system_prompt: str,
                      max_tokens: int = 2000, temperature: float = 0.7) -> str:
     """Invoke a Bedrock model using the Converse API (unified across all providers)."""
+    if bedrock_runtime is None:
+        raise RuntimeError("Bedrock runtime not initialized")
     try:
         response = bedrock_runtime.converse(
             modelId=model_id,
@@ -487,25 +505,29 @@ Return your findings as a JSON object with: has_hypothesis, title, description, 
 @tracer.capture_method
 def get_status():
     """Get current orchestrator status. Never exposes model identities."""
-    state = get_discovery_state()
-    if not state:
-        return {
-            "state": "idle",
-            "stats": None,
-            "top_hypotheses": [],
-        }
+    try:
+        state = get_discovery_state()
+        if not state:
+            return {
+                "state": "idle",
+                "stats": None,
+                "top_hypotheses": [],
+            }
 
-    # Strip any model info from hypotheses before sending to frontend
-    safe_hypotheses = []
-    for h in (state.get("hypotheses", []) or [])[:20]:
-        safe_h = {k: v for k, v in h.items() if k not in ("model_used", "model_id", "role")}
-        safe_hypotheses.append(safe_h)
+        # Strip any model info from hypotheses before sending to frontend
+        safe_hypotheses = []
+        for h in (state.get("hypotheses", []) or [])[:20]:
+            safe_h = {k: v for k, v in h.items() if k not in ("model_used", "model_id", "role")}
+            safe_hypotheses.append(safe_h)
 
-    return serialize({
-        "state": state.get("status", "idle"),
-        "stats": state.get("stats"),
-        "top_hypotheses": safe_hypotheses,
-    })
+        return serialize({
+            "state": state.get("status", "idle"),
+            "stats": state.get("stats"),
+            "top_hypotheses": safe_hypotheses,
+        })
+    except Exception as e:
+        logger.error(f"Status endpoint error: {e}")
+        return {"state": "idle", "stats": None, "top_hypotheses": []}
 
 
 @app.post("/api/v1/orchestrator/start")
@@ -627,6 +649,13 @@ def health_check():
     """Check AI model connectivity. Returns count only — never exposes model names."""
     connected = 0
     total = len(AGENT_MODELS)
+
+    if bedrock_runtime is None:
+        return {
+            "status": "no_models",
+            "connected_count": 0,
+            "total_models": total,
+        }
 
     # Test each model with a minimal call
     for role, model_config in AGENT_MODELS.items():
