@@ -70,18 +70,25 @@ class Settings(BaseSettings):
     GROQ_API_KEY: SecretStr | None = None
     GROQ_MODEL: str = "llama-3.3-70b-versatile"
 
-    # AWS Bedrock (for Llama Maverick and other models)
+    # AWS Bedrock (IAM user: humanovo-admin)
+    # All 4 discovery models route through Bedrock Converse API
     AWS_ACCESS_KEY_ID: SecretStr | None = None
     AWS_SECRET_ACCESS_KEY: SecretStr | None = None
     AWS_REGION: str = "us-east-1"
-    BEDROCK_MODEL: str = "meta.llama3-3-70b-instruct-v1:0"
+    BEDROCK_MODEL: str = "meta.llama4-maverick-17b-instruct-v1:0"
 
-    # Kimi 2.5 (Moonshot AI)
+    # Bedrock Model IDs — all 4 models invoked via Bedrock Converse API
+    BEDROCK_MODEL_KIMI: str = "moonshotai.kimi-k2.5"
+    BEDROCK_MODEL_DEEPSEEK: str = "deepseek.r1-v1:0"
+    BEDROCK_MODEL_LLAMA_MAVERICK: str = "meta.llama4-maverick-17b-instruct-v1:0"
+    BEDROCK_MODEL_GPT_OSS: str = "openai.gpt-oss-safeguard-120b"
+
+    # Kimi 2.5 (Moonshot AI) — kept for fallback if Bedrock route unavailable
     KIMI_API_KEY: SecretStr | None = None
     KIMI_BASE_URL: str = "https://api.moonshot.cn/v1"
     KIMI_MODEL: str = "kimi-2.5"
 
-    # GPT OSS 120B (open-source GPT via Together)
+    # GPT OSS 120B — kept for fallback if Bedrock route unavailable
     GPT_OSS_API_KEY: SecretStr | None = None
     GPT_OSS_BASE_URL: str = "https://api.together.xyz/v1"
     GPT_OSS_MODEL: str = "nvidia/Llama-3.1-Nemotron-70B-Instruct-HF"
@@ -98,6 +105,15 @@ class Settings(BaseSettings):
     TOKEN_POOL_RETRY_BACKOFF_BASE: float = 1.5
     TOKEN_POOL_RETRY_MAX_ATTEMPTS: int = 5
     TOKEN_POOL_AGENT_BATCH_SIZE: int = 50  # agents per dispatch batch
+
+    # Parallel MCP (Model Context Protocol) Configuration
+    # Distributes context windows across models to overcome per-model token limits
+    MCP_ENABLED: bool = True
+    MCP_MAX_CONTEXT_PER_MODEL: int = 128_000  # max tokens per model context window
+    MCP_CONTEXT_OVERLAP: int = 2_000  # overlap tokens between model context shards
+    MCP_PARALLEL_SHARDS: int = 4  # number of parallel context shards (one per model)
+    MCP_SYNTHESIS_MODEL: str = "moonshotai.kimi-k2.5"  # model for final synthesis (largest context)
+    MCP_CHUNK_STRATEGY: str = "semantic"  # semantic | fixed | sliding_window
 
     # Search APIs
     GOOGLE_API_KEY: SecretStr | None = None

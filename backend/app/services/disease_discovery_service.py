@@ -144,11 +144,18 @@ class BaseLLMClient(ABC):
 
 
 class BedrockLLMClient(BaseLLMClient):
-    """AWS Bedrock LLM client for Llama Maverick and other models."""
+    """AWS Bedrock LLM client using the Converse API for unified multi-model access.
 
-    def __init__(self):
+    Supports all 4 Humanovo discovery models via Bedrock:
+    - meta.llama4-maverick-17b-instruct-v1:0  (Explorer)
+    - deepseek.r1-v1:0                         (Reasoner)
+    - moonshotai.kimi-k2.5                      (Synthesizer)
+    - openai.gpt-oss-safeguard-120b             (Critic)
+    """
+
+    def __init__(self, model_id: str = None):
         self._client = None
-        self._model_id = settings.BEDROCK_MODEL
+        self._model_id = model_id or settings.BEDROCK_MODEL
 
     async def _get_client(self):
         """Get or create Bedrock client."""
@@ -173,51 +180,132 @@ class BedrockLLMClient(BaseLLMClient):
         max_tokens: int = 4000,
         temperature: float = 0.3,
     ) -> str:
-        """Generate using AWS Bedrock."""
+        """Generate using AWS Bedrock Converse API (unified across all providers)."""
         client = await self._get_client()
 
-        # Format for Llama models on Bedrock
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": prompt})
-
-        body = json.dumps({
-            "messages": messages,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "top_p": 0.9,
-        })
-
-        # Run in thread pool since boto3 is synchronous
+        # Use Converse API for unified interface across all Bedrock models
         loop = asyncio.get_event_loop()
         response = await loop.run_in_executor(
             None,
-            lambda: client.invoke_model(
+            lambda: client.converse(
                 modelId=self._model_id,
-                body=body,
-                contentType="application/json",
-                accept="application/json",
+                messages=[
+                    {"role": "user", "content": [{"text": prompt}]},
+                ],
+                system=[{"text": system_prompt}] if system_prompt else [],
+                inferenceConfig={
+                    "maxTokens": max_tokens,
+                    "temperature": temperature,
+                },
             )
         )
-
-        result = json.loads(response["body"].read())
-
-        # Handle different response formats
-        if "content" in result:
-            # Claude format
-            return result["content"][0]["text"]
-        elif "generation" in result:
-            # Llama format
-            return result["generation"]
-        elif "outputs" in result:
-            return result["outputs"][0]["text"]
-        else:
-            return str(result)
+        return response["output"]["message"]["content"][0]["text"]
 
     @property
     def model_name(self) -> str:
         return self._model_id
+
+
+class BedrockMultiModelClient(BaseLLMClient):
+    """Multi-model Bedrock client that runs all 4 models in parallel for discovery.
+
+    Uses the Converse API to invoke all 4 Bedrock models simultaneously,
+    then synthesizes their outputs into a unified response.
+    """
+
+    MODEL_ROLES = {
+        "explorer": settings.BEDROCK_MODEL_LLAMA_MAVERICK,
+        "reasoner": settings.BEDROCK_MODEL_DEEPSEEK,
+        "synthesizer": settings.BEDROCK_MODEL_KIMI,
+        "critic": settings.BEDROCK_MODEL_GPT_OSS,
+    }
+
+    def __init__(self):
+        self._client = None
+
+    async def _get_client(self):
+        if self._client is None:
+            try:
+                import boto3
+                self._client = boto3.client(
+                    "bedrock-runtime",
+                    region_name=settings.AWS_REGION,
+                    aws_access_key_id=settings.aws_access_key_value,
+                    aws_secret_access_key=settings.aws_secret_key_value,
+                )
+            except ImportError:
+                raise RuntimeError("boto3 not installed. Run: pip install boto3")
+        return self._client
+
+    async def _invoke_single(
+        self, model_id: str, prompt: str, system_prompt: str,
+        max_tokens: int, temperature: float,
+    ) -> str:
+        client = await self._get_client()
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: client.converse(
+                modelId=model_id,
+                messages=[{"role": "user", "content": [{"text": prompt}]}],
+                system=[{"text": system_prompt}] if system_prompt else [],
+                inferenceConfig={"maxTokens": max_tokens, "temperature": temperature},
+            )
+        )
+        return response["output"]["message"]["content"][0]["text"]
+
+    async def generate(
+        self,
+        prompt: str,
+        system_prompt: str = "",
+        max_tokens: int = 4000,
+        temperature: float = 0.3,
+    ) -> str:
+        """Run all 4 models in parallel and synthesize outputs."""
+        tasks = {}
+        for role, model_id in self.MODEL_ROLES.items():
+            role_system = f"{system_prompt}\n\nYour role: {role.upper()} — focus on your specialty."
+            tasks[role] = self._invoke_single(
+                model_id, prompt, role_system, max_tokens, temperature,
+            )
+
+        results = await asyncio.gather(
+            *[asyncio.create_task(coro) for coro in tasks.values()],
+            return_exceptions=True,
+        )
+
+        # Collect successful responses
+        successful = {}
+        for (role, _), result in zip(tasks.items(), results):
+            if isinstance(result, Exception):
+                logger.warning(f"Multi-model {role} failed: {result}")
+            else:
+                successful[role] = result
+
+        if not successful:
+            raise RuntimeError("All Bedrock models failed in multi-model invocation")
+
+        # If only one succeeded, return it directly
+        if len(successful) == 1:
+            return list(successful.values())[0]
+
+        # Synthesize via Kimi 2.5 (largest context)
+        synthesis_prompt = f"""Synthesize these parallel model outputs into a single unified response:
+
+{chr(10).join(f'=== {role.upper()} OUTPUT ===\n{text}' for role, text in successful.items())}
+
+Produce a single, integrated JSON response that combines the best insights from all models.
+Resolve contradictions by favoring higher-evidence claims. Note any unresolved disagreements."""
+
+        return await self._invoke_single(
+            self.MODEL_ROLES["synthesizer"], synthesis_prompt,
+            "You are a synthesis agent integrating outputs from parallel discovery models.",
+            max_tokens, temperature,
+        )
+
+    @property
+    def model_name(self) -> str:
+        return "bedrock-multi-model"
 
 
 class OpenAILLMClient(BaseLLMClient):
@@ -391,7 +479,16 @@ class GroqLLMClient(BaseLLMClient):
 
 
 def get_llm_client(provider: LLMProvider = None) -> BaseLLMClient:
-    """Get LLM client based on provider."""
+    """Get LLM client based on provider.
+
+    Bedrock provider uses the Converse API for unified multi-model access.
+    Use 'bedrock' for single-model (default Llama Maverick) or configure
+    BEDROCK_MODEL to point to any of the 4 models:
+    - meta.llama4-maverick-17b-instruct-v1:0
+    - deepseek.r1-v1:0
+    - moonshotai.kimi-k2.5
+    - openai.gpt-oss-safeguard-120b
+    """
     provider = provider or LLMProvider(settings.DISCOVERY_LLM_PROVIDER)
 
     clients = {
