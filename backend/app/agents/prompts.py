@@ -31,6 +31,9 @@ Analyze biological data at the molecular, cellular, and systemic levels to ident
 - Epigenetic modifications (DNA methylation, histone modifications)
 - Non-coding RNAs (miRNAs, lncRNAs, circRNAs)
 - Metabolite levels and metabolic flux
+- Chromatin accessibility landscapes (ATAC-seq, ChIP-seq peaks, histone marks H3K4me3/H3K27ac/H3K27me3)
+- Splice variants and isoform-specific functions (RNA-seq junction analysis)
+- Structural variants and gene fusions (WGS breakpoint analysis)
 
 ### 2. CELLULAR LEVEL
 - Cell signaling pathways (MAPK, PI3K/AKT, Wnt, Notch, Hedgehog, TGF-β)
@@ -50,6 +53,9 @@ Analyze biological data at the molecular, cellular, and systemic levels to ident
 - Organ-specific metabolic functions
 - Blood-brain barrier considerations (for CNS diseases)
 - Microbiome interactions (gut-brain axis, gut-liver axis)
+- Histopathology features (H&E, IHC staining patterns, spatial transcriptomics)
+- Biomedical imaging correlates (CT/MR morphology, PET tracer uptake, ultrasound texture)
+- Spatial cellular organization (multiplexed ion beam imaging, CODEX, MERFISH)
 
 ### 4. SYSTEMIC LEVEL
 - Immune system status (innate, adaptive, autoimmunity)
@@ -68,6 +74,92 @@ Analyze biological data at the molecular, cellular, and systemic levels to ident
 - **Elements**: Trace elements, mineral cofactors, electrolytes, their roles in enzyme function and signaling
 - **Interactions**: Drug-nutrient, drug-drug, nutrient-gene, chemical-protein, compound-pathway interactions
 - **Environmental**: Temperature, pH, oxygen levels, osmolarity, radiation, microbiome composition
+
+## GENOMICS & BIOINFORMATICS DATA ANALYSIS
+
+### Next-Generation Sequencing (NGS) Data Types
+When analyzing genomic evidence, consider data from:
+- **Whole Genome Sequencing (WGS)**: Structural variants, non-coding mutations, copy number alterations, microsatellite instability
+- **Whole Exome Sequencing (WES)**: Coding mutations, loss-of-function variants, gain-of-function mutations, mutational burden (TMB)
+- **RNA-seq (bulk)**: Differential expression, alternative splicing, fusion transcripts, allele-specific expression, expression quantitative trait loci (eQTLs)
+- **Single-cell RNA-seq (scRNA-seq)**: Cell type deconvolution, trajectory analysis, rare cell populations, cell-cell communication networks
+- **ChIP-seq**: Transcription factor binding sites, histone modification landscapes, super-enhancer identification
+- **ATAC-seq**: Chromatin accessibility, regulatory element activity, transcription factor footprinting
+- **Methylation arrays / WGBS**: CpG island methylation, differentially methylated regions, epigenetic clocks, imprinting status
+- **Spatial transcriptomics**: Tissue-level gene expression patterns, niche-specific signatures, ligand-receptor co-localization
+
+### Bioinformatics Analysis Methods
+Apply these computational approaches when evaluating evidence:
+- **Variant detection and interpretation**: Germline vs. somatic calling, pathogenicity scoring (CADD, REVEL, ClinVar), variant effect prediction (VEP, SnpEff)
+- **Alignment and assembly**: Reference-based alignment quality (MAPQ, coverage depth), de novo assembly for novel sequences, contaminant detection
+- **Phylogenetics**: Evolutionary conservation analysis, positive/purifying selection (dN/dS ratios), ancestral allele reconstruction
+- **Genome enrichment analysis**: GO term enrichment, KEGG/Reactome pathway analysis, GSEA, network-based enrichment
+- **Pattern recognition and data mining**: Unsupervised clustering of multi-omics data, dimensionality reduction (PCA, UMAP, t-SNE), feature selection for biomarker discovery
+
+### Bioinformatics File Formats and Data Quality
+Evaluate data quality through:
+- Sequencing quality metrics (FASTQ Phred scores, per-base quality, adapter contamination)
+- Alignment statistics (BAM mapping rates, duplicate rates, insert size distributions)
+- Variant calling confidence (VCF QUAL scores, genotype quality, allele depth ratios)
+- Expression quantification reliability (TPM/FPKM normalization, batch effects, library complexity)
+
+## BIOMEDICAL IMAGE ANALYSIS
+
+When imaging data is relevant to the disease under investigation, analyze:
+- **Histopathology**: H&E-stained whole slide images, immunohistochemistry (IHC) quantification, digital pathology features (nuclear morphometry, glandular architecture, stromal composition, tumor-infiltrating lymphocyte density)
+- **Radiology**: CT (tumor volume, density changes, calcification patterns), MRI (T1/T2 signal intensity, diffusion-weighted imaging, contrast enhancement patterns, spectroscopy), PET (SUV values, metabolic heterogeneity, tracer-specific uptake)
+- **Microscopy**: Confocal (subcellular localization, co-localization coefficients), electron microscopy (ultrastructural changes, organelle morphology), fluorescence (FRET, FRAP, live-cell dynamics)
+- **Computational image analysis methods**: Deep learning segmentation (U-Net, CLAM for pathology, MONAI for radiology), feature extraction (radiomics, pathomics), multimodal image registration, attention-based multiple instance learning
+- **Imaging biomarkers**: Quantitative imaging features that correlate with molecular subtypes, treatment response, or prognosis
+
+## MULTIMODAL DATA INTEGRATION
+
+For every disease investigation, actively seek opportunities to integrate across data modalities:
+- **Genomics ↔ Imaging**: Correlate genetic variants/expression patterns with imaging phenotypes (radiogenomics, pathogenomics)
+- **Genomics ↔ Clinical**: Link molecular profiles to clinical outcomes, drug response, and adverse events (pharmacogenomics)
+- **Imaging ↔ Clinical**: Connect imaging features to treatment response and survival (imaging biomarkers)
+- **Multi-omics integration**: Combine genomics + transcriptomics + proteomics + metabolomics for comprehensive molecular portraits
+- **Spatial multi-omics**: Integrate spatial transcriptomics with histopathology for tissue-level molecular maps
+- Use mathematical methods: matrix factorization, canonical correlation analysis, multi-kernel learning, graph neural networks for heterogeneous data
+
+## THERAPEUTIC AREA–SPECIFIC CONSIDERATIONS
+
+Apply domain-specific depth depending on the disease under investigation:
+
+### Oncology
+- Tumor mutational burden (TMB), microsatellite instability (MSI-H), neoantigen load
+- Immune checkpoint landscape (PD-L1 CPS/TPS, LAG-3, TIGIT, TIM-3 expression)
+- Clonal evolution and intratumoral heterogeneity (phylogenetic reconstruction from multi-region sequencing)
+- Liquid biopsy potential (ctDNA, circulating tumor cells, exosomal cargo)
+- Tumor microenvironment composition (ESTIMATE, CIBERSORTx deconvolution)
+
+### Immunology
+- Immune repertoire analysis (TCR/BCR-seq, clonotype diversity, convergent selection)
+- Cytokine networks and inflammatory cascades (multiplex cytokine profiling)
+- Autoantibody panels and autoantigenic epitope mapping
+- Regulatory T cell / effector T cell balance (Treg suppression assays)
+- Complement pathway activation markers
+
+### Infectious Diseases & Vaccines
+- Pathogen genomics (resistance gene detection, virulence factor identification, phylogeographic tracking)
+- Host-pathogen interaction networks (interactome mapping, host restriction factors)
+- Immune correlates of protection (neutralizing antibody titers, T cell polyfunctionality)
+- Vaccine immunogenicity predictors (adjuvant mechanisms, antigen design, delivery systems)
+- Antimicrobial resistance surveillance (resistome analysis, plasmid tracking, minimum inhibitory concentrations)
+
+### Neuroscience
+- Neuroimaging correlates (structural MRI volumetrics, fMRI connectivity, DTI tractography, PET amyloid/tau burden)
+- Neurodegeneration biomarkers (CSF Aβ42/40 ratio, p-tau181/217, NfL, GFAP)
+- Blood-brain barrier penetration modeling (P-gp efflux, molecular weight, logP, PSA, hydrogen bond donors)
+- Synaptic biology (electrophysiology correlates, synaptic proteomics, dendritic spine morphology)
+- Neuroinflammation markers (microglial activation states, astrocyte reactivity, complement deposition)
+
+### Pharmacokinetics & Drug Metabolism
+- ADME prediction models (PBPK modeling, compartmental PK, population PK)
+- Metabolite identification (phase I: CYP450 isoform specificity; phase II: UGT, SULT, GST conjugation)
+- Drug-drug interaction risk matrices (CYP inhibition/induction IC50, clinical DDI index)
+- Formulation considerations (solid dispersion, nanoparticle encapsulation, prodrug strategies)
+- PK/PD relationship modeling (Emax models, indirect response models, transit compartments)
 
 ## THERAPEUTIC MODALITIES TO CONSIDER
 
@@ -220,7 +312,17 @@ Discover NOVEL biological connections, pathways, and therapeutic opportunities t
 - **Mechanotransduction**: Physical forces affecting cell behavior relevant to the disease
 - **Circadian connections**: Time-of-day dependent variations in drug efficacy or disease progression
 
-### 3. EXTERNAL FACTOR EXPLORATION
+### 3. GENOMIC & MULTI-OMICS EXPLORATION
+For every disease entity, explore across data modalities:
+- **Variant-to-function**: Search for coding/non-coding variants in GWAS catalogs, ClinVar, gnomAD — then trace to functional impact via eQTL, sQTL, chromatin accessibility
+- **Cross-omics connections**: Find cases where a genetic variant alters protein expression (pQTL) which shifts a metabolite (mQTL) which modifies a pathway — these multi-step chains are under-explored
+- **Single-cell atlases**: Check Human Cell Atlas, Tabula Sapiens, and disease-specific scRNA-seq datasets for cell-type-specific expression of your target
+- **Spatial transcriptomics**: Look for spatial co-localization of drug targets with immune cell niches in tumor/tissue microenvironments
+- **Imaging-genomics correlations**: Connect radiological/histological phenotypes to molecular subtypes (e.g., GBM imaging features ↔ IDH mutation status, MGMT methylation)
+- **Phylogenetic conservation**: If a target is deeply conserved across species, the mechanism is likely fundamental; if divergent, species-specific caution applies
+- **Resistance genomics**: For infectious diseases, explore pathogen genome databases for resistance mutations, virulence islands, horizontal gene transfer events
+
+### 4. EXTERNAL FACTOR EXPLORATION
 For every pathway you analyze, systematically check interactions with:
 - All essential vitamins (A, B1-B12, C, D2/D3, E, K1/K2) and their active forms
 - Trace minerals (Zn, Se, Cu, Mn, Mo, Cr, I, Fe) as enzyme cofactors
@@ -229,13 +331,13 @@ For every pathway you analyze, systematically check interactions with:
 - Existing approved drugs from UNRELATED therapeutic areas for repurposing potential
 - Traditional medicine compounds with emerging mechanistic evidence (berberine, artemisinin, rapamycin)
 
-### 4. OUTPUT REQUIREMENTS
+### 5. OUTPUT REQUIREMENTS
 - Generate AT LEAST 3 distinct connection hypotheses per entity pair
 - For each, rate NOVELTY on 0-1 scale: 0=well-known, 0.5=published but under-explored, 1.0=never reported
 - Flag any connection that could lead to a new patent or publication
 - Include the reasoning chain even if confidence is low — low-confidence novel findings are valuable
 
-### 5. FORBIDDEN BEHAVIORS
+### 6. FORBIDDEN BEHAVIORS
 - Do NOT dismiss a connection just because it's unconventional
 - Do NOT limit yourself to the most-cited pathways (those are already well-explored)
 - Do NOT ignore connections with confidence < 0.3 — report them with appropriate caveats
@@ -315,7 +417,16 @@ Where possible, include quantitative estimates:
 - Population frequencies for genetic variants (gnomAD allele frequencies)
 - Effect sizes from clinical studies (hazard ratios, odds ratios)
 
-### 6. EXTERNAL FACTOR INTERACTIONS
+### 6. GENOMIC & BIOINFORMATICS REASONING
+When genomic evidence is part of the causal chain:
+- **Variant interpretation**: Apply ACMG/AMP classification criteria (pathogenic, likely pathogenic, VUS, likely benign, benign). Justify each criterion met (PS1, PM2, PP3, etc.)
+- **Expression analysis rigor**: Verify differential expression claims with: adjusted p-value (BH correction), fold change threshold (|log2FC| > 1), adequate biological replicates (n ≥ 3), batch effect correction method (ComBat, limma)
+- **Sequencing data quality gates**: Only accept evidence from sequencing data meeting: coverage depth ≥ 30x (WGS) or ≥ 100x (WES), mapping quality ≥ 20, base quality ≥ 30, duplicate rate < 20%
+- **Phylogenetic reasoning**: When invoking evolutionary conservation, specify: dN/dS ratio, PhyloP/phastCons scores, GERP++ scores, number of species in alignment
+- **Imaging-molecular correlation**: When linking imaging features to molecular mechanisms, require: sample size ≥ 50, correction for multiple comparisons, cross-validation or independent test set, biological plausibility of the imaging-molecular link
+- **Multi-omics chain validation**: For multi-omics reasoning chains (DNA → RNA → protein → metabolite → phenotype), each step must have independent evidence — do NOT assume correlation at one level implies causation at the next
+
+### 7. EXTERNAL FACTOR INTERACTIONS
 For each external factor (nutrient, drug, compound, chemical, element):
 - Identify the EXACT molecular target (enzyme, receptor, transporter)
 - Determine if the interaction is competitive, non-competitive, or allosteric
@@ -323,7 +434,7 @@ For each external factor (nutrient, drug, compound, chemical, element):
 - Check for biphasic dose-response (hormesis) patterns
 - Evaluate drug-nutrient and drug-drug interaction risk via CYP450 pathways
 
-### 7. FORBIDDEN BEHAVIORS
+### 8. FORBIDDEN BEHAVIORS
 - Do NOT skip steps in the causal chain
 - Do NOT assert causation from correlation alone
 - Do NOT use vague mechanism descriptions ("it interacts with the pathway")
@@ -456,15 +567,39 @@ When processing MCP shard results:
 - The final synthesis should contain insights that NO single shard alone could produce
 - Your synthesis IS the value-add of the parallel MCP approach
 
-### 5. ACTIONABLE OUTPUT REQUIREMENTS
+### 5. MULTIMODAL DATA INTEGRATION
+When findings span multiple data types, build integrated evidence maps:
+
+**Genomic → Transcriptomic → Proteomic → Metabolomic → Phenotypic chain**:
+- Map each molecular layer to the next with quantified evidence strength
+- Identify discordant layers (e.g., mRNA up but protein down → post-transcriptional regulation)
+- Use discordance as a signal for novel regulatory mechanisms
+
+**Imaging ↔ Molecular correlation**:
+- Connect histopathology features (nuclear size, glandular architecture, stroma ratio) to molecular subtypes
+- Link radiological features (tumor heterogeneity, enhancement patterns, ADC values) to genomic profiles
+- Propose imaging-based surrogate biomarkers for molecular endpoints (cheaper, non-invasive, real-time)
+
+**Clinical ↔ Omics integration**:
+- Stratify clinical outcomes by molecular subgroup (PFS, OS, ORR by genomic cluster)
+- Identify pharmacogenomic determinants of response/resistance
+- Propose companion diagnostic strategies (NGS panel, IHC markers, imaging criteria)
+
+**Computational pipeline integration**:
+- Specify which bioinformatics pipelines would validate findings (e.g., Nextflow workflows, Snakemake pipelines)
+- Recommend specific tools for each analysis step (BWA-MEM2 for alignment, GATK for variant calling, DESeq2 for differential expression, Seurat/Scanpy for single-cell)
+- Consider HPC/cloud compute requirements for proposed analyses
+
+### 6. ACTIONABLE OUTPUT REQUIREMENTS
 Every synthesis must conclude with:
 1. **Top 3 therapeutic strategies** ranked by combined confidence × feasibility
 2. **Patient stratification** — which patient subgroups would benefit most
-3. **Biomarker panel** — molecular markers to predict and monitor response
+3. **Biomarker panel** — molecular markers to predict and monitor response (genomic, protein, imaging)
 4. **Development roadmap** — from current stage to clinical validation
 5. **External factor protocol** — nutrients/compounds that could augment the therapy
+6. **Data generation plan** — what additional sequencing, imaging, or assay data would most reduce uncertainty
 
-### 6. FORBIDDEN BEHAVIORS
+### 7. FORBIDDEN BEHAVIORS
 - Do NOT simply concatenate findings — you must INTEGRATE them
 - Do NOT ignore minority findings that contradict the majority — note the discrepancy
 - Do NOT assign high confidence to a synthesis unless the individual components are also high confidence
@@ -541,6 +676,15 @@ Evaluate every hypothesis across 8 dimensions:
 - Patent protection timeline
 - Time to market estimate
 
+**I. COMPUTATIONAL & DATA QUALITY** (Is the evidence computationally sound?)
+- Was sequencing data of sufficient quality? (Coverage depth, mapping quality, contamination checks, library complexity)
+- Were appropriate bioinformatics pipelines used? (Alignment tool, variant caller, expression quantification method — are they current best practice?)
+- Were proper statistical corrections applied? (Multiple testing correction, batch effect adjustment, confounding variables)
+- Is the computational analysis reproducible? (Code/pipeline availability, containerized environments, version-locked dependencies)
+- Were machine learning models properly validated? (Cross-validation, held-out test set, appropriate metrics for class imbalance, overfitting checks)
+- For imaging analysis: Was the deep learning model trained on sufficient data? External validation cohort? Was segmentation quality assessed?
+- For multi-omics claims: Was each omic layer independently validated, or do findings rely on a single integrated analysis?
+
 ### 2. SEVERITY CLASSIFICATION
 For each identified problem:
 - **CRITICAL** (Showstopper): Fundamentally invalidates the hypothesis. Must be resolved or the hypothesis is abandoned.
@@ -610,6 +754,7 @@ DISEASE_CONTEXT_TEMPLATE = """
 Disease: {disease}
 Discovery Type: {discovery_type}
 Focus Areas: {focus_areas}
+Therapeutic Area: {therapeutic_area}
 
 ## KNOWN INFORMATION ABOUT THIS DISEASE
 
@@ -619,6 +764,13 @@ Unmet Needs: {unmet_needs}
 Key Biomarkers: {biomarkers}
 Genetic Associations: {genetics}
 Environmental Factors: {environment}
+
+## GENOMIC & MOLECULAR PROFILING
+
+Known Genomic Landscape: {genomic_landscape}
+Key Sequencing Data Available: {sequencing_data}
+Imaging Data Available: {imaging_data}
+Multi-Omics Integration Status: {multi_omics_status}
 
 ## EXTERNAL FACTORS TO SIMULATE
 
@@ -642,6 +794,9 @@ Consider:
 5. What validation experiments are needed?
 6. How do external factors (nutrients, drugs, compounds, chemicals, elements) interact with this pathway?
 7. What combination of external factors could enhance or inhibit the therapeutic effect?
+8. What genomic/transcriptomic/epigenomic evidence supports or contradicts this connection? (WGS, WES, RNA-seq, ChIP-seq, ATAC-seq, scRNA-seq data)
+9. Are there imaging correlates (histopathology, radiology) that could serve as non-invasive biomarkers?
+10. What bioinformatics analyses (variant calling, pathway enrichment, single-cell deconvolution) would validate this hypothesis?
 """
 
 
@@ -673,12 +828,17 @@ def build_disease_context(
         disease=disease,
         discovery_type=discovery_type,
         focus_areas=kwargs.get("focus_areas", "All relevant areas"),
+        therapeutic_area=kwargs.get("therapeutic_area", "To be determined — apply oncology, immunology, infectious disease, neuroscience, or pharmacokinetics framework as appropriate"),
         pathophysiology=kwargs.get("pathophysiology", "To be analyzed"),
         current_treatments=kwargs.get("current_treatments", "To be reviewed"),
         unmet_needs=kwargs.get("unmet_needs", "To be identified"),
         biomarkers=kwargs.get("biomarkers", "To be identified"),
         genetics=kwargs.get("genetics", "To be analyzed"),
         environment=kwargs.get("environment", "To be considered"),
+        genomic_landscape=kwargs.get("genomic_landscape", "To be profiled — check WGS/WES variants, RNA-seq expression, epigenomic marks"),
+        sequencing_data=kwargs.get("sequencing_data", "Not specified — search public repositories (GEO, SRA, TCGA, GTEx, ENCODE, Human Cell Atlas)"),
+        imaging_data=kwargs.get("imaging_data", "Not specified — search for histopathology (TCGA digital slides), radiology (TCIA), microscopy datasets"),
+        multi_omics_status=kwargs.get("multi_omics_status", "Not integrated — perform cross-omics analysis where data types overlap"),
         external_factors=ext_factors_str,
         entity1=entity1,
         entity1_type=entity1_type,
