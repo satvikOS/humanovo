@@ -16,14 +16,63 @@ from decimal import Decimal
 from typing import Any
 from uuid import uuid4
 
-import boto3
-from aws_lambda_powertools import Logger, Metrics, Tracer
-from aws_lambda_powertools.event_handler import APIGatewayHttpResolver, Response
-from aws_lambda_powertools.utilities.typing import LambdaContext
+import logging
 
-logger = Logger()
-tracer = Tracer()
-metrics = Metrics()
+import boto3
+
+# Defensive powertools imports — Lambda must NEVER crash on cold start
+try:
+    from aws_lambda_powertools import Logger, Metrics
+    from aws_lambda_powertools.event_handler import APIGatewayHttpResolver, Response
+    from aws_lambda_powertools.utilities.typing import LambdaContext
+    logger = Logger()
+    metrics = Metrics()
+except ImportError as _import_err:
+    # Fallback if powertools layer is missing or incompatible
+    logging.error(f"aws_lambda_powertools import failed: {_import_err}")
+    from collections import namedtuple
+    logger = logging.getLogger("agent_orchestrator")
+    logger.setLevel(logging.DEBUG)
+
+    # Minimal stub for APIGatewayHttpResolver
+    class APIGatewayHttpResolver:
+        """Stub resolver when powertools is unavailable."""
+        def __init__(self):
+            self._routes = {}
+            self.current_event = None
+        def get(self, path):
+            def decorator(func):
+                self._routes[("GET", path)] = func
+                return func
+            return decorator
+        def post(self, path):
+            def decorator(func):
+                self._routes[("POST", path)] = func
+                return func
+            return decorator
+        def resolve(self, event, context):
+            method = event.get("requestContext", {}).get("http", {}).get("method", "GET")
+            path = event.get("rawPath", "")
+            handler_fn = self._routes.get((method, path))
+            if handler_fn:
+                self.current_event = type("Event", (), {"json_body": json.loads(event.get("body", "{}") or "{}")})()
+                result = handler_fn()
+                if isinstance(result, dict):
+                    return {"statusCode": 200, "headers": {"Content-Type": "application/json"}, "body": json.dumps(result, cls=DecimalEncoder)}
+                return result
+            return {"statusCode": 404, "body": "Not Found"}
+
+    class Response:
+        def __init__(self, status_code=200, body="", content_type="application/json", headers=None):
+            self.status_code = status_code
+            self.body = body
+            self.content_type = content_type
+
+    LambdaContext = object
+
+    class _NoopMetrics:
+        def add_metric(self, **kwargs): pass
+    metrics = _NoopMetrics()
 
 app = APIGatewayHttpResolver()
 
@@ -648,7 +697,6 @@ Return your findings as a JSON object with: has_hypothesis, title, description, 
 # ============== API Endpoints ==============
 
 @app.get("/api/v1/orchestrator/status")
-@tracer.capture_method
 def get_status():
     """Get current orchestrator status. Never exposes model identities."""
     try:
@@ -677,120 +725,139 @@ def get_status():
 
 
 @app.post("/api/v1/orchestrator/start")
-@tracer.capture_method
 def start_discovery():
     """Start a new discovery process with 4 parallel agents."""
-    body = app.current_event.json_body or {}
+    try:
+        body = app.current_event.json_body or {}
+    except Exception:
+        body = {}
 
     disease = body.get("disease", "")
     if not disease:
-        return {"detail": "Disease is required"}, 400
-
-    # Create initial state in DynamoDB
-    table = get_task_table()
-    now = datetime.utcnow().isoformat()
-    config = {
-        "disease": disease,
-        "discovery_type": body.get("discovery_type", "cure"),
-        "focus_entities": body.get("focus_entities", []),
-        "max_agents": body.get("max_agents", 1000),
-        "target_confidence": body.get("target_confidence", 0.95),
-        "external_factors": body.get("external_factors", []),
-    }
-
-    table.put_item(Item={
-        "id": DISCOVERY_TASK_KEY,
-        "status": "running",
-        "config": config,
-        "hypotheses": [],
-        "stats": {
-            "total_agents": 4,
-            "active_agents": 4,
-            "hypotheses_found": 0,
-            "paths_explored": 0,
-            "high_confidence_discoveries": 0,
-            "current_best_confidence": Decimal("0"),
-            "runtime_seconds": 0,
-            "current_round": 0,
-            "total_rounds": 0,
-            "learning_stats": {
-                "total_explored": 0,
-                "low_value_paths": 0,
-                "high_value_paths": 0,
-                "avg_relation_score": Decimal("0"),
-            },
-        },
-        "created_at": now,
-        "updated_at": now,
-        "project_id": "discovery",
-    })
-
-    # Invoke self asynchronously to do the AI work
-    try:
-        lambda_client.invoke(
-            FunctionName=FUNCTION_NAME,
-            InvocationType="Event",  # Async
-            Payload=json.dumps({
-                "source": "self-invoke",
-                "action": "run_discovery",
-                "config": config,
-            }),
+        return Response(
+            status_code=400,
+            content_type="application/json",
+            body=json.dumps({"detail": "Disease is required"}),
         )
-        logger.info("Async discovery worker invoked", disease=disease)
-    except Exception as e:
-        logger.error(f"Failed to invoke async worker: {e}")
-        # Fallback: run synchronously (will timeout after 300s but still useful)
-        try:
-            run_discovery_worker(config)
-        except Exception as e2:
-            logger.error(f"Synchronous fallback also failed: {e2}")
-            update_discovery_state({"status": "idle"})
 
-    return {"status": "started", "disease": disease, "agents": 4}
+    try:
+        # Create initial state in DynamoDB
+        table = get_task_table()
+        now = datetime.utcnow().isoformat()
+        config = {
+            "disease": disease,
+            "discovery_type": body.get("discovery_type", "cure"),
+            "focus_entities": body.get("focus_entities", []),
+            "max_agents": body.get("max_agents", 1000),
+            "target_confidence": body.get("target_confidence", 0.95),
+            "external_factors": body.get("external_factors", []),
+        }
+
+        table.put_item(Item={
+            "id": DISCOVERY_TASK_KEY,
+            "status": "running",
+            "config": config,
+            "hypotheses": [],
+            "stats": {
+                "total_agents": 4,
+                "active_agents": 4,
+                "hypotheses_found": 0,
+                "paths_explored": 0,
+                "high_confidence_discoveries": 0,
+                "current_best_confidence": Decimal("0"),
+                "runtime_seconds": 0,
+                "current_round": 0,
+                "total_rounds": 0,
+                "learning_stats": {
+                    "total_explored": 0,
+                    "low_value_paths": 0,
+                    "high_value_paths": 0,
+                    "avg_relation_score": Decimal("0"),
+                },
+            },
+            "created_at": now,
+            "updated_at": now,
+            "project_id": "discovery",
+        })
+
+        # Invoke self asynchronously to do the AI work
+        try:
+            lambda_client.invoke(
+                FunctionName=FUNCTION_NAME,
+                InvocationType="Event",  # Async
+                Payload=json.dumps({
+                    "source": "self-invoke",
+                    "action": "run_discovery",
+                    "config": config,
+                }),
+            )
+            logger.info("Async discovery worker invoked", disease=disease)
+        except Exception as e:
+            logger.error(f"Failed to invoke async worker: {e}")
+            # Fallback: run synchronously (will timeout after 300s but still useful)
+            try:
+                run_discovery_worker(config)
+            except Exception as e2:
+                logger.error(f"Synchronous fallback also failed: {e2}")
+                update_discovery_state({"status": "idle"})
+
+        return {"status": "started", "disease": disease, "agents": 4}
+    except Exception as e:
+        logger.error(f"Start discovery failed: {e}")
+        return Response(
+            status_code=500,
+            content_type="application/json",
+            body=json.dumps({"detail": f"Failed to start discovery: {str(e)}"}),
+        )
 
 
 @app.post("/api/v1/orchestrator/pause")
-@tracer.capture_method
 def pause_discovery():
     """Pause the discovery process."""
-    update_discovery_state({"status": "paused"})
+    try:
+        update_discovery_state({"status": "paused"})
+    except Exception as e:
+        logger.error(f"Pause failed: {e}")
     return {"status": "paused"}
 
 
 @app.post("/api/v1/orchestrator/resume")
-@tracer.capture_method
 def resume_discovery():
     """Resume the discovery process."""
-    state = get_discovery_state()
-    if state and state.get("config"):
-        update_discovery_state({"status": "running"})
-        try:
-            lambda_client.invoke(
-                FunctionName=FUNCTION_NAME,
-                InvocationType="Event",
-                Payload=json.dumps({
-                    "source": "self-invoke",
-                    "action": "run_discovery",
-                    "config": state["config"],
-                }),
-            )
-        except Exception as e:
-            logger.error(f"Failed to resume worker: {e}")
+    try:
+        state = get_discovery_state()
+        if state and state.get("config"):
+            update_discovery_state({"status": "running"})
+            try:
+                lambda_client.invoke(
+                    FunctionName=FUNCTION_NAME,
+                    InvocationType="Event",
+                    Payload=json.dumps({
+                        "source": "self-invoke",
+                        "action": "run_discovery",
+                        "config": state["config"],
+                    }),
+                )
+            except Exception as e:
+                logger.error(f"Failed to resume worker: {e}")
+    except Exception as e:
+        logger.error(f"Resume failed: {e}")
     return {"status": "running"}
 
 
 @app.post("/api/v1/orchestrator/stop")
-@tracer.capture_method
 def stop_discovery():
     """Stop the discovery process."""
-    update_discovery_state({"status": "stopping"})
-    time.sleep(1)
-    update_discovery_state({"status": "idle"})
+    try:
+        update_discovery_state({"status": "stopping"})
+        time.sleep(1)
+        update_discovery_state({"status": "idle"})
+    except Exception as e:
+        logger.error(f"Stop failed: {e}")
     return {"status": "idle"}
 
 
 @app.get("/api/v1/orchestrator/health")
-@tracer.capture_method
 def health_check():
     """Check AI model connectivity. Returns count only — never exposes model names."""
     connected = 0
@@ -825,12 +892,15 @@ def health_check():
 
 
 @app.post("/api/v1/orchestrator/generate-paper/markdown")
-@tracer.capture_method
 def generate_paper():
     """Generate a research paper from discovered hypotheses."""
     state = get_discovery_state()
     if not state or not state.get("hypotheses"):
-        return {"detail": "No hypotheses available for paper generation"}, 400
+        return Response(
+            status_code=400,
+            content_type="application/json",
+            body=json.dumps({"detail": "No hypotheses available for paper generation"}),
+        )
 
     hypotheses = state.get("hypotheses", [])
     config = state.get("config", {})
@@ -879,22 +949,23 @@ Be thorough, scientific, and cite real biomedical concepts. Format as proper Mar
         )
     except Exception as e:
         logger.error(f"Paper generation failed: {e}")
-        return {"detail": f"Paper generation failed: {str(e)}"}, 500
+        return Response(
+            status_code=500,
+            content_type="application/json",
+            body=json.dumps({"detail": f"Paper generation failed: {str(e)}"}),
+        )
 
 
 # ============== Agent Task Endpoints (API Gateway routes) ==============
 
 @app.post("/api/v1/agents/tasks")
-@tracer.capture_method
 def create_agent_task():
     """Create an agent task (alternative endpoint)."""
-    body = app.current_event.json_body or {}
     task_id = str(uuid4())
     return {"id": task_id, "status": "queued"}
 
 
 @app.get("/api/v1/agents/tasks/<task_id>")
-@tracer.capture_method
 def get_agent_task(task_id: str):
     """Get agent task status."""
     return {"id": task_id, "status": "completed", "progress": 100}
@@ -902,23 +973,36 @@ def get_agent_task(task_id: str):
 
 # ============== Lambda Handler ==============
 
-@logger.inject_lambda_context
-@tracer.capture_lambda_handler
-@metrics.log_metrics(capture_cold_start_metric=True)
 def handler(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
     """Lambda handler entry point.
 
     Handles both:
     1. API Gateway HTTP requests (normal API calls)
     2. Async self-invocations (background discovery work)
-    """
-    # Check if this is a self-invocation for background work
-    if event.get("source") == "self-invoke":
-        action = event.get("action")
-        if action == "run_discovery":
-            config = event.get("config", {})
-            run_discovery_worker(config)
-            return {"status": "completed"}
 
-    # Otherwise, handle as API Gateway request
-    return app.resolve(event, context)
+    Wrapped in top-level try/except to NEVER return 500 for API requests.
+    """
+    try:
+        # Check if this is a self-invocation for background work
+        if event.get("source") == "self-invoke":
+            action = event.get("action")
+            if action == "run_discovery":
+                config = event.get("config", {})
+                run_discovery_worker(config)
+                return {"status": "completed"}
+
+        # Otherwise, handle as API Gateway request
+        return app.resolve(event, context)
+    except Exception as e:
+        logger.error(f"Top-level handler error: {e}")
+        # Return a valid API Gateway v2 response so the client gets JSON, not 500
+        return {
+            "statusCode": 200,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({
+                "state": "idle",
+                "stats": None,
+                "top_hypotheses": [],
+                "detail": f"Internal error: {str(e)}",
+            }),
+        }

@@ -302,8 +302,13 @@ export default function Agents() {
           metadata: { disease: config.disease, discoveryType: config.discoveryType },
         })
       } else {
-        const error = await response.json()
-        alert(`Failed to start: ${error.detail}`)
+        let detail = `Server error (${response.status})`
+        try {
+          const error = await response.json()
+          if (error.detail) detail = error.detail
+          else if (error.message) detail = error.message
+        } catch { /* non-JSON response */ }
+        alert(`Failed to start: ${detail}`)
       }
     } catch (e) {
       console.error('Failed to start discovery:', e)
