@@ -2,7 +2,7 @@
 Agent Orchestrator Lambda Handler - Multi-model AI discovery system.
 
 Handles the /orchestrator/* endpoints for the discovery page.
-Uses AWS Bedrock Converse API for unified multi-model calls.
+Uses AWS Bedrock Converse API with InvokeModel fallback for all providers.
 4 models run in parallel with different roles to avoid token bottlenecks.
 Model identities are never exposed to the frontend (unbiasing).
 """
@@ -293,11 +293,92 @@ def update_discovery_state(updates: dict):
     )
 
 
-def converse_bedrock(model_id: str, prompt: str, system_prompt: str,
-                     max_tokens: int = 2000, temperature: float = 0.7) -> str:
-    """Invoke a Bedrock model using the Converse API (unified across all providers)."""
+def _build_invoke_body(model_id: str, prompt: str, system_prompt: str,
+                       max_tokens: int, temperature: float) -> dict:
+    """Build provider-specific request body for InvokeModel API."""
+    provider = model_id.split(".")[0]  # meta, deepseek, moonshotai, openai
+
+    if provider == "meta":
+        # Meta Llama uses prompt template format
+        full_prompt = (
+            f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
+            f"{system_prompt}<|eot_id|>"
+            f"<|start_header_id|>user<|end_header_id|>\n\n"
+            f"{prompt}<|eot_id|>"
+            f"<|start_header_id|>assistant<|end_header_id|>\n\n"
+        )
+        return {
+            "prompt": full_prompt,
+            "max_gen_len": max_tokens,
+            "temperature": temperature,
+            "top_p": 0.9,
+        }
+    else:
+        # OpenAI-compatible chat format (deepseek, moonshotai, openai)
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        return {
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "top_p": 0.9,
+        }
+
+
+def _parse_invoke_response(model_id: str, response_body: dict) -> str:
+    """Parse provider-specific response from InvokeModel API."""
+    provider = model_id.split(".")[0]
+
+    # Meta Llama format
+    if provider == "meta":
+        if "generation" in response_body:
+            return response_body["generation"]
+
+    # OpenAI-compatible choices format (deepseek, openai, moonshotai)
+    if "choices" in response_body:
+        choices = response_body["choices"]
+        if choices and isinstance(choices, list):
+            choice = choices[0]
+            msg = choice.get("message", {})
+            if isinstance(msg, dict) and "content" in msg:
+                return msg["content"]
+            # Some models put text directly in choice
+            if "text" in choice:
+                return choice["text"]
+
+    # Converse-style nested output
+    if "output" in response_body:
+        output = response_body["output"]
+        if isinstance(output, dict):
+            msg = output.get("message", {})
+            if isinstance(msg, dict) and "content" in msg:
+                content = msg["content"]
+                if isinstance(content, list) and content:
+                    return content[0].get("text", "")
+                if isinstance(content, str):
+                    return content
+        if isinstance(output, str):
+            return output
+
+    # Fallback: try common response keys
+    for key in ["text", "content", "response", "completion", "generated_text", "result"]:
+        if key in response_body and isinstance(response_body[key], str):
+            return response_body[key]
+
+    logger.warning(f"Could not parse InvokeModel response for {model_id}, returning raw")
+    return json.dumps(response_body)
+
+
+def call_bedrock(model_id: str, prompt: str, system_prompt: str,
+                 max_tokens: int = 2000, temperature: float = 0.7) -> str:
+    """Invoke a Bedrock model. Tries Converse API first, falls back to InvokeModel."""
     if bedrock_runtime is None:
         raise RuntimeError("Bedrock runtime not initialized")
+
+    converse_err = None
+    # Try Converse API first (unified across providers)
     try:
         response = bedrock_runtime.converse(
             modelId=model_id,
@@ -315,8 +396,26 @@ def converse_bedrock(model_id: str, prompt: str, system_prompt: str,
         )
         return response["output"]["message"]["content"][0]["text"]
     except Exception as e:
-        logger.error(f"Bedrock converse failed for model: {e}")
-        raise
+        converse_err = e
+        logger.warning(f"Converse API failed for {model_id}: {e}, trying InvokeModel")
+
+    # Fallback: InvokeModel with provider-specific body format
+    try:
+        body = _build_invoke_body(model_id, prompt, system_prompt, max_tokens, temperature)
+        response = bedrock_runtime.invoke_model(
+            modelId=model_id,
+            contentType="application/json",
+            accept="application/json",
+            body=json.dumps(body),
+        )
+        response_body = json.loads(response["body"].read())
+        return _parse_invoke_response(model_id, response_body)
+    except Exception as invoke_err:
+        logger.error(f"InvokeModel also failed for {model_id}: {invoke_err}")
+        raise RuntimeError(
+            f"Both APIs failed for {model_id}. "
+            f"Converse: {converse_err}. InvokeModel: {invoke_err}"
+        )
 
 
 def parse_hypothesis_json(text: str) -> dict | None:
@@ -351,7 +450,7 @@ def run_single_agent(role: str, prompt: str, system_prompt: str) -> dict | None:
     """Run a single agent with its assigned model. Returns hypothesis or None."""
     model_config = AGENT_MODELS[role]
     try:
-        response_text = converse_bedrock(
+        response_text = call_bedrock(
             model_id=model_config["model_id"],
             prompt=prompt,
             system_prompt=system_prompt,
@@ -704,13 +803,15 @@ def health_check():
             "total_models": total,
         }
 
-    # Test each model with a minimal call
+    # Test each model with a minimal call (try Converse, then InvokeModel)
     for role, model_config in AGENT_MODELS.items():
         try:
-            bedrock_runtime.converse(
-                modelId=model_config["model_id"],
-                messages=[{"role": "user", "content": [{"text": "hi"}]}],
-                inferenceConfig={"maxTokens": 5, "temperature": 0.1},
+            call_bedrock(
+                model_id=model_config["model_id"],
+                prompt="hi",
+                system_prompt="Reply with OK.",
+                max_tokens=5,
+                temperature=0.1,
             )
             connected += 1
         except Exception as e:
@@ -764,7 +865,7 @@ Be thorough, scientific, and cite real biomedical concepts. Format as proper Mar
     system_prompt = "You are a biomedical research paper writer. Write detailed, scientifically rigorous papers."
 
     try:
-        paper_text = converse_bedrock(
+        paper_text = call_bedrock(
             model_id=PAPER_MODEL,
             prompt=prompt,
             system_prompt=system_prompt,

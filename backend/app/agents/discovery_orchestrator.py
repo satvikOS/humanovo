@@ -34,6 +34,60 @@ from app.agents.prompts import get_agent_prompt, MASTER_DISCOVERY_PROMPT
 logger = get_logger(__name__)
 
 
+# ============== Bedrock InvokeModel helpers ==============
+
+def _build_invoke_body(model_id: str, prompt: str, system_prompt: str,
+                       max_tokens: int, temperature: float) -> dict:
+    """Build provider-specific request body for Bedrock InvokeModel API."""
+    provider = model_id.split(".")[0]
+    if provider == "meta":
+        full_prompt = (
+            f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
+            f"{system_prompt}<|eot_id|>"
+            f"<|start_header_id|>user<|end_header_id|>\n\n"
+            f"{prompt}<|eot_id|>"
+            f"<|start_header_id|>assistant<|end_header_id|>\n\n"
+        )
+        return {"prompt": full_prompt, "max_gen_len": max_tokens, "temperature": temperature, "top_p": 0.9}
+    else:
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        return {"messages": messages, "max_tokens": max_tokens, "temperature": temperature, "top_p": 0.9}
+
+
+def _parse_invoke_response(model_id: str, response_body: dict) -> str:
+    """Parse provider-specific response from Bedrock InvokeModel API."""
+    provider = model_id.split(".")[0]
+    if provider == "meta" and "generation" in response_body:
+        return response_body["generation"]
+    if "choices" in response_body:
+        choices = response_body["choices"]
+        if choices and isinstance(choices, list):
+            msg = choices[0].get("message", {})
+            if isinstance(msg, dict) and "content" in msg:
+                return msg["content"]
+            if "text" in choices[0]:
+                return choices[0]["text"]
+    if "output" in response_body:
+        output = response_body["output"]
+        if isinstance(output, dict):
+            msg = output.get("message", {})
+            if isinstance(msg, dict) and "content" in msg:
+                content = msg["content"]
+                if isinstance(content, list) and content:
+                    return content[0].get("text", "")
+                if isinstance(content, str):
+                    return content
+        if isinstance(output, str):
+            return output
+    for key in ["text", "content", "response", "completion", "generated_text", "result"]:
+        if key in response_body and isinstance(response_body[key], str):
+            return response_body[key]
+    return json.dumps(response_body)
+
+
 class OrchestratorState(str, Enum):
     """State of the discovery orchestrator."""
     IDLE = "idle"
@@ -450,24 +504,40 @@ INSTRUCTIONS:
         self, model_id: str, prompt: str, system_prompt: str,
         max_tokens: int, temperature: float,
     ) -> str:
-        """Invoke a Bedrock model using the Converse API."""
+        """Invoke a Bedrock model. Tries Converse API, falls back to InvokeModel."""
         if not self._bedrock_client:
             raise RuntimeError("Bedrock client not initialized for MCP")
 
         loop = asyncio.get_event_loop()
+
+        # Try Converse first
+        try:
+            response = await loop.run_in_executor(
+                None,
+                lambda: self._bedrock_client.converse(
+                    modelId=model_id,
+                    messages=[{"role": "user", "content": [{"text": prompt}]}],
+                    system=[{"text": system_prompt}] if system_prompt else [],
+                    inferenceConfig={"maxTokens": max_tokens, "temperature": temperature},
+                )
+            )
+            return response["output"]["message"]["content"][0]["text"]
+        except Exception as e:
+            logger.warning(f"MCP Converse failed for {model_id}: {e}, trying InvokeModel")
+
+        # Fallback: InvokeModel
+        body = _build_invoke_body(model_id, prompt, system_prompt, max_tokens, temperature)
         response = await loop.run_in_executor(
             None,
-            lambda: self._bedrock_client.converse(
+            lambda: self._bedrock_client.invoke_model(
                 modelId=model_id,
-                messages=[{"role": "user", "content": [{"text": prompt}]}],
-                system=[{"text": system_prompt}] if system_prompt else [],
-                inferenceConfig={
-                    "maxTokens": max_tokens,
-                    "temperature": temperature,
-                },
+                contentType="application/json",
+                accept="application/json",
+                body=json.dumps(body),
             )
         )
-        return response["output"]["message"]["content"][0]["text"]
+        response_body = json.loads(response["body"].read())
+        return _parse_invoke_response(model_id, response_body)
 
 
 class MultiModelLLM:
@@ -551,28 +621,41 @@ class MultiModelLLM:
         self, model_type: ModelType, prompt: str, system_prompt: str,
         max_tokens: int, temperature: float,
     ) -> str:
-        """Invoke any model via Bedrock Converse API (unified interface)."""
+        """Invoke any model via Bedrock. Tries Converse API, falls back to InvokeModel."""
         if not self._bedrock_client:
             raise RuntimeError("Bedrock client not initialized")
 
         model_id = self.BEDROCK_MODELS[model_type]
-
         loop = asyncio.get_event_loop()
+
+        # Try Converse API first
+        try:
+            response = await loop.run_in_executor(
+                None,
+                lambda: self._bedrock_client.converse(
+                    modelId=model_id,
+                    messages=[{"role": "user", "content": [{"text": prompt}]}],
+                    system=[{"text": system_prompt}] if system_prompt else [],
+                    inferenceConfig={"maxTokens": max_tokens, "temperature": temperature},
+                )
+            )
+            return response["output"]["message"]["content"][0]["text"]
+        except Exception as e:
+            logger.warning(f"Converse failed for {model_id}: {e}, trying InvokeModel")
+
+        # Fallback: InvokeModel with provider-specific body
+        body = _build_invoke_body(model_id, prompt, system_prompt, max_tokens, temperature)
         response = await loop.run_in_executor(
             None,
-            lambda: self._bedrock_client.converse(
+            lambda: self._bedrock_client.invoke_model(
                 modelId=model_id,
-                messages=[
-                    {"role": "user", "content": [{"text": prompt}]},
-                ],
-                system=[{"text": system_prompt}] if system_prompt else [],
-                inferenceConfig={
-                    "maxTokens": max_tokens,
-                    "temperature": temperature,
-                },
+                contentType="application/json",
+                accept="application/json",
+                body=json.dumps(body),
             )
         )
-        return response["output"]["message"]["content"][0]["text"]
+        response_body = json.loads(response["body"].read())
+        return _parse_invoke_response(model_id, response_body)
 
     async def _generate_fallback(
         self, prompt: str, system_prompt: str, max_tokens: int, temperature: float,
