@@ -253,7 +253,8 @@ export default function Agents() {
           const data = await response.json()
           setConnectedAgents(data.connected_count || 0)
           setTotalAgents(data.total_models || 4)
-          setAiConnected(data.connected_count > 0)
+          // Don't override aiConnected here — status polling handles that.
+          // Health check only updates model counts.
         }
       } catch {
         // Health check failed, status polling will still set aiConnected

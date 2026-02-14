@@ -135,23 +135,27 @@ function DiscoveryStatus() {
   const [hypothesesFound, setHypothesesFound] = useState(0)
 
   useEffect(() => {
+    let fails = 0
     const check = async () => {
       try {
         const res = await fetch('/api/v1/orchestrator/status')
         if (res.ok) {
+          fails = 0
           setConnected(true)
           const data = await res.json()
           setDiscoveryState(data.state || 'idle')
           setHypothesesFound(data.stats?.hypotheses_found || 0)
         } else {
-          setConnected(false)
+          fails++
+          if (fails >= 3) setConnected(false)
         }
       } catch {
-        setConnected(false)
+        fails++
+        if (fails >= 3) setConnected(false)
       }
     }
     check()
-    const interval = setInterval(check, 30000)
+    const interval = setInterval(check, 10000)
     return () => clearInterval(interval)
   }, [])
 
@@ -169,9 +173,9 @@ function DiscoveryStatus() {
             <div className="text-xs text-[var(--color-text-muted)]">Pipeline</div>
             <div className={clsx(
               'text-sm font-bold mt-0.5',
-              connected === null ? 'text-yellow-400' : connected ? 'text-green-400' : 'text-red-400'
+              connected ? 'text-green-400' : 'text-yellow-400'
             )}>
-              {connected === null ? 'Checking...' : connected ? 'Connected' : 'Offline'}
+              {connected ? 'Connected' : 'Connecting...'}
             </div>
           </div>
           <div className="p-2 bg-[var(--color-bg)] rounded text-center">
