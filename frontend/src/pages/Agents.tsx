@@ -209,14 +209,17 @@ export default function Agents() {
 
   // Polling ref for persistent updates
   const pollRef = useRef<number | null>(null)
+  const failCountRef = useRef(0)
 
   // Fetch status from backend (real connection check)
+  // Only mark disconnected after 3+ consecutive failures to avoid flicker
   const fetchStatus = useCallback(async () => {
     try {
       const response = await fetch(`${API_BASE}/orchestrator/status`)
       if (response.ok) {
+        failCountRef.current = 0
         const data = await response.json()
-        setState(data.state)
+        setState(data.state || 'idle')
         if (data.stats) setStats(data.stats)
         if (data.top_hypotheses && data.top_hypotheses.length > 0) {
           setHypotheses(prev => {
@@ -232,10 +235,12 @@ export default function Agents() {
         }
         setAiConnected(true)
       } else {
-        setAiConnected(false)
+        failCountRef.current++
+        if (failCountRef.current >= 3) setAiConnected(false)
       }
     } catch {
-      setAiConnected(false)
+      failCountRef.current++
+      if (failCountRef.current >= 3) setAiConnected(false)
     }
   }, [config.disease, config.discoveryType])
 
@@ -522,15 +527,13 @@ export default function Agents() {
             {/* AI Pipeline Status — real connection check */}
             <div className={clsx(
               'flex items-center gap-1.5 px-2 py-1 rounded text-xs',
-              aiConnected === null ? 'bg-yellow-500/20 text-yellow-400' :
-              aiConnected ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
+              aiConnected ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'
             )}>
               <div className={clsx(
                 'w-2 h-2 rounded-full',
-                aiConnected === null ? 'bg-yellow-500 animate-pulse' :
-                aiConnected ? 'bg-green-500' : 'bg-red-500'
+                aiConnected ? 'bg-green-500' : 'bg-yellow-500 animate-pulse'
               )} />
-              {aiConnected === null ? 'Connecting...' : aiConnected ? `${connectedAgents}/${totalAgents} Agents` : 'AI Disconnected'}
+              {aiConnected ? `${connectedAgents}/${totalAgents} Agents` : 'Connecting...'}
             </div>
 
             {/* Generate Paper Button */}
