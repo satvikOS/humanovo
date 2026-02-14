@@ -749,7 +749,7 @@ def start_discovery():
             "discovery_type": body.get("discovery_type", "cure"),
             "focus_entities": body.get("focus_entities", []),
             "max_agents": body.get("max_agents", 1000),
-            "target_confidence": body.get("target_confidence", 0.95),
+            "target_confidence": Decimal(str(body.get("target_confidence", 0.95))),
             "external_factors": body.get("external_factors", []),
         }
 
@@ -991,7 +991,19 @@ def handler(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
                 run_discovery_worker(config)
                 return {"status": "completed"}
 
-        # Otherwise, handle as API Gateway request
+        # Fix: aws-lambda-powertools v3 strips /{stage} from rawPath.
+        # API Gateway HTTP API v2 sends rawPath WITHOUT stage prefix,
+        # but powertools expects it WITH the prefix when stage != "$default".
+        # Without this fix, /api/v1/... becomes /v1/... and routes return 404.
+        stage = event.get("requestContext", {}).get("stage", "$default")
+        raw_path = event.get("rawPath", "")
+        if stage and stage != "$default" and not raw_path.startswith(f"/{stage}/"):
+            event["rawPath"] = f"/{stage}{raw_path}"
+            rc_http = event.get("requestContext", {}).get("http", {})
+            if rc_http:
+                rc_http["path"] = f"/{stage}{rc_http.get('path', raw_path)}"
+
+        # Handle as API Gateway request
         return app.resolve(event, context)
     except Exception as e:
         logger.error(f"Top-level handler error: {e}")
