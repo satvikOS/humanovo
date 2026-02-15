@@ -218,22 +218,28 @@ export default function Agents() {
       const response = await fetch(`${API_BASE}/orchestrator/status`)
       if (response.ok) {
         failCountRef.current = 0
-        const data = await response.json()
-        setState(data.state || 'idle')
-        if (data.stats) setStats(data.stats)
-        if (data.top_hypotheses && data.top_hypotheses.length > 0) {
-          setHypotheses(prev => {
-            const existingIds = new Set(prev.map(h => h.id))
-            const incoming = data.top_hypotheses.filter((h: Hypothesis) => !existingIds.has(h.id))
-            if (incoming.length === 0) return prev
-            // Auto-save new hypotheses to project library
-            for (const h of incoming) {
-              saveHypothesisToProject(h, config.disease, config.discoveryType)
-            }
-            return [...incoming, ...prev].sort((a: Hypothesis, b: Hypothesis) => b.confidence - a.confidence).slice(0, 100)
-          })
-        }
+        // Mark connected FIRST — 200 OK means the backend is alive.
+        // Do this before response.json() so a body-parsing error can't block it.
         setAiConnected(true)
+        try {
+          const data = await response.json()
+          setState(data.state || 'idle')
+          if (data.stats) setStats(data.stats)
+          if (data.top_hypotheses && data.top_hypotheses.length > 0) {
+            setHypotheses(prev => {
+              const existingIds = new Set(prev.map(h => h.id))
+              const incoming = data.top_hypotheses.filter((h: Hypothesis) => !existingIds.has(h.id))
+              if (incoming.length === 0) return prev
+              // Auto-save new hypotheses to project library
+              for (const h of incoming) {
+                saveHypothesisToProject(h, config.disease, config.discoveryType)
+              }
+              return [...incoming, ...prev].sort((a: Hypothesis, b: Hypothesis) => b.confidence - a.confidence).slice(0, 100)
+            })
+          }
+        } catch {
+          // Body parse failed but connection is still alive (200 OK)
+        }
       } else {
         failCountRef.current++
         if (failCountRef.current >= 3) setAiConnected(false)
