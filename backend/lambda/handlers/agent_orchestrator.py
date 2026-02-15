@@ -993,15 +993,25 @@ def handler(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
 
         # Fix: aws-lambda-powertools v3 strips /{stage} from rawPath.
         # API Gateway HTTP API v2 sends rawPath WITHOUT stage prefix,
-        # but powertools expects it WITH the prefix when stage != "$default".
+        # but powertools v3 expects it WITH the prefix when stage != "$default".
         # Without this fix, /api/v1/... becomes /v1/... and routes return 404.
-        stage = event.get("requestContext", {}).get("stage", "$default")
-        raw_path = event.get("rawPath", "")
-        if stage and stage != "$default" and not raw_path.startswith(f"/{stage}/"):
-            event["rawPath"] = f"/{stage}{raw_path}"
-            rc_http = event.get("requestContext", {}).get("http", {})
-            if rc_http:
-                rc_http["path"] = f"/{stage}{rc_http.get('path', raw_path)}"
+        # Only apply when powertools v3+ is installed (v2 uses paths directly).
+        _needs_stage_fix = False
+        try:
+            import aws_lambda_powertools
+            _pt_version = getattr(aws_lambda_powertools, "__version__", "0.0.0")
+            _needs_stage_fix = int(_pt_version.split(".")[0]) >= 3
+        except Exception:
+            _needs_stage_fix = False
+
+        if _needs_stage_fix:
+            stage = event.get("requestContext", {}).get("stage", "$default")
+            raw_path = event.get("rawPath", "")
+            if stage and stage != "$default" and not raw_path.startswith(f"/{stage}/"):
+                event["rawPath"] = f"/{stage}{raw_path}"
+                rc_http = event.get("requestContext", {}).get("http", {})
+                if rc_http:
+                    rc_http["path"] = f"/{stage}{rc_http.get('path', raw_path)}"
 
         # Handle as API Gateway request
         return app.resolve(event, context)

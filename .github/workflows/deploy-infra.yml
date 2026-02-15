@@ -196,7 +196,7 @@ jobs:
           # --- Lambda Layers ---
           # Create minimal layer with aws_lambda_powertools
           mkdir -p /tmp/lambda-layer/python
-          pip install "aws-lambda-powertools>=2.40,<3.0" -t /tmp/lambda-layer/python/ --quiet
+          pip install "aws-lambda-powertools>=3.0,<4.0" -t /tmp/lambda-layer/python/ --quiet
           cd /tmp/lambda-layer && zip -r ../dependencies-layer.zip python/ -x '*.pyc' '*__pycache__*'
 
           # Create scipy placeholder layer (real scipy too large for quick deploy)
