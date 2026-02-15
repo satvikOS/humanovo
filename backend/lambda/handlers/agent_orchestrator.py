@@ -1007,28 +1007,49 @@ def handler(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
                 run_discovery_worker(config)
                 return {"status": "completed"}
 
-        # Fix: aws-lambda-powertools v3 strips /{stage} from rawPath.
-        # API Gateway HTTP API v2 sends rawPath WITHOUT stage prefix,
-        # but powertools v3 expects it WITH the prefix when stage != "$default".
-        # Without this fix, /api/v1/... becomes /v1/... and routes return 404.
-        # Only apply when powertools v3+ is installed (v2 uses paths directly).
-        _needs_stage_fix = False
+        # Normalize rawPath for route matching.
+        # API Gateway HTTP API v2 with named stage (e.g. "dev") includes
+        # the stage prefix in rawPath: /dev/api/v1/orchestrator/status
+        # Routes are registered as /api/v1/orchestrator/status (no prefix).
+        #
+        # - Stub resolver & powertools v2: need rawPath WITHOUT stage prefix
+        # - Powertools v3: needs rawPath WITH stage prefix (strips it internally)
+        _pt_major = 0
         try:
             import aws_lambda_powertools
             _pt_version = getattr(aws_lambda_powertools, "__version__", "0.0.0")
-            _needs_stage_fix = int(_pt_version.split(".")[0]) >= 3
-            print(f"[HANDLER] powertools_version={_pt_version} needs_stage_fix={_needs_stage_fix}")
+            _pt_major = int(_pt_version.split(".")[0])
+            print(f"[HANDLER] powertools_version={_pt_version} pt_major={_pt_major}")
         except Exception:
-            _needs_stage_fix = False
-            print("[HANDLER] powertools version detection failed")
+            print("[HANDLER] powertools not available, using stub resolver")
 
-        if _needs_stage_fix:
-            if stage and stage != "$default" and not raw_path.startswith(f"/{stage}/"):
-                event["rawPath"] = f"/{stage}{raw_path}"
-                rc_http = event.get("requestContext", {}).get("http", {})
-                if rc_http:
-                    rc_http["path"] = f"/{stage}{rc_http.get('path', raw_path)}"
-                print(f"[HANDLER] Fixed rawPath to: {event['rawPath']}")
+        if stage and stage != "$default":
+            stage_prefix = f"/{stage}"
+            has_prefix = raw_path.startswith(f"{stage_prefix}/") or raw_path == stage_prefix
+
+            if _pt_major >= 3:
+                # v3 expects rawPath WITH /{stage} prefix (it strips internally)
+                if not has_prefix:
+                    event["rawPath"] = f"{stage_prefix}{raw_path}"
+                    rc_http = event.get("requestContext", {}).get("http", {})
+                    if rc_http:
+                        rc_http["path"] = f"{stage_prefix}{rc_http.get('path', raw_path)}"
+                    print(f"[HANDLER] v3: Added stage prefix -> {event['rawPath']}")
+                # else: already has prefix, v3 will strip it correctly
+            else:
+                # Stub and v2 expect rawPath WITHOUT /{stage} prefix
+                if has_prefix:
+                    stripped = raw_path[len(stage_prefix):]
+                    if not stripped:
+                        stripped = "/"
+                    event["rawPath"] = stripped
+                    rc_http = event.get("requestContext", {}).get("http", {})
+                    if rc_http:
+                        old_http_path = rc_http.get("path", raw_path)
+                        if old_http_path.startswith(f"{stage_prefix}"):
+                            rc_http["path"] = old_http_path[len(stage_prefix):] or "/"
+                    print(f"[HANDLER] stub/v2: Stripped stage prefix -> {event['rawPath']}")
+                # else: no prefix, already correct for v2/stub
 
         # Handle as API Gateway request
         print(f"[HANDLER] Resolving with rawPath={event.get('rawPath', '')}")
