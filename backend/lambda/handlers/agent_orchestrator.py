@@ -7,6 +7,8 @@ Uses AWS Bedrock Converse API with InvokeModel fallback for all providers.
 Model identities are never exposed to the frontend (unbiasing).
 """
 
+print("[ORCHESTRATOR] Module loading...")
+
 import json
 import os
 import time
@@ -75,6 +77,7 @@ except ImportError as _import_err:
     metrics = _NoopMetrics()
 
 app = APIGatewayHttpResolver()
+print(f"[ORCHESTRATOR] App initialized, type={type(app).__name__}")
 
 # AWS Clients — defensive init to prevent cold start crashes
 try:
@@ -699,8 +702,10 @@ Return your findings as a JSON object with: has_hypothesis, title, description, 
 @app.get("/api/v1/orchestrator/status")
 def get_status():
     """Get current orchestrator status. Never exposes model identities."""
+    print("[STATUS] Endpoint hit")
     try:
         state = get_discovery_state()
+        print(f"[STATUS] DynamoDB state: {state is not None}")
         if not state:
             return {
                 "state": "idle",
@@ -860,10 +865,12 @@ def stop_discovery():
 @app.get("/api/v1/orchestrator/health")
 def health_check():
     """Check AI model connectivity. Returns count only — never exposes model names."""
+    print("[HEALTH] Endpoint hit")
     connected = 0
     total = len(AGENT_MODELS)
 
     if bedrock_runtime is None:
+        print("[HEALTH] bedrock_runtime is None!")
         return {
             "status": "no_models",
             "connected_count": 0,
@@ -873,6 +880,7 @@ def health_check():
     # Test each model with a minimal call (try Converse, then InvokeModel)
     for role, model_config in AGENT_MODELS.items():
         try:
+            print(f"[HEALTH] Testing {role} with {model_config['model_id']}")
             call_bedrock(
                 model_id=model_config["model_id"],
                 prompt="hi",
@@ -881,7 +889,9 @@ def health_check():
                 temperature=0.1,
             )
             connected += 1
+            print(f"[HEALTH] {role} OK")
         except Exception as e:
+            print(f"[HEALTH] {role} FAILED: {e}")
             logger.warning(f"Health check failed for agent {role}: {e}")
 
     return {
@@ -982,6 +992,12 @@ def handler(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
 
     Wrapped in top-level try/except to NEVER return 500 for API requests.
     """
+    # Use print() to guarantee CloudWatch output regardless of Logger config
+    raw_path = event.get("rawPath", "")
+    method = event.get("requestContext", {}).get("http", {}).get("method", "?")
+    stage = event.get("requestContext", {}).get("stage", "$default")
+    print(f"[HANDLER] method={method} rawPath={raw_path} stage={stage}")
+
     try:
         # Check if this is a self-invocation for background work
         if event.get("source") == "self-invoke":
@@ -1001,20 +1017,25 @@ def handler(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
             import aws_lambda_powertools
             _pt_version = getattr(aws_lambda_powertools, "__version__", "0.0.0")
             _needs_stage_fix = int(_pt_version.split(".")[0]) >= 3
+            print(f"[HANDLER] powertools_version={_pt_version} needs_stage_fix={_needs_stage_fix}")
         except Exception:
             _needs_stage_fix = False
+            print("[HANDLER] powertools version detection failed")
 
         if _needs_stage_fix:
-            stage = event.get("requestContext", {}).get("stage", "$default")
-            raw_path = event.get("rawPath", "")
             if stage and stage != "$default" and not raw_path.startswith(f"/{stage}/"):
                 event["rawPath"] = f"/{stage}{raw_path}"
                 rc_http = event.get("requestContext", {}).get("http", {})
                 if rc_http:
                     rc_http["path"] = f"/{stage}{rc_http.get('path', raw_path)}"
+                print(f"[HANDLER] Fixed rawPath to: {event['rawPath']}")
 
         # Handle as API Gateway request
-        return app.resolve(event, context)
+        print(f"[HANDLER] Resolving with rawPath={event.get('rawPath', '')}")
+        result = app.resolve(event, context)
+        result_status = result.get("statusCode", "?") if isinstance(result, dict) else "?"
+        print(f"[HANDLER] Resolved statusCode={result_status}")
+        return result
     except Exception as e:
         logger.error(f"Top-level handler error: {e}")
         # Return a valid API Gateway v2 response so the client gets JSON, not 500
