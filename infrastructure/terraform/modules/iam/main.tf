@@ -228,13 +228,13 @@ resource "aws_iam_role_policy" "lambda_bedrock" {
           "bedrock:ConverseStream"
         ]
         Resource = [
-          "arn:aws:bedrock:${var.aws_region}::foundation-model/anthropic.*",
-          "arn:aws:bedrock:${var.aws_region}::foundation-model/amazon.*",
-          "arn:aws:bedrock:${var.aws_region}::foundation-model/cohere.*",
-          "arn:aws:bedrock:${var.aws_region}::foundation-model/meta.*",
-          "arn:aws:bedrock:${var.aws_region}::foundation-model/deepseek.*",
-          "arn:aws:bedrock:${var.aws_region}::foundation-model/moonshotai.*",
-          "arn:aws:bedrock:${var.aws_region}::foundation-model/openai.*",
+          "arn:aws:bedrock:*::foundation-model/anthropic.*",
+          "arn:aws:bedrock:*::foundation-model/amazon.*",
+          "arn:aws:bedrock:*::foundation-model/cohere.*",
+          "arn:aws:bedrock:*::foundation-model/meta.*",
+          "arn:aws:bedrock:*::foundation-model/deepseek.*",
+          "arn:aws:bedrock:*::foundation-model/moonshotai.*",
+          "arn:aws:bedrock:*::foundation-model/openai.*",
           "arn:aws:bedrock:${var.aws_region}:${var.account_id}:inference-profile/us.*",
           "arn:aws:bedrock:${var.aws_region}:${var.account_id}:inference-profile/eu.*",
           "arn:aws:bedrock:${var.aws_region}:${var.account_id}:inference-profile/ap.*"
