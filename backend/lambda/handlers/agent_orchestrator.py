@@ -113,13 +113,13 @@ DISCOVERY_TASK_KEY = "active-discovery"
 
 AGENT_MODELS = {
     "explorer": {
-        "model_id": "meta.llama4-maverick-17b-instruct-v1:0",
+        "model_id": "us.meta.llama4-maverick-17b-instruct-v1:0",
         "max_tokens": 4000,
         "temperature": 0.8,  # Higher creativity for exploration
         "role_description": "Fast broad exploration — discovers novel pathways and unconventional connections",
     },
     "reasoner": {
-        "model_id": "deepseek.r1-v1:0",
+        "model_id": "us.deepseek.r1-v1:0",
         "max_tokens": 4000,
         "temperature": 0.3,  # Lower for rigorous reasoning
         "role_description": "Deep causal chain reasoning — step-by-step logical analysis with formal justification",
@@ -345,10 +345,22 @@ def update_discovery_state(updates: dict):
     )
 
 
+def _get_provider(model_id: str) -> str:
+    """Extract provider from model ID, handling cross-region inference profile prefixes.
+
+    e.g. 'us.meta.llama4-...' -> 'meta', 'moonshotai.kimi-k2.5' -> 'moonshotai'
+    """
+    parts = model_id.split(".")
+    # Cross-region prefix: us, eu, ap — skip it
+    if parts[0] in ("us", "eu", "ap") and len(parts) > 2:
+        return parts[1]
+    return parts[0]
+
+
 def _build_invoke_body(model_id: str, prompt: str, system_prompt: str,
                        max_tokens: int, temperature: float) -> dict:
     """Build provider-specific request body for InvokeModel API."""
-    provider = model_id.split(".")[0]  # meta, deepseek, moonshotai, openai
+    provider = _get_provider(model_id)
 
     if provider == "meta":
         # Meta Llama uses prompt template format
@@ -381,7 +393,7 @@ def _build_invoke_body(model_id: str, prompt: str, system_prompt: str,
 
 def _parse_invoke_response(model_id: str, response_body: dict) -> str:
     """Parse provider-specific response from InvokeModel API."""
-    provider = model_id.split(".")[0]
+    provider = _get_provider(model_id)
 
     # Meta Llama format
     if provider == "meta":
