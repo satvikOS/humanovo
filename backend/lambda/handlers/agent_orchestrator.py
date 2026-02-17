@@ -564,20 +564,22 @@ def run_discovery_worker(config: dict):
     external_factors = config.get("external_factors", [])
     max_agents = min(config.get("max_agents", 10), 20)  # Cap for Lambda
 
-    logger.info(f"Starting parallel discovery for: {disease}", disease=disease)
+    roles = list(AGENT_MODELS.keys())  # explorer, reasoner, synthesizer, critic
+    num_rounds = min(max_agents // len(roles), 5)  # Up to 5 rounds
+
+    print(f"[WORKER] Starting: disease={disease!r} max_agents={max_agents} num_rounds={num_rounds} roles={roles}")
 
     start_time = time.time()
     hypotheses = []
     paths_explored = 0
 
-    roles = list(AGENT_MODELS.keys())  # explorer, reasoner, synthesizer, critic
-    num_rounds = min(max_agents // len(roles), 5)  # Up to 5 rounds
-
     for round_num in range(num_rounds):
         # Check if stopped
         state = get_discovery_state()
+        db_status = state.get("status", "?") if state else "NO_ITEM"
+        print(f"[WORKER] Round {round_num+1}/{num_rounds} db_status={db_status}")
         if state and state.get("status") in ["stopping", "stopped", "idle"]:
-            logger.info("Discovery stopped by user")
+            print(f"[WORKER] Stopping: db_status={db_status}")
             break
 
         if state and state.get("status") == "paused":
@@ -636,12 +638,17 @@ Return your findings as a JSON object with: has_hypothesis, title, description, 
                     hypothesis = future.result()
                     if hypothesis:
                         hypotheses.append(hypothesis)
+                        print(f"[WORKER] {role} -> hypothesis: {hypothesis['title'][:80]} conf={hypothesis['confidence']}")
                         metrics.add_metric(name="HypothesesDiscovered", unit="Count", value=1)
+                    else:
+                        print(f"[WORKER] {role} -> no hypothesis returned")
                 except Exception as e:
+                    print(f"[WORKER] {role} -> EXCEPTION: {e}")
                     logger.error(f"Agent {role} round {round_num} failed: {e}")
 
         # Update state with partial results after each round
         elapsed = time.time() - start_time
+        print(f"[WORKER] Round {round_num+1} done: {len(hypotheses)} hypotheses, {elapsed:.1f}s elapsed")
         sorted_h = sorted(hypotheses, key=lambda x: x["confidence"], reverse=True)
         update_discovery_state({
             "status": "running",
@@ -668,6 +675,7 @@ Return your findings as a JSON object with: has_hypothesis, title, description, 
     # Mark as completed
     elapsed = time.time() - start_time
     sorted_h = sorted(hypotheses, key=lambda x: x["confidence"], reverse=True)
+    print(f"[WORKER] DONE: {len(hypotheses)} hypotheses in {elapsed:.1f}s, marking idle")
     update_discovery_state({
         "status": "idle",
         "hypotheses": sorted_h[:50],
@@ -725,7 +733,11 @@ def get_status():
     print("[STATUS] Endpoint hit")
     try:
         state = get_discovery_state()
-        print(f"[STATUS] DynamoDB state: {state is not None}")
+        status_val = state.get("status", "?") if state else "NO_ITEM"
+        hyp_count = len(state.get("hypotheses", []) or []) if state else 0
+        stats = state.get("stats", {}) or {} if state else {}
+        rnd = stats.get("current_round", "?") if isinstance(stats, dict) else "?"
+        print(f"[STATUS] status={status_val} hypotheses={hyp_count} round={rnd}")
         if not state:
             return {
                 "state": "idle",
@@ -758,6 +770,7 @@ def start_discovery():
         body = {}
 
     disease = body.get("disease", "")
+    print(f"[START] disease={disease!r} discovery_type={body.get('discovery_type','cure')}")
     if not disease:
         return Response(
             status_code=400,
@@ -778,6 +791,7 @@ def start_discovery():
             "external_factors": body.get("external_factors", []),
         }
 
+        print(f"[START] Writing DynamoDB initial state...")
         table.put_item(Item={
             "id": DISCOVERY_TASK_KEY,
             "status": "running",
@@ -806,6 +820,7 @@ def start_discovery():
         })
 
         # Invoke self asynchronously to do the AI work
+        print(f"[START] DynamoDB write done. Invoking async worker fn={FUNCTION_NAME}")
         try:
             lambda_client.invoke(
                 FunctionName=FUNCTION_NAME,
@@ -816,16 +831,19 @@ def start_discovery():
                     "config": config,
                 }, cls=DecimalEncoder),
             )
-            logger.info("Async discovery worker invoked", disease=disease)
+            print(f"[START] Async invoke SUCCESS")
         except Exception as e:
+            print(f"[START] Async invoke FAILED: {e}")
             logger.error(f"Failed to invoke async worker: {e}")
             # Fallback: run synchronously (will timeout after 300s but still useful)
             try:
                 run_discovery_worker(config)
             except Exception as e2:
+                print(f"[START] Sync fallback FAILED: {e2}")
                 logger.error(f"Synchronous fallback also failed: {e2}")
                 update_discovery_state({"status": "idle"})
 
+        print(f"[START] Returning started response")
         return {"status": "started", "disease": disease, "agents": 4}
     except Exception as e:
         logger.error(f"Start discovery failed: {e}")
@@ -1035,9 +1053,23 @@ def handler(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
         # Check if this is a self-invocation for background work
         if event.get("source") == "self-invoke":
             action = event.get("action")
+            print(f"[HANDLER] Self-invoke: action={action}")
             if action == "run_discovery":
                 config = event.get("config", {})
-                run_discovery_worker(config)
+                print(f"[HANDLER] Starting worker: disease={config.get('disease','?')}")
+                try:
+                    run_discovery_worker(config)
+                    print(f"[HANDLER] Worker completed successfully")
+                except Exception as worker_err:
+                    print(f"[HANDLER] Worker CRASHED: {worker_err}")
+                    import traceback
+                    traceback.print_exc()
+                    # Ensure status is set to idle so frontend isn't stuck
+                    try:
+                        update_discovery_state({"status": "idle"})
+                    except Exception:
+                        pass
+                    raise
                 return {"status": "completed"}
 
         # Normalize rawPath for route matching.
