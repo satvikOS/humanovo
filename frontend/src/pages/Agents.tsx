@@ -31,6 +31,8 @@ interface OrchestratorStats {
   high_confidence_discoveries: number
   current_best_confidence: number
   runtime_seconds: number
+  current_round?: number
+  total_rounds?: number
   agents_by_role: Record<string, number>
   models_active?: string[]
   token_pool_stats?: {
