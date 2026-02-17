@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
-  FiCheckCircle,
   FiPlay,
   FiPause,
   FiSquare,
@@ -56,7 +55,21 @@ interface Hypothesis {
   confidence: number
   validated: boolean
   external_factors?: Array<Record<string, string>>
+  evidence_summary?: string[]
+  risks?: string[]
+  validation_steps?: string[]
+  novelty_score?: number
   created_at?: string
+}
+
+// Filter out malformed hypotheses (system messages, raw JSON, reasoning tags)
+function isValidHypothesis(h: Hypothesis): boolean {
+  if (!h.title || h.title.length < 10) return false
+  if (h.title.startsWith('<reasoning>') || h.title.startsWith('<think>')) return false
+  if (h.title.startsWith('```') || h.title.startsWith('{')) return false
+  if (h.description?.startsWith('<reasoning>') || h.description?.startsWith('<think>')) return false
+  if (!h.description || h.description.length < 50) return false
+  return true
 }
 
 interface ExternalFactor {
@@ -189,7 +202,9 @@ export default function Agents() {
 
   // Paper generation
   const [generatingPaper, setGeneratingPaper] = useState(false)
+  const [generatingPaperId, setGeneratingPaperId] = useState<string | null>(null)
   const [paperMarkdown, setPaperMarkdown] = useState<string | null>(null)
+  const [, setPaperHypothesisTitle] = useState<string>('')
 
   // Configuration
   const [config, setConfig] = useState<DiscoveryConfig>({
@@ -230,7 +245,10 @@ export default function Agents() {
           if (data.top_hypotheses && data.top_hypotheses.length > 0) {
             setHypotheses(prev => {
               const existingIds = new Set(prev.map(h => h.id))
-              const incoming = data.top_hypotheses.filter((h: Hypothesis) => !existingIds.has(h.id))
+              // Filter out malformed hypotheses (system messages, raw JSON, reasoning tags)
+              const incoming = data.top_hypotheses
+                .filter((h: Hypothesis) => !existingIds.has(h.id))
+                .filter(isValidHypothesis)
               if (incoming.length === 0) return prev
               // Auto-save new hypotheses to project library
               for (const h of incoming) {
@@ -357,13 +375,19 @@ export default function Agents() {
     }
   }, [])
 
-  const generatePaper = useCallback(async () => {
+  const generatePaper = useCallback(async (hypothesisId?: string, hypothesisTitle?: string) => {
     setGeneratingPaper(true)
+    setGeneratingPaperId(hypothesisId || null)
     try {
-      const response = await fetch(`${API_BASE}/orchestrator/generate-paper/markdown`, { method: 'POST' })
+      const response = await fetch(`${API_BASE}/orchestrator/generate-paper/markdown`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(hypothesisId ? { hypothesis_id: hypothesisId } : {}),
+      })
       if (response.ok) {
         const text = await response.text()
         setPaperMarkdown(text)
+        setPaperHypothesisTitle(hypothesisTitle || config.disease)
       } else {
         const error = await response.json()
         alert(`Paper generation failed: ${error.detail}`)
@@ -373,8 +397,9 @@ export default function Agents() {
       alert('Failed to generate paper')
     } finally {
       setGeneratingPaper(false)
+      setGeneratingPaperId(null)
     }
-  }, [])
+  }, [config.disease])
 
   const downloadPaperMd = useCallback(() => {
     if (!paperMarkdown) return
@@ -544,22 +569,6 @@ export default function Agents() {
               )} />
               {aiConnected ? `${connectedAgents}/${totalAgents} Agents` : 'Connecting...'}
             </div>
-
-            {/* Generate Paper Button */}
-            {(state === 'idle' || state === 'paused') && hypotheses.length > 0 && (
-              <button
-                onClick={generatePaper}
-                disabled={generatingPaper}
-                className="btn bg-purple-500 text-white hover:bg-purple-600 disabled:opacity-50"
-              >
-                {generatingPaper ? (
-                  <FiRefreshCw className="w-4 h-4 animate-spin" />
-                ) : (
-                  <FiFileText className="w-4 h-4" />
-                )}
-                {generatingPaper ? 'Generating...' : 'Generate Paper'}
-              </button>
-            )}
 
             {/* Control Buttons */}
             {state === 'idle' && (
@@ -984,56 +993,69 @@ export default function Agents() {
               </h2>
 
               {hypotheses.map((hypothesis, index) => (
-                <button
+                <div
                   key={hypothesis.id}
-                  onClick={() => setSelectedHypothesis(hypothesis)}
                   className={clsx(
                     'w-full text-left card hover:border-[var(--color-border-strong)] transition-colors',
                     selectedHypothesis?.id === hypothesis.id && 'border-primary-500'
                   )}
                 >
-                  <div className="flex items-start gap-3">
-                    <div className={clsx(
-                      'w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold',
-                      hypothesis.confidence >= 0.8 ? 'bg-green-500/20 text-green-400' :
-                      hypothesis.confidence >= 0.6 ? 'bg-yellow-500/20 text-yellow-400' :
-                      'bg-orange-500/20 text-orange-400'
-                    )}>
-                      {index + 1}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-medium truncate">{hypothesis.title}</span>
-                        <span className={clsx(
-                          'text-sm font-bold',
-                          getConfidenceColor(hypothesis.confidence)
-                        )}>
-                          {(hypothesis.confidence * 100).toFixed(1)}%
-                        </span>
+                  <button
+                    onClick={() => setSelectedHypothesis(hypothesis)}
+                    className="w-full text-left"
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className={clsx(
+                        'w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold shrink-0',
+                        hypothesis.confidence >= 0.8 ? 'bg-green-500/20 text-green-400' :
+                        hypothesis.confidence >= 0.6 ? 'bg-yellow-500/20 text-yellow-400' :
+                        'bg-orange-500/20 text-orange-400'
+                      )}>
+                        {index + 1}
                       </div>
-                      <p className="text-sm text-[var(--color-text-muted)] mt-1 line-clamp-2">
-                        {hypothesis.description}
-                      </p>
-                      <div className="flex items-center gap-2 mt-2">
-                        {hypothesis.validated && (
-                          <span className="text-xxs px-1.5 py-0.5 bg-green-500/20 text-green-400 rounded flex items-center gap-1">
-                            <FiCheckCircle className="w-3 h-3" />
-                            Validated
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-medium truncate">{hypothesis.title}</span>
+                          <span className={clsx(
+                            'text-sm font-bold shrink-0',
+                            getConfidenceColor(hypothesis.confidence)
+                          )}>
+                            {(hypothesis.confidence * 100).toFixed(1)}%
                           </span>
-                        )}
-                        {hypothesis.external_factors && hypothesis.external_factors.length > 0 && (
-                          <span className="text-xxs px-1.5 py-0.5 bg-purple-500/20 text-purple-400 rounded">
-                            +{hypothesis.external_factors.length} factors
-                          </span>
-                        )}
-                        <span className="text-xxs px-1.5 py-0.5 bg-blue-500/20 text-blue-400 rounded flex items-center gap-1">
-                          <FiSend className="w-3 h-3" />
-                          Saved to Project
-                        </span>
+                        </div>
+                        <p className="text-sm text-[var(--color-text-muted)] mt-1 line-clamp-2">
+                          {hypothesis.description}
+                        </p>
                       </div>
                     </div>
+                  </button>
+                  <div className="flex items-center gap-2 mt-2 pl-11">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        generatePaper(hypothesis.id, hypothesis.title)
+                      }}
+                      disabled={generatingPaper}
+                      className="text-xxs px-2 py-1 bg-purple-500/20 text-purple-400 rounded flex items-center gap-1 hover:bg-purple-500/30 transition-colors disabled:opacity-50"
+                    >
+                      {generatingPaperId === hypothesis.id ? (
+                        <FiRefreshCw className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <FiFileText className="w-3 h-3" />
+                      )}
+                      {generatingPaperId === hypothesis.id ? 'Generating...' : 'Generate Paper'}
+                    </button>
+                    {hypothesis.evidence_summary && hypothesis.evidence_summary.length > 0 && (
+                      <span className="text-xxs px-1.5 py-0.5 bg-blue-500/20 text-blue-400 rounded">
+                        {hypothesis.evidence_summary.length} citations
+                      </span>
+                    )}
+                    <span className="text-xxs px-1.5 py-0.5 bg-green-500/20 text-green-400 rounded flex items-center gap-1">
+                      <FiSend className="w-3 h-3" />
+                      Saved
+                    </span>
                   </div>
-                </button>
+                </div>
               ))}
             </div>
           ) : state === 'running' || state === 'paused' ? (
@@ -1222,8 +1244,53 @@ export default function Agents() {
                   <h4 className="text-xs font-medium text-[var(--color-text-muted)] uppercase mb-1">
                     Mechanism of Action
                   </h4>
-                  <p className="text-sm">{selectedHypothesis.mechanism || 'Not specified'}</p>
+                  <p className="text-sm leading-relaxed">{selectedHypothesis.mechanism || 'Not specified'}</p>
                 </div>
+
+                {selectedHypothesis.evidence_summary && selectedHypothesis.evidence_summary.length > 0 && (
+                  <div>
+                    <h4 className="text-xs font-medium text-[var(--color-text-muted)] uppercase mb-1">
+                      Supporting Evidence ({selectedHypothesis.evidence_summary.length})
+                    </h4>
+                    <div className="space-y-1">
+                      {selectedHypothesis.evidence_summary.map((evidence, i) => (
+                        <div key={i} className="text-xs p-2 bg-blue-500/10 border border-blue-500/20 rounded leading-relaxed">
+                          {evidence}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {selectedHypothesis.risks && selectedHypothesis.risks.length > 0 && (
+                  <div>
+                    <h4 className="text-xs font-medium text-[var(--color-text-muted)] uppercase mb-1">
+                      Risks ({selectedHypothesis.risks.length})
+                    </h4>
+                    <div className="space-y-1">
+                      {selectedHypothesis.risks.map((risk, i) => (
+                        <div key={i} className="text-xs p-2 bg-red-500/10 border border-red-500/20 rounded leading-relaxed">
+                          {risk}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {selectedHypothesis.validation_steps && selectedHypothesis.validation_steps.length > 0 && (
+                  <div>
+                    <h4 className="text-xs font-medium text-[var(--color-text-muted)] uppercase mb-1">
+                      Validation Steps ({selectedHypothesis.validation_steps.length})
+                    </h4>
+                    <div className="space-y-1">
+                      {selectedHypothesis.validation_steps.map((step, i) => (
+                        <div key={i} className="text-xs p-2 bg-yellow-500/10 border border-yellow-500/20 rounded leading-relaxed">
+                          {i + 1}. {step}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {selectedHypothesis.external_factors && selectedHypothesis.external_factors.length > 0 && (
                   <div>
@@ -1240,14 +1307,19 @@ export default function Agents() {
                   </div>
                 )}
 
-                {selectedHypothesis.validated && (
-                  <div className="p-3 bg-green-500/10 border border-green-500/30 rounded">
-                    <div className="flex items-center gap-2 text-green-400">
-                      <FiCheckCircle className="w-4 h-4" />
-                      <span className="font-medium">Validated</span>
-                    </div>
-                  </div>
-                )}
+                {/* Per-Hypothesis Paper Generation */}
+                <button
+                  onClick={() => generatePaper(selectedHypothesis.id, selectedHypothesis.title)}
+                  disabled={generatingPaper}
+                  className="w-full btn bg-purple-500 text-white hover:bg-purple-600 disabled:opacity-50 mt-2"
+                >
+                  {generatingPaperId === selectedHypothesis.id ? (
+                    <FiRefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <FiFileText className="w-4 h-4" />
+                  )}
+                  {generatingPaperId === selectedHypothesis.id ? 'Generating Paper...' : 'Generate Research Paper'}
+                </button>
               </div>
             </div>
           </div>

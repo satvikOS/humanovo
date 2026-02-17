@@ -114,25 +114,25 @@ DISCOVERY_TASK_KEY = "active-discovery"
 AGENT_MODELS = {
     "explorer": {
         "model_id": "us.meta.llama4-maverick-17b-instruct-v1:0",
-        "max_tokens": 4000,
+        "max_tokens": 8000,
         "temperature": 0.8,  # Higher creativity for exploration
         "role_description": "Fast broad exploration — discovers novel pathways and unconventional connections",
     },
     "reasoner": {
         "model_id": "us.deepseek.r1-v1:0",
-        "max_tokens": 4000,
+        "max_tokens": 8000,
         "temperature": 0.3,  # Lower for rigorous reasoning
         "role_description": "Deep causal chain reasoning — step-by-step logical analysis with formal justification",
     },
     "synthesizer": {
         "model_id": "moonshotai.kimi-k2.5",
-        "max_tokens": 4000,
+        "max_tokens": 8000,
         "temperature": 0.5,  # Balanced for synthesis
         "role_description": "Long-context integration — synthesizes findings across shards into unified hypotheses",
     },
     "critic": {
         "model_id": "openai.gpt-oss-safeguard-120b",
-        "max_tokens": 4000,
+        "max_tokens": 8000,
         "temperature": 0.4,  # Precise for critique
         "role_description": "Large-parameter critical analysis — identifies flaws, risks, and failure modes",
     },
@@ -181,17 +181,27 @@ MASTER_PROMPT = """You are an advanced biomedical discovery AI agent on humanovo
 - **Neuroscience**: BBB penetration, neuroimaging biomarkers, synaptic targets, neurodegeneration cascades
 - **Pharmacokinetics**: ADME modeling, CYP450 interactions, population PK, therapeutic drug monitoring
 
+## CRITICAL OUTPUT REQUIREMENTS
+- Every hypothesis MUST be UNIQUE in therapeutic angle, biological scale, and mechanistic class
+- NO vague or broad statements. Every word must be surgically precise and microscopically detailed
+- Name SPECIFIC genes (e.g., BRAF V600E, IDH1 R132H), proteins (e.g., PD-L1, VEGFR2), pathways (e.g., PI3K/AKT/mTOR), cell types (e.g., CD8+ TILs, M2 TAMs), doses (e.g., 200mg/m² q3w), and receptors (e.g., EGFR vIII)
+- Back EVERY claim with real published evidence: cite specific studies, trials (e.g., NCT03548571, KEYNOTE-028), or foundational papers (e.g., "Stupp et al., NEJM 2005")
+- Include quantitative data: IC50 values, hazard ratios, response rates, p-values, patient counts
+- Description must be 200+ words with dense mechanistic detail
+- Mechanism must be a complete molecular cascade: [Drug/Intervention] → [Molecular Target] → [Signaling Effect] → [Cellular Response] → [Tissue Impact] → [Clinical Outcome]
+- Each hypothesis must operate at a DIFFERENT biological scale or therapeutic modality to ensure diversity
+
 ## OUTPUT FORMAT
-Return valid JSON:
+Return ONLY valid JSON (no markdown, no commentary, no <reasoning> tags):
 {
-    "has_hypothesis": true/false,
-    "title": "Brief hypothesis title",
-    "description": "Detailed description",
-    "mechanism": "Step-by-step mechanism of action",
+    "has_hypothesis": true,
+    "title": "Precise hypothesis title with specific targets and intervention",
+    "description": "Dense 200+ word description with specific molecular targets, published evidence citations, quantitative data (IC50, HR, ORR, p-values), named clinical trials, and precise dosing. No vague language.",
+    "mechanism": "Complete causal chain: [Intervention] → [Molecular Target with Ki/IC50] → [Pathway Disruption] → [Cellular Phenotype] → [Tissue Remodeling] → [Clinical Endpoint]. Every step must name specific molecules.",
     "confidence": 0.0-1.0,
-    "evidence_summary": ["Key evidence points"],
-    "risks": ["Identified risks"],
-    "validation_steps": ["Required experiments"],
+    "evidence_summary": ["Author et al., Journal Year: specific finding with quantitative result", "NCT#: Phase X trial in N patients showing Y% ORR", "At least 5 specific evidence items with real data"],
+    "risks": ["Specific risk with molecular basis and known incidence rates"],
+    "validation_steps": ["Specific experiment with cell line, assay type, expected readout, and success threshold"],
     "novelty_score": 0.0-1.0
 }"""
 
@@ -491,30 +501,63 @@ def call_bedrock(model_id: str, prompt: str, system_prompt: str,
 
 
 def parse_hypothesis_json(text: str) -> dict | None:
-    """Extract JSON hypothesis from LLM response text."""
+    """Extract and validate JSON hypothesis from LLM response text.
+
+    Rejects malformed outputs: raw reasoning tags, system messages,
+    truncated JSON, and vague/empty hypotheses.
+    """
+    if not text or len(text.strip()) < 50:
+        return None
+
+    # Strip common LLM wrapping artifacts
+    cleaned = text.strip()
+    # Remove markdown code fences
+    if cleaned.startswith("```"):
+        cleaned = cleaned.split("\n", 1)[-1] if "\n" in cleaned else cleaned[3:]
+    if cleaned.endswith("```"):
+        cleaned = cleaned.rsplit("```", 1)[0]
+    cleaned = cleaned.strip()
+
+    # Reject outputs that are clearly not hypotheses
+    reject_prefixes = ("<reasoning>", "<think>", "```json", "```")
+    for prefix in reject_prefixes:
+        if cleaned.lower().startswith(prefix):
+            # Try to find JSON after the tag
+            brace_pos = cleaned.find("{")
+            if brace_pos >= 0:
+                cleaned = cleaned[brace_pos:]
+            else:
+                return None
+
     try:
-        start = text.find("{")
-        end = text.rfind("}") + 1
+        start = cleaned.find("{")
+        end = cleaned.rfind("}") + 1
         if start >= 0 and end > start:
-            return json.loads(text[start:end])
+            data = json.loads(cleaned[start:end])
+
+            # Validate required fields have real content
+            title = data.get("title", "")
+            desc = data.get("description", "")
+            mechanism = data.get("mechanism", "")
+
+            # Reject if title looks like system output or is too short
+            if not title or len(title) < 10:
+                return None
+            if title.startswith("<") or title.startswith("```") or title.startswith("{"):
+                return None
+
+            # Reject if description is too short (< 100 chars = vague/weak)
+            if len(desc) < 100:
+                return None
+
+            # Reject if no real mechanism provided
+            if not mechanism or len(mechanism) < 30:
+                return None
+
+            return data
     except json.JSONDecodeError:
         pass
 
-    # Fallback: create hypothesis from text
-    if len(text.strip()) > 50:
-        lines = text.strip().split("\n")
-        title = lines[0][:200].strip("# -")
-        return {
-            "has_hypothesis": True,
-            "title": title if title else "AI-generated hypothesis",
-            "description": text[:500],
-            "mechanism": "",
-            "confidence": 0.5,
-            "evidence_summary": [],
-            "risks": [],
-            "validation_steps": [],
-            "novelty_score": 0.5,
-        }
     return None
 
 
@@ -541,6 +584,7 @@ def run_single_agent(role: str, prompt: str, system_prompt: str) -> dict | None:
                 "external_factors": hypothesis_data.get("external_factors", []),
                 "evidence_summary": hypothesis_data.get("evidence_summary", []),
                 "risks": hypothesis_data.get("risks", []),
+                "validation_steps": hypothesis_data.get("validation_steps", []),
                 "novelty_score": float(hypothesis_data.get("novelty_score", 0.5)),
                 "role": role,  # Only role stored, never model name
                 "created_at": datetime.utcnow().isoformat(),
@@ -616,16 +660,49 @@ def run_discovery_worker(config: dict):
 
                 system_prompt = f"{MASTER_PROMPT}\n\n---\n\n{ROLE_PROMPTS[role]}"
 
+                # Each round+role gets a unique angle to ensure diversity
+                angle_matrix = {
+                    ("explorer", 0): "Focus on NOVEL molecular targets not yet in clinical trials. Explore unconventional biology: phase separation, mechanotransduction, metabolic symbiosis, non-coding RNA.",
+                    ("explorer", 1): "Focus on DRUG REPURPOSING and cross-disease pathway hijacking. Find approved drugs from unrelated fields with unexpected activity.",
+                    ("explorer", 2): "Focus on MICROBIOME-IMMUNE-METABOLISM axis. Explore gut-brain connections, bacterial metabolites, and ecological interventions.",
+                    ("explorer", 3): "Focus on NANOTECHNOLOGY and advanced delivery: BBB-crossing nanoparticles, exosome engineering, spatial targeting, theranostics.",
+                    ("explorer", 4): "Focus on GENE THERAPY and epigenetic reprogramming: CRISPR, base editing, ASO, siRNA, histone modification, chromatin remodeling.",
+                    ("reasoner", 0): "Build a rigorous IMMUNOTHERAPY causal chain. Map checkpoint interactions, T-cell exhaustion markers, neoantigen load, and TME remodeling with exact IC50/EC50 values.",
+                    ("reasoner", 1): "Build a rigorous METABOLIC VULNERABILITY chain. Map synthetic lethality, nutrient addiction, mitochondrial dependencies with exact enzyme kinetics.",
+                    ("reasoner", 2): "Build a rigorous SIGNALING CASCADE chain. Map kinase networks, feedback loops, resistance mutations, and combination logic with quantitative modeling.",
+                    ("reasoner", 3): "Build a rigorous EPIGENETIC THERAPY chain. Map histone marks, DNA methylation patterns, chromatin accessibility, and transcriptional consequences.",
+                    ("reasoner", 4): "Build a rigorous TUMOR MICROENVIRONMENT chain. Map ECM composition, vascular normalization, hypoxia gradients, and immune infiltration dynamics.",
+                    ("synthesizer", 0): "INTEGRATE all findings into a multi-modal combination therapy protocol. Specify exact drugs, doses, schedules, and synergy mechanisms.",
+                    ("synthesizer", 1): "INTEGRATE findings into a precision medicine stratification framework. Define molecular subtypes, biomarker panels, and matched therapeutics.",
+                    ("synthesizer", 2): "INTEGRATE findings into a temporal treatment cascade. Design sequential phases that exploit therapy-induced vulnerabilities at each stage.",
+                    ("synthesizer", 3): "INTEGRATE findings into a systems biology model. Map all intervention points onto pathway networks and predict emergent therapeutic effects.",
+                    ("synthesizer", 4): "INTEGRATE findings into a clinical translation roadmap. Design Phase I/II trial with biomarker-guided adaptive design and companion diagnostics.",
+                    ("critic", 0): "Evaluate the STRONGEST hypothesis critically. Identify resistance mechanisms, compensatory pathways, and toxicity risks with specific molecular bases.",
+                    ("critic", 1): "Propose a CONTRARIAN hypothesis that challenges the dominant paradigm. What if the assumed target is wrong? Build an alternative.",
+                    ("critic", 2): "Design a SAFETY-FIRST hypothesis. Prioritize therapeutic window, off-target analysis, patient population risks, and long-term consequences.",
+                    ("critic", 3): "Evaluate FEASIBILITY: manufacturing, scalability, BBB penetration, stability, cold chain, cost of goods. Propose practical alternatives.",
+                    ("critic", 4): "Propose a COMBINATION THERAPY hypothesis that mitigates weaknesses of individual approaches. Address resistance through orthogonal mechanisms.",
+                }
+                angle = angle_matrix.get((role, round_num), f"Generate a unique {role}-perspective hypothesis distinct from all others.")
+
                 prompt = f"""Investigate {disease} for {discovery_type} discovery.
 {focus_str}
 {factors_str}
 {prev_context}
 
-Round {round_num + 1}, Agent role: {role}
-Generate a novel hypothesis about potential {discovery_type} approaches for {disease}.
-Consider all biological levels and external factor interactions.
+Round {round_num + 1}/{num_rounds}, Agent role: {role}
+SPECIFIC ANGLE FOR THIS ROUND: {angle}
 
-Return your findings as a JSON object with: has_hypothesis, title, description, mechanism, confidence (0-1), evidence_summary (list), risks (list), validation_steps (list), novelty_score (0-1)."""
+REQUIREMENTS:
+- Your hypothesis MUST differ from all previous hypotheses in complexity, clinical scope, mechanistic precision, and overall concept
+- Every statement must be backed by specific published evidence (cite authors, journals, years, trial numbers)
+- No broad or vague language — every word must be surgical and microscopic-level precise
+- Name SPECIFIC molecules, genes, proteins, cell types, doses, and quantitative data
+- Description must be 200+ words of dense, evidence-rich scientific content
+- Mechanism must trace a complete molecular cascade from intervention to clinical outcome
+
+Return ONLY a valid JSON object (no markdown fences, no commentary before/after the JSON):
+{{"has_hypothesis": true, "title": "...", "description": "200+ words with citations...", "mechanism": "Complete molecular cascade...", "confidence": 0.0-1.0, "evidence_summary": ["5+ specific cited evidence items..."], "risks": ["specific risks..."], "validation_steps": ["specific experiments..."], "novelty_score": 0.0-1.0}}"""
 
                 future = executor.submit(run_single_agent, role, prompt, system_prompt)
                 futures[future] = role
@@ -954,7 +1031,12 @@ def health_check():
 
 @app.post("/api/v1/orchestrator/generate-paper/markdown")
 def generate_paper():
-    """Generate a research paper from discovered hypotheses."""
+    """Generate a research paper for a specific hypothesis (or all if no ID given)."""
+    try:
+        body = app.current_event.json_body or {}
+    except Exception:
+        body = {}
+
     state = get_discovery_state()
     if not state or not state.get("hypotheses"):
         return Response(
@@ -963,45 +1045,112 @@ def generate_paper():
             body=json.dumps({"detail": "No hypotheses available for paper generation"}),
         )
 
-    hypotheses = state.get("hypotheses", [])
     config = state.get("config", {})
     disease = config.get("disease", "Unknown Disease")
+    discovery_type = config.get("discovery_type", "cure")
 
-    hyp_summaries = []
-    for i, h in enumerate(hypotheses[:10], 1):
-        hyp_summaries.append(
-            f"{i}. **{h.get('title', 'Untitled')}** (Confidence: {h.get('confidence', 0):.0%})\n"
-            f"   {h.get('description', '')}\n"
-            f"   Mechanism: {h.get('mechanism', 'Not specified')}"
+    # Find specific hypothesis if ID provided
+    hypothesis_id = body.get("hypothesis_id")
+    if hypothesis_id:
+        target_h = next((h for h in state.get("hypotheses", []) if h.get("id") == hypothesis_id), None)
+        if not target_h:
+            return Response(
+                status_code=404,
+                content_type="application/json",
+                body=json.dumps({"detail": "Hypothesis not found"}),
+            )
+        hypotheses_for_paper = [target_h]
+    else:
+        hypotheses_for_paper = state.get("hypotheses", [])[:10]
+
+    # Build hypothesis detail block
+    hyp_blocks = []
+    for i, h in enumerate(hypotheses_for_paper, 1):
+        evidence = h.get("evidence_summary", [])
+        evidence_str = "\n".join(f"   - {e}" for e in evidence) if evidence else "   - No specific evidence cited"
+        risks = h.get("risks", [])
+        risks_str = "\n".join(f"   - {r}" for r in risks) if risks else "   - No specific risks identified"
+        validation = h.get("validation_steps", [])
+        validation_str = "\n".join(f"   - {v}" for v in validation) if validation else "   - No validation steps specified"
+
+        hyp_blocks.append(
+            f"### Hypothesis {i}: {h.get('title', 'Untitled')} (Confidence: {h.get('confidence', 0):.0%})\n\n"
+            f"**Description:** {h.get('description', '')}\n\n"
+            f"**Mechanism of Action:** {h.get('mechanism', 'Not specified')}\n\n"
+            f"**Supporting Evidence:**\n{evidence_str}\n\n"
+            f"**Risks:**\n{risks_str}\n\n"
+            f"**Validation Steps:**\n{validation_str}"
         )
 
-    prompt = f"""Write a comprehensive research paper about potential {config.get('discovery_type', 'cure')} strategies for {disease}.
+    prompt = f"""Write a MAXIMUM-LENGTH, exhaustive research paper about {discovery_type} strategies for {disease}.
+
+THIS PAPER MUST BE AS LONG AND DETAILED AS POSSIBLE. Use every available token.
 
 Based on these AI-discovered hypotheses:
 
-{chr(10).join(hyp_summaries)}
+{chr(10).join(hyp_blocks)}
 
-Write a complete research paper in Markdown format with these sections:
-1. Title
-2. Abstract
-3. Introduction (disease background, unmet needs)
-4. Methods (AI-driven multi-agent discovery approach)
-5. Results (hypotheses discovered, confidence analysis)
-6. Discussion (implications, limitations, future directions)
-7. Conclusion
-8. References (cite relevant known literature)
+Write a complete research paper in Markdown format with ALL of the following sections.
+Each section must be EXTENSIVE (multiple paragraphs with dense scientific content):
 
-Be thorough, scientific, and cite real biomedical concepts. Format as proper Markdown."""
+1. **TITLE PAGE** — Full title, "By humanovo", date, "AI-Driven Biomedical Research Platform"
 
-    system_prompt = "You are a biomedical research paper writer. Write detailed, scientifically rigorous papers."
+2. **ABSTRACT** (300+ words) — Background, methods, key findings, clinical implications, conclusion
+
+3. **1. INTRODUCTION** (500+ words)
+   - Disease epidemiology with specific statistics (incidence, prevalence, mortality rates, 5-year survival)
+   - Current standard of care with named drugs, regimens, and their limitations
+   - Unmet medical needs and therapeutic gaps
+   - Rationale for AI-driven multi-agent hypothesis generation
+
+4. **2. METHODS**
+   - 2.1 Multi-Agent AI Discovery Architecture (4 parallel agents, role descriptions)
+   - 2.2 Knowledge Integration Framework (how agents cross-reference findings)
+   - 2.3 Confidence Scoring Methodology (evidence weighting formula)
+   - 2.4 Hypothesis Validation Criteria
+
+5. **3. RESULTS** — For EACH hypothesis:
+   - 3.X.1 Molecular Rationale (name every gene, protein, pathway with specificity)
+   - 3.X.2 Mechanism of Action (complete molecular cascade with arrow notation)
+   - 3.X.3 Supporting Evidence (cite specific papers: Author et al., Journal, Year)
+   - 3.X.4 Proposed Therapeutic Protocol (doses, schedules, combinations, biomarkers)
+   - 3.X.5 Expected Clinical Endpoints (ORR, PFS, OS with projected values)
+
+6. **4. DISCUSSION**
+   - 4.1 Comparative Analysis (how hypotheses relate, synergies, conflicts)
+   - 4.2 Biological Plausibility Assessment
+   - 4.3 Clinical Translation Pathway (IND requirements, Phase I design, endpoints)
+   - 4.4 Safety Considerations (specific toxicities, monitoring, mitigation)
+   - 4.5 Limitations and Future Directions
+
+7. **5. CONCLUSION** — Definitive summary with recommended next steps
+
+8. **TABLES** — Include at least:
+   - Table 1: Hypothesis Comparison Matrix (Title | Targets | Mechanism Class | Confidence | TRL)
+   - Table 2: Proposed Biomarker Panel (Biomarker | Assay | Clinical Utility | Validation Status)
+   - Table 3: Drug/Compound Properties (Name | Target | IC50/EC50 | Route | Status)
+
+9. **FIGURES** (describe in text with ASCII/markdown diagrams):
+   - Figure 1: Disease pathway diagram showing intervention points
+   - Figure 2: Mechanism of action flowchart for primary hypothesis
+   - Figure 3: Proposed clinical trial design schema
+
+10. **REFERENCES** — At least 30 numbered references in format: [N] Author et al., "Title," Journal, vol(issue), pages, year.
+    Use REAL publications from PubMed. Cite specific DOIs where possible.
+
+CRITICAL: Write MAXIMUM length. Fill every section with dense, specific, quantitative scientific content.
+Do NOT use filler phrases like "further research is needed" without specifying exactly what research.
+Every sentence must add specific factual content."""
+
+    system_prompt = """You are an elite biomedical research paper author with expertise across oncology, immunology, pharmacology, and translational medicine. You write with the rigor of Nature Medicine, the detail of a Phase III protocol, and the precision of an FDA submission. Every claim must be backed by specific evidence. Use proper scientific nomenclature, quantitative data, and formal academic structure throughout. Write the LONGEST, most DETAILED paper possible within the token limit."""
 
     try:
         paper_text = call_bedrock(
             model_id=PAPER_MODEL,
             prompt=prompt,
             system_prompt=system_prompt,
-            max_tokens=4000,
-            temperature=0.5,
+            max_tokens=16000,
+            temperature=0.4,
         )
         return Response(
             status_code=200,
