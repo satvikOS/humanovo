@@ -868,9 +868,12 @@ def health_check():
     print("[HEALTH] Endpoint hit")
     connected = 0
     total = len(AGENT_MODELS)
+    results = {}
 
     if bedrock_runtime is None:
         print("[HEALTH] bedrock_runtime is None!")
+        for role, mc in AGENT_MODELS.items():
+            print(f"[HEALTH]   {role}: {mc['model_id']} -> SKIP (no client)")
         return {
             "status": "no_models",
             "connected_count": 0,
@@ -879,20 +882,30 @@ def health_check():
 
     # Test each model with a minimal call (try Converse, then InvokeModel)
     for role, model_config in AGENT_MODELS.items():
+        model_id = model_config["model_id"]
         try:
-            print(f"[HEALTH] Testing {role} with {model_config['model_id']}")
+            print(f"[HEALTH] Testing {role} -> model={model_id}")
             call_bedrock(
-                model_id=model_config["model_id"],
+                model_id=model_id,
                 prompt="hi",
                 system_prompt="Reply with OK.",
                 max_tokens=5,
                 temperature=0.1,
             )
             connected += 1
-            print(f"[HEALTH] {role} OK")
+            results[role] = "OK"
+            print(f"[HEALTH] {role} ({model_id}) -> OK")
         except Exception as e:
-            print(f"[HEALTH] {role} FAILED: {e}")
+            results[role] = f"FAIL: {e}"
+            print(f"[HEALTH] {role} ({model_id}) -> FAIL: {e}")
             logger.warning(f"Health check failed for agent {role}: {e}")
+
+    # Summary log for easy CloudWatch scanning
+    print(f"[HEALTH] ===== SUMMARY: {connected}/{total} models connected =====")
+    for role, mc in AGENT_MODELS.items():
+        status = results.get(role, "NOT_TESTED")
+        print(f"[HEALTH]   {role:12s} | {mc['model_id']:50s} | {status}")
+    print(f"[HEALTH] ================================================")
 
     return {
         "status": "healthy" if connected == total else "partial" if connected > 0 else "no_models",

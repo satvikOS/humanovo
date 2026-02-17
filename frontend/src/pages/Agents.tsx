@@ -1034,26 +1034,148 @@ export default function Agents() {
                 </button>
               ))}
             </div>
+          ) : state === 'running' || state === 'paused' ? (
+            <div className="flex items-center justify-center h-full p-8">
+              <div className="w-full max-w-lg space-y-8">
+                {/* Animated Progress Ring */}
+                <div className="flex flex-col items-center">
+                  <div className="relative w-40 h-40 mb-4">
+                    {/* Background ring */}
+                    <svg className="w-full h-full -rotate-90" viewBox="0 0 120 120">
+                      <circle cx="60" cy="60" r="52" fill="none" stroke="var(--color-border)" strokeWidth="6" />
+                      {/* Progress arc */}
+                      <circle
+                        cx="60" cy="60" r="52" fill="none"
+                        stroke={state === 'paused' ? '#eab308' : '#8b5cf6'}
+                        strokeWidth="6"
+                        strokeLinecap="round"
+                        strokeDasharray={`${2 * Math.PI * 52}`}
+                        strokeDashoffset={`${2 * Math.PI * 52 * (1 - (stats ? (stats.current_round || 0) / Math.max(stats.total_rounds || 1, 1) : 0))}`}
+                        className="transition-all duration-1000 ease-out"
+                      />
+                      {/* Animated sweep for running state */}
+                      {state === 'running' && (
+                        <circle
+                          cx="60" cy="60" r="52" fill="none"
+                          stroke="#8b5cf6"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeDasharray={`${2 * Math.PI * 52 * 0.15} ${2 * Math.PI * 52 * 0.85}`}
+                          className="animate-spin origin-center"
+                          style={{ animationDuration: '2s' }}
+                          opacity="0.4"
+                        />
+                      )}
+                    </svg>
+                    {/* Center text */}
+                    <div className="absolute inset-0 flex flex-col items-center justify-center">
+                      <span className="text-3xl font-bold tabular-nums">
+                        {stats ? Math.round(((stats.current_round || 0) / Math.max(stats.total_rounds || 1, 1)) * 100) : 0}%
+                      </span>
+                      <span className="text-xs text-[var(--color-text-muted)]">
+                        {state === 'paused' ? 'Paused' : stats ? `Round ${stats.current_round || 0}/${stats.total_rounds || '?'}` : 'Starting...'}
+                      </span>
+                    </div>
+                  </div>
+                  <p className="text-sm font-medium">
+                    {state === 'paused' ? 'Discovery Paused' : 'Agents Exploring...'}
+                  </p>
+                  <p className="text-xs text-[var(--color-text-muted)] mt-1">
+                    {config.disease} &middot; {config.discoveryType}
+                  </p>
+                </div>
+
+                {/* Live Confidence Score */}
+                <div className="card p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">Best Confidence</span>
+                    <span className={clsx(
+                      'text-2xl font-bold tabular-nums transition-all duration-500',
+                      getConfidenceColor(stats?.current_best_confidence || 0)
+                    )}>
+                      {((stats?.current_best_confidence || 0) * 100).toFixed(1)}%
+                    </span>
+                  </div>
+                  <div className="h-3 bg-[var(--color-border)] rounded-full overflow-hidden">
+                    <div
+                      className={clsx(
+                        'h-full rounded-full transition-all duration-1000 ease-out',
+                        (stats?.current_best_confidence || 0) >= 0.8 ? 'bg-green-500' :
+                        (stats?.current_best_confidence || 0) >= 0.6 ? 'bg-yellow-500' :
+                        (stats?.current_best_confidence || 0) >= 0.4 ? 'bg-orange-500' : 'bg-red-500'
+                      )}
+                      style={{ width: `${(stats?.current_best_confidence || 0) * 100}%` }}
+                    />
+                  </div>
+                  <div className="flex justify-between mt-1.5">
+                    <span className="text-xxs text-[var(--color-text-muted)]">0%</span>
+                    <span className="text-xxs text-[var(--color-text-muted)]">Target: {(config.targetConfidence * 100).toFixed(0)}%</span>
+                  </div>
+                </div>
+
+                {/* Agent Activity Grid */}
+                <div className="grid grid-cols-2 gap-3">
+                  {['Explorer', 'Reasoner', 'Synthesizer', 'Critic'].map((role, i) => (
+                    <div key={role} className="card p-3 relative overflow-hidden">
+                      {state === 'running' && (
+                        <div
+                          className="absolute inset-0 bg-purple-500/5 animate-pulse"
+                          style={{ animationDelay: `${i * 0.3}s`, animationDuration: '2s' }}
+                        />
+                      )}
+                      <div className="relative flex items-center gap-2">
+                        <div className={clsx(
+                          'w-2 h-2 rounded-full',
+                          state === 'running' ? 'bg-green-500 animate-pulse' :
+                          state === 'paused' ? 'bg-yellow-500' : 'bg-gray-500'
+                        )} style={{ animationDelay: `${i * 0.2}s` }} />
+                        <span className="text-xs font-medium">{role}</span>
+                      </div>
+                      <div className="relative text-xxs text-[var(--color-text-muted)] mt-1 ml-4">
+                        {state === 'running' ? 'Analyzing...' : state === 'paused' ? 'Paused' : 'Idle'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Live Counters */}
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="card p-3 text-center">
+                    <div className="text-xl font-bold tabular-nums text-purple-400">
+                      {stats?.hypotheses_found || 0}
+                    </div>
+                    <div className="text-xxs text-[var(--color-text-muted)]">Hypotheses</div>
+                  </div>
+                  <div className="card p-3 text-center">
+                    <div className="text-xl font-bold tabular-nums">
+                      {stats?.paths_explored?.toLocaleString() || 0}
+                    </div>
+                    <div className="text-xxs text-[var(--color-text-muted)]">Paths</div>
+                  </div>
+                  <div className="card p-3 text-center">
+                    <div className="text-xl font-bold tabular-nums text-green-400">
+                      {stats?.high_confidence_discoveries || 0}
+                    </div>
+                    <div className="text-xxs text-[var(--color-text-muted)]">High Conf.</div>
+                  </div>
+                </div>
+
+                {/* Runtime */}
+                {stats && (
+                  <div className="text-center text-sm text-[var(--color-text-muted)]">
+                    Runtime: <span className="font-mono">{formatTime(stats.runtime_seconds)}</span>
+                  </div>
+                )}
+              </div>
+            </div>
           ) : (
             <div className="flex items-center justify-center h-full">
               <div className="text-center">
-                {state === 'running' ? (
-                  <>
-                    <FiRefreshCw className="w-12 h-12 text-primary-400 mx-auto mb-4 animate-spin" />
-                    <p className="text-[var(--color-text-muted)]">Agents are exploring...</p>
-                    <p className="text-xs text-[var(--color-text-muted)] mt-2">
-                      Hypotheses will appear here as they are discovered
-                    </p>
-                  </>
-                ) : (
-                  <>
-                    <FiTarget className="w-12 h-12 text-[var(--color-border)] mx-auto mb-4" />
-                    <p className="text-[var(--color-text-muted)]">No hypotheses yet</p>
-                    <p className="text-xs text-[var(--color-text-muted)] mt-2">
-                      Configure and start a discovery to see results
-                    </p>
-                  </>
-                )}
+                <FiTarget className="w-12 h-12 text-[var(--color-border)] mx-auto mb-4" />
+                <p className="text-[var(--color-text-muted)]">No hypotheses yet</p>
+                <p className="text-xs text-[var(--color-text-muted)] mt-2">
+                  Configure and start a discovery to see results
+                </p>
               </div>
             </div>
           )}
