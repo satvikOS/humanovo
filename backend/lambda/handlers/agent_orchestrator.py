@@ -106,6 +106,8 @@ FUNCTION_NAME = os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "")
 
 # Discovery task key (single active discovery)
 DISCOVERY_TASK_KEY = "active-discovery"
+# Paper generation key (single active paper)
+PAPER_TASK_KEY = "active-paper"
 
 # ============== Model Configuration ==============
 # Each model is assigned a specific role. Model IDs are NEVER sent to frontend.
@@ -114,25 +116,25 @@ DISCOVERY_TASK_KEY = "active-discovery"
 AGENT_MODELS = {
     "explorer": {
         "model_id": "us.meta.llama4-maverick-17b-instruct-v1:0",
-        "max_tokens": 8000,
+        "max_tokens": 16000,
         "temperature": 0.8,  # Higher creativity for exploration
         "role_description": "Fast broad exploration — discovers novel pathways and unconventional connections",
     },
     "reasoner": {
         "model_id": "us.deepseek.r1-v1:0",
-        "max_tokens": 8000,
+        "max_tokens": 16000,
         "temperature": 0.3,  # Lower for rigorous reasoning
         "role_description": "Deep causal chain reasoning — step-by-step logical analysis with formal justification",
     },
     "synthesizer": {
         "model_id": "moonshotai.kimi-k2.5",
-        "max_tokens": 8000,
+        "max_tokens": 16000,
         "temperature": 0.5,  # Balanced for synthesis
         "role_description": "Long-context integration — synthesizes findings across shards into unified hypotheses",
     },
     "critic": {
         "model_id": "openai.gpt-oss-safeguard-120b",
-        "max_tokens": 8000,
+        "max_tokens": 16000,
         "temperature": 0.4,  # Precise for critique
         "role_description": "Large-parameter critical analysis — identifies flaws, risks, and failure modes",
     },
@@ -609,7 +611,7 @@ def run_discovery_worker(config: dict):
     max_agents = min(config.get("max_agents", 10), 20)  # Cap for Lambda
 
     roles = list(AGENT_MODELS.keys())  # explorer, reasoner, synthesizer, critic
-    num_rounds = min(max_agents // len(roles), 5)  # Up to 5 rounds
+    num_rounds = min(max_agents // len(roles), 15)  # Up to 15 rounds for deep research
 
     print(f"[WORKER] Starting: disease={disease!r} max_agents={max_agents} num_rounds={num_rounds} roles={roles}")
 
@@ -1031,7 +1033,7 @@ def health_check():
 
 @app.post("/api/v1/orchestrator/generate-paper/markdown")
 def generate_paper():
-    """Generate a research paper for a specific hypothesis (or all if no ID given)."""
+    """Start async paper generation for a specific hypothesis (or top 5)."""
     try:
         body = app.current_event.json_body or {}
     except Exception:
@@ -1046,32 +1048,103 @@ def generate_paper():
         )
 
     config = state.get("config", {})
+    hypothesis_id = body.get("hypothesis_id")
+
+    # Store paper task in DynamoDB
+    table = get_task_table()
+    table.put_item(Item={
+        "id": PAPER_TASK_KEY,
+        "status": "generating",
+        "hypothesis_id": hypothesis_id or "all",
+        "paper_html": "",
+        "error": "",
+        "created_at": datetime.utcnow().isoformat(),
+        "updated_at": datetime.utcnow().isoformat(),
+    })
+
+    # Invoke async paper worker
+    print(f"[PAPER] Starting async paper generation for hypothesis={hypothesis_id or 'all'}")
+    try:
+        lambda_client.invoke(
+            FunctionName=FUNCTION_NAME,
+            InvocationType="Event",
+            Payload=json.dumps({
+                "source": "self-invoke",
+                "action": "generate_paper",
+                "hypothesis_id": hypothesis_id,
+                "config": config,
+            }, cls=DecimalEncoder),
+        )
+        print("[PAPER] Async invoke SUCCESS")
+    except Exception as e:
+        print(f"[PAPER] Async invoke FAILED: {e}")
+        table.update_item(
+            Key={"id": PAPER_TASK_KEY},
+            UpdateExpression="SET #s = :s, #e = :e",
+            ExpressionAttributeNames={"#s": "status", "#e": "error"},
+            ExpressionAttributeValues={":s": "failed", ":e": str(e)},
+        )
+        return Response(
+            status_code=500,
+            content_type="application/json",
+            body=json.dumps({"detail": f"Failed to start paper generation: {str(e)}"}),
+        )
+
+    return {"status": "generating", "hypothesis_id": hypothesis_id or "all"}
+
+
+@app.get("/api/v1/orchestrator/paper-status")
+def get_paper_status():
+    """Poll paper generation status."""
+    try:
+        table = get_task_table()
+        response = table.get_item(Key={"id": PAPER_TASK_KEY})
+        item = response.get("Item")
+        if not item:
+            return {"status": "idle", "paper_html": ""}
+        return serialize({
+            "status": item.get("status", "idle"),
+            "paper_html": item.get("paper_html", ""),
+            "error": item.get("error", ""),
+        })
+    except Exception as e:
+        logger.error(f"Paper status error: {e}")
+        return {"status": "error", "paper_html": "", "error": str(e)}
+
+
+def run_paper_worker(hypothesis_id: str | None, config: dict):
+    """Async worker: generate a rich research paper and store in DynamoDB."""
+    print(f"[PAPER-WORKER] Starting for hypothesis={hypothesis_id or 'all'}")
+    table = get_task_table()
     disease = config.get("disease", "Unknown Disease")
     discovery_type = config.get("discovery_type", "cure")
 
-    # Find specific hypothesis if ID provided
-    hypothesis_id = body.get("hypothesis_id")
-    if hypothesis_id:
-        target_h = next((h for h in state.get("hypotheses", []) if h.get("id") == hypothesis_id), None)
-        if not target_h:
-            return Response(
-                status_code=404,
-                content_type="application/json",
-                body=json.dumps({"detail": "Hypothesis not found"}),
-            )
-        hypotheses_for_paper = [target_h]
-    else:
-        hypotheses_for_paper = state.get("hypotheses", [])[:10]
+    state = get_discovery_state()
+    if not state or not state.get("hypotheses"):
+        table.update_item(
+            Key={"id": PAPER_TASK_KEY},
+            UpdateExpression="SET #s = :s, #e = :e",
+            ExpressionAttributeNames={"#s": "status", "#e": "error"},
+            ExpressionAttributeValues={":s": "failed", ":e": "No hypotheses found"},
+        )
+        return
 
-    # Build hypothesis detail block
+    # Select hypotheses
+    if hypothesis_id and hypothesis_id != "all":
+        target = next((h for h in state["hypotheses"] if h.get("id") == hypothesis_id), None)
+        hypotheses_for_paper = [target] if target else state["hypotheses"][:3]
+    else:
+        hypotheses_for_paper = state["hypotheses"][:5]
+
+    # Build hypothesis detail blocks
     hyp_blocks = []
     for i, h in enumerate(hypotheses_for_paper, 1):
         evidence = h.get("evidence_summary", [])
         evidence_str = "\n".join(f"   - {e}" for e in evidence) if evidence else "   - No specific evidence cited"
         risks = h.get("risks", [])
-        risks_str = "\n".join(f"   - {r}" for r in risks) if risks else "   - No specific risks identified"
+        risks_str = "\n".join(f"   - {r}" for r in risks) if risks else "   - No risks identified"
         validation = h.get("validation_steps", [])
-        validation_str = "\n".join(f"   - {v}" for v in validation) if validation else "   - No validation steps specified"
+        validation_str = "\n".join(f"   - {v}" for v in validation) if validation else "   - No validation steps"
 
         hyp_blocks.append(
             f"### Hypothesis {i}: {h.get('title', 'Untitled')} (Confidence: {h.get('confidence', 0):.0%})\n\n"
@@ -1090,80 +1163,250 @@ Based on these AI-discovered hypotheses:
 
 {chr(10).join(hyp_blocks)}
 
-Write a complete research paper in Markdown format with ALL of the following sections.
+Write a complete research paper in Markdown format with ALL sections below.
 Each section must be EXTENSIVE (multiple paragraphs with dense scientific content):
 
-1. **TITLE PAGE** — Full title, "By humanovo", date, "AI-Driven Biomedical Research Platform"
+# {hypotheses_for_paper[0].get('title', disease)} — {discovery_type.title()} Discovery Report
 
-2. **ABSTRACT** (300+ words) — Background, methods, key findings, clinical implications, conclusion
+## Abstract
+(300+ words — background, methods, key findings, clinical implications)
 
-3. **1. INTRODUCTION** (500+ words)
-   - Disease epidemiology with specific statistics (incidence, prevalence, mortality rates, 5-year survival)
-   - Current standard of care with named drugs, regimens, and their limitations
-   - Unmet medical needs and therapeutic gaps
-   - Rationale for AI-driven multi-agent hypothesis generation
+## 1. Introduction
+(500+ words — epidemiology with statistics, standard of care, unmet needs, rationale)
 
-4. **2. METHODS**
-   - 2.1 Multi-Agent AI Discovery Architecture (4 parallel agents, role descriptions)
-   - 2.2 Knowledge Integration Framework (how agents cross-reference findings)
-   - 2.3 Confidence Scoring Methodology (evidence weighting formula)
-   - 2.4 Hypothesis Validation Criteria
+## 2. Methods
+### 2.1 Multi-Agent AI Discovery Architecture
+### 2.2 Knowledge Integration Framework
+### 2.3 Confidence Scoring Methodology
 
-5. **3. RESULTS** — For EACH hypothesis:
-   - 3.X.1 Molecular Rationale (name every gene, protein, pathway with specificity)
-   - 3.X.2 Mechanism of Action (complete molecular cascade with arrow notation)
-   - 3.X.3 Supporting Evidence (cite specific papers: Author et al., Journal, Year)
-   - 3.X.4 Proposed Therapeutic Protocol (doses, schedules, combinations, biomarkers)
-   - 3.X.5 Expected Clinical Endpoints (ORR, PFS, OS with projected values)
+## 3. Results
+(For EACH hypothesis: molecular rationale, mechanism cascade, evidence, therapeutic protocol, endpoints)
 
-6. **4. DISCUSSION**
-   - 4.1 Comparative Analysis (how hypotheses relate, synergies, conflicts)
-   - 4.2 Biological Plausibility Assessment
-   - 4.3 Clinical Translation Pathway (IND requirements, Phase I design, endpoints)
-   - 4.4 Safety Considerations (specific toxicities, monitoring, mitigation)
-   - 4.5 Limitations and Future Directions
+## 4. Discussion
+### 4.1 Comparative Analysis
+### 4.2 Biological Plausibility
+### 4.3 Clinical Translation Pathway
+### 4.4 Safety Considerations
+### 4.5 Limitations and Future Directions
 
-7. **5. CONCLUSION** — Definitive summary with recommended next steps
+## 5. Conclusion
 
-8. **TABLES** — Include at least:
-   - Table 1: Hypothesis Comparison Matrix (Title | Targets | Mechanism Class | Confidence | TRL)
-   - Table 2: Proposed Biomarker Panel (Biomarker | Assay | Clinical Utility | Validation Status)
-   - Table 3: Drug/Compound Properties (Name | Target | IC50/EC50 | Route | Status)
+## Tables
+- Table 1: Hypothesis Comparison (Title | Targets | Mechanism | Confidence | TRL)
+- Table 2: Biomarker Panel (Biomarker | Assay | Utility | Status)
+- Table 3: Drug Properties (Name | Target | IC50/EC50 | Route | Phase)
 
-9. **FIGURES** (describe in text with ASCII/markdown diagrams):
-   - Figure 1: Disease pathway diagram showing intervention points
-   - Figure 2: Mechanism of action flowchart for primary hypothesis
-   - Figure 3: Proposed clinical trial design schema
+## Figures
+- Figure 1: Disease pathway diagram (use ASCII box diagrams with arrows)
+- Figure 2: Mechanism of action flowchart (use ASCII flowchart)
+- Figure 3: Clinical trial design schema
 
-10. **REFERENCES** — At least 30 numbered references in format: [N] Author et al., "Title," Journal, vol(issue), pages, year.
-    Use REAL publications from PubMed. Cite specific DOIs where possible.
+## References
+(30+ numbered references: [N] Author et al., "Title," Journal, vol(issue):pages, year. DOI:...)
 
-CRITICAL: Write MAXIMUM length. Fill every section with dense, specific, quantitative scientific content.
-Do NOT use filler phrases like "further research is needed" without specifying exactly what research.
-Every sentence must add specific factual content."""
+CRITICAL: Maximum length. Every sentence must be specific, quantitative, evidence-based."""
 
-    system_prompt = """You are an elite biomedical research paper author with expertise across oncology, immunology, pharmacology, and translational medicine. You write with the rigor of Nature Medicine, the detail of a Phase III protocol, and the precision of an FDA submission. Every claim must be backed by specific evidence. Use proper scientific nomenclature, quantitative data, and formal academic structure throughout. Write the LONGEST, most DETAILED paper possible within the token limit."""
+    system_prompt = """You are an elite biomedical research paper author. Write with Nature Medicine rigor, Phase III protocol detail, and FDA submission precision. Every claim backed by evidence. Proper nomenclature, quantitative data, formal academic structure. Write the LONGEST, most DETAILED paper possible."""
 
     try:
-        paper_text = call_bedrock(
+        print("[PAPER-WORKER] Calling Bedrock for paper generation...")
+        paper_md = call_bedrock(
             model_id=PAPER_MODEL,
             prompt=prompt,
             system_prompt=system_prompt,
-            max_tokens=16000,
+            max_tokens=65536,
             temperature=0.4,
         )
-        return Response(
-            status_code=200,
-            body=paper_text,
-            content_type="text/markdown",
+        print(f"[PAPER-WORKER] Got {len(paper_md)} chars of markdown")
+
+        # Convert markdown to rich HTML with professional typography
+        paper_html = _markdown_to_rich_html(paper_md, disease, discovery_type, hypotheses_for_paper)
+
+        # Store in DynamoDB (max item 400KB, paper should be well under)
+        table.update_item(
+            Key={"id": PAPER_TASK_KEY},
+            UpdateExpression="SET #s = :s, #p = :p, #u = :u",
+            ExpressionAttributeNames={"#s": "status", "#p": "paper_html", "#u": "updated_at"},
+            ExpressionAttributeValues={
+                ":s": "done",
+                ":p": paper_html,
+                ":u": datetime.utcnow().isoformat(),
+            },
         )
+        print("[PAPER-WORKER] Paper saved to DynamoDB")
     except Exception as e:
-        logger.error(f"Paper generation failed: {e}")
-        return Response(
-            status_code=500,
-            content_type="application/json",
-            body=json.dumps({"detail": f"Paper generation failed: {str(e)}"}),
+        print(f"[PAPER-WORKER] FAILED: {e}")
+        import traceback
+        traceback.print_exc()
+        table.update_item(
+            Key={"id": PAPER_TASK_KEY},
+            UpdateExpression="SET #s = :s, #e = :e",
+            ExpressionAttributeNames={"#s": "status", "#e": "error"},
+            ExpressionAttributeValues={":s": "failed", ":e": str(e)},
         )
+
+
+def _markdown_to_rich_html(md: str, disease: str, discovery_type: str, hypotheses: list) -> str:
+    """Convert markdown paper to rich HTML with cover page, typography, diagrams."""
+    date_str = datetime.utcnow().strftime("%B %d, %Y")
+    title = hypotheses[0].get("title", disease) if hypotheses else disease
+
+    # Extract title from markdown if present
+    for line in md.split("\n"):
+        if line.startswith("# "):
+            title = line[2:].strip()
+            break
+
+    # Convert markdown to HTML
+    body = md
+    # Tables: convert markdown tables to HTML tables
+    import re
+    def _convert_table(match):
+        lines = match.group(0).strip().split("\n")
+        if len(lines) < 2:
+            return match.group(0)
+        html_parts = ['<table>']
+        for idx, line in enumerate(lines):
+            if set(line.strip().replace("|", "").replace("-", "").replace(":", "").strip()) == set():
+                continue  # Skip separator line
+            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            tag = "th" if idx == 0 else "td"
+            html_parts.append("<tr>" + "".join(f"<{tag}>{c}</{tag}>" for c in cells) + "</tr>")
+        html_parts.append("</table>")
+        return "\n".join(html_parts)
+
+    body = re.sub(r'(?:^\|.+\|$\n?){2,}', _convert_table, body, flags=re.MULTILINE)
+
+    # Headers
+    body = re.sub(r'^#### (.+)$', r'<h4>\1</h4>', body, flags=re.MULTILINE)
+    body = re.sub(r'^### (.+)$', r'<h3>\1</h3>', body, flags=re.MULTILINE)
+    body = re.sub(r'^## (.+)$', r'<h2>\1</h2>', body, flags=re.MULTILINE)
+    body = re.sub(r'^# (.+)$', r'<h1>\1</h1>', body, flags=re.MULTILINE)
+    # Bold and italic
+    body = re.sub(r'\*\*\*(.+?)\*\*\*', r'<strong><em>\1</em></strong>', body)
+    body = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', body)
+    body = re.sub(r'\*(.+?)\*', r'<em>\1</em>', body)
+    # Lists
+    body = re.sub(r'^- (.+)$', r'<li>\1</li>', body, flags=re.MULTILINE)
+    body = re.sub(r'(<li>.*?</li>\n?)+', lambda m: f'<ul>{m.group(0)}</ul>', body)
+    body = re.sub(r'^\d+\.\s+(.+)$', r'<li>\1</li>', body, flags=re.MULTILINE)
+    # Code blocks (ASCII diagrams)
+    body = re.sub(r'```[\w]*\n(.*?)```', r'<pre class="diagram">\1</pre>', body, flags=re.DOTALL)
+    # Inline code
+    body = re.sub(r'`([^`]+)`', r'<code>\1</code>', body)
+    # Arrow notation in mechanisms
+    body = body.replace("→", '<span class="arrow">→</span>')
+    # References [N]
+    body = re.sub(r'\[(\d+)\]', r'<sup class="ref">[\1]</sup>', body)
+    # Paragraphs
+    body = re.sub(r'\n{2,}', '</p><p>', body)
+    body = re.sub(r'\n', '<br/>', body)
+
+    # Build confidence badge
+    conf = hypotheses[0].get("confidence", 0) if hypotheses else 0
+    conf_color = "#22c55e" if conf >= 0.8 else "#eab308" if conf >= 0.6 else "#f97316"
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>{title}</title>
+<style>
+@page {{ margin: 0.8in; size: A4; }}
+@media print {{ .no-print {{ display: none; }} .page-break {{ page-break-before: always; }} }}
+:root {{ --brand: #6c63ff; --brand-light: #8b85ff; --dark: #0f0f1a; --text: #e2e2e8; --muted: #8888aa; --surface: #1a1a2e; --border: #2a2a3e; }}
+* {{ box-sizing: border-box; margin: 0; padding: 0; }}
+body {{ font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: var(--dark); color: var(--text); line-height: 1.8; }}
+.paper {{ max-width: 900px; margin: 0 auto; background: var(--surface); min-height: 100vh; }}
+
+/* Cover Page */
+.cover {{ min-height: 100vh; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 80px 60px; background: linear-gradient(135deg, #0f0f1a 0%, #1a1a3e 50%, #0f0f1a 100%); border-bottom: 4px solid var(--brand); position: relative; overflow: hidden; }}
+.cover::before {{ content: ''; position: absolute; top: -50%; right: -50%; width: 100%; height: 100%; background: radial-gradient(circle, rgba(108,99,255,0.08) 0%, transparent 70%); }}
+.cover-logo {{ font-size: 13px; letter-spacing: 10px; text-transform: uppercase; color: var(--brand); font-weight: 800; margin-bottom: 60px; position: relative; }}
+.cover-line {{ width: 80px; height: 3px; background: linear-gradient(90deg, transparent, var(--brand), transparent); margin: 24px auto; }}
+.cover-title {{ font-size: 28px; font-weight: 700; color: #fff; line-height: 1.3; margin-bottom: 20px; max-width: 700px; }}
+.cover-subtitle {{ font-size: 15px; color: var(--muted); margin-bottom: 40px; }}
+.cover-conf {{ display: inline-block; padding: 6px 20px; border-radius: 20px; font-size: 14px; font-weight: 700; color: #fff; background: {conf_color}33; border: 1px solid {conf_color}; margin-bottom: 40px; }}
+.cover-author {{ font-size: 16px; font-weight: 600; color: #fff; margin-bottom: 6px; }}
+.cover-affil {{ font-size: 12px; letter-spacing: 4px; text-transform: uppercase; color: var(--brand-light); margin-bottom: 30px; }}
+.cover-date {{ font-size: 13px; color: var(--muted); }}
+
+/* Content */
+.content {{ padding: 48px 56px; }}
+h1 {{ font-size: 22px; color: #fff; border-bottom: 2px solid var(--brand); padding-bottom: 10px; margin: 40px 0 20px; font-weight: 700; }}
+h2 {{ font-size: 19px; color: var(--brand-light); margin: 36px 0 16px; font-weight: 600; }}
+h3 {{ font-size: 16px; color: #ccc; margin: 28px 0 12px; font-weight: 600; }}
+h4 {{ font-size: 14px; color: var(--muted); margin: 20px 0 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }}
+p {{ margin-bottom: 14px; font-size: 14px; }}
+strong {{ color: #fff; }}
+em {{ color: var(--brand-light); }}
+code {{ background: #2a2a3e; padding: 2px 6px; border-radius: 3px; font-size: 13px; color: var(--brand-light); }}
+.arrow {{ color: var(--brand); font-weight: bold; font-size: 16px; }}
+sup.ref {{ color: var(--brand); font-size: 10px; cursor: pointer; }}
+ul, ol {{ padding-left: 24px; margin: 12px 0; }}
+li {{ margin-bottom: 8px; font-size: 14px; }}
+
+/* Tables */
+table {{ width: 100%; border-collapse: collapse; margin: 24px 0; font-size: 13px; }}
+th {{ background: var(--brand); color: #fff; padding: 10px 14px; text-align: left; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }}
+td {{ padding: 10px 14px; border-bottom: 1px solid var(--border); }}
+tr:nth-child(even) td {{ background: rgba(108,99,255,0.04); }}
+tr:hover td {{ background: rgba(108,99,255,0.08); }}
+
+/* Diagrams */
+pre.diagram {{ background: #0d0d1a; border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin: 20px 0; font-family: 'Fira Code', 'Consolas', monospace; font-size: 12px; line-height: 1.6; color: var(--brand-light); overflow-x: auto; white-space: pre; }}
+
+/* Footer */
+.footer {{ text-align: center; padding: 30px; border-top: 1px solid var(--border); font-size: 11px; color: var(--muted); margin-top: 60px; }}
+
+/* Index/TOC */
+.toc {{ background: rgba(108,99,255,0.05); border: 1px solid var(--border); border-radius: 8px; padding: 24px 32px; margin: 30px 0; }}
+.toc-title {{ font-size: 14px; font-weight: 700; color: var(--brand); margin-bottom: 16px; text-transform: uppercase; letter-spacing: 2px; }}
+.toc-item {{ display: block; padding: 4px 0; font-size: 13px; color: var(--text); text-decoration: none; border-bottom: 1px dotted var(--border); }}
+.toc-item:hover {{ color: var(--brand); }}
+.toc-section {{ font-weight: 600; }}
+.toc-sub {{ padding-left: 20px; color: var(--muted); }}
+</style></head>
+<body>
+<div class="paper">
+  <!-- Cover Page -->
+  <div class="cover">
+    <div class="cover-logo">humanovo</div>
+    <div class="cover-line"></div>
+    <div class="cover-title">{title}</div>
+    <div class="cover-subtitle">{discovery_type.title()} Discovery Report for {disease}</div>
+    <div class="cover-conf">Confidence: {conf:.0%}</div>
+    <div class="cover-line"></div>
+    <div class="cover-author">By humanovo</div>
+    <div class="cover-affil">AI-Driven Biomedical Research Platform</div>
+    <div class="cover-date">{date_str}</div>
+  </div>
+
+  <!-- Table of Contents -->
+  <div class="content">
+    <div class="toc">
+      <div class="toc-title">Table of Contents</div>
+      <span class="toc-item toc-section">Abstract</span>
+      <span class="toc-item toc-section">1. Introduction</span>
+      <span class="toc-item toc-section">2. Methods</span>
+      <span class="toc-item toc-sub">2.1 Multi-Agent AI Architecture</span>
+      <span class="toc-item toc-sub">2.2 Knowledge Integration</span>
+      <span class="toc-item toc-sub">2.3 Confidence Scoring</span>
+      <span class="toc-item toc-section">3. Results</span>
+      <span class="toc-item toc-section">4. Discussion</span>
+      <span class="toc-item toc-section">5. Conclusion</span>
+      <span class="toc-item toc-section">Tables &amp; Figures</span>
+      <span class="toc-item toc-section">References</span>
+    </div>
+
+    <!-- Paper Body -->
+    <p>{body}</p>
+  </div>
+
+  <div class="footer">
+    Generated by <strong>humanovo</strong> — Multi-Model Parallel AI Discovery System — {date_str}<br/>
+    This paper was generated using {len(hypotheses)} AI-discovered hypothesis/hypotheses analyzed across 4 parallel agents.
+  </div>
+</div>
+</body></html>"""
 
 
 # ============== Agent Task Endpoints (API Gateway routes) ==============
@@ -1219,6 +1462,29 @@ def handler(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
                     except Exception:
                         pass
                     raise
+                return {"status": "completed"}
+            elif action == "generate_paper":
+                hypothesis_id = event.get("hypothesis_id")
+                paper_config = event.get("config", {})
+                print(f"[HANDLER] Starting paper worker: hypothesis={hypothesis_id}")
+                try:
+                    run_paper_worker(hypothesis_id, paper_config)
+                    print(f"[HANDLER] Paper worker completed successfully")
+                except Exception as paper_err:
+                    print(f"[HANDLER] Paper worker CRASHED: {paper_err}")
+                    import traceback
+                    traceback.print_exc()
+                    # Mark paper as failed so frontend isn't stuck
+                    try:
+                        table = get_task_table()
+                        table.update_item(
+                            Key={"id": PAPER_TASK_KEY},
+                            UpdateExpression="SET #s = :s, #e = :e",
+                            ExpressionAttributeNames={"#s": "status", "#e": "error"},
+                            ExpressionAttributeValues={":s": "failed", ":e": str(paper_err)},
+                        )
+                    except Exception:
+                        pass
                 return {"status": "completed"}
 
         # Normalize rawPath for route matching.

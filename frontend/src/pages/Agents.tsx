@@ -227,6 +227,7 @@ export default function Agents() {
   // Polling ref for persistent updates
   const pollRef = useRef<number | null>(null)
   const failCountRef = useRef(0)
+  const paperPollRef = useRef<number | null>(null)
 
   // Fetch status from backend (real connection check)
   // Only mark disconnected after 3+ consecutive failures to avoid flicker
@@ -298,6 +299,7 @@ export default function Agents() {
 
     return () => {
       if (pollRef.current) clearInterval(pollRef.current)
+      if (paperPollRef.current) clearInterval(paperPollRef.current)
     }
   }, [fetchStatus])
 
@@ -378,105 +380,65 @@ export default function Agents() {
   const generatePaper = useCallback(async (hypothesisId?: string, hypothesisTitle?: string) => {
     setGeneratingPaper(true)
     setGeneratingPaperId(hypothesisId || null)
+    setPaperHypothesisTitle(hypothesisTitle || config.disease)
+
     try {
+      // Start async paper generation (returns immediately)
       const response = await fetch(`${API_BASE}/orchestrator/generate-paper/markdown`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(hypothesisId ? { hypothesis_id: hypothesisId } : {}),
       })
-      if (response.ok) {
-        const text = await response.text()
-        setPaperMarkdown(text)
-        setPaperHypothesisTitle(hypothesisTitle || config.disease)
-      } else {
-        const error = await response.json()
-        alert(`Paper generation failed: ${error.detail}`)
+
+      if (!response.ok) {
+        let detail = 'Unknown error'
+        try { const err = await response.json(); detail = err.detail || detail } catch {}
+        alert(`Paper generation failed: ${detail}`)
+        setGeneratingPaper(false)
+        setGeneratingPaperId(null)
+        return
       }
+
+      // Poll for paper completion every 4 seconds
+      if (paperPollRef.current) clearInterval(paperPollRef.current)
+      paperPollRef.current = window.setInterval(async () => {
+        try {
+          const statusRes = await fetch(`${API_BASE}/orchestrator/paper-status`)
+          if (!statusRes.ok) return
+          const data = await statusRes.json()
+          if (data.status === 'done' && data.paper_html) {
+            if (paperPollRef.current) { clearInterval(paperPollRef.current); paperPollRef.current = null }
+            setPaperMarkdown(data.paper_html)
+            setGeneratingPaper(false)
+            setGeneratingPaperId(null)
+          } else if (data.status === 'failed') {
+            if (paperPollRef.current) { clearInterval(paperPollRef.current); paperPollRef.current = null }
+            alert(`Paper generation failed: ${data.error || 'Unknown error'}`)
+            setGeneratingPaper(false)
+            setGeneratingPaperId(null)
+          }
+          // else status is 'generating' — keep polling
+        } catch { /* poll error, keep trying */ }
+      }, 4000)
+
     } catch (e) {
-      console.error('Failed to generate paper:', e)
-      alert('Failed to generate paper')
-    } finally {
+      console.error('Failed to start paper generation:', e)
+      alert('Failed to start paper generation')
       setGeneratingPaper(false)
       setGeneratingPaperId(null)
     }
   }, [config.disease])
 
-  const downloadPaperMd = useCallback(() => {
-    if (!paperMarkdown) return
-    const blob = new Blob([paperMarkdown], { type: 'text/markdown' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `humanovo-research-${config.disease.replace(/\s+/g, '-').toLowerCase()}-${new Date().toISOString().split('T')[0]}.md`
-    a.click()
-    URL.revokeObjectURL(url)
-  }, [paperMarkdown, config.disease])
-
   const downloadPaperHtml = useCallback(() => {
     if (!paperMarkdown) return
-    const date = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
-    const titleMatch = paperMarkdown.match(/^#\s+(.+)$/m)
-    const paperTitle = titleMatch ? titleMatch[1] : `${config.disease} — Research Report`
-
-    // Convert markdown to simple HTML
-    const bodyHtml = paperMarkdown
-      .replace(/^### (.+)$/gm, '<h3>$1</h3>')
-      .replace(/^## (.+)$/gm, '<h2>$1</h2>')
-      .replace(/^# (.+)$/gm, '<h1>$1</h1>')
-      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-      .replace(/\*(.+?)\*/g, '<em>$1</em>')
-      .replace(/^- (.+)$/gm, '<li>$1</li>')
-      .replace(/(<li>.*<\/li>\n?)+/g, (m) => `<ul>${m}</ul>`)
-      .replace(/^\d+\.\s+(.+)$/gm, '<li>$1</li>')
-      .replace(/\n{2,}/g, '</p><p>')
-      .replace(/\n/g, '<br/>')
-
-    const html = `<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="UTF-8"><title>${paperTitle}</title>
-<style>
-  @page { margin: 1in; size: A4; }
-  body { font-family: 'Georgia', 'Times New Roman', serif; color: #1a1a2e; line-height: 1.7; max-width: 800px; margin: 0 auto; padding: 40px; }
-  .cover-page { display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 90vh; text-align: center; page-break-after: always; border: 3px solid #1a1a2e; padding: 60px 40px; margin-bottom: 40px; }
-  .cover-logo { font-size: 14px; letter-spacing: 8px; text-transform: uppercase; color: #6c63ff; margin-bottom: 80px; font-weight: 700; }
-  .cover-title { font-size: 32px; font-weight: 700; color: #1a1a2e; margin-bottom: 24px; line-height: 1.3; }
-  .cover-subtitle { font-size: 16px; color: #555; margin-bottom: 60px; }
-  .cover-author { font-size: 18px; font-weight: 600; color: #1a1a2e; margin-bottom: 8px; }
-  .cover-affiliation { font-size: 14px; color: #6c63ff; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 40px; }
-  .cover-date { font-size: 14px; color: #777; }
-  .cover-line { width: 60px; height: 3px; background: #6c63ff; margin: 20px auto; }
-  h1 { font-size: 24px; color: #1a1a2e; border-bottom: 2px solid #6c63ff; padding-bottom: 8px; margin-top: 40px; }
-  h2 { font-size: 20px; color: #2d2d5e; margin-top: 32px; }
-  h3 { font-size: 16px; color: #3d3d7e; margin-top: 24px; }
-  p { margin-bottom: 12px; }
-  ul, ol { padding-left: 24px; margin-bottom: 12px; }
-  li { margin-bottom: 6px; }
-  strong { color: #1a1a2e; }
-  .footer { text-align: center; margin-top: 60px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #999; }
-</style></head>
-<body>
-  <div class="cover-page">
-    <div class="cover-logo">humanovo</div>
-    <div class="cover-line"></div>
-    <div class="cover-title">${paperTitle}</div>
-    <div class="cover-subtitle">${config.discoveryType.charAt(0).toUpperCase() + config.discoveryType.slice(1)} Discovery Report</div>
-    <div class="cover-line"></div>
-    <div class="cover-author">By humanovo</div>
-    <div class="cover-affiliation">AI-Driven Biomedical Research Platform</div>
-    <div class="cover-date">${date}</div>
-  </div>
-  <div class="content"><p>${bodyHtml}</p></div>
-  <div class="footer">Generated by humanovo &mdash; Multi-Model Parallel AI Discovery System &mdash; ${date}</div>
-</body></html>`
-
-    const blob = new Blob([html], { type: 'text/html' })
+    const blob = new Blob([paperMarkdown], { type: 'text/html' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
     a.download = `humanovo-research-${config.disease.replace(/\s+/g, '-').toLowerCase()}-${new Date().toISOString().split('T')[0]}.html`
     a.click()
     URL.revokeObjectURL(url)
-  }, [paperMarkdown, config.disease, config.discoveryType])
+  }, [paperMarkdown, config.disease])
 
   const addFocusEntity = useCallback(() => {
     if (focusEntityInput.trim() && !config.focusEntities.includes(focusEntityInput.trim())) {
@@ -925,9 +887,9 @@ export default function Agents() {
 
         {/* Main Content - Hypotheses or Paper */}
         <div className="flex-1 overflow-y-auto">
-          {/* Paper View — visual doc with cover page */}
+          {/* Paper View — rich HTML rendered in iframe */}
           {paperMarkdown ? (
-            <div className="p-4">
+            <div className="p-4 h-full flex flex-col">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-sm font-medium text-[var(--color-text-muted)] uppercase">
                   Generated Research Paper
@@ -938,14 +900,7 @@ export default function Agents() {
                     className="btn btn-sm bg-purple-500/20 text-purple-400"
                   >
                     <FiDownload className="w-3.5 h-3.5" />
-                    Download Visual Doc
-                  </button>
-                  <button
-                    onClick={downloadPaperMd}
-                    className="btn btn-sm bg-[var(--color-border)]"
-                  >
-                    <FiDownload className="w-3.5 h-3.5" />
-                    Markdown
+                    Download HTML
                   </button>
                   <button
                     onClick={() => setPaperMarkdown(null)}
@@ -956,35 +911,14 @@ export default function Agents() {
                 </div>
               </div>
 
-              {/* Visual Cover Page */}
-              <div className="card mb-4 overflow-hidden">
-                <div className="flex flex-col items-center justify-center py-16 px-8 text-center border-b-2 border-purple-500/30 bg-gradient-to-b from-[var(--color-surface)] to-[var(--color-bg)]">
-                  <div className="text-xs tracking-[0.3em] uppercase text-purple-400 font-bold mb-8">humanovo</div>
-                  <div className="w-12 h-0.5 bg-purple-500 mb-8" />
-                  <h1 className="text-2xl font-bold mb-3 max-w-lg leading-snug">
-                    {paperMarkdown.match(/^#\s+(.+)$/m)?.[1] || `${config.disease} — Research Report`}
-                  </h1>
-                  <p className="text-sm text-[var(--color-text-muted)] mb-8">
-                    {config.discoveryType.charAt(0).toUpperCase() + config.discoveryType.slice(1)} Discovery Report
-                  </p>
-                  <div className="w-12 h-0.5 bg-purple-500 mb-8" />
-                  <p className="text-sm font-semibold mb-1">By humanovo</p>
-                  <p className="text-xs tracking-[0.2em] uppercase text-purple-400 mb-6">AI-Driven Biomedical Research Platform</p>
-                  <p className="text-xs text-[var(--color-text-muted)]">
-                    {new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
-                  </p>
-                </div>
-
-                {/* Paper Content */}
-                <div className="p-6 prose prose-invert max-w-none">
-                  <pre className="whitespace-pre-wrap text-sm font-mono leading-relaxed">{paperMarkdown}</pre>
-                </div>
-
-                {/* Footer */}
-                <div className="px-6 py-4 border-t border-[var(--color-border)] text-center text-xs text-[var(--color-text-muted)]">
-                  Generated by humanovo — Multi-Model Parallel AI Discovery System — {new Date().toLocaleDateString()}
-                </div>
-              </div>
+              {/* Rich HTML Paper in iframe */}
+              <iframe
+                srcDoc={paperMarkdown}
+                className="flex-1 w-full rounded-lg border border-[var(--color-border)]"
+                style={{ minHeight: '85vh' }}
+                title="Research Paper"
+                sandbox="allow-same-origin"
+              />
             </div>
           ) : hypotheses.length > 0 ? (
             <div className="p-4 space-y-3">
@@ -1045,11 +979,6 @@ export default function Agents() {
                       )}
                       {generatingPaperId === hypothesis.id ? 'Generating...' : 'Generate Paper'}
                     </button>
-                    {hypothesis.evidence_summary && hypothesis.evidence_summary.length > 0 && (
-                      <span className="text-xxs px-1.5 py-0.5 bg-blue-500/20 text-blue-400 rounded">
-                        {hypothesis.evidence_summary.length} citations
-                      </span>
-                    )}
                     <span className="text-xxs px-1.5 py-0.5 bg-green-500/20 text-green-400 rounded flex items-center gap-1">
                       <FiSend className="w-3 h-3" />
                       Saved
@@ -1246,21 +1175,6 @@ export default function Agents() {
                   </h4>
                   <p className="text-sm leading-relaxed">{selectedHypothesis.mechanism || 'Not specified'}</p>
                 </div>
-
-                {selectedHypothesis.evidence_summary && selectedHypothesis.evidence_summary.length > 0 && (
-                  <div>
-                    <h4 className="text-xs font-medium text-[var(--color-text-muted)] uppercase mb-1">
-                      Supporting Evidence ({selectedHypothesis.evidence_summary.length})
-                    </h4>
-                    <div className="space-y-1">
-                      {selectedHypothesis.evidence_summary.map((evidence, i) => (
-                        <div key={i} className="text-xs p-2 bg-blue-500/10 border border-blue-500/20 rounded leading-relaxed">
-                          {evidence}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
 
                 {selectedHypothesis.risks && selectedHypothesis.risks.length > 0 && (
                   <div>

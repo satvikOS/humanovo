@@ -156,7 +156,7 @@ locals {
       description = "Multi-agent orchestration"
       handler     = "handlers.agent_orchestrator.handler"
       memory      = 2048
-      timeout     = 300
+      timeout     = 900
     }
 
     search_agent = {
