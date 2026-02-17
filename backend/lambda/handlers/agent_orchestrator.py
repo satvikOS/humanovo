@@ -319,6 +319,17 @@ def get_discovery_state() -> dict | None:
         return None
 
 
+def _floats_to_decimal(obj):
+    """Recursively convert float values to Decimal for DynamoDB compatibility."""
+    if isinstance(obj, float):
+        return Decimal(str(round(obj, 6)))
+    if isinstance(obj, dict):
+        return {k: _floats_to_decimal(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_floats_to_decimal(v) for v in obj]
+    return obj
+
+
 def update_discovery_state(updates: dict):
     """Update the discovery state in DynamoDB."""
     table = get_task_table()
@@ -332,10 +343,7 @@ def update_discovery_state(updates: dict):
         safe_key = key.replace("-", "_")
         update_parts.append(f"#{safe_key} = :{safe_key}")
         expr_names[f"#{safe_key}"] = key
-        if isinstance(value, float):
-            expr_values[f":{safe_key}"] = Decimal(str(round(value, 4)))
-        else:
-            expr_values[f":{safe_key}"] = value
+        expr_values[f":{safe_key}"] = _floats_to_decimal(value)
 
     table.update_item(
         Key={"id": DISCOVERY_TASK_KEY},
@@ -806,7 +814,7 @@ def start_discovery():
                     "source": "self-invoke",
                     "action": "run_discovery",
                     "config": config,
-                }),
+                }, cls=DecimalEncoder),
             )
             logger.info("Async discovery worker invoked", disease=disease)
         except Exception as e:
@@ -853,7 +861,7 @@ def resume_discovery():
                         "source": "self-invoke",
                         "action": "run_discovery",
                         "config": state["config"],
-                    }),
+                    }, cls=DecimalEncoder),
                 )
             except Exception as e:
                 logger.error(f"Failed to resume worker: {e}")
