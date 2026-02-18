@@ -576,7 +576,7 @@ Entity 2: {neighbor["entity"]}
 Confidence: {path.confidence}
 Evidence Count: {path.evidence_count}
 {external_context}
-Based on this connection, could this pathway lead to a cure or prevention strategy for {disease}?
+Based on this connection, could this pathway lead to a treatment or prevention strategy for {disease}?
 Provide:
 1. Hypothesis (if any)
 2. Mechanism of action
@@ -700,6 +700,7 @@ class DiscoveryOrchestrator(LoggerMixin):
         self._pause_event.set()
         self._stop_requested = False
         self._disease: Optional[str] = None
+        self._discovery_type: str = "treatment"
         self._external_factors: list[dict[str, Any]] = []
 
         self._on_hypothesis: Optional[Callable] = None
@@ -755,7 +756,7 @@ class DiscoveryOrchestrator(LoggerMixin):
         self,
         disease: str,
         focus_entities: list[str] = None,
-        discovery_type: str = "cure",
+        discovery_type: str = "treatment",
         external_factors: list[dict[str, Any]] = None,
     ) -> None:
         if self.state == OrchestratorState.RUNNING:
@@ -769,6 +770,7 @@ class DiscoveryOrchestrator(LoggerMixin):
         self._hypotheses = []
         self._best_confidence = 0.0
         self._disease = disease
+        self._discovery_type = discovery_type
         self._external_factors = external_factors or []
 
         graph_data = await self._get_graph_data(disease, focus_entities)
@@ -1075,7 +1077,7 @@ async def get_orchestrator() -> DiscoveryOrchestrator:
 async def start_discovery(
     disease: str,
     focus_entities: list[str] = None,
-    discovery_type: str = "cure",
+    discovery_type: str = "treatment",
     max_agents: int = 1000,
     target_confidence: float = 0.95,
     external_factors: list[dict[str, Any]] = None,

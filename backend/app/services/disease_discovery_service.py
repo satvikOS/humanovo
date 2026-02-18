@@ -31,9 +31,9 @@ logger = get_logger(__name__)
 
 class DiscoveryType(str, Enum):
     """Type of discovery being sought."""
-    CURE = "cure"
+    CURE = "cure"  # Kept for backward compatibility
     PREVENTION = "prevention"
-    TREATMENT = "treatment"
+    TREATMENT = "treatment"  # Primary default
     BIOMARKER = "biomarker"
     DRUG_REPURPOSING = "drug_repurposing"
     COMBINATION_THERAPY = "combination_therapy"
@@ -476,16 +476,16 @@ class DiseaseDiscoveryService(LoggerMixin):
     async def discover(
         self,
         disease: str,
-        discovery_type: DiscoveryType = DiscoveryType.CURE,
+        discovery_type: DiscoveryType = DiscoveryType.TREATMENT,
         focus_entities: list[str] = None,
         max_results: int = 5,
     ) -> list[DiscoveryResult]:
         """
-        Discover potential cures or treatments for a disease.
+        Discover potential treatments or strategies for a disease.
 
         Args:
             disease: Name of the disease to analyze
-            discovery_type: Type of discovery (cure, prevention, treatment, etc.)
+            discovery_type: Type of discovery (treatment, prevention, biomarker, etc.)
             focus_entities: Optional specific genes/proteins/drugs to focus on
             max_results: Maximum number of discoveries to return
 

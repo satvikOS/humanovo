@@ -69,7 +69,7 @@ class StartDiscoveryRequest(BaseModel):
     """Request to start discovery."""
     disease: str
     focus_entities: list[str] = []
-    discovery_type: str = "cure"  # cure, prevention, treatment, biomarker, drug_repurposing
+    discovery_type: str = "treatment"  # treatment, prevention, biomarker, drug_repurposing, combination_therapy
     max_agents: int = 1000
     target_confidence: float = 0.95
     external_factors: list[ExternalFactor] = []
@@ -89,7 +89,7 @@ async def start_discovery_endpoint(request: StartDiscoveryRequest):
     Start a new parallel discovery process.
 
     Launches agents across Llama Maverick, DeepSeek R1, Kimi 2.5, and GPT OSS 120B
-    to explore biological pathways and discover potential cures/treatments.
+    to explore biological pathways and discover potential treatments/strategies.
     External factors (nutrients, chemicals, drugs, compounds, elements) are simulated
     alongside biological interactions.
     """
@@ -350,7 +350,7 @@ async def generate_research_paper():
 
     paper = await paper_service.generate_paper(
         disease=_current_orchestrator._disease or "Unknown",
-        discovery_type="cure",
+        discovery_type=_current_orchestrator._discovery_type or "treatment",
         hypotheses=hyp_dicts,
         stats=stats.model_dump(),
         external_factors=_current_orchestrator._external_factors,
@@ -394,7 +394,7 @@ async def generate_research_paper_markdown():
 
     paper = await paper_service.generate_paper(
         disease=_current_orchestrator._disease or "Unknown",
-        discovery_type="cure",
+        discovery_type=_current_orchestrator._discovery_type or "treatment",
         hypotheses=hyp_dicts,
         stats=stats.model_dump(),
         external_factors=_current_orchestrator._external_factors,
