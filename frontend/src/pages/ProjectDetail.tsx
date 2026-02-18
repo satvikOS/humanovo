@@ -1,7 +1,6 @@
 import { useParams, Link } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
 import { FiArrowLeft, FiActivity, FiTarget, FiCpu, FiCheckCircle, FiClock } from 'react-icons/fi'
-import { api } from '../services/api'
+import { persistGet } from '../utils/persistence'
 
 interface ProjectHypothesis {
   id: string
@@ -15,29 +14,45 @@ interface ProjectHypothesis {
   created_at: string
 }
 
+interface LocalProject {
+  id: string
+  name: string
+  description?: string
+  disease_focus?: string
+  research_question?: string
+  tags: string[]
+  hypothesis_count: number
+  evidence_count: number
+  status: string
+  created_at: string
+  updated_at: string
+}
+
+interface SavedHypothesis {
+  id: string
+  title: string
+  description: string
+  mechanism: string
+  confidence: number
+  tags: string[]
+  disease: string
+  discovery_type: string
+  project_id: string
+  created_at: string
+}
+
 export default function ProjectDetail() {
   const { projectId } = useParams<{ projectId: string }>()
 
-  const { data: project, isLoading, error } = useQuery({
-    queryKey: ['project', projectId],
-    queryFn: () => api.getProject(projectId!),
-    enabled: !!projectId,
-    retry: 2,
-  })
+  // Read from localStorage — same source as Projects.tsx and Agents.tsx
+  const projects = persistGet<LocalProject[]>('projects', [])
+  const project = projects.find(p => p.id === projectId)
 
-  if (isLoading) {
-    return (
-      <div className="p-8">
-        <div className="animate-pulse space-y-4">
-          <div className="h-8 bg-secondary-800 rounded w-1/3" />
-          <div className="h-4 bg-secondary-800 rounded w-2/3" />
-          <div className="h-64 bg-secondary-800 rounded mt-6" />
-        </div>
-      </div>
-    )
-  }
+  // Load hypotheses for this project from localStorage
+  const allHypotheses = persistGet<SavedHypothesis[]>('hypotheses', [])
+  const projectHypotheses = allHypotheses.filter(h => h.project_id === projectId)
 
-  if (error || !project) {
+  if (!project) {
     return (
       <div className="p-8">
         <Link to="/projects" className="inline-flex items-center text-primary-400 hover:text-primary-300 mb-6">
@@ -56,7 +71,19 @@ export default function ProjectDetail() {
     )
   }
 
-  const hypotheses: ProjectHypothesis[] = project.hypotheses || []
+  // Map saved hypotheses to the display format
+  const hypotheses: ProjectHypothesis[] = projectHypotheses.map(h => ({
+    id: h.id,
+    title: h.title,
+    description: h.description,
+    mechanism: h.mechanism,
+    confidence: h.confidence,
+    model_used: h.discovery_type || 'unknown',
+    validated: false,
+    external_factors: [],
+    created_at: h.created_at,
+  }))
+
   const modelColors: Record<string, string> = {
     llama_maverick: 'text-orange-400',
     deepseek_r1: 'text-teal-400',
@@ -111,7 +138,7 @@ export default function ProjectDetail() {
           <div className="card">
             <h2 className="text-lg font-semibold text-white mb-4 flex items-center">
               <FiActivity className="w-5 h-5 mr-2 text-primary-400" />
-              Hypotheses ({project.hypothesis_count || hypotheses.length})
+              Hypotheses ({hypotheses.length})
             </h2>
 
             {hypotheses.length > 0 ? (
@@ -183,7 +210,7 @@ export default function ProjectDetail() {
             <dl className="space-y-3">
               <div className="flex justify-between">
                 <dt className="text-secondary-400">Hypotheses</dt>
-                <dd className="text-white font-medium">{project.hypothesis_count || hypotheses.length}</dd>
+                <dd className="text-white font-medium">{hypotheses.length}</dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-secondary-400">Evidence</dt>

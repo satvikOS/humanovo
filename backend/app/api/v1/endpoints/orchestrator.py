@@ -27,6 +27,12 @@ logger = get_logger(__name__)
 
 router = APIRouter(prefix="/orchestrator", tags=["orchestrator"])
 
+# Async paper generation state
+_paper_status: str = "idle"  # idle | generating | done | failed
+_paper_result: Optional[str] = None
+_paper_error: Optional[str] = None
+_paper_task: Optional[asyncio.Task] = None
+
 
 # WebSocket connection manager for real-time updates
 class ConnectionManager:
@@ -362,9 +368,10 @@ async def generate_research_paper():
 @router.post("/generate-paper/markdown")
 async def generate_research_paper_markdown():
     """
-    Generate a research paper in Markdown format for direct viewing/export.
+    Start async paper generation. Returns immediately.
+    Poll /paper-status to check completion.
     """
-    global _current_orchestrator
+    global _current_orchestrator, _paper_status, _paper_result, _paper_error, _paper_task
 
     if not _current_orchestrator:
         raise HTTPException(status_code=400, detail="No discovery data available.")
@@ -373,10 +380,15 @@ async def generate_research_paper_markdown():
     if not hypotheses:
         raise HTTPException(status_code=400, detail="No hypotheses found.")
 
-    stats = _current_orchestrator.get_stats()
+    if _paper_status == "generating":
+        raise HTTPException(status_code=400, detail="Paper generation already in progress.")
 
-    from app.services.paper_generation_service import get_paper_service
-    paper_service = get_paper_service()
+    # Reset state
+    _paper_status = "generating"
+    _paper_result = None
+    _paper_error = None
+
+    stats = _current_orchestrator.get_stats()
 
     hyp_dicts = [
         {
@@ -392,16 +404,56 @@ async def generate_research_paper_markdown():
         for h in hypotheses
     ]
 
-    paper = await paper_service.generate_paper(
-        disease=_current_orchestrator._disease or "Unknown",
-        discovery_type=_current_orchestrator._discovery_type or "treatment",
-        hypotheses=hyp_dicts,
-        stats=stats.model_dump(),
-        external_factors=_current_orchestrator._external_factors,
-    )
+    disease = _current_orchestrator._disease or "Unknown"
+    discovery_type = _current_orchestrator._discovery_type or "treatment"
+    external_factors = _current_orchestrator._external_factors
 
-    markdown = paper_service.paper_to_markdown(paper)
-    return PlainTextResponse(content=markdown, media_type="text/markdown")
+    async def _generate_paper_background():
+        global _paper_status, _paper_result, _paper_error
+        try:
+            from app.services.paper_generation_service import get_paper_service
+            paper_service = get_paper_service()
+
+            paper = await paper_service.generate_paper(
+                disease=disease,
+                discovery_type=discovery_type,
+                hypotheses=hyp_dicts,
+                stats=stats.model_dump(),
+                external_factors=external_factors,
+            )
+
+            markdown = paper_service.paper_to_markdown(paper)
+            _paper_result = markdown
+            _paper_status = "done"
+            logger.info("Paper generation completed successfully")
+
+            await manager.broadcast({
+                "type": "paper_ready",
+                "data": {"status": "done"},
+            })
+        except Exception as e:
+            _paper_error = str(e)
+            _paper_status = "failed"
+            logger.error(f"Paper generation failed: {e}")
+
+    _paper_task = asyncio.create_task(_generate_paper_background())
+
+    return {"status": "generating", "message": "Paper generation started. Poll /paper-status for updates."}
+
+
+@router.get("/paper-status")
+async def get_paper_status():
+    """Check the status of async paper generation."""
+    global _paper_status, _paper_result, _paper_error
+
+    response: dict[str, Any] = {"status": _paper_status}
+
+    if _paper_status == "done" and _paper_result:
+        response["paper_html"] = _paper_result
+    elif _paper_status == "failed" and _paper_error:
+        response["error"] = _paper_error
+
+    return response
 
 
 @router.post("/save-to-project")
