@@ -404,6 +404,139 @@ async def generate_research_paper_markdown():
     return PlainTextResponse(content=markdown, media_type="text/markdown")
 
 
+@router.post("/save-to-project")
+async def save_discovery_to_project(project_name: str = None):
+    """
+    Save current discovery hypotheses to a project.
+    Creates a new project and stores all hypotheses, fixing the transfer bug
+    where hypotheses appeared to be saved but the project didn't exist.
+    """
+    global _current_orchestrator
+
+    if not _current_orchestrator:
+        raise HTTPException(status_code=400, detail="No discovery data available. Run a discovery first.")
+
+    hypotheses = _current_orchestrator.get_hypotheses(min_confidence=0.0, limit=100)
+    if not hypotheses:
+        raise HTTPException(status_code=400, detail="No hypotheses found. Run discovery first.")
+
+    disease = _current_orchestrator._disease or "Unknown"
+    discovery_type = _current_orchestrator._discovery_type or "treatment"
+
+    # Import project memory store and create project
+    from app.api.v1.endpoints.projects import _memory_projects, _check_db_available
+    from uuid import uuid4
+    from datetime import datetime
+
+    project_id = str(uuid4())
+    name = project_name or f"{disease} - {discovery_type.replace('_', ' ').title()} Discovery"
+    now = datetime.utcnow()
+
+    # Try database first
+    db_ok = await _check_db_available()
+    if db_ok:
+        try:
+            from app.core.database import get_db
+            from app.models.project import Project, ProjectStatus
+            from app.models.hypothesis import Hypothesis, HypothesisStatus
+
+            async for db in get_db():
+                db_project = Project(
+                    name=name,
+                    description=f"Auto-generated from discovery run: {len(hypotheses)} hypotheses for {disease}",
+                    disease_focus=disease,
+                    research_question=f"What are the most promising {discovery_type} strategies for {disease}?",
+                    tags=[disease.lower(), discovery_type, "ai-discovery", "multi-model"],
+                    status=ProjectStatus.ACTIVE,
+                    hypothesis_count=len(hypotheses),
+                )
+                db.add(db_project)
+                await db.flush()
+
+                # Store each hypothesis
+                for h in hypotheses:
+                    db_hyp = Hypothesis(
+                        project_id=db_project.id,
+                        statement=h.title,
+                        mechanism=h.mechanism,
+                        rationale=h.description,
+                        status=HypothesisStatus.ACTIVE,
+                        confidence_score=h.confidence,
+                        novelty_score=0.0,
+                        generated_by="ai",
+                        generation_context={
+                            "model_used": h.model_used,
+                            "disease": h.disease,
+                            "external_factors": h.external_factors,
+                            "contributing_agents": h.contributing_agents,
+                        },
+                        tags=[disease.lower(), h.model_used],
+                    )
+                    db.add(db_hyp)
+
+                await db.commit()
+                await db.refresh(db_project)
+
+                await manager.broadcast({
+                    "type": "project_saved",
+                    "data": {"project_id": str(db_project.id), "name": name},
+                })
+
+                return {
+                    "status": "saved",
+                    "project_id": str(db_project.id),
+                    "name": name,
+                    "hypothesis_count": len(hypotheses),
+                    "message": f"Saved {len(hypotheses)} hypotheses to project '{name}'",
+                }
+        except Exception as e:
+            logger.warning(f"DB save failed, using in-memory: {e}")
+
+    # In-memory fallback — ensure project is stored so it can be retrieved
+    mem_project = {
+        "id": project_id,
+        "name": name,
+        "description": f"Auto-generated from discovery run: {len(hypotheses)} hypotheses for {disease}",
+        "disease_focus": disease,
+        "research_question": f"What are the most promising {discovery_type} strategies for {disease}?",
+        "tags": [disease.lower(), discovery_type, "ai-discovery", "multi-model"],
+        "status": "active",
+        "hypothesis_count": len(hypotheses),
+        "evidence_count": 0,
+        "simulation_count": 0,
+        "created_at": now,
+        "updated_at": now,
+        "hypotheses": [
+            {
+                "id": h.id,
+                "title": h.title,
+                "description": h.description,
+                "mechanism": h.mechanism,
+                "confidence": h.confidence,
+                "model_used": h.model_used,
+                "validated": h.validated,
+                "external_factors": h.external_factors,
+                "created_at": h.created_at.isoformat(),
+            }
+            for h in hypotheses
+        ],
+    }
+    _memory_projects[project_id] = mem_project
+
+    await manager.broadcast({
+        "type": "project_saved",
+        "data": {"project_id": project_id, "name": name},
+    })
+
+    return {
+        "status": "saved",
+        "project_id": project_id,
+        "name": name,
+        "hypothesis_count": len(hypotheses),
+        "message": f"Saved {len(hypotheses)} hypotheses to project '{name}'",
+    }
+
+
 @router.get("/learning-stats")
 async def get_learning_stats():
     """Get learning memory statistics."""

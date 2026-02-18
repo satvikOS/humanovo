@@ -25,7 +25,7 @@ router = APIRouter(prefix="/discovery", tags=["discovery"])
 class DiscoveryRequest(BaseModel):
     """Request model for disease discovery."""
     disease: str
-    discovery_type: DiscoveryType = DiscoveryType.CURE
+    discovery_type: DiscoveryType = DiscoveryType.TREATMENT
     focus_entities: list[str] = []
     max_results: int = 5
     llm_provider: Optional[str] = None  # openai, anthropic, bedrock, together, groq
@@ -70,9 +70,9 @@ async def get_service(provider: str = None) -> DiseaseDiscoveryService:
 
 
 @router.post("/analyze", response_model=DiscoveryResponse)
-async def discover_disease_cures(request: DiscoveryRequest):
+async def discover_disease_treatments(request: DiscoveryRequest):
     """
-    Discover potential cures, treatments, or prevention strategies for a disease.
+    Discover potential treatments, strategies, or prevention approaches for a disease.
 
     This endpoint uses advanced LLM reasoning combined with:
     - Knowledge graph analysis (genes, proteins, drugs, pathways)
@@ -108,7 +108,7 @@ async def discover_disease_cures(request: DiscoveryRequest):
 @router.get("/quick/{disease}")
 async def quick_discovery(
     disease: str,
-    discovery_type: DiscoveryType = Query(default=DiscoveryType.CURE),
+    discovery_type: DiscoveryType = Query(default=DiscoveryType.TREATMENT),
     max_results: int = Query(default=3, ge=1, le=10),
 ):
     """
@@ -248,9 +248,10 @@ async def list_discovery_types():
     return {
         "types": [
             {
-                "id": "cure",
-                "name": "Cure Discovery",
-                "description": "Find potential curative treatments for the disease",
+                "id": "treatment",
+                "name": "Treatment Discovery",
+                "description": "Find potential therapeutic strategies for the disease",
+                "default": True,
             },
             {
                 "id": "prevention",

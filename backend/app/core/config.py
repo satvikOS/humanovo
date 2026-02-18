@@ -123,6 +123,11 @@ class Settings(BaseSettings):
     AGENT_TIMEOUT_SECONDS: int = 120
     AGENT_MAX_PARALLEL_SEARCHES: int = 5
 
+    # Paper Generation Configuration
+    PAPER_GENERATION_TIMEOUT_SECONDS: int = 1800  # 30 minutes hard limit
+    PAPER_MIN_HYPOTHESES: int = 20  # Minimum hypotheses for rich paper
+    PAPER_HYPOTHESIS_DIVERSITY: bool = True  # Ensure diverse complexity levels
+
     # Logging
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "json"

@@ -327,6 +327,24 @@ export const api = {
     const { data } = await apiClient.post('/agents/search', { query, sources, max_results: maxResults })
     return data
   },
+
+  // Orchestrator - Discovery & Paper Generation
+  async saveDiscoveryToProject(projectName?: string): Promise<{ status: string; project_id: string; name: string; hypothesis_count: number; message: string }> {
+    const { data } = await apiClient.post('/orchestrator/save-to-project', null, {
+      params: projectName ? { project_name: projectName } : undefined,
+    })
+    return data
+  },
+
+  async generatePaper(): Promise<any> {
+    const { data } = await apiClient.post('/orchestrator/generate-paper')
+    return data
+  },
+
+  async generatePaperMarkdown(): Promise<string> {
+    const { data } = await apiClient.post('/orchestrator/generate-paper/markdown')
+    return data
+  },
 }
 
 export default api

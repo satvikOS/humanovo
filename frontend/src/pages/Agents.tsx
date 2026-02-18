@@ -11,6 +11,7 @@ import {
   FiChevronUp,
   FiAward,
   FiFileText,
+  FiFolder,
   FiPlus,
   FiX,
   FiDownload,
@@ -63,7 +64,7 @@ interface ExternalFactor {
 
 interface DiscoveryConfig {
   disease: string
-  discoveryType: 'cure' | 'prevention' | 'treatment' | 'biomarker' | 'drug_repurposing'
+  discoveryType: 'treatment' | 'prevention' | 'biomarker' | 'drug_repurposing' | 'combination_therapy'
   focusEntities: string[]
   maxAgents: number
   targetConfidence: number
@@ -71,11 +72,11 @@ interface DiscoveryConfig {
 }
 
 const discoveryTypes = [
-  { value: 'cure', label: 'Cure Discovery', description: 'Find curative treatments' },
+  { value: 'treatment', label: 'Treatment Discovery', description: 'Find therapeutic strategies' },
   { value: 'prevention', label: 'Prevention Strategy', description: 'Prevent disease onset' },
-  { value: 'treatment', label: 'Treatment Options', description: 'Manage symptoms and progression' },
   { value: 'biomarker', label: 'Biomarker Discovery', description: 'Early detection markers' },
   { value: 'drug_repurposing', label: 'Drug Repurposing', description: 'Existing drugs for new uses' },
+  { value: 'combination_therapy', label: 'Combination Therapy', description: 'Synergistic drug combinations' },
 ]
 
 const factorCategories = ['nutrient', 'chemical', 'drug', 'compound', 'element'] as const
@@ -98,10 +99,13 @@ export default function Agents() {
   const [generatingPaper, setGeneratingPaper] = useState(false)
   const [paperMarkdown, setPaperMarkdown] = useState<string | null>(null)
 
+  // Project saving
+  const [savingToProject, setSavingToProject] = useState(false)
+
   // Configuration
   const [config, setConfig] = useState<DiscoveryConfig>({
     disease: '',
-    discoveryType: 'cure',
+    discoveryType: 'treatment',
     focusEntities: [],
     maxAgents: 1000,
     targetConfidence: 0.95,
@@ -256,6 +260,25 @@ export default function Agents() {
     }
   }, [])
 
+  const saveToProject = useCallback(async () => {
+    setSavingToProject(true)
+    try {
+      const response = await fetch(`${API_BASE}/orchestrator/save-to-project`, { method: 'POST' })
+      if (response.ok) {
+        const result = await response.json()
+        alert(`Saved ${result.hypothesis_count} hypotheses to project "${result.name}". Navigate to Projects to view.`)
+      } else {
+        const error = await response.json()
+        alert(`Save failed: ${error.detail}`)
+      }
+    } catch (e) {
+      console.error('Failed to save to project:', e)
+      alert('Failed to save to project')
+    } finally {
+      setSavingToProject(false)
+    }
+  }, [])
+
   const downloadPaper = useCallback(() => {
     if (!paperMarkdown) return
     const blob = new Blob([paperMarkdown], { type: 'text/markdown' })
@@ -361,20 +384,34 @@ export default function Agents() {
               {aiConnected === null ? 'Connecting...' : aiConnected ? `${connectedAgents}/${totalAgents} Agents` : 'AI Disconnected'}
             </div>
 
-            {/* Generate Paper Button */}
+            {/* Save & Generate Buttons */}
             {(state === 'idle' || state === 'paused') && hypotheses.length > 0 && (
-              <button
-                onClick={generatePaper}
-                disabled={generatingPaper}
-                className="btn bg-purple-500 text-white hover:bg-purple-600 disabled:opacity-50"
-              >
-                {generatingPaper ? (
-                  <FiRefreshCw className="w-4 h-4 animate-spin" />
-                ) : (
-                  <FiFileText className="w-4 h-4" />
-                )}
-                {generatingPaper ? 'Generating...' : 'Generate Paper'}
-              </button>
+              <>
+                <button
+                  onClick={saveToProject}
+                  disabled={savingToProject}
+                  className="btn bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50"
+                >
+                  {savingToProject ? (
+                    <FiRefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <FiFolder className="w-4 h-4" />
+                  )}
+                  {savingToProject ? 'Saving...' : 'Save to Project'}
+                </button>
+                <button
+                  onClick={generatePaper}
+                  disabled={generatingPaper}
+                  className="btn bg-purple-500 text-white hover:bg-purple-600 disabled:opacity-50"
+                >
+                  {generatingPaper ? (
+                    <FiRefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <FiFileText className="w-4 h-4" />
+                  )}
+                  {generatingPaper ? 'Generating...' : 'Generate Paper'}
+                </button>
+              </>
             )}
 
             {/* Control Buttons */}

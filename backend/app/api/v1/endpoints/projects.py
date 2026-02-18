@@ -77,16 +77,17 @@ class ProjectResponse(BaseModel):
 
     id: UUID
     name: str
-    description: str | None
-    disease_focus: str | None
-    research_question: str | None
-    tags: list[str]
-    status: str
-    hypothesis_count: int
-    evidence_count: int
-    simulation_count: int
-    created_at: datetime
-    updated_at: datetime
+    description: str | None = None
+    disease_focus: str | None = None
+    research_question: str | None = None
+    tags: list[str] = []
+    status: str = "active"
+    hypothesis_count: int = 0
+    evidence_count: int = 0
+    simulation_count: int = 0
+    hypotheses: list[dict] | None = None  # Included when available (from discovery save)
+    created_at: datetime = datetime.utcnow()
+    updated_at: datetime = datetime.utcnow()
 
     class Config:
         from_attributes = True
@@ -289,6 +290,7 @@ async def get_project(project_id: UUID) -> ProjectResponse:
         disease_focus=p.get("disease_focus"), research_question=p.get("research_question"),
         tags=p.get("tags", []), status=p["status"], hypothesis_count=p.get("hypothesis_count", 0),
         evidence_count=p.get("evidence_count", 0), simulation_count=p.get("simulation_count", 0),
+        hypotheses=p.get("hypotheses"),
         created_at=p["created_at"], updated_at=p["updated_at"],
     )
 
