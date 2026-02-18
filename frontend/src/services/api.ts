@@ -15,8 +15,21 @@ export interface Project {
   disease_focus?: string
   research_question?: string
   tags: string[]
+  status?: string
   hypothesis_count: number
   evidence_count: number
+  simulation_count?: number
+  hypotheses?: Array<{
+    id: string
+    title: string
+    description: string
+    mechanism: string
+    confidence: number
+    model_used: string
+    validated: boolean
+    external_factors: any[]
+    created_at: string
+  }>
   created_at: string
   updated_at: string
 }
