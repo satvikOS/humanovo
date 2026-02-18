@@ -30,10 +30,9 @@ const mainNavItems = [
   { to: '/dashboard', icon: FiHome, label: 'Dashboard', shortcut: '1' },
   { to: '/projects', icon: FiFolder, label: 'Projects', shortcut: '2' },
   { to: '/evidence', icon: FiDatabase, label: 'Evidence', shortcut: '3' },
-  { to: '/hypotheses', icon: FiZap, label: 'Hypotheses', shortcut: '4' },
-  { to: '/agents', icon: FiActivity, label: 'Discovery', shortcut: '5' },
-  { to: '/workbench', icon: FiBox, label: 'Workbench', shortcut: '6' },
-  { to: '/anatomy', icon: FiUser, label: '3D Anatomy', shortcut: '7' },
+  { to: '/agents', icon: FiActivity, label: 'Discovery', shortcut: '4' },
+  { to: '/workbench', icon: FiBox, label: 'Workbench', shortcut: '5' },
+  { to: '/anatomy', icon: FiUser, label: '3D Anatomy', shortcut: '6' },
 ]
 
 const secondaryNavItems = [
@@ -130,7 +129,7 @@ function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
           <div className="text-xxs text-[var(--color-text-muted)] px-2 py-1">Quick Actions</div>
           {[
             { label: 'New Project', icon: FiFolder },
-            { label: 'New Hypothesis', icon: FiZap },
+            { label: 'Start Discovery', icon: FiZap },
             { label: 'Run Simulation', icon: FiActivity },
             { label: 'Open Workbench', icon: FiBox },
           ].map((item) => (

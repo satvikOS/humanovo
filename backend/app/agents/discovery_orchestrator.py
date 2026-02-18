@@ -34,6 +34,60 @@ from app.agents.prompts import get_agent_prompt, MASTER_DISCOVERY_PROMPT
 logger = get_logger(__name__)
 
 
+# ============== Bedrock InvokeModel helpers ==============
+
+def _build_invoke_body(model_id: str, prompt: str, system_prompt: str,
+                       max_tokens: int, temperature: float) -> dict:
+    """Build provider-specific request body for Bedrock InvokeModel API."""
+    provider = model_id.split(".")[0]
+    if provider == "meta":
+        full_prompt = (
+            f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
+            f"{system_prompt}<|eot_id|>"
+            f"<|start_header_id|>user<|end_header_id|>\n\n"
+            f"{prompt}<|eot_id|>"
+            f"<|start_header_id|>assistant<|end_header_id|>\n\n"
+        )
+        return {"prompt": full_prompt, "max_gen_len": max_tokens, "temperature": temperature, "top_p": 0.9}
+    else:
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        return {"messages": messages, "max_tokens": max_tokens, "temperature": temperature, "top_p": 0.9}
+
+
+def _parse_invoke_response(model_id: str, response_body: dict) -> str:
+    """Parse provider-specific response from Bedrock InvokeModel API."""
+    provider = model_id.split(".")[0]
+    if provider == "meta" and "generation" in response_body:
+        return response_body["generation"]
+    if "choices" in response_body:
+        choices = response_body["choices"]
+        if choices and isinstance(choices, list):
+            msg = choices[0].get("message", {})
+            if isinstance(msg, dict) and "content" in msg:
+                return msg["content"]
+            if "text" in choices[0]:
+                return choices[0]["text"]
+    if "output" in response_body:
+        output = response_body["output"]
+        if isinstance(output, dict):
+            msg = output.get("message", {})
+            if isinstance(msg, dict) and "content" in msg:
+                content = msg["content"]
+                if isinstance(content, list) and content:
+                    return content[0].get("text", "")
+                if isinstance(content, str):
+                    return content
+        if isinstance(output, str):
+            return output
+    for key in ["text", "content", "response", "completion", "generated_text", "result"]:
+        if key in response_body and isinstance(response_body[key], str):
+            return response_body[key]
+    return json.dumps(response_body)
+
+
 class OrchestratorState(str, Enum):
     """State of the discovery orchestrator."""
     IDLE = "idle"
@@ -247,32 +301,275 @@ class LearningMemory:
         }
 
 
+class ParallelMCP:
+    """
+    Parallel Model Context Protocol (MCP) for distributing context across models.
+
+    Overcomes per-model token limits by sharding large contexts across the 4 models,
+    having each model process its shard, then synthesizing results. This allows
+    effective context windows of 4x a single model's limit.
+
+    Strategies:
+    - semantic: Split context by semantic sections (pathways, evidence, entities, factors)
+    - fixed: Split context into equal-sized chunks
+    - sliding_window: Overlapping sliding window chunks
+    """
+
+    def __init__(self, bedrock_client, token_pool: TokenPool):
+        self._bedrock_client = bedrock_client
+        self._token_pool = token_pool
+
+    def _estimate_tokens(self, text: str) -> int:
+        """Estimate token count (rough: 1 token ~ 4 chars)."""
+        return len(text) // 4
+
+    def _shard_context_semantic(
+        self, context: str, num_shards: int, overlap: int,
+    ) -> list[dict[str, str]]:
+        """Split context into semantic shards with labeled sections."""
+        sections = {
+            "molecular_pathways": [],
+            "evidence_literature": [],
+            "entity_relationships": [],
+            "external_factors": [],
+        }
+
+        current_section = "molecular_pathways"
+        for line in context.split("\n"):
+            line_lower = line.lower()
+            if any(kw in line_lower for kw in ["evidence", "pubmed", "clinical trial", "study", "paper", "citation"]):
+                current_section = "evidence_literature"
+            elif any(kw in line_lower for kw in ["entity", "gene", "protein", "drug", "target", "relation"]):
+                current_section = "entity_relationships"
+            elif any(kw in line_lower for kw in ["nutrient", "chemical", "compound", "element", "external", "factor", "vitamin"]):
+                current_section = "external_factors"
+            elif any(kw in line_lower for kw in ["pathway", "signal", "mechanism", "molecular", "cellular"]):
+                current_section = "molecular_pathways"
+            sections[current_section].append(line)
+
+        section_keys = list(sections.keys())
+        shards = []
+        for i in range(num_shards):
+            primary_key = section_keys[i % len(section_keys)]
+            primary_text = "\n".join(sections[primary_key])
+
+            # Add overlap from adjacent sections
+            overlap_text = ""
+            if overlap > 0:
+                for j in range(len(section_keys)):
+                    if j != (i % len(section_keys)):
+                        other_text = "\n".join(sections[section_keys[j]])
+                        overlap_chars = overlap * 4  # tokens to chars
+                        if other_text:
+                            overlap_text += f"\n[Cross-reference from {section_keys[j]}]:\n{other_text[:overlap_chars]}\n"
+
+            shards.append({
+                "section": primary_key,
+                "content": primary_text + overlap_text,
+                "shard_index": i,
+                "total_shards": num_shards,
+            })
+
+        return shards
+
+    def _shard_context_fixed(
+        self, context: str, num_shards: int, overlap: int,
+    ) -> list[dict[str, str]]:
+        """Split context into fixed-size chunks."""
+        lines = context.split("\n")
+        chunk_size = max(1, len(lines) // num_shards)
+        overlap_lines = overlap // 10  # rough estimate
+
+        shards = []
+        for i in range(num_shards):
+            start = max(0, i * chunk_size - overlap_lines)
+            end = min(len(lines), (i + 1) * chunk_size + overlap_lines)
+            shards.append({
+                "section": f"chunk_{i}",
+                "content": "\n".join(lines[start:end]),
+                "shard_index": i,
+                "total_shards": num_shards,
+            })
+
+        return shards
+
+    def shard_context(
+        self, context: str, strategy: str = None,
+    ) -> list[dict[str, str]]:
+        """Shard context according to configured strategy."""
+        strategy = strategy or settings.MCP_CHUNK_STRATEGY
+        num_shards = settings.MCP_PARALLEL_SHARDS
+        overlap = settings.MCP_CONTEXT_OVERLAP
+
+        if strategy == "semantic":
+            return self._shard_context_semantic(context, num_shards, overlap)
+        else:
+            return self._shard_context_fixed(context, num_shards, overlap)
+
+    async def parallel_process(
+        self,
+        prompt: str,
+        context: str,
+        model_assignments: dict[str, str],
+        system_prompts: dict[str, str],
+        max_tokens: int = 4000,
+        temperature: float = 0.3,
+    ) -> dict[str, str]:
+        """
+        Process a large context in parallel across all 4 models.
+
+        Each model receives its context shard + the shared prompt.
+        Results are collected for synthesis.
+        """
+        context_tokens = self._estimate_tokens(context)
+        max_per_model = settings.MCP_MAX_CONTEXT_PER_MODEL
+
+        # If context fits in a single model, no sharding needed
+        if context_tokens <= max_per_model:
+            shards = [{"section": "full", "content": context, "shard_index": 0, "total_shards": 1}]
+        else:
+            shards = self.shard_context(context)
+
+        model_keys = list(model_assignments.keys())
+        tasks = {}
+
+        for i, (model_key, model_id) in enumerate(model_assignments.items()):
+            shard = shards[i % len(shards)]
+            shard_prompt = f"""[MCP Shard {shard['shard_index'] + 1}/{shard['total_shards']} — Section: {shard['section']}]
+
+CONTEXT FOR YOUR SHARD:
+{shard['content']}
+
+TASK:
+{prompt}
+
+IMPORTANT: You are processing shard {shard['shard_index'] + 1} of {shard['total_shards']}. Focus on extracting insights from YOUR section while noting cross-references to other sections. Your output will be synthesized with outputs from the other shards."""
+
+            system = system_prompts.get(model_key, "")
+            tasks[model_key] = self._invoke_bedrock(
+                model_id, shard_prompt, system, max_tokens, temperature,
+            )
+
+        results = await asyncio.gather(
+            *[asyncio.create_task(coro) for coro in tasks.values()],
+            return_exceptions=True,
+        )
+
+        responses = {}
+        for (name, _), result in zip(tasks.items(), results):
+            if isinstance(result, Exception):
+                responses[name] = f"[MCP Shard Error]: {result}"
+                logger.warning(f"MCP shard {name} failed: {result}")
+            else:
+                responses[name] = result
+
+        return responses
+
+    async def synthesize_shards(
+        self, shard_results: dict[str, str], original_prompt: str,
+        synthesis_model_id: str = None,
+    ) -> str:
+        """Synthesize results from all MCP shards into a unified response."""
+        synthesis_model = synthesis_model_id or settings.MCP_SYNTHESIS_MODEL
+
+        shard_summaries = "\n\n".join([
+            f"=== SHARD: {name} ===\n{result}"
+            for name, result in shard_results.items()
+            if not result.startswith("[MCP Shard Error]")
+        ])
+
+        synthesis_prompt = f"""You are synthesizing results from a parallel multi-model context protocol (MCP) run.
+Multiple AI models each processed a different shard of the total context in parallel.
+Your job is to integrate their findings into a single, coherent, comprehensive response.
+
+ORIGINAL TASK:
+{original_prompt}
+
+SHARD RESULTS FROM PARALLEL MODELS:
+{shard_summaries}
+
+INSTRUCTIONS:
+1. Integrate all findings — do not discard any shard's unique contributions
+2. Resolve any contradictions by noting both perspectives with confidence levels
+3. Identify cross-shard connections that individual models may have missed
+4. Produce a unified JSON response following the standard hypothesis format
+5. The final confidence score should be a weighted average across all shards"""
+
+        system = "You are a synthesis agent integrating parallel model outputs into a unified biomedical discovery."
+        return await self._invoke_bedrock(
+            synthesis_model, synthesis_prompt, system, max_tokens=4000, temperature=0.3,
+        )
+
+    async def _invoke_bedrock(
+        self, model_id: str, prompt: str, system_prompt: str,
+        max_tokens: int, temperature: float,
+    ) -> str:
+        """Invoke a Bedrock model. Tries Converse API, falls back to InvokeModel."""
+        if not self._bedrock_client:
+            raise RuntimeError("Bedrock client not initialized for MCP")
+
+        loop = asyncio.get_event_loop()
+
+        # Try Converse first
+        try:
+            response = await loop.run_in_executor(
+                None,
+                lambda: self._bedrock_client.converse(
+                    modelId=model_id,
+                    messages=[{"role": "user", "content": [{"text": prompt}]}],
+                    system=[{"text": system_prompt}] if system_prompt else [],
+                    inferenceConfig={"maxTokens": max_tokens, "temperature": temperature},
+                )
+            )
+            return response["output"]["message"]["content"][0]["text"]
+        except Exception as e:
+            logger.warning(f"MCP Converse failed for {model_id}: {e}, trying InvokeModel")
+
+        # Fallback: InvokeModel
+        body = _build_invoke_body(model_id, prompt, system_prompt, max_tokens, temperature)
+        response = await loop.run_in_executor(
+            None,
+            lambda: self._bedrock_client.invoke_model(
+                modelId=model_id,
+                contentType="application/json",
+                accept="application/json",
+                body=json.dumps(body),
+            )
+        )
+        response_body = json.loads(response["body"].read())
+        return _parse_invoke_response(model_id, response_body)
+
+
 class MultiModelLLM:
     """
-    Multi-model interface supporting four parallel LLMs:
-    - Llama Maverick (AWS Bedrock) - Fast broad reasoning
-    - DeepSeek R1 (AWS Bedrock) - Deep logical reasoning
-    - Kimi 2.5 (Moonshot API) - Long-context analysis
-    - GPT OSS 120B (Together API) - Large parameter reasoning
+    Multi-model interface routing ALL four models through AWS Bedrock Converse API:
+    - Llama Maverick 17B (meta.llama4-maverick-17b-instruct-v1:0) — Fast broad exploration
+    - DeepSeek R1 (deepseek.r1-v1:0) — Deep causal chain reasoning
+    - Kimi 2.5 (moonshotai.kimi-k2.5) — Long-context synthesis & integration
+    - GPT OSS Safeguard 120B (openai.gpt-oss-safeguard-120b) — Large-parameter critical analysis
+
+    All models are invoked via Bedrock Converse API for unified access.
+    Parallel MCP (Model Context Protocol) distributes large contexts across models.
     """
 
     BEDROCK_MODELS = {
-        ModelType.LLAMA_MAVERICK: "us.meta.llama4-maverick-17b-instruct-v1:0",
-        ModelType.DEEPSEEK_R1: "us.deepseek.deepseek-r1-distill-llama-70b-v1:0",
+        ModelType.LLAMA_MAVERICK: settings.BEDROCK_MODEL_LLAMA_MAVERICK,
+        ModelType.DEEPSEEK_R1: settings.BEDROCK_MODEL_DEEPSEEK,
+        ModelType.KIMI_25: settings.BEDROCK_MODEL_KIMI,
+        ModelType.GPT_OSS_120B: settings.BEDROCK_MODEL_GPT_OSS,
     }
 
     def __init__(self, token_pool: TokenPool):
         self._bedrock_client = None
-        self._kimi_client = None
-        self._gpt_oss_client = None
         self._initialized = False
         self._token_pool = token_pool
+        self._mcp: Optional[ParallelMCP] = None
 
     async def initialize(self) -> None:
         if self._initialized:
             return
 
-        # Initialize Bedrock for Llama Maverick + DeepSeek R1
+        # Initialize single Bedrock client for ALL 4 models
         try:
             import boto3
             self._bedrock_client = boto3.client(
@@ -282,40 +579,19 @@ class MultiModelLLM:
                 aws_secret_access_key=settings.aws_secret_key_value,
             )
         except Exception as e:
-            logger.warning(f"Bedrock init failed (Maverick/DeepSeek unavailable): {e}")
+            logger.warning(f"Bedrock init failed: {e}")
 
-        # Initialize Kimi 2.5 client
-        try:
-            from openai import AsyncOpenAI
-            if settings.kimi_api_key_value:
-                self._kimi_client = AsyncOpenAI(
-                    api_key=settings.kimi_api_key_value,
-                    base_url=settings.KIMI_BASE_URL,
-                )
-        except Exception as e:
-            logger.warning(f"Kimi init failed: {e}")
-
-        # Initialize GPT OSS 120B client
-        try:
-            from openai import AsyncOpenAI
-            api_key = settings.gpt_oss_api_key_value or settings.together_api_key_value
-            if api_key:
-                self._gpt_oss_client = AsyncOpenAI(
-                    api_key=api_key,
-                    base_url=settings.GPT_OSS_BASE_URL,
-                )
-        except Exception as e:
-            logger.warning(f"GPT OSS init failed: {e}")
+        # Initialize Parallel MCP
+        if self._bedrock_client and settings.MCP_ENABLED:
+            self._mcp = ParallelMCP(self._bedrock_client, self._token_pool)
+            logger.info("Parallel MCP initialized for cross-model context distribution")
 
         self._initialized = True
         available = []
         if self._bedrock_client:
-            available.extend(["llama_maverick", "deepseek_r1"])
-        if self._kimi_client:
-            available.append("kimi_25")
-        if self._gpt_oss_client:
-            available.append("gpt_oss_120b")
-        logger.info(f"Multi-model LLM initialized. Available: {available}")
+            for model_type, model_id in self.BEDROCK_MODELS.items():
+                available.append(f"{model_type.value} ({model_id})")
+        logger.info(f"Multi-model LLM initialized via Bedrock. Available: {available}")
 
     async def generate(
         self,
@@ -325,7 +601,7 @@ class MultiModelLLM:
         max_tokens: int = 4000,
         temperature: float = 0.3,
     ) -> str:
-        """Generate response from specified model with token pool management."""
+        """Generate response from specified model via Bedrock Converse API with token pool management."""
         if not self._initialized:
             await self.initialize()
 
@@ -334,15 +610,7 @@ class MultiModelLLM:
             raise RuntimeError(f"Token pool exhausted for {model_type.value}, rate limit hit")
 
         try:
-            if model_type in (ModelType.LLAMA_MAVERICK, ModelType.DEEPSEEK_R1):
-                return await self._generate_bedrock(model_type, prompt, system_prompt, max_tokens, temperature)
-            elif model_type == ModelType.KIMI_25:
-                return await self._generate_kimi(prompt, system_prompt, max_tokens, temperature)
-            elif model_type == ModelType.GPT_OSS_120B:
-                return await self._generate_gpt_oss(prompt, system_prompt, max_tokens, temperature)
-            else:
-                # Fallback to any available
-                return await self._generate_fallback(prompt, system_prompt, max_tokens, temperature)
+            return await self._generate_bedrock(model_type, prompt, system_prompt, max_tokens, temperature)
         except Exception as e:
             self._token_pool.record_error(model_type)
             raise
@@ -353,106 +621,80 @@ class MultiModelLLM:
         self, model_type: ModelType, prompt: str, system_prompt: str,
         max_tokens: int, temperature: float,
     ) -> str:
+        """Invoke any model via Bedrock. Tries Converse API, falls back to InvokeModel."""
         if not self._bedrock_client:
             raise RuntimeError("Bedrock client not initialized")
 
         model_id = self.BEDROCK_MODELS[model_type]
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": prompt})
-
-        body = json.dumps({
-            "messages": messages,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "top_p": 0.9,
-        })
-
         loop = asyncio.get_event_loop()
+
+        # Try Converse API first
+        try:
+            response = await loop.run_in_executor(
+                None,
+                lambda: self._bedrock_client.converse(
+                    modelId=model_id,
+                    messages=[{"role": "user", "content": [{"text": prompt}]}],
+                    system=[{"text": system_prompt}] if system_prompt else [],
+                    inferenceConfig={"maxTokens": max_tokens, "temperature": temperature},
+                )
+            )
+            return response["output"]["message"]["content"][0]["text"]
+        except Exception as e:
+            logger.warning(f"Converse failed for {model_id}: {e}, trying InvokeModel")
+
+        # Fallback: InvokeModel with provider-specific body
+        body = _build_invoke_body(model_id, prompt, system_prompt, max_tokens, temperature)
         response = await loop.run_in_executor(
             None,
             lambda: self._bedrock_client.invoke_model(
-                modelId=model_id, body=body,
-                contentType="application/json", accept="application/json",
+                modelId=model_id,
+                contentType="application/json",
+                accept="application/json",
+                body=json.dumps(body),
             )
         )
-
-        result = json.loads(response["body"].read())
-        if "content" in result:
-            return result["content"][0]["text"]
-        elif "generation" in result:
-            return result["generation"]
-        elif "outputs" in result:
-            return result["outputs"][0]["text"]
-        elif "choices" in result:
-            return result["choices"][0]["message"]["content"]
-        return str(result)
-
-    async def _generate_kimi(
-        self, prompt: str, system_prompt: str, max_tokens: int, temperature: float,
-    ) -> str:
-        if not self._kimi_client:
-            raise RuntimeError("Kimi client not initialized")
-
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": prompt})
-
-        response = await self._kimi_client.chat.completions.create(
-            model=settings.KIMI_MODEL,
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-        )
-        return response.choices[0].message.content
-
-    async def _generate_gpt_oss(
-        self, prompt: str, system_prompt: str, max_tokens: int, temperature: float,
-    ) -> str:
-        if not self._gpt_oss_client:
-            raise RuntimeError("GPT OSS client not initialized")
-
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": prompt})
-
-        response = await self._gpt_oss_client.chat.completions.create(
-            model=settings.GPT_OSS_MODEL,
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-        )
-        return response.choices[0].message.content
+        response_body = json.loads(response["body"].read())
+        return _parse_invoke_response(model_id, response_body)
 
     async def _generate_fallback(
         self, prompt: str, system_prompt: str, max_tokens: int, temperature: float,
     ) -> str:
         """Try each model in priority order until one works."""
-        for model_type, generator in [
-            (ModelType.LLAMA_MAVERICK, lambda: self._generate_bedrock(ModelType.LLAMA_MAVERICK, prompt, system_prompt, max_tokens, temperature)),
-            (ModelType.DEEPSEEK_R1, lambda: self._generate_bedrock(ModelType.DEEPSEEK_R1, prompt, system_prompt, max_tokens, temperature)),
-            (ModelType.KIMI_25, lambda: self._generate_kimi(prompt, system_prompt, max_tokens, temperature)),
-            (ModelType.GPT_OSS_120B, lambda: self._generate_gpt_oss(prompt, system_prompt, max_tokens, temperature)),
+        for model_type in [
+            ModelType.LLAMA_MAVERICK,
+            ModelType.DEEPSEEK_R1,
+            ModelType.KIMI_25,
+            ModelType.GPT_OSS_120B,
         ]:
             try:
-                return await generator()
+                return await self._generate_bedrock(model_type, prompt, system_prompt, max_tokens, temperature)
             except Exception:
                 continue
-        raise RuntimeError("All models unavailable")
+        raise RuntimeError("All Bedrock models unavailable")
 
     async def parallel_reasoning(
         self, prompt: str, context: str = "",
     ) -> dict[str, str]:
         """
-        Run all four models in parallel on the same prompt.
+        Run all four models in parallel on the same prompt via Bedrock.
         Returns dict mapping model name to response.
         Uses comprehensive system prompts from prompts.py.
+
+        When context exceeds per-model token limits, automatically engages
+        Parallel MCP to shard context across models.
         """
+        if not self._initialized:
+            await self.initialize()
+
         full_prompt = f"{context}\n\n{prompt}" if context else prompt
 
+        # Check if MCP sharding is needed for large contexts
+        if self._mcp and context and (len(context) // 4) > settings.MCP_MAX_CONTEXT_PER_MODEL:
+            logger.info("Context exceeds per-model limit — engaging Parallel MCP")
+            return await self._mcp_parallel_reasoning(prompt, context)
+
+        # Standard parallel: all 4 models get the same prompt via Bedrock
         tasks = {}
         if self._bedrock_client:
             tasks["llama_maverick"] = self.generate(
@@ -465,13 +707,11 @@ class MultiModelLLM:
                 get_agent_prompt("reasoner", include_master=True),
                 temperature=0.2,
             )
-        if self._kimi_client:
             tasks["kimi_25"] = self.generate(
                 ModelType.KIMI_25, full_prompt,
                 get_agent_prompt("synthesizer", include_master=True),
                 temperature=0.3,
             )
-        if self._gpt_oss_client:
             tasks["gpt_oss_120b"] = self.generate(
                 ModelType.GPT_OSS_120B, full_prompt,
                 get_agent_prompt("critic", include_master=True),
@@ -479,7 +719,7 @@ class MultiModelLLM:
             )
 
         if not tasks:
-            raise RuntimeError("No models available for parallel reasoning")
+            raise RuntimeError("No Bedrock models available for parallel reasoning")
 
         results = await asyncio.gather(
             *[asyncio.create_task(coro) for coro in tasks.values()],
@@ -494,6 +734,45 @@ class MultiModelLLM:
                 responses[name] = result
 
         return responses
+
+    async def _mcp_parallel_reasoning(
+        self, prompt: str, context: str,
+    ) -> dict[str, str]:
+        """
+        Parallel MCP reasoning: shard context across models, process, then synthesize.
+        Used when total context exceeds per-model token limits.
+        """
+        model_assignments = {
+            "llama_maverick": self.BEDROCK_MODELS[ModelType.LLAMA_MAVERICK],
+            "deepseek_r1": self.BEDROCK_MODELS[ModelType.DEEPSEEK_R1],
+            "kimi_25": self.BEDROCK_MODELS[ModelType.KIMI_25],
+            "gpt_oss_120b": self.BEDROCK_MODELS[ModelType.GPT_OSS_120B],
+        }
+
+        system_prompts = {
+            "llama_maverick": get_agent_prompt("explorer", include_master=True),
+            "deepseek_r1": get_agent_prompt("reasoner", include_master=True),
+            "kimi_25": get_agent_prompt("synthesizer", include_master=True),
+            "gpt_oss_120b": get_agent_prompt("critic", include_master=True),
+        }
+
+        # Phase 1: Parallel shard processing
+        shard_results = await self._mcp.parallel_process(
+            prompt=prompt,
+            context=context,
+            model_assignments=model_assignments,
+            system_prompts=system_prompts,
+        )
+
+        # Phase 2: Synthesis via Kimi 2.5 (largest context window)
+        synthesized = await self._mcp.synthesize_shards(
+            shard_results, prompt,
+            synthesis_model_id=self.BEDROCK_MODELS[ModelType.KIMI_25],
+        )
+
+        # Return both individual shard results and synthesis
+        shard_results["mcp_synthesis"] = synthesized
+        return shard_results
 
 
 class DiscoveryAgent:

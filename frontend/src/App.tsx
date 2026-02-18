@@ -3,8 +3,6 @@ import Layout from './components/Layout'
 import Dashboard from './pages/Dashboard'
 import Projects from './pages/Projects'
 import ProjectDetail from './pages/ProjectDetail'
-import Hypotheses from './pages/Hypotheses'
-import HypothesisDetail from './pages/HypothesisDetail'
 
 import Evidence from './pages/Evidence'
 import Workbench from './pages/Workbench'
@@ -25,8 +23,9 @@ function App() {
         <Route path="projects/:projectId" element={<ProjectDetail />} />
         <Route path="evidence" element={<Evidence />} />
 
-        <Route path="hypotheses" element={<Hypotheses />} />
-        <Route path="hypotheses/:hypothesisId" element={<HypothesisDetail />} />
+        {/* Hypotheses integrated into Discovery — redirect old routes */}
+        <Route path="hypotheses" element={<Navigate to="/agents" replace />} />
+        <Route path="hypotheses/:hypothesisId" element={<Navigate to="/agents" replace />} />
         <Route path="simulations" element={<Navigate to="/agents" replace />} />
         <Route path="workbench" element={<Workbench />} />
         <Route path="anatomy" element={<HumanAnatomy />} />

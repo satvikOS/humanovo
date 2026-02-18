@@ -1,39 +1,57 @@
 import { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { FiPlus, FiFolder, FiX } from 'react-icons/fi'
-import { api, ProjectCreate, Project } from '../services/api'
+import { FiPlus, FiFolder, FiX, FiTrash2 } from 'react-icons/fi'
+import { usePersistentState, logActivity } from '../utils/persistence'
 
-function CreateProjectModal({ onClose }: { onClose: () => void }) {
-  const [formData, setFormData] = useState<ProjectCreate>({
+interface LocalProject {
+  id: string
+  name: string
+  description?: string
+  disease_focus?: string
+  research_question?: string
+  tags: string[]
+  hypothesis_count: number
+  evidence_count: number
+  status: 'active' | 'draft' | 'completed'
+  created_at: string
+  updated_at: string
+}
+
+function CreateProjectModal({ onClose, onCreate }: { onClose: () => void; onCreate: (project: LocalProject) => void }) {
+  const [formData, setFormData] = useState({
     name: '',
     description: '',
     disease_focus: '',
     research_question: '',
-    tags: [],
+    tags: [] as string[],
   })
   const [tagInput, setTagInput] = useState('')
 
-  const queryClient = useQueryClient()
-
-  const createMutation = useMutation({
-    mutationFn: api.createProject,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['projects'] })
-      onClose()
-    },
-  })
-
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    createMutation.mutate(formData)
+    const project: LocalProject = {
+      id: `proj-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name: formData.name,
+      description: formData.description || undefined,
+      disease_focus: formData.disease_focus || undefined,
+      research_question: formData.research_question || undefined,
+      tags: formData.tags,
+      hypothesis_count: 0,
+      evidence_count: 0,
+      status: 'active',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }
+    onCreate(project)
+    logActivity({ type: 'project', action: 'created', title: `Created project: ${formData.name}` })
+    onClose()
   }
 
   const addTag = () => {
-    if (tagInput.trim() && !formData.tags?.includes(tagInput.trim())) {
+    if (tagInput.trim() && !formData.tags.includes(tagInput.trim())) {
       setFormData({
         ...formData,
-        tags: [...(formData.tags || []), tagInput.trim()],
+        tags: [...formData.tags, tagInput.trim()],
       })
       setTagInput('')
     }
@@ -42,7 +60,7 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const removeTag = (tag: string) => {
     setFormData({
       ...formData,
-      tags: formData.tags?.filter((t) => t !== tag),
+      tags: formData.tags.filter((t) => t !== tag),
     })
   }
 
@@ -125,7 +143,7 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
                 Add
               </button>
             </div>
-            {formData.tags && formData.tags.length > 0 && (
+            {formData.tags.length > 0 && (
               <div className="flex flex-wrap gap-2 mt-2">
                 {formData.tags.map((tag) => (
                   <span
@@ -153,9 +171,8 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
             <button
               type="submit"
               className="btn btn-primary"
-              disabled={createMutation.isPending}
             >
-              {createMutation.isPending ? 'Creating...' : 'Create Project'}
+              Create Project
             </button>
           </div>
         </form>
@@ -164,71 +181,85 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
   )
 }
 
-function ProjectCard({ project }: { project: Project }) {
+function ProjectCard({ project, onDelete }: { project: LocalProject; onDelete: (id: string) => void }) {
   return (
-    <Link
-      to={`/projects/${project.id}`}
-      className="card hover:border-primary-600/50 transition-colors group"
-    >
-      <div className="flex items-start justify-between">
-        <div className="flex items-center space-x-3">
-          <div className="p-2 bg-primary-600/20 rounded-lg">
-            <FiFolder className="w-5 h-5 text-primary-400" />
+    <div className="card hover:border-primary-600/50 transition-colors group relative">
+      <Link to={`/projects/${project.id}`} className="block">
+        <div className="flex items-start justify-between">
+          <div className="flex items-center space-x-3">
+            <div className="p-2 bg-primary-600/20 rounded-lg">
+              <FiFolder className="w-5 h-5 text-primary-400" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-white group-hover:text-primary-400 transition-colors">
+                {project.name}
+              </h3>
+              {project.disease_focus && (
+                <p className="text-secondary-400 text-sm">{project.disease_focus}</p>
+              )}
+            </div>
           </div>
-          <div>
-            <h3 className="font-semibold text-white group-hover:text-primary-400 transition-colors">
-              {project.name}
-            </h3>
-            {project.disease_focus && (
-              <p className="text-secondary-400 text-sm">{project.disease_focus}</p>
+        </div>
+
+        {project.description && (
+          <p className="text-secondary-400 text-sm mt-3 line-clamp-2">
+            {project.description}
+          </p>
+        )}
+
+        <div className="flex items-center justify-between mt-4 pt-4 border-t border-secondary-700">
+          <div className="flex space-x-4 text-sm">
+            <span className="text-secondary-400">
+              <span className="text-white font-medium">{project.hypothesis_count}</span> hypotheses
+            </span>
+            <span className="text-secondary-400">
+              <span className="text-white font-medium">{project.evidence_count}</span> evidence
+            </span>
+          </div>
+          <span className="text-secondary-500 text-xs">
+            Updated {new Date(project.updated_at).toLocaleDateString()}
+          </span>
+        </div>
+
+        {project.tags && project.tags.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-3">
+            {project.tags.slice(0, 3).map((tag) => (
+              <span key={tag} className="badge badge-info text-xs">
+                {tag}
+              </span>
+            ))}
+            {project.tags.length > 3 && (
+              <span className="text-secondary-500 text-xs">+{project.tags.length - 3}</span>
             )}
           </div>
-        </div>
-      </div>
-
-      {project.description && (
-        <p className="text-secondary-400 text-sm mt-3 line-clamp-2">
-          {project.description}
-        </p>
-      )}
-
-      <div className="flex items-center justify-between mt-4 pt-4 border-t border-secondary-700">
-        <div className="flex space-x-4 text-sm">
-          <span className="text-secondary-400">
-            <span className="text-white font-medium">{project.hypothesis_count}</span> hypotheses
-          </span>
-          <span className="text-secondary-400">
-            <span className="text-white font-medium">{project.evidence_count}</span> evidence
-          </span>
-        </div>
-        <span className="text-secondary-500 text-xs">
-          Updated {new Date(project.updated_at).toLocaleDateString()}
-        </span>
-      </div>
-
-      {project.tags && project.tags.length > 0 && (
-        <div className="flex flex-wrap gap-1 mt-3">
-          {project.tags.slice(0, 3).map((tag) => (
-            <span key={tag} className="badge badge-info text-xs">
-              {tag}
-            </span>
-          ))}
-          {project.tags.length > 3 && (
-            <span className="text-secondary-500 text-xs">+{project.tags.length - 3}</span>
-          )}
-        </div>
-      )}
-    </Link>
+        )}
+      </Link>
+      <button
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDelete(project.id) }}
+        className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 p-1.5 rounded hover:bg-error-500/20 text-error-400 transition-all"
+        title="Delete project"
+      >
+        <FiTrash2 className="w-3.5 h-3.5" />
+      </button>
+    </div>
   )
 }
 
 export default function Projects() {
   const [showCreateModal, setShowCreateModal] = useState(false)
+  const [projects, setProjects] = usePersistentState<LocalProject[]>('projects', [])
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['projects'],
-    queryFn: () => api.getProjects({ page: 1, page_size: 50 }),
-  })
+  const handleCreate = (project: LocalProject) => {
+    setProjects(prev => [project, ...prev])
+  }
+
+  const handleDelete = (id: string) => {
+    const project = projects.find(p => p.id === id)
+    setProjects(prev => prev.filter(p => p.id !== id))
+    if (project) {
+      logActivity({ type: 'project', action: 'deleted', title: `Deleted project: ${project.name}` })
+    }
+  }
 
   return (
     <div className="p-8">
@@ -248,16 +279,10 @@ export default function Projects() {
       </div>
 
       {/* Projects Grid */}
-      {isLoading ? (
+      {projects.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="animate-pulse bg-secondary-800 h-48 rounded-lg" />
-          ))}
-        </div>
-      ) : data?.items && data.items.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {data.items.map((project) => (
-            <ProjectCard key={project.id} project={project} />
+          {projects.map((project) => (
+            <ProjectCard key={project.id} project={project} onDelete={handleDelete} />
           ))}
         </div>
       ) : (
@@ -278,7 +303,7 @@ export default function Projects() {
 
       {/* Create Modal */}
       {showCreateModal && (
-        <CreateProjectModal onClose={() => setShowCreateModal(false)} />
+        <CreateProjectModal onClose={() => setShowCreateModal(false)} onCreate={handleCreate} />
       )}
     </div>
   )

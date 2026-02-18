@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import {
   FiFolder,
   FiZap,
@@ -8,27 +8,13 @@ import {
   FiClock,
   FiCalendar,
   FiRefreshCw,
-  FiUser,
-  FiMessageSquare
+  FiFileText
 } from 'react-icons/fi'
 import clsx from 'clsx'
+import { getActivityLog, type ActivityEntry } from '../utils/persistence'
 
-interface TimelineEvent {
-  id: string
-  type: 'project' | 'hypothesis' | 'evidence' | 'simulation' | 'comment' | 'milestone'
-  action: 'created' | 'updated' | 'completed' | 'validated' | 'rejected' | 'ingested' | 'started'
-  title: string
-  description?: string
-  project?: string
-  user: string
-  timestamp: Date
-  metadata?: Record<string, unknown>
-}
-
-type FilterType = 'all' | 'project' | 'hypothesis' | 'evidence' | 'simulation' | 'milestone'
+type FilterType = 'all' | 'project' | 'hypothesis' | 'evidence' | 'simulation' | 'notebook' | 'discovery'
 type TimeRange = 'today' | 'week' | 'month' | 'all'
-
-// Timeline events fetched from API (empty by default)
 
 const filterOptions: { value: FilterType; label: string; icon: typeof FiFolder }[] = [
   { value: 'all', label: 'All Activity', icon: FiClock },
@@ -36,7 +22,8 @@ const filterOptions: { value: FilterType; label: string; icon: typeof FiFolder }
   { value: 'hypothesis', label: 'Hypotheses', icon: FiZap },
   { value: 'evidence', label: 'Evidence', icon: FiDatabase },
   { value: 'simulation', label: 'Simulations', icon: FiActivity },
-  { value: 'milestone', label: 'Milestones', icon: FiCheckCircle },
+  { value: 'notebook', label: 'Notebooks', icon: FiFileText },
+  { value: 'discovery', label: 'Discoveries', icon: FiCheckCircle },
 ]
 
 const timeRanges: { value: TimeRange; label: string }[] = [
@@ -46,7 +33,8 @@ const timeRanges: { value: TimeRange; label: string }[] = [
   { value: 'all', label: 'All Time' },
 ]
 
-function formatRelativeTime(date: Date): string {
+function formatRelativeTime(dateStr: string): string {
+  const date = new Date(dateStr)
   const now = new Date()
   const diffMs = now.getTime() - date.getTime()
   const diffMins = Math.floor(diffMs / (1000 * 60))
@@ -60,20 +48,20 @@ function formatRelativeTime(date: Date): string {
   return date.toLocaleDateString()
 }
 
-function getEventIcon(type: TimelineEvent['type']) {
+function getEventIcon(type: ActivityEntry['type']) {
   switch (type) {
     case 'project': return FiFolder
     case 'hypothesis': return FiZap
     case 'evidence': return FiDatabase
     case 'simulation': return FiActivity
-    case 'comment': return FiMessageSquare
-    case 'milestone': return FiCheckCircle
+    case 'notebook': return FiFileText
+    case 'discovery': return FiCheckCircle
     default: return FiClock
   }
 }
 
-function getEventColor(type: TimelineEvent['type'], action: TimelineEvent['action']) {
-  if (action === 'rejected') return 'text-error-400 bg-error-500/20'
+function getEventColor(type: ActivityEntry['type'], action: ActivityEntry['action']) {
+  if (action === 'rejected' || action === 'deleted') return 'text-error-400 bg-error-500/20'
   if (action === 'validated' || action === 'completed') return 'text-success-400 bg-success-500/20'
 
   switch (type) {
@@ -81,20 +69,22 @@ function getEventColor(type: TimelineEvent['type'], action: TimelineEvent['actio
     case 'hypothesis': return 'text-warning-400 bg-warning-500/20'
     case 'evidence': return 'text-primary-400 bg-primary-500/20'
     case 'simulation': return 'text-success-400 bg-success-500/20'
-    case 'milestone': return 'text-purple-400 bg-purple-500/20'
+    case 'notebook': return 'text-purple-400 bg-purple-500/20'
+    case 'discovery': return 'text-warning-400 bg-warning-500/20'
     default: return 'text-[var(--color-text-muted)] bg-[var(--color-border)]'
   }
 }
 
-function getActionBadge(action: TimelineEvent['action']) {
+function getActionBadge(action: ActivityEntry['action']) {
   const badges: Record<string, { color: string; label: string }> = {
     created: { color: 'bg-primary-500/20 text-primary-400', label: 'Created' },
     updated: { color: 'bg-[var(--color-border)] text-[var(--color-text-muted)]', label: 'Updated' },
     completed: { color: 'bg-success-500/20 text-success-400', label: 'Completed' },
     validated: { color: 'bg-success-500/20 text-success-400', label: 'Validated' },
     rejected: { color: 'bg-error-500/20 text-error-400', label: 'Rejected' },
-    ingested: { color: 'bg-primary-500/20 text-primary-400', label: 'Ingested' },
+    imported: { color: 'bg-primary-500/20 text-primary-400', label: 'Imported' },
     started: { color: 'bg-warning-500/20 text-warning-400', label: 'Started' },
+    deleted: { color: 'bg-error-500/20 text-error-400', label: 'Deleted' },
   }
   return badges[action] || { color: 'bg-[var(--color-border)]', label: action }
 }
@@ -102,39 +92,44 @@ function getActionBadge(action: TimelineEvent['action']) {
 export default function Timeline() {
   const [filterType, setFilterType] = useState<FilterType>('all')
   const [timeRange, setTimeRange] = useState<TimeRange>('all')
-  const [selectedProject, setSelectedProject] = useState<string>('all')
-  const [events] = useState<TimelineEvent[]>([])
+  const [refreshKey, setRefreshKey] = useState(0)
 
-  // Get unique projects
-  const projects = ['all', ...new Set(events.filter(e => e.project).map(e => e.project!))]
+  // Read activity log from localStorage (refreshable)
+  const events = useMemo(() => {
+    void refreshKey
+    return getActivityLog()
+  }, [refreshKey])
 
   // Filter events
-  const filteredEvents = events.filter(event => {
-    if (filterType !== 'all' && event.type !== filterType) return false
-    if (selectedProject !== 'all' && event.project !== selectedProject) return false
-    if (timeRange !== 'all') {
-      const now = new Date()
-      const eventDate = event.timestamp
-      if (timeRange === 'today') {
-        if (eventDate.toDateString() !== now.toDateString()) return false
-      } else if (timeRange === 'week') {
-        const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
-        if (eventDate < weekAgo) return false
-      } else if (timeRange === 'month') {
-        const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
-        if (eventDate < monthAgo) return false
+  const filteredEvents = useMemo(() => {
+    return events.filter(event => {
+      if (filterType !== 'all' && event.type !== filterType) return false
+      if (timeRange !== 'all') {
+        const now = new Date()
+        const eventDate = new Date(event.timestamp)
+        if (timeRange === 'today') {
+          if (eventDate.toDateString() !== now.toDateString()) return false
+        } else if (timeRange === 'week') {
+          const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+          if (eventDate < weekAgo) return false
+        } else if (timeRange === 'month') {
+          const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
+          if (eventDate < monthAgo) return false
+        }
       }
-    }
-    return true
-  })
+      return true
+    })
+  }, [events, filterType, timeRange])
 
   // Group events by date
-  const groupedEvents = filteredEvents.reduce((groups, event) => {
-    const dateKey = event.timestamp.toDateString()
-    if (!groups[dateKey]) groups[dateKey] = []
-    groups[dateKey].push(event)
-    return groups
-  }, {} as Record<string, TimelineEvent[]>)
+  const groupedEvents = useMemo(() => {
+    return filteredEvents.reduce((groups, event) => {
+      const dateKey = new Date(event.timestamp).toDateString()
+      if (!groups[dateKey]) groups[dateKey] = []
+      groups[dateKey].push(event)
+      return groups
+    }, {} as Record<string, ActivityEntry[]>)
+  }, [filteredEvents])
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -147,7 +142,10 @@ export default function Timeline() {
               Track all research activity across your projects
             </p>
           </div>
-          <button className="btn btn-sm bg-[var(--color-border)] hover:bg-[var(--color-border-strong)]">
+          <button
+            className="btn btn-sm bg-[var(--color-border)] hover:bg-[var(--color-border-strong)]"
+            onClick={() => setRefreshKey(k => k + 1)}
+          >
             <FiRefreshCw className="w-3.5 h-3.5" />
             Refresh
           </button>
@@ -189,21 +187,6 @@ export default function Timeline() {
               ))}
             </select>
           </div>
-
-          {/* Project Filter */}
-          <div className="flex items-center gap-2">
-            <FiFolder className="w-4 h-4 text-[var(--color-text-muted)]" />
-            <select
-              value={selectedProject}
-              onChange={(e) => setSelectedProject(e.target.value)}
-              className="text-xs bg-[var(--color-bg)] border border-[var(--color-border)] rounded px-2 py-1.5"
-            >
-              <option value="all">All Projects</option>
-              {projects.filter(p => p !== 'all').map(project => (
-                <option key={project} value={project}>{project}</option>
-              ))}
-            </select>
-          </div>
         </div>
       </div>
 
@@ -241,7 +224,7 @@ export default function Timeline() {
                   return (
                     <div
                       key={event.id}
-                      className="relative card hover:border-[var(--color-border-strong)] transition-colors cursor-pointer"
+                      className="relative card hover:border-[var(--color-border-strong)] transition-colors"
                     >
                       {/* Timeline dot */}
                       <div className={clsx(
@@ -257,9 +240,10 @@ export default function Timeline() {
                           <div className="flex items-start justify-between gap-2">
                             <div>
                               <h3 className="text-sm font-medium">{event.title}</h3>
-                              {event.description && (
+                              {event.project && (
                                 <p className="text-xs text-[var(--color-text-muted)] mt-1">
-                                  {event.description}
+                                  <FiFolder className="inline w-3 h-3 mr-1" />
+                                  {event.project}
                                 </p>
                               )}
                             </div>
@@ -268,16 +252,6 @@ export default function Timeline() {
                             </span>
                           </div>
                           <div className="flex items-center gap-4 mt-2 text-xs text-[var(--color-text-muted)]">
-                            {event.project && (
-                              <span className="flex items-center gap-1">
-                                <FiFolder className="w-3 h-3" />
-                                {event.project}
-                              </span>
-                            )}
-                            <span className="flex items-center gap-1">
-                              <FiUser className="w-3 h-3" />
-                              {event.user}
-                            </span>
                             <span className="flex items-center gap-1">
                               <FiClock className="w-3 h-3" />
                               {formatRelativeTime(event.timestamp)}
@@ -295,11 +269,6 @@ export default function Timeline() {
                                   {String(event.metadata.count)} items
                                 </span>
                               )}
-                              {event.metadata.iterations !== undefined && (
-                                <span className="text-success-400">
-                                  {Number(event.metadata.iterations).toLocaleString()} iterations
-                                </span>
-                              )}
                             </div>
                           )}
                         </div>
@@ -315,10 +284,12 @@ export default function Timeline() {
             <div className="text-center py-12">
               <FiClock className="w-12 h-12 text-[var(--color-border)] mx-auto mb-4" />
               <p className="text-[var(--color-text-muted)]">
-                No activity found for the selected filters
+                {events.length === 0
+                  ? 'No activity yet — create a project, add evidence, or start a discovery'
+                  : 'No activity found for the selected filters'}
               </p>
               <p className="text-xs text-[var(--color-text-muted)] mt-2">
-                Try adjusting your filters to see more events
+                All your research actions are automatically tracked here
               </p>
             </div>
           )}

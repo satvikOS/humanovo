@@ -1,9 +1,8 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import {
   FiDatabase,
   FiSearch,
   FiPlus,
-  FiUpload,
   FiRefreshCw,
   FiExternalLink,
   FiFileText,
@@ -14,17 +13,12 @@ import {
   FiUser,
   FiMoreVertical,
   FiBookOpen,
-  FiAward
+  FiAward,
+  FiX
 } from 'react-icons/fi'
 import clsx from 'clsx'
-
-// Import evidence repository
-import {
-  evidenceRepository,
-  searchEvidence,
-  getEvidenceStats,
-  type EvidenceItem
-} from '../data/evidence/evidenceRepository'
+import { usePersistentState, logActivity } from '../utils/persistence'
+import type { EvidenceItem } from '../data/evidence/evidenceRepository'
 
 const typeIcons: Record<EvidenceItem['type'], typeof FiFileText> = {
   paper: FiFileText,
@@ -48,7 +42,6 @@ interface IngestionItem {
 }
 
 function IngestionQueue() {
-  // Queue data fetched from API (empty by default)
   const [queue] = useState<IngestionItem[]>([])
 
   return (
@@ -287,24 +280,136 @@ function EvidenceDetail({ item }: { item: EvidenceItem | null }) {
   )
 }
 
+function AddEvidenceModal({ onClose, onAdd }: { onClose: () => void; onAdd: (item: EvidenceItem) => void }) {
+  const [form, setForm] = useState({
+    title: '',
+    source: '',
+    sourceUrl: '',
+    type: 'paper' as EvidenceItem['type'],
+    abstract: '',
+    authors: '',
+    tags: '',
+    date: new Date().toISOString().split('T')[0],
+  })
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    const newItem: EvidenceItem = {
+      id: `ev-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      title: form.title,
+      source: form.source || 'User Added',
+      sourceUrl: form.sourceUrl,
+      type: form.type,
+      status: 'pending',
+      date: form.date,
+      authors: form.authors ? form.authors.split(',').map(a => a.trim()) : [],
+      abstract: form.abstract,
+      tags: form.tags ? form.tags.split(',').map(t => t.trim()) : [],
+      citations: 0,
+      relevanceScore: 0.5,
+      publisher: form.source || 'User Added',
+    }
+    onAdd(newItem)
+    logActivity({ type: 'evidence', action: 'created', title: `Added evidence: ${form.title}` })
+    onClose()
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-[var(--color-surface)] rounded-xl border border-[var(--color-border)] w-full max-w-lg mx-4">
+        <div className="flex items-center justify-between p-4 border-b border-[var(--color-border)]">
+          <h2 className="text-lg font-semibold">Add Evidence</h2>
+          <button onClick={onClose} className="text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
+            <FiX className="w-5 h-5" />
+          </button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-4 space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Title *</label>
+            <input type="text" className="input w-full" value={form.title} onChange={e => setForm({...form, title: e.target.value})} required placeholder="Paper or evidence title" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Source</label>
+              <input type="text" className="input w-full" value={form.source} onChange={e => setForm({...form, source: e.target.value})} placeholder="e.g., Nature, PubMed" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Type</label>
+              <select className="input w-full" value={form.type} onChange={e => setForm({...form, type: e.target.value as EvidenceItem['type']})}>
+                <option value="paper">Paper</option>
+                <option value="trial">Clinical Trial</option>
+                <option value="dataset">Dataset</option>
+                <option value="patent">Patent</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">URL</label>
+            <input type="url" className="input w-full" value={form.sourceUrl} onChange={e => setForm({...form, sourceUrl: e.target.value})} placeholder="https://..." />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Authors (comma separated)</label>
+            <input type="text" className="input w-full" value={form.authors} onChange={e => setForm({...form, authors: e.target.value})} placeholder="Author A, Author B" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Abstract</label>
+            <textarea className="input w-full h-20 resize-none" value={form.abstract} onChange={e => setForm({...form, abstract: e.target.value})} placeholder="Brief description..." />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Tags (comma separated)</label>
+            <input type="text" className="input w-full" value={form.tags} onChange={e => setForm({...form, tags: e.target.value})} placeholder="genomics, cancer, ..." />
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <button type="button" onClick={onClose} className="btn btn-secondary">Cancel</button>
+            <button type="submit" className="btn btn-primary">Add Evidence</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
 export default function Evidence() {
+  const [evidence, setEvidence] = usePersistentState<EvidenceItem[]>('evidence', [])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [filterType, setFilterType] = useState<string>('all')
   const [filterStatus, setFilterStatus] = useState<string>('all')
   const [page, setPage] = useState(1)
+  const [showAddModal, setShowAddModal] = useState(false)
   const pageSize = 50
 
-  const stats = useMemo(() => getEvidenceStats(), [])
+  const addEvidence = useCallback((item: EvidenceItem) => {
+    setEvidence(prev => [item, ...prev])
+  }, [setEvidence])
 
-  const selectedItem = evidenceRepository.find(e => e.id === selectedId) || null
+  const stats = useMemo(() => {
+    const byType: Record<string, number> = {}
+    const byStatus: Record<string, number> = {}
+    for (const e of evidence) {
+      byType[e.type] = (byType[e.type] || 0) + 1
+      byStatus[e.status] = (byStatus[e.status] || 0) + 1
+    }
+    return { total: evidence.length, byType, byStatus }
+  }, [evidence])
+
+  const selectedItem = evidence.find(e => e.id === selectedId) || null
 
   const filteredEvidence = useMemo(() => {
-    return searchEvidence(searchQuery, {
-      type: filterType !== 'all' ? [filterType as EvidenceItem['type']] : undefined,
-      status: filterStatus !== 'all' ? [filterStatus as EvidenceItem['status']] : undefined
-    })
-  }, [searchQuery, filterType, filterStatus])
+    let items = evidence
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase()
+      items = items.filter(e =>
+        e.title.toLowerCase().includes(q) ||
+        e.abstract?.toLowerCase().includes(q) ||
+        e.tags.some(t => t.toLowerCase().includes(q)) ||
+        e.authors?.some(a => a.toLowerCase().includes(q))
+      )
+    }
+    if (filterType !== 'all') items = items.filter(e => e.type === filterType)
+    if (filterStatus !== 'all') items = items.filter(e => e.status === filterStatus)
+    return items
+  }, [evidence, searchQuery, filterType, filterStatus])
 
   const paginatedEvidence = useMemo(() => {
     const start = (page - 1) * pageSize
@@ -322,13 +427,9 @@ export default function Evidence() {
           <div className="flex items-center justify-between mb-3">
             <h1 className="text-lg font-semibold">Evidence Repository</h1>
             <div className="flex items-center gap-2">
-              <button className="btn btn-secondary">
-                <FiUpload className="w-3.5 h-3.5" />
-                Import
-              </button>
-              <button className="btn btn-primary">
+              <button className="btn btn-primary" onClick={() => setShowAddModal(true)}>
                 <FiPlus className="w-3.5 h-3.5" />
-                Add Source
+                Add Evidence
               </button>
             </div>
           </div>
@@ -437,6 +538,10 @@ export default function Evidence() {
           <IngestionQueue />
         </div>
       </div>
+
+      {showAddModal && (
+        <AddEvidenceModal onClose={() => setShowAddModal(false)} onAdd={addEvidence} />
+      )}
     </div>
   )
 }

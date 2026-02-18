@@ -1,0 +1,19 @@
+{
+  "name": "humanovo",
+  "version": "1.0.0",
+  "description": "An AI-centric platform for biomedical hypothesis generation, integrating continuous data ingestion, knowledge management, AI reasoning, Monte Carlo simulation, and interactive visualization.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "http://local_proxy@127.0.0.1:24907/git/satvikOS/humanovo"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@playwright/test": "^1.58.2"
+  }
+}
