@@ -26,6 +26,7 @@ import {
   FiDroplet
 } from 'react-icons/fi'
 import clsx from 'clsx'
+import { usePersistentState, logActivity } from '../utils/persistence'
 
 // Types
 interface Point {
@@ -123,8 +124,8 @@ export default function Notebook() {
   const canvasRef = useRef<HTMLDivElement>(null)
   const drawingCanvasRef = useRef<HTMLCanvasElement>(null)
 
-  // Page management
-  const [pages, setPages] = useState<Page[]>([
+  // Page management — persisted to localStorage
+  const [pages, setPages] = usePersistentState<Page[]>('notebook-pages', [
     {
       id: 'page-1',
       name: 'Untitled Page',
@@ -136,7 +137,7 @@ export default function Notebook() {
       modifiedAt: new Date()
     }
   ])
-  const [currentPageIndex, setCurrentPageIndex] = useState(0)
+  const [currentPageIndex, setCurrentPageIndex] = usePersistentState<number>('notebook-current-page', 0)
 
   // Current page data
   const currentPage = pages[currentPageIndex]
@@ -1046,9 +1047,10 @@ export default function Notebook() {
           <button
             className="btn btn-sm bg-primary-500/20 text-primary-400"
             title="Save"
+            onClick={() => logActivity({ type: 'notebook', action: 'updated', title: `Saved notebook: ${currentPage?.name || 'Untitled'}` })}
           >
             <FiSave className="w-3.5 h-3.5" />
-            Save
+            Saved
           </button>
         </div>
       </div>
