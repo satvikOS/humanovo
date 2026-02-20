@@ -33,6 +33,7 @@ interface OrchestratorStats {
   current_round?: number
   total_rounds?: number
   agents_by_role: Record<string, number>
+  agents_by_model?: Record<string, number>
   models_active?: string[]
   token_pool_stats?: {
     global_tokens_used: number
@@ -241,7 +242,15 @@ export default function Agents() {
         setAiConnected(true)
         try {
           const data = await response.json()
-          setState(data.state || 'idle')
+          const newState = data.state || 'idle'
+          // When discovery finishes, clear hypotheses from discovery panel
+          // (they're already saved to project via saveHypothesisToProject)
+          setState(prev => {
+            if ((prev === 'running' || prev === 'paused' || prev === 'stopping') && newState === 'idle' && hypotheses.length > 0) {
+              setHypotheses([])
+            }
+            return newState
+          })
           if (data.stats) setStats(data.stats)
           if (data.top_hypotheses && data.top_hypotheses.length > 0) {
             setHypotheses(prev => {
@@ -787,6 +796,9 @@ export default function Agents() {
                 <div>
                   <label className="text-xs text-[var(--color-text-muted)] block mb-1">
                     Max Agents: {config.maxAgents.toLocaleString()}
+                    <span className="text-[var(--color-text-muted)] ml-1">
+                      ({Math.floor(config.maxAgents / 4).toLocaleString()} per model)
+                    </span>
                   </label>
                   <input
                     type="range"
@@ -829,8 +841,8 @@ export default function Agents() {
 
               <div className="grid grid-cols-2 gap-2">
                 <div className="card p-2">
-                  <div className="text-lg font-bold">{stats.total_agents}</div>
-                  <div className="text-xxs text-[var(--color-text-muted)]">Agents (configured: {config.maxAgents.toLocaleString()})</div>
+                  <div className="text-lg font-bold">{stats.total_agents.toLocaleString()}</div>
+                  <div className="text-xxs text-[var(--color-text-muted)]">Total Agents</div>
                 </div>
                 <div className="card p-2">
                   <div className="text-lg font-bold text-green-400">{stats.active_agents}</div>
@@ -845,6 +857,44 @@ export default function Agents() {
                   <div className="text-xxs text-[var(--color-text-muted)]">Hypotheses</div>
                 </div>
               </div>
+
+              {/* Per-Model Agent Distribution */}
+              {stats.agents_by_model && Object.keys(stats.agents_by_model).length > 0 && (
+                <div className="mt-3 card p-3">
+                  <div className="text-xs text-[var(--color-text-muted)] mb-2">Agents Per Model</div>
+                  <div className="space-y-1.5">
+                    {Object.entries(stats.agents_by_model).map(([model, count]) => {
+                      const modelNames: Record<string, string> = {
+                        llama_maverick: 'Llama Maverick',
+                        deepseek_r1: 'DeepSeek R1',
+                        kimi_25: 'Kimi 2.5',
+                        gpt_oss_120b: 'GPT OSS 120B',
+                      }
+                      const modelColors: Record<string, string> = {
+                        llama_maverick: 'bg-orange-500',
+                        deepseek_r1: 'bg-teal-500',
+                        kimi_25: 'bg-purple-500',
+                        gpt_oss_120b: 'bg-blue-500',
+                      }
+                      const pct = stats.total_agents > 0 ? (count / stats.total_agents) * 100 : 0
+                      return (
+                        <div key={model}>
+                          <div className="flex justify-between text-xxs mb-0.5">
+                            <span className="text-[var(--color-text-muted)]">{modelNames[model] || model}</span>
+                            <span className="font-mono">{count.toLocaleString()}</span>
+                          </div>
+                          <div className="h-1.5 bg-[var(--color-border)] rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full ${modelColors[model] || 'bg-primary-500'}`}
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
 
               {/* Best Confidence */}
               <div className="mt-3 card p-3">
@@ -923,6 +973,25 @@ export default function Agents() {
                   Generated Research Paper
                 </h2>
                 <div className="flex items-center gap-2">
+                  <button
+                    onClick={async () => {
+                      try {
+                        const res = await fetch(`${API_BASE}/orchestrator/generate-paper/pdf`, { method: 'POST' })
+                        if (!res.ok) { alert('PDF generation failed'); return }
+                        const blob = await res.blob()
+                        const url = URL.createObjectURL(blob)
+                        const a = document.createElement('a')
+                        a.href = url
+                        a.download = `humanovo-${config.disease.replace(/\s+/g, '-').toLowerCase()}-${new Date().toISOString().split('T')[0]}.pdf`
+                        a.click()
+                        URL.revokeObjectURL(url)
+                      } catch { alert('PDF generation failed') }
+                    }}
+                    className="btn btn-sm bg-red-500/20 text-red-400"
+                  >
+                    <FiDownload className="w-3.5 h-3.5" />
+                    Download PDF
+                  </button>
                   <button
                     onClick={downloadPaperHtml}
                     className="btn btn-sm bg-purple-500/20 text-purple-400"

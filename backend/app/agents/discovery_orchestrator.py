@@ -564,12 +564,23 @@ class MultiModelLLM:
         self._initialized = False
         self._token_pool = token_pool
         self._mcp: Optional[ParallelMCP] = None
+        # Expose provider info for health check
+        self._fallback_provider: Optional[str] = None
+        self._fallback_client: Any = None
 
     async def initialize(self) -> None:
         if self._initialized:
             return
 
-        # Initialize single Bedrock client for ALL 4 models
+        # Initialize Bedrock client — REQUIRE valid credentials
+        if not settings.aws_access_key_value or not settings.aws_secret_key_value:
+            logger.error(
+                "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are REQUIRED. "
+                "Set them as environment variables or in .env file."
+            )
+            self._initialized = True
+            return
+
         try:
             import boto3
             self._bedrock_client = boto3.client(
@@ -578,8 +589,11 @@ class MultiModelLLM:
                 aws_access_key_id=settings.aws_access_key_value,
                 aws_secret_access_key=settings.aws_secret_key_value,
             )
+            logger.info(f"Bedrock client initialized (region={settings.AWS_REGION})")
         except Exception as e:
-            logger.warning(f"Bedrock init failed: {e}")
+            logger.error(f"Bedrock client initialization FAILED: {e}")
+            self._initialized = True
+            return
 
         # Initialize Parallel MCP
         if self._bedrock_client and settings.MCP_ENABLED:
@@ -588,9 +602,8 @@ class MultiModelLLM:
 
         self._initialized = True
         available = []
-        if self._bedrock_client:
-            for model_type, model_id in self.BEDROCK_MODELS.items():
-                available.append(f"{model_type.value} ({model_id})")
+        for model_type, model_id in self.BEDROCK_MODELS.items():
+            available.append(f"{model_type.value} ({model_id})")
         logger.info(f"Multi-model LLM initialized via Bedrock. Available: {available}")
 
     async def generate(
@@ -604,6 +617,12 @@ class MultiModelLLM:
         """Generate response from specified model via Bedrock Converse API with token pool management."""
         if not self._initialized:
             await self.initialize()
+
+        if not self._bedrock_client:
+            raise RuntimeError(
+                "Bedrock client not initialized. Ensure AWS_ACCESS_KEY_ID and "
+                "AWS_SECRET_ACCESS_KEY environment variables are set."
+            )
 
         acquired = await self._token_pool.acquire(model_type)
         if not acquired:
@@ -941,6 +960,7 @@ class DiscoveryOrchestratorStats(BaseModel):
     current_best_confidence: float
     runtime_seconds: float
     agents_by_role: dict[str, int]
+    agents_by_model: dict[str, int] = {}
     models_active: list[str]
     token_pool_stats: dict[str, Any]
     learning_stats: dict[str, Any]
@@ -1165,15 +1185,8 @@ class DiscoveryOrchestrator(LoggerMixin):
     async def _create_agents(self) -> None:
         self._agents = {}
 
-        role_distribution = {
-            AgentRole.EXPLORER: 0.4,
-            AgentRole.REASONER: 0.25,
-            AgentRole.VALIDATOR: 0.15,
-            AgentRole.SYNTHESIZER: 0.1,
-            AgentRole.CRITIC: 0.1,
-        }
-
-        # Distribute across all four models
+        # Equal distribution: max_agents / 4 per model
+        # e.g. 10000 agents = 2500 per model
         models = [
             ModelType.LLAMA_MAVERICK,
             ModelType.DEEPSEEK_R1,
@@ -1181,34 +1194,51 @@ class DiscoveryOrchestrator(LoggerMixin):
             ModelType.GPT_OSS_120B,
         ]
 
-        for i in range(self.max_agents):
-            rand = i / self.max_agents
-            cumulative = 0
-            role = AgentRole.EXPLORER
-            for r, prob in role_distribution.items():
-                cumulative += prob
-                if rand < cumulative:
-                    role = r
-                    break
+        # Roles distributed within each model's agent pool
+        role_distribution = [
+            (AgentRole.EXPLORER, 0.4),
+            (AgentRole.REASONER, 0.25),
+            (AgentRole.VALIDATOR, 0.15),
+            (AgentRole.SYNTHESIZER, 0.1),
+            (AgentRole.CRITIC, 0.1),
+        ]
 
-            # Assign model: reasoners get DeepSeek, explorers get round-robin across all 4
-            if role == AgentRole.REASONER:
-                model = ModelType.DEEPSEEK_R1
-            elif role == AgentRole.SYNTHESIZER:
-                model = ModelType.KIMI_25  # Long context for synthesis
-            else:
-                model = models[i % len(models)]
+        agents_per_model = self.max_agents // len(models)
+        remainder = self.max_agents % len(models)
 
-            agent = DiscoveryAgent(
-                agent_id=f"agent-{i:04d}",
-                role=role,
-                model=model,
-                llm=self.llm,
-                memory=self.memory,
-            )
-            self._agents[agent.id] = agent
+        agent_idx = 0
+        model_counts: dict[str, int] = {}
 
-        self.logger.info(f"Created {len(self._agents)} agents across 4 models")
+        for model_idx, model in enumerate(models):
+            # Distribute remainder agents to first models
+            count = agents_per_model + (1 if model_idx < remainder else 0)
+            model_counts[model.value] = count
+
+            for j in range(count):
+                # Assign role based on position within this model's pool
+                frac = j / max(count, 1)
+                cumulative = 0.0
+                role = AgentRole.EXPLORER
+                for r, prob in role_distribution:
+                    cumulative += prob
+                    if frac < cumulative:
+                        role = r
+                        break
+
+                agent = DiscoveryAgent(
+                    agent_id=f"agent-{agent_idx:04d}",
+                    role=role,
+                    model=model,
+                    llm=self.llm,
+                    memory=self.memory,
+                )
+                self._agents[agent.id] = agent
+                agent_idx += 1
+
+        self.logger.info(
+            f"Created {len(self._agents)} agents — equal distribution: "
+            + ", ".join(f"{k}: {v}" for k, v in model_counts.items())
+        )
 
     async def _run_discovery_loop(
         self, disease: str, graph_data: dict[str, Any], discovery_type: str,
@@ -1308,10 +1338,13 @@ class DiscoveryOrchestrator(LoggerMixin):
         active_agents = sum(1 for a in self._agents.values() if a.state.is_active)
         paths_explored = sum(a.state.paths_explored for a in self._agents.values())
 
-        agents_by_role = {}
+        agents_by_role: dict[str, int] = {}
+        agents_by_model: dict[str, int] = {}
         for agent in self._agents.values():
             role = agent.role.value
             agents_by_role[role] = agents_by_role.get(role, 0) + 1
+            model = agent.model.value
+            agents_by_model[model] = agents_by_model.get(model, 0) + 1
 
         high_confidence = sum(1 for h in self._hypotheses if h.confidence >= 0.7)
         runtime = time.time() - self._start_time if self._start_time else 0
@@ -1328,6 +1361,7 @@ class DiscoveryOrchestrator(LoggerMixin):
             current_best_confidence=self._best_confidence,
             runtime_seconds=runtime,
             agents_by_role=agents_by_role,
+            agents_by_model=agents_by_model,
             models_active=models_active,
             token_pool_stats=self.token_pool.get_stats(),
             learning_stats=self.memory.get_stats(),

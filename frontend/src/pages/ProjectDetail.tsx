@@ -1,16 +1,24 @@
+import { useState, useCallback, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { FiArrowLeft, FiActivity, FiTarget, FiCpu, FiCheckCircle, FiClock } from 'react-icons/fi'
-import { persistGet } from '../utils/persistence'
+import {
+  FiArrowLeft, FiActivity, FiTarget, FiCpu, FiClock,
+  FiChevronDown, FiChevronUp, FiFileText, FiRefreshCw, FiDownload, FiX, FiTag,
+} from 'react-icons/fi'
+import clsx from 'clsx'
+import { persistGet, persistSet, logActivity } from '../utils/persistence'
 
-interface ProjectHypothesis {
+const API_BASE = '/api/v1'
+
+interface SavedHypothesis {
   id: string
   title: string
   description: string
   mechanism: string
   confidence: number
-  model_used: string
-  validated: boolean
-  external_factors: any[]
+  tags: string[]
+  disease: string
+  discovery_type: string
+  project_id: string
   created_at: string
 }
 
@@ -28,29 +36,100 @@ interface LocalProject {
   updated_at: string
 }
 
-interface SavedHypothesis {
-  id: string
-  title: string
-  description: string
-  mechanism: string
-  confidence: number
-  tags: string[]
-  disease: string
-  discovery_type: string
-  project_id: string
-  created_at: string
-}
-
 export default function ProjectDetail() {
   const { projectId } = useParams<{ projectId: string }>()
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [generatingPaper, setGeneratingPaper] = useState(false)
+  const [generatingHypId, setGeneratingHypId] = useState<string | null>(null)
+  const [paperHtml, setPaperHtml] = useState<string | null>(null)
+  const paperPollRef = useRef<number | null>(null)
 
-  // Read from localStorage — same source as Projects.tsx and Agents.tsx
   const projects = persistGet<LocalProject[]>('projects', [])
   const project = projects.find(p => p.id === projectId)
 
-  // Load hypotheses for this project from localStorage
   const allHypotheses = persistGet<SavedHypothesis[]>('hypotheses', [])
   const projectHypotheses = allHypotheses.filter(h => h.project_id === projectId)
+
+  const generatePaper = useCallback(async (hypothesisId?: string) => {
+    setGeneratingPaper(true)
+    setGeneratingHypId(hypothesisId || null)
+
+    try {
+      const response = await fetch(`${API_BASE}/orchestrator/generate-paper/markdown`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(hypothesisId ? { hypothesis_id: hypothesisId } : {}),
+      })
+
+      if (!response.ok) {
+        let detail = 'Unknown error'
+        try { const err = await response.json(); detail = err.detail || detail } catch {}
+        alert(`Paper generation failed: ${detail}`)
+        setGeneratingPaper(false)
+        setGeneratingHypId(null)
+        return
+      }
+
+      if (paperPollRef.current) clearInterval(paperPollRef.current)
+      paperPollRef.current = window.setInterval(async () => {
+        try {
+          const statusRes = await fetch(`${API_BASE}/orchestrator/paper-status`)
+          if (!statusRes.ok) return
+          const data = await statusRes.json()
+          if (data.status === 'done' && data.paper_html) {
+            if (paperPollRef.current) { clearInterval(paperPollRef.current); paperPollRef.current = null }
+            setPaperHtml(data.paper_html)
+            setGeneratingPaper(false)
+            setGeneratingHypId(null)
+
+            // Auto-save to evidence
+            const evidence = persistGet<Array<Record<string, unknown>>>('evidence', [])
+            const disease = project?.disease_focus || 'Unknown'
+            const diseaseTag = disease.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+            evidence.unshift({
+              id: `ev-paper-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              title: `AI Research Paper: ${disease}`,
+              source: 'Humanovo AI Pipeline',
+              sourceUrl: '',
+              type: 'paper',
+              status: 'pending',
+              date: new Date().toISOString().split('T')[0],
+              authors: ['Humanovo Multi-Model Discovery System'],
+              abstract: `Auto-generated research paper for ${disease} containing ${projectHypotheses.length} hypotheses.`,
+              tags: ['internal-hypothesis-source', 'humanovo', 'ai-generated', diseaseTag],
+              citations: 0,
+              relevanceScore: 0.95,
+              publisher: 'Humanovo',
+              fullText: data.paper_html,
+            })
+            persistSet('evidence', evidence.slice(0, 500))
+            logActivity({ type: 'evidence', action: 'created', title: `Auto-saved paper: ${disease}` })
+          } else if (data.status === 'failed') {
+            if (paperPollRef.current) { clearInterval(paperPollRef.current); paperPollRef.current = null }
+            alert(`Paper generation failed: ${data.error || 'Unknown error'}`)
+            setGeneratingPaper(false)
+            setGeneratingHypId(null)
+          }
+        } catch { /* keep polling */ }
+      }, 4000)
+    } catch (e) {
+      console.error('Failed to start paper generation:', e)
+      alert('Failed to start paper generation')
+      setGeneratingPaper(false)
+      setGeneratingHypId(null)
+    }
+  }, [project, projectHypotheses.length])
+
+  const downloadPaper = useCallback(() => {
+    if (!paperHtml) return
+    const blob = new Blob([paperHtml], { type: 'text/html' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `humanovo-paper-${project?.disease_focus?.replace(/\s+/g, '-').toLowerCase() || 'research'}-${new Date().toISOString().split('T')[0]}.html`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [paperHtml, project])
 
   if (!project) {
     return (
@@ -71,35 +150,59 @@ export default function ProjectDetail() {
     )
   }
 
-  // Map saved hypotheses to the display format
-  const hypotheses: ProjectHypothesis[] = projectHypotheses.map(h => ({
-    id: h.id,
-    title: h.title,
-    description: h.description,
-    mechanism: h.mechanism,
-    confidence: h.confidence,
-    model_used: h.discovery_type || 'unknown',
-    validated: false,
-    external_factors: [],
-    created_at: h.created_at,
-  }))
+  // Paper view
+  if (paperHtml) {
+    return (
+      <div className="p-8 h-full flex flex-col">
+        <div className="flex items-center justify-between mb-4">
+          <Link to="/projects" className="inline-flex items-center text-primary-400 hover:text-primary-300">
+            <FiArrowLeft className="w-4 h-4 mr-2" />
+            Back to Projects
+          </Link>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={async () => {
+                try {
+                  const res = await fetch(`${API_BASE}/orchestrator/generate-paper/pdf`, { method: 'POST' })
+                  if (!res.ok) { alert('PDF generation failed'); return }
+                  const blob = await res.blob()
+                  const url = URL.createObjectURL(blob)
+                  const a = document.createElement('a')
+                  a.href = url
+                  a.download = `humanovo-${project?.disease_focus?.replace(/\s+/g, '-').toLowerCase() || 'research'}.pdf`
+                  a.click()
+                  URL.revokeObjectURL(url)
+                } catch { alert('PDF generation failed') }
+              }}
+              className="btn btn-sm bg-red-500/20 text-red-400"
+            >
+              <FiDownload className="w-3.5 h-3.5" /> Download PDF
+            </button>
+            <button onClick={downloadPaper} className="btn btn-sm bg-purple-500/20 text-purple-400">
+              <FiDownload className="w-3.5 h-3.5" /> Download HTML
+            </button>
+            <button onClick={() => setPaperHtml(null)} className="btn btn-sm bg-secondary-700 text-secondary-300">
+              <FiX className="w-3.5 h-3.5" /> Close Paper
+            </button>
+          </div>
+        </div>
+        <iframe
+          srcDoc={paperHtml}
+          className="flex-1 w-full rounded-lg border border-secondary-700"
+          style={{ minHeight: '85vh' }}
+          title="Research Paper"
+          sandbox="allow-same-origin"
+        />
+      </div>
+    )
+  }
 
-  const modelColors: Record<string, string> = {
-    llama_maverick: 'text-orange-400',
-    deepseek_r1: 'text-teal-400',
-    kimi_25: 'text-purple-400',
-    gpt_oss_120b: 'text-blue-400',
-  }
-  const modelLabels: Record<string, string> = {
-    llama_maverick: 'Llama Maverick',
-    deepseek_r1: 'DeepSeek R1',
-    kimi_25: 'Kimi 2.5',
-    gpt_oss_120b: 'GPT OSS 120B',
-  }
+  const highConf = projectHypotheses.filter(h => h.confidence >= 0.7).length
+  const medConf = projectHypotheses.filter(h => h.confidence >= 0.5 && h.confidence < 0.7).length
+  const lowConf = projectHypotheses.filter(h => h.confidence < 0.5).length
 
   return (
     <div className="p-8">
-      {/* Back navigation */}
       <Link to="/projects" className="inline-flex items-center text-primary-400 hover:text-primary-300 mb-6">
         <FiArrowLeft className="w-4 h-4 mr-2" />
         Back to Projects
@@ -110,6 +213,21 @@ export default function ProjectDetail() {
         <h1 className="text-3xl font-bold text-white">{project.name}</h1>
         {project.description && (
           <p className="text-secondary-400 mt-2">{project.description}</p>
+        )}
+        {/* Generate paper for entire project */}
+        {projectHypotheses.length > 0 && (
+          <button
+            onClick={() => generatePaper()}
+            disabled={generatingPaper}
+            className="mt-4 btn bg-purple-500 text-white hover:bg-purple-600 disabled:opacity-50"
+          >
+            {generatingPaper && !generatingHypId ? (
+              <FiRefreshCw className="w-4 h-4 animate-spin" />
+            ) : (
+              <FiFileText className="w-4 h-4" />
+            )}
+            {generatingPaper && !generatingHypId ? 'Generating Paper...' : 'Generate Research Paper'}
+          </button>
         )}
       </div>
 
@@ -134,65 +252,115 @@ export default function ProjectDetail() {
             </dl>
           </div>
 
-          {/* Hypotheses */}
+          {/* Hypotheses - expandable detail view */}
           <div className="card">
             <h2 className="text-lg font-semibold text-white mb-4 flex items-center">
               <FiActivity className="w-5 h-5 mr-2 text-primary-400" />
-              Hypotheses ({hypotheses.length})
+              Hypotheses ({projectHypotheses.length})
             </h2>
 
-            {hypotheses.length > 0 ? (
-              <div className="space-y-4">
-                {hypotheses.map((h, idx) => (
-                  <div key={h.id} className="border border-secondary-700 rounded-lg p-4 hover:border-primary-600/50 transition-colors">
-                    <div className="flex items-start justify-between mb-2">
-                      <div className="flex items-center space-x-2">
-                        <span className="text-secondary-500 font-mono text-sm">#{idx + 1}</span>
-                        <h3 className="font-medium text-white">{h.title}</h3>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        {h.validated && (
-                          <FiCheckCircle className="w-4 h-4 text-green-400" />
+            {projectHypotheses.length > 0 ? (
+              <div className="space-y-3">
+                {projectHypotheses.map((h, idx) => {
+                  const isExpanded = expandedId === h.id
+                  return (
+                    <div
+                      key={h.id}
+                      className={clsx(
+                        'border rounded-lg transition-colors',
+                        isExpanded ? 'border-primary-500 bg-primary-500/5' : 'border-secondary-700 hover:border-primary-600/50'
+                      )}
+                    >
+                      {/* Collapsed header — always visible */}
+                      <button
+                        onClick={() => setExpandedId(isExpanded ? null : h.id)}
+                        className="w-full text-left p-4"
+                      >
+                        <div className="flex items-start justify-between">
+                          <div className="flex items-center space-x-2 flex-1 min-w-0">
+                            <span className="text-secondary-500 font-mono text-sm shrink-0">#{idx + 1}</span>
+                            <h3 className="font-medium text-white truncate">{h.title}</h3>
+                          </div>
+                          <div className="flex items-center space-x-2 shrink-0 ml-2">
+                            <span className={clsx(
+                              'text-sm font-bold',
+                              h.confidence >= 0.7 ? 'text-green-400' :
+                              h.confidence >= 0.5 ? 'text-yellow-400' : 'text-orange-400'
+                            )}>
+                              {(h.confidence * 100).toFixed(1)}%
+                            </span>
+                            {isExpanded ? <FiChevronUp className="w-4 h-4 text-secondary-400" /> : <FiChevronDown className="w-4 h-4 text-secondary-400" />}
+                          </div>
+                        </div>
+                        {!isExpanded && h.description && (
+                          <p className="text-secondary-400 text-sm mt-1 line-clamp-1 ml-8">{h.description}</p>
                         )}
-                        <span className={`text-sm font-medium ${
-                          h.confidence >= 0.7 ? 'text-green-400' :
-                          h.confidence >= 0.5 ? 'text-yellow-400' : 'text-orange-400'
-                        }`}>
-                          {(h.confidence * 100).toFixed(1)}%
-                        </span>
-                      </div>
-                    </div>
+                      </button>
 
-                    {h.description && (
-                      <p className="text-secondary-400 text-sm mb-2 line-clamp-2">{h.description}</p>
-                    )}
+                      {/* Expanded detail */}
+                      {isExpanded && (
+                        <div className="px-4 pb-4 space-y-4 border-t border-secondary-700/50 pt-3">
+                          {/* Description */}
+                          <div>
+                            <div className="text-xs text-secondary-500 uppercase tracking-wider mb-1">Description</div>
+                            <p className="text-secondary-300 text-sm leading-relaxed">{h.description}</p>
+                          </div>
 
-                    {h.mechanism && (
-                      <div className="mt-2">
-                        <span className="text-secondary-500 text-xs uppercase tracking-wider">Mechanism</span>
-                        <p className="text-secondary-300 text-sm mt-1 line-clamp-2">{h.mechanism}</p>
-                      </div>
-                    )}
+                          {/* Mechanism */}
+                          {h.mechanism && (
+                            <div>
+                              <div className="text-xs text-secondary-500 uppercase tracking-wider mb-1">Mechanism of Action</div>
+                              <p className="text-secondary-300 text-sm leading-relaxed">{h.mechanism}</p>
+                            </div>
+                          )}
 
-                    <div className="flex items-center space-x-4 mt-3 pt-3 border-t border-secondary-700">
-                      <span className={`text-xs ${modelColors[h.model_used] || 'text-secondary-400'} flex items-center`}>
-                        <FiCpu className="w-3 h-3 mr-1" />
-                        {modelLabels[h.model_used] || h.model_used}
-                      </span>
-                      {h.external_factors && h.external_factors.length > 0 && (
-                        <span className="text-xs text-secondary-500">
-                          {h.external_factors.length} external factor{h.external_factors.length !== 1 ? 's' : ''}
-                        </span>
+                          {/* Tags */}
+                          {h.tags && h.tags.length > 0 && (
+                            <div>
+                              <div className="text-xs text-secondary-500 uppercase tracking-wider mb-1 flex items-center gap-1">
+                                <FiTag className="w-3 h-3" /> Tags
+                              </div>
+                              <div className="flex flex-wrap gap-1">
+                                {h.tags.map(tag => (
+                                  <span key={tag} className="badge badge-info text-xs">{tag}</span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Metadata row */}
+                          <div className="flex items-center flex-wrap gap-4 pt-2 border-t border-secondary-700/50">
+                            <span className="text-xs text-secondary-400 flex items-center gap-1">
+                              <FiCpu className="w-3 h-3" />
+                              {h.discovery_type || 'Unknown'}
+                            </span>
+                            <span className="text-xs text-secondary-400 flex items-center gap-1">
+                              <FiClock className="w-3 h-3" />
+                              {new Date(h.created_at).toLocaleDateString()}
+                            </span>
+                            <span className="text-xs text-secondary-400">
+                              Disease: {h.disease}
+                            </span>
+                          </div>
+
+                          {/* Generate paper for this hypothesis */}
+                          <button
+                            onClick={() => generatePaper(h.id)}
+                            disabled={generatingPaper}
+                            className="btn bg-purple-500/20 text-purple-400 hover:bg-purple-500/30 disabled:opacity-50 text-sm"
+                          >
+                            {generatingHypId === h.id ? (
+                              <FiRefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <FiFileText className="w-3.5 h-3.5" />
+                            )}
+                            {generatingHypId === h.id ? 'Generating Paper...' : 'Generate Paper for This Hypothesis'}
+                          </button>
+                        </div>
                       )}
-                      {h.created_at && (
-                        <span className="text-xs text-secondary-500 flex items-center">
-                          <FiClock className="w-3 h-3 mr-1" />
-                          {new Date(h.created_at).toLocaleDateString()}
-                        </span>
-                      )}
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             ) : (
               <p className="text-secondary-400">
@@ -210,7 +378,7 @@ export default function ProjectDetail() {
             <dl className="space-y-3">
               <div className="flex justify-between">
                 <dt className="text-secondary-400">Hypotheses</dt>
-                <dd className="text-white font-medium">{hypotheses.length}</dd>
+                <dd className="text-white font-medium">{projectHypotheses.length}</dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-secondary-400">Evidence</dt>
@@ -223,18 +391,17 @@ export default function ProjectDetail() {
             </dl>
           </div>
 
-          {/* Confidence distribution mini */}
-          {hypotheses.length > 0 && (
+          {/* Confidence distribution */}
+          {projectHypotheses.length > 0 && (
             <div className="card">
               <h2 className="text-lg font-semibold text-white mb-4">Confidence Distribution</h2>
               <div className="space-y-2">
                 {[
-                  { label: 'High (>=70%)', filter: (c: number) => c >= 0.7, color: 'bg-green-500' },
-                  { label: 'Medium (50-70%)', filter: (c: number) => c >= 0.5 && c < 0.7, color: 'bg-yellow-500' },
-                  { label: 'Low (<50%)', filter: (c: number) => c < 0.5, color: 'bg-orange-500' },
-                ].map(({ label, filter, color }) => {
-                  const count = hypotheses.filter(h => filter(h.confidence)).length
-                  const pct = hypotheses.length > 0 ? (count / hypotheses.length) * 100 : 0
+                  { label: 'High (>=70%)', count: highConf, color: 'bg-green-500' },
+                  { label: 'Medium (50-70%)', count: medConf, color: 'bg-yellow-500' },
+                  { label: 'Low (<50%)', count: lowConf, color: 'bg-orange-500' },
+                ].map(({ label, count, color }) => {
+                  const pct = projectHypotheses.length > 0 ? (count / projectHypotheses.length) * 100 : 0
                   return (
                     <div key={label}>
                       <div className="flex justify-between text-sm mb-1">

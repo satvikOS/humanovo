@@ -456,6 +456,63 @@ async def get_paper_status():
     return response
 
 
+@router.post("/generate-paper/pdf")
+async def generate_research_paper_pdf():
+    """
+    Generate a rich visual PDF research paper with cover page, tables,
+    diagrams, confidence charts, citations, glossary, and indexing.
+    Uses built-in code interpreter approach with reportlab.
+    """
+    global _current_orchestrator
+
+    if not _current_orchestrator:
+        raise HTTPException(status_code=400, detail="No discovery data available.")
+
+    hypotheses = _current_orchestrator.get_hypotheses(min_confidence=0.0, limit=100)
+    if not hypotheses:
+        raise HTTPException(status_code=400, detail="No hypotheses found.")
+
+    hyp_dicts = [
+        {
+            "id": h.id,
+            "title": h.title,
+            "description": h.description,
+            "mechanism": h.mechanism,
+            "confidence": h.confidence,
+            "model_used": h.model_used,
+            "validated": h.validated,
+            "external_factors": h.external_factors,
+        }
+        for h in hypotheses
+    ]
+
+    from app.services.pdf_generation_service import get_pdf_service
+    pdf_service = get_pdf_service()
+
+    try:
+        pdf_bytes = await pdf_service.generate_pdf(
+            disease=_current_orchestrator._disease or "Unknown",
+            discovery_type=_current_orchestrator._discovery_type or "treatment",
+            hypotheses=hyp_dicts,
+            paper_html=_paper_result,
+            num_agents=_current_orchestrator.max_agents,
+            target_confidence=_current_orchestrator.target_confidence,
+        )
+    except Exception as e:
+        logger.error(f"PDF generation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"PDF generation failed: {e}")
+
+    from fastapi.responses import Response
+    disease_slug = (_current_orchestrator._disease or "research").replace(" ", "-").lower()
+    filename = f"humanovo-{disease_slug}-{_current_orchestrator._discovery_type}.pdf"
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
 @router.post("/save-to-project")
 async def save_discovery_to_project(project_name: str = None):
     """
@@ -631,27 +688,21 @@ async def orchestrator_health():
         if llm._bedrock_client:
             models_status["llama_maverick"] = True
             models_status["deepseek_r1"] = True
-        if llm._kimi_client:
             models_status["kimi_25"] = True
-        if llm._gpt_oss_client:
             models_status["gpt_oss_120b"] = True
     else:
-        # Check config for available credentials
         from app.core.config import settings
         if settings.aws_access_key_value and settings.aws_secret_key_value:
-            models_status["llama_maverick"] = True
-            models_status["deepseek_r1"] = True
-        if settings.kimi_api_key_value:
-            models_status["kimi_25"] = True
-        if settings.gpt_oss_api_key_value or settings.together_api_key_value:
-            models_status["gpt_oss_120b"] = True
+            for k in models_status:
+                models_status[k] = True
 
     active_count = sum(1 for v in models_status.values() if v)
 
     return {
         "status": "healthy" if active_count > 0 else "no_models",
         "models": models_status,
-        "active_model_count": active_count,
+        "connected_count": active_count,
+        "total_models": 4,
         "orchestrator_initialized": _current_orchestrator is not None,
     }
 
