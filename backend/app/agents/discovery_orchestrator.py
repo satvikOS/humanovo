@@ -1,13 +1,15 @@
 """
 Discovery Orchestrator
 
-Six-model parallel agent system for continuous biomedical discovery.
-Runs 4 Bedrock models (Kimi 2.5, DeepSeek R1, Llama Maverick, GPT OSS 120B)
-and 2 Azure OpenAI models (GPT-4o, o1) in parallel with token pool management
-to prevent exhaustion at 100-10000 agent scale.
+Four-model hybrid pipeline (2 Bedrock + 2 Azure OpenAI) for continuous biomedical discovery.
+Models are selected for complementary reasoning architectures, not raw count:
+  GPT-4o (Azure)     — Broad exploration, strategic analysis, clinical planning
+  DeepSeek R1 (Bedrock) — Best-in-class causal chain reasoning
+  Kimi 2.5 (Bedrock)    — Largest context window, cross-document synthesis
+  o1 (Azure)         — Deep multi-step mathematical & statistical analysis
 
 Features:
-- Six-model parallel reasoning across AWS Bedrock and Azure OpenAI
+- Four-model parallel reasoning across AWS Bedrock and Azure OpenAI
 - Token pool with rate limiting, backoff, and per-model quota management
 - 100 to 10,000 concurrent agents with adaptive batching
 - Confidence-based stopping with start/pause/stop controls
@@ -547,26 +549,23 @@ INSTRUCTIONS:
 
 class MultiModelLLM:
     """
-    Six-model interface routing models through AWS Bedrock and Azure OpenAI:
+    Four-model hybrid pipeline across AWS Bedrock and Azure OpenAI.
+    Models chosen for complementary reasoning architectures — no redundancy.
 
-    Bedrock (4 models):
-    - Llama Maverick 17B (meta.llama4-maverick-17b-instruct-v1:0) — Fast broad exploration
-    - DeepSeek R1 (deepseek.r1-v1:0) — Deep causal chain reasoning
-    - Kimi 2.5 (moonshotai.kimi-k2.5) — Long-context synthesis & integration
-    - GPT OSS Safeguard 120B (openai.gpt-oss-safeguard-120b) — Large-parameter critical analysis
+    Bedrock (2 models — top-tier for their roles):
+    - DeepSeek R1  — Best-in-class chain-of-thought causal reasoning
+    - Kimi 2.5     — Largest context window, cross-document synthesis
 
-    Azure OpenAI (2 models):
-    - GPT-4o — Strategic analysis, structured output, clinical planning
-    - o1 — Deep multi-step reasoning, statistical & mathematical analysis
+    Azure OpenAI (2 models — top-tier reasoning from Microsoft):
+    - GPT-4o       — Broad exploration, structured analysis, clinical planning
+    - o1           — Deep multi-step mathematical & statistical reasoning
 
-    Parallel MCP (Model Context Protocol) distributes large contexts across all 6 models.
+    Parallel MCP distributes large contexts across all 4 models.
     """
 
     BEDROCK_MODELS = {
-        ModelType.LLAMA_MAVERICK: settings.BEDROCK_MODEL_LLAMA_MAVERICK,
         ModelType.DEEPSEEK_R1: settings.BEDROCK_MODEL_DEEPSEEK,
         ModelType.KIMI_25: settings.BEDROCK_MODEL_KIMI,
-        ModelType.GPT_OSS_120B: settings.BEDROCK_MODEL_GPT_OSS,
     }
 
     AZURE_MODELS = {
@@ -747,10 +746,8 @@ class MultiModelLLM:
         """Try each model in priority order until one works."""
         for model_type in [
             ModelType.GPT_4O,
-            ModelType.LLAMA_MAVERICK,
             ModelType.DEEPSEEK_R1,
             ModelType.KIMI_25,
-            ModelType.GPT_OSS_120B,
             ModelType.O1,
         ]:
             try:
@@ -783,16 +780,21 @@ class MultiModelLLM:
             logger.info("Context exceeds per-model limit — engaging Parallel MCP")
             return await self._mcp_parallel_reasoning(prompt, context)
 
-        # Standard parallel: all 6 models get the same prompt
+        # Standard parallel: all 4 models get the same prompt
+        # GPT-4o: broad exploration & strategic analysis (Azure)
+        # DeepSeek R1: rigorous causal chain reasoning (Bedrock)
+        # Kimi 2.5: long-context synthesis & integration (Bedrock)
+        # o1: deep mathematical & statistical analysis (Azure)
         tasks = {}
 
-        # Bedrock models
-        if self._bedrock_client:
-            tasks["llama_maverick"] = self.generate(
-                ModelType.LLAMA_MAVERICK, full_prompt,
-                get_agent_prompt("explorer", include_master=True),
+        if self._azure_client:
+            tasks["gpt_4o"] = self.generate(
+                ModelType.GPT_4O, full_prompt,
+                get_agent_prompt("strategist", include_master=True),
                 temperature=0.4,
             )
+
+        if self._bedrock_client:
             tasks["deepseek_r1"] = self.generate(
                 ModelType.DEEPSEEK_R1, full_prompt,
                 get_agent_prompt("reasoner", include_master=True),
@@ -803,19 +805,8 @@ class MultiModelLLM:
                 get_agent_prompt("synthesizer", include_master=True),
                 temperature=0.3,
             )
-            tasks["gpt_oss_120b"] = self.generate(
-                ModelType.GPT_OSS_120B, full_prompt,
-                get_agent_prompt("critic", include_master=True),
-                temperature=0.3,
-            )
 
-        # Azure OpenAI models
         if self._azure_client:
-            tasks["gpt_4o"] = self.generate(
-                ModelType.GPT_4O, full_prompt,
-                get_agent_prompt("strategist", include_master=True),
-                temperature=0.3,
-            )
             tasks["o1"] = self.generate(
                 ModelType.O1, full_prompt,
                 get_agent_prompt("deep_analyst", include_master=True),
@@ -847,18 +838,15 @@ class MultiModelLLM:
         Used when total context exceeds per-model token limits.
         MCP shards go to Bedrock models; Azure models get the full prompt separately.
         """
+        # Bedrock models handle MCP shards (Converse/InvokeModel)
         model_assignments = {
-            "llama_maverick": self.BEDROCK_MODELS[ModelType.LLAMA_MAVERICK],
             "deepseek_r1": self.BEDROCK_MODELS[ModelType.DEEPSEEK_R1],
             "kimi_25": self.BEDROCK_MODELS[ModelType.KIMI_25],
-            "gpt_oss_120b": self.BEDROCK_MODELS[ModelType.GPT_OSS_120B],
         }
 
         system_prompts = {
-            "llama_maverick": get_agent_prompt("explorer", include_master=True),
             "deepseek_r1": get_agent_prompt("reasoner", include_master=True),
             "kimi_25": get_agent_prompt("synthesizer", include_master=True),
-            "gpt_oss_120b": get_agent_prompt("critic", include_master=True),
         }
 
         # Phase 1: Parallel shard processing via Bedrock MCP
@@ -1082,11 +1070,9 @@ class DiscoveryOrchestrator(LoggerMixin):
     """
     Main orchestrator for parallel discovery agents.
 
-    Manages 100-10,000 agents running across six models in parallel:
-    Bedrock: Llama Maverick, DeepSeek R1, Kimi 2.5, GPT OSS 120B
-    Azure:   GPT-4o, o1
-
-    Token pool prevents exhaustion across all models simultaneously.
+    Manages 100-10,000 agents across 4 top-tier models:
+    Azure:   GPT-4o (explorer), o1 (deep analyst)
+    Bedrock: DeepSeek R1 (reasoner), Kimi 2.5 (synthesizer)
     """
 
     def __init__(
@@ -1119,7 +1105,7 @@ class DiscoveryOrchestrator(LoggerMixin):
         self._rag_service = None
 
     async def initialize(self) -> None:
-        self.logger.info("Initializing discovery orchestrator (6-model parallel: Bedrock + Azure)")
+        self.logger.info("Initializing discovery orchestrator (4-model hybrid: GPT-4o + DeepSeek R1 + Kimi 2.5 + o1)")
         await self.llm.initialize()
 
         try:
@@ -1172,7 +1158,7 @@ class DiscoveryOrchestrator(LoggerMixin):
             self.logger.warning("Orchestrator already running")
             return
 
-        self.logger.info(f"Starting discovery for {disease} with {self.max_agents} agents across 6 models")
+        self.logger.info(f"Starting discovery for {disease} with {self.max_agents} agents across 4 models (GPT-4o, DeepSeek R1, Kimi 2.5, o1)")
         self.state = OrchestratorState.RUNNING
         self._start_time = time.time()
         self._stop_requested = False
@@ -1295,20 +1281,12 @@ class DiscoveryOrchestrator(LoggerMixin):
     async def _create_agents(self) -> None:
         self._agents = {}
 
-        # Equal distribution: max_agents / 6 per model
-        # e.g. 10000 agents ≈ 1667 per model
-        models = [
-            ModelType.LLAMA_MAVERICK,
-            ModelType.DEEPSEEK_R1,
-            ModelType.KIMI_25,
-            ModelType.GPT_OSS_120B,
-            ModelType.GPT_4O,
-            ModelType.O1,
-        ]
-
-        # Exclude Azure models if client is not initialized
+        # Equal distribution across 4 top-tier models: max_agents / 4 per model
+        # e.g. 10000 agents = 2500 per model
+        # Azure models excluded if client unavailable (graceful degradation to Bedrock-only)
+        models = [ModelType.GPT_4O, ModelType.DEEPSEEK_R1, ModelType.KIMI_25, ModelType.O1]
         if not self.llm._azure_client:
-            models = [m for m in models if m not in (ModelType.GPT_4O, ModelType.O1)]
+            models = [ModelType.DEEPSEEK_R1, ModelType.KIMI_25]
 
         # Roles distributed within each model's agent pool
         role_distribution = [

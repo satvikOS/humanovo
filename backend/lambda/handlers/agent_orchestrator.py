@@ -144,53 +144,42 @@ DISCOVERY_TASK_KEY = "active-discovery"
 PAPER_TASK_KEY = "active-paper"
 
 # ============== Model Configuration ==============
-# Each model is assigned a specific role. Model IDs are NEVER sent to frontend.
-# Using Bedrock Converse API for unified interface across all providers.
+# 4 top-tier models with complementary reasoning architectures.
+# Model IDs are NEVER sent to frontend (unbiasing).
+#
+# Azure OpenAI:  GPT-4o (strategist) + o1 (deep_analyst)
+# AWS Bedrock:   DeepSeek R1 (reasoner) + Kimi 2.5 (synthesizer)
 
 AGENT_MODELS = {
-    # Bedrock models
-    "explorer": {
-        "model_id": "us.meta.llama4-maverick-17b-instruct-v1:0",
-        "provider": "bedrock",
-        "max_tokens": 8000,  # Llama Maverick limit is 8192
-        "temperature": 0.8,  # Higher creativity for exploration
-        "role_description": "Fast broad exploration — discovers novel pathways and unconventional connections",
-    },
-    "reasoner": {
-        "model_id": "us.deepseek.r1-v1:0",
-        "provider": "bedrock",
-        "max_tokens": 16000,
-        "temperature": 0.3,  # Lower for rigorous reasoning
-        "role_description": "Deep causal chain reasoning — step-by-step logical analysis with formal justification",
-    },
-    "synthesizer": {
-        "model_id": "moonshotai.kimi-k2.5",
-        "provider": "bedrock",
-        "max_tokens": 16000,
-        "temperature": 0.5,  # Balanced for synthesis
-        "role_description": "Long-context integration — synthesizes findings across shards into unified hypotheses",
-    },
-    "critic": {
-        "model_id": "openai.gpt-oss-safeguard-120b",
-        "provider": "bedrock",
-        "max_tokens": 16000,
-        "temperature": 0.4,  # Precise for critique
-        "role_description": "Large-parameter critical analysis — identifies flaws, risks, and failure modes",
-    },
-    # Azure OpenAI models
+    # Azure OpenAI — top-tier models via Azure
     "strategist": {
         "model_id": AZURE_OPENAI_DEPLOYMENT_GPT4O,
         "provider": "azure",
         "max_tokens": 16000,
-        "temperature": 0.3,
-        "role_description": "Strategic analysis — clinical trial design, combination strategies, translational planning",
+        "temperature": 0.4,  # Slightly higher for exploration breadth
+        "role_description": "Broad exploration + strategic analysis — novel pathways, clinical trial design, combination strategies",
     },
     "deep_analyst": {
         "model_id": AZURE_OPENAI_DEPLOYMENT_O1,
         "provider": "azure",
         "max_tokens": 16000,
         "temperature": 0.0,  # o1 ignores temperature
-        "role_description": "Deep multi-step reasoning — quantitative pharmacology, systems biology, statistical analysis",
+        "role_description": "Deep multi-step reasoning — quantitative pharmacology, systems biology, rigorous validation",
+    },
+    # AWS Bedrock — top open-weight models
+    "reasoner": {
+        "model_id": "us.deepseek.r1-v1:0",
+        "provider": "bedrock",
+        "max_tokens": 16000,
+        "temperature": 0.3,
+        "role_description": "Causal chain reasoning — step-by-step logical analysis with formal justification",
+    },
+    "synthesizer": {
+        "model_id": "moonshotai.kimi-k2.5",
+        "provider": "bedrock",
+        "max_tokens": 16000,
+        "temperature": 0.5,
+        "role_description": "Long-context synthesis — integrates findings across shards into unified hypotheses",
     },
 }
 
@@ -811,31 +800,25 @@ def run_discovery_worker(config: dict):
 
                 # Each round+role gets a unique angle to ensure diversity
                 angle_matrix = {
-                    ("explorer", 0): "Focus on NOVEL molecular targets not yet in clinical trials. Explore unconventional biology: phase separation, mechanotransduction, metabolic symbiosis, non-coding RNA.",
-                    ("explorer", 1): "Focus on DRUG REPURPOSING and cross-disease pathway hijacking. Find approved drugs from unrelated fields with unexpected activity.",
-                    ("explorer", 2): "Focus on MICROBIOME-IMMUNE-METABOLISM axis. Explore gut-brain connections, bacterial metabolites, and ecological interventions.",
-                    ("explorer", 3): "Focus on NANOTECHNOLOGY and advanced delivery: BBB-crossing nanoparticles, exosome engineering, spatial targeting, theranostics.",
-                    ("explorer", 4): "Focus on GENE THERAPY and epigenetic reprogramming: CRISPR, base editing, ASO, siRNA, histone modification, chromatin remodeling.",
+                    # GPT-4o: broad exploration, novel connections, strategic planning
+                    ("strategist", 0): "Explore NOVEL molecular targets (phase separation, mechanotransduction, non-coding RNA, metabolic symbiosis) AND design the clinical development strategy for the most promising.",
+                    ("strategist", 1): "Focus on DRUG REPURPOSING: find approved drugs from unrelated fields with unexpected activity. Design the rapid clinical validation path (basket trial, platform study).",
+                    ("strategist", 2): "Explore MICROBIOME-IMMUNE-METABOLISM axis. Design a COMBINATION PROTOCOL leveraging gut-brain connections, bacterial metabolites, and ecological interventions.",
+                    ("strategist", 3): "Explore GENE THERAPY and epigenetic reprogramming (CRISPR, base editing, ASO, siRNA). Design PRECISION MEDICINE STRATIFICATION: molecular subtypes, biomarker panels, matched therapeutics.",
+                    ("strategist", 4): "Explore NANOTECHNOLOGY and advanced delivery (BBB-crossing nanoparticles, exosome engineering). Design HEALTH ECONOMICS AND MARKET ACCESS plan with QALY impact, payer evidence requirements.",
+                    # DeepSeek R1: rigorous causal chain reasoning
                     ("reasoner", 0): "Build a rigorous IMMUNOTHERAPY causal chain. Map checkpoint interactions, T-cell exhaustion markers, neoantigen load, and TME remodeling with exact IC50/EC50 values.",
                     ("reasoner", 1): "Build a rigorous METABOLIC VULNERABILITY chain. Map synthetic lethality, nutrient addiction, mitochondrial dependencies with exact enzyme kinetics.",
                     ("reasoner", 2): "Build a rigorous SIGNALING CASCADE chain. Map kinase networks, feedback loops, resistance mutations, and combination logic with quantitative modeling.",
                     ("reasoner", 3): "Build a rigorous EPIGENETIC THERAPY chain. Map histone marks, DNA methylation patterns, chromatin accessibility, and transcriptional consequences.",
                     ("reasoner", 4): "Build a rigorous TUMOR MICROENVIRONMENT chain. Map ECM composition, vascular normalization, hypoxia gradients, and immune infiltration dynamics.",
+                    # Kimi 2.5: long-context synthesis & integration
                     ("synthesizer", 0): "INTEGRATE all findings into a multi-modal combination therapy protocol. Specify exact drugs, doses, schedules, and synergy mechanisms.",
                     ("synthesizer", 1): "INTEGRATE findings into a precision medicine stratification framework. Define molecular subtypes, biomarker panels, and matched therapeutics.",
                     ("synthesizer", 2): "INTEGRATE findings into a temporal treatment cascade. Design sequential phases that exploit therapy-induced vulnerabilities at each stage.",
                     ("synthesizer", 3): "INTEGRATE findings into a systems biology model. Map all intervention points onto pathway networks and predict emergent therapeutic effects.",
                     ("synthesizer", 4): "INTEGRATE findings into a clinical translation roadmap. Design Phase I/II trial with biomarker-guided adaptive design and companion diagnostics.",
-                    ("critic", 0): "Evaluate the STRONGEST hypothesis critically. Identify resistance mechanisms, compensatory pathways, and toxicity risks with specific molecular bases.",
-                    ("critic", 1): "Propose a CONTRARIAN hypothesis that challenges the dominant paradigm. What if the assumed target is wrong? Build an alternative.",
-                    ("critic", 2): "Design a SAFETY-FIRST hypothesis. Prioritize therapeutic window, off-target analysis, patient population risks, and long-term consequences.",
-                    ("critic", 3): "Evaluate FEASIBILITY: manufacturing, scalability, BBB penetration, stability, cold chain, cost of goods. Propose practical alternatives.",
-                    ("critic", 4): "Propose a COMBINATION THERAPY hypothesis that mitigates weaknesses of individual approaches. Address resistance through orthogonal mechanisms.",
-                    ("strategist", 0): "Design a COMPLETE CLINICAL DEVELOPMENT STRATEGY: patient selection, biomarker panel, Phase I dose escalation, Phase II endpoint, companion diagnostic. Include regulatory pathway (breakthrough, accelerated approval).",
-                    ("strategist", 1): "Design a COMBINATION THERAPY PROTOCOL with exact drugs, doses, schedules, and synergy rationale. Include drug-drug interaction analysis (CYP450, transporter effects).",
-                    ("strategist", 2): "Design a PRECISION MEDICINE STRATIFICATION: molecular subtypes, matched therapeutics, response biomarkers, adaptive trial design with interim analysis.",
-                    ("strategist", 3): "Design a REAL-WORLD EVIDENCE STRATEGY: observational cohort design, EHR mining approach, propensity score matching, endpoints for regulatory submission.",
-                    ("strategist", 4): "Design a HEALTH ECONOMICS AND MARKET ACCESS plan: QALY impact, cost-effectiveness threshold, payer evidence requirements, manufacturing scalability.",
+                    # o1: deep multi-step mathematical & statistical reasoning
                     ("deep_analyst", 0): "Perform QUANTITATIVE PHARMACOLOGY analysis: receptor occupancy modeling (Emax), PK/PD simulation (2-compartment), therapeutic index calculation, dose-response curve with Hill coefficient.",
                     ("deep_analyst", 1): "Calculate STATISTICAL POWER for validation: sample size estimation, effect size from prior data, multiple comparison correction, adaptive enrichment design boundaries.",
                     ("deep_analyst", 2): "Build a SYSTEMS BIOLOGY ODE MODEL: pathway dynamics equations, sensitivity analysis of key parameters, bifurcation analysis, stochastic simulation for low-copy effects.",

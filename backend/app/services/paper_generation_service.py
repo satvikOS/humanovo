@@ -510,7 +510,7 @@ Cover in depth:
 
 Write in formal academic style. Be scientifically precise. Do NOT use section headers — write flowing paragraphs with logical transitions."""
 
-        return await llm.generate(ModelType.LLAMA_MAVERICK, prompt, temperature=0.3, max_tokens=3000)
+        return await llm.generate(ModelType.GPT_4O, prompt, temperature=0.3, max_tokens=3000)
 
     async def _generate_methods_ai(self, llm, paper: ResearchPaper) -> str:
         from app.agents.discovery_orchestrator import ModelType
@@ -576,7 +576,7 @@ PAPER GENERATION:
 
 Write as formal Methods text. Use subsections with ### headers for: Multi-Model Discovery Platform, Agent Architecture, Token Pool Management, Knowledge Graph Integration, External Factor Simulation, Confidence Scoring, Research Paper Generation. Be technically precise."""
 
-        return await llm.generate(ModelType.GPT_OSS_120B, prompt, temperature=0.25, max_tokens=4000)
+        return await llm.generate(ModelType.DEEPSEEK_R1, prompt, temperature=0.25, max_tokens=4000)
 
     async def _generate_results_overview_ai(self, llm, paper: ResearchPaper, hyp_context: str) -> str:
         from app.agents.discovery_orchestrator import ModelType
@@ -613,7 +613,7 @@ Write in formal results style. Report numbers precisely. No interpretation — s
 
         analyses = []
         # Distribute hypotheses across models for diverse analysis perspectives
-        model_cycle = [ModelType.DEEPSEEK_R1, ModelType.KIMI_25, ModelType.LLAMA_MAVERICK, ModelType.GPT_OSS_120B, ModelType.GPT_4O, ModelType.O1]
+        model_cycle = [ModelType.DEEPSEEK_R1, ModelType.KIMI_25, ModelType.GPT_4O, ModelType.O1]
 
         async def analyze_single(idx: int, hyp: dict) -> str:
             model = model_cycle[idx % len(model_cycle)]
@@ -686,7 +686,7 @@ Since no specific external factors were configured for this run, discuss:
 
 Write as formal scientific text with specific examples and mechanisms."""
 
-            return await llm.generate(ModelType.LLAMA_MAVERICK, prompt, temperature=0.3, max_tokens=2000)
+            return await llm.generate(ModelType.GPT_4O, prompt, temperature=0.3, max_tokens=2000)
 
         prompt = f"""Write a comprehensive External Factors Analysis section (600-1000 words) for a {paper.disease} research paper.
 
@@ -707,7 +707,7 @@ For each category of factors, write a detailed analysis covering:
 Organize by category (Nutrients, Compounds, Drugs, Chemicals, Elements).
 Write as formal scientific text. Be specific about molecular mechanisms."""
 
-        return await llm.generate(ModelType.LLAMA_MAVERICK, prompt, temperature=0.3, max_tokens=3000)
+        return await llm.generate(ModelType.GPT_4O, prompt, temperature=0.3, max_tokens=3000)
 
     async def _generate_molecular_mechanisms_ai(self, llm, paper: ResearchPaper, hyp_context: str) -> str:
         from app.agents.discovery_orchestrator import ModelType
@@ -809,7 +809,7 @@ FUTURE DIRECTIONS:
 
 Write as formal scientific text."""
 
-        return await llm.generate(ModelType.GPT_OSS_120B, prompt, temperature=0.3, max_tokens=2500)
+        return await llm.generate(ModelType.O1, prompt, temperature=0.3, max_tokens=2500)
 
     async def _generate_conclusion_ai(self, llm, paper: ResearchPaper, hyp_context: str) -> str:
         from app.agents.discovery_orchestrator import ModelType
