@@ -4,12 +4,9 @@ Disease Discovery Service
 Advanced LLM-powered service for discovering disease cures and prevention strategies
 by connecting billions of data points across the knowledge graph.
 
-Supports multiple LLM providers:
-- AWS Bedrock (Llama Maverick 17B, Claude, etc.)
-- OpenAI (GPT-4)
-- Anthropic (Claude)
-- Together AI (open-source models)
-- Groq (fast inference)
+Supports two LLM providers:
+- AWS Bedrock (Llama Maverick 17B, DeepSeek R1, Kimi 2.5, GPT OSS 120B)
+- Azure OpenAI (GPT-4o and other Azure-hosted deployments)
 """
 
 import asyncio
@@ -48,12 +45,9 @@ class EvidenceStrength(str, Enum):
 
 
 class LLMProvider(str, Enum):
-    """Supported LLM providers."""
+    """Supported LLM providers — Azure OpenAI and AWS Bedrock only."""
     BEDROCK = "bedrock"
-    OPENAI = "openai"
-    ANTHROPIC = "anthropic"
-    TOGETHER = "together"
-    GROQ = "groq"
+    AZURE = "azure"
 
 
 @dataclass
@@ -394,100 +388,25 @@ Resolve contradictions by favoring higher-evidence claims. Note any unresolved d
         return "bedrock-multi-model"
 
 
-class OpenAILLMClient(BaseLLMClient):
-    """OpenAI LLM client."""
+class AzureOpenAILLMClient(BaseLLMClient):
+    """Azure OpenAI LLM client."""
 
     def __init__(self):
         self._client = None
 
     async def _get_client(self):
         if self._client is None:
+            if not settings.azure_openai_api_key_value or not settings.AZURE_OPENAI_ENDPOINT:
+                raise RuntimeError(
+                    "AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT are required. "
+                    "Set them as environment variables or in .env file."
+                )
             try:
-                from openai import AsyncOpenAI
-                self._client = AsyncOpenAI(api_key=settings.openai_api_key_value)
-            except ImportError:
-                raise RuntimeError("openai not installed. Run: pip install openai")
-        return self._client
-
-    async def generate(
-        self,
-        prompt: str,
-        system_prompt: str = "",
-        max_tokens: int = 4000,
-        temperature: float = 0.3,
-    ) -> str:
-        client = await self._get_client()
-
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": prompt})
-
-        response = await client.chat.completions.create(
-            model=settings.OPENAI_MODEL,
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-        )
-
-        return response.choices[0].message.content
-
-    @property
-    def model_name(self) -> str:
-        return settings.OPENAI_MODEL
-
-
-class AnthropicLLMClient(BaseLLMClient):
-    """Anthropic Claude LLM client."""
-
-    def __init__(self):
-        self._client = None
-
-    async def _get_client(self):
-        if self._client is None:
-            try:
-                from anthropic import AsyncAnthropic
-                self._client = AsyncAnthropic(api_key=settings.anthropic_api_key_value)
-            except ImportError:
-                raise RuntimeError("anthropic not installed. Run: pip install anthropic")
-        return self._client
-
-    async def generate(
-        self,
-        prompt: str,
-        system_prompt: str = "",
-        max_tokens: int = 4000,
-        temperature: float = 0.3,
-    ) -> str:
-        client = await self._get_client()
-
-        response = await client.messages.create(
-            model=settings.ANTHROPIC_MODEL,
-            max_tokens=max_tokens,
-            system=system_prompt if system_prompt else "You are a biomedical research AI.",
-            messages=[{"role": "user", "content": prompt}],
-        )
-
-        return response.content[0].text
-
-    @property
-    def model_name(self) -> str:
-        return settings.ANTHROPIC_MODEL
-
-
-class TogetherLLMClient(BaseLLMClient):
-    """Together AI LLM client for open-source models."""
-
-    def __init__(self):
-        self._client = None
-
-    async def _get_client(self):
-        if self._client is None:
-            try:
-                from openai import AsyncOpenAI
-                self._client = AsyncOpenAI(
-                    api_key=settings.together_api_key_value,
-                    base_url="https://api.together.xyz/v1",
+                from openai import AsyncAzureOpenAI
+                self._client = AsyncAzureOpenAI(
+                    api_key=settings.azure_openai_api_key_value,
+                    azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
+                    api_version=settings.AZURE_OPENAI_API_VERSION,
                 )
             except ImportError:
                 raise RuntimeError("openai not installed. Run: pip install openai")
@@ -508,7 +427,7 @@ class TogetherLLMClient(BaseLLMClient):
         messages.append({"role": "user", "content": prompt})
 
         response = await client.chat.completions.create(
-            model=settings.TOGETHER_MODEL,
+            model=settings.AZURE_OPENAI_DEPLOYMENT,
             messages=messages,
             max_tokens=max_tokens,
             temperature=temperature,
@@ -518,71 +437,21 @@ class TogetherLLMClient(BaseLLMClient):
 
     @property
     def model_name(self) -> str:
-        return settings.TOGETHER_MODEL
-
-
-class GroqLLMClient(BaseLLMClient):
-    """Groq LLM client for fast inference."""
-
-    def __init__(self):
-        self._client = None
-
-    async def _get_client(self):
-        if self._client is None:
-            try:
-                from groq import AsyncGroq
-                self._client = AsyncGroq(api_key=settings.groq_api_key_value)
-            except ImportError:
-                raise RuntimeError("groq not installed. Run: pip install groq")
-        return self._client
-
-    async def generate(
-        self,
-        prompt: str,
-        system_prompt: str = "",
-        max_tokens: int = 4000,
-        temperature: float = 0.3,
-    ) -> str:
-        client = await self._get_client()
-
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": prompt})
-
-        response = await client.chat.completions.create(
-            model=settings.GROQ_MODEL,
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-        )
-
-        return response.choices[0].message.content
-
-    @property
-    def model_name(self) -> str:
-        return settings.GROQ_MODEL
+        return f"azure/{settings.AZURE_OPENAI_DEPLOYMENT}"
 
 
 def get_llm_client(provider: LLMProvider = None) -> BaseLLMClient:
     """Get LLM client based on provider.
 
-    Bedrock provider uses the Converse API for unified multi-model access.
-    Use 'bedrock' for single-model (default Llama Maverick) or configure
-    BEDROCK_MODEL to point to any of the 4 models:
-    - meta.llama4-maverick-17b-instruct-v1:0
-    - deepseek.r1-v1:0
-    - moonshotai.kimi-k2.5
-    - openai.gpt-oss-safeguard-120b
+    Only two providers are supported:
+    - 'bedrock': AWS Bedrock Converse API for unified multi-model access
+    - 'azure': Azure OpenAI for GPT-4o and other Azure-hosted deployments
     """
     provider = provider or LLMProvider(settings.DISCOVERY_LLM_PROVIDER)
 
     clients = {
         LLMProvider.BEDROCK: BedrockLLMClient,
-        LLMProvider.OPENAI: OpenAILLMClient,
-        LLMProvider.ANTHROPIC: AnthropicLLMClient,
-        LLMProvider.TOGETHER: TogetherLLMClient,
-        LLMProvider.GROQ: GroqLLMClient,
+        LLMProvider.AZURE: AzureOpenAILLMClient,
     }
 
     return clients[provider]()

@@ -53,22 +53,12 @@ class Settings(BaseSettings):
     CHROMA_PERSIST_DIRECTORY: str = "./data/chroma"
     VECTOR_EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
 
-    # OpenAI / LLM
-    OPENAI_API_KEY: SecretStr | None = None
-    OPENAI_MODEL: str = "gpt-4-turbo-preview"
-    OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
-
-    # Anthropic Claude
-    ANTHROPIC_API_KEY: SecretStr | None = None
-    ANTHROPIC_MODEL: str = "claude-sonnet-4-20250514"
-
-    # Together AI (for open-source models like Llama)
-    TOGETHER_API_KEY: SecretStr | None = None
-    TOGETHER_MODEL: str = "meta-llama/Llama-3.3-70B-Instruct-Turbo"
-
-    # Groq (fast inference for open-source models)
-    GROQ_API_KEY: SecretStr | None = None
-    GROQ_MODEL: str = "llama-3.3-70b-versatile"
+    # Azure OpenAI
+    AZURE_OPENAI_API_KEY: SecretStr | None = None
+    AZURE_OPENAI_ENDPOINT: str = ""  # e.g. https://<resource>.openai.azure.com
+    AZURE_OPENAI_API_VERSION: str = "2024-12-01-preview"
+    AZURE_OPENAI_DEPLOYMENT: str = "gpt-4o"  # deployment name in Azure portal
+    AZURE_OPENAI_EMBEDDING_DEPLOYMENT: str = "text-embedding-3-small"
 
     # AWS Bedrock (IAM user: humanovo-admin)
     # All 4 discovery models route through Bedrock Converse API
@@ -83,18 +73,8 @@ class Settings(BaseSettings):
     BEDROCK_MODEL_LLAMA_MAVERICK: str = "meta.llama4-maverick-17b-instruct-v1:0"
     BEDROCK_MODEL_GPT_OSS: str = "openai.gpt-oss-safeguard-120b"
 
-    # Kimi 2.5 (Moonshot AI) — kept for fallback if Bedrock route unavailable
-    KIMI_API_KEY: SecretStr | None = None
-    KIMI_BASE_URL: str = "https://api.moonshot.cn/v1"
-    KIMI_MODEL: str = "kimi-2.5"
-
-    # GPT OSS 120B — kept for fallback if Bedrock route unavailable
-    GPT_OSS_API_KEY: SecretStr | None = None
-    GPT_OSS_BASE_URL: str = "https://api.together.xyz/v1"
-    GPT_OSS_MODEL: str = "nvidia/Llama-3.1-Nemotron-70B-Instruct-HF"
-
     # Discovery Service Configuration
-    DISCOVERY_LLM_PROVIDER: str = "bedrock"  # openai, anthropic, together, groq, bedrock, kimi, gpt_oss
+    DISCOVERY_LLM_PROVIDER: str = "bedrock"  # bedrock, azure
     DISCOVERY_MAX_EVIDENCE_CHUNKS: int = 50
     DISCOVERY_MAX_GRAPH_PATHS: int = 100
     DISCOVERY_MIN_CONFIDENCE: float = 0.3
@@ -158,24 +138,9 @@ class Settings(BaseSettings):
         return self.NEO4J_PASSWORD.get_secret_value()
 
     @property
-    def openai_api_key_value(self) -> str | None:
-        """Get OpenAI API key value."""
-        return self.OPENAI_API_KEY.get_secret_value() if self.OPENAI_API_KEY else None
-
-    @property
-    def anthropic_api_key_value(self) -> str | None:
-        """Get Anthropic API key value."""
-        return self.ANTHROPIC_API_KEY.get_secret_value() if self.ANTHROPIC_API_KEY else None
-
-    @property
-    def together_api_key_value(self) -> str | None:
-        """Get Together API key value."""
-        return self.TOGETHER_API_KEY.get_secret_value() if self.TOGETHER_API_KEY else None
-
-    @property
-    def groq_api_key_value(self) -> str | None:
-        """Get Groq API key value."""
-        return self.GROQ_API_KEY.get_secret_value() if self.GROQ_API_KEY else None
+    def azure_openai_api_key_value(self) -> str | None:
+        """Get Azure OpenAI API key value."""
+        return self.AZURE_OPENAI_API_KEY.get_secret_value() if self.AZURE_OPENAI_API_KEY else None
 
     @property
     def brave_api_key_value(self) -> str | None:
@@ -191,16 +156,6 @@ class Settings(BaseSettings):
     def aws_secret_key_value(self) -> str | None:
         """Get AWS secret key value."""
         return self.AWS_SECRET_ACCESS_KEY.get_secret_value() if self.AWS_SECRET_ACCESS_KEY else None
-
-    @property
-    def kimi_api_key_value(self) -> str | None:
-        """Get Kimi API key value."""
-        return self.KIMI_API_KEY.get_secret_value() if self.KIMI_API_KEY else None
-
-    @property
-    def gpt_oss_api_key_value(self) -> str | None:
-        """Get GPT OSS API key value."""
-        return self.GPT_OSS_API_KEY.get_secret_value() if self.GPT_OSS_API_KEY else None
 
 
 @lru_cache
