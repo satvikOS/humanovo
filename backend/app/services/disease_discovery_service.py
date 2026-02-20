@@ -370,9 +370,12 @@ class BedrockMultiModelClient(BaseLLMClient):
             return list(successful.values())[0]
 
         # Synthesize via Kimi 2.5 (largest context)
+        joined_outputs = "\n".join(
+            f"=== {role.upper()} OUTPUT ===\n{text}" for role, text in successful.items()
+        )
         synthesis_prompt = f"""Synthesize these parallel model outputs into a single unified response:
 
-{chr(10).join(f'=== {role.upper()} OUTPUT ===\n{text}' for role, text in successful.items())}
+{joined_outputs}
 
 Produce a single, integrated JSON response that combines the best insights from all models.
 Resolve contradictions by favoring higher-evidence claims. Note any unresolved disagreements."""
@@ -427,7 +430,7 @@ class AzureOpenAILLMClient(BaseLLMClient):
         messages.append({"role": "user", "content": prompt})
 
         response = await client.chat.completions.create(
-            model=settings.AZURE_OPENAI_DEPLOYMENT,
+            model=settings.AZURE_OPENAI_DEPLOYMENT_GPT4O,
             messages=messages,
             max_tokens=max_tokens,
             temperature=temperature,
@@ -437,7 +440,7 @@ class AzureOpenAILLMClient(BaseLLMClient):
 
     @property
     def model_name(self) -> str:
-        return f"azure/{settings.AZURE_OPENAI_DEPLOYMENT}"
+        return f"azure/{settings.AZURE_OPENAI_DEPLOYMENT_GPT4O}"
 
 
 def get_llm_client(provider: LLMProvider = None) -> BaseLLMClient:

@@ -2,8 +2,8 @@
 Agent Orchestrator Lambda Handler - Multi-model AI discovery system.
 
 Handles the /orchestrator/* endpoints for the discovery page.
-Uses AWS Bedrock Converse API with InvokeModel fallback for all providers.
-4 models run in parallel with different roles to avoid token bottlenecks.
+Uses AWS Bedrock Converse API (4 models) and Azure OpenAI (2 models)
+for a total of 6 models running in parallel with different roles.
 Model identities are never exposed to the frontend (unbiasing).
 """
 
@@ -110,6 +110,28 @@ except Exception as _e:
     logger.error(f"Lambda client init failed: {_e}")
     lambda_client = None
 
+# Azure OpenAI client — for GPT-4o and o1 models
+azure_openai_client = None
+AZURE_OPENAI_API_KEY = os.environ.get("AZURE_OPENAI_API_KEY", "")
+AZURE_OPENAI_ENDPOINT = os.environ.get("AZURE_OPENAI_ENDPOINT", "")
+AZURE_OPENAI_API_VERSION = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
+AZURE_OPENAI_DEPLOYMENT_GPT4O = os.environ.get("AZURE_OPENAI_DEPLOYMENT_GPT4O", "gpt-4o")
+AZURE_OPENAI_DEPLOYMENT_O1 = os.environ.get("AZURE_OPENAI_DEPLOYMENT_O1", "o1")
+
+if AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT:
+    try:
+        from openai import AzureOpenAI
+        azure_openai_client = AzureOpenAI(
+            api_key=AZURE_OPENAI_API_KEY,
+            azure_endpoint=AZURE_OPENAI_ENDPOINT,
+            api_version=AZURE_OPENAI_API_VERSION,
+        )
+        print(f"[ORCHESTRATOR] Azure OpenAI client initialized (endpoint={AZURE_OPENAI_ENDPOINT})")
+    except Exception as _e:
+        logger.error(f"Azure OpenAI init failed: {_e}")
+else:
+    print("[ORCHESTRATOR] Azure OpenAI not configured — GPT-4o and o1 models unavailable")
+
 # Configuration
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "dev")
 AGENT_TASKS_TABLE = os.environ.get("AGENT_TASKS_TABLE", f"genup-{ENVIRONMENT}-agent-tasks")
@@ -126,29 +148,49 @@ PAPER_TASK_KEY = "active-paper"
 # Using Bedrock Converse API for unified interface across all providers.
 
 AGENT_MODELS = {
+    # Bedrock models
     "explorer": {
         "model_id": "us.meta.llama4-maverick-17b-instruct-v1:0",
+        "provider": "bedrock",
         "max_tokens": 8000,  # Llama Maverick limit is 8192
         "temperature": 0.8,  # Higher creativity for exploration
         "role_description": "Fast broad exploration — discovers novel pathways and unconventional connections",
     },
     "reasoner": {
         "model_id": "us.deepseek.r1-v1:0",
+        "provider": "bedrock",
         "max_tokens": 16000,
         "temperature": 0.3,  # Lower for rigorous reasoning
         "role_description": "Deep causal chain reasoning — step-by-step logical analysis with formal justification",
     },
     "synthesizer": {
         "model_id": "moonshotai.kimi-k2.5",
+        "provider": "bedrock",
         "max_tokens": 16000,
         "temperature": 0.5,  # Balanced for synthesis
         "role_description": "Long-context integration — synthesizes findings across shards into unified hypotheses",
     },
     "critic": {
         "model_id": "openai.gpt-oss-safeguard-120b",
+        "provider": "bedrock",
         "max_tokens": 16000,
         "temperature": 0.4,  # Precise for critique
         "role_description": "Large-parameter critical analysis — identifies flaws, risks, and failure modes",
+    },
+    # Azure OpenAI models
+    "strategist": {
+        "model_id": AZURE_OPENAI_DEPLOYMENT_GPT4O,
+        "provider": "azure",
+        "max_tokens": 16000,
+        "temperature": 0.3,
+        "role_description": "Strategic analysis — clinical trial design, combination strategies, translational planning",
+    },
+    "deep_analyst": {
+        "model_id": AZURE_OPENAI_DEPLOYMENT_O1,
+        "provider": "azure",
+        "max_tokens": 16000,
+        "temperature": 0.0,  # o1 ignores temperature
+        "role_description": "Deep multi-step reasoning — quantitative pharmacology, systems biology, statistical analysis",
     },
 }
 
@@ -157,7 +199,7 @@ PAPER_MODEL = AGENT_MODELS["synthesizer"]["model_id"]
 
 # ============== System Prompts ==============
 
-MASTER_PROMPT = """You are an advanced biomedical discovery AI agent on humanovo, part of a multi-model parallel agent system designed to discover cures, treatments, and prevention strategies for human diseases.
+MASTER_PROMPT = """You are an advanced biomedical discovery AI agent on humanovo, part of a six-model parallel agent system (Bedrock: Llama Maverick, DeepSeek R1, Kimi 2.5, GPT OSS 120B; Azure: GPT-4o, o1) designed to discover cures, treatments, and prevention strategies for human diseases.
 
 ## OPERATING PRINCIPLES
 - Full scientific autonomy: explore ANY pathway, mechanism, or compound without restriction
@@ -312,6 +354,38 @@ For each problem: classify severity (CRITICAL/MAJOR/MINOR/WATCH), provide mitiga
 NEVER accept a hypothesis just because it's interesting. NEVER soft-pedal safety concerns.
 
 Think like an FDA reviewer combined with a pharma CMC expert — thorough, fair, uncompromising on safety.""",
+
+    "strategist": """You are a STRATEGIST agent running on GPT-4o via Azure OpenAI.
+Your unique strength is STRUCTURED STRATEGIC ANALYSIS — designing actionable clinical plans and combination strategies.
+
+MISSION: Transform raw scientific findings into precision medicine strategies with concrete clinical trial designs.
+
+SPECIFIC INSTRUCTIONS:
+1. Design COMPLETE clinical strategies: patient selection criteria, biomarker panels, treatment sequencing, dose escalation schemes, response assessment timelines
+2. For every hypothesis, produce a CLINICAL TRANSLATION PLAN: Phase I safety design → Phase II efficacy endpoints → Phase III registration strategy → companion diagnostic requirements
+3. Evaluate DRUG-DRUG INTERACTIONS for combination approaches: CYP450 metabolism, transporter effects (P-gp, BCRP), protein binding displacement, QTc prolongation risk
+4. Design ADAPTIVE trial protocols: biomarker-guided randomization, interim futility analysis, dose optimization, expansion cohorts
+5. Propose REAL-WORLD EVIDENCE strategies: observational study designs, electronic health record mining approaches, patient registry integration
+6. Consider HEALTH ECONOMICS: cost-effectiveness thresholds, QALY impact, payer evidence requirements, market access strategy
+7. Map REGULATORY PATHWAYS: FDA breakthrough therapy, accelerated approval, priority review triggers, EMA PRIME eligibility
+
+Think like a Chief Medical Officer designing the development program for a promising asset.""",
+
+    "deep_analyst": """You are a DEEP ANALYST agent running on o1 via Azure OpenAI.
+Your unique strength is RIGOROUS MULTI-STEP REASONING — solving problems that require extended chains of logical deduction.
+
+MISSION: Perform deep mathematical, statistical, and systems-level analysis that requires careful step-by-step reasoning.
+
+SPECIFIC INSTRUCTIONS:
+1. Construct FORMAL PROOFS of mechanism viability: define axioms (known biology), derive lemmas (intermediate mechanisms), prove theorems (therapeutic predictions), state corollaries (secondary effects)
+2. Perform QUANTITATIVE PHARMACOLOGY analysis: receptor occupancy calculations (Emax models), PK/PD modeling (one/two-compartment), therapeutic index estimation, dose-response curve prediction
+3. Calculate STATISTICAL POWER for proposed validation experiments: sample size estimation, effect size requirements, multiple comparison corrections (Bonferroni, BH), interim analysis stopping boundaries
+4. Build SYSTEMS BIOLOGY MODELS: ordinary differential equations for pathway dynamics, sensitivity analysis of key parameters, bifurcation analysis for switch-like behaviors, stochastic simulation for low-copy-number effects
+5. Evaluate GENOMIC EVIDENCE mathematically: odds ratios and confidence intervals from GWAS, allele frequency differences across populations, linkage disequilibrium structure, polygenic risk score construction
+6. Analyze NETWORK TOPOLOGY: identify critical nodes (betweenness centrality), essential edges (minimum cut), feedback loops (strongly connected components), drug target vulnerability (network attack tolerance)
+7. Assess COMBINATION SYNERGY quantitatively: Bliss independence, Loewe additivity, Chou-Talalay combination index, response surface methodology
+
+Think like a computational biologist running the most rigorous quantitative analysis possible.""",
 }
 
 
@@ -529,6 +603,40 @@ def call_bedrock(model_id: str, prompt: str, system_prompt: str,
         )
 
 
+def call_azure(deployment: str, prompt: str, system_prompt: str,
+               max_tokens: int = 2000, temperature: float = 0.7) -> str:
+    """Invoke an Azure OpenAI model (GPT-4o or o1)."""
+    if azure_openai_client is None:
+        raise RuntimeError("Azure OpenAI client not initialized")
+
+    is_o1 = "o1" in deployment.lower()
+
+    if is_o1:
+        # o1: no system message, no temperature, use max_completion_tokens
+        messages = []
+        if system_prompt:
+            messages.append({"role": "user", "content": f"[System Instructions]\n{system_prompt}"})
+        messages.append({"role": "user", "content": prompt})
+        response = azure_openai_client.chat.completions.create(
+            model=deployment,
+            messages=messages,
+            max_completion_tokens=max_tokens,
+        )
+    else:
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        response = azure_openai_client.chat.completions.create(
+            model=deployment,
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+
+    return response.choices[0].message.content
+
+
 def parse_hypothesis_json(text: str) -> dict | None:
     """Extract and validate JSON hypothesis from LLM response text.
 
@@ -591,16 +699,26 @@ def parse_hypothesis_json(text: str) -> dict | None:
 
 
 def run_single_agent(role: str, prompt: str, system_prompt: str) -> dict | None:
-    """Run a single agent with its assigned model. Returns hypothesis or None."""
+    """Run a single agent with its assigned model (Bedrock or Azure). Returns hypothesis or None."""
     model_config = AGENT_MODELS[role]
+    provider = model_config.get("provider", "bedrock")
     try:
-        response_text = call_bedrock(
-            model_id=model_config["model_id"],
-            prompt=prompt,
-            system_prompt=system_prompt,
-            max_tokens=model_config["max_tokens"],
-            temperature=model_config["temperature"],
-        )
+        if provider == "azure":
+            response_text = call_azure(
+                deployment=model_config["model_id"],
+                prompt=prompt,
+                system_prompt=system_prompt,
+                max_tokens=model_config["max_tokens"],
+                temperature=model_config["temperature"],
+            )
+        else:
+            response_text = call_bedrock(
+                model_id=model_config["model_id"],
+                prompt=prompt,
+                system_prompt=system_prompt,
+                max_tokens=model_config["max_tokens"],
+                temperature=model_config["temperature"],
+            )
         hypothesis_data = parse_hypothesis_json(response_text)
         if hypothesis_data and hypothesis_data.get("has_hypothesis", False):
             return {
@@ -628,7 +746,7 @@ def run_single_agent(role: str, prompt: str, system_prompt: str) -> dict | None:
 def run_discovery_worker(config: dict):
     """Run the actual AI discovery process. Called via async Lambda invocation.
 
-    All 4 models run IN PARALLEL each round using ThreadPoolExecutor.
+    All 6 models (4 Bedrock + 2 Azure) run IN PARALLEL each round using ThreadPoolExecutor.
     Each model has its own role and token budget — no shared token pool.
     """
     disease = config.get("disease", "")
@@ -637,7 +755,9 @@ def run_discovery_worker(config: dict):
     external_factors = config.get("external_factors", [])
     max_agents = min(config.get("max_agents", 10), 20)  # Cap for Lambda
 
-    roles = list(AGENT_MODELS.keys())  # explorer, reasoner, synthesizer, critic
+    # Only include Azure roles if client is available
+    roles = [r for r, cfg in AGENT_MODELS.items()
+             if cfg["provider"] == "bedrock" or azure_openai_client is not None]
     num_rounds = min(max_agents // len(roles), 15)  # Up to 15 rounds for deep research
 
     print(f"[WORKER] Starting: disease={disease!r} max_agents={max_agents} num_rounds={num_rounds} roles={roles}")
@@ -678,9 +798,9 @@ def run_discovery_worker(config: dict):
                 for h in top_3
             )
 
-        # Run all 4 agents IN PARALLEL using ThreadPoolExecutor
+        # Run all agents IN PARALLEL using ThreadPoolExecutor (up to 6 models)
         futures = {}
-        with ThreadPoolExecutor(max_workers=4) as executor:
+        with ThreadPoolExecutor(max_workers=len(roles)) as executor:
             for role in roles:
                 # Check status before submitting
                 state = get_discovery_state()
@@ -711,6 +831,16 @@ def run_discovery_worker(config: dict):
                     ("critic", 2): "Design a SAFETY-FIRST hypothesis. Prioritize therapeutic window, off-target analysis, patient population risks, and long-term consequences.",
                     ("critic", 3): "Evaluate FEASIBILITY: manufacturing, scalability, BBB penetration, stability, cold chain, cost of goods. Propose practical alternatives.",
                     ("critic", 4): "Propose a COMBINATION THERAPY hypothesis that mitigates weaknesses of individual approaches. Address resistance through orthogonal mechanisms.",
+                    ("strategist", 0): "Design a COMPLETE CLINICAL DEVELOPMENT STRATEGY: patient selection, biomarker panel, Phase I dose escalation, Phase II endpoint, companion diagnostic. Include regulatory pathway (breakthrough, accelerated approval).",
+                    ("strategist", 1): "Design a COMBINATION THERAPY PROTOCOL with exact drugs, doses, schedules, and synergy rationale. Include drug-drug interaction analysis (CYP450, transporter effects).",
+                    ("strategist", 2): "Design a PRECISION MEDICINE STRATIFICATION: molecular subtypes, matched therapeutics, response biomarkers, adaptive trial design with interim analysis.",
+                    ("strategist", 3): "Design a REAL-WORLD EVIDENCE STRATEGY: observational cohort design, EHR mining approach, propensity score matching, endpoints for regulatory submission.",
+                    ("strategist", 4): "Design a HEALTH ECONOMICS AND MARKET ACCESS plan: QALY impact, cost-effectiveness threshold, payer evidence requirements, manufacturing scalability.",
+                    ("deep_analyst", 0): "Perform QUANTITATIVE PHARMACOLOGY analysis: receptor occupancy modeling (Emax), PK/PD simulation (2-compartment), therapeutic index calculation, dose-response curve with Hill coefficient.",
+                    ("deep_analyst", 1): "Calculate STATISTICAL POWER for validation: sample size estimation, effect size from prior data, multiple comparison correction, adaptive enrichment design boundaries.",
+                    ("deep_analyst", 2): "Build a SYSTEMS BIOLOGY ODE MODEL: pathway dynamics equations, sensitivity analysis of key parameters, bifurcation analysis, stochastic simulation for low-copy effects.",
+                    ("deep_analyst", 3): "Analyze NETWORK TOPOLOGY: betweenness centrality of drug targets, minimum cut for pathway disruption, feedback loop identification, network attack tolerance assessment.",
+                    ("deep_analyst", 4): "Evaluate COMBINATION SYNERGY quantitatively: Bliss independence, Loewe additivity, Chou-Talalay combination index, response surface methodology with confidence intervals.",
                 }
                 angle = angle_matrix.get((role, round_num), f"Generate a unique {role}-perspective hypothesis distinct from all others.")
 
@@ -760,8 +890,8 @@ Return ONLY a valid JSON object (no markdown fences, no commentary before/after 
             "status": "running",
             "hypotheses": sorted_h[:50],
             "stats": {
-                "total_agents": 4,  # Always 4 parallel agents
-                "active_agents": 4 if round_num < num_rounds - 1 else 0,
+                "total_agents": len(roles),  # Parallel agents per round
+                "active_agents": len(roles) if round_num < num_rounds - 1 else 0,
                 "hypotheses_found": len(hypotheses),
                 "paths_explored": paths_explored,
                 "high_confidence_discoveries": sum(1 for h in hypotheses if h["confidence"] >= 0.7),
@@ -786,7 +916,7 @@ Return ONLY a valid JSON object (no markdown fences, no commentary before/after 
         "status": "idle",
         "hypotheses": sorted_h[:50],
         "stats": {
-            "total_agents": 4,
+            "total_agents": len(roles),
             "active_agents": 0,
             "hypotheses_found": len(hypotheses),
             "paths_explored": paths_explored,

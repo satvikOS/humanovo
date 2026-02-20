@@ -53,11 +53,12 @@ class Settings(BaseSettings):
     CHROMA_PERSIST_DIRECTORY: str = "./data/chroma"
     VECTOR_EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
 
-    # Azure OpenAI
+    # Azure OpenAI — both GPT-4o and o1 participate in the 6-model pipeline
     AZURE_OPENAI_API_KEY: SecretStr | None = None
     AZURE_OPENAI_ENDPOINT: str = ""  # e.g. https://<resource>.openai.azure.com
     AZURE_OPENAI_API_VERSION: str = "2024-12-01-preview"
-    AZURE_OPENAI_DEPLOYMENT: str = "gpt-4o"  # deployment name in Azure portal
+    AZURE_OPENAI_DEPLOYMENT_GPT4O: str = "gpt-4o"  # Strategist: structured analysis, clinical planning
+    AZURE_OPENAI_DEPLOYMENT_O1: str = "o1"  # Deep Analyst: multi-step reasoning, statistical analysis
     AZURE_OPENAI_EMBEDDING_DEPLOYMENT: str = "text-embedding-3-small"
 
     # AWS Bedrock (IAM user: humanovo-admin)
@@ -91,7 +92,7 @@ class Settings(BaseSettings):
     MCP_ENABLED: bool = True
     MCP_MAX_CONTEXT_PER_MODEL: int = 128_000  # max tokens per model context window
     MCP_CONTEXT_OVERLAP: int = 2_000  # overlap tokens between model context shards
-    MCP_PARALLEL_SHARDS: int = 4  # number of parallel context shards (one per model)
+    MCP_PARALLEL_SHARDS: int = 6  # number of parallel context shards (one per model)
     MCP_SYNTHESIS_MODEL: str = "moonshotai.kimi-k2.5"  # model for final synthesis (largest context)
     MCP_CHUNK_STRATEGY: str = "semantic"  # semantic | fixed | sliding_window
 

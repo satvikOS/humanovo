@@ -1,12 +1,13 @@
 """
 Discovery Orchestrator
 
-Multi-model parallel agent system for continuous biomedical discovery.
-Runs Kimi 2.5, DeepSeek R1, Llama Maverick, and GPT OSS 120B in parallel
-with token pool management to prevent exhaustion at 100-10000 agent scale.
+Six-model parallel agent system for continuous biomedical discovery.
+Runs 4 Bedrock models (Kimi 2.5, DeepSeek R1, Llama Maverick, GPT OSS 120B)
+and 2 Azure OpenAI models (GPT-4o, o1) in parallel with token pool management
+to prevent exhaustion at 100-10000 agent scale.
 
 Features:
-- Four-model parallel reasoning (Kimi 2.5, DeepSeek R1, Llama Maverick, GPT OSS 120B)
+- Six-model parallel reasoning across AWS Bedrock and Azure OpenAI
 - Token pool with rate limiting, backoff, and per-model quota management
 - 100 to 10,000 concurrent agents with adaptive batching
 - Confidence-based stopping with start/pause/stop controls
@@ -107,10 +108,14 @@ class AgentRole(str, Enum):
 
 class ModelType(str, Enum):
     """LLM model types available for parallel discovery."""
+    # Bedrock models
     LLAMA_MAVERICK = "llama_maverick"
     DEEPSEEK_R1 = "deepseek_r1"
     KIMI_25 = "kimi_25"
     GPT_OSS_120B = "gpt_oss_120b"
+    # Azure OpenAI models
+    GPT_4O = "gpt_4o"
+    O1 = "o1"
     HYBRID = "hybrid"
 
 
@@ -542,14 +547,19 @@ INSTRUCTIONS:
 
 class MultiModelLLM:
     """
-    Multi-model interface routing ALL four models through AWS Bedrock Converse API:
+    Six-model interface routing models through AWS Bedrock and Azure OpenAI:
+
+    Bedrock (4 models):
     - Llama Maverick 17B (meta.llama4-maverick-17b-instruct-v1:0) — Fast broad exploration
     - DeepSeek R1 (deepseek.r1-v1:0) — Deep causal chain reasoning
     - Kimi 2.5 (moonshotai.kimi-k2.5) — Long-context synthesis & integration
     - GPT OSS Safeguard 120B (openai.gpt-oss-safeguard-120b) — Large-parameter critical analysis
 
-    All models are invoked via Bedrock Converse API for unified access.
-    Parallel MCP (Model Context Protocol) distributes large contexts across models.
+    Azure OpenAI (2 models):
+    - GPT-4o — Strategic analysis, structured output, clinical planning
+    - o1 — Deep multi-step reasoning, statistical & mathematical analysis
+
+    Parallel MCP (Model Context Protocol) distributes large contexts across all 6 models.
     """
 
     BEDROCK_MODELS = {
@@ -559,41 +569,52 @@ class MultiModelLLM:
         ModelType.GPT_OSS_120B: settings.BEDROCK_MODEL_GPT_OSS,
     }
 
+    AZURE_MODELS = {
+        ModelType.GPT_4O: settings.AZURE_OPENAI_DEPLOYMENT_GPT4O,
+        ModelType.O1: settings.AZURE_OPENAI_DEPLOYMENT_O1,
+    }
+
     def __init__(self, token_pool: TokenPool):
         self._bedrock_client = None
+        self._azure_client = None
         self._initialized = False
         self._token_pool = token_pool
         self._mcp: Optional[ParallelMCP] = None
-        # Expose provider info for health check
-        self._fallback_provider: Optional[str] = None
-        self._fallback_client: Any = None
 
     async def initialize(self) -> None:
         if self._initialized:
             return
 
-        # Initialize Bedrock client — REQUIRE valid credentials
-        if not settings.aws_access_key_value or not settings.aws_secret_key_value:
-            logger.error(
-                "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are REQUIRED. "
-                "Set them as environment variables or in .env file."
-            )
-            self._initialized = True
-            return
+        # Initialize Bedrock client
+        if settings.aws_access_key_value and settings.aws_secret_key_value:
+            try:
+                import boto3
+                self._bedrock_client = boto3.client(
+                    "bedrock-runtime",
+                    region_name=settings.AWS_REGION,
+                    aws_access_key_id=settings.aws_access_key_value,
+                    aws_secret_access_key=settings.aws_secret_key_value,
+                )
+                logger.info(f"Bedrock client initialized (region={settings.AWS_REGION})")
+            except Exception as e:
+                logger.error(f"Bedrock client initialization FAILED: {e}")
+        else:
+            logger.error("AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are REQUIRED for Bedrock models")
 
-        try:
-            import boto3
-            self._bedrock_client = boto3.client(
-                "bedrock-runtime",
-                region_name=settings.AWS_REGION,
-                aws_access_key_id=settings.aws_access_key_value,
-                aws_secret_access_key=settings.aws_secret_key_value,
-            )
-            logger.info(f"Bedrock client initialized (region={settings.AWS_REGION})")
-        except Exception as e:
-            logger.error(f"Bedrock client initialization FAILED: {e}")
-            self._initialized = True
-            return
+        # Initialize Azure OpenAI client
+        if settings.azure_openai_api_key_value and settings.AZURE_OPENAI_ENDPOINT:
+            try:
+                from openai import AsyncAzureOpenAI
+                self._azure_client = AsyncAzureOpenAI(
+                    api_key=settings.azure_openai_api_key_value,
+                    azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
+                    api_version=settings.AZURE_OPENAI_API_VERSION,
+                )
+                logger.info(f"Azure OpenAI client initialized (endpoint={settings.AZURE_OPENAI_ENDPOINT})")
+            except Exception as e:
+                logger.error(f"Azure OpenAI client initialization FAILED: {e}")
+        else:
+            logger.warning("AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT not set — Azure models unavailable")
 
         # Initialize Parallel MCP
         if self._bedrock_client and settings.MCP_ENABLED:
@@ -603,8 +624,16 @@ class MultiModelLLM:
         self._initialized = True
         available = []
         for model_type, model_id in self.BEDROCK_MODELS.items():
-            available.append(f"{model_type.value} ({model_id})")
-        logger.info(f"Multi-model LLM initialized via Bedrock. Available: {available}")
+            if self._bedrock_client:
+                available.append(f"{model_type.value} ({model_id}) [bedrock]")
+        for model_type, deployment in self.AZURE_MODELS.items():
+            if self._azure_client:
+                available.append(f"{model_type.value} ({deployment}) [azure]")
+        logger.info(f"Multi-model LLM initialized. Available: {available}")
+
+    def _is_azure_model(self, model_type: ModelType) -> bool:
+        """Check if a model type routes through Azure OpenAI."""
+        return model_type in self.AZURE_MODELS
 
     async def generate(
         self,
@@ -614,27 +643,63 @@ class MultiModelLLM:
         max_tokens: int = 4000,
         temperature: float = 0.3,
     ) -> str:
-        """Generate response from specified model via Bedrock Converse API with token pool management."""
+        """Generate response from specified model via Bedrock or Azure OpenAI."""
         if not self._initialized:
             await self.initialize()
-
-        if not self._bedrock_client:
-            raise RuntimeError(
-                "Bedrock client not initialized. Ensure AWS_ACCESS_KEY_ID and "
-                "AWS_SECRET_ACCESS_KEY environment variables are set."
-            )
 
         acquired = await self._token_pool.acquire(model_type)
         if not acquired:
             raise RuntimeError(f"Token pool exhausted for {model_type.value}, rate limit hit")
 
         try:
-            return await self._generate_bedrock(model_type, prompt, system_prompt, max_tokens, temperature)
+            if self._is_azure_model(model_type):
+                return await self._generate_azure(model_type, prompt, system_prompt, max_tokens, temperature)
+            else:
+                return await self._generate_bedrock(model_type, prompt, system_prompt, max_tokens, temperature)
         except Exception as e:
             self._token_pool.record_error(model_type)
             raise
         finally:
             self._token_pool.release(model_type, max_tokens)
+
+    async def _generate_azure(
+        self, model_type: ModelType, prompt: str, system_prompt: str,
+        max_tokens: int, temperature: float,
+    ) -> str:
+        """Invoke a model via Azure OpenAI."""
+        if not self._azure_client:
+            raise RuntimeError(
+                "Azure OpenAI client not initialized. Set AZURE_OPENAI_API_KEY "
+                "and AZURE_OPENAI_ENDPOINT environment variables."
+            )
+
+        deployment = self.AZURE_MODELS[model_type]
+        is_o1 = model_type == ModelType.O1
+
+        # o1 models: no system message, no temperature, use max_completion_tokens
+        if is_o1:
+            messages = []
+            if system_prompt:
+                messages.append({"role": "user", "content": f"[System Instructions]\n{system_prompt}"})
+            messages.append({"role": "user", "content": prompt})
+            response = await self._azure_client.chat.completions.create(
+                model=deployment,
+                messages=messages,
+                max_completion_tokens=max_tokens,
+            )
+        else:
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": prompt})
+            response = await self._azure_client.chat.completions.create(
+                model=deployment,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+
+        return response.choices[0].message.content
 
     async def _generate_bedrock(
         self, model_type: ModelType, prompt: str, system_prompt: str,
@@ -681,22 +746,27 @@ class MultiModelLLM:
     ) -> str:
         """Try each model in priority order until one works."""
         for model_type in [
+            ModelType.GPT_4O,
             ModelType.LLAMA_MAVERICK,
             ModelType.DEEPSEEK_R1,
             ModelType.KIMI_25,
             ModelType.GPT_OSS_120B,
+            ModelType.O1,
         ]:
             try:
-                return await self._generate_bedrock(model_type, prompt, system_prompt, max_tokens, temperature)
+                if self._is_azure_model(model_type):
+                    return await self._generate_azure(model_type, prompt, system_prompt, max_tokens, temperature)
+                else:
+                    return await self._generate_bedrock(model_type, prompt, system_prompt, max_tokens, temperature)
             except Exception:
                 continue
-        raise RuntimeError("All Bedrock models unavailable")
+        raise RuntimeError("All models unavailable (Bedrock + Azure)")
 
     async def parallel_reasoning(
         self, prompt: str, context: str = "",
     ) -> dict[str, str]:
         """
-        Run all four models in parallel on the same prompt via Bedrock.
+        Run all six models in parallel on the same prompt.
         Returns dict mapping model name to response.
         Uses comprehensive system prompts from prompts.py.
 
@@ -709,12 +779,14 @@ class MultiModelLLM:
         full_prompt = f"{context}\n\n{prompt}" if context else prompt
 
         # Check if MCP sharding is needed for large contexts
-        if self._mcp and context and (len(context) // 4) > settings.MCP_MAX_CONTEXT_PER_MODEL:
+        if self._mcp and context and (len(context) // 6) > settings.MCP_MAX_CONTEXT_PER_MODEL:
             logger.info("Context exceeds per-model limit — engaging Parallel MCP")
             return await self._mcp_parallel_reasoning(prompt, context)
 
-        # Standard parallel: all 4 models get the same prompt via Bedrock
+        # Standard parallel: all 6 models get the same prompt
         tasks = {}
+
+        # Bedrock models
         if self._bedrock_client:
             tasks["llama_maverick"] = self.generate(
                 ModelType.LLAMA_MAVERICK, full_prompt,
@@ -737,8 +809,21 @@ class MultiModelLLM:
                 temperature=0.3,
             )
 
+        # Azure OpenAI models
+        if self._azure_client:
+            tasks["gpt_4o"] = self.generate(
+                ModelType.GPT_4O, full_prompt,
+                get_agent_prompt("strategist", include_master=True),
+                temperature=0.3,
+            )
+            tasks["o1"] = self.generate(
+                ModelType.O1, full_prompt,
+                get_agent_prompt("deep_analyst", include_master=True),
+                temperature=0.3,  # ignored for o1 inside _generate_azure
+            )
+
         if not tasks:
-            raise RuntimeError("No Bedrock models available for parallel reasoning")
+            raise RuntimeError("No models available for parallel reasoning (Bedrock + Azure)")
 
         results = await asyncio.gather(
             *[asyncio.create_task(coro) for coro in tasks.values()],
@@ -760,6 +845,7 @@ class MultiModelLLM:
         """
         Parallel MCP reasoning: shard context across models, process, then synthesize.
         Used when total context exceeds per-model token limits.
+        MCP shards go to Bedrock models; Azure models get the full prompt separately.
         """
         model_assignments = {
             "llama_maverick": self.BEDROCK_MODELS[ModelType.LLAMA_MAVERICK],
@@ -775,7 +861,7 @@ class MultiModelLLM:
             "gpt_oss_120b": get_agent_prompt("critic", include_master=True),
         }
 
-        # Phase 1: Parallel shard processing
+        # Phase 1: Parallel shard processing via Bedrock MCP
         shard_results = await self._mcp.parallel_process(
             prompt=prompt,
             context=context,
@@ -783,7 +869,33 @@ class MultiModelLLM:
             system_prompts=system_prompts,
         )
 
-        # Phase 2: Synthesis via Kimi 2.5 (largest context window)
+        # Phase 1b: Azure models process the full context in parallel
+        # (GPT-4o and o1 have large context windows — 128K and 200K respectively)
+        if self._azure_client:
+            full_prompt = f"{context}\n\n{prompt}"
+            azure_tasks = {
+                "gpt_4o": self._generate_azure(
+                    ModelType.GPT_4O, full_prompt,
+                    get_agent_prompt("strategist", include_master=True),
+                    max_tokens=4000, temperature=0.3,
+                ),
+                "o1": self._generate_azure(
+                    ModelType.O1, full_prompt,
+                    get_agent_prompt("deep_analyst", include_master=True),
+                    max_tokens=4000, temperature=0.3,
+                ),
+            }
+            azure_results = await asyncio.gather(
+                *[asyncio.create_task(c) for c in azure_tasks.values()],
+                return_exceptions=True,
+            )
+            for (name, _), result in zip(azure_tasks.items(), azure_results):
+                if isinstance(result, Exception):
+                    logger.warning(f"Azure MCP model {name} failed: {result}")
+                else:
+                    shard_results[name] = result
+
+        # Phase 2: Synthesis via Kimi 2.5 (largest Bedrock context window)
         synthesized = await self._mcp.synthesize_shards(
             shard_results, prompt,
             synthesis_model_id=self.BEDROCK_MODELS[ModelType.KIMI_25],
@@ -970,11 +1082,9 @@ class DiscoveryOrchestrator(LoggerMixin):
     """
     Main orchestrator for parallel discovery agents.
 
-    Manages 100-10,000 agents running across four models in parallel:
-    - Llama Maverick: Fast exploration
-    - DeepSeek R1: Deep reasoning
-    - Kimi 2.5: Long-context analysis
-    - GPT OSS 120B: Large-parameter reasoning
+    Manages 100-10,000 agents running across six models in parallel:
+    Bedrock: Llama Maverick, DeepSeek R1, Kimi 2.5, GPT OSS 120B
+    Azure:   GPT-4o, o1
 
     Token pool prevents exhaustion across all models simultaneously.
     """
@@ -1009,7 +1119,7 @@ class DiscoveryOrchestrator(LoggerMixin):
         self._rag_service = None
 
     async def initialize(self) -> None:
-        self.logger.info("Initializing discovery orchestrator (4-model parallel)")
+        self.logger.info("Initializing discovery orchestrator (6-model parallel: Bedrock + Azure)")
         await self.llm.initialize()
 
         try:
@@ -1062,7 +1172,7 @@ class DiscoveryOrchestrator(LoggerMixin):
             self.logger.warning("Orchestrator already running")
             return
 
-        self.logger.info(f"Starting discovery for {disease} with {self.max_agents} agents across 4 models")
+        self.logger.info(f"Starting discovery for {disease} with {self.max_agents} agents across 6 models")
         self.state = OrchestratorState.RUNNING
         self._start_time = time.time()
         self._stop_requested = False
@@ -1185,14 +1295,20 @@ class DiscoveryOrchestrator(LoggerMixin):
     async def _create_agents(self) -> None:
         self._agents = {}
 
-        # Equal distribution: max_agents / 4 per model
-        # e.g. 10000 agents = 2500 per model
+        # Equal distribution: max_agents / 6 per model
+        # e.g. 10000 agents ≈ 1667 per model
         models = [
             ModelType.LLAMA_MAVERICK,
             ModelType.DEEPSEEK_R1,
             ModelType.KIMI_25,
             ModelType.GPT_OSS_120B,
+            ModelType.GPT_4O,
+            ModelType.O1,
         ]
+
+        # Exclude Azure models if client is not initialized
+        if not self.llm._azure_client:
+            models = [m for m in models if m not in (ModelType.GPT_4O, ModelType.O1)]
 
         # Roles distributed within each model's agent pool
         role_distribution = [
