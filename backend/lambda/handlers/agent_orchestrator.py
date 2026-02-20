@@ -21,6 +21,7 @@ from uuid import uuid4
 import logging
 
 import boto3
+from botocore.config import Config as BotoConfig
 
 # Defensive powertools imports — Lambda must NEVER crash on cold start
 try:
@@ -87,10 +88,21 @@ except Exception as _e:
     dynamodb = None
 
 try:
-    bedrock_runtime = boto3.client("bedrock-runtime")
+    bedrock_runtime = boto3.client("bedrock-runtime", config=BotoConfig(
+        read_timeout=120, connect_timeout=10, retries={"max_attempts": 2}
+    ))
 except Exception as _e:
     logger.error(f"Bedrock init failed: {_e}")
     bedrock_runtime = None
+
+# Separate client with extended timeout for paper generation (long inference)
+try:
+    bedrock_long = boto3.client("bedrock-runtime", config=BotoConfig(
+        read_timeout=600, connect_timeout=10, retries={"max_attempts": 1}
+    ))
+except Exception as _e:
+    logger.error(f"Bedrock long-timeout init failed: {_e}")
+    bedrock_long = None
 
 try:
     lambda_client = boto3.client("lambda")
@@ -116,7 +128,7 @@ PAPER_TASK_KEY = "active-paper"
 AGENT_MODELS = {
     "explorer": {
         "model_id": "us.meta.llama4-maverick-17b-instruct-v1:0",
-        "max_tokens": 16000,
+        "max_tokens": 8000,  # Llama Maverick limit is 8192
         "temperature": 0.8,  # Higher creativity for exploration
         "role_description": "Fast broad exploration — discovers novel pathways and unconventional connections",
     },
@@ -456,15 +468,21 @@ def _parse_invoke_response(model_id: str, response_body: dict) -> str:
 
 
 def call_bedrock(model_id: str, prompt: str, system_prompt: str,
-                 max_tokens: int = 2000, temperature: float = 0.7) -> str:
-    """Invoke a Bedrock model. Tries Converse API first, falls back to InvokeModel."""
-    if bedrock_runtime is None:
+                 max_tokens: int = 2000, temperature: float = 0.7,
+                 client=None) -> str:
+    """Invoke a Bedrock model. Tries Converse API first, falls back to InvokeModel.
+
+    Args:
+        client: Optional boto3 bedrock-runtime client override (e.g. bedrock_long for paper generation).
+    """
+    _client = client or bedrock_runtime
+    if _client is None:
         raise RuntimeError("Bedrock runtime not initialized")
 
     converse_err = None
     # Try Converse API first (unified across providers)
     try:
-        response = bedrock_runtime.converse(
+        response = _client.converse(
             modelId=model_id,
             messages=[
                 {
@@ -478,7 +496,16 @@ def call_bedrock(model_id: str, prompt: str, system_prompt: str,
                 "temperature": temperature,
             },
         )
-        return response["output"]["message"]["content"][0]["text"]
+        # Parse Converse response — handle varying content structures
+        content_blocks = response["output"]["message"]["content"]
+        if content_blocks and isinstance(content_blocks, list):
+            block = content_blocks[0]
+            if isinstance(block, dict) and "text" in block:
+                return block["text"]
+            elif isinstance(block, str):
+                return block
+        # Fallback: stringify
+        return json.dumps(content_blocks)
     except Exception as e:
         converse_err = e
         logger.warning(f"Converse API failed for {model_id}: {e}, trying InvokeModel")
@@ -486,7 +513,7 @@ def call_bedrock(model_id: str, prompt: str, system_prompt: str,
     # Fallback: InvokeModel with provider-specific body format
     try:
         body = _build_invoke_body(model_id, prompt, system_prompt, max_tokens, temperature)
-        response = bedrock_runtime.invoke_model(
+        response = _client.invoke_model(
             modelId=model_id,
             contentType="application/json",
             accept="application/json",
@@ -1093,6 +1120,22 @@ def generate_paper():
     return {"status": "generating", "hypothesis_id": hypothesis_id or "all"}
 
 
+@app.post("/api/v1/orchestrator/cancel-paper")
+def cancel_paper():
+    """Cancel in-progress paper generation."""
+    try:
+        table = get_task_table()
+        table.update_item(
+            Key={"id": PAPER_TASK_KEY},
+            UpdateExpression="SET #s = :s, #u = :u",
+            ExpressionAttributeNames={"#s": "status", "#u": "updated_at"},
+            ExpressionAttributeValues={":s": "cancelled", ":u": datetime.utcnow().isoformat()},
+        )
+    except Exception as e:
+        logger.error(f"Cancel paper failed: {e}")
+    return {"status": "cancelled"}
+
+
 @app.get("/api/v1/orchestrator/paper-status")
 def get_paper_status():
     """Poll paper generation status."""
@@ -1102,8 +1145,12 @@ def get_paper_status():
         item = response.get("Item")
         if not item:
             return {"status": "idle", "paper_html": ""}
+        status = item.get("status", "idle")
+        # Treat cancelled as idle for the frontend
+        if status == "cancelled":
+            status = "idle"
         return serialize({
-            "status": item.get("status", "idle"),
+            "status": status,
             "paper_html": item.get("paper_html", ""),
             "error": item.get("error", ""),
         })
@@ -1209,14 +1256,38 @@ CRITICAL: Maximum length. Every sentence must be specific, quantitative, evidenc
     system_prompt = """You are an elite biomedical research paper author. Write with Nature Medicine rigor, Phase III protocol detail, and FDA submission precision. Every claim backed by evidence. Proper nomenclature, quantitative data, formal academic structure. Write the LONGEST, most DETAILED paper possible."""
 
     try:
-        print("[PAPER-WORKER] Calling Bedrock for paper generation...")
-        paper_md = call_bedrock(
-            model_id=PAPER_MODEL,
-            prompt=prompt,
-            system_prompt=system_prompt,
-            max_tokens=65536,
-            temperature=0.4,
-        )
+        print("[PAPER-WORKER] Calling Bedrock for paper generation (long timeout)...")
+        # Use extended-timeout client for long paper generation inference
+        _paper_client = bedrock_long or bedrock_runtime
+        # Retry up to 2 times on timeout
+        last_err = None
+        paper_md = None
+        for attempt in range(3):
+            # Check if cancelled before each attempt
+            paper_state = table.get_item(Key={"id": PAPER_TASK_KEY}).get("Item", {})
+            if paper_state.get("status") in ("cancelled", "idle"):
+                print("[PAPER-WORKER] Cancelled by user, aborting")
+                return
+            try:
+                paper_md = call_bedrock(
+                    model_id=PAPER_MODEL,
+                    prompt=prompt,
+                    system_prompt=system_prompt,
+                    max_tokens=65536,
+                    temperature=0.4,
+                    client=_paper_client,
+                )
+                break
+            except Exception as retry_err:
+                last_err = retry_err
+                err_str = str(retry_err).lower()
+                if "timeout" in err_str or "timed out" in err_str:
+                    print(f"[PAPER-WORKER] Attempt {attempt+1}/3 timed out, retrying...")
+                    time.sleep(2)
+                    continue
+                raise  # Non-timeout errors fail immediately
+        if paper_md is None:
+            raise last_err or RuntimeError("Paper generation failed after retries")
         print(f"[PAPER-WORKER] Got {len(paper_md)} chars of markdown")
 
         # Convert markdown to rich HTML with professional typography

@@ -299,6 +299,43 @@ export default function Agents() {
     checkHealth()
   }, [])
 
+  // On mount, check if paper generation is still running (persists across navigation)
+  useEffect(() => {
+    const resumePaperPoll = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/orchestrator/paper-status`)
+        if (!res.ok) return
+        const data = await res.json()
+        if (data.status === 'generating') {
+          // Paper gen is still running — resume the polling UI
+          setGeneratingPaper(true)
+          if (paperPollRef.current) clearInterval(paperPollRef.current)
+          paperPollRef.current = window.setInterval(async () => {
+            try {
+              const statusRes = await fetch(`${API_BASE}/orchestrator/paper-status`)
+              if (!statusRes.ok) return
+              const d = await statusRes.json()
+              if (d.status === 'done' && d.paper_html) {
+                if (paperPollRef.current) { clearInterval(paperPollRef.current); paperPollRef.current = null }
+                setPaperMarkdown(d.paper_html)
+                setGeneratingPaper(false)
+                setGeneratingPaperId(null)
+              } else if (d.status === 'failed' || d.status === 'idle') {
+                if (paperPollRef.current) { clearInterval(paperPollRef.current); paperPollRef.current = null }
+                if (d.status === 'failed') alert(`Paper generation failed: ${d.error || 'Unknown error'}`)
+                setGeneratingPaper(false)
+                setGeneratingPaperId(null)
+              }
+            } catch { /* poll error, keep trying */ }
+          }, 4000)
+        } else if (data.status === 'done' && data.paper_html) {
+          setPaperMarkdown(data.paper_html)
+        }
+      } catch { /* no paper status available */ }
+    }
+    resumePaperPoll()
+  }, [])
+
   // Poll for updates — persists across navigation (backend keeps running)
   useEffect(() => {
     fetchStatus()
@@ -465,6 +502,15 @@ export default function Agents() {
       setGeneratingPaperId(null)
     }
   }, [config.disease])
+
+  const cancelPaper = useCallback(async () => {
+    try {
+      await fetch(`${API_BASE}/orchestrator/cancel-paper`, { method: 'POST' })
+    } catch { /* best effort */ }
+    if (paperPollRef.current) { clearInterval(paperPollRef.current); paperPollRef.current = null }
+    setGeneratingPaper(false)
+    setGeneratingPaperId(null)
+  }, [])
 
   const downloadPaperHtml = useCallback(() => {
     if (!paperMarkdown) return
@@ -965,6 +1011,26 @@ export default function Agents() {
 
         {/* Main Content - Hypotheses or Paper */}
         <div className="flex-1 overflow-y-auto">
+          {/* Global paper generation status bar */}
+          {generatingPaper && !paperMarkdown && (
+            <div className="mx-4 mt-4 p-3 bg-purple-500/10 border border-purple-500/30 rounded-lg flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <FiRefreshCw className="w-4 h-4 text-purple-400 animate-spin" />
+                <span className="text-sm text-purple-300">
+                  Generating research paper{generatingPaperId ? '' : ' for all hypotheses'}...
+                  <span className="text-purple-400/60 ml-2">This runs in the background — you can navigate away and come back.</span>
+                </span>
+              </div>
+              <button
+                onClick={cancelPaper}
+                className="text-xs px-3 py-1.5 bg-red-500/20 text-red-400 rounded hover:bg-red-500/30 transition-colors flex items-center gap-1"
+              >
+                <FiX className="w-3 h-3" />
+                Cancel
+              </button>
+            </div>
+          )}
+
           {/* Paper View — rich HTML rendered in iframe */}
           {paperMarkdown ? (
             <div className="p-4 h-full flex flex-col">
@@ -1076,6 +1142,15 @@ export default function Agents() {
                       )}
                       {generatingPaperId === hypothesis.id ? 'Generating...' : 'Generate Paper'}
                     </button>
+                    {generatingPaper && generatingPaperId === hypothesis.id && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); cancelPaper() }}
+                        className="text-xxs px-2 py-1 bg-red-500/20 text-red-400 rounded flex items-center gap-1 hover:bg-red-500/30 transition-colors"
+                      >
+                        <FiX className="w-3 h-3" />
+                        Cancel
+                      </button>
+                    )}
                     <span className="text-xxs px-1.5 py-0.5 bg-green-500/20 text-green-400 rounded flex items-center gap-1">
                       <FiSend className="w-3 h-3" />
                       Saved
@@ -1319,18 +1394,29 @@ export default function Agents() {
                 )}
 
                 {/* Per-Hypothesis Paper Generation */}
-                <button
-                  onClick={() => generatePaper(selectedHypothesis.id, selectedHypothesis.title)}
-                  disabled={generatingPaper}
-                  className="w-full btn bg-purple-500 text-white hover:bg-purple-600 disabled:opacity-50 mt-2"
-                >
-                  {generatingPaperId === selectedHypothesis.id ? (
-                    <FiRefreshCw className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <FiFileText className="w-4 h-4" />
+                <div className="flex gap-2 mt-2">
+                  <button
+                    onClick={() => generatePaper(selectedHypothesis.id, selectedHypothesis.title)}
+                    disabled={generatingPaper}
+                    className="flex-1 btn bg-purple-500 text-white hover:bg-purple-600 disabled:opacity-50"
+                  >
+                    {generatingPaperId === selectedHypothesis.id ? (
+                      <FiRefreshCw className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <FiFileText className="w-4 h-4" />
+                    )}
+                    {generatingPaperId === selectedHypothesis.id ? 'Generating Paper...' : 'Generate Research Paper'}
+                  </button>
+                  {generatingPaper && generatingPaperId === selectedHypothesis.id && (
+                    <button
+                      onClick={cancelPaper}
+                      className="btn bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/30"
+                    >
+                      <FiX className="w-4 h-4" />
+                      Cancel
+                    </button>
                   )}
-                  {generatingPaperId === selectedHypothesis.id ? 'Generating Paper...' : 'Generate Research Paper'}
-                </button>
+                </div>
               </div>
             </div>
           </div>
