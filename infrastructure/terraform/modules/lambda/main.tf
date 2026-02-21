@@ -74,6 +74,17 @@ variable "bedrock_embedding_model_id" {
   type = string
 }
 
+variable "azure_ai_endpoint" {
+  type    = string
+  default = ""
+}
+
+variable "azure_ai_key" {
+  type      = string
+  default   = ""
+  sensitive = true
+}
+
 variable "lambda_memory_size" {
   type    = number
   default = 1024
@@ -102,6 +113,8 @@ locals {
     EXPORTS_PREFIX             = "exports"
     BEDROCK_MODEL_ID           = var.bedrock_model_id
     BEDROCK_EMBEDDING_MODEL_ID = var.bedrock_embedding_model_id
+    AZURE_AI_ENDPOINT          = var.azure_ai_endpoint
+    AZURE_AI_KEY               = var.azure_ai_key
     LOG_LEVEL                  = var.environment == "prod" ? "INFO" : "DEBUG"
     POWERTOOLS_SERVICE_NAME    = "genup"
     POWERTOOLS_METRICS_NAMESPACE = "GenUp"

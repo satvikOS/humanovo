@@ -17,6 +17,8 @@ env:
   TF_STATE_BUCKET: genup-terraform-state
   TF_LOCK_TABLE: genup-terraform-locks
   ENVIRONMENT: dev
+  TF_VAR_azure_ai_endpoint: ${{ secrets.AZURE_AI_ENDPOINT }}
+  TF_VAR_azure_ai_key: ${{ secrets.AZURE_AI_KEY }}
 
 jobs:
   deploy-infra:

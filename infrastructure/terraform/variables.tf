@@ -120,6 +120,21 @@ variable "bedrock_embedding_model_id" {
   default     = "amazon.titan-embed-text-v2:0"
 }
 
+# ==================== Azure AI Foundry ====================
+
+variable "azure_ai_endpoint" {
+  description = "Azure AI Foundry unified endpoint (e.g. https://humanovo.services.ai.azure.com/)"
+  type        = string
+  default     = ""
+}
+
+variable "azure_ai_key" {
+  description = "Azure AI Foundry API key"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
 # ==================== API Gateway ====================
 
 variable "cors_allowed_origins" {
