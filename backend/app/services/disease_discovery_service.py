@@ -5,7 +5,7 @@ Advanced LLM-powered service for discovering disease cures and prevention strate
 by connecting billions of data points across the knowledge graph.
 
 Supports three LLM providers:
-- Azure AI Model Catalog (grok-4, DeepSeek-R1-0528, Kimi-K2.5, Mistral-Large-3) — primary
+- Azure AI Foundry (grok-4, DeepSeek-R1-0528, claude-opus-4-6, Mistral-Large-3) — primary
 - AWS Bedrock (DeepSeek R1, Claude Opus 4.6) — fallback
 - Azure OpenAI (legacy)
 """
@@ -446,60 +446,28 @@ class AzureOpenAILLMClient(BaseLLMClient):
 
 
 class AzureAILLMClient(BaseLLMClient):
-    """Azure AI Model Catalog client — non-OpenAI serverless deployments.
+    """Azure AI Foundry client — single unified endpoint for all models.
 
-    Picks the best available Azure AI model. Supports both:
-    - Chat completion models (grok-4, DeepSeek, Mistral) via OpenAI SDK
-    - Anthropic Messages API models (claude-opus-4-6) via httpx
+    Uses the shared AZURE_AI_ENDPOINT / AZURE_AI_KEY via OpenAI-compatible
+    chat completions API. Defaults to the synthesizer model (claude-opus-4-6).
     """
 
     def __init__(self):
         self._client = None
-        self._model_name = ""
-        self._endpoint = ""
-        self._key = ""
-        self._api_format = ""
-        self._resolved = False
-
-    def _resolve_model(self):
-        """Pick the best available Azure AI model in priority order."""
-        if self._resolved:
-            return
-        # Priority: claude-opus-4-6 (synthesizer) > grok-4 (explorer) > others
-        candidates = [
-            (settings.AZURE_AI_SYNTHESIZER_MODEL, settings.AZURE_AI_SYNTHESIZER_ENDPOINT,
-             settings.azure_ai_synthesizer_key_value, settings.AZURE_AI_SYNTHESIZER_API_FORMAT),
-            (settings.AZURE_AI_EXPLORER_MODEL, settings.AZURE_AI_EXPLORER_ENDPOINT,
-             settings.azure_ai_explorer_key_value, "openai"),
-            (settings.AZURE_AI_REASONER_MODEL, settings.AZURE_AI_REASONER_ENDPOINT,
-             settings.azure_ai_reasoner_key_value, "openai"),
-            (settings.AZURE_AI_CRITIC_MODEL, settings.AZURE_AI_CRITIC_ENDPOINT,
-             settings.azure_ai_critic_key_value, "openai"),
-        ]
-        for model_name, endpoint, key, api_format in candidates:
-            if endpoint and key:
-                self._model_name = model_name
-                self._endpoint = endpoint
-                self._key = key
-                self._api_format = api_format
-                self._resolved = True
-                return
-        raise RuntimeError(
-            "No Azure AI models configured. Deploy at least one model from "
-            "Azure AI Foundry Model Catalog and set AZURE_AI_*_ENDPOINT/KEY env vars."
-        )
 
     async def _get_client(self):
-        """Get OpenAI client (only for Chat completion models)."""
-        self._resolve_model()
-        if self._api_format == "anthropic":
-            return None  # Will use httpx for Anthropic models
         if self._client is None:
+            endpoint = settings.AZURE_AI_ENDPOINT
+            key = settings.azure_ai_key_value
+            if not endpoint or not key:
+                raise RuntimeError(
+                    "Azure AI Foundry not configured. Set AZURE_AI_ENDPOINT and AZURE_AI_KEY."
+                )
             try:
                 from openai import AsyncOpenAI
                 self._client = AsyncOpenAI(
-                    base_url=f"{self._endpoint.rstrip('/')}/v1",
-                    api_key=self._key,
+                    base_url=f"{endpoint.rstrip('/')}/models",
+                    api_key=key,
                 )
             except ImportError:
                 raise RuntimeError("openai not installed. Run: pip install openai")
@@ -512,11 +480,6 @@ class AzureAILLMClient(BaseLLMClient):
         max_tokens: int = 4000,
         temperature: float = 0.3,
     ) -> str:
-        self._resolve_model()
-
-        if self._api_format == "anthropic":
-            return await self._generate_anthropic(prompt, system_prompt, max_tokens, temperature)
-
         client = await self._get_client()
         messages = []
         if system_prompt:
@@ -524,53 +487,16 @@ class AzureAILLMClient(BaseLLMClient):
         messages.append({"role": "user", "content": prompt})
 
         response = await client.chat.completions.create(
-            model=self._model_name,
+            model=settings.AZURE_AI_SYNTHESIZER_MODEL,
             messages=messages,
             max_tokens=max_tokens,
             temperature=temperature,
         )
         return response.choices[0].message.content
 
-    async def _generate_anthropic(
-        self, prompt: str, system_prompt: str, max_tokens: int, temperature: float,
-    ) -> str:
-        """Generate via Anthropic Messages API (for claude-* models on Azure AI)."""
-        import httpx
-
-        endpoint = self._endpoint.rstrip("/")
-        request_body = {
-            "model": self._model_name,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "messages": [{"role": "user", "content": prompt}],
-        }
-        if system_prompt:
-            request_body["system"] = system_prompt
-
-        async with httpx.AsyncClient(timeout=300.0) as client:
-            response = await client.post(
-                f"{endpoint}/v1/messages",
-                headers={
-                    "Content-Type": "application/json",
-                    "api-key": self._key,
-                    "anthropic-version": "2023-06-01",
-                },
-                json=request_body,
-            )
-            response.raise_for_status()
-            data = response.json()
-
-        content = data.get("content", [])
-        if content and isinstance(content, list):
-            text_blocks = [block["text"] for block in content if block.get("type") == "text"]
-            return "\n".join(text_blocks) if text_blocks else ""
-        raise RuntimeError(f"Unexpected Anthropic response: {data}")
-
     @property
     def model_name(self) -> str:
-        if not self._resolved:
-            self._resolve_model()
-        return f"azure-ai/{self._model_name}"
+        return f"azure-ai/{settings.AZURE_AI_SYNTHESIZER_MODEL}"
 
 
 def get_llm_client(provider: LLMProvider = None) -> BaseLLMClient:

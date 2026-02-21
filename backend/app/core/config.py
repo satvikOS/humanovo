@@ -61,31 +61,16 @@ class Settings(BaseSettings):
     AZURE_OPENAI_DEPLOYMENT_O1: str = "o1"
     AZURE_OPENAI_EMBEDDING_DEPLOYMENT: str = "text-embedding-3-small"
 
-    # Azure AI Model Catalog — Non-OpenAI serverless deployments (primary)
-    # Deploy from Azure AI Foundry → Model Catalog → Deploy → Serverless API
-    # Each deployment gets its own endpoint URL and API key
-    #
-    # Explorer: grok-4 — xAI flagship, broad deep reasoning
-    AZURE_AI_EXPLORER_ENDPOINT: str = ""  # e.g. https://grok-4-xxxx.eastus2.models.ai.azure.com
-    AZURE_AI_EXPLORER_KEY: SecretStr | None = None
-    AZURE_AI_EXPLORER_MODEL: str = "grok-4"
-    #
-    # Reasoner: DeepSeek-R1-0528 — state-of-the-art reasoning, formal chain-of-thought
-    AZURE_AI_REASONER_ENDPOINT: str = ""
-    AZURE_AI_REASONER_KEY: SecretStr | None = None
-    AZURE_AI_REASONER_MODEL: str = "DeepSeek-R1-0528"
-    #
-    # Synthesizer: claude-opus-4-6 — Anthropic flagship, 200K context, best synthesis
-    # NOTE: Uses Anthropic Messages API (not Chat completion), handled separately
-    AZURE_AI_SYNTHESIZER_ENDPOINT: str = ""
-    AZURE_AI_SYNTHESIZER_KEY: SecretStr | None = None
-    AZURE_AI_SYNTHESIZER_MODEL: str = "claude-opus-4-6"
-    AZURE_AI_SYNTHESIZER_API_FORMAT: str = "anthropic"  # anthropic | openai
-    #
-    # Critic: Mistral-Large-3 — strong analytical, cost-efficient
-    AZURE_AI_CRITIC_ENDPOINT: str = ""
-    AZURE_AI_CRITIC_KEY: SecretStr | None = None
-    AZURE_AI_CRITIC_MODEL: str = "Mistral-Large-3"
+    # Azure AI Foundry — single shared endpoint for all models
+    # One key covers grok-4, DeepSeek-R1-0528, claude-opus-4-6, Mistral-Large-3, etc.
+    AZURE_AI_ENDPOINT: str = ""   # e.g. https://humanovo.services.ai.azure.com/
+    AZURE_AI_KEY: SecretStr | None = None
+
+    # Azure AI model names — change to swap models without touching endpoints/keys
+    AZURE_AI_EXPLORER_MODEL: str = "grok-4"                # Explorer: xAI flagship
+    AZURE_AI_REASONER_MODEL: str = "DeepSeek-R1-0528"      # Reasoner: latest DeepSeek
+    AZURE_AI_SYNTHESIZER_MODEL: str = "claude-opus-4-6"    # Synthesizer: Anthropic flagship
+    AZURE_AI_CRITIC_MODEL: str = "Mistral-Large-3"         # Critic: Mistral flagship
 
     # AWS Bedrock (IAM user: humanovo-admin)
     AWS_ACCESS_KEY_ID: SecretStr | None = None
@@ -181,20 +166,9 @@ class Settings(BaseSettings):
         return self.AWS_SECRET_ACCESS_KEY.get_secret_value() if self.AWS_SECRET_ACCESS_KEY else None
 
     @property
-    def azure_ai_explorer_key_value(self) -> str | None:
-        return self.AZURE_AI_EXPLORER_KEY.get_secret_value() if self.AZURE_AI_EXPLORER_KEY else None
-
-    @property
-    def azure_ai_reasoner_key_value(self) -> str | None:
-        return self.AZURE_AI_REASONER_KEY.get_secret_value() if self.AZURE_AI_REASONER_KEY else None
-
-    @property
-    def azure_ai_synthesizer_key_value(self) -> str | None:
-        return self.AZURE_AI_SYNTHESIZER_KEY.get_secret_value() if self.AZURE_AI_SYNTHESIZER_KEY else None
-
-    @property
-    def azure_ai_critic_key_value(self) -> str | None:
-        return self.AZURE_AI_CRITIC_KEY.get_secret_value() if self.AZURE_AI_CRITIC_KEY else None
+    def azure_ai_key_value(self) -> str | None:
+        """Shared Azure AI Foundry key for all models."""
+        return self.AZURE_AI_KEY.get_secret_value() if self.AZURE_AI_KEY else None
 
 
 @lru_cache

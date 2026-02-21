@@ -588,42 +588,18 @@ class MultiModelLLM:
         ModelType.O1: settings.AZURE_OPENAI_DEPLOYMENT_O1,
     }
 
-    # Azure AI Model Catalog — role → config mapping
+    # Azure AI Foundry — single endpoint, all models via OpenAI-compatible chat completions
     AZURE_AI_MODELS = {
-        ModelType.GROK_4: {
-            "role": "explorer",
-            "endpoint": "AZURE_AI_EXPLORER_ENDPOINT",
-            "key": "azure_ai_explorer_key_value",
-            "model": "AZURE_AI_EXPLORER_MODEL",
-            "api_format": "openai",
-        },
-        ModelType.DEEPSEEK_R1_0528: {
-            "role": "reasoner",
-            "endpoint": "AZURE_AI_REASONER_ENDPOINT",
-            "key": "azure_ai_reasoner_key_value",
-            "model": "AZURE_AI_REASONER_MODEL",
-            "api_format": "openai",
-        },
-        ModelType.CLAUDE_OPUS_AZURE_AI: {
-            "role": "synthesizer",
-            "endpoint": "AZURE_AI_SYNTHESIZER_ENDPOINT",
-            "key": "azure_ai_synthesizer_key_value",
-            "model": "AZURE_AI_SYNTHESIZER_MODEL",
-            "api_format": "anthropic",  # Anthropic Messages API, not Chat completion
-        },
-        ModelType.MISTRAL_LARGE_3: {
-            "role": "critic",
-            "endpoint": "AZURE_AI_CRITIC_ENDPOINT",
-            "key": "azure_ai_critic_key_value",
-            "model": "AZURE_AI_CRITIC_MODEL",
-            "api_format": "openai",
-        },
+        ModelType.GROK_4:              settings.AZURE_AI_EXPLORER_MODEL,
+        ModelType.DEEPSEEK_R1_0528:    settings.AZURE_AI_REASONER_MODEL,
+        ModelType.CLAUDE_OPUS_AZURE_AI: settings.AZURE_AI_SYNTHESIZER_MODEL,
+        ModelType.MISTRAL_LARGE_3:     settings.AZURE_AI_CRITIC_MODEL,
     }
 
     def __init__(self, token_pool: TokenPool):
         self._bedrock_client = None
-        self._azure_client = None  # Legacy Azure OpenAI
-        self._azure_ai_clients: dict[ModelType, Any] = {}  # Per-model Azure AI clients
+        self._azure_client = None        # Legacy Azure OpenAI
+        self._azure_ai_client = None    # Shared Azure AI Foundry client (all 4 models)
         self._azure_ai_available = False
         self._initialized = False
         self._token_pool = token_pool
@@ -633,48 +609,24 @@ class MultiModelLLM:
         if self._initialized:
             return
 
-        # Initialize Azure AI Model Catalog clients (primary)
-        azure_ai_count = 0
-        for model_type, cfg in self.AZURE_AI_MODELS.items():
-            endpoint = getattr(settings, cfg["endpoint"], "")
-            key = getattr(settings, cfg["key"], None)
-            model_name = getattr(settings, cfg["model"], "")
-            api_format = cfg.get("api_format", "openai")
-            if endpoint and key:
-                try:
-                    if api_format == "anthropic":
-                        # Anthropic Messages API — use httpx directly (no OpenAI client)
-                        self._azure_ai_clients[model_type] = {
-                            "client": None,  # Will use httpx
-                            "model": model_name,
-                            "endpoint": endpoint,
-                            "key": key,
-                            "api_format": "anthropic",
-                        }
-                    else:
-                        from openai import AsyncOpenAI
-                        client = AsyncOpenAI(
-                            base_url=f"{endpoint.rstrip('/')}/v1",
-                            api_key=key,
-                        )
-                        self._azure_ai_clients[model_type] = {
-                            "client": client,
-                            "model": model_name,
-                            "endpoint": endpoint,
-                            "api_format": "openai",
-                        }
-                    azure_ai_count += 1
-                    logger.info(f"Azure AI client initialized: {model_name} ({cfg['role']}, {api_format}) → {endpoint}")
-                except Exception as e:
-                    logger.error(f"Azure AI client init FAILED for {model_name}: {e}")
-            else:
-                logger.debug(f"Azure AI {cfg['role']} not configured (no endpoint/key)")
-
-        self._azure_ai_available = azure_ai_count > 0
-        if azure_ai_count > 0:
-            logger.info(f"Azure AI Model Catalog: {azure_ai_count}/4 models initialized")
+        # Initialize Azure AI Foundry client (single shared endpoint for all 4 models)
+        if settings.azure_ai_key_value and settings.AZURE_AI_ENDPOINT:
+            try:
+                from openai import AsyncOpenAI
+                # Azure AI Foundry unified endpoint exposes OpenAI-compatible API for all models.
+                # The endpoint handles translation (including Anthropic Messages for claude-* models).
+                self._azure_ai_client = AsyncOpenAI(
+                    base_url=f"{settings.AZURE_AI_ENDPOINT.rstrip('/')}/models",
+                    api_key=settings.azure_ai_key_value,
+                )
+                self._azure_ai_available = True
+                model_names = list(self.AZURE_AI_MODELS.values())
+                logger.info(f"Azure AI Foundry client initialized → {settings.AZURE_AI_ENDPOINT}")
+                logger.info(f"Available models: {model_names}")
+            except Exception as e:
+                logger.error(f"Azure AI Foundry client initialization FAILED: {e}")
         else:
-            logger.warning("No Azure AI models configured — will fall back to Bedrock")
+            logger.warning("AZURE_AI_ENDPOINT or AZURE_AI_KEY not set — Azure AI unavailable")
 
         # Initialize Bedrock client (fallback)
         if settings.aws_access_key_value and settings.aws_secret_key_value:
@@ -712,9 +664,9 @@ class MultiModelLLM:
 
         self._initialized = True
         available = []
-        for model_type in self._azure_ai_clients:
-            info = self._azure_ai_clients[model_type]
-            available.append(f"{model_type.value} ({info['model']}) [azure-ai]")
+        if self._azure_ai_available:
+            for model_type, model_name in self.AZURE_AI_MODELS.items():
+                available.append(f"{model_type.value} ({model_name}) [azure-ai-foundry]")
         for model_type, model_id in self.BEDROCK_MODELS.items():
             if self._bedrock_client:
                 available.append(f"{model_type.value} ({model_id}) [bedrock]")
@@ -724,8 +676,8 @@ class MultiModelLLM:
         logger.info(f"Multi-model LLM initialized. Available: {available}")
 
     def _is_azure_ai_model(self, model_type: ModelType) -> bool:
-        """Check if a model type routes through Azure AI Model Catalog."""
-        return model_type in self._azure_ai_clients
+        """Check if a model type routes through Azure AI Foundry."""
+        return model_type in self.AZURE_AI_MODELS and self._azure_ai_available
 
     def _is_azure_openai_model(self, model_type: ModelType) -> bool:
         """Check if a model type routes through legacy Azure OpenAI."""
@@ -768,94 +720,29 @@ class MultiModelLLM:
         self, model_type: ModelType, prompt: str, system_prompt: str,
         max_tokens: int, temperature: float,
     ) -> str:
-        """Invoke a model via Azure AI Model Catalog serverless API."""
-        if model_type not in self._azure_ai_clients:
-            raise RuntimeError(f"Azure AI client not initialized for {model_type.value}")
+        """Invoke a model via Azure AI Foundry unified endpoint.
 
-        info = self._azure_ai_clients[model_type]
-        api_format = info.get("api_format", "openai")
-
-        # Route Anthropic models (claude-*) to Messages API handler
-        if api_format == "anthropic":
-            return await self._generate_azure_ai_anthropic(model_type, prompt, system_prompt, max_tokens, temperature)
-
-        # OpenAI-compatible Chat Completion API
-        client = info["client"]
-        model_name = info["model"]
-
-        # DeepSeek R1 reasoning models: prepend system to user message (no system role support)
-        is_deepseek_reasoning = "deepseek" in model_name.lower() and "r1" in model_name.lower()
-
-        if is_deepseek_reasoning:
-            messages = []
-            if system_prompt:
-                messages.append({"role": "user", "content": f"[System Instructions]\n{system_prompt}"})
-            messages.append({"role": "user", "content": prompt})
-            response = await client.chat.completions.create(
-                model=model_name,
-                messages=messages,
-                max_tokens=max_tokens,
-            )
-        else:
-            messages = []
-            if system_prompt:
-                messages.append({"role": "system", "content": system_prompt})
-            messages.append({"role": "user", "content": prompt})
-            response = await client.chat.completions.create(
-                model=model_name,
-                messages=messages,
-                max_tokens=max_tokens,
-                temperature=temperature,
-            )
-
-        return response.choices[0].message.content
-
-    async def _generate_azure_ai_anthropic(
-        self, model_type: ModelType, prompt: str, system_prompt: str,
-        max_tokens: int, temperature: float,
-    ) -> str:
-        """Invoke an Anthropic model (claude-*) via Azure AI using the Messages API.
-
-        Azure AI serverless endpoints for Claude use the Anthropic Messages format:
-        POST {endpoint}/v1/messages
-        Uses httpx directly (transitive dep of openai, no new packages needed).
+        All models (grok-4, DeepSeek-R1-0528, claude-opus-4-6, Mistral-Large-3) share
+        a single AsyncOpenAI client. The Foundry endpoint exposes an OpenAI-compatible
+        chat completions API for all models — including Claude (the endpoint translates
+        to Anthropic Messages format internally).
         """
-        import httpx
+        if not self._azure_ai_client:
+            raise RuntimeError("Azure AI Foundry client not initialized — set AZURE_AI_ENDPOINT and AZURE_AI_KEY")
 
-        info = self._azure_ai_clients[model_type]
-        endpoint = info["endpoint"].rstrip("/")
-        key = info["key"]
-        model_name = info["model"]
-
-        request_body = {
-            "model": model_name,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "messages": [{"role": "user", "content": prompt}],
-        }
+        model_name = self.AZURE_AI_MODELS[model_type]
+        messages = []
         if system_prompt:
-            request_body["system"] = system_prompt
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
 
-        async with httpx.AsyncClient(timeout=300.0) as client:
-            response = await client.post(
-                f"{endpoint}/v1/messages",
-                headers={
-                    "Content-Type": "application/json",
-                    "api-key": key,                  # Azure AI standard auth header
-                    "anthropic-version": "2023-06-01",
-                },
-                json=request_body,
-            )
-            response.raise_for_status()
-            data = response.json()
-
-        # Anthropic Messages API response format
-        content = data.get("content", [])
-        if content and isinstance(content, list):
-            text_blocks = [block["text"] for block in content if block.get("type") == "text"]
-            return "\n".join(text_blocks) if text_blocks else ""
-
-        raise RuntimeError(f"Unexpected Anthropic response format: {data}")
+        response = await self._azure_ai_client.chat.completions.create(
+            model=model_name,
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+        return response.choices[0].message.content
 
     async def _generate_azure_openai(
         self, model_type: ModelType, prompt: str, system_prompt: str,
@@ -980,36 +867,28 @@ class MultiModelLLM:
 
         tasks = {}
 
-        # Primary: Azure AI Model Catalog (non-OpenAI)
+        # Primary: Azure AI Foundry — all 4 models share one endpoint
         if self._azure_ai_available:
-            if ModelType.GROK_4 in self._azure_ai_clients:
-                tasks["grok_4"] = self.generate(
-                    ModelType.GROK_4, full_prompt,
-                    get_agent_prompt("explorer", include_master=True),
-                    max_tokens=32_768,
-                    temperature=0.4,
-                )
-            if ModelType.DEEPSEEK_R1_0528 in self._azure_ai_clients:
-                tasks["deepseek_r1_0528"] = self.generate(
-                    ModelType.DEEPSEEK_R1_0528, full_prompt,
-                    get_agent_prompt("reasoner", include_master=True),
-                    max_tokens=65_536,
-                    temperature=0.2,
-                )
-            if ModelType.CLAUDE_OPUS_AZURE_AI in self._azure_ai_clients:
-                tasks["claude_opus_azure_ai"] = self.generate(
-                    ModelType.CLAUDE_OPUS_AZURE_AI, full_prompt,
-                    get_agent_prompt("synthesizer", include_master=True),
-                    max_tokens=32_768,
-                    temperature=0.3,
-                )
-            if ModelType.MISTRAL_LARGE_3 in self._azure_ai_clients:
-                tasks["mistral_large_3"] = self.generate(
-                    ModelType.MISTRAL_LARGE_3, full_prompt,
-                    get_agent_prompt("critic", include_master=True),
-                    max_tokens=32_768,
-                    temperature=0.3,
-                )
+            tasks["grok_4"] = self.generate(
+                ModelType.GROK_4, full_prompt,
+                get_agent_prompt("explorer", include_master=True),
+                max_tokens=32_768, temperature=0.4,
+            )
+            tasks["deepseek_r1_0528"] = self.generate(
+                ModelType.DEEPSEEK_R1_0528, full_prompt,
+                get_agent_prompt("reasoner", include_master=True),
+                max_tokens=65_536, temperature=0.2,
+            )
+            tasks["claude_opus_azure_ai"] = self.generate(
+                ModelType.CLAUDE_OPUS_AZURE_AI, full_prompt,
+                get_agent_prompt("synthesizer", include_master=True),
+                max_tokens=32_768, temperature=0.3,
+            )
+            tasks["mistral_large_3"] = self.generate(
+                ModelType.MISTRAL_LARGE_3, full_prompt,
+                get_agent_prompt("critic", include_master=True),
+                max_tokens=32_768, temperature=0.3,
+            )
 
         # Fallback: Bedrock if no Azure AI models available
         if not tasks and self._bedrock_client:
@@ -1057,42 +936,37 @@ class MultiModelLLM:
         shard_results = {}
 
         if self._azure_ai_available:
-            azure_ai_tasks = {}
-            if ModelType.GROK_4 in self._azure_ai_clients:
-                azure_ai_tasks["grok_4"] = self._generate_azure_ai(
+            azure_ai_tasks = {
+                "grok_4": self._generate_azure_ai(
                     ModelType.GROK_4, full_prompt,
                     get_agent_prompt("explorer", include_master=True),
                     max_tokens=32_768, temperature=0.4,
-                )
-            if ModelType.DEEPSEEK_R1_0528 in self._azure_ai_clients:
-                azure_ai_tasks["deepseek_r1_0528"] = self._generate_azure_ai(
+                ),
+                "deepseek_r1_0528": self._generate_azure_ai(
                     ModelType.DEEPSEEK_R1_0528, full_prompt,
                     get_agent_prompt("reasoner", include_master=True),
                     max_tokens=65_536, temperature=0.2,
-                )
-            if ModelType.CLAUDE_OPUS_AZURE_AI in self._azure_ai_clients:
-                azure_ai_tasks["claude_opus_azure_ai"] = self._generate_azure_ai(
+                ),
+                "claude_opus_azure_ai": self._generate_azure_ai(
                     ModelType.CLAUDE_OPUS_AZURE_AI, full_prompt,
                     get_agent_prompt("synthesizer", include_master=True),
                     max_tokens=32_768, temperature=0.3,
-                )
-            if ModelType.MISTRAL_LARGE_3 in self._azure_ai_clients:
-                azure_ai_tasks["mistral_large_3"] = self._generate_azure_ai(
+                ),
+                "mistral_large_3": self._generate_azure_ai(
                     ModelType.MISTRAL_LARGE_3, full_prompt,
                     get_agent_prompt("critic", include_master=True),
                     max_tokens=32_768, temperature=0.3,
-                )
-
-            if azure_ai_tasks:
-                results = await asyncio.gather(
-                    *[asyncio.create_task(c) for c in azure_ai_tasks.values()],
-                    return_exceptions=True,
-                )
-                for (name, _), result in zip(azure_ai_tasks.items(), results):
-                    if isinstance(result, Exception):
-                        logger.warning(f"Azure AI MCP model {name} failed: {result}")
-                    else:
-                        shard_results[name] = result
+                ),
+            }
+            results = await asyncio.gather(
+                *[asyncio.create_task(c) for c in azure_ai_tasks.values()],
+                return_exceptions=True,
+            )
+            for (name, _), result in zip(azure_ai_tasks.items(), results):
+                if isinstance(result, Exception):
+                    logger.warning(f"Azure AI MCP model {name} failed: {result}")
+                else:
+                    shard_results[name] = result
 
         # Phase 1b: Bedrock fallback if no Azure AI results
         if not shard_results and self._bedrock_client:
@@ -1111,7 +985,7 @@ class MultiModelLLM:
             )
 
         # Phase 2: Synthesis via Claude Opus 4.6 (200K context) or Bedrock Claude fallback
-        if ModelType.CLAUDE_OPUS_AZURE_AI in self._azure_ai_clients:
+        if self._azure_ai_available:
             # Synthesize via Claude Opus 4.6 (Anthropic Messages API)
             shard_summaries = "\n\n".join(
                 f"=== {name} ===\n{text}" for name, text in shard_results.items()
@@ -1536,10 +1410,10 @@ class DiscoveryOrchestrator(LoggerMixin):
         # e.g. 10000 agents = 2500 per model
         # Priority: Azure AI → Bedrock fallback
         if self.llm._azure_ai_available:
-            models = [m for m in [
+            models = [
                 ModelType.GROK_4, ModelType.DEEPSEEK_R1_0528,
                 ModelType.CLAUDE_OPUS_AZURE_AI, ModelType.MISTRAL_LARGE_3,
-            ] if m in self.llm._azure_ai_clients]
+            ]
         else:
             models = []
 
