@@ -75,10 +75,12 @@ class Settings(BaseSettings):
     AZURE_AI_REASONER_KEY: SecretStr | None = None
     AZURE_AI_REASONER_MODEL: str = "DeepSeek-R1-0528"
     #
-    # Synthesizer: Kimi-K2.5 — large context, excellent multi-source integration
+    # Synthesizer: claude-opus-4-6 — Anthropic flagship, 200K context, best synthesis
+    # NOTE: Uses Anthropic Messages API (not Chat completion), handled separately
     AZURE_AI_SYNTHESIZER_ENDPOINT: str = ""
     AZURE_AI_SYNTHESIZER_KEY: SecretStr | None = None
-    AZURE_AI_SYNTHESIZER_MODEL: str = "Kimi-K2.5"
+    AZURE_AI_SYNTHESIZER_MODEL: str = "claude-opus-4-6"
+    AZURE_AI_SYNTHESIZER_API_FORMAT: str = "anthropic"  # anthropic | openai
     #
     # Critic: Mistral-Large-3 — strong analytical, cost-efficient
     AZURE_AI_CRITIC_ENDPOINT: str = ""
@@ -113,7 +115,7 @@ class Settings(BaseSettings):
     MCP_MAX_CONTEXT_PER_MODEL: int = 128_000  # max tokens per model context window
     MCP_CONTEXT_OVERLAP: int = 2_000  # overlap tokens between model context shards
     MCP_PARALLEL_SHARDS: int = 4  # number of parallel context shards (one per model)
-    MCP_SYNTHESIS_MODEL: str = "kimi-k2.5"  # Kimi K2.5 via Azure AI for final synthesis (large context)
+    MCP_SYNTHESIS_MODEL: str = "claude-opus-4-6"  # Claude Opus via Azure AI for final synthesis (200K context)
     MCP_CHUNK_STRATEGY: str = "semantic"  # semantic | fixed | sliding_window
 
     # Search APIs

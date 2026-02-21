@@ -3,10 +3,10 @@ Discovery Orchestrator
 
 Four-model hybrid pipeline using Azure AI Model Catalog (non-OpenAI) serverless deployments.
 Models maxed out on token capacity:
-  grok-4           (Azure AI)  — xAI flagship, broad deep reasoning & exploration
-  DeepSeek-R1-0528 (Azure AI)  — State-of-the-art reasoning, formal chain-of-thought
-  Kimi-K2.5        (Azure AI)  — Large context, multi-source integration & synthesis
-  Mistral-Large-3  (Azure AI)  — Strong analytical capabilities, critical analysis
+  grok-4           (Azure AI, Chat completion)  — xAI flagship, broad deep reasoning & exploration
+  DeepSeek-R1-0528 (Azure AI, Chat completion)  — State-of-the-art reasoning, formal chain-of-thought
+  claude-opus-4-6  (Azure AI, Anthropic Messages) — Anthropic flagship, 200K context synthesis
+  Mistral-Large-3  (Azure AI, Chat completion)  — Strong analytical capabilities, critical analysis
 
 Fallback: AWS Bedrock (DeepSeek R1 + Claude Opus 4.6) if Azure AI unavailable.
 
@@ -113,10 +113,10 @@ class AgentRole(str, Enum):
 class ModelType(str, Enum):
     """LLM model types available for parallel discovery."""
     # Azure AI Model Catalog — primary (non-OpenAI serverless deployments)
-    GROK_4 = "grok_4"                      # Explorer: xAI flagship
-    DEEPSEEK_R1_0528 = "deepseek_r1_0528"  # Reasoner: latest DeepSeek reasoning
-    KIMI_K25 = "kimi_k25"                  # Synthesizer: Moonshot AI, large context
-    MISTRAL_LARGE_3 = "mistral_large_3"    # Critic: Mistral flagship
+    GROK_4 = "grok_4"                              # Explorer: xAI flagship
+    DEEPSEEK_R1_0528 = "deepseek_r1_0528"          # Reasoner: latest DeepSeek reasoning
+    CLAUDE_OPUS_AZURE_AI = "claude_opus_azure_ai"  # Synthesizer: Anthropic flagship, 200K context
+    MISTRAL_LARGE_3 = "mistral_large_3"            # Critic: Mistral flagship
     # Bedrock models — fallback
     DEEPSEEK_R1 = "deepseek_r1"
     CLAUDE_OPUS = "claude_opus"
@@ -561,11 +561,11 @@ class MultiModelLLM:
     """
     Four-model hybrid pipeline — Azure AI Model Catalog (non-OpenAI) primary.
 
-    Azure AI (primary — serverless deployments via OpenAI-compatible API):
-    - grok-4           — Explorer: xAI flagship, broad deep reasoning
-    - DeepSeek-R1-0528 — Reasoner: state-of-the-art reasoning chains
-    - Kimi-K2.5        — Synthesizer: large context, multi-source integration
-    - Mistral-Large-3  — Critic: strong analytical capabilities
+    Azure AI (primary — serverless deployments):
+    - grok-4           — Explorer: xAI flagship, broad deep reasoning (Chat completion)
+    - DeepSeek-R1-0528 — Reasoner: state-of-the-art reasoning chains (Chat completion)
+    - claude-opus-4-6  — Synthesizer: Anthropic flagship, 200K context (Anthropic Messages API)
+    - Mistral-Large-3  — Critic: strong analytical capabilities (Chat completion)
 
     Bedrock (fallback):
     - DeepSeek R1      (us.deepseek.r1-v1:0)            — 64K out, causal reasoning
@@ -588,31 +588,35 @@ class MultiModelLLM:
         ModelType.O1: settings.AZURE_OPENAI_DEPLOYMENT_O1,
     }
 
-    # Azure AI Model Catalog — role → (model_type, endpoint_setting, key_setting, model_name_setting)
+    # Azure AI Model Catalog — role → config mapping
     AZURE_AI_MODELS = {
         ModelType.GROK_4: {
             "role": "explorer",
             "endpoint": "AZURE_AI_EXPLORER_ENDPOINT",
             "key": "azure_ai_explorer_key_value",
             "model": "AZURE_AI_EXPLORER_MODEL",
+            "api_format": "openai",
         },
         ModelType.DEEPSEEK_R1_0528: {
             "role": "reasoner",
             "endpoint": "AZURE_AI_REASONER_ENDPOINT",
             "key": "azure_ai_reasoner_key_value",
             "model": "AZURE_AI_REASONER_MODEL",
+            "api_format": "openai",
         },
-        ModelType.KIMI_K25: {
+        ModelType.CLAUDE_OPUS_AZURE_AI: {
             "role": "synthesizer",
             "endpoint": "AZURE_AI_SYNTHESIZER_ENDPOINT",
             "key": "azure_ai_synthesizer_key_value",
             "model": "AZURE_AI_SYNTHESIZER_MODEL",
+            "api_format": "anthropic",  # Anthropic Messages API, not Chat completion
         },
         ModelType.MISTRAL_LARGE_3: {
             "role": "critic",
             "endpoint": "AZURE_AI_CRITIC_ENDPOINT",
             "key": "azure_ai_critic_key_value",
             "model": "AZURE_AI_CRITIC_MODEL",
+            "api_format": "openai",
         },
     }
 
@@ -635,21 +639,32 @@ class MultiModelLLM:
             endpoint = getattr(settings, cfg["endpoint"], "")
             key = getattr(settings, cfg["key"], None)
             model_name = getattr(settings, cfg["model"], "")
+            api_format = cfg.get("api_format", "openai")
             if endpoint and key:
                 try:
-                    from openai import AsyncOpenAI
-                    # Azure AI serverless endpoints expose OpenAI-compatible API
-                    client = AsyncOpenAI(
-                        base_url=f"{endpoint.rstrip('/')}/v1",
-                        api_key=key,
-                    )
-                    self._azure_ai_clients[model_type] = {
-                        "client": client,
-                        "model": model_name,
-                        "endpoint": endpoint,
-                    }
+                    if api_format == "anthropic":
+                        # Anthropic Messages API — use httpx directly (no OpenAI client)
+                        self._azure_ai_clients[model_type] = {
+                            "client": None,  # Will use httpx
+                            "model": model_name,
+                            "endpoint": endpoint,
+                            "key": key,
+                            "api_format": "anthropic",
+                        }
+                    else:
+                        from openai import AsyncOpenAI
+                        client = AsyncOpenAI(
+                            base_url=f"{endpoint.rstrip('/')}/v1",
+                            api_key=key,
+                        )
+                        self._azure_ai_clients[model_type] = {
+                            "client": client,
+                            "model": model_name,
+                            "endpoint": endpoint,
+                            "api_format": "openai",
+                        }
                     azure_ai_count += 1
-                    logger.info(f"Azure AI client initialized: {model_name} ({cfg['role']}) → {endpoint}")
+                    logger.info(f"Azure AI client initialized: {model_name} ({cfg['role']}, {api_format}) → {endpoint}")
                 except Exception as e:
                     logger.error(f"Azure AI client init FAILED for {model_name}: {e}")
             else:
@@ -753,11 +768,18 @@ class MultiModelLLM:
         self, model_type: ModelType, prompt: str, system_prompt: str,
         max_tokens: int, temperature: float,
     ) -> str:
-        """Invoke a model via Azure AI Model Catalog (OpenAI-compatible serverless API)."""
+        """Invoke a model via Azure AI Model Catalog serverless API."""
         if model_type not in self._azure_ai_clients:
             raise RuntimeError(f"Azure AI client not initialized for {model_type.value}")
 
         info = self._azure_ai_clients[model_type]
+        api_format = info.get("api_format", "openai")
+
+        # Route Anthropic models (claude-*) to Messages API handler
+        if api_format == "anthropic":
+            return await self._generate_azure_ai_anthropic(model_type, prompt, system_prompt, max_tokens, temperature)
+
+        # OpenAI-compatible Chat Completion API
         client = info["client"]
         model_name = info["model"]
 
@@ -787,6 +809,53 @@ class MultiModelLLM:
             )
 
         return response.choices[0].message.content
+
+    async def _generate_azure_ai_anthropic(
+        self, model_type: ModelType, prompt: str, system_prompt: str,
+        max_tokens: int, temperature: float,
+    ) -> str:
+        """Invoke an Anthropic model (claude-*) via Azure AI using the Messages API.
+
+        Azure AI serverless endpoints for Claude use the Anthropic Messages format:
+        POST {endpoint}/v1/messages
+        Uses httpx directly (transitive dep of openai, no new packages needed).
+        """
+        import httpx
+
+        info = self._azure_ai_clients[model_type]
+        endpoint = info["endpoint"].rstrip("/")
+        key = info["key"]
+        model_name = info["model"]
+
+        request_body = {
+            "model": model_name,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        if system_prompt:
+            request_body["system"] = system_prompt
+
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            response = await client.post(
+                f"{endpoint}/v1/messages",
+                headers={
+                    "Content-Type": "application/json",
+                    "api-key": key,                  # Azure AI standard auth header
+                    "anthropic-version": "2023-06-01",
+                },
+                json=request_body,
+            )
+            response.raise_for_status()
+            data = response.json()
+
+        # Anthropic Messages API response format
+        content = data.get("content", [])
+        if content and isinstance(content, list):
+            text_blocks = [block["text"] for block in content if block.get("type") == "text"]
+            return "\n".join(text_blocks) if text_blocks else ""
+
+        raise RuntimeError(f"Unexpected Anthropic response format: {data}")
 
     async def _generate_azure_openai(
         self, model_type: ModelType, prompt: str, system_prompt: str,
@@ -870,7 +939,7 @@ class MultiModelLLM:
         # Priority: Azure AI → Bedrock → Azure OpenAI legacy
         for model_type in [
             ModelType.GROK_4,
-            ModelType.KIMI_K25,
+            ModelType.CLAUDE_OPUS_AZURE_AI,
             ModelType.DEEPSEEK_R1_0528,
             ModelType.MISTRAL_LARGE_3,
             ModelType.CLAUDE_OPUS,
@@ -927,9 +996,9 @@ class MultiModelLLM:
                     max_tokens=65_536,
                     temperature=0.2,
                 )
-            if ModelType.KIMI_K25 in self._azure_ai_clients:
-                tasks["kimi_k25"] = self.generate(
-                    ModelType.KIMI_K25, full_prompt,
+            if ModelType.CLAUDE_OPUS_AZURE_AI in self._azure_ai_clients:
+                tasks["claude_opus_azure_ai"] = self.generate(
+                    ModelType.CLAUDE_OPUS_AZURE_AI, full_prompt,
                     get_agent_prompt("synthesizer", include_master=True),
                     max_tokens=32_768,
                     temperature=0.3,
@@ -1001,9 +1070,9 @@ class MultiModelLLM:
                     get_agent_prompt("reasoner", include_master=True),
                     max_tokens=65_536, temperature=0.2,
                 )
-            if ModelType.KIMI_K25 in self._azure_ai_clients:
-                azure_ai_tasks["kimi_k25"] = self._generate_azure_ai(
-                    ModelType.KIMI_K25, full_prompt,
+            if ModelType.CLAUDE_OPUS_AZURE_AI in self._azure_ai_clients:
+                azure_ai_tasks["claude_opus_azure_ai"] = self._generate_azure_ai(
+                    ModelType.CLAUDE_OPUS_AZURE_AI, full_prompt,
                     get_agent_prompt("synthesizer", include_master=True),
                     max_tokens=32_768, temperature=0.3,
                 )
@@ -1041,9 +1110,9 @@ class MultiModelLLM:
                 system_prompts=system_prompts,
             )
 
-        # Phase 2: Synthesis via Kimi K2.5 (large context) or Claude Opus fallback
-        if ModelType.KIMI_K25 in self._azure_ai_clients:
-            # Synthesize via Kimi K2.5
+        # Phase 2: Synthesis via Claude Opus 4.6 (200K context) or Bedrock Claude fallback
+        if ModelType.CLAUDE_OPUS_AZURE_AI in self._azure_ai_clients:
+            # Synthesize via Claude Opus 4.6 (Anthropic Messages API)
             shard_summaries = "\n\n".join(
                 f"=== {name} ===\n{text}" for name, text in shard_results.items()
                 if not str(text).startswith("[MCP Shard Error]") and not str(text).startswith("Error:")
@@ -1059,13 +1128,13 @@ Integrate all findings, resolve contradictions, identify cross-model connections
 
             try:
                 synthesized = await self._generate_azure_ai(
-                    ModelType.KIMI_K25, synthesis_prompt,
+                    ModelType.CLAUDE_OPUS_AZURE_AI, synthesis_prompt,
                     "You are a synthesis agent integrating parallel model outputs into unified biomedical discovery.",
                     max_tokens=32_768, temperature=0.3,
                 )
                 shard_results["mcp_synthesis"] = synthesized
             except Exception as e:
-                logger.warning(f"Kimi K2.5 synthesis failed: {e}")
+                logger.warning(f"Claude Opus synthesis failed: {e}")
         elif self._bedrock_client:
             synthesized = await self._mcp.synthesize_shards(
                 shard_results, prompt,
@@ -1253,7 +1322,7 @@ class DiscoveryOrchestrator(LoggerMixin):
     Main orchestrator for parallel discovery agents.
 
     Manages 100-10,000 agents across 4 top-tier non-OpenAI models via Azure AI:
-    grok-4 (explorer), DeepSeek-R1-0528 (reasoner), Kimi-K2.5 (synthesizer), Mistral-Large-3 (critic)
+    grok-4 (explorer), DeepSeek-R1-0528 (reasoner), claude-opus-4-6 (synthesizer), Mistral-Large-3 (critic)
     Fallback: DeepSeek R1 + Claude Opus 4.6 via AWS Bedrock.
     """
 
@@ -1287,7 +1356,7 @@ class DiscoveryOrchestrator(LoggerMixin):
         self._rag_service = None
 
     async def initialize(self) -> None:
-        self.logger.info("Initializing discovery orchestrator (4-model Azure AI: grok-4 + DeepSeek-R1-0528 + Kimi-K2.5 + Mistral-Large-3)")
+        self.logger.info("Initializing discovery orchestrator (4-model Azure AI: grok-4 + DeepSeek-R1-0528 + claude-opus-4-6 + Mistral-Large-3)")
         await self.llm.initialize()
 
         try:
@@ -1340,7 +1409,7 @@ class DiscoveryOrchestrator(LoggerMixin):
             self.logger.warning("Orchestrator already running")
             return
 
-        self.logger.info(f"Starting discovery for {disease} with {self.max_agents} agents across Azure AI models (grok-4, DeepSeek-R1-0528, Kimi-K2.5, Mistral-Large-3)")
+        self.logger.info(f"Starting discovery for {disease} with {self.max_agents} agents across Azure AI models (grok-4, DeepSeek-R1-0528, claude-opus-4-6, Mistral-Large-3)")
         self.state = OrchestratorState.RUNNING
         self._start_time = time.time()
         self._stop_requested = False
@@ -1469,7 +1538,7 @@ class DiscoveryOrchestrator(LoggerMixin):
         if self.llm._azure_ai_available:
             models = [m for m in [
                 ModelType.GROK_4, ModelType.DEEPSEEK_R1_0528,
-                ModelType.KIMI_K25, ModelType.MISTRAL_LARGE_3,
+                ModelType.CLAUDE_OPUS_AZURE_AI, ModelType.MISTRAL_LARGE_3,
             ] if m in self.llm._azure_ai_clients]
         else:
             models = []

@@ -214,7 +214,7 @@ async def list_providers():
             {
                 "id": "azure_ai",
                 "name": "Azure AI Model Catalog",
-                "description": "grok-4, DeepSeek-R1-0528, Kimi-K2.5, Mistral-Large-3 (non-OpenAI)",
+                "description": "grok-4, DeepSeek-R1-0528, claude-opus-4-6, Mistral-Large-3 (non-OpenAI)",
                 "default": True,
             },
             {
