@@ -430,7 +430,7 @@ class AzureOpenAILLMClient(BaseLLMClient):
         messages.append({"role": "user", "content": prompt})
 
         response = await client.chat.completions.create(
-            model=settings.AZURE_OPENAI_DEPLOYMENT_GPT4O,
+            model=settings.AZURE_OPENAI_DEPLOYMENT_O3_DEEP_RESEARCH,
             messages=messages,
             max_tokens=max_tokens,
             temperature=temperature,
@@ -440,7 +440,7 @@ class AzureOpenAILLMClient(BaseLLMClient):
 
     @property
     def model_name(self) -> str:
-        return f"azure/{settings.AZURE_OPENAI_DEPLOYMENT_GPT4O}"
+        return f"azure/{settings.AZURE_OPENAI_DEPLOYMENT_O3_DEEP_RESEARCH}"
 
 
 def get_llm_client(provider: LLMProvider = None) -> BaseLLMClient:

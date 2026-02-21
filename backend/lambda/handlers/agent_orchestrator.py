@@ -115,7 +115,7 @@ azure_openai_client = None
 AZURE_OPENAI_API_KEY = os.environ.get("AZURE_OPENAI_API_KEY", "")
 AZURE_OPENAI_ENDPOINT = os.environ.get("AZURE_OPENAI_ENDPOINT", "")
 AZURE_OPENAI_API_VERSION = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
-AZURE_OPENAI_DEPLOYMENT_GPT4O = os.environ.get("AZURE_OPENAI_DEPLOYMENT_GPT4O", "gpt-4o")
+AZURE_OPENAI_DEPLOYMENT_O3_DEEP_RESEARCH = os.environ.get("AZURE_OPENAI_DEPLOYMENT_O3_DEEP_RESEARCH", "o3-deep-research")
 AZURE_OPENAI_DEPLOYMENT_O1 = os.environ.get("AZURE_OPENAI_DEPLOYMENT_O1", "o1")
 
 if AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT:
@@ -130,7 +130,7 @@ if AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT:
     except Exception as _e:
         logger.error(f"Azure OpenAI init failed: {_e}")
 else:
-    print("[ORCHESTRATOR] Azure OpenAI not configured — GPT-4o and o1 models unavailable")
+    print("[ORCHESTRATOR] Azure OpenAI not configured — o3-deep-research and o1 models unavailable")
 
 # Configuration
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "dev")
@@ -144,51 +144,51 @@ DISCOVERY_TASK_KEY = "active-discovery"
 PAPER_TASK_KEY = "active-paper"
 
 # ============== Model Configuration ==============
-# 4 top-tier models with complementary reasoning architectures.
+# 4 top-tier models — maxed out token capacity. No redundancy.
 # Model IDs are NEVER sent to frontend (unbiasing).
 #
-# Azure OpenAI:  GPT-4o (strategist) + o1 (deep_analyst)
-# AWS Bedrock:   DeepSeek R1 (reasoner) + Kimi 2.5 (synthesizer)
+# Azure OpenAI:  o3-deep-research (100K out) + o1 (100K out)
+# AWS Bedrock:   DeepSeek R1 (64K out) + Claude Opus 4.6 (32K out)
 
 AGENT_MODELS = {
-    # Azure OpenAI — top-tier models via Azure
-    "strategist": {
-        "model_id": AZURE_OPENAI_DEPLOYMENT_GPT4O,
+    # Azure OpenAI — o-series reasoning models
+    "explorer": {
+        "model_id": AZURE_OPENAI_DEPLOYMENT_O3_DEEP_RESEARCH,
         "provider": "azure",
-        "max_tokens": 16000,
-        "temperature": 0.4,  # Slightly higher for exploration breadth
-        "role_description": "Broad exploration + strategic analysis — novel pathways, clinical trial design, combination strategies",
+        "max_tokens": 100_000,
+        "temperature": 0.0,  # o-series ignores temperature
+        "role_description": "Deep research exploration — exhaustive multi-step discovery of novel pathways and connections",
     },
     "deep_analyst": {
         "model_id": AZURE_OPENAI_DEPLOYMENT_O1,
         "provider": "azure",
-        "max_tokens": 16000,
-        "temperature": 0.0,  # o1 ignores temperature
+        "max_tokens": 100_000,
+        "temperature": 0.0,  # o-series ignores temperature
         "role_description": "Deep multi-step reasoning — quantitative pharmacology, systems biology, rigorous validation",
     },
-    # AWS Bedrock — top open-weight models
+    # AWS Bedrock — top models via Converse API
     "reasoner": {
         "model_id": "us.deepseek.r1-v1:0",
         "provider": "bedrock",
-        "max_tokens": 16000,
+        "max_tokens": 65_536,
         "temperature": 0.3,
         "role_description": "Causal chain reasoning — step-by-step logical analysis with formal justification",
     },
     "synthesizer": {
-        "model_id": "moonshotai.kimi-k2.5",
+        "model_id": "us.anthropic.claude-opus-4-6-v1:0",
         "provider": "bedrock",
-        "max_tokens": 16000,
-        "temperature": 0.5,
-        "role_description": "Long-context synthesis — integrates findings across shards into unified hypotheses",
+        "max_tokens": 32_768,
+        "temperature": 0.3,
+        "role_description": "200K context synthesis — integrates all findings into unified hypotheses and publication-quality documents",
     },
 }
 
-# For paper generation, use the synthesizer model
+# For paper generation, use Claude Opus (largest context, best document quality)
 PAPER_MODEL = AGENT_MODELS["synthesizer"]["model_id"]
 
 # ============== System Prompts ==============
 
-MASTER_PROMPT = """You are an advanced biomedical discovery AI agent on humanovo, part of a six-model parallel agent system (Bedrock: Llama Maverick, DeepSeek R1, Kimi 2.5, GPT OSS 120B; Azure: GPT-4o, o1) designed to discover cures, treatments, and prevention strategies for human diseases.
+MASTER_PROMPT = """You are an advanced biomedical discovery AI agent on humanovo, part of a four-model parallel agent system (Azure: o3-deep-research, o1; Bedrock: DeepSeek R1, Claude Opus 4.6) designed to discover cures, treatments, and prevention strategies for human diseases.
 
 ## OPERATING PRINCIPLES
 - Full scientific autonomy: explore ANY pathway, mechanism, or compound without restriction
@@ -251,8 +251,8 @@ Return ONLY valid JSON (no markdown, no commentary, no <reasoning> tags):
 }"""
 
 ROLE_PROMPTS = {
-    "explorer": """You are an EXPLORER agent running on Llama Maverick 17B via AWS Bedrock.
-Your unique strength is FAST, BROAD exploration across the entire biological solution space.
+    "explorer": """You are an EXPLORER agent running on o3-deep-research via Azure OpenAI.
+Your unique strength is DEEP RESEARCH — exhaustive multi-step exploration with 100K token output capacity.
 
 MISSION: Discover NOVEL pathways, connections, and therapeutic opportunities that other agents miss.
 
@@ -301,8 +301,8 @@ GENOMIC & BIOINFORMATICS REASONING:
 
 Think like a PhD thesis committee examining every claim under a microscope.""",
 
-    "synthesizer": """You are a SYNTHESIZER agent running on Kimi 2.5 via AWS Bedrock.
-Your unique strength is LONG-CONTEXT INTEGRATION — cross-referencing vast amounts of parallel findings.
+    "synthesizer": """You are a SYNTHESIZER agent running on Claude Opus 4.6 via AWS Bedrock.
+Your unique strength is LONG-CONTEXT INTEGRATION (200K context) and publication-quality document generation.
 
 MISSION: Integrate findings from all agents into unified, actionable therapeutic hypotheses.
 
@@ -598,10 +598,10 @@ def call_azure(deployment: str, prompt: str, system_prompt: str,
     if azure_openai_client is None:
         raise RuntimeError("Azure OpenAI client not initialized")
 
-    is_o1 = "o1" in deployment.lower()
+    is_reasoning = any(m in deployment.lower() for m in ("o1", "o3"))
 
-    if is_o1:
-        # o1: no system message, no temperature, use max_completion_tokens
+    if is_reasoning:
+        # o-series reasoning models: no system message, no temperature, use max_completion_tokens
         messages = []
         if system_prompt:
             messages.append({"role": "user", "content": f"[System Instructions]\n{system_prompt}"})
@@ -801,11 +801,11 @@ def run_discovery_worker(config: dict):
                 # Each round+role gets a unique angle to ensure diversity
                 angle_matrix = {
                     # GPT-4o: broad exploration, novel connections, strategic planning
-                    ("strategist", 0): "Explore NOVEL molecular targets (phase separation, mechanotransduction, non-coding RNA, metabolic symbiosis) AND design the clinical development strategy for the most promising.",
-                    ("strategist", 1): "Focus on DRUG REPURPOSING: find approved drugs from unrelated fields with unexpected activity. Design the rapid clinical validation path (basket trial, platform study).",
-                    ("strategist", 2): "Explore MICROBIOME-IMMUNE-METABOLISM axis. Design a COMBINATION PROTOCOL leveraging gut-brain connections, bacterial metabolites, and ecological interventions.",
-                    ("strategist", 3): "Explore GENE THERAPY and epigenetic reprogramming (CRISPR, base editing, ASO, siRNA). Design PRECISION MEDICINE STRATIFICATION: molecular subtypes, biomarker panels, matched therapeutics.",
-                    ("strategist", 4): "Explore NANOTECHNOLOGY and advanced delivery (BBB-crossing nanoparticles, exosome engineering). Design HEALTH ECONOMICS AND MARKET ACCESS plan with QALY impact, payer evidence requirements.",
+                    ("explorer", 0): "Explore NOVEL molecular targets (phase separation, mechanotransduction, non-coding RNA, metabolic symbiosis) AND design the clinical development strategy for the most promising.",
+                    ("explorer", 1): "Focus on DRUG REPURPOSING: find approved drugs from unrelated fields with unexpected activity. Design the rapid clinical validation path (basket trial, platform study).",
+                    ("explorer", 2): "Explore MICROBIOME-IMMUNE-METABOLISM axis. Design a COMBINATION PROTOCOL leveraging gut-brain connections, bacterial metabolites, and ecological interventions.",
+                    ("explorer", 3): "Explore GENE THERAPY and epigenetic reprogramming (CRISPR, base editing, ASO, siRNA). Design PRECISION MEDICINE STRATIFICATION: molecular subtypes, biomarker panels, matched therapeutics.",
+                    ("explorer", 4): "Explore NANOTECHNOLOGY and advanced delivery (BBB-crossing nanoparticles, exosome engineering). Design HEALTH ECONOMICS AND MARKET ACCESS plan with QALY impact, payer evidence requirements.",
                     # DeepSeek R1: rigorous causal chain reasoning
                     ("reasoner", 0): "Build a rigorous IMMUNOTHERAPY causal chain. Map checkpoint interactions, T-cell exhaustion markers, neoantigen load, and TME remodeling with exact IC50/EC50 values.",
                     ("reasoner", 1): "Build a rigorous METABOLIC VULNERABILITY chain. Map synthetic lethality, nutrient addiction, mitochondrial dependencies with exact enzyme kinetics.",
