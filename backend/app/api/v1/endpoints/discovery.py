@@ -276,10 +276,28 @@ async def list_discovery_types():
 async def discovery_health():
     """Check health of the discovery service."""
     try:
+        from app.core.config import settings
         service = await get_service()
+
+        # Build model list — show all 4 when Azure AI Foundry is configured
+        if settings.AZURE_AI_ENDPOINT and settings.azure_ai_key_value:
+            models_active = [
+                settings.AZURE_AI_EXPLORER_MODEL,
+                settings.AZURE_AI_REASONER_MODEL,
+                settings.AZURE_AI_SYNTHESIZER_MODEL,
+                settings.AZURE_AI_CRITIC_MODEL,
+            ]
+            llm_info = {
+                "provider": "azure_ai_foundry",
+                "endpoint": settings.AZURE_AI_ENDPOINT,
+                "models": models_active,
+            }
+        else:
+            llm_info = {"provider": service._llm.model_name}
+
         return {
             "status": "healthy",
-            "llm_provider": service._llm.model_name,
+            "llm": llm_info,
             "graph_store": "connected" if service._graph_store else "not connected",
             "rag_service": "connected" if service._rag_service else "not connected",
         }

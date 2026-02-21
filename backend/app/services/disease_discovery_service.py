@@ -496,7 +496,13 @@ class AzureAILLMClient(BaseLLMClient):
 
     @property
     def model_name(self) -> str:
-        return f"azure-ai/{settings.AZURE_AI_SYNTHESIZER_MODEL}"
+        models = ", ".join([
+            settings.AZURE_AI_EXPLORER_MODEL,
+            settings.AZURE_AI_REASONER_MODEL,
+            settings.AZURE_AI_SYNTHESIZER_MODEL,
+            settings.AZURE_AI_CRITIC_MODEL,
+        ])
+        return f"azure-ai-foundry/[{models}]"
 
 
 def get_llm_client(provider: LLMProvider = None) -> BaseLLMClient:
