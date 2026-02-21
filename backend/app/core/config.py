@@ -53,13 +53,37 @@ class Settings(BaseSettings):
     CHROMA_PERSIST_DIRECTORY: str = "./data/chroma"
     VECTOR_EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
 
-    # Azure OpenAI — o3-deep-research and o1 for the 4-model hybrid pipeline
+    # Azure OpenAI — legacy config (kept for backward compatibility)
     AZURE_OPENAI_API_KEY: SecretStr | None = None
     AZURE_OPENAI_ENDPOINT: str = ""  # e.g. https://<resource>.openai.azure.com
     AZURE_OPENAI_API_VERSION: str = "2024-12-01-preview"
-    AZURE_OPENAI_DEPLOYMENT_O3_DEEP_RESEARCH: str = "o3-deep-research"  # Explorer: deep research, broad discovery
-    AZURE_OPENAI_DEPLOYMENT_O1: str = "o1"  # Deep Analyst: multi-step reasoning, statistical analysis
+    AZURE_OPENAI_DEPLOYMENT_O3_DEEP_RESEARCH: str = "o3-deep-research"
+    AZURE_OPENAI_DEPLOYMENT_O1: str = "o1"
     AZURE_OPENAI_EMBEDDING_DEPLOYMENT: str = "text-embedding-3-small"
+
+    # Azure AI Model Catalog — Non-OpenAI serverless deployments (primary)
+    # Deploy from Azure AI Foundry → Model Catalog → Deploy → Serverless API
+    # Each deployment gets its own endpoint URL and API key
+    #
+    # Explorer: grok-4 — xAI flagship, broad deep reasoning
+    AZURE_AI_EXPLORER_ENDPOINT: str = ""  # e.g. https://grok-4-xxxx.eastus2.models.ai.azure.com
+    AZURE_AI_EXPLORER_KEY: SecretStr | None = None
+    AZURE_AI_EXPLORER_MODEL: str = "grok-4"
+    #
+    # Reasoner: DeepSeek-R1-0528 — state-of-the-art reasoning, formal chain-of-thought
+    AZURE_AI_REASONER_ENDPOINT: str = ""
+    AZURE_AI_REASONER_KEY: SecretStr | None = None
+    AZURE_AI_REASONER_MODEL: str = "DeepSeek-R1-0528"
+    #
+    # Synthesizer: Kimi-K2.5 — large context, excellent multi-source integration
+    AZURE_AI_SYNTHESIZER_ENDPOINT: str = ""
+    AZURE_AI_SYNTHESIZER_KEY: SecretStr | None = None
+    AZURE_AI_SYNTHESIZER_MODEL: str = "Kimi-K2.5"
+    #
+    # Critic: Mistral-Large-3 — strong analytical, cost-efficient
+    AZURE_AI_CRITIC_ENDPOINT: str = ""
+    AZURE_AI_CRITIC_KEY: SecretStr | None = None
+    AZURE_AI_CRITIC_MODEL: str = "Mistral-Large-3"
 
     # AWS Bedrock (IAM user: humanovo-admin)
     AWS_ACCESS_KEY_ID: SecretStr | None = None
@@ -71,7 +95,7 @@ class Settings(BaseSettings):
     BEDROCK_MODEL_CLAUDE_OPUS: str = "us.anthropic.claude-opus-4-6-v1:0"
 
     # Discovery Service Configuration
-    DISCOVERY_LLM_PROVIDER: str = "bedrock"  # bedrock, azure
+    DISCOVERY_LLM_PROVIDER: str = "azure_ai"  # azure_ai (primary), bedrock, azure (legacy)
     DISCOVERY_MAX_EVIDENCE_CHUNKS: int = 50
     DISCOVERY_MAX_GRAPH_PATHS: int = 100
     DISCOVERY_MIN_CONFIDENCE: float = 0.3
@@ -89,7 +113,7 @@ class Settings(BaseSettings):
     MCP_MAX_CONTEXT_PER_MODEL: int = 128_000  # max tokens per model context window
     MCP_CONTEXT_OVERLAP: int = 2_000  # overlap tokens between model context shards
     MCP_PARALLEL_SHARDS: int = 4  # number of parallel context shards (one per model)
-    MCP_SYNTHESIS_MODEL: str = "us.anthropic.claude-opus-4-6-v1:0"  # Claude Opus for final synthesis (200K context)
+    MCP_SYNTHESIS_MODEL: str = "kimi-k2.5"  # Kimi K2.5 via Azure AI for final synthesis (large context)
     MCP_CHUNK_STRATEGY: str = "semantic"  # semantic | fixed | sliding_window
 
     # Search APIs
@@ -153,6 +177,22 @@ class Settings(BaseSettings):
     def aws_secret_key_value(self) -> str | None:
         """Get AWS secret key value."""
         return self.AWS_SECRET_ACCESS_KEY.get_secret_value() if self.AWS_SECRET_ACCESS_KEY else None
+
+    @property
+    def azure_ai_explorer_key_value(self) -> str | None:
+        return self.AZURE_AI_EXPLORER_KEY.get_secret_value() if self.AZURE_AI_EXPLORER_KEY else None
+
+    @property
+    def azure_ai_reasoner_key_value(self) -> str | None:
+        return self.AZURE_AI_REASONER_KEY.get_secret_value() if self.AZURE_AI_REASONER_KEY else None
+
+    @property
+    def azure_ai_synthesizer_key_value(self) -> str | None:
+        return self.AZURE_AI_SYNTHESIZER_KEY.get_secret_value() if self.AZURE_AI_SYNTHESIZER_KEY else None
+
+    @property
+    def azure_ai_critic_key_value(self) -> str | None:
+        return self.AZURE_AI_CRITIC_KEY.get_secret_value() if self.AZURE_AI_CRITIC_KEY else None
 
 
 @lru_cache

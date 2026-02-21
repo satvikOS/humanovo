@@ -4,9 +4,10 @@ Disease Discovery Service
 Advanced LLM-powered service for discovering disease cures and prevention strategies
 by connecting billions of data points across the knowledge graph.
 
-Supports two LLM providers:
-- AWS Bedrock (Llama Maverick 17B, DeepSeek R1, Kimi 2.5, GPT OSS 120B)
-- Azure OpenAI (GPT-4o and other Azure-hosted deployments)
+Supports three LLM providers:
+- Azure AI Model Catalog (grok-4, DeepSeek-R1-0528, Kimi-K2.5, Mistral-Large-3) — primary
+- AWS Bedrock (DeepSeek R1, Claude Opus 4.6) — fallback
+- Azure OpenAI (legacy)
 """
 
 import asyncio
@@ -45,9 +46,10 @@ class EvidenceStrength(str, Enum):
 
 
 class LLMProvider(str, Enum):
-    """Supported LLM providers — Azure OpenAI and AWS Bedrock only."""
-    BEDROCK = "bedrock"
-    AZURE = "azure"
+    """Supported LLM providers."""
+    AZURE_AI = "azure_ai"   # Azure AI Model Catalog (non-OpenAI) — primary
+    BEDROCK = "bedrock"      # AWS Bedrock — fallback
+    AZURE = "azure"          # Azure OpenAI — legacy
 
 
 @dataclass
@@ -443,16 +445,76 @@ class AzureOpenAILLMClient(BaseLLMClient):
         return f"azure/{settings.AZURE_OPENAI_DEPLOYMENT_O3_DEEP_RESEARCH}"
 
 
+class AzureAILLMClient(BaseLLMClient):
+    """Azure AI Model Catalog client — non-OpenAI serverless deployments.
+
+    Uses grok-4 as default model (explorer role). All Azure AI serverless
+    endpoints expose an OpenAI-compatible chat completions API.
+    """
+
+    def __init__(self):
+        self._client = None
+        self._model_name = settings.AZURE_AI_EXPLORER_MODEL
+
+    async def _get_client(self):
+        if self._client is None:
+            endpoint = settings.AZURE_AI_EXPLORER_ENDPOINT
+            key = settings.azure_ai_explorer_key_value
+            if not endpoint or not key:
+                raise RuntimeError(
+                    "AZURE_AI_EXPLORER_ENDPOINT and AZURE_AI_EXPLORER_KEY are required. "
+                    "Deploy grok-4 from Azure AI Model Catalog and set these env vars."
+                )
+            try:
+                from openai import AsyncOpenAI
+                self._client = AsyncOpenAI(
+                    base_url=f"{endpoint.rstrip('/')}/v1",
+                    api_key=key,
+                )
+            except ImportError:
+                raise RuntimeError("openai not installed. Run: pip install openai")
+        return self._client
+
+    async def generate(
+        self,
+        prompt: str,
+        system_prompt: str = "",
+        max_tokens: int = 4000,
+        temperature: float = 0.3,
+    ) -> str:
+        client = await self._get_client()
+
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+
+        response = await client.chat.completions.create(
+            model=self._model_name,
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+
+        return response.choices[0].message.content
+
+    @property
+    def model_name(self) -> str:
+        return f"azure-ai/{self._model_name}"
+
+
 def get_llm_client(provider: LLMProvider = None) -> BaseLLMClient:
     """Get LLM client based on provider.
 
-    Only two providers are supported:
-    - 'bedrock': AWS Bedrock Converse API for unified multi-model access
-    - 'azure': Azure OpenAI for GPT-4o and other Azure-hosted deployments
+    Three providers supported:
+    - 'azure_ai': Azure AI Model Catalog (non-OpenAI serverless) — primary
+    - 'bedrock': AWS Bedrock Converse API — fallback
+    - 'azure': Azure OpenAI — legacy
     """
     provider = provider or LLMProvider(settings.DISCOVERY_LLM_PROVIDER)
 
     clients = {
+        LLMProvider.AZURE_AI: AzureAILLMClient,
         LLMProvider.BEDROCK: BedrockLLMClient,
         LLMProvider.AZURE: AzureOpenAILLMClient,
     }

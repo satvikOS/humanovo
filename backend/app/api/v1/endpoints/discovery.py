@@ -212,33 +212,23 @@ async def list_providers():
     return {
         "providers": [
             {
-                "id": "bedrock",
-                "name": "AWS Bedrock",
-                "description": "Llama Maverick 17B, Claude, and other models via AWS",
+                "id": "azure_ai",
+                "name": "Azure AI Model Catalog",
+                "description": "grok-4, DeepSeek-R1-0528, Kimi-K2.5, Mistral-Large-3 (non-OpenAI)",
                 "default": True,
             },
             {
-                "id": "anthropic",
-                "name": "Anthropic Claude",
-                "description": "Claude Sonnet/Opus for advanced reasoning",
+                "id": "bedrock",
+                "name": "AWS Bedrock",
+                "description": "DeepSeek R1 + Claude Opus 4.6 via AWS (fallback)",
             },
             {
-                "id": "openai",
-                "name": "OpenAI",
-                "description": "GPT-4 Turbo for comprehensive analysis",
-            },
-            {
-                "id": "together",
-                "name": "Together AI",
-                "description": "Open-source models like Llama 3.3 70B",
-            },
-            {
-                "id": "groq",
-                "name": "Groq",
-                "description": "Ultra-fast inference for quick discoveries",
+                "id": "azure",
+                "name": "Azure OpenAI",
+                "description": "o3-deep-research, o1 (legacy, requires org access)",
             },
         ],
-        "recommended": "bedrock",
+        "recommended": "azure_ai",
     }
 
 
