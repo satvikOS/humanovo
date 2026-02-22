@@ -112,23 +112,40 @@ except Exception as _e:
     logger.error(f"Lambda client init failed: {_e}")
     lambda_client = None
 
-# Azure AI Foundry client — unified endpoint for all 4 models
-azure_ai_client = None
-AZURE_AI_ENDPOINT = os.environ.get("AZURE_AI_ENDPOINT", "")
-AZURE_AI_KEY = os.environ.get("AZURE_AI_KEY", "")
+# Azure AI — model-specific clients (direct endpoints, no Foundry routing layer)
+azure_deepseek_client = None
+azure_mistral_client = None
 
-if AZURE_AI_ENDPOINT and AZURE_AI_KEY:
+AZURE_DEEPSEEK_ENDPOINT = os.environ.get("AZURE_DEEPSEEK_ENDPOINT", "")
+AZURE_DEEPSEEK_KEY = os.environ.get("AZURE_DEEPSEEK_KEY", "")
+AZURE_MISTRAL_ENDPOINT = os.environ.get("AZURE_MISTRAL_ENDPOINT", "")
+AZURE_MISTRAL_KEY = os.environ.get("AZURE_MISTRAL_KEY", "")
+
+if AZURE_DEEPSEEK_ENDPOINT and AZURE_DEEPSEEK_KEY:
     try:
         from openai import OpenAI
-        azure_ai_client = OpenAI(
-            base_url=f"{AZURE_AI_ENDPOINT.rstrip('/')}/models",
-            api_key=AZURE_AI_KEY,
+        azure_deepseek_client = OpenAI(
+            base_url=f"{AZURE_DEEPSEEK_ENDPOINT.rstrip('/')}/v1",
+            api_key=AZURE_DEEPSEEK_KEY,
         )
-        print(f"[ORCHESTRATOR] Azure AI Foundry client initialized (endpoint={AZURE_AI_ENDPOINT})")
+        print(f"[ORCHESTRATOR] Azure DeepSeek client initialized (endpoint={AZURE_DEEPSEEK_ENDPOINT})")
     except Exception as _e:
-        logger.error(f"Azure AI Foundry init failed: {_e}")
+        logger.error(f"Azure DeepSeek init failed: {_e}")
 else:
-    print("[ORCHESTRATOR] Azure AI Foundry not configured — set AZURE_AI_ENDPOINT and AZURE_AI_KEY")
+    print("[ORCHESTRATOR] Azure DeepSeek not configured — set AZURE_DEEPSEEK_ENDPOINT and AZURE_DEEPSEEK_KEY")
+
+if AZURE_MISTRAL_ENDPOINT and AZURE_MISTRAL_KEY:
+    try:
+        from openai import OpenAI
+        azure_mistral_client = OpenAI(
+            base_url=f"{AZURE_MISTRAL_ENDPOINT.rstrip('/')}/v1",
+            api_key=AZURE_MISTRAL_KEY,
+        )
+        print(f"[ORCHESTRATOR] Azure Mistral client initialized (endpoint={AZURE_MISTRAL_ENDPOINT})")
+    except Exception as _e:
+        logger.error(f"Azure Mistral init failed: {_e}")
+else:
+    print("[ORCHESTRATOR] Azure Mistral not configured — set AZURE_MISTRAL_ENDPOINT and AZURE_MISTRAL_KEY")
 
 # Configuration
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "dev")
@@ -595,16 +612,28 @@ def call_bedrock(model_id: str, prompt: str, system_prompt: str,
 
 def call_azure_ai(model_name: str, prompt: str, system_prompt: str,
                   max_tokens: int = 2000, temperature: float = 0.7) -> str:
-    """Invoke a model via Azure AI Foundry unified endpoint."""
-    if azure_ai_client is None:
-        raise RuntimeError("Azure AI Foundry client not initialized — set AZURE_AI_ENDPOINT and AZURE_AI_KEY")
+    """Invoke a model via its Azure AI model-specific endpoint."""
+    # Route to the correct per-model client based on model name
+    if "deepseek" in model_name.lower() or "DeepSeek" in model_name:
+        client = azure_deepseek_client
+    elif "mistral" in model_name.lower() or "Mistral" in model_name:
+        client = azure_mistral_client
+    else:
+        # Try DeepSeek as default fallback
+        client = azure_deepseek_client or azure_mistral_client
+
+    if client is None:
+        raise RuntimeError(
+            f"No Azure AI client available for {model_name}. "
+            "Set AZURE_DEEPSEEK_ENDPOINT/KEY and AZURE_MISTRAL_ENDPOINT/KEY."
+        )
 
     messages = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": prompt})
 
-    response = azure_ai_client.chat.completions.create(
+    response = client.chat.completions.create(
         model=model_name,
         messages=messages,
         max_tokens=max_tokens,
@@ -735,13 +764,22 @@ def run_discovery_worker(config: dict):
     max_agents = min(config.get("max_agents", 10), 20)  # Cap for Lambda
 
     # Only include roles whose provider is available
-    roles = [r for r, cfg in AGENT_MODELS.items()
-             if (cfg["provider"] == "azure_ai" and azure_ai_client is not None)
-             or (cfg["provider"] == "bedrock" and bedrock_runtime is not None)]
+    def _role_available(role_name, cfg):
+        if cfg["provider"] == "bedrock":
+            return bedrock_runtime is not None
+        if cfg["provider"] == "azure_ai":
+            model_id = cfg["model_id"]
+            if "deepseek" in model_id.lower() or "DeepSeek" in model_id:
+                return azure_deepseek_client is not None
+            if "mistral" in model_id.lower() or "Mistral" in model_id:
+                return azure_mistral_client is not None
+        return False
+
+    roles = [r for r, cfg in AGENT_MODELS.items() if _role_available(r, cfg)]
 
     if not roles:
-        logger.error("No AI providers available — need Bedrock (AWS creds) and/or Azure AI (AZURE_AI_ENDPOINT/AZURE_AI_KEY)")
-        update_discovery_state({"status": "failed", "error": "No AI models connected. Check AWS credentials (Bedrock) and AZURE_AI_ENDPOINT/AZURE_AI_KEY (Azure AI) environment variables."})
+        logger.error("No AI providers available — need Bedrock + Azure DeepSeek/Mistral endpoints")
+        update_discovery_state({"status": "failed", "error": "No AI models connected. Check AWS credentials (Bedrock) and AZURE_DEEPSEEK_ENDPOINT/KEY + AZURE_MISTRAL_ENDPOINT/KEY environment variables."})
         return
 
     num_rounds = min(max_agents // len(roles), 15)  # Up to 15 rounds for deep research

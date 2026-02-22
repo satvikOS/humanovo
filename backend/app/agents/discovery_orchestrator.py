@@ -586,16 +586,17 @@ class MultiModelLLM:
         ModelType.O1: settings.AZURE_OPENAI_DEPLOYMENT_O1,
     }
 
-    # Azure AI Foundry — only models that work on Azure AI (not grok, not claude)
+    # Azure AI — model-specific endpoints (direct, no Foundry routing layer)
     AZURE_AI_MODELS = {
-        ModelType.DEEPSEEK_R1_0528:    settings.AZURE_AI_REASONER_MODEL,
-        ModelType.MISTRAL_LARGE_3:     settings.AZURE_AI_CRITIC_MODEL,
+        ModelType.DEEPSEEK_R1_0528:    settings.AZURE_DEEPSEEK_MODEL,
+        ModelType.MISTRAL_LARGE_3:     settings.AZURE_MISTRAL_MODEL,
     }
 
     def __init__(self, token_pool: TokenPool):
         self._bedrock_client = None
         self._azure_client = None        # Legacy Azure OpenAI
-        self._azure_ai_client = None    # Shared Azure AI Foundry client (all 4 models)
+        self._azure_deepseek_client = None   # DeepSeek model-specific endpoint
+        self._azure_mistral_client = None    # Mistral model-specific endpoint
         self._azure_ai_available = False
         self._initialized = False
         self._token_pool = token_pool
@@ -605,22 +606,38 @@ class MultiModelLLM:
         if self._initialized:
             return
 
-        # Initialize Azure AI Foundry client (DeepSeek-R1-0528 + Mistral-Large-3 only)
-        if settings.azure_ai_key_value and settings.AZURE_AI_ENDPOINT:
+        # Initialize Azure AI model-specific clients (direct endpoints, no Foundry layer)
+        azure_models_ready = 0
+
+        if settings.azure_deepseek_key_value and settings.AZURE_DEEPSEEK_ENDPOINT:
             try:
                 from openai import AsyncOpenAI
-                self._azure_ai_client = AsyncOpenAI(
-                    base_url=f"{settings.AZURE_AI_ENDPOINT.rstrip('/')}/models",
-                    api_key=settings.azure_ai_key_value,
+                self._azure_deepseek_client = AsyncOpenAI(
+                    base_url=f"{settings.AZURE_DEEPSEEK_ENDPOINT.rstrip('/')}/v1",
+                    api_key=settings.azure_deepseek_key_value,
                 )
-                self._azure_ai_available = True
-                model_names = list(self.AZURE_AI_MODELS.values())
-                logger.info(f"Azure AI Foundry client initialized → {settings.AZURE_AI_ENDPOINT}")
-                logger.info(f"Azure AI models: {model_names}")
+                azure_models_ready += 1
+                logger.info(f"Azure DeepSeek client initialized → {settings.AZURE_DEEPSEEK_ENDPOINT}")
             except Exception as e:
-                logger.error(f"Azure AI Foundry client initialization FAILED: {e}")
+                logger.error(f"Azure DeepSeek client init FAILED: {e}")
         else:
-            logger.warning("AZURE_AI_ENDPOINT or AZURE_AI_KEY not set — Azure AI unavailable")
+            logger.warning("AZURE_DEEPSEEK_ENDPOINT or AZURE_DEEPSEEK_KEY not set")
+
+        if settings.azure_mistral_key_value and settings.AZURE_MISTRAL_ENDPOINT:
+            try:
+                from openai import AsyncOpenAI
+                self._azure_mistral_client = AsyncOpenAI(
+                    base_url=f"{settings.AZURE_MISTRAL_ENDPOINT.rstrip('/')}/v1",
+                    api_key=settings.azure_mistral_key_value,
+                )
+                azure_models_ready += 1
+                logger.info(f"Azure Mistral client initialized → {settings.AZURE_MISTRAL_ENDPOINT}")
+            except Exception as e:
+                logger.error(f"Azure Mistral client init FAILED: {e}")
+        else:
+            logger.warning("AZURE_MISTRAL_ENDPOINT or AZURE_MISTRAL_KEY not set")
+
+        self._azure_ai_available = azure_models_ready > 0
 
         # Initialize Bedrock client (fallback)
         if settings.aws_access_key_value and settings.aws_secret_key_value:
@@ -658,9 +675,10 @@ class MultiModelLLM:
 
         self._initialized = True
         available = []
-        if self._azure_ai_available:
-            for model_type, model_name in self.AZURE_AI_MODELS.items():
-                available.append(f"{model_type.value} ({model_name}) [azure-ai-foundry]")
+        if self._azure_deepseek_client:
+            available.append(f"deepseek_r1_0528 ({settings.AZURE_DEEPSEEK_MODEL}) [azure-model-specific]")
+        if self._azure_mistral_client:
+            available.append(f"mistral_large_3 ({settings.AZURE_MISTRAL_MODEL}) [azure-model-specific]")
         for model_type, model_id in self.BEDROCK_MODELS.items():
             if self._bedrock_client:
                 available.append(f"{model_type.value} ({model_id}) [bedrock]")
@@ -670,8 +688,12 @@ class MultiModelLLM:
         logger.info(f"Multi-model LLM initialized. Available: {available}")
 
     def _is_azure_ai_model(self, model_type: ModelType) -> bool:
-        """Check if a model type routes through Azure AI Foundry."""
-        return model_type in self.AZURE_AI_MODELS and self._azure_ai_available
+        """Check if a model type routes through an Azure AI model-specific endpoint."""
+        if model_type == ModelType.DEEPSEEK_R1_0528:
+            return self._azure_deepseek_client is not None
+        if model_type == ModelType.MISTRAL_LARGE_3:
+            return self._azure_mistral_client is not None
+        return False
 
     def _is_azure_openai_model(self, model_type: ModelType) -> bool:
         """Check if a model type routes through legacy Azure OpenAI."""
@@ -714,21 +736,28 @@ class MultiModelLLM:
         self, model_type: ModelType, prompt: str, system_prompt: str,
         max_tokens: int, temperature: float,
     ) -> str:
-        """Invoke a model via Azure AI Foundry unified endpoint.
+        """Invoke a model via its Azure AI model-specific endpoint.
 
-        Only DeepSeek-R1-0528 and Mistral-Large-3 route through Azure AI.
-        Claude Opus routes through Bedrock instead.
+        Each model has its own client/endpoint/key — no shared Foundry layer.
         """
-        if not self._azure_ai_client:
-            raise RuntimeError("Azure AI Foundry client not initialized — set AZURE_AI_ENDPOINT and AZURE_AI_KEY")
+        if model_type == ModelType.DEEPSEEK_R1_0528:
+            client = self._azure_deepseek_client
+            model_name = settings.AZURE_DEEPSEEK_MODEL
+        elif model_type == ModelType.MISTRAL_LARGE_3:
+            client = self._azure_mistral_client
+            model_name = settings.AZURE_MISTRAL_MODEL
+        else:
+            raise RuntimeError(f"No Azure AI client for model type: {model_type}")
 
-        model_name = self.AZURE_AI_MODELS[model_type]
+        if not client:
+            raise RuntimeError(f"Azure AI client not initialized for {model_name}")
+
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
 
-        response = await self._azure_ai_client.chat.completions.create(
+        response = await client.chat.completions.create(
             model=model_name,
             messages=messages,
             max_tokens=max_tokens,

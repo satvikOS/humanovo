@@ -61,15 +61,15 @@ class Settings(BaseSettings):
     AZURE_OPENAI_DEPLOYMENT_O1: str = "o1"
     AZURE_OPENAI_EMBEDDING_DEPLOYMENT: str = "text-embedding-3-small"
 
-    # Azure AI Foundry — shared endpoint for models available on Azure AI
-    # DeepSeek-R1-0528 and Mistral-Large-3 work here.
-    # grok and claude-opus are restricted to personal accounts / unavailable on Azure AI.
-    AZURE_AI_ENDPOINT: str = ""   # e.g. https://humanovo.services.ai.azure.com/
-    AZURE_AI_KEY: SecretStr | None = None
+    # Azure AI — model-specific endpoints (direct, no Foundry routing layer)
+    # Each model deployed separately with its own endpoint URL + API key
+    AZURE_DEEPSEEK_ENDPOINT: str = ""   # e.g. https://DeepSeek-R1-0528-xxxxx.eastus.models.ai.azure.com/
+    AZURE_DEEPSEEK_KEY: SecretStr | None = None
+    AZURE_DEEPSEEK_MODEL: str = "DeepSeek-R1-0528"
 
-    # Azure AI model names — only models that work on Azure AI Foundry
-    AZURE_AI_REASONER_MODEL: str = "DeepSeek-R1-0528"      # Reasoner: latest DeepSeek
-    AZURE_AI_CRITIC_MODEL: str = "Mistral-Large-3"         # Critic: Mistral flagship
+    AZURE_MISTRAL_ENDPOINT: str = ""    # e.g. https://Mistral-Large-3-xxxxx.eastus.models.ai.azure.com/
+    AZURE_MISTRAL_KEY: SecretStr | None = None
+    AZURE_MISTRAL_MODEL: str = "Mistral-Large-3"
 
     # AWS Bedrock (IAM user: humanovo-admin)
     AWS_ACCESS_KEY_ID: SecretStr | None = None
@@ -165,9 +165,14 @@ class Settings(BaseSettings):
         return self.AWS_SECRET_ACCESS_KEY.get_secret_value() if self.AWS_SECRET_ACCESS_KEY else None
 
     @property
-    def azure_ai_key_value(self) -> str | None:
-        """Shared Azure AI Foundry key for all models."""
-        return self.AZURE_AI_KEY.get_secret_value() if self.AZURE_AI_KEY else None
+    def azure_deepseek_key_value(self) -> str | None:
+        """Azure DeepSeek model-specific API key."""
+        return self.AZURE_DEEPSEEK_KEY.get_secret_value() if self.AZURE_DEEPSEEK_KEY else None
+
+    @property
+    def azure_mistral_key_value(self) -> str | None:
+        """Azure Mistral model-specific API key."""
+        return self.AZURE_MISTRAL_KEY.get_secret_value() if self.AZURE_MISTRAL_KEY else None
 
 
 @lru_cache

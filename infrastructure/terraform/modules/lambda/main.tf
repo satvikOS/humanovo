@@ -74,12 +74,23 @@ variable "bedrock_embedding_model_id" {
   type = string
 }
 
-variable "azure_ai_endpoint" {
+variable "azure_deepseek_endpoint" {
   type    = string
   default = ""
 }
 
-variable "azure_ai_key" {
+variable "azure_deepseek_key" {
+  type      = string
+  default   = ""
+  sensitive = true
+}
+
+variable "azure_mistral_endpoint" {
+  type    = string
+  default = ""
+}
+
+variable "azure_mistral_key" {
   type      = string
   default   = ""
   sensitive = true
@@ -113,8 +124,10 @@ locals {
     EXPORTS_PREFIX             = "exports"
     BEDROCK_MODEL_ID           = var.bedrock_model_id
     BEDROCK_EMBEDDING_MODEL_ID = var.bedrock_embedding_model_id
-    AZURE_AI_ENDPOINT          = var.azure_ai_endpoint
-    AZURE_AI_KEY               = var.azure_ai_key
+    AZURE_DEEPSEEK_ENDPOINT    = var.azure_deepseek_endpoint
+    AZURE_DEEPSEEK_KEY         = var.azure_deepseek_key
+    AZURE_MISTRAL_ENDPOINT     = var.azure_mistral_endpoint
+    AZURE_MISTRAL_KEY          = var.azure_mistral_key
     LOG_LEVEL                  = var.environment == "prod" ? "INFO" : "DEBUG"
     POWERTOOLS_SERVICE_NAME    = "genup"
     POWERTOOLS_METRICS_NAMESPACE = "GenUp"

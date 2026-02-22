@@ -445,32 +445,30 @@ class AzureOpenAILLMClient(BaseLLMClient):
 
 
 class AzureAILLMClient(BaseLLMClient):
-    """Azure AI Foundry client — unified endpoint for DeepSeek + Mistral.
+    """Azure AI client — model-specific endpoints for DeepSeek + Mistral.
 
-    Uses the shared AZURE_AI_ENDPOINT / AZURE_AI_KEY via OpenAI-compatible
-    chat completions API. Defaults to the reasoner model (DeepSeek-R1-0528).
+    Each model has its own endpoint URL + API key (direct, no Foundry layer).
+    Defaults to DeepSeek-R1-0528 for single-model calls.
     """
 
     def __init__(self):
-        self._client = None
+        self._deepseek_client = None
+        self._mistral_client = None
 
-    async def _get_client(self):
-        if self._client is None:
-            endpoint = settings.AZURE_AI_ENDPOINT
-            key = settings.azure_ai_key_value
+    async def _get_deepseek_client(self):
+        if self._deepseek_client is None:
+            endpoint = settings.AZURE_DEEPSEEK_ENDPOINT
+            key = settings.azure_deepseek_key_value
             if not endpoint or not key:
                 raise RuntimeError(
-                    "Azure AI Foundry not configured. Set AZURE_AI_ENDPOINT and AZURE_AI_KEY."
+                    "Azure DeepSeek not configured. Set AZURE_DEEPSEEK_ENDPOINT and AZURE_DEEPSEEK_KEY."
                 )
-            try:
-                from openai import AsyncOpenAI
-                self._client = AsyncOpenAI(
-                    base_url=f"{endpoint.rstrip('/')}/models",
-                    api_key=key,
-                )
-            except ImportError:
-                raise RuntimeError("openai not installed. Run: pip install openai")
-        return self._client
+            from openai import AsyncOpenAI
+            self._deepseek_client = AsyncOpenAI(
+                base_url=f"{endpoint.rstrip('/')}/v1",
+                api_key=key,
+            )
+        return self._deepseek_client
 
     async def generate(
         self,
@@ -479,14 +477,14 @@ class AzureAILLMClient(BaseLLMClient):
         max_tokens: int = 4000,
         temperature: float = 0.3,
     ) -> str:
-        client = await self._get_client()
+        client = await self._get_deepseek_client()
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
 
         response = await client.chat.completions.create(
-            model=settings.AZURE_AI_REASONER_MODEL,
+            model=settings.AZURE_DEEPSEEK_MODEL,
             messages=messages,
             max_tokens=max_tokens,
             temperature=temperature,
@@ -496,10 +494,10 @@ class AzureAILLMClient(BaseLLMClient):
     @property
     def model_name(self) -> str:
         models = ", ".join([
-            settings.AZURE_AI_REASONER_MODEL,
-            settings.AZURE_AI_CRITIC_MODEL,
+            settings.AZURE_DEEPSEEK_MODEL,
+            settings.AZURE_MISTRAL_MODEL,
         ])
-        return f"azure-ai-foundry/[{models}]"
+        return f"azure-model-specific/[{models}]"
 
 
 def get_llm_client(provider: LLMProvider = None) -> BaseLLMClient:

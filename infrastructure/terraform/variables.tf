@@ -120,16 +120,29 @@ variable "bedrock_embedding_model_id" {
   default     = "amazon.titan-embed-text-v2:0"
 }
 
-# ==================== Azure AI Foundry ====================
+# ==================== Azure AI — Model-Specific Endpoints ====================
 
-variable "azure_ai_endpoint" {
-  description = "Azure AI Foundry unified endpoint (e.g. https://humanovo.services.ai.azure.com/)"
+variable "azure_deepseek_endpoint" {
+  description = "Azure AI DeepSeek-R1-0528 model-specific endpoint"
   type        = string
   default     = ""
 }
 
-variable "azure_ai_key" {
-  description = "Azure AI Foundry API key"
+variable "azure_deepseek_key" {
+  description = "Azure AI DeepSeek-R1-0528 API key"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "azure_mistral_endpoint" {
+  description = "Azure AI Mistral-Large-3 model-specific endpoint"
+  type        = string
+  default     = ""
+}
+
+variable "azure_mistral_key" {
+  description = "Azure AI Mistral-Large-3 API key"
   type        = string
   default     = ""
   sensitive   = true

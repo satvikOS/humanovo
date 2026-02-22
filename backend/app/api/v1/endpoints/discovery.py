@@ -285,10 +285,12 @@ async def discovery_health():
         if settings.aws_access_key_value and settings.aws_secret_key_value:
             models_active.append(f"{settings.BEDROCK_MODEL_CLAUDE_OPUS} (explorer+synthesizer)")
             providers.append("bedrock")
-        if settings.AZURE_AI_ENDPOINT and settings.azure_ai_key_value:
-            models_active.append(f"{settings.AZURE_AI_REASONER_MODEL} (reasoner)")
-            models_active.append(f"{settings.AZURE_AI_CRITIC_MODEL} (critic)")
-            providers.append("azure_ai")
+        if settings.azure_deepseek_key_value and settings.AZURE_DEEPSEEK_ENDPOINT:
+            models_active.append(f"{settings.AZURE_DEEPSEEK_MODEL} (reasoner)")
+            providers.append("azure-deepseek")
+        if settings.azure_mistral_key_value and settings.AZURE_MISTRAL_ENDPOINT:
+            models_active.append(f"{settings.AZURE_MISTRAL_MODEL} (critic)")
+            providers.append("azure-mistral")
         llm_info = {
             "providers": providers,
             "models": models_active,
