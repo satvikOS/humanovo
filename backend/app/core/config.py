@@ -61,15 +61,14 @@ class Settings(BaseSettings):
     AZURE_OPENAI_DEPLOYMENT_O1: str = "o1"
     AZURE_OPENAI_EMBEDDING_DEPLOYMENT: str = "text-embedding-3-small"
 
-    # Azure AI Foundry — single shared endpoint for all models
-    # One key covers grok-4, DeepSeek-R1-0528, claude-opus-4-6, Mistral-Large-3, etc.
+    # Azure AI Foundry — shared endpoint for models available on Azure AI
+    # DeepSeek-R1-0528 and Mistral-Large-3 work here.
+    # grok and claude-opus are restricted to personal accounts / unavailable on Azure AI.
     AZURE_AI_ENDPOINT: str = ""   # e.g. https://humanovo.services.ai.azure.com/
     AZURE_AI_KEY: SecretStr | None = None
 
-    # Azure AI model names — change to swap models without touching endpoints/keys
-    AZURE_AI_EXPLORER_MODEL: str = "grok-4"                # Explorer: xAI flagship
+    # Azure AI model names — only models that work on Azure AI Foundry
     AZURE_AI_REASONER_MODEL: str = "DeepSeek-R1-0528"      # Reasoner: latest DeepSeek
-    AZURE_AI_SYNTHESIZER_MODEL: str = "claude-opus-4-6"    # Synthesizer: Anthropic flagship
     AZURE_AI_CRITIC_MODEL: str = "Mistral-Large-3"         # Critic: Mistral flagship
 
     # AWS Bedrock (IAM user: humanovo-admin)
@@ -77,7 +76,7 @@ class Settings(BaseSettings):
     AWS_SECRET_ACCESS_KEY: SecretStr | None = None
     AWS_REGION: str = "us-east-1"
 
-    # Bedrock Model IDs — top-tier models invoked via Bedrock Converse API
+    # Bedrock Model IDs — Claude Opus 4.6 serves as Explorer + Synthesizer
     BEDROCK_MODEL_DEEPSEEK: str = "us.deepseek.r1-v1:0"
     BEDROCK_MODEL_CLAUDE_OPUS: str = "us.anthropic.claude-opus-4-6-v1:0"
 
@@ -100,7 +99,7 @@ class Settings(BaseSettings):
     MCP_MAX_CONTEXT_PER_MODEL: int = 128_000  # max tokens per model context window
     MCP_CONTEXT_OVERLAP: int = 2_000  # overlap tokens between model context shards
     MCP_PARALLEL_SHARDS: int = 4  # number of parallel context shards (one per model)
-    MCP_SYNTHESIS_MODEL: str = "claude-opus-4-6"  # Claude Opus via Azure AI for final synthesis (200K context)
+    MCP_SYNTHESIS_MODEL: str = "us.anthropic.claude-opus-4-6-v1:0"  # Claude Opus via Bedrock for final synthesis (200K context)
     MCP_CHUNK_STRATEGY: str = "semantic"  # semantic | fixed | sliding_window
 
     # Search APIs

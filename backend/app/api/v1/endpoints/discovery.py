@@ -213,14 +213,14 @@ async def list_providers():
         "providers": [
             {
                 "id": "azure_ai",
-                "name": "Azure AI Model Catalog",
-                "description": "grok-4, DeepSeek-R1-0528, claude-opus-4-6, Mistral-Large-3 (non-OpenAI)",
+                "name": "Azure AI Foundry",
+                "description": "DeepSeek-R1-0528 (reasoner) + Mistral-Large-3 (critic)",
                 "default": True,
             },
             {
                 "id": "bedrock",
                 "name": "AWS Bedrock",
-                "description": "DeepSeek R1 + Claude Opus 4.6 via AWS (fallback)",
+                "description": "Claude Opus 4.6 (explorer + synthesizer)",
             },
             {
                 "id": "azure",
@@ -279,21 +279,20 @@ async def discovery_health():
         from app.core.config import settings
         service = await get_service()
 
-        # Build model list — show all 4 when Azure AI Foundry is configured
+        # Build model list — show mixed provider models
+        models_active = []
+        providers = []
+        if settings.aws_access_key_value and settings.aws_secret_key_value:
+            models_active.append(f"{settings.BEDROCK_MODEL_CLAUDE_OPUS} (explorer+synthesizer)")
+            providers.append("bedrock")
         if settings.AZURE_AI_ENDPOINT and settings.azure_ai_key_value:
-            models_active = [
-                settings.AZURE_AI_EXPLORER_MODEL,
-                settings.AZURE_AI_REASONER_MODEL,
-                settings.AZURE_AI_SYNTHESIZER_MODEL,
-                settings.AZURE_AI_CRITIC_MODEL,
-            ]
-            llm_info = {
-                "provider": "azure_ai_foundry",
-                "endpoint": settings.AZURE_AI_ENDPOINT,
-                "models": models_active,
-            }
-        else:
-            llm_info = {"provider": service._llm.model_name}
+            models_active.append(f"{settings.AZURE_AI_REASONER_MODEL} (reasoner)")
+            models_active.append(f"{settings.AZURE_AI_CRITIC_MODEL} (critic)")
+            providers.append("azure_ai")
+        llm_info = {
+            "providers": providers,
+            "models": models_active,
+        } if models_active else {"provider": service._llm.model_name}
 
         return {
             "status": "healthy",

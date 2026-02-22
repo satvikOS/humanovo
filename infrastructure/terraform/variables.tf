@@ -109,9 +109,9 @@ variable "lambda_reserved_concurrency" {
 # ==================== Bedrock Configuration ====================
 
 variable "bedrock_model_id" {
-  description = "Bedrock model ID for text generation"
+  description = "Bedrock model ID for Explorer + Synthesizer (Claude Opus 4.6)"
   type        = string
-  default     = "anthropic.claude-3-5-sonnet-20241022-v2:0"
+  default     = "us.anthropic.claude-opus-4-6-v1:0"
 }
 
 variable "bedrock_embedding_model_id" {

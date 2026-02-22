@@ -5,8 +5,8 @@ Advanced LLM-powered service for discovering disease cures and prevention strate
 by connecting billions of data points across the knowledge graph.
 
 Supports three LLM providers:
-- Azure AI Foundry (grok-4, DeepSeek-R1-0528, claude-opus-4-6, Mistral-Large-3) — primary
-- AWS Bedrock (DeepSeek R1, Claude Opus 4.6) — fallback
+- Azure AI Foundry (DeepSeek-R1-0528, Mistral-Large-3) — reasoner + critic
+- AWS Bedrock (Claude Opus 4.6) — explorer + synthesizer
 - Azure OpenAI (legacy)
 """
 
@@ -203,7 +203,7 @@ class BedrockLLMClient(BaseLLMClient):
 
     def __init__(self, model_id: str = None):
         self._client = None
-        self._model_id = model_id or settings.BEDROCK_MODEL
+        self._model_id = model_id or settings.BEDROCK_MODEL_CLAUDE_OPUS
 
     async def _get_client(self):
         """Get or create Bedrock client."""
@@ -270,17 +270,16 @@ class BedrockLLMClient(BaseLLMClient):
 
 
 class BedrockMultiModelClient(BaseLLMClient):
-    """Multi-model Bedrock client that runs all 4 models in parallel for discovery.
+    """Multi-model Bedrock client for parallel discovery.
 
-    Uses the Converse API to invoke all 4 Bedrock models simultaneously,
-    then synthesizes their outputs into a unified response.
+    Uses Claude Opus (explorer+synthesizer) and DeepSeek R1 (reasoner)
+    via the Converse API, then synthesizes outputs.
     """
 
     MODEL_ROLES = {
-        "explorer": settings.BEDROCK_MODEL_LLAMA_MAVERICK,
+        "explorer": settings.BEDROCK_MODEL_CLAUDE_OPUS,
         "reasoner": settings.BEDROCK_MODEL_DEEPSEEK,
-        "synthesizer": settings.BEDROCK_MODEL_KIMI,
-        "critic": settings.BEDROCK_MODEL_GPT_OSS,
+        "synthesizer": settings.BEDROCK_MODEL_CLAUDE_OPUS,
     }
 
     def __init__(self):
@@ -371,7 +370,7 @@ class BedrockMultiModelClient(BaseLLMClient):
         if len(successful) == 1:
             return list(successful.values())[0]
 
-        # Synthesize via Kimi 2.5 (largest context)
+        # Synthesize via Claude Opus (200K context)
         joined_outputs = "\n".join(
             f"=== {role.upper()} OUTPUT ===\n{text}" for role, text in successful.items()
         )
@@ -446,10 +445,10 @@ class AzureOpenAILLMClient(BaseLLMClient):
 
 
 class AzureAILLMClient(BaseLLMClient):
-    """Azure AI Foundry client — single unified endpoint for all models.
+    """Azure AI Foundry client — unified endpoint for DeepSeek + Mistral.
 
     Uses the shared AZURE_AI_ENDPOINT / AZURE_AI_KEY via OpenAI-compatible
-    chat completions API. Defaults to the synthesizer model (claude-opus-4-6).
+    chat completions API. Defaults to the reasoner model (DeepSeek-R1-0528).
     """
 
     def __init__(self):
@@ -487,7 +486,7 @@ class AzureAILLMClient(BaseLLMClient):
         messages.append({"role": "user", "content": prompt})
 
         response = await client.chat.completions.create(
-            model=settings.AZURE_AI_SYNTHESIZER_MODEL,
+            model=settings.AZURE_AI_REASONER_MODEL,
             messages=messages,
             max_tokens=max_tokens,
             temperature=temperature,
@@ -497,9 +496,7 @@ class AzureAILLMClient(BaseLLMClient):
     @property
     def model_name(self) -> str:
         models = ", ".join([
-            settings.AZURE_AI_EXPLORER_MODEL,
             settings.AZURE_AI_REASONER_MODEL,
-            settings.AZURE_AI_SYNTHESIZER_MODEL,
             settings.AZURE_AI_CRITIC_MODEL,
         ])
         return f"azure-ai-foundry/[{models}]"

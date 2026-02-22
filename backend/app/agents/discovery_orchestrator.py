@@ -1,17 +1,18 @@
 """
 Discovery Orchestrator
 
-Four-model hybrid pipeline using Azure AI Model Catalog (non-OpenAI) serverless deployments.
-Models maxed out on token capacity:
-  grok-4           (Azure AI, Chat completion)  — xAI flagship, broad deep reasoning & exploration
-  DeepSeek-R1-0528 (Azure AI, Chat completion)  — State-of-the-art reasoning, formal chain-of-thought
-  claude-opus-4-6  (Azure AI, Anthropic Messages) — Anthropic flagship, 200K context synthesis
-  Mistral-Large-3  (Azure AI, Chat completion)  — Strong analytical capabilities, critical analysis
+Three-model hybrid pipeline using mixed providers:
+  Claude Opus 4.6  (Bedrock, Converse API)     — Explorer + Synthesizer: 200K context
+  DeepSeek-R1-0528 (Azure AI, Chat completion)  — Reasoner: state-of-the-art chain-of-thought
+  Mistral-Large-3  (Azure AI, Chat completion)  — Critic: strong analytical capabilities
 
-Fallback: AWS Bedrock (DeepSeek R1 + Claude Opus 4.6) if Azure AI unavailable.
+Provider routing:
+  - Claude Opus 4.6 → AWS Bedrock (restricted on Azure AI)
+  - DeepSeek-R1-0528 → Azure AI Foundry
+  - Mistral-Large-3 → Azure AI Foundry
 
 Features:
-- Four-model parallel reasoning via Azure AI Model Catalog serverless APIs
+- Three-model parallel reasoning via mixed Bedrock + Azure AI providers
 - Token pool with rate limiting, backoff, and per-model quota management
 - 100 to 10,000 concurrent agents with adaptive batching
 - Confidence-based stopping with start/pause/stop controls
@@ -112,18 +113,18 @@ class AgentRole(str, Enum):
 
 class ModelType(str, Enum):
     """LLM model types available for parallel discovery."""
-    # Azure AI Model Catalog — primary (non-OpenAI serverless deployments)
-    GROK_4 = "grok_4"                              # Explorer: xAI flagship
-    DEEPSEEK_R1_0528 = "deepseek_r1_0528"          # Reasoner: latest DeepSeek reasoning
-    CLAUDE_OPUS_AZURE_AI = "claude_opus_azure_ai"  # Synthesizer: Anthropic flagship, 200K context
-    MISTRAL_LARGE_3 = "mistral_large_3"            # Critic: Mistral flagship
-    # Bedrock models — fallback
+    # Primary models — mixed provider routing
+    CLAUDE_OPUS = "claude_opus"                    # Explorer + Synthesizer via Bedrock (200K context)
+    DEEPSEEK_R1_0528 = "deepseek_r1_0528"          # Reasoner via Azure AI
+    MISTRAL_LARGE_3 = "mistral_large_3"            # Critic via Azure AI
+    # Bedrock-only fallback
     DEEPSEEK_R1 = "deepseek_r1"
-    CLAUDE_OPUS = "claude_opus"
     # Azure OpenAI models — legacy
     O3_DEEP_RESEARCH = "o3_deep_research"
     O1 = "o1"
     # Legacy (kept for stored data compatibility)
+    GROK_4 = "grok_4"
+    CLAUDE_OPUS_AZURE_AI = "claude_opus_azure_ai"
     LLAMA_MAVERICK = "llama_maverick"
     KIMI_25 = "kimi_25"
     GPT_OSS_120B = "gpt_oss_120b"
@@ -559,28 +560,25 @@ INSTRUCTIONS:
 
 class MultiModelLLM:
     """
-    Four-model hybrid pipeline — Azure AI Model Catalog (non-OpenAI) primary.
+    Three-model hybrid pipeline — mixed Bedrock + Azure AI providers.
 
-    Azure AI (primary — serverless deployments):
-    - grok-4           — Explorer: xAI flagship, broad deep reasoning (Chat completion)
+    Bedrock (Claude Opus 4.6):
+    - Claude Opus 4.6  (us.anthropic.claude-opus-4-6-v1:0) — Explorer + Synthesizer, 200K context
+
+    Azure AI (DeepSeek + Mistral):
     - DeepSeek-R1-0528 — Reasoner: state-of-the-art reasoning chains (Chat completion)
-    - claude-opus-4-6  — Synthesizer: Anthropic flagship, 200K context (Anthropic Messages API)
     - Mistral-Large-3  — Critic: strong analytical capabilities (Chat completion)
-
-    Bedrock (fallback):
-    - DeepSeek R1      (us.deepseek.r1-v1:0)            — 64K out, causal reasoning
-    - Claude Opus 4.6  (us.anthropic.claude-opus-4-6-v1:0) — 32K out, 200K context
 
     Azure OpenAI (legacy):
     - o3-deep-research — 100K out, deep research exploration
     - o1               — 100K out, multi-step mathematical reasoning
 
-    Parallel MCP distributes large contexts across all 4 models.
+    Parallel MCP distributes large contexts across all 3 models.
     """
 
     BEDROCK_MODELS = {
-        ModelType.DEEPSEEK_R1: settings.BEDROCK_MODEL_DEEPSEEK,
         ModelType.CLAUDE_OPUS: settings.BEDROCK_MODEL_CLAUDE_OPUS,
+        ModelType.DEEPSEEK_R1: settings.BEDROCK_MODEL_DEEPSEEK,
     }
 
     AZURE_OPENAI_MODELS = {
@@ -588,11 +586,9 @@ class MultiModelLLM:
         ModelType.O1: settings.AZURE_OPENAI_DEPLOYMENT_O1,
     }
 
-    # Azure AI Foundry — single endpoint, all models via OpenAI-compatible chat completions
+    # Azure AI Foundry — only models that work on Azure AI (not grok, not claude)
     AZURE_AI_MODELS = {
-        ModelType.GROK_4:              settings.AZURE_AI_EXPLORER_MODEL,
         ModelType.DEEPSEEK_R1_0528:    settings.AZURE_AI_REASONER_MODEL,
-        ModelType.CLAUDE_OPUS_AZURE_AI: settings.AZURE_AI_SYNTHESIZER_MODEL,
         ModelType.MISTRAL_LARGE_3:     settings.AZURE_AI_CRITIC_MODEL,
     }
 
@@ -609,12 +605,10 @@ class MultiModelLLM:
         if self._initialized:
             return
 
-        # Initialize Azure AI Foundry client (single shared endpoint for all 4 models)
+        # Initialize Azure AI Foundry client (DeepSeek-R1-0528 + Mistral-Large-3 only)
         if settings.azure_ai_key_value and settings.AZURE_AI_ENDPOINT:
             try:
                 from openai import AsyncOpenAI
-                # Azure AI Foundry unified endpoint exposes OpenAI-compatible API for all models.
-                # The endpoint handles translation (including Anthropic Messages for claude-* models).
                 self._azure_ai_client = AsyncOpenAI(
                     base_url=f"{settings.AZURE_AI_ENDPOINT.rstrip('/')}/models",
                     api_key=settings.azure_ai_key_value,
@@ -622,7 +616,7 @@ class MultiModelLLM:
                 self._azure_ai_available = True
                 model_names = list(self.AZURE_AI_MODELS.values())
                 logger.info(f"Azure AI Foundry client initialized → {settings.AZURE_AI_ENDPOINT}")
-                logger.info(f"Available models: {model_names}")
+                logger.info(f"Azure AI models: {model_names}")
             except Exception as e:
                 logger.error(f"Azure AI Foundry client initialization FAILED: {e}")
         else:
@@ -722,10 +716,8 @@ class MultiModelLLM:
     ) -> str:
         """Invoke a model via Azure AI Foundry unified endpoint.
 
-        All models (grok-4, DeepSeek-R1-0528, claude-opus-4-6, Mistral-Large-3) share
-        a single AsyncOpenAI client. The Foundry endpoint exposes an OpenAI-compatible
-        chat completions API for all models — including Claude (the endpoint translates
-        to Anthropic Messages format internally).
+        Only DeepSeek-R1-0528 and Mistral-Large-3 route through Azure AI.
+        Claude Opus routes through Bedrock instead.
         """
         if not self._azure_ai_client:
             raise RuntimeError("Azure AI Foundry client not initialized — set AZURE_AI_ENDPOINT and AZURE_AI_KEY")
@@ -823,13 +815,11 @@ class MultiModelLLM:
         self, prompt: str, system_prompt: str, max_tokens: int, temperature: float,
     ) -> str:
         """Try each model in priority order until one works."""
-        # Priority: Azure AI → Bedrock → Azure OpenAI legacy
+        # Priority: Bedrock Claude → Azure AI → Bedrock DeepSeek → Azure OpenAI legacy
         for model_type in [
-            ModelType.GROK_4,
-            ModelType.CLAUDE_OPUS_AZURE_AI,
+            ModelType.CLAUDE_OPUS,
             ModelType.DEEPSEEK_R1_0528,
             ModelType.MISTRAL_LARGE_3,
-            ModelType.CLAUDE_OPUS,
             ModelType.DEEPSEEK_R1,
             ModelType.O3_DEEP_RESEARCH,
             ModelType.O1,
@@ -867,22 +857,25 @@ class MultiModelLLM:
 
         tasks = {}
 
-        # Primary: Azure AI Foundry — all 4 models share one endpoint
-        if self._azure_ai_available:
-            tasks["grok_4"] = self.generate(
-                ModelType.GROK_4, full_prompt,
+        # Claude Opus 4.6 via Bedrock — Explorer + Synthesizer
+        if self._bedrock_client:
+            tasks["claude_opus_explorer"] = self.generate(
+                ModelType.CLAUDE_OPUS, full_prompt,
                 get_agent_prompt("explorer", include_master=True),
                 max_tokens=32_768, temperature=0.4,
             )
+            tasks["claude_opus_synthesizer"] = self.generate(
+                ModelType.CLAUDE_OPUS, full_prompt,
+                get_agent_prompt("synthesizer", include_master=True),
+                max_tokens=32_768, temperature=0.3,
+            )
+
+        # DeepSeek-R1-0528 + Mistral-Large-3 via Azure AI
+        if self._azure_ai_available:
             tasks["deepseek_r1_0528"] = self.generate(
                 ModelType.DEEPSEEK_R1_0528, full_prompt,
                 get_agent_prompt("reasoner", include_master=True),
                 max_tokens=65_536, temperature=0.2,
-            )
-            tasks["claude_opus_azure_ai"] = self.generate(
-                ModelType.CLAUDE_OPUS_AZURE_AI, full_prompt,
-                get_agent_prompt("synthesizer", include_master=True),
-                max_tokens=32_768, temperature=0.3,
             )
             tasks["mistral_large_3"] = self.generate(
                 ModelType.MISTRAL_LARGE_3, full_prompt,
@@ -890,19 +883,13 @@ class MultiModelLLM:
                 max_tokens=32_768, temperature=0.3,
             )
 
-        # Fallback: Bedrock if no Azure AI models available
-        if not tasks and self._bedrock_client:
+        # If no Azure AI, add Bedrock DeepSeek as reasoner fallback
+        if not self._azure_ai_available and self._bedrock_client:
             tasks["deepseek_r1"] = self.generate(
                 ModelType.DEEPSEEK_R1, full_prompt,
                 get_agent_prompt("reasoner", include_master=True),
                 max_tokens=65_536,
                 temperature=0.2,
-            )
-            tasks["claude_opus"] = self.generate(
-                ModelType.CLAUDE_OPUS, full_prompt,
-                get_agent_prompt("synthesizer", include_master=True),
-                max_tokens=32_768,
-                temperature=0.3,
             )
 
         if not tasks:
@@ -928,65 +915,53 @@ class MultiModelLLM:
         """
         Parallel MCP reasoning: shard context across models, process, then synthesize.
         Used when total context exceeds per-model token limits.
-        Primary: Azure AI models process shards. Fallback: Bedrock models.
+        Claude Opus (Bedrock) + DeepSeek/Mistral (Azure AI).
         """
         full_prompt = f"{context}\n\n{prompt}"
 
-        # Phase 1: All available Azure AI models process in parallel
+        # Phase 1: All available models process in parallel (mixed providers)
         shard_results = {}
+        all_tasks = {}
 
+        # Claude Opus via Bedrock (Explorer + Synthesizer)
+        if self._bedrock_client:
+            all_tasks["claude_opus_explorer"] = self._generate_bedrock(
+                ModelType.CLAUDE_OPUS, full_prompt,
+                get_agent_prompt("explorer", include_master=True),
+                max_tokens=32_768, temperature=0.4,
+            )
+            all_tasks["claude_opus_synthesizer"] = self._generate_bedrock(
+                ModelType.CLAUDE_OPUS, full_prompt,
+                get_agent_prompt("synthesizer", include_master=True),
+                max_tokens=32_768, temperature=0.3,
+            )
+
+        # DeepSeek + Mistral via Azure AI
         if self._azure_ai_available:
-            azure_ai_tasks = {
-                "grok_4": self._generate_azure_ai(
-                    ModelType.GROK_4, full_prompt,
-                    get_agent_prompt("explorer", include_master=True),
-                    max_tokens=32_768, temperature=0.4,
-                ),
-                "deepseek_r1_0528": self._generate_azure_ai(
-                    ModelType.DEEPSEEK_R1_0528, full_prompt,
-                    get_agent_prompt("reasoner", include_master=True),
-                    max_tokens=65_536, temperature=0.2,
-                ),
-                "claude_opus_azure_ai": self._generate_azure_ai(
-                    ModelType.CLAUDE_OPUS_AZURE_AI, full_prompt,
-                    get_agent_prompt("synthesizer", include_master=True),
-                    max_tokens=32_768, temperature=0.3,
-                ),
-                "mistral_large_3": self._generate_azure_ai(
-                    ModelType.MISTRAL_LARGE_3, full_prompt,
-                    get_agent_prompt("critic", include_master=True),
-                    max_tokens=32_768, temperature=0.3,
-                ),
-            }
+            all_tasks["deepseek_r1_0528"] = self._generate_azure_ai(
+                ModelType.DEEPSEEK_R1_0528, full_prompt,
+                get_agent_prompt("reasoner", include_master=True),
+                max_tokens=65_536, temperature=0.2,
+            )
+            all_tasks["mistral_large_3"] = self._generate_azure_ai(
+                ModelType.MISTRAL_LARGE_3, full_prompt,
+                get_agent_prompt("critic", include_master=True),
+                max_tokens=32_768, temperature=0.3,
+            )
+
+        if all_tasks:
             results = await asyncio.gather(
-                *[asyncio.create_task(c) for c in azure_ai_tasks.values()],
+                *[asyncio.create_task(c) for c in all_tasks.values()],
                 return_exceptions=True,
             )
-            for (name, _), result in zip(azure_ai_tasks.items(), results):
+            for (name, _), result in zip(all_tasks.items(), results):
                 if isinstance(result, Exception):
-                    logger.warning(f"Azure AI MCP model {name} failed: {result}")
+                    logger.warning(f"MCP model {name} failed: {result}")
                 else:
                     shard_results[name] = result
 
-        # Phase 1b: Bedrock fallback if no Azure AI results
-        if not shard_results and self._bedrock_client:
-            model_assignments = {
-                "deepseek_r1": self.BEDROCK_MODELS[ModelType.DEEPSEEK_R1],
-                "claude_opus": self.BEDROCK_MODELS[ModelType.CLAUDE_OPUS],
-            }
-            system_prompts = {
-                "deepseek_r1": get_agent_prompt("reasoner", include_master=True),
-                "claude_opus": get_agent_prompt("synthesizer", include_master=True),
-            }
-            shard_results = await self._mcp.parallel_process(
-                prompt=prompt, context=context,
-                model_assignments=model_assignments,
-                system_prompts=system_prompts,
-            )
-
-        # Phase 2: Synthesis via Claude Opus 4.6 (200K context) or Bedrock Claude fallback
-        if self._azure_ai_available:
-            # Synthesize via Claude Opus 4.6 (Anthropic Messages API)
+        # Phase 2: Synthesis via Claude Opus 4.6 (Bedrock, 200K context)
+        if self._bedrock_client and shard_results:
             shard_summaries = "\n\n".join(
                 f"=== {name} ===\n{text}" for name, text in shard_results.items()
                 if not str(text).startswith("[MCP Shard Error]") and not str(text).startswith("Error:")
@@ -1001,20 +976,14 @@ PARALLEL MODEL OUTPUTS:
 Integrate all findings, resolve contradictions, identify cross-model connections, and produce a unified JSON response."""
 
             try:
-                synthesized = await self._generate_azure_ai(
-                    ModelType.CLAUDE_OPUS_AZURE_AI, synthesis_prompt,
+                synthesized = await self._generate_bedrock(
+                    ModelType.CLAUDE_OPUS, synthesis_prompt,
                     "You are a synthesis agent integrating parallel model outputs into unified biomedical discovery.",
                     max_tokens=32_768, temperature=0.3,
                 )
                 shard_results["mcp_synthesis"] = synthesized
             except Exception as e:
                 logger.warning(f"Claude Opus synthesis failed: {e}")
-        elif self._bedrock_client:
-            synthesized = await self._mcp.synthesize_shards(
-                shard_results, prompt,
-                synthesis_model_id=self.BEDROCK_MODELS[ModelType.CLAUDE_OPUS],
-            )
-            shard_results["mcp_synthesis"] = synthesized
 
         return shard_results
 
@@ -1195,9 +1164,9 @@ class DiscoveryOrchestrator(LoggerMixin):
     """
     Main orchestrator for parallel discovery agents.
 
-    Manages 100-10,000 agents across 4 top-tier non-OpenAI models via Azure AI:
-    grok-4 (explorer), DeepSeek-R1-0528 (reasoner), claude-opus-4-6 (synthesizer), Mistral-Large-3 (critic)
-    Fallback: DeepSeek R1 + Claude Opus 4.6 via AWS Bedrock.
+    Manages 100-10,000 agents across 3 models with mixed providers:
+    Claude Opus 4.6 (Bedrock, explorer+synthesizer), DeepSeek-R1-0528 (Azure AI, reasoner),
+    Mistral-Large-3 (Azure AI, critic).
     """
 
     def __init__(
@@ -1230,7 +1199,7 @@ class DiscoveryOrchestrator(LoggerMixin):
         self._rag_service = None
 
     async def initialize(self) -> None:
-        self.logger.info("Initializing discovery orchestrator (4-model Azure AI: grok-4 + DeepSeek-R1-0528 + claude-opus-4-6 + Mistral-Large-3)")
+        self.logger.info("Initializing discovery orchestrator (Claude Opus via Bedrock + DeepSeek-R1-0528 + Mistral-Large-3 via Azure AI)")
         await self.llm.initialize()
 
         try:
@@ -1283,7 +1252,7 @@ class DiscoveryOrchestrator(LoggerMixin):
             self.logger.warning("Orchestrator already running")
             return
 
-        self.logger.info(f"Starting discovery for {disease} with {self.max_agents} agents across Azure AI models (grok-4, DeepSeek-R1-0528, claude-opus-4-6, Mistral-Large-3)")
+        self.logger.info(f"Starting discovery for {disease} with {self.max_agents} agents (Claude Opus via Bedrock, DeepSeek-R1-0528 + Mistral-Large-3 via Azure AI)")
         self.state = OrchestratorState.RUNNING
         self._start_time = time.time()
         self._stop_requested = False
@@ -1406,20 +1375,19 @@ class DiscoveryOrchestrator(LoggerMixin):
     async def _create_agents(self) -> None:
         self._agents = {}
 
-        # Equal distribution across 4 top-tier models: max_agents / 4 per model
-        # e.g. 10000 agents = 2500 per model
-        # Priority: Azure AI → Bedrock fallback
+        # Mixed provider distribution:
+        # Claude Opus (Bedrock) + DeepSeek-R1-0528 (Azure AI) + Mistral-Large-3 (Azure AI)
+        models = []
+        if self.llm._bedrock_client:
+            models.append(ModelType.CLAUDE_OPUS)
         if self.llm._azure_ai_available:
-            models = [
-                ModelType.GROK_4, ModelType.DEEPSEEK_R1_0528,
-                ModelType.CLAUDE_OPUS_AZURE_AI, ModelType.MISTRAL_LARGE_3,
-            ]
-        else:
-            models = []
+            models.extend([ModelType.DEEPSEEK_R1_0528, ModelType.MISTRAL_LARGE_3])
 
-        # Fallback to Bedrock if not enough Azure AI models
-        if len(models) < 2 and self.llm._bedrock_client:
-            models = [ModelType.DEEPSEEK_R1, ModelType.CLAUDE_OPUS]
+        # Fallback to Bedrock-only if no Azure AI
+        if not models and self.llm._bedrock_client:
+            models = [ModelType.CLAUDE_OPUS, ModelType.DEEPSEEK_R1]
+        elif not self.llm._azure_ai_available and self.llm._bedrock_client:
+            models.append(ModelType.DEEPSEEK_R1)
 
         # Roles distributed within each model's agent pool
         role_distribution = [
