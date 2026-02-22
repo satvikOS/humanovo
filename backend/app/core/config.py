@@ -63,11 +63,11 @@ class Settings(BaseSettings):
 
     # Azure AI — model-specific endpoints (direct, no Foundry routing layer)
     # Each model deployed separately with its own endpoint URL + API key
-    AZURE_DEEPSEEK_ENDPOINT: str = ""   # e.g. https://DeepSeek-R1-0528-xxxxx.eastus.models.ai.azure.com/
+    AZURE_DEEPSEEK_ENDPOINT: str = ""   # Full base_url from Azure (e.g. https://humanovo-openai.services.ai.azure.com/openai/v1/)
     AZURE_DEEPSEEK_KEY: SecretStr | None = None
     AZURE_DEEPSEEK_MODEL: str = "DeepSeek-R1-0528"
 
-    AZURE_MISTRAL_ENDPOINT: str = ""    # e.g. https://Mistral-Large-3-xxxxx.eastus.models.ai.azure.com/
+    AZURE_MISTRAL_ENDPOINT: str = ""    # Full base_url from Azure (can be same as DeepSeek if shared endpoint)
     AZURE_MISTRAL_KEY: SecretStr | None = None
     AZURE_MISTRAL_MODEL: str = "Mistral-Large-3"
 

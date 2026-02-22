@@ -613,7 +613,7 @@ class MultiModelLLM:
             try:
                 from openai import AsyncOpenAI
                 self._azure_deepseek_client = AsyncOpenAI(
-                    base_url=f"{settings.AZURE_DEEPSEEK_ENDPOINT.rstrip('/')}/v1",
+                    base_url=settings.AZURE_DEEPSEEK_ENDPOINT.rstrip('/'),
                     api_key=settings.azure_deepseek_key_value,
                 )
                 azure_models_ready += 1
@@ -627,7 +627,7 @@ class MultiModelLLM:
             try:
                 from openai import AsyncOpenAI
                 self._azure_mistral_client = AsyncOpenAI(
-                    base_url=f"{settings.AZURE_MISTRAL_ENDPOINT.rstrip('/')}/v1",
+                    base_url=settings.AZURE_MISTRAL_ENDPOINT.rstrip('/'),
                     api_key=settings.azure_mistral_key_value,
                 )
                 azure_models_ready += 1

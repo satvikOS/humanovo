@@ -125,7 +125,7 @@ if AZURE_DEEPSEEK_ENDPOINT and AZURE_DEEPSEEK_KEY:
     try:
         from openai import OpenAI
         azure_deepseek_client = OpenAI(
-            base_url=f"{AZURE_DEEPSEEK_ENDPOINT.rstrip('/')}/v1",
+            base_url=AZURE_DEEPSEEK_ENDPOINT.rstrip('/'),
             api_key=AZURE_DEEPSEEK_KEY,
         )
         print(f"[ORCHESTRATOR] Azure DeepSeek client initialized (endpoint={AZURE_DEEPSEEK_ENDPOINT})")
@@ -138,7 +138,7 @@ if AZURE_MISTRAL_ENDPOINT and AZURE_MISTRAL_KEY:
     try:
         from openai import OpenAI
         azure_mistral_client = OpenAI(
-            base_url=f"{AZURE_MISTRAL_ENDPOINT.rstrip('/')}/v1",
+            base_url=AZURE_MISTRAL_ENDPOINT.rstrip('/'),
             api_key=AZURE_MISTRAL_KEY,
         )
         print(f"[ORCHESTRATOR] Azure Mistral client initialized (endpoint={AZURE_MISTRAL_ENDPOINT})")

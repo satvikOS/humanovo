@@ -465,7 +465,7 @@ class AzureAILLMClient(BaseLLMClient):
                 )
             from openai import AsyncOpenAI
             self._deepseek_client = AsyncOpenAI(
-                base_url=f"{endpoint.rstrip('/')}/v1",
+                base_url=endpoint.rstrip('/'),
                 api_key=key,
             )
         return self._deepseek_client
