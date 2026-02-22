@@ -735,6 +735,12 @@ def run_discovery_worker(config: dict):
     roles = [r for r, cfg in AGENT_MODELS.items()
              if (cfg["provider"] == "azure_ai" and azure_ai_client is not None)
              or (cfg["provider"] == "bedrock" and bedrock_runtime is not None)]
+
+    if not roles:
+        logger.error("No AI providers available — set AZURE_AI_ENDPOINT/AZURE_AI_KEY env vars")
+        update_discovery_state({"status": "failed", "error": "No AI models connected. Check AZURE_AI_ENDPOINT and AZURE_AI_KEY environment variables."})
+        return
+
     num_rounds = min(max_agents // len(roles), 15)  # Up to 15 rounds for deep research
 
     print(f"[WORKER] Starting: disease={disease!r} max_agents={max_agents} num_rounds={num_rounds} roles={roles}")
