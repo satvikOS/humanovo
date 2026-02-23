@@ -251,7 +251,15 @@ jobs:
               cp "$HANDLERS_DIR/$handler_file" "/tmp/fn-$fn/handlers/$handler_file"
               # Create __init__.py for the handlers package
               touch "/tmp/fn-$fn/handlers/__init__.py"
-              cd "/tmp/fn-$fn" && zip -r "/tmp/$fn.zip" handlers/
+
+              # Bundle openai + httpx directly into agent_orchestrator zip
+              # (Lambda Layer may not refresh reliably due to Terraform lifecycle)
+              if [ "$fn" = "agent_orchestrator" ]; then
+                echo "    Installing openai into $fn function zip..."
+                pip install "openai>=1.12.0,<2.0" -t "/tmp/fn-$fn/" --quiet 2>/dev/null
+              fi
+
+              cd "/tmp/fn-$fn" && zip -r "/tmp/$fn.zip" . -x '*.pyc' '*__pycache__*'
               aws s3 cp "/tmp/$fn.zip" "s3://$GENUP_BUCKET/artifacts/lambda-functions/$fn.zip"
             else
               echo "  WARNING: No handler file for $fn, using placeholder"
