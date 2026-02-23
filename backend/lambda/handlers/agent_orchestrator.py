@@ -112,9 +112,74 @@ except Exception as _e:
     logger.error(f"Lambda client init failed: {_e}")
     lambda_client = None
 
-# Azure AI — model clients
-# Both DeepSeek-R1 and Mistral-Large-3 can share the same Azure AI endpoint,
-# or use per-model endpoints if configured separately.
+# Azure AI — lightweight client using stdlib (no openai package needed)
+# Uses urllib.request to call Azure AI's OpenAI-compatible chat completion API.
+import urllib.request
+import urllib.error
+import ssl
+
+class _AzureAIMessage:
+    """Mimics openai's message object."""
+    def __init__(self, content: str):
+        self.content = content
+
+class _AzureAIChoice:
+    """Mimics openai's choice object."""
+    def __init__(self, message_content: str):
+        self.message = _AzureAIMessage(message_content)
+
+class _AzureAIResponse:
+    """Mimics openai's completion response."""
+    def __init__(self, choices_data: list):
+        self.choices = [
+            _AzureAIChoice(c.get("message", {}).get("content", ""))
+            for c in choices_data
+        ]
+
+class _AzureAIChatCompletions:
+    """Mimics openai's chat.completions interface."""
+    def __init__(self, base_url: str, api_key: str):
+        self._base_url = base_url.rstrip("/")
+        self._api_key = api_key
+
+    def create(self, model: str, messages: list, max_tokens: int = 2000,
+               temperature: float = 0.7, **kwargs) -> _AzureAIResponse:
+        url = f"{self._base_url}/chat/completions"
+        payload = json.dumps({
+            "model": model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }).encode("utf-8")
+
+        req = urllib.request.Request(
+            url,
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self._api_key}",
+            },
+            method="POST",
+        )
+
+        ctx = ssl.create_default_context()
+        with urllib.request.urlopen(req, timeout=120, context=ctx) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+        return _AzureAIResponse(body.get("choices", []))
+
+
+class _AzureAIChat:
+    """Mimics openai's chat namespace."""
+    def __init__(self, base_url: str, api_key: str):
+        self.completions = _AzureAIChatCompletions(base_url, api_key)
+
+
+class AzureAIClient:
+    """Drop-in replacement for OpenAI() — uses stdlib only."""
+    def __init__(self, base_url: str, api_key: str):
+        self.chat = _AzureAIChat(base_url, api_key)
+
+
 azure_deepseek_client = None
 azure_mistral_client = None
 
@@ -130,8 +195,7 @@ AZURE_MISTRAL_KEY = os.environ.get("AZURE_MISTRAL_KEY", "") or AZURE_AI_KEY
 
 if AZURE_DEEPSEEK_ENDPOINT and AZURE_DEEPSEEK_KEY:
     try:
-        from openai import OpenAI
-        azure_deepseek_client = OpenAI(
+        azure_deepseek_client = AzureAIClient(
             base_url=AZURE_DEEPSEEK_ENDPOINT.rstrip('/'),
             api_key=AZURE_DEEPSEEK_KEY,
         )
@@ -143,8 +207,7 @@ else:
 
 if AZURE_MISTRAL_ENDPOINT and AZURE_MISTRAL_KEY:
     try:
-        from openai import OpenAI
-        azure_mistral_client = OpenAI(
+        azure_mistral_client = AzureAIClient(
             base_url=AZURE_MISTRAL_ENDPOINT.rstrip('/'),
             api_key=AZURE_MISTRAL_KEY,
         )
