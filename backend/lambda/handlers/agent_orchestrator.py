@@ -259,14 +259,14 @@ AGENT_MODELS = {
     "reasoner": {
         "model_id": AZURE_AI_REASONER_MODEL,
         "provider": "azure_ai",
-        "max_tokens": 65_536,
+        "max_tokens": 16_000,  # Capped to stay within Azure AI 20K TPM limit
         "temperature": 0.2,
         "role_description": "Causal chain reasoning — step-by-step logical analysis with formal justification",
     },
     "critic": {
         "model_id": AZURE_AI_CRITIC_MODEL,
         "provider": "azure_ai",
-        "max_tokens": 32_768,
+        "max_tokens": 16_000,  # Capped to stay within Azure AI 20K TPM limit
         "temperature": 0.3,
         "role_description": "Critical analysis — identifies weaknesses, risks, and failure modes in proposed hypotheses",
     },
@@ -476,6 +476,39 @@ class DecimalEncoder(json.JSONEncoder):
 
 def serialize(item: dict) -> dict:
     return json.loads(json.dumps(item, cls=DecimalEncoder))
+
+
+class RateLimitError(Exception):
+    """Raised when an API call fails due to HTTP 429 after exhausting all retries."""
+    pass
+
+
+class CancelledError(Exception):
+    """Raised when the discovery process has been cancelled by the user."""
+    pass
+
+
+def _is_cancelled() -> bool:
+    """Check DynamoDB to see if the discovery has been stopped/cancelled."""
+    try:
+        state = get_discovery_state()
+        return state is not None and state.get("status") in ("stopping", "stopped", "idle")
+    except Exception:
+        return False
+
+
+def _cancellable_sleep(seconds: float, check_interval: float = 2.0):
+    """Sleep for `seconds` but check for cancellation every `check_interval` seconds.
+
+    Raises CancelledError if the discovery is cancelled during the sleep.
+    """
+    elapsed = 0.0
+    while elapsed < seconds:
+        chunk = min(check_interval, seconds - elapsed)
+        time.sleep(chunk)
+        elapsed += chunk
+        if _is_cancelled():
+            raise CancelledError("Discovery cancelled during sleep")
 
 
 def get_task_table():
@@ -707,8 +740,9 @@ def call_azure_ai(model_name: str, prompt: str, system_prompt: str,
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": prompt})
 
-    # Retry with exponential backoff for 429 rate-limit errors
-    # Azure AI serverless endpoints have strict per-minute limits
+    # Retry with exponential backoff for 429 rate-limit errors.
+    # Azure AI serverless endpoints have strict per-minute limits.
+    # Uses cancellable sleep so the worker can respond to stop signals.
     max_retries = 5
     for attempt in range(max_retries + 1):
         try:
@@ -723,10 +757,17 @@ def call_azure_ai(model_name: str, prompt: str, system_prompt: str,
             if e.code == 429 and attempt < max_retries:
                 wait = min(5 * (3 ** attempt), 60)  # 5s, 15s, 45s, 60s, 60s
                 logger.warning(f"Azure AI 429 for {model_name}, retry {attempt+1}/{max_retries} in {wait}s")
-                time.sleep(wait)
+                try:
+                    _cancellable_sleep(wait)
+                except CancelledError:
+                    raise CancelledError(f"Cancelled during 429 backoff for {model_name}")
+            elif e.code == 429:
+                # All retries exhausted — raise RateLimitError so caller can skip gracefully
+                raise RateLimitError(
+                    f"Azure AI rate limit (429) exhausted after {max_retries} retries for {model_name}"
+                )
             else:
                 raise
-    # Should not reach here, but just in case
     raise RuntimeError(f"Azure AI call failed after {max_retries} retries for {model_name}")
 
 
@@ -792,7 +833,12 @@ def parse_hypothesis_json(text: str) -> dict | None:
 
 
 def run_single_agent(role: str, prompt: str, system_prompt: str) -> dict | None:
-    """Run a single agent with its assigned model (Bedrock or Azure). Returns hypothesis or None."""
+    """Run a single agent with its assigned model (Bedrock or Azure). Returns hypothesis or None.
+
+    Raises:
+        RateLimitError: If the API returns 429 after exhausting all retries.
+        CancelledError: If the discovery is cancelled during execution.
+    """
     model_config = AGENT_MODELS[role]
     provider = model_config.get("provider", "azure_ai")
     try:
@@ -829,6 +875,8 @@ def run_single_agent(role: str, prompt: str, system_prompt: str) -> dict | None:
                 "role": role,  # Only role stored, never model name
                 "created_at": datetime.utcnow().isoformat(),
             }
+    except (RateLimitError, CancelledError):
+        raise  # Propagate to worker for specific handling
     except Exception as e:
         logger.error(f"Agent {role} failed: {e}")
     return None
@@ -926,7 +974,11 @@ def run_discovery_worker(config: dict):
 
         if state and state.get("status") == "paused":
             logger.info("Discovery paused, waiting...")
-            time.sleep(5)
+            try:
+                _cancellable_sleep(5)
+            except CancelledError:
+                print("[WORKER] Cancelled while paused")
+                break
             continue
 
         # Build shared context strings
@@ -952,11 +1004,13 @@ def run_discovery_worker(config: dict):
 
         # --- PHASED SEQUENTIAL EXECUTION ---
         # Each role runs one at a time: Explorer → Synthesizer → Reasoner → Critic
+        cancelled = False
         for role in roles:
             # Check status before each agent call
             state = get_discovery_state()
-            if state and state.get("status") in ["stopping", "stopped"]:
+            if state and state.get("status") in ["stopping", "stopped", "idle"]:
                 print(f"[WORKER] Stopping mid-round: db_status={state.get('status')}")
+                cancelled = True
                 break
 
             system_prompt = f"{MASTER_PROMPT}\n\n---\n\n{ROLE_PROMPTS[role]}"
@@ -1004,9 +1058,9 @@ Return ONLY a valid JSON object (no markdown fences, no commentary before/after 
                     print(f"[WORKER] {role} -> hypothesis: {hypothesis['title'][:80]} conf={hypothesis['confidence']}")
                     metrics.add_metric(name="HypothesesDiscovered", unit="Count", value=1)
                 else:
-                    # Retry once if agent returned nothing
+                    # Retry once if agent returned nothing (not a rate limit — just bad output)
                     print(f"[WORKER] {role} -> no hypothesis, retrying once...")
-                    time.sleep(2)
+                    _cancellable_sleep(2)
                     hypothesis = run_single_agent(role, prompt, system_prompt)
                     if hypothesis:
                         hypothesis["confidence"] = min(hypothesis["confidence"], target_confidence)
@@ -1015,12 +1069,33 @@ Return ONLY a valid JSON object (no markdown fences, no commentary before/after 
                         print(f"[WORKER] {role} -> RETRY SUCCESS: {hypothesis['title'][:80]} conf={hypothesis['confidence']}")
                     else:
                         print(f"[WORKER] {role} -> RETRY also returned no hypothesis")
+            except CancelledError:
+                print(f"[WORKER] {role} -> CANCELLED by user")
+                cancelled = True
+                break
+            except RateLimitError as e:
+                # Rate-limited after all retries — skip this agent, don't retry
+                print(f"[WORKER] {role} -> RATE LIMITED, skipping: {e}")
+                logger.warning(f"Agent {role} rate-limited in round {round_num}, skipping")
             except Exception as e:
                 print(f"[WORKER] {role} -> EXCEPTION: {e}")
                 logger.error(f"Agent {role} round {round_num} failed: {e}")
 
-            # Delay between sequential agent calls to avoid Azure AI rate limits
-            time.sleep(5)
+            # Delay between sequential agent calls to respect rate limits.
+            # Azure AI models have strict per-minute limits (20 RPM / 20K TPM),
+            # so we wait longer after Azure AI calls to avoid 429 errors.
+            model_config = AGENT_MODELS.get(role, {})
+            delay = 30 if model_config.get("provider") == "azure_ai" else 5
+            try:
+                _cancellable_sleep(delay)
+            except CancelledError:
+                print(f"[WORKER] Cancelled during inter-agent delay")
+                cancelled = True
+                break
+
+        # If cancelled mid-round, break out of the outer loop
+        if cancelled:
+            break
 
         # Update state with partial results after each round
         elapsed = time.time() - start_time
@@ -1048,9 +1123,45 @@ Return ONLY a valid JSON object (no markdown fences, no commentary before/after 
             },
         })
 
-        # Inter-round delay to prevent Azure rate limiting
+        # Inter-round delay to prevent Azure rate limiting (cancellable)
         if round_num < num_rounds - 1:
-            time.sleep(10)
+            try:
+                _cancellable_sleep(10)
+            except CancelledError:
+                print("[WORKER] Cancelled during inter-round delay")
+                break
+
+    # ---- Check if we were stopped/cancelled ----
+    was_cancelled = _is_cancelled()
+    if was_cancelled:
+        # Save partial results and mark as stopped
+        elapsed = time.time() - start_time
+        sorted_h = sorted(hypotheses, key=lambda x: x["confidence"], reverse=True)
+        final_hypotheses = sorted_h[:TARGET_TOTAL_HYPOTHESES]
+        print(f"[WORKER] STOPPED by user: {len(final_hypotheses)} hypotheses in {elapsed:.1f}s")
+        update_discovery_state({
+            "status": "stopped",
+            "hypotheses": final_hypotheses,
+            "stats": {
+                "total_agents": len(roles),
+                "active_agents": 0,
+                "hypotheses_found": len(final_hypotheses),
+                "paths_explored": paths_explored,
+                "high_confidence_discoveries": sum(1 for h in final_hypotheses if h["confidence"] >= 0.7),
+                "current_best_confidence": max((h["confidence"] for h in final_hypotheses), default=0),
+                "runtime_seconds": int(elapsed),
+                "current_round": round_num + 1,
+                "total_rounds": num_rounds,
+                "learning_stats": {
+                    "total_explored": paths_explored,
+                    "low_value_paths": sum(1 for h in final_hypotheses if h["confidence"] < 0.4),
+                    "high_value_paths": sum(1 for h in final_hypotheses if h["confidence"] >= 0.7),
+                    "avg_relation_score": sum(h["confidence"] for h in final_hypotheses) / len(final_hypotheses) if final_hypotheses else 0,
+                },
+            },
+        })
+        logger.info(f"Discovery stopped by user: {len(final_hypotheses)} hypotheses, {elapsed:.0f}s")
+        return
 
     # ---- Discovery complete — finalize ----
     elapsed = time.time() - start_time
@@ -1281,13 +1392,12 @@ def get_status():
             print(f"[STATUS] State is 'failed' — auto-resetting to idle")
             update_discovery_state({"status": "idle"})
             current_status = "idle"
-        elif current_status == "completed":
-            # Return completed once with project info, then reset to idle
+        elif current_status in ("completed", "stopped"):
+            # Return completed/stopped once with results, then reset to idle
             # so the frontend can show Start Discovery again
-            print(f"[STATUS] State is 'completed' — auto-resetting to idle for next run")
+            print(f"[STATUS] State is '{current_status}' — auto-resetting to idle for next run")
             update_discovery_state({"status": "idle"})
-            # Keep current_status as "completed" for THIS response only
-            # so the frontend gets the project_id
+            # Keep current_status for THIS response only so the frontend gets the data
         elif current_status in ("running", "stopping", "paused"):
             updated_at = state.get("updated_at", "")
             if updated_at:
@@ -1466,14 +1576,16 @@ def resume_discovery():
 
 @app.post("/api/v1/orchestrator/stop")
 def stop_discovery():
-    """Stop the discovery process."""
+    """Stop the discovery process.
+
+    Sets status to 'stopping' so the async worker detects it and exits gracefully.
+    The worker will set status to 'stopped' when it finishes cleaning up.
+    """
     try:
         update_discovery_state({"status": "stopping"})
-        time.sleep(1)
-        update_discovery_state({"status": "idle"})
     except Exception as e:
         logger.error(f"Stop failed: {e}")
-    return {"status": "idle"}
+    return {"status": "stopping"}
 
 
 @app.get("/api/v1/orchestrator/health")
