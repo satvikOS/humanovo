@@ -234,7 +234,7 @@ PAPER_TASK_KEY = "active-paper"
 # Bedrock: Claude Opus 4.6 (Explorer + Synthesizer) — restricted on Azure AI
 # Azure AI Foundry: DeepSeek-R1-0528 (Reasoner) + Mistral-Large-3 (Critic)
 
-BEDROCK_MODEL_CLAUDE_OPUS = os.environ.get("BEDROCK_MODEL_ID", "us.anthropic.claude-opus-4-6-v1:0")
+BEDROCK_MODEL_CLAUDE_OPUS = os.environ.get("BEDROCK_MODEL_ID", "anthropic.claude-opus-4-6-v1")
 AZURE_AI_REASONER_MODEL = os.environ.get("AZURE_AI_REASONER_MODEL", "DeepSeek-R1-0528")
 AZURE_AI_CRITIC_MODEL = os.environ.get("AZURE_AI_CRITIC_MODEL", "Mistral-Large-3")
 
@@ -682,7 +682,10 @@ def call_bedrock(model_id: str, prompt: str, system_prompt: str,
 
 def call_azure_ai(model_name: str, prompt: str, system_prompt: str,
                   max_tokens: int = 2000, temperature: float = 0.7) -> str:
-    """Invoke a model via its Azure AI model-specific endpoint."""
+    """Invoke a model via its Azure AI model-specific endpoint.
+
+    Includes retry with exponential backoff for HTTP 429 (rate limiting).
+    """
     # Route to the correct per-model client based on model name
     if "deepseek" in model_name.lower() or "DeepSeek" in model_name:
         client = azure_deepseek_client
@@ -703,13 +706,26 @@ def call_azure_ai(model_name: str, prompt: str, system_prompt: str,
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": prompt})
 
-    response = client.chat.completions.create(
-        model=model_name,
-        messages=messages,
-        max_tokens=max_tokens,
-        temperature=temperature,
-    )
-    return response.choices[0].message.content
+    # Retry with exponential backoff for 429 rate-limit errors
+    max_retries = 3
+    for attempt in range(max_retries + 1):
+        try:
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+            return response.choices[0].message.content
+        except urllib.error.HTTPError as e:
+            if e.code == 429 and attempt < max_retries:
+                wait = 2 ** (attempt + 1)  # 2s, 4s, 8s
+                logger.warning(f"Azure AI 429 for {model_name}, retry {attempt+1}/{max_retries} in {wait}s")
+                time.sleep(wait)
+            else:
+                raise
+    # Should not reach here, but just in case
+    raise RuntimeError(f"Azure AI call failed after {max_retries} retries for {model_name}")
 
 
 def parse_hypothesis_json(text: str) -> dict | None:
