@@ -221,6 +221,7 @@ else:
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "dev")
 AGENT_TASKS_TABLE = os.environ.get("AGENT_TASKS_TABLE", f"genup-{ENVIRONMENT}-agent-tasks")
 HYPOTHESES_TABLE = os.environ.get("HYPOTHESES_TABLE", f"genup-{ENVIRONMENT}-hypotheses")
+PROJECTS_TABLE = os.environ.get("PROJECTS_TABLE", f"genup-{ENVIRONMENT}-projects")
 FUNCTION_NAME = os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "")
 
 # Discovery task key (single active discovery)
@@ -834,20 +835,30 @@ def run_single_agent(role: str, prompt: str, system_prompt: str) -> dict | None:
 
 # ============== Async Discovery Worker ==============
 
-def run_discovery_worker(config: dict):
-    """Run the actual AI discovery process. Called via async Lambda invocation.
+# Phased execution order: Explorer → Synthesizer → Reasoner → Critic
+# Each role runs sequentially within a round, building on prior context.
+PHASE_ORDER = ["explorer", "synthesizer", "reasoner", "critic"]
+NUM_ROUNDS = 5  # 5 rounds × 4 agents = 20 hypotheses
+TARGET_TOTAL_HYPOTHESES = 20
 
-    All models run IN PARALLEL each round using ThreadPoolExecutor:
-    - Claude Opus 4.6 (Bedrock) — Explorer + Synthesizer
-    - DeepSeek-R1-0528 (Azure AI) — Reasoner
-    - Mistral-Large-3 (Azure AI) — Critic
-    Each model has its own role and token budget — no shared token pool.
+
+def run_discovery_worker(config: dict):
+    """Run the AI discovery process. Called via async Lambda invocation.
+
+    Phased sequential execution per round:
+      Phase 1: Explorer (Claude Opus 4.6 via Bedrock) — broad exploration
+      Phase 2: Synthesizer (Claude Opus 4.6 via Bedrock) — integration
+      Phase 3: Reasoner (DeepSeek-R1-0528 via Azure AI) — rigorous causal reasoning
+      Phase 4: Critic (Mistral-Large-3 via Azure AI) — critical analysis
+
+    5 rounds × 4 agents = exactly 20 hypotheses.
+    After completion, auto-creates a project with all hypotheses.
     """
     disease = config.get("disease", "")
     discovery_type = config.get("discovery_type", "cure")
     focus_entities = config.get("focus_entities", [])
     external_factors = config.get("external_factors", [])
-    max_agents = min(config.get("max_agents", 10), 20)  # Cap for Lambda
+    target_confidence = float(config.get("target_confidence", 0.95))
 
     # Only include roles whose provider is available
     def _role_available(role_name, cfg):
@@ -861,20 +872,47 @@ def run_discovery_worker(config: dict):
                 return azure_mistral_client is not None
         return False
 
-    roles = [r for r, cfg in AGENT_MODELS.items() if _role_available(r, cfg)]
+    roles = [r for r in PHASE_ORDER if r in AGENT_MODELS and _role_available(r, AGENT_MODELS[r])]
 
     if not roles:
         logger.error("No AI providers available — need Bedrock + Azure DeepSeek/Mistral endpoints")
         update_discovery_state({"status": "failed", "error": "No AI models connected. Check AWS credentials (Bedrock) and AZURE_DEEPSEEK_ENDPOINT/KEY + AZURE_MISTRAL_ENDPOINT/KEY environment variables."})
         return
 
-    num_rounds = min(max_agents // len(roles), 15)  # Up to 15 rounds for deep research
-
-    print(f"[WORKER] Starting: disease={disease!r} max_agents={max_agents} num_rounds={num_rounds} roles={roles}")
+    num_rounds = NUM_ROUNDS
+    print(f"[WORKER] Starting: disease={disease!r} num_rounds={num_rounds} roles={roles} target_conf={target_confidence}")
 
     start_time = time.time()
     hypotheses = []
     paths_explored = 0
+
+    # Each round+role gets a unique angle to ensure diversity
+    angle_matrix = {
+        # Claude Opus 4.6 (Bedrock): broad exploration, novel connections
+        ("explorer", 0): "Explore NOVEL molecular targets (phase separation, mechanotransduction, non-coding RNA, metabolic symbiosis) AND design the clinical development strategy for the most promising.",
+        ("explorer", 1): "Focus on DRUG REPURPOSING: find approved drugs from unrelated fields with unexpected activity. Design the rapid clinical validation path (basket trial, platform study).",
+        ("explorer", 2): "Explore MICROBIOME-IMMUNE-METABOLISM axis. Design a COMBINATION PROTOCOL leveraging gut-brain connections, bacterial metabolites, and ecological interventions.",
+        ("explorer", 3): "Explore GENE THERAPY and epigenetic reprogramming (CRISPR, base editing, ASO, siRNA). Design PRECISION MEDICINE STRATIFICATION: molecular subtypes, biomarker panels, matched therapeutics.",
+        ("explorer", 4): "Explore NANOTECHNOLOGY and advanced delivery (BBB-crossing nanoparticles, exosome engineering). Design HEALTH ECONOMICS AND MARKET ACCESS plan with QALY impact, payer evidence requirements.",
+        # DeepSeek-R1-0528 (Azure AI): rigorous causal chain reasoning
+        ("reasoner", 0): "Build a rigorous IMMUNOTHERAPY causal chain. Map checkpoint interactions, T-cell exhaustion markers, neoantigen load, and TME remodeling with exact IC50/EC50 values.",
+        ("reasoner", 1): "Build a rigorous METABOLIC VULNERABILITY chain. Map synthetic lethality, nutrient addiction, mitochondrial dependencies with exact enzyme kinetics.",
+        ("reasoner", 2): "Build a rigorous SIGNALING CASCADE chain. Map kinase networks, feedback loops, resistance mutations, and combination logic with quantitative modeling.",
+        ("reasoner", 3): "Build a rigorous EPIGENETIC THERAPY chain. Map histone marks, DNA methylation patterns, chromatin accessibility, and transcriptional consequences.",
+        ("reasoner", 4): "Build a rigorous TUMOR MICROENVIRONMENT chain. Map ECM composition, vascular normalization, hypoxia gradients, and immune infiltration dynamics.",
+        # Claude Opus 4.6 (Bedrock): long-context synthesis & integration
+        ("synthesizer", 0): "INTEGRATE all findings into a multi-modal combination therapy protocol. Specify exact drugs, doses, schedules, and synergy mechanisms.",
+        ("synthesizer", 1): "INTEGRATE findings into a precision medicine stratification framework. Define molecular subtypes, biomarker panels, and matched therapeutics.",
+        ("synthesizer", 2): "INTEGRATE findings into a temporal treatment cascade. Design sequential phases that exploit therapy-induced vulnerabilities at each stage.",
+        ("synthesizer", 3): "INTEGRATE findings into a systems biology model. Map all intervention points onto pathway networks and predict emergent therapeutic effects.",
+        ("synthesizer", 4): "INTEGRATE findings into a clinical translation roadmap. Design Phase I/II trial with biomarker-guided adaptive design and companion diagnostics.",
+        # Mistral-Large-3 (Azure AI): critical analysis, risk assessment, validation
+        ("critic", 0): "Perform QUANTITATIVE PHARMACOLOGY critique: challenge receptor occupancy assumptions, PK/PD model validity, therapeutic index calculations, dose-response confidence intervals.",
+        ("critic", 1): "Evaluate STATISTICAL RIGOR of proposed validation: assess sample size adequacy, effect size plausibility, multiple comparison corrections, adaptive design boundary assumptions.",
+        ("critic", 2): "Challenge SYSTEMS BIOLOGY MODELS: stress-test ODE assumptions, parameter sensitivity bounds, bifurcation robustness, stochastic noise impact on predictions.",
+        ("critic", 3): "Assess SAFETY AND TOXICOLOGY risks: on/off-target effects, CYP450 interactions, immunogenicity, genotoxicity potential, black box warning likelihood.",
+        ("critic", 4): "Evaluate CLINICAL TRANSLATABILITY: regulatory pathway feasibility, manufacturing scalability, IP landscape, market access barriers, payer evidence requirements.",
+    }
 
     for round_num in range(num_rounds):
         # Check if stopped
@@ -890,7 +928,7 @@ def run_discovery_worker(config: dict):
             time.sleep(5)
             continue
 
-        # Build prompts for this round
+        # Build shared context strings
         focus_str = f"\nFocus entities: {', '.join(focus_entities)}" if focus_entities else ""
         factors_str = ""
         if external_factors:
@@ -899,7 +937,7 @@ def run_discovery_worker(config: dict):
                 for f in external_factors
             )
 
-        # Context from previous hypotheses for this round
+        # Context from previous hypotheses
         prev_context = ""
         if hypotheses:
             top_3 = sorted(hypotheses, key=lambda x: x["confidence"], reverse=True)[:3]
@@ -908,50 +946,34 @@ def run_discovery_worker(config: dict):
                 for h in top_3
             )
 
-        # Run all agents IN PARALLEL using ThreadPoolExecutor (up to 6 models)
-        futures = {}
-        with ThreadPoolExecutor(max_workers=len(roles)) as executor:
-            for role in roles:
-                # Check status before submitting
-                state = get_discovery_state()
-                if state and state.get("status") in ["stopping", "stopped"]:
-                    break
+        # Track what this round's earlier phases produced (for subsequent phases)
+        round_findings = []
 
-                system_prompt = f"{MASTER_PROMPT}\n\n---\n\n{ROLE_PROMPTS[role]}"
+        # --- PHASED SEQUENTIAL EXECUTION ---
+        # Each role runs one at a time: Explorer → Synthesizer → Reasoner → Critic
+        for role in roles:
+            # Check status before each agent call
+            state = get_discovery_state()
+            if state and state.get("status") in ["stopping", "stopped"]:
+                print(f"[WORKER] Stopping mid-round: db_status={state.get('status')}")
+                break
 
-                # Each round+role gets a unique angle to ensure diversity
-                angle_matrix = {
-                    # Claude Opus 4.6 (Bedrock): broad exploration, novel connections, strategic planning
-                    ("explorer", 0): "Explore NOVEL molecular targets (phase separation, mechanotransduction, non-coding RNA, metabolic symbiosis) AND design the clinical development strategy for the most promising.",
-                    ("explorer", 1): "Focus on DRUG REPURPOSING: find approved drugs from unrelated fields with unexpected activity. Design the rapid clinical validation path (basket trial, platform study).",
-                    ("explorer", 2): "Explore MICROBIOME-IMMUNE-METABOLISM axis. Design a COMBINATION PROTOCOL leveraging gut-brain connections, bacterial metabolites, and ecological interventions.",
-                    ("explorer", 3): "Explore GENE THERAPY and epigenetic reprogramming (CRISPR, base editing, ASO, siRNA). Design PRECISION MEDICINE STRATIFICATION: molecular subtypes, biomarker panels, matched therapeutics.",
-                    ("explorer", 4): "Explore NANOTECHNOLOGY and advanced delivery (BBB-crossing nanoparticles, exosome engineering). Design HEALTH ECONOMICS AND MARKET ACCESS plan with QALY impact, payer evidence requirements.",
-                    # DeepSeek-R1-0528 (Azure AI): rigorous causal chain reasoning
-                    ("reasoner", 0): "Build a rigorous IMMUNOTHERAPY causal chain. Map checkpoint interactions, T-cell exhaustion markers, neoantigen load, and TME remodeling with exact IC50/EC50 values.",
-                    ("reasoner", 1): "Build a rigorous METABOLIC VULNERABILITY chain. Map synthetic lethality, nutrient addiction, mitochondrial dependencies with exact enzyme kinetics.",
-                    ("reasoner", 2): "Build a rigorous SIGNALING CASCADE chain. Map kinase networks, feedback loops, resistance mutations, and combination logic with quantitative modeling.",
-                    ("reasoner", 3): "Build a rigorous EPIGENETIC THERAPY chain. Map histone marks, DNA methylation patterns, chromatin accessibility, and transcriptional consequences.",
-                    ("reasoner", 4): "Build a rigorous TUMOR MICROENVIRONMENT chain. Map ECM composition, vascular normalization, hypoxia gradients, and immune infiltration dynamics.",
-                    # Claude Opus 4.6 (Bedrock): long-context synthesis & integration
-                    ("synthesizer", 0): "INTEGRATE all findings into a multi-modal combination therapy protocol. Specify exact drugs, doses, schedules, and synergy mechanisms.",
-                    ("synthesizer", 1): "INTEGRATE findings into a precision medicine stratification framework. Define molecular subtypes, biomarker panels, and matched therapeutics.",
-                    ("synthesizer", 2): "INTEGRATE findings into a temporal treatment cascade. Design sequential phases that exploit therapy-induced vulnerabilities at each stage.",
-                    ("synthesizer", 3): "INTEGRATE findings into a systems biology model. Map all intervention points onto pathway networks and predict emergent therapeutic effects.",
-                    ("synthesizer", 4): "INTEGRATE findings into a clinical translation roadmap. Design Phase I/II trial with biomarker-guided adaptive design and companion diagnostics.",
-                    # Mistral-Large-3 (Azure AI): critical analysis, risk assessment, validation
-                    ("critic", 0): "Perform QUANTITATIVE PHARMACOLOGY critique: challenge receptor occupancy assumptions, PK/PD model validity, therapeutic index calculations, dose-response confidence intervals.",
-                    ("critic", 1): "Evaluate STATISTICAL RIGOR of proposed validation: assess sample size adequacy, effect size plausibility, multiple comparison corrections, adaptive design boundary assumptions.",
-                    ("critic", 2): "Challenge SYSTEMS BIOLOGY MODELS: stress-test ODE assumptions, parameter sensitivity bounds, bifurcation robustness, stochastic noise impact on predictions.",
-                    ("critic", 3): "Assess SAFETY AND TOXICOLOGY risks: on/off-target effects, CYP450 interactions, immunogenicity, genotoxicity potential, black box warning likelihood.",
-                    ("critic", 4): "Evaluate CLINICAL TRANSLATABILITY: regulatory pathway feasibility, manufacturing scalability, IP landscape, market access barriers, payer evidence requirements.",
-                }
-                angle = angle_matrix.get((role, round_num), f"Generate a unique {role}-perspective hypothesis distinct from all others.")
+            system_prompt = f"{MASTER_PROMPT}\n\n---\n\n{ROLE_PROMPTS[role]}"
+            angle = angle_matrix.get((role, round_num), f"Generate a unique {role}-perspective hypothesis distinct from all others.")
 
-                prompt = f"""Investigate {disease} for {discovery_type} discovery.
+            # Build phase-specific context from earlier phases in this round
+            phase_context = ""
+            if round_findings:
+                phase_context = "\n\nFindings from earlier phases in this round:\n" + "\n".join(
+                    f"- [{f['role'].upper()}] {f['title']} (conf={f['confidence']:.0%})"
+                    for f in round_findings
+                )
+
+            prompt = f"""Investigate {disease} for {discovery_type} discovery.
 {focus_str}
 {factors_str}
 {prev_context}
+{phase_context}
 
 Round {round_num + 1}/{num_rounds}, Agent role: {role}
 SPECIFIC ANGLE FOR THIS ROUND: {angle}
@@ -963,38 +985,51 @@ REQUIREMENTS:
 - Name SPECIFIC molecules, genes, proteins, cell types, doses, and quantitative data
 - Description must be 200+ words of dense, evidence-rich scientific content
 - Mechanism must trace a complete molecular cascade from intervention to clinical outcome
+- Confidence MUST NOT exceed {target_confidence}
 
 Return ONLY a valid JSON object (no markdown fences, no commentary before/after the JSON):
-{{"has_hypothesis": true, "title": "...", "description": "200+ words with citations...", "mechanism": "Complete molecular cascade...", "confidence": 0.0-1.0, "evidence_summary": ["5+ specific cited evidence items..."], "risks": ["specific risks..."], "validation_steps": ["specific experiments..."], "novelty_score": 0.0-1.0}}"""
+{{"has_hypothesis": true, "title": "...", "description": "200+ words with citations...", "mechanism": "Complete molecular cascade...", "confidence": 0.0-{target_confidence}, "evidence_summary": ["5+ specific cited evidence items..."], "risks": ["specific risks..."], "validation_steps": ["specific experiments..."], "novelty_score": 0.0-1.0}}"""
 
-                future = executor.submit(run_single_agent, role, prompt, system_prompt)
-                futures[future] = role
+            paths_explored += 1
+            print(f"[WORKER] Round {round_num+1} Phase {role}: calling model...")
 
-            # Collect results as they complete
-            for future in as_completed(futures):
-                role = futures[future]
-                paths_explored += 1
-                try:
-                    hypothesis = future.result()
+            try:
+                hypothesis = run_single_agent(role, prompt, system_prompt)
+                if hypothesis:
+                    # Cap confidence at target_confidence
+                    hypothesis["confidence"] = min(hypothesis["confidence"], target_confidence)
+                    hypotheses.append(hypothesis)
+                    round_findings.append(hypothesis)
+                    print(f"[WORKER] {role} -> hypothesis: {hypothesis['title'][:80]} conf={hypothesis['confidence']}")
+                    metrics.add_metric(name="HypothesesDiscovered", unit="Count", value=1)
+                else:
+                    # Retry once if agent returned nothing
+                    print(f"[WORKER] {role} -> no hypothesis, retrying once...")
+                    time.sleep(2)
+                    hypothesis = run_single_agent(role, prompt, system_prompt)
                     if hypothesis:
+                        hypothesis["confidence"] = min(hypothesis["confidence"], target_confidence)
                         hypotheses.append(hypothesis)
-                        print(f"[WORKER] {role} -> hypothesis: {hypothesis['title'][:80]} conf={hypothesis['confidence']}")
-                        metrics.add_metric(name="HypothesesDiscovered", unit="Count", value=1)
+                        round_findings.append(hypothesis)
+                        print(f"[WORKER] {role} -> RETRY SUCCESS: {hypothesis['title'][:80]} conf={hypothesis['confidence']}")
                     else:
-                        print(f"[WORKER] {role} -> no hypothesis returned")
-                except Exception as e:
-                    print(f"[WORKER] {role} -> EXCEPTION: {e}")
-                    logger.error(f"Agent {role} round {round_num} failed: {e}")
+                        print(f"[WORKER] {role} -> RETRY also returned no hypothesis")
+            except Exception as e:
+                print(f"[WORKER] {role} -> EXCEPTION: {e}")
+                logger.error(f"Agent {role} round {round_num} failed: {e}")
+
+            # Small delay between sequential agent calls to avoid rate limits
+            time.sleep(1)
 
         # Update state with partial results after each round
         elapsed = time.time() - start_time
-        print(f"[WORKER] Round {round_num+1} done: {len(hypotheses)} hypotheses, {elapsed:.1f}s elapsed")
+        print(f"[WORKER] Round {round_num+1} done: {len(hypotheses)} hypotheses total, {elapsed:.1f}s elapsed")
         sorted_h = sorted(hypotheses, key=lambda x: x["confidence"], reverse=True)
         update_discovery_state({
             "status": "running",
             "hypotheses": sorted_h[:50],
             "stats": {
-                "total_agents": len(roles),  # Parallel agents per round
+                "total_agents": len(roles),
                 "active_agents": len(roles) if round_num < num_rounds - 1 else 0,
                 "hypotheses_found": len(hypotheses),
                 "paths_explored": paths_explored,
@@ -1012,39 +1047,49 @@ Return ONLY a valid JSON object (no markdown fences, no commentary before/after 
             },
         })
 
-    # Mark as completed
+        # Inter-round delay to prevent Azure rate limiting
+        if round_num < num_rounds - 1:
+            time.sleep(3)
+
+    # ---- Discovery complete — finalize ----
     elapsed = time.time() - start_time
     sorted_h = sorted(hypotheses, key=lambda x: x["confidence"], reverse=True)
-    print(f"[WORKER] DONE: {len(hypotheses)} hypotheses in {elapsed:.1f}s, marking idle")
-    update_discovery_state({
-        "status": "idle",
-        "hypotheses": sorted_h[:50],
-        "stats": {
-            "total_agents": len(roles),
-            "active_agents": 0,
-            "hypotheses_found": len(hypotheses),
-            "paths_explored": paths_explored,
-            "high_confidence_discoveries": sum(1 for h in hypotheses if h["confidence"] >= 0.7),
-            "current_best_confidence": max((h["confidence"] for h in hypotheses), default=0),
-            "runtime_seconds": int(elapsed),
-            "current_round": num_rounds,
-            "total_rounds": num_rounds,
-            "learning_stats": {
-                "total_explored": paths_explored,
-                "low_value_paths": sum(1 for h in hypotheses if h["confidence"] < 0.4),
-                "high_value_paths": sum(1 for h in hypotheses if h["confidence"] >= 0.7),
-                "avg_relation_score": sum(h["confidence"] for h in hypotheses) / len(hypotheses) if hypotheses else 0,
-            },
-        },
-    })
+    # Keep exactly TARGET_TOTAL_HYPOTHESES (20)
+    final_hypotheses = sorted_h[:TARGET_TOTAL_HYPOTHESES]
+    print(f"[WORKER] DONE: {len(final_hypotheses)} hypotheses in {elapsed:.1f}s")
 
-    # Save top hypotheses to the hypotheses table
+    # ---- Auto-create project ----
+    project_id = str(uuid4())
+    now = datetime.utcnow().isoformat()
+    project_name = f"Discovery: {disease}"
+    try:
+        proj_table = dynamodb.Table(PROJECTS_TABLE)
+        proj_table.put_item(Item={
+            "id": project_id,
+            "name": project_name,
+            "description": f"Auto-generated project from AI discovery for {disease} ({discovery_type}). {len(final_hypotheses)} hypotheses generated across {num_rounds} rounds.",
+            "disease_focus": disease,
+            "research_question": f"{discovery_type.capitalize()} discovery for {disease}",
+            "tags": [disease, discovery_type, "ai-generated"],
+            "hypothesis_count": len(final_hypotheses),
+            "evidence_count": 0,
+            "user_id": "default",
+            "created_at": now,
+            "updated_at": now,
+        })
+        print(f"[WORKER] Auto-created project: {project_id} name={project_name!r}")
+    except Exception as e:
+        logger.error(f"Failed to auto-create project: {e}")
+        project_id = "discovery"  # Fallback
+
+    # ---- Save ALL hypotheses to hypotheses table ----
     hyp_table = dynamodb.Table(HYPOTHESES_TABLE)
-    for h in sorted_h[:10]:
+    saved_count = 0
+    for h in final_hypotheses:
         try:
             hyp_table.put_item(Item={
                 "id": h["id"],
-                "project_id": config.get("project_id", "discovery"),
+                "project_id": project_id,
                 "statement": h["title"],
                 "mechanism": h.get("mechanism", ""),
                 "rationale": h.get("description", ""),
@@ -1052,17 +1097,159 @@ Return ONLY a valid JSON object (no markdown fences, no commentary before/after 
                 "confidence_score": Decimal(str(round(h["confidence"], 4))),
                 "novelty_score": Decimal(str(round(h.get("novelty_score", 0.5), 4))),
                 "evidence_refs": [],
+                "evidence_summary": h.get("evidence_summary", []),
+                "risks": h.get("risks", []),
+                "validation_steps": h.get("validation_steps", []),
                 "contradiction_count": 0,
                 "supporting_count": 0,
                 "tags": [],
                 "version": 1,
-                "created_at": h.get("created_at", datetime.utcnow().isoformat()),
-                "updated_at": datetime.utcnow().isoformat(),
+                "role": h.get("role", ""),
+                "created_at": h.get("created_at", now),
+                "updated_at": now,
             })
+            saved_count += 1
         except Exception as e:
             logger.warning(f"Failed to save hypothesis: {e}")
 
-    logger.info(f"Discovery completed: {len(hypotheses)} hypotheses found in {elapsed:.0f}s")
+    print(f"[WORKER] Saved {saved_count}/{len(final_hypotheses)} hypotheses to DB, project={project_id}")
+
+    # ---- Mark as completed with project reference ----
+    update_discovery_state({
+        "status": "completed",
+        "project_id": project_id,
+        "project_name": project_name,
+        "hypotheses": final_hypotheses,
+        "stats": {
+            "total_agents": len(roles),
+            "active_agents": 0,
+            "hypotheses_found": len(final_hypotheses),
+            "paths_explored": paths_explored,
+            "high_confidence_discoveries": sum(1 for h in final_hypotheses if h["confidence"] >= 0.7),
+            "current_best_confidence": max((h["confidence"] for h in final_hypotheses), default=0),
+            "runtime_seconds": int(elapsed),
+            "current_round": num_rounds,
+            "total_rounds": num_rounds,
+            "learning_stats": {
+                "total_explored": paths_explored,
+                "low_value_paths": sum(1 for h in final_hypotheses if h["confidence"] < 0.4),
+                "high_value_paths": sum(1 for h in final_hypotheses if h["confidence"] >= 0.7),
+                "avg_relation_score": sum(h["confidence"] for h in final_hypotheses) / len(final_hypotheses) if final_hypotheses else 0,
+            },
+        },
+    })
+
+    logger.info(f"Discovery completed: {len(final_hypotheses)} hypotheses, project={project_id}, {elapsed:.0f}s")
+
+
+# ============== Save-to-Project Endpoint ==============
+
+@app.post("/api/v1/orchestrator/save-to-project")
+def save_discovery_to_project():
+    """Save current discovery results to a new or existing project.
+
+    Called by frontend after discovery completes. If the worker already
+    auto-created a project, this returns that project's info.
+    Otherwise it creates a new project from the current discovery state.
+    """
+    try:
+        # Check query params for custom project name
+        try:
+            params = app.current_event.query_string_parameters or {}
+        except Exception:
+            params = {}
+        project_name = params.get("project_name", "")
+
+        state = get_discovery_state()
+        if not state:
+            return Response(
+                status_code=404,
+                content_type="application/json",
+                body=json.dumps({"detail": "No discovery state found"}),
+            )
+
+        hypotheses = state.get("hypotheses", [])
+        if not hypotheses:
+            return Response(
+                status_code=400,
+                content_type="application/json",
+                body=json.dumps({"detail": "No hypotheses found in current discovery"}),
+            )
+
+        # If auto-created project exists, return it
+        existing_project_id = state.get("project_id")
+        existing_project_name = state.get("project_name", "")
+        if existing_project_id and existing_project_id != "discovery":
+            return {
+                "status": "success",
+                "project_id": existing_project_id,
+                "name": existing_project_name,
+                "hypothesis_count": len(hypotheses),
+                "message": f"Project already created: {existing_project_name}",
+            }
+
+        # Create a new project
+        disease = (state.get("config", {}) or {}).get("disease", "Unknown")
+        now = datetime.utcnow().isoformat()
+        project_id = str(uuid4())
+        name = project_name or f"Discovery: {disease}"
+
+        proj_table = dynamodb.Table(PROJECTS_TABLE)
+        proj_table.put_item(Item={
+            "id": project_id,
+            "name": name,
+            "description": f"Project from AI discovery for {disease}. {len(hypotheses)} hypotheses.",
+            "disease_focus": disease,
+            "research_question": f"Discovery for {disease}",
+            "tags": [disease, "ai-generated"],
+            "hypothesis_count": len(hypotheses),
+            "evidence_count": 0,
+            "user_id": "default",
+            "created_at": now,
+            "updated_at": now,
+        })
+
+        # Save hypotheses linked to this project
+        hyp_table = dynamodb.Table(HYPOTHESES_TABLE)
+        for h in hypotheses:
+            try:
+                hyp_table.put_item(Item={
+                    "id": h.get("id", str(uuid4())),
+                    "project_id": project_id,
+                    "statement": h.get("title", ""),
+                    "mechanism": h.get("mechanism", ""),
+                    "rationale": h.get("description", ""),
+                    "status": "generated",
+                    "confidence_score": Decimal(str(round(float(h.get("confidence", 0.5)), 4))),
+                    "novelty_score": Decimal(str(round(float(h.get("novelty_score", 0.5)), 4))),
+                    "evidence_refs": [],
+                    "contradiction_count": 0,
+                    "supporting_count": 0,
+                    "tags": [],
+                    "version": 1,
+                    "created_at": h.get("created_at", now),
+                    "updated_at": now,
+                })
+            except Exception as e:
+                logger.warning(f"Failed to save hypothesis to project: {e}")
+
+        # Update discovery state with project reference
+        update_discovery_state({**state, "project_id": project_id, "project_name": name})
+
+        return {
+            "status": "success",
+            "project_id": project_id,
+            "name": name,
+            "hypothesis_count": len(hypotheses),
+            "message": f"Created project '{name}' with {len(hypotheses)} hypotheses",
+        }
+    except Exception as e:
+        logger.error(f"save-to-project failed: {e}")
+        return Response(
+            status_code=500,
+            content_type="application/json",
+            body=json.dumps({"detail": f"Failed to save to project: {str(e)}"}),
+        )
 
 
 # ============== API Endpoints ==============
@@ -1116,11 +1303,16 @@ def get_status():
             safe_h = {k: v for k, v in h.items() if k not in ("model_used", "model_id", "role")}
             safe_hypotheses.append(safe_h)
 
-        return serialize({
+        result = {
             "state": current_status,
             "stats": state.get("stats"),
             "top_hypotheses": safe_hypotheses,
-        })
+        }
+        # Include project reference if discovery completed
+        if state.get("project_id") and state["project_id"] != "discovery":
+            result["project_id"] = state["project_id"]
+            result["project_name"] = state.get("project_name", "")
+        return serialize(result)
     except Exception as e:
         logger.error(f"Status endpoint error: {e}")
         return {"state": "idle", "stats": None, "top_hypotheses": []}
@@ -1182,7 +1374,7 @@ def start_discovery():
                 "current_best_confidence": Decimal("0"),
                 "runtime_seconds": 0,
                 "current_round": 0,
-                "total_rounds": 0,
+                "total_rounds": NUM_ROUNDS,
                 "learning_stats": {
                     "total_explored": 0,
                     "low_value_paths": 0,
@@ -1220,7 +1412,7 @@ def start_discovery():
                 update_discovery_state({"status": "idle"})
 
         print(f"[START] Returning started response")
-        return {"status": "started", "disease": disease, "agents": 4}
+        return {"status": "started", "disease": disease, "agents": 4, "total_rounds": NUM_ROUNDS}
     except Exception as e:
         logger.error(f"Start discovery failed: {e}")
         return Response(
