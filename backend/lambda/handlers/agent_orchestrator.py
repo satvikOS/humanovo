@@ -112,14 +112,21 @@ except Exception as _e:
     logger.error(f"Lambda client init failed: {_e}")
     lambda_client = None
 
-# Azure AI — model-specific clients (direct endpoints, no Foundry routing layer)
+# Azure AI — model clients
+# Both DeepSeek-R1 and Mistral-Large-3 can share the same Azure AI endpoint,
+# or use per-model endpoints if configured separately.
 azure_deepseek_client = None
 azure_mistral_client = None
 
-AZURE_DEEPSEEK_ENDPOINT = os.environ.get("AZURE_DEEPSEEK_ENDPOINT", "")
-AZURE_DEEPSEEK_KEY = os.environ.get("AZURE_DEEPSEEK_KEY", "")
-AZURE_MISTRAL_ENDPOINT = os.environ.get("AZURE_MISTRAL_ENDPOINT", "")
-AZURE_MISTRAL_KEY = os.environ.get("AZURE_MISTRAL_KEY", "")
+# Shared endpoint (both models at same Azure AI resource)
+AZURE_AI_ENDPOINT = os.environ.get("AZURE_AI_ENDPOINT", "")
+AZURE_AI_KEY = os.environ.get("AZURE_AI_KEY", "")
+
+# Per-model overrides (fall back to shared endpoint)
+AZURE_DEEPSEEK_ENDPOINT = os.environ.get("AZURE_DEEPSEEK_ENDPOINT", "") or AZURE_AI_ENDPOINT
+AZURE_DEEPSEEK_KEY = os.environ.get("AZURE_DEEPSEEK_KEY", "") or AZURE_AI_KEY
+AZURE_MISTRAL_ENDPOINT = os.environ.get("AZURE_MISTRAL_ENDPOINT", "") or AZURE_AI_ENDPOINT
+AZURE_MISTRAL_KEY = os.environ.get("AZURE_MISTRAL_KEY", "") or AZURE_AI_KEY
 
 if AZURE_DEEPSEEK_ENDPOINT and AZURE_DEEPSEEK_KEY:
     try:
@@ -132,7 +139,7 @@ if AZURE_DEEPSEEK_ENDPOINT and AZURE_DEEPSEEK_KEY:
     except Exception as _e:
         logger.error(f"Azure DeepSeek init failed: {_e}")
 else:
-    print("[ORCHESTRATOR] Azure DeepSeek not configured — set AZURE_DEEPSEEK_ENDPOINT and AZURE_DEEPSEEK_KEY")
+    print("[ORCHESTRATOR] Azure DeepSeek not configured — set AZURE_AI_ENDPOINT/KEY or AZURE_DEEPSEEK_ENDPOINT/KEY")
 
 if AZURE_MISTRAL_ENDPOINT and AZURE_MISTRAL_KEY:
     try:
@@ -145,7 +152,7 @@ if AZURE_MISTRAL_ENDPOINT and AZURE_MISTRAL_KEY:
     except Exception as _e:
         logger.error(f"Azure Mistral init failed: {_e}")
 else:
-    print("[ORCHESTRATOR] Azure Mistral not configured — set AZURE_MISTRAL_ENDPOINT and AZURE_MISTRAL_KEY")
+    print("[ORCHESTRATOR] Azure Mistral not configured — set AZURE_AI_ENDPOINT/KEY or AZURE_MISTRAL_ENDPOINT/KEY")
 
 # Configuration
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "dev")
@@ -999,6 +1006,26 @@ def get_status():
                 "top_hypotheses": [],
             }
 
+        # Auto-detect stale states — if running/stopping/paused >15 min with no update,
+        # the Lambda probably crashed. Reset to idle so the user can start a new discovery.
+        current_status = state.get("status", "idle")
+        if current_status in ("running", "stopping", "paused"):
+            updated_at = state.get("updated_at", "")
+            if updated_at:
+                try:
+                    last_update = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+                    now = datetime.utcnow()
+                    # Make both offset-naive for comparison
+                    if last_update.tzinfo:
+                        last_update = last_update.replace(tzinfo=None)
+                    age_minutes = (now - last_update).total_seconds() / 60
+                    if age_minutes > 15:
+                        print(f"[STATUS] STALE state detected: {current_status} for {age_minutes:.0f}min — auto-resetting to idle")
+                        update_discovery_state({"status": "idle"})
+                        current_status = "idle"
+                except Exception as parse_err:
+                    logger.warning(f"Could not parse updated_at for stale check: {parse_err}")
+
         # Strip any model info from hypotheses before sending to frontend
         safe_hypotheses = []
         for h in (state.get("hypotheses", []) or [])[:20]:
@@ -1006,13 +1033,24 @@ def get_status():
             safe_hypotheses.append(safe_h)
 
         return serialize({
-            "state": state.get("status", "idle"),
+            "state": current_status,
             "stats": state.get("stats"),
             "top_hypotheses": safe_hypotheses,
         })
     except Exception as e:
         logger.error(f"Status endpoint error: {e}")
         return {"state": "idle", "stats": None, "top_hypotheses": []}
+
+
+@app.post("/api/v1/orchestrator/reset")
+def reset_discovery():
+    """Force-reset discovery state to idle. Use when state is stuck."""
+    try:
+        update_discovery_state({"status": "idle"})
+        print("[RESET] Discovery state force-reset to idle")
+    except Exception as e:
+        logger.error(f"Reset failed: {e}")
+    return {"status": "idle"}
 
 
 @app.post("/api/v1/orchestrator/start")

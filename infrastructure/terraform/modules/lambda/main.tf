@@ -74,6 +74,19 @@ variable "bedrock_embedding_model_id" {
   type = string
 }
 
+# Shared Azure AI endpoint (both DeepSeek + Mistral at same resource)
+variable "azure_ai_endpoint" {
+  type    = string
+  default = ""
+}
+
+variable "azure_ai_key" {
+  type      = string
+  default   = ""
+  sensitive = true
+}
+
+# Per-model overrides (optional — fall back to shared endpoint)
 variable "azure_deepseek_endpoint" {
   type    = string
   default = ""
@@ -124,6 +137,8 @@ locals {
     EXPORTS_PREFIX             = "exports"
     BEDROCK_MODEL_ID           = var.bedrock_model_id
     BEDROCK_EMBEDDING_MODEL_ID = var.bedrock_embedding_model_id
+    AZURE_AI_ENDPOINT          = var.azure_ai_endpoint
+    AZURE_AI_KEY               = var.azure_ai_key
     AZURE_DEEPSEEK_ENDPOINT    = var.azure_deepseek_endpoint
     AZURE_DEEPSEEK_KEY         = var.azure_deepseek_key
     AZURE_MISTRAL_ENDPOINT     = var.azure_mistral_endpoint

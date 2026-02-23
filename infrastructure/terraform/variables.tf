@@ -120,7 +120,22 @@ variable "bedrock_embedding_model_id" {
   default     = "amazon.titan-embed-text-v2:0"
 }
 
-# ==================== Azure AI — Model-Specific Endpoints ====================
+# ==================== Azure AI — Shared Endpoint ====================
+
+variable "azure_ai_endpoint" {
+  description = "Azure AI shared endpoint (both DeepSeek + Mistral at same resource)"
+  type        = string
+  default     = ""
+}
+
+variable "azure_ai_key" {
+  description = "Azure AI shared API key"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+# ==================== Azure AI — Per-Model Overrides ====================
 
 variable "azure_deepseek_endpoint" {
   description = "Azure AI DeepSeek-R1-0528 model-specific endpoint"

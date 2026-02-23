@@ -344,6 +344,12 @@ resource "aws_apigatewayv2_route" "orchestrator_health" {
   target    = "integrations/${aws_apigatewayv2_integration.lambda["agent_orchestrator"].id}"
 }
 
+resource "aws_apigatewayv2_route" "orchestrator_reset" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /api/v1/orchestrator/reset"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda["agent_orchestrator"].id}"
+}
+
 resource "aws_apigatewayv2_route" "orchestrator_paper" {
   api_id    = aws_apigatewayv2_api.main.id
   route_key = "POST /api/v1/orchestrator/generate-paper/markdown"

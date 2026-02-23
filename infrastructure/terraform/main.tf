@@ -268,6 +268,8 @@ module "lambda" {
   # Configuration
   bedrock_model_id      = var.bedrock_model_id
   bedrock_embedding_model_id = var.bedrock_embedding_model_id
+  azure_ai_endpoint       = var.azure_ai_endpoint
+  azure_ai_key            = var.azure_ai_key
   azure_deepseek_endpoint = var.azure_deepseek_endpoint
   azure_deepseek_key      = var.azure_deepseek_key
   azure_mistral_endpoint  = var.azure_mistral_endpoint
