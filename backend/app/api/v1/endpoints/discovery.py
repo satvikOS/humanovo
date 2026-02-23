@@ -25,7 +25,7 @@ router = APIRouter(prefix="/discovery", tags=["discovery"])
 class DiscoveryRequest(BaseModel):
     """Request model for disease discovery."""
     disease: str
-    discovery_type: DiscoveryType = DiscoveryType.CURE
+    discovery_type: DiscoveryType = DiscoveryType.TREATMENT
     focus_entities: list[str] = []
     max_results: int = 5
     llm_provider: Optional[str] = None  # openai, anthropic, bedrock, together, groq
@@ -70,9 +70,9 @@ async def get_service(provider: str = None) -> DiseaseDiscoveryService:
 
 
 @router.post("/analyze", response_model=DiscoveryResponse)
-async def discover_disease_cures(request: DiscoveryRequest):
+async def discover_disease_treatments(request: DiscoveryRequest):
     """
-    Discover potential cures, treatments, or prevention strategies for a disease.
+    Discover potential treatments, strategies, or prevention approaches for a disease.
 
     This endpoint uses advanced LLM reasoning combined with:
     - Knowledge graph analysis (genes, proteins, drugs, pathways)
@@ -108,7 +108,7 @@ async def discover_disease_cures(request: DiscoveryRequest):
 @router.get("/quick/{disease}")
 async def quick_discovery(
     disease: str,
-    discovery_type: DiscoveryType = Query(default=DiscoveryType.CURE),
+    discovery_type: DiscoveryType = Query(default=DiscoveryType.TREATMENT),
     max_results: int = Query(default=3, ge=1, le=10),
 ):
     """
@@ -212,33 +212,23 @@ async def list_providers():
     return {
         "providers": [
             {
-                "id": "bedrock",
-                "name": "AWS Bedrock",
-                "description": "Llama Maverick 17B, Claude, and other models via AWS",
+                "id": "azure_ai",
+                "name": "Azure AI Foundry",
+                "description": "DeepSeek-R1-0528 (reasoner) + Mistral-Large-3 (critic)",
                 "default": True,
             },
             {
-                "id": "anthropic",
-                "name": "Anthropic Claude",
-                "description": "Claude Sonnet/Opus for advanced reasoning",
+                "id": "bedrock",
+                "name": "AWS Bedrock",
+                "description": "Claude Opus 4.6 (explorer + synthesizer)",
             },
             {
-                "id": "openai",
-                "name": "OpenAI",
-                "description": "GPT-4 Turbo for comprehensive analysis",
-            },
-            {
-                "id": "together",
-                "name": "Together AI",
-                "description": "Open-source models like Llama 3.3 70B",
-            },
-            {
-                "id": "groq",
-                "name": "Groq",
-                "description": "Ultra-fast inference for quick discoveries",
+                "id": "azure",
+                "name": "Azure OpenAI",
+                "description": "o3-deep-research, o1 (legacy, requires org access)",
             },
         ],
-        "recommended": "bedrock",
+        "recommended": "azure_ai",
     }
 
 
@@ -248,9 +238,10 @@ async def list_discovery_types():
     return {
         "types": [
             {
-                "id": "cure",
-                "name": "Cure Discovery",
-                "description": "Find potential curative treatments for the disease",
+                "id": "treatment",
+                "name": "Treatment Discovery",
+                "description": "Find potential therapeutic strategies for the disease",
+                "default": True,
             },
             {
                 "id": "prevention",
@@ -285,10 +276,29 @@ async def list_discovery_types():
 async def discovery_health():
     """Check health of the discovery service."""
     try:
+        from app.core.config import settings
         service = await get_service()
+
+        # Build model list — show mixed provider models
+        models_active = []
+        providers = []
+        if settings.aws_access_key_value and settings.aws_secret_key_value:
+            models_active.append(f"{settings.BEDROCK_MODEL_CLAUDE_OPUS} (explorer+synthesizer)")
+            providers.append("bedrock")
+        if settings.azure_deepseek_key_value and settings.AZURE_DEEPSEEK_ENDPOINT:
+            models_active.append(f"{settings.AZURE_DEEPSEEK_MODEL} (reasoner)")
+            providers.append("azure-deepseek")
+        if settings.azure_mistral_key_value and settings.AZURE_MISTRAL_ENDPOINT:
+            models_active.append(f"{settings.AZURE_MISTRAL_MODEL} (critic)")
+            providers.append("azure-mistral")
+        llm_info = {
+            "providers": providers,
+            "models": models_active,
+        } if models_active else {"provider": service._llm.model_name}
+
         return {
             "status": "healthy",
-            "llm_provider": service._llm.model_name,
+            "llm": llm_info,
             "graph_store": "connected" if service._graph_store else "not connected",
             "rag_service": "connected" if service._rag_service else "not connected",
         }

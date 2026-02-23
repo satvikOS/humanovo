@@ -121,6 +121,7 @@ deploy_lambdas() {
         boto3 \
         pydantic \
         httpx \
+        "openai>=1.12.0,<2.0" \
         -t "$layer_dir" \
         --quiet
 

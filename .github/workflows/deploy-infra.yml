@@ -17,6 +17,10 @@ env:
   TF_STATE_BUCKET: genup-terraform-state
   TF_LOCK_TABLE: genup-terraform-locks
   ENVIRONMENT: dev
+  TF_VAR_azure_deepseek_endpoint: ${{ secrets.AZURE_DEEPSEEK_ENDPOINT }}
+  TF_VAR_azure_deepseek_key: ${{ secrets.AZURE_DEEPSEEK_KEY }}
+  TF_VAR_azure_mistral_endpoint: ${{ secrets.AZURE_MISTRAL_ENDPOINT }}
+  TF_VAR_azure_mistral_key: ${{ secrets.AZURE_MISTRAL_KEY }}
 
 jobs:
   deploy-infra:
@@ -194,9 +198,9 @@ jobs:
           GENUP_BUCKET="${{ steps.get-bucket.outputs.GENUP_BUCKET }}"
 
           # --- Lambda Layers ---
-          # Create minimal layer with aws_lambda_powertools
+          # Create layer with aws_lambda_powertools + openai (for Azure AI Foundry)
           mkdir -p /tmp/lambda-layer/python
-          pip install "aws-lambda-powertools>=3.0,<4.0" -t /tmp/lambda-layer/python/ --quiet
+          pip install "aws-lambda-powertools>=3.0,<4.0" "openai>=1.12.0,<2.0" -t /tmp/lambda-layer/python/ --quiet
           cd /tmp/lambda-layer && zip -r ../dependencies-layer.zip python/ -x '*.pyc' '*__pycache__*'
 
           # Create scipy placeholder layer (real scipy too large for quick deploy)

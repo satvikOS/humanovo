@@ -27,6 +27,12 @@ logger = get_logger(__name__)
 
 router = APIRouter(prefix="/orchestrator", tags=["orchestrator"])
 
+# Async paper generation state
+_paper_status: str = "idle"  # idle | generating | done | failed
+_paper_result: Optional[str] = None
+_paper_error: Optional[str] = None
+_paper_task: Optional[asyncio.Task] = None
+
 
 # WebSocket connection manager for real-time updates
 class ConnectionManager:
@@ -69,7 +75,7 @@ class StartDiscoveryRequest(BaseModel):
     """Request to start discovery."""
     disease: str
     focus_entities: list[str] = []
-    discovery_type: str = "cure"  # cure, prevention, treatment, biomarker, drug_repurposing
+    discovery_type: str = "treatment"  # treatment, prevention, biomarker, drug_repurposing, combination_therapy
     max_agents: int = 1000
     target_confidence: float = 0.95
     external_factors: list[ExternalFactor] = []
@@ -89,7 +95,7 @@ async def start_discovery_endpoint(request: StartDiscoveryRequest):
     Start a new parallel discovery process.
 
     Launches agents across Llama Maverick, DeepSeek R1, Kimi 2.5, and GPT OSS 120B
-    to explore biological pathways and discover potential cures/treatments.
+    to explore biological pathways and discover potential treatments/strategies.
     External factors (nutrients, chemicals, drugs, compounds, elements) are simulated
     alongside biological interactions.
     """
@@ -350,7 +356,7 @@ async def generate_research_paper():
 
     paper = await paper_service.generate_paper(
         disease=_current_orchestrator._disease or "Unknown",
-        discovery_type="cure",
+        discovery_type=_current_orchestrator._discovery_type or "treatment",
         hypotheses=hyp_dicts,
         stats=stats.model_dump(),
         external_factors=_current_orchestrator._external_factors,
@@ -362,9 +368,10 @@ async def generate_research_paper():
 @router.post("/generate-paper/markdown")
 async def generate_research_paper_markdown():
     """
-    Generate a research paper in Markdown format for direct viewing/export.
+    Start async paper generation. Returns immediately.
+    Poll /paper-status to check completion.
     """
-    global _current_orchestrator
+    global _current_orchestrator, _paper_status, _paper_result, _paper_error, _paper_task
 
     if not _current_orchestrator:
         raise HTTPException(status_code=400, detail="No discovery data available.")
@@ -373,10 +380,15 @@ async def generate_research_paper_markdown():
     if not hypotheses:
         raise HTTPException(status_code=400, detail="No hypotheses found.")
 
-    stats = _current_orchestrator.get_stats()
+    if _paper_status == "generating":
+        raise HTTPException(status_code=400, detail="Paper generation already in progress.")
 
-    from app.services.paper_generation_service import get_paper_service
-    paper_service = get_paper_service()
+    # Reset state
+    _paper_status = "generating"
+    _paper_result = None
+    _paper_error = None
+
+    stats = _current_orchestrator.get_stats()
 
     hyp_dicts = [
         {
@@ -392,16 +404,246 @@ async def generate_research_paper_markdown():
         for h in hypotheses
     ]
 
-    paper = await paper_service.generate_paper(
-        disease=_current_orchestrator._disease or "Unknown",
-        discovery_type="cure",
-        hypotheses=hyp_dicts,
-        stats=stats.model_dump(),
-        external_factors=_current_orchestrator._external_factors,
+    disease = _current_orchestrator._disease or "Unknown"
+    discovery_type = _current_orchestrator._discovery_type or "treatment"
+    external_factors = _current_orchestrator._external_factors
+
+    async def _generate_paper_background():
+        global _paper_status, _paper_result, _paper_error
+        try:
+            from app.services.paper_generation_service import get_paper_service
+            paper_service = get_paper_service()
+
+            paper = await paper_service.generate_paper(
+                disease=disease,
+                discovery_type=discovery_type,
+                hypotheses=hyp_dicts,
+                stats=stats.model_dump(),
+                external_factors=external_factors,
+            )
+
+            markdown = paper_service.paper_to_markdown(paper)
+            _paper_result = markdown
+            _paper_status = "done"
+            logger.info("Paper generation completed successfully")
+
+            await manager.broadcast({
+                "type": "paper_ready",
+                "data": {"status": "done"},
+            })
+        except Exception as e:
+            _paper_error = str(e)
+            _paper_status = "failed"
+            logger.error(f"Paper generation failed: {e}")
+
+    _paper_task = asyncio.create_task(_generate_paper_background())
+
+    return {"status": "generating", "message": "Paper generation started. Poll /paper-status for updates."}
+
+
+@router.get("/paper-status")
+async def get_paper_status():
+    """Check the status of async paper generation."""
+    global _paper_status, _paper_result, _paper_error
+
+    response: dict[str, Any] = {"status": _paper_status}
+
+    if _paper_status == "done" and _paper_result:
+        response["paper_html"] = _paper_result
+    elif _paper_status == "failed" and _paper_error:
+        response["error"] = _paper_error
+
+    return response
+
+
+@router.post("/generate-paper/pdf")
+async def generate_research_paper_pdf():
+    """
+    Generate a rich visual PDF research paper with cover page, tables,
+    diagrams, confidence charts, citations, glossary, and indexing.
+    Uses built-in code interpreter approach with reportlab.
+    """
+    global _current_orchestrator
+
+    if not _current_orchestrator:
+        raise HTTPException(status_code=400, detail="No discovery data available.")
+
+    hypotheses = _current_orchestrator.get_hypotheses(min_confidence=0.0, limit=100)
+    if not hypotheses:
+        raise HTTPException(status_code=400, detail="No hypotheses found.")
+
+    hyp_dicts = [
+        {
+            "id": h.id,
+            "title": h.title,
+            "description": h.description,
+            "mechanism": h.mechanism,
+            "confidence": h.confidence,
+            "model_used": h.model_used,
+            "validated": h.validated,
+            "external_factors": h.external_factors,
+        }
+        for h in hypotheses
+    ]
+
+    from app.services.pdf_generation_service import get_pdf_service
+    pdf_service = get_pdf_service()
+
+    try:
+        pdf_bytes = await pdf_service.generate_pdf(
+            disease=_current_orchestrator._disease or "Unknown",
+            discovery_type=_current_orchestrator._discovery_type or "treatment",
+            hypotheses=hyp_dicts,
+            paper_html=_paper_result,
+            num_agents=_current_orchestrator.max_agents,
+            target_confidence=_current_orchestrator.target_confidence,
+        )
+    except Exception as e:
+        logger.error(f"PDF generation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"PDF generation failed: {e}")
+
+    from fastapi.responses import Response
+    disease_slug = (_current_orchestrator._disease or "research").replace(" ", "-").lower()
+    filename = f"humanovo-{disease_slug}-{_current_orchestrator._discovery_type}.pdf"
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
 
-    markdown = paper_service.paper_to_markdown(paper)
-    return PlainTextResponse(content=markdown, media_type="text/markdown")
+
+@router.post("/save-to-project")
+async def save_discovery_to_project(project_name: str = None):
+    """
+    Save current discovery hypotheses to a project.
+    Creates a new project and stores all hypotheses, fixing the transfer bug
+    where hypotheses appeared to be saved but the project didn't exist.
+    """
+    global _current_orchestrator
+
+    if not _current_orchestrator:
+        raise HTTPException(status_code=400, detail="No discovery data available. Run a discovery first.")
+
+    hypotheses = _current_orchestrator.get_hypotheses(min_confidence=0.0, limit=100)
+    if not hypotheses:
+        raise HTTPException(status_code=400, detail="No hypotheses found. Run discovery first.")
+
+    disease = _current_orchestrator._disease or "Unknown"
+    discovery_type = _current_orchestrator._discovery_type or "treatment"
+
+    # Import project memory store and create project
+    from app.api.v1.endpoints.projects import _memory_projects, _check_db_available
+    from uuid import uuid4
+    from datetime import datetime
+
+    project_id = str(uuid4())
+    name = project_name or f"{disease} - {discovery_type.replace('_', ' ').title()} Discovery"
+    now = datetime.utcnow()
+
+    # Try database first
+    db_ok = await _check_db_available()
+    if db_ok:
+        try:
+            from app.core.database import get_db
+            from app.models.project import Project, ProjectStatus
+            from app.models.hypothesis import Hypothesis, HypothesisStatus
+
+            async for db in get_db():
+                db_project = Project(
+                    name=name,
+                    description=f"Auto-generated from discovery run: {len(hypotheses)} hypotheses for {disease}",
+                    disease_focus=disease,
+                    research_question=f"What are the most promising {discovery_type} strategies for {disease}?",
+                    tags=[disease.lower(), discovery_type, "ai-discovery", "multi-model"],
+                    status=ProjectStatus.ACTIVE,
+                    hypothesis_count=len(hypotheses),
+                )
+                db.add(db_project)
+                await db.flush()
+
+                # Store each hypothesis
+                for h in hypotheses:
+                    db_hyp = Hypothesis(
+                        project_id=db_project.id,
+                        statement=h.title,
+                        mechanism=h.mechanism,
+                        rationale=h.description,
+                        status=HypothesisStatus.ACTIVE,
+                        confidence_score=h.confidence,
+                        novelty_score=0.0,
+                        generated_by="ai",
+                        generation_context={
+                            "model_used": h.model_used,
+                            "disease": h.disease,
+                            "external_factors": h.external_factors,
+                            "contributing_agents": h.contributing_agents,
+                        },
+                        tags=[disease.lower(), h.model_used],
+                    )
+                    db.add(db_hyp)
+
+                await db.commit()
+                await db.refresh(db_project)
+
+                await manager.broadcast({
+                    "type": "project_saved",
+                    "data": {"project_id": str(db_project.id), "name": name},
+                })
+
+                return {
+                    "status": "saved",
+                    "project_id": str(db_project.id),
+                    "name": name,
+                    "hypothesis_count": len(hypotheses),
+                    "message": f"Saved {len(hypotheses)} hypotheses to project '{name}'",
+                }
+        except Exception as e:
+            logger.warning(f"DB save failed, using in-memory: {e}")
+
+    # In-memory fallback — ensure project is stored so it can be retrieved
+    mem_project = {
+        "id": project_id,
+        "name": name,
+        "description": f"Auto-generated from discovery run: {len(hypotheses)} hypotheses for {disease}",
+        "disease_focus": disease,
+        "research_question": f"What are the most promising {discovery_type} strategies for {disease}?",
+        "tags": [disease.lower(), discovery_type, "ai-discovery", "multi-model"],
+        "status": "active",
+        "hypothesis_count": len(hypotheses),
+        "evidence_count": 0,
+        "simulation_count": 0,
+        "created_at": now,
+        "updated_at": now,
+        "hypotheses": [
+            {
+                "id": h.id,
+                "title": h.title,
+                "description": h.description,
+                "mechanism": h.mechanism,
+                "confidence": h.confidence,
+                "model_used": h.model_used,
+                "validated": h.validated,
+                "external_factors": h.external_factors,
+                "created_at": h.created_at.isoformat(),
+            }
+            for h in hypotheses
+        ],
+    }
+    _memory_projects[project_id] = mem_project
+
+    await manager.broadcast({
+        "type": "project_saved",
+        "data": {"project_id": project_id, "name": name},
+    })
+
+    return {
+        "status": "saved",
+        "project_id": project_id,
+        "name": name,
+        "hypothesis_count": len(hypotheses),
+        "message": f"Saved {len(hypotheses)} hypotheses to project '{name}'",
+    }
 
 
 @router.get("/learning-stats")
@@ -446,27 +688,21 @@ async def orchestrator_health():
         if llm._bedrock_client:
             models_status["llama_maverick"] = True
             models_status["deepseek_r1"] = True
-        if llm._kimi_client:
             models_status["kimi_25"] = True
-        if llm._gpt_oss_client:
             models_status["gpt_oss_120b"] = True
     else:
-        # Check config for available credentials
         from app.core.config import settings
         if settings.aws_access_key_value and settings.aws_secret_key_value:
-            models_status["llama_maverick"] = True
-            models_status["deepseek_r1"] = True
-        if settings.kimi_api_key_value:
-            models_status["kimi_25"] = True
-        if settings.gpt_oss_api_key_value or settings.together_api_key_value:
-            models_status["gpt_oss_120b"] = True
+            for k in models_status:
+                models_status[k] = True
 
     active_count = sum(1 for v in models_status.values() if v)
 
     return {
         "status": "healthy" if active_count > 0 else "no_models",
         "models": models_status,
-        "active_model_count": active_count,
+        "connected_count": active_count,
+        "total_models": 4,
         "orchestrator_initialized": _current_orchestrator is not None,
     }
 

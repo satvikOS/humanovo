@@ -1,12 +1,18 @@
 """
 Discovery Orchestrator
 
-Multi-model parallel agent system for continuous biomedical discovery.
-Runs Kimi 2.5, DeepSeek R1, Llama Maverick, and GPT OSS 120B in parallel
-with token pool management to prevent exhaustion at 100-10000 agent scale.
+Three-model hybrid pipeline using mixed providers:
+  Claude Opus 4.6  (Bedrock, Converse API)     — Explorer + Synthesizer: 200K context
+  DeepSeek-R1-0528 (Azure AI, Chat completion)  — Reasoner: state-of-the-art chain-of-thought
+  Mistral-Large-3  (Azure AI, Chat completion)  — Critic: strong analytical capabilities
+
+Provider routing:
+  - Claude Opus 4.6 → AWS Bedrock (restricted on Azure AI)
+  - DeepSeek-R1-0528 → Azure AI Foundry
+  - Mistral-Large-3 → Azure AI Foundry
 
 Features:
-- Four-model parallel reasoning (Kimi 2.5, DeepSeek R1, Llama Maverick, GPT OSS 120B)
+- Three-model parallel reasoning via mixed Bedrock + Azure AI providers
 - Token pool with rate limiting, backoff, and per-model quota management
 - 100 to 10,000 concurrent agents with adaptive batching
 - Confidence-based stopping with start/pause/stop controls
@@ -107,10 +113,22 @@ class AgentRole(str, Enum):
 
 class ModelType(str, Enum):
     """LLM model types available for parallel discovery."""
-    LLAMA_MAVERICK = "llama_maverick"
+    # Primary models — mixed provider routing
+    CLAUDE_OPUS = "claude_opus"                    # Explorer + Synthesizer via Bedrock (200K context)
+    DEEPSEEK_R1_0528 = "deepseek_r1_0528"          # Reasoner via Azure AI
+    MISTRAL_LARGE_3 = "mistral_large_3"            # Critic via Azure AI
+    # Bedrock-only fallback
     DEEPSEEK_R1 = "deepseek_r1"
+    # Azure OpenAI models — legacy
+    O3_DEEP_RESEARCH = "o3_deep_research"
+    O1 = "o1"
+    # Legacy (kept for stored data compatibility)
+    GROK_4 = "grok_4"
+    CLAUDE_OPUS_AZURE_AI = "claude_opus_azure_ai"
+    LLAMA_MAVERICK = "llama_maverick"
     KIMI_25 = "kimi_25"
     GPT_OSS_120B = "gpt_oss_120b"
+    GPT_4O = "gpt_4o"
     HYBRID = "hybrid"
 
 
@@ -542,25 +560,44 @@ INSTRUCTIONS:
 
 class MultiModelLLM:
     """
-    Multi-model interface routing ALL four models through AWS Bedrock Converse API:
-    - Llama Maverick 17B (meta.llama4-maverick-17b-instruct-v1:0) — Fast broad exploration
-    - DeepSeek R1 (deepseek.r1-v1:0) — Deep causal chain reasoning
-    - Kimi 2.5 (moonshotai.kimi-k2.5) — Long-context synthesis & integration
-    - GPT OSS Safeguard 120B (openai.gpt-oss-safeguard-120b) — Large-parameter critical analysis
+    Three-model hybrid pipeline — mixed Bedrock + Azure AI providers.
 
-    All models are invoked via Bedrock Converse API for unified access.
-    Parallel MCP (Model Context Protocol) distributes large contexts across models.
+    Bedrock (Claude Opus 4.6):
+    - Claude Opus 4.6  (us.anthropic.claude-opus-4-6-v1:0) — Explorer + Synthesizer, 200K context
+
+    Azure AI (DeepSeek + Mistral):
+    - DeepSeek-R1-0528 — Reasoner: state-of-the-art reasoning chains (Chat completion)
+    - Mistral-Large-3  — Critic: strong analytical capabilities (Chat completion)
+
+    Azure OpenAI (legacy):
+    - o3-deep-research — 100K out, deep research exploration
+    - o1               — 100K out, multi-step mathematical reasoning
+
+    Parallel MCP distributes large contexts across all 3 models.
     """
 
     BEDROCK_MODELS = {
-        ModelType.LLAMA_MAVERICK: settings.BEDROCK_MODEL_LLAMA_MAVERICK,
+        ModelType.CLAUDE_OPUS: settings.BEDROCK_MODEL_CLAUDE_OPUS,
         ModelType.DEEPSEEK_R1: settings.BEDROCK_MODEL_DEEPSEEK,
-        ModelType.KIMI_25: settings.BEDROCK_MODEL_KIMI,
-        ModelType.GPT_OSS_120B: settings.BEDROCK_MODEL_GPT_OSS,
+    }
+
+    AZURE_OPENAI_MODELS = {
+        ModelType.O3_DEEP_RESEARCH: settings.AZURE_OPENAI_DEPLOYMENT_O3_DEEP_RESEARCH,
+        ModelType.O1: settings.AZURE_OPENAI_DEPLOYMENT_O1,
+    }
+
+    # Azure AI — model-specific endpoints (direct, no Foundry routing layer)
+    AZURE_AI_MODELS = {
+        ModelType.DEEPSEEK_R1_0528:    settings.AZURE_DEEPSEEK_MODEL,
+        ModelType.MISTRAL_LARGE_3:     settings.AZURE_MISTRAL_MODEL,
     }
 
     def __init__(self, token_pool: TokenPool):
         self._bedrock_client = None
+        self._azure_client = None        # Legacy Azure OpenAI
+        self._azure_deepseek_client = None   # DeepSeek model-specific endpoint
+        self._azure_mistral_client = None    # Mistral model-specific endpoint
+        self._azure_ai_available = False
         self._initialized = False
         self._token_pool = token_pool
         self._mcp: Optional[ParallelMCP] = None
@@ -569,29 +606,102 @@ class MultiModelLLM:
         if self._initialized:
             return
 
-        # Initialize single Bedrock client for ALL 4 models
-        try:
-            import boto3
-            self._bedrock_client = boto3.client(
-                "bedrock-runtime",
-                region_name=settings.AWS_REGION,
-                aws_access_key_id=settings.aws_access_key_value,
-                aws_secret_access_key=settings.aws_secret_key_value,
-            )
-        except Exception as e:
-            logger.warning(f"Bedrock init failed: {e}")
+        # Initialize Azure AI model-specific clients (direct endpoints, no Foundry layer)
+        azure_models_ready = 0
+
+        if settings.azure_deepseek_key_value and settings.AZURE_DEEPSEEK_ENDPOINT:
+            try:
+                from openai import AsyncOpenAI
+                self._azure_deepseek_client = AsyncOpenAI(
+                    base_url=settings.AZURE_DEEPSEEK_ENDPOINT.rstrip('/'),
+                    api_key=settings.azure_deepseek_key_value,
+                )
+                azure_models_ready += 1
+                logger.info(f"Azure DeepSeek client initialized → {settings.AZURE_DEEPSEEK_ENDPOINT}")
+            except Exception as e:
+                logger.error(f"Azure DeepSeek client init FAILED: {e}")
+        else:
+            logger.warning("AZURE_DEEPSEEK_ENDPOINT or AZURE_DEEPSEEK_KEY not set")
+
+        if settings.azure_mistral_key_value and settings.AZURE_MISTRAL_ENDPOINT:
+            try:
+                from openai import AsyncOpenAI
+                self._azure_mistral_client = AsyncOpenAI(
+                    base_url=settings.AZURE_MISTRAL_ENDPOINT.rstrip('/'),
+                    api_key=settings.azure_mistral_key_value,
+                )
+                azure_models_ready += 1
+                logger.info(f"Azure Mistral client initialized → {settings.AZURE_MISTRAL_ENDPOINT}")
+            except Exception as e:
+                logger.error(f"Azure Mistral client init FAILED: {e}")
+        else:
+            logger.warning("AZURE_MISTRAL_ENDPOINT or AZURE_MISTRAL_KEY not set")
+
+        self._azure_ai_available = azure_models_ready > 0
+
+        # Initialize Bedrock client (fallback)
+        if settings.aws_access_key_value and settings.aws_secret_key_value:
+            try:
+                import boto3
+                self._bedrock_client = boto3.client(
+                    "bedrock-runtime",
+                    region_name=settings.AWS_REGION,
+                    aws_access_key_id=settings.aws_access_key_value,
+                    aws_secret_access_key=settings.aws_secret_key_value,
+                )
+                logger.info(f"Bedrock client initialized (region={settings.AWS_REGION}) [fallback]")
+            except Exception as e:
+                logger.error(f"Bedrock client initialization FAILED: {e}")
+        else:
+            logger.warning("AWS credentials not set — Bedrock fallback unavailable")
+
+        # Initialize legacy Azure OpenAI client
+        if settings.azure_openai_api_key_value and settings.AZURE_OPENAI_ENDPOINT:
+            try:
+                from openai import AsyncAzureOpenAI
+                self._azure_client = AsyncAzureOpenAI(
+                    api_key=settings.azure_openai_api_key_value,
+                    azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
+                    api_version=settings.AZURE_OPENAI_API_VERSION,
+                )
+                logger.info(f"Azure OpenAI client initialized [legacy] (endpoint={settings.AZURE_OPENAI_ENDPOINT})")
+            except Exception as e:
+                logger.error(f"Azure OpenAI client initialization FAILED: {e}")
 
         # Initialize Parallel MCP
-        if self._bedrock_client and settings.MCP_ENABLED:
+        if settings.MCP_ENABLED and (self._azure_ai_available or self._bedrock_client):
             self._mcp = ParallelMCP(self._bedrock_client, self._token_pool)
             logger.info("Parallel MCP initialized for cross-model context distribution")
 
         self._initialized = True
         available = []
-        if self._bedrock_client:
-            for model_type, model_id in self.BEDROCK_MODELS.items():
-                available.append(f"{model_type.value} ({model_id})")
-        logger.info(f"Multi-model LLM initialized via Bedrock. Available: {available}")
+        if self._azure_deepseek_client:
+            available.append(f"deepseek_r1_0528 ({settings.AZURE_DEEPSEEK_MODEL}) [azure-model-specific]")
+        if self._azure_mistral_client:
+            available.append(f"mistral_large_3 ({settings.AZURE_MISTRAL_MODEL}) [azure-model-specific]")
+        for model_type, model_id in self.BEDROCK_MODELS.items():
+            if self._bedrock_client:
+                available.append(f"{model_type.value} ({model_id}) [bedrock]")
+        for model_type, deployment in self.AZURE_OPENAI_MODELS.items():
+            if self._azure_client:
+                available.append(f"{model_type.value} ({deployment}) [azure-openai-legacy]")
+        logger.info(f"Multi-model LLM initialized. Available: {available}")
+
+    def _is_azure_ai_model(self, model_type: ModelType) -> bool:
+        """Check if a model type routes through an Azure AI model-specific endpoint."""
+        if model_type == ModelType.DEEPSEEK_R1_0528:
+            return self._azure_deepseek_client is not None
+        if model_type == ModelType.MISTRAL_LARGE_3:
+            return self._azure_mistral_client is not None
+        return False
+
+    def _is_azure_openai_model(self, model_type: ModelType) -> bool:
+        """Check if a model type routes through legacy Azure OpenAI."""
+        return model_type in self.AZURE_OPENAI_MODELS and self._azure_client is not None
+
+    def _is_azure_model(self, model_type: ModelType) -> bool:
+        """Check if a model type routes through any Azure endpoint (AI or OpenAI)."""
+        return self._is_azure_ai_model(model_type) or self._is_azure_openai_model(model_type)
 
     async def generate(
         self,
@@ -601,7 +711,7 @@ class MultiModelLLM:
         max_tokens: int = 4000,
         temperature: float = 0.3,
     ) -> str:
-        """Generate response from specified model via Bedrock Converse API with token pool management."""
+        """Generate response from specified model via Azure AI, Bedrock, or Azure OpenAI."""
         if not self._initialized:
             await self.initialize()
 
@@ -610,12 +720,85 @@ class MultiModelLLM:
             raise RuntimeError(f"Token pool exhausted for {model_type.value}, rate limit hit")
 
         try:
-            return await self._generate_bedrock(model_type, prompt, system_prompt, max_tokens, temperature)
+            if self._is_azure_ai_model(model_type):
+                return await self._generate_azure_ai(model_type, prompt, system_prompt, max_tokens, temperature)
+            elif self._is_azure_openai_model(model_type):
+                return await self._generate_azure_openai(model_type, prompt, system_prompt, max_tokens, temperature)
+            else:
+                return await self._generate_bedrock(model_type, prompt, system_prompt, max_tokens, temperature)
         except Exception as e:
             self._token_pool.record_error(model_type)
             raise
         finally:
             self._token_pool.release(model_type, max_tokens)
+
+    async def _generate_azure_ai(
+        self, model_type: ModelType, prompt: str, system_prompt: str,
+        max_tokens: int, temperature: float,
+    ) -> str:
+        """Invoke a model via its Azure AI model-specific endpoint.
+
+        Each model has its own client/endpoint/key — no shared Foundry layer.
+        """
+        if model_type == ModelType.DEEPSEEK_R1_0528:
+            client = self._azure_deepseek_client
+            model_name = settings.AZURE_DEEPSEEK_MODEL
+        elif model_type == ModelType.MISTRAL_LARGE_3:
+            client = self._azure_mistral_client
+            model_name = settings.AZURE_MISTRAL_MODEL
+        else:
+            raise RuntimeError(f"No Azure AI client for model type: {model_type}")
+
+        if not client:
+            raise RuntimeError(f"Azure AI client not initialized for {model_name}")
+
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+
+        response = await client.chat.completions.create(
+            model=model_name,
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+        return response.choices[0].message.content
+
+    async def _generate_azure_openai(
+        self, model_type: ModelType, prompt: str, system_prompt: str,
+        max_tokens: int, temperature: float,
+    ) -> str:
+        """Invoke a model via legacy Azure OpenAI."""
+        if not self._azure_client:
+            raise RuntimeError("Azure OpenAI client not initialized (legacy)")
+
+        deployment = self.AZURE_OPENAI_MODELS[model_type]
+        is_reasoning = model_type in (ModelType.O1, ModelType.O3_DEEP_RESEARCH)
+
+        if is_reasoning:
+            messages = []
+            if system_prompt:
+                messages.append({"role": "user", "content": f"[System Instructions]\n{system_prompt}"})
+            messages.append({"role": "user", "content": prompt})
+            response = await self._azure_client.chat.completions.create(
+                model=deployment,
+                messages=messages,
+                max_completion_tokens=max_tokens,
+            )
+        else:
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": prompt})
+            response = await self._azure_client.chat.completions.create(
+                model=deployment,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+
+        return response.choices[0].message.content
 
     async def _generate_bedrock(
         self, model_type: ModelType, prompt: str, system_prompt: str,
@@ -661,28 +844,35 @@ class MultiModelLLM:
         self, prompt: str, system_prompt: str, max_tokens: int, temperature: float,
     ) -> str:
         """Try each model in priority order until one works."""
+        # Priority: Bedrock Claude → Azure AI → Bedrock DeepSeek → Azure OpenAI legacy
         for model_type in [
-            ModelType.LLAMA_MAVERICK,
+            ModelType.CLAUDE_OPUS,
+            ModelType.DEEPSEEK_R1_0528,
+            ModelType.MISTRAL_LARGE_3,
             ModelType.DEEPSEEK_R1,
-            ModelType.KIMI_25,
-            ModelType.GPT_OSS_120B,
+            ModelType.O3_DEEP_RESEARCH,
+            ModelType.O1,
         ]:
             try:
-                return await self._generate_bedrock(model_type, prompt, system_prompt, max_tokens, temperature)
+                if self._is_azure_ai_model(model_type):
+                    return await self._generate_azure_ai(model_type, prompt, system_prompt, max_tokens, temperature)
+                elif self._is_azure_openai_model(model_type):
+                    return await self._generate_azure_openai(model_type, prompt, system_prompt, max_tokens, temperature)
+                elif model_type in self.BEDROCK_MODELS and self._bedrock_client:
+                    return await self._generate_bedrock(model_type, prompt, system_prompt, max_tokens, temperature)
             except Exception:
                 continue
-        raise RuntimeError("All Bedrock models unavailable")
+        raise RuntimeError("All models unavailable (Azure AI + Bedrock + Azure OpenAI)")
 
     async def parallel_reasoning(
         self, prompt: str, context: str = "",
     ) -> dict[str, str]:
         """
-        Run all four models in parallel on the same prompt via Bedrock.
+        Run all 4 models in parallel on the same prompt — maxed out tokens.
         Returns dict mapping model name to response.
-        Uses comprehensive system prompts from prompts.py.
 
-        When context exceeds per-model token limits, automatically engages
-        Parallel MCP to shard context across models.
+        Priority: Azure AI Model Catalog → Bedrock fallback.
+        When context exceeds per-model token limits, engages Parallel MCP.
         """
         if not self._initialized:
             await self.initialize()
@@ -694,32 +884,45 @@ class MultiModelLLM:
             logger.info("Context exceeds per-model limit — engaging Parallel MCP")
             return await self._mcp_parallel_reasoning(prompt, context)
 
-        # Standard parallel: all 4 models get the same prompt via Bedrock
         tasks = {}
+
+        # Claude Opus 4.6 via Bedrock — Explorer + Synthesizer
         if self._bedrock_client:
-            tasks["llama_maverick"] = self.generate(
-                ModelType.LLAMA_MAVERICK, full_prompt,
+            tasks["claude_opus_explorer"] = self.generate(
+                ModelType.CLAUDE_OPUS, full_prompt,
                 get_agent_prompt("explorer", include_master=True),
-                temperature=0.4,
+                max_tokens=32_768, temperature=0.4,
             )
+            tasks["claude_opus_synthesizer"] = self.generate(
+                ModelType.CLAUDE_OPUS, full_prompt,
+                get_agent_prompt("synthesizer", include_master=True),
+                max_tokens=32_768, temperature=0.3,
+            )
+
+        # DeepSeek-R1-0528 + Mistral-Large-3 via Azure AI
+        if self._azure_ai_available:
+            tasks["deepseek_r1_0528"] = self.generate(
+                ModelType.DEEPSEEK_R1_0528, full_prompt,
+                get_agent_prompt("reasoner", include_master=True),
+                max_tokens=65_536, temperature=0.2,
+            )
+            tasks["mistral_large_3"] = self.generate(
+                ModelType.MISTRAL_LARGE_3, full_prompt,
+                get_agent_prompt("critic", include_master=True),
+                max_tokens=32_768, temperature=0.3,
+            )
+
+        # If no Azure AI, add Bedrock DeepSeek as reasoner fallback
+        if not self._azure_ai_available and self._bedrock_client:
             tasks["deepseek_r1"] = self.generate(
                 ModelType.DEEPSEEK_R1, full_prompt,
                 get_agent_prompt("reasoner", include_master=True),
+                max_tokens=65_536,
                 temperature=0.2,
-            )
-            tasks["kimi_25"] = self.generate(
-                ModelType.KIMI_25, full_prompt,
-                get_agent_prompt("synthesizer", include_master=True),
-                temperature=0.3,
-            )
-            tasks["gpt_oss_120b"] = self.generate(
-                ModelType.GPT_OSS_120B, full_prompt,
-                get_agent_prompt("critic", include_master=True),
-                temperature=0.3,
             )
 
         if not tasks:
-            raise RuntimeError("No Bedrock models available for parallel reasoning")
+            raise RuntimeError("No models available for parallel reasoning (Azure AI + Bedrock)")
 
         results = await asyncio.gather(
             *[asyncio.create_task(coro) for coro in tasks.values()],
@@ -741,37 +944,76 @@ class MultiModelLLM:
         """
         Parallel MCP reasoning: shard context across models, process, then synthesize.
         Used when total context exceeds per-model token limits.
+        Claude Opus (Bedrock) + DeepSeek/Mistral (Azure AI).
         """
-        model_assignments = {
-            "llama_maverick": self.BEDROCK_MODELS[ModelType.LLAMA_MAVERICK],
-            "deepseek_r1": self.BEDROCK_MODELS[ModelType.DEEPSEEK_R1],
-            "kimi_25": self.BEDROCK_MODELS[ModelType.KIMI_25],
-            "gpt_oss_120b": self.BEDROCK_MODELS[ModelType.GPT_OSS_120B],
-        }
+        full_prompt = f"{context}\n\n{prompt}"
 
-        system_prompts = {
-            "llama_maverick": get_agent_prompt("explorer", include_master=True),
-            "deepseek_r1": get_agent_prompt("reasoner", include_master=True),
-            "kimi_25": get_agent_prompt("synthesizer", include_master=True),
-            "gpt_oss_120b": get_agent_prompt("critic", include_master=True),
-        }
+        # Phase 1: All available models process in parallel (mixed providers)
+        shard_results = {}
+        all_tasks = {}
 
-        # Phase 1: Parallel shard processing
-        shard_results = await self._mcp.parallel_process(
-            prompt=prompt,
-            context=context,
-            model_assignments=model_assignments,
-            system_prompts=system_prompts,
-        )
+        # Claude Opus via Bedrock (Explorer + Synthesizer)
+        if self._bedrock_client:
+            all_tasks["claude_opus_explorer"] = self._generate_bedrock(
+                ModelType.CLAUDE_OPUS, full_prompt,
+                get_agent_prompt("explorer", include_master=True),
+                max_tokens=32_768, temperature=0.4,
+            )
+            all_tasks["claude_opus_synthesizer"] = self._generate_bedrock(
+                ModelType.CLAUDE_OPUS, full_prompt,
+                get_agent_prompt("synthesizer", include_master=True),
+                max_tokens=32_768, temperature=0.3,
+            )
 
-        # Phase 2: Synthesis via Kimi 2.5 (largest context window)
-        synthesized = await self._mcp.synthesize_shards(
-            shard_results, prompt,
-            synthesis_model_id=self.BEDROCK_MODELS[ModelType.KIMI_25],
-        )
+        # DeepSeek + Mistral via Azure AI
+        if self._azure_ai_available:
+            all_tasks["deepseek_r1_0528"] = self._generate_azure_ai(
+                ModelType.DEEPSEEK_R1_0528, full_prompt,
+                get_agent_prompt("reasoner", include_master=True),
+                max_tokens=65_536, temperature=0.2,
+            )
+            all_tasks["mistral_large_3"] = self._generate_azure_ai(
+                ModelType.MISTRAL_LARGE_3, full_prompt,
+                get_agent_prompt("critic", include_master=True),
+                max_tokens=32_768, temperature=0.3,
+            )
 
-        # Return both individual shard results and synthesis
-        shard_results["mcp_synthesis"] = synthesized
+        if all_tasks:
+            results = await asyncio.gather(
+                *[asyncio.create_task(c) for c in all_tasks.values()],
+                return_exceptions=True,
+            )
+            for (name, _), result in zip(all_tasks.items(), results):
+                if isinstance(result, Exception):
+                    logger.warning(f"MCP model {name} failed: {result}")
+                else:
+                    shard_results[name] = result
+
+        # Phase 2: Synthesis via Claude Opus 4.6 (Bedrock, 200K context)
+        if self._bedrock_client and shard_results:
+            shard_summaries = "\n\n".join(
+                f"=== {name} ===\n{text}" for name, text in shard_results.items()
+                if not str(text).startswith("[MCP Shard Error]") and not str(text).startswith("Error:")
+            )
+            synthesis_prompt = f"""Synthesize these parallel model outputs into a unified response:
+
+ORIGINAL TASK: {prompt}
+
+PARALLEL MODEL OUTPUTS:
+{shard_summaries}
+
+Integrate all findings, resolve contradictions, identify cross-model connections, and produce a unified JSON response."""
+
+            try:
+                synthesized = await self._generate_bedrock(
+                    ModelType.CLAUDE_OPUS, synthesis_prompt,
+                    "You are a synthesis agent integrating parallel model outputs into unified biomedical discovery.",
+                    max_tokens=32_768, temperature=0.3,
+                )
+                shard_results["mcp_synthesis"] = synthesized
+            except Exception as e:
+                logger.warning(f"Claude Opus synthesis failed: {e}")
+
         return shard_results
 
 
@@ -855,7 +1097,7 @@ Entity 2: {neighbor["entity"]}
 Confidence: {path.confidence}
 Evidence Count: {path.evidence_count}
 {external_context}
-Based on this connection, could this pathway lead to a cure or prevention strategy for {disease}?
+Based on this connection, could this pathway lead to a treatment or prevention strategy for {disease}?
 Provide:
 1. Hypothesis (if any)
 2. Mechanism of action
@@ -941,6 +1183,7 @@ class DiscoveryOrchestratorStats(BaseModel):
     current_best_confidence: float
     runtime_seconds: float
     agents_by_role: dict[str, int]
+    agents_by_model: dict[str, int] = {}
     models_active: list[str]
     token_pool_stats: dict[str, Any]
     learning_stats: dict[str, Any]
@@ -950,13 +1193,9 @@ class DiscoveryOrchestrator(LoggerMixin):
     """
     Main orchestrator for parallel discovery agents.
 
-    Manages 100-10,000 agents running across four models in parallel:
-    - Llama Maverick: Fast exploration
-    - DeepSeek R1: Deep reasoning
-    - Kimi 2.5: Long-context analysis
-    - GPT OSS 120B: Large-parameter reasoning
-
-    Token pool prevents exhaustion across all models simultaneously.
+    Manages 100-10,000 agents across 3 models with mixed providers:
+    Claude Opus 4.6 (Bedrock, explorer+synthesizer), DeepSeek-R1-0528 (Azure AI, reasoner),
+    Mistral-Large-3 (Azure AI, critic).
     """
 
     def __init__(
@@ -979,6 +1218,7 @@ class DiscoveryOrchestrator(LoggerMixin):
         self._pause_event.set()
         self._stop_requested = False
         self._disease: Optional[str] = None
+        self._discovery_type: str = "treatment"
         self._external_factors: list[dict[str, Any]] = []
 
         self._on_hypothesis: Optional[Callable] = None
@@ -988,7 +1228,7 @@ class DiscoveryOrchestrator(LoggerMixin):
         self._rag_service = None
 
     async def initialize(self) -> None:
-        self.logger.info("Initializing discovery orchestrator (4-model parallel)")
+        self.logger.info("Initializing discovery orchestrator (Claude Opus via Bedrock + DeepSeek-R1-0528 + Mistral-Large-3 via Azure AI)")
         await self.llm.initialize()
 
         try:
@@ -1034,20 +1274,21 @@ class DiscoveryOrchestrator(LoggerMixin):
         self,
         disease: str,
         focus_entities: list[str] = None,
-        discovery_type: str = "cure",
+        discovery_type: str = "treatment",
         external_factors: list[dict[str, Any]] = None,
     ) -> None:
         if self.state == OrchestratorState.RUNNING:
             self.logger.warning("Orchestrator already running")
             return
 
-        self.logger.info(f"Starting discovery for {disease} with {self.max_agents} agents across 4 models")
+        self.logger.info(f"Starting discovery for {disease} with {self.max_agents} agents (Claude Opus via Bedrock, DeepSeek-R1-0528 + Mistral-Large-3 via Azure AI)")
         self.state = OrchestratorState.RUNNING
         self._start_time = time.time()
         self._stop_requested = False
         self._hypotheses = []
         self._best_confidence = 0.0
         self._disease = disease
+        self._discovery_type = discovery_type
         self._external_factors = external_factors or []
 
         graph_data = await self._get_graph_data(disease, focus_entities)
@@ -1163,50 +1404,65 @@ class DiscoveryOrchestrator(LoggerMixin):
     async def _create_agents(self) -> None:
         self._agents = {}
 
-        role_distribution = {
-            AgentRole.EXPLORER: 0.4,
-            AgentRole.REASONER: 0.25,
-            AgentRole.VALIDATOR: 0.15,
-            AgentRole.SYNTHESIZER: 0.1,
-            AgentRole.CRITIC: 0.1,
-        }
+        # Mixed provider distribution:
+        # Claude Opus (Bedrock) + DeepSeek-R1-0528 (Azure AI) + Mistral-Large-3 (Azure AI)
+        models = []
+        if self.llm._bedrock_client:
+            models.append(ModelType.CLAUDE_OPUS)
+        if self.llm._azure_ai_available:
+            models.extend([ModelType.DEEPSEEK_R1_0528, ModelType.MISTRAL_LARGE_3])
 
-        # Distribute across all four models
-        models = [
-            ModelType.LLAMA_MAVERICK,
-            ModelType.DEEPSEEK_R1,
-            ModelType.KIMI_25,
-            ModelType.GPT_OSS_120B,
+        # Fallback to Bedrock-only if no Azure AI
+        if not models and self.llm._bedrock_client:
+            models = [ModelType.CLAUDE_OPUS, ModelType.DEEPSEEK_R1]
+        elif not self.llm._azure_ai_available and self.llm._bedrock_client:
+            models.append(ModelType.DEEPSEEK_R1)
+
+        # Roles distributed within each model's agent pool
+        role_distribution = [
+            (AgentRole.EXPLORER, 0.4),
+            (AgentRole.REASONER, 0.25),
+            (AgentRole.VALIDATOR, 0.15),
+            (AgentRole.SYNTHESIZER, 0.1),
+            (AgentRole.CRITIC, 0.1),
         ]
 
-        for i in range(self.max_agents):
-            rand = i / self.max_agents
-            cumulative = 0
-            role = AgentRole.EXPLORER
-            for r, prob in role_distribution.items():
-                cumulative += prob
-                if rand < cumulative:
-                    role = r
-                    break
+        agents_per_model = self.max_agents // len(models)
+        remainder = self.max_agents % len(models)
 
-            # Assign model: reasoners get DeepSeek, explorers get round-robin across all 4
-            if role == AgentRole.REASONER:
-                model = ModelType.DEEPSEEK_R1
-            elif role == AgentRole.SYNTHESIZER:
-                model = ModelType.KIMI_25  # Long context for synthesis
-            else:
-                model = models[i % len(models)]
+        agent_idx = 0
+        model_counts: dict[str, int] = {}
 
-            agent = DiscoveryAgent(
-                agent_id=f"agent-{i:04d}",
-                role=role,
-                model=model,
-                llm=self.llm,
-                memory=self.memory,
-            )
-            self._agents[agent.id] = agent
+        for model_idx, model in enumerate(models):
+            # Distribute remainder agents to first models
+            count = agents_per_model + (1 if model_idx < remainder else 0)
+            model_counts[model.value] = count
 
-        self.logger.info(f"Created {len(self._agents)} agents across 4 models")
+            for j in range(count):
+                # Assign role based on position within this model's pool
+                frac = j / max(count, 1)
+                cumulative = 0.0
+                role = AgentRole.EXPLORER
+                for r, prob in role_distribution:
+                    cumulative += prob
+                    if frac < cumulative:
+                        role = r
+                        break
+
+                agent = DiscoveryAgent(
+                    agent_id=f"agent-{agent_idx:04d}",
+                    role=role,
+                    model=model,
+                    llm=self.llm,
+                    memory=self.memory,
+                )
+                self._agents[agent.id] = agent
+                agent_idx += 1
+
+        self.logger.info(
+            f"Created {len(self._agents)} agents — equal distribution: "
+            + ", ".join(f"{k}: {v}" for k, v in model_counts.items())
+        )
 
     async def _run_discovery_loop(
         self, disease: str, graph_data: dict[str, Any], discovery_type: str,
@@ -1306,10 +1562,13 @@ class DiscoveryOrchestrator(LoggerMixin):
         active_agents = sum(1 for a in self._agents.values() if a.state.is_active)
         paths_explored = sum(a.state.paths_explored for a in self._agents.values())
 
-        agents_by_role = {}
+        agents_by_role: dict[str, int] = {}
+        agents_by_model: dict[str, int] = {}
         for agent in self._agents.values():
             role = agent.role.value
             agents_by_role[role] = agents_by_role.get(role, 0) + 1
+            model = agent.model.value
+            agents_by_model[model] = agents_by_model.get(model, 0) + 1
 
         high_confidence = sum(1 for h in self._hypotheses if h.confidence >= 0.7)
         runtime = time.time() - self._start_time if self._start_time else 0
@@ -1326,6 +1585,7 @@ class DiscoveryOrchestrator(LoggerMixin):
             current_best_confidence=self._best_confidence,
             runtime_seconds=runtime,
             agents_by_role=agents_by_role,
+            agents_by_model=agents_by_model,
             models_active=models_active,
             token_pool_stats=self.token_pool.get_stats(),
             learning_stats=self.memory.get_stats(),
@@ -1354,7 +1614,7 @@ async def get_orchestrator() -> DiscoveryOrchestrator:
 async def start_discovery(
     disease: str,
     focus_entities: list[str] = None,
-    discovery_type: str = "cure",
+    discovery_type: str = "treatment",
     max_agents: int = 1000,
     target_confidence: float = 0.95,
     external_factors: list[dict[str, Any]] = None,

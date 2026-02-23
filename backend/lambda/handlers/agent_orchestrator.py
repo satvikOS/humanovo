@@ -2,8 +2,10 @@
 Agent Orchestrator Lambda Handler - Multi-model AI discovery system.
 
 Handles the /orchestrator/* endpoints for the discovery page.
-Uses AWS Bedrock Converse API with InvokeModel fallback for all providers.
-4 models run in parallel with different roles to avoid token bottlenecks.
+Uses mixed providers:
+  - Claude Opus 4.6 via AWS Bedrock (Explorer + Synthesizer)
+  - DeepSeek-R1-0528 via Azure AI Foundry (Reasoner)
+  - Mistral-Large-3 via Azure AI Foundry (Critic)
 Model identities are never exposed to the frontend (unbiasing).
 """
 
@@ -21,6 +23,7 @@ from uuid import uuid4
 import logging
 
 import boto3
+from botocore.config import Config as BotoConfig
 
 # Defensive powertools imports — Lambda must NEVER crash on cold start
 try:
@@ -87,16 +90,62 @@ except Exception as _e:
     dynamodb = None
 
 try:
-    bedrock_runtime = boto3.client("bedrock-runtime")
+    bedrock_runtime = boto3.client("bedrock-runtime", config=BotoConfig(
+        read_timeout=120, connect_timeout=10, retries={"max_attempts": 2}
+    ))
 except Exception as _e:
     logger.error(f"Bedrock init failed: {_e}")
     bedrock_runtime = None
+
+# Separate client with extended timeout for paper generation (long inference)
+try:
+    bedrock_long = boto3.client("bedrock-runtime", config=BotoConfig(
+        read_timeout=600, connect_timeout=10, retries={"max_attempts": 1}
+    ))
+except Exception as _e:
+    logger.error(f"Bedrock long-timeout init failed: {_e}")
+    bedrock_long = None
 
 try:
     lambda_client = boto3.client("lambda")
 except Exception as _e:
     logger.error(f"Lambda client init failed: {_e}")
     lambda_client = None
+
+# Azure AI — model-specific clients (direct endpoints, no Foundry routing layer)
+azure_deepseek_client = None
+azure_mistral_client = None
+
+AZURE_DEEPSEEK_ENDPOINT = os.environ.get("AZURE_DEEPSEEK_ENDPOINT", "")
+AZURE_DEEPSEEK_KEY = os.environ.get("AZURE_DEEPSEEK_KEY", "")
+AZURE_MISTRAL_ENDPOINT = os.environ.get("AZURE_MISTRAL_ENDPOINT", "")
+AZURE_MISTRAL_KEY = os.environ.get("AZURE_MISTRAL_KEY", "")
+
+if AZURE_DEEPSEEK_ENDPOINT and AZURE_DEEPSEEK_KEY:
+    try:
+        from openai import OpenAI
+        azure_deepseek_client = OpenAI(
+            base_url=AZURE_DEEPSEEK_ENDPOINT.rstrip('/'),
+            api_key=AZURE_DEEPSEEK_KEY,
+        )
+        print(f"[ORCHESTRATOR] Azure DeepSeek client initialized (endpoint={AZURE_DEEPSEEK_ENDPOINT})")
+    except Exception as _e:
+        logger.error(f"Azure DeepSeek init failed: {_e}")
+else:
+    print("[ORCHESTRATOR] Azure DeepSeek not configured — set AZURE_DEEPSEEK_ENDPOINT and AZURE_DEEPSEEK_KEY")
+
+if AZURE_MISTRAL_ENDPOINT and AZURE_MISTRAL_KEY:
+    try:
+        from openai import OpenAI
+        azure_mistral_client = OpenAI(
+            base_url=AZURE_MISTRAL_ENDPOINT.rstrip('/'),
+            api_key=AZURE_MISTRAL_KEY,
+        )
+        print(f"[ORCHESTRATOR] Azure Mistral client initialized (endpoint={AZURE_MISTRAL_ENDPOINT})")
+    except Exception as _e:
+        logger.error(f"Azure Mistral init failed: {_e}")
+else:
+    print("[ORCHESTRATOR] Azure Mistral not configured — set AZURE_MISTRAL_ENDPOINT and AZURE_MISTRAL_KEY")
 
 # Configuration
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "dev")
@@ -110,42 +159,54 @@ DISCOVERY_TASK_KEY = "active-discovery"
 PAPER_TASK_KEY = "active-paper"
 
 # ============== Model Configuration ==============
-# Each model is assigned a specific role. Model IDs are NEVER sent to frontend.
-# Using Bedrock Converse API for unified interface across all providers.
+# Mixed provider routing — model IDs are NEVER sent to frontend (unbiasing).
+#
+# Bedrock: Claude Opus 4.6 (Explorer + Synthesizer) — restricted on Azure AI
+# Azure AI Foundry: DeepSeek-R1-0528 (Reasoner) + Mistral-Large-3 (Critic)
+
+BEDROCK_MODEL_CLAUDE_OPUS = os.environ.get("BEDROCK_MODEL_ID", "us.anthropic.claude-opus-4-6-v1:0")
+AZURE_AI_REASONER_MODEL = os.environ.get("AZURE_AI_REASONER_MODEL", "DeepSeek-R1-0528")
+AZURE_AI_CRITIC_MODEL = os.environ.get("AZURE_AI_CRITIC_MODEL", "Mistral-Large-3")
 
 AGENT_MODELS = {
+    # Claude Opus 4.6 via Bedrock — Explorer + Synthesizer (restricted on Azure AI)
     "explorer": {
-        "model_id": "us.meta.llama4-maverick-17b-instruct-v1:0",
-        "max_tokens": 16000,
-        "temperature": 0.8,  # Higher creativity for exploration
-        "role_description": "Fast broad exploration — discovers novel pathways and unconventional connections",
-    },
-    "reasoner": {
-        "model_id": "us.deepseek.r1-v1:0",
-        "max_tokens": 16000,
-        "temperature": 0.3,  # Lower for rigorous reasoning
-        "role_description": "Deep causal chain reasoning — step-by-step logical analysis with formal justification",
+        "model_id": BEDROCK_MODEL_CLAUDE_OPUS,
+        "provider": "bedrock",
+        "max_tokens": 32_768,
+        "temperature": 0.4,
+        "role_description": "Deep research exploration — exhaustive multi-step discovery of novel pathways and connections",
     },
     "synthesizer": {
-        "model_id": "moonshotai.kimi-k2.5",
-        "max_tokens": 16000,
-        "temperature": 0.5,  # Balanced for synthesis
-        "role_description": "Long-context integration — synthesizes findings across shards into unified hypotheses",
+        "model_id": BEDROCK_MODEL_CLAUDE_OPUS,
+        "provider": "bedrock",
+        "max_tokens": 32_768,
+        "temperature": 0.3,
+        "role_description": "200K context synthesis — integrates all findings into unified hypotheses and publication-quality documents",
+    },
+    # DeepSeek-R1-0528 + Mistral-Large-3 via Azure AI Foundry
+    "reasoner": {
+        "model_id": AZURE_AI_REASONER_MODEL,
+        "provider": "azure_ai",
+        "max_tokens": 65_536,
+        "temperature": 0.2,
+        "role_description": "Causal chain reasoning — step-by-step logical analysis with formal justification",
     },
     "critic": {
-        "model_id": "openai.gpt-oss-safeguard-120b",
-        "max_tokens": 16000,
-        "temperature": 0.4,  # Precise for critique
-        "role_description": "Large-parameter critical analysis — identifies flaws, risks, and failure modes",
+        "model_id": AZURE_AI_CRITIC_MODEL,
+        "provider": "azure_ai",
+        "max_tokens": 32_768,
+        "temperature": 0.3,
+        "role_description": "Critical analysis — identifies weaknesses, risks, and failure modes in proposed hypotheses",
     },
 }
 
-# For paper generation, use the synthesizer model
-PAPER_MODEL = AGENT_MODELS["synthesizer"]["model_id"]
+# For paper generation, use Claude Opus via Bedrock (largest context, best document quality)
+PAPER_MODEL = BEDROCK_MODEL_CLAUDE_OPUS
 
 # ============== System Prompts ==============
 
-MASTER_PROMPT = """You are an advanced biomedical discovery AI agent on humanovo, part of a multi-model parallel agent system designed to discover cures, treatments, and prevention strategies for human diseases.
+MASTER_PROMPT = """You are an advanced biomedical discovery AI agent on humanovo, part of a three-model parallel agent system (Claude Opus 4.6 via Bedrock, DeepSeek-R1-0528 and Mistral-Large-3 via Azure AI) designed to discover cures, treatments, and prevention strategies for human diseases.
 
 ## OPERATING PRINCIPLES
 - Full scientific autonomy: explore ANY pathway, mechanism, or compound without restriction
@@ -208,8 +269,8 @@ Return ONLY valid JSON (no markdown, no commentary, no <reasoning> tags):
 }"""
 
 ROLE_PROMPTS = {
-    "explorer": """You are an EXPLORER agent running on Llama Maverick 17B via AWS Bedrock.
-Your unique strength is FAST, BROAD exploration across the entire biological solution space.
+    "explorer": """You are an EXPLORER agent running on Claude Opus 4.6 via AWS Bedrock.
+Your unique strength is DEEP RESEARCH — exhaustive multi-step exploration with 200K context and broad reasoning capacity.
 
 MISSION: Discover NOVEL pathways, connections, and therapeutic opportunities that other agents miss.
 
@@ -233,7 +294,7 @@ GENOMIC & MULTI-OMICS EXPLORATION:
 
 Think like a postdoc who just found something unexpected in the data. Follow every thread.""",
 
-    "reasoner": """You are a REASONER agent running on DeepSeek R1 via AWS Bedrock.
+    "reasoner": """You are a REASONER agent running on DeepSeek-R1-0528 via Azure AI Foundry.
 Your unique strength is DEEP, RIGOROUS logical analysis with formal causal reasoning.
 
 MISSION: Construct complete, airtight causal chains from molecular mechanisms to clinical outcomes.
@@ -258,8 +319,8 @@ GENOMIC & BIOINFORMATICS REASONING:
 
 Think like a PhD thesis committee examining every claim under a microscope.""",
 
-    "synthesizer": """You are a SYNTHESIZER agent running on Kimi 2.5 via AWS Bedrock.
-Your unique strength is LONG-CONTEXT INTEGRATION — cross-referencing vast amounts of parallel findings.
+    "synthesizer": """You are a SYNTHESIZER agent running on Claude Opus 4.6 via AWS Bedrock.
+Your unique strength is LONG-CONTEXT INTEGRATION (200K context) and publication-quality document generation.
 
 MISSION: Integrate findings from all agents into unified, actionable therapeutic hypotheses.
 
@@ -280,8 +341,8 @@ MULTIMODAL DATA INTEGRATION:
 
 Think like a PI reviewing all lab data to write the definitive paper.""",
 
-    "critic": """You are a CRITIC agent running on GPT OSS Safeguard 120B via AWS Bedrock.
-Your unique strength is LARGE-PARAMETER critical analysis for finding subtle flaws.
+    "critic": """You are a CRITIC agent running on Mistral-Large-3 via Azure AI Foundry.
+Your unique strength is analytical critical reasoning for finding subtle flaws.
 
 MISSION: Identify every weakness, risk, failure mode, and problem with proposed hypotheses.
 
@@ -300,6 +361,38 @@ For each problem: classify severity (CRITICAL/MAJOR/MINOR/WATCH), provide mitiga
 NEVER accept a hypothesis just because it's interesting. NEVER soft-pedal safety concerns.
 
 Think like an FDA reviewer combined with a pharma CMC expert — thorough, fair, uncompromising on safety.""",
+
+    "strategist": """You are a STRATEGIST agent running on GPT-4o via Azure OpenAI.
+Your unique strength is STRUCTURED STRATEGIC ANALYSIS — designing actionable clinical plans and combination strategies.
+
+MISSION: Transform raw scientific findings into precision medicine strategies with concrete clinical trial designs.
+
+SPECIFIC INSTRUCTIONS:
+1. Design COMPLETE clinical strategies: patient selection criteria, biomarker panels, treatment sequencing, dose escalation schemes, response assessment timelines
+2. For every hypothesis, produce a CLINICAL TRANSLATION PLAN: Phase I safety design → Phase II efficacy endpoints → Phase III registration strategy → companion diagnostic requirements
+3. Evaluate DRUG-DRUG INTERACTIONS for combination approaches: CYP450 metabolism, transporter effects (P-gp, BCRP), protein binding displacement, QTc prolongation risk
+4. Design ADAPTIVE trial protocols: biomarker-guided randomization, interim futility analysis, dose optimization, expansion cohorts
+5. Propose REAL-WORLD EVIDENCE strategies: observational study designs, electronic health record mining approaches, patient registry integration
+6. Consider HEALTH ECONOMICS: cost-effectiveness thresholds, QALY impact, payer evidence requirements, market access strategy
+7. Map REGULATORY PATHWAYS: FDA breakthrough therapy, accelerated approval, priority review triggers, EMA PRIME eligibility
+
+Think like a Chief Medical Officer designing the development program for a promising asset.""",
+
+    "deep_analyst": """You are a DEEP ANALYST agent running on o1 via Azure OpenAI.
+Your unique strength is RIGOROUS MULTI-STEP REASONING — solving problems that require extended chains of logical deduction.
+
+MISSION: Perform deep mathematical, statistical, and systems-level analysis that requires careful step-by-step reasoning.
+
+SPECIFIC INSTRUCTIONS:
+1. Construct FORMAL PROOFS of mechanism viability: define axioms (known biology), derive lemmas (intermediate mechanisms), prove theorems (therapeutic predictions), state corollaries (secondary effects)
+2. Perform QUANTITATIVE PHARMACOLOGY analysis: receptor occupancy calculations (Emax models), PK/PD modeling (one/two-compartment), therapeutic index estimation, dose-response curve prediction
+3. Calculate STATISTICAL POWER for proposed validation experiments: sample size estimation, effect size requirements, multiple comparison corrections (Bonferroni, BH), interim analysis stopping boundaries
+4. Build SYSTEMS BIOLOGY MODELS: ordinary differential equations for pathway dynamics, sensitivity analysis of key parameters, bifurcation analysis for switch-like behaviors, stochastic simulation for low-copy-number effects
+5. Evaluate GENOMIC EVIDENCE mathematically: odds ratios and confidence intervals from GWAS, allele frequency differences across populations, linkage disequilibrium structure, polygenic risk score construction
+6. Analyze NETWORK TOPOLOGY: identify critical nodes (betweenness centrality), essential edges (minimum cut), feedback loops (strongly connected components), drug target vulnerability (network attack tolerance)
+7. Assess COMBINATION SYNERGY quantitatively: Bliss independence, Loewe additivity, Chou-Talalay combination index, response surface methodology
+
+Think like a computational biologist running the most rigorous quantitative analysis possible.""",
 }
 
 
@@ -456,15 +549,21 @@ def _parse_invoke_response(model_id: str, response_body: dict) -> str:
 
 
 def call_bedrock(model_id: str, prompt: str, system_prompt: str,
-                 max_tokens: int = 2000, temperature: float = 0.7) -> str:
-    """Invoke a Bedrock model. Tries Converse API first, falls back to InvokeModel."""
-    if bedrock_runtime is None:
+                 max_tokens: int = 2000, temperature: float = 0.7,
+                 client=None) -> str:
+    """Invoke a Bedrock model. Tries Converse API first, falls back to InvokeModel.
+
+    Args:
+        client: Optional boto3 bedrock-runtime client override (e.g. bedrock_long for paper generation).
+    """
+    _client = client or bedrock_runtime
+    if _client is None:
         raise RuntimeError("Bedrock runtime not initialized")
 
     converse_err = None
     # Try Converse API first (unified across providers)
     try:
-        response = bedrock_runtime.converse(
+        response = _client.converse(
             modelId=model_id,
             messages=[
                 {
@@ -478,7 +577,16 @@ def call_bedrock(model_id: str, prompt: str, system_prompt: str,
                 "temperature": temperature,
             },
         )
-        return response["output"]["message"]["content"][0]["text"]
+        # Parse Converse response — handle varying content structures
+        content_blocks = response["output"]["message"]["content"]
+        if content_blocks and isinstance(content_blocks, list):
+            block = content_blocks[0]
+            if isinstance(block, dict) and "text" in block:
+                return block["text"]
+            elif isinstance(block, str):
+                return block
+        # Fallback: stringify
+        return json.dumps(content_blocks)
     except Exception as e:
         converse_err = e
         logger.warning(f"Converse API failed for {model_id}: {e}, trying InvokeModel")
@@ -486,7 +594,7 @@ def call_bedrock(model_id: str, prompt: str, system_prompt: str,
     # Fallback: InvokeModel with provider-specific body format
     try:
         body = _build_invoke_body(model_id, prompt, system_prompt, max_tokens, temperature)
-        response = bedrock_runtime.invoke_model(
+        response = _client.invoke_model(
             modelId=model_id,
             contentType="application/json",
             accept="application/json",
@@ -500,6 +608,38 @@ def call_bedrock(model_id: str, prompt: str, system_prompt: str,
             f"Both APIs failed for {model_id}. "
             f"Converse: {converse_err}. InvokeModel: {invoke_err}"
         )
+
+
+def call_azure_ai(model_name: str, prompt: str, system_prompt: str,
+                  max_tokens: int = 2000, temperature: float = 0.7) -> str:
+    """Invoke a model via its Azure AI model-specific endpoint."""
+    # Route to the correct per-model client based on model name
+    if "deepseek" in model_name.lower() or "DeepSeek" in model_name:
+        client = azure_deepseek_client
+    elif "mistral" in model_name.lower() or "Mistral" in model_name:
+        client = azure_mistral_client
+    else:
+        # Try DeepSeek as default fallback
+        client = azure_deepseek_client or azure_mistral_client
+
+    if client is None:
+        raise RuntimeError(
+            f"No Azure AI client available for {model_name}. "
+            "Set AZURE_DEEPSEEK_ENDPOINT/KEY and AZURE_MISTRAL_ENDPOINT/KEY."
+        )
+
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
+
+    response = client.chat.completions.create(
+        model=model_name,
+        messages=messages,
+        max_tokens=max_tokens,
+        temperature=temperature,
+    )
+    return response.choices[0].message.content
 
 
 def parse_hypothesis_json(text: str) -> dict | None:
@@ -564,16 +704,26 @@ def parse_hypothesis_json(text: str) -> dict | None:
 
 
 def run_single_agent(role: str, prompt: str, system_prompt: str) -> dict | None:
-    """Run a single agent with its assigned model. Returns hypothesis or None."""
+    """Run a single agent with its assigned model (Bedrock or Azure). Returns hypothesis or None."""
     model_config = AGENT_MODELS[role]
+    provider = model_config.get("provider", "azure_ai")
     try:
-        response_text = call_bedrock(
-            model_id=model_config["model_id"],
-            prompt=prompt,
-            system_prompt=system_prompt,
-            max_tokens=model_config["max_tokens"],
-            temperature=model_config["temperature"],
-        )
+        if provider == "azure_ai":
+            response_text = call_azure_ai(
+                model_name=model_config["model_id"],
+                prompt=prompt,
+                system_prompt=system_prompt,
+                max_tokens=model_config["max_tokens"],
+                temperature=model_config["temperature"],
+            )
+        else:
+            response_text = call_bedrock(
+                model_id=model_config["model_id"],
+                prompt=prompt,
+                system_prompt=system_prompt,
+                max_tokens=model_config["max_tokens"],
+                temperature=model_config["temperature"],
+            )
         hypothesis_data = parse_hypothesis_json(response_text)
         if hypothesis_data and hypothesis_data.get("has_hypothesis", False):
             return {
@@ -601,7 +751,10 @@ def run_single_agent(role: str, prompt: str, system_prompt: str) -> dict | None:
 def run_discovery_worker(config: dict):
     """Run the actual AI discovery process. Called via async Lambda invocation.
 
-    All 4 models run IN PARALLEL each round using ThreadPoolExecutor.
+    All models run IN PARALLEL each round using ThreadPoolExecutor:
+    - Claude Opus 4.6 (Bedrock) — Explorer + Synthesizer
+    - DeepSeek-R1-0528 (Azure AI) — Reasoner
+    - Mistral-Large-3 (Azure AI) — Critic
     Each model has its own role and token budget — no shared token pool.
     """
     disease = config.get("disease", "")
@@ -610,7 +763,25 @@ def run_discovery_worker(config: dict):
     external_factors = config.get("external_factors", [])
     max_agents = min(config.get("max_agents", 10), 20)  # Cap for Lambda
 
-    roles = list(AGENT_MODELS.keys())  # explorer, reasoner, synthesizer, critic
+    # Only include roles whose provider is available
+    def _role_available(role_name, cfg):
+        if cfg["provider"] == "bedrock":
+            return bedrock_runtime is not None
+        if cfg["provider"] == "azure_ai":
+            model_id = cfg["model_id"]
+            if "deepseek" in model_id.lower() or "DeepSeek" in model_id:
+                return azure_deepseek_client is not None
+            if "mistral" in model_id.lower() or "Mistral" in model_id:
+                return azure_mistral_client is not None
+        return False
+
+    roles = [r for r, cfg in AGENT_MODELS.items() if _role_available(r, cfg)]
+
+    if not roles:
+        logger.error("No AI providers available — need Bedrock + Azure DeepSeek/Mistral endpoints")
+        update_discovery_state({"status": "failed", "error": "No AI models connected. Check AWS credentials (Bedrock) and AZURE_DEEPSEEK_ENDPOINT/KEY + AZURE_MISTRAL_ENDPOINT/KEY environment variables."})
+        return
+
     num_rounds = min(max_agents // len(roles), 15)  # Up to 15 rounds for deep research
 
     print(f"[WORKER] Starting: disease={disease!r} max_agents={max_agents} num_rounds={num_rounds} roles={roles}")
@@ -651,9 +822,9 @@ def run_discovery_worker(config: dict):
                 for h in top_3
             )
 
-        # Run all 4 agents IN PARALLEL using ThreadPoolExecutor
+        # Run all agents IN PARALLEL using ThreadPoolExecutor (up to 6 models)
         futures = {}
-        with ThreadPoolExecutor(max_workers=4) as executor:
+        with ThreadPoolExecutor(max_workers=len(roles)) as executor:
             for role in roles:
                 # Check status before submitting
                 state = get_discovery_state()
@@ -664,26 +835,30 @@ def run_discovery_worker(config: dict):
 
                 # Each round+role gets a unique angle to ensure diversity
                 angle_matrix = {
-                    ("explorer", 0): "Focus on NOVEL molecular targets not yet in clinical trials. Explore unconventional biology: phase separation, mechanotransduction, metabolic symbiosis, non-coding RNA.",
-                    ("explorer", 1): "Focus on DRUG REPURPOSING and cross-disease pathway hijacking. Find approved drugs from unrelated fields with unexpected activity.",
-                    ("explorer", 2): "Focus on MICROBIOME-IMMUNE-METABOLISM axis. Explore gut-brain connections, bacterial metabolites, and ecological interventions.",
-                    ("explorer", 3): "Focus on NANOTECHNOLOGY and advanced delivery: BBB-crossing nanoparticles, exosome engineering, spatial targeting, theranostics.",
-                    ("explorer", 4): "Focus on GENE THERAPY and epigenetic reprogramming: CRISPR, base editing, ASO, siRNA, histone modification, chromatin remodeling.",
+                    # Claude Opus 4.6 (Bedrock): broad exploration, novel connections, strategic planning
+                    ("explorer", 0): "Explore NOVEL molecular targets (phase separation, mechanotransduction, non-coding RNA, metabolic symbiosis) AND design the clinical development strategy for the most promising.",
+                    ("explorer", 1): "Focus on DRUG REPURPOSING: find approved drugs from unrelated fields with unexpected activity. Design the rapid clinical validation path (basket trial, platform study).",
+                    ("explorer", 2): "Explore MICROBIOME-IMMUNE-METABOLISM axis. Design a COMBINATION PROTOCOL leveraging gut-brain connections, bacterial metabolites, and ecological interventions.",
+                    ("explorer", 3): "Explore GENE THERAPY and epigenetic reprogramming (CRISPR, base editing, ASO, siRNA). Design PRECISION MEDICINE STRATIFICATION: molecular subtypes, biomarker panels, matched therapeutics.",
+                    ("explorer", 4): "Explore NANOTECHNOLOGY and advanced delivery (BBB-crossing nanoparticles, exosome engineering). Design HEALTH ECONOMICS AND MARKET ACCESS plan with QALY impact, payer evidence requirements.",
+                    # DeepSeek-R1-0528 (Azure AI): rigorous causal chain reasoning
                     ("reasoner", 0): "Build a rigorous IMMUNOTHERAPY causal chain. Map checkpoint interactions, T-cell exhaustion markers, neoantigen load, and TME remodeling with exact IC50/EC50 values.",
                     ("reasoner", 1): "Build a rigorous METABOLIC VULNERABILITY chain. Map synthetic lethality, nutrient addiction, mitochondrial dependencies with exact enzyme kinetics.",
                     ("reasoner", 2): "Build a rigorous SIGNALING CASCADE chain. Map kinase networks, feedback loops, resistance mutations, and combination logic with quantitative modeling.",
                     ("reasoner", 3): "Build a rigorous EPIGENETIC THERAPY chain. Map histone marks, DNA methylation patterns, chromatin accessibility, and transcriptional consequences.",
                     ("reasoner", 4): "Build a rigorous TUMOR MICROENVIRONMENT chain. Map ECM composition, vascular normalization, hypoxia gradients, and immune infiltration dynamics.",
+                    # Claude Opus 4.6 (Bedrock): long-context synthesis & integration
                     ("synthesizer", 0): "INTEGRATE all findings into a multi-modal combination therapy protocol. Specify exact drugs, doses, schedules, and synergy mechanisms.",
                     ("synthesizer", 1): "INTEGRATE findings into a precision medicine stratification framework. Define molecular subtypes, biomarker panels, and matched therapeutics.",
                     ("synthesizer", 2): "INTEGRATE findings into a temporal treatment cascade. Design sequential phases that exploit therapy-induced vulnerabilities at each stage.",
                     ("synthesizer", 3): "INTEGRATE findings into a systems biology model. Map all intervention points onto pathway networks and predict emergent therapeutic effects.",
                     ("synthesizer", 4): "INTEGRATE findings into a clinical translation roadmap. Design Phase I/II trial with biomarker-guided adaptive design and companion diagnostics.",
-                    ("critic", 0): "Evaluate the STRONGEST hypothesis critically. Identify resistance mechanisms, compensatory pathways, and toxicity risks with specific molecular bases.",
-                    ("critic", 1): "Propose a CONTRARIAN hypothesis that challenges the dominant paradigm. What if the assumed target is wrong? Build an alternative.",
-                    ("critic", 2): "Design a SAFETY-FIRST hypothesis. Prioritize therapeutic window, off-target analysis, patient population risks, and long-term consequences.",
-                    ("critic", 3): "Evaluate FEASIBILITY: manufacturing, scalability, BBB penetration, stability, cold chain, cost of goods. Propose practical alternatives.",
-                    ("critic", 4): "Propose a COMBINATION THERAPY hypothesis that mitigates weaknesses of individual approaches. Address resistance through orthogonal mechanisms.",
+                    # Mistral-Large-3 (Azure AI): critical analysis, risk assessment, validation
+                    ("critic", 0): "Perform QUANTITATIVE PHARMACOLOGY critique: challenge receptor occupancy assumptions, PK/PD model validity, therapeutic index calculations, dose-response confidence intervals.",
+                    ("critic", 1): "Evaluate STATISTICAL RIGOR of proposed validation: assess sample size adequacy, effect size plausibility, multiple comparison corrections, adaptive design boundary assumptions.",
+                    ("critic", 2): "Challenge SYSTEMS BIOLOGY MODELS: stress-test ODE assumptions, parameter sensitivity bounds, bifurcation robustness, stochastic noise impact on predictions.",
+                    ("critic", 3): "Assess SAFETY AND TOXICOLOGY risks: on/off-target effects, CYP450 interactions, immunogenicity, genotoxicity potential, black box warning likelihood.",
+                    ("critic", 4): "Evaluate CLINICAL TRANSLATABILITY: regulatory pathway feasibility, manufacturing scalability, IP landscape, market access barriers, payer evidence requirements.",
                 }
                 angle = angle_matrix.get((role, round_num), f"Generate a unique {role}-perspective hypothesis distinct from all others.")
 
@@ -733,8 +908,8 @@ Return ONLY a valid JSON object (no markdown fences, no commentary before/after 
             "status": "running",
             "hypotheses": sorted_h[:50],
             "stats": {
-                "total_agents": 4,  # Always 4 parallel agents
-                "active_agents": 4 if round_num < num_rounds - 1 else 0,
+                "total_agents": len(roles),  # Parallel agents per round
+                "active_agents": len(roles) if round_num < num_rounds - 1 else 0,
                 "hypotheses_found": len(hypotheses),
                 "paths_explored": paths_explored,
                 "high_confidence_discoveries": sum(1 for h in hypotheses if h["confidence"] >= 0.7),
@@ -759,7 +934,7 @@ Return ONLY a valid JSON object (no markdown fences, no commentary before/after 
         "status": "idle",
         "hypotheses": sorted_h[:50],
         "stats": {
-            "total_agents": 4,
+            "total_agents": len(roles),
             "active_agents": 0,
             "hypotheses_found": len(hypotheses),
             "paths_explored": paths_explored,
@@ -987,28 +1162,28 @@ def health_check():
     total = len(AGENT_MODELS)
     results = {}
 
-    if bedrock_runtime is None:
-        print("[HEALTH] bedrock_runtime is None!")
-        for role, mc in AGENT_MODELS.items():
-            print(f"[HEALTH]   {role}: {mc['model_id']} -> SKIP (no client)")
-        return {
-            "status": "no_models",
-            "connected_count": 0,
-            "total_models": total,
-        }
-
-    # Test each model with a minimal call (try Converse, then InvokeModel)
+    # Test each model with a minimal call via its configured provider
     for role, model_config in AGENT_MODELS.items():
         model_id = model_config["model_id"]
+        provider = model_config.get("provider", "azure_ai")
         try:
-            print(f"[HEALTH] Testing {role} -> model={model_id}")
-            call_bedrock(
-                model_id=model_id,
-                prompt="hi",
-                system_prompt="Reply with OK.",
-                max_tokens=5,
-                temperature=0.1,
-            )
+            print(f"[HEALTH] Testing {role} -> model={model_id} provider={provider}")
+            if provider == "azure_ai":
+                call_azure_ai(
+                    model_name=model_id,
+                    prompt="hi",
+                    system_prompt="Reply with OK.",
+                    max_tokens=5,
+                    temperature=0.1,
+                )
+            else:
+                call_bedrock(
+                    model_id=model_id,
+                    prompt="hi",
+                    system_prompt="Reply with OK.",
+                    max_tokens=5,
+                    temperature=0.1,
+                )
             connected += 1
             results[role] = "OK"
             print(f"[HEALTH] {role} ({model_id}) -> OK")
@@ -1093,6 +1268,22 @@ def generate_paper():
     return {"status": "generating", "hypothesis_id": hypothesis_id or "all"}
 
 
+@app.post("/api/v1/orchestrator/cancel-paper")
+def cancel_paper():
+    """Cancel in-progress paper generation."""
+    try:
+        table = get_task_table()
+        table.update_item(
+            Key={"id": PAPER_TASK_KEY},
+            UpdateExpression="SET #s = :s, #u = :u",
+            ExpressionAttributeNames={"#s": "status", "#u": "updated_at"},
+            ExpressionAttributeValues={":s": "cancelled", ":u": datetime.utcnow().isoformat()},
+        )
+    except Exception as e:
+        logger.error(f"Cancel paper failed: {e}")
+    return {"status": "cancelled"}
+
+
 @app.get("/api/v1/orchestrator/paper-status")
 def get_paper_status():
     """Poll paper generation status."""
@@ -1102,8 +1293,12 @@ def get_paper_status():
         item = response.get("Item")
         if not item:
             return {"status": "idle", "paper_html": ""}
+        status = item.get("status", "idle")
+        # Treat cancelled as idle for the frontend
+        if status == "cancelled":
+            status = "idle"
         return serialize({
-            "status": item.get("status", "idle"),
+            "status": status,
             "paper_html": item.get("paper_html", ""),
             "error": item.get("error", ""),
         })
@@ -1209,14 +1404,40 @@ CRITICAL: Maximum length. Every sentence must be specific, quantitative, evidenc
     system_prompt = """You are an elite biomedical research paper author. Write with Nature Medicine rigor, Phase III protocol detail, and FDA submission precision. Every claim backed by evidence. Proper nomenclature, quantitative data, formal academic structure. Write the LONGEST, most DETAILED paper possible."""
 
     try:
-        print("[PAPER-WORKER] Calling Bedrock for paper generation...")
-        paper_md = call_bedrock(
-            model_id=PAPER_MODEL,
-            prompt=prompt,
-            system_prompt=system_prompt,
-            max_tokens=65536,
-            temperature=0.4,
-        )
+        print("[PAPER-WORKER] Calling Bedrock Claude Opus for paper generation (long timeout)...")
+        # Use extended-timeout client for long paper generation inference
+        _paper_client = bedrock_long or bedrock_runtime
+        # Retry up to 2 times on timeout
+        last_err = None
+        paper_md = None
+        for attempt in range(3):
+            # Check if cancelled before each attempt
+            paper_state = table.get_item(Key={"id": PAPER_TASK_KEY}).get("Item", {})
+            if paper_state.get("status") in ("cancelled", "idle"):
+                print("[PAPER-WORKER] Cancelled by user, aborting")
+                return
+            try:
+                # Always use Claude Opus via Bedrock for paper generation
+                # (best document quality + 200K context)
+                paper_md = call_bedrock(
+                    model_id=PAPER_MODEL,
+                    prompt=prompt,
+                    system_prompt=system_prompt,
+                    max_tokens=32_768,
+                    temperature=0.4,
+                    client=_paper_client,
+                )
+                break
+            except Exception as retry_err:
+                last_err = retry_err
+                err_str = str(retry_err).lower()
+                if "timeout" in err_str or "timed out" in err_str:
+                    print(f"[PAPER-WORKER] Attempt {attempt+1}/3 timed out, retrying...")
+                    time.sleep(2)
+                    continue
+                raise  # Non-timeout errors fail immediately
+        if paper_md is None:
+            raise last_err or RuntimeError("Paper generation failed after retries")
         print(f"[PAPER-WORKER] Got {len(paper_md)} chars of markdown")
 
         # Convert markdown to rich HTML with professional typography

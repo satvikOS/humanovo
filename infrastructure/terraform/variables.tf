@@ -109,15 +109,43 @@ variable "lambda_reserved_concurrency" {
 # ==================== Bedrock Configuration ====================
 
 variable "bedrock_model_id" {
-  description = "Bedrock model ID for text generation"
+  description = "Bedrock model ID for Explorer + Synthesizer (Claude Opus 4.6)"
   type        = string
-  default     = "anthropic.claude-3-5-sonnet-20241022-v2:0"
+  default     = "us.anthropic.claude-opus-4-6-v1:0"
 }
 
 variable "bedrock_embedding_model_id" {
   description = "Bedrock model ID for embeddings"
   type        = string
   default     = "amazon.titan-embed-text-v2:0"
+}
+
+# ==================== Azure AI — Model-Specific Endpoints ====================
+
+variable "azure_deepseek_endpoint" {
+  description = "Azure AI DeepSeek-R1-0528 model-specific endpoint"
+  type        = string
+  default     = ""
+}
+
+variable "azure_deepseek_key" {
+  description = "Azure AI DeepSeek-R1-0528 API key"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "azure_mistral_endpoint" {
+  description = "Azure AI Mistral-Large-3 model-specific endpoint"
+  type        = string
+  default     = ""
+}
+
+variable "azure_mistral_key" {
+  description = "Azure AI Mistral-Large-3 API key"
+  type        = string
+  default     = ""
+  sensitive   = true
 }
 
 # ==================== API Gateway ====================

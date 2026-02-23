@@ -4,12 +4,10 @@ Disease Discovery Service
 Advanced LLM-powered service for discovering disease cures and prevention strategies
 by connecting billions of data points across the knowledge graph.
 
-Supports multiple LLM providers:
-- AWS Bedrock (Llama Maverick 17B, Claude, etc.)
-- OpenAI (GPT-4)
-- Anthropic (Claude)
-- Together AI (open-source models)
-- Groq (fast inference)
+Supports three LLM providers:
+- Azure AI Foundry (DeepSeek-R1-0528, Mistral-Large-3) — reasoner + critic
+- AWS Bedrock (Claude Opus 4.6) — explorer + synthesizer
+- Azure OpenAI (legacy)
 """
 
 import asyncio
@@ -31,9 +29,9 @@ logger = get_logger(__name__)
 
 class DiscoveryType(str, Enum):
     """Type of discovery being sought."""
-    CURE = "cure"
+    CURE = "cure"  # Kept for backward compatibility
     PREVENTION = "prevention"
-    TREATMENT = "treatment"
+    TREATMENT = "treatment"  # Primary default
     BIOMARKER = "biomarker"
     DRUG_REPURPOSING = "drug_repurposing"
     COMBINATION_THERAPY = "combination_therapy"
@@ -49,11 +47,9 @@ class EvidenceStrength(str, Enum):
 
 class LLMProvider(str, Enum):
     """Supported LLM providers."""
-    BEDROCK = "bedrock"
-    OPENAI = "openai"
-    ANTHROPIC = "anthropic"
-    TOGETHER = "together"
-    GROQ = "groq"
+    AZURE_AI = "azure_ai"   # Azure AI Model Catalog (non-OpenAI) — primary
+    BEDROCK = "bedrock"      # AWS Bedrock — fallback
+    AZURE = "azure"          # Azure OpenAI — legacy
 
 
 @dataclass
@@ -207,7 +203,7 @@ class BedrockLLMClient(BaseLLMClient):
 
     def __init__(self, model_id: str = None):
         self._client = None
-        self._model_id = model_id or settings.BEDROCK_MODEL
+        self._model_id = model_id or settings.BEDROCK_MODEL_CLAUDE_OPUS
 
     async def _get_client(self):
         """Get or create Bedrock client."""
@@ -274,17 +270,16 @@ class BedrockLLMClient(BaseLLMClient):
 
 
 class BedrockMultiModelClient(BaseLLMClient):
-    """Multi-model Bedrock client that runs all 4 models in parallel for discovery.
+    """Multi-model Bedrock client for parallel discovery.
 
-    Uses the Converse API to invoke all 4 Bedrock models simultaneously,
-    then synthesizes their outputs into a unified response.
+    Uses Claude Opus (explorer+synthesizer) and DeepSeek R1 (reasoner)
+    via the Converse API, then synthesizes outputs.
     """
 
     MODEL_ROLES = {
-        "explorer": settings.BEDROCK_MODEL_LLAMA_MAVERICK,
+        "explorer": settings.BEDROCK_MODEL_CLAUDE_OPUS,
         "reasoner": settings.BEDROCK_MODEL_DEEPSEEK,
-        "synthesizer": settings.BEDROCK_MODEL_KIMI,
-        "critic": settings.BEDROCK_MODEL_GPT_OSS,
+        "synthesizer": settings.BEDROCK_MODEL_CLAUDE_OPUS,
     }
 
     def __init__(self):
@@ -375,10 +370,13 @@ class BedrockMultiModelClient(BaseLLMClient):
         if len(successful) == 1:
             return list(successful.values())[0]
 
-        # Synthesize via Kimi 2.5 (largest context)
+        # Synthesize via Claude Opus (200K context)
+        joined_outputs = "\n".join(
+            f"=== {role.upper()} OUTPUT ===\n{text}" for role, text in successful.items()
+        )
         synthesis_prompt = f"""Synthesize these parallel model outputs into a single unified response:
 
-{chr(10).join(f'=== {role.upper()} OUTPUT ===\n{text}' for role, text in successful.items())}
+{joined_outputs}
 
 Produce a single, integrated JSON response that combines the best insights from all models.
 Resolve contradictions by favoring higher-evidence claims. Note any unresolved disagreements."""
@@ -394,100 +392,25 @@ Resolve contradictions by favoring higher-evidence claims. Note any unresolved d
         return "bedrock-multi-model"
 
 
-class OpenAILLMClient(BaseLLMClient):
-    """OpenAI LLM client."""
+class AzureOpenAILLMClient(BaseLLMClient):
+    """Azure OpenAI LLM client."""
 
     def __init__(self):
         self._client = None
 
     async def _get_client(self):
         if self._client is None:
+            if not settings.azure_openai_api_key_value or not settings.AZURE_OPENAI_ENDPOINT:
+                raise RuntimeError(
+                    "AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT are required. "
+                    "Set them as environment variables or in .env file."
+                )
             try:
-                from openai import AsyncOpenAI
-                self._client = AsyncOpenAI(api_key=settings.openai_api_key_value)
-            except ImportError:
-                raise RuntimeError("openai not installed. Run: pip install openai")
-        return self._client
-
-    async def generate(
-        self,
-        prompt: str,
-        system_prompt: str = "",
-        max_tokens: int = 4000,
-        temperature: float = 0.3,
-    ) -> str:
-        client = await self._get_client()
-
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": prompt})
-
-        response = await client.chat.completions.create(
-            model=settings.OPENAI_MODEL,
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-        )
-
-        return response.choices[0].message.content
-
-    @property
-    def model_name(self) -> str:
-        return settings.OPENAI_MODEL
-
-
-class AnthropicLLMClient(BaseLLMClient):
-    """Anthropic Claude LLM client."""
-
-    def __init__(self):
-        self._client = None
-
-    async def _get_client(self):
-        if self._client is None:
-            try:
-                from anthropic import AsyncAnthropic
-                self._client = AsyncAnthropic(api_key=settings.anthropic_api_key_value)
-            except ImportError:
-                raise RuntimeError("anthropic not installed. Run: pip install anthropic")
-        return self._client
-
-    async def generate(
-        self,
-        prompt: str,
-        system_prompt: str = "",
-        max_tokens: int = 4000,
-        temperature: float = 0.3,
-    ) -> str:
-        client = await self._get_client()
-
-        response = await client.messages.create(
-            model=settings.ANTHROPIC_MODEL,
-            max_tokens=max_tokens,
-            system=system_prompt if system_prompt else "You are a biomedical research AI.",
-            messages=[{"role": "user", "content": prompt}],
-        )
-
-        return response.content[0].text
-
-    @property
-    def model_name(self) -> str:
-        return settings.ANTHROPIC_MODEL
-
-
-class TogetherLLMClient(BaseLLMClient):
-    """Together AI LLM client for open-source models."""
-
-    def __init__(self):
-        self._client = None
-
-    async def _get_client(self):
-        if self._client is None:
-            try:
-                from openai import AsyncOpenAI
-                self._client = AsyncOpenAI(
-                    api_key=settings.together_api_key_value,
-                    base_url="https://api.together.xyz/v1",
+                from openai import AsyncAzureOpenAI
+                self._client = AsyncAzureOpenAI(
+                    api_key=settings.azure_openai_api_key_value,
+                    azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
+                    api_version=settings.AZURE_OPENAI_API_VERSION,
                 )
             except ImportError:
                 raise RuntimeError("openai not installed. Run: pip install openai")
@@ -508,7 +431,7 @@ class TogetherLLMClient(BaseLLMClient):
         messages.append({"role": "user", "content": prompt})
 
         response = await client.chat.completions.create(
-            model=settings.TOGETHER_MODEL,
+            model=settings.AZURE_OPENAI_DEPLOYMENT_O3_DEEP_RESEARCH,
             messages=messages,
             max_tokens=max_tokens,
             temperature=temperature,
@@ -518,23 +441,34 @@ class TogetherLLMClient(BaseLLMClient):
 
     @property
     def model_name(self) -> str:
-        return settings.TOGETHER_MODEL
+        return f"azure/{settings.AZURE_OPENAI_DEPLOYMENT_O3_DEEP_RESEARCH}"
 
 
-class GroqLLMClient(BaseLLMClient):
-    """Groq LLM client for fast inference."""
+class AzureAILLMClient(BaseLLMClient):
+    """Azure AI client — model-specific endpoints for DeepSeek + Mistral.
+
+    Each model has its own endpoint URL + API key (direct, no Foundry layer).
+    Defaults to DeepSeek-R1-0528 for single-model calls.
+    """
 
     def __init__(self):
-        self._client = None
+        self._deepseek_client = None
+        self._mistral_client = None
 
-    async def _get_client(self):
-        if self._client is None:
-            try:
-                from groq import AsyncGroq
-                self._client = AsyncGroq(api_key=settings.groq_api_key_value)
-            except ImportError:
-                raise RuntimeError("groq not installed. Run: pip install groq")
-        return self._client
+    async def _get_deepseek_client(self):
+        if self._deepseek_client is None:
+            endpoint = settings.AZURE_DEEPSEEK_ENDPOINT
+            key = settings.azure_deepseek_key_value
+            if not endpoint or not key:
+                raise RuntimeError(
+                    "Azure DeepSeek not configured. Set AZURE_DEEPSEEK_ENDPOINT and AZURE_DEEPSEEK_KEY."
+                )
+            from openai import AsyncOpenAI
+            self._deepseek_client = AsyncOpenAI(
+                base_url=endpoint.rstrip('/'),
+                api_key=key,
+            )
+        return self._deepseek_client
 
     async def generate(
         self,
@@ -543,46 +477,43 @@ class GroqLLMClient(BaseLLMClient):
         max_tokens: int = 4000,
         temperature: float = 0.3,
     ) -> str:
-        client = await self._get_client()
-
+        client = await self._get_deepseek_client()
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
 
         response = await client.chat.completions.create(
-            model=settings.GROQ_MODEL,
+            model=settings.AZURE_DEEPSEEK_MODEL,
             messages=messages,
             max_tokens=max_tokens,
             temperature=temperature,
         )
-
         return response.choices[0].message.content
 
     @property
     def model_name(self) -> str:
-        return settings.GROQ_MODEL
+        models = ", ".join([
+            settings.AZURE_DEEPSEEK_MODEL,
+            settings.AZURE_MISTRAL_MODEL,
+        ])
+        return f"azure-model-specific/[{models}]"
 
 
 def get_llm_client(provider: LLMProvider = None) -> BaseLLMClient:
     """Get LLM client based on provider.
 
-    Bedrock provider uses the Converse API for unified multi-model access.
-    Use 'bedrock' for single-model (default Llama Maverick) or configure
-    BEDROCK_MODEL to point to any of the 4 models:
-    - meta.llama4-maverick-17b-instruct-v1:0
-    - deepseek.r1-v1:0
-    - moonshotai.kimi-k2.5
-    - openai.gpt-oss-safeguard-120b
+    Three providers supported:
+    - 'azure_ai': Azure AI Model Catalog (non-OpenAI serverless) — primary
+    - 'bedrock': AWS Bedrock Converse API — fallback
+    - 'azure': Azure OpenAI — legacy
     """
     provider = provider or LLMProvider(settings.DISCOVERY_LLM_PROVIDER)
 
     clients = {
+        LLMProvider.AZURE_AI: AzureAILLMClient,
         LLMProvider.BEDROCK: BedrockLLMClient,
-        LLMProvider.OPENAI: OpenAILLMClient,
-        LLMProvider.ANTHROPIC: AnthropicLLMClient,
-        LLMProvider.TOGETHER: TogetherLLMClient,
-        LLMProvider.GROQ: GroqLLMClient,
+        LLMProvider.AZURE: AzureOpenAILLMClient,
     }
 
     return clients[provider]()
@@ -659,16 +590,16 @@ class DiseaseDiscoveryService(LoggerMixin):
     async def discover(
         self,
         disease: str,
-        discovery_type: DiscoveryType = DiscoveryType.CURE,
+        discovery_type: DiscoveryType = DiscoveryType.TREATMENT,
         focus_entities: list[str] = None,
         max_results: int = 5,
     ) -> list[DiscoveryResult]:
         """
-        Discover potential cures or treatments for a disease.
+        Discover potential treatments or strategies for a disease.
 
         Args:
             disease: Name of the disease to analyze
-            discovery_type: Type of discovery (cure, prevention, treatment, etc.)
+            discovery_type: Type of discovery (treatment, prevention, biomarker, etc.)
             focus_entities: Optional specific genes/proteins/drugs to focus on
             max_results: Maximum number of discoveries to return
 

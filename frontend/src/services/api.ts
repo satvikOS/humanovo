@@ -15,8 +15,21 @@ export interface Project {
   disease_focus?: string
   research_question?: string
   tags: string[]
+  status?: string
   hypothesis_count: number
   evidence_count: number
+  simulation_count?: number
+  hypotheses?: Array<{
+    id: string
+    title: string
+    description: string
+    mechanism: string
+    confidence: number
+    model_used: string
+    validated: boolean
+    external_factors: any[]
+    created_at: string
+  }>
   created_at: string
   updated_at: string
 }
@@ -325,6 +338,24 @@ export const api = {
 
   async runSearch(query: string, sources?: string[], maxResults?: number): Promise<{ query: string; results: Array<{ title: string; url: string; snippet?: string; source: string; relevance_score: number }>; total_results: number }> {
     const { data } = await apiClient.post('/agents/search', { query, sources, max_results: maxResults })
+    return data
+  },
+
+  // Orchestrator - Discovery & Paper Generation
+  async saveDiscoveryToProject(projectName?: string): Promise<{ status: string; project_id: string; name: string; hypothesis_count: number; message: string }> {
+    const { data } = await apiClient.post('/orchestrator/save-to-project', null, {
+      params: projectName ? { project_name: projectName } : undefined,
+    })
+    return data
+  },
+
+  async generatePaper(): Promise<any> {
+    const { data } = await apiClient.post('/orchestrator/generate-paper')
+    return data
+  },
+
+  async generatePaperMarkdown(): Promise<string> {
+    const { data } = await apiClient.post('/orchestrator/generate-paper/markdown')
     return data
   },
 }
