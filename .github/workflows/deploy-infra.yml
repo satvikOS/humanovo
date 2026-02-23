@@ -317,6 +317,50 @@ jobs:
             aws lambda get-function --function-name "${NAME_PREFIX}-${fn}" --query 'Configuration.{State:State,LastModified:LastModified}' --no-cli-pager 2>/dev/null || echo "  Could not verify ${fn}"
           done
 
+      - name: Update Agent Orchestrator Azure AI Env Vars
+        env:
+          AZURE_AI_ENDPOINT: ${{ secrets.AZURE_AI_ENDPOINT }}
+          AZURE_AI_KEY: ${{ secrets.AZURE_AI_KEY }}
+          AZURE_DEEPSEEK_ENDPOINT: ${{ secrets.AZURE_DEEPSEEK_ENDPOINT }}
+          AZURE_DEEPSEEK_KEY: ${{ secrets.AZURE_DEEPSEEK_KEY }}
+          AZURE_MISTRAL_ENDPOINT: ${{ secrets.AZURE_MISTRAL_ENDPOINT }}
+          AZURE_MISTRAL_KEY: ${{ secrets.AZURE_MISTRAL_KEY }}
+        run: |
+          NAME_PREFIX="genup-${ENVIRONMENT}"
+          FN_NAME="${NAME_PREFIX}-agent_orchestrator"
+
+          echo "Updating Azure AI env vars on ${FN_NAME}..."
+
+          # Get current env vars and merge in Azure AI credentials
+          CURRENT_ENV=$(aws lambda get-function-configuration \
+            --function-name "$FN_NAME" \
+            --query 'Environment.Variables' \
+            --output json 2>/dev/null || echo '{}')
+
+          # Merge Azure AI env vars into existing config
+          UPDATED_ENV=$(echo "$CURRENT_ENV" | python3 -c "
+          import json, sys, os
+          env = json.load(sys.stdin)
+          env['AZURE_AI_ENDPOINT'] = os.environ.get('AZURE_AI_ENDPOINT', '')
+          env['AZURE_AI_KEY'] = os.environ.get('AZURE_AI_KEY', '')
+          env['AZURE_DEEPSEEK_ENDPOINT'] = os.environ.get('AZURE_DEEPSEEK_ENDPOINT', '')
+          env['AZURE_DEEPSEEK_KEY'] = os.environ.get('AZURE_DEEPSEEK_KEY', '')
+          env['AZURE_MISTRAL_ENDPOINT'] = os.environ.get('AZURE_MISTRAL_ENDPOINT', '')
+          env['AZURE_MISTRAL_KEY'] = os.environ.get('AZURE_MISTRAL_KEY', '')
+          print(json.dumps({'Variables': env}))
+          ")
+
+          aws lambda update-function-configuration \
+            --function-name "$FN_NAME" \
+            --environment "$UPDATED_ENV" \
+            --no-cli-pager 2>/dev/null
+
+          echo "Azure AI env vars updated on ${FN_NAME}"
+
+          # Wait for update to complete
+          aws lambda wait function-updated --function-name "$FN_NAME" 2>/dev/null || true
+          echo "Lambda configuration update complete"
+
       - name: Get Outputs
         id: outputs
         working-directory: infrastructure/terraform
