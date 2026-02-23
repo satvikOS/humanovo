@@ -1156,47 +1156,56 @@ def stop_discovery():
 
 @app.get("/api/v1/orchestrator/health")
 def health_check():
-    """Check AI model connectivity. Returns count only — never exposes model names."""
+    """Check AI model connectivity. Returns count only — never exposes model names.
+
+    Uses fast client-availability checks instead of live inference calls.
+    A model is 'connected' if its provider client is initialized and ready.
+    """
     print("[HEALTH] Endpoint hit")
     connected = 0
     total = len(AGENT_MODELS)
     results = {}
 
-    # Test each model with a minimal call via its configured provider
     for role, model_config in AGENT_MODELS.items():
         model_id = model_config["model_id"]
         provider = model_config.get("provider", "azure_ai")
         try:
-            print(f"[HEALTH] Testing {role} -> model={model_id} provider={provider}")
             if provider == "azure_ai":
-                call_azure_ai(
-                    model_name=model_id,
-                    prompt="hi",
-                    system_prompt="Reply with OK.",
-                    max_tokens=5,
-                    temperature=0.1,
-                )
+                # Check if the appropriate Azure AI client is initialized
+                if "deepseek" in model_id.lower() or "DeepSeek" in model_id:
+                    client = azure_deepseek_client
+                elif "mistral" in model_id.lower() or "Mistral" in model_id:
+                    client = azure_mistral_client
+                else:
+                    client = azure_deepseek_client or azure_mistral_client
+
+                if client is None:
+                    raise RuntimeError(
+                        f"Azure AI client not configured for {model_id}. "
+                        "Check AZURE_DEEPSEEK_ENDPOINT/KEY or AZURE_MISTRAL_ENDPOINT/KEY env vars."
+                    )
+                # Client exists — model is available
+                connected += 1
+                results[role] = "OK"
             else:
-                call_bedrock(
-                    model_id=model_id,
-                    prompt="hi",
-                    system_prompt="Reply with OK.",
-                    max_tokens=5,
-                    temperature=0.1,
-                )
-            connected += 1
-            results[role] = "OK"
-            print(f"[HEALTH] {role} ({model_id}) -> OK")
+                # Bedrock — check if runtime client is initialized
+                if bedrock_runtime is None:
+                    raise RuntimeError("Bedrock runtime not initialized")
+                # Client exists — model is available
+                connected += 1
+                results[role] = "OK"
+
+            print(f"[HEALTH] {role} ({provider}) -> OK")
         except Exception as e:
             results[role] = f"FAIL: {e}"
-            print(f"[HEALTH] {role} ({model_id}) -> FAIL: {e}")
+            print(f"[HEALTH] {role} ({provider}) -> FAIL: {e}")
             logger.warning(f"Health check failed for agent {role}: {e}")
 
     # Summary log for easy CloudWatch scanning
     print(f"[HEALTH] ===== SUMMARY: {connected}/{total} models connected =====")
     for role, mc in AGENT_MODELS.items():
         status = results.get(role, "NOT_TESTED")
-        print(f"[HEALTH]   {role:12s} | {mc['model_id']:50s} | {status}")
+        print(f"[HEALTH]   {role:12s} | {mc.get('provider', 'unknown'):10s} | {status}")
     print(f"[HEALTH] ================================================")
 
     return {
