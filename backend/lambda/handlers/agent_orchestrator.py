@@ -1281,6 +1281,13 @@ def get_status():
             print(f"[STATUS] State is 'failed' — auto-resetting to idle")
             update_discovery_state({"status": "idle"})
             current_status = "idle"
+        elif current_status == "completed":
+            # Return completed once with project info, then reset to idle
+            # so the frontend can show Start Discovery again
+            print(f"[STATUS] State is 'completed' — auto-resetting to idle for next run")
+            update_discovery_state({"status": "idle"})
+            # Keep current_status as "completed" for THIS response only
+            # so the frontend gets the project_id
         elif current_status in ("running", "stopping", "paused"):
             updated_at = state.get("updated_at", "")
             if updated_at:

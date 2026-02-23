@@ -19,7 +19,7 @@ import clsx from 'clsx'
 import { persistGet, persistSet, logActivity } from '../utils/persistence'
 
 // Types
-type OrchestratorState = 'idle' | 'running' | 'paused' | 'stopping'
+type OrchestratorState = 'idle' | 'running' | 'paused' | 'stopping' | 'completed'
 
 interface OrchestratorStats {
   state: OrchestratorState
@@ -438,7 +438,7 @@ export default function Agents() {
 
       if (!response.ok) {
         let detail = 'Unknown error'
-        try { const err = await response.json(); detail = err.detail || detail } catch {}
+        try { const err = await response.json(); detail = err.detail || detail } catch { }
         alert(`Paper generation failed: ${detail}`)
         setGeneratingPaper(false)
         setGeneratingPaperId(null)
@@ -616,7 +616,7 @@ export default function Agents() {
             </div>
 
             {/* Control Buttons */}
-            {state === 'idle' && (
+            {(state === 'idle' || state === 'completed') && (
               <button
                 onClick={startDiscovery}
                 disabled={!config.disease.trim()}
@@ -704,7 +704,7 @@ export default function Agents() {
                     onChange={(e) => setConfig(prev => ({ ...prev, disease: e.target.value }))}
                     placeholder="e.g., Alzheimer's Disease"
                     className="w-full px-3 py-2 bg-[var(--color-bg)] border border-[var(--color-border)] rounded text-sm"
-                    disabled={state !== 'idle'}
+                    disabled={state !== 'idle' && state !== 'completed'}
                   />
                 </div>
 
@@ -717,7 +717,7 @@ export default function Agents() {
                     value={config.discoveryType}
                     onChange={(e) => setConfig(prev => ({ ...prev, discoveryType: e.target.value as DiscoveryConfig['discoveryType'] }))}
                     className="w-full px-3 py-2 bg-[var(--color-bg)] border border-[var(--color-border)] rounded text-sm"
-                    disabled={state !== 'idle'}
+                    disabled={state !== 'idle' && state !== 'completed'}
                   >
                     {discoveryTypes.map(type => (
                       <option key={type.value} value={type.value}>{type.label}</option>
@@ -738,12 +738,12 @@ export default function Agents() {
                       onKeyDown={(e) => e.key === 'Enter' && addFocusEntity()}
                       placeholder="e.g., BRCA1, Amyloid-beta"
                       className="flex-1 px-3 py-2 bg-[var(--color-bg)] border border-[var(--color-border)] rounded text-sm"
-                      disabled={state !== 'idle'}
+                      disabled={state !== 'idle' && state !== 'completed'}
                     />
                     <button
                       onClick={addFocusEntity}
                       className="btn btn-sm bg-[var(--color-border)]"
-                      disabled={state !== 'idle'}
+                      disabled={state !== 'idle' && state !== 'completed'}
                     >
                       Add
                     </button>
@@ -759,7 +759,7 @@ export default function Agents() {
                           <button
                             onClick={() => removeFocusEntity(entity)}
                             className="hover:text-red-400"
-                            disabled={state !== 'idle'}
+                            disabled={state !== 'idle' && state !== 'completed'}
                           >
                             <FiX className="w-3 h-3" />
                           </button>
@@ -787,13 +787,13 @@ export default function Agents() {
                         onChange={(e) => setFactorName(e.target.value)}
                         placeholder="Factor name (e.g., Vitamin D)"
                         className="w-full px-2 py-1.5 bg-[var(--color-bg-elevated)] border border-[var(--color-border)] rounded text-xs"
-                        disabled={state !== 'idle'}
+                        disabled={state !== 'idle' && state !== 'completed'}
                       />
                       <select
                         value={factorCategory}
                         onChange={(e) => setFactorCategory(e.target.value as ExternalFactor['category'])}
                         className="w-full px-2 py-1.5 bg-[var(--color-bg-elevated)] border border-[var(--color-border)] rounded text-xs"
-                        disabled={state !== 'idle'}
+                        disabled={state !== 'idle' && state !== 'completed'}
                       >
                         {factorCategories.map(cat => (
                           <option key={cat} value={cat}>{cat.charAt(0).toUpperCase() + cat.slice(1)}</option>
@@ -805,12 +805,12 @@ export default function Agents() {
                         onChange={(e) => setFactorInteraction(e.target.value)}
                         placeholder="Known interaction (optional)"
                         className="w-full px-2 py-1.5 bg-[var(--color-bg-elevated)] border border-[var(--color-border)] rounded text-xs"
-                        disabled={state !== 'idle'}
+                        disabled={state !== 'idle' && state !== 'completed'}
                       />
                       <button
                         onClick={addExternalFactor}
                         className="btn btn-sm w-full bg-[var(--color-border)] text-xs"
-                        disabled={state !== 'idle' || !factorName.trim()}
+                        disabled={(state !== 'idle' && state !== 'completed') || !factorName.trim()}
                       >
                         <FiPlus className="w-3 h-3" /> Add Factor
                       </button>
@@ -826,7 +826,7 @@ export default function Agents() {
                               <button
                                 onClick={() => removeExternalFactor(i)}
                                 className="text-red-400 hover:text-red-300"
-                                disabled={state !== 'idle'}
+                                disabled={state !== 'idle' && state !== 'completed'}
                               >
                                 <FiX className="w-3 h-3" />
                               </button>
@@ -854,7 +854,7 @@ export default function Agents() {
                     value={config.maxAgents}
                     onChange={(e) => setConfig(prev => ({ ...prev, maxAgents: parseInt(e.target.value) }))}
                     className="w-full"
-                    disabled={state !== 'idle'}
+                    disabled={state !== 'idle' && state !== 'completed'}
                   />
                 </div>
 
@@ -871,7 +871,7 @@ export default function Agents() {
                     value={config.targetConfidence}
                     onChange={(e) => setConfig(prev => ({ ...prev, targetConfidence: parseFloat(e.target.value) }))}
                     className="w-full"
-                    disabled={state !== 'idle'}
+                    disabled={state !== 'idle' && state !== 'completed'}
                   />
                 </div>
               </div>
@@ -955,8 +955,8 @@ export default function Agents() {
                     className={clsx(
                       'h-full rounded-full transition-all duration-500',
                       stats.current_best_confidence >= 0.8 ? 'bg-green-500' :
-                      stats.current_best_confidence >= 0.6 ? 'bg-yellow-500' :
-                      stats.current_best_confidence >= 0.4 ? 'bg-orange-500' : 'bg-red-500'
+                        stats.current_best_confidence >= 0.6 ? 'bg-yellow-500' :
+                          stats.current_best_confidence >= 0.4 ? 'bg-orange-500' : 'bg-red-500'
                     )}
                     style={{ width: `${stats.current_best_confidence * 100}%` }}
                   />
@@ -1105,8 +1105,8 @@ export default function Agents() {
                       <div className={clsx(
                         'w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold shrink-0',
                         hypothesis.confidence >= 0.8 ? 'bg-green-500/20 text-green-400' :
-                        hypothesis.confidence >= 0.6 ? 'bg-yellow-500/20 text-yellow-400' :
-                        'bg-orange-500/20 text-orange-400'
+                          hypothesis.confidence >= 0.6 ? 'bg-yellow-500/20 text-yellow-400' :
+                            'bg-orange-500/20 text-orange-400'
                       )}>
                         {index + 1}
                       </div>
@@ -1226,8 +1226,8 @@ export default function Agents() {
                       className={clsx(
                         'h-full rounded-full transition-all duration-1000 ease-out',
                         (stats?.current_best_confidence || 0) >= 0.8 ? 'bg-green-500' :
-                        (stats?.current_best_confidence || 0) >= 0.6 ? 'bg-yellow-500' :
-                        (stats?.current_best_confidence || 0) >= 0.4 ? 'bg-orange-500' : 'bg-red-500'
+                          (stats?.current_best_confidence || 0) >= 0.6 ? 'bg-yellow-500' :
+                            (stats?.current_best_confidence || 0) >= 0.4 ? 'bg-orange-500' : 'bg-red-500'
                       )}
                       style={{ width: `${(stats?.current_best_confidence || 0) * 100}%` }}
                     />
@@ -1252,7 +1252,7 @@ export default function Agents() {
                         <div className={clsx(
                           'w-2 h-2 rounded-full',
                           state === 'running' ? 'bg-green-500 animate-pulse' :
-                          state === 'paused' ? 'bg-yellow-500' : 'bg-gray-500'
+                            state === 'paused' ? 'bg-yellow-500' : 'bg-gray-500'
                         )} style={{ animationDelay: `${i * 0.2}s` }} />
                         <span className="text-xs font-medium">{role}</span>
                       </div>
