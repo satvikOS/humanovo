@@ -1006,10 +1006,15 @@ def get_status():
                 "top_hypotheses": [],
             }
 
-        # Auto-detect stale states — if running/stopping/paused >15 min with no update,
-        # the Lambda probably crashed. Reset to idle so the user can start a new discovery.
+        # Auto-detect stale or failed states and reset to idle.
+        # - 'failed' always resets (user should be able to start fresh)
+        # - running/stopping/paused reset after 15 min with no update (Lambda crash recovery)
         current_status = state.get("status", "idle")
-        if current_status in ("running", "stopping", "paused"):
+        if current_status == "failed":
+            print(f"[STATUS] State is 'failed' — auto-resetting to idle")
+            update_discovery_state({"status": "idle"})
+            current_status = "idle"
+        elif current_status in ("running", "stopping", "paused"):
             updated_at = state.get("updated_at", "")
             if updated_at:
                 try:
@@ -1220,7 +1225,7 @@ def health_check():
                 if client is None:
                     raise RuntimeError(
                         f"Azure AI client not configured for {model_id}. "
-                        "Check AZURE_DEEPSEEK_ENDPOINT/KEY or AZURE_MISTRAL_ENDPOINT/KEY env vars."
+                        "Check AZURE_AI_ENDPOINT/KEY or per-model env vars."
                     )
                 # Client exists — model is available
                 connected += 1
@@ -1246,10 +1251,24 @@ def health_check():
         print(f"[HEALTH]   {role:12s} | {mc.get('provider', 'unknown'):10s} | {status}")
     print(f"[HEALTH] ================================================")
 
+    # Debug diagnostics — show which env vars and clients are available
+    debug = {
+        "azure_ai_endpoint_set": bool(os.environ.get("AZURE_AI_ENDPOINT", "")),
+        "azure_ai_key_set": bool(os.environ.get("AZURE_AI_KEY", "")),
+        "azure_deepseek_endpoint_set": bool(os.environ.get("AZURE_DEEPSEEK_ENDPOINT", "")),
+        "azure_deepseek_key_set": bool(os.environ.get("AZURE_DEEPSEEK_KEY", "")),
+        "azure_mistral_endpoint_set": bool(os.environ.get("AZURE_MISTRAL_ENDPOINT", "")),
+        "azure_mistral_key_set": bool(os.environ.get("AZURE_MISTRAL_KEY", "")),
+        "azure_deepseek_client_init": azure_deepseek_client is not None,
+        "azure_mistral_client_init": azure_mistral_client is not None,
+        "bedrock_runtime_init": bedrock_runtime is not None,
+    }
+
     return {
         "status": "healthy" if connected == total else "partial" if connected > 0 else "no_models",
         "connected_count": connected,
         "total_models": total,
+        "debug": debug,
     }
 
 
