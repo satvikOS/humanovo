@@ -13,7 +13,7 @@ lambda_memory_size = 2048
 lambda_timeout     = 60
 
 # Bedrock Models
-bedrock_model_id           = "us.anthropic.claude-opus-4-6-v1:0"
+bedrock_model_id           = "anthropic.claude-opus-4-6-v1"
 bedrock_embedding_model_id = "amazon.titan-embed-text-v2:0"
 
 # API Gateway

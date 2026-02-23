@@ -708,7 +708,8 @@ def call_azure_ai(model_name: str, prompt: str, system_prompt: str,
     messages.append({"role": "user", "content": prompt})
 
     # Retry with exponential backoff for 429 rate-limit errors
-    max_retries = 3
+    # Azure AI serverless endpoints have strict per-minute limits
+    max_retries = 5
     for attempt in range(max_retries + 1):
         try:
             response = client.chat.completions.create(
@@ -720,7 +721,7 @@ def call_azure_ai(model_name: str, prompt: str, system_prompt: str,
             return response.choices[0].message.content
         except urllib.error.HTTPError as e:
             if e.code == 429 and attempt < max_retries:
-                wait = 2 ** (attempt + 1)  # 2s, 4s, 8s
+                wait = min(5 * (3 ** attempt), 60)  # 5s, 15s, 45s, 60s, 60s
                 logger.warning(f"Azure AI 429 for {model_name}, retry {attempt+1}/{max_retries} in {wait}s")
                 time.sleep(wait)
             else:
@@ -1018,8 +1019,8 @@ Return ONLY a valid JSON object (no markdown fences, no commentary before/after 
                 print(f"[WORKER] {role} -> EXCEPTION: {e}")
                 logger.error(f"Agent {role} round {round_num} failed: {e}")
 
-            # Small delay between sequential agent calls to avoid rate limits
-            time.sleep(1)
+            # Delay between sequential agent calls to avoid Azure AI rate limits
+            time.sleep(5)
 
         # Update state with partial results after each round
         elapsed = time.time() - start_time
@@ -1049,7 +1050,7 @@ Return ONLY a valid JSON object (no markdown fences, no commentary before/after 
 
         # Inter-round delay to prevent Azure rate limiting
         if round_num < num_rounds - 1:
-            time.sleep(3)
+            time.sleep(10)
 
     # ---- Discovery complete — finalize ----
     elapsed = time.time() - start_time
