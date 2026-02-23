@@ -235,7 +235,7 @@ PAPER_TASK_KEY = "active-paper"
 # Bedrock: Claude Opus 4.6 (Explorer + Synthesizer) — restricted on Azure AI
 # Azure AI Foundry: DeepSeek-R1-0528 (Reasoner) + Mistral-Large-3 (Critic)
 
-BEDROCK_MODEL_CLAUDE_OPUS = os.environ.get("BEDROCK_MODEL_ID", "anthropic.claude-opus-4-6-v1")
+BEDROCK_MODEL_CLAUDE_OPUS = os.environ.get("BEDROCK_MODEL_ID", "us.anthropic.claude-opus-4-6-v1")
 AZURE_AI_REASONER_MODEL = os.environ.get("AZURE_AI_REASONER_MODEL", "DeepSeek-R1-0528")
 AZURE_AI_CRITIC_MODEL = os.environ.get("AZURE_AI_CRITIC_MODEL", "Mistral-Large-3")
 
