@@ -3,12 +3,23 @@ import { useParams, Link } from 'react-router-dom'
 import {
   FiArrowLeft, FiActivity, FiTarget, FiCpu, FiClock,
   FiChevronDown, FiChevronUp, FiFileText, FiRefreshCw, FiTag,
+  FiTrash2, FiBook,
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import { persistGet, persistSet, logActivity } from '../utils/persistence'
 import DocumentViewer, { HypothesisViewer } from '../components/DocumentViewer'
 
 const API_BASE = '/api/v1'
+
+interface SavedResearchPaper {
+  id: string
+  hypothesis_id: string
+  hypothesis_title: string
+  project_id: string
+  disease: string
+  generated_at: string
+  filename: string
+}
 
 interface SavedHypothesis {
   id: string
@@ -45,6 +56,7 @@ export default function ProjectDetail() {
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [generatingPaper, setGeneratingPaper] = useState(false)
   const [generatingHypId, setGeneratingHypId] = useState<string | null>(null)
+  const [, setRefresh] = useState(0)
 
   // Document viewer state
   const [viewMode, setViewMode] = useState<ViewMode>('list')
@@ -58,6 +70,10 @@ export default function ProjectDetail() {
 
   const allHypotheses = persistGet<SavedHypothesis[]>('hypotheses', [])
   const projectHypotheses = allHypotheses.filter(h => h.project_id === projectId)
+
+  // Research papers state
+  const allPapers = persistGet<SavedResearchPaper[]>('research-papers', [])
+  const projectPapers = allPapers.filter(p => p.project_id === projectId)
 
   // ---- Generate project-level paper via document pipeline ----
   const generateProjectPaper = useCallback(async () => {
@@ -118,6 +134,7 @@ export default function ProjectDetail() {
 
         const disease = hypothesis.disease || project?.disease_focus || 'Unknown'
         _saveToEvidence(disease, 1)
+        _saveResearchPaper(hypothesis)
         return
       }
 
@@ -179,6 +196,24 @@ export default function ProjectDetail() {
       setViewMode('list')
     }
   }, [project, projectHypotheses.length])
+
+  // ---- Save generated paper to research papers list ----
+  const _saveResearchPaper = useCallback((hypothesis: SavedHypothesis) => {
+    const papers = persistGet<SavedResearchPaper[]>('research-papers', [])
+    const paper: SavedResearchPaper = {
+      id: `rp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      hypothesis_id: hypothesis.id,
+      hypothesis_title: hypothesis.title,
+      project_id: hypothesis.project_id,
+      disease: hypothesis.disease || project?.disease_focus || 'Unknown',
+      generated_at: new Date().toISOString(),
+      filename: `humanovo-${hypothesis.title.replace(/\s+/g, '-').toLowerCase().slice(0, 50)}.pdf`,
+    }
+    papers.unshift(paper)
+    persistSet('research-papers', papers.slice(0, 200))
+    logActivity({ type: 'evidence', action: 'created', title: `Research paper: ${hypothesis.title}`, project: project?.name })
+    setRefresh(n => n + 1)
+  }, [project])
 
   // ---- Save generated paper to evidence store ----
   const _saveToEvidence = useCallback((disease: string, hypCount: number) => {
@@ -462,6 +497,64 @@ export default function ProjectDetail() {
               <p className="text-secondary-400">
                 No hypotheses stored in this project yet. Run a discovery from the Agents page
                 and save results to populate this project.
+              </p>
+            )}
+          </div>
+
+          {/* Research Papers section */}
+          <div className="card">
+            <h2 className="text-lg font-semibold text-white mb-4 flex items-center">
+              <FiBook className="w-5 h-5 mr-2 text-purple-400" />
+              Research Papers ({projectPapers.length})
+            </h2>
+
+            {projectPapers.length > 0 ? (
+              <div className="space-y-2">
+                {projectPapers.map((paper) => (
+                  <div
+                    key={paper.id}
+                    className="flex items-center justify-between p-3 border border-secondary-700 rounded-lg hover:border-purple-600/50 transition-colors"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <FiFileText className="w-4 h-4 text-purple-400 shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-white text-sm font-medium truncate">{paper.hypothesis_title}</p>
+                        <p className="text-secondary-500 text-xs">
+                          {new Date(paper.generated_at).toLocaleDateString()} &middot; {paper.disease}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        onClick={() => {
+                          const hyp = projectHypotheses.find(h => h.id === paper.hypothesis_id)
+                          if (hyp) generateHypothesisPaper(hyp)
+                        }}
+                        disabled={generatingPaper}
+                        className="p-1.5 rounded hover:bg-secondary-700 text-secondary-400 hover:text-purple-400 transition-colors"
+                        title="Regenerate & view"
+                      >
+                        <FiRefreshCw className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => {
+                          const updated = persistGet<SavedResearchPaper[]>('research-papers', []).filter(p => p.id !== paper.id)
+                          persistSet('research-papers', updated)
+                          setRefresh(n => n + 1)
+                        }}
+                        className="p-1.5 rounded hover:bg-secondary-700 text-secondary-400 hover:text-red-400 transition-colors"
+                        title="Remove"
+                      >
+                        <FiTrash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-secondary-400 text-sm">
+                No research papers generated yet. Expand a hypothesis above and click
+                &ldquo;Generate Research Paper&rdquo; to create one.
               </p>
             )}
           </div>

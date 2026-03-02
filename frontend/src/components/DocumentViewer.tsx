@@ -20,6 +20,8 @@ interface DocumentViewerProps {
   isGenerating?: boolean
   /** Generation progress message */
   progressMessage?: string
+  /** Callback to trigger research paper generation (shown in topbar) */
+  onGenerateResearchPaper?: () => void
 }
 
 /**
@@ -43,6 +45,7 @@ export default function DocumentViewer({
   filename = 'humanovo-paper.pdf',
   isGenerating = false,
   progressMessage,
+  onGenerateResearchPaper,
 }: DocumentViewerProps) {
   const [isFullscreen, setIsFullscreen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -106,6 +109,21 @@ export default function DocumentViewer({
         </div>
 
         <div className="flex items-center gap-1 shrink-0">
+          {onGenerateResearchPaper && (
+            <button
+              onClick={onGenerateResearchPaper}
+              disabled={isGenerating}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-purple-500/20 text-purple-400 hover:bg-purple-500/30 disabled:opacity-50 text-xs font-medium transition-colors"
+              title="Generate Research Paper"
+            >
+              {isGenerating ? (
+                <FiRefreshCw className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <FiFileText className="w-3.5 h-3.5" />
+              )}
+              {isGenerating ? 'Generating...' : hasContent ? 'Regenerate' : 'Generate Research Paper'}
+            </button>
+          )}
           {hasContent && (
             <button
               onClick={handleDownload}
@@ -229,8 +247,6 @@ export function HypothesisViewer({
 }: HypothesisViewerProps) {
   const [collapsed, setCollapsed] = useState(false)
 
-  const hasPaper = pdfUrl || htmlContent
-
   return (
     <div className="flex h-full gap-0 overflow-hidden">
       {/* Left panel: Hypothesis details */}
@@ -295,21 +311,13 @@ export function HypothesisViewer({
               </div>
             )}
 
-            {/* Generate Paper button */}
-            <button
-              onClick={() => {
-                if (onGeneratePaper) onGeneratePaper()
-              }}
-              disabled={isGenerating}
-              className="btn bg-purple-500 text-white hover:bg-purple-600 disabled:opacity-50 w-full"
-            >
-              {isGenerating ? (
+            {/* Status indicator */}
+            {isGenerating && (
+              <div className="flex items-center gap-2 text-yellow-400 text-sm">
                 <FiRefreshCw className="w-4 h-4 animate-spin" />
-              ) : (
-                <FiFileText className="w-4 h-4" />
-              )}
-              {isGenerating ? 'Generating Paper...' : hasPaper ? 'Regenerate Paper' : 'Generate Research Paper'}
-            </button>
+                Generating research paper...
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -333,6 +341,7 @@ export function HypothesisViewer({
           filename={`humanovo-${hypothesis.title.replace(/\s+/g, '-').toLowerCase().slice(0, 50)}.pdf`}
           isGenerating={isGenerating}
           progressMessage={isGenerating ? 'Running document pipeline...' : undefined}
+          onGenerateResearchPaper={onGeneratePaper}
         />
       </div>
     </div>
