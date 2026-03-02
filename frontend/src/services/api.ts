@@ -358,6 +358,40 @@ export const api = {
     const { data } = await apiClient.post('/orchestrator/generate-paper/markdown')
     return data
   },
+
+  // Document Pipeline — PDF generation
+  async generateProjectPdf(projectId: string, useAi: boolean = true): Promise<Blob> {
+    const { data } = await apiClient.post(
+      `/documents/project/${projectId}/pdf?use_ai=${useAi}`,
+      null,
+      { responseType: 'blob' },
+    )
+    return data
+  },
+
+  async generateProjectPdfAsync(projectId: string, useAi: boolean = true): Promise<{ status: string; project_id: string; message: string }> {
+    const { data } = await apiClient.post(`/documents/project/${projectId}/pdf/async?use_ai=${useAi}`)
+    return data
+  },
+
+  async generateHypothesisPdf(hypothesisId: string, useAi: boolean = true): Promise<Blob> {
+    const { data } = await apiClient.post(
+      `/documents/hypothesis/${hypothesisId}/pdf?use_ai=${useAi}`,
+      null,
+      { responseType: 'blob' },
+    )
+    return data
+  },
+
+  async getDocumentStatus(): Promise<{ status: string; filename?: string; size_bytes?: number; error?: string }> {
+    const { data } = await apiClient.get('/documents/status')
+    return data
+  },
+
+  async downloadDocument(): Promise<Blob> {
+    const { data } = await apiClient.get('/documents/download', { responseType: 'blob' })
+    return data
+  },
 }
 
 export default api

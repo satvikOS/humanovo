@@ -1,15 +1,69 @@
-import { useParams } from 'react-router-dom'
+import { useState, useCallback } from 'react'
+import { useParams, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
+import {
+  FiArrowLeft, FiFileText, FiRefreshCw,
+} from 'react-icons/fi'
 import { api } from '../services/api'
+import DocumentViewer from '../components/DocumentViewer'
+
+const API_BASE = '/api/v1'
 
 export default function HypothesisDetail() {
   const { hypothesisId } = useParams<{ hypothesisId: string }>()
+
+  const [generatingPaper, setGeneratingPaper] = useState(false)
+  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null)
+  const [showViewer, setShowViewer] = useState(false)
 
   const { data: hypothesis, isLoading } = useQuery({
     queryKey: ['hypothesis', hypothesisId],
     queryFn: () => api.getHypothesis(hypothesisId!),
     enabled: !!hypothesisId,
   })
+
+  const generatePaper = useCallback(async () => {
+    if (!hypothesisId) return
+    setGeneratingPaper(true)
+    setShowViewer(true)
+    if (pdfBlobUrl) {
+      URL.revokeObjectURL(pdfBlobUrl)
+      setPdfBlobUrl(null)
+    }
+
+    try {
+      const res = await fetch(`${API_BASE}/documents/hypothesis/${hypothesisId}/pdf?use_ai=true`, {
+        method: 'POST',
+      })
+
+      if (res.ok) {
+        const blob = await res.blob()
+        const url = URL.createObjectURL(blob)
+        setPdfBlobUrl(url)
+        setGeneratingPaper(false)
+        return
+      }
+
+      // Fallback error
+      let detail = 'Unknown error'
+      try { const err = await res.json(); detail = err.detail || detail } catch {}
+      alert(`Paper generation failed: ${detail}`)
+      setGeneratingPaper(false)
+      setShowViewer(false)
+    } catch (e) {
+      console.error('Paper generation failed:', e)
+      alert('Failed to generate paper')
+      setGeneratingPaper(false)
+      setShowViewer(false)
+    }
+  }, [hypothesisId, pdfBlobUrl])
+
+  const closeViewer = useCallback(() => {
+    if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl)
+    setPdfBlobUrl(null)
+    setShowViewer(false)
+    setGeneratingPaper(false)
+  }, [pdfBlobUrl])
 
   if (isLoading) {
     return (
@@ -30,6 +84,32 @@ export default function HypothesisDetail() {
     )
   }
 
+  // ---- Document viewer mode ----
+  if (showViewer) {
+    return (
+      <div className="h-full flex flex-col">
+        <div className="px-4 py-2 border-b border-secondary-700 flex items-center gap-2 shrink-0">
+          <button onClick={closeViewer} className="text-primary-400 hover:text-primary-300 text-sm">
+            <FiArrowLeft className="w-3.5 h-3.5 inline mr-1" />Back
+          </button>
+          <span className="text-secondary-600">/</span>
+          <span className="text-secondary-400 text-sm truncate">{hypothesis.statement}</span>
+        </div>
+        <div className="flex-1 min-h-0">
+          <DocumentViewer
+            pdfUrl={pdfBlobUrl}
+            title={`Research Paper: ${hypothesis.statement}`}
+            onClose={closeViewer}
+            filename={`humanovo-hypothesis-${hypothesisId}.pdf`}
+            isGenerating={generatingPaper}
+            progressMessage="Running document pipeline..."
+          />
+        </div>
+      </div>
+    )
+  }
+
+  // ---- Standard detail view ----
   return (
     <div className="p-8">
       <div className="mb-8">
@@ -141,6 +221,18 @@ export default function HypothesisDetail() {
           <div className="card">
             <h2 className="text-lg font-semibold text-white mb-4">Actions</h2>
             <div className="space-y-2">
+              <button
+                onClick={generatePaper}
+                disabled={generatingPaper}
+                className="btn bg-purple-500 text-white hover:bg-purple-600 disabled:opacity-50 w-full"
+              >
+                {generatingPaper ? (
+                  <FiRefreshCw className="w-4 h-4 animate-spin" />
+                ) : (
+                  <FiFileText className="w-4 h-4" />
+                )}
+                {generatingPaper ? 'Generating...' : 'Generate Research Paper'}
+              </button>
               <button className="btn btn-primary w-full">Verify Hypothesis</button>
               <button className="btn btn-secondary w-full">Run Simulation</button>
               <button className="btn btn-secondary w-full">Find Evidence</button>

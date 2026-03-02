@@ -6,6 +6,7 @@ import {
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import { persistGet, persistSet, logActivity } from '../utils/persistence'
+import DocumentViewer, { HypothesisViewer } from '../components/DocumentViewer'
 
 const API_BASE = '/api/v1'
 
@@ -20,6 +21,7 @@ interface SavedHypothesis {
   discovery_type: string
   project_id: string
   created_at: string
+  model_used?: string
 }
 
 interface LocalProject {
@@ -36,12 +38,19 @@ interface LocalProject {
   updated_at: string
 }
 
+type ViewMode = 'list' | 'project_paper' | 'hypothesis_paper'
+
 export default function ProjectDetail() {
   const { projectId } = useParams<{ projectId: string }>()
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [generatingPaper, setGeneratingPaper] = useState(false)
   const [generatingHypId, setGeneratingHypId] = useState<string | null>(null)
+
+  // Document viewer state
+  const [viewMode, setViewMode] = useState<ViewMode>('list')
+  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null)
   const [paperHtml, setPaperHtml] = useState<string | null>(null)
+  const [activeHypothesis, setActiveHypothesis] = useState<SavedHypothesis | null>(null)
   const paperPollRef = useRef<number | null>(null)
 
   const projects = persistGet<LocalProject[]>('projects', [])
@@ -50,10 +59,78 @@ export default function ProjectDetail() {
   const allHypotheses = persistGet<SavedHypothesis[]>('hypotheses', [])
   const projectHypotheses = allHypotheses.filter(h => h.project_id === projectId)
 
-  const generatePaper = useCallback(async (hypothesisId?: string) => {
+  // ---- Generate project-level paper via document pipeline ----
+  const generateProjectPaper = useCallback(async () => {
+    if (!projectId) return
     setGeneratingPaper(true)
-    setGeneratingHypId(hypothesisId || null)
+    setGeneratingHypId(null)
+    setViewMode('project_paper')
+    setPdfBlobUrl(null)
+    setPaperHtml(null)
 
+    try {
+      // Try the new document pipeline first (returns PDF bytes directly)
+      const res = await fetch(`${API_BASE}/documents/project/${projectId}/pdf?use_ai=true`, {
+        method: 'POST',
+      })
+
+      if (res.ok) {
+        const blob = await res.blob()
+        const url = URL.createObjectURL(blob)
+        setPdfBlobUrl(url)
+        setGeneratingPaper(false)
+
+        // Auto-save to evidence
+        const disease = project?.disease_focus || 'Unknown'
+        _saveToEvidence(disease, projectHypotheses.length)
+        return
+      }
+
+      // Fallback: use legacy orchestrator HTML pipeline
+      await _fallbackLegacyPaper()
+    } catch (e) {
+      console.error('Document pipeline failed, trying fallback:', e)
+      await _fallbackLegacyPaper()
+    }
+  }, [projectId, project, projectHypotheses.length])
+
+  // ---- Generate hypothesis-level paper ----
+  const generateHypothesisPaper = useCallback(async (hypothesis: SavedHypothesis) => {
+    setGeneratingPaper(true)
+    setGeneratingHypId(hypothesis.id)
+    setActiveHypothesis(hypothesis)
+    setViewMode('hypothesis_paper')
+    setPdfBlobUrl(null)
+    setPaperHtml(null)
+
+    try {
+      // Use document pipeline for hypothesis-level PDF
+      const res = await fetch(`${API_BASE}/documents/hypothesis/${hypothesis.id}/pdf?use_ai=true`, {
+        method: 'POST',
+      })
+
+      if (res.ok) {
+        const blob = await res.blob()
+        const url = URL.createObjectURL(blob)
+        setPdfBlobUrl(url)
+        setGeneratingPaper(false)
+        setGeneratingHypId(null)
+
+        const disease = hypothesis.disease || project?.disease_focus || 'Unknown'
+        _saveToEvidence(disease, 1)
+        return
+      }
+
+      // Fallback: use legacy orchestrator
+      await _fallbackLegacyPaper(hypothesis.id)
+    } catch (e) {
+      console.error('Hypothesis paper generation failed, trying fallback:', e)
+      await _fallbackLegacyPaper(hypothesis.id)
+    }
+  }, [project])
+
+  // ---- Legacy fallback (existing orchestrator HTML pipeline) ----
+  const _fallbackLegacyPaper = useCallback(async (hypothesisId?: string) => {
     try {
       const response = await fetch(`${API_BASE}/orchestrator/generate-paper/markdown`, {
         method: 'POST',
@@ -67,6 +144,7 @@ export default function ProjectDetail() {
         alert(`Paper generation failed: ${detail}`)
         setGeneratingPaper(false)
         setGeneratingHypId(null)
+        setViewMode('list')
         return
       }
 
@@ -82,54 +160,59 @@ export default function ProjectDetail() {
             setGeneratingPaper(false)
             setGeneratingHypId(null)
 
-            // Auto-save to evidence
-            const evidence = persistGet<Array<Record<string, unknown>>>('evidence', [])
             const disease = project?.disease_focus || 'Unknown'
-            const diseaseTag = disease.toLowerCase().replace(/[^a-z0-9]+/g, '-')
-            evidence.unshift({
-              id: `ev-paper-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-              title: `AI Research Paper: ${disease}`,
-              source: 'Humanovo AI Pipeline',
-              sourceUrl: '',
-              type: 'paper',
-              status: 'pending',
-              date: new Date().toISOString().split('T')[0],
-              authors: ['Humanovo Multi-Model Discovery System'],
-              abstract: `Auto-generated research paper for ${disease} containing ${projectHypotheses.length} hypotheses.`,
-              tags: ['internal-hypothesis-source', 'humanovo', 'ai-generated', diseaseTag],
-              citations: 0,
-              relevanceScore: 0.95,
-              publisher: 'Humanovo',
-              fullText: data.paper_html,
-            })
-            persistSet('evidence', evidence.slice(0, 500))
-            logActivity({ type: 'evidence', action: 'created', title: `Auto-saved paper: ${disease}` })
+            _saveToEvidence(disease, projectHypotheses.length)
           } else if (data.status === 'failed') {
             if (paperPollRef.current) { clearInterval(paperPollRef.current); paperPollRef.current = null }
             alert(`Paper generation failed: ${data.error || 'Unknown error'}`)
             setGeneratingPaper(false)
             setGeneratingHypId(null)
+            setViewMode('list')
           }
         } catch { /* keep polling */ }
       }, 4000)
     } catch (e) {
-      console.error('Failed to start paper generation:', e)
-      alert('Failed to start paper generation')
+      console.error('Legacy paper generation failed:', e)
+      alert('Failed to generate paper')
       setGeneratingPaper(false)
       setGeneratingHypId(null)
+      setViewMode('list')
     }
   }, [project, projectHypotheses.length])
 
-  const downloadPaper = useCallback(() => {
-    if (!paperHtml) return
-    const blob = new Blob([paperHtml], { type: 'text/html' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `humanovo-paper-${project?.disease_focus?.replace(/\s+/g, '-').toLowerCase() || 'research'}-${new Date().toISOString().split('T')[0]}.html`
-    a.click()
-    URL.revokeObjectURL(url)
-  }, [paperHtml, project])
+  // ---- Save generated paper to evidence store ----
+  const _saveToEvidence = useCallback((disease: string, hypCount: number) => {
+    const evidence = persistGet<Array<Record<string, unknown>>>('evidence', [])
+    const diseaseTag = disease.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+    evidence.unshift({
+      id: `ev-paper-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      title: `AI Research Paper: ${disease}`,
+      source: 'Humanovo Document Pipeline',
+      sourceUrl: '',
+      type: 'paper',
+      status: 'pending',
+      date: new Date().toISOString().split('T')[0],
+      authors: ['Humanovo Multi-Model Discovery System'],
+      abstract: `Auto-generated research paper for ${disease} containing ${hypCount} hypotheses.`,
+      tags: ['internal-hypothesis-source', 'humanovo', 'ai-generated', 'document-pipeline', diseaseTag],
+      citations: 0,
+      relevanceScore: 0.95,
+      publisher: 'Humanovo',
+    })
+    persistSet('evidence', evidence.slice(0, 500))
+    logActivity({ type: 'evidence', action: 'created', title: `Auto-saved paper: ${disease}` })
+  }, [])
+
+  const closeViewer = useCallback(() => {
+    if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl)
+    setPdfBlobUrl(null)
+    setPaperHtml(null)
+    setActiveHypothesis(null)
+    setViewMode('list')
+    setGeneratingPaper(false)
+    setGeneratingHypId(null)
+    if (paperPollRef.current) { clearInterval(paperPollRef.current); paperPollRef.current = null }
+  }, [pdfBlobUrl])
 
   if (!project) {
     return (
@@ -150,53 +233,66 @@ export default function ProjectDetail() {
     )
   }
 
-  // Paper view
-  if (paperHtml) {
+  // ---- Hypothesis paper viewer (split view) ----
+  if (viewMode === 'hypothesis_paper' && activeHypothesis) {
     return (
-      <div className="p-8 h-full flex flex-col">
-        <div className="flex items-center justify-between mb-4">
-          <Link to="/projects" className="inline-flex items-center text-primary-400 hover:text-primary-300">
-            <FiArrowLeft className="w-4 h-4 mr-2" />
-            Back to Projects
+      <div className="h-full flex flex-col">
+        <div className="px-4 py-2 border-b border-secondary-700 flex items-center gap-2 shrink-0">
+          <Link to="/projects" className="text-primary-400 hover:text-primary-300 text-sm">
+            <FiArrowLeft className="w-3.5 h-3.5 inline mr-1" />Projects
           </Link>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={async () => {
-                try {
-                  const res = await fetch(`${API_BASE}/orchestrator/generate-paper/pdf`, { method: 'POST' })
-                  if (!res.ok) { alert('PDF generation failed'); return }
-                  const blob = await res.blob()
-                  const url = URL.createObjectURL(blob)
-                  const a = document.createElement('a')
-                  a.href = url
-                  a.download = `humanovo-${project?.disease_focus?.replace(/\s+/g, '-').toLowerCase() || 'research'}.pdf`
-                  a.click()
-                  URL.revokeObjectURL(url)
-                } catch { alert('PDF generation failed') }
-              }}
-              className="btn btn-sm bg-red-500/20 text-red-400"
-            >
-              <FiDownload className="w-3.5 h-3.5" /> Download PDF
-            </button>
-            <button onClick={downloadPaper} className="btn btn-sm bg-purple-500/20 text-purple-400">
-              <FiDownload className="w-3.5 h-3.5" /> Download HTML
-            </button>
-            <button onClick={() => setPaperHtml(null)} className="btn btn-sm bg-secondary-700 text-secondary-300">
-              <FiX className="w-3.5 h-3.5" /> Close Paper
-            </button>
-          </div>
+          <span className="text-secondary-600">/</span>
+          <button onClick={closeViewer} className="text-primary-400 hover:text-primary-300 text-sm">
+            {project.name}
+          </button>
+          <span className="text-secondary-600">/</span>
+          <span className="text-secondary-400 text-sm truncate">{activeHypothesis.title}</span>
         </div>
-        <iframe
-          srcDoc={paperHtml}
-          className="flex-1 w-full rounded-lg border border-secondary-700"
-          style={{ minHeight: '85vh' }}
-          title="Research Paper"
-          sandbox="allow-same-origin"
-        />
+        <div className="flex-1 min-h-0">
+          <HypothesisViewer
+            hypothesis={activeHypothesis}
+            pdfUrl={pdfBlobUrl}
+            htmlContent={paperHtml}
+            isGenerating={generatingPaper}
+            onGeneratePaper={() => generateHypothesisPaper(activeHypothesis)}
+            onClose={closeViewer}
+          />
+        </div>
       </div>
     )
   }
 
+  // ---- Project paper viewer (full width) ----
+  if (viewMode === 'project_paper') {
+    return (
+      <div className="h-full flex flex-col">
+        <div className="px-4 py-2 border-b border-secondary-700 flex items-center gap-2 shrink-0">
+          <Link to="/projects" className="text-primary-400 hover:text-primary-300 text-sm">
+            <FiArrowLeft className="w-3.5 h-3.5 inline mr-1" />Projects
+          </Link>
+          <span className="text-secondary-600">/</span>
+          <button onClick={closeViewer} className="text-primary-400 hover:text-primary-300 text-sm">
+            {project.name}
+          </button>
+          <span className="text-secondary-600">/</span>
+          <span className="text-secondary-400 text-sm">Research Paper</span>
+        </div>
+        <div className="flex-1 min-h-0">
+          <DocumentViewer
+            pdfUrl={pdfBlobUrl}
+            htmlContent={paperHtml}
+            title={`Research Paper: ${project.disease_focus || project.name}`}
+            onClose={closeViewer}
+            filename={`humanovo-${project.disease_focus?.replace(/\s+/g, '-').toLowerCase() || 'research'}.pdf`}
+            isGenerating={generatingPaper}
+            progressMessage="Running document pipeline..."
+          />
+        </div>
+      </div>
+    )
+  }
+
+  // ---- Default: project detail list view ----
   const highConf = projectHypotheses.filter(h => h.confidence >= 0.7).length
   const medConf = projectHypotheses.filter(h => h.confidence >= 0.5 && h.confidence < 0.7).length
   const lowConf = projectHypotheses.filter(h => h.confidence < 0.5).length
@@ -217,7 +313,7 @@ export default function ProjectDetail() {
         {/* Generate paper for entire project */}
         {projectHypotheses.length > 0 && (
           <button
-            onClick={() => generatePaper()}
+            onClick={generateProjectPaper}
             disabled={generatingPaper}
             className="mt-4 btn bg-purple-500 text-white hover:bg-purple-600 disabled:opacity-50"
           >
@@ -345,7 +441,7 @@ export default function ProjectDetail() {
 
                           {/* Generate paper for this hypothesis */}
                           <button
-                            onClick={() => generatePaper(h.id)}
+                            onClick={() => generateHypothesisPaper(h)}
                             disabled={generatingPaper}
                             className="btn bg-purple-500/20 text-purple-400 hover:bg-purple-500/30 disabled:opacity-50 text-sm"
                           >
@@ -354,7 +450,7 @@ export default function ProjectDetail() {
                             ) : (
                               <FiFileText className="w-3.5 h-3.5" />
                             )}
-                            {generatingHypId === h.id ? 'Generating Paper...' : 'Generate Paper for This Hypothesis'}
+                            {generatingHypId === h.id ? 'Generating Paper...' : 'Generate Research Paper'}
                           </button>
                         </div>
                       )}
