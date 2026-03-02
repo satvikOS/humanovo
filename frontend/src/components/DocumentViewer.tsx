@@ -1,11 +1,9 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import {
   FiX, FiDownload, FiMaximize2, FiMinimize2, FiFileText,
-  FiRefreshCw, FiChevronLeft, FiChevronRight, FiZoomIn, FiZoomOut,
+  FiRefreshCw, FiChevronLeft, FiChevronRight,
 } from 'react-icons/fi'
 import clsx from 'clsx'
-
-const API_BASE = '/api/v1'
 
 interface DocumentViewerProps {
   /** PDF blob URL or null */
@@ -229,12 +227,7 @@ export function HypothesisViewer({
   onGeneratePaper,
   onClose,
 }: HypothesisViewerProps) {
-  const [showPaper, setShowPaper] = useState(!!pdfUrl || !!htmlContent)
   const [collapsed, setCollapsed] = useState(false)
-
-  useEffect(() => {
-    if (pdfUrl || htmlContent) setShowPaper(true)
-  }, [pdfUrl, htmlContent])
 
   const hasPaper = pdfUrl || htmlContent
 

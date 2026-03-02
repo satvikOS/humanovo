@@ -2,7 +2,7 @@ import { useState, useCallback, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
   FiArrowLeft, FiActivity, FiTarget, FiCpu, FiClock,
-  FiChevronDown, FiChevronUp, FiFileText, FiRefreshCw, FiDownload, FiX, FiTag,
+  FiChevronDown, FiChevronUp, FiFileText, FiRefreshCw, FiTag,
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import { persistGet, persistSet, logActivity } from '../utils/persistence'
