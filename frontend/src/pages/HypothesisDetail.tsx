@@ -30,8 +30,21 @@ export default function HypothesisDetail() {
     }
 
     try {
+      // Send hypothesis data in body so backend doesn't need to look it up
       const res = await fetch(`${API_BASE}/documents/hypothesis/${hypothesisId}/pdf?use_ai=true`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: hypothesis?.statement || '',
+          description: hypothesis?.rationale || hypothesis?.mechanism || '',
+          mechanism: hypothesis?.mechanism || '',
+          confidence: hypothesis?.confidence_score || 0,
+          disease: 'Unknown',
+          discovery_type: 'treatment',
+          model_used: 'unknown',
+          tags: hypothesis?.tags || [],
+          external_factors: [],
+        }),
       })
 
       if (res.ok) {

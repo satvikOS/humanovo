@@ -45,6 +45,19 @@ class GeneratePaperRequest(BaseModel):
     )
 
 
+class GenerateHypothesisPaperRequest(BaseModel):
+    """Optional request body to supply hypothesis data directly."""
+    title: str = Field(..., description="Hypothesis title/statement")
+    description: str = Field(default="", description="Hypothesis description")
+    mechanism: str = Field(default="", description="Mechanism of action")
+    confidence: float = Field(default=0.0, description="Confidence score 0-1")
+    disease: str = Field(default="Unknown", description="Disease focus")
+    discovery_type: str = Field(default="treatment", description="Discovery type")
+    model_used: str = Field(default="unknown", description="Model that generated the hypothesis")
+    tags: list[str] = Field(default_factory=list, description="Tags")
+    external_factors: list[dict[str, Any]] = Field(default_factory=list, description="External factors")
+
+
 # ============================================================================
 # Project-level PDF Generation
 # ============================================================================
@@ -161,14 +174,33 @@ async def generate_project_paper_async(project_id: UUID, use_ai: bool = Query(Tr
 
 
 @router.post("/hypothesis/{hypothesis_id}/pdf")
-async def generate_hypothesis_paper(hypothesis_id: UUID, use_ai: bool = Query(True)):
+async def generate_hypothesis_paper(
+    hypothesis_id: UUID,
+    use_ai: bool = Query(True),
+    body: Optional[GenerateHypothesisPaperRequest] = None,
+):
     """
     Generate a research paper PDF focused on a single hypothesis.
 
-    Retrieves the hypothesis details and generates a focused PDF
-    analyzing that specific hypothesis in depth.
+    If a request body is provided with hypothesis data, uses that directly.
+    Otherwise retrieves the hypothesis details from backend stores.
     """
-    hypothesis_data = await _get_hypothesis_data(hypothesis_id)
+    if body:
+        hypothesis_data = {
+            "id": str(hypothesis_id),
+            "title": body.title,
+            "description": body.description,
+            "mechanism": body.mechanism,
+            "confidence": body.confidence,
+            "disease": body.disease,
+            "disease_focus": body.disease,
+            "hypothesis_type": body.discovery_type,
+            "model_used": body.model_used,
+            "validated": False,
+            "external_factors": body.external_factors,
+        }
+    else:
+        hypothesis_data = await _get_hypothesis_data(hypothesis_id)
 
     disease = hypothesis_data.get("disease", hypothesis_data.get("disease_focus", "Unknown"))
     discovery_type = hypothesis_data.get("hypothesis_type", "treatment")

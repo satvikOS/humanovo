@@ -251,7 +251,16 @@ export default function Agents() {
             }
             return newState
           })
-          if (data.stats) setStats(data.stats)
+          if (data.stats) {
+            setStats(data.stats)
+            // Auto-stop: when all rounds are completed, stop the pipeline
+            const currentRound = data.stats.current_round || 0
+            const totalRounds = data.stats.total_rounds || 0
+            if (totalRounds > 0 && currentRound >= totalRounds && newState === 'running') {
+              // Rounds finished — auto-stop
+              fetch(`${API_BASE}/orchestrator/stop`, { method: 'POST' }).catch(() => {})
+            }
+          }
           if (data.top_hypotheses && data.top_hypotheses.length > 0) {
             setHypotheses(prev => {
               const existingIds = new Set(prev.map(h => h.id))
@@ -1084,80 +1093,30 @@ export default function Agents() {
               />
             </div>
           ) : hypotheses.length > 0 ? (
-            <div className="p-4 space-y-3">
-              <h2 className="text-sm font-medium text-[var(--color-text-muted)] uppercase">
-                Discovered Hypotheses ({hypotheses.length})
-              </h2>
-
-              {hypotheses.map((hypothesis, index) => (
-                <div
-                  key={hypothesis.id}
-                  className={clsx(
-                    'w-full text-left card hover:border-[var(--color-border-strong)] transition-colors',
-                    selectedHypothesis?.id === hypothesis.id && 'border-primary-500'
-                  )}
-                >
-                  <button
-                    onClick={() => setSelectedHypothesis(hypothesis)}
-                    className="w-full text-left"
-                  >
-                    <div className="flex items-start gap-3">
-                      <div className={clsx(
-                        'w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold shrink-0',
-                        hypothesis.confidence >= 0.8 ? 'bg-green-500/20 text-green-400' :
-                          hypothesis.confidence >= 0.6 ? 'bg-yellow-500/20 text-yellow-400' :
-                            'bg-orange-500/20 text-orange-400'
-                      )}>
-                        {index + 1}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="font-medium truncate">{hypothesis.title}</span>
-                          <span className={clsx(
-                            'text-sm font-bold shrink-0',
-                            getConfidenceColor(hypothesis.confidence)
-                          )}>
-                            {(hypothesis.confidence * 100).toFixed(1)}%
-                          </span>
-                        </div>
-                        <p className="text-sm text-[var(--color-text-muted)] mt-1 line-clamp-2">
-                          {hypothesis.description}
-                        </p>
-                      </div>
-                    </div>
-                  </button>
-                  <div className="flex items-center gap-2 mt-2 pl-11">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        generatePaper(hypothesis.id, hypothesis.title)
-                      }}
-                      disabled={generatingPaper}
-                      className="text-xxs px-2 py-1 bg-purple-500/20 text-purple-400 rounded flex items-center gap-1 hover:bg-purple-500/30 transition-colors disabled:opacity-50"
-                    >
-                      {generatingPaperId === hypothesis.id ? (
-                        <FiRefreshCw className="w-3 h-3 animate-spin" />
-                      ) : (
-                        <FiFileText className="w-3 h-3" />
-                      )}
-                      {generatingPaperId === hypothesis.id ? 'Generating...' : 'Generate Paper'}
-                    </button>
-                    {generatingPaper && generatingPaperId === hypothesis.id && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); cancelPaper() }}
-                        className="text-xxs px-2 py-1 bg-red-500/20 text-red-400 rounded flex items-center gap-1 hover:bg-red-500/30 transition-colors"
-                      >
-                        <FiX className="w-3 h-3" />
-                        Cancel
-                      </button>
-                    )}
-                    <span className="text-xxs px-1.5 py-0.5 bg-green-500/20 text-green-400 rounded flex items-center gap-1">
-                      <FiSend className="w-3 h-3" />
-                      Saved
-                    </span>
-                  </div>
+            <div className="flex flex-col items-center justify-center h-full p-8">
+              <div className="text-center space-y-4 max-w-md">
+                <div className="w-16 h-16 mx-auto rounded-full bg-green-500/20 flex items-center justify-center">
+                  <FiSend className="w-7 h-7 text-green-400" />
                 </div>
-              ))}
+                <h3 className="text-lg font-medium text-white">
+                  {hypotheses.length} Hypotheses Discovered
+                </h3>
+                <p className="text-sm text-[var(--color-text-muted)]">
+                  All hypotheses have been automatically saved to their project folder.
+                  Navigate to <span className="text-primary-400">Projects</span> to view details and generate research papers.
+                </p>
+                <div className="flex items-center justify-center gap-3 pt-2">
+                  <span className="text-xs text-green-400 bg-green-500/10 px-3 py-1.5 rounded-full">
+                    Auto-saved to project
+                  </span>
+                  {state === 'running' && (
+                    <span className="text-xs text-purple-400 bg-purple-500/10 px-3 py-1.5 rounded-full flex items-center gap-1">
+                      <FiRefreshCw className="w-3 h-3 animate-spin" />
+                      Discovery in progress...
+                    </span>
+                  )}
+                </div>
+              </div>
             </div>
           ) : state === 'running' || state === 'paused' ? (
             <div className="flex items-center justify-center h-full p-8">

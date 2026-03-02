@@ -1,8 +1,8 @@
 import { useState, useCallback, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
-  FiArrowLeft, FiActivity, FiTarget, FiCpu, FiClock,
-  FiChevronDown, FiChevronUp, FiFileText, FiRefreshCw, FiTag,
+  FiArrowLeft, FiActivity, FiTarget,
+  FiChevronRight, FiFileText, FiRefreshCw,
   FiTrash2, FiBook,
 } from 'react-icons/fi'
 import clsx from 'clsx'
@@ -53,7 +53,6 @@ type ViewMode = 'list' | 'project_paper' | 'hypothesis_paper'
 
 export default function ProjectDetail() {
   const { projectId } = useParams<{ projectId: string }>()
-  const [expandedId, setExpandedId] = useState<string | null>(null)
   const [generatingPaper, setGeneratingPaper] = useState(false)
   const [generatingHypId, setGeneratingHypId] = useState<string | null>(null)
   const [, setRefresh] = useState(0)
@@ -111,6 +110,14 @@ export default function ProjectDetail() {
   }, [projectId, project, projectHypotheses.length])
 
   // ---- Generate hypothesis-level paper ----
+  // ---- Open hypothesis in doc viewer ----
+  const openHypothesisViewer = useCallback((hypothesis: SavedHypothesis) => {
+    setActiveHypothesis(hypothesis)
+    setViewMode('hypothesis_paper')
+    setPdfBlobUrl(null)
+    setPaperHtml(null)
+  }, [])
+
   const generateHypothesisPaper = useCallback(async (hypothesis: SavedHypothesis) => {
     setGeneratingPaper(true)
     setGeneratingHypId(hypothesis.id)
@@ -120,9 +127,21 @@ export default function ProjectDetail() {
     setPaperHtml(null)
 
     try {
-      // Use document pipeline for hypothesis-level PDF
+      // Send hypothesis data in request body so backend doesn't need to look it up
       const res = await fetch(`${API_BASE}/documents/hypothesis/${hypothesis.id}/pdf?use_ai=true`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: hypothesis.title,
+          description: hypothesis.description,
+          mechanism: hypothesis.mechanism,
+          confidence: hypothesis.confidence,
+          disease: hypothesis.disease || project?.disease_focus || 'Unknown',
+          discovery_type: hypothesis.discovery_type || 'treatment',
+          model_used: hypothesis.model_used || 'unknown',
+          tags: hypothesis.tags || [],
+          external_factors: [],
+        }),
       })
 
       if (res.ok) {
@@ -393,18 +412,14 @@ export default function ProjectDetail() {
             {projectHypotheses.length > 0 ? (
               <div className="space-y-3">
                 {projectHypotheses.map((h, idx) => {
-                  const isExpanded = expandedId === h.id
                   return (
                     <div
                       key={h.id}
-                      className={clsx(
-                        'border rounded-lg transition-colors',
-                        isExpanded ? 'border-primary-500 bg-primary-500/5' : 'border-secondary-700 hover:border-primary-600/50'
-                      )}
+                      className="border rounded-lg transition-colors border-secondary-700 hover:border-primary-600/50"
                     >
-                      {/* Collapsed header — always visible */}
+                      {/* Collapsed header — click to open in doc viewer */}
                       <button
-                        onClick={() => setExpandedId(isExpanded ? null : h.id)}
+                        onClick={() => openHypothesisViewer(h)}
                         className="w-full text-left p-4"
                       >
                         <div className="flex items-start justify-between">
@@ -420,75 +435,13 @@ export default function ProjectDetail() {
                             )}>
                               {(h.confidence * 100).toFixed(1)}%
                             </span>
-                            {isExpanded ? <FiChevronUp className="w-4 h-4 text-secondary-400" /> : <FiChevronDown className="w-4 h-4 text-secondary-400" />}
+                            <FiChevronRight className="w-4 h-4 text-secondary-400" />
                           </div>
                         </div>
-                        {!isExpanded && h.description && (
+                        {h.description && (
                           <p className="text-secondary-400 text-sm mt-1 line-clamp-1 ml-8">{h.description}</p>
                         )}
                       </button>
-
-                      {/* Expanded detail */}
-                      {isExpanded && (
-                        <div className="px-4 pb-4 space-y-4 border-t border-secondary-700/50 pt-3">
-                          {/* Description */}
-                          <div>
-                            <div className="text-xs text-secondary-500 uppercase tracking-wider mb-1">Description</div>
-                            <p className="text-secondary-300 text-sm leading-relaxed">{h.description}</p>
-                          </div>
-
-                          {/* Mechanism */}
-                          {h.mechanism && (
-                            <div>
-                              <div className="text-xs text-secondary-500 uppercase tracking-wider mb-1">Mechanism of Action</div>
-                              <p className="text-secondary-300 text-sm leading-relaxed">{h.mechanism}</p>
-                            </div>
-                          )}
-
-                          {/* Tags */}
-                          {h.tags && h.tags.length > 0 && (
-                            <div>
-                              <div className="text-xs text-secondary-500 uppercase tracking-wider mb-1 flex items-center gap-1">
-                                <FiTag className="w-3 h-3" /> Tags
-                              </div>
-                              <div className="flex flex-wrap gap-1">
-                                {h.tags.map(tag => (
-                                  <span key={tag} className="badge badge-info text-xs">{tag}</span>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Metadata row */}
-                          <div className="flex items-center flex-wrap gap-4 pt-2 border-t border-secondary-700/50">
-                            <span className="text-xs text-secondary-400 flex items-center gap-1">
-                              <FiCpu className="w-3 h-3" />
-                              {h.discovery_type || 'Unknown'}
-                            </span>
-                            <span className="text-xs text-secondary-400 flex items-center gap-1">
-                              <FiClock className="w-3 h-3" />
-                              {new Date(h.created_at).toLocaleDateString()}
-                            </span>
-                            <span className="text-xs text-secondary-400">
-                              Disease: {h.disease}
-                            </span>
-                          </div>
-
-                          {/* Generate paper for this hypothesis */}
-                          <button
-                            onClick={() => generateHypothesisPaper(h)}
-                            disabled={generatingPaper}
-                            className="btn bg-purple-500/20 text-purple-400 hover:bg-purple-500/30 disabled:opacity-50 text-sm"
-                          >
-                            {generatingHypId === h.id ? (
-                              <FiRefreshCw className="w-3.5 h-3.5 animate-spin" />
-                            ) : (
-                              <FiFileText className="w-3.5 h-3.5" />
-                            )}
-                            {generatingHypId === h.id ? 'Generating Paper...' : 'Generate Research Paper'}
-                          </button>
-                        </div>
-                      )}
                     </div>
                   )
                 })}
