@@ -711,7 +711,11 @@ class MultiModelLLM:
         max_tokens: int = 4000,
         temperature: float = 0.3,
     ) -> str:
-        """Generate response from specified model via Azure AI, Bedrock, or Azure OpenAI."""
+        """Generate response from specified model via Azure AI, Bedrock, or Azure OpenAI.
+
+        Routes to the preferred provider for the model type, then falls back
+        to any available provider if the preferred one isn't configured.
+        """
         if not self._initialized:
             await self.initialize()
 
@@ -720,12 +724,17 @@ class MultiModelLLM:
             raise RuntimeError(f"Token pool exhausted for {model_type.value}, rate limit hit")
 
         try:
+            # Try the preferred provider for this model type
             if self._is_azure_ai_model(model_type):
                 return await self._generate_azure_ai(model_type, prompt, system_prompt, max_tokens, temperature)
             elif self._is_azure_openai_model(model_type):
                 return await self._generate_azure_openai(model_type, prompt, system_prompt, max_tokens, temperature)
-            else:
+            elif model_type in self.BEDROCK_MODELS and self._bedrock_client:
                 return await self._generate_bedrock(model_type, prompt, system_prompt, max_tokens, temperature)
+            else:
+                # Preferred provider unavailable — try any available model
+                logger.warning(f"Preferred provider for {model_type.value} unavailable, trying fallback")
+                return await self._generate_fallback(prompt, system_prompt, max_tokens, temperature)
         except Exception as e:
             self._token_pool.record_error(model_type)
             raise

@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import {
   FiX, FiDownload, FiMaximize2, FiMinimize2, FiFileText,
-  FiRefreshCw, FiChevronLeft, FiChevronRight,
+  FiRefreshCw, FiChevronLeft, FiChevronRight, FiAlertTriangle,
 } from 'react-icons/fi'
 import clsx from 'clsx'
 
@@ -22,6 +22,8 @@ interface DocumentViewerProps {
   progressMessage?: string
   /** Callback to trigger research paper generation (shown in topbar) */
   onGenerateResearchPaper?: () => void
+  /** Error message to display when generation fails */
+  errorMessage?: string | null
 }
 
 /**
@@ -46,6 +48,7 @@ export default function DocumentViewer({
   isGenerating = false,
   progressMessage,
   onGenerateResearchPaper,
+  errorMessage,
 }: DocumentViewerProps) {
   const [isFullscreen, setIsFullscreen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -192,10 +195,32 @@ export default function DocumentViewer({
             title={title}
             sandbox="allow-same-origin"
           />
+        ) : errorMessage ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center px-8">
+            <FiAlertTriangle className="w-12 h-12 text-red-400 mb-4" />
+            <p className="text-white font-medium mb-2">Generation Failed</p>
+            <p className="text-secondary-400 text-sm text-center max-w-lg mb-4">{errorMessage}</p>
+            {onGenerateResearchPaper && (
+              <button
+                onClick={onGenerateResearchPaper}
+                className="btn bg-purple-500 text-white hover:bg-purple-600 text-sm"
+              >
+                <FiRefreshCw className="w-4 h-4" /> Try Again
+              </button>
+            )}
+          </div>
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center">
             <FiFileText className="w-12 h-12 text-secondary-600 mb-4" />
-            <p className="text-secondary-400">No document to display</p>
+            <p className="text-secondary-400 mb-1">No document to display</p>
+            {onGenerateResearchPaper && (
+              <button
+                onClick={onGenerateResearchPaper}
+                className="mt-3 btn bg-purple-500 text-white hover:bg-purple-600 text-sm"
+              >
+                <FiFileText className="w-4 h-4" /> Generate Research Paper
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -231,6 +256,8 @@ interface HypothesisViewerProps {
   onGeneratePaper?: () => void
   /** Callback to close the viewer */
   onClose: () => void
+  /** Error message from failed generation */
+  errorMessage?: string | null
 }
 
 /**
@@ -244,6 +271,7 @@ export function HypothesisViewer({
   isGenerating,
   onGeneratePaper,
   onClose,
+  errorMessage,
 }: HypothesisViewerProps) {
   const [collapsed, setCollapsed] = useState(false)
 
@@ -342,6 +370,7 @@ export function HypothesisViewer({
           isGenerating={isGenerating}
           progressMessage={isGenerating ? 'Running document pipeline...' : undefined}
           onGenerateResearchPaper={onGeneratePaper}
+          errorMessage={errorMessage}
         />
       </div>
     </div>

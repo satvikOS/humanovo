@@ -14,6 +14,7 @@ export default function HypothesisDetail() {
 
   const [generatingPaper, setGeneratingPaper] = useState(false)
   const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null)
+  const [paperError, setPaperError] = useState<string | null>(null)
 
   const { data: hypothesis, isLoading } = useQuery({
     queryKey: ['hypothesis', hypothesisId],
@@ -22,50 +23,54 @@ export default function HypothesisDetail() {
   })
 
   const generatePaper = useCallback(async () => {
-    if (!hypothesisId) return
+    if (!hypothesisId || !hypothesis) return
     setGeneratingPaper(true)
+    setPaperError(null)
     if (pdfBlobUrl) {
       URL.revokeObjectURL(pdfBlobUrl)
       setPdfBlobUrl(null)
     }
 
     try {
-      // Send hypothesis data in body so backend doesn't need to look it up
       const res = await fetch(`${API_BASE}/documents/hypothesis/${hypothesisId}/pdf?use_ai=true`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: hypothesis?.statement || '',
-          description: hypothesis?.rationale || hypothesis?.mechanism || '',
-          mechanism: hypothesis?.mechanism || '',
-          confidence: hypothesis?.confidence_score || 0,
+          title: hypothesis.statement || '',
+          description: hypothesis.rationale || hypothesis.mechanism || '',
+          mechanism: hypothesis.mechanism || '',
+          confidence: hypothesis.confidence_score || 0,
           disease: 'Unknown',
           discovery_type: 'treatment',
           model_used: 'unknown',
-          tags: hypothesis?.tags || [],
+          tags: hypothesis.tags || [],
           external_factors: [],
         }),
       })
 
       if (res.ok) {
         const blob = await res.blob()
+        if (blob.size === 0) {
+          setPaperError('Server returned empty PDF. Check backend logs for errors.')
+          setGeneratingPaper(false)
+          return
+        }
         const url = URL.createObjectURL(blob)
         setPdfBlobUrl(url)
         setGeneratingPaper(false)
         return
       }
 
-      // Fallback error
       let detail = 'Unknown error'
       try { const err = await res.json(); detail = err.detail || detail } catch {}
-      alert(`Paper generation failed: ${detail}`)
+      setPaperError(`Paper generation failed (${res.status}): ${detail}`)
       setGeneratingPaper(false)
     } catch (e) {
       console.error('Paper generation failed:', e)
-      alert('Failed to generate paper')
+      setPaperError(`Paper generation failed: ${e instanceof Error ? e.message : String(e)}`)
       setGeneratingPaper(false)
     }
-  }, [hypothesisId, pdfBlobUrl])
+  }, [hypothesisId, hypothesis, pdfBlobUrl])
 
   if (isLoading) {
     return (
@@ -115,6 +120,7 @@ export default function HypothesisDetail() {
           isGenerating={generatingPaper}
           onGeneratePaper={generatePaper}
           onClose={() => window.history.back()}
+          errorMessage={paperError}
         />
       </div>
     </div>

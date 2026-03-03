@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
   FiArrowLeft, FiActivity, FiTarget,
@@ -60,9 +60,8 @@ export default function ProjectDetail() {
   // Document viewer state
   const [viewMode, setViewMode] = useState<ViewMode>('list')
   const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null)
-  const [paperHtml, setPaperHtml] = useState<string | null>(null)
+  const [paperError, setPaperError] = useState<string | null>(null)
   const [activeHypothesis, setActiveHypothesis] = useState<SavedHypothesis | null>(null)
-  const paperPollRef = useRef<number | null>(null)
 
   const projects = persistGet<LocalProject[]>('projects', [])
   const project = projects.find(p => p.id === projectId)
@@ -81,33 +80,37 @@ export default function ProjectDetail() {
     setGeneratingHypId(null)
     setViewMode('project_paper')
     setPdfBlobUrl(null)
-    setPaperHtml(null)
+
+    setPaperError(null)
 
     try {
-      // Try the new document pipeline first (returns PDF bytes directly)
       const res = await fetch(`${API_BASE}/documents/project/${projectId}/pdf?use_ai=true`, {
         method: 'POST',
       })
 
       if (res.ok) {
         const blob = await res.blob()
+        if (blob.size === 0) {
+          setPaperError('Server returned empty PDF. Check backend logs for errors.')
+          setGeneratingPaper(false)
+          return
+        }
         const url = URL.createObjectURL(blob)
         setPdfBlobUrl(url)
         setGeneratingPaper(false)
-
-        // Auto-save to evidence
-        const disease = project?.disease_focus || 'Unknown'
-        _saveToEvidence(disease, projectHypotheses.length)
         return
       }
 
-      // Fallback: use legacy orchestrator HTML pipeline
-      await _fallbackLegacyPaper()
+      let detail = 'Unknown error'
+      try { const err = await res.json(); detail = err.detail || detail } catch {}
+      setPaperError(`Paper generation failed (${res.status}): ${detail}`)
+      setGeneratingPaper(false)
     } catch (e) {
-      console.error('Document pipeline failed, trying fallback:', e)
-      await _fallbackLegacyPaper()
+      console.error('Document pipeline failed:', e)
+      setPaperError(`Paper generation failed: ${e instanceof Error ? e.message : String(e)}`)
+      setGeneratingPaper(false)
     }
-  }, [projectId, project, projectHypotheses.length])
+  }, [projectId])
 
   // ---- Generate hypothesis-level paper ----
   // ---- Open hypothesis in doc viewer ----
@@ -115,7 +118,8 @@ export default function ProjectDetail() {
     setActiveHypothesis(hypothesis)
     setViewMode('hypothesis_paper')
     setPdfBlobUrl(null)
-    setPaperHtml(null)
+
+    setPaperError(null)
   }, [])
 
   const generateHypothesisPaper = useCallback(async (hypothesis: SavedHypothesis) => {
@@ -124,10 +128,10 @@ export default function ProjectDetail() {
     setActiveHypothesis(hypothesis)
     setViewMode('hypothesis_paper')
     setPdfBlobUrl(null)
-    setPaperHtml(null)
+
+    setPaperError(null)
 
     try {
-      // Send hypothesis data in request body so backend doesn't need to look it up
       const res = await fetch(`${API_BASE}/documents/hypothesis/${hypothesis.id}/pdf?use_ai=true`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -146,75 +150,32 @@ export default function ProjectDetail() {
 
       if (res.ok) {
         const blob = await res.blob()
+        if (blob.size === 0) {
+          setPaperError('Server returned empty PDF. Check backend logs for errors.')
+          setGeneratingPaper(false)
+          setGeneratingHypId(null)
+          return
+        }
         const url = URL.createObjectURL(blob)
         setPdfBlobUrl(url)
         setGeneratingPaper(false)
         setGeneratingHypId(null)
-
-        const disease = hypothesis.disease || project?.disease_focus || 'Unknown'
-        _saveToEvidence(disease, 1)
         _saveResearchPaper(hypothesis)
         return
       }
 
-      // Fallback: use legacy orchestrator
-      await _fallbackLegacyPaper(hypothesis.id)
-    } catch (e) {
-      console.error('Hypothesis paper generation failed, trying fallback:', e)
-      await _fallbackLegacyPaper(hypothesis.id)
-    }
-  }, [project])
-
-  // ---- Legacy fallback (existing orchestrator HTML pipeline) ----
-  const _fallbackLegacyPaper = useCallback(async (hypothesisId?: string) => {
-    try {
-      const response = await fetch(`${API_BASE}/orchestrator/generate-paper/markdown`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(hypothesisId ? { hypothesis_id: hypothesisId } : {}),
-      })
-
-      if (!response.ok) {
-        let detail = 'Unknown error'
-        try { const err = await response.json(); detail = err.detail || detail } catch {}
-        alert(`Paper generation failed: ${detail}`)
-        setGeneratingPaper(false)
-        setGeneratingHypId(null)
-        setViewMode('list')
-        return
-      }
-
-      if (paperPollRef.current) clearInterval(paperPollRef.current)
-      paperPollRef.current = window.setInterval(async () => {
-        try {
-          const statusRes = await fetch(`${API_BASE}/orchestrator/paper-status`)
-          if (!statusRes.ok) return
-          const data = await statusRes.json()
-          if (data.status === 'done' && data.paper_html) {
-            if (paperPollRef.current) { clearInterval(paperPollRef.current); paperPollRef.current = null }
-            setPaperHtml(data.paper_html)
-            setGeneratingPaper(false)
-            setGeneratingHypId(null)
-
-            const disease = project?.disease_focus || 'Unknown'
-            _saveToEvidence(disease, projectHypotheses.length)
-          } else if (data.status === 'failed') {
-            if (paperPollRef.current) { clearInterval(paperPollRef.current); paperPollRef.current = null }
-            alert(`Paper generation failed: ${data.error || 'Unknown error'}`)
-            setGeneratingPaper(false)
-            setGeneratingHypId(null)
-            setViewMode('list')
-          }
-        } catch { /* keep polling */ }
-      }, 4000)
-    } catch (e) {
-      console.error('Legacy paper generation failed:', e)
-      alert('Failed to generate paper')
+      let detail = 'Unknown error'
+      try { const err = await res.json(); detail = err.detail || detail } catch {}
+      setPaperError(`Paper generation failed (${res.status}): ${detail}`)
       setGeneratingPaper(false)
       setGeneratingHypId(null)
-      setViewMode('list')
+    } catch (e) {
+      console.error('Hypothesis paper generation failed:', e)
+      setPaperError(`Paper generation failed: ${e instanceof Error ? e.message : String(e)}`)
+      setGeneratingPaper(false)
+      setGeneratingHypId(null)
     }
-  }, [project, projectHypotheses.length])
+  }, [project])
 
   // ---- Save generated paper to research papers list ----
   const _saveResearchPaper = useCallback((hypothesis: SavedHypothesis) => {
@@ -234,38 +195,15 @@ export default function ProjectDetail() {
     setRefresh(n => n + 1)
   }, [project])
 
-  // ---- Save generated paper to evidence store ----
-  const _saveToEvidence = useCallback((disease: string, hypCount: number) => {
-    const evidence = persistGet<Array<Record<string, unknown>>>('evidence', [])
-    const diseaseTag = disease.toLowerCase().replace(/[^a-z0-9]+/g, '-')
-    evidence.unshift({
-      id: `ev-paper-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      title: `AI Research Paper: ${disease}`,
-      source: 'Humanovo Document Pipeline',
-      sourceUrl: '',
-      type: 'paper',
-      status: 'pending',
-      date: new Date().toISOString().split('T')[0],
-      authors: ['Humanovo Multi-Model Discovery System'],
-      abstract: `Auto-generated research paper for ${disease} containing ${hypCount} hypotheses.`,
-      tags: ['internal-hypothesis-source', 'humanovo', 'ai-generated', 'document-pipeline', diseaseTag],
-      citations: 0,
-      relevanceScore: 0.95,
-      publisher: 'Humanovo',
-    })
-    persistSet('evidence', evidence.slice(0, 500))
-    logActivity({ type: 'evidence', action: 'created', title: `Auto-saved paper: ${disease}` })
-  }, [])
-
   const closeViewer = useCallback(() => {
     if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl)
     setPdfBlobUrl(null)
-    setPaperHtml(null)
+
+    setPaperError(null)
     setActiveHypothesis(null)
     setViewMode('list')
     setGeneratingPaper(false)
     setGeneratingHypId(null)
-    if (paperPollRef.current) { clearInterval(paperPollRef.current); paperPollRef.current = null }
   }, [pdfBlobUrl])
 
   if (!project) {
@@ -306,10 +244,11 @@ export default function ProjectDetail() {
           <HypothesisViewer
             hypothesis={activeHypothesis}
             pdfUrl={pdfBlobUrl}
-            htmlContent={paperHtml}
+            htmlContent={null}
             isGenerating={generatingPaper}
             onGeneratePaper={() => generateHypothesisPaper(activeHypothesis)}
             onClose={closeViewer}
+            errorMessage={paperError}
           />
         </div>
       </div>
@@ -334,12 +273,14 @@ export default function ProjectDetail() {
         <div className="flex-1 min-h-0">
           <DocumentViewer
             pdfUrl={pdfBlobUrl}
-            htmlContent={paperHtml}
+            htmlContent={null}
             title={`Research Paper: ${project.disease_focus || project.name}`}
             onClose={closeViewer}
             filename={`humanovo-${project.disease_focus?.replace(/\s+/g, '-').toLowerCase() || 'research'}.pdf`}
             isGenerating={generatingPaper}
             progressMessage="Running document pipeline..."
+            errorMessage={paperError}
+            onGenerateResearchPaper={generateProjectPaper}
           />
         </div>
       </div>
