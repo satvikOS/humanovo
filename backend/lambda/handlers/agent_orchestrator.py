@@ -182,6 +182,9 @@ class AzureAIClient:
 
 azure_deepseek_client = None
 azure_mistral_client = None
+azure_gpt4o_client = None
+azure_cohere_client = None
+azure_phi4_client = None
 
 # Shared endpoint (both models at same Azure AI resource)
 AZURE_AI_ENDPOINT = os.environ.get("AZURE_AI_ENDPOINT", "")
@@ -192,30 +195,52 @@ AZURE_DEEPSEEK_ENDPOINT = os.environ.get("AZURE_DEEPSEEK_ENDPOINT", "") or AZURE
 AZURE_DEEPSEEK_KEY = os.environ.get("AZURE_DEEPSEEK_KEY", "") or AZURE_AI_KEY
 AZURE_MISTRAL_ENDPOINT = os.environ.get("AZURE_MISTRAL_ENDPOINT", "") or AZURE_AI_ENDPOINT
 AZURE_MISTRAL_KEY = os.environ.get("AZURE_MISTRAL_KEY", "") or AZURE_AI_KEY
+AZURE_GPT4O_ENDPOINT = os.environ.get("AZURE_GPT4O_ENDPOINT", "") or AZURE_AI_ENDPOINT
+AZURE_GPT4O_KEY = os.environ.get("AZURE_GPT4O_KEY", "") or AZURE_AI_KEY
+AZURE_COHERE_ENDPOINT = os.environ.get("AZURE_COHERE_ENDPOINT", "") or AZURE_AI_ENDPOINT
+AZURE_COHERE_KEY = os.environ.get("AZURE_COHERE_KEY", "") or AZURE_AI_KEY
+AZURE_PHI4_ENDPOINT = os.environ.get("AZURE_PHI4_ENDPOINT", "") or AZURE_AI_ENDPOINT
+AZURE_PHI4_KEY = os.environ.get("AZURE_PHI4_KEY", "") or AZURE_AI_KEY
 
-if AZURE_DEEPSEEK_ENDPOINT and AZURE_DEEPSEEK_KEY:
-    try:
-        azure_deepseek_client = AzureAIClient(
-            base_url=AZURE_DEEPSEEK_ENDPOINT.rstrip('/'),
-            api_key=AZURE_DEEPSEEK_KEY,
-        )
-        print(f"[ORCHESTRATOR] Azure DeepSeek client initialized (endpoint={AZURE_DEEPSEEK_ENDPOINT})")
-    except Exception as _e:
-        logger.error(f"Azure DeepSeek init failed: {_e}")
-else:
-    print("[ORCHESTRATOR] Azure DeepSeek not configured — set AZURE_AI_ENDPOINT/KEY or AZURE_DEEPSEEK_ENDPOINT/KEY")
+def _init_azure_client(name, endpoint, key):
+    """Initialize an Azure AI client, returning None on failure."""
+    if endpoint and key:
+        try:
+            client = AzureAIClient(base_url=endpoint.rstrip('/'), api_key=key)
+            print(f"[ORCHESTRATOR] Azure {name} client initialized (endpoint={endpoint})")
+            return client
+        except Exception as _e:
+            logger.error(f"Azure {name} init failed: {_e}")
+    else:
+        print(f"[ORCHESTRATOR] Azure {name} not configured")
+    return None
 
-if AZURE_MISTRAL_ENDPOINT and AZURE_MISTRAL_KEY:
-    try:
-        azure_mistral_client = AzureAIClient(
-            base_url=AZURE_MISTRAL_ENDPOINT.rstrip('/'),
-            api_key=AZURE_MISTRAL_KEY,
-        )
-        print(f"[ORCHESTRATOR] Azure Mistral client initialized (endpoint={AZURE_MISTRAL_ENDPOINT})")
-    except Exception as _e:
-        logger.error(f"Azure Mistral init failed: {_e}")
-else:
-    print("[ORCHESTRATOR] Azure Mistral not configured — set AZURE_AI_ENDPOINT/KEY or AZURE_MISTRAL_ENDPOINT/KEY")
+azure_deepseek_client = _init_azure_client("DeepSeek", AZURE_DEEPSEEK_ENDPOINT, AZURE_DEEPSEEK_KEY)
+azure_mistral_client = _init_azure_client("Mistral", AZURE_MISTRAL_ENDPOINT, AZURE_MISTRAL_KEY)
+azure_gpt4o_client = _init_azure_client("GPT-4o", AZURE_GPT4O_ENDPOINT, AZURE_GPT4O_KEY)
+azure_cohere_client = _init_azure_client("Cohere", AZURE_COHERE_ENDPOINT, AZURE_COHERE_KEY)
+azure_phi4_client = _init_azure_client("Phi-4", AZURE_PHI4_ENDPOINT, AZURE_PHI4_KEY)
+
+# Map model name patterns to their clients for routing
+AZURE_MODEL_CLIENTS = {
+    "deepseek": ("azure_deepseek", lambda: azure_deepseek_client),
+    "mistral": ("azure_mistral", lambda: azure_mistral_client),
+    "gpt-4o": ("azure_gpt4o", lambda: azure_gpt4o_client),
+    "gpt4o": ("azure_gpt4o", lambda: azure_gpt4o_client),
+    "cohere": ("azure_cohere", lambda: azure_cohere_client),
+    "command": ("azure_cohere", lambda: azure_cohere_client),
+    "phi-4": ("azure_phi4", lambda: azure_phi4_client),
+    "phi4": ("azure_phi4", lambda: azure_phi4_client),
+}
+
+# Fallback chains: when primary model gets 429, try these alternatives
+MODEL_FALLBACKS = {
+    "DeepSeek-R1-0528": ["gpt-4o", "Phi-4-reasoning", "Mistral-Large-3"],
+    "Mistral-Large-3": ["Cohere-command-a", "gpt-4o", "DeepSeek-R1-0528"],
+    "gpt-4o": ["DeepSeek-R1-0528", "Cohere-command-a", "Phi-4-reasoning"],
+    "Cohere-command-a": ["gpt-4o", "Mistral-Large-3", "DeepSeek-R1-0528"],
+    "Phi-4-reasoning": ["gpt-4o", "DeepSeek-R1-0528", "Cohere-command-a"],
+}
 
 # Configuration
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "dev")
@@ -238,6 +263,9 @@ PAPER_TASK_KEY = "active-paper"
 BEDROCK_MODEL_CLAUDE_OPUS = os.environ.get("BEDROCK_MODEL_ID", "us.anthropic.claude-opus-4-6-v1")
 AZURE_AI_REASONER_MODEL = os.environ.get("AZURE_AI_REASONER_MODEL", "DeepSeek-R1-0528")
 AZURE_AI_CRITIC_MODEL = os.environ.get("AZURE_AI_CRITIC_MODEL", "Mistral-Large-3")
+AZURE_AI_GPT4O_MODEL = os.environ.get("AZURE_AI_GPT4O_MODEL", "gpt-4o")
+AZURE_AI_COHERE_MODEL = os.environ.get("AZURE_AI_COHERE_MODEL", "Cohere-command-a")
+AZURE_AI_PHI4_MODEL = os.environ.get("AZURE_AI_PHI4_MODEL", "Phi-4-reasoning")
 
 AGENT_MODELS = {
     # Claude Opus 4.6 via Bedrock — Explorer + Synthesizer (restricted on Azure AI)
@@ -681,25 +709,37 @@ def call_bedrock(model_id: str, prompt: str, system_prompt: str,
         )
 
 
+def _get_azure_client(model_name: str):
+    """Route to the correct Azure AI client based on model name."""
+    name_lower = model_name.lower()
+    for pattern, (_label, getter) in AZURE_MODEL_CLIENTS.items():
+        if pattern in name_lower:
+            client = getter()
+            if client is not None:
+                return client
+    # Fallback: try any available client
+    for getter_fn in [lambda: azure_deepseek_client, lambda: azure_mistral_client,
+                      lambda: azure_gpt4o_client, lambda: azure_cohere_client,
+                      lambda: azure_phi4_client]:
+        c = getter_fn()
+        if c is not None:
+            return c
+    return None
+
+
 def call_azure_ai(model_name: str, prompt: str, system_prompt: str,
                   max_tokens: int = 2000, temperature: float = 0.7) -> str:
     """Invoke a model via its Azure AI model-specific endpoint.
 
-    Includes retry with exponential backoff for HTTP 429 (rate limiting).
+    Includes retry with exponential backoff for HTTP 429 (rate limiting)
+    and automatic fallback to alternative models when rate-limited.
     """
-    # Route to the correct per-model client based on model name
-    if "deepseek" in model_name.lower() or "DeepSeek" in model_name:
-        client = azure_deepseek_client
-    elif "mistral" in model_name.lower() or "Mistral" in model_name:
-        client = azure_mistral_client
-    else:
-        # Try DeepSeek as default fallback
-        client = azure_deepseek_client or azure_mistral_client
+    client = _get_azure_client(model_name)
 
     if client is None:
         raise RuntimeError(
             f"No Azure AI client available for {model_name}. "
-            "Set AZURE_DEEPSEEK_ENDPOINT/KEY and AZURE_MISTRAL_ENDPOINT/KEY."
+            "Check AZURE_*_ENDPOINT/KEY environment variables."
         )
 
     messages = []
@@ -708,8 +748,7 @@ def call_azure_ai(model_name: str, prompt: str, system_prompt: str,
     messages.append({"role": "user", "content": prompt})
 
     # Retry with exponential backoff for 429 rate-limit errors
-    # Azure AI serverless endpoints have strict per-minute limits
-    max_retries = 5
+    max_retries = 3  # Reduced from 5 — fail faster to fallback sooner
     for attempt in range(max_retries + 1):
         try:
             response = client.chat.completions.create(
@@ -721,12 +760,31 @@ def call_azure_ai(model_name: str, prompt: str, system_prompt: str,
             return response.choices[0].message.content
         except urllib.error.HTTPError as e:
             if e.code == 429 and attempt < max_retries:
-                wait = min(5 * (3 ** attempt), 60)  # 5s, 15s, 45s, 60s, 60s
+                wait = min(5 * (3 ** attempt), 30)  # 5s, 15s, 30s
                 logger.warning(f"Azure AI 429 for {model_name}, retry {attempt+1}/{max_retries} in {wait}s")
                 time.sleep(wait)
+            elif e.code == 429:
+                # Exhausted retries on primary model — try fallbacks
+                fallbacks = MODEL_FALLBACKS.get(model_name, [])
+                for fb_model in fallbacks:
+                    fb_client = _get_azure_client(fb_model)
+                    if fb_client is None:
+                        continue
+                    try:
+                        logger.warning(f"Azure AI 429 exhausted for {model_name}, falling back to {fb_model}")
+                        response = fb_client.chat.completions.create(
+                            model=fb_model,
+                            messages=messages,
+                            max_tokens=max_tokens,
+                            temperature=temperature,
+                        )
+                        return response.choices[0].message.content
+                    except Exception as fb_err:
+                        logger.warning(f"Fallback {fb_model} also failed: {fb_err}")
+                        continue
+                raise  # All fallbacks failed
             else:
                 raise
-    # Should not reach here, but just in case
     raise RuntimeError(f"Azure AI call failed after {max_retries} retries for {model_name}")
 
 
@@ -861,16 +919,18 @@ def run_discovery_worker(config: dict):
     external_factors = config.get("external_factors", [])
     target_confidence = float(config.get("target_confidence", 0.95))
 
-    # Only include roles whose provider is available
+    # Only include roles whose provider is available (including fallbacks)
     def _role_available(role_name, cfg):
         if cfg["provider"] == "bedrock":
             return bedrock_runtime is not None
         if cfg["provider"] == "azure_ai":
-            model_id = cfg["model_id"]
-            if "deepseek" in model_id.lower() or "DeepSeek" in model_id:
-                return azure_deepseek_client is not None
-            if "mistral" in model_id.lower() or "Mistral" in model_id:
-                return azure_mistral_client is not None
+            # Primary client available?
+            if _get_azure_client(cfg["model_id"]) is not None:
+                return True
+            # Any fallback available?
+            for fb in MODEL_FALLBACKS.get(cfg["model_id"], []):
+                if _get_azure_client(fb) is not None:
+                    return True
         return False
 
     roles = [r for r in PHASE_ORDER if r in AGENT_MODELS and _role_available(r, AGENT_MODELS[r])]
@@ -1493,20 +1553,12 @@ def health_check():
         provider = model_config.get("provider", "azure_ai")
         try:
             if provider == "azure_ai":
-                # Check if the appropriate Azure AI client is initialized
-                if "deepseek" in model_id.lower() or "DeepSeek" in model_id:
-                    client = azure_deepseek_client
-                elif "mistral" in model_id.lower() or "Mistral" in model_id:
-                    client = azure_mistral_client
-                else:
-                    client = azure_deepseek_client or azure_mistral_client
-
+                client = _get_azure_client(model_id)
                 if client is None:
                     raise RuntimeError(
                         f"Azure AI client not configured for {model_id}. "
-                        "Check AZURE_AI_ENDPOINT/KEY or per-model env vars."
+                        "Check AZURE_*_ENDPOINT/KEY env vars."
                     )
-                # Client exists — model is available
                 connected += 1
                 results[role] = "OK"
             else:
