@@ -412,18 +412,21 @@ export default function Agents() {
         const response = await fetch(`${API_BASE}/orchestrator/health`)
         if (response.ok) {
           const data = await response.json()
-          setConnectedAgents(data.connected_count || 0)
-          setTotalAgents(data.total_models || 4)
+          const count = data.connected_count || 0
+          setConnectedAgents(count)
+          setTotalAgents(data.total_models || 8)
+          setAiConnected(count > 0)
+        } else {
+          setAiConnected(false)
         }
       } catch {
-        // Health check failed — still mark as online (client-side pipeline available)
+        setAiConnected(false)
       }
-      // Always resolve from Initializing to Online quickly
-      setTimeout(() => {
-        setAiConnected(prev => prev === null ? false : prev)
-      }, 1500)
     }
     checkHealth()
+    // Re-check health every 30 seconds
+    const healthInterval = window.setInterval(checkHealth, 30000)
+    return () => clearInterval(healthInterval)
   }, [])
 
   // On mount, check if paper generation is still running (persists across navigation)
@@ -776,14 +779,16 @@ export default function Agents() {
             {/* AI Pipeline Status */}
             <div className={clsx(
               'flex items-center gap-1.5 px-2 py-1 rounded text-xs',
-              aiConnected === null ? 'bg-yellow-500/20 text-yellow-400' : 'bg-green-500/20 text-green-400'
+              aiConnected === null ? 'bg-yellow-500/20 text-yellow-400' :
+              aiConnected ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
             )}>
               <div className={clsx(
                 'w-2 h-2 rounded-full',
-                aiConnected === null ? 'bg-yellow-500 animate-pulse' : 'bg-green-500'
+                aiConnected === null ? 'bg-yellow-500 animate-pulse' :
+                aiConnected ? 'bg-green-500' : 'bg-red-500'
               )} />
               {aiConnected === null ? 'Initializing...' :
-               aiConnected ? `${connectedAgents}/${totalAgents} Agents` : 'Online'}
+               aiConnected ? `${connectedAgents}/${totalAgents} Models Connected` : 'Connecting...'}
             </div>
 
             {/* Control Buttons */}
@@ -1631,7 +1636,33 @@ export default function Agents() {
                     {generatingPaperId === selectedHypothesis.id ? 'Generating...' : 'Generate Paper'}
                   </button>
                   <button
-                    onClick={() => {
+                    onClick={async () => {
+                      try {
+                        // Try backend ReportLab PDF first
+                        const res = await fetch(`${API_BASE}/documents/hypothesis/${selectedHypothesis.id}/pdf`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            title: selectedHypothesis.title,
+                            description: selectedHypothesis.description,
+                            mechanism: selectedHypothesis.mechanism,
+                            confidence: selectedHypothesis.confidence,
+                            disease: config.disease || 'Research',
+                            discovery_type: config.discoveryType || 'treatment',
+                          }),
+                        })
+                        if (res.ok) {
+                          const blob = await res.blob()
+                          const url = URL.createObjectURL(blob)
+                          const a = document.createElement('a')
+                          a.href = url
+                          a.download = `humanovo-${selectedHypothesis.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase().slice(0, 50)}.pdf`
+                          a.click()
+                          URL.revokeObjectURL(url)
+                          return
+                        }
+                      } catch { /* backend unavailable */ }
+                      // Fallback: client-side print
                       const html = generateClientSidePaperHtml(
                         [selectedHypothesis],
                         config.disease || 'Research',

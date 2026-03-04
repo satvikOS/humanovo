@@ -1391,6 +1391,8 @@ class DiscoveryOrchestrator(LoggerMixin):
         self._discovery_type: str = "treatment"
         self._external_factors: list[dict[str, Any]] = []
 
+        self.state = OrchestratorState.IDLE
+
         self._on_hypothesis: Optional[Callable] = None
         self._on_stats_update: Optional[Callable] = None
 

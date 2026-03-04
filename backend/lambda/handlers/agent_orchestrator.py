@@ -11,6 +11,7 @@ Model identities are never exposed to the frontend (unbiasing).
 
 print("[ORCHESTRATOR] Module loading...")
 
+import base64
 import json
 import os
 import time
@@ -2247,6 +2248,382 @@ pre.diagram {{ background: #0d0d1a; border: 1px solid var(--border); border-radi
   </div>
 </div>
 </body></html>"""
+
+
+# ============== Hypothesis PDF Export ==============
+
+@app.post("/api/v1/documents/hypothesis/<hypothesis_id>/pdf")
+def generate_hypothesis_pdf(hypothesis_id: str):
+    """Generate a ReportLab PDF for a single hypothesis and return bytes."""
+    try:
+        body = app.current_event.json_body or {}
+    except Exception:
+        body = {}
+
+    # Try to find hypothesis from discovery state first
+    state = get_discovery_state()
+    hypothesis = None
+    if state and state.get("hypotheses"):
+        hypothesis = next(
+            (h for h in state["hypotheses"] if h.get("id") == hypothesis_id),
+            None,
+        )
+
+    # If not found in state, use body data sent from frontend
+    if not hypothesis:
+        hypothesis = {
+            "id": hypothesis_id,
+            "title": body.get("title", "Untitled Hypothesis"),
+            "description": body.get("description", ""),
+            "mechanism": body.get("mechanism", ""),
+            "confidence": body.get("confidence", 0),
+            "evidence_summary": body.get("evidence_summary", []),
+            "risks": body.get("risks", []),
+            "validation_steps": body.get("validation_steps", []),
+        }
+
+    disease = body.get("disease", state.get("config", {}).get("disease", "Research") if state else "Research")
+    discovery_type = body.get("discovery_type", "treatment")
+
+    # Generate PDF using ReportLab
+    pdf_bytes = _generate_hypothesis_pdf_reportlab(hypothesis, disease, discovery_type)
+
+    title_slug = hypothesis.get("title", "hypothesis")[:50].replace(" ", "-").lower()
+    import re as _re
+    title_slug = _re.sub(r'[^a-z0-9\-]', '', title_slug)
+
+    # Return binary PDF via API Gateway v2 (base64 encoded)
+    return {
+        "statusCode": 200,
+        "headers": {
+            "Content-Type": "application/pdf",
+            "Content-Disposition": f'attachment; filename="humanovo-{title_slug}.pdf"',
+        },
+        "body": base64.b64encode(pdf_bytes).decode("utf-8"),
+        "isBase64Encoded": True,
+    }
+
+
+@app.post("/api/v1/documents/hypothesis/<hypothesis_id>/html")
+def generate_hypothesis_html(hypothesis_id: str):
+    """Generate HTML research paper for a single hypothesis using AI."""
+    try:
+        body = app.current_event.json_body or {}
+    except Exception:
+        body = {}
+
+    # Build hypothesis dict from body
+    hypothesis = {
+        "id": hypothesis_id,
+        "title": body.get("title", "Untitled"),
+        "description": body.get("description", ""),
+        "mechanism": body.get("mechanism", ""),
+        "confidence": body.get("confidence", 0),
+        "evidence_summary": body.get("evidence_summary", []),
+        "risks": body.get("risks", []),
+        "external_factors": body.get("external_factors", []),
+    }
+    disease = body.get("disease", "Research")
+    discovery_type = body.get("discovery_type", "treatment")
+
+    # Store paper task in DynamoDB for async generation
+    table = get_task_table()
+    table.put_item(Item={
+        "id": PAPER_TASK_KEY,
+        "status": "generating",
+        "hypothesis_id": hypothesis_id,
+        "paper_html": "",
+        "error": "",
+        "created_at": datetime.utcnow().isoformat(),
+        "updated_at": datetime.utcnow().isoformat(),
+    })
+
+    # Invoke async paper worker
+    try:
+        lambda_client.invoke(
+            FunctionName=FUNCTION_NAME,
+            InvocationType="Event",
+            Payload=json.dumps({
+                "source": "self-invoke",
+                "action": "generate_paper",
+                "hypothesis_id": hypothesis_id,
+                "config": {"disease": disease, "discovery_type": discovery_type},
+            }),
+        )
+    except Exception as e:
+        table.update_item(
+            Key={"id": PAPER_TASK_KEY},
+            UpdateExpression="SET #s = :s, #e = :e",
+            ExpressionAttributeNames={"#s": "status", "#e": "error"},
+            ExpressionAttributeValues={":s": "failed", ":e": str(e)},
+        )
+        return Response(
+            status_code=500,
+            content_type="application/json",
+            body=json.dumps({"detail": f"Failed to start paper generation: {str(e)}"}),
+        )
+
+    return {"status": "generating", "hypothesis_id": hypothesis_id}
+
+
+def _generate_hypothesis_pdf_reportlab(hypothesis: dict, disease: str, discovery_type: str) -> bytes:
+    """Generate a professional PDF for a hypothesis using ReportLab."""
+    import io as _io
+
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import letter
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import inch
+        from reportlab.platypus import (
+            SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
+            HRFlowable, PageBreak,
+        )
+        from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
+    except ImportError:
+        # ReportLab not available — return a minimal PDF
+        return _generate_minimal_pdf(hypothesis, disease)
+
+    buf = _io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=letter,
+        rightMargin=72,
+        leftMargin=72,
+        topMargin=72,
+        bottomMargin=72,
+    )
+
+    styles = getSampleStyleSheet()
+    brand_color = colors.HexColor("#6c63ff")
+    dark_bg = colors.HexColor("#0f0f1a")
+
+    # Custom styles
+    title_style = ParagraphStyle(
+        "CustomTitle",
+        parent=styles["Title"],
+        fontSize=22,
+        spaceAfter=12,
+        textColor=colors.HexColor("#1a1a2e"),
+        alignment=TA_CENTER,
+    )
+    subtitle_style = ParagraphStyle(
+        "Subtitle",
+        parent=styles["Normal"],
+        fontSize=12,
+        textColor=colors.HexColor("#6b7280"),
+        alignment=TA_CENTER,
+        spaceAfter=24,
+    )
+    heading_style = ParagraphStyle(
+        "CustomHeading",
+        parent=styles["Heading2"],
+        fontSize=16,
+        textColor=colors.HexColor("#1a1a2e"),
+        spaceBefore=20,
+        spaceAfter=8,
+        borderWidth=1,
+        borderColor=colors.HexColor("#e5e7eb"),
+        borderPadding=4,
+    )
+    body_style = ParagraphStyle(
+        "CustomBody",
+        parent=styles["Normal"],
+        fontSize=11,
+        leading=16,
+        textColor=colors.HexColor("#374151"),
+        alignment=TA_JUSTIFY,
+        spaceAfter=10,
+    )
+    meta_style = ParagraphStyle(
+        "Meta",
+        parent=styles["Normal"],
+        fontSize=10,
+        textColor=colors.HexColor("#9ca3af"),
+        alignment=TA_CENTER,
+        spaceAfter=4,
+    )
+
+    elements = []
+    date_str = datetime.utcnow().strftime("%B %d, %Y")
+
+    # Cover page
+    elements.append(Spacer(1, 2 * inch))
+    elements.append(Paragraph("HUMANOVO", ParagraphStyle(
+        "Logo", parent=styles["Normal"], fontSize=12,
+        textColor=brand_color, alignment=TA_CENTER,
+        spaceAfter=30, letterSpacing=8,
+    )))
+    elements.append(HRFlowable(
+        width="40%", thickness=2, color=brand_color,
+        spaceAfter=20, spaceBefore=10,
+    ))
+    elements.append(Paragraph(
+        hypothesis.get("title", "Untitled Hypothesis"),
+        title_style,
+    ))
+    elements.append(Paragraph(
+        f"{disease} — {discovery_type.replace('_', ' ').title()} Discovery",
+        subtitle_style,
+    ))
+
+    # Confidence badge
+    conf = hypothesis.get("confidence", 0)
+    conf_pct = f"{conf * 100:.1f}%" if isinstance(conf, float) else f"{conf}%"
+    conf_color = "#22c55e" if conf >= 0.7 else "#eab308" if conf >= 0.5 else "#f97316"
+    elements.append(Paragraph(
+        f'<font color="{conf_color}"><b>Confidence: {conf_pct}</b></font>',
+        ParagraphStyle("ConfBadge", parent=styles["Normal"], fontSize=14,
+                       alignment=TA_CENTER, spaceAfter=40),
+    ))
+    elements.append(HRFlowable(
+        width="40%", thickness=2, color=brand_color,
+        spaceAfter=20, spaceBefore=10,
+    ))
+    elements.append(Paragraph("AI-Powered Biomedical Discovery Platform", meta_style))
+    elements.append(Paragraph(date_str, meta_style))
+    elements.append(PageBreak())
+
+    # Description
+    desc = hypothesis.get("description", "")
+    if desc:
+        elements.append(Paragraph("Description", heading_style))
+        elements.append(Paragraph(desc, body_style))
+
+    # Mechanism
+    mechanism = hypothesis.get("mechanism", "")
+    if mechanism:
+        elements.append(Paragraph("Mechanism of Action", heading_style))
+        elements.append(Paragraph(mechanism, body_style))
+
+    # Confidence Analysis
+    elements.append(Paragraph("Confidence Analysis", heading_style))
+    conf_tier = (
+        "very high" if conf >= 0.8 else
+        "high" if conf >= 0.7 else
+        "moderate" if conf >= 0.5 else
+        "preliminary"
+    )
+    conf_text = (
+        f"This hypothesis has a confidence score of <b>{conf_pct}</b>, "
+        f"placing it in the <b>{conf_tier}</b> confidence tier. "
+    )
+    if conf >= 0.7:
+        conf_text += "This level of confidence suggests strong supporting evidence from multiple sources and validated mechanisms."
+    elif conf >= 0.5:
+        conf_text += "Further validation through experimental studies is recommended to strengthen the evidence base."
+    else:
+        conf_text += "Additional evidence gathering and validation is needed before proceeding to experimental stages."
+    elements.append(Paragraph(conf_text, body_style))
+
+    # Evidence
+    evidence = hypothesis.get("evidence_summary", [])
+    if evidence:
+        elements.append(Paragraph("Supporting Evidence", heading_style))
+        for e in evidence:
+            elements.append(Paragraph(f"• {e}", body_style))
+
+    # Risks
+    risks = hypothesis.get("risks", [])
+    if risks:
+        elements.append(Paragraph("Risks & Limitations", heading_style))
+        for r in risks:
+            elements.append(Paragraph(f"• {r}", body_style))
+
+    # Validation Steps
+    validation = hypothesis.get("validation_steps", [])
+    if validation:
+        elements.append(Paragraph("Validation Steps", heading_style))
+        for i, v in enumerate(validation, 1):
+            elements.append(Paragraph(f"{i}. {v}", body_style))
+
+    # Summary table
+    elements.append(Spacer(1, 20))
+    elements.append(Paragraph("Summary", heading_style))
+    table_data = [
+        ["Property", "Value"],
+        ["Disease Focus", disease],
+        ["Discovery Type", discovery_type.replace("_", " ").title()],
+        ["Confidence Score", conf_pct],
+        ["Confidence Tier", conf_tier.title()],
+        ["Evidence Items", str(len(evidence))],
+        ["Identified Risks", str(len(risks))],
+        ["Validation Steps", str(len(validation))],
+    ]
+    t = Table(table_data, colWidths=[2.5 * inch, 4 * inch])
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), brand_color),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 10),
+        ("BOTTOMPADDING", (0, 0), (-1, 0), 10),
+        ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#f9fafb")),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#e5e7eb")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 10),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+        ("TOPPADDING", (0, 0), (-1, -1), 8),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+    ]))
+    elements.append(t)
+
+    # Footer
+    elements.append(Spacer(1, 40))
+    elements.append(HRFlowable(
+        width="100%", thickness=1, color=colors.HexColor("#e5e7eb"),
+        spaceAfter=10, spaceBefore=20,
+    ))
+    elements.append(Paragraph(
+        f"Humanovo — AI-Powered Biomedical Discovery Platform — Generated on {date_str}",
+        meta_style,
+    ))
+    elements.append(Paragraph(
+        "This document was generated by AI and should be validated by domain experts.",
+        meta_style,
+    ))
+
+    doc.build(elements)
+    return buf.getvalue()
+
+
+def _generate_minimal_pdf(hypothesis: dict, disease: str) -> bytes:
+    """Minimal PDF fallback when ReportLab is not available."""
+    import io as _io
+    title = hypothesis.get("title", "Hypothesis")
+    desc = hypothesis.get("description", "")
+    conf = hypothesis.get("confidence", 0)
+
+    # Build a minimal valid PDF
+    content = f"Humanovo Hypothesis Report\n\n{title}\n\nDisease: {disease}\nConfidence: {conf*100:.1f}%\n\n{desc}"
+    buf = _io.BytesIO()
+    buf.write(b"%PDF-1.4\n")
+    # Minimal PDF with text stream
+    stream = content.encode("latin-1", errors="replace")
+    stream_obj = (
+        f"4 0 obj\n<< /Length {len(stream)} >>\nstream\n".encode()
+        + stream
+        + b"\nendstream\nendobj\n"
+    )
+    page_obj = b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n"
+    font_obj = b"5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n"
+    pages_obj = b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"
+    catalog = b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"
+
+    buf.write(catalog)
+    buf.write(pages_obj)
+    buf.write(page_obj)
+    buf.write(stream_obj)
+    buf.write(font_obj)
+    xref_offset = buf.tell()
+    buf.write(b"xref\n0 6\n")
+    buf.write(b"0000000000 65535 f \n")
+    # Simplified xref (not perfectly valid but readable by most viewers)
+    for i in range(1, 6):
+        buf.write(f"{i:010d} 00000 n \n".encode())
+    buf.write(b"trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n")
+    buf.write(f"{xref_offset}\n".encode())
+    buf.write(b"%%EOF\n")
+    return buf.getvalue()
 
 
 # ============== Agent Task Endpoints (API Gateway routes) ==============

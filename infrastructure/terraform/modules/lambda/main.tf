@@ -109,6 +109,61 @@ variable "azure_mistral_key" {
   sensitive = true
 }
 
+variable "azure_gpt4o_endpoint" {
+  type    = string
+  default = ""
+}
+
+variable "azure_gpt4o_key" {
+  type      = string
+  default   = ""
+  sensitive = true
+}
+
+variable "azure_cohere_endpoint" {
+  type    = string
+  default = ""
+}
+
+variable "azure_cohere_key" {
+  type      = string
+  default   = ""
+  sensitive = true
+}
+
+variable "azure_kimi_endpoint" {
+  type    = string
+  default = ""
+}
+
+variable "azure_kimi_key" {
+  type      = string
+  default   = ""
+  sensitive = true
+}
+
+variable "azure_o3mini_endpoint" {
+  type    = string
+  default = ""
+}
+
+variable "azure_o3mini_key" {
+  type      = string
+  default   = ""
+  sensitive = true
+}
+
+variable "azure_gpt41_endpoint" {
+  type    = string
+  default = ""
+}
+
+variable "azure_gpt41_key" {
+  type      = string
+  default   = ""
+  sensitive = true
+}
+
 variable "lambda_memory_size" {
   type    = number
   default = 1024
@@ -143,6 +198,16 @@ locals {
     AZURE_DEEPSEEK_KEY         = var.azure_deepseek_key
     AZURE_MISTRAL_ENDPOINT     = var.azure_mistral_endpoint
     AZURE_MISTRAL_KEY          = var.azure_mistral_key
+    AZURE_GPT4O_ENDPOINT       = var.azure_gpt4o_endpoint
+    AZURE_GPT4O_KEY            = var.azure_gpt4o_key
+    AZURE_COHERE_ENDPOINT      = var.azure_cohere_endpoint
+    AZURE_COHERE_KEY           = var.azure_cohere_key
+    AZURE_KIMI_ENDPOINT        = var.azure_kimi_endpoint
+    AZURE_KIMI_KEY             = var.azure_kimi_key
+    AZURE_O3MINI_ENDPOINT      = var.azure_o3mini_endpoint
+    AZURE_O3MINI_KEY           = var.azure_o3mini_key
+    AZURE_GPT41_ENDPOINT       = var.azure_gpt41_endpoint
+    AZURE_GPT41_KEY            = var.azure_gpt41_key
     LOG_LEVEL                  = var.environment == "prod" ? "INFO" : "DEBUG"
     POWERTOOLS_SERVICE_NAME    = "genup"
     POWERTOOLS_METRICS_NAMESPACE = "GenUp"
