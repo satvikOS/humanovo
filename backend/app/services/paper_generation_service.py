@@ -11,7 +11,7 @@ Key features:
   Azure AI:    Mistral-Large-3     (32K out, critical analysis + validation)
   Azure OpenAI: GPT-4o            (16K out, editorial synthesis, GA 2024-11-20)
   Azure AI:    Cohere Command A    (4K out, 256K context, RAG literature review)
-  Azure AI:    Phi-4-reasoning     (4K out, QA validation, Microsoft Preview)
+  Azure AI:    Kimi-K2-Thinking    (QA validation, 20K TPM, Stable)
 - FDA/R&D grade output: cover page, TOC, numbered citations, references
 - Content includes: flowcharts, mechanism diagrams, formulas, tables
 - Dynamic Table of Contents with section anchors
@@ -21,7 +21,7 @@ Key features:
 - 30-minute hard timeout with failure on exceed
 - Low temperature (0.15-0.3) for factual accuracy — NO HALLUCINATION
 - top_p = 0.9 across all models for controlled diversity
-- Phase 4: QA Validation (Phi-4) + Editorial Review (GPT-4o)
+- Phase 4: QA Validation (Kimi-K2) + Editorial Review (GPT-4o)
 
 All content is real-time AI generated. Zero hardcoded templates.
 """
@@ -365,7 +365,7 @@ class PaperGenerationService:
             else:
                 paper.sections[key] = result
 
-        # Phase 4: QA Validation (Phi-4-reasoning) + Editorial Review (GPT-4o)
+        # Phase 4: QA Validation (Kimi-K2-Thinking) + Editorial Review (GPT-4o)
         phase4_tasks = {
             "qa_validation": self._generate_qa_validation(llm, paper),
             "editorial_review": self._generate_editorial_review(llm, paper),
@@ -627,7 +627,7 @@ MODELS USED (describe each architecture and role):
 3. Mistral-Large-3 (via Azure AI) — Critical analysis + validation, 32K output, temperature 0.2-0.3
 4. GPT-4o (via Azure OpenAI) — Editorial synthesis + review, 131K context → 16K output, temperature 0.25
 5. Cohere Command A (via Azure AI) — RAG literature review, 256K context → 4K output, temperature 0.2
-6. Phi-4-reasoning (Microsoft, via Azure AI) — QA validation pass, 32K input → 4K output, temperature 0.15
+6. Kimi-K2-Thinking (Moonshot AI, via Azure AI) — QA validation pass, 20K TPM, temperature 0.15
 
 TOKEN POOL MANAGEMENT:
 - Max concurrent requests per model: {settings.TOKEN_POOL_MAX_CONCURRENT_REQUESTS}
@@ -671,7 +671,7 @@ IMPORTANT: This is an FDA/R&D-grade methods section. Include:
 
     Input Disease → Knowledge Graph Exploration → Agent Distribution (6 Models)
          ↓                    ↓                        ↓
-    Claude Opus 4.6    DeepSeek-R1-0528    Mistral-Large-3    GPT-4o    Cohere Command A    Phi-4
+    Claude Opus 4.6    DeepSeek-R1-0528    Mistral-Large-3    GPT-4o    Cohere Command A    Kimi-K2
     (Explorer/Synth)   (Reasoner)          (Critic)           (Editorial) (Literature/RAG)  (QA)
          ↓                    ↓                 ↓                ↓            ↓               ↓
          └─────────────→ Hypothesis Pool ←──────┴────────────────┴────────────┘               │
@@ -964,7 +964,7 @@ Be concise, impactful, and forward-looking. Avoid repeating the abstract."""
     # =========================================================================
 
     async def _generate_qa_validation(self, llm, paper: ResearchPaper) -> str:
-        """QA validation pass using Phi-4-reasoning (Microsoft, fast reasoning model)."""
+        """QA validation pass using Kimi-K2-Thinking (Moonshot AI, reasoning model)."""
         from app.agents.discovery_orchestrator import ModelType
 
         # Gather key section summaries for QA review
@@ -972,7 +972,7 @@ Be concise, impactful, and forward-looking. Avoid repeating the abstract."""
         for key in ["abstract", "introduction", "methods", "results_overview", "discussion", "conclusion"]:
             content = paper.sections.get(key, "")
             if content:
-                # Truncate each section to stay within Phi-4's 32K input
+                # Truncate each section to stay within Kimi-K2's input limits
                 sections_summary.append(f"[{key.upper()}]: {content[:2000]}")
 
         prompt = f"""You are a scientific QA reviewer for an FDA/R&D-grade research paper about {paper.disease}.
@@ -1028,7 +1028,7 @@ PAPER OVERVIEW:
 - Total content: ~{total_content_length // 4:,} tokens across {len(section_keys)} sections
 - References: {len(paper.references)} PubMed-verified citations
 - Hypotheses: {len(paper.hypotheses)} (best confidence: {paper.stats.get('current_best_confidence', 0):.1%})
-- Models used: Claude Opus 4.6, DeepSeek-R1-0528, Mistral-Large-3, GPT-4o, Cohere Command A, Phi-4-reasoning
+- Models used: Claude Opus 4.6, DeepSeek-R1-0528, Mistral-Large-3, GPT-4o, Cohere Command A, Kimi-K2-Thinking
 
 ABSTRACT (for context):
 {paper.sections.get('abstract', 'Not yet generated')[:3000]}
@@ -1080,7 +1080,7 @@ Write as a professional editorial assessment. Be concise and actionable."""
             "mistral_large_3": "#A855F7",
             "gpt_4o_azure": "#10B981",
             "cohere_command_a": "#F59E0B",
-            "phi_4_reasoning": "#EC4899",
+            "kimi_k2_thinking": "#EC4899",
             "deepseek_r1": "#4ECDC4",
         }
         colors = [model_colors.get(m, "#6B7280") for m in models]
@@ -1154,8 +1154,8 @@ Write as a professional editorial assessment. Be concise and actionable."""
         token_stats = paper.stats.get("token_pool_stats", {})
         requests = token_stats.get("requests_per_model", {})
         errors = token_stats.get("errors_per_model", {})
-        model_names = ["claude_opus", "deepseek_r1_0528", "mistral_large_3", "gpt_4o_azure", "cohere_command_a", "phi_4_reasoning"]
-        display_names = ["Claude Opus 4.6", "DeepSeek-R1-0528", "Mistral-Large-3", "GPT-4o", "Cohere Command A", "Phi-4-reasoning"]
+        model_names = ["claude_opus", "deepseek_r1_0528", "mistral_large_3", "gpt_4o_azure", "cohere_command_a", "kimi_k2_thinking"]
+        display_names = ["Claude Opus 4.6", "DeepSeek-R1-0528", "Mistral-Large-3", "GPT-4o", "Cohere Command A", "Kimi-K2-Thinking"]
 
         figures.append({
             "id": "fig_model_performance",
@@ -1274,7 +1274,7 @@ Write as a professional editorial assessment. Be concise and actionable."""
                 "    C --> F[Mistral-Large-3<br/>Critical Analyst]\n"
                 "    C --> G1[GPT-4o<br/>Editorial Synthesis]\n"
                 "    C --> G2[Cohere Command A<br/>Literature RAG]\n"
-                "    C --> G3[Phi-4-reasoning<br/>QA Validation]\n"
+                "    C --> G3[Kimi-K2-Thinking<br/>QA Validation]\n"
                 "    D --> H[Hypothesis Pool]\n"
                 "    E --> H\n"
                 "    F --> H\n"
@@ -1287,7 +1287,7 @@ Write as a professional editorial assessment. Be concise and actionable."""
                 "    K --> C\n"
                 "    L[External Factors] --> H\n"
                 "    J --> M[PubMed Citation<br/>Validation]\n"
-                "    J --> N[QA Validation<br/>Phi-4-reasoning]\n"
+                "    J --> N[QA Validation<br/>Kimi-K2-Thinking]\n"
                 "    J --> P[Editorial Review<br/>GPT-4o]\n"
                 "    M --> O[FDA/R&D Grade Paper]\n"
                 "    N --> O\n"
@@ -1333,7 +1333,7 @@ Write as a professional editorial assessment. Be concise and actionable."""
             ("mistral_large_3", "Mistral-Large-3"),
             ("gpt_4o_azure", "GPT-4o"),
             ("cohere_command_a", "Cohere Command A"),
-            ("phi_4_reasoning", "Phi-4-reasoning"),
+            ("kimi_k2_thinking", "Kimi-K2-Thinking"),
         ]:
             reqs = token_stats.get("requests_per_model", {}).get(model_name, 0)
             tokens = token_stats.get("tokens_per_model", {}).get(model_name, 0)
@@ -1459,7 +1459,7 @@ Write as a professional editorial assessment. Be concise and actionable."""
         md.append(f"# {paper.sections.get('title', 'Untitled Research Paper')}\n")
         md.append(f"*Generated by Humanovo Multi-Model Discovery Platform — {paper.created_at.strftime('%Y-%m-%d %H:%M UTC')}*\n")
         md.append(f"*Generation time: {paper.generation_time_seconds:.1f}s | "
-                   f"Models: Claude Opus 4.6, DeepSeek-R1-0528, Mistral-Large-3, GPT-4o, Cohere Command A, Phi-4-reasoning | "
+                   f"Models: Claude Opus 4.6, DeepSeek-R1-0528, Mistral-Large-3, GPT-4o, Cohere Command A, Kimi-K2-Thinking | "
                    f"All citations PubMed-verified*\n")
         md.append("---\n")
 

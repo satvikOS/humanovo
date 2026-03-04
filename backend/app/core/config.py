@@ -83,11 +83,11 @@ class Settings(BaseSettings):
     AZURE_COHERE_DEPLOYMENT: str = "cohere-command-a"
     AZURE_COHERE_API_VERSION: str = "2024-05-01-preview"
 
-    # Azure OpenAI — Phi-4-reasoning (same resource, deployment-based routing)
-    AZURE_PHI4_ENDPOINT: str = ""      # Azure OpenAI resource URL (e.g. https://humanovo-openai.cognitiveservices.azure.com)
-    AZURE_PHI4_KEY: SecretStr | None = None
-    AZURE_PHI4_DEPLOYMENT: str = "Phi-4-reasoning"
-    AZURE_PHI4_API_VERSION: str = "2024-05-01-preview"
+    # Azure AI Foundry — Kimi-K2-Thinking (same resource, deployment-based routing)
+    AZURE_KIMI_ENDPOINT: str = ""      # Azure AI resource URL (e.g. https://humanovo-openai.cognitiveservices.azure.com)
+    AZURE_KIMI_KEY: SecretStr | None = None
+    AZURE_KIMI_DEPLOYMENT: str = "Kimi-K2-Thinking"
+    AZURE_KIMI_API_VERSION: str = "2024-05-01-preview"
 
     # AWS Bedrock (IAM user: humanovo-admin)
     AWS_ACCESS_KEY_ID: SecretStr | None = None
@@ -203,9 +203,9 @@ class Settings(BaseSettings):
         return self.AZURE_COHERE_KEY.get_secret_value() if self.AZURE_COHERE_KEY else None
 
     @property
-    def azure_phi4_key_value(self) -> str | None:
-        """Azure Phi-4-reasoning API key."""
-        return self.AZURE_PHI4_KEY.get_secret_value() if self.AZURE_PHI4_KEY else None
+    def azure_kimi_key_value(self) -> str | None:
+        """Azure Kimi-K2-Thinking API key."""
+        return self.AZURE_KIMI_KEY.get_secret_value() if self.AZURE_KIMI_KEY else None
 
 
 @lru_cache

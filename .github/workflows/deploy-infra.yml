@@ -28,8 +28,8 @@ env:
   TF_VAR_azure_gpt4o_key: ${{ secrets.AZURE_GPT4O_KEY }}
   TF_VAR_azure_cohere_endpoint: ${{ secrets.AZURE_COHERE_ENDPOINT }}
   TF_VAR_azure_cohere_key: ${{ secrets.AZURE_COHERE_KEY }}
-  TF_VAR_azure_phi4_endpoint: ${{ secrets.AZURE_PHI4_ENDPOINT }}
-  TF_VAR_azure_phi4_key: ${{ secrets.AZURE_PHI4_KEY }}
+  TF_VAR_azure_kimi_endpoint: ${{ secrets.AZURE_KIMI_ENDPOINT }}
+  TF_VAR_azure_kimi_key: ${{ secrets.AZURE_KIMI_KEY }}
 
 jobs:
   deploy-infra:
@@ -343,8 +343,8 @@ jobs:
           AZURE_GPT4O_KEY: ${{ secrets.AZURE_GPT4O_KEY }}
           AZURE_COHERE_ENDPOINT: ${{ secrets.AZURE_COHERE_ENDPOINT }}
           AZURE_COHERE_KEY: ${{ secrets.AZURE_COHERE_KEY }}
-          AZURE_PHI4_ENDPOINT: ${{ secrets.AZURE_PHI4_ENDPOINT }}
-          AZURE_PHI4_KEY: ${{ secrets.AZURE_PHI4_KEY }}
+          AZURE_KIMI_ENDPOINT: ${{ secrets.AZURE_KIMI_ENDPOINT }}
+          AZURE_KIMI_KEY: ${{ secrets.AZURE_KIMI_KEY }}
         run: |
           NAME_PREFIX="genup-${ENVIRONMENT}"
           FN_NAME="${NAME_PREFIX}-agent_orchestrator"
@@ -371,8 +371,8 @@ jobs:
           env['AZURE_GPT4O_KEY'] = os.environ.get('AZURE_GPT4O_KEY', '')
           env['AZURE_COHERE_ENDPOINT'] = os.environ.get('AZURE_COHERE_ENDPOINT', '')
           env['AZURE_COHERE_KEY'] = os.environ.get('AZURE_COHERE_KEY', '')
-          env['AZURE_PHI4_ENDPOINT'] = os.environ.get('AZURE_PHI4_ENDPOINT', '')
-          env['AZURE_PHI4_KEY'] = os.environ.get('AZURE_PHI4_KEY', '')
+          env['AZURE_KIMI_ENDPOINT'] = os.environ.get('AZURE_KIMI_ENDPOINT', '')
+          env['AZURE_KIMI_KEY'] = os.environ.get('AZURE_KIMI_KEY', '')
           print(json.dumps({'Variables': env}))
           ")
 

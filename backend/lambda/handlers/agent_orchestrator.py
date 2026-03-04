@@ -184,7 +184,7 @@ azure_deepseek_client = None
 azure_mistral_client = None
 azure_gpt4o_client = None
 azure_cohere_client = None
-azure_phi4_client = None
+azure_kimi_client = None
 
 # Shared endpoint (both models at same Azure AI resource)
 AZURE_AI_ENDPOINT = os.environ.get("AZURE_AI_ENDPOINT", "")
@@ -199,8 +199,8 @@ AZURE_GPT4O_ENDPOINT = os.environ.get("AZURE_GPT4O_ENDPOINT", "") or AZURE_AI_EN
 AZURE_GPT4O_KEY = os.environ.get("AZURE_GPT4O_KEY", "") or AZURE_AI_KEY
 AZURE_COHERE_ENDPOINT = os.environ.get("AZURE_COHERE_ENDPOINT", "") or AZURE_AI_ENDPOINT
 AZURE_COHERE_KEY = os.environ.get("AZURE_COHERE_KEY", "") or AZURE_AI_KEY
-AZURE_PHI4_ENDPOINT = os.environ.get("AZURE_PHI4_ENDPOINT", "") or AZURE_AI_ENDPOINT
-AZURE_PHI4_KEY = os.environ.get("AZURE_PHI4_KEY", "") or AZURE_AI_KEY
+AZURE_KIMI_ENDPOINT = os.environ.get("AZURE_KIMI_ENDPOINT", "") or AZURE_AI_ENDPOINT
+AZURE_KIMI_KEY = os.environ.get("AZURE_KIMI_KEY", "") or AZURE_AI_KEY
 
 def _init_azure_client(name, endpoint, key):
     """Initialize an Azure AI client, returning None on failure."""
@@ -219,7 +219,7 @@ azure_deepseek_client = _init_azure_client("DeepSeek", AZURE_DEEPSEEK_ENDPOINT, 
 azure_mistral_client = _init_azure_client("Mistral", AZURE_MISTRAL_ENDPOINT, AZURE_MISTRAL_KEY)
 azure_gpt4o_client = _init_azure_client("GPT-4o", AZURE_GPT4O_ENDPOINT, AZURE_GPT4O_KEY)
 azure_cohere_client = _init_azure_client("Cohere", AZURE_COHERE_ENDPOINT, AZURE_COHERE_KEY)
-azure_phi4_client = _init_azure_client("Phi-4", AZURE_PHI4_ENDPOINT, AZURE_PHI4_KEY)
+azure_kimi_client = _init_azure_client("Kimi-K2", AZURE_KIMI_ENDPOINT, AZURE_KIMI_KEY)
 
 # Map model name patterns to their clients for routing
 AZURE_MODEL_CLIENTS = {
@@ -229,20 +229,18 @@ AZURE_MODEL_CLIENTS = {
     "gpt4o": ("azure_gpt4o", lambda: azure_gpt4o_client),
     "cohere": ("azure_cohere", lambda: azure_cohere_client),
     "command": ("azure_cohere", lambda: azure_cohere_client),
-    "phi-4": ("azure_phi4", lambda: azure_phi4_client),
-    "phi4": ("azure_phi4", lambda: azure_phi4_client),
+    "kimi": ("azure_kimi", lambda: azure_kimi_client),
 }
 
 # Fallback chains: when primary model gets 429, try these alternatives
-# GPT-4o has 225K TPM (10x+ others), so it's always the first fallback.
-# DeepSeek/Mistral/Cohere all have 20K TPM / 20 RPM.
-# Phi-4 is excluded — 1 TPM is unusable.
+# GPT-4o has 225K TPM / 2250 RPM (10x+ others), so it's always the first fallback.
+# DeepSeek/Mistral/Cohere/Kimi all have 20K TPM / 20 RPM.
 MODEL_FALLBACKS = {
-    "DeepSeek-R1-0528": ["gpt-4o", "Cohere-command-a", "Mistral-Large-3"],
-    "Mistral-Large-3": ["gpt-4o", "Cohere-command-a", "DeepSeek-R1-0528"],
-    "gpt-4o": ["DeepSeek-R1-0528", "Cohere-command-a", "Mistral-Large-3"],
-    "Cohere-command-a": ["gpt-4o", "Mistral-Large-3", "DeepSeek-R1-0528"],
-    "Phi-4-reasoning": ["gpt-4o", "DeepSeek-R1-0528", "Cohere-command-a"],
+    "DeepSeek-R1-0528": ["gpt-4o", "Kimi-K2-Thinking", "Cohere-command-a", "Mistral-Large-3"],
+    "Mistral-Large-3": ["gpt-4o", "Kimi-K2-Thinking", "Cohere-command-a", "DeepSeek-R1-0528"],
+    "gpt-4o": ["Kimi-K2-Thinking", "DeepSeek-R1-0528", "Cohere-command-a", "Mistral-Large-3"],
+    "Cohere-command-a": ["gpt-4o", "Kimi-K2-Thinking", "Mistral-Large-3", "DeepSeek-R1-0528"],
+    "Kimi-K2-Thinking": ["gpt-4o", "DeepSeek-R1-0528", "Cohere-command-a", "Mistral-Large-3"],
 }
 
 # Configuration
@@ -268,7 +266,7 @@ AZURE_AI_REASONER_MODEL = os.environ.get("AZURE_AI_REASONER_MODEL", "DeepSeek-R1
 AZURE_AI_CRITIC_MODEL = os.environ.get("AZURE_AI_CRITIC_MODEL", "Mistral-Large-3")
 AZURE_AI_GPT4O_MODEL = os.environ.get("AZURE_AI_GPT4O_MODEL", "gpt-4o")
 AZURE_AI_COHERE_MODEL = os.environ.get("AZURE_AI_COHERE_MODEL", "Cohere-command-a")
-AZURE_AI_PHI4_MODEL = os.environ.get("AZURE_AI_PHI4_MODEL", "Phi-4-reasoning")
+AZURE_AI_KIMI_MODEL = os.environ.get("AZURE_AI_KIMI_MODEL", "Kimi-K2-Thinking")
 
 AGENT_MODELS = {
     # Claude Opus 4.6 via Bedrock — Explorer + Synthesizer (restricted on Azure AI)
@@ -723,7 +721,7 @@ def _get_azure_client(model_name: str):
     # Fallback: try any available client
     for getter_fn in [lambda: azure_deepseek_client, lambda: azure_mistral_client,
                       lambda: azure_gpt4o_client, lambda: azure_cohere_client,
-                      lambda: azure_phi4_client]:
+                      lambda: azure_kimi_client]:
         c = getter_fn()
         if c is not None:
             return c
