@@ -206,48 +206,32 @@ export default function HypothesisDetail() {
 
   const downloadPaper = useCallback(async () => {
     if (!hypothesis) return
-    // Try backend ReportLab PDF first
-    try {
-      const res = await fetch(`${API_BASE}/documents/hypothesis/${hypothesisId}/pdf`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: hypothesis.statement || '',
-          description: hypothesis.rationale || hypothesis.mechanism || '',
-          mechanism: hypothesis.mechanism || '',
-          confidence: hypothesis.confidence_score || 0,
-          disease: localHypothesis?.disease || 'Unknown',
-          tags: hypothesis.tags || [],
-        }),
-      })
-      if (res.ok) {
-        const blob = await res.blob()
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `humanovo-hypothesis-${hypothesisId}.pdf`
-        a.click()
-        URL.revokeObjectURL(url)
-        return
-      }
-    } catch { /* backend unavailable */ }
-
-    // Fallback: client-side HTML print
-    const html = paperHtml || buildHypothesisPaperHtml({
-      title: hypothesis.statement || '',
-      description: hypothesis.rationale || hypothesis.mechanism || '',
-      mechanism: hypothesis.mechanism || '',
-      confidence: hypothesis.confidence_score || 0,
-      disease: localHypothesis?.disease || 'Unknown',
-      tags: hypothesis.tags || [],
+    const res = await fetch(`${API_BASE}/documents/hypothesis/${hypothesisId}/pdf`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: hypothesis.statement || '',
+        description: hypothesis.rationale || hypothesis.mechanism || '',
+        mechanism: hypothesis.mechanism || '',
+        confidence: hypothesis.confidence_score || 0,
+        disease: localHypothesis?.disease || 'Unknown',
+        tags: hypothesis.tags || [],
+      }),
     })
-    const win = window.open('', '_blank')
-    if (win) {
-      win.document.write(html)
-      win.document.close()
-      setTimeout(() => win.print(), 500)
+    if (res.ok) {
+      const data = await res.json()
+      const byteChars = atob(data.pdf_base64)
+      const byteArray = new Uint8Array(byteChars.length)
+      for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i)
+      const blob = new Blob([byteArray], { type: 'application/pdf' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = data.filename || `humanovo-hypothesis-${hypothesisId}.pdf`
+      a.click()
+      URL.revokeObjectURL(url)
     }
-  }, [paperHtml, hypothesisId, hypothesis, localHypothesis])
+  }, [hypothesisId, hypothesis, localHypothesis])
 
   if (isLoading && !localHypothesis) {
     return (

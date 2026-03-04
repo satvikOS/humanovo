@@ -897,36 +897,26 @@ def call_azure_ai(model_name: str, prompt: str, system_prompt: str,
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": prompt})
 
- claude/add-document-pipeline-cF8tH
-    try:
-        # o3-mini is a reasoning model: use max_completion_tokens, no temperature
-        if "o3" in model_name.lower():
-            response = client.chat.completions.create(
-                model=model_name,
-                messages=messages,
-                max_completion_tokens=max_tokens,
-            )
-        else:
-
     # Retry with exponential backoff for 429 rate-limit errors.
     # Azure AI serverless endpoints have strict per-minute limits.
     # Uses cancellable sleep so the worker can respond to stop signals.
     max_retries = 5
     for attempt in range(max_retries + 1):
         try:
-humanovo
-            response = client.chat.completions.create(
-                model=model_name,
-                messages=messages,
-                max_tokens=max_tokens,
-                temperature=temperature,
-            )
- claude/add-document-pipeline-cF8tH
-        return response.choices[0].message.content
-    except Exception as e:
-        logger.error(f"Azure AI call FAILED for {model_name}: {e}")
-        raise RuntimeError(f"Model {model_name} failed: {e}")
-
+            # o3-mini is a reasoning model: use max_completion_tokens, no temperature
+            if "o3" in model_name.lower():
+                response = client.chat.completions.create(
+                    model=model_name,
+                    messages=messages,
+                    max_completion_tokens=max_tokens,
+                )
+            else:
+                response = client.chat.completions.create(
+                    model=model_name,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                )
             return response.choices[0].message.content
         except urllib.error.HTTPError as e:
             if e.code == 429 and attempt < max_retries:
@@ -937,14 +927,15 @@ humanovo
                 except CancelledError:
                     raise CancelledError(f"Cancelled during 429 backoff for {model_name}")
             elif e.code == 429:
-                # All retries exhausted — raise RateLimitError so caller can skip gracefully
                 raise RateLimitError(
                     f"Azure AI rate limit (429) exhausted after {max_retries} retries for {model_name}"
                 )
             else:
                 raise
+        except Exception as e:
+            logger.error(f"Azure AI call FAILED for {model_name}: {e}")
+            raise RuntimeError(f"Model {model_name} failed: {e}")
     raise RuntimeError(f"Azure AI call failed after {max_retries} retries for {model_name}")
- humanovo
 
 
 def parse_hypothesis_json(text: str) -> dict | None:
@@ -1065,6 +1056,7 @@ def run_single_agent(role: str, prompt: str, system_prompt: str) -> dict | None:
 PHASE_ORDER = ["explorer", "synthesizer", "reasoner", "critic"]
 NUM_ROUNDS = 5  # 5 rounds × 4 agents = 20 hypotheses
 TARGET_TOTAL_HYPOTHESES = 20
+MODEL_FALLBACKS: dict = {}  # No fallbacks — each model must work or fail explicitly
 
 
 def run_discovery_worker(config: dict):
@@ -1897,13 +1889,9 @@ def generate_paper_pdf():
             )
 
         return {
-            "statusCode": 200,
-            "headers": {
-                "Content-Type": "application/pdf",
-                "Content-Disposition": f'attachment; filename="humanovo-research-paper.pdf"',
-            },
-            "body": base64.b64encode(pdf_bytes).decode("utf-8"),
-            "isBase64Encoded": True,
+            "pdf_base64": base64.b64encode(pdf_bytes).decode("utf-8"),
+            "filename": "humanovo-research-paper.pdf",
+            "content_type": "application/pdf",
         }
     except Exception as e:
         logger.error(f"Paper PDF generation failed: {e}")
@@ -2380,15 +2368,11 @@ def generate_hypothesis_pdf(hypothesis_id: str):
     import re as _re
     title_slug = _re.sub(r'[^a-z0-9\-]', '', title_slug)
 
-    # Return binary PDF via API Gateway v2 (base64 encoded)
+    # Return PDF as base64 JSON (Powertools wraps dicts as JSON; binary passthrough unreliable)
     return {
-        "statusCode": 200,
-        "headers": {
-            "Content-Type": "application/pdf",
-            "Content-Disposition": f'attachment; filename="humanovo-{title_slug}.pdf"',
-        },
-        "body": base64.b64encode(pdf_bytes).decode("utf-8"),
-        "isBase64Encoded": True,
+        "pdf_base64": base64.b64encode(pdf_bytes).decode("utf-8"),
+        "filename": f"humanovo-{title_slug}.pdf",
+        "content_type": "application/pdf",
     }
 
 

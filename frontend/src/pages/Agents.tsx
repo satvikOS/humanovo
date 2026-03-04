@@ -406,7 +406,10 @@ export default function Agents() {
   }, [config.disease, config.discoveryType])
 
   // Check AI health on mount (returns connected count, never model names)
+  // Retries up to 3 times on failure (Lambda cold starts take time)
   useEffect(() => {
+    let retries = 0
+    const maxRetries = 3
     const checkHealth = async () => {
       try {
         const response = await fetch(`${API_BASE}/orchestrator/health`)
@@ -416,16 +419,20 @@ export default function Agents() {
           setConnectedAgents(count)
           setTotalAgents(data.total_models || 8)
           setAiConnected(count > 0)
+          retries = 0
         } else {
-          setAiConnected(false)
+          retries++
+          if (retries >= maxRetries) setAiConnected(false)
+          // else keep aiConnected as null (yellow/loading)
         }
       } catch {
-        setAiConnected(false)
+        retries++
+        if (retries >= maxRetries) setAiConnected(false)
       }
     }
     checkHealth()
-    // Re-check health every 30 seconds
-    const healthInterval = window.setInterval(checkHealth, 30000)
+    // Re-check health every 20 seconds
+    const healthInterval = window.setInterval(checkHealth, 20000)
     return () => clearInterval(healthInterval)
   }, [])
 
@@ -780,15 +787,15 @@ export default function Agents() {
             <div className={clsx(
               'flex items-center gap-1.5 px-2 py-1 rounded text-xs',
               aiConnected === null ? 'bg-yellow-500/20 text-yellow-400' :
-              aiConnected ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
+              aiConnected ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'
             )}>
               <div className={clsx(
                 'w-2 h-2 rounded-full',
                 aiConnected === null ? 'bg-yellow-500 animate-pulse' :
-                aiConnected ? 'bg-green-500' : 'bg-red-500'
+                aiConnected ? 'bg-green-500' : 'bg-yellow-500 animate-pulse'
               )} />
-              {aiConnected === null ? 'Initializing...' :
-               aiConnected ? `${connectedAgents}/${totalAgents} Models Connected` : 'Connecting...'}
+              {aiConnected === null ? 'Connecting...' :
+               aiConnected ? `${connectedAgents}/${totalAgents} Models Connected` : 'Reconnecting...'}
             </div>
 
             {/* Control Buttons */}
@@ -1295,17 +1302,19 @@ export default function Agents() {
                 <div className="flex items-center gap-2">
                   <button
                     onClick={async () => {
-                      try {
-                        const res = await fetch(`${API_BASE}/orchestrator/generate-paper/pdf`, { method: 'POST' })
-                        if (!res.ok) { alert('PDF generation failed'); return }
-                        const blob = await res.blob()
-                        const url = URL.createObjectURL(blob)
-                        const a = document.createElement('a')
-                        a.href = url
-                        a.download = `humanovo-${config.disease.replace(/\s+/g, '-').toLowerCase()}-${new Date().toISOString().split('T')[0]}.pdf`
-                        a.click()
-                        URL.revokeObjectURL(url)
-                      } catch { alert('PDF generation failed') }
+                      const res = await fetch(`${API_BASE}/orchestrator/generate-paper/pdf`, { method: 'POST' })
+                      if (!res.ok) return
+                      const data = await res.json()
+                      const byteChars = atob(data.pdf_base64)
+                      const byteArray = new Uint8Array(byteChars.length)
+                      for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i)
+                      const blob = new Blob([byteArray], { type: 'application/pdf' })
+                      const url = URL.createObjectURL(blob)
+                      const a = document.createElement('a')
+                      a.href = url
+                      a.download = data.filename || `humanovo-${config.disease.replace(/\s+/g, '-').toLowerCase()}-${new Date().toISOString().split('T')[0]}.pdf`
+                      a.click()
+                      URL.revokeObjectURL(url)
                     }}
                     className="btn btn-sm bg-red-500/20 text-red-400"
                   >
@@ -1315,19 +1324,12 @@ export default function Agents() {
                   <button
                     onClick={() => {
                       if (!paperMarkdown) return
-                      const win = window.open('', '_blank')
-                      if (win) {
-                        win.document.write(paperMarkdown)
-                        win.document.close()
-                        setTimeout(() => win.print(), 500)
-                      } else {
-                        downloadPaperHtml()
-                      }
+                      downloadPaperHtml()
                     }}
                     className="btn btn-sm bg-green-500 text-white hover:bg-green-600"
                   >
                     <FiDownload className="w-3.5 h-3.5" />
-                    Export PDF
+                    Download HTML
                   </button>
                   <button
                     onClick={() => setPaperMarkdown(null)}
@@ -1637,42 +1639,30 @@ export default function Agents() {
                   </button>
                   <button
                     onClick={async () => {
-                      try {
-                        // Try backend ReportLab PDF first
-                        const res = await fetch(`${API_BASE}/documents/hypothesis/${selectedHypothesis.id}/pdf`, {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({
-                            title: selectedHypothesis.title,
-                            description: selectedHypothesis.description,
-                            mechanism: selectedHypothesis.mechanism,
-                            confidence: selectedHypothesis.confidence,
-                            disease: config.disease || 'Research',
-                            discovery_type: config.discoveryType || 'treatment',
-                          }),
-                        })
-                        if (res.ok) {
-                          const blob = await res.blob()
-                          const url = URL.createObjectURL(blob)
-                          const a = document.createElement('a')
-                          a.href = url
-                          a.download = `humanovo-${selectedHypothesis.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase().slice(0, 50)}.pdf`
-                          a.click()
-                          URL.revokeObjectURL(url)
-                          return
-                        }
-                      } catch { /* backend unavailable */ }
-                      // Fallback: client-side print
-                      const html = generateClientSidePaperHtml(
-                        [selectedHypothesis],
-                        config.disease || 'Research',
-                        config.discoveryType || 'treatment',
-                      )
-                      const win = window.open('', '_blank')
-                      if (win) {
-                        win.document.write(html)
-                        win.document.close()
-                        setTimeout(() => win.print(), 500)
+                      const res = await fetch(`${API_BASE}/documents/hypothesis/${selectedHypothesis.id}/pdf`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          title: selectedHypothesis.title,
+                          description: selectedHypothesis.description,
+                          mechanism: selectedHypothesis.mechanism,
+                          confidence: selectedHypothesis.confidence,
+                          disease: config.disease || 'Research',
+                          discovery_type: config.discoveryType || 'treatment',
+                        }),
+                      })
+                      if (res.ok) {
+                        const data = await res.json()
+                        const byteChars = atob(data.pdf_base64)
+                        const byteArray = new Uint8Array(byteChars.length)
+                        for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i)
+                        const blob = new Blob([byteArray], { type: 'application/pdf' })
+                        const url = URL.createObjectURL(blob)
+                        const a = document.createElement('a')
+                        a.href = url
+                        a.download = data.filename || `humanovo-${selectedHypothesis.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase().slice(0, 50)}.pdf`
+                        a.click()
+                        URL.revokeObjectURL(url)
                       }
                     }}
                     className="btn bg-green-500 text-white hover:bg-green-600"

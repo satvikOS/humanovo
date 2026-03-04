@@ -274,31 +274,31 @@ export default function ProjectDetail() {
             </button>
             <button
               onClick={async () => {
-                try {
-                  const res = await fetch(`${API_BASE}/documents/hypothesis/${activeHypothesis.id}/pdf`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      title: activeHypothesis.title,
-                      description: activeHypothesis.description,
-                      mechanism: activeHypothesis.mechanism,
-                      confidence: activeHypothesis.confidence,
-                      disease: activeHypothesis.disease || project?.disease_focus || 'Research',
-                      discovery_type: activeHypothesis.discovery_type || 'treatment',
-                    }),
-                  })
-                  if (res.ok) {
-                    const blob = await res.blob()
-                    const url = URL.createObjectURL(blob)
-                    const a = document.createElement('a')
-                    a.href = url
-                    a.download = `humanovo-${activeHypothesis.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase().slice(0, 50)}.pdf`
-                    a.click()
-                    URL.revokeObjectURL(url)
-                    return
-                  }
-                } catch { /* backend unavailable */ }
-                alert('PDF export unavailable — backend endpoint could not be reached.')
+                const res = await fetch(`${API_BASE}/documents/hypothesis/${activeHypothesis.id}/pdf`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    title: activeHypothesis.title,
+                    description: activeHypothesis.description,
+                    mechanism: activeHypothesis.mechanism,
+                    confidence: activeHypothesis.confidence,
+                    disease: activeHypothesis.disease || project?.disease_focus || 'Research',
+                    discovery_type: activeHypothesis.discovery_type || 'treatment',
+                  }),
+                })
+                if (res.ok) {
+                  const data = await res.json()
+                  const byteChars = atob(data.pdf_base64)
+                  const byteArray = new Uint8Array(byteChars.length)
+                  for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i)
+                  const blob = new Blob([byteArray], { type: 'application/pdf' })
+                  const url = URL.createObjectURL(blob)
+                  const a = document.createElement('a')
+                  a.href = url
+                  a.download = data.filename || `humanovo-${activeHypothesis.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase().slice(0, 50)}.pdf`
+                  a.click()
+                  URL.revokeObjectURL(url)
+                }
               }}
               className="btn bg-green-500 text-white hover:bg-green-600 text-sm"
             >
