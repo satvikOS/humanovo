@@ -1,13 +1,25 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
-  FiArrowLeft, FiActivity, FiTarget, FiCpu, FiClock,
-  FiChevronDown, FiChevronUp, FiFileText, FiRefreshCw, FiDownload, FiX, FiTag,
+  FiArrowLeft, FiActivity, FiTarget,
+  FiChevronRight, FiFileText, FiRefreshCw,
+  FiTrash2, FiBook,
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import { persistGet, persistSet, logActivity } from '../utils/persistence'
+import DocumentViewer, { HypothesisViewer } from '../components/DocumentViewer'
 
 const API_BASE = '/api/v1'
+
+interface SavedResearchPaper {
+  id: string
+  hypothesis_id: string
+  hypothesis_title: string
+  project_id: string
+  disease: string
+  generated_at: string
+  filename: string
+}
 
 interface SavedHypothesis {
   id: string
@@ -20,6 +32,7 @@ interface SavedHypothesis {
   discovery_type: string
   project_id: string
   created_at: string
+  model_used?: string
 }
 
 interface LocalProject {
@@ -36,13 +49,19 @@ interface LocalProject {
   updated_at: string
 }
 
+type ViewMode = 'list' | 'project_paper' | 'hypothesis_paper'
+
 export default function ProjectDetail() {
   const { projectId } = useParams<{ projectId: string }>()
-  const [expandedId, setExpandedId] = useState<string | null>(null)
   const [generatingPaper, setGeneratingPaper] = useState(false)
   const [generatingHypId, setGeneratingHypId] = useState<string | null>(null)
-  const [paperHtml, setPaperHtml] = useState<string | null>(null)
-  const paperPollRef = useRef<number | null>(null)
+  const [, setRefresh] = useState(0)
+
+  // Document viewer state
+  const [viewMode, setViewMode] = useState<ViewMode>('list')
+  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null)
+  const [paperError, setPaperError] = useState<string | null>(null)
+  const [activeHypothesis, setActiveHypothesis] = useState<SavedHypothesis | null>(null)
 
   const projects = persistGet<LocalProject[]>('projects', [])
   const project = projects.find(p => p.id === projectId)
@@ -50,86 +69,142 @@ export default function ProjectDetail() {
   const allHypotheses = persistGet<SavedHypothesis[]>('hypotheses', [])
   const projectHypotheses = allHypotheses.filter(h => h.project_id === projectId)
 
-  const generatePaper = useCallback(async (hypothesisId?: string) => {
+  // Research papers state
+  const allPapers = persistGet<SavedResearchPaper[]>('research-papers', [])
+  const projectPapers = allPapers.filter(p => p.project_id === projectId)
+
+  // ---- Generate project-level paper via document pipeline ----
+  const generateProjectPaper = useCallback(async () => {
+    if (!projectId) return
     setGeneratingPaper(true)
-    setGeneratingHypId(hypothesisId || null)
+    setGeneratingHypId(null)
+    setViewMode('project_paper')
+    setPdfBlobUrl(null)
+
+    setPaperError(null)
 
     try {
-      const response = await fetch(`${API_BASE}/orchestrator/generate-paper/markdown`, {
+      const res = await fetch(`${API_BASE}/documents/project/${projectId}/pdf?use_ai=true`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(hypothesisId ? { hypothesis_id: hypothesisId } : {}),
       })
 
-      if (!response.ok) {
-        let detail = 'Unknown error'
-        try { const err = await response.json(); detail = err.detail || detail } catch {}
-        alert(`Paper generation failed: ${detail}`)
+      if (res.ok) {
+        const blob = await res.blob()
+        if (blob.size === 0) {
+          setPaperError('Server returned empty PDF. Check backend logs for errors.')
+          setGeneratingPaper(false)
+          return
+        }
+        const url = URL.createObjectURL(blob)
+        setPdfBlobUrl(url)
         setGeneratingPaper(false)
-        setGeneratingHypId(null)
         return
       }
 
-      if (paperPollRef.current) clearInterval(paperPollRef.current)
-      paperPollRef.current = window.setInterval(async () => {
-        try {
-          const statusRes = await fetch(`${API_BASE}/orchestrator/paper-status`)
-          if (!statusRes.ok) return
-          const data = await statusRes.json()
-          if (data.status === 'done' && data.paper_html) {
-            if (paperPollRef.current) { clearInterval(paperPollRef.current); paperPollRef.current = null }
-            setPaperHtml(data.paper_html)
-            setGeneratingPaper(false)
-            setGeneratingHypId(null)
-
-            // Auto-save to evidence
-            const evidence = persistGet<Array<Record<string, unknown>>>('evidence', [])
-            const disease = project?.disease_focus || 'Unknown'
-            const diseaseTag = disease.toLowerCase().replace(/[^a-z0-9]+/g, '-')
-            evidence.unshift({
-              id: `ev-paper-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-              title: `AI Research Paper: ${disease}`,
-              source: 'Humanovo AI Pipeline',
-              sourceUrl: '',
-              type: 'paper',
-              status: 'pending',
-              date: new Date().toISOString().split('T')[0],
-              authors: ['Humanovo Multi-Model Discovery System'],
-              abstract: `Auto-generated research paper for ${disease} containing ${projectHypotheses.length} hypotheses.`,
-              tags: ['internal-hypothesis-source', 'humanovo', 'ai-generated', diseaseTag],
-              citations: 0,
-              relevanceScore: 0.95,
-              publisher: 'Humanovo',
-              fullText: data.paper_html,
-            })
-            persistSet('evidence', evidence.slice(0, 500))
-            logActivity({ type: 'evidence', action: 'created', title: `Auto-saved paper: ${disease}` })
-          } else if (data.status === 'failed') {
-            if (paperPollRef.current) { clearInterval(paperPollRef.current); paperPollRef.current = null }
-            alert(`Paper generation failed: ${data.error || 'Unknown error'}`)
-            setGeneratingPaper(false)
-            setGeneratingHypId(null)
-          }
-        } catch { /* keep polling */ }
-      }, 4000)
+      let detail = 'Unknown error'
+      try { const err = await res.json(); detail = err.detail || detail } catch {}
+      setPaperError(`Paper generation failed (${res.status}): ${detail}`)
+      setGeneratingPaper(false)
     } catch (e) {
-      console.error('Failed to start paper generation:', e)
-      alert('Failed to start paper generation')
+      console.error('Document pipeline failed:', e)
+      setPaperError(`Paper generation failed: ${e instanceof Error ? e.message : String(e)}`)
+      setGeneratingPaper(false)
+    }
+  }, [projectId])
+
+  // ---- Generate hypothesis-level paper ----
+  // ---- Open hypothesis in doc viewer ----
+  const openHypothesisViewer = useCallback((hypothesis: SavedHypothesis) => {
+    setActiveHypothesis(hypothesis)
+    setViewMode('hypothesis_paper')
+    setPdfBlobUrl(null)
+
+    setPaperError(null)
+  }, [])
+
+  const generateHypothesisPaper = useCallback(async (hypothesis: SavedHypothesis) => {
+    setGeneratingPaper(true)
+    setGeneratingHypId(hypothesis.id)
+    setActiveHypothesis(hypothesis)
+    setViewMode('hypothesis_paper')
+    setPdfBlobUrl(null)
+
+    setPaperError(null)
+
+    try {
+      const res = await fetch(`${API_BASE}/documents/hypothesis/${hypothesis.id}/pdf?use_ai=true`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: hypothesis.title,
+          description: hypothesis.description,
+          mechanism: hypothesis.mechanism,
+          confidence: hypothesis.confidence,
+          disease: hypothesis.disease || project?.disease_focus || 'Unknown',
+          discovery_type: hypothesis.discovery_type || 'treatment',
+          model_used: hypothesis.model_used || 'unknown',
+          tags: hypothesis.tags || [],
+          external_factors: [],
+        }),
+      })
+
+      if (res.ok) {
+        const blob = await res.blob()
+        if (blob.size === 0) {
+          setPaperError('Server returned empty PDF. Check backend logs for errors.')
+          setGeneratingPaper(false)
+          setGeneratingHypId(null)
+          return
+        }
+        const url = URL.createObjectURL(blob)
+        setPdfBlobUrl(url)
+        setGeneratingPaper(false)
+        setGeneratingHypId(null)
+        _saveResearchPaper(hypothesis)
+        return
+      }
+
+      let detail = 'Unknown error'
+      try { const err = await res.json(); detail = err.detail || detail } catch {}
+      setPaperError(`Paper generation failed (${res.status}): ${detail}`)
+      setGeneratingPaper(false)
+      setGeneratingHypId(null)
+    } catch (e) {
+      console.error('Hypothesis paper generation failed:', e)
+      setPaperError(`Paper generation failed: ${e instanceof Error ? e.message : String(e)}`)
       setGeneratingPaper(false)
       setGeneratingHypId(null)
     }
-  }, [project, projectHypotheses.length])
+  }, [project])
 
-  const downloadPaper = useCallback(() => {
-    if (!paperHtml) return
-    const blob = new Blob([paperHtml], { type: 'text/html' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `humanovo-paper-${project?.disease_focus?.replace(/\s+/g, '-').toLowerCase() || 'research'}-${new Date().toISOString().split('T')[0]}.html`
-    a.click()
-    URL.revokeObjectURL(url)
-  }, [paperHtml, project])
+  // ---- Save generated paper to research papers list ----
+  const _saveResearchPaper = useCallback((hypothesis: SavedHypothesis) => {
+    const papers = persistGet<SavedResearchPaper[]>('research-papers', [])
+    const paper: SavedResearchPaper = {
+      id: `rp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      hypothesis_id: hypothesis.id,
+      hypothesis_title: hypothesis.title,
+      project_id: hypothesis.project_id,
+      disease: hypothesis.disease || project?.disease_focus || 'Unknown',
+      generated_at: new Date().toISOString(),
+      filename: `humanovo-${hypothesis.title.replace(/\s+/g, '-').toLowerCase().slice(0, 50)}.pdf`,
+    }
+    papers.unshift(paper)
+    persistSet('research-papers', papers.slice(0, 200))
+    logActivity({ type: 'evidence', action: 'created', title: `Research paper: ${hypothesis.title}`, project: project?.name })
+    setRefresh(n => n + 1)
+  }, [project])
+
+  const closeViewer = useCallback(() => {
+    if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl)
+    setPdfBlobUrl(null)
+
+    setPaperError(null)
+    setActiveHypothesis(null)
+    setViewMode('list')
+    setGeneratingPaper(false)
+    setGeneratingHypId(null)
+  }, [pdfBlobUrl])
 
   if (!project) {
     return (
@@ -150,53 +225,69 @@ export default function ProjectDetail() {
     )
   }
 
-  // Paper view
-  if (paperHtml) {
+  // ---- Hypothesis paper viewer (split view) ----
+  if (viewMode === 'hypothesis_paper' && activeHypothesis) {
     return (
-      <div className="p-8 h-full flex flex-col">
-        <div className="flex items-center justify-between mb-4">
-          <Link to="/projects" className="inline-flex items-center text-primary-400 hover:text-primary-300">
-            <FiArrowLeft className="w-4 h-4 mr-2" />
-            Back to Projects
+      <div className="h-full flex flex-col">
+        <div className="px-4 py-2 border-b border-secondary-700 flex items-center gap-2 shrink-0">
+          <Link to="/projects" className="text-primary-400 hover:text-primary-300 text-sm">
+            <FiArrowLeft className="w-3.5 h-3.5 inline mr-1" />Projects
           </Link>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={async () => {
-                try {
-                  const res = await fetch(`${API_BASE}/orchestrator/generate-paper/pdf`, { method: 'POST' })
-                  if (!res.ok) { alert('PDF generation failed'); return }
-                  const blob = await res.blob()
-                  const url = URL.createObjectURL(blob)
-                  const a = document.createElement('a')
-                  a.href = url
-                  a.download = `humanovo-${project?.disease_focus?.replace(/\s+/g, '-').toLowerCase() || 'research'}.pdf`
-                  a.click()
-                  URL.revokeObjectURL(url)
-                } catch { alert('PDF generation failed') }
-              }}
-              className="btn btn-sm bg-red-500/20 text-red-400"
-            >
-              <FiDownload className="w-3.5 h-3.5" /> Download PDF
-            </button>
-            <button onClick={downloadPaper} className="btn btn-sm bg-purple-500/20 text-purple-400">
-              <FiDownload className="w-3.5 h-3.5" /> Download HTML
-            </button>
-            <button onClick={() => setPaperHtml(null)} className="btn btn-sm bg-secondary-700 text-secondary-300">
-              <FiX className="w-3.5 h-3.5" /> Close Paper
-            </button>
-          </div>
+          <span className="text-secondary-600">/</span>
+          <button onClick={closeViewer} className="text-primary-400 hover:text-primary-300 text-sm">
+            {project.name}
+          </button>
+          <span className="text-secondary-600">/</span>
+          <span className="text-secondary-400 text-sm truncate">{activeHypothesis.title}</span>
         </div>
-        <iframe
-          srcDoc={paperHtml}
-          className="flex-1 w-full rounded-lg border border-secondary-700"
-          style={{ minHeight: '85vh' }}
-          title="Research Paper"
-          sandbox="allow-same-origin"
-        />
+        <div className="flex-1 min-h-0">
+          <HypothesisViewer
+            hypothesis={activeHypothesis}
+            pdfUrl={pdfBlobUrl}
+            htmlContent={null}
+            isGenerating={generatingPaper}
+            onGeneratePaper={() => generateHypothesisPaper(activeHypothesis)}
+            onClose={closeViewer}
+            errorMessage={paperError}
+          />
+        </div>
       </div>
     )
   }
 
+  // ---- Project paper viewer (full width) ----
+  if (viewMode === 'project_paper') {
+    return (
+      <div className="h-full flex flex-col">
+        <div className="px-4 py-2 border-b border-secondary-700 flex items-center gap-2 shrink-0">
+          <Link to="/projects" className="text-primary-400 hover:text-primary-300 text-sm">
+            <FiArrowLeft className="w-3.5 h-3.5 inline mr-1" />Projects
+          </Link>
+          <span className="text-secondary-600">/</span>
+          <button onClick={closeViewer} className="text-primary-400 hover:text-primary-300 text-sm">
+            {project.name}
+          </button>
+          <span className="text-secondary-600">/</span>
+          <span className="text-secondary-400 text-sm">Research Paper</span>
+        </div>
+        <div className="flex-1 min-h-0">
+          <DocumentViewer
+            pdfUrl={pdfBlobUrl}
+            htmlContent={null}
+            title={`Research Paper: ${project.disease_focus || project.name}`}
+            onClose={closeViewer}
+            filename={`humanovo-${project.disease_focus?.replace(/\s+/g, '-').toLowerCase() || 'research'}.pdf`}
+            isGenerating={generatingPaper}
+            progressMessage="Running document pipeline..."
+            errorMessage={paperError}
+            onGenerateResearchPaper={generateProjectPaper}
+          />
+        </div>
+      </div>
+    )
+  }
+
+  // ---- Default: project detail list view ----
   const highConf = projectHypotheses.filter(h => h.confidence >= 0.7).length
   const medConf = projectHypotheses.filter(h => h.confidence >= 0.5 && h.confidence < 0.7).length
   const lowConf = projectHypotheses.filter(h => h.confidence < 0.5).length
@@ -217,7 +308,7 @@ export default function ProjectDetail() {
         {/* Generate paper for entire project */}
         {projectHypotheses.length > 0 && (
           <button
-            onClick={() => generatePaper()}
+            onClick={generateProjectPaper}
             disabled={generatingPaper}
             className="mt-4 btn bg-purple-500 text-white hover:bg-purple-600 disabled:opacity-50"
           >
@@ -262,18 +353,14 @@ export default function ProjectDetail() {
             {projectHypotheses.length > 0 ? (
               <div className="space-y-3">
                 {projectHypotheses.map((h, idx) => {
-                  const isExpanded = expandedId === h.id
                   return (
                     <div
                       key={h.id}
-                      className={clsx(
-                        'border rounded-lg transition-colors',
-                        isExpanded ? 'border-primary-500 bg-primary-500/5' : 'border-secondary-700 hover:border-primary-600/50'
-                      )}
+                      className="border rounded-lg transition-colors border-secondary-700 hover:border-primary-600/50"
                     >
-                      {/* Collapsed header — always visible */}
+                      {/* Collapsed header — click to open in doc viewer */}
                       <button
-                        onClick={() => setExpandedId(isExpanded ? null : h.id)}
+                        onClick={() => openHypothesisViewer(h)}
                         className="w-full text-left p-4"
                       >
                         <div className="flex items-start justify-between">
@@ -289,75 +376,13 @@ export default function ProjectDetail() {
                             )}>
                               {(h.confidence * 100).toFixed(1)}%
                             </span>
-                            {isExpanded ? <FiChevronUp className="w-4 h-4 text-secondary-400" /> : <FiChevronDown className="w-4 h-4 text-secondary-400" />}
+                            <FiChevronRight className="w-4 h-4 text-secondary-400" />
                           </div>
                         </div>
-                        {!isExpanded && h.description && (
+                        {h.description && (
                           <p className="text-secondary-400 text-sm mt-1 line-clamp-1 ml-8">{h.description}</p>
                         )}
                       </button>
-
-                      {/* Expanded detail */}
-                      {isExpanded && (
-                        <div className="px-4 pb-4 space-y-4 border-t border-secondary-700/50 pt-3">
-                          {/* Description */}
-                          <div>
-                            <div className="text-xs text-secondary-500 uppercase tracking-wider mb-1">Description</div>
-                            <p className="text-secondary-300 text-sm leading-relaxed">{h.description}</p>
-                          </div>
-
-                          {/* Mechanism */}
-                          {h.mechanism && (
-                            <div>
-                              <div className="text-xs text-secondary-500 uppercase tracking-wider mb-1">Mechanism of Action</div>
-                              <p className="text-secondary-300 text-sm leading-relaxed">{h.mechanism}</p>
-                            </div>
-                          )}
-
-                          {/* Tags */}
-                          {h.tags && h.tags.length > 0 && (
-                            <div>
-                              <div className="text-xs text-secondary-500 uppercase tracking-wider mb-1 flex items-center gap-1">
-                                <FiTag className="w-3 h-3" /> Tags
-                              </div>
-                              <div className="flex flex-wrap gap-1">
-                                {h.tags.map(tag => (
-                                  <span key={tag} className="badge badge-info text-xs">{tag}</span>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Metadata row */}
-                          <div className="flex items-center flex-wrap gap-4 pt-2 border-t border-secondary-700/50">
-                            <span className="text-xs text-secondary-400 flex items-center gap-1">
-                              <FiCpu className="w-3 h-3" />
-                              {h.discovery_type || 'Unknown'}
-                            </span>
-                            <span className="text-xs text-secondary-400 flex items-center gap-1">
-                              <FiClock className="w-3 h-3" />
-                              {new Date(h.created_at).toLocaleDateString()}
-                            </span>
-                            <span className="text-xs text-secondary-400">
-                              Disease: {h.disease}
-                            </span>
-                          </div>
-
-                          {/* Generate paper for this hypothesis */}
-                          <button
-                            onClick={() => generatePaper(h.id)}
-                            disabled={generatingPaper}
-                            className="btn bg-purple-500/20 text-purple-400 hover:bg-purple-500/30 disabled:opacity-50 text-sm"
-                          >
-                            {generatingHypId === h.id ? (
-                              <FiRefreshCw className="w-3.5 h-3.5 animate-spin" />
-                            ) : (
-                              <FiFileText className="w-3.5 h-3.5" />
-                            )}
-                            {generatingHypId === h.id ? 'Generating Paper...' : 'Generate Paper for This Hypothesis'}
-                          </button>
-                        </div>
-                      )}
                     </div>
                   )
                 })}
@@ -366,6 +391,64 @@ export default function ProjectDetail() {
               <p className="text-secondary-400">
                 No hypotheses stored in this project yet. Run a discovery from the Agents page
                 and save results to populate this project.
+              </p>
+            )}
+          </div>
+
+          {/* Research Papers section */}
+          <div className="card">
+            <h2 className="text-lg font-semibold text-white mb-4 flex items-center">
+              <FiBook className="w-5 h-5 mr-2 text-purple-400" />
+              Research Papers ({projectPapers.length})
+            </h2>
+
+            {projectPapers.length > 0 ? (
+              <div className="space-y-2">
+                {projectPapers.map((paper) => (
+                  <div
+                    key={paper.id}
+                    className="flex items-center justify-between p-3 border border-secondary-700 rounded-lg hover:border-purple-600/50 transition-colors"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <FiFileText className="w-4 h-4 text-purple-400 shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-white text-sm font-medium truncate">{paper.hypothesis_title}</p>
+                        <p className="text-secondary-500 text-xs">
+                          {new Date(paper.generated_at).toLocaleDateString()} &middot; {paper.disease}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        onClick={() => {
+                          const hyp = projectHypotheses.find(h => h.id === paper.hypothesis_id)
+                          if (hyp) generateHypothesisPaper(hyp)
+                        }}
+                        disabled={generatingPaper}
+                        className="p-1.5 rounded hover:bg-secondary-700 text-secondary-400 hover:text-purple-400 transition-colors"
+                        title="Regenerate & view"
+                      >
+                        <FiRefreshCw className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => {
+                          const updated = persistGet<SavedResearchPaper[]>('research-papers', []).filter(p => p.id !== paper.id)
+                          persistSet('research-papers', updated)
+                          setRefresh(n => n + 1)
+                        }}
+                        className="p-1.5 rounded hover:bg-secondary-700 text-secondary-400 hover:text-red-400 transition-colors"
+                        title="Remove"
+                      >
+                        <FiTrash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-secondary-400 text-sm">
+                No research papers generated yet. Expand a hypothesis above and click
+                &ldquo;Generate Research Paper&rdquo; to create one.
               </p>
             )}
           </div>

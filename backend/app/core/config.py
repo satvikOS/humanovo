@@ -71,6 +71,24 @@ class Settings(BaseSettings):
     AZURE_MISTRAL_KEY: SecretStr | None = None
     AZURE_MISTRAL_MODEL: str = "Mistral-Large-3"
 
+    # Azure OpenAI — GPT-4o (dedicated Azure OpenAI resource)
+    AZURE_GPT4O_ENDPOINT: str = ""     # Azure OpenAI resource URL (e.g. https://humanovo-gpt4o.openai.azure.com)
+    AZURE_GPT4O_KEY: SecretStr | None = None
+    AZURE_GPT4O_DEPLOYMENT: str = "gpt-4o"
+    AZURE_GPT4O_API_VERSION: str = "2024-11-20"
+
+    # Azure OpenAI — Cohere Command A (same resource, deployment-based routing)
+    AZURE_COHERE_ENDPOINT: str = ""    # Azure OpenAI resource URL (e.g. https://humanovo-openai.cognitiveservices.azure.com)
+    AZURE_COHERE_KEY: SecretStr | None = None
+    AZURE_COHERE_DEPLOYMENT: str = "cohere-command-a"
+    AZURE_COHERE_API_VERSION: str = "2024-05-01-preview"
+
+    # Azure OpenAI — Phi-4-reasoning (same resource, deployment-based routing)
+    AZURE_PHI4_ENDPOINT: str = ""      # Azure OpenAI resource URL (e.g. https://humanovo-openai.cognitiveservices.azure.com)
+    AZURE_PHI4_KEY: SecretStr | None = None
+    AZURE_PHI4_DEPLOYMENT: str = "Phi-4-reasoning"
+    AZURE_PHI4_API_VERSION: str = "2024-05-01-preview"
+
     # AWS Bedrock (IAM user: humanovo-admin)
     AWS_ACCESS_KEY_ID: SecretStr | None = None
     AWS_SECRET_ACCESS_KEY: SecretStr | None = None
@@ -173,6 +191,21 @@ class Settings(BaseSettings):
     def azure_mistral_key_value(self) -> str | None:
         """Azure Mistral model-specific API key."""
         return self.AZURE_MISTRAL_KEY.get_secret_value() if self.AZURE_MISTRAL_KEY else None
+
+    @property
+    def azure_gpt4o_key_value(self) -> str | None:
+        """Azure GPT-4o API key."""
+        return self.AZURE_GPT4O_KEY.get_secret_value() if self.AZURE_GPT4O_KEY else None
+
+    @property
+    def azure_cohere_key_value(self) -> str | None:
+        """Azure Cohere Command A API key."""
+        return self.AZURE_COHERE_KEY.get_secret_value() if self.AZURE_COHERE_KEY else None
+
+    @property
+    def azure_phi4_key_value(self) -> str | None:
+        """Azure Phi-4-reasoning API key."""
+        return self.AZURE_PHI4_KEY.get_secret_value() if self.AZURE_PHI4_KEY else None
 
 
 @lru_cache

@@ -8,7 +8,7 @@ on:
       - 'claude/*'
     paths:
       - 'infrastructure/**'
-      - 'backend/lambda/**'
+      - 'backend/**'
       - '.github/workflows/deploy-infra.yml'
   workflow_dispatch:
 
@@ -24,6 +24,12 @@ env:
   TF_VAR_azure_deepseek_key: ${{ secrets.AZURE_DEEPSEEK_KEY }}
   TF_VAR_azure_mistral_endpoint: ${{ secrets.AZURE_MISTRAL_ENDPOINT }}
   TF_VAR_azure_mistral_key: ${{ secrets.AZURE_MISTRAL_KEY }}
+  TF_VAR_azure_gpt4o_endpoint: ${{ secrets.AZURE_GPT4O_ENDPOINT }}
+  TF_VAR_azure_gpt4o_key: ${{ secrets.AZURE_GPT4O_KEY }}
+  TF_VAR_azure_cohere_endpoint: ${{ secrets.AZURE_COHERE_ENDPOINT }}
+  TF_VAR_azure_cohere_key: ${{ secrets.AZURE_COHERE_KEY }}
+  TF_VAR_azure_phi4_endpoint: ${{ secrets.AZURE_PHI4_ENDPOINT }}
+  TF_VAR_azure_phi4_key: ${{ secrets.AZURE_PHI4_KEY }}
 
 jobs:
   deploy-infra:
@@ -333,6 +339,12 @@ jobs:
           AZURE_DEEPSEEK_KEY: ${{ secrets.AZURE_DEEPSEEK_KEY }}
           AZURE_MISTRAL_ENDPOINT: ${{ secrets.AZURE_MISTRAL_ENDPOINT }}
           AZURE_MISTRAL_KEY: ${{ secrets.AZURE_MISTRAL_KEY }}
+          AZURE_GPT4O_ENDPOINT: ${{ secrets.AZURE_GPT4O_ENDPOINT }}
+          AZURE_GPT4O_KEY: ${{ secrets.AZURE_GPT4O_KEY }}
+          AZURE_COHERE_ENDPOINT: ${{ secrets.AZURE_COHERE_ENDPOINT }}
+          AZURE_COHERE_KEY: ${{ secrets.AZURE_COHERE_KEY }}
+          AZURE_PHI4_ENDPOINT: ${{ secrets.AZURE_PHI4_ENDPOINT }}
+          AZURE_PHI4_KEY: ${{ secrets.AZURE_PHI4_KEY }}
         run: |
           NAME_PREFIX="genup-${ENVIRONMENT}"
           FN_NAME="${NAME_PREFIX}-agent_orchestrator"
@@ -355,6 +367,12 @@ jobs:
           env['AZURE_DEEPSEEK_KEY'] = os.environ.get('AZURE_DEEPSEEK_KEY', '')
           env['AZURE_MISTRAL_ENDPOINT'] = os.environ.get('AZURE_MISTRAL_ENDPOINT', '')
           env['AZURE_MISTRAL_KEY'] = os.environ.get('AZURE_MISTRAL_KEY', '')
+          env['AZURE_GPT4O_ENDPOINT'] = os.environ.get('AZURE_GPT4O_ENDPOINT', '')
+          env['AZURE_GPT4O_KEY'] = os.environ.get('AZURE_GPT4O_KEY', '')
+          env['AZURE_COHERE_ENDPOINT'] = os.environ.get('AZURE_COHERE_ENDPOINT', '')
+          env['AZURE_COHERE_KEY'] = os.environ.get('AZURE_COHERE_KEY', '')
+          env['AZURE_PHI4_ENDPOINT'] = os.environ.get('AZURE_PHI4_ENDPOINT', '')
+          env['AZURE_PHI4_KEY'] = os.environ.get('AZURE_PHI4_KEY', '')
           print(json.dumps({'Variables': env}))
           ")
 

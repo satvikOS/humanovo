@@ -10,6 +10,7 @@ from app.api.v1.endpoints import (
     agents,
     auth,
     discovery,
+    document_pipeline,
     evidence,
     hypotheses,
     ingestion,
@@ -44,3 +45,6 @@ router.include_router(discovery.router)
 
 # Parallel Discovery Orchestrator (replaces simulation)
 router.include_router(orchestrator.router)
+
+# Document Pipeline (PDF research paper generation)
+router.include_router(document_pipeline.router)
