@@ -646,6 +646,7 @@ class DocumentPipelineService:
             models_used=stats.get("models_active", []) or [
                 "Claude Opus 4.6", "DeepSeek-R1-0528", "Mistral-Large-3",
                 "GPT-4o", "Cohere Command A", "Kimi-K2-Thinking",
+                "o3-mini", "GPT-4.1",
             ],
             external_factors=external_factors,
         )
@@ -781,6 +782,8 @@ class DocumentPipelineService:
             ("gpt_4o_azure", "GPT-4o"),
             ("cohere_command_a", "Cohere Command A"),
             ("kimi_k2_thinking", "Kimi-K2-Thinking"),
+            ("o3_mini", "o3-mini"),
+            ("gpt_41", "GPT-4.1"),
         ]:
             reqs = token_stats.get("requests_per_model", {}).get(model_name, 0)
             tokens = token_stats.get("tokens_per_model", {}).get(model_name, 0)

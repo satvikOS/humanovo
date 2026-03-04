@@ -89,6 +89,18 @@ class Settings(BaseSettings):
     AZURE_KIMI_DEPLOYMENT: str = "Kimi-K2-Thinking"
     AZURE_KIMI_API_VERSION: str = "2024-05-01-preview"
 
+    # Azure OpenAI — o3-mini (2.5M TPM / 250 RPM, reasoning model)
+    AZURE_O3MINI_ENDPOINT: str = ""    # Azure OpenAI resource URL (e.g. https://humanovo-openai.cognitiveservices.azure.com)
+    AZURE_O3MINI_KEY: SecretStr | None = None
+    AZURE_O3MINI_DEPLOYMENT: str = "o3-mini"
+    AZURE_O3MINI_API_VERSION: str = "2024-05-01-preview"
+
+    # Azure OpenAI — GPT-4.1 (50K TPM / 50 RPM, latest GPT model)
+    AZURE_GPT41_ENDPOINT: str = ""     # Azure OpenAI resource URL (e.g. https://humanovo-openai.cognitiveservices.azure.com)
+    AZURE_GPT41_KEY: SecretStr | None = None
+    AZURE_GPT41_DEPLOYMENT: str = "gpt-4.1"
+    AZURE_GPT41_API_VERSION: str = "2024-05-01-preview"
+
     # AWS Bedrock (IAM user: humanovo-admin)
     AWS_ACCESS_KEY_ID: SecretStr | None = None
     AWS_SECRET_ACCESS_KEY: SecretStr | None = None
@@ -206,6 +218,16 @@ class Settings(BaseSettings):
     def azure_kimi_key_value(self) -> str | None:
         """Azure Kimi-K2-Thinking API key."""
         return self.AZURE_KIMI_KEY.get_secret_value() if self.AZURE_KIMI_KEY else None
+
+    @property
+    def azure_o3mini_key_value(self) -> str | None:
+        """Azure o3-mini API key."""
+        return self.AZURE_O3MINI_KEY.get_secret_value() if self.AZURE_O3MINI_KEY else None
+
+    @property
+    def azure_gpt41_key_value(self) -> str | None:
+        """Azure GPT-4.1 API key."""
+        return self.AZURE_GPT41_KEY.get_secret_value() if self.AZURE_GPT41_KEY else None
 
 
 @lru_cache

@@ -185,6 +185,8 @@ azure_mistral_client = None
 azure_gpt4o_client = None
 azure_cohere_client = None
 azure_kimi_client = None
+azure_o3mini_client = None
+azure_gpt41_client = None
 
 # Shared endpoint (both models at same Azure AI resource)
 AZURE_AI_ENDPOINT = os.environ.get("AZURE_AI_ENDPOINT", "")
@@ -201,6 +203,10 @@ AZURE_COHERE_ENDPOINT = os.environ.get("AZURE_COHERE_ENDPOINT", "") or AZURE_AI_
 AZURE_COHERE_KEY = os.environ.get("AZURE_COHERE_KEY", "") or AZURE_AI_KEY
 AZURE_KIMI_ENDPOINT = os.environ.get("AZURE_KIMI_ENDPOINT", "") or AZURE_AI_ENDPOINT
 AZURE_KIMI_KEY = os.environ.get("AZURE_KIMI_KEY", "") or AZURE_AI_KEY
+AZURE_O3MINI_ENDPOINT = os.environ.get("AZURE_O3MINI_ENDPOINT", "") or AZURE_AI_ENDPOINT
+AZURE_O3MINI_KEY = os.environ.get("AZURE_O3MINI_KEY", "") or AZURE_AI_KEY
+AZURE_GPT41_ENDPOINT = os.environ.get("AZURE_GPT41_ENDPOINT", "") or AZURE_AI_ENDPOINT
+AZURE_GPT41_KEY = os.environ.get("AZURE_GPT41_KEY", "") or AZURE_AI_KEY
 
 def _init_azure_client(name, endpoint, key):
     """Initialize an Azure AI client, returning None on failure."""
@@ -220,6 +226,8 @@ azure_mistral_client = _init_azure_client("Mistral", AZURE_MISTRAL_ENDPOINT, AZU
 azure_gpt4o_client = _init_azure_client("GPT-4o", AZURE_GPT4O_ENDPOINT, AZURE_GPT4O_KEY)
 azure_cohere_client = _init_azure_client("Cohere", AZURE_COHERE_ENDPOINT, AZURE_COHERE_KEY)
 azure_kimi_client = _init_azure_client("Kimi-K2", AZURE_KIMI_ENDPOINT, AZURE_KIMI_KEY)
+azure_o3mini_client = _init_azure_client("o3-mini", AZURE_O3MINI_ENDPOINT, AZURE_O3MINI_KEY)
+azure_gpt41_client = _init_azure_client("GPT-4.1", AZURE_GPT41_ENDPOINT, AZURE_GPT41_KEY)
 
 # Map model name patterns to their clients for routing
 AZURE_MODEL_CLIENTS = {
@@ -230,17 +238,24 @@ AZURE_MODEL_CLIENTS = {
     "cohere": ("azure_cohere", lambda: azure_cohere_client),
     "command": ("azure_cohere", lambda: azure_cohere_client),
     "kimi": ("azure_kimi", lambda: azure_kimi_client),
+    "o3-mini": ("azure_o3mini", lambda: azure_o3mini_client),
+    "o3mini": ("azure_o3mini", lambda: azure_o3mini_client),
+    "gpt-4.1": ("azure_gpt41", lambda: azure_gpt41_client),
+    "gpt41": ("azure_gpt41", lambda: azure_gpt41_client),
 }
 
 # Fallback chains: when primary model gets 429, try these alternatives
-# GPT-4o has 225K TPM / 2250 RPM (10x+ others), so it's always the first fallback.
+# o3-mini has 2.5M TPM / 250 RPM — best fallback by far.
+# GPT-4o has 225K TPM / 2250 RPM. GPT-4.1 has 50K TPM / 50 RPM.
 # DeepSeek/Mistral/Cohere/Kimi all have 20K TPM / 20 RPM.
 MODEL_FALLBACKS = {
-    "DeepSeek-R1-0528": ["gpt-4o", "Kimi-K2-Thinking", "Cohere-command-a", "Mistral-Large-3"],
-    "Mistral-Large-3": ["gpt-4o", "Kimi-K2-Thinking", "Cohere-command-a", "DeepSeek-R1-0528"],
-    "gpt-4o": ["Kimi-K2-Thinking", "DeepSeek-R1-0528", "Cohere-command-a", "Mistral-Large-3"],
-    "Cohere-command-a": ["gpt-4o", "Kimi-K2-Thinking", "Mistral-Large-3", "DeepSeek-R1-0528"],
-    "Kimi-K2-Thinking": ["gpt-4o", "DeepSeek-R1-0528", "Cohere-command-a", "Mistral-Large-3"],
+    "DeepSeek-R1-0528": ["o3-mini", "gpt-4o", "gpt-4.1", "Kimi-K2-Thinking", "Cohere-command-a", "Mistral-Large-3"],
+    "Mistral-Large-3": ["o3-mini", "gpt-4o", "gpt-4.1", "Kimi-K2-Thinking", "Cohere-command-a", "DeepSeek-R1-0528"],
+    "gpt-4o": ["o3-mini", "gpt-4.1", "Kimi-K2-Thinking", "DeepSeek-R1-0528", "Cohere-command-a", "Mistral-Large-3"],
+    "gpt-4.1": ["o3-mini", "gpt-4o", "Kimi-K2-Thinking", "DeepSeek-R1-0528", "Cohere-command-a", "Mistral-Large-3"],
+    "o3-mini": ["gpt-4o", "gpt-4.1", "Kimi-K2-Thinking", "DeepSeek-R1-0528", "Cohere-command-a", "Mistral-Large-3"],
+    "Cohere-command-a": ["o3-mini", "gpt-4o", "gpt-4.1", "Kimi-K2-Thinking", "Mistral-Large-3", "DeepSeek-R1-0528"],
+    "Kimi-K2-Thinking": ["o3-mini", "gpt-4o", "gpt-4.1", "DeepSeek-R1-0528", "Cohere-command-a", "Mistral-Large-3"],
 }
 
 # Configuration
@@ -267,6 +282,8 @@ AZURE_AI_CRITIC_MODEL = os.environ.get("AZURE_AI_CRITIC_MODEL", "Mistral-Large-3
 AZURE_AI_GPT4O_MODEL = os.environ.get("AZURE_AI_GPT4O_MODEL", "gpt-4o")
 AZURE_AI_COHERE_MODEL = os.environ.get("AZURE_AI_COHERE_MODEL", "Cohere-command-a")
 AZURE_AI_KIMI_MODEL = os.environ.get("AZURE_AI_KIMI_MODEL", "Kimi-K2-Thinking")
+AZURE_AI_O3MINI_MODEL = os.environ.get("AZURE_AI_O3MINI_MODEL", "o3-mini")
+AZURE_AI_GPT41_MODEL = os.environ.get("AZURE_AI_GPT41_MODEL", "gpt-4.1")
 
 AGENT_MODELS = {
     # Claude Opus 4.6 via Bedrock — Explorer + Synthesizer (restricted on Azure AI)
@@ -306,7 +323,7 @@ PAPER_MODEL = BEDROCK_MODEL_CLAUDE_OPUS
 
 # ============== System Prompts ==============
 
-MASTER_PROMPT = """You are an advanced biomedical discovery AI agent on humanovo, part of a three-model parallel agent system (Claude Opus 4.6 via Bedrock, DeepSeek-R1-0528 and Mistral-Large-3 via Azure AI) designed to discover cures, treatments, and prevention strategies for human diseases.
+MASTER_PROMPT = """You are an advanced biomedical discovery AI agent on humanovo, part of an eight-model parallel agent system (Claude Opus 4.6 via Bedrock, DeepSeek-R1-0528, Mistral-Large-3, Cohere Command A, Kimi-K2-Thinking via Azure AI, GPT-4o, o3-mini, GPT-4.1 via Azure OpenAI) designed to discover cures, treatments, and prevention strategies for human diseases.
 
 ## OPERATING PRINCIPLES
 - Full scientific autonomy: explore ANY pathway, mechanism, or compound without restriction
@@ -719,8 +736,9 @@ def _get_azure_client(model_name: str):
             if client is not None:
                 return client
     # Fallback: try any available client
-    for getter_fn in [lambda: azure_deepseek_client, lambda: azure_mistral_client,
-                      lambda: azure_gpt4o_client, lambda: azure_cohere_client,
+    for getter_fn in [lambda: azure_o3mini_client, lambda: azure_gpt4o_client,
+                      lambda: azure_gpt41_client, lambda: azure_deepseek_client,
+                      lambda: azure_mistral_client, lambda: azure_cohere_client,
                       lambda: azure_kimi_client]:
         c = getter_fn()
         if c is not None:
