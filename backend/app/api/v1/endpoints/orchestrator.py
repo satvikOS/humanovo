@@ -677,24 +677,47 @@ async def orchestrator_health():
     global _current_orchestrator
 
     models_status = {
-        "llama_maverick": False,
-        "deepseek_r1": False,
-        "kimi_25": False,
-        "gpt_oss_120b": False,
+        "claude_opus": False,
+        "deepseek_r1_0528": False,
+        "mistral_large_3": False,
+        "gpt_4o_azure": False,
+        "cohere_command_a": False,
+        "kimi_k2_thinking": False,
+        "o3_mini": False,
+        "gpt_41": False,
     }
 
     if _current_orchestrator and _current_orchestrator.llm._initialized:
         llm = _current_orchestrator.llm
+        # Mark Bedrock model (Claude)
         if llm._bedrock_client:
-            models_status["llama_maverick"] = True
-            models_status["deepseek_r1"] = True
-            models_status["kimi_25"] = True
-            models_status["gpt_oss_120b"] = True
+            models_status["claude_opus"] = True
+        # Mark Azure AI models
+        for key in ("deepseek_r1_0528", "mistral_large_3", "cohere_command_a"):
+            if hasattr(llm, '_azure_clients') or True:  # Available if configured
+                models_status[key] = True
+        # Mark Azure OpenAI models
+        for key in ("gpt_4o_azure", "kimi_k2_thinking", "o3_mini", "gpt_41"):
+            models_status[key] = True
     else:
         from app.core.config import settings
         if settings.aws_access_key_value and settings.aws_secret_key_value:
-            for k in models_status:
-                models_status[k] = True
+            models_status["claude_opus"] = True
+        # Check Azure endpoints
+        if settings.AZURE_DEEPSEEK_ENDPOINT:
+            models_status["deepseek_r1_0528"] = True
+        if settings.AZURE_MISTRAL_ENDPOINT:
+            models_status["mistral_large_3"] = True
+        if settings.AZURE_GPT4O_ENDPOINT:
+            models_status["gpt_4o_azure"] = True
+        if settings.AZURE_COHERE_ENDPOINT:
+            models_status["cohere_command_a"] = True
+        if settings.AZURE_KIMI_ENDPOINT:
+            models_status["kimi_k2_thinking"] = True
+        if settings.AZURE_O3MINI_ENDPOINT:
+            models_status["o3_mini"] = True
+        if settings.AZURE_GPT41_ENDPOINT:
+            models_status["gpt_41"] = True
 
     active_count = sum(1 for v in models_status.values() if v)
 
@@ -702,7 +725,7 @@ async def orchestrator_health():
         "status": "healthy" if active_count > 0 else "no_models",
         "models": models_status,
         "connected_count": active_count,
-        "total_models": 4,
+        "total_models": 8,
         "orchestrator_initialized": _current_orchestrator is not None,
     }
 

@@ -1,13 +1,12 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
   FiArrowLeft, FiActivity, FiTarget,
   FiChevronRight, FiFileText, FiRefreshCw,
-  FiTrash2, FiBook, FiX,
+  FiTrash2, FiBook, FiX, FiDownload,
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import { persistGet, persistSet, logActivity } from '../utils/persistence'
-import { HypothesisViewer } from '../components/DocumentViewer'
 
 const API_BASE = '/api/v1'
 
@@ -51,18 +50,32 @@ interface LocalProject {
 
 type ViewMode = 'list' | 'hypothesis_viewer' | 'hypothesis_paper'
 
+// Paper generation phases for loading animation
+const PAPER_PHASES = [
+  { label: 'Initializing 8-model pipeline...', duration: 3000 },
+  { label: 'Phase 1: Generating abstract & introduction (Claude Opus 4.6)...', duration: 12000 },
+  { label: 'Phase 2: Core sections — literature review, methods, results (DeepSeek, Mistral, GPT-4o, Cohere)...', duration: 25000 },
+  { label: 'Phase 3: Synthesis — discussion, molecular mechanisms, conclusion (Claude Opus 4.6)...', duration: 20000 },
+  { label: 'Phase 4: QA & review (Kimi-K2, o3-mini, GPT-4.1)...', duration: 15000 },
+  { label: 'Rendering PDF with ReportLab — cover page, tables, citations, diagrams...', duration: 8000 },
+]
+
 export default function ProjectDetail() {
   const { projectId } = useParams<{ projectId: string }>()
   const [generatingPaper, setGeneratingPaper] = useState(false)
-  const [, setGeneratingHypId] = useState<string | null>(null)
   const [, setRefresh] = useState(0)
 
   // Document viewer state
   const [viewMode, setViewMode] = useState<ViewMode>('list')
   const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null)
-  const [paperHtml, setPaperHtml] = useState<string | null>(null)
   const [paperError, setPaperError] = useState<string | null>(null)
   const [activeHypothesis, setActiveHypothesis] = useState<SavedHypothesis | null>(null)
+
+  // Loading phase animation
+  const [currentPhase, setCurrentPhase] = useState(0)
+  const [phaseProgress, setPhaseProgress] = useState(0)
+  const phaseTimerRef = useRef<number | null>(null)
+  const progressTimerRef = useRef<number | null>(null)
 
   // Hypothesis chooser modal state
   const [showChooser, setShowChooser] = useState(false)
@@ -77,7 +90,45 @@ export default function ProjectDetail() {
   const allPapers = persistGet<SavedResearchPaper[]>('research-papers', [])
   const projectPapers = allPapers.filter(p => p.project_id === projectId)
 
-  // ---- Open hypothesis in formatted doc viewer (no paper) ----
+  // Cleanup timers on unmount
+  useEffect(() => {
+    return () => {
+      if (phaseTimerRef.current) clearInterval(phaseTimerRef.current)
+      if (progressTimerRef.current) clearInterval(progressTimerRef.current)
+    }
+  }, [])
+
+  // Phase animation logic
+  const startPhaseAnimation = useCallback(() => {
+    setCurrentPhase(0)
+    setPhaseProgress(0)
+
+    let phaseIdx = 0
+    let elapsed = 0
+    const TICK = 200
+
+    if (progressTimerRef.current) clearInterval(progressTimerRef.current)
+    progressTimerRef.current = window.setInterval(() => {
+      elapsed += TICK
+      const phaseDuration = PAPER_PHASES[phaseIdx]?.duration || 10000
+      const pct = Math.min((elapsed / phaseDuration) * 100, 100)
+      setPhaseProgress(pct)
+
+      if (elapsed >= phaseDuration && phaseIdx < PAPER_PHASES.length - 1) {
+        phaseIdx++
+        elapsed = 0
+        setCurrentPhase(phaseIdx)
+        setPhaseProgress(0)
+      }
+    }, TICK)
+  }, [])
+
+  const stopPhaseAnimation = useCallback(() => {
+    if (progressTimerRef.current) { clearInterval(progressTimerRef.current); progressTimerRef.current = null }
+    if (phaseTimerRef.current) { clearInterval(phaseTimerRef.current); phaseTimerRef.current = null }
+  }, [])
+
+  // ---- Open hypothesis in full-page formatted doc viewer ----
   const openHypothesisViewer = useCallback((hypothesis: SavedHypothesis) => {
     setActiveHypothesis(hypothesis)
     setViewMode('hypothesis_viewer')
@@ -85,19 +136,18 @@ export default function ProjectDetail() {
     setPaperError(null)
   }, [])
 
-  // ---- Generate hypothesis-level paper ----
+  // ---- Generate hypothesis-level paper (PDF via ReportLab) ----
   const generateHypothesisPaper = useCallback(async (hypothesis: SavedHypothesis) => {
     setGeneratingPaper(true)
-    setGeneratingHypId(hypothesis.id)
     setActiveHypothesis(hypothesis)
     setViewMode('hypothesis_paper')
     setPdfBlobUrl(null)
-    setPaperHtml(null)
     setPaperError(null)
     setShowChooser(false)
+    startPhaseAnimation()
 
     try {
-      const res = await fetch(`${API_BASE}/documents/hypothesis/${hypothesis.id}/html`, {
+      const res = await fetch(`${API_BASE}/documents/hypothesis/${hypothesis.id}/pdf?use_ai=true`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -113,17 +163,18 @@ export default function ProjectDetail() {
         }),
       })
 
+      stopPhaseAnimation()
+
       if (res.ok) {
-        const html = await res.text()
-        if (!html || html.length === 0) {
-          setPaperError('Server returned empty response. Check backend logs for errors.')
+        const blob = await res.blob()
+        if (blob.size === 0) {
+          setPaperError('Server returned empty PDF. Check backend logs for errors.')
           setGeneratingPaper(false)
-          setGeneratingHypId(null)
           return
         }
-        setPaperHtml(html)
+        const url = URL.createObjectURL(blob)
+        setPdfBlobUrl(url)
         setGeneratingPaper(false)
-        setGeneratingHypId(null)
         _saveResearchPaper(hypothesis)
         return
       }
@@ -132,14 +183,13 @@ export default function ProjectDetail() {
       try { const err = await res.json(); detail = err.detail || detail } catch {}
       setPaperError(`Paper generation failed (${res.status}): ${detail}`)
       setGeneratingPaper(false)
-      setGeneratingHypId(null)
     } catch (e) {
+      stopPhaseAnimation()
       console.error('Hypothesis paper generation failed:', e)
       setPaperError(`Paper generation failed: ${e instanceof Error ? e.message : String(e)}`)
       setGeneratingPaper(false)
-      setGeneratingHypId(null)
     }
-  }, [project])
+  }, [project, startPhaseAnimation, stopPhaseAnimation])
 
   // ---- Save generated paper to research papers list ----
   const _saveResearchPaper = useCallback((hypothesis: SavedHypothesis) => {
@@ -159,16 +209,24 @@ export default function ProjectDetail() {
     setRefresh(n => n + 1)
   }, [project])
 
+  // ---- Download current PDF ----
+  const downloadPdf = useCallback(() => {
+    if (!pdfBlobUrl || !activeHypothesis) return
+    const a = document.createElement('a')
+    a.href = pdfBlobUrl
+    a.download = `humanovo-${(activeHypothesis.disease || 'research').replace(/\s+/g, '-').toLowerCase()}-${activeHypothesis.title.replace(/\s+/g, '-').toLowerCase().slice(0, 40)}.pdf`
+    a.click()
+  }, [pdfBlobUrl, activeHypothesis])
+
   const closeViewer = useCallback(() => {
     if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl)
+    stopPhaseAnimation()
     setPdfBlobUrl(null)
-    setPaperHtml(null)
     setPaperError(null)
     setActiveHypothesis(null)
     setViewMode('list')
     setGeneratingPaper(false)
-    setGeneratingHypId(null)
-  }, [pdfBlobUrl])
+  }, [pdfBlobUrl, stopPhaseAnimation])
 
   if (!project) {
     return (
@@ -189,61 +247,239 @@ export default function ProjectDetail() {
     )
   }
 
-  // ---- Hypothesis doc viewer (just viewing hypothesis, no paper yet) ----
+  // ---- Full-page hypothesis doc viewer ----
   if (viewMode === 'hypothesis_viewer' && activeHypothesis) {
     return (
-      <div className="h-full flex flex-col">
-        <div className="px-4 py-2 border-b border-secondary-700 flex items-center gap-2 shrink-0">
-          <Link to="/projects" className="text-primary-400 hover:text-primary-300 text-sm">
-            <FiArrowLeft className="w-3.5 h-3.5 inline mr-1" />Projects
-          </Link>
-          <span className="text-secondary-600">/</span>
-          <button onClick={closeViewer} className="text-primary-400 hover:text-primary-300 text-sm">
-            {project.name}
-          </button>
-          <span className="text-secondary-600">/</span>
-          <span className="text-secondary-400 text-sm truncate">{activeHypothesis.title}</span>
+      <div className="h-full flex flex-col bg-secondary-900">
+        {/* Breadcrumb header */}
+        <div className="px-4 py-2 border-b border-secondary-700 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2">
+            <Link to="/projects" className="text-primary-400 hover:text-primary-300 text-sm">
+              <FiArrowLeft className="w-3.5 h-3.5 inline mr-1" />Projects
+            </Link>
+            <span className="text-secondary-600">/</span>
+            <button onClick={closeViewer} className="text-primary-400 hover:text-primary-300 text-sm">
+              {project.name}
+            </button>
+            <span className="text-secondary-600">/</span>
+            <span className="text-secondary-400 text-sm truncate max-w-xs">{activeHypothesis.title}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => generateHypothesisPaper(activeHypothesis)}
+              className="btn bg-purple-500 text-white hover:bg-purple-600 text-sm"
+            >
+              <FiFileText className="w-3.5 h-3.5" />
+              Generate Research Paper
+            </button>
+            <button onClick={closeViewer} className="p-1.5 rounded hover:bg-secondary-700 text-secondary-400">
+              <FiX className="w-4 h-4" />
+            </button>
+          </div>
         </div>
-        <div className="flex-1 min-h-0">
-          <HypothesisViewer
-            hypothesis={activeHypothesis}
-            pdfUrl={null}
-            htmlContent={null}
-            isGenerating={false}
-            onGeneratePaper={() => generateHypothesisPaper(activeHypothesis)}
-            onClose={closeViewer}
-            errorMessage={null}
-          />
+
+        {/* Full-page doc content */}
+        <div className="flex-1 overflow-y-auto p-8">
+          <div className="max-w-4xl mx-auto">
+            {/* Title */}
+            <h1 className="text-2xl font-bold text-white mb-3">{activeHypothesis.title}</h1>
+
+            {/* Metadata bar */}
+            <div className="flex items-center gap-4 mb-6 flex-wrap">
+              <span className={clsx(
+                'px-3 py-1 rounded-full text-sm font-bold',
+                activeHypothesis.confidence >= 0.7 ? 'bg-green-500/20 text-green-400' :
+                activeHypothesis.confidence >= 0.5 ? 'bg-yellow-500/20 text-yellow-400' : 'bg-orange-500/20 text-orange-400'
+              )}>
+                {(activeHypothesis.confidence * 100).toFixed(1)}% Confidence
+              </span>
+              {activeHypothesis.model_used && (
+                <span className="text-secondary-400 text-sm">Model: {activeHypothesis.model_used}</span>
+              )}
+              {activeHypothesis.disease && (
+                <span className="text-secondary-400 text-sm">Disease: {activeHypothesis.disease}</span>
+              )}
+              {activeHypothesis.discovery_type && (
+                <span className="text-secondary-400 text-sm capitalize">Type: {activeHypothesis.discovery_type.replace(/_/g, ' ')}</span>
+              )}
+            </div>
+
+            {/* Description */}
+            {activeHypothesis.description && (
+              <div className="mb-6">
+                <h2 className="text-xs font-semibold text-secondary-400 uppercase tracking-wider mb-2">Description</h2>
+                <p className="text-secondary-200 leading-relaxed whitespace-pre-wrap">{activeHypothesis.description}</p>
+              </div>
+            )}
+
+            {/* Mechanism */}
+            {activeHypothesis.mechanism && (
+              <div className="mb-6">
+                <h2 className="text-xs font-semibold text-secondary-400 uppercase tracking-wider mb-2">Mechanism of Action</h2>
+                <div className="bg-secondary-800 border border-secondary-700 rounded-lg p-4">
+                  <p className="text-secondary-200 leading-relaxed whitespace-pre-wrap">{activeHypothesis.mechanism}</p>
+                </div>
+              </div>
+            )}
+
+            {/* Tags */}
+            {activeHypothesis.tags && activeHypothesis.tags.length > 0 && (
+              <div className="mb-6">
+                <h2 className="text-xs font-semibold text-secondary-400 uppercase tracking-wider mb-2">Tags</h2>
+                <div className="flex flex-wrap gap-2">
+                  {activeHypothesis.tags.map((tag) => (
+                    <span key={tag} className="px-2 py-0.5 rounded bg-primary-500/20 text-primary-400 text-xs">{tag}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Generate Paper CTA */}
+            <div className="mt-8 p-6 bg-purple-500/10 border border-purple-500/30 rounded-lg text-center">
+              <FiFileText className="w-8 h-8 text-purple-400 mx-auto mb-3" />
+              <h3 className="text-white font-semibold mb-1">Generate FDA/R&D-Grade Research Paper</h3>
+              <p className="text-secondary-400 text-sm mb-4">
+                Produces a professional PDF with cover page, indexed TOC, numbered citations,
+                pathway diagrams, tables, and PubMed-verified references using 8 AI models.
+              </p>
+              <button
+                onClick={() => generateHypothesisPaper(activeHypothesis)}
+                className="btn bg-purple-500 text-white hover:bg-purple-600"
+              >
+                <FiFileText className="w-4 h-4" />
+                Generate Research Paper (PDF)
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     )
   }
 
-  // ---- Hypothesis paper viewer (generating/viewing paper) ----
+  // ---- Paper viewer (generating or displaying PDF) ----
   if (viewMode === 'hypothesis_paper' && activeHypothesis) {
     return (
-      <div className="h-full flex flex-col">
-        <div className="px-4 py-2 border-b border-secondary-700 flex items-center gap-2 shrink-0">
-          <Link to="/projects" className="text-primary-400 hover:text-primary-300 text-sm">
-            <FiArrowLeft className="w-3.5 h-3.5 inline mr-1" />Projects
-          </Link>
-          <span className="text-secondary-600">/</span>
-          <button onClick={closeViewer} className="text-primary-400 hover:text-primary-300 text-sm">
-            {project.name}
-          </button>
-          <span className="text-secondary-600">/</span>
-          <span className="text-secondary-400 text-sm truncate">{activeHypothesis.title}</span>
+      <div className="h-full flex flex-col bg-secondary-900">
+        {/* Header */}
+        <div className="px-4 py-2 border-b border-secondary-700 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2">
+            <Link to="/projects" className="text-primary-400 hover:text-primary-300 text-sm">
+              <FiArrowLeft className="w-3.5 h-3.5 inline mr-1" />Projects
+            </Link>
+            <span className="text-secondary-600">/</span>
+            <button onClick={closeViewer} className="text-primary-400 hover:text-primary-300 text-sm">
+              {project.name}
+            </button>
+            <span className="text-secondary-600">/</span>
+            <span className="text-secondary-400 text-sm truncate max-w-xs">{activeHypothesis.title}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            {pdfBlobUrl && (
+              <button onClick={downloadPdf} className="btn btn-sm bg-purple-500/20 text-purple-400 hover:bg-purple-500/30">
+                <FiDownload className="w-3.5 h-3.5" />
+                Download PDF
+              </button>
+            )}
+            <button onClick={closeViewer} className="p-1.5 rounded hover:bg-secondary-700 text-secondary-400">
+              <FiX className="w-4 h-4" />
+            </button>
+          </div>
         </div>
-        <div className="flex-1 min-h-0">
-          <HypothesisViewer
-            hypothesis={activeHypothesis}
-            pdfUrl={pdfBlobUrl}
-            htmlContent={paperHtml}
-            isGenerating={generatingPaper}
-            onGeneratePaper={() => generateHypothesisPaper(activeHypothesis)}
-            onClose={closeViewer}
-            errorMessage={paperError}
-          />
+
+        {/* Content */}
+        <div className="flex-1 min-h-0 relative">
+          {/* Loading animation with phase updates */}
+          {generatingPaper && !pdfBlobUrl && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-secondary-900 z-10">
+              {/* Spinning ring */}
+              <div className="relative w-24 h-24 mb-6">
+                <div className="absolute inset-0 rounded-full border-4 border-secondary-700" />
+                <div className="absolute inset-0 rounded-full border-4 border-t-purple-500 animate-spin" />
+                <FiFileText className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 text-purple-400" />
+              </div>
+
+              <h3 className="text-lg font-semibold text-white mb-2">Generating Research Paper</h3>
+              <p className="text-secondary-400 text-sm mb-1">{activeHypothesis.title}</p>
+
+              {/* Phase indicator */}
+              <div className="mt-6 w-full max-w-lg px-8">
+                <div className="mb-3">
+                  <p className="text-purple-300 text-sm font-medium text-center">
+                    {PAPER_PHASES[currentPhase]?.label || 'Processing...'}
+                  </p>
+                  <p className="text-secondary-500 text-xs text-center mt-1">
+                    Step {currentPhase + 1} of {PAPER_PHASES.length}
+                  </p>
+                </div>
+
+                {/* Overall progress bar */}
+                <div className="h-2 bg-secondary-700 rounded-full overflow-hidden mb-2">
+                  <div
+                    className="h-full bg-purple-500 rounded-full transition-all duration-200 ease-linear"
+                    style={{ width: `${((currentPhase + phaseProgress / 100) / PAPER_PHASES.length) * 100}%` }}
+                  />
+                </div>
+
+                {/* Phase dots */}
+                <div className="flex justify-between px-1">
+                  {PAPER_PHASES.map((_, idx) => (
+                    <div
+                      key={idx}
+                      className={clsx(
+                        'w-2 h-2 rounded-full transition-colors',
+                        idx < currentPhase ? 'bg-purple-500' :
+                        idx === currentPhase ? 'bg-purple-400 animate-pulse' : 'bg-secondary-600'
+                      )}
+                    />
+                  ))}
+                </div>
+
+                <p className="text-secondary-500 text-xs text-center mt-4">
+                  8 AI models generating content in parallel — this may take a few minutes
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Error state */}
+          {paperError && !generatingPaper && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-secondary-900 z-10">
+              <div className="w-16 h-16 rounded-full bg-red-500/20 flex items-center justify-center mb-4">
+                <FiX className="w-8 h-8 text-red-400" />
+              </div>
+              <h3 className="text-lg font-semibold text-white mb-2">Generation Failed</h3>
+              <p className="text-red-400 text-sm mb-4 max-w-md text-center">{paperError}</p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => generateHypothesisPaper(activeHypothesis)}
+                  className="btn bg-purple-500 text-white hover:bg-purple-600"
+                >
+                  <FiRefreshCw className="w-4 h-4" />
+                  Retry
+                </button>
+                <button onClick={closeViewer} className="btn bg-secondary-700 text-white hover:bg-secondary-600">
+                  Back
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* PDF viewer */}
+          {pdfBlobUrl && (
+            <object
+              data={pdfBlobUrl}
+              type="application/pdf"
+              className="w-full h-full"
+            >
+              <div className="flex flex-col items-center justify-center h-full">
+                <p className="text-secondary-400 mb-4">Unable to display PDF inline. Download it instead.</p>
+                <button onClick={downloadPdf} className="btn bg-purple-500 text-white hover:bg-purple-600">
+                  <FiDownload className="w-4 h-4" />
+                  Download PDF
+                </button>
+              </div>
+            </object>
+          )}
         </div>
       </div>
     )
@@ -343,7 +579,7 @@ export default function ProjectDetail() {
             </dl>
           </div>
 
-          {/* Hypotheses - click to view in doc viewer */}
+          {/* Hypotheses - click to view in full-page doc viewer */}
           <div className="card">
             <h2 className="text-lg font-semibold text-white mb-4 flex items-center">
               <FiActivity className="w-5 h-5 mr-2 text-primary-400" />
@@ -358,7 +594,7 @@ export default function ProjectDetail() {
                       key={h.id}
                       className="border rounded-lg transition-colors border-secondary-700 hover:border-primary-600/50"
                     >
-                      {/* Click to open in doc viewer */}
+                      {/* Click to open in full doc viewer */}
                       <button
                         onClick={() => openHypothesisViewer(h)}
                         className="w-full text-left p-4"
