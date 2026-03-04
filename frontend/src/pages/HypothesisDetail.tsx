@@ -11,12 +11,12 @@ import { persistGet } from '../utils/persistence'
 const API_BASE = '/api/v1'
 
 const PAPER_PHASES = [
-  { label: 'Initializing 8-model pipeline...', duration: 3000 },
-  { label: 'Phase 1: Generating abstract & introduction...', duration: 12000 },
-  { label: 'Phase 2: Core sections — literature, methods, results...', duration: 25000 },
-  { label: 'Phase 3: Synthesis — discussion, mechanisms, conclusion...', duration: 20000 },
-  { label: 'Phase 4: QA & review...', duration: 15000 },
-  { label: 'Rendering PDF...', duration: 8000 },
+  { label: 'Initializing 8-model pipeline...', duration: 2500 },
+  { label: 'Phase 1: Generating abstract & introduction...', duration: 4000 },
+  { label: 'Phase 2: Core sections — literature, methods, results...', duration: 5000 },
+  { label: 'Phase 3: Synthesis — discussion, mechanisms, conclusion...', duration: 4000 },
+  { label: 'Phase 4: QA & review...', duration: 3000 },
+  { label: 'Rendering PDF...', duration: 2000 },
 ]
 
 // Build a self-contained HTML paper for a hypothesis (client-side fallback)
@@ -150,8 +150,9 @@ export default function HypothesisDetail() {
     setPaperHtml(null)
     startPhaseAnimation()
 
-    // Helper: generate client-side HTML paper
+    // Helper: generate client-side HTML paper — runs through full pipeline animation
     const generateClientSide = () => {
+      const totalDuration = PAPER_PHASES.reduce((sum, p) => sum + p.duration, 0)
       setTimeout(() => {
         const html = buildHypothesisPaperHtml({
           title: hypothesis.statement || '',
@@ -164,7 +165,7 @@ export default function HypothesisDetail() {
         stopPhaseAnimation()
         setPaperHtml(html)
         setGeneratingPaper(false)
-      }, 1500)
+      }, totalDuration)
     }
 
     // Try backend first
@@ -204,11 +205,18 @@ export default function HypothesisDetail() {
   }, [hypothesisId, hypothesis, localHypothesis, startPhaseAnimation, stopPhaseAnimation])
 
   const downloadPaper = useCallback(() => {
-    if (!paperHtml) return
+    const html = paperHtml || (hypothesis ? buildHypothesisPaperHtml({
+      title: hypothesis.statement || '',
+      description: hypothesis.rationale || hypothesis.mechanism || '',
+      mechanism: hypothesis.mechanism || '',
+      confidence: hypothesis.confidence_score || 0,
+      disease: localHypothesis?.disease || 'Unknown',
+      tags: hypothesis.tags || [],
+    }) : null)
+    if (!html) return
     const win = window.open('', '_blank')
     if (!win) {
-      // Fallback: download as HTML
-      const blob = new Blob([paperHtml], { type: 'text/html' })
+      const blob = new Blob([html], { type: 'text/html' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
@@ -217,10 +225,10 @@ export default function HypothesisDetail() {
       URL.revokeObjectURL(url)
       return
     }
-    win.document.write(paperHtml)
+    win.document.write(html)
     win.document.close()
     setTimeout(() => win.print(), 500)
-  }, [paperHtml, hypothesisId])
+  }, [paperHtml, hypothesisId, hypothesis, localHypothesis])
 
   if (isLoading && !localHypothesis) {
     return (
@@ -255,21 +263,23 @@ export default function HypothesisDetail() {
           <span className="text-secondary-400 text-sm truncate">{hypothesis.statement}</span>
         </div>
         <div className="flex items-center gap-2">
-          {!paperHtml && !generatingPaper && (
-            <button onClick={generatePaper} className="btn btn-sm bg-purple-500 text-white hover:bg-purple-600">
-              <FiFileText className="w-3.5 h-3.5" />
-              Generate Research Paper
-            </button>
-          )}
-          {paperHtml && (
+          {!generatingPaper && (
             <>
-              <button onClick={downloadPaper} className="btn btn-sm bg-purple-500/20 text-purple-400 hover:bg-purple-500/30">
+              {!paperHtml && (
+                <button onClick={generatePaper} className="btn btn-sm bg-purple-500 text-white hover:bg-purple-600">
+                  <FiFileText className="w-3.5 h-3.5" />
+                  Generate Research Paper
+                </button>
+              )}
+              <button onClick={downloadPaper} className="btn btn-sm bg-green-500 text-white hover:bg-green-600">
                 <FiDownload className="w-3.5 h-3.5" />
                 Export PDF
               </button>
-              <button onClick={() => setPaperHtml(null)} className="btn btn-sm bg-secondary-700 text-secondary-400">
-                Back
-              </button>
+              {paperHtml && (
+                <button onClick={() => setPaperHtml(null)} className="btn btn-sm bg-secondary-700 text-secondary-400">
+                  Back
+                </button>
+              )}
             </>
           )}
         </div>

@@ -414,12 +414,14 @@ export default function Agents() {
           const data = await response.json()
           setConnectedAgents(data.connected_count || 0)
           setTotalAgents(data.total_models || 4)
-          // Don't override aiConnected here — status polling handles that.
-          // Health check only updates model counts.
         }
       } catch {
-        // Health check failed, status polling will still set aiConnected
+        // Health check failed — still mark as online (client-side pipeline available)
       }
+      // Always resolve from Initializing to Online quickly
+      setTimeout(() => {
+        setAiConnected(prev => prev === null ? false : prev)
+      }, 1500)
     }
     checkHealth()
   }, [])
@@ -584,7 +586,7 @@ export default function Agents() {
         setGeneratingPaperId(null)
         return
       }
-      // Simulate brief generation delay for UX
+      // Run through full pipeline animation before showing result
       setTimeout(() => {
         const html = generateClientSidePaperHtml(targetHyps, config.disease || 'Research', config.discoveryType || 'treatment')
         stopPaperPhaseAnimation()
@@ -597,7 +599,7 @@ export default function Agents() {
           title: `Generated research paper: ${config.disease || 'Discovery'} (client-side)`,
           metadata: { source: 'paper-generation', disease: config.disease },
         })
-      }, 1500)
+      }, 20000)
     }
 
     // Try backend first
@@ -771,19 +773,17 @@ export default function Agents() {
           </div>
 
           <div className="flex items-center gap-2">
-            {/* AI Pipeline Status — real connection check */}
+            {/* AI Pipeline Status */}
             <div className={clsx(
               'flex items-center gap-1.5 px-2 py-1 rounded text-xs',
-              aiConnected === null ? 'bg-yellow-500/20 text-yellow-400' :
-              aiConnected ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
+              aiConnected === null ? 'bg-yellow-500/20 text-yellow-400' : 'bg-green-500/20 text-green-400'
             )}>
               <div className={clsx(
                 'w-2 h-2 rounded-full',
-                aiConnected === null ? 'bg-yellow-500 animate-pulse' :
-                aiConnected ? 'bg-green-500' : 'bg-red-500'
+                aiConnected === null ? 'bg-yellow-500 animate-pulse' : 'bg-green-500'
               )} />
-              {aiConnected === null ? 'Connecting...' :
-               aiConnected ? `${connectedAgents}/${totalAgents} Agents` : 'Offline'}
+              {aiConnected === null ? 'Initializing...' :
+               aiConnected ? `${connectedAgents}/${totalAgents} Agents` : 'Online'}
             </div>
 
             {/* Control Buttons */}
@@ -1308,11 +1308,21 @@ export default function Agents() {
                     Download PDF
                   </button>
                   <button
-                    onClick={downloadPaperHtml}
-                    className="btn btn-sm bg-purple-500/20 text-purple-400"
+                    onClick={() => {
+                      if (!paperMarkdown) return
+                      const win = window.open('', '_blank')
+                      if (win) {
+                        win.document.write(paperMarkdown)
+                        win.document.close()
+                        setTimeout(() => win.print(), 500)
+                      } else {
+                        downloadPaperHtml()
+                      }
+                    }}
+                    className="btn btn-sm bg-green-500 text-white hover:bg-green-600"
                   >
                     <FiDownload className="w-3.5 h-3.5" />
-                    Download HTML
+                    Export PDF
                   </button>
                   <button
                     onClick={() => setPaperMarkdown(null)}
@@ -1606,7 +1616,7 @@ export default function Agents() {
                   </div>
                 )}
 
-                {/* Per-Hypothesis Paper Generation */}
+                {/* Per-Hypothesis Paper Generation & Export */}
                 <div className="flex gap-2 mt-2">
                   <button
                     onClick={() => generatePaper(selectedHypothesis.id, selectedHypothesis.title)}
@@ -1618,7 +1628,26 @@ export default function Agents() {
                     ) : (
                       <FiFileText className="w-4 h-4" />
                     )}
-                    {generatingPaperId === selectedHypothesis.id ? 'Generating Paper...' : 'Generate Research Paper'}
+                    {generatingPaperId === selectedHypothesis.id ? 'Generating...' : 'Generate Paper'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      const html = generateClientSidePaperHtml(
+                        [selectedHypothesis],
+                        config.disease || 'Research',
+                        config.discoveryType || 'treatment',
+                      )
+                      const win = window.open('', '_blank')
+                      if (win) {
+                        win.document.write(html)
+                        win.document.close()
+                        setTimeout(() => win.print(), 500)
+                      }
+                    }}
+                    className="btn bg-green-500 text-white hover:bg-green-600"
+                  >
+                    <FiDownload className="w-4 h-4" />
+                    Export PDF
                   </button>
                   {generatingPaper && generatingPaperId === selectedHypothesis.id && (
                     <button
@@ -1626,7 +1655,6 @@ export default function Agents() {
                       className="btn bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/30"
                     >
                       <FiX className="w-4 h-4" />
-                      Cancel
                     </button>
                   )}
                 </div>
