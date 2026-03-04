@@ -245,6 +245,7 @@ azure_cohere_client = None
 azure_kimi_client = None
 azure_o3mini_client = None
 azure_gpt41_client = None
+azure_phi4_client = None
 
 # Shared endpoint (both models at same Azure AI resource)
 AZURE_AI_ENDPOINT = os.environ.get("AZURE_AI_ENDPOINT", "")
@@ -265,42 +266,86 @@ AZURE_O3MINI_ENDPOINT = os.environ.get("AZURE_O3MINI_ENDPOINT", "") or AZURE_AI_
 AZURE_O3MINI_KEY = os.environ.get("AZURE_O3MINI_KEY", "") or AZURE_AI_KEY
 AZURE_GPT41_ENDPOINT = os.environ.get("AZURE_GPT41_ENDPOINT", "") or AZURE_AI_ENDPOINT
 AZURE_GPT41_KEY = os.environ.get("AZURE_GPT41_KEY", "") or AZURE_AI_KEY
+AZURE_PHI4_ENDPOINT = os.environ.get("AZURE_PHI4_ENDPOINT", "") or AZURE_AI_ENDPOINT
+AZURE_PHI4_KEY = os.environ.get("AZURE_PHI4_KEY", "") or AZURE_AI_KEY
+
+def _normalize_azure_ai_endpoint(endpoint: str) -> str:
+    """Normalize Azure AI Foundry endpoint to base URL (before /chat/completions).
+
+    Input examples:
+      https://humanovo-openai.services.ai.azure.com/models/chat/completions?api-version=2024-05-01-preview
+      https://humanovo-openai.services.ai.azure.com/models
+      https://humanovo-openai.services.ai.azure.com
+
+    Output: https://humanovo-openai.services.ai.azure.com/models
+    """
+    # Strip query string
+    endpoint = endpoint.split("?")[0].rstrip("/")
+    # Strip /chat/completions suffix if present
+    if endpoint.endswith("/chat/completions"):
+        endpoint = endpoint[: -len("/chat/completions")]
+    # Ensure /models suffix for Azure AI Foundry endpoints
+    if "services.ai.azure.com" in endpoint and not endpoint.endswith("/models"):
+        endpoint = endpoint.rstrip("/") + "/models"
+    return endpoint
+
+
+def _normalize_azure_openai_endpoint(endpoint: str) -> str:
+    """Normalize Azure OpenAI endpoint to just the host.
+
+    Input examples:
+      https://humanovo-openai.cognitiveservices.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2025-01-01-preview
+      https://humanovo-openai.cognitiveservices.azure.com
+
+    Output: https://humanovo-openai.cognitiveservices.azure.com
+    """
+    # Strip query string
+    endpoint = endpoint.split("?")[0].rstrip("/")
+    # Strip everything from /openai/ onwards
+    idx = endpoint.find("/openai/")
+    if idx > 0:
+        endpoint = endpoint[:idx]
+    return endpoint
+
 
 def _init_azure_client(name, endpoint, key):
     """Initialize an Azure AI model-specific client, returning None on failure."""
     if endpoint and key:
         try:
-            client = AzureAIClient(base_url=endpoint.rstrip('/'), api_key=key)
-            print(f"[ORCHESTRATOR] Azure {name} client initialized (endpoint={endpoint})")
+            normalized = _normalize_azure_ai_endpoint(endpoint)
+            client = AzureAIClient(base_url=normalized, api_key=key)
+            print(f"[ORCHESTRATOR] Azure {name} client initialized (endpoint={normalized})")
             return client
         except Exception as _e:
             logger.error(f"Azure {name} init failed: {_e}")
     else:
-        print(f"[ORCHESTRATOR] Azure {name} not configured")
+        print(f"[ORCHESTRATOR] Azure {name} not configured (endpoint={'set' if endpoint else 'empty'}, key={'set' if key else 'empty'})")
     return None
 
 def _init_azure_openai_client(name, endpoint, key, deployment, api_version="2024-05-01-preview"):
     """Initialize an Azure OpenAI deployment-based client, returning None on failure."""
     if endpoint and key:
         try:
-            client = AzureOpenAIClient(endpoint=endpoint, api_key=key, deployment=deployment, api_version=api_version)
-            print(f"[ORCHESTRATOR] Azure OpenAI {name} client initialized (endpoint={endpoint}, deployment={deployment})")
+            normalized = _normalize_azure_openai_endpoint(endpoint)
+            client = AzureOpenAIClient(endpoint=normalized, api_key=key, deployment=deployment, api_version=api_version)
+            print(f"[ORCHESTRATOR] Azure OpenAI {name} client initialized (endpoint={normalized}, deployment={deployment})")
             return client
         except Exception as _e:
             logger.error(f"Azure OpenAI {name} init failed: {_e}")
     else:
-        print(f"[ORCHESTRATOR] Azure OpenAI {name} not configured")
+        print(f"[ORCHESTRATOR] Azure OpenAI {name} not configured (endpoint={'set' if endpoint else 'empty'}, key={'set' if key else 'empty'})")
     return None
 
-# Azure AI model-specific endpoints (DeepSeek, Mistral — direct inference URL)
+# Azure AI Foundry model-specific endpoints (DeepSeek, Mistral, Cohere, Kimi, Phi4 — all via services.ai.azure.com)
 azure_deepseek_client = _init_azure_client("DeepSeek", AZURE_DEEPSEEK_ENDPOINT, AZURE_DEEPSEEK_KEY)
 azure_mistral_client = _init_azure_client("Mistral", AZURE_MISTRAL_ENDPOINT, AZURE_MISTRAL_KEY)
-# Azure OpenAI deployment-based endpoints (GPT-4o, Cohere, Kimi, o3-mini, GPT-4.1)
-azure_gpt4o_client = _init_azure_openai_client("GPT-4o", AZURE_GPT4O_ENDPOINT, AZURE_GPT4O_KEY, "gpt-4o", "2024-11-20")
-azure_cohere_client = _init_azure_openai_client("Cohere", AZURE_COHERE_ENDPOINT, AZURE_COHERE_KEY, "cohere-command-a")
-azure_kimi_client = _init_azure_openai_client("Kimi-K2", AZURE_KIMI_ENDPOINT, AZURE_KIMI_KEY, "Kimi-K2-Thinking")
-azure_o3mini_client = _init_azure_openai_client("o3-mini", AZURE_O3MINI_ENDPOINT, AZURE_O3MINI_KEY, "o3-mini")
-azure_gpt41_client = _init_azure_openai_client("GPT-4.1", AZURE_GPT41_ENDPOINT, AZURE_GPT41_KEY, "gpt-4.1")
+azure_cohere_client = _init_azure_client("Cohere", AZURE_COHERE_ENDPOINT, AZURE_COHERE_KEY)
+azure_kimi_client = _init_azure_client("Kimi-K2", AZURE_KIMI_ENDPOINT, AZURE_KIMI_KEY)
+azure_phi4_client = _init_azure_client("Phi4", AZURE_PHI4_ENDPOINT, AZURE_PHI4_KEY)
+# Azure OpenAI deployment-based endpoints (GPT-4o, o3-mini, GPT-4.1 — via cognitiveservices.azure.com)
+azure_gpt4o_client = _init_azure_openai_client("GPT-4o", AZURE_GPT4O_ENDPOINT, AZURE_GPT4O_KEY, "gpt-4o", "2025-01-01-preview")
+azure_o3mini_client = _init_azure_openai_client("o3-mini", AZURE_O3MINI_ENDPOINT, AZURE_O3MINI_KEY, "o3-mini", "2025-01-01-preview")
+azure_gpt41_client = _init_azure_openai_client("GPT-4.1", AZURE_GPT41_ENDPOINT, AZURE_GPT41_KEY, "gpt-4.1", "2025-01-01-preview")
 
 # Map model name patterns to their clients for routing
 AZURE_MODEL_CLIENTS = {
@@ -315,6 +360,8 @@ AZURE_MODEL_CLIENTS = {
     "o3mini": ("azure_o3mini", lambda: azure_o3mini_client),
     "gpt-4.1": ("azure_gpt41", lambda: azure_gpt41_client),
     "gpt41": ("azure_gpt41", lambda: azure_gpt41_client),
+    "phi-4": ("azure_phi4", lambda: azure_phi4_client),
+    "phi4": ("azure_phi4", lambda: azure_phi4_client),
 }
 
 # Configuration
@@ -1738,7 +1785,6 @@ def resume_discovery():
 def stop_discovery():
     """Stop the discovery process.
 
-claude/add-document-pipeline-cF8tH
     Sets status to 'stopping'. The worker checks this flag before each
     agent call and between rounds, then transitions to 'idle' itself.
     We do NOT immediately set 'idle' here — that creates a race where
@@ -1747,13 +1793,6 @@ claude/add-document-pipeline-cF8tH
     try:
         update_discovery_state({"status": "stopping"})
         print("[STOP] Set status=stopping — worker will transition to idle")
-
-    Sets status to 'stopping' so the async worker detects it and exits gracefully.
-    The worker will set status to 'stopped' when it finishes cleaning up.
-    """
-    try:
-        update_discovery_state({"status": "stopping"})
- humanovo
     except Exception as e:
         logger.error(f"Stop failed: {e}")
     return {"status": "stopping"}
@@ -1809,12 +1848,14 @@ def health_check():
     debug = {
         "azure_ai_endpoint_set": bool(os.environ.get("AZURE_AI_ENDPOINT", "")),
         "azure_ai_key_set": bool(os.environ.get("AZURE_AI_KEY", "")),
-        "azure_deepseek_endpoint_set": bool(os.environ.get("AZURE_DEEPSEEK_ENDPOINT", "")),
-        "azure_deepseek_key_set": bool(os.environ.get("AZURE_DEEPSEEK_KEY", "")),
-        "azure_mistral_endpoint_set": bool(os.environ.get("AZURE_MISTRAL_ENDPOINT", "")),
-        "azure_mistral_key_set": bool(os.environ.get("AZURE_MISTRAL_KEY", "")),
         "azure_deepseek_client_init": azure_deepseek_client is not None,
         "azure_mistral_client_init": azure_mistral_client is not None,
+        "azure_cohere_client_init": azure_cohere_client is not None,
+        "azure_kimi_client_init": azure_kimi_client is not None,
+        "azure_phi4_client_init": azure_phi4_client is not None,
+        "azure_gpt4o_client_init": azure_gpt4o_client is not None,
+        "azure_o3mini_client_init": azure_o3mini_client is not None,
+        "azure_gpt41_client_init": azure_gpt41_client is not None,
         "bedrock_runtime_init": bedrock_runtime is not None,
     }
 
@@ -1824,6 +1865,53 @@ def health_check():
         "total_models": total,
         "debug": debug,
     }
+
+
+@app.post("/api/v1/orchestrator/generate-paper/pdf")
+def generate_paper_pdf():
+    """Generate a PDF from the latest paper HTML stored in DynamoDB."""
+    try:
+        table = get_task_table()
+        response = table.get_item(Key={"id": PAPER_TASK_KEY})
+        item = response.get("Item")
+        if not item or item.get("status") != "done" or not item.get("paper_html"):
+            return Response(
+                status_code=400,
+                content_type="application/json",
+                body=json.dumps({"detail": "No completed paper available for PDF generation"}),
+            )
+
+        # Get hypotheses from state for PDF metadata
+        state = get_discovery_state()
+        hypotheses = state.get("hypotheses", []) if state else []
+        disease = state.get("config", {}).get("disease", "Research") if state else "Research"
+
+        # Generate PDF using ReportLab from the first hypothesis
+        if hypotheses:
+            pdf_bytes = _generate_hypothesis_pdf_reportlab(hypotheses[0], disease, "treatment")
+        else:
+            pdf_bytes = _generate_hypothesis_pdf_reportlab(
+                {"title": "Research Paper", "description": item.get("paper_html", "")[:500], "confidence": 0.5},
+                disease,
+                "treatment",
+            )
+
+        return {
+            "statusCode": 200,
+            "headers": {
+                "Content-Type": "application/pdf",
+                "Content-Disposition": f'attachment; filename="humanovo-research-paper.pdf"',
+            },
+            "body": base64.b64encode(pdf_bytes).decode("utf-8"),
+            "isBase64Encoded": True,
+        }
+    except Exception as e:
+        logger.error(f"Paper PDF generation failed: {e}")
+        return Response(
+            status_code=500,
+            content_type="application/json",
+            body=json.dumps({"detail": f"PDF generation failed: {str(e)}"}),
+        )
 
 
 @app.post("/api/v1/orchestrator/generate-paper/markdown")

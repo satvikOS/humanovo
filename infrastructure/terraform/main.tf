@@ -284,6 +284,8 @@ module "lambda" {
   azure_o3mini_key        = var.azure_o3mini_key
   azure_gpt41_endpoint    = var.azure_gpt41_endpoint
   azure_gpt41_key         = var.azure_gpt41_key
+  azure_phi4_endpoint     = var.azure_phi4_endpoint
+  azure_phi4_key          = var.azure_phi4_key
   lambda_memory_size    = var.lambda_memory_size
   lambda_timeout        = var.lambda_timeout
 }

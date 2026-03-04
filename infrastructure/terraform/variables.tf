@@ -230,6 +230,19 @@ variable "azure_gpt41_key" {
   sensitive   = true
 }
 
+variable "azure_phi4_endpoint" {
+  description = "Azure AI Phi-4 Reasoning endpoint"
+  type        = string
+  default     = ""
+}
+
+variable "azure_phi4_key" {
+  description = "Azure AI Phi-4 Reasoning API key"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
 # ==================== API Gateway ====================
 
 variable "cors_allowed_origins" {
