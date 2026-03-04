@@ -2079,15 +2079,150 @@ def get_paper_status():
             "status": status,
             "paper_html": item.get("paper_html", ""),
             "error": item.get("error", ""),
+            "current_phase": item.get("current_phase", ""),
+            "phase_num": item.get("phase_num", 0),
+            "total_phases": item.get("total_phases", 4),
         })
     except Exception as e:
         logger.error(f"Paper status error: {e}")
         return {"status": "error", "paper_html": "", "error": str(e)}
 
 
+# ============== Multi-Model Research Paper Pipeline ==============
+# Section-per-model architecture: each model writes a specific paper section
+# in parallel, then Claude Opus synthesizes into the final cohesive paper.
+
+PAPER_SECTIONS = {
+    # (section_key, heading, model_client_getter, model_name, system_prompt_role)
+    "abstract": {
+        "heading": "Abstract",
+        "model": "gpt4o",
+        "model_id": lambda: AZURE_AI_GPT4O_MODEL,
+        "client": lambda: azure_gpt4o_client,
+        "provider": "azure_ai",
+        "system": "You are a senior biomedical researcher writing a comprehensive abstract for a journal paper. Write a structured abstract (Background, Methods, Results, Conclusions) of 300-400 words. Be specific with quantitative findings.",
+    },
+    "introduction": {
+        "heading": "1. Introduction",
+        "model": "deepseek",
+        "model_id": lambda: AZURE_AI_REASONER_MODEL,
+        "client": lambda: azure_deepseek_client,
+        "provider": "azure_ai",
+        "system": "You are an expert in epidemiology and disease biology. Write a comprehensive introduction (800+ words) covering: disease epidemiology with specific statistics, current standard of care and its limitations, unmet medical needs, and the scientific rationale for the proposed approach. Cite specific studies with author names and years.",
+    },
+    "methods": {
+        "heading": "2. Methods",
+        "model": "phi4",
+        "model_id": lambda: AZURE_AI_PHI4_MODEL,
+        "client": lambda: azure_phi4_client,
+        "provider": "azure_ai",
+        "system": "You are a computational biology methodologist. Write a detailed Methods section (800+ words) with subsections: 2.1 Multi-Agent AI Discovery Architecture (describe the 10-agent system), 2.2 Knowledge Integration Framework (how evidence is synthesized), 2.3 Confidence Scoring Methodology (statistical approach), 2.4 Hypothesis Generation Protocol. Be quantitatively precise.",
+    },
+    "results_mechanism": {
+        "heading": "3. Results — Molecular Mechanism & Target Validation",
+        "model": "kimi",
+        "model_id": lambda: AZURE_AI_KIMI_MODEL,
+        "client": lambda: azure_kimi_client,
+        "provider": "azure_ai",
+        "system": "You are a molecular biologist. Write a detailed Results subsection (800+ words) analyzing: molecular targets identified, mechanism of action cascades, protein-protein interactions, signaling pathway maps, binding affinities (IC50/EC50/Ki values), and structural biology insights. Include specific gene names, protein structures, and pathway identifiers.",
+    },
+    "results_evidence": {
+        "heading": "4. Results — Preclinical & Clinical Evidence",
+        "model": "cohere",
+        "model_id": lambda: AZURE_AI_COHERE_MODEL,
+        "client": lambda: azure_cohere_client,
+        "provider": "azure_ai",
+        "system": "You are a clinical research analyst. Write a detailed Results subsection (800+ words) covering: preclinical evidence (in vitro, animal models), clinical trial data (phases, endpoints, outcomes), real-world evidence, biomarker validation data. Include specific study results with p-values, confidence intervals, hazard ratios, and effect sizes.",
+    },
+    "therapeutic_protocol": {
+        "heading": "5. Proposed Therapeutic Protocol",
+        "model": "gpt41",
+        "model_id": lambda: AZURE_AI_GPT41_MODEL,
+        "client": lambda: azure_gpt41_client,
+        "provider": "azure_ai",
+        "system": "You are a clinical pharmacologist designing a therapeutic protocol. Write a detailed section (800+ words) covering: drug selection and rationale, dosing regimen (mg/kg, schedule, route), combination therapy design, patient stratification criteria, treatment duration, dose modifications for adverse events, concomitant medications, and monitoring schedule. Be as specific as a Phase II protocol.",
+    },
+    "discussion": {
+        "heading": "6. Discussion",
+        "model": "mistral",
+        "model_id": lambda: AZURE_AI_CRITIC_MODEL,
+        "client": lambda: azure_mistral_client,
+        "provider": "azure_ai",
+        "system": "You are a critical reviewer for a top-tier medical journal. Write a comprehensive Discussion (1000+ words) with subsections: 6.1 Comparative Analysis (vs existing treatments), 6.2 Biological Plausibility assessment, 6.3 Clinical Translation Pathway, 6.4 Safety Considerations (on/off-target effects, drug interactions), 6.5 Limitations and Future Directions. Be rigorously critical and balanced.",
+    },
+    "safety_regulatory": {
+        "heading": "7. Safety, Regulatory & Market Analysis",
+        "model": "o3mini",
+        "model_id": lambda: AZURE_AI_O3MINI_MODEL,
+        "client": lambda: azure_o3mini_client,
+        "provider": "azure_ai",
+        "system": "You are a regulatory affairs and health economics expert. Write a detailed section (600+ words) covering: regulatory pathway (FDA/EMA), IND-enabling studies required, clinical trial design for approval, safety monitoring plan (DSMB), REMS if needed, health economics (QALY, ICER), market access strategy, IP landscape. Be specific with timelines and costs.",
+    },
+}
+
+
+def _update_paper_phase(table, phase_name: str, phase_num: int, total_phases: int):
+    """Update DynamoDB with current paper generation phase for frontend polling."""
+    try:
+        table.update_item(
+            Key={"id": PAPER_TASK_KEY},
+            UpdateExpression="SET #cp = :cp, #pn = :pn, #tp = :tp, #u = :u",
+            ExpressionAttributeNames={"#cp": "current_phase", "#pn": "phase_num", "#tp": "total_phases", "#u": "updated_at"},
+            ExpressionAttributeValues={
+                ":cp": phase_name,
+                ":pn": phase_num,
+                ":tp": total_phases,
+                ":u": datetime.utcnow().isoformat(),
+            },
+        )
+    except Exception:
+        pass  # Non-critical
+
+
+def _call_model_for_section(section_key: str, section_cfg: dict, prompt: str) -> tuple[str, str, str | None]:
+    """Call a specific model for a paper section. Returns (section_key, result_text, error)."""
+    model_id = section_cfg["model_id"]()
+    client = section_cfg["client"]()
+    provider = section_cfg["provider"]
+    heading = section_cfg["heading"]
+    system = section_cfg["system"]
+
+    try:
+        if client is not None and provider == "azure_ai":
+            result = call_azure_ai(model_id, prompt, system, max_tokens=8_000, temperature=0.3)
+            print(f"[PAPER] Section '{heading}' ({model_id}): {len(result)} chars")
+            return (section_key, result, None)
+        elif provider == "bedrock" and bedrock_runtime is not None:
+            result = call_bedrock(model_id, prompt, system, max_tokens=8_000, temperature=0.3)
+            print(f"[PAPER] Section '{heading}' (bedrock): {len(result)} chars")
+            return (section_key, result, None)
+        else:
+            return (section_key, "", f"Client not available for {model_id}")
+    except Exception as e:
+        print(f"[PAPER] Section '{heading}' FAILED: {e}")
+        return (section_key, "", str(e))
+
+
 def run_paper_worker(hypothesis_id: str | None, config: dict):
-    """Async worker: generate a rich research paper and store in DynamoDB."""
-    print(f"[PAPER-WORKER] Starting for hypothesis={hypothesis_id or 'all'}")
+    """Multi-model research paper pipeline.
+
+    Architecture (section-per-model for variety and no single-model bias):
+      Phase 1: Parallel section generation — 6 models write sections concurrently
+        - GPT-4o → Abstract (structured, concise)
+        - DeepSeek-R1 → Introduction (epidemiology, rationale)
+        - Kimi-K2 → Results: Molecular Mechanism & Target Validation
+        - Cohere Command A → Results: Preclinical & Clinical Evidence
+        - Mistral-Large-3 → Discussion (critical, balanced)
+        - o3-mini → Safety, Regulatory & Market Analysis
+      Phase 2: Claude Opus synthesis — combines all sections into final cohesive paper
+        - Adds Methods, Therapeutic Protocol, Conclusion
+        - Unifies voice, cross-references, adds tables/figures
+        - Generates 30+ grounded references
+
+    All models are instructed to ground claims in real scientific literature with
+    specific author names, journal names, years, and DOIs where possible.
+    """
+    print(f"[PAPER-WORKER] Starting multi-model pipeline for hypothesis={hypothesis_id or 'all'}")
     table = get_task_table()
     disease = config.get("disease", "Unknown Disease")
     discovery_type = config.get("discovery_type", "cure")
@@ -2102,107 +2237,173 @@ def run_paper_worker(hypothesis_id: str | None, config: dict):
         )
         return
 
-    # Select hypotheses
+    # Select hypothesis
     if hypothesis_id and hypothesis_id != "all":
         target = next((h for h in state["hypotheses"] if h.get("id") == hypothesis_id), None)
-        hypotheses_for_paper = [target] if target else state["hypotheses"][:3]
+        hypotheses_for_paper = [target] if target else state["hypotheses"][:1]
     else:
         hypotheses_for_paper = state["hypotheses"][:5]
 
-    # Build hypothesis detail blocks
-    hyp_blocks = []
-    for i, h in enumerate(hypotheses_for_paper, 1):
-        evidence = h.get("evidence_summary", [])
-        evidence_str = "\n".join(f"   - {e}" for e in evidence) if evidence else "   - No specific evidence cited"
-        risks = h.get("risks", [])
-        risks_str = "\n".join(f"   - {r}" for r in risks) if risks else "   - No risks identified"
-        validation = h.get("validation_steps", [])
-        validation_str = "\n".join(f"   - {v}" for v in validation) if validation else "   - No validation steps"
+    h = hypotheses_for_paper[0]
+    evidence = h.get("evidence_summary", [])
+    evidence_str = "\n".join(f"- {e}" for e in evidence) if evidence else "- No specific evidence cited"
+    risks = h.get("risks", [])
+    risks_str = "\n".join(f"- {r}" for r in risks) if risks else "- No risks identified"
+    validation = h.get("validation_steps", [])
+    validation_str = "\n".join(f"- {v}" for v in validation) if validation else "- No validation steps"
 
-        hyp_blocks.append(
-            f"### Hypothesis {i}: {h.get('title', 'Untitled')} (Confidence: {h.get('confidence', 0):.0%})\n\n"
-            f"**Description:** {h.get('description', '')}\n\n"
-            f"**Mechanism of Action:** {h.get('mechanism', 'Not specified')}\n\n"
-            f"**Supporting Evidence:**\n{evidence_str}\n\n"
-            f"**Risks:**\n{risks_str}\n\n"
-            f"**Validation Steps:**\n{validation_str}"
+    # Shared hypothesis context block given to every model
+    hypothesis_context = f"""HYPOTHESIS: {h.get('title', 'Untitled')}
+DISEASE: {disease}
+DISCOVERY TYPE: {discovery_type}
+CONFIDENCE: {h.get('confidence', 0):.0%}
+
+DESCRIPTION: {h.get('description', '')}
+
+MECHANISM OF ACTION: {h.get('mechanism', '')}
+
+SUPPORTING EVIDENCE:
+{evidence_str}
+
+RISKS & LIMITATIONS:
+{risks_str}
+
+PROPOSED VALIDATION:
+{validation_str}"""
+
+    grounding_instruction = """
+CRITICAL GROUNDING REQUIREMENT: Every major claim MUST be grounded in real scientific literature.
+- Cite specific authors, journal names, publication years, and DOI numbers where possible
+- Reference real clinical trials by their NCT numbers (e.g., NCT03456789)
+- Use actual drug names, gene symbols (HUGO nomenclature), protein identifiers (UniProt)
+- Reference specific FDA approvals, EMA opinions, or regulatory decisions
+- Include real statistical data: p-values, hazard ratios, confidence intervals, effect sizes
+- When discussing epidemiology, cite WHO, CDC, or national registry statistics
+Do NOT fabricate references — if uncertain, state the general finding without a specific citation."""
+
+    total_phases = 4  # parallel sections, synthesis, HTML conversion, done
+
+    # ---- Phase 1: Parallel section generation ----
+    _update_paper_phase(table, "Generating sections across 6 models...", 0, total_phases)
+    print("[PAPER] Phase 1: Parallel section generation (6 models)")
+
+    # Check cancellation
+    paper_state = table.get_item(Key={"id": PAPER_TASK_KEY}).get("Item", {})
+    if paper_state.get("status") in ("cancelled", "idle"):
+        print("[PAPER] Cancelled before phase 1")
+        return
+
+    # Build section-specific prompts
+    section_prompts = {}
+    for key, cfg in PAPER_SECTIONS.items():
+        section_prompts[key] = f"""{hypothesis_context}
+
+{grounding_instruction}
+
+Write the section: ## {cfg['heading']}
+
+Write this section for a full research paper to be published in a top-tier journal (Nature Medicine, The Lancet, NEJM).
+Be exhaustive, specific, and quantitative. Minimum 600 words. Use formal academic prose.
+Reference real studies, drugs, genes, and clinical data wherever possible.
+Write in markdown format with ## for section heading and ### for subsections."""
+
+    # Run all sections in parallel using ThreadPoolExecutor
+    section_results = {}
+    section_errors = []
+
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        futures = {}
+        for key, cfg in PAPER_SECTIONS.items():
+            client = cfg["client"]()
+            if client is None:
+                print(f"[PAPER] Skipping section '{cfg['heading']}' — no client for {cfg['model']}")
+                continue
+            futures[executor.submit(
+                _call_model_for_section,
+                key, cfg, section_prompts[key]
+            )] = key
+
+        for future in as_completed(futures):
+            section_key, result_text, error = future.result()
+            if error:
+                section_errors.append(f"{section_key}: {error}")
+                print(f"[PAPER] Section '{section_key}' failed: {error}")
+            elif result_text:
+                section_results[section_key] = result_text
+
+    completed_count = len(section_results)
+    print(f"[PAPER] Phase 1 complete: {completed_count}/{len(PAPER_SECTIONS)} sections generated")
+
+    if completed_count == 0:
+        table.update_item(
+            Key={"id": PAPER_TASK_KEY},
+            UpdateExpression="SET #s = :s, #e = :e",
+            ExpressionAttributeNames={"#s": "status", "#e": "error"},
+            ExpressionAttributeValues={
+                ":s": "failed",
+                ":e": f"All section models failed: {'; '.join(section_errors[:3])}",
+            },
         )
+        return
 
-    prompt = f"""Write a MAXIMUM-LENGTH, exhaustive research paper about {discovery_type} strategies for {disease}.
+    # Check cancellation before synthesis
+    paper_state = table.get_item(Key={"id": PAPER_TASK_KEY}).get("Item", {})
+    if paper_state.get("status") in ("cancelled", "idle"):
+        print("[PAPER] Cancelled before synthesis")
+        return
 
-THIS PAPER MUST BE AS LONG AND DETAILED AS POSSIBLE. Use every available token.
+    # ---- Phase 2: Claude Opus synthesis ----
+    _update_paper_phase(table, "Claude Opus synthesizing final paper...", 1, total_phases)
+    print("[PAPER] Phase 2: Claude Opus synthesis pass")
 
-Based on these AI-discovered hypotheses:
+    # Assemble section drafts
+    section_drafts = ""
+    for key in ["abstract", "introduction", "methods", "results_mechanism", "results_evidence",
+                 "therapeutic_protocol", "discussion", "safety_regulatory"]:
+        if key in section_results:
+            section_drafts += f"\n\n--- SECTION: {PAPER_SECTIONS[key]['heading']} ---\n{section_results[key]}"
 
-{chr(10).join(hyp_blocks)}
+    synthesis_prompt = f"""{hypothesis_context}
 
-Write a complete research paper in Markdown format with ALL sections below.
-Each section must be EXTENSIVE (multiple paragraphs with dense scientific content):
+Below are section drafts written by different AI models for a research paper. Your task is to:
 
-# {hypotheses_for_paper[0].get('title', disease)} — {discovery_type.title()} Discovery Report
+1. SYNTHESIZE these into a single cohesive, publication-ready research paper
+2. ADD the sections that are missing: Methods (2. Methods with subsections), Proposed Therapeutic Protocol, Conclusion, Tables, Figures, and References
+3. UNIFY the voice and style across all sections (Nature Medicine standard)
+4. ADD cross-references between sections (e.g., "As discussed in Section 3.1...")
+5. ADD 30+ REAL references in the format: [N] Author et al., "Title," Journal, vol(issue):pages, year. DOI:10.xxxx/xxxxx
+6. ADD 3 tables: Hypothesis Comparison, Biomarker Panel, Drug Properties (use markdown table format)
+7. ADD 3 figures as ASCII box diagrams: Disease Pathway, Mechanism of Action Flowchart, Clinical Trial Design
+8. ENSURE total paper is 15-25 pages when printed (8000-12000 words)
 
-## Abstract
-(300+ words — background, methods, key findings, clinical implications)
+{grounding_instruction}
 
-## 1. Introduction
-(500+ words — epidemiology with statistics, standard of care, unmet needs, rationale)
+SECTION DRAFTS FROM MULTIPLE MODELS:
+{section_drafts}
 
-## 2. Methods
-### 2.1 Multi-Agent AI Discovery Architecture
-### 2.2 Knowledge Integration Framework
-### 2.3 Confidence Scoring Methodology
+Write the COMPLETE final paper in markdown format. Start with:
+# {h.get('title', disease)} — {discovery_type.title()} Discovery Report
 
-## 3. Results
-(For EACH hypothesis: molecular rationale, mechanism cascade, evidence, therapeutic protocol, endpoints)
+Use ## for major sections, ### for subsections. Include ALL sections from Abstract through References."""
 
-## 4. Discussion
-### 4.1 Comparative Analysis
-### 4.2 Biological Plausibility
-### 4.3 Clinical Translation Pathway
-### 4.4 Safety Considerations
-### 4.5 Limitations and Future Directions
-
-## 5. Conclusion
-
-## Tables
-- Table 1: Hypothesis Comparison (Title | Targets | Mechanism | Confidence | TRL)
-- Table 2: Biomarker Panel (Biomarker | Assay | Utility | Status)
-- Table 3: Drug Properties (Name | Target | IC50/EC50 | Route | Phase)
-
-## Figures
-- Figure 1: Disease pathway diagram (use ASCII box diagrams with arrows)
-- Figure 2: Mechanism of action flowchart (use ASCII flowchart)
-- Figure 3: Clinical trial design schema
-
-## References
-(30+ numbered references: [N] Author et al., "Title," Journal, vol(issue):pages, year. DOI:...)
-
-CRITICAL: Maximum length. Every sentence must be specific, quantitative, evidence-based."""
-
-    system_prompt = """You are an elite biomedical research paper author. Write with Nature Medicine rigor, Phase III protocol detail, and FDA submission precision. Every claim backed by evidence. Proper nomenclature, quantitative data, formal academic structure. Write the LONGEST, most DETAILED paper possible."""
+    synthesis_system = """You are an elite scientific editor at Nature Medicine. You are synthesizing section drafts written by different expert AI models into a single publication-ready research paper. Maintain the strongest insights from each section while creating a unified voice. Every claim must be grounded in real scientific literature. The paper must read as if written by a single expert author team. Write the LONGEST, most DETAILED paper possible. Use every available token."""
 
     try:
-        print("[PAPER-WORKER] Calling Bedrock Claude Opus for paper generation (long timeout)...")
-        # Use extended-timeout client for long paper generation inference
         _paper_client = bedrock_long or bedrock_runtime
-        # Retry up to 2 times on timeout
-        last_err = None
         paper_md = None
+        last_err = None
         for attempt in range(3):
-            # Check if cancelled before each attempt
             paper_state = table.get_item(Key={"id": PAPER_TASK_KEY}).get("Item", {})
             if paper_state.get("status") in ("cancelled", "idle"):
-                print("[PAPER-WORKER] Cancelled by user, aborting")
+                print("[PAPER] Cancelled during synthesis")
                 return
             try:
-                # Always use Claude Opus via Bedrock for paper generation
-                # (best document quality + 200K context)
                 paper_md = call_bedrock(
                     model_id=PAPER_MODEL,
-                    prompt=prompt,
-                    system_prompt=system_prompt,
+                    prompt=synthesis_prompt,
+                    system_prompt=synthesis_system,
                     max_tokens=32_768,
-                    temperature=0.4,
+                    temperature=0.3,
                     client=_paper_client,
                 )
                 break
@@ -2210,18 +2411,20 @@ CRITICAL: Maximum length. Every sentence must be specific, quantitative, evidenc
                 last_err = retry_err
                 err_str = str(retry_err).lower()
                 if "timeout" in err_str or "timed out" in err_str:
-                    print(f"[PAPER-WORKER] Attempt {attempt+1}/3 timed out, retrying...")
+                    print(f"[PAPER] Synthesis attempt {attempt+1}/3 timed out, retrying...")
                     time.sleep(2)
                     continue
-                raise  # Non-timeout errors fail immediately
+                raise
         if paper_md is None:
-            raise last_err or RuntimeError("Paper generation failed after retries")
-        print(f"[PAPER-WORKER] Got {len(paper_md)} chars of markdown")
+            raise last_err or RuntimeError("Paper synthesis failed after retries")
+        print(f"[PAPER] Synthesis complete: {len(paper_md)} chars")
 
-        # Convert markdown to rich HTML with professional typography
+        # ---- Phase 3: Convert to rich HTML ----
+        _update_paper_phase(table, "Rendering final document...", 2, total_phases)
         paper_html = _markdown_to_rich_html(paper_md, disease, discovery_type, hypotheses_for_paper)
 
-        # Store in DynamoDB (max item 400KB, paper should be well under)
+        # ---- Phase 4: Store in DynamoDB ----
+        _update_paper_phase(table, "Done", 3, total_phases)
         table.update_item(
             Key={"id": PAPER_TASK_KEY},
             UpdateExpression="SET #s = :s, #p = :p, #u = :u",
@@ -2232,9 +2435,9 @@ CRITICAL: Maximum length. Every sentence must be specific, quantitative, evidenc
                 ":u": datetime.utcnow().isoformat(),
             },
         )
-        print("[PAPER-WORKER] Paper saved to DynamoDB")
+        print("[PAPER] Paper saved to DynamoDB")
     except Exception as e:
-        print(f"[PAPER-WORKER] FAILED: {e}")
+        print(f"[PAPER] FAILED: {e}")
         import traceback
         traceback.print_exc()
         table.update_item(

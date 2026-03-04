@@ -561,17 +561,21 @@ export default function Agents() {
     }
   }, [])
 
-  // Start phase animation for paper generation
+  // Start phase animation for paper generation — polls backend for real phase progress
   const startPaperPhaseAnimation = useCallback(() => {
     setPaperPhase(0)
     if (paperPhaseRef.current) clearInterval(paperPhaseRef.current)
-    let phase = 0
-    paperPhaseRef.current = window.setInterval(() => {
-      phase++
-      if (phase <= 4) {
-        setPaperPhase(phase)
-      }
-    }, 8000) // Advance phase every 8 seconds
+    paperPhaseRef.current = window.setInterval(async () => {
+      try {
+        const res = await fetch(`${API_BASE}/orchestrator/paper-status`)
+        if (res.ok) {
+          const data = await res.json()
+          if (typeof data.phase_num === 'number') {
+            setPaperPhase(data.phase_num)
+          }
+        }
+      } catch { /* ignore */ }
+    }, 3000) // Poll every 3 seconds
   }, [])
 
   const stopPaperPhaseAnimation = useCallback(() => {
@@ -1221,11 +1225,10 @@ export default function Agents() {
               {/* Phase progress with active step indicator */}
               <div className="flex items-center gap-2 text-xs mb-2">
                 {[
-                  'Phase 1: Abstract & Intro',
-                  'Phase 2: Core Sections',
-                  'Phase 3: Synthesis',
-                  'Phase 4: QA Review',
-                  'PDF Render',
+                  '6 Models Writing Sections',
+                  'Claude Opus Synthesizing',
+                  'Rendering Document',
+                  'Complete',
                 ].map((label, idx) => (
                   <span key={idx} className="flex items-center gap-1.5">
                     {idx > 0 && <span className="text-secondary-600">&rarr;</span>}
@@ -1242,11 +1245,11 @@ export default function Agents() {
               <div className="h-1.5 bg-secondary-700 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-purple-500 rounded-full transition-all duration-1000 ease-out"
-                  style={{ width: `${Math.min(((paperPhase + 1) / 5) * 100, 95)}%` }}
+                  style={{ width: `${Math.min(((paperPhase + 1) / 4) * 100, 95)}%` }}
                 />
               </div>
               <p className="text-xs text-purple-400/60 mt-1.5">
-                Step {paperPhase + 1} of 5 &middot; This may take a few minutes
+                Step {paperPhase + 1} of 4 &middot; Multi-model pipeline
               </p>
             </div>
           )}
