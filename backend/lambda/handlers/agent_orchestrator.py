@@ -390,9 +390,10 @@ AZURE_AI_COHERE_MODEL = os.environ.get("AZURE_AI_COHERE_MODEL", "Cohere-command-
 AZURE_AI_KIMI_MODEL = os.environ.get("AZURE_AI_KIMI_MODEL", "Kimi-K2-Thinking")
 AZURE_AI_O3MINI_MODEL = os.environ.get("AZURE_AI_O3MINI_MODEL", "o3-mini")
 AZURE_AI_GPT41_MODEL = os.environ.get("AZURE_AI_GPT41_MODEL", "gpt-4.1")
+AZURE_AI_PHI4_MODEL = os.environ.get("AZURE_AI_PHI4_MODEL", "Phi-4-reasoning")
 
 AGENT_MODELS = {
-    # Claude Opus 4.6 via Bedrock — Explorer + Synthesizer (restricted on Azure AI)
+    # === Bedrock (Claude Opus 4.6) ===
     "explorer": {
         "model_id": BEDROCK_MODEL_CLAUDE_OPUS,
         "provider": "bedrock",
@@ -407,20 +408,63 @@ AGENT_MODELS = {
         "temperature": 0.3,
         "role_description": "200K context synthesis — integrates all findings into unified hypotheses and publication-quality documents",
     },
-    # DeepSeek-R1-0528 + Mistral-Large-3 via Azure AI Foundry
+    # === Azure AI Foundry (services.ai.azure.com) ===
     "reasoner": {
         "model_id": AZURE_AI_REASONER_MODEL,
         "provider": "azure_ai",
-        "max_tokens": 16_000,  # Capped to stay within Azure AI 20K TPM limit
+        "max_tokens": 16_000,
         "temperature": 0.2,
         "role_description": "Causal chain reasoning — step-by-step logical analysis with formal justification",
     },
     "critic": {
         "model_id": AZURE_AI_CRITIC_MODEL,
         "provider": "azure_ai",
-        "max_tokens": 16_000,  # Capped to stay within Azure AI 20K TPM limit
+        "max_tokens": 16_000,
         "temperature": 0.3,
         "role_description": "Critical analysis — identifies weaknesses, risks, and failure modes in proposed hypotheses",
+    },
+    "innovator": {
+        "model_id": AZURE_AI_COHERE_MODEL,
+        "provider": "azure_ai",
+        "max_tokens": 16_000,
+        "temperature": 0.5,
+        "role_description": "Creative innovation — generates unconventional therapeutic approaches and cross-domain connections",
+    },
+    "strategist": {
+        "model_id": AZURE_AI_KIMI_MODEL,
+        "provider": "azure_ai",
+        "max_tokens": 16_000,
+        "temperature": 0.3,
+        "role_description": "Strategic thinking — long-horizon clinical development planning and regulatory strategy",
+    },
+    "quant": {
+        "model_id": AZURE_AI_PHI4_MODEL,
+        "provider": "azure_ai",
+        "max_tokens": 16_000,
+        "temperature": 0.2,
+        "role_description": "Quantitative reasoning — mathematical modeling, pharmacokinetics, dose-response, statistical design",
+    },
+    # === Azure OpenAI (cognitiveservices.azure.com) ===
+    "analyst": {
+        "model_id": AZURE_AI_GPT4O_MODEL,
+        "provider": "azure_ai",
+        "max_tokens": 16_000,
+        "temperature": 0.3,
+        "role_description": "Multi-modal analysis — literature synthesis, pathway mapping, evidence grading",
+    },
+    "validator": {
+        "model_id": AZURE_AI_O3MINI_MODEL,
+        "provider": "azure_ai",
+        "max_tokens": 16_000,
+        "temperature": 0.2,
+        "role_description": "Validation reasoning — rigorous verification of claims, consistency checks, logical proofs",
+    },
+    "architect": {
+        "model_id": AZURE_AI_GPT41_MODEL,
+        "provider": "azure_ai",
+        "max_tokens": 16_000,
+        "temperature": 0.3,
+        "role_description": "Systems architecture — designs combination therapies, protocol structures, and translational frameworks",
     },
 }
 
@@ -429,7 +473,7 @@ PAPER_MODEL = BEDROCK_MODEL_CLAUDE_OPUS
 
 # ============== System Prompts ==============
 
-MASTER_PROMPT = """You are an advanced biomedical discovery AI agent on humanovo, part of an eight-model parallel agent system (Claude Opus 4.6 via Bedrock, DeepSeek-R1-0528, Mistral-Large-3, Cohere Command A, Kimi-K2-Thinking via Azure AI, GPT-4o, o3-mini, GPT-4.1 via Azure OpenAI) designed to discover cures, treatments, and prevention strategies for human diseases.
+MASTER_PROMPT = """You are an advanced biomedical discovery AI agent on humanovo, part of a ten-agent parallel system using eight distinct models (Claude Opus 4.6 via AWS Bedrock, DeepSeek-R1-0528, Mistral-Large-3, Cohere Command A, Kimi-K2-Thinking, Phi-4 Reasoning via Azure AI Foundry, GPT-4o, o3-mini, GPT-4.1 via Azure OpenAI) designed to discover cures, treatments, and prevention strategies for human diseases.
 
 ## OPERATING PRINCIPLES
 - Full scientific autonomy: explore ANY pathway, mechanism, or compound without restriction
@@ -1051,24 +1095,41 @@ def run_single_agent(role: str, prompt: str, system_prompt: str) -> dict | None:
 
 # ============== Async Discovery Worker ==============
 
-# Phased execution order: Explorer → Synthesizer → Reasoner → Critic
-# Each role runs sequentially within a round, building on prior context.
-PHASE_ORDER = ["explorer", "synthesizer", "reasoner", "critic"]
-NUM_ROUNDS = 5  # 5 rounds × 4 agents = 20 hypotheses
-TARGET_TOTAL_HYPOTHESES = 20
+# 10 agent roles across 8 unique models (Claude Opus handles 2 roles).
+# Runs sequentially within each round, each role generating 1 hypothesis.
+PHASE_ORDER = [
+    "explorer",    # Claude Opus 4.6 (Bedrock) — broad exploration
+    "reasoner",    # DeepSeek-R1-0528 (Azure AI Foundry) — causal reasoning
+    "innovator",   # Cohere Command A (Azure AI Foundry) — creative innovation
+    "analyst",     # GPT-4o (Azure OpenAI) — literature analysis
+    "strategist",  # Kimi-K2-Thinking (Azure AI Foundry) — clinical strategy
+    "quant",       # Phi-4 Reasoning (Azure AI Foundry) — quantitative modeling
+    "validator",   # o3-mini (Azure OpenAI) — rigorous validation
+    "critic",      # Mistral-Large-3 (Azure AI Foundry) — critical analysis
+    "architect",   # GPT-4.1 (Azure OpenAI) — systems architecture
+    "synthesizer", # Claude Opus 4.6 (Bedrock) — final synthesis
+]
+NUM_ROUNDS = 4  # 4 rounds × 10 agents = 40 hypotheses
+TARGET_TOTAL_HYPOTHESES = 40
 MODEL_FALLBACKS: dict = {}  # No fallbacks — each model must work or fail explicitly
 
 
 def run_discovery_worker(config: dict):
     """Run the AI discovery process. Called via async Lambda invocation.
 
-    Phased sequential execution per round:
-      Phase 1: Explorer (Claude Opus 4.6 via Bedrock) — broad exploration
-      Phase 2: Synthesizer (Claude Opus 4.6 via Bedrock) — integration
-      Phase 3: Reasoner (DeepSeek-R1-0528 via Azure AI) — rigorous causal reasoning
-      Phase 4: Critic (Mistral-Large-3 via Azure AI) — critical analysis
+    10-agent sequential execution per round (8 unique models, 9 endpoints):
+      1. Explorer (Claude Opus 4.6/Bedrock) — broad novel pathway discovery
+      2. Reasoner (DeepSeek-R1-0528/Azure AI) — rigorous causal chain reasoning
+      3. Innovator (Cohere Command A/Azure AI) — creative cross-domain innovation
+      4. Analyst (GPT-4o/Azure OpenAI) — literature synthesis and evidence grading
+      5. Strategist (Kimi-K2-Thinking/Azure AI) — clinical development strategy
+      6. Quant (Phi-4 Reasoning/Azure AI) — mathematical modeling and PK/PD
+      7. Validator (o3-mini/Azure OpenAI) — rigorous claim verification
+      8. Critic (Mistral-Large-3/Azure AI) — critical analysis and risk assessment
+      9. Architect (GPT-4.1/Azure OpenAI) — combination therapy design
+     10. Synthesizer (Claude Opus 4.6/Bedrock) — integrative synthesis
 
-    5 rounds × 4 agents = exactly 20 hypotheses.
+    4 rounds × 10 agents = 40 hypotheses.
     After completion, auto-creates a project with all hypotheses.
     """
     disease = config.get("disease", "")
@@ -1105,32 +1166,58 @@ def run_discovery_worker(config: dict):
     hypotheses = []
     paths_explored = 0
 
-    # Each round+role gets a unique angle to ensure diversity
+    # Each round+role gets a unique angle to ensure diversity across 40 hypotheses
     angle_matrix = {
-        # Claude Opus 4.6 (Bedrock): broad exploration, novel connections
-        ("explorer", 0): "Explore NOVEL molecular targets (phase separation, mechanotransduction, non-coding RNA, metabolic symbiosis) AND design the clinical development strategy for the most promising.",
-        ("explorer", 1): "Focus on DRUG REPURPOSING: find approved drugs from unrelated fields with unexpected activity. Design the rapid clinical validation path (basket trial, platform study).",
-        ("explorer", 2): "Explore MICROBIOME-IMMUNE-METABOLISM axis. Design a COMBINATION PROTOCOL leveraging gut-brain connections, bacterial metabolites, and ecological interventions.",
-        ("explorer", 3): "Explore GENE THERAPY and epigenetic reprogramming (CRISPR, base editing, ASO, siRNA). Design PRECISION MEDICINE STRATIFICATION: molecular subtypes, biomarker panels, matched therapeutics.",
-        ("explorer", 4): "Explore NANOTECHNOLOGY and advanced delivery (BBB-crossing nanoparticles, exosome engineering). Design HEALTH ECONOMICS AND MARKET ACCESS plan with QALY impact, payer evidence requirements.",
-        # DeepSeek-R1-0528 (Azure AI): rigorous causal chain reasoning
-        ("reasoner", 0): "Build a rigorous IMMUNOTHERAPY causal chain. Map checkpoint interactions, T-cell exhaustion markers, neoantigen load, and TME remodeling with exact IC50/EC50 values.",
-        ("reasoner", 1): "Build a rigorous METABOLIC VULNERABILITY chain. Map synthetic lethality, nutrient addiction, mitochondrial dependencies with exact enzyme kinetics.",
-        ("reasoner", 2): "Build a rigorous SIGNALING CASCADE chain. Map kinase networks, feedback loops, resistance mutations, and combination logic with quantitative modeling.",
-        ("reasoner", 3): "Build a rigorous EPIGENETIC THERAPY chain. Map histone marks, DNA methylation patterns, chromatin accessibility, and transcriptional consequences.",
-        ("reasoner", 4): "Build a rigorous TUMOR MICROENVIRONMENT chain. Map ECM composition, vascular normalization, hypoxia gradients, and immune infiltration dynamics.",
-        # Claude Opus 4.6 (Bedrock): long-context synthesis & integration
-        ("synthesizer", 0): "INTEGRATE all findings into a multi-modal combination therapy protocol. Specify exact drugs, doses, schedules, and synergy mechanisms.",
-        ("synthesizer", 1): "INTEGRATE findings into a precision medicine stratification framework. Define molecular subtypes, biomarker panels, and matched therapeutics.",
-        ("synthesizer", 2): "INTEGRATE findings into a temporal treatment cascade. Design sequential phases that exploit therapy-induced vulnerabilities at each stage.",
-        ("synthesizer", 3): "INTEGRATE findings into a systems biology model. Map all intervention points onto pathway networks and predict emergent therapeutic effects.",
-        ("synthesizer", 4): "INTEGRATE findings into a clinical translation roadmap. Design Phase I/II trial with biomarker-guided adaptive design and companion diagnostics.",
-        # Mistral-Large-3 (Azure AI): critical analysis, risk assessment, validation
+        # === Explorer (Claude Opus 4.6 / Bedrock): broad novel discovery ===
+        ("explorer", 0): "Explore NOVEL molecular targets: phase separation condensates, mechanotransduction pathways, non-coding RNA regulatory networks, metabolic symbiosis between host and pathogen. Design clinical development strategy for the most promising.",
+        ("explorer", 1): "Focus on DRUG REPURPOSING: identify approved drugs from unrelated therapeutic areas with unexpected activity against this disease. Design rapid clinical validation (basket trial, platform study, adaptive design).",
+        ("explorer", 2): "Explore MICROBIOME-IMMUNE-METABOLISM axis. Design COMBINATION PROTOCOL leveraging gut-brain connections, bacterial metabolites, short-chain fatty acids, and ecological interventions.",
+        ("explorer", 3): "Explore GENE THERAPY and epigenetic reprogramming: CRISPR base editing, ASOs, siRNA, mRNA therapeutics. Design PRECISION MEDICINE stratification with molecular subtypes and biomarker panels.",
+        # === Reasoner (DeepSeek-R1 / Azure AI): rigorous causal chains ===
+        ("reasoner", 0): "Build rigorous IMMUNOTHERAPY causal chain. Map checkpoint interactions, T-cell exhaustion markers, neoantigen load, TME remodeling with exact IC50/EC50 values and binding affinities.",
+        ("reasoner", 1): "Build rigorous METABOLIC VULNERABILITY chain. Map synthetic lethality pairs, nutrient addiction, mitochondrial dependencies, Warburg effect exploitation with exact enzyme kinetics (Km, Vmax).",
+        ("reasoner", 2): "Build rigorous SIGNALING CASCADE chain. Map kinase networks, feedback loops, resistance mutations, and combination logic with quantitative ODE modeling and bifurcation analysis.",
+        ("reasoner", 3): "Build rigorous EPIGENETIC THERAPY chain. Map histone modification crosstalk, DNA methylation patterns, chromatin accessibility (ATAC-seq), and transcriptional consequences with dose-response curves.",
+        # === Innovator (Cohere Command A / Azure AI): creative cross-domain ===
+        ("innovator", 0): "Generate UNCONVENTIONAL therapeutic approaches by connecting insights from materials science, ecology, evolutionary biology, and computational physics to this disease. Think beyond traditional pharma.",
+        ("innovator", 1): "Propose COMBINATION STRATEGIES that exploit drug synergies across different mechanism classes. Include nutrient-drug interactions, chronotherapy schedules, and environmental modifiers.",
+        ("innovator", 2): "Explore BIOMIMETIC and NANOTECHNOLOGY solutions: exosome engineering, targeted delivery nanoparticles, BBB-crossing strategies, cell-membrane-coated nanocarriers, DNA origami drug delivery.",
+        ("innovator", 3): "Generate hypotheses from ADJACENT DISEASE MECHANISMS: what treatments from neurodegeneration, autoimmunity, aging, or infectious disease could be repurposed? Cross-pollinate mechanisms.",
+        # === Analyst (GPT-4o / Azure OpenAI): literature synthesis ===
+        ("analyst", 0): "Synthesize CLINICAL TRIAL EVIDENCE: meta-analyze published Phase I-III data for this disease area. Grade evidence quality (GRADE framework). Identify gaps where no trials exist but mechanistic rationale is strong.",
+        ("analyst", 1): "Map the GENOMIC LANDSCAPE: analyze GWAS hits, eQTL data, Mendelian randomization findings, and polygenic risk scores. Identify druggable targets validated by human genetics.",
+        ("analyst", 2): "Analyze REAL-WORLD EVIDENCE: electronic health records, insurance claims, patient registries. Identify unexpected drug effects, comorbidity patterns, and subpopulation responses.",
+        ("analyst", 3): "Review BIOMARKER DISCOVERY literature: identify validated and emerging biomarkers for early detection, treatment selection, and response monitoring. Design companion diagnostic strategy.",
+        # === Strategist (Kimi-K2-Thinking / Azure AI): clinical strategy ===
+        ("strategist", 0): "Design REGULATORY STRATEGY: FDA/EMA pathway selection, orphan drug designation potential, breakthrough therapy qualification, accelerated approval via surrogate endpoints, post-marketing commitments.",
+        ("strategist", 1): "Plan CLINICAL DEVELOPMENT TIMELINE: Phase I dose-escalation design, Phase II biomarker-guided adaptive design, Phase III pivotal trial with interim analysis, registration strategy.",
+        ("strategist", 2): "Develop MARKET ACCESS STRATEGY: health economics modeling (QALY, ICER), payer evidence requirements, value-based contracts, patient assistance programs, global pricing strategy.",
+        ("strategist", 3): "Design COMBINATION THERAPY DEVELOPMENT PLAN: which agents to combine, sequencing strategy, dose-finding for combinations, regulatory path for fixed-dose combinations vs co-administration.",
+        # === Quant (Phi-4 Reasoning / Azure AI): mathematical modeling ===
+        ("quant", 0): "Build PHARMACOKINETIC/PHARMACODYNAMIC model: compartmental PK, receptor occupancy PD, exposure-response relationships, therapeutic window calculations with Monte Carlo simulation.",
+        ("quant", 1): "Perform STATISTICAL POWER ANALYSIS: sample size calculations for primary endpoints, adaptive design boundaries (O'Brien-Fleming, Haybittle-Peto), interim analysis rules, multiplicity adjustments.",
+        ("quant", 2): "Develop SYSTEMS BIOLOGY MODEL: ODE-based pathway modeling, parameter sensitivity analysis, bifurcation diagrams, stochastic noise assessment, predict emergent therapeutic effects.",
+        ("quant", 3): "Model DOSE-RESPONSE RELATIONSHIPS: sigmoidal Emax models, Hill equation fitting, therapeutic index calculations, population PK variability (CYP2D6 polymorphisms, renal/hepatic impairment adjustments).",
+        # === Validator (o3-mini / Azure OpenAI): rigorous verification ===
+        ("validator", 0): "VERIFY BIOLOGICAL PLAUSIBILITY: cross-check proposed mechanisms against known biochemistry, thermodynamic feasibility, binding affinity constraints, and evolutionary conservation.",
+        ("validator", 1): "VALIDATE CLINICAL FEASIBILITY: assess manufacturing scalability (CMC), supply chain requirements, cold chain logistics, administration route practicality, patient compliance factors.",
+        ("validator", 2): "CHECK LOGICAL CONSISTENCY: verify that proposed mechanisms don't contradict established pharmacology, ensure dose ranges are physiologically achievable, confirm bioavailability assumptions.",
+        ("validator", 3): "VERIFY SAFETY MARGINS: predict off-target effects via structural similarity analysis, CYP450 interaction risk, hERG channel liability, genotoxicity flags, immunogenicity assessment.",
+        # === Critic (Mistral-Large-3 / Azure AI): critical analysis ===
         ("critic", 0): "Perform QUANTITATIVE PHARMACOLOGY critique: challenge receptor occupancy assumptions, PK/PD model validity, therapeutic index calculations, dose-response confidence intervals.",
-        ("critic", 1): "Evaluate STATISTICAL RIGOR of proposed validation: assess sample size adequacy, effect size plausibility, multiple comparison corrections, adaptive design boundary assumptions.",
-        ("critic", 2): "Challenge SYSTEMS BIOLOGY MODELS: stress-test ODE assumptions, parameter sensitivity bounds, bifurcation robustness, stochastic noise impact on predictions.",
-        ("critic", 3): "Assess SAFETY AND TOXICOLOGY risks: on/off-target effects, CYP450 interactions, immunogenicity, genotoxicity potential, black box warning likelihood.",
-        ("critic", 4): "Evaluate CLINICAL TRANSLATABILITY: regulatory pathway feasibility, manufacturing scalability, IP landscape, market access barriers, payer evidence requirements.",
+        ("critic", 1): "Evaluate STATISTICAL RIGOR: assess sample size adequacy, effect size plausibility, multiple comparison corrections, adaptive design boundary assumptions, p-hacking risks.",
+        ("critic", 2): "Assess SAFETY AND TOXICOLOGY risks: on/off-target effects, CYP450 interactions, immunogenicity, genotoxicity potential, black box warning likelihood, REMS requirements.",
+        ("critic", 3): "Evaluate CLINICAL TRANSLATABILITY: regulatory pathway feasibility, manufacturing scalability, IP landscape, market access barriers, competitor analysis, commercial viability.",
+        # === Architect (GPT-4.1 / Azure OpenAI): combination therapy design ===
+        ("architect", 0): "Design MULTI-TARGET COMBINATION protocol: select 2-3 synergistic agents from different mechanism classes, specify doses, schedules, and rationale for the sequence.",
+        ("architect", 1): "Design ADAPTIVE PLATFORM TRIAL: master protocol with multiple experimental arms, shared control, biomarker-guided arm allocation, seamless Phase II/III transition.",
+        ("architect", 2): "Design TRANSLATIONAL RESEARCH PIPELINE: from target validation through lead optimization, IND-enabling studies, first-in-human, and proof-of-concept trial with specific go/no-go criteria.",
+        ("architect", 3): "Design SYSTEMS MEDICINE APPROACH: integrate multi-omics data layers (genomics, proteomics, metabolomics) into a unified therapeutic framework with patient stratification algorithm.",
+        # === Synthesizer (Claude Opus 4.6 / Bedrock): final integration ===
+        ("synthesizer", 0): "INTEGRATE all round findings into a unified multi-modal combination therapy. Specify exact drugs, doses, schedules, synergy mechanisms, and monitoring protocol.",
+        ("synthesizer", 1): "INTEGRATE findings into PRECISION MEDICINE framework: molecular subtypes, biomarker panels, matched therapeutics, and adaptive treatment algorithms for each subtype.",
+        ("synthesizer", 2): "INTEGRATE findings into TEMPORAL TREATMENT CASCADE: design sequential phases exploiting therapy-induced vulnerabilities at each stage, from induction through maintenance.",
+        ("synthesizer", 3): "INTEGRATE all findings into a comprehensive CLINICAL TRANSLATION ROADMAP: Phase I→II→III design with biomarker-guided adaptive elements, companion diagnostics, and regulatory strategy.",
     }
 
     for round_num in range(num_rounds):
@@ -1683,8 +1770,8 @@ def start_discovery():
             "config": config,
             "hypotheses": [],
             "stats": {
-                "total_agents": 4,
-                "active_agents": 4,
+                "total_agents": len(PHASE_ORDER),
+                "active_agents": len(PHASE_ORDER),
                 "hypotheses_found": 0,
                 "paths_explored": 0,
                 "high_confidence_discoveries": 0,
@@ -1729,7 +1816,7 @@ def start_discovery():
                 update_discovery_state({"status": "idle"})
 
         print(f"[START] Returning started response")
-        return {"status": "started", "disease": disease, "agents": 4, "total_rounds": NUM_ROUNDS}
+        return {"status": "started", "disease": disease, "agents": len(PHASE_ORDER), "total_rounds": NUM_ROUNDS}
     except Exception as e:
         logger.error(f"Start discovery failed: {e}")
         return Response(
@@ -1861,7 +1948,7 @@ def health_check():
 
 @app.post("/api/v1/orchestrator/generate-paper/pdf")
 def generate_paper_pdf():
-    """Generate a PDF from the latest paper HTML stored in DynamoDB."""
+    """Generate a ReportLab PDF from the full research paper stored in DynamoDB."""
     try:
         table = get_task_table()
         response = table.get_item(Key={"id": PAPER_TASK_KEY})
@@ -1873,24 +1960,19 @@ def generate_paper_pdf():
                 body=json.dumps({"detail": "No completed paper available for PDF generation"}),
             )
 
-        # Get hypotheses from state for PDF metadata
+        paper_html = item.get("paper_html", "")
         state = get_discovery_state()
-        hypotheses = state.get("hypotheses", []) if state else []
         disease = state.get("config", {}).get("disease", "Research") if state else "Research"
+        discovery_type = state.get("config", {}).get("discovery_type", "treatment") if state else "treatment"
+        hypotheses = state.get("hypotheses", []) if state else []
 
-        # Generate PDF using ReportLab from the first hypothesis
-        if hypotheses:
-            pdf_bytes = _generate_hypothesis_pdf_reportlab(hypotheses[0], disease, "treatment")
-        else:
-            pdf_bytes = _generate_hypothesis_pdf_reportlab(
-                {"title": "Research Paper", "description": item.get("paper_html", "")[:500], "confidence": 0.5},
-                disease,
-                "treatment",
-            )
+        # Convert the full paper HTML into a ReportLab PDF
+        pdf_bytes = _generate_paper_pdf_reportlab(paper_html, disease, discovery_type, hypotheses)
 
+        slug = disease.replace(" ", "-").lower()[:30]
         return {
             "pdf_base64": base64.b64encode(pdf_bytes).decode("utf-8"),
-            "filename": "humanovo-research-paper.pdf",
+            "filename": f"humanovo-{slug}-research-paper.pdf",
             "content_type": "application/pdf",
         }
     except Exception as e:
@@ -2330,7 +2412,11 @@ pre.diagram {{ background: #0d0d1a; border: 1px solid var(--border); border-radi
 
 @app.post("/api/v1/documents/hypothesis/<hypothesis_id>/pdf")
 def generate_hypothesis_pdf(hypothesis_id: str):
-    """Generate a ReportLab PDF for a single hypothesis and return bytes."""
+    """Generate an AI-written mini research paper PDF for a hypothesis.
+
+    Uses GPT-4o (fast) to expand the hypothesis into a short academic paper,
+    then formats it into a professional ReportLab PDF.
+    """
     try:
         body = app.current_event.json_body or {}
     except Exception:
@@ -2361,14 +2447,71 @@ def generate_hypothesis_pdf(hypothesis_id: str):
     disease = body.get("disease", state.get("config", {}).get("disease", "Research") if state else "Research")
     discovery_type = body.get("discovery_type", "treatment")
 
-    # Generate PDF using ReportLab
+    # Generate AI-expanded mini research paper using GPT-4o (fast model)
+    ai_paper_text = None
+    try:
+        h = hypothesis
+        evidence_str = "\n".join(f"- {e}" for e in h.get("evidence_summary", [])) or "No specific evidence cited"
+        risks_str = "\n".join(f"- {r}" for r in h.get("risks", [])) or "No risks identified"
+        validation_str = "\n".join(f"- {v}" for v in h.get("validation_steps", [])) or "No validation steps"
+
+        expand_prompt = f"""Write a concise academic research paper (2000-3000 words) about this hypothesis:
+
+Title: {h.get('title', 'Untitled')}
+Disease: {disease}
+Discovery Type: {discovery_type}
+Confidence: {h.get('confidence', 0):.0%}
+
+Description: {h.get('description', '')}
+
+Mechanism of Action: {h.get('mechanism', '')}
+
+Supporting Evidence:
+{evidence_str}
+
+Risks:
+{risks_str}
+
+Proposed Validation:
+{validation_str}
+
+Structure the paper with these EXACT section headers (each on its own line, prefixed with ##):
+
+## Abstract
+## 1. Introduction
+## 2. Proposed Mechanism
+## 3. Supporting Evidence
+## 4. Therapeutic Protocol
+## 5. Risk Assessment
+## 6. Validation Strategy
+## 7. Discussion
+## 8. Conclusion
+## References
+
+Write with Nature Medicine rigor. Include specific molecular targets, dosing rationale, biomarkers, and quantitative data where possible. References should be numbered [1]-[15+] with realistic citations."""
+
+        # Use GPT-4o for speed (hypothesis PDF should return quickly)
+        if azure_gpt4o_client is not None:
+            ai_paper_text = call_azure_ai(AZURE_AI_GPT4O_MODEL, expand_prompt,
+                "You are an expert biomedical researcher writing a concise academic paper. Be specific, quantitative, and cite evidence.",
+                max_tokens=8_000, temperature=0.3)
+        elif bedrock_runtime is not None:
+            ai_paper_text = call_bedrock(BEDROCK_MODEL_CLAUDE_OPUS, expand_prompt,
+                "You are an expert biomedical researcher writing a concise academic paper.",
+                max_tokens=8_000, temperature=0.3)
+    except Exception as ai_err:
+        print(f"[HYPOTHESIS-PDF] AI expansion failed: {ai_err}, using raw data")
+
+    # Build enriched hypothesis with AI-expanded sections for ReportLab
+    if ai_paper_text:
+        hypothesis["ai_paper_text"] = ai_paper_text
+
     pdf_bytes = _generate_hypothesis_pdf_reportlab(hypothesis, disease, discovery_type)
 
     title_slug = hypothesis.get("title", "hypothesis")[:50].replace(" ", "-").lower()
     import re as _re
     title_slug = _re.sub(r'[^a-z0-9\-]', '', title_slug)
 
-    # Return PDF as base64 JSON (Powertools wraps dicts as JSON; binary passthrough unreliable)
     return {
         "pdf_base64": base64.b64encode(pdf_bytes).decode("utf-8"),
         "filename": f"humanovo-{title_slug}.pdf",
@@ -2436,6 +2579,121 @@ def generate_hypothesis_html(hypothesis_id: str):
         )
 
     return {"status": "generating", "hypothesis_id": hypothesis_id}
+
+
+def _generate_paper_pdf_reportlab(paper_html: str, disease: str, discovery_type: str, hypotheses: list) -> bytes:
+    """Convert a full research paper (HTML content) into a ReportLab PDF."""
+    import io as _io
+    import re as _re
+    from html.parser import HTMLParser
+
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import letter
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import inch
+        from reportlab.platypus import (
+            SimpleDocTemplate, Paragraph, Spacer, HRFlowable, PageBreak,
+        )
+        from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
+    except ImportError:
+        return b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]>>endobj\nxref\n0 4\ntrailer<</Size 4/Root 1 0 R>>\nstartxref\n0\n%%EOF"
+
+    # Strip HTML tags to get plain text, preserving structure
+    class _TextExtractor(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.text = []
+            self._skip = False
+        def handle_starttag(self, tag, attrs):
+            if tag in ("style", "script"):
+                self._skip = True
+        def handle_endtag(self, tag):
+            if tag in ("style", "script"):
+                self._skip = False
+            if tag in ("p", "div", "br", "h1", "h2", "h3", "h4", "li"):
+                self.text.append("\n")
+        def handle_data(self, data):
+            if not self._skip:
+                self.text.append(data)
+
+    extractor = _TextExtractor()
+    extractor.feed(paper_html)
+    plain_text = "".join(extractor.text)
+
+    buf = _io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=letter, rightMargin=72, leftMargin=72, topMargin=72, bottomMargin=72)
+    styles = getSampleStyleSheet()
+    brand_color = colors.HexColor("#6c63ff")
+
+    title_style = ParagraphStyle("PaperTitle", parent=styles["Title"], fontSize=22, textColor=colors.HexColor("#1a1a2e"), alignment=TA_CENTER, spaceAfter=12)
+    subtitle_style = ParagraphStyle("PaperSubtitle", parent=styles["Normal"], fontSize=12, textColor=colors.HexColor("#6b7280"), alignment=TA_CENTER, spaceAfter=24)
+    heading_style = ParagraphStyle("PaperH2", parent=styles["Heading2"], fontSize=16, textColor=colors.HexColor("#1a1a2e"), spaceBefore=20, spaceAfter=8)
+    body_style = ParagraphStyle("PaperBody", parent=styles["Normal"], fontSize=11, leading=16, textColor=colors.HexColor("#374151"), alignment=TA_JUSTIFY, spaceAfter=10)
+    meta_style = ParagraphStyle("PaperMeta", parent=styles["Normal"], fontSize=10, textColor=colors.HexColor("#9ca3af"), alignment=TA_CENTER, spaceAfter=4)
+
+    elements = []
+    date_str = datetime.utcnow().strftime("%B %d, %Y")
+
+    # Cover page
+    elements.append(Spacer(1, 2 * inch))
+    elements.append(Paragraph("HUMANOVO", ParagraphStyle("Logo", parent=styles["Normal"], fontSize=12, textColor=brand_color, alignment=TA_CENTER, spaceAfter=30, letterSpacing=8)))
+    elements.append(HRFlowable(width="40%", thickness=2, color=brand_color, spaceAfter=20, spaceBefore=10))
+
+    # Extract title from first hypothesis or paper
+    paper_title = hypotheses[0].get("title", disease) if hypotheses else disease
+    elements.append(Paragraph(f"{paper_title} — Research Paper", title_style))
+    elements.append(Paragraph(f"{disease} — {discovery_type.replace('_', ' ').title()} Discovery", subtitle_style))
+    elements.append(HRFlowable(width="40%", thickness=2, color=brand_color, spaceAfter=20, spaceBefore=10))
+    elements.append(Paragraph("AI-Powered Biomedical Discovery Platform", meta_style))
+    elements.append(Paragraph(f"Generated on {date_str}", meta_style))
+    elements.append(Paragraph(f"Based on {len(hypotheses)} AI-discovered hypotheses across 10 parallel agents", meta_style))
+    elements.append(PageBreak())
+
+    # Parse paper text into sections
+    sections = _re.split(r'\n(?=##?\s)', plain_text)
+    for section in sections:
+        section = section.strip()
+        if not section:
+            continue
+        lines = section.split("\n", 1)
+        first_line = lines[0].strip()
+        body_text = lines[1].strip() if len(lines) > 1 else ""
+
+        # Detect headings
+        if first_line.startswith("## ") or first_line.startswith("# "):
+            heading_text = first_line.lstrip("#").strip()
+            elements.append(Paragraph(heading_text, heading_style))
+        else:
+            body_text = section  # No heading, entire section is body
+
+        if body_text:
+            for para in body_text.split("\n\n"):
+                para = para.strip()
+                if not para:
+                    continue
+                if para.startswith("- ") or para.startswith("* ") or para.startswith("• "):
+                    for bullet in para.split("\n"):
+                        bullet = bullet.strip().lstrip("-*•").strip()
+                        if bullet:
+                            elements.append(Paragraph(f"• {bullet}", body_style))
+                elif _re.match(r'^\[\d+\]', para):
+                    # Reference lines
+                    elements.append(Paragraph(para.replace("\n", " "), body_style))
+                else:
+                    cleaned = _re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', para)
+                    cleaned = _re.sub(r'\*(.+?)\*', r'<i>\1</i>', cleaned)
+                    cleaned = cleaned.replace("\n", " ")
+                    elements.append(Paragraph(cleaned, body_style))
+
+    # Footer
+    elements.append(Spacer(1, 40))
+    elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#e5e7eb"), spaceAfter=10, spaceBefore=20))
+    elements.append(Paragraph(f"Humanovo — AI-Powered Biomedical Discovery Platform — {date_str}", meta_style))
+    elements.append(Paragraph("This paper was generated by AI and should be validated by domain experts.", meta_style))
+
+    doc.build(elements)
+    return buf.getvalue()
 
 
 def _generate_hypothesis_pdf_reportlab(hypothesis: dict, disease: str, discovery_type: str) -> bytes:
@@ -2556,58 +2814,77 @@ def _generate_hypothesis_pdf_reportlab(hypothesis: dict, disease: str, discovery
     elements.append(Paragraph(date_str, meta_style))
     elements.append(PageBreak())
 
-    # Description
-    desc = hypothesis.get("description", "")
-    if desc:
-        elements.append(Paragraph("Description", heading_style))
-        elements.append(Paragraph(desc, body_style))
+    # If AI-expanded paper text is available, use structured sections
+    ai_text = hypothesis.get("ai_paper_text", "")
+    if ai_text:
+        # Parse markdown-ish AI output into sections
+        import re as _re
+        sections = _re.split(r'\n##\s+', ai_text)
+        for section in sections:
+            section = section.strip()
+            if not section:
+                continue
+            # First line is heading, rest is body
+            lines = section.split("\n", 1)
+            heading_text = lines[0].strip().lstrip("#").strip()
+            body_text = lines[1].strip() if len(lines) > 1 else ""
+            if heading_text:
+                elements.append(Paragraph(heading_text, heading_style))
+            if body_text:
+                # Split paragraphs and render each
+                for para in body_text.split("\n\n"):
+                    para = para.strip()
+                    if not para:
+                        continue
+                    # Handle bullet lists
+                    if para.startswith("- ") or para.startswith("* "):
+                        for bullet in para.split("\n"):
+                            bullet = bullet.strip().lstrip("-*").strip()
+                            if bullet:
+                                elements.append(Paragraph(f"• {bullet}", body_style))
+                    else:
+                        # Clean markdown bold/italic for ReportLab
+                        para = _re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', para)
+                        para = _re.sub(r'\*(.+?)\*', r'<i>\1</i>', para)
+                        para = para.replace("\n", " ")
+                        elements.append(Paragraph(para, body_style))
+    else:
+        # Fallback: render raw hypothesis fields
+        desc = hypothesis.get("description", "")
+        if desc:
+            elements.append(Paragraph("Description", heading_style))
+            elements.append(Paragraph(desc, body_style))
 
-    # Mechanism
-    mechanism = hypothesis.get("mechanism", "")
-    if mechanism:
-        elements.append(Paragraph("Mechanism of Action", heading_style))
-        elements.append(Paragraph(mechanism, body_style))
+        mechanism = hypothesis.get("mechanism", "")
+        if mechanism:
+            elements.append(Paragraph("Mechanism of Action", heading_style))
+            elements.append(Paragraph(mechanism, body_style))
+
+        evidence = hypothesis.get("evidence_summary", [])
+        if evidence:
+            elements.append(Paragraph("Supporting Evidence", heading_style))
+            for e in evidence:
+                elements.append(Paragraph(f"• {e}", body_style))
+
+        risks = hypothesis.get("risks", [])
+        if risks:
+            elements.append(Paragraph("Risks & Limitations", heading_style))
+            for r in risks:
+                elements.append(Paragraph(f"• {r}", body_style))
+
+        validation = hypothesis.get("validation_steps", [])
+        if validation:
+            elements.append(Paragraph("Validation Steps", heading_style))
+            for i, v in enumerate(validation, 1):
+                elements.append(Paragraph(f"{i}. {v}", body_style))
 
     # Confidence Analysis
-    elements.append(Paragraph("Confidence Analysis", heading_style))
     conf_tier = (
         "very high" if conf >= 0.8 else
         "high" if conf >= 0.7 else
         "moderate" if conf >= 0.5 else
         "preliminary"
     )
-    conf_text = (
-        f"This hypothesis has a confidence score of <b>{conf_pct}</b>, "
-        f"placing it in the <b>{conf_tier}</b> confidence tier. "
-    )
-    if conf >= 0.7:
-        conf_text += "This level of confidence suggests strong supporting evidence from multiple sources and validated mechanisms."
-    elif conf >= 0.5:
-        conf_text += "Further validation through experimental studies is recommended to strengthen the evidence base."
-    else:
-        conf_text += "Additional evidence gathering and validation is needed before proceeding to experimental stages."
-    elements.append(Paragraph(conf_text, body_style))
-
-    # Evidence
-    evidence = hypothesis.get("evidence_summary", [])
-    if evidence:
-        elements.append(Paragraph("Supporting Evidence", heading_style))
-        for e in evidence:
-            elements.append(Paragraph(f"• {e}", body_style))
-
-    # Risks
-    risks = hypothesis.get("risks", [])
-    if risks:
-        elements.append(Paragraph("Risks & Limitations", heading_style))
-        for r in risks:
-            elements.append(Paragraph(f"• {r}", body_style))
-
-    # Validation Steps
-    validation = hypothesis.get("validation_steps", [])
-    if validation:
-        elements.append(Paragraph("Validation Steps", heading_style))
-        for i, v in enumerate(validation, 1):
-            elements.append(Paragraph(f"{i}. {v}", body_style))
 
     # Summary table
     elements.append(Spacer(1, 20))

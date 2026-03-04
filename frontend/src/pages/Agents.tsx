@@ -692,17 +692,6 @@ export default function Agents() {
     setPaperError(null)
   }, [stopPaperPhaseAnimation])
 
-  const downloadPaperHtml = useCallback(() => {
-    if (!paperMarkdown) return
-    const blob = new Blob([paperMarkdown], { type: 'text/html' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `humanovo-research-${config.disease.replace(/\s+/g, '-').toLowerCase()}-${new Date().toISOString().split('T')[0]}.html`
-    a.click()
-    URL.revokeObjectURL(url)
-  }, [paperMarkdown, config.disease])
-
   const addFocusEntity = useCallback(() => {
     if (focusEntityInput.trim() && !config.focusEntities.includes(focusEntityInput.trim())) {
       setConfig(prev => ({
@@ -777,7 +766,7 @@ export default function Agents() {
             <div>
               <h1 className="text-xl font-semibold">Discovery</h1>
               <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
-                8 parallel models &middot; multi-model pipeline
+                10 parallel agents &middot; 8 models &middot; multi-model pipeline
               </p>
             </div>
           </div>
@@ -1026,7 +1015,7 @@ export default function Agents() {
                   <label className="text-xs text-[var(--color-text-muted)] block mb-1">
                     Max Agents: {config.maxAgents.toLocaleString()}
                     <span className="text-[var(--color-text-muted)] ml-1">
-                      ({Math.floor(config.maxAgents / 8).toLocaleString()} per model)
+                      ({Math.floor(config.maxAgents / 10).toLocaleString()} per agent)
                     </span>
                   </label>
                   <input
@@ -1217,7 +1206,7 @@ export default function Agents() {
                       Generating Research Paper
                     </span>
                     <span className="text-purple-400/60 text-xs ml-2">
-                      8-model pipeline &middot; runs in the background
+                      10-agent pipeline &middot; runs in the background
                     </span>
                   </div>
                 </div>
@@ -1320,16 +1309,6 @@ export default function Agents() {
                   >
                     <FiDownload className="w-3.5 h-3.5" />
                     Download PDF
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (!paperMarkdown) return
-                      downloadPaperHtml()
-                    }}
-                    className="btn btn-sm bg-green-500 text-white hover:bg-green-600"
-                  >
-                    <FiDownload className="w-3.5 h-3.5" />
-                    Download HTML
                   </button>
                   <button
                     onClick={() => setPaperMarkdown(null)}
