@@ -234,10 +234,13 @@ AZURE_MODEL_CLIENTS = {
 }
 
 # Fallback chains: when primary model gets 429, try these alternatives
+# GPT-4o has 225K TPM (10x+ others), so it's always the first fallback.
+# DeepSeek/Mistral/Cohere all have 20K TPM / 20 RPM.
+# Phi-4 is excluded — 1 TPM is unusable.
 MODEL_FALLBACKS = {
-    "DeepSeek-R1-0528": ["gpt-4o", "Phi-4-reasoning", "Mistral-Large-3"],
-    "Mistral-Large-3": ["Cohere-command-a", "gpt-4o", "DeepSeek-R1-0528"],
-    "gpt-4o": ["DeepSeek-R1-0528", "Cohere-command-a", "Phi-4-reasoning"],
+    "DeepSeek-R1-0528": ["gpt-4o", "Cohere-command-a", "Mistral-Large-3"],
+    "Mistral-Large-3": ["gpt-4o", "Cohere-command-a", "DeepSeek-R1-0528"],
+    "gpt-4o": ["DeepSeek-R1-0528", "Cohere-command-a", "Mistral-Large-3"],
     "Cohere-command-a": ["gpt-4o", "Mistral-Large-3", "DeepSeek-R1-0528"],
     "Phi-4-reasoning": ["gpt-4o", "DeepSeek-R1-0528", "Cohere-command-a"],
 }
@@ -1085,6 +1088,31 @@ Return ONLY a valid JSON object (no markdown fences, no commentary before/after 
         # Update state with partial results after each round
         elapsed = time.time() - start_time
         print(f"[WORKER] Round {round_num+1} done: {len(hypotheses)} hypotheses total, {elapsed:.1f}s elapsed")
+
+        # Re-check DB status BEFORE writing — never overwrite a stop signal
+        state = get_discovery_state()
+        db_status = state.get("status", "?") if state else "?"
+        if db_status in ("stopping", "stopped", "idle"):
+            print(f"[WORKER] Stop detected after round {round_num+1}: db_status={db_status} — halting")
+            # Transition to idle so frontend sees it's done
+            sorted_h = sorted(hypotheses, key=lambda x: x["confidence"], reverse=True)
+            update_discovery_state({
+                "status": "idle",
+                "hypotheses": sorted_h[:50],
+                "stats": {
+                    "total_agents": len(roles),
+                    "active_agents": 0,
+                    "hypotheses_found": len(hypotheses),
+                    "paths_explored": paths_explored,
+                    "high_confidence_discoveries": sum(1 for h in hypotheses if h["confidence"] >= 0.7),
+                    "current_best_confidence": max((h["confidence"] for h in hypotheses), default=0),
+                    "runtime_seconds": int(elapsed),
+                    "current_round": round_num + 1,
+                    "total_rounds": num_rounds,
+                },
+            })
+            return  # Exit worker entirely
+
         sorted_h = sorted(hypotheses, key=lambda x: x["confidence"], reverse=True)
         update_discovery_state({
             "status": "running",
@@ -1358,7 +1386,11 @@ def get_status():
                     if last_update.tzinfo:
                         last_update = last_update.replace(tzinfo=None)
                     age_minutes = (now - last_update).total_seconds() / 60
-                    if age_minutes > 15:
+                    # 'stopping' gets a shorter timeout — worker should have
+                    # exited within seconds. If still 'stopping' after 2 min,
+                    # the worker likely crashed; reset to idle.
+                    stale_threshold = 2 if current_status == "stopping" else 15
+                    if age_minutes > stale_threshold:
                         print(f"[STATUS] STALE state detected: {current_status} for {age_minutes:.0f}min — auto-resetting to idle")
                         update_discovery_state({"status": "idle"})
                         current_status = "idle"
@@ -1526,14 +1558,19 @@ def resume_discovery():
 
 @app.post("/api/v1/orchestrator/stop")
 def stop_discovery():
-    """Stop the discovery process."""
+    """Stop the discovery process.
+
+    Sets status to 'stopping'. The worker checks this flag before each
+    agent call and between rounds, then transitions to 'idle' itself.
+    We do NOT immediately set 'idle' here — that creates a race where
+    the worker's round-end update overwrites it back to 'running'.
+    """
     try:
         update_discovery_state({"status": "stopping"})
-        time.sleep(1)
-        update_discovery_state({"status": "idle"})
+        print("[STOP] Set status=stopping — worker will transition to idle")
     except Exception as e:
         logger.error(f"Stop failed: {e}")
-    return {"status": "idle"}
+    return {"status": "stopping"}
 
 
 @app.get("/api/v1/orchestrator/health")
