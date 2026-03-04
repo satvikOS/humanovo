@@ -643,7 +643,10 @@ class DocumentPipelineService:
             target_confidence=stats.get("target_confidence", 0.95),
             best_confidence=stats.get("current_best_confidence", 0.0),
             runtime_seconds=stats.get("runtime_seconds", 0.0),
-            models_used=stats.get("models_active", []) or ["Claude Opus 4.6", "DeepSeek-R1-0528", "Mistral-Large-3"],
+            models_used=stats.get("models_active", []) or [
+                "Claude Opus 4.6", "DeepSeek-R1-0528", "Mistral-Large-3",
+                "GPT-4o", "Cohere Command A", "Phi-4-reasoning",
+            ],
             external_factors=external_factors,
         )
 
@@ -698,6 +701,7 @@ class DocumentPipelineService:
                 ("abstract", "Abstract", 0),
                 ("introduction", "Introduction", 0),
                 ("disease_background", "Disease Background", 1),
+                ("literature_review", "Literature Review", 0),
                 ("methods", "Methods", 0),
                 ("results_overview", "Results", 0),
                 ("hypothesis_analyses", "Hypothesis Analyses", 1),
@@ -706,6 +710,8 @@ class DocumentPipelineService:
                 ("discussion", "Discussion", 0),
                 ("limitations_future", "Limitations & Future Directions", 1),
                 ("conclusion", "Conclusion", 0),
+                ("qa_validation", "QA Validation Report", 1),
+                ("editorial_review", "Editorial Review", 1),
             ]
 
             bundle.sections = []
@@ -769,10 +775,12 @@ class DocumentPipelineService:
         token_stats = stats.get("token_pool_stats", {})
         model_rows = []
         for model_name, display in [
-            ("llama_maverick", "Llama Maverick 17B"),
-            ("deepseek_r1", "DeepSeek R1 70B"),
-            ("kimi_25", "Kimi 2.5"),
-            ("gpt_oss_120b", "GPT OSS 120B"),
+            ("claude_opus", "Claude Opus 4.6"),
+            ("deepseek_r1_0528", "DeepSeek-R1-0528"),
+            ("mistral_large_3", "Mistral-Large-3"),
+            ("gpt_4o_azure", "GPT-4o"),
+            ("cohere_command_a", "Cohere Command A"),
+            ("phi_4_reasoning", "Phi-4-reasoning"),
         ]:
             reqs = token_stats.get("requests_per_model", {}).get(model_name, 0)
             tokens = token_stats.get("tokens_per_model", {}).get(model_name, 0)
