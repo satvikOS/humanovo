@@ -476,7 +476,7 @@ Conclusions: (significance, translational potential, next steps)
 
 IMPORTANT: This is an FDA/R&D-grade document. Be scientifically precise, cite specific molecular targets, pathways, and mechanisms. Do NOT hallucinate any data or statistics — only report what is provided above. Write in formal academic style."""
 
-        return await llm.generate(ModelType.DEEPSEEK_R1_0528, prompt, temperature=0.2, max_tokens=8_000)
+        return await llm.generate(ModelType.DEEPSEEK_R1_0528, prompt, temperature=0.2, max_tokens=65_536)
 
     async def _generate_introduction_ai(self, llm, paper: ResearchPaper, hyp_context: str) -> str:
         from app.agents.discovery_orchestrator import ModelType
@@ -515,7 +515,7 @@ IMPORTANT: This is an FDA/R&D-grade document. Include specific molecular formula
 
 Write in formal academic style with clear paragraph transitions. Use specific scientific terminology. Do NOT include section headers — write flowing paragraphs."""
 
-        return await llm.generate(ModelType.DEEPSEEK_R1_0528, prompt, temperature=0.2, max_tokens=16_000)
+        return await llm.generate(ModelType.DEEPSEEK_R1_0528, prompt, temperature=0.2, max_tokens=65_536)
 
     async def _generate_disease_background_ai(self, llm, paper: ResearchPaper) -> str:
         from app.agents.discovery_orchestrator import ModelType
@@ -547,7 +547,7 @@ IMPORTANT: This is an FDA/R&D-grade document. Include specific gene names (e.g.,
 
 Write in formal academic style. Be scientifically precise. Do NOT use section headers — write flowing paragraphs with logical transitions."""
 
-        return await llm.generate(ModelType.COHERE_COMMAND_A, prompt, temperature=0.2, max_tokens=4_000)
+        return await llm.generate(ModelType.COHERE_COMMAND_A, prompt, temperature=0.2, max_tokens=4_096)
 
     async def _generate_literature_review_ai(self, llm, paper: ResearchPaper, hyp_context: str) -> str:
         """Generate literature review using Cohere Command A (256K context, RAG-optimized)."""
@@ -600,7 +600,7 @@ IMPORTANT GUIDELINES:
 - Do NOT hallucinate citations — only reference well-established findings
 - Write in formal academic style with flowing paragraphs"""
 
-        return await llm.generate(ModelType.COHERE_COMMAND_A, prompt, temperature=0.2, max_tokens=4_000)
+        return await llm.generate(ModelType.COHERE_COMMAND_A, prompt, temperature=0.2, max_tokens=4_096)
 
     async def _generate_methods_ai(self, llm, paper: ResearchPaper) -> str:
         from app.agents.discovery_orchestrator import ModelType
@@ -686,7 +686,7 @@ IMPORTANT: This is an FDA/R&D-grade methods section. Include:
 
 Write as formal Methods text. Use subsections with ### headers for: Multi-Model Discovery Platform, Agent Architecture, Token Pool Management, Knowledge Graph Integration, External Factor Simulation, Confidence Scoring, Research Paper Generation. Be technically precise. Do NOT hallucinate parameters — use only the values provided."""
 
-        return await llm.generate(ModelType.DEEPSEEK_R1_0528, prompt, temperature=0.15, max_tokens=16_000)
+        return await llm.generate(ModelType.DEEPSEEK_R1_0528, prompt, temperature=0.15, max_tokens=65_536)
 
     async def _generate_results_overview_ai(self, llm, paper: ResearchPaper, hyp_context: str) -> str:
         from app.agents.discovery_orchestrator import ModelType
@@ -715,7 +715,7 @@ Summarize the overall discovery results:
 
 Write in formal results style. Report numbers precisely. No interpretation — save that for Discussion."""
 
-        return await llm.generate(ModelType.CLAUDE_OPUS, prompt, temperature=0.25, max_tokens=16_000)
+        return await llm.generate(ModelType.CLAUDE_OPUS, prompt, temperature=0.25, max_tokens=32_768)
 
     async def _generate_hypothesis_deep_analyses(self, llm, paper: ResearchPaper) -> str:
         """Generate detailed analysis of each hypothesis using different models in parallel."""
@@ -752,7 +752,7 @@ IMPORTANT: Do NOT hallucinate data. Only state well-established biomedical facts
 
 Write as formal FDA/R&D-grade scientific text. Be specific, not generic."""
 
-            return await llm.generate(model, prompt, temperature=0.2, max_tokens=8_000)
+            return await llm.generate(model, prompt, temperature=0.2, max_tokens=65_536)
 
         # Process in batches of 4 (one per model)
         for batch_start in range(0, min(len(paper.hypotheses), 20), 4):
@@ -801,7 +801,7 @@ Since no specific external factors were configured for this run, discuss:
 IMPORTANT: Do NOT hallucinate. Only state well-established biomedical facts. Include specific compound formulas and mechanisms.
 Write as formal scientific text with specific examples and mechanisms."""
 
-            return await llm.generate(ModelType.MISTRAL_LARGE_3, prompt, temperature=0.2, max_tokens=16_000)
+            return await llm.generate(ModelType.MISTRAL_LARGE_3, prompt, temperature=0.2, max_tokens=32_768)
 
         prompt = f"""Write a comprehensive External Factors Analysis section (600-1000 words) for a {paper.disease} research paper.
 
@@ -829,7 +829,7 @@ Include for each factor:
 IMPORTANT: Do NOT hallucinate. Only state well-established biomedical facts.
 Write as formal FDA/R&D-grade scientific text. Be specific about molecular mechanisms."""
 
-        return await llm.generate(ModelType.MISTRAL_LARGE_3, prompt, temperature=0.2, max_tokens=16_000)
+        return await llm.generate(ModelType.MISTRAL_LARGE_3, prompt, temperature=0.2, max_tokens=32_768)
 
     async def _generate_molecular_mechanisms_ai(self, llm, paper: ResearchPaper, hyp_context: str) -> str:
         from app.agents.discovery_orchestrator import ModelType
@@ -860,7 +860,7 @@ IMPORTANT: Do NOT hallucinate. Only state well-established biomedical facts. Use
 
 Write as formal FDA/R&D-grade scientific text. No headers — flowing paragraphs."""
 
-        return await llm.generate(ModelType.DEEPSEEK_R1_0528, prompt, temperature=0.15, max_tokens=32_000)
+        return await llm.generate(ModelType.DEEPSEEK_R1_0528, prompt, temperature=0.15, max_tokens=65_536)
 
     async def _generate_discussion_ai(self, llm, paper: ResearchPaper, hyp_context: str) -> str:
         from app.agents.discovery_orchestrator import ModelType
@@ -906,7 +906,7 @@ Cover ALL of the following:
 IMPORTANT: Do NOT hallucinate. Base discussion on the provided data only.
 Write in formal FDA/R&D-grade academic discussion style. Be balanced — acknowledge both strengths and weaknesses."""
 
-        return await llm.generate(ModelType.GPT_4O_AZURE, prompt, temperature=0.25, max_tokens=16_000)
+        return await llm.generate(ModelType.GPT_4O_AZURE, prompt, temperature=0.25, max_tokens=16_384)
 
     async def _generate_limitations_future_ai(self, llm, paper: ResearchPaper) -> str:
         from app.agents.discovery_orchestrator import ModelType
@@ -942,7 +942,7 @@ FUTURE DIRECTIONS:
 IMPORTANT: Do NOT hallucinate. Be honest about limitations.
 Write as formal FDA/R&D-grade scientific text."""
 
-        return await llm.generate(ModelType.MISTRAL_LARGE_3, prompt, temperature=0.25, max_tokens=16_000)
+        return await llm.generate(ModelType.MISTRAL_LARGE_3, prompt, temperature=0.25, max_tokens=32_768)
 
     async def _generate_conclusion_ai(self, llm, paper: ResearchPaper, hyp_context: str) -> str:
         from app.agents.discovery_orchestrator import ModelType
@@ -963,7 +963,7 @@ End with:
 
 Be concise, impactful, and forward-looking. Avoid repeating the abstract."""
 
-        return await llm.generate(ModelType.GPT_4O_AZURE, prompt, temperature=0.3, max_tokens=8_000)
+        return await llm.generate(ModelType.GPT_4O_AZURE, prompt, temperature=0.3, max_tokens=16_384)
 
     # =========================================================================
     # Phase 4: QA Validation + Editorial Review + Reasoning Review + Analytical Review
@@ -1015,7 +1015,7 @@ Perform the following QA checks:
 
 Write your QA report as a structured assessment with clear findings and actionable recommendations. Be concise and specific."""
 
-        return await llm.generate(ModelType.KIMI_K2_THINKING, prompt, temperature=0.15, max_tokens=4_000)
+        return await llm.generate(ModelType.KIMI_K2_THINKING, prompt, temperature=0.15, max_tokens=4_096)
 
     async def _generate_editorial_review(self, llm, paper: ResearchPaper) -> str:
         """Editorial review using GPT-4o (editorial synthesis, cross-validation)."""
@@ -1065,7 +1065,7 @@ Write an Editorial Summary that includes:
 
 Write as a professional editorial assessment. Be concise and actionable."""
 
-        return await llm.generate(ModelType.GPT_4O_AZURE, prompt, temperature=0.25, max_tokens=8_000)
+        return await llm.generate(ModelType.GPT_4O_AZURE, prompt, temperature=0.25, max_tokens=16_384)
 
     async def _generate_reasoning_review(self, llm, paper: ResearchPaper) -> str:
         """Deep reasoning review using o3-mini (OpenAI reasoning model, 2.5M TPM)."""
@@ -1110,7 +1110,7 @@ Perform a DEEP REASONING review:
 
 Write a structured reasoning assessment with clear logical analysis."""
 
-        return await llm.generate(ModelType.O3_MINI, prompt, temperature=0.2, max_tokens=8_000)
+        return await llm.generate(ModelType.O3_MINI, prompt, temperature=0.0, max_tokens=100_000)
 
     async def _generate_analytical_review(self, llm, paper: ResearchPaper) -> str:
         """Analytical review using GPT-4.1 (latest GPT model, 50K TPM)."""
@@ -1156,7 +1156,7 @@ Provide a comprehensive ANALYTICAL REVIEW:
 
 Write as a professional analytical assessment. Be data-driven and actionable."""
 
-        return await llm.generate(ModelType.GPT_41, prompt, temperature=0.25, max_tokens=8_000)
+        return await llm.generate(ModelType.GPT_41, prompt, temperature=0.25, max_tokens=32_768)
 
     # =========================================================================
     # Plotly Figures — Interactive chart specifications for frontend

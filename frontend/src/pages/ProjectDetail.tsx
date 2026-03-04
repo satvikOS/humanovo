@@ -3,11 +3,11 @@ import { useParams, Link } from 'react-router-dom'
 import {
   FiArrowLeft, FiActivity, FiTarget,
   FiChevronRight, FiFileText, FiRefreshCw,
-  FiTrash2, FiBook,
+  FiTrash2, FiBook, FiX,
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import { persistGet, persistSet, logActivity } from '../utils/persistence'
-import DocumentViewer, { HypothesisViewer } from '../components/DocumentViewer'
+import { HypothesisViewer } from '../components/DocumentViewer'
 
 const API_BASE = '/api/v1'
 
@@ -49,12 +49,12 @@ interface LocalProject {
   updated_at: string
 }
 
-type ViewMode = 'list' | 'project_paper' | 'hypothesis_paper'
+type ViewMode = 'list' | 'hypothesis_viewer' | 'hypothesis_paper'
 
 export default function ProjectDetail() {
   const { projectId } = useParams<{ projectId: string }>()
   const [generatingPaper, setGeneratingPaper] = useState(false)
-  const [generatingHypId, setGeneratingHypId] = useState<string | null>(null)
+  const [, setGeneratingHypId] = useState<string | null>(null)
   const [, setRefresh] = useState(0)
 
   // Document viewer state
@@ -62,6 +62,9 @@ export default function ProjectDetail() {
   const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null)
   const [paperError, setPaperError] = useState<string | null>(null)
   const [activeHypothesis, setActiveHypothesis] = useState<SavedHypothesis | null>(null)
+
+  // Hypothesis chooser modal state
+  const [showChooser, setShowChooser] = useState(false)
 
   const projects = persistGet<LocalProject[]>('projects', [])
   const project = projects.find(p => p.id === projectId)
@@ -73,63 +76,23 @@ export default function ProjectDetail() {
   const allPapers = persistGet<SavedResearchPaper[]>('research-papers', [])
   const projectPapers = allPapers.filter(p => p.project_id === projectId)
 
-  // ---- Generate project-level paper via document pipeline ----
-  const generateProjectPaper = useCallback(async () => {
-    if (!projectId) return
-    setGeneratingPaper(true)
-    setGeneratingHypId(null)
-    setViewMode('project_paper')
-    setPdfBlobUrl(null)
-
-    setPaperError(null)
-
-    try {
-      const res = await fetch(`${API_BASE}/documents/project/${projectId}/pdf?use_ai=true`, {
-        method: 'POST',
-      })
-
-      if (res.ok) {
-        const blob = await res.blob()
-        if (blob.size === 0) {
-          setPaperError('Server returned empty PDF. Check backend logs for errors.')
-          setGeneratingPaper(false)
-          return
-        }
-        const url = URL.createObjectURL(blob)
-        setPdfBlobUrl(url)
-        setGeneratingPaper(false)
-        return
-      }
-
-      let detail = 'Unknown error'
-      try { const err = await res.json(); detail = err.detail || detail } catch {}
-      setPaperError(`Paper generation failed (${res.status}): ${detail}`)
-      setGeneratingPaper(false)
-    } catch (e) {
-      console.error('Document pipeline failed:', e)
-      setPaperError(`Paper generation failed: ${e instanceof Error ? e.message : String(e)}`)
-      setGeneratingPaper(false)
-    }
-  }, [projectId])
-
-  // ---- Generate hypothesis-level paper ----
-  // ---- Open hypothesis in doc viewer ----
+  // ---- Open hypothesis in formatted doc viewer (no paper) ----
   const openHypothesisViewer = useCallback((hypothesis: SavedHypothesis) => {
     setActiveHypothesis(hypothesis)
-    setViewMode('hypothesis_paper')
+    setViewMode('hypothesis_viewer')
     setPdfBlobUrl(null)
-
     setPaperError(null)
   }, [])
 
+  // ---- Generate hypothesis-level paper ----
   const generateHypothesisPaper = useCallback(async (hypothesis: SavedHypothesis) => {
     setGeneratingPaper(true)
     setGeneratingHypId(hypothesis.id)
     setActiveHypothesis(hypothesis)
     setViewMode('hypothesis_paper')
     setPdfBlobUrl(null)
-
     setPaperError(null)
+    setShowChooser(false)
 
     try {
       const res = await fetch(`${API_BASE}/documents/hypothesis/${hypothesis.id}/pdf?use_ai=true`, {
@@ -198,7 +161,6 @@ export default function ProjectDetail() {
   const closeViewer = useCallback(() => {
     if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl)
     setPdfBlobUrl(null)
-
     setPaperError(null)
     setActiveHypothesis(null)
     setViewMode('list')
@@ -225,7 +187,37 @@ export default function ProjectDetail() {
     )
   }
 
-  // ---- Hypothesis paper viewer (split view) ----
+  // ---- Hypothesis doc viewer (just viewing hypothesis, no paper yet) ----
+  if (viewMode === 'hypothesis_viewer' && activeHypothesis) {
+    return (
+      <div className="h-full flex flex-col">
+        <div className="px-4 py-2 border-b border-secondary-700 flex items-center gap-2 shrink-0">
+          <Link to="/projects" className="text-primary-400 hover:text-primary-300 text-sm">
+            <FiArrowLeft className="w-3.5 h-3.5 inline mr-1" />Projects
+          </Link>
+          <span className="text-secondary-600">/</span>
+          <button onClick={closeViewer} className="text-primary-400 hover:text-primary-300 text-sm">
+            {project.name}
+          </button>
+          <span className="text-secondary-600">/</span>
+          <span className="text-secondary-400 text-sm truncate">{activeHypothesis.title}</span>
+        </div>
+        <div className="flex-1 min-h-0">
+          <HypothesisViewer
+            hypothesis={activeHypothesis}
+            pdfUrl={null}
+            htmlContent={null}
+            isGenerating={false}
+            onGeneratePaper={() => generateHypothesisPaper(activeHypothesis)}
+            onClose={closeViewer}
+            errorMessage={null}
+          />
+        </div>
+      </div>
+    )
+  }
+
+  // ---- Hypothesis paper viewer (generating/viewing paper) ----
   if (viewMode === 'hypothesis_paper' && activeHypothesis) {
     return (
       <div className="h-full flex flex-col">
@@ -255,38 +247,6 @@ export default function ProjectDetail() {
     )
   }
 
-  // ---- Project paper viewer (full width) ----
-  if (viewMode === 'project_paper') {
-    return (
-      <div className="h-full flex flex-col">
-        <div className="px-4 py-2 border-b border-secondary-700 flex items-center gap-2 shrink-0">
-          <Link to="/projects" className="text-primary-400 hover:text-primary-300 text-sm">
-            <FiArrowLeft className="w-3.5 h-3.5 inline mr-1" />Projects
-          </Link>
-          <span className="text-secondary-600">/</span>
-          <button onClick={closeViewer} className="text-primary-400 hover:text-primary-300 text-sm">
-            {project.name}
-          </button>
-          <span className="text-secondary-600">/</span>
-          <span className="text-secondary-400 text-sm">Research Paper</span>
-        </div>
-        <div className="flex-1 min-h-0">
-          <DocumentViewer
-            pdfUrl={pdfBlobUrl}
-            htmlContent={null}
-            title={`Research Paper: ${project.disease_focus || project.name}`}
-            onClose={closeViewer}
-            filename={`humanovo-${project.disease_focus?.replace(/\s+/g, '-').toLowerCase() || 'research'}.pdf`}
-            isGenerating={generatingPaper}
-            progressMessage="Running document pipeline..."
-            errorMessage={paperError}
-            onGenerateResearchPaper={generateProjectPaper}
-          />
-        </div>
-      </div>
-    )
-  }
-
   // ---- Default: project detail list view ----
   const highConf = projectHypotheses.filter(h => h.confidence >= 0.7).length
   const medConf = projectHypotheses.filter(h => h.confidence >= 0.5 && h.confidence < 0.7).length
@@ -305,20 +265,58 @@ export default function ProjectDetail() {
         {project.description && (
           <p className="text-secondary-400 mt-2">{project.description}</p>
         )}
-        {/* Generate paper for entire project */}
+        {/* Generate paper — choose which hypothesis */}
         {projectHypotheses.length > 0 && (
-          <button
-            onClick={generateProjectPaper}
-            disabled={generatingPaper}
-            className="mt-4 btn bg-purple-500 text-white hover:bg-purple-600 disabled:opacity-50"
-          >
-            {generatingPaper && !generatingHypId ? (
-              <FiRefreshCw className="w-4 h-4 animate-spin" />
-            ) : (
-              <FiFileText className="w-4 h-4" />
+          <div className="relative inline-block">
+            <button
+              onClick={() => setShowChooser(!showChooser)}
+              disabled={generatingPaper}
+              className="mt-4 btn bg-purple-500 text-white hover:bg-purple-600 disabled:opacity-50"
+            >
+              {generatingPaper ? (
+                <FiRefreshCw className="w-4 h-4 animate-spin" />
+              ) : (
+                <FiFileText className="w-4 h-4" />
+              )}
+              {generatingPaper ? 'Generating Paper...' : 'Generate Research Paper'}
+            </button>
+
+            {/* Hypothesis chooser dropdown */}
+            {showChooser && !generatingPaper && (
+              <div className="absolute z-50 mt-2 w-96 max-h-80 overflow-y-auto bg-secondary-800 border border-secondary-600 rounded-lg shadow-xl">
+                <div className="p-3 border-b border-secondary-700 flex items-center justify-between">
+                  <span className="text-sm font-medium text-white">Choose a hypothesis for the paper</span>
+                  <button onClick={() => setShowChooser(false)} className="p-1 rounded hover:bg-secondary-700 text-secondary-400">
+                    <FiX className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <div className="p-1">
+                  {projectHypotheses.map((h, idx) => (
+                    <button
+                      key={h.id}
+                      onClick={() => generateHypothesisPaper(h)}
+                      className="w-full text-left p-3 rounded-lg hover:bg-secondary-700 transition-colors"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-secondary-500 font-mono text-xs shrink-0">#{idx + 1}</span>
+                        <span className="text-white text-sm font-medium truncate flex-1">{h.title}</span>
+                        <span className={clsx(
+                          'text-xs font-bold shrink-0',
+                          h.confidence >= 0.7 ? 'text-green-400' :
+                          h.confidence >= 0.5 ? 'text-yellow-400' : 'text-orange-400'
+                        )}>
+                          {(h.confidence * 100).toFixed(1)}%
+                        </span>
+                      </div>
+                      {h.description && (
+                        <p className="text-secondary-400 text-xs mt-1 line-clamp-1 ml-6">{h.description}</p>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
-            {generatingPaper && !generatingHypId ? 'Generating Paper...' : 'Generate Research Paper'}
-          </button>
+          </div>
         )}
       </div>
 
@@ -343,7 +341,7 @@ export default function ProjectDetail() {
             </dl>
           </div>
 
-          {/* Hypotheses - expandable detail view */}
+          {/* Hypotheses - click to view in doc viewer */}
           <div className="card">
             <h2 className="text-lg font-semibold text-white mb-4 flex items-center">
               <FiActivity className="w-5 h-5 mr-2 text-primary-400" />
@@ -358,7 +356,7 @@ export default function ProjectDetail() {
                       key={h.id}
                       className="border rounded-lg transition-colors border-secondary-700 hover:border-primary-600/50"
                     >
-                      {/* Collapsed header — click to open in doc viewer */}
+                      {/* Click to open in doc viewer */}
                       <button
                         onClick={() => openHypothesisViewer(h)}
                         className="w-full text-left p-4"
@@ -447,8 +445,8 @@ export default function ProjectDetail() {
               </div>
             ) : (
               <p className="text-secondary-400 text-sm">
-                No research papers generated yet. Expand a hypothesis above and click
-                &ldquo;Generate Research Paper&rdquo; to create one.
+                No research papers generated yet. Click &ldquo;Generate Research Paper&rdquo; above
+                and choose a hypothesis, or click a hypothesis to view it and generate from there.
               </p>
             )}
           </div>

@@ -834,7 +834,7 @@ class MultiModelLLM:
             raise RuntimeError(f"Token pool exhausted for {model_type.value}, rate limit hit")
 
         try:
-            # Try the preferred provider for this model type
+            # Route to the correct provider — no fallbacks, fail immediately
             if self._is_azure_ai_model(model_type):
                 return await self._generate_azure_ai(model_type, prompt, system_prompt, max_tokens, temperature)
             elif self._is_azure_openai_model(model_type):
@@ -842,9 +842,7 @@ class MultiModelLLM:
             elif model_type in self.BEDROCK_MODELS and self._bedrock_client:
                 return await self._generate_bedrock(model_type, prompt, system_prompt, max_tokens, temperature)
             else:
-                # Preferred provider unavailable — try any available model
-                logger.warning(f"Preferred provider for {model_type.value} unavailable, trying fallback")
-                return await self._generate_fallback(prompt, system_prompt, max_tokens, temperature)
+                raise RuntimeError(f"No provider available for {model_type.value}. Check endpoint/key configuration.")
         except Exception as e:
             self._token_pool.record_error(model_type)
             raise
@@ -910,12 +908,21 @@ class MultiModelLLM:
             if system_prompt:
                 messages.append({"role": "system", "content": system_prompt})
             messages.append({"role": "user", "content": prompt})
-            response = await client.chat.completions.create(
-                model=deployment,
-                messages=messages,
-                max_tokens=max_tokens,
-                temperature=temperature,
-            )
+
+            # o3-mini is a reasoning model: use max_completion_tokens, no temperature
+            if model_type == ModelType.O3_MINI:
+                response = await client.chat.completions.create(
+                    model=deployment,
+                    messages=messages,
+                    max_completion_tokens=max_tokens,
+                )
+            else:
+                response = await client.chat.completions.create(
+                    model=deployment,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                )
             return response.choices[0].message.content
 
         # Legacy Azure OpenAI (o3, o1)
@@ -988,35 +995,6 @@ class MultiModelLLM:
         )
         response_body = json.loads(response["body"].read())
         return _parse_invoke_response(model_id, response_body)
-
-    async def _generate_fallback(
-        self, prompt: str, system_prompt: str, max_tokens: int, temperature: float,
-    ) -> str:
-        """Try each model in priority order until one works."""
-        # Priority: Claude Opus → o3-mini → GPT-4o → GPT-4.1 → DeepSeek → Cohere → Mistral → Kimi-K2 → fallbacks
-        for model_type in [
-            ModelType.CLAUDE_OPUS,
-            ModelType.O3_MINI,
-            ModelType.GPT_4O_AZURE,
-            ModelType.GPT_41,
-            ModelType.DEEPSEEK_R1_0528,
-            ModelType.COHERE_COMMAND_A,
-            ModelType.MISTRAL_LARGE_3,
-            ModelType.KIMI_K2_THINKING,
-            ModelType.DEEPSEEK_R1,
-            ModelType.O3_DEEP_RESEARCH,
-            ModelType.O1,
-        ]:
-            try:
-                if self._is_azure_ai_model(model_type):
-                    return await self._generate_azure_ai(model_type, prompt, system_prompt, max_tokens, temperature)
-                elif self._is_azure_openai_model(model_type):
-                    return await self._generate_azure_openai(model_type, prompt, system_prompt, max_tokens, temperature)
-                elif model_type in self.BEDROCK_MODELS and self._bedrock_client:
-                    return await self._generate_bedrock(model_type, prompt, system_prompt, max_tokens, temperature)
-            except Exception:
-                continue
-        raise RuntimeError("All models unavailable (Azure AI + Bedrock + Azure OpenAI)")
 
     async def parallel_reasoning(
         self, prompt: str, context: str = "",
@@ -1091,29 +1069,20 @@ class MultiModelLLM:
                 max_tokens=4_096, temperature=0.15,
             )
 
-        # o3-mini via Azure OpenAI (Secondary Reasoning — 2.5M TPM)
+        # o3-mini via Azure OpenAI (Secondary Reasoning — 2.5M TPM, 100K output)
         if self._azure_o3mini_client:
             tasks["o3_mini_reasoner"] = self.generate(
                 ModelType.O3_MINI, full_prompt,
                 get_agent_prompt("reasoner", include_master=True),
-                max_tokens=65_536, temperature=0.2,
+                max_tokens=100_000, temperature=0.0,  # reasoning model ignores temperature
             )
 
-        # GPT-4.1 via Azure OpenAI (Analytical Review — 50K TPM)
+        # GPT-4.1 via Azure OpenAI (Analytical Review — 50K TPM, 32K output)
         if self._azure_gpt41_client:
             tasks["gpt_41_analyst"] = self.generate(
                 ModelType.GPT_41, full_prompt,
                 get_agent_prompt("critic", include_master=True),
-                max_tokens=16_384, temperature=0.25,
-            )
-
-        # If no Azure AI, add Bedrock DeepSeek as reasoner fallback
-        if not self._azure_ai_available and self._bedrock_client:
-            tasks["deepseek_r1"] = self.generate(
-                ModelType.DEEPSEEK_R1, full_prompt,
-                get_agent_prompt("reasoner", include_master=True),
-                max_tokens=65_536,
-                temperature=0.2,
+                max_tokens=32_768, temperature=0.25,
             )
 
         if not tasks:
@@ -1124,12 +1093,18 @@ class MultiModelLLM:
             return_exceptions=True,
         )
 
+        # Check for errors — any model failure stops the pipeline
         responses = {}
+        errors = []
         for (name, _), result in zip(tasks.items(), results):
             if isinstance(result, Exception):
-                responses[name] = f"Error: {result}"
+                errors.append(f"{name}: {result}")
             else:
                 responses[name] = result
+
+        if errors:
+            error_summary = "; ".join(errors)
+            raise RuntimeError(f"Model(s) failed — pipeline stopped: {error_summary}")
 
         return responses
 

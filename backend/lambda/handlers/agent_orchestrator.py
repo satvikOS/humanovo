@@ -137,20 +137,21 @@ class _AzureAIResponse:
         ]
 
 class _AzureAIChatCompletions:
-    """Mimics openai's chat.completions interface."""
+    """Mimics openai's chat.completions interface for Azure AI model-specific endpoints."""
     def __init__(self, base_url: str, api_key: str):
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
 
-    def create(self, model: str, messages: list, max_tokens: int = 2000,
-               temperature: float = 0.7, **kwargs) -> _AzureAIResponse:
+    def create(self, model: str, messages: list, max_tokens: int = 65_536,
+               temperature: float = 0.7, max_completion_tokens: int = 0, **kwargs) -> _AzureAIResponse:
         url = f"{self._base_url}/chat/completions"
-        payload = json.dumps({
-            "model": model,
-            "messages": messages,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-        }).encode("utf-8")
+        body: dict = {"model": model, "messages": messages}
+        if max_completion_tokens > 0:
+            body["max_completion_tokens"] = max_completion_tokens
+        else:
+            body["max_tokens"] = max_tokens
+            body["temperature"] = temperature
+        payload = json.dumps(body).encode("utf-8")
 
         req = urllib.request.Request(
             url,
@@ -164,20 +165,76 @@ class _AzureAIChatCompletions:
 
         ctx = ssl.create_default_context()
         with urllib.request.urlopen(req, timeout=120, context=ctx) as resp:
-            body = json.loads(resp.read().decode("utf-8"))
-        return _AzureAIResponse(body.get("choices", []))
+            resp_body = json.loads(resp.read().decode("utf-8"))
+        return _AzureAIResponse(resp_body.get("choices", []))
+
+
+class _AzureOpenAIChatCompletions:
+    """Mimics openai's chat.completions interface for Azure OpenAI deployment-based models.
+
+    URL format: {endpoint}/openai/deployments/{deployment}/chat/completions?api-version={version}
+    Auth: api-key header (not Bearer token).
+    """
+    def __init__(self, endpoint: str, api_key: str, deployment: str, api_version: str = "2024-05-01-preview"):
+        self._endpoint = endpoint.rstrip("/")
+        if not self._endpoint.startswith("https://"):
+            self._endpoint = f"https://{self._endpoint}"
+        self._api_key = api_key
+        self._deployment = deployment
+        self._api_version = api_version
+
+    def create(self, model: str, messages: list, max_tokens: int = 65_536,
+               temperature: float = 0.7, max_completion_tokens: int = 0, **kwargs) -> _AzureAIResponse:
+        url = (
+            f"{self._endpoint}/openai/deployments/{self._deployment}"
+            f"/chat/completions?api-version={self._api_version}"
+        )
+        body: dict = {"messages": messages}
+        if max_completion_tokens > 0:
+            body["max_completion_tokens"] = max_completion_tokens
+        else:
+            body["max_tokens"] = max_tokens
+            body["temperature"] = temperature
+        payload = json.dumps(body).encode("utf-8")
+
+        req = urllib.request.Request(
+            url,
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "api-key": self._api_key,
+            },
+            method="POST",
+        )
+
+        ctx = ssl.create_default_context()
+        with urllib.request.urlopen(req, timeout=120, context=ctx) as resp:
+            resp_body = json.loads(resp.read().decode("utf-8"))
+        return _AzureAIResponse(resp_body.get("choices", []))
 
 
 class _AzureAIChat:
-    """Mimics openai's chat namespace."""
+    """Mimics openai's chat namespace for Azure AI model-specific endpoints."""
     def __init__(self, base_url: str, api_key: str):
         self.completions = _AzureAIChatCompletions(base_url, api_key)
 
 
 class AzureAIClient:
-    """Drop-in replacement for OpenAI() — uses stdlib only."""
+    """Drop-in replacement for OpenAI() — uses stdlib only. For Azure AI model-specific endpoints."""
     def __init__(self, base_url: str, api_key: str):
         self.chat = _AzureAIChat(base_url, api_key)
+
+
+class _AzureOpenAIChat:
+    """Mimics openai's chat namespace for Azure OpenAI deployment-based models."""
+    def __init__(self, endpoint: str, api_key: str, deployment: str, api_version: str):
+        self.completions = _AzureOpenAIChatCompletions(endpoint, api_key, deployment, api_version)
+
+
+class AzureOpenAIClient:
+    """Drop-in replacement for AzureOpenAI() — uses stdlib only. For Azure OpenAI deployments."""
+    def __init__(self, endpoint: str, api_key: str, deployment: str, api_version: str = "2024-05-01-preview"):
+        self.chat = _AzureOpenAIChat(endpoint, api_key, deployment, api_version)
 
 
 azure_deepseek_client = None
@@ -209,7 +266,7 @@ AZURE_GPT41_ENDPOINT = os.environ.get("AZURE_GPT41_ENDPOINT", "") or AZURE_AI_EN
 AZURE_GPT41_KEY = os.environ.get("AZURE_GPT41_KEY", "") or AZURE_AI_KEY
 
 def _init_azure_client(name, endpoint, key):
-    """Initialize an Azure AI client, returning None on failure."""
+    """Initialize an Azure AI model-specific client, returning None on failure."""
     if endpoint and key:
         try:
             client = AzureAIClient(base_url=endpoint.rstrip('/'), api_key=key)
@@ -221,13 +278,28 @@ def _init_azure_client(name, endpoint, key):
         print(f"[ORCHESTRATOR] Azure {name} not configured")
     return None
 
+def _init_azure_openai_client(name, endpoint, key, deployment, api_version="2024-05-01-preview"):
+    """Initialize an Azure OpenAI deployment-based client, returning None on failure."""
+    if endpoint and key:
+        try:
+            client = AzureOpenAIClient(endpoint=endpoint, api_key=key, deployment=deployment, api_version=api_version)
+            print(f"[ORCHESTRATOR] Azure OpenAI {name} client initialized (endpoint={endpoint}, deployment={deployment})")
+            return client
+        except Exception as _e:
+            logger.error(f"Azure OpenAI {name} init failed: {_e}")
+    else:
+        print(f"[ORCHESTRATOR] Azure OpenAI {name} not configured")
+    return None
+
+# Azure AI model-specific endpoints (DeepSeek, Mistral — direct inference URL)
 azure_deepseek_client = _init_azure_client("DeepSeek", AZURE_DEEPSEEK_ENDPOINT, AZURE_DEEPSEEK_KEY)
 azure_mistral_client = _init_azure_client("Mistral", AZURE_MISTRAL_ENDPOINT, AZURE_MISTRAL_KEY)
-azure_gpt4o_client = _init_azure_client("GPT-4o", AZURE_GPT4O_ENDPOINT, AZURE_GPT4O_KEY)
-azure_cohere_client = _init_azure_client("Cohere", AZURE_COHERE_ENDPOINT, AZURE_COHERE_KEY)
-azure_kimi_client = _init_azure_client("Kimi-K2", AZURE_KIMI_ENDPOINT, AZURE_KIMI_KEY)
-azure_o3mini_client = _init_azure_client("o3-mini", AZURE_O3MINI_ENDPOINT, AZURE_O3MINI_KEY)
-azure_gpt41_client = _init_azure_client("GPT-4.1", AZURE_GPT41_ENDPOINT, AZURE_GPT41_KEY)
+# Azure OpenAI deployment-based endpoints (GPT-4o, Cohere, Kimi, o3-mini, GPT-4.1)
+azure_gpt4o_client = _init_azure_openai_client("GPT-4o", AZURE_GPT4O_ENDPOINT, AZURE_GPT4O_KEY, "gpt-4o", "2024-11-20")
+azure_cohere_client = _init_azure_openai_client("Cohere", AZURE_COHERE_ENDPOINT, AZURE_COHERE_KEY, "cohere-command-a")
+azure_kimi_client = _init_azure_openai_client("Kimi-K2", AZURE_KIMI_ENDPOINT, AZURE_KIMI_KEY, "Kimi-K2-Thinking")
+azure_o3mini_client = _init_azure_openai_client("o3-mini", AZURE_O3MINI_ENDPOINT, AZURE_O3MINI_KEY, "o3-mini")
+azure_gpt41_client = _init_azure_openai_client("GPT-4.1", AZURE_GPT41_ENDPOINT, AZURE_GPT41_KEY, "gpt-4.1")
 
 # Map model name patterns to their clients for routing
 AZURE_MODEL_CLIENTS = {
@@ -242,20 +314,6 @@ AZURE_MODEL_CLIENTS = {
     "o3mini": ("azure_o3mini", lambda: azure_o3mini_client),
     "gpt-4.1": ("azure_gpt41", lambda: azure_gpt41_client),
     "gpt41": ("azure_gpt41", lambda: azure_gpt41_client),
-}
-
-# Fallback chains: when primary model gets 429, try these alternatives
-# o3-mini has 2.5M TPM / 250 RPM — best fallback by far.
-# GPT-4o has 225K TPM / 2250 RPM. GPT-4.1 has 50K TPM / 50 RPM.
-# DeepSeek/Mistral/Cohere/Kimi all have 20K TPM / 20 RPM.
-MODEL_FALLBACKS = {
-    "DeepSeek-R1-0528": ["o3-mini", "gpt-4o", "gpt-4.1", "Kimi-K2-Thinking", "Cohere-command-a", "Mistral-Large-3"],
-    "Mistral-Large-3": ["o3-mini", "gpt-4o", "gpt-4.1", "Kimi-K2-Thinking", "Cohere-command-a", "DeepSeek-R1-0528"],
-    "gpt-4o": ["o3-mini", "gpt-4.1", "Kimi-K2-Thinking", "DeepSeek-R1-0528", "Cohere-command-a", "Mistral-Large-3"],
-    "gpt-4.1": ["o3-mini", "gpt-4o", "Kimi-K2-Thinking", "DeepSeek-R1-0528", "Cohere-command-a", "Mistral-Large-3"],
-    "o3-mini": ["gpt-4o", "gpt-4.1", "Kimi-K2-Thinking", "DeepSeek-R1-0528", "Cohere-command-a", "Mistral-Large-3"],
-    "Cohere-command-a": ["o3-mini", "gpt-4o", "gpt-4.1", "Kimi-K2-Thinking", "Mistral-Large-3", "DeepSeek-R1-0528"],
-    "Kimi-K2-Thinking": ["o3-mini", "gpt-4o", "gpt-4.1", "DeepSeek-R1-0528", "Cohere-command-a", "Mistral-Large-3"],
 }
 
 # Configuration
@@ -735,23 +793,15 @@ def _get_azure_client(model_name: str):
             client = getter()
             if client is not None:
                 return client
-    # Fallback: try any available client
-    for getter_fn in [lambda: azure_o3mini_client, lambda: azure_gpt4o_client,
-                      lambda: azure_gpt41_client, lambda: azure_deepseek_client,
-                      lambda: azure_mistral_client, lambda: azure_cohere_client,
-                      lambda: azure_kimi_client]:
-        c = getter_fn()
-        if c is not None:
-            return c
     return None
 
 
 def call_azure_ai(model_name: str, prompt: str, system_prompt: str,
-                  max_tokens: int = 2000, temperature: float = 0.7) -> str:
+                  max_tokens: int = 65_536, temperature: float = 0.7) -> str:
     """Invoke a model via its Azure AI model-specific endpoint.
 
-    Includes retry with exponential backoff for HTTP 429 (rate limiting)
-    and automatic fallback to alternative models when rate-limited.
+    No fallbacks — if a model fails, the pipeline stops immediately
+    and the error is surfaced to the frontend.
     """
     client = _get_azure_client(model_name)
 
@@ -766,45 +816,25 @@ def call_azure_ai(model_name: str, prompt: str, system_prompt: str,
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": prompt})
 
-    # Retry with exponential backoff for 429 rate-limit errors
-    max_retries = 3  # Reduced from 5 — fail faster to fallback sooner
-    for attempt in range(max_retries + 1):
-        try:
+    try:
+        # o3-mini is a reasoning model: use max_completion_tokens, no temperature
+        if "o3" in model_name.lower():
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=messages,
+                max_completion_tokens=max_tokens,
+            )
+        else:
             response = client.chat.completions.create(
                 model=model_name,
                 messages=messages,
                 max_tokens=max_tokens,
                 temperature=temperature,
             )
-            return response.choices[0].message.content
-        except urllib.error.HTTPError as e:
-            if e.code == 429 and attempt < max_retries:
-                wait = min(5 * (3 ** attempt), 30)  # 5s, 15s, 30s
-                logger.warning(f"Azure AI 429 for {model_name}, retry {attempt+1}/{max_retries} in {wait}s")
-                time.sleep(wait)
-            elif e.code == 429:
-                # Exhausted retries on primary model — try fallbacks
-                fallbacks = MODEL_FALLBACKS.get(model_name, [])
-                for fb_model in fallbacks:
-                    fb_client = _get_azure_client(fb_model)
-                    if fb_client is None:
-                        continue
-                    try:
-                        logger.warning(f"Azure AI 429 exhausted for {model_name}, falling back to {fb_model}")
-                        response = fb_client.chat.completions.create(
-                            model=fb_model,
-                            messages=messages,
-                            max_tokens=max_tokens,
-                            temperature=temperature,
-                        )
-                        return response.choices[0].message.content
-                    except Exception as fb_err:
-                        logger.warning(f"Fallback {fb_model} also failed: {fb_err}")
-                        continue
-                raise  # All fallbacks failed
-            else:
-                raise
-    raise RuntimeError(f"Azure AI call failed after {max_retries} retries for {model_name}")
+        return response.choices[0].message.content
+    except Exception as e:
+        logger.error(f"Azure AI call FAILED for {model_name}: {e}")
+        raise RuntimeError(f"Model {model_name} failed: {e}")
 
 
 def parse_hypothesis_json(text: str) -> dict | None:
