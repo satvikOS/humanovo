@@ -141,6 +141,8 @@ class _AzureAIChatCompletions:
     """Mimics openai's chat.completions interface for Azure AI model-specific endpoints."""
     def __init__(self, base_url: str, api_key: str):
         self._base_url = base_url.rstrip("/")
+        if not self._base_url.startswith("https://"):
+            self._base_url = f"https://{self._base_url}"
         self._api_key = api_key
 
     def create(self, model: str, messages: list, max_tokens: int = 65_536,
@@ -270,23 +272,32 @@ AZURE_PHI4_ENDPOINT = os.environ.get("AZURE_PHI4_ENDPOINT", "") or AZURE_AI_ENDP
 AZURE_PHI4_KEY = os.environ.get("AZURE_PHI4_KEY", "") or AZURE_AI_KEY
 
 def _normalize_azure_ai_endpoint(endpoint: str) -> str:
-    """Normalize Azure AI Foundry endpoint to base URL (before /chat/completions).
+    """Normalize Azure AI Foundry endpoint to base URL for /chat/completions.
 
     Input examples:
-      https://humanovo-openai.services.ai.azure.com/models/chat/completions?api-version=2024-05-01-preview
+      https://humanovo-openai.services.ai.azure.com/openai/v1/chat/completions?api-version=...
+      https://humanovo-openai.services.ai.azure.com/models/chat/completions?api-version=...
       https://humanovo-openai.services.ai.azure.com/models
       https://humanovo-openai.services.ai.azure.com
+      humanovo-openai.services.ai.azure.com
 
     Output: https://humanovo-openai.services.ai.azure.com/models
     """
     # Strip query string
     endpoint = endpoint.split("?")[0].rstrip("/")
-    # Strip /chat/completions suffix if present
-    if endpoint.endswith("/chat/completions"):
-        endpoint = endpoint[: -len("/chat/completions")]
-    # Ensure /models suffix for Azure AI Foundry endpoints
-    if "services.ai.azure.com" in endpoint and not endpoint.endswith("/models"):
-        endpoint = endpoint.rstrip("/") + "/models"
+    # Add https:// if missing
+    if not endpoint.startswith("https://") and not endpoint.startswith("http://"):
+        endpoint = f"https://{endpoint}"
+    # For services.ai.azure.com: strip ALL path components, then add /models
+    if "services.ai.azure.com" in endpoint:
+        # Extract just scheme + hostname
+        from urllib.parse import urlparse
+        parsed = urlparse(endpoint)
+        endpoint = f"{parsed.scheme}://{parsed.netloc}/models"
+    else:
+        # Non-AI-Foundry: just strip /chat/completions suffix
+        if endpoint.endswith("/chat/completions"):
+            endpoint = endpoint[: -len("/chat/completions")]
     return endpoint
 
 
@@ -295,27 +306,50 @@ def _normalize_azure_openai_endpoint(endpoint: str) -> str:
 
     Input examples:
       https://humanovo-openai.cognitiveservices.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2025-01-01-preview
+      humanovo-openai.cognitiveservices.azure.com
       https://humanovo-openai.cognitiveservices.azure.com
 
     Output: https://humanovo-openai.cognitiveservices.azure.com
     """
     # Strip query string
     endpoint = endpoint.split("?")[0].rstrip("/")
+    # Add https:// if missing
+    if not endpoint.startswith("https://") and not endpoint.startswith("http://"):
+        endpoint = f"https://{endpoint}"
     # Strip everything from /openai/ onwards
     idx = endpoint.find("/openai/")
     if idx > 0:
         endpoint = endpoint[:idx]
+    # Strip /chat/completions or other path suffixes
+    if endpoint.endswith("/chat/completions"):
+        endpoint = endpoint[: -len("/chat/completions")]
     return endpoint
 
 
-def _init_azure_client(name, endpoint, key):
-    """Initialize an Azure AI model-specific client, returning None on failure."""
+def _init_azure_client(name, endpoint, key, model_name=None):
+    """Initialize an Azure AI client, auto-detecting endpoint type.
+
+    If endpoint is cognitiveservices.azure.com → AzureOpenAIClient (deployment-based).
+    If endpoint is services.ai.azure.com → AzureAIClient (model-specific).
+    """
     if endpoint and key:
         try:
-            normalized = _normalize_azure_ai_endpoint(endpoint)
-            client = AzureAIClient(base_url=normalized, api_key=key)
-            print(f"[ORCHESTRATOR] Azure {name} client initialized (endpoint={normalized})")
-            return client
+            # Auto-detect: cognitiveservices endpoints need deployment-based routing
+            if "cognitiveservices.azure.com" in endpoint:
+                normalized = _normalize_azure_openai_endpoint(endpoint)
+                # Use model_name or name as the deployment name
+                deployment = (model_name or name).lower().replace(" ", "-")
+                client = AzureOpenAIClient(
+                    endpoint=normalized, api_key=key,
+                    deployment=deployment, api_version="2025-01-01-preview",
+                )
+                print(f"[ORCHESTRATOR] Azure {name} client initialized as OpenAI deployment (endpoint={normalized}, deployment={deployment})")
+                return client
+            else:
+                normalized = _normalize_azure_ai_endpoint(endpoint)
+                client = AzureAIClient(base_url=normalized, api_key=key)
+                print(f"[ORCHESTRATOR] Azure {name} client initialized (endpoint={normalized})")
+                return client
         except Exception as _e:
             logger.error(f"Azure {name} init failed: {_e}")
     else:
@@ -336,12 +370,12 @@ def _init_azure_openai_client(name, endpoint, key, deployment, api_version="2024
         print(f"[ORCHESTRATOR] Azure OpenAI {name} not configured (endpoint={'set' if endpoint else 'empty'}, key={'set' if key else 'empty'})")
     return None
 
-# Azure AI Foundry model-specific endpoints (DeepSeek, Mistral, Cohere, Kimi, Phi4 — all via services.ai.azure.com)
-azure_deepseek_client = _init_azure_client("DeepSeek", AZURE_DEEPSEEK_ENDPOINT, AZURE_DEEPSEEK_KEY)
-azure_mistral_client = _init_azure_client("Mistral", AZURE_MISTRAL_ENDPOINT, AZURE_MISTRAL_KEY)
-azure_cohere_client = _init_azure_client("Cohere", AZURE_COHERE_ENDPOINT, AZURE_COHERE_KEY)
-azure_kimi_client = _init_azure_client("Kimi-K2", AZURE_KIMI_ENDPOINT, AZURE_KIMI_KEY)
-azure_phi4_client = _init_azure_client("Phi4", AZURE_PHI4_ENDPOINT, AZURE_PHI4_KEY)
+# Azure AI model-specific endpoints — auto-detects services.ai.azure.com vs cognitiveservices.azure.com
+azure_deepseek_client = _init_azure_client("DeepSeek", AZURE_DEEPSEEK_ENDPOINT, AZURE_DEEPSEEK_KEY, model_name="DeepSeek-R1")
+azure_mistral_client = _init_azure_client("Mistral", AZURE_MISTRAL_ENDPOINT, AZURE_MISTRAL_KEY, model_name="Mistral-Large-3")
+azure_cohere_client = _init_azure_client("Cohere", AZURE_COHERE_ENDPOINT, AZURE_COHERE_KEY, model_name="Cohere-command-a")
+azure_kimi_client = _init_azure_client("Kimi-K2", AZURE_KIMI_ENDPOINT, AZURE_KIMI_KEY, model_name="Kimi-K2-Thinking")
+azure_phi4_client = _init_azure_client("Phi4", AZURE_PHI4_ENDPOINT, AZURE_PHI4_KEY, model_name="Phi-4-reasoning")
 # Azure OpenAI deployment-based endpoints (GPT-4o, o3-mini, GPT-4.1 — via cognitiveservices.azure.com)
 azure_gpt4o_client = _init_azure_openai_client("GPT-4o", AZURE_GPT4O_ENDPOINT, AZURE_GPT4O_KEY, "gpt-4o", "2025-01-01-preview")
 azure_o3mini_client = _init_azure_openai_client("o3-mini", AZURE_O3MINI_ENDPOINT, AZURE_O3MINI_KEY, "o3-mini", "2025-01-01-preview")
