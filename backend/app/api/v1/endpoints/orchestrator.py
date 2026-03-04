@@ -422,8 +422,8 @@ async def generate_research_paper_markdown():
                 external_factors=external_factors,
             )
 
-            markdown = paper_service.paper_to_markdown(paper)
-            _paper_result = markdown
+            html_content = paper_service.paper_to_html(paper)
+            _paper_result = html_content
             _paper_status = "done"
             logger.info("Paper generation completed successfully")
 

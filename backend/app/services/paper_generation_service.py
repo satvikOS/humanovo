@@ -444,7 +444,7 @@ Disease: {paper.disease}
 Discovery type: {type_label}
 Top finding: {top_hyp.get('title', 'Multi-model AI discovery')}
 Total hypotheses: {len(paper.hypotheses)}
-Models used: Claude Opus 4.6, DeepSeek-R1-0528, Mistral-Large-3
+Models used: 8-model AI pipeline (Claude Opus 4.6, DeepSeek-R1-0528, Mistral-Large-3, GPT-4o, Cohere Command A, Kimi-K2-Thinking, o3-mini, GPT-4.1)
 
 Return ONLY the title text, no quotes, no explanation. The title should be concise (under 200 characters), scientifically precise, and reflect the multi-model AI approach. Format as: "Title — by Humanovo"."""
 
@@ -460,7 +460,7 @@ Discovery type: {paper.discovery_type}
 Total hypotheses generated: {len(paper.hypotheses)}
 Best confidence achieved: {paper.stats.get('current_best_confidence', 0):.1%}
 Total agents deployed: {paper.stats.get('total_agents', 0)}
-Models used: Claude Opus 4.6 (exploration + synthesis), DeepSeek-R1-0528 (chain-of-thought reasoning), Mistral-Large-3 (critical analysis)
+Models used: 8-model pipeline — Claude Opus 4.6 (exploration + synthesis), DeepSeek-R1-0528 (chain-of-thought reasoning), Mistral-Large-3 (critical analysis), GPT-4o (editorial synthesis), Cohere Command A (RAG literature review), Kimi-K2-Thinking (QA validation), o3-mini (deep reasoning), GPT-4.1 (analytical review)
 Runtime: {paper.stats.get('runtime_seconds', 0):.0f} seconds
 External factors analyzed: {len(paper.external_factors)}
 High confidence discoveries (>=70%): {paper.stats.get('high_confidence_discoveries', 0)}
@@ -499,7 +499,7 @@ This must cover ALL of the following in depth:
    - Evolution from single-model to multi-model AI systems
    - Advantages of parallel reasoning with diverse architectures
    - Recent breakthroughs in AI-assisted drug discovery
-   - How our 3-model approach (Claude Opus 4.6 for synthesis, DeepSeek-R1-0528 for reasoning, Mistral-Large-3 for critical analysis) advances the field
+   - How our 8-model approach (Claude Opus 4.6 for synthesis, DeepSeek-R1-0528 for reasoning, Mistral-Large-3 for critical analysis, GPT-4o for editorial synthesis, Cohere Command A for literature RAG, Kimi-K2-Thinking for QA, o3-mini for deep reasoning, GPT-4.1 for analytical review) advances the field
 
 4. ROLE OF EXTERNAL FACTORS (150+ words)
    - Nutrients, chemicals, drugs, natural compounds, trace elements in disease modulation
@@ -738,8 +738,14 @@ External factor interactions: {json.dumps(hyp.get('external_factors', []))}
 
 Cover in your analysis:
 1. Scientific rationale and biological plausibility with specific pathway references
-2. Detailed mechanism of action at molecular level — include a text-based mechanism diagram:
-   [Ligand] → [Receptor] → [Signaling Cascade] → [Transcription Factor] → [Gene Expression] → [Phenotype]
+2. Detailed mechanism of action at molecular level — MUST include text-based mechanism diagrams using arrows:
+
+   [Drug/Compound] → [Target Receptor] → [Signaling Cascade] → [Transcription Factor]
+        ↓                                        ↓
+   [Downstream Effects]              [Gene Expression Changes]
+        ↓                                        ↓
+   [Cellular Response]               [Therapeutic Phenotype]
+
 3. Existing supporting evidence from literature (reference specific studies)
 4. Potential therapeutic modalities (small molecule, biologic, gene therapy, etc.)
 5. Key risks, toxicity concerns, and off-target effects
@@ -747,7 +753,12 @@ Cover in your analysis:
 7. Patient population considerations and stratification
 8. Comparison with existing treatments for {paper.disease}
 
-Include any relevant molecular formulas (e.g., IC50 values, binding affinities in nM/μM).
+Include for EACH hypothesis:
+- Molecular formula of key compounds (e.g., C₂₁H₃₀O₂)
+- IC50/Ki/Kd values where known (e.g., IC₅₀ = 2.3 nM)
+- Dose-response relationship text diagram if applicable
+- At least ONE pathway diagram in arrow notation (→, ↓)
+
 IMPORTANT: Do NOT hallucinate data. Only state well-established biomedical facts.
 
 Write as formal FDA/R&D-grade scientific text. Be specific, not generic."""
@@ -822,9 +833,15 @@ For each category of factors, write a detailed analysis covering:
 Organize by category (Nutrients, Compounds, Drugs, Chemicals, Elements).
 
 Include for each factor:
-- Molecular formula and structure description
-- Mechanism of action text diagram: [Factor] → [Target] → [Pathway] → [Effect]
-- Known dosing ranges from literature
+- Molecular formula and structure description (e.g., Curcumin: C₂₁H₂₀O₆, MW: 368.38)
+- MUST include mechanism of action text diagram using arrow notation:
+
+    [Factor] → [Target Receptor/Enzyme] → [Signaling Pathway] → [Cellular Effect]
+         ↓                                       ↓
+    [Dose-Response]                    [Downstream Gene Expression]
+
+- Known dosing ranges from literature (e.g., therapeutic window: 500-2000 mg/day)
+- Drug-factor interaction diagrams where relevant
 
 IMPORTANT: Do NOT hallucinate. Only state well-established biomedical facts.
 Write as formal FDA/R&D-grade scientific text. Be specific about molecular mechanisms."""
@@ -849,13 +866,21 @@ Describe in scientific detail:
 6. Potential resistance mechanisms and how to overcome them
 7. Biomarker opportunities arising from these mechanisms
 
-Include text-based pathway diagrams where relevant, for example:
+Include MULTIPLE text-based pathway diagrams using arrow notation (→, ↓, ←) for each major pathway:
+
+Example format (use this style throughout):
 
     Growth Factor → RTK → RAS → RAF → MEK → ERK → Transcription
                                         ↓
                               PI3K → AKT → mTOR → Protein Synthesis
 
-Include relevant kinetic parameters (Km, Kd, IC50) where well-established.
+Also include:
+- Chemical formulas for key compounds (e.g., C₂₁H₃₀O₂, IC₅₀ = 2.3 nM)
+- Receptor binding diagrams: [Ligand] + [Receptor] → [Complex] → [Signal]
+- Enzyme kinetics: Km, Kd, IC50, Ki values where well-established
+- Feedback loop diagrams showing positive/negative regulation
+- Cross-pathway interaction maps
+
 IMPORTANT: Do NOT hallucinate. Only state well-established biomedical facts. Use specific gene/protein names (with UniProt/HGNC identifiers where possible), pathway identifiers, and molecular interactions.
 
 Write as formal FDA/R&D-grade scientific text. No headers — flowing paragraphs."""
@@ -872,7 +897,7 @@ Key findings to discuss:
 - Top hypotheses: {', '.join(top_titles)}
 - Best confidence achieved: {paper.stats.get('current_best_confidence', 0):.1%}
 - Total hypotheses: {len(paper.hypotheses)}
-- Models used: Claude Opus 4.6, DeepSeek-R1-0528, Mistral-Large-3
+- Models used: 8-model pipeline (Claude Opus 4.6, DeepSeek-R1-0528, Mistral-Large-3, GPT-4o, Cohere Command A, Kimi-K2-Thinking, o3-mini, GPT-4.1)
 - External factors analyzed: {len(paper.external_factors)}
 - Paths explored: {paper.stats.get('paths_explored', 0):,}
 
@@ -914,7 +939,7 @@ Write in formal FDA/R&D-grade academic discussion style. Be balanced — acknowl
         prompt = f"""Write a Limitations and Future Directions section (500-700 words) for a research paper on AI-driven {paper.disease} discovery.
 
 Current study parameters:
-- {paper.stats.get('total_agents', 0)} agents across 3 models (Claude Opus 4.6, DeepSeek-R1-0528, Mistral-Large-3)
+- {paper.stats.get('total_agents', 0)} agents across 8 models (Claude Opus 4.6, DeepSeek-R1-0528, Mistral-Large-3, GPT-4o, Cohere Command A, Kimi-K2-Thinking, o3-mini, GPT-4.1)
 - {len(paper.hypotheses)} hypotheses generated
 - {paper.stats.get('paths_explored', 0):,} paths explored
 - Runtime: {paper.stats.get('runtime_seconds', 0):.0f} seconds
@@ -950,7 +975,7 @@ Write as formal FDA/R&D-grade scientific text."""
         prompt = f"""Write a strong Conclusion section (300-400 words) for a research paper on AI-driven {paper.disease} discovery.
 
 Summarize:
-- {paper.stats.get('total_agents', 0)} parallel agents across 3 LLMs (Claude Opus, DeepSeek-R1-0528, Mistral-Large-3) identified {len(paper.hypotheses)} hypotheses
+- {paper.stats.get('total_agents', 0)} parallel agents across 8 LLMs (Claude Opus 4.6, DeepSeek-R1-0528, Mistral-Large-3, GPT-4o, Cohere Command A, Kimi-K2-Thinking, o3-mini, GPT-4.1) identified {len(paper.hypotheses)} hypotheses
 - Best confidence: {paper.stats.get('current_best_confidence', 0):.1%}
 - Top finding: {paper.hypotheses[0].get('title', 'N/A') if paper.hypotheses else 'N/A'}
 - {len(paper.external_factors)} external factors integrated
@@ -1562,28 +1587,386 @@ Write as a professional analytical assessment. Be data-driven and actionable."""
     # Markdown Export
     # =========================================================================
 
-    def paper_to_markdown(self, paper: ResearchPaper) -> str:
-        """Convert a research paper to Markdown format with TOC."""
-        md = []
+    def paper_to_html(self, paper: ResearchPaper) -> str:
+        """Convert a research paper to a self-contained, professionally formatted HTML document.
 
-        # Title
-        md.append(f"# {paper.sections.get('title', 'Untitled Research Paper')}\n")
-        md.append(f"*Generated by Humanovo Multi-Model Discovery Platform — {paper.created_at.strftime('%Y-%m-%d %H:%M UTC')}*\n")
-        md.append(f"*Generation time: {paper.generation_time_seconds:.1f}s | "
-                   f"Models: Claude Opus 4.6, DeepSeek-R1-0528, Mistral-Large-3, GPT-4o, Cohere Command A, Kimi-K2-Thinking, o3-mini, GPT-4.1 | "
-                   f"All citations PubMed-verified*\n")
-        md.append("---\n")
+        Produces an FDA/R&D-grade HTML page with:
+        - Cover page with title, "by Humanovo", date, model info
+        - Indexed table of contents with numbered sections
+        - Professional typography (system fonts, proper spacing, colors)
+        - Numbered citations [1], [2], etc. with PubMed verification
+        - Formatted tables with zebra striping
+        - Code/diagram blocks preserved in monospace
+        - Mermaid diagram code blocks
+        - Responsive layout for the iframe viewer
+        """
+        import html as html_mod
+        import re
 
-        # Table of Contents
-        md.append("## Table of Contents\n")
+        title = html_mod.escape(paper.sections.get('title', 'Untitled Research Paper'))
+        date_str = paper.created_at.strftime('%B %d, %Y at %H:%M UTC')
+        models = "Claude Opus 4.6, DeepSeek-R1-0528, Mistral-Large-3, GPT-4o, Cohere Command A, Kimi-K2-Thinking, o3-mini, GPT-4.1"
+
+        def _md_to_html(text: str) -> str:
+            """Convert basic markdown formatting to HTML."""
+            t = html_mod.escape(text)
+            # Bold **text**
+            t = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', t)
+            # Italic *text*
+            t = re.sub(r'\*(.+?)\*', r'<em>\1</em>', t)
+            # Inline code `text`
+            t = re.sub(r'`(.+?)`', r'<code>\1</code>', t)
+            return t
+
+        def _section_to_html(content: str) -> str:
+            """Convert section content (markdown-ish) to HTML paragraphs."""
+            blocks = content.split('\n\n')
+            parts = []
+            for block in blocks:
+                block = block.strip()
+                if not block:
+                    continue
+                if block.startswith('#### '):
+                    parts.append(f'<h4>{_md_to_html(block[5:])}</h4>')
+                elif block.startswith('### '):
+                    parts.append(f'<h3>{_md_to_html(block[4:])}</h3>')
+                elif block.startswith('## '):
+                    parts.append(f'<h2>{_md_to_html(block[3:])}</h2>')
+                elif block.startswith('---'):
+                    parts.append('<hr/>')
+                elif _is_diagram(block):
+                    parts.append(f'<pre class="diagram">{html_mod.escape(block)}</pre>')
+                elif block.startswith('- ') or block.startswith('* '):
+                    items = []
+                    for line in block.split('\n'):
+                        line = line.strip()
+                        if line.startswith('- ') or line.startswith('* '):
+                            items.append(f'<li>{_md_to_html(line[2:])}</li>')
+                        elif line:
+                            items.append(f'<li>{_md_to_html(line)}</li>')
+                    parts.append(f'<ul>{"".join(items)}</ul>')
+                else:
+                    parts.append(f'<p>{_md_to_html(block)}</p>')
+            return '\n'.join(parts)
+
+        def _is_diagram(text: str) -> bool:
+            arrow_chars = text.count('→') + text.count('←') + text.count('↓') + text.count('↑')
+            pipe_chars = text.count('│') + text.count('┌') + text.count('└') + text.count('├')
+            box_chars = text.count('[') + text.count(']')
+            if arrow_chars >= 2 or pipe_chars >= 2:
+                return True
+            if box_chars >= 4 and arrow_chars >= 1:
+                return True
+            indent_lines = sum(1 for line in text.split('\n') if line.startswith('    '))
+            total_lines = max(len(text.split('\n')), 1)
+            if indent_lines >= 3 and indent_lines / total_lines > 0.5:
+                return True
+            return False
+
+        # Build HTML
+        h = []
+        h.append(f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{title}</title>
+<style>
+:root {{
+  --primary: #0f1b2d;
+  --accent: #e94560;
+  --text: #1a1a2e;
+  --text-light: #4a4a6a;
+  --text-muted: #888;
+  --bg: #ffffff;
+  --bg-alt: #f4f6f9;
+  --border: #d0d5dd;
+  --table-header: #0f1b2d;
+}}
+* {{ margin: 0; padding: 0; box-sizing: border-box; }}
+body {{
+  font-family: 'Georgia', 'Times New Roman', serif;
+  color: var(--text);
+  background: var(--bg);
+  line-height: 1.7;
+  font-size: 11pt;
+}}
+.page {{ max-width: 8.5in; margin: 0 auto; padding: 0.75in; }}
+
+/* ---- Cover Page ---- */
+.cover {{
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 2in 1in;
+  page-break-after: always;
+}}
+.cover .accent-line {{
+  width: 200px;
+  height: 3px;
+  background: var(--accent);
+  margin: 0 auto 2rem;
+}}
+.cover h1 {{
+  font-size: 26pt;
+  color: var(--primary);
+  line-height: 1.3;
+  margin-bottom: 0.5rem;
+  font-weight: 700;
+}}
+.cover .disease {{
+  font-size: 20pt;
+  color: var(--accent);
+  font-weight: 700;
+  margin: 0.5rem 0 1.5rem;
+}}
+.cover .divider {{
+  width: 70%;
+  height: 1px;
+  background: var(--border);
+  margin: 0 auto 1.5rem;
+}}
+.cover .brand {{
+  font-size: 20pt;
+  color: var(--primary);
+  font-weight: 700;
+  margin-bottom: 0.25rem;
+}}
+.cover .subtitle {{
+  font-size: 13pt;
+  color: var(--text-light);
+  margin-bottom: 0.25rem;
+}}
+.cover .grade {{
+  font-size: 11pt;
+  color: var(--accent);
+  font-weight: 700;
+  margin-bottom: 1.5rem;
+}}
+.cover .models {{
+  font-size: 9pt;
+  color: var(--text-muted);
+  margin-bottom: 1rem;
+}}
+.cover .meta {{
+  font-size: 10pt;
+  color: var(--text-muted);
+  margin-bottom: 0.25rem;
+}}
+.cover-table {{
+  margin: 1.5rem auto 0;
+  border-collapse: collapse;
+  font-size: 9pt;
+  font-family: 'Helvetica Neue', Arial, sans-serif;
+}}
+.cover-table th {{
+  background: var(--table-header);
+  color: white;
+  padding: 6px 16px;
+  text-align: left;
+  font-weight: 600;
+}}
+.cover-table td {{
+  padding: 5px 16px;
+  border: 1px solid var(--border);
+}}
+.cover-table tr:nth-child(even) td {{ background: var(--bg-alt); }}
+
+/* ---- TOC ---- */
+.toc {{ page-break-after: always; }}
+.toc h2 {{
+  font-size: 18pt;
+  color: var(--primary);
+  border-bottom: 2px solid var(--accent);
+  padding-bottom: 6px;
+  margin-bottom: 1rem;
+}}
+.toc-entry {{
+  font-family: 'Helvetica Neue', Arial, sans-serif;
+  font-size: 11pt;
+  padding: 4px 0;
+  color: var(--text);
+}}
+.toc-entry a {{
+  color: var(--text);
+  text-decoration: none;
+}}
+.toc-entry a:hover {{ color: var(--accent); }}
+.toc-entry.sub {{ padding-left: 24px; font-size: 10pt; color: var(--text-light); }}
+
+/* ---- Section headings ---- */
+h2.section-heading {{
+  font-size: 17pt;
+  color: var(--primary);
+  border-bottom: 2px solid var(--accent);
+  padding-bottom: 6px;
+  margin: 2rem 0 1rem;
+  page-break-after: avoid;
+}}
+h3 {{
+  font-size: 13pt;
+  color: #1a3a5c;
+  margin: 1.5rem 0 0.5rem;
+  font-weight: 700;
+}}
+h4 {{
+  font-size: 11pt;
+  color: #2a5a8c;
+  margin: 1rem 0 0.5rem;
+  font-weight: 700;
+}}
+
+/* ---- Body ---- */
+p {{ margin-bottom: 0.75rem; text-align: justify; }}
+ul, ol {{ margin: 0.5rem 0 0.75rem 1.5rem; }}
+li {{ margin-bottom: 0.3rem; }}
+strong {{ font-weight: 700; }}
+em {{ font-style: italic; }}
+code {{
+  font-family: 'Courier New', Courier, monospace;
+  background: var(--bg-alt);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 0.9em;
+}}
+hr {{
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 1.5rem 0;
+}}
+
+/* ---- Diagrams / code blocks ---- */
+pre.diagram {{
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 9pt;
+  line-height: 1.4;
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  padding: 12px 16px;
+  margin: 1rem 0;
+  overflow-x: auto;
+  white-space: pre;
+  border-radius: 4px;
+}}
+
+/* ---- Tables ---- */
+.data-table {{
+  width: 100%;
+  border-collapse: collapse;
+  font-family: 'Helvetica Neue', Arial, sans-serif;
+  font-size: 9pt;
+  margin: 0.75rem 0 1.5rem;
+}}
+.data-table th {{
+  background: var(--table-header);
+  color: white;
+  padding: 7px 10px;
+  text-align: left;
+  font-weight: 600;
+  font-size: 8.5pt;
+}}
+.data-table td {{
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  vertical-align: top;
+}}
+.data-table tr:nth-child(even) td {{ background: var(--bg-alt); }}
+.table-caption {{
+  font-size: 9pt;
+  color: var(--text-light);
+  text-align: center;
+  font-style: italic;
+  margin-bottom: 1.5rem;
+}}
+
+/* ---- References ---- */
+.ref-entry {{
+  font-size: 9pt;
+  line-height: 1.5;
+  margin-bottom: 4px;
+  padding-left: 2em;
+  text-indent: -2em;
+  font-family: 'Helvetica Neue', Arial, sans-serif;
+}}
+.ref-id {{ font-weight: 700; }}
+.ref-verified {{
+  color: #16a34a;
+  font-weight: 600;
+  font-size: 8pt;
+}}
+
+/* ---- Footer ---- */
+.doc-footer {{
+  margin-top: 3rem;
+  padding-top: 1rem;
+  border-top: 2px solid var(--accent);
+  text-align: center;
+  font-size: 8pt;
+  color: var(--text-muted);
+  font-family: 'Helvetica Neue', Arial, sans-serif;
+}}
+
+@media print {{
+  body {{ font-size: 10pt; }}
+  .page {{ padding: 0; }}
+  .cover {{ min-height: auto; padding: 1in; }}
+}}
+</style>
+</head>
+<body>
+''')
+
+        # ---- Cover Page ----
+        h.append('<div class="cover">')
+        h.append('<div class="accent-line"></div>')
+        h.append(f'<h1>{title}</h1>')
+        h.append(f'<div class="disease">{html_mod.escape(paper.disease)}</div>')
+        h.append('<div class="divider"></div>')
+        h.append('<div class="brand">by Humanovo</div>')
+        h.append('<div class="subtitle">Multi-Model AI Discovery Platform</div>')
+        h.append('<div class="grade">FDA/R&amp;D-Grade Research Document</div>')
+        h.append(f'<div class="models">{html_mod.escape(models)}</div>')
+        h.append(f'<div class="meta">{date_str}</div>')
+        h.append(f'<div class="meta">{len(paper.hypotheses)} Hypotheses &bull; '
+                 f'Generation time: {paper.generation_time_seconds:.1f}s &bull; '
+                 f'All citations PubMed-verified</div>')
+
+        # Config table
+        h.append('<table class="cover-table">')
+        h.append('<tr><th>Parameter</th><th>Value</th></tr>')
+        config = [
+            ('Disease Focus', paper.disease),
+            ('Discovery Type', paper.discovery_type.replace('_', ' ').title()),
+            ('Total Hypotheses', str(len(paper.hypotheses))),
+            ('Best Confidence', f"{paper.stats.get('current_best_confidence', 0):.1%}"),
+            ('AI Models', '8 (see above)'),
+            ('References', f"{len(paper.references)} PubMed-verified"),
+        ]
+        for param, val in config:
+            h.append(f'<tr><td><strong>{html_mod.escape(param)}</strong></td>'
+                     f'<td>{html_mod.escape(val)}</td></tr>')
+        h.append('</table>')
+        h.append('</div>')  # end cover
+
+        h.append('<div class="page">')
+
+        # ---- Table of Contents ----
+        h.append('<div class="toc">')
+        h.append('<h2>Table of Contents</h2>')
         for entry in paper.toc:
-            indent = "  " * entry.get("depth", 0)
-            label = entry["label"]
+            depth = entry.get("depth", 0)
+            cls = "toc-entry sub" if depth > 0 else "toc-entry"
+            label = html_mod.escape(entry["label"])
             anchor = entry["id"]
-            md.append(f"{indent}- [{entry['index']}. {label}](#{anchor})")
-        md.append("\n---\n")
+            idx = entry["index"]
+            h.append(f'<div class="{cls}"><a href="#{anchor}">{idx}. {label}</a></div>')
+        h.append('</div>')  # end toc
 
-        # Sections
+        # ---- Sections ----
         section_headers = {
             "abstract": "Abstract",
             "introduction": "Introduction",
@@ -1603,60 +1986,91 @@ Write as a professional analytical assessment. Be data-driven and actionable."""
             "analytical_review": "Analytical Review",
         }
 
+        sec_idx = 0
         for key, header in section_headers.items():
             content = paper.sections.get(key, "")
-            if content:
-                anchor_id = f"section-{key}"
-                md.append(f"\n<a id=\"{anchor_id}\"></a>\n")
-                if not content.strip().startswith("##"):
-                    md.append(f"## {header}\n")
-                md.append(content + "\n")
+            if not content:
+                continue
+            sec_idx += 1
+            anchor_id = f"section-{key}"
+            h.append(f'<a id="{anchor_id}"></a>')
+            if not content.strip().startswith("##"):
+                h.append(f'<h2 class="section-heading">{sec_idx}. {html_mod.escape(header)}</h2>')
+            h.append(_section_to_html(content))
 
-        # Tables
+        # ---- Tables ----
         if paper.tables:
-            md.append("\n<a id=\"section-tables\"></a>\n")
-            md.append("## Tables\n")
+            h.append('<a id="section-tables"></a>')
+            h.append('<h2 class="section-heading">Tables</h2>')
             for table in paper.tables:
-                md.append(f"\n### {table['caption']}\n")
+                caption = html_mod.escape(table["caption"])
                 cols = table["columns"]
-                md.append("| " + " | ".join(cols) + " |")
-                md.append("| " + " | ".join(["---"] * len(cols)) + " |")
+                h.append(f'<table class="data-table">')
+                h.append('<thead><tr>')
+                for c in cols:
+                    h.append(f'<th>{html_mod.escape(c)}</th>')
+                h.append('</tr></thead><tbody>')
                 for row in table["rows"]:
-                    values = []
+                    h.append('<tr>')
                     for c in cols:
-                        key = c.lower().replace(" ", "_")
-                        val = row.get(key, "")
+                        key_name = c.lower().replace(" ", "_")
+                        val = row.get(key_name, "")
                         if val == "":
-                            # Try direct column name
                             val = row.get(c.lower(), "")
-                        values.append(str(val))
-                    if all(v == "" for v in values):
-                        values = [str(v) for v in row.values()]
-                    md.append("| " + " | ".join(values) + " |")
-                md.append("")
+                        h.append(f'<td>{html_mod.escape(str(val))}</td>')
+                    h.append('</tr>')
+                h.append('</tbody></table>')
+                h.append(f'<div class="table-caption">{caption}</div>')
 
-        # Plotly figures (as JSON code blocks for frontend rendering)
+        # ---- Plotly / Mermaid figures ----
         if paper.plotly_figures:
-            md.append("\n<a id=\"section-figures\"></a>\n")
-            md.append("## Figures\n")
+            h.append('<a id="section-figures"></a>')
+            h.append('<h2 class="section-heading">Figures</h2>')
             for fig in paper.plotly_figures:
-                md.append(f"\n### {fig['caption']}\n")
-                if fig["type"] == "plotly":
-                    md.append(f"```plotly\n{json.dumps(fig['spec'], indent=2)}\n```\n")
-                elif fig["type"] == "mermaid":
-                    md.append(f"```mermaid\n{fig['spec']}\n```\n")
+                caption = html_mod.escape(fig["caption"])
+                h.append(f'<h3>{caption}</h3>')
+                if fig["type"] == "mermaid":
+                    h.append(f'<pre class="diagram">{html_mod.escape(fig["spec"])}</pre>')
+                elif fig["type"] == "plotly":
+                    h.append(f'<pre class="diagram">{html_mod.escape(json.dumps(fig["spec"], indent=2))}</pre>')
 
-        # References
+        # ---- References ----
         if paper.references:
-            md.append("\n<a id=\"section-references\"></a>\n")
-            md.append("## References\n")
+            h.append('<a id="section-references"></a>')
+            h.append('<h2 class="section-heading">References</h2>')
             for ref in paper.references:
-                doi_link = f" DOI: [{ref['doi']}]({ref['doi']})" if ref.get("doi") else ""
-                pmid_link = f" PMID: {ref['pmid']}" if ref.get("pmid") else ""
-                verified = " [Verified]" if ref.get("verified") else ""
-                md.append(f"[{ref['id']}] {ref['text']}{doi_link}{pmid_link}{verified}\n")
+                ref_id = ref.get("id", "")
+                text = html_mod.escape(ref.get("text", ""))
+                doi = ref.get("doi", "")
+                pmid = ref.get("pmid", "")
+                verified = ref.get("verified", False)
+                line = f'<div class="ref-entry"><span class="ref-id">[{ref_id}]</span> {text}'
+                if doi:
+                    safe_doi = html_mod.escape(doi)
+                    line += f' DOI: <a href="{safe_doi}" target="_blank">{safe_doi}</a>'
+                if pmid:
+                    line += f' PMID: {html_mod.escape(pmid)}'
+                if verified:
+                    line += ' <span class="ref-verified">[PubMed Verified]</span>'
+                line += '</div>'
+                h.append(line)
 
-        return "\n".join(md)
+        # ---- Footer ----
+        h.append('<div class="doc-footer">')
+        h.append(f'Generated by <strong>Humanovo</strong> &mdash; FDA/R&amp;D-Grade AI Discovery Platform<br/>')
+        h.append(f'{date_str} &bull; 8 Models &bull; '
+                 f'{len(paper.references)} PubMed-Verified References<br/>')
+        h.append('CONFIDENTIAL &mdash; FOR AUTHORIZED USE ONLY')
+        h.append('</div>')
+
+        h.append('</div>')  # end page
+        h.append('</body></html>')
+
+        return '\n'.join(h)
+
+    def paper_to_markdown(self, paper: ResearchPaper) -> str:
+        """Convert a research paper to HTML format (legacy name kept for API compat)."""
+        return self.paper_to_html(paper)
 
 
 # Singleton

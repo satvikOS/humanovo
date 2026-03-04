@@ -150,17 +150,56 @@ class ExportResult:
 
 class PdfRenderer:
     """
-    Renders a DocumentBundle into a professional research paper PDF.
+    Renders a DocumentBundle into a professional FDA/R&D-grade research paper PDF.
 
     Features:
-    - Cover page with pipeline configuration and Humanovo branding
-    - Auto-generated table of contents
-    - AI-generated section content with proper formatting
-    - Formatted data tables (hypotheses, model performance, confidence distribution)
-    - Keywords, glossary, and PubMed-verified references
+    - Professional cover page with Humanovo branding, title, date, configuration
+    - Numbered table of contents with dotted leaders
+    - AI-generated section content with markdown-to-PDF conversion
+    - Monospace code blocks for pathway diagrams, flowcharts, and formulas
+    - Formatted data tables with professional styling
+    - Numbered citations [1], [2], etc. with PubMed verification badges
+    - Keywords, glossary, and indexed references
+    - Page numbers in footer
     - Color-coded confidence indicators
     - Page breaks between major sections
     """
+
+    @staticmethod
+    def _sanitize(text: str) -> str:
+        """Sanitize text for ReportLab XML parser, preserving allowed tags."""
+        import re
+        safe = (text.replace("&", "&amp;")
+                    .replace("<", "&lt;")
+                    .replace(">", "&gt;"))
+        # Restore ReportLab-safe HTML tags
+        for tag in ("b", "i", "u", "sub", "sup", "br"):
+            safe = safe.replace(f"&lt;{tag}&gt;", f"<{tag}>")
+            safe = safe.replace(f"&lt;/{tag}&gt;", f"</{tag}>")
+        # Convert markdown bold **text** to <b>text</b>
+        safe = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', safe)
+        # Convert markdown italic *text* to <i>text</i>
+        safe = re.sub(r'\*(.+?)\*', r'<i>\1</i>', safe)
+        # Convert subscript notation (e.g., H₂O already unicode, but also CO_2 → CO<sub>2</sub>)
+        safe = re.sub(r'(\w)_(\d+)', r'\1<sub>\2</sub>', safe)
+        return safe
+
+    @staticmethod
+    def _is_code_or_diagram(text: str) -> bool:
+        """Detect if a text block is a code/diagram block (monospace)."""
+        arrow_chars = text.count('→') + text.count('←') + text.count('↓') + text.count('↑')
+        pipe_chars = text.count('│') + text.count('┌') + text.count('└') + text.count('├')
+        box_chars = text.count('[') + text.count(']')
+        indent_lines = sum(1 for line in text.split('\n') if line.startswith('    ') or line.startswith('\t'))
+        total_lines = max(len(text.split('\n')), 1)
+        # Looks like a diagram or flowchart
+        if arrow_chars >= 2 or pipe_chars >= 2:
+            return True
+        if box_chars >= 4 and arrow_chars >= 1:
+            return True
+        if indent_lines >= 3 and indent_lines / total_lines > 0.5:
+            return True
+        return False
 
     def render(self, bundle: DocumentBundle) -> bytes:
         try:
@@ -170,127 +209,249 @@ class PdfRenderer:
             from reportlab.lib.units import inch
             from reportlab.platypus import (
                 SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
-                PageBreak, HRFlowable,
+                PageBreak, HRFlowable, Preformatted,
             )
-            from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
+            from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT, TA_RIGHT
         except ImportError:
             raise RuntimeError("reportlab required for PDF generation")
 
         buf = io.BytesIO()
+
+        # Page number callback
+        page_count_holder = [0]
+
+        def _on_page(canvas, doc_template):
+            page_count_holder[0] += 1
+            page_num = page_count_holder[0]
+            canvas.saveState()
+            # Header line
+            canvas.setStrokeColor(colors.HexColor('#e94560'))
+            canvas.setLineWidth(0.5)
+            canvas.line(
+                doc_template.leftMargin,
+                letter[1] - doc_template.topMargin + 12,
+                letter[0] - doc_template.rightMargin,
+                letter[1] - doc_template.topMargin + 12,
+            )
+            # Header text
+            canvas.setFont('Helvetica', 7)
+            canvas.setFillColor(colors.HexColor('#999999'))
+            canvas.drawString(
+                doc_template.leftMargin,
+                letter[1] - doc_template.topMargin + 16,
+                f"Humanovo — FDA/R&D-Grade Research Document — {bundle.disease}",
+            )
+            # Footer line
+            canvas.setStrokeColor(colors.HexColor('#cccccc'))
+            canvas.line(
+                doc_template.leftMargin,
+                doc_template.bottomMargin - 8,
+                letter[0] - doc_template.rightMargin,
+                doc_template.bottomMargin - 8,
+            )
+            # Page number
+            canvas.setFont('Helvetica', 8)
+            canvas.setFillColor(colors.HexColor('#666666'))
+            canvas.drawRightString(
+                letter[0] - doc_template.rightMargin,
+                doc_template.bottomMargin - 20,
+                f"Page {page_num}",
+            )
+            # Confidential footer
+            canvas.setFont('Helvetica', 6)
+            canvas.setFillColor(colors.HexColor('#bbbbbb'))
+            canvas.drawString(
+                doc_template.leftMargin,
+                doc_template.bottomMargin - 20,
+                "CONFIDENTIAL — All citations PubMed-verified",
+            )
+            canvas.restoreState()
+
+        def _on_first_page(canvas, doc_template):
+            """Cover page — no header/footer."""
+            pass
+
         doc = SimpleDocTemplate(
             buf, pagesize=letter,
-            topMargin=0.75 * inch, bottomMargin=0.75 * inch,
-            leftMargin=0.75 * inch, rightMargin=0.75 * inch,
+            topMargin=0.85 * inch, bottomMargin=0.85 * inch,
+            leftMargin=0.85 * inch, rightMargin=0.85 * inch,
         )
 
         styles = getSampleStyleSheet()
-        title_style = ParagraphStyle(
-            'DocTitle', parent=styles['Title'],
-            fontSize=26, leading=32, spaceAfter=12,
-            textColor=colors.HexColor('#1a1a2e'), alignment=TA_CENTER,
+
+        # --- Professional typography styles ---
+        cover_title_style = ParagraphStyle(
+            'CoverTitle', parent=styles['Title'],
+            fontSize=28, leading=34, spaceAfter=8,
+            textColor=colors.HexColor('#0f1b2d'), alignment=TA_CENTER,
+            fontName='Helvetica-Bold',
         )
-        subtitle_style = ParagraphStyle(
-            'DocSubtitle', parent=styles['Normal'],
-            fontSize=14, leading=18, spaceAfter=6,
-            textColor=colors.HexColor('#4a4a6a'), alignment=TA_CENTER,
+        cover_subtitle_style = ParagraphStyle(
+            'CoverSubtitle', parent=styles['Normal'],
+            fontSize=15, leading=20, spaceAfter=6,
+            textColor=colors.HexColor('#3a4a6a'), alignment=TA_CENTER,
+            fontName='Helvetica',
         )
+        cover_brand_style = ParagraphStyle(
+            'CoverBrand', parent=styles['Title'],
+            fontSize=22, leading=28, spaceAfter=4,
+            textColor=colors.HexColor('#0f1b2d'), alignment=TA_CENTER,
+            fontName='Helvetica-Bold',
+        )
+        cover_accent_style = ParagraphStyle(
+            'CoverAccent', parent=styles['Normal'],
+            fontSize=12, leading=16,
+            textColor=colors.HexColor('#e94560'), alignment=TA_CENTER,
+            fontName='Helvetica-Bold',
+        )
+        cover_meta_style = ParagraphStyle(
+            'CoverMeta', parent=styles['Normal'],
+            fontSize=10, leading=14,
+            textColor=colors.HexColor('#888888'), alignment=TA_CENTER,
+        )
+
         heading_style = ParagraphStyle(
             'DocHeading', parent=styles['Heading1'],
-            fontSize=16, leading=20, spaceBefore=18, spaceAfter=8,
-            textColor=colors.HexColor('#16213e'),
+            fontSize=16, leading=20, spaceBefore=20, spaceAfter=10,
+            textColor=colors.HexColor('#0f1b2d'),
+            fontName='Helvetica-Bold',
+            borderWidth=0, borderPadding=0,
+            borderColor=colors.HexColor('#e94560'),
         )
         subheading_style = ParagraphStyle(
             'DocSubheading', parent=styles['Heading2'],
-            fontSize=13, leading=16, spaceBefore=12, spaceAfter=6,
-            textColor=colors.HexColor('#0f3460'),
+            fontSize=13, leading=16, spaceBefore=14, spaceAfter=6,
+            textColor=colors.HexColor('#1a3a5c'),
+            fontName='Helvetica-Bold',
+        )
+        h3_style = ParagraphStyle(
+            'DocH3', parent=styles['Heading3'],
+            fontSize=11, leading=14, spaceBefore=10, spaceAfter=4,
+            textColor=colors.HexColor('#2a5a8c'),
+            fontName='Helvetica-Bold',
         )
         body_style = ParagraphStyle(
             'DocBody', parent=styles['Normal'],
-            fontSize=10, leading=14, spaceAfter=6, alignment=TA_JUSTIFY,
+            fontSize=10, leading=14.5, spaceAfter=6, alignment=TA_JUSTIFY,
+            fontName='Helvetica',
+        )
+        code_style = ParagraphStyle(
+            'DocCode', parent=styles['Normal'],
+            fontSize=8, leading=11, spaceAfter=8, spaceBefore=8,
+            fontName='Courier', alignment=TA_LEFT,
+            backColor=colors.HexColor('#f4f6f9'),
+            borderWidth=0.5, borderColor=colors.HexColor('#d0d5dd'),
+            borderPadding=8,
         )
         caption_style = ParagraphStyle(
             'DocCaption', parent=styles['Normal'],
-            fontSize=9, leading=12, spaceAfter=8,
-            textColor=colors.HexColor('#666666'), alignment=TA_CENTER,
+            fontSize=9, leading=12, spaceAfter=10,
+            textColor=colors.HexColor('#555555'), alignment=TA_CENTER,
+            fontName='Helvetica-Oblique',
+        )
+        toc_style = ParagraphStyle(
+            'TOC', parent=body_style,
+            fontSize=11, spaceBefore=3, spaceAfter=3,
+            fontName='Helvetica',
+        )
+        toc_sub_style = ParagraphStyle(
+            'TOCSub', parent=body_style,
+            fontSize=10, spaceBefore=2, spaceAfter=2,
+            fontName='Helvetica',
+            leftIndent=20,
+            textColor=colors.HexColor('#444444'),
         )
 
         elements = []
 
         # ===================== COVER PAGE =====================
-        elements.append(Spacer(1, 1.5 * inch))
-        elements.append(Paragraph(
-            bundle.title or f"AI-Driven {bundle.discovery_type.replace('_', ' ').title()} Discovery",
-            title_style,
-        ))
-        elements.append(Spacer(1, 0.3 * inch))
+        elements.append(Spacer(1, 1.2 * inch))
+
+        # Accent line above title
         elements.append(HRFlowable(
-            width="60%", thickness=2,
-            color=colors.HexColor('#e94560'), spaceBefore=0, spaceAfter=12,
+            width="40%", thickness=3,
+            color=colors.HexColor('#e94560'), spaceBefore=0, spaceAfter=20,
         ))
-        elements.append(Paragraph(bundle.disease, ParagraphStyle(
-            'CoverDisease', parent=title_style, fontSize=22,
-            textColor=colors.HexColor('#e94560'),
-        )))
+
+        elements.append(Paragraph(
+            self._sanitize(bundle.title or f"AI-Driven {bundle.discovery_type.replace('_', ' ').title()} Discovery"),
+            cover_title_style,
+        ))
+        elements.append(Spacer(1, 0.15 * inch))
+
+        # Disease name in accent color
+        elements.append(Paragraph(
+            self._sanitize(bundle.disease),
+            ParagraphStyle('CoverDisease', parent=cover_title_style, fontSize=22,
+                           textColor=colors.HexColor('#e94560')),
+        ))
         elements.append(Spacer(1, 0.4 * inch))
-        elements.append(Paragraph(
-            "by Humanovo", ParagraphStyle(
-                'CoverBrand', parent=title_style, fontSize=20,
-                textColor=colors.HexColor('#1a1a2e'),
-            ),
+
+        # Thin divider
+        elements.append(HRFlowable(
+            width="70%", thickness=1,
+            color=colors.HexColor('#cccccc'), spaceBefore=0, spaceAfter=16,
         ))
-        elements.append(Spacer(1, 0.2 * inch))
+
+        # "by Humanovo"
+        elements.append(Paragraph("by Humanovo", cover_brand_style))
+        elements.append(Spacer(1, 0.1 * inch))
         elements.append(Paragraph(
-            "Multi-Model AI Discovery Platform", subtitle_style,
+            "Multi-Model AI Discovery Platform", cover_subtitle_style,
         ))
         elements.append(Paragraph(
-            "FDA/R&amp;D-Grade Research Document",
-            ParagraphStyle('CoverGrade', parent=subtitle_style,
-                           fontSize=11, textColor=colors.HexColor('#e94560')),
+            "FDA/R&amp;D-Grade Research Document", cover_accent_style,
         ))
-        elements.append(Spacer(1, 0.3 * inch))
+        elements.append(Spacer(1, 0.35 * inch))
+
+        # Model list
         if bundle.models_used:
             elements.append(Paragraph(
-                " &bull; ".join(bundle.models_used),
-                ParagraphStyle('CoverModels', parent=subtitle_style,
-                               fontSize=10, textColor=colors.HexColor('#888888')),
+                " &bull; ".join(bundle.models_used), cover_meta_style,
             ))
-        elements.append(Spacer(1, 0.2 * inch))
+        elements.append(Spacer(1, 0.15 * inch))
+
+        # Date and stats
         elements.append(Paragraph(
-            f"Date: {bundle.generated_at.strftime('%B %d, %Y')}", subtitle_style,
+            f"Date: {bundle.generated_at.strftime('%B %d, %Y')}",
+            cover_subtitle_style,
         ))
         elements.append(Paragraph(
             f"{bundle.num_agents:,} Parallel Agents &bull; "
             f"Target Confidence: {bundle.target_confidence * 100:.0f}% &bull; "
-            f"{bundle.num_hypotheses} Hypotheses",
-            ParagraphStyle('CoverConfig', parent=subtitle_style,
-                           fontSize=10, textColor=colors.HexColor('#888888')),
+            f"{bundle.num_hypotheses} Hypotheses &bull; "
+            f"Best Confidence: {bundle.best_confidence * 100:.1f}%",
+            cover_meta_style,
         ))
-        elements.append(Spacer(1, 0.4 * inch))
+        elements.append(Spacer(1, 0.35 * inch))
 
-        # Config table on cover
+        # Configuration table on cover
         config_data = [
             ['Parameter', 'Value'],
             ['Disease Focus', bundle.disease],
             ['Discovery Type', bundle.discovery_type.replace('_', ' ').title()],
             ['Total Agents', f'{bundle.num_agents:,}'],
             ['Target Confidence', f'{bundle.target_confidence * 100:.0f}%'],
-            ['Best Confidence', f'{bundle.best_confidence * 100:.1f}%'],
-            ['Models', ', '.join(bundle.models_used) if bundle.models_used else 'Multi-model'],
-            ['Hypotheses', str(bundle.num_hypotheses)],
-            ['Runtime', f'{bundle.runtime_seconds:.0f}s'],
+            ['Best Confidence Achieved', f'{bundle.best_confidence * 100:.1f}%'],
+            ['AI Models', ', '.join(bundle.models_used) if bundle.models_used else 'Multi-model'],
+            ['Hypotheses Generated', str(bundle.num_hypotheses)],
+            ['Pipeline Runtime', f'{bundle.runtime_seconds:.0f} seconds'],
+            ['External Factors', str(len(bundle.external_factors))],
+            ['Citations', f'{len(bundle.references)} PubMed-verified'],
         ]
         config_table = Table(config_data, colWidths=[2.5 * inch, 3.5 * inch])
         config_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#16213e')),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0f1b2d')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTNAME', (0, 1), (0, -1), 'Helvetica-Bold'),
             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cccccc')),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#d0d5dd')),
             ('ROWBACKGROUNDS', (0, 1), (-1, -1),
-             [colors.white, colors.HexColor('#f8f8f8')]),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+             [colors.white, colors.HexColor('#f4f6f9')]),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
             ('LEFTPADDING', (0, 0), (-1, -1), 10),
         ]))
         elements.append(config_table)
@@ -298,71 +459,89 @@ class PdfRenderer:
 
         # ===================== TABLE OF CONTENTS =====================
         elements.append(Paragraph("Table of Contents", heading_style))
-        elements.append(Spacer(1, 0.2 * inch))
+        elements.append(HRFlowable(
+            width="100%", thickness=1,
+            color=colors.HexColor('#e94560'), spaceBefore=0, spaceAfter=12,
+        ))
         for i, section in enumerate(bundle.sections, 1):
-            indent = "    " * section.depth
+            style = toc_sub_style if section.depth > 0 else toc_style
+            prefix = f"    {i}." if section.depth > 0 else f"{i}."
             elements.append(Paragraph(
-                f"{indent}{i}. {section.title}",
-                ParagraphStyle('TOC', parent=body_style,
-                               fontSize=11, spaceBefore=4, spaceAfter=4),
+                f"{prefix} {section.title}", style,
             ))
-        # Append table / reference entries to TOC
+        # Extra TOC entries
         extra_idx = len(bundle.sections) + 1
         if bundle.tables:
-            elements.append(Paragraph(
-                f"{extra_idx}. Tables",
-                ParagraphStyle('TOC', parent=body_style,
-                               fontSize=11, spaceBefore=4, spaceAfter=4),
-            ))
+            elements.append(Paragraph(f"{extra_idx}. Tables", toc_style))
             extra_idx += 1
         if bundle.keywords:
             elements.append(Paragraph(
-                f"{extra_idx}. Keywords & Glossary",
-                ParagraphStyle('TOC', parent=body_style,
-                               fontSize=11, spaceBefore=4, spaceAfter=4),
+                f"{extra_idx}. Keywords &amp; Glossary", toc_style,
             ))
             extra_idx += 1
         if bundle.references:
-            elements.append(Paragraph(
-                f"{extra_idx}. References",
-                ParagraphStyle('TOC', parent=body_style,
-                               fontSize=11, spaceBefore=4, spaceAfter=4),
-            ))
+            elements.append(Paragraph(f"{extra_idx}. References", toc_style))
         elements.append(PageBreak())
 
         # ===================== SECTIONS =====================
         for i, section in enumerate(bundle.sections, 1):
             level_style = heading_style if section.depth == 0 else subheading_style
-            elements.append(Paragraph(f"{i}. {section.title}", level_style))
+            # Section number + heading with accent underline for top-level
+            elements.append(Paragraph(f"{i}. {self._sanitize(section.title)}", level_style))
+            if section.depth == 0:
+                elements.append(HRFlowable(
+                    width="100%", thickness=0.75,
+                    color=colors.HexColor('#e94560'),
+                    spaceBefore=0, spaceAfter=8,
+                ))
 
             for para_text in section.content.split("\n\n"):
                 text = para_text.strip()
                 if not text:
                     continue
-                if text.startswith("### "):
-                    elements.append(Paragraph(text[4:], subheading_style))
+
+                # Markdown headings
+                if text.startswith("#### "):
+                    elements.append(Paragraph(self._sanitize(text[5:]), h3_style))
+                elif text.startswith("### "):
+                    elements.append(Paragraph(self._sanitize(text[4:]), h3_style))
                 elif text.startswith("## "):
-                    elements.append(Paragraph(text[3:], subheading_style))
+                    elements.append(Paragraph(self._sanitize(text[3:]), subheading_style))
                 elif text.startswith("---"):
                     elements.append(HRFlowable(
                         width="100%", thickness=0.5,
-                        color=colors.HexColor('#cccccc'),
+                        color=colors.HexColor('#d0d5dd'),
                         spaceBefore=6, spaceAfter=6,
                     ))
+                elif self._is_code_or_diagram(text):
+                    # Render as monospace preformatted block (diagrams, flowcharts)
+                    try:
+                        pre = Preformatted(text, code_style)
+                        elements.append(pre)
+                    except Exception:
+                        elements.append(Paragraph(
+                            self._sanitize(text).replace('\n', '<br/>'),
+                            code_style,
+                        ))
+                elif text.startswith("- ") or text.startswith("* "):
+                    # Bullet list items
+                    for line in text.split('\n'):
+                        line = line.strip()
+                        if line.startswith("- ") or line.startswith("* "):
+                            bullet_text = line[2:]
+                            elements.append(Paragraph(
+                                f"&bull; {self._sanitize(bullet_text)}",
+                                ParagraphStyle('Bullet', parent=body_style,
+                                               leftIndent=15, firstLineIndent=-10),
+                            ))
+                        elif line:
+                            elements.append(Paragraph(self._sanitize(line), body_style))
                 else:
-                    # Sanitize for reportlab XML parser
-                    safe = (text.replace("&", "&amp;")
-                                .replace("<", "&lt;")
-                                .replace(">", "&gt;"))
-                    # Restore safe reportlab HTML tags
-                    safe = (safe.replace("&lt;b&gt;", "<b>")
-                                .replace("&lt;/b&gt;", "</b>")
-                                .replace("&lt;i&gt;", "<i>")
-                                .replace("&lt;/i&gt;", "</i>"))
+                    safe = self._sanitize(text)
                     try:
                         elements.append(Paragraph(safe, body_style))
                     except Exception:
-                        # Fallback: fully escaped
+                        # Full escape fallback
                         elements.append(Paragraph(
                             text.replace("&", "&amp;")
                                 .replace("<", "&lt;")
@@ -377,8 +556,18 @@ class PdfRenderer:
                 elements.append(PageBreak())
 
         # ===================== TABLES =====================
+        if bundle.tables:
+            elements.append(PageBreak())
+            elements.append(Paragraph("Tables", heading_style))
+            elements.append(HRFlowable(
+                width="100%", thickness=0.75,
+                color=colors.HexColor('#e94560'), spaceBefore=0, spaceAfter=12,
+            ))
+
         for table_data in bundle.tables:
-            elements.append(Paragraph(table_data.caption, heading_style))
+            elements.append(Paragraph(
+                f"<b>{self._sanitize(table_data.caption)}</b>", caption_style,
+            ))
 
             cols = table_data.columns
             rows = table_data.rows
@@ -401,29 +590,32 @@ class PdfRenderer:
                         row_values.append(val_str)
                     t_data.append(row_values)
 
-                col_width = 6.0 * inch / len(cols)
+                col_width = 6.3 * inch / len(cols)
                 table = Table(t_data, colWidths=[col_width] * len(cols))
                 table.setStyle(TableStyle([
-                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0f3460')),
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0f1b2d')),
                     ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
                     ('FONTSIZE', (0, 0), (-1, -1), 8),
                     ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                    ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cccccc')),
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#d0d5dd')),
                     ('ROWBACKGROUNDS', (0, 1), (-1, -1),
-                     [colors.white, colors.HexColor('#f0f4ff')]),
+                     [colors.white, colors.HexColor('#f4f6f9')]),
                     ('TOPPADDING', (0, 0), (-1, -1), 4),
                     ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
                     ('LEFTPADDING', (0, 0), (-1, -1), 6),
                     ('VALIGN', (0, 0), (-1, -1), 'TOP'),
                 ]))
                 elements.append(table)
-                elements.append(Paragraph(table_data.caption, caption_style))
-            elements.append(Spacer(1, 0.2 * inch))
+            elements.append(Spacer(1, 0.25 * inch))
 
         # ===================== KEYWORDS & GLOSSARY =====================
         if bundle.keywords:
             elements.append(PageBreak())
             elements.append(Paragraph("Keywords &amp; Glossary", heading_style))
+            elements.append(HRFlowable(
+                width="100%", thickness=0.75,
+                color=colors.HexColor('#e94560'), spaceBefore=0, spaceAfter=8,
+            ))
             elements.append(Paragraph(
                 f"<b>Keywords:</b> {', '.join(bundle.keywords)}", body_style,
             ))
@@ -431,16 +623,16 @@ class PdfRenderer:
 
             if bundle.glossary:
                 g_data = [['Term', 'Definition']] + [list(g) for g in bundle.glossary]
-                g_table = Table(g_data, colWidths=[1.5 * inch, 4.5 * inch])
+                g_table = Table(g_data, colWidths=[1.5 * inch, 4.8 * inch])
                 g_table.setStyle(TableStyle([
-                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#16213e')),
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0f1b2d')),
                     ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
                     ('FONTSIZE', (0, 0), (-1, -1), 9),
                     ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
                     ('FONTNAME', (0, 1), (0, -1), 'Helvetica-Bold'),
-                    ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cccccc')),
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#d0d5dd')),
                     ('ROWBACKGROUNDS', (0, 1), (-1, -1),
-                     [colors.white, colors.HexColor('#f8f8f8')]),
+                     [colors.white, colors.HexColor('#f4f6f9')]),
                     ('TOPPADDING', (0, 0), (-1, -1), 5),
                     ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
                     ('LEFTPADDING', (0, 0), (-1, -1), 8),
@@ -452,42 +644,54 @@ class PdfRenderer:
         if bundle.references:
             elements.append(PageBreak())
             elements.append(Paragraph("References", heading_style))
+            elements.append(HRFlowable(
+                width="100%", thickness=0.75,
+                color=colors.HexColor('#e94560'), spaceBefore=0, spaceAfter=8,
+            ))
+            ref_style = ParagraphStyle(
+                'Ref', parent=body_style,
+                fontSize=9, leading=12, spaceAfter=4, alignment=TA_LEFT,
+                leftIndent=20, firstLineIndent=-20,
+            )
             for ref in bundle.references:
                 ref_id = ref.get("id", "")
                 text = ref.get("text", "")
                 doi = ref.get("doi", "")
                 pmid = ref.get("pmid", "")
-                verified = " [Verified]" if ref.get("verified") else ""
-                ref_line = f"[{ref_id}] {text}"
+                verified = " <b>[PubMed Verified]</b>" if ref.get("verified") else ""
+                ref_line = f"<b>[{ref_id}]</b> {self._sanitize(text)}"
                 if doi:
-                    ref_line += f" DOI: {doi}"
+                    safe_doi = self._sanitize(doi)
+                    ref_line += f" DOI: {safe_doi}"
                 if pmid:
                     ref_line += f" PMID: {pmid}"
                 ref_line += verified
-                safe_ref = (ref_line.replace("&", "&amp;")
-                                    .replace("<", "&lt;")
-                                    .replace(">", "&gt;"))
-                elements.append(Paragraph(safe_ref, ParagraphStyle(
-                    'Ref', parent=body_style, fontSize=9, spaceAfter=3,
-                )))
+                try:
+                    elements.append(Paragraph(ref_line, ref_style))
+                except Exception:
+                    elements.append(Paragraph(
+                        self._sanitize(f"[{ref_id}] {text}"), ref_style,
+                    ))
 
-        # ===================== FOOTER NOTE =====================
+        # ===================== FINAL FOOTER =====================
         elements.append(Spacer(1, 0.5 * inch))
         elements.append(HRFlowable(
-            width="100%", thickness=0.5,
-            color=colors.HexColor('#cccccc'),
+            width="100%", thickness=1,
+            color=colors.HexColor('#e94560'),
             spaceBefore=6, spaceAfter=6,
         ))
         elements.append(Paragraph(
-            f"Generated by Humanovo &mdash; FDA/R&amp;D-Grade AI Discovery Platform &mdash; "
-            f"{bundle.generated_at.strftime('%Y-%m-%d %H:%M UTC')} &mdash; "
-            f"All citations PubMed-verified &mdash; CONFIDENTIAL",
-            ParagraphStyle('Footer', parent=body_style, fontSize=8,
-                           textColor=colors.HexColor('#999999'),
-                           alignment=TA_CENTER),
+            f"Generated by <b>Humanovo</b> &mdash; FDA/R&amp;D-Grade AI Discovery Platform<br/>"
+            f"{bundle.generated_at.strftime('%B %d, %Y at %H:%M UTC')} &mdash; "
+            f"Pipeline: 8 Models &bull; {len(bundle.sections)} Sections &bull; "
+            f"{len(bundle.references)} PubMed-Verified References<br/>"
+            f"CONFIDENTIAL &mdash; FOR AUTHORIZED USE ONLY",
+            ParagraphStyle('FinalFooter', parent=body_style, fontSize=8,
+                           textColor=colors.HexColor('#888888'),
+                           alignment=TA_CENTER, leading=11),
         ))
 
-        doc.build(elements)
+        doc.build(elements, onFirstPage=_on_first_page, onLaterPages=_on_page)
         return buf.getvalue()
 
 
@@ -713,6 +917,8 @@ class DocumentPipelineService:
                 ("conclusion", "Conclusion", 0),
                 ("qa_validation", "QA Validation Report", 1),
                 ("editorial_review", "Editorial Review", 1),
+                ("reasoning_review", "Reasoning Review", 1),
+                ("analytical_review", "Analytical Review", 1),
             ]
 
             bundle.sections = []

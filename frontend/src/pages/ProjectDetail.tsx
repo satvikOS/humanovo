@@ -60,6 +60,7 @@ export default function ProjectDetail() {
   // Document viewer state
   const [viewMode, setViewMode] = useState<ViewMode>('list')
   const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null)
+  const [paperHtml, setPaperHtml] = useState<string | null>(null)
   const [paperError, setPaperError] = useState<string | null>(null)
   const [activeHypothesis, setActiveHypothesis] = useState<SavedHypothesis | null>(null)
 
@@ -91,11 +92,12 @@ export default function ProjectDetail() {
     setActiveHypothesis(hypothesis)
     setViewMode('hypothesis_paper')
     setPdfBlobUrl(null)
+    setPaperHtml(null)
     setPaperError(null)
     setShowChooser(false)
 
     try {
-      const res = await fetch(`${API_BASE}/documents/hypothesis/${hypothesis.id}/pdf?use_ai=true`, {
+      const res = await fetch(`${API_BASE}/documents/hypothesis/${hypothesis.id}/html`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -112,15 +114,14 @@ export default function ProjectDetail() {
       })
 
       if (res.ok) {
-        const blob = await res.blob()
-        if (blob.size === 0) {
-          setPaperError('Server returned empty PDF. Check backend logs for errors.')
+        const html = await res.text()
+        if (!html || html.length === 0) {
+          setPaperError('Server returned empty response. Check backend logs for errors.')
           setGeneratingPaper(false)
           setGeneratingHypId(null)
           return
         }
-        const url = URL.createObjectURL(blob)
-        setPdfBlobUrl(url)
+        setPaperHtml(html)
         setGeneratingPaper(false)
         setGeneratingHypId(null)
         _saveResearchPaper(hypothesis)
@@ -161,6 +162,7 @@ export default function ProjectDetail() {
   const closeViewer = useCallback(() => {
     if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl)
     setPdfBlobUrl(null)
+    setPaperHtml(null)
     setPaperError(null)
     setActiveHypothesis(null)
     setViewMode('list')
@@ -236,7 +238,7 @@ export default function ProjectDetail() {
           <HypothesisViewer
             hypothesis={activeHypothesis}
             pdfUrl={pdfBlobUrl}
-            htmlContent={null}
+            htmlContent={paperHtml}
             isGenerating={generatingPaper}
             onGeneratePaper={() => generateHypothesisPaper(activeHypothesis)}
             onClose={closeViewer}

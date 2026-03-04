@@ -14,6 +14,7 @@ export default function HypothesisDetail() {
 
   const [generatingPaper, setGeneratingPaper] = useState(false)
   const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null)
+  const [paperHtml, setPaperHtml] = useState<string | null>(null)
   const [paperError, setPaperError] = useState<string | null>(null)
 
   const { data: hypothesis, isLoading } = useQuery({
@@ -26,13 +27,14 @@ export default function HypothesisDetail() {
     if (!hypothesisId || !hypothesis) return
     setGeneratingPaper(true)
     setPaperError(null)
+    setPaperHtml(null)
     if (pdfBlobUrl) {
       URL.revokeObjectURL(pdfBlobUrl)
       setPdfBlobUrl(null)
     }
 
     try {
-      const res = await fetch(`${API_BASE}/documents/hypothesis/${hypothesisId}/pdf?use_ai=true`, {
+      const res = await fetch(`${API_BASE}/documents/hypothesis/${hypothesisId}/html`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -49,14 +51,13 @@ export default function HypothesisDetail() {
       })
 
       if (res.ok) {
-        const blob = await res.blob()
-        if (blob.size === 0) {
-          setPaperError('Server returned empty PDF. Check backend logs for errors.')
+        const html = await res.text()
+        if (!html || html.length === 0) {
+          setPaperError('Server returned empty response. Check backend logs for errors.')
           setGeneratingPaper(false)
           return
         }
-        const url = URL.createObjectURL(blob)
-        setPdfBlobUrl(url)
+        setPaperHtml(html)
         setGeneratingPaper(false)
         return
       }
@@ -117,6 +118,7 @@ export default function HypothesisDetail() {
         <HypothesisViewer
           hypothesis={viewerHypothesis}
           pdfUrl={pdfBlobUrl}
+          htmlContent={paperHtml}
           isGenerating={generatingPaper}
           onGeneratePaper={generatePaper}
           onClose={() => window.history.back()}
