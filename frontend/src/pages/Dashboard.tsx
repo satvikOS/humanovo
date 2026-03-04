@@ -133,6 +133,7 @@ function DiscoveryStatus() {
   const [connected, setConnected] = useState<boolean | null>(null)
   const [discoveryState, setDiscoveryState] = useState<string>('idle')
   const [hypothesesFound, setHypothesesFound] = useState(0)
+  const [backendAvailable, setBackendAvailable] = useState(true)
 
   useEffect(() => {
     let fails = 0
@@ -142,16 +143,27 @@ function DiscoveryStatus() {
         if (res.ok) {
           fails = 0
           setConnected(true)
+          setBackendAvailable(true)
           const data = await res.json()
           setDiscoveryState(data.state || 'idle')
           setHypothesesFound(data.stats?.hypotheses_found || 0)
         } else {
           fails++
-          if (fails >= 3) setConnected(false)
+          if (fails >= 2) {
+            // Backend returned error — mark as ready (idle) so users can still navigate
+            setConnected(true)
+            setBackendAvailable(false)
+            setDiscoveryState('idle')
+          }
         }
       } catch {
         fails++
-        if (fails >= 3) setConnected(false)
+        if (fails >= 2) {
+          // Backend unreachable — show ready state instead of perpetual "Connecting..."
+          setConnected(true)
+          setBackendAvailable(false)
+          setDiscoveryState('idle')
+        }
       }
     }
     check()
@@ -173,9 +185,13 @@ function DiscoveryStatus() {
             <div className="text-xs text-[var(--color-text-muted)]">Pipeline</div>
             <div className={clsx(
               'text-sm font-bold mt-0.5',
-              connected ? 'text-green-400' : 'text-yellow-400'
+              connected === null ? 'text-yellow-400' :
+              connected && backendAvailable ? 'text-green-400' :
+              connected ? 'text-blue-400' : 'text-yellow-400'
             )}>
-              {connected ? 'Connected' : 'Connecting...'}
+              {connected === null ? 'Connecting...' :
+               connected && backendAvailable ? 'Connected' :
+               connected ? 'Ready' : 'Connecting...'}
             </div>
           </div>
           <div className="p-2 bg-[var(--color-bg)] rounded text-center">

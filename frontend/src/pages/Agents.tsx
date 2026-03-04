@@ -206,6 +206,9 @@ export default function Agents() {
   const [generatingPaperId, setGeneratingPaperId] = useState<string | null>(null)
   const [paperMarkdown, setPaperMarkdown] = useState<string | null>(null)
   const [, setPaperHypothesisTitle] = useState<string>('')
+  const [paperError, setPaperError] = useState<string | null>(null)
+  const [paperPhase, setPaperPhase] = useState(0)
+  const paperPhaseRef = useRef<number | null>(null)
 
   // Configuration
   const [config, setConfig] = useState<DiscoveryConfig>({
@@ -281,11 +284,11 @@ export default function Agents() {
         }
       } else {
         failCountRef.current++
-        if (failCountRef.current >= 3) setAiConnected(false)
+        if (failCountRef.current >= 2) setAiConnected(false)
       }
     } catch {
       failCountRef.current++
-      if (failCountRef.current >= 3) setAiConnected(false)
+      if (failCountRef.current >= 2) setAiConnected(false)
     }
   }, [config.disease, config.discoveryType])
 
@@ -355,6 +358,7 @@ export default function Agents() {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current)
       if (paperPollRef.current) clearInterval(paperPollRef.current)
+      if (paperPhaseRef.current) clearInterval(paperPhaseRef.current)
     }
   }, [fetchStatus])
 
@@ -432,23 +436,120 @@ export default function Agents() {
     }
   }, [])
 
+  // Start phase animation for paper generation
+  const startPaperPhaseAnimation = useCallback(() => {
+    setPaperPhase(0)
+    if (paperPhaseRef.current) clearInterval(paperPhaseRef.current)
+    let phase = 0
+    paperPhaseRef.current = window.setInterval(() => {
+      phase++
+      if (phase <= 4) {
+        setPaperPhase(phase)
+      }
+    }, 8000) // Advance phase every 8 seconds
+  }, [])
+
+  const stopPaperPhaseAnimation = useCallback(() => {
+    if (paperPhaseRef.current) { clearInterval(paperPhaseRef.current); paperPhaseRef.current = null }
+  }, [])
+
   const generatePaper = useCallback(async (hypothesisId?: string, hypothesisTitle?: string) => {
     setGeneratingPaper(true)
     setGeneratingPaperId(hypothesisId || null)
     setPaperHypothesisTitle(hypothesisTitle || config.disease)
+    setPaperError(null)
+    startPaperPhaseAnimation()
 
+    // If generating for a specific hypothesis, use the document pipeline HTML endpoint
+    // which works independently of the orchestrator
+    if (hypothesisId) {
+      try {
+        const selectedHyp = hypotheses.find(h => h.id === hypothesisId)
+        const response = await fetch(`${API_BASE}/documents/hypothesis/${hypothesisId}/html`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: hypothesisTitle || selectedHyp?.title || '',
+            description: selectedHyp?.description || '',
+            mechanism: selectedHyp?.mechanism || '',
+            confidence: selectedHyp?.confidence || 0,
+            disease: config.disease || 'Unknown',
+            discovery_type: config.discoveryType || 'treatment',
+            model_used: 'multi-model',
+            tags: [],
+            external_factors: selectedHyp?.external_factors || [],
+          }),
+        })
+
+        stopPaperPhaseAnimation()
+
+        if (response.ok) {
+          const htmlContent = await response.text()
+          if (htmlContent && htmlContent.length > 100) {
+            setPaperMarkdown(htmlContent)
+            setGeneratingPaper(false)
+            setGeneratingPaperId(null)
+
+            // Auto-save paper to Evidence section
+            const evidenceItems = persistGet<Array<Record<string, unknown>>>('evidence', [])
+            const paperId = `ev-paper-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+            const diseaseTag = config.disease.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+            evidenceItems.unshift({
+              id: paperId,
+              title: `AI-Generated Research Paper: ${hypothesisTitle || config.disease}`,
+              source: 'Humanovo AI Pipeline',
+              sourceUrl: '',
+              type: 'paper',
+              status: 'pending',
+              date: new Date().toISOString().split('T')[0],
+              authors: ['Humanovo Multi-Model Discovery System'],
+              abstract: `Research paper for hypothesis: ${hypothesisTitle || 'Unknown'}`,
+              tags: ['internal-hypothesis-source', 'humanovo', 'ai-generated', diseaseTag, config.discoveryType],
+              citations: 0,
+              relevanceScore: 0.95,
+              publisher: 'Humanovo',
+              fullText: htmlContent,
+            })
+            persistSet('evidence', evidenceItems.slice(0, 500))
+            logActivity({
+              type: 'evidence',
+              action: 'created',
+              title: `Auto-saved research paper: ${hypothesisTitle || config.disease}`,
+              metadata: { source: 'paper-generation', disease: config.disease },
+            })
+            return
+          }
+        }
+
+        // Fallback error
+        let detail = 'Unknown error'
+        try { const err = await response.json(); detail = err.detail || detail } catch { }
+        setPaperError(`Paper generation failed: ${detail}`)
+        setGeneratingPaper(false)
+        setGeneratingPaperId(null)
+        return
+      } catch (e) {
+        stopPaperPhaseAnimation()
+        console.error('Hypothesis paper generation failed:', e)
+        setPaperError(`Paper generation failed: ${e instanceof Error ? e.message : String(e)}`)
+        setGeneratingPaper(false)
+        setGeneratingPaperId(null)
+        return
+      }
+    }
+
+    // For full discovery paper generation, use orchestrator endpoint
     try {
-      // Start async paper generation (returns immediately)
       const response = await fetch(`${API_BASE}/orchestrator/generate-paper/markdown`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(hypothesisId ? { hypothesis_id: hypothesisId } : {}),
       })
 
       if (!response.ok) {
         let detail = 'Unknown error'
         try { const err = await response.json(); detail = err.detail || detail } catch { }
-        alert(`Paper generation failed: ${detail}`)
+        stopPaperPhaseAnimation()
+        setPaperError(`Paper generation failed: ${detail}`)
         setGeneratingPaper(false)
         setGeneratingPaperId(null)
         return
@@ -463,6 +564,7 @@ export default function Agents() {
           const data = await statusRes.json()
           if (data.status === 'done' && data.paper_html) {
             if (paperPollRef.current) { clearInterval(paperPollRef.current); paperPollRef.current = null }
+            stopPaperPhaseAnimation()
             setPaperMarkdown(data.paper_html)
             setGeneratingPaper(false)
             setGeneratingPaperId(null)
@@ -496,7 +598,8 @@ export default function Agents() {
             })
           } else if (data.status === 'failed') {
             if (paperPollRef.current) { clearInterval(paperPollRef.current); paperPollRef.current = null }
-            alert(`Paper generation failed: ${data.error || 'Unknown error'}`)
+            stopPaperPhaseAnimation()
+            setPaperError(`Paper generation failed: ${data.error || 'Unknown error'}`)
             setGeneratingPaper(false)
             setGeneratingPaperId(null)
           }
@@ -506,20 +609,23 @@ export default function Agents() {
 
     } catch (e) {
       console.error('Failed to start paper generation:', e)
-      alert('Failed to start paper generation')
+      stopPaperPhaseAnimation()
+      setPaperError('Failed to start paper generation. Please ensure a discovery has been run first.')
       setGeneratingPaper(false)
       setGeneratingPaperId(null)
     }
-  }, [config.disease])
+  }, [config.disease, config.discoveryType, hypotheses, startPaperPhaseAnimation, stopPaperPhaseAnimation])
 
   const cancelPaper = useCallback(async () => {
     try {
       await fetch(`${API_BASE}/orchestrator/cancel-paper`, { method: 'POST' })
     } catch { /* best effort */ }
     if (paperPollRef.current) { clearInterval(paperPollRef.current); paperPollRef.current = null }
+    stopPaperPhaseAnimation()
     setGeneratingPaper(false)
     setGeneratingPaperId(null)
-  }, [])
+    setPaperError(null)
+  }, [stopPaperPhaseAnimation])
 
   const downloadPaperHtml = useCallback(() => {
     if (!paperMarkdown) return
@@ -615,13 +721,16 @@ export default function Agents() {
             {/* AI Pipeline Status — real connection check */}
             <div className={clsx(
               'flex items-center gap-1.5 px-2 py-1 rounded text-xs',
-              aiConnected ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'
+              aiConnected === null ? 'bg-yellow-500/20 text-yellow-400' :
+              aiConnected ? 'bg-green-500/20 text-green-400' : 'bg-blue-500/20 text-blue-400'
             )}>
               <div className={clsx(
                 'w-2 h-2 rounded-full',
-                aiConnected ? 'bg-green-500' : 'bg-yellow-500 animate-pulse'
+                aiConnected === null ? 'bg-yellow-500 animate-pulse' :
+                aiConnected ? 'bg-green-500' : 'bg-blue-500'
               )} />
-              {aiConnected ? `${connectedAgents}/${totalAgents} Agents` : 'Connecting...'}
+              {aiConnected === null ? 'Connecting...' :
+               aiConnected ? `${connectedAgents}/${totalAgents} Agents` : 'Ready'}
             </div>
 
             {/* Control Buttons */}
@@ -1055,20 +1164,65 @@ export default function Agents() {
                   Cancel
                 </button>
               </div>
-              {/* Phase progress */}
-              <div className="flex items-center gap-2 text-xs text-purple-300/80 mb-2">
-                <span>Phase 1: Abstract &amp; Intro</span>
-                <span className="text-secondary-600">&rarr;</span>
-                <span>Phase 2: Core Sections</span>
-                <span className="text-secondary-600">&rarr;</span>
-                <span>Phase 3: Synthesis</span>
-                <span className="text-secondary-600">&rarr;</span>
-                <span>Phase 4: QA Review</span>
-                <span className="text-secondary-600">&rarr;</span>
-                <span>PDF Render</span>
+              {/* Phase progress with active step indicator */}
+              <div className="flex items-center gap-2 text-xs mb-2">
+                {[
+                  'Phase 1: Abstract & Intro',
+                  'Phase 2: Core Sections',
+                  'Phase 3: Synthesis',
+                  'Phase 4: QA Review',
+                  'PDF Render',
+                ].map((label, idx) => (
+                  <span key={idx} className="flex items-center gap-1.5">
+                    {idx > 0 && <span className="text-secondary-600">&rarr;</span>}
+                    <span className={clsx(
+                      'transition-colors',
+                      idx < paperPhase ? 'text-green-400' :
+                      idx === paperPhase ? 'text-purple-300 font-medium' : 'text-purple-300/40'
+                    )}>
+                      {idx < paperPhase ? '✓ ' : idx === paperPhase ? '● ' : ''}{label}
+                    </span>
+                  </span>
+                ))}
               </div>
               <div className="h-1.5 bg-secondary-700 rounded-full overflow-hidden">
-                <div className="h-full bg-purple-500 rounded-full animate-pulse" style={{ width: '60%' }} />
+                <div
+                  className="h-full bg-purple-500 rounded-full transition-all duration-1000 ease-out"
+                  style={{ width: `${Math.min(((paperPhase + 1) / 5) * 100, 95)}%` }}
+                />
+              </div>
+              <p className="text-xs text-purple-400/60 mt-1.5">
+                Step {paperPhase + 1} of 5 &middot; This may take a few minutes
+              </p>
+            </div>
+          )}
+
+          {/* Paper generation error */}
+          {paperError && !generatingPaper && !paperMarkdown && (
+            <div className="mx-4 mt-4 p-4 bg-red-500/10 border border-red-500/30 rounded-lg">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <FiX className="w-5 h-5 text-red-400" />
+                  <div>
+                    <span className="text-sm font-medium text-red-300">Paper Generation Failed</span>
+                    <p className="text-xs text-red-400/80 mt-0.5">{paperError}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => generatePaper()}
+                    className="text-xs px-3 py-1.5 bg-purple-500/20 text-purple-400 rounded hover:bg-purple-500/30 transition-colors flex items-center gap-1"
+                  >
+                    <FiRefreshCw className="w-3 h-3" />
+                    Retry
+                  </button>
+                  <button
+                    onClick={() => setPaperError(null)}
+                    className="text-xs px-3 py-1.5 bg-secondary-700 text-secondary-400 rounded hover:bg-secondary-600 transition-colors"
+                  >
+                    Dismiss
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -1136,9 +1290,23 @@ export default function Agents() {
                 </h3>
                 <p className="text-sm text-[var(--color-text-muted)]">
                   All hypotheses have been automatically saved to their project folder.
-                  Navigate to <span className="text-primary-400">Projects</span> to view details and generate research papers.
+                  Select a hypothesis from the sidebar, or generate a full research paper.
                 </p>
                 <div className="flex items-center justify-center gap-3 pt-2">
+                  <button
+                    onClick={() => generatePaper()}
+                    disabled={generatingPaper}
+                    className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 disabled:opacity-50 transition-colors text-sm font-medium"
+                  >
+                    {generatingPaper ? (
+                      <FiRefreshCw className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <FiFileText className="w-4 h-4" />
+                    )}
+                    {generatingPaper ? 'Generating...' : 'Generate Research Paper'}
+                  </button>
+                </div>
+                <div className="flex items-center justify-center gap-3">
                   <span className="text-xs text-green-400 bg-green-500/10 px-3 py-1.5 rounded-full">
                     Auto-saved to project
                   </span>

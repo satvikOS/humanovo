@@ -1,10 +1,13 @@
+import { useState, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { FiZap, FiCheck, FiAlertTriangle, FiClock } from 'react-icons/fi'
+import { FiZap, FiCheck, FiAlertTriangle, FiClock, FiDownload, FiRefreshCw } from 'react-icons/fi'
 import { api, Hypothesis } from '../services/api'
 import clsx from 'clsx'
 
 function HypothesisCard({ hypothesis }: { hypothesis: Hypothesis }) {
+  const [exporting, setExporting] = useState(false)
+
   const statusConfig = {
     draft: { icon: FiClock, color: 'text-secondary-400', bg: 'bg-secondary-600/20' },
     generating: { icon: FiClock, color: 'text-yellow-400', bg: 'bg-yellow-600/20' },
@@ -16,6 +19,30 @@ function HypothesisCard({ hypothesis }: { hypothesis: Hypothesis }) {
 
   const status = statusConfig[hypothesis.status] || statusConfig.draft
   const StatusIcon = status.icon
+
+  const handleExportPdf = useCallback(async (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setExporting(true)
+    try {
+      const blob = await api.generateHypothesisPdf(hypothesis.id, true)
+      if (blob.size === 0) {
+        alert('PDF generation returned empty result. Please try again.')
+        return
+      }
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `humanovo-hypothesis-${hypothesis.id}.pdf`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error('PDF export failed:', err)
+      alert('PDF export failed. Please try again or open the hypothesis detail page.')
+    } finally {
+      setExporting(false)
+    }
+  }, [hypothesis.id])
 
   return (
     <Link
@@ -50,9 +77,24 @@ function HypothesisCard({ hypothesis }: { hypothesis: Hypothesis }) {
             {Math.round(hypothesis.confidence_score * 100)}% confidence
           </span>
         </div>
-        <span className="text-secondary-500 text-xs">
-          v{hypothesis.version}
-        </span>
+        <div className="flex items-center space-x-2">
+          <button
+            onClick={handleExportPdf}
+            disabled={exporting}
+            className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-purple-500/20 text-purple-400 hover:bg-purple-500/30 disabled:opacity-50 transition-colors"
+            title="Export as PDF"
+          >
+            {exporting ? (
+              <FiRefreshCw className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <FiDownload className="w-3.5 h-3.5" />
+            )}
+            {exporting ? 'Exporting...' : 'PDF'}
+          </button>
+          <span className="text-secondary-500 text-xs">
+            v{hypothesis.version}
+          </span>
+        </div>
       </div>
 
       <div className="mt-3 flex items-center space-x-4 text-sm">

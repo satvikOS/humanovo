@@ -251,27 +251,31 @@ async def get_discovery_status():
     if not _current_orchestrator:
         return DiscoveryStatusResponse(state="idle")
 
-    stats = _current_orchestrator.get_stats()
-    hypotheses = _current_orchestrator.get_hypotheses(min_confidence=0.5, limit=10)
+    try:
+        stats = _current_orchestrator.get_stats()
+        hypotheses = _current_orchestrator.get_hypotheses(min_confidence=0.5, limit=10)
 
-    return DiscoveryStatusResponse(
-        state=_current_orchestrator.state.value,
-        disease=_current_orchestrator._disease,
-        stats=stats,
-        top_hypotheses=[
-            {
-                "id": h.id,
-                "title": h.title,
-                "description": h.description,
-                "mechanism": h.mechanism,
-                "confidence": h.confidence,
-                "model_used": h.model_used,
-                "validated": h.validated,
-                "external_factors": h.external_factors,
-            }
-            for h in hypotheses
-        ],
-    )
+        return DiscoveryStatusResponse(
+            state=_current_orchestrator.state.value,
+            disease=_current_orchestrator._disease,
+            stats=stats,
+            top_hypotheses=[
+                {
+                    "id": h.id,
+                    "title": h.title,
+                    "description": h.description,
+                    "mechanism": h.mechanism,
+                    "confidence": h.confidence,
+                    "model_used": h.model_used,
+                    "validated": h.validated,
+                    "external_factors": h.external_factors,
+                }
+                for h in hypotheses
+            ],
+        )
+    except Exception as e:
+        logger.error(f"Error getting discovery status: {e}")
+        return DiscoveryStatusResponse(state="idle")
 
 
 @router.get("/hypotheses")
@@ -687,37 +691,42 @@ async def orchestrator_health():
         "gpt_41": False,
     }
 
-    if _current_orchestrator and _current_orchestrator.llm._initialized:
-        llm = _current_orchestrator.llm
-        # Mark Bedrock model (Claude)
-        if llm._bedrock_client:
-            models_status["claude_opus"] = True
-        # Mark Azure AI models
-        for key in ("deepseek_r1_0528", "mistral_large_3", "cohere_command_a"):
-            if hasattr(llm, '_azure_clients') or True:  # Available if configured
+    try:
+        if _current_orchestrator and hasattr(_current_orchestrator, 'llm') and _current_orchestrator.llm._initialized:
+            llm = _current_orchestrator.llm
+            # Mark Bedrock model (Claude)
+            if hasattr(llm, '_bedrock_client') and llm._bedrock_client:
+                models_status["claude_opus"] = True
+            # Mark Azure AI models
+            for key in ("deepseek_r1_0528", "mistral_large_3", "cohere_command_a"):
+                if hasattr(llm, '_azure_clients') or True:  # Available if configured
+                    models_status[key] = True
+            # Mark Azure OpenAI models
+            for key in ("gpt_4o_azure", "kimi_k2_thinking", "o3_mini", "gpt_41"):
                 models_status[key] = True
-        # Mark Azure OpenAI models
-        for key in ("gpt_4o_azure", "kimi_k2_thinking", "o3_mini", "gpt_41"):
-            models_status[key] = True
-    else:
-        from app.core.config import settings
-        if settings.aws_access_key_value and settings.aws_secret_key_value:
-            models_status["claude_opus"] = True
-        # Check Azure endpoints
-        if settings.AZURE_DEEPSEEK_ENDPOINT:
-            models_status["deepseek_r1_0528"] = True
-        if settings.AZURE_MISTRAL_ENDPOINT:
-            models_status["mistral_large_3"] = True
-        if settings.AZURE_GPT4O_ENDPOINT:
-            models_status["gpt_4o_azure"] = True
-        if settings.AZURE_COHERE_ENDPOINT:
-            models_status["cohere_command_a"] = True
-        if settings.AZURE_KIMI_ENDPOINT:
-            models_status["kimi_k2_thinking"] = True
-        if settings.AZURE_O3MINI_ENDPOINT:
-            models_status["o3_mini"] = True
-        if settings.AZURE_GPT41_ENDPOINT:
-            models_status["gpt_41"] = True
+        else:
+            try:
+                from app.core.config import settings
+                if settings.aws_access_key_value and settings.aws_secret_key_value:
+                    models_status["claude_opus"] = True
+                if settings.AZURE_DEEPSEEK_ENDPOINT:
+                    models_status["deepseek_r1_0528"] = True
+                if settings.AZURE_MISTRAL_ENDPOINT:
+                    models_status["mistral_large_3"] = True
+                if settings.AZURE_GPT4O_ENDPOINT:
+                    models_status["gpt_4o_azure"] = True
+                if settings.AZURE_COHERE_ENDPOINT:
+                    models_status["cohere_command_a"] = True
+                if settings.AZURE_KIMI_ENDPOINT:
+                    models_status["kimi_k2_thinking"] = True
+                if settings.AZURE_O3MINI_ENDPOINT:
+                    models_status["o3_mini"] = True
+                if settings.AZURE_GPT41_ENDPOINT:
+                    models_status["gpt_41"] = True
+            except Exception:
+                pass  # Settings not available, all models remain False
+    except Exception as e:
+        logger.error(f"Error checking orchestrator health: {e}")
 
     active_count = sum(1 for v in models_status.values() if v)
 
