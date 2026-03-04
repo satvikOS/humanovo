@@ -130,19 +130,18 @@ function ActivityItemComponent({ activity }: { activity: ActivityEntry }) {
 }
 
 function DiscoveryStatus() {
-  const [connected, setConnected] = useState<boolean | null>(null)
   const [discoveryState, setDiscoveryState] = useState<string>('idle')
   const [hypothesesFound, setHypothesesFound] = useState(0)
-  const [backendAvailable, setBackendAvailable] = useState(true)
+  const [backendAvailable, setBackendAvailable] = useState<boolean | null>(null)
 
   useEffect(() => {
     let fails = 0
+    let intervalId: number
     const check = async () => {
       try {
         const res = await fetch('/api/v1/orchestrator/status')
         if (res.ok) {
           fails = 0
-          setConnected(true)
           setBackendAvailable(true)
           const data = await res.json()
           setDiscoveryState(data.state || 'idle')
@@ -150,25 +149,23 @@ function DiscoveryStatus() {
         } else {
           fails++
           if (fails >= 2) {
-            // Backend returned error — mark as ready (idle) so users can still navigate
-            setConnected(true)
             setBackendAvailable(false)
-            setDiscoveryState('idle')
+            clearInterval(intervalId)
+            intervalId = window.setInterval(check, 30000)
           }
         }
       } catch {
         fails++
         if (fails >= 2) {
-          // Backend unreachable — show ready state instead of perpetual "Connecting..."
-          setConnected(true)
           setBackendAvailable(false)
-          setDiscoveryState('idle')
+          clearInterval(intervalId)
+          intervalId = window.setInterval(check, 30000)
         }
       }
     }
     check()
-    const interval = setInterval(check, 10000)
-    return () => clearInterval(interval)
+    intervalId = window.setInterval(check, 10000)
+    return () => clearInterval(intervalId)
   }, [])
 
   return (
@@ -185,13 +182,11 @@ function DiscoveryStatus() {
             <div className="text-xs text-[var(--color-text-muted)]">Pipeline</div>
             <div className={clsx(
               'text-sm font-bold mt-0.5',
-              connected === null ? 'text-yellow-400' :
-              connected && backendAvailable ? 'text-green-400' :
-              connected ? 'text-blue-400' : 'text-yellow-400'
+              backendAvailable === null ? 'text-yellow-400' :
+              backendAvailable ? 'text-green-400' : 'text-red-400'
             )}>
-              {connected === null ? 'Connecting...' :
-               connected && backendAvailable ? 'Connected' :
-               connected ? 'Ready' : 'Connecting...'}
+              {backendAvailable === null ? 'Connecting...' :
+               backendAvailable ? 'Connected' : 'Offline'}
             </div>
           </div>
           <div className="p-2 bg-[var(--color-bg)] rounded text-center">
@@ -212,19 +207,19 @@ function DiscoveryStatus() {
         )}
         <div className="space-y-1.5 text-xs">
           <div className="flex items-center gap-2">
-            <span className={clsx('w-2 h-2 rounded-full', connected ? 'bg-green-500' : 'bg-gray-500')} />
+            <span className={clsx('w-2 h-2 rounded-full', backendAvailable ? 'bg-green-500' : 'bg-red-500')} />
             <span className="text-[var(--color-text-muted)]">Multi-model reasoning (4 models)</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className={clsx('w-2 h-2 rounded-full', connected ? 'bg-green-500' : 'bg-gray-500')} />
+            <span className={clsx('w-2 h-2 rounded-full', backendAvailable ? 'bg-green-500' : 'bg-red-500')} />
             <span className="text-[var(--color-text-muted)]">Parallel MCP context sharding</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className={clsx('w-2 h-2 rounded-full', connected ? 'bg-green-500' : 'bg-gray-500')} />
+            <span className={clsx('w-2 h-2 rounded-full', backendAvailable ? 'bg-green-500' : 'bg-red-500')} />
             <span className="text-[var(--color-text-muted)]">Genomics & bioinformatics analysis</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className={clsx('w-2 h-2 rounded-full', connected ? 'bg-green-500' : 'bg-gray-500')} />
+            <span className={clsx('w-2 h-2 rounded-full', backendAvailable ? 'bg-green-500' : 'bg-red-500')} />
             <span className="text-[var(--color-text-muted)]">Research paper generation</span>
           </div>
         </div>
