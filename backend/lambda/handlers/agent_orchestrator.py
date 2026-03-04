@@ -137,20 +137,21 @@ class _AzureAIResponse:
         ]
 
 class _AzureAIChatCompletions:
-    """Mimics openai's chat.completions interface."""
+    """Mimics openai's chat.completions interface for Azure AI model-specific endpoints."""
     def __init__(self, base_url: str, api_key: str):
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
 
-    def create(self, model: str, messages: list, max_tokens: int = 2000,
-               temperature: float = 0.7, **kwargs) -> _AzureAIResponse:
+    def create(self, model: str, messages: list, max_tokens: int = 65_536,
+               temperature: float = 0.7, max_completion_tokens: int = 0, **kwargs) -> _AzureAIResponse:
         url = f"{self._base_url}/chat/completions"
-        payload = json.dumps({
-            "model": model,
-            "messages": messages,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-        }).encode("utf-8")
+        body: dict = {"model": model, "messages": messages}
+        if max_completion_tokens > 0:
+            body["max_completion_tokens"] = max_completion_tokens
+        else:
+            body["max_tokens"] = max_tokens
+            body["temperature"] = temperature
+        payload = json.dumps(body).encode("utf-8")
 
         req = urllib.request.Request(
             url,
@@ -164,24 +165,85 @@ class _AzureAIChatCompletions:
 
         ctx = ssl.create_default_context()
         with urllib.request.urlopen(req, timeout=120, context=ctx) as resp:
-            body = json.loads(resp.read().decode("utf-8"))
-        return _AzureAIResponse(body.get("choices", []))
+            resp_body = json.loads(resp.read().decode("utf-8"))
+        return _AzureAIResponse(resp_body.get("choices", []))
+
+
+class _AzureOpenAIChatCompletions:
+    """Mimics openai's chat.completions interface for Azure OpenAI deployment-based models.
+
+    URL format: {endpoint}/openai/deployments/{deployment}/chat/completions?api-version={version}
+    Auth: api-key header (not Bearer token).
+    """
+    def __init__(self, endpoint: str, api_key: str, deployment: str, api_version: str = "2024-05-01-preview"):
+        self._endpoint = endpoint.rstrip("/")
+        if not self._endpoint.startswith("https://"):
+            self._endpoint = f"https://{self._endpoint}"
+        self._api_key = api_key
+        self._deployment = deployment
+        self._api_version = api_version
+
+    def create(self, model: str, messages: list, max_tokens: int = 65_536,
+               temperature: float = 0.7, max_completion_tokens: int = 0, **kwargs) -> _AzureAIResponse:
+        url = (
+            f"{self._endpoint}/openai/deployments/{self._deployment}"
+            f"/chat/completions?api-version={self._api_version}"
+        )
+        body: dict = {"messages": messages}
+        if max_completion_tokens > 0:
+            body["max_completion_tokens"] = max_completion_tokens
+        else:
+            body["max_tokens"] = max_tokens
+            body["temperature"] = temperature
+        payload = json.dumps(body).encode("utf-8")
+
+        req = urllib.request.Request(
+            url,
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "api-key": self._api_key,
+            },
+            method="POST",
+        )
+
+        ctx = ssl.create_default_context()
+        with urllib.request.urlopen(req, timeout=120, context=ctx) as resp:
+            resp_body = json.loads(resp.read().decode("utf-8"))
+        return _AzureAIResponse(resp_body.get("choices", []))
 
 
 class _AzureAIChat:
-    """Mimics openai's chat namespace."""
+    """Mimics openai's chat namespace for Azure AI model-specific endpoints."""
     def __init__(self, base_url: str, api_key: str):
         self.completions = _AzureAIChatCompletions(base_url, api_key)
 
 
 class AzureAIClient:
-    """Drop-in replacement for OpenAI() — uses stdlib only."""
+    """Drop-in replacement for OpenAI() — uses stdlib only. For Azure AI model-specific endpoints."""
     def __init__(self, base_url: str, api_key: str):
         self.chat = _AzureAIChat(base_url, api_key)
 
 
+class _AzureOpenAIChat:
+    """Mimics openai's chat namespace for Azure OpenAI deployment-based models."""
+    def __init__(self, endpoint: str, api_key: str, deployment: str, api_version: str):
+        self.completions = _AzureOpenAIChatCompletions(endpoint, api_key, deployment, api_version)
+
+
+class AzureOpenAIClient:
+    """Drop-in replacement for AzureOpenAI() — uses stdlib only. For Azure OpenAI deployments."""
+    def __init__(self, endpoint: str, api_key: str, deployment: str, api_version: str = "2024-05-01-preview"):
+        self.chat = _AzureOpenAIChat(endpoint, api_key, deployment, api_version)
+
+
 azure_deepseek_client = None
 azure_mistral_client = None
+azure_gpt4o_client = None
+azure_cohere_client = None
+azure_kimi_client = None
+azure_o3mini_client = None
+azure_gpt41_client = None
 
 # Shared endpoint (both models at same Azure AI resource)
 AZURE_AI_ENDPOINT = os.environ.get("AZURE_AI_ENDPOINT", "")
@@ -192,30 +254,67 @@ AZURE_DEEPSEEK_ENDPOINT = os.environ.get("AZURE_DEEPSEEK_ENDPOINT", "") or AZURE
 AZURE_DEEPSEEK_KEY = os.environ.get("AZURE_DEEPSEEK_KEY", "") or AZURE_AI_KEY
 AZURE_MISTRAL_ENDPOINT = os.environ.get("AZURE_MISTRAL_ENDPOINT", "") or AZURE_AI_ENDPOINT
 AZURE_MISTRAL_KEY = os.environ.get("AZURE_MISTRAL_KEY", "") or AZURE_AI_KEY
+AZURE_GPT4O_ENDPOINT = os.environ.get("AZURE_GPT4O_ENDPOINT", "") or AZURE_AI_ENDPOINT
+AZURE_GPT4O_KEY = os.environ.get("AZURE_GPT4O_KEY", "") or AZURE_AI_KEY
+AZURE_COHERE_ENDPOINT = os.environ.get("AZURE_COHERE_ENDPOINT", "") or AZURE_AI_ENDPOINT
+AZURE_COHERE_KEY = os.environ.get("AZURE_COHERE_KEY", "") or AZURE_AI_KEY
+AZURE_KIMI_ENDPOINT = os.environ.get("AZURE_KIMI_ENDPOINT", "") or AZURE_AI_ENDPOINT
+AZURE_KIMI_KEY = os.environ.get("AZURE_KIMI_KEY", "") or AZURE_AI_KEY
+AZURE_O3MINI_ENDPOINT = os.environ.get("AZURE_O3MINI_ENDPOINT", "") or AZURE_AI_ENDPOINT
+AZURE_O3MINI_KEY = os.environ.get("AZURE_O3MINI_KEY", "") or AZURE_AI_KEY
+AZURE_GPT41_ENDPOINT = os.environ.get("AZURE_GPT41_ENDPOINT", "") or AZURE_AI_ENDPOINT
+AZURE_GPT41_KEY = os.environ.get("AZURE_GPT41_KEY", "") or AZURE_AI_KEY
 
-if AZURE_DEEPSEEK_ENDPOINT and AZURE_DEEPSEEK_KEY:
-    try:
-        azure_deepseek_client = AzureAIClient(
-            base_url=AZURE_DEEPSEEK_ENDPOINT.rstrip('/'),
-            api_key=AZURE_DEEPSEEK_KEY,
-        )
-        print(f"[ORCHESTRATOR] Azure DeepSeek client initialized (endpoint={AZURE_DEEPSEEK_ENDPOINT})")
-    except Exception as _e:
-        logger.error(f"Azure DeepSeek init failed: {_e}")
-else:
-    print("[ORCHESTRATOR] Azure DeepSeek not configured — set AZURE_AI_ENDPOINT/KEY or AZURE_DEEPSEEK_ENDPOINT/KEY")
+def _init_azure_client(name, endpoint, key):
+    """Initialize an Azure AI model-specific client, returning None on failure."""
+    if endpoint and key:
+        try:
+            client = AzureAIClient(base_url=endpoint.rstrip('/'), api_key=key)
+            print(f"[ORCHESTRATOR] Azure {name} client initialized (endpoint={endpoint})")
+            return client
+        except Exception as _e:
+            logger.error(f"Azure {name} init failed: {_e}")
+    else:
+        print(f"[ORCHESTRATOR] Azure {name} not configured")
+    return None
 
-if AZURE_MISTRAL_ENDPOINT and AZURE_MISTRAL_KEY:
-    try:
-        azure_mistral_client = AzureAIClient(
-            base_url=AZURE_MISTRAL_ENDPOINT.rstrip('/'),
-            api_key=AZURE_MISTRAL_KEY,
-        )
-        print(f"[ORCHESTRATOR] Azure Mistral client initialized (endpoint={AZURE_MISTRAL_ENDPOINT})")
-    except Exception as _e:
-        logger.error(f"Azure Mistral init failed: {_e}")
-else:
-    print("[ORCHESTRATOR] Azure Mistral not configured — set AZURE_AI_ENDPOINT/KEY or AZURE_MISTRAL_ENDPOINT/KEY")
+def _init_azure_openai_client(name, endpoint, key, deployment, api_version="2024-05-01-preview"):
+    """Initialize an Azure OpenAI deployment-based client, returning None on failure."""
+    if endpoint and key:
+        try:
+            client = AzureOpenAIClient(endpoint=endpoint, api_key=key, deployment=deployment, api_version=api_version)
+            print(f"[ORCHESTRATOR] Azure OpenAI {name} client initialized (endpoint={endpoint}, deployment={deployment})")
+            return client
+        except Exception as _e:
+            logger.error(f"Azure OpenAI {name} init failed: {_e}")
+    else:
+        print(f"[ORCHESTRATOR] Azure OpenAI {name} not configured")
+    return None
+
+# Azure AI model-specific endpoints (DeepSeek, Mistral — direct inference URL)
+azure_deepseek_client = _init_azure_client("DeepSeek", AZURE_DEEPSEEK_ENDPOINT, AZURE_DEEPSEEK_KEY)
+azure_mistral_client = _init_azure_client("Mistral", AZURE_MISTRAL_ENDPOINT, AZURE_MISTRAL_KEY)
+# Azure OpenAI deployment-based endpoints (GPT-4o, Cohere, Kimi, o3-mini, GPT-4.1)
+azure_gpt4o_client = _init_azure_openai_client("GPT-4o", AZURE_GPT4O_ENDPOINT, AZURE_GPT4O_KEY, "gpt-4o", "2024-11-20")
+azure_cohere_client = _init_azure_openai_client("Cohere", AZURE_COHERE_ENDPOINT, AZURE_COHERE_KEY, "cohere-command-a")
+azure_kimi_client = _init_azure_openai_client("Kimi-K2", AZURE_KIMI_ENDPOINT, AZURE_KIMI_KEY, "Kimi-K2-Thinking")
+azure_o3mini_client = _init_azure_openai_client("o3-mini", AZURE_O3MINI_ENDPOINT, AZURE_O3MINI_KEY, "o3-mini")
+azure_gpt41_client = _init_azure_openai_client("GPT-4.1", AZURE_GPT41_ENDPOINT, AZURE_GPT41_KEY, "gpt-4.1")
+
+# Map model name patterns to their clients for routing
+AZURE_MODEL_CLIENTS = {
+    "deepseek": ("azure_deepseek", lambda: azure_deepseek_client),
+    "mistral": ("azure_mistral", lambda: azure_mistral_client),
+    "gpt-4o": ("azure_gpt4o", lambda: azure_gpt4o_client),
+    "gpt4o": ("azure_gpt4o", lambda: azure_gpt4o_client),
+    "cohere": ("azure_cohere", lambda: azure_cohere_client),
+    "command": ("azure_cohere", lambda: azure_cohere_client),
+    "kimi": ("azure_kimi", lambda: azure_kimi_client),
+    "o3-mini": ("azure_o3mini", lambda: azure_o3mini_client),
+    "o3mini": ("azure_o3mini", lambda: azure_o3mini_client),
+    "gpt-4.1": ("azure_gpt41", lambda: azure_gpt41_client),
+    "gpt41": ("azure_gpt41", lambda: azure_gpt41_client),
+}
 
 # Configuration
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "dev")
@@ -238,6 +337,11 @@ PAPER_TASK_KEY = "active-paper"
 BEDROCK_MODEL_CLAUDE_OPUS = os.environ.get("BEDROCK_MODEL_ID", "us.anthropic.claude-opus-4-6-v1")
 AZURE_AI_REASONER_MODEL = os.environ.get("AZURE_AI_REASONER_MODEL", "DeepSeek-R1-0528")
 AZURE_AI_CRITIC_MODEL = os.environ.get("AZURE_AI_CRITIC_MODEL", "Mistral-Large-3")
+AZURE_AI_GPT4O_MODEL = os.environ.get("AZURE_AI_GPT4O_MODEL", "gpt-4o")
+AZURE_AI_COHERE_MODEL = os.environ.get("AZURE_AI_COHERE_MODEL", "Cohere-command-a")
+AZURE_AI_KIMI_MODEL = os.environ.get("AZURE_AI_KIMI_MODEL", "Kimi-K2-Thinking")
+AZURE_AI_O3MINI_MODEL = os.environ.get("AZURE_AI_O3MINI_MODEL", "o3-mini")
+AZURE_AI_GPT41_MODEL = os.environ.get("AZURE_AI_GPT41_MODEL", "gpt-4.1")
 
 AGENT_MODELS = {
     # Claude Opus 4.6 via Bedrock — Explorer + Synthesizer (restricted on Azure AI)
@@ -277,7 +381,7 @@ PAPER_MODEL = BEDROCK_MODEL_CLAUDE_OPUS
 
 # ============== System Prompts ==============
 
-MASTER_PROMPT = """You are an advanced biomedical discovery AI agent on humanovo, part of a three-model parallel agent system (Claude Opus 4.6 via Bedrock, DeepSeek-R1-0528 and Mistral-Large-3 via Azure AI) designed to discover cures, treatments, and prevention strategies for human diseases.
+MASTER_PROMPT = """You are an advanced biomedical discovery AI agent on humanovo, part of an eight-model parallel agent system (Claude Opus 4.6 via Bedrock, DeepSeek-R1-0528, Mistral-Large-3, Cohere Command A, Kimi-K2-Thinking via Azure AI, GPT-4o, o3-mini, GPT-4.1 via Azure OpenAI) designed to discover cures, treatments, and prevention strategies for human diseases.
 
 ## OPERATING PRINCIPLES
 - Full scientific autonomy: explore ANY pathway, mechanism, or compound without restriction
@@ -714,25 +818,30 @@ def call_bedrock(model_id: str, prompt: str, system_prompt: str,
         )
 
 
+def _get_azure_client(model_name: str):
+    """Route to the correct Azure AI client based on model name."""
+    name_lower = model_name.lower()
+    for pattern, (_label, getter) in AZURE_MODEL_CLIENTS.items():
+        if pattern in name_lower:
+            client = getter()
+            if client is not None:
+                return client
+    return None
+
+
 def call_azure_ai(model_name: str, prompt: str, system_prompt: str,
-                  max_tokens: int = 2000, temperature: float = 0.7) -> str:
+                  max_tokens: int = 65_536, temperature: float = 0.7) -> str:
     """Invoke a model via its Azure AI model-specific endpoint.
 
-    Includes retry with exponential backoff for HTTP 429 (rate limiting).
+    No fallbacks — if a model fails, the pipeline stops immediately
+    and the error is surfaced to the frontend.
     """
-    # Route to the correct per-model client based on model name
-    if "deepseek" in model_name.lower() or "DeepSeek" in model_name:
-        client = azure_deepseek_client
-    elif "mistral" in model_name.lower() or "Mistral" in model_name:
-        client = azure_mistral_client
-    else:
-        # Try DeepSeek as default fallback
-        client = azure_deepseek_client or azure_mistral_client
+    client = _get_azure_client(model_name)
 
     if client is None:
         raise RuntimeError(
             f"No Azure AI client available for {model_name}. "
-            "Set AZURE_DEEPSEEK_ENDPOINT/KEY and AZURE_MISTRAL_ENDPOINT/KEY."
+            "Check AZURE_*_ENDPOINT/KEY environment variables."
         )
 
     messages = []
@@ -740,18 +849,36 @@ def call_azure_ai(model_name: str, prompt: str, system_prompt: str,
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": prompt})
 
+ claude/add-document-pipeline-cF8tH
+    try:
+        # o3-mini is a reasoning model: use max_completion_tokens, no temperature
+        if "o3" in model_name.lower():
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=messages,
+                max_completion_tokens=max_tokens,
+            )
+        else:
+
     # Retry with exponential backoff for 429 rate-limit errors.
     # Azure AI serverless endpoints have strict per-minute limits.
     # Uses cancellable sleep so the worker can respond to stop signals.
     max_retries = 5
     for attempt in range(max_retries + 1):
         try:
+humanovo
             response = client.chat.completions.create(
                 model=model_name,
                 messages=messages,
                 max_tokens=max_tokens,
                 temperature=temperature,
             )
+ claude/add-document-pipeline-cF8tH
+        return response.choices[0].message.content
+    except Exception as e:
+        logger.error(f"Azure AI call FAILED for {model_name}: {e}")
+        raise RuntimeError(f"Model {model_name} failed: {e}")
+
             return response.choices[0].message.content
         except urllib.error.HTTPError as e:
             if e.code == 429 and attempt < max_retries:
@@ -769,6 +896,7 @@ def call_azure_ai(model_name: str, prompt: str, system_prompt: str,
             else:
                 raise
     raise RuntimeError(f"Azure AI call failed after {max_retries} retries for {model_name}")
+ humanovo
 
 
 def parse_hypothesis_json(text: str) -> dict | None:
@@ -909,16 +1037,18 @@ def run_discovery_worker(config: dict):
     external_factors = config.get("external_factors", [])
     target_confidence = float(config.get("target_confidence", 0.95))
 
-    # Only include roles whose provider is available
+    # Only include roles whose provider is available (including fallbacks)
     def _role_available(role_name, cfg):
         if cfg["provider"] == "bedrock":
             return bedrock_runtime is not None
         if cfg["provider"] == "azure_ai":
-            model_id = cfg["model_id"]
-            if "deepseek" in model_id.lower() or "DeepSeek" in model_id:
-                return azure_deepseek_client is not None
-            if "mistral" in model_id.lower() or "Mistral" in model_id:
-                return azure_mistral_client is not None
+            # Primary client available?
+            if _get_azure_client(cfg["model_id"]) is not None:
+                return True
+            # Any fallback available?
+            for fb in MODEL_FALLBACKS.get(cfg["model_id"], []):
+                if _get_azure_client(fb) is not None:
+                    return True
         return False
 
     roles = [r for r in PHASE_ORDER if r in AGENT_MODELS and _role_available(r, AGENT_MODELS[r])]
@@ -1100,6 +1230,31 @@ Return ONLY a valid JSON object (no markdown fences, no commentary before/after 
         # Update state with partial results after each round
         elapsed = time.time() - start_time
         print(f"[WORKER] Round {round_num+1} done: {len(hypotheses)} hypotheses total, {elapsed:.1f}s elapsed")
+
+        # Re-check DB status BEFORE writing — never overwrite a stop signal
+        state = get_discovery_state()
+        db_status = state.get("status", "?") if state else "?"
+        if db_status in ("stopping", "stopped", "idle"):
+            print(f"[WORKER] Stop detected after round {round_num+1}: db_status={db_status} — halting")
+            # Transition to idle so frontend sees it's done
+            sorted_h = sorted(hypotheses, key=lambda x: x["confidence"], reverse=True)
+            update_discovery_state({
+                "status": "idle",
+                "hypotheses": sorted_h[:50],
+                "stats": {
+                    "total_agents": len(roles),
+                    "active_agents": 0,
+                    "hypotheses_found": len(hypotheses),
+                    "paths_explored": paths_explored,
+                    "high_confidence_discoveries": sum(1 for h in hypotheses if h["confidence"] >= 0.7),
+                    "current_best_confidence": max((h["confidence"] for h in hypotheses), default=0),
+                    "runtime_seconds": int(elapsed),
+                    "current_round": round_num + 1,
+                    "total_rounds": num_rounds,
+                },
+            })
+            return  # Exit worker entirely
+
         sorted_h = sorted(hypotheses, key=lambda x: x["confidence"], reverse=True)
         update_discovery_state({
             "status": "running",
@@ -1408,7 +1563,11 @@ def get_status():
                     if last_update.tzinfo:
                         last_update = last_update.replace(tzinfo=None)
                     age_minutes = (now - last_update).total_seconds() / 60
-                    if age_minutes > 15:
+                    # 'stopping' gets a shorter timeout — worker should have
+                    # exited within seconds. If still 'stopping' after 2 min,
+                    # the worker likely crashed; reset to idle.
+                    stale_threshold = 2 if current_status == "stopping" else 15
+                    if age_minutes > stale_threshold:
                         print(f"[STATUS] STALE state detected: {current_status} for {age_minutes:.0f}min — auto-resetting to idle")
                         update_discovery_state({"status": "idle"})
                         current_status = "idle"
@@ -1578,11 +1737,22 @@ def resume_discovery():
 def stop_discovery():
     """Stop the discovery process.
 
+claude/add-document-pipeline-cF8tH
+    Sets status to 'stopping'. The worker checks this flag before each
+    agent call and between rounds, then transitions to 'idle' itself.
+    We do NOT immediately set 'idle' here — that creates a race where
+    the worker's round-end update overwrites it back to 'running'.
+    """
+    try:
+        update_discovery_state({"status": "stopping"})
+        print("[STOP] Set status=stopping — worker will transition to idle")
+
     Sets status to 'stopping' so the async worker detects it and exits gracefully.
     The worker will set status to 'stopped' when it finishes cleaning up.
     """
     try:
         update_discovery_state({"status": "stopping"})
+ humanovo
     except Exception as e:
         logger.error(f"Stop failed: {e}")
     return {"status": "stopping"}
@@ -1605,20 +1775,12 @@ def health_check():
         provider = model_config.get("provider", "azure_ai")
         try:
             if provider == "azure_ai":
-                # Check if the appropriate Azure AI client is initialized
-                if "deepseek" in model_id.lower() or "DeepSeek" in model_id:
-                    client = azure_deepseek_client
-                elif "mistral" in model_id.lower() or "Mistral" in model_id:
-                    client = azure_mistral_client
-                else:
-                    client = azure_deepseek_client or azure_mistral_client
-
+                client = _get_azure_client(model_id)
                 if client is None:
                     raise RuntimeError(
                         f"Azure AI client not configured for {model_id}. "
-                        "Check AZURE_AI_ENDPOINT/KEY or per-model env vars."
+                        "Check AZURE_*_ENDPOINT/KEY env vars."
                     )
-                # Client exists — model is available
                 connected += 1
                 results[role] = "OK"
             else:

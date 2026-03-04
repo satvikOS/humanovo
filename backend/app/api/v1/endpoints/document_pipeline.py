@@ -235,6 +235,67 @@ async def generate_hypothesis_paper(
     )
 
 
+@router.post("/hypothesis/{hypothesis_id}/html")
+async def generate_hypothesis_paper_html(
+    hypothesis_id: UUID,
+    body: Optional[GenerateHypothesisPaperRequest] = None,
+):
+    """
+    Generate a research paper as a self-contained HTML document for a single hypothesis.
+
+    Returns a professionally formatted HTML page with cover page, TOC, numbered
+    citations, tables, diagrams, and FDA/R&D-grade typography — suitable for
+    rendering in an iframe or downloading.
+    """
+    if body:
+        hypothesis_data = {
+            "id": str(hypothesis_id),
+            "title": body.title,
+            "description": body.description,
+            "mechanism": body.mechanism,
+            "confidence": body.confidence,
+            "disease": body.disease,
+            "disease_focus": body.disease,
+            "hypothesis_type": body.discovery_type,
+            "model_used": body.model_used,
+            "validated": False,
+            "external_factors": body.external_factors,
+        }
+    else:
+        hypothesis_data = await _get_hypothesis_data(hypothesis_id)
+
+    disease = hypothesis_data.get("disease", hypothesis_data.get("disease_focus", "Unknown"))
+    discovery_type = hypothesis_data.get("hypothesis_type", "treatment")
+
+    hyp_list = [hypothesis_data]
+    stats = _build_stats_from_hypothesis(hypothesis_data)
+    external_factors = hypothesis_data.get("external_factors", [])
+    if isinstance(external_factors, list) and external_factors and isinstance(external_factors[0], str):
+        external_factors = [{"name": f, "category": "unknown"} for f in external_factors]
+
+    from app.services.paper_generation_service import get_paper_service
+    paper_service = get_paper_service()
+
+    try:
+        paper = await paper_service.generate_paper(
+            disease=disease,
+            discovery_type=discovery_type,
+            hypotheses=hyp_list,
+            stats=stats,
+            external_factors=external_factors if isinstance(external_factors, list) else [],
+        )
+        html_content = paper_service.paper_to_html(paper)
+    except Exception as e:
+        logger.error(f"HTML paper generation failed for hypothesis {hypothesis_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Paper generation failed: {e}")
+
+    return Response(
+        content=html_content,
+        media_type="text/html",
+        headers={"Content-Disposition": f"inline; filename=humanovo-{disease.replace(' ', '-').lower()}.html"},
+    )
+
+
 # ============================================================================
 # Discovery Session PDF Generation
 # ============================================================================

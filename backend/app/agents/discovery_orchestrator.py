@@ -119,7 +119,9 @@ class ModelType(str, Enum):
     MISTRAL_LARGE_3 = "mistral_large_3"            # Critic via Azure AI (32K output)
     GPT_4O_AZURE = "gpt_4o_azure"                  # Editorial synthesis via Azure OpenAI (131K→16K, GA)
     COHERE_COMMAND_A = "cohere_command_a"           # RAG literature review via Azure AI (256K context, GA)
-    PHI_4_REASONING = "phi_4_reasoning"            # QA validation via Azure AI (32K→4K, Preview)
+    KIMI_K2_THINKING = "kimi_k2_thinking"          # QA validation via Azure AI (20K TPM, Stable)
+    O3_MINI = "o3_mini"                            # Reasoning via Azure OpenAI (2.5M TPM / 250 RPM, GA)
+    GPT_41 = "gpt_41"                              # General purpose via Azure OpenAI (50K TPM / 50 RPM, GA)
     # Bedrock-only fallback
     DEEPSEEK_R1 = "deepseek_r1"
     # Azure OpenAI models — legacy
@@ -602,7 +604,9 @@ class MultiModelLLM:
         self._azure_mistral_client = None    # Mistral model-specific endpoint
         self._azure_gpt4o_client = None      # GPT-4o (Azure OpenAI deployment)
         self._azure_cohere_client = None     # Cohere Command A (Azure OpenAI deployment)
-        self._azure_phi4_client = None       # Phi-4-reasoning (Azure OpenAI deployment)
+        self._azure_kimi_client = None       # Kimi-K2-Thinking (Azure AI deployment)
+        self._azure_o3mini_client = None     # o3-mini (Azure OpenAI deployment)
+        self._azure_gpt41_client = None      # GPT-4.1 (Azure OpenAI deployment)
         self._azure_ai_available = False
         self._initialized = False
         self._token_pool = token_pool
@@ -675,21 +679,53 @@ class MultiModelLLM:
         else:
             logger.warning("AZURE_COHERE_ENDPOINT or AZURE_COHERE_KEY not set")
 
-        # Phi-4-reasoning via Azure OpenAI (deployment-based — uses AsyncAzureOpenAI)
-        if settings.azure_phi4_key_value and settings.AZURE_PHI4_ENDPOINT:
+        # Kimi-K2-Thinking via Azure OpenAI (deployment-based — uses AsyncAzureOpenAI)
+        if settings.azure_kimi_key_value and settings.AZURE_KIMI_ENDPOINT:
             try:
                 from openai import AsyncAzureOpenAI
-                self._azure_phi4_client = AsyncAzureOpenAI(
-                    api_key=settings.azure_phi4_key_value,
-                    azure_endpoint=settings.AZURE_PHI4_ENDPOINT,
-                    api_version=settings.AZURE_PHI4_API_VERSION,
+                self._azure_kimi_client = AsyncAzureOpenAI(
+                    api_key=settings.azure_kimi_key_value,
+                    azure_endpoint=settings.AZURE_KIMI_ENDPOINT,
+                    api_version=settings.AZURE_KIMI_API_VERSION,
                 )
                 azure_models_ready += 1
-                logger.info(f"Azure Phi-4-reasoning client initialized → {settings.AZURE_PHI4_ENDPOINT}")
+                logger.info(f"Azure Kimi-K2-Thinking client initialized → {settings.AZURE_KIMI_ENDPOINT}")
             except Exception as e:
-                logger.error(f"Azure Phi-4 client init FAILED: {e}")
+                logger.error(f"Azure Kimi-K2 client init FAILED: {e}")
         else:
-            logger.warning("AZURE_PHI4_ENDPOINT or AZURE_PHI4_KEY not set")
+            logger.warning("AZURE_KIMI_ENDPOINT or AZURE_KIMI_KEY not set")
+
+        # o3-mini via Azure OpenAI (deployment-based — uses AsyncAzureOpenAI)
+        if settings.azure_o3mini_key_value and settings.AZURE_O3MINI_ENDPOINT:
+            try:
+                from openai import AsyncAzureOpenAI
+                self._azure_o3mini_client = AsyncAzureOpenAI(
+                    api_key=settings.azure_o3mini_key_value,
+                    azure_endpoint=settings.AZURE_O3MINI_ENDPOINT,
+                    api_version=settings.AZURE_O3MINI_API_VERSION,
+                )
+                azure_models_ready += 1
+                logger.info(f"Azure o3-mini client initialized → {settings.AZURE_O3MINI_ENDPOINT}")
+            except Exception as e:
+                logger.error(f"Azure o3-mini client init FAILED: {e}")
+        else:
+            logger.warning("AZURE_O3MINI_ENDPOINT or AZURE_O3MINI_KEY not set")
+
+        # GPT-4.1 via Azure OpenAI (deployment-based — uses AsyncAzureOpenAI)
+        if settings.azure_gpt41_key_value and settings.AZURE_GPT41_ENDPOINT:
+            try:
+                from openai import AsyncAzureOpenAI
+                self._azure_gpt41_client = AsyncAzureOpenAI(
+                    api_key=settings.azure_gpt41_key_value,
+                    azure_endpoint=settings.AZURE_GPT41_ENDPOINT,
+                    api_version=settings.AZURE_GPT41_API_VERSION,
+                )
+                azure_models_ready += 1
+                logger.info(f"Azure GPT-4.1 client initialized → {settings.AZURE_GPT41_ENDPOINT}")
+            except Exception as e:
+                logger.error(f"Azure GPT-4.1 client init FAILED: {e}")
+        else:
+            logger.warning("AZURE_GPT41_ENDPOINT or AZURE_GPT41_KEY not set")
 
         self._azure_ai_available = azure_models_ready > 0
 
@@ -737,8 +773,12 @@ class MultiModelLLM:
             available.append(f"gpt_4o_azure ({settings.AZURE_GPT4O_DEPLOYMENT}) [azure-openai-dedicated]")
         if self._azure_cohere_client:
             available.append(f"cohere_command_a ({settings.AZURE_COHERE_DEPLOYMENT}) [azure-openai]")
-        if self._azure_phi4_client:
-            available.append(f"phi_4_reasoning ({settings.AZURE_PHI4_DEPLOYMENT}) [azure-openai]")
+        if self._azure_kimi_client:
+            available.append(f"kimi_k2_thinking ({settings.AZURE_KIMI_DEPLOYMENT}) [azure-openai]")
+        if self._azure_o3mini_client:
+            available.append(f"o3_mini ({settings.AZURE_O3MINI_DEPLOYMENT}) [azure-openai]")
+        if self._azure_gpt41_client:
+            available.append(f"gpt_41 ({settings.AZURE_GPT41_DEPLOYMENT}) [azure-openai]")
         for model_type, model_id in self.BEDROCK_MODELS.items():
             if self._bedrock_client:
                 available.append(f"{model_type.value} ({model_id}) [bedrock]")
@@ -761,8 +801,12 @@ class MultiModelLLM:
             return self._azure_gpt4o_client is not None
         if model_type == ModelType.COHERE_COMMAND_A:
             return self._azure_cohere_client is not None
-        if model_type == ModelType.PHI_4_REASONING:
-            return self._azure_phi4_client is not None
+        if model_type == ModelType.KIMI_K2_THINKING:
+            return self._azure_kimi_client is not None
+        if model_type == ModelType.O3_MINI:
+            return self._azure_o3mini_client is not None
+        if model_type == ModelType.GPT_41:
+            return self._azure_gpt41_client is not None
         return model_type in self.AZURE_OPENAI_MODELS and self._azure_client is not None
 
     def _is_azure_model(self, model_type: ModelType) -> bool:
@@ -790,7 +834,7 @@ class MultiModelLLM:
             raise RuntimeError(f"Token pool exhausted for {model_type.value}, rate limit hit")
 
         try:
-            # Try the preferred provider for this model type
+            # Route to the correct provider — no fallbacks, fail immediately
             if self._is_azure_ai_model(model_type):
                 return await self._generate_azure_ai(model_type, prompt, system_prompt, max_tokens, temperature)
             elif self._is_azure_openai_model(model_type):
@@ -798,9 +842,7 @@ class MultiModelLLM:
             elif model_type in self.BEDROCK_MODELS and self._bedrock_client:
                 return await self._generate_bedrock(model_type, prompt, system_prompt, max_tokens, temperature)
             else:
-                # Preferred provider unavailable — try any available model
-                logger.warning(f"Preferred provider for {model_type.value} unavailable, trying fallback")
-                return await self._generate_fallback(prompt, system_prompt, max_tokens, temperature)
+                raise RuntimeError(f"No provider available for {model_type.value}. Check endpoint/key configuration.")
         except Exception as e:
             self._token_pool.record_error(model_type)
             raise
@@ -846,14 +888,16 @@ class MultiModelLLM:
     ) -> str:
         """Invoke a model via Azure OpenAI (deployment-based routing).
 
-        All new models (GPT-4o, Cohere Command A, Phi-4-reasoning) are deployed
+        All new models (GPT-4o, Cohere Command A, Kimi-K2-Thinking, o3-mini, GPT-4.1) are deployed
         on the same Azure OpenAI resource with separate deployment names.
         """
         # Deployment-based models — each has its own AsyncAzureOpenAI client
         _deployment_clients = {
             ModelType.GPT_4O_AZURE: (self._azure_gpt4o_client, settings.AZURE_GPT4O_DEPLOYMENT),
             ModelType.COHERE_COMMAND_A: (self._azure_cohere_client, settings.AZURE_COHERE_DEPLOYMENT),
-            ModelType.PHI_4_REASONING: (self._azure_phi4_client, settings.AZURE_PHI4_DEPLOYMENT),
+            ModelType.KIMI_K2_THINKING: (self._azure_kimi_client, settings.AZURE_KIMI_DEPLOYMENT),
+            ModelType.O3_MINI: (self._azure_o3mini_client, settings.AZURE_O3MINI_DEPLOYMENT),
+            ModelType.GPT_41: (self._azure_gpt41_client, settings.AZURE_GPT41_DEPLOYMENT),
         }
 
         if model_type in _deployment_clients:
@@ -864,12 +908,21 @@ class MultiModelLLM:
             if system_prompt:
                 messages.append({"role": "system", "content": system_prompt})
             messages.append({"role": "user", "content": prompt})
-            response = await client.chat.completions.create(
-                model=deployment,
-                messages=messages,
-                max_tokens=max_tokens,
-                temperature=temperature,
-            )
+
+            # o3-mini is a reasoning model: use max_completion_tokens, no temperature
+            if model_type == ModelType.O3_MINI:
+                response = await client.chat.completions.create(
+                    model=deployment,
+                    messages=messages,
+                    max_completion_tokens=max_tokens,
+                )
+            else:
+                response = await client.chat.completions.create(
+                    model=deployment,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                )
             return response.choices[0].message.content
 
         # Legacy Azure OpenAI (o3, o1)
@@ -943,33 +996,6 @@ class MultiModelLLM:
         response_body = json.loads(response["body"].read())
         return _parse_invoke_response(model_id, response_body)
 
-    async def _generate_fallback(
-        self, prompt: str, system_prompt: str, max_tokens: int, temperature: float,
-    ) -> str:
-        """Try each model in priority order until one works."""
-        # Priority: Claude Opus → GPT-4o → DeepSeek → Cohere → Mistral → Phi-4 → fallbacks
-        for model_type in [
-            ModelType.CLAUDE_OPUS,
-            ModelType.GPT_4O_AZURE,
-            ModelType.DEEPSEEK_R1_0528,
-            ModelType.COHERE_COMMAND_A,
-            ModelType.MISTRAL_LARGE_3,
-            ModelType.PHI_4_REASONING,
-            ModelType.DEEPSEEK_R1,
-            ModelType.O3_DEEP_RESEARCH,
-            ModelType.O1,
-        ]:
-            try:
-                if self._is_azure_ai_model(model_type):
-                    return await self._generate_azure_ai(model_type, prompt, system_prompt, max_tokens, temperature)
-                elif self._is_azure_openai_model(model_type):
-                    return await self._generate_azure_openai(model_type, prompt, system_prompt, max_tokens, temperature)
-                elif model_type in self.BEDROCK_MODELS and self._bedrock_client:
-                    return await self._generate_bedrock(model_type, prompt, system_prompt, max_tokens, temperature)
-            except Exception:
-                continue
-        raise RuntimeError("All models unavailable (Azure AI + Bedrock + Azure OpenAI)")
-
     async def parallel_reasoning(
         self, prompt: str, context: str = "",
     ) -> dict[str, str]:
@@ -1035,21 +1061,28 @@ class MultiModelLLM:
                 max_tokens=4_096, temperature=0.2,
             )
 
-        # Phi-4-reasoning via Azure AI (Validation QA)
-        if self._azure_phi4_client:
-            tasks["phi_4_reasoning"] = self.generate(
-                ModelType.PHI_4_REASONING, full_prompt,
+        # Kimi-K2-Thinking via Azure AI (Validation QA)
+        if self._azure_kimi_client:
+            tasks["kimi_k2_thinking"] = self.generate(
+                ModelType.KIMI_K2_THINKING, full_prompt,
                 get_agent_prompt("validator", include_master=True),
                 max_tokens=4_096, temperature=0.15,
             )
 
-        # If no Azure AI, add Bedrock DeepSeek as reasoner fallback
-        if not self._azure_ai_available and self._bedrock_client:
-            tasks["deepseek_r1"] = self.generate(
-                ModelType.DEEPSEEK_R1, full_prompt,
+        # o3-mini via Azure OpenAI (Secondary Reasoning — 2.5M TPM, 100K output)
+        if self._azure_o3mini_client:
+            tasks["o3_mini_reasoner"] = self.generate(
+                ModelType.O3_MINI, full_prompt,
                 get_agent_prompt("reasoner", include_master=True),
-                max_tokens=65_536,
-                temperature=0.2,
+                max_tokens=100_000, temperature=0.0,  # reasoning model ignores temperature
+            )
+
+        # GPT-4.1 via Azure OpenAI (Analytical Review — 50K TPM, 32K output)
+        if self._azure_gpt41_client:
+            tasks["gpt_41_analyst"] = self.generate(
+                ModelType.GPT_41, full_prompt,
+                get_agent_prompt("critic", include_master=True),
+                max_tokens=32_768, temperature=0.25,
             )
 
         if not tasks:
@@ -1060,12 +1093,18 @@ class MultiModelLLM:
             return_exceptions=True,
         )
 
+        # Check for errors — any model failure stops the pipeline
         responses = {}
+        errors = []
         for (name, _), result in zip(tasks.items(), results):
             if isinstance(result, Exception):
-                responses[name] = f"Error: {result}"
+                errors.append(f"{name}: {result}")
             else:
                 responses[name] = result
+
+        if errors:
+            error_summary = "; ".join(errors)
+            raise RuntimeError(f"Model(s) failed — pipeline stopped: {error_summary}")
 
         return responses
 
@@ -1535,10 +1574,10 @@ class DiscoveryOrchestrator(LoggerMixin):
     async def _create_agents(self) -> None:
         self._agents = {}
 
-        # 6-model distribution across mixed providers:
+        # 8-model distribution across mixed providers:
         # Bedrock: Claude Opus 4.6
-        # Azure AI: DeepSeek-R1-0528, Mistral-Large-3, Cohere Command A, Phi-4-reasoning
-        # Azure OpenAI: GPT-4o
+        # Azure AI: DeepSeek-R1-0528, Mistral-Large-3, Cohere Command A, Kimi-K2-Thinking
+        # Azure OpenAI: GPT-4o, o3-mini, GPT-4.1
         models = []
         if self.llm._bedrock_client:
             models.append(ModelType.CLAUDE_OPUS)
@@ -1550,8 +1589,12 @@ class DiscoveryOrchestrator(LoggerMixin):
             models.append(ModelType.GPT_4O_AZURE)
         if self.llm._azure_cohere_client:
             models.append(ModelType.COHERE_COMMAND_A)
-        if self.llm._azure_phi4_client:
-            models.append(ModelType.PHI_4_REASONING)
+        if self.llm._azure_kimi_client:
+            models.append(ModelType.KIMI_K2_THINKING)
+        if self.llm._azure_o3mini_client:
+            models.append(ModelType.O3_MINI)
+        if self.llm._azure_gpt41_client:
+            models.append(ModelType.GPT_41)
 
         # Fallback to Bedrock-only if no Azure models available
         if not models and self.llm._bedrock_client:
