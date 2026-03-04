@@ -593,8 +593,6 @@ class MultiModelLLM:
     AZURE_AI_MODELS = {
         ModelType.DEEPSEEK_R1_0528:    settings.AZURE_DEEPSEEK_MODEL,
         ModelType.MISTRAL_LARGE_3:     settings.AZURE_MISTRAL_MODEL,
-        ModelType.COHERE_COMMAND_A:    settings.AZURE_COHERE_MODEL,
-        ModelType.PHI_4_REASONING:     settings.AZURE_PHI4_MODEL,
     }
 
     def __init__(self, token_pool: TokenPool):
@@ -602,9 +600,9 @@ class MultiModelLLM:
         self._azure_client = None        # Legacy Azure OpenAI
         self._azure_deepseek_client = None   # DeepSeek model-specific endpoint
         self._azure_mistral_client = None    # Mistral model-specific endpoint
-        self._azure_gpt4o_client = None      # GPT-4o (Azure OpenAI dedicated resource)
-        self._azure_cohere_client = None     # Cohere Command A model-specific endpoint
-        self._azure_phi4_client = None       # Phi-4-reasoning model-specific endpoint
+        self._azure_gpt4o_client = None      # GPT-4o (Azure OpenAI deployment)
+        self._azure_cohere_client = None     # Cohere Command A (Azure OpenAI deployment)
+        self._azure_phi4_client = None       # Phi-4-reasoning (Azure OpenAI deployment)
         self._azure_ai_available = False
         self._initialized = False
         self._token_pool = token_pool
@@ -661,13 +659,14 @@ class MultiModelLLM:
         else:
             logger.warning("AZURE_GPT4O_ENDPOINT or AZURE_GPT4O_KEY not set")
 
-        # Cohere Command A via Azure AI (direct endpoint — uses AsyncOpenAI)
+        # Cohere Command A via Azure OpenAI (deployment-based — uses AsyncAzureOpenAI)
         if settings.azure_cohere_key_value and settings.AZURE_COHERE_ENDPOINT:
             try:
-                from openai import AsyncOpenAI
-                self._azure_cohere_client = AsyncOpenAI(
-                    base_url=settings.AZURE_COHERE_ENDPOINT.rstrip('/'),
+                from openai import AsyncAzureOpenAI
+                self._azure_cohere_client = AsyncAzureOpenAI(
                     api_key=settings.azure_cohere_key_value,
+                    azure_endpoint=settings.AZURE_COHERE_ENDPOINT,
+                    api_version=settings.AZURE_COHERE_API_VERSION,
                 )
                 azure_models_ready += 1
                 logger.info(f"Azure Cohere Command A client initialized → {settings.AZURE_COHERE_ENDPOINT}")
@@ -676,13 +675,14 @@ class MultiModelLLM:
         else:
             logger.warning("AZURE_COHERE_ENDPOINT or AZURE_COHERE_KEY not set")
 
-        # Phi-4-reasoning via Azure AI (direct endpoint — uses AsyncOpenAI)
+        # Phi-4-reasoning via Azure OpenAI (deployment-based — uses AsyncAzureOpenAI)
         if settings.azure_phi4_key_value and settings.AZURE_PHI4_ENDPOINT:
             try:
-                from openai import AsyncOpenAI
-                self._azure_phi4_client = AsyncOpenAI(
-                    base_url=settings.AZURE_PHI4_ENDPOINT.rstrip('/'),
+                from openai import AsyncAzureOpenAI
+                self._azure_phi4_client = AsyncAzureOpenAI(
                     api_key=settings.azure_phi4_key_value,
+                    azure_endpoint=settings.AZURE_PHI4_ENDPOINT,
+                    api_version=settings.AZURE_PHI4_API_VERSION,
                 )
                 azure_models_ready += 1
                 logger.info(f"Azure Phi-4-reasoning client initialized → {settings.AZURE_PHI4_ENDPOINT}")
@@ -736,9 +736,9 @@ class MultiModelLLM:
         if self._azure_gpt4o_client:
             available.append(f"gpt_4o_azure ({settings.AZURE_GPT4O_DEPLOYMENT}) [azure-openai-dedicated]")
         if self._azure_cohere_client:
-            available.append(f"cohere_command_a ({settings.AZURE_COHERE_MODEL}) [azure-model-specific]")
+            available.append(f"cohere_command_a ({settings.AZURE_COHERE_DEPLOYMENT}) [azure-openai]")
         if self._azure_phi4_client:
-            available.append(f"phi_4_reasoning ({settings.AZURE_PHI4_MODEL}) [azure-model-specific]")
+            available.append(f"phi_4_reasoning ({settings.AZURE_PHI4_DEPLOYMENT}) [azure-openai]")
         for model_type, model_id in self.BEDROCK_MODELS.items():
             if self._bedrock_client:
                 available.append(f"{model_type.value} ({model_id}) [bedrock]")
@@ -753,16 +753,16 @@ class MultiModelLLM:
             return self._azure_deepseek_client is not None
         if model_type == ModelType.MISTRAL_LARGE_3:
             return self._azure_mistral_client is not None
+        return False
+
+    def _is_azure_openai_model(self, model_type: ModelType) -> bool:
+        """Check if a model type routes through Azure OpenAI (deployment-based)."""
+        if model_type == ModelType.GPT_4O_AZURE:
+            return self._azure_gpt4o_client is not None
         if model_type == ModelType.COHERE_COMMAND_A:
             return self._azure_cohere_client is not None
         if model_type == ModelType.PHI_4_REASONING:
             return self._azure_phi4_client is not None
-        return False
-
-    def _is_azure_openai_model(self, model_type: ModelType) -> bool:
-        """Check if a model type routes through Azure OpenAI."""
-        if model_type == ModelType.GPT_4O_AZURE:
-            return self._azure_gpt4o_client is not None
         return model_type in self.AZURE_OPENAI_MODELS and self._azure_client is not None
 
     def _is_azure_model(self, model_type: ModelType) -> bool:
@@ -821,12 +821,6 @@ class MultiModelLLM:
         elif model_type == ModelType.MISTRAL_LARGE_3:
             client = self._azure_mistral_client
             model_name = settings.AZURE_MISTRAL_MODEL
-        elif model_type == ModelType.COHERE_COMMAND_A:
-            client = self._azure_cohere_client
-            model_name = settings.AZURE_COHERE_MODEL
-        elif model_type == ModelType.PHI_4_REASONING:
-            client = self._azure_phi4_client
-            model_name = settings.AZURE_PHI4_MODEL
         else:
             raise RuntimeError(f"No Azure AI client for model type: {model_type}")
 
@@ -850,17 +844,28 @@ class MultiModelLLM:
         self, model_type: ModelType, prompt: str, system_prompt: str,
         max_tokens: int, temperature: float,
     ) -> str:
-        """Invoke a model via Azure OpenAI (dedicated GPT-4o resource or legacy)."""
-        # GPT-4o has its own dedicated Azure OpenAI client
-        if model_type == ModelType.GPT_4O_AZURE:
-            if not self._azure_gpt4o_client:
-                raise RuntimeError("Azure GPT-4o client not initialized")
+        """Invoke a model via Azure OpenAI (deployment-based routing).
+
+        All new models (GPT-4o, Cohere Command A, Phi-4-reasoning) are deployed
+        on the same Azure OpenAI resource with separate deployment names.
+        """
+        # Deployment-based models — each has its own AsyncAzureOpenAI client
+        _deployment_clients = {
+            ModelType.GPT_4O_AZURE: (self._azure_gpt4o_client, settings.AZURE_GPT4O_DEPLOYMENT),
+            ModelType.COHERE_COMMAND_A: (self._azure_cohere_client, settings.AZURE_COHERE_DEPLOYMENT),
+            ModelType.PHI_4_REASONING: (self._azure_phi4_client, settings.AZURE_PHI4_DEPLOYMENT),
+        }
+
+        if model_type in _deployment_clients:
+            client, deployment = _deployment_clients[model_type]
+            if not client:
+                raise RuntimeError(f"Azure OpenAI client not initialized for {model_type.value}")
             messages = []
             if system_prompt:
                 messages.append({"role": "system", "content": system_prompt})
             messages.append({"role": "user", "content": prompt})
-            response = await self._azure_gpt4o_client.chat.completions.create(
-                model=settings.AZURE_GPT4O_DEPLOYMENT,
+            response = await client.chat.completions.create(
+                model=deployment,
                 messages=messages,
                 max_tokens=max_tokens,
                 temperature=temperature,

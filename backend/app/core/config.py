@@ -77,15 +77,17 @@ class Settings(BaseSettings):
     AZURE_GPT4O_DEPLOYMENT: str = "gpt-4o"
     AZURE_GPT4O_API_VERSION: str = "2024-11-20"
 
-    # Azure AI — Cohere Command A (direct endpoint, 256K context, RAG-optimized)
-    AZURE_COHERE_ENDPOINT: str = ""    # Full base_url from Azure
+    # Azure OpenAI — Cohere Command A (same resource, deployment-based routing)
+    AZURE_COHERE_ENDPOINT: str = ""    # Azure OpenAI resource URL (e.g. https://humanovo-openai.cognitiveservices.azure.com)
     AZURE_COHERE_KEY: SecretStr | None = None
-    AZURE_COHERE_MODEL: str = "cohere-command-a"
+    AZURE_COHERE_DEPLOYMENT: str = "cohere-command-a"
+    AZURE_COHERE_API_VERSION: str = "2024-05-01-preview"
 
-    # Azure AI — Phi-4-reasoning (Microsoft, 32K input / 4K output, QA/validation)
-    AZURE_PHI4_ENDPOINT: str = ""      # Full base_url from Azure
+    # Azure OpenAI — Phi-4-reasoning (same resource, deployment-based routing)
+    AZURE_PHI4_ENDPOINT: str = ""      # Azure OpenAI resource URL (e.g. https://humanovo-openai.cognitiveservices.azure.com)
     AZURE_PHI4_KEY: SecretStr | None = None
-    AZURE_PHI4_MODEL: str = "Phi-4-reasoning"
+    AZURE_PHI4_DEPLOYMENT: str = "Phi-4-reasoning"
+    AZURE_PHI4_API_VERSION: str = "2024-05-01-preview"
 
     # AWS Bedrock (IAM user: humanovo-admin)
     AWS_ACCESS_KEY_ID: SecretStr | None = None
