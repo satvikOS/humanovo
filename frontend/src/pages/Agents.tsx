@@ -1242,49 +1242,61 @@ export default function Agents() {
                 {/* Export PDF */}
                 <div className="flex gap-2 mt-2">
                   <button
-                    onClick={async () => {
-                      const res = await fetch(`${API_BASE}/documents/hypothesis/${selectedHypothesis.id}/pdf`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          title: selectedHypothesis.title,
-                          description: selectedHypothesis.description,
-                          mechanism: selectedHypothesis.mechanism,
-                          confidence: selectedHypothesis.confidence,
-                          evidence_summary: selectedHypothesis.evidence_summary || [],
-                          risks: selectedHypothesis.risks || [],
-                          validation_steps: selectedHypothesis.validation_steps || [],
-                          key_citations: selectedHypothesis.key_citations || [],
-                          fda_references: selectedHypothesis.fda_references || [],
-                          clinical_trial_references: selectedHypothesis.clinical_trial_references || [],
-                          disease: config.disease || 'Research',
-                          discovery_type: config.discoveryType || 'treatment',
-                        }),
-                      })
-                      if (res.ok) {
-                        const data = await res.json()
-                        if (data.pdf_base64) {
-                          const byteChars = atob(data.pdf_base64)
-                          const byteArray = new Uint8Array(byteChars.length)
-                          for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i)
-                          const blob = new Blob([byteArray], { type: 'application/pdf' })
-                          const url = URL.createObjectURL(blob)
-                          const a = document.createElement('a')
-                          a.href = url
-                          a.download = data.filename || `humanovo-${selectedHypothesis.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase().slice(0, 50)}.pdf`
-                          a.click()
-                          URL.revokeObjectURL(url)
+                    onClick={async (e) => {
+                      const btn = e.currentTarget
+                      btn.disabled = true
+                      const origText = btn.textContent
+                      btn.textContent = 'Generating PDF...'
+                      try {
+                        const res = await fetch(`${API_BASE}/documents/hypothesis/${selectedHypothesis.id}/pdf?use_ai=false`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            title: selectedHypothesis.title,
+                            description: selectedHypothesis.description,
+                            mechanism: selectedHypothesis.mechanism,
+                            confidence: selectedHypothesis.confidence,
+                            evidence_summary: selectedHypothesis.evidence_summary || [],
+                            risks: selectedHypothesis.risks || [],
+                            validation_steps: selectedHypothesis.validation_steps || [],
+                            key_citations: selectedHypothesis.key_citations || [],
+                            fda_references: selectedHypothesis.fda_references || [],
+                            clinical_trial_references: selectedHypothesis.clinical_trial_references || [],
+                            disease: config.disease || 'Research',
+                            discovery_type: config.discoveryType || 'treatment',
+                          }),
+                        })
+                        if (res.ok) {
+                          const data = await res.json()
+                          if (data.pdf_base64) {
+                            const byteChars = atob(data.pdf_base64)
+                            const byteArray = new Uint8Array(byteChars.length)
+                            for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i)
+                            const blob = new Blob([byteArray], { type: 'application/pdf' })
+                            const url = URL.createObjectURL(blob)
+                            const a = document.createElement('a')
+                            a.href = url
+                            a.download = data.filename || `humanovo-${selectedHypothesis.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase().slice(0, 50)}.pdf`
+                            a.click()
+                            URL.revokeObjectURL(url)
+                          } else {
+                            console.error('PDF response missing pdf_base64:', data)
+                            alert('PDF generation failed — no PDF data returned')
+                          }
                         } else {
-                          console.error('PDF response missing pdf_base64:', data)
-                          alert('PDF generation failed — no PDF data returned')
+                          const errText = await res.text().catch(() => 'Unknown error')
+                          console.error('PDF export failed:', res.status, errText)
+                          alert(`PDF export failed (${res.status}): ${errText.slice(0, 200)}`)
                         }
-                      } else {
-                        const errText = await res.text().catch(() => 'Unknown error')
-                        console.error('PDF export failed:', res.status, errText)
-                        alert(`PDF export failed (${res.status}): ${errText.slice(0, 200)}`)
+                      } catch (err) {
+                        console.error('PDF export error:', err)
+                        alert('PDF export failed — network error')
+                      } finally {
+                        btn.disabled = false
+                        btn.textContent = origText || 'Export PDF'
                       }
                     }}
-                    className="flex-1 btn bg-green-500 text-white hover:bg-green-600"
+                    className="flex-1 btn bg-green-500 text-white hover:bg-green-600 disabled:opacity-50"
                   >
                     <FiDownload className="w-4 h-4" />
                     Export PDF

@@ -526,12 +526,24 @@ AGENT_MODELS = {
 # For paper generation, use Claude Opus via Bedrock (largest context, best document quality)
 PAPER_MODEL = BEDROCK_MODEL_CLAUDE_OPUS
 
+# ============== Helpers ==============
+
+
+def _safe_join(sep: str, items: list, limit: int | None = None) -> str:
+    """Join list items safely, converting dicts/non-strings to str first."""
+    if not items:
+        return ""
+    if limit is not None:
+        items = items[:limit]
+    return sep.join(str(item) if not isinstance(item, str) else item for item in items)
+
+
 # ============== System Prompts ==============
 
 MASTER_PROMPT = """You are an advanced biomedical discovery AI agent on humanovo, part of a ten-agent parallel system using eight distinct models (Claude Opus 4.6 via AWS Bedrock, DeepSeek-R1, Mistral-Large-3, Cohere Command A, Kimi-K2-Thinking, Grok-4.1 Fast Reasoning via Azure AI Foundry, GPT-4o, o3-mini, GPT-4.1 via Azure OpenAI) designed to discover cures, treatments, and prevention strategies for human diseases.
 
 ## OPERATING PRINCIPLES
-- Full scientific autonomy: explore ANY pathway, mechanism, or compound without restriction
+- Broad scientific scope: explore diverse pathways, mechanisms, and compounds for therapeutic discovery
 - Data-driven: generate, test, and refine hypotheses continuously
 - Cross-domain reasoning: connect biology, chemistry, pharmacology, nutrition, environmental science
 - External factor integration: always consider nutrients, chemicals, drugs, compounds, and elements
@@ -1484,7 +1496,17 @@ def ground_hypothesis_with_databases(disease: str, hypothesis_title: str, mechan
     """
     # Build targeted queries from hypothesis content
     query_base = f"{disease} {hypothesis_title[:80]}"
-    mechanism_short = mechanism[:100] if mechanism else disease
+    # Extract protein/gene names from mechanism for UniProt/Reactome queries
+    # instead of passing raw descriptive text which causes 400 errors
+    import re as _re
+    _gene_protein_pattern = _re.compile(
+        r'\b([A-Z][A-Z0-9]{1,10}(?:-[A-Z0-9]+)?)\b'  # e.g., PIEZO2, GsMTx4, CYP450, TRPV1
+    )
+    _extracted = _gene_protein_pattern.findall(mechanism[:300]) if mechanism else []
+    # Filter out common English words that match the pattern
+    _stopwords = {"THE", "AND", "FOR", "NOT", "BUT", "ARE", "WAS", "HAS", "HAD", "CAN", "MAY", "VIA", "WITH"}
+    _extracted = [g for g in _extracted if g not in _stopwords and len(g) >= 2]
+    mechanism_short = " ".join(_extracted[:5]) if _extracted else disease
 
     grounding = {
         "pubmed": [],
@@ -1699,8 +1721,8 @@ Title: {ref_h.get('title', '')}
 Description: {ref_h.get('description', '')[:500]}
 Mechanism: {ref_h.get('mechanism', '')[:300]}
 Current Confidence: {ref_h.get('confidence', 0):.0%}
-Evidence: {'; '.join(ref_h.get('evidence_summary', [])[:3])}
-Risks: {'; '.join(ref_h.get('risks', [])[:3])}
+Evidence: {_safe_join('; ', ref_h.get('evidence_summary', []), 3)}
+Risks: {_safe_join('; ', ref_h.get('risks', []), 3)}
 
 Your task: REFINE and DEEPEN this hypothesis. Make it more specific, better-evidenced, and clinically actionable.
 """
@@ -1877,9 +1899,9 @@ Return ONLY valid JSON:
 Description: {result['description'][:800]}
 Mechanism: {result['mechanism'][:500]}
 Confidence: {result['confidence']:.0%}
-Evidence: {'; '.join(result.get('evidence_summary', [])[:5])}
-Risks: {'; '.join(result.get('risks', [])[:3])}
-Validation: {'; '.join(result.get('validation_steps', [])[:3])}"""
+Evidence: {_safe_join('; ', result.get('evidence_summary', []), 5)}
+Risks: {_safe_join('; ', result.get('risks', []), 3)}
+Validation: {_safe_join('; ', result.get('validation_steps', []), 3)}"""
                         print(f"[WORKER]   {stage_name} -> refined: {result['title'][:70]} conf={result['confidence']:.2f}")
                     else:
                         print(f"[WORKER]   {stage_name} -> no output, keeping previous version")
@@ -2839,11 +2861,11 @@ def run_paper_worker(hypothesis_id: str | None, config: dict, continuation: dict
 
     h = hypotheses_for_paper[0]
     evidence = h.get("evidence_summary", [])
-    evidence_str = "\n".join(f"- {e}" for e in evidence) if evidence else "- No specific evidence cited"
+    evidence_str = "\n".join(f"- {e}" for e in (str(x) if not isinstance(x, str) else x for x in evidence)) if evidence else "- No specific evidence cited"
     risks = h.get("risks", [])
-    risks_str = "\n".join(f"- {r}" for r in risks) if risks else "- No risks identified"
+    risks_str = "\n".join(f"- {r}" for r in (str(x) if not isinstance(x, str) else x for x in risks)) if risks else "- No risks identified"
     validation = h.get("validation_steps", [])
-    validation_str = "\n".join(f"- {v}" for v in validation) if validation else "- No validation steps"
+    validation_str = "\n".join(f"- {v}" for v in (str(x) if not isinstance(x, str) else x for x in validation)) if validation else "- No validation steps"
 
     # Shared hypothesis context block given to every model
     hypothesis_context = f"""HYPOTHESIS: {h.get('title', 'Untitled')}
@@ -3278,9 +3300,9 @@ def generate_hypothesis_pdf(hypothesis_id: str):
     ai_paper_text = None
     try:
         h = hypothesis
-        evidence_str = "\n".join(f"- {e}" for e in h.get("evidence_summary", [])) or "No specific evidence cited"
-        risks_str = "\n".join(f"- {r}" for r in h.get("risks", [])) or "No risks identified"
-        validation_str = "\n".join(f"- {v}" for v in h.get("validation_steps", [])) or "No validation steps"
+        evidence_str = "\n".join(f"- {e}" for e in (str(x) if not isinstance(x, str) else x for x in h.get("evidence_summary", []))) or "No specific evidence cited"
+        risks_str = "\n".join(f"- {r}" for r in (str(x) if not isinstance(x, str) else x for x in h.get("risks", []))) or "No risks identified"
+        validation_str = "\n".join(f"- {v}" for v in (str(x) if not isinstance(x, str) else x for x in h.get("validation_steps", []))) or "No validation steps"
 
         expand_prompt = f"""Write a concise academic research paper (2000-3000 words) about this hypothesis:
 

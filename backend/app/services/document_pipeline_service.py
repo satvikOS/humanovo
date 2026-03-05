@@ -1150,13 +1150,35 @@ class DocumentPipelineService:
         # Hypothesis details
         hyp_lines = []
         for i, h in enumerate(sorted_hyps[:10], 1):
-            hyp_lines.append(
+            entry = (
                 f"### Hypothesis {i}: {h.get('title', 'Untitled')}\n\n"
                 f"Confidence: {h.get('confidence', 0):.1%} | "
                 f"Model: {h.get('model_used', 'unknown')}\n\n"
                 f"{h.get('description', 'No description available.')}\n\n"
                 f"Mechanism: {h.get('mechanism', 'Not specified')}"
             )
+            # Include evidence, risks, and validation steps if available
+            evidence = h.get("evidence_summary", [])
+            if evidence:
+                entry += "\n\n#### Evidence\n\n" + "\n".join(
+                    f"- {str(e)}" for e in evidence[:10]
+                )
+            risks = h.get("risks", [])
+            if risks:
+                entry += "\n\n#### Risks\n\n" + "\n".join(
+                    f"- {str(r)}" for r in risks[:5]
+                )
+            validation = h.get("validation_steps", [])
+            if validation:
+                entry += "\n\n#### Validation Steps\n\n" + "\n".join(
+                    f"- {str(v)}" for v in validation[:5]
+                )
+            citations = h.get("key_citations", [])
+            if citations:
+                entry += "\n\n#### Key Citations\n\n" + "\n".join(
+                    f"- {str(c)}" for c in citations[:10]
+                )
+            hyp_lines.append(entry)
         sections.append(DocumentSection(
             key="hypothesis_analyses", title="Hypothesis Analyses",
             order=3, depth=1,
