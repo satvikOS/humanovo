@@ -167,7 +167,7 @@ class _AzureAIChatCompletions:
         )
 
         ctx = ssl.create_default_context()
-        with urllib.request.urlopen(req, timeout=120, context=ctx) as resp:
+        with urllib.request.urlopen(req, timeout=180, context=ctx) as resp:
             resp_body = json.loads(resp.read().decode("utf-8"))
         return _AzureAIResponse(resp_body.get("choices", []))
 
@@ -211,7 +211,7 @@ class _AzureOpenAIChatCompletions:
         )
 
         ctx = ssl.create_default_context()
-        with urllib.request.urlopen(req, timeout=120, context=ctx) as resp:
+        with urllib.request.urlopen(req, timeout=180, context=ctx) as resp:
             resp_body = json.loads(resp.read().decode("utf-8"))
         return _AzureAIResponse(resp_body.get("choices", []))
 
@@ -1077,6 +1077,12 @@ def call_azure_ai(model_name: str, prompt: str, system_prompt: str,
                 )
             return response.choices[0].message.content
         except urllib.error.HTTPError as e:
+            # Read error response body for diagnostics
+            error_body = ""
+            try:
+                error_body = e.read().decode("utf-8", errors="replace")[:500]
+            except Exception:
+                pass
             if e.code == 429 and attempt < max_retries:
                 wait = min(5 * (3 ** attempt), 60)  # 5s, 15s, 45s, 60s, 60s
                 logger.warning(f"Azure AI 429 for {model_name}, retry {attempt+1}/{max_retries} in {wait}s")
@@ -1089,7 +1095,8 @@ def call_azure_ai(model_name: str, prompt: str, system_prompt: str,
                     f"Azure AI rate limit (429) exhausted after {max_retries} retries for {model_name}"
                 )
             else:
-                raise
+                logger.error(f"Azure AI HTTP {e.code} for {model_name}: {error_body}")
+                raise RuntimeError(f"Model {model_name} HTTP {e.code}: {error_body[:200]}")
         except Exception as e:
             logger.error(f"Azure AI call FAILED for {model_name}: {e}")
             raise RuntimeError(f"Model {model_name} failed: {e}")
@@ -1228,21 +1235,13 @@ TARGET_TOTAL_HYPOTHESES = 40
 MODEL_FALLBACKS: dict = {}  # No fallbacks — each model must work or fail explicitly
 
 
-def run_discovery_worker(config: dict):
+def run_discovery_worker(config: dict, continuation: dict | None = None):
     """Run the AI discovery process. Called via async Lambda invocation.
 
-    10-agent sequential execution per round (8 unique models, 9 endpoints):
-      1. Explorer (Claude Opus 4.6/Bedrock) — broad novel pathway discovery
-      2. Reasoner (DeepSeek-R1/Azure AI) — rigorous causal chain reasoning
-      3. Innovator (Cohere Command A/Azure AI) — creative cross-domain innovation
-      4. Analyst (GPT-4o/Azure OpenAI) — literature synthesis and evidence grading
-      5. Strategist (Kimi-K2-Thinking/Azure AI) — clinical development strategy
-      6. Quant (Phi-4 Reasoning/Azure AI) — mathematical modeling and PK/PD
-      7. Validator (o3-mini/Azure OpenAI) — rigorous claim verification
-      8. Critic (Mistral-Large-3/Azure AI) — critical analysis and risk assessment
-      9. Architect (GPT-4.1/Azure OpenAI) — combination therapy design
-     10. Synthesizer (Claude Opus 4.6/Bedrock) — integrative synthesis
+    Supports continuation: if Lambda approaches its 900s timeout,
+    it saves state and self-invokes to continue from the next round.
 
+    10-agent sequential execution per round (8 unique models, 9 endpoints).
     4 rounds × 10 agents = 40 hypotheses.
     After completion, auto-creates a project with all hypotheses.
     """
@@ -1251,6 +1250,18 @@ def run_discovery_worker(config: dict):
     focus_entities = config.get("focus_entities", [])
     external_factors = config.get("external_factors", [])
     target_confidence = float(config.get("target_confidence", 0.95))
+
+    # Continuation support: resume from a previous invocation
+    start_round = 0
+    prior_hypotheses = []
+    prior_paths = 0
+    time_offset = 0.0
+    if continuation:
+        start_round = continuation.get("start_round", 0)
+        prior_hypotheses = continuation.get("existing_hypotheses", [])
+        prior_paths = continuation.get("paths_explored", 0)
+        time_offset = float(continuation.get("total_start_time_offset", 0))
+        print(f"[WORKER] CONTINUATION: resuming from round {start_round+1}, {len(prior_hypotheses)} prior hypotheses, {time_offset:.0f}s prior elapsed")
 
     # Only include roles whose provider is available (including fallbacks)
     def _role_available(role_name, cfg):
@@ -1274,11 +1285,11 @@ def run_discovery_worker(config: dict):
         return
 
     num_rounds = NUM_ROUNDS
-    print(f"[WORKER] Starting: disease={disease!r} num_rounds={num_rounds} roles={roles} target_conf={target_confidence}")
+    print(f"[WORKER] Starting: disease={disease!r} num_rounds={num_rounds} roles={roles} target_conf={target_confidence} start_round={start_round}")
 
     start_time = time.time()
-    hypotheses = []
-    paths_explored = 0
+    hypotheses = list(prior_hypotheses)  # Resume with prior hypotheses if continuing
+    paths_explored = prior_paths
 
     # Each round+role gets a unique angle to ensure diversity across 40 hypotheses
     angle_matrix = {
@@ -1334,7 +1345,7 @@ def run_discovery_worker(config: dict):
         ("synthesizer", 3): "INTEGRATE all findings into a comprehensive CLINICAL TRANSLATION ROADMAP: Phase I→II→III design with biomarker-guided adaptive elements, companion diagnostics, and regulatory strategy.",
     }
 
-    for round_num in range(num_rounds):
+    for round_num in range(start_round, num_rounds):
         # Check if stopped
         state = get_discovery_state()
         db_status = state.get("status", "?") if state else "NO_ITEM"
@@ -1454,10 +1465,8 @@ Return ONLY a valid JSON object (no markdown fences, no commentary before/after 
                 logger.error(f"Agent {role} round {round_num} failed: {e}")
 
             # Delay between sequential agent calls to respect rate limits.
-            # Azure AI models have strict per-minute limits (20 RPM / 20K TPM),
-            # so we wait longer after Azure AI calls to avoid 429 errors.
             model_config = AGENT_MODELS.get(role, {})
-            delay = 30 if model_config.get("provider") == "azure_ai" else 5
+            delay = 10 if model_config.get("provider") == "azure_ai" else 3
             try:
                 _cancellable_sleep(delay)
             except CancelledError:
@@ -1465,12 +1474,61 @@ Return ONLY a valid JSON object (no markdown fences, no commentary before/after 
                 cancelled = True
                 break
 
+            # Check if approaching Lambda timeout — self-invoke to continue
+            elapsed_now = time.time() - start_time
+            if elapsed_now > 720:
+                print(f"[WORKER] Approaching Lambda timeout ({elapsed_now:.0f}s) — saving state and self-invoking continuation")
+                # Save current progress
+                sorted_h_partial = sorted(hypotheses, key=lambda x: x["confidence"], reverse=True)
+                update_discovery_state({
+                    "status": "running",
+                    "hypotheses": sorted_h_partial[:50],
+                    "stats": {
+                        "total_agents": len(roles),
+                        "active_agents": len(roles),
+                        "hypotheses_found": len(hypotheses),
+                        "paths_explored": paths_explored,
+                        "high_confidence_discoveries": sum(1 for h in hypotheses if h["confidence"] >= 0.7),
+                        "current_best_confidence": max((h["confidence"] for h in hypotheses), default=0),
+                        "runtime_seconds": int(elapsed_now),
+                        "current_round": round_num + 1,
+                        "total_rounds": num_rounds,
+                    },
+                    # Store continuation state for next invocation
+                    "_continuation": {
+                        "completed_round": round_num,
+                        "completed_roles_in_round": [r for r in roles[:roles.index(role)+1]],
+                    },
+                })
+                # Self-invoke to continue — skip already-completed work
+                try:
+                    lambda_client.invoke(
+                        FunctionName=FUNCTION_NAME,
+                        InvocationType="Event",
+                        Payload=json.dumps({
+                            "source": "self-invoke",
+                            "action": "run_discovery",
+                            "config": config,
+                            "continuation": {
+                                "start_round": round_num + 1,  # Continue from next round
+                                "existing_hypotheses": hypotheses,
+                                "paths_explored": paths_explored,
+                                "total_start_time_offset": elapsed_now + time_offset,
+                            },
+                        }, cls=DecimalEncoder),
+                    )
+                    print(f"[WORKER] Continuation invoke SUCCESS — handing off at round {round_num + 1}")
+                except Exception as cont_err:
+                    print(f"[WORKER] Continuation invoke FAILED: {cont_err}")
+                    logger.error(f"Continuation invoke failed: {cont_err}")
+                return  # Exit this invocation — continuation will pick up
+
         # If cancelled mid-round, break out of the outer loop
         if cancelled:
             break
 
         # Update state with partial results after each round
-        elapsed = time.time() - start_time
+        elapsed = time.time() - start_time + time_offset
         print(f"[WORKER] Round {round_num+1} done: {len(hypotheses)} hypotheses total, {elapsed:.1f}s elapsed")
 
         # Re-check DB status BEFORE writing — never overwrite a stop signal
@@ -1523,7 +1581,7 @@ Return ONLY a valid JSON object (no markdown fences, no commentary before/after 
         # Inter-round delay to prevent Azure rate limiting (cancellable)
         if round_num < num_rounds - 1:
             try:
-                _cancellable_sleep(10)
+                _cancellable_sleep(5)
             except CancelledError:
                 print("[WORKER] Cancelled during inter-round delay")
                 break
@@ -1532,7 +1590,7 @@ Return ONLY a valid JSON object (no markdown fences, no commentary before/after 
     was_cancelled = _is_cancelled()
     if was_cancelled:
         # Save partial results and mark as stopped
-        elapsed = time.time() - start_time
+        elapsed = time.time() - start_time + time_offset
         sorted_h = sorted(hypotheses, key=lambda x: x["confidence"], reverse=True)
         final_hypotheses = sorted_h[:TARGET_TOTAL_HYPOTHESES]
         print(f"[WORKER] STOPPED by user: {len(final_hypotheses)} hypotheses in {elapsed:.1f}s")
@@ -1561,7 +1619,7 @@ Return ONLY a valid JSON object (no markdown fences, no commentary before/after 
         return
 
     # ---- Discovery complete — finalize ----
-    elapsed = time.time() - start_time
+    elapsed = time.time() - start_time + time_offset
     sorted_h = sorted(hypotheses, key=lambda x: x["confidence"], reverse=True)
     # Keep exactly TARGET_TOTAL_HYPOTHESES (20)
     final_hypotheses = sorted_h[:TARGET_TOTAL_HYPOTHESES]
@@ -2318,7 +2376,7 @@ def _call_model_for_section(section_key: str, section_cfg: dict, prompt: str) ->
         return (section_key, "", str(e))
 
 
-def run_paper_worker(hypothesis_id: str | None, config: dict):
+def run_paper_worker(hypothesis_id: str | None, config: dict, continuation: dict | None = None):
     """Multi-model research paper pipeline.
 
     Architecture (section-per-model for variety and no single-model bias):
@@ -2336,7 +2394,11 @@ def run_paper_worker(hypothesis_id: str | None, config: dict):
 
     All models are instructed to ground claims in real scientific literature with
     specific author names, journal names, years, and DOIs where possible.
+
+    Supports continuation: if Phase 1 completes but synthesis would exceed Lambda
+    timeout, saves section results and self-invokes to continue at Phase 2.
     """
+    paper_start_time = time.time()
     print(f"[PAPER-WORKER] Starting multi-model pipeline for hypothesis={hypothesis_id or 'all'}")
     table = get_task_table()
     disease = config.get("disease", "Unknown Disease")
@@ -2398,20 +2460,26 @@ Do NOT fabricate references — if uncertain, state the general finding without 
 
     total_phases = 4  # parallel sections, synthesis, HTML conversion, done
 
-    # ---- Phase 1: Parallel section generation ----
-    _update_paper_phase(table, "Generating sections across 6 models...", 0, total_phases)
-    print("[PAPER] Phase 1: Parallel section generation (6 models)")
+    # Support continuation from Phase 2 (section results already generated)
+    section_results = {}
+    if continuation and continuation.get("section_results"):
+        section_results = continuation["section_results"]
+        print(f"[PAPER] Resuming from continuation — {len(section_results)} sections from Phase 1")
+    else:
+        # ---- Phase 1: Parallel section generation ----
+        _update_paper_phase(table, "Generating sections across 6 models...", 0, total_phases)
+        print("[PAPER] Phase 1: Parallel section generation (8 models)")
 
-    # Check cancellation
-    paper_state = table.get_item(Key={"id": PAPER_TASK_KEY}).get("Item", {})
-    if paper_state.get("status") in ("cancelled", "idle"):
-        print("[PAPER] Cancelled before phase 1")
-        return
+        # Check cancellation
+        paper_state = table.get_item(Key={"id": PAPER_TASK_KEY}).get("Item", {})
+        if paper_state.get("status") in ("cancelled", "idle"):
+            print("[PAPER] Cancelled before phase 1")
+            return
 
-    # Build section-specific prompts
-    section_prompts = {}
-    for key, cfg in PAPER_SECTIONS.items():
-        section_prompts[key] = f"""{hypothesis_context}
+        # Build section-specific prompts
+        section_prompts = {}
+        for key, cfg in PAPER_SECTIONS.items():
+            section_prompts[key] = f"""{hypothesis_context}
 
 {grounding_instruction}
 
@@ -2422,44 +2490,69 @@ Be exhaustive, specific, and quantitative. Minimum 600 words. Use formal academi
 Reference real studies, drugs, genes, and clinical data wherever possible.
 Write in markdown format with ## for section heading and ### for subsections."""
 
-    # Run all sections in parallel using ThreadPoolExecutor
-    section_results = {}
-    section_errors = []
+        # Run all sections in parallel using ThreadPoolExecutor
+        section_errors = []
 
-    with ThreadPoolExecutor(max_workers=6) as executor:
-        futures = {}
-        for key, cfg in PAPER_SECTIONS.items():
-            client = cfg["client"]()
-            if client is None:
-                print(f"[PAPER] Skipping section '{cfg['heading']}' — no client for {cfg['model']}")
-                continue
-            futures[executor.submit(
-                _call_model_for_section,
-                key, cfg, section_prompts[key]
-            )] = key
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            futures = {}
+            for key, cfg in PAPER_SECTIONS.items():
+                client = cfg["client"]()
+                if client is None:
+                    print(f"[PAPER] Skipping section '{cfg['heading']}' — no client for {cfg['model']}")
+                    continue
+                futures[executor.submit(
+                    _call_model_for_section,
+                    key, cfg, section_prompts[key]
+                )] = key
 
-        for future in as_completed(futures):
-            section_key, result_text, error = future.result()
-            if error:
-                section_errors.append(f"{section_key}: {error}")
-                print(f"[PAPER] Section '{section_key}' failed: {error}")
-            elif result_text:
-                section_results[section_key] = result_text
+            for future in as_completed(futures):
+                section_key, result_text, error = future.result()
+                if error:
+                    section_errors.append(f"{section_key}: {error}")
+                    print(f"[PAPER] Section '{section_key}' failed: {error}")
+                elif result_text:
+                    section_results[section_key] = result_text
 
-    completed_count = len(section_results)
-    print(f"[PAPER] Phase 1 complete: {completed_count}/{len(PAPER_SECTIONS)} sections generated")
+        completed_count = len(section_results)
+        print(f"[PAPER] Phase 1 complete: {completed_count}/{len(PAPER_SECTIONS)} sections generated")
 
-    if completed_count == 0:
-        table.update_item(
-            Key={"id": PAPER_TASK_KEY},
-            UpdateExpression="SET #s = :s, #e = :e",
-            ExpressionAttributeNames={"#s": "status", "#e": "error"},
-            ExpressionAttributeValues={
-                ":s": "failed",
-                ":e": f"All section models failed: {'; '.join(section_errors[:3])}",
-            },
-        )
-        return
+        if completed_count == 0:
+            table.update_item(
+                Key={"id": PAPER_TASK_KEY},
+                UpdateExpression="SET #s = :s, #e = :e",
+                ExpressionAttributeNames={"#s": "status", "#e": "error"},
+                ExpressionAttributeValues={
+                    ":s": "failed",
+                    ":e": f"All section models failed: {'; '.join(section_errors[:3])}",
+                },
+            )
+            return
+
+        # Check if approaching Lambda timeout — self-invoke with section results to continue at Phase 2
+        elapsed = time.time() - paper_start_time
+        if elapsed > 600:
+            print(f"[PAPER] Phase 1 took {elapsed:.0f}s — approaching Lambda timeout, self-invoking for Phase 2")
+            _update_paper_phase(table, "Continuing synthesis in new invocation...", 1, total_phases)
+            try:
+                lambda_client.invoke(
+                    FunctionName=FUNCTION_NAME,
+                    InvocationType="Event",
+                    Payload=json.dumps({
+                        "source": "self-invoke",
+                        "action": "generate_paper",
+                        "hypothesis_id": hypothesis_id,
+                        "config": config,
+                        "continuation": {
+                            "section_results": section_results,
+                        },
+                    }, cls=DecimalEncoder),
+                )
+                print("[PAPER] Self-invoke for Phase 2 SUCCESS")
+            except Exception as cont_err:
+                print(f"[PAPER] Self-invoke FAILED: {cont_err}, continuing in current invocation")
+                # Fall through to Phase 2 in this invocation (risky but better than nothing)
+            else:
+                return  # Exit — Phase 2 will run in the new invocation
 
     # Check cancellation before synthesis
     paper_state = table.get_item(Key={"id": PAPER_TASK_KEY}).get("Item", {})
@@ -3332,9 +3425,10 @@ def handler(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
             print(f"[HANDLER] Self-invoke: action={action}")
             if action == "run_discovery":
                 config = event.get("config", {})
-                print(f"[HANDLER] Starting worker: disease={config.get('disease','?')}")
+                continuation = event.get("continuation")
+                print(f"[HANDLER] Starting worker: disease={config.get('disease','?')} continuation={'yes' if continuation else 'no'}")
                 try:
-                    run_discovery_worker(config)
+                    run_discovery_worker(config, continuation=continuation)
                     print(f"[HANDLER] Worker completed successfully")
                 except Exception as worker_err:
                     print(f"[HANDLER] Worker CRASHED: {worker_err}")
@@ -3350,9 +3444,10 @@ def handler(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
             elif action == "generate_paper":
                 hypothesis_id = event.get("hypothesis_id")
                 paper_config = event.get("config", {})
-                print(f"[HANDLER] Starting paper worker: hypothesis={hypothesis_id}")
+                paper_continuation = event.get("continuation")
+                print(f"[HANDLER] Starting paper worker: hypothesis={hypothesis_id}, continuation={'yes' if paper_continuation else 'no'}")
                 try:
-                    run_paper_worker(hypothesis_id, paper_config)
+                    run_paper_worker(hypothesis_id, paper_config, continuation=paper_continuation)
                     print(f"[HANDLER] Paper worker completed successfully")
                 except Exception as paper_err:
                     print(f"[HANDLER] Paper worker CRASHED: {paper_err}")
