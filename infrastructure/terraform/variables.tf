@@ -243,6 +243,19 @@ variable "azure_phi4_key" {
   sensitive   = true
 }
 
+variable "azure_grok_endpoint" {
+  description = "Azure AI Grok-4.1 Fast Reasoning endpoint"
+  type        = string
+  default     = ""
+}
+
+variable "azure_grok_key" {
+  description = "Azure AI Grok-4.1 Fast Reasoning API key"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
 # ==================== API Gateway ====================
 
 variable "cors_allowed_origins" {

@@ -175,6 +175,17 @@ variable "azure_phi4_key" {
   sensitive = true
 }
 
+variable "azure_grok_endpoint" {
+  type    = string
+  default = ""
+}
+
+variable "azure_grok_key" {
+  type      = string
+  default   = ""
+  sensitive = true
+}
+
 variable "lambda_memory_size" {
   type    = number
   default = 1024
@@ -221,6 +232,8 @@ locals {
     AZURE_GPT41_KEY            = var.azure_gpt41_key
     AZURE_PHI4_ENDPOINT        = var.azure_phi4_endpoint
     AZURE_PHI4_KEY             = var.azure_phi4_key
+    AZURE_GROK_ENDPOINT        = var.azure_grok_endpoint
+    AZURE_GROK_KEY             = var.azure_grok_key
     LOG_LEVEL                  = var.environment == "prod" ? "INFO" : "DEBUG"
     POWERTOOLS_SERVICE_NAME    = "genup"
     POWERTOOLS_METRICS_NAMESPACE = "GenUp"

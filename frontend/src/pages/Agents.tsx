@@ -242,6 +242,13 @@ export default function Agents() {
             }
             return newState
           })
+          // Restore disease/discoveryType from backend if local config is empty
+          // (handles page refresh during continuation — prevents "— Treatment Research" trash project)
+          const effectiveDisease = config.disease || data.disease || ''
+          const effectiveDiscoveryType = config.discoveryType || data.discovery_type || 'treatment'
+          if (!config.disease && data.disease) {
+            setConfig(prev => ({ ...prev, disease: data.disease, discoveryType: data.discovery_type || prev.discoveryType }))
+          }
           if (data.stats) {
             setStats(data.stats)
             const currentRound = data.stats.current_round || 0
@@ -258,7 +265,7 @@ export default function Agents() {
                 .filter(isValidHypothesis)
               if (incoming.length === 0) return prev
               for (const h of incoming) {
-                saveHypothesisToProject(h, config.disease, config.discoveryType)
+                saveHypothesisToProject(h, effectiveDisease, effectiveDiscoveryType)
               }
               return [...incoming, ...prev].sort((a: Hypothesis, b: Hypothesis) => b.confidence - a.confidence).slice(0, 100)
             })

@@ -286,6 +286,8 @@ module "lambda" {
   azure_gpt41_key         = var.azure_gpt41_key
   azure_phi4_endpoint     = var.azure_phi4_endpoint
   azure_phi4_key          = var.azure_phi4_key
+  azure_grok_endpoint     = var.azure_grok_endpoint
+  azure_grok_key          = var.azure_grok_key
   lambda_memory_size    = var.lambda_memory_size
   lambda_timeout        = var.lambda_timeout
 }

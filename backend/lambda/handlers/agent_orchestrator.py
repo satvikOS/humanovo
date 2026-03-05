@@ -248,6 +248,7 @@ azure_kimi_client = None
 azure_o3mini_client = None
 azure_gpt41_client = None
 azure_phi4_client = None
+azure_grok_client = None
 
 # Shared endpoint (both models at same Azure AI resource)
 AZURE_AI_ENDPOINT = os.environ.get("AZURE_AI_ENDPOINT", "")
@@ -270,6 +271,8 @@ AZURE_GPT41_ENDPOINT = os.environ.get("AZURE_GPT41_ENDPOINT", "") or AZURE_AI_EN
 AZURE_GPT41_KEY = os.environ.get("AZURE_GPT41_KEY", "") or AZURE_AI_KEY
 AZURE_PHI4_ENDPOINT = os.environ.get("AZURE_PHI4_ENDPOINT", "") or AZURE_AI_ENDPOINT
 AZURE_PHI4_KEY = os.environ.get("AZURE_PHI4_KEY", "") or AZURE_AI_KEY
+AZURE_GROK_ENDPOINT = os.environ.get("AZURE_GROK_ENDPOINT", "") or AZURE_AI_ENDPOINT
+AZURE_GROK_KEY = os.environ.get("AZURE_GROK_KEY", "") or AZURE_AI_KEY
 
 def _normalize_azure_ai_endpoint(endpoint: str) -> str:
     """Normalize Azure AI Foundry endpoint to base URL for /chat/completions.
@@ -376,6 +379,7 @@ azure_mistral_client = _init_azure_client("Mistral", AZURE_MISTRAL_ENDPOINT, AZU
 azure_cohere_client = _init_azure_client("Cohere", AZURE_COHERE_ENDPOINT, AZURE_COHERE_KEY, model_name="Cohere-command-a")
 azure_kimi_client = _init_azure_client("Kimi-K2", AZURE_KIMI_ENDPOINT, AZURE_KIMI_KEY, model_name="Kimi-K2-Thinking")
 azure_phi4_client = _init_azure_client("Phi4", AZURE_PHI4_ENDPOINT, AZURE_PHI4_KEY, model_name="Phi-4-reasoning")
+azure_grok_client = _init_azure_client("Grok", AZURE_GROK_ENDPOINT, AZURE_GROK_KEY, model_name="grok-4-1-fast-reasoning")
 # Azure OpenAI deployment-based endpoints (GPT-4o, o3-mini, GPT-4.1 — via cognitiveservices.azure.com)
 azure_gpt4o_client = _init_azure_openai_client("GPT-4o", AZURE_GPT4O_ENDPOINT, AZURE_GPT4O_KEY, "gpt-4o", "2025-01-01-preview")
 azure_o3mini_client = _init_azure_openai_client("o3-mini", AZURE_O3MINI_ENDPOINT, AZURE_O3MINI_KEY, "o3-mini", "2025-01-01-preview")
@@ -396,6 +400,7 @@ AZURE_MODEL_CLIENTS = {
     "gpt41": ("azure_gpt41", lambda: azure_gpt41_client),
     "phi-4": ("azure_phi4", lambda: azure_phi4_client),
     "phi4": ("azure_phi4", lambda: azure_phi4_client),
+    "grok": ("azure_grok", lambda: azure_grok_client),
 }
 
 # Configuration
@@ -425,6 +430,7 @@ AZURE_AI_KIMI_MODEL = os.environ.get("AZURE_AI_KIMI_MODEL", "Kimi-K2-Thinking")
 AZURE_AI_O3MINI_MODEL = os.environ.get("AZURE_AI_O3MINI_MODEL", "o3-mini")
 AZURE_AI_GPT41_MODEL = os.environ.get("AZURE_AI_GPT41_MODEL", "gpt-4.1")
 AZURE_AI_PHI4_MODEL = os.environ.get("AZURE_AI_PHI4_MODEL", "Phi-4-reasoning")
+AZURE_AI_GROK_MODEL = os.environ.get("AZURE_AI_GROK_MODEL", "grok-4-1-fast-reasoning")
 
 AGENT_MODELS = {
     # === Bedrock (Claude Opus 4.6) ===
@@ -460,7 +466,7 @@ AGENT_MODELS = {
     "innovator": {
         "model_id": AZURE_AI_COHERE_MODEL,
         "provider": "azure_ai",
-        "max_tokens": 16_000,
+        "max_tokens": 8_000,  # Cohere Command A has 8192 max output limit
         "temperature": 0.5,
         "role_description": "Creative innovation — generates unconventional therapeutic approaches and cross-domain connections",
     },
@@ -472,7 +478,7 @@ AGENT_MODELS = {
         "role_description": "Strategic thinking — long-horizon clinical development planning and regulatory strategy",
     },
     "quant": {
-        "model_id": AZURE_AI_PHI4_MODEL,
+        "model_id": AZURE_AI_GROK_MODEL,
         "provider": "azure_ai",
         "max_tokens": 16_000,
         "temperature": 0.2,
@@ -507,7 +513,7 @@ PAPER_MODEL = BEDROCK_MODEL_CLAUDE_OPUS
 
 # ============== System Prompts ==============
 
-MASTER_PROMPT = """You are an advanced biomedical discovery AI agent on humanovo, part of a ten-agent parallel system using eight distinct models (Claude Opus 4.6 via AWS Bedrock, DeepSeek-R1, Mistral-Large-3, Cohere Command A, Kimi-K2-Thinking, Phi-4 Reasoning via Azure AI Foundry, GPT-4o, o3-mini, GPT-4.1 via Azure OpenAI) designed to discover cures, treatments, and prevention strategies for human diseases.
+MASTER_PROMPT = """You are an advanced biomedical discovery AI agent on humanovo, part of a ten-agent parallel system using eight distinct models (Claude Opus 4.6 via AWS Bedrock, DeepSeek-R1, Mistral-Large-3, Cohere Command A, Kimi-K2-Thinking, Grok-4.1 Fast Reasoning via Azure AI Foundry, GPT-4o, o3-mini, GPT-4.1 via Azure OpenAI) designed to discover cures, treatments, and prevention strategies for human diseases.
 
 ## OPERATING PRINCIPLES
 - Full scientific autonomy: explore ANY pathway, mechanism, or compound without restriction
@@ -711,7 +717,7 @@ SPECIFIC INSTRUCTIONS:
 
 Think like a Cochrane reviewer — systematic, unbiased, transparent about limitations.""",
 
-    "quant": """You are a QUANT agent running on Phi-4 Reasoning via Azure AI Foundry.
+    "quant": """You are a QUANT agent running on Grok-4.1 Fast Reasoning via Azure AI Foundry.
 Your unique strength is MATHEMATICAL AND QUANTITATIVE REASONING — precise calculations and statistical modeling.
 
 MISSION: Perform rigorous quantitative analysis: pharmacokinetic modeling, statistical power calculations, dose-response curves, and systems biology simulations.
@@ -1224,7 +1230,7 @@ PHASE_ORDER = [
     "innovator",   # Cohere Command A (Azure AI Foundry) — creative innovation
     "analyst",     # GPT-4o (Azure OpenAI) — literature analysis
     "strategist",  # Kimi-K2-Thinking (Azure AI Foundry) — clinical strategy
-    "quant",       # Phi-4 Reasoning (Azure AI Foundry) — quantitative modeling
+    "quant",       # Grok-4.1 Fast Reasoning (Azure AI Foundry) — quantitative modeling
     "validator",   # o3-mini (Azure OpenAI) — rigorous validation
     "critic",      # Mistral-Large-3 (Azure AI Foundry) — critical analysis
     "architect",   # GPT-4.1 (Azure OpenAI) — systems architecture
@@ -1318,7 +1324,7 @@ def run_discovery_worker(config: dict, continuation: dict | None = None):
         ("strategist", 1): "Plan CLINICAL DEVELOPMENT TIMELINE: Phase I dose-escalation design, Phase II biomarker-guided adaptive design, Phase III pivotal trial with interim analysis, registration strategy.",
         ("strategist", 2): "Develop MARKET ACCESS STRATEGY: health economics modeling (QALY, ICER), payer evidence requirements, value-based contracts, patient assistance programs, global pricing strategy.",
         ("strategist", 3): "Design COMBINATION THERAPY DEVELOPMENT PLAN: which agents to combine, sequencing strategy, dose-finding for combinations, regulatory path for fixed-dose combinations vs co-administration.",
-        # === Quant (Phi-4 Reasoning / Azure AI): mathematical modeling ===
+        # === Quant (Grok-4.1 Fast Reasoning / Azure AI): mathematical modeling ===
         ("quant", 0): "Build PHARMACOKINETIC/PHARMACODYNAMIC model: compartmental PK, receptor occupancy PD, exposure-response relationships, therapeutic window calculations with Monte Carlo simulation.",
         ("quant", 1): "Perform STATISTICAL POWER ANALYSIS: sample size calculations for primary endpoints, adaptive design boundaries (O'Brien-Fleming, Haybittle-Peto), interim analysis rules, multiplicity adjustments.",
         ("quant", 2): "Develop SYSTEMS BIOLOGY MODEL: ODE-based pathway modeling, parameter sensitivity analysis, bifurcation diagrams, stochastic noise assessment, predict emergent therapeutic effects.",
@@ -1880,10 +1886,15 @@ def get_status():
             safe_h = {k: v for k, v in h.items() if k not in ("model_used", "model_id", "role")}
             safe_hypotheses.append(safe_h)
 
+        # Include disease/discovery_type from config so frontend can restore context
+        # (e.g., after page refresh during continuation)
+        stored_config = state.get("config") or {}
         result = {
             "state": current_status,
             "stats": state.get("stats"),
             "top_hypotheses": safe_hypotheses,
+            "disease": stored_config.get("disease", ""),
+            "discovery_type": stored_config.get("discovery_type", ""),
         }
         # Include project reference if discovery completed
         if state.get("project_id") and state["project_id"] != "discovery":
@@ -2105,6 +2116,7 @@ def health_check():
         "azure_cohere_client_init": azure_cohere_client is not None,
         "azure_kimi_client_init": azure_kimi_client is not None,
         "azure_phi4_client_init": azure_phi4_client is not None,
+        "azure_grok_client_init": azure_grok_client is not None,
         "azure_gpt4o_client_init": azure_gpt4o_client is not None,
         "azure_o3mini_client_init": azure_o3mini_client is not None,
         "azure_gpt41_client_init": azure_gpt41_client is not None,
@@ -2285,9 +2297,9 @@ PAPER_SECTIONS = {
     },
     "methods": {
         "heading": "2. Methods",
-        "model": "phi4",
-        "model_id": lambda: AZURE_AI_PHI4_MODEL,
-        "client": lambda: azure_phi4_client,
+        "model": "grok",
+        "model_id": lambda: AZURE_AI_GROK_MODEL,
+        "client": lambda: azure_grok_client,
         "provider": "azure_ai",
         "system": "You are a computational biology methodologist. Write a detailed Methods section (800+ words) with subsections: 2.1 Multi-Agent AI Discovery Architecture (describe the 10-agent system), 2.2 Knowledge Integration Framework (how evidence is synthesized), 2.3 Confidence Scoring Methodology (statistical approach), 2.4 Hypothesis Generation Protocol. Be quantitatively precise.",
     },
