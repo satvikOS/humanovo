@@ -2358,8 +2358,8 @@ def start_discovery():
             "config": config,
             "hypotheses": [],
             "stats": {
-                "total_agents": len(PHASE_ORDER),
-                "active_agents": len(PHASE_ORDER),
+                "total_agents": len(PIPELINE_STAGES),
+                "active_agents": len(PIPELINE_STAGES),
                 "hypotheses_found": 0,
                 "paths_explored": 0,
                 "high_confidence_discoveries": 0,
@@ -2404,7 +2404,7 @@ def start_discovery():
                 update_discovery_state({"status": "idle"})
 
         print(f"[START] Returning started response")
-        return {"status": "started", "disease": disease, "agents": len(PHASE_ORDER), "total_rounds": NUM_ROUNDS}
+        return {"status": "started", "disease": disease, "agents": len(PIPELINE_STAGES), "total_rounds": NUM_ROUNDS}
     except Exception as e:
         logger.error(f"Start discovery failed: {e}")
         return Response(
