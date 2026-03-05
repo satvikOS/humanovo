@@ -1,24 +1,36 @@
 """
-Discovery Orchestrator
+Discovery Orchestrator — 10-Stage Sequential Hypothesis Pipeline
 
-Three-model hybrid pipeline using mixed providers:
-  Claude Opus 4.6  (Bedrock, Converse API)     — Explorer + Synthesizer: 200K context
-  DeepSeek-R1-0528 (Azure AI, Chat completion)  — Reasoner: state-of-the-art chain-of-thought
-  Mistral-Large-3  (Azure AI, Chat completion)  — Critic: strong analytical capabilities
+Architecture: 10 models work sequentially on ONE hypothesis at a time.
+Each hypothesis passes through 10 specialized stages before the pipeline
+moves to the next hypothesis. This makes each hypothesis maximally strong,
+evidence-grounded, and non-ambiguous.
+
+10-Stage Pipeline (one model per stage):
+  Stage 1  — SEED       (Claude Opus, Bedrock)         : Generate initial hypothesis seed
+  Stage 2  — EXPAND     (DeepSeek-R1-0528, Azure AI)   : Deep causal chain reasoning
+  Stage 3  — EVIDENCE   (Cohere Command A, Azure OpenAI): Literature evidence review (+ PubMed API)
+  Stage 4  — COUNTER    (Mistral-Large-3, Azure AI)     : Counter-argument generation
+  Stage 5  — MECHANISM  (o3-mini, Azure OpenAI)         : Mechanistic deep dive
+  Stage 6  — VALIDATE   (Kimi-K2-Thinking, Azure OpenAI): Cross-validation
+  Stage 7  — GROUND     (GPT-4.1, Azure OpenAI)         : Scientific grounding (+ PubMed/FDA/ClinicalTrials.gov)
+  Stage 8  — SCORE      (GPT-4o, Azure OpenAI)          : Multi-dimensional confidence scoring
+  Stage 9  — REFINE     (Grok-4-1-fast, Azure AI)       : Rapid refinement
+  Stage 10 — FINALIZE   (Claude Opus, Bedrock)          : Final synthesis
+
+Discovery Rounds (4 rounds, 3 hypotheses per round = 12 total):
+  Round 1-2: Independent exploration — new hypotheses from different pathways
+  Round 3-4: Hybrid refinement — refine and deepen the best hypotheses from Round 1-2
+
+Scientific Grounding:
+  - PubMed E-utilities API for real citations (PMID, DOI)
+  - ClinicalTrials.gov v2 API for relevant clinical trials
+  - openFDA API for FDA-approved drug references
 
 Provider routing:
-  - Claude Opus 4.6 → AWS Bedrock (restricted on Azure AI)
-  - DeepSeek-R1-0528 → Azure AI Foundry
-  - Mistral-Large-3 → Azure AI Foundry
-
-Features:
-- Three-model parallel reasoning via mixed Bedrock + Azure AI providers
-- Token pool with rate limiting, backoff, and per-model quota management
-- 100 to 10,000 concurrent agents with adaptive batching
-- Confidence-based stopping with start/pause/stop controls
-- Learning system to skip redundant relations
-- External factor simulation (nutrients, chemicals, drugs, compounds, elements)
-- Research paper generation upon completion
+  - Claude Opus 4.6 → AWS Bedrock
+  - DeepSeek-R1-0528, Mistral-Large-3, Grok → Azure AI Foundry
+  - GPT-4o, Cohere, Kimi-K2, o3-mini, GPT-4.1 → Azure OpenAI
 """
 
 import asyncio
@@ -122,6 +134,7 @@ class ModelType(str, Enum):
     KIMI_K2_THINKING = "kimi_k2_thinking"          # QA validation via Azure AI (20K TPM, Stable)
     O3_MINI = "o3_mini"                            # Reasoning via Azure OpenAI (2.5M TPM / 250 RPM, GA)
     GPT_41 = "gpt_41"                              # General purpose via Azure OpenAI (50K TPM / 50 RPM, GA)
+    GROK_FAST = "grok_fast"                            # Fast Refiner via Azure AI (Grok-4-1-fast-reasoning)
     # Bedrock-only fallback
     DEEPSEEK_R1 = "deepseek_r1"
     # Azure OpenAI models — legacy
@@ -168,6 +181,18 @@ class DiscoveryHypothesis:
     created_at: datetime = field(default_factory=datetime.utcnow)
     validated: bool = False
     validation_score: float = 0.0
+    # New fields for 10-stage pipeline
+    evidence_summary: list[str] = field(default_factory=list)
+    risks: list[str] = field(default_factory=list)
+    validation_steps: list[str] = field(default_factory=list)
+    novelty_score: float = 0.0
+    citations: list[dict[str, Any]] = field(default_factory=list)
+    key_citations: list[str] = field(default_factory=list)
+    fda_references: list[Any] = field(default_factory=list)
+    clinical_trial_references: list[Any] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
+    round_number: int = 0
+    stages_completed: int = 0
 
 
 @dataclass
@@ -607,6 +632,7 @@ class MultiModelLLM:
         self._azure_kimi_client = None       # Kimi-K2-Thinking (Azure AI deployment)
         self._azure_o3mini_client = None     # o3-mini (Azure OpenAI deployment)
         self._azure_gpt41_client = None      # GPT-4.1 (Azure OpenAI deployment)
+        self._azure_grok_client = None       # Grok-4-1-fast-reasoning (Azure AI Foundry)
         self._azure_ai_available = False
         self._initialized = False
         self._token_pool = token_pool
@@ -727,6 +753,25 @@ class MultiModelLLM:
         else:
             logger.warning("AZURE_GPT41_ENDPOINT or AZURE_GPT41_KEY not set")
 
+        # Grok-4-1-fast-reasoning via Azure AI Foundry (shared endpoint, model-based routing)
+        if settings.azure_grok_key_value and settings.AZURE_GROK_ENDPOINT:
+            try:
+                from openai import AsyncOpenAI
+                endpoint = settings.AZURE_GROK_ENDPOINT.rstrip('/')
+                # Azure AI Foundry shared endpoints need /models path
+                if 'services.ai.azure.com' in endpoint and not endpoint.endswith('/models'):
+                    endpoint = f"{endpoint}/models"
+                self._azure_grok_client = AsyncOpenAI(
+                    base_url=endpoint,
+                    api_key=settings.azure_grok_key_value,
+                )
+                azure_models_ready += 1
+                logger.info(f"Azure Grok client initialized → {endpoint}")
+            except Exception as e:
+                logger.error(f"Azure Grok client init FAILED: {e}")
+        else:
+            logger.warning("AZURE_GROK_ENDPOINT or AZURE_GROK_KEY not set")
+
         self._azure_ai_available = azure_models_ready > 0
 
         # Initialize Bedrock client (fallback)
@@ -769,6 +814,8 @@ class MultiModelLLM:
             available.append(f"deepseek_r1_0528 ({settings.AZURE_DEEPSEEK_MODEL}) [azure-model-specific]")
         if self._azure_mistral_client:
             available.append(f"mistral_large_3 ({settings.AZURE_MISTRAL_MODEL}) [azure-model-specific]")
+        if self._azure_grok_client:
+            available.append(f"grok_fast ({settings.AZURE_GROK_MODEL}) [azure-ai-foundry]")
         if self._azure_gpt4o_client:
             available.append(f"gpt_4o_azure ({settings.AZURE_GPT4O_DEPLOYMENT}) [azure-openai-dedicated]")
         if self._azure_cohere_client:
@@ -793,6 +840,8 @@ class MultiModelLLM:
             return self._azure_deepseek_client is not None
         if model_type == ModelType.MISTRAL_LARGE_3:
             return self._azure_mistral_client is not None
+        if model_type == ModelType.GROK_FAST:
+            return self._azure_grok_client is not None
         return False
 
     def _is_azure_openai_model(self, model_type: ModelType) -> bool:
@@ -863,6 +912,9 @@ class MultiModelLLM:
         elif model_type == ModelType.MISTRAL_LARGE_3:
             client = self._azure_mistral_client
             model_name = settings.AZURE_MISTRAL_MODEL
+        elif model_type == ModelType.GROK_FAST:
+            client = self._azure_grok_client
+            model_name = settings.AZURE_GROK_MODEL
         else:
             raise RuntimeError(f"No Azure AI client for model type: {model_type}")
 
@@ -1085,6 +1137,14 @@ class MultiModelLLM:
                 max_tokens=32_768, temperature=0.25,
             )
 
+        # Grok-4-1-fast via Azure AI (Fast Reasoning — refinement)
+        if self._azure_grok_client:
+            tasks["grok_fast_refiner"] = self.generate(
+                ModelType.GROK_FAST, full_prompt,
+                get_agent_prompt("reasoner", include_master=True),
+                max_tokens=16_384, temperature=0.3,
+            )
+
         if not tasks:
             raise RuntimeError("No models available for parallel reasoning (Azure AI + Bedrock)")
 
@@ -1185,6 +1245,651 @@ Integrate all findings, resolve contradictions, identify cross-model connections
                 logger.warning(f"Claude Opus synthesis failed: {e}")
 
         return shard_results
+
+
+@dataclass
+class PipelineStageResult:
+    """Result from a single pipeline stage."""
+    stage: int
+    stage_name: str
+    model_used: str
+    output: dict[str, Any]
+    duration_seconds: float
+    success: bool
+    error: str = ""
+
+
+@dataclass
+class HypothesisPipelineResult:
+    """Complete result from the 10-stage pipeline for one hypothesis."""
+    hypothesis_id: str
+    round_number: int
+    hypothesis_index: int  # 1-3 within the round
+    stage_results: list[PipelineStageResult]
+    final_hypothesis: Optional['DiscoveryHypothesis']
+    total_duration_seconds: float
+    stages_completed: int
+    success: bool
+
+
+class SequentialHypothesisPipeline:
+    """
+    10-Stage Sequential Hypothesis Pipeline.
+
+    All 10 models work on ONE hypothesis at a time, passing results
+    from stage to stage. Only after all 10 stages complete does the
+    pipeline move to the next hypothesis.
+
+    Stage → Model Assignment:
+      1. Seed       → Claude Opus (Bedrock)           — Explorer
+      2. Expand     → DeepSeek-R1-0528 (Azure AI)     — Deep Reasoner
+      3. Evidence   → Cohere Command A (Azure OpenAI)  — Literature RAG
+      4. Counter    → Mistral-Large-3 (Azure AI)       — Critic
+      5. Mechanism  → o3-mini (Azure OpenAI)           — Mechanistic Reasoner
+      6. Validate   → Kimi-K2-Thinking (Azure OpenAI)  — QA Validator
+      7. Ground     → GPT-4.1 (Azure OpenAI)           — Scientific Grounder
+      8. Score      → GPT-4o (Azure OpenAI)            — Confidence Scorer
+      9. Refine     → Grok-4-1-fast (Azure AI)         — Fast Refiner
+      10. Finalize  → Claude Opus (Bedrock)            — Final Synthesizer
+    """
+
+    # Stage definitions: (stage_number, name, model_type, max_tokens, temperature)
+    STAGES = [
+        (1,  "seed",      ModelType.CLAUDE_OPUS,       32_768, 0.4),
+        (2,  "expand",    ModelType.DEEPSEEK_R1_0528,  65_536, 0.2),
+        (3,  "evidence",  ModelType.COHERE_COMMAND_A,    4_096, 0.2),
+        (4,  "counter",   ModelType.MISTRAL_LARGE_3,   32_768, 0.3),
+        (5,  "mechanism", ModelType.O3_MINI,          100_000, 0.0),
+        (6,  "validate",  ModelType.KIMI_K2_THINKING,   4_096, 0.15),
+        (7,  "ground",    ModelType.GPT_41,            32_768, 0.25),
+        (8,  "score",     ModelType.GPT_4O_AZURE,      16_384, 0.25),
+        (9,  "refine",    ModelType.GROK_FAST,         16_384, 0.3),
+        (10, "finalize",  ModelType.CLAUDE_OPUS,       32_768, 0.3),
+    ]
+
+    def __init__(self, llm: MultiModelLLM):
+        self._llm = llm
+        self._grounding_service = None
+
+    async def _get_grounding(self):
+        """Lazy-load grounding service."""
+        if self._grounding_service is None:
+            from app.services.pubmed_service import get_grounding_service
+            self._grounding_service = get_grounding_service()
+        return self._grounding_service
+
+    def _get_available_stages(self) -> list[tuple]:
+        """Get stages with available model clients, with fallback mapping."""
+        available = []
+        fallback_map = {
+            # If a model is unavailable, fall back to another
+            ModelType.COHERE_COMMAND_A: ModelType.CLAUDE_OPUS,
+            ModelType.O3_MINI: ModelType.DEEPSEEK_R1_0528,
+            ModelType.KIMI_K2_THINKING: ModelType.CLAUDE_OPUS,
+            ModelType.GPT_41: ModelType.CLAUDE_OPUS,
+            ModelType.GPT_4O_AZURE: ModelType.CLAUDE_OPUS,
+            ModelType.GROK_FAST: ModelType.MISTRAL_LARGE_3,
+            ModelType.DEEPSEEK_R1_0528: ModelType.CLAUDE_OPUS,
+            ModelType.MISTRAL_LARGE_3: ModelType.CLAUDE_OPUS,
+        }
+
+        for stage_num, name, model_type, max_tokens, temp in self.STAGES:
+            # Check if the model is available
+            actual_model = model_type
+            if not self._is_model_available(model_type):
+                fallback = fallback_map.get(model_type)
+                if fallback and self._is_model_available(fallback):
+                    actual_model = fallback
+                    logger.warning(f"Stage {stage_num} ({name}): {model_type.value} unavailable, using {fallback.value}")
+                elif self._is_model_available(ModelType.CLAUDE_OPUS):
+                    actual_model = ModelType.CLAUDE_OPUS
+                    logger.warning(f"Stage {stage_num} ({name}): falling back to Claude Opus")
+                else:
+                    logger.error(f"Stage {stage_num} ({name}): NO model available, skipping")
+                    continue
+            available.append((stage_num, name, actual_model, max_tokens, temp))
+
+        return available
+
+    def _is_model_available(self, model_type: ModelType) -> bool:
+        """Check if a model client is initialized."""
+        if model_type == ModelType.CLAUDE_OPUS:
+            return self._llm._bedrock_client is not None
+        if model_type == ModelType.DEEPSEEK_R1_0528:
+            return self._llm._azure_deepseek_client is not None
+        if model_type == ModelType.MISTRAL_LARGE_3:
+            return self._llm._azure_mistral_client is not None
+        if model_type == ModelType.COHERE_COMMAND_A:
+            return self._llm._azure_cohere_client is not None
+        if model_type == ModelType.KIMI_K2_THINKING:
+            return self._llm._azure_kimi_client is not None
+        if model_type == ModelType.O3_MINI:
+            return self._llm._azure_o3mini_client is not None
+        if model_type == ModelType.GPT_41:
+            return self._llm._azure_gpt41_client is not None
+        if model_type == ModelType.GPT_4O_AZURE:
+            return self._llm._azure_gpt4o_client is not None
+        if model_type == ModelType.GROK_FAST:
+            return self._llm._azure_grok_client is not None
+        return False
+
+    async def run_hypothesis(
+        self,
+        disease: str,
+        discovery_type: str,
+        pathway_context: str,
+        external_factors: list[dict[str, Any]],
+        round_number: int,
+        hypothesis_index: int,
+        previous_hypotheses: list[dict[str, Any]] = None,
+        refine_hypothesis: dict[str, Any] = None,
+        on_stage_complete: Optional[Callable] = None,
+    ) -> HypothesisPipelineResult:
+        """
+        Run the full 10-stage pipeline for a single hypothesis.
+
+        Args:
+            disease: Target disease
+            discovery_type: Type of discovery (treatment, prevention, etc.)
+            pathway_context: Graph/pathway data as text
+            external_factors: List of external factors to consider
+            round_number: Current round (1-4)
+            hypothesis_index: Hypothesis index within round (1-3)
+            previous_hypotheses: Hypotheses from previous rounds (for context in rounds 3-4)
+            refine_hypothesis: Specific hypothesis to refine (for rounds 3-4)
+            on_stage_complete: Callback after each stage completes
+        """
+        from app.agents.prompts import get_stage_prompt
+
+        hypothesis_id = str(uuid4())
+        stage_results = []
+        accumulated_context = {}
+        pipeline_start = time.time()
+
+        # Build external factors context
+        ext_factors_text = ""
+        if external_factors:
+            lines = [f"- {f.get('name', 'Unknown')} ({f.get('category', 'unknown')}): {f.get('interaction', 'unknown')}"
+                     for f in external_factors[:10]]
+            ext_factors_text = "\nExternal Factors:\n" + "\n".join(lines)
+
+        # Build previous hypotheses context (for rounds 3-4)
+        prev_context = ""
+        if previous_hypotheses:
+            prev_lines = []
+            for ph in previous_hypotheses[:6]:
+                prev_lines.append(f"- [{ph.get('confidence', 0)*100:.0f}%] {ph.get('title', 'Untitled')}: {ph.get('mechanism', '')[:200]}")
+            prev_context = f"\n\n## PREVIOUS DISCOVERIES (from earlier rounds)\n" + "\n".join(prev_lines)
+
+        # Build refinement context (for rounds 3-4)
+        refine_context = ""
+        if refine_hypothesis:
+            refine_context = f"""
+
+## HYPOTHESIS TO REFINE AND DEEPEN
+Title: {refine_hypothesis.get('title', '')}
+Mechanism: {refine_hypothesis.get('mechanism', '')}
+Description: {refine_hypothesis.get('description', '')}
+Current Confidence: {refine_hypothesis.get('confidence', 0)*100:.0f}%
+Weaknesses to Address: {', '.join(refine_hypothesis.get('risks', ['None identified']))}
+
+Your goal is to STRENGTHEN this hypothesis — address its weaknesses, find stronger evidence, and refine the mechanism.
+"""
+
+        stages = self._get_available_stages()
+        logger.info(f"Starting 10-stage pipeline for hypothesis R{round_number}H{hypothesis_index} ({len(stages)} stages available)")
+
+        for stage_num, stage_name, model_type, max_tokens, temperature in stages:
+            stage_start = time.time()
+
+            try:
+                # Get the stage-specific system prompt
+                system_prompt = get_stage_prompt(stage_num)
+
+                # Build the stage-specific user prompt
+                user_prompt = self._build_stage_prompt(
+                    stage_num=stage_num,
+                    stage_name=stage_name,
+                    disease=disease,
+                    discovery_type=discovery_type,
+                    pathway_context=pathway_context,
+                    ext_factors_text=ext_factors_text,
+                    prev_context=prev_context,
+                    refine_context=refine_context,
+                    accumulated_context=accumulated_context,
+                    round_number=round_number,
+                    hypothesis_index=hypothesis_index,
+                )
+
+                # For Stage 3 (Evidence) and Stage 7 (Ground), fetch real scientific data
+                if stage_num in (3, 7):
+                    grounding = await self._get_grounding()
+                    # Extract search terms from accumulated context
+                    search_text = accumulated_context.get("title", disease)
+                    target_entities = accumulated_context.get("target_entities", [])
+
+                    evidence_data = await grounding.ground_hypothesis(
+                        hypothesis_text=search_text,
+                        disease=disease,
+                        target_entities=target_entities,
+                    )
+                    user_prompt += f"\n\n## REAL SCIENTIFIC DATA (from PubMed, ClinicalTrials.gov, FDA)\n{evidence_data.get('evidence_text', 'No data found')}"
+                    accumulated_context["scientific_evidence"] = evidence_data
+
+                # Call the model
+                response = await self._llm.generate(
+                    model_type=model_type,
+                    prompt=user_prompt,
+                    system_prompt=system_prompt,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                )
+
+                # Parse the response
+                parsed = self._parse_stage_output(response, stage_num)
+                accumulated_context.update(parsed)
+                accumulated_context[f"stage_{stage_num}_raw"] = response[:2000]
+
+                duration = time.time() - stage_start
+                stage_results.append(PipelineStageResult(
+                    stage=stage_num,
+                    stage_name=stage_name,
+                    model_used=model_type.value,
+                    output=parsed,
+                    duration_seconds=duration,
+                    success=True,
+                ))
+
+                logger.info(f"  Stage {stage_num}/{len(stages)} ({stage_name}) completed in {duration:.1f}s via {model_type.value}")
+
+                if on_stage_complete:
+                    try:
+                        await on_stage_complete(stage_num, stage_name, model_type.value, parsed)
+                    except Exception:
+                        pass
+
+            except Exception as e:
+                duration = time.time() - stage_start
+                logger.error(f"  Stage {stage_num} ({stage_name}) FAILED: {e}")
+                stage_results.append(PipelineStageResult(
+                    stage=stage_num,
+                    stage_name=stage_name,
+                    model_used=model_type.value,
+                    output={},
+                    duration_seconds=duration,
+                    success=False,
+                    error=str(e),
+                ))
+                # Continue to next stage — pipeline is resilient
+
+        # Build final hypothesis from accumulated context
+        total_duration = time.time() - pipeline_start
+        stages_completed = sum(1 for sr in stage_results if sr.success)
+
+        final_hypothesis = self._build_final_hypothesis(
+            hypothesis_id=hypothesis_id,
+            disease=disease,
+            discovery_type=discovery_type,
+            accumulated_context=accumulated_context,
+            stage_results=stage_results,
+            round_number=round_number,
+        )
+
+        logger.info(
+            f"Pipeline complete for R{round_number}H{hypothesis_index}: "
+            f"{stages_completed}/{len(stages)} stages, "
+            f"confidence={final_hypothesis.confidence:.2f}, "
+            f"duration={total_duration:.1f}s"
+        )
+
+        return HypothesisPipelineResult(
+            hypothesis_id=hypothesis_id,
+            round_number=round_number,
+            hypothesis_index=hypothesis_index,
+            stage_results=stage_results,
+            final_hypothesis=final_hypothesis,
+            total_duration_seconds=total_duration,
+            stages_completed=stages_completed,
+            success=stages_completed >= 5,  # At least half the stages must succeed
+        )
+
+    def _build_stage_prompt(
+        self,
+        stage_num: int,
+        stage_name: str,
+        disease: str,
+        discovery_type: str,
+        pathway_context: str,
+        ext_factors_text: str,
+        prev_context: str,
+        refine_context: str,
+        accumulated_context: dict[str, Any],
+        round_number: int,
+        hypothesis_index: int,
+    ) -> str:
+        """Build the user prompt for a specific pipeline stage."""
+        base = f"""Disease: {disease}
+Discovery Type: {discovery_type}
+Round: {round_number}/4 | Hypothesis: {hypothesis_index}/3
+{ext_factors_text}
+{prev_context}
+{refine_context}
+"""
+
+        if stage_num == 1:
+            # Seed stage gets pathway context
+            return f"""{base}
+
+## PATHWAY DATA
+{pathway_context[:8000]}
+
+Generate a novel, specific, testable hypothesis for {discovery_type} of {disease}.
+Focus on mechanisms that are scientifically grounded and experimentally verifiable.
+You MUST cite only real biological pathways, genes, and proteins."""
+
+        # All subsequent stages get accumulated context from previous stages
+        context_summary = self._summarize_accumulated(accumulated_context)
+
+        if stage_num == 2:
+            return f"""{base}
+
+## HYPOTHESIS SEED (from Stage 1)
+{context_summary}
+
+Expand this hypothesis with deep causal chain reasoning. Trace the complete mechanism from molecular trigger to therapeutic outcome."""
+
+        if stage_num == 3:
+            return f"""{base}
+
+## HYPOTHESIS WITH MECHANISM (from Stages 1-2)
+{context_summary}
+
+Review the scientific literature for evidence supporting or contradicting this hypothesis.
+You will receive real PubMed articles below — evaluate them carefully."""
+
+        if stage_num == 4:
+            return f"""{base}
+
+## HYPOTHESIS WITH EVIDENCE (from Stages 1-3)
+{context_summary}
+
+Generate the strongest possible counter-arguments against this hypothesis. Be ruthlessly honest."""
+
+        if stage_num == 5:
+            return f"""{base}
+
+## HYPOTHESIS AFTER CRITICISM (from Stages 1-4)
+{context_summary}
+
+Perform a deep mechanistic analysis. Validate every molecular interaction in the proposed mechanism."""
+
+        if stage_num == 6:
+            return f"""{base}
+
+## HYPOTHESIS WITH MECHANISM VALIDATED (from Stages 1-5)
+{context_summary}
+
+Cross-validate this hypothesis against multiple independent knowledge sources."""
+
+        if stage_num == 7:
+            return f"""{base}
+
+## HYPOTHESIS CROSS-VALIDATED (from Stages 1-6)
+{context_summary}
+
+Ground every claim to real, verifiable scientific sources. You will receive PubMed, ClinicalTrials.gov, and FDA data below."""
+
+        if stage_num == 8:
+            return f"""{base}
+
+## HYPOTHESIS GROUNDED (from Stages 1-7)
+{context_summary}
+
+Score this hypothesis across 7 dimensions: biological plausibility, evidence strength, novelty, feasibility, safety, clinical relevance, reproducibility."""
+
+        if stage_num == 9:
+            return f"""{base}
+
+## HYPOTHESIS SCORED (from Stages 1-8)
+{context_summary}
+
+Rapidly refine this hypothesis. Fix logical inconsistencies, address major counter-arguments, tighten the language."""
+
+        if stage_num == 10:
+            return f"""{base}
+
+## COMPLETE PIPELINE DATA (from all 9 previous stages)
+{context_summary}
+
+Produce the FINAL, COMPLETE hypothesis. Integrate ALL findings from stages 1-9 into one coherent, publication-ready result."""
+
+        return f"{base}\n{context_summary}"
+
+    def _summarize_accumulated(self, ctx: dict[str, Any]) -> str:
+        """Summarize accumulated context from all completed stages."""
+        parts = []
+
+        if ctx.get("title"):
+            parts.append(f"**Title:** {ctx['title']}")
+        if ctx.get("seed_mechanism") or ctx.get("expanded_mechanism") or ctx.get("refined_mechanism") or ctx.get("validated_mechanism") or ctx.get("mechanism"):
+            mech = ctx.get("refined_mechanism") or ctx.get("validated_mechanism") or ctx.get("expanded_mechanism") or ctx.get("seed_mechanism") or ctx.get("mechanism", "")
+            parts.append(f"**Mechanism:** {str(mech)[:1000]}")
+        if ctx.get("description"):
+            parts.append(f"**Description:** {str(ctx['description'])[:1000]}")
+        if ctx.get("target_entities"):
+            parts.append(f"**Target Entities:** {', '.join(ctx['target_entities'][:10])}")
+        if ctx.get("target_pathways"):
+            parts.append(f"**Target Pathways:** {', '.join(ctx['target_pathways'][:5])}")
+        if ctx.get("causal_chain"):
+            chain = ctx["causal_chain"]
+            if isinstance(chain, list):
+                chain_str = " → ".join(str(c.get("event", c) if isinstance(c, dict) else c) for c in chain[:8])
+                parts.append(f"**Causal Chain:** {chain_str}")
+        if ctx.get("evidence_assessment"):
+            parts.append(f"**Evidence Assessment:** {ctx['evidence_assessment']}")
+        if ctx.get("supporting_evidence"):
+            ev = ctx["supporting_evidence"]
+            if isinstance(ev, list):
+                for e in ev[:3]:
+                    if isinstance(e, dict):
+                        parts.append(f"  - Supporting: {e.get('finding', str(e)[:200])} (PMID:{e.get('pmid', 'N/A')})")
+        if ctx.get("counter_arguments"):
+            ca = ctx["counter_arguments"]
+            if isinstance(ca, list):
+                for c in ca[:3]:
+                    if isinstance(c, dict):
+                        parts.append(f"  - Counter: [{c.get('severity', '?')}] {c.get('argument', str(c)[:200])}")
+        if ctx.get("grounded_claims"):
+            gc = ctx["grounded_claims"]
+            if isinstance(gc, list):
+                parts.append(f"**Grounded Claims:** {len(gc)} claims grounded in literature")
+        if ctx.get("clinical_trial_references"):
+            ct = ctx["clinical_trial_references"]
+            if isinstance(ct, list) and ct:
+                parts.append(f"**Clinical Trials:** {', '.join(str(t.get('nct_id', t) if isinstance(t, dict) else t) for t in ct[:5])}")
+        if ctx.get("fda_references"):
+            fda = ctx["fda_references"]
+            if isinstance(fda, list) and fda:
+                parts.append(f"**FDA References:** {', '.join(str(f.get('drug', f) if isinstance(f, dict) else f) for f in fda[:5])}")
+        if ctx.get("dimension_scores"):
+            ds = ctx["dimension_scores"]
+            if isinstance(ds, dict):
+                scores_str = ", ".join(f"{k}: {v.get('score', v) if isinstance(v, dict) else v}" for k, v in ds.items())
+                parts.append(f"**Dimension Scores:** {scores_str}")
+        if ctx.get("weighted_confidence"):
+            parts.append(f"**Weighted Confidence:** {ctx['weighted_confidence']}")
+        if ctx.get("confidence_after_refinement"):
+            parts.append(f"**Post-Refinement Confidence:** {ctx['confidence_after_refinement']}")
+
+        # Include raw stage outputs for later stages
+        for i in range(1, 11):
+            raw = ctx.get(f"stage_{i}_raw")
+            if raw and i <= 5:  # Include raw outputs from first 5 stages
+                parts.append(f"\n--- Stage {i} Raw Output (truncated) ---\n{raw[:500]}")
+
+        return "\n".join(parts) if parts else "No accumulated context yet."
+
+    def _parse_stage_output(self, response: str, stage_num: int) -> dict[str, Any]:
+        """Parse the JSON output from a pipeline stage."""
+        try:
+            # Extract JSON from response
+            text = response.strip()
+            # Handle markdown code blocks
+            if "```json" in text:
+                text = text.split("```json")[1].split("```")[0].strip()
+            elif "```" in text:
+                text = text.split("```")[1].split("```")[0].strip()
+
+            data = json.loads(text)
+            return data
+        except (json.JSONDecodeError, IndexError):
+            # Try to extract JSON from anywhere in the response
+            import re
+            json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response, re.DOTALL)
+            if json_match:
+                try:
+                    return json.loads(json_match.group())
+                except json.JSONDecodeError:
+                    pass
+
+            # Fallback: extract key fields from text
+            logger.warning(f"Stage {stage_num}: Could not parse JSON, extracting text fields")
+            return {
+                "title": self._extract_field(response, "title", f"Stage {stage_num} output"),
+                "description": response[:500],
+                "mechanism": self._extract_field(response, "mechanism", ""),
+                "confidence": 0.5,
+                "parse_error": True,
+            }
+
+    def _extract_field(self, text: str, field: str, default: str) -> str:
+        """Extract a field value from text by looking for patterns."""
+        import re
+        patterns = [
+            rf'"{field}"\s*:\s*"([^"]+)"',
+            rf'{field}:\s*(.+?)(?:\n|$)',
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                return match.group(1).strip()
+        return default
+
+    def _build_final_hypothesis(
+        self,
+        hypothesis_id: str,
+        disease: str,
+        discovery_type: str,
+        accumulated_context: dict[str, Any],
+        stage_results: list[PipelineStageResult],
+        round_number: int,
+    ) -> 'DiscoveryHypothesis':
+        """Build the final DiscoveryHypothesis from accumulated pipeline context."""
+        title = (
+            accumulated_context.get("refined_title")
+            or accumulated_context.get("title")
+            or "Untitled Hypothesis"
+        )
+        description = (
+            accumulated_context.get("description")
+            or accumulated_context.get("expanded_mechanism")
+            or ""
+        )
+        mechanism = (
+            accumulated_context.get("refined_mechanism")
+            or accumulated_context.get("validated_mechanism")
+            or accumulated_context.get("expanded_mechanism")
+            or accumulated_context.get("seed_mechanism")
+            or accumulated_context.get("mechanism")
+            or ""
+        )
+
+        # Confidence: use the scored/refined confidence, or derive from stage outputs
+        confidence = 0.5
+        for key in ["confidence", "weighted_confidence", "confidence_after_refinement",
+                     "confidence_after_grounding", "confidence_after_validation",
+                     "confidence_after_mechanism", "confidence_after_evidence",
+                     "confidence_after_expansion", "confidence_after_criticism",
+                     "initial_confidence"]:
+            val = accumulated_context.get(key)
+            if val is not None:
+                try:
+                    confidence = float(val)
+                except (ValueError, TypeError):
+                    pass
+
+        # Collect models used across stages
+        models_used = list(set(sr.model_used for sr in stage_results if sr.success))
+
+        # Build evidence summary
+        evidence_summary = []
+        if accumulated_context.get("supporting_evidence"):
+            for ev in accumulated_context["supporting_evidence"][:5]:
+                if isinstance(ev, dict):
+                    evidence_summary.append(f"{ev.get('finding', '')} (PMID:{ev.get('pmid', 'N/A')})")
+                else:
+                    evidence_summary.append(str(ev))
+
+        # Build risks
+        risks = accumulated_context.get("risks", [])
+        if not risks and accumulated_context.get("counter_arguments"):
+            for ca in accumulated_context["counter_arguments"][:3]:
+                if isinstance(ca, dict):
+                    risks.append(ca.get("argument", str(ca)))
+                else:
+                    risks.append(str(ca))
+
+        # Build validation steps
+        validation_steps = []
+        if accumulated_context.get("experimental_validation"):
+            for ev in accumulated_context["experimental_validation"]:
+                if isinstance(ev, dict):
+                    validation_steps.append(ev.get("experiment", str(ev)))
+                else:
+                    validation_steps.append(str(ev))
+        elif accumulated_context.get("validation_steps"):
+            validation_steps = accumulated_context["validation_steps"]
+
+        # External factors
+        ext_factors = []
+        if accumulated_context.get("external_factors"):
+            for f in accumulated_context["external_factors"]:
+                if isinstance(f, dict):
+                    ext_factors.append(f)
+                elif isinstance(f, str):
+                    ext_factors.append({"factor": f})
+        elif accumulated_context.get("external_factors_involved"):
+            for f in accumulated_context["external_factors_involved"]:
+                ext_factors.append({"factor": f} if isinstance(f, str) else f)
+
+        # Citations
+        citations = accumulated_context.get("citations", [])
+        key_citations = accumulated_context.get("key_citations", [])
+
+        return DiscoveryHypothesis(
+            id=hypothesis_id,
+            disease=disease,
+            hypothesis_type=discovery_type,
+            title=str(title)[:500],
+            description=str(description)[:5000] if isinstance(description, str) else json.dumps(description)[:5000],
+            mechanism=str(mechanism)[:3000] if isinstance(mechanism, str) else json.dumps(mechanism)[:3000],
+            confidence=max(0.0, min(1.0, confidence)),
+            supporting_paths=[],
+            contributing_agents=models_used,
+            model_used="10-stage-pipeline",
+            external_factors=ext_factors,
+            evidence_summary=evidence_summary,
+            risks=risks,
+            validation_steps=validation_steps,
+            novelty_score=float(accumulated_context.get("novelty_score", 0.0)),
+            citations=citations if isinstance(citations, list) else [],
+            key_citations=key_citations if isinstance(key_citations, list) else [],
+            fda_references=accumulated_context.get("fda_references", []),
+            clinical_trial_references=accumulated_context.get("clinical_trial_references", []),
+            tags=accumulated_context.get("tags", []),
+            round_number=round_number,
+            stages_completed=sum(1 for sr in stage_results if sr.success),
+        )
 
 
 class DiscoveryAgent:
@@ -1357,6 +2062,8 @@ class DiscoveryOrchestratorStats(BaseModel):
     models_active: list[str]
     token_pool_stats: dict[str, Any]
     learning_stats: dict[str, Any]
+    current_round: int = 0
+    total_rounds: int = 4
 
 
 class DiscoveryOrchestrator(LoggerMixin):
@@ -1597,6 +2304,8 @@ class DiscoveryOrchestrator(LoggerMixin):
             models.append(ModelType.O3_MINI)
         if self.llm._azure_gpt41_client:
             models.append(ModelType.GPT_41)
+        if self.llm._azure_grok_client:
+            models.append(ModelType.GROK_FAST)
 
         # Fallback to Bedrock-only if no Azure models available
         if not models and self.llm._bedrock_client:
@@ -1653,76 +2362,214 @@ class DiscoveryOrchestrator(LoggerMixin):
     async def _run_discovery_loop(
         self, disease: str, graph_data: dict[str, Any], discovery_type: str,
     ) -> None:
+        """
+        4-Round Discovery with 10-Stage Sequential Hypothesis Pipeline.
+
+        Round 1-2: Independent exploration — 3 new hypotheses per round from different pathways
+        Round 3-4: Hybrid refinement — refine the top 3 hypotheses from earlier rounds
+
+        Each hypothesis goes through the full 10-stage pipeline sequentially:
+        all 10 models work on ONE hypothesis before moving to the next.
+        """
         entities = graph_data.get("entities", [])
         if not entities:
             self.logger.warning("No entities to explore")
             return
 
-        batch_size = min(settings.TOKEN_POOL_AGENT_BATCH_SIZE, len(self._agents))
-        entity_index = 0
+        # Initialize the sequential pipeline
+        pipeline = SequentialHypothesisPipeline(self.llm)
 
-        while not self._stop_requested:
+        # Build pathway context from graph data
+        pathway_context = self._build_pathway_context(graph_data)
+
+        # Track current round for stats
+        self._current_round = 0
+        self._total_rounds = 4
+        self._hypotheses_per_round = 3
+        all_hypothesis_dicts = []  # For passing to refinement rounds
+
+        # ===== ROUND 1-2: Independent Exploration =====
+        for round_num in range(1, 3):
+            if self._stop_requested:
+                break
             await self._pause_event.wait()
             if self._stop_requested:
                 break
 
-            if self._best_confidence >= self.target_confidence:
-                self.logger.info(f"Reached target confidence: {self._best_confidence}")
-                break
+            self._current_round = round_num
+            self.logger.info(f"=== ROUND {round_num}/4: Independent Exploration ===")
 
-            agent_list = list(self._agents.values())
-            batch_agents = agent_list[:batch_size]
+            for hyp_idx in range(1, 4):  # 3 hypotheses per round
+                if self._stop_requested:
+                    break
+                await self._pause_event.wait()
 
-            tasks = []
-            for agent in batch_agents:
-                if not agent.state.is_active:
-                    continue
+                # Select different starting entities for diversity
+                entity_offset = ((round_num - 1) * 3 + hyp_idx - 1) % len(entities)
+                entity = entities[entity_offset]
 
-                entity = entities[entity_index % len(entities)]
-                entity_index += 1
+                # Build entity-specific pathway context
+                entity_context = self._build_entity_context(graph_data, entity, pathway_context)
 
-                task = agent.explore_pathway(
+                self.logger.info(f"  Hypothesis R{round_num}H{hyp_idx}: starting from entity '{entity}'")
+
+                result = await pipeline.run_hypothesis(
                     disease=disease,
-                    start_entity=entity,
-                    graph_data=graph_data,
+                    discovery_type=discovery_type,
+                    pathway_context=entity_context,
                     external_factors=self._external_factors,
+                    round_number=round_num,
+                    hypothesis_index=hyp_idx,
+                    previous_hypotheses=all_hypothesis_dicts,
+                    on_stage_complete=self._on_stage_complete,
                 )
-                tasks.append(task)
 
-            if not tasks:
-                break
+                if result.final_hypothesis:
+                    self._hypotheses.append(result.final_hypothesis)
+                    if result.final_hypothesis.confidence > self._best_confidence:
+                        self._best_confidence = result.final_hypothesis.confidence
 
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-
-            for result in results:
-                if isinstance(result, Exception):
-                    self.logger.warning(f"Agent task failed: {result}")
-                    continue
-
-                for hypothesis in result:
-                    self._hypotheses.append(hypothesis)
-                    if hypothesis.confidence > self._best_confidence:
-                        self._best_confidence = hypothesis.confidence
+                    # Store dict version for passing to later rounds
+                    all_hypothesis_dicts.append({
+                        "title": result.final_hypothesis.title,
+                        "description": result.final_hypothesis.description,
+                        "mechanism": result.final_hypothesis.mechanism,
+                        "confidence": result.final_hypothesis.confidence,
+                        "risks": result.final_hypothesis.risks,
+                        "evidence_summary": result.final_hypothesis.evidence_summary,
+                        "novelty_score": result.final_hypothesis.novelty_score,
+                    })
 
                     if self._on_hypothesis:
                         try:
-                            await self._on_hypothesis(hypothesis)
+                            await self._on_hypothesis(result.final_hypothesis)
                         except Exception as e:
                             self.logger.warning(f"Hypothesis callback failed: {e}")
 
-            if self._on_stats_update:
-                try:
-                    stats = self.get_stats()
-                    await self._on_stats_update(stats)
-                except Exception as e:
-                    self.logger.warning(f"Stats callback failed: {e}")
+                if self._on_stats_update:
+                    try:
+                        await self._on_stats_update(self.get_stats())
+                    except Exception:
+                        pass
 
-            await asyncio.sleep(0.1)
+        # ===== ROUND 3-4: Hybrid Refinement =====
+        # Select top hypotheses to refine
+        sorted_hyps = sorted(all_hypothesis_dicts, key=lambda h: h.get("confidence", 0), reverse=True)
+
+        for round_num in range(3, 5):
+            if self._stop_requested:
+                break
+            await self._pause_event.wait()
+            if self._stop_requested:
+                break
+
+            self._current_round = round_num
+            self.logger.info(f"=== ROUND {round_num}/4: Hybrid Refinement (deepening top hypotheses) ===")
+
+            # Select 3 hypotheses to refine for this round
+            refine_start = (round_num - 3) * 3  # Round 3: top 3, Round 4: next 3 (or re-refine top 3)
+            hypotheses_to_refine = sorted_hyps[refine_start:refine_start + 3]
+
+            # If we don't have enough, cycle back to the best ones
+            while len(hypotheses_to_refine) < 3 and sorted_hyps:
+                hypotheses_to_refine.append(sorted_hyps[len(hypotheses_to_refine) % len(sorted_hyps)])
+
+            for hyp_idx, refine_hyp in enumerate(hypotheses_to_refine, 1):
+                if self._stop_requested:
+                    break
+                await self._pause_event.wait()
+
+                self.logger.info(
+                    f"  Refining R{round_num}H{hyp_idx}: "
+                    f"'{refine_hyp.get('title', 'Untitled')[:60]}...' "
+                    f"(current confidence: {refine_hyp.get('confidence', 0)*100:.0f}%)"
+                )
+
+                result = await pipeline.run_hypothesis(
+                    disease=disease,
+                    discovery_type=discovery_type,
+                    pathway_context=pathway_context,
+                    external_factors=self._external_factors,
+                    round_number=round_num,
+                    hypothesis_index=hyp_idx,
+                    previous_hypotheses=all_hypothesis_dicts,
+                    refine_hypothesis=refine_hyp,
+                    on_stage_complete=self._on_stage_complete,
+                )
+
+                if result.final_hypothesis:
+                    self._hypotheses.append(result.final_hypothesis)
+                    if result.final_hypothesis.confidence > self._best_confidence:
+                        self._best_confidence = result.final_hypothesis.confidence
+
+                    all_hypothesis_dicts.append({
+                        "title": result.final_hypothesis.title,
+                        "description": result.final_hypothesis.description,
+                        "mechanism": result.final_hypothesis.mechanism,
+                        "confidence": result.final_hypothesis.confidence,
+                        "risks": result.final_hypothesis.risks,
+                        "evidence_summary": result.final_hypothesis.evidence_summary,
+                        "novelty_score": result.final_hypothesis.novelty_score,
+                    })
+
+                    if self._on_hypothesis:
+                        try:
+                            await self._on_hypothesis(result.final_hypothesis)
+                        except Exception as e:
+                            self.logger.warning(f"Hypothesis callback failed: {e}")
+
+                if self._on_stats_update:
+                    try:
+                        await self._on_stats_update(self.get_stats())
+                    except Exception:
+                        pass
 
         self.logger.info(
-            f"Discovery loop ended. Found {len(self._hypotheses)} hypotheses, "
-            f"best confidence: {self._best_confidence}"
+            f"Discovery complete. {len(self._hypotheses)} hypotheses across 4 rounds, "
+            f"best confidence: {self._best_confidence:.2f}"
         )
+
+    async def _on_stage_complete(
+        self, stage_num: int, stage_name: str, model_used: str, output: dict,
+    ) -> None:
+        """Internal callback for stage completion — fires stats update."""
+        if self._on_stats_update:
+            try:
+                await self._on_stats_update(self.get_stats())
+            except Exception:
+                pass
+
+    def _build_pathway_context(self, graph_data: dict[str, Any]) -> str:
+        """Build pathway context text from graph data."""
+        parts = [f"Disease: {graph_data.get('disease', 'Unknown')}"]
+        parts.append(f"Known Entities ({len(graph_data.get('entities', []))}): {', '.join(graph_data.get('entities', [])[:20])}")
+
+        for entity, neighbors in graph_data.get("neighbors", {}).items():
+            if neighbors:
+                neighbor_str = "; ".join(
+                    f"{n.get('entity', '?')} ({n.get('relation', '?')}, conf={n.get('confidence', 0):.2f})"
+                    for n in neighbors[:5]
+                )
+                parts.append(f"{entity} → {neighbor_str}")
+
+        return "\n".join(parts)
+
+    def _build_entity_context(
+        self, graph_data: dict[str, Any], entity: str, base_context: str,
+    ) -> str:
+        """Build entity-specific context for hypothesis seeding."""
+        parts = [base_context, f"\n## FOCUS ENTITY: {entity}"]
+
+        neighbors = graph_data.get("neighbors", {}).get(entity, [])
+        if neighbors:
+            parts.append(f"Direct connections ({len(neighbors)}):")
+            for n in neighbors:
+                parts.append(
+                    f"  - {n.get('entity', '?')} via {n.get('relation', '?')} "
+                    f"(confidence: {n.get('confidence', 0):.2f}, evidence: {n.get('evidence_count', 0)})"
+                )
+
+        return "\n".join(parts)
 
     def pause(self) -> None:
         if self.state == OrchestratorState.RUNNING:
@@ -1775,6 +2622,8 @@ class DiscoveryOrchestrator(LoggerMixin):
             models_active=models_active,
             token_pool_stats=self.token_pool.get_stats(),
             learning_stats=self.memory.get_stats(),
+            current_round=getattr(self, '_current_round', 0),
+            total_rounds=getattr(self, '_total_rounds', 4),
         )
 
     def get_hypotheses(

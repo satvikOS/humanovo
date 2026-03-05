@@ -228,11 +228,14 @@ async def generate_hypothesis_paper(
         logger.error(f"PDF generation failed for hypothesis {hypothesis_id}: {e}")
         raise HTTPException(status_code=500, detail=f"PDF generation failed: {e}")
 
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename={filename}"},
-    )
+    # Return base64-encoded JSON (frontend expects this format)
+    import base64
+    pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
+    return {
+        "pdf_base64": pdf_base64,
+        "filename": filename,
+        "size_bytes": len(pdf_bytes),
+    }
 
 
 @router.post("/hypothesis/{hypothesis_id}/html")

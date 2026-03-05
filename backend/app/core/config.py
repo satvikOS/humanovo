@@ -101,6 +101,11 @@ class Settings(BaseSettings):
     AZURE_GPT41_DEPLOYMENT: str = "gpt-4.1"
     AZURE_GPT41_API_VERSION: str = "2024-05-01-preview"
 
+    # Azure AI — Grok-4-1-fast-reasoning (Azure AI Foundry shared endpoint)
+    AZURE_GROK_ENDPOINT: str = ""      # Azure AI Foundry URL (e.g. https://humanovo-openai.services.ai.azure.com)
+    AZURE_GROK_KEY: SecretStr | None = None
+    AZURE_GROK_MODEL: str = "grok-4-1-fast-reasoning"
+
     # AWS Bedrock (IAM user: humanovo-admin)
     AWS_ACCESS_KEY_ID: SecretStr | None = None
     AWS_SECRET_ACCESS_KEY: SecretStr | None = None
@@ -228,6 +233,11 @@ class Settings(BaseSettings):
     def azure_gpt41_key_value(self) -> str | None:
         """Azure GPT-4.1 API key."""
         return self.AZURE_GPT41_KEY.get_secret_value() if self.AZURE_GPT41_KEY else None
+
+    @property
+    def azure_grok_key_value(self) -> str | None:
+        """Azure Grok API key."""
+        return self.AZURE_GROK_KEY.get_secret_value() if self.AZURE_GROK_KEY else None
 
 
 @lru_cache
