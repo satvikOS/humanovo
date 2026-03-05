@@ -40,33 +40,47 @@ except ImportError as _import_err:
     logger = logging.getLogger("agent_orchestrator")
     logger.setLevel(logging.DEBUG)
 
-    # Minimal stub for APIGatewayHttpResolver
+    # Minimal stub for APIGatewayHttpResolver with path parameter support
+    import re as _re_stub
+
     class APIGatewayHttpResolver:
-        """Stub resolver when powertools is unavailable."""
+        """Stub resolver when powertools is unavailable. Supports <param> path parameters."""
         def __init__(self):
-            self._routes = {}
+            self._routes = []  # list of (method, pattern_re, param_names, func)
             self.current_event = None
+        def _register(self, method, path, func):
+            # Convert /api/v1/foo/<bar>/baz to regex with named groups
+            param_names = _re_stub.findall(r'<(\w+)>', path)
+            pattern = _re_stub.sub(r'<\w+>', r'([^/]+)', path)
+            pattern_re = _re_stub.compile(f'^{pattern}$')
+            self._routes.append((method, pattern_re, param_names, func))
         def get(self, path):
             def decorator(func):
-                self._routes[("GET", path)] = func
+                self._register("GET", path, func)
                 return func
             return decorator
         def post(self, path):
             def decorator(func):
-                self._routes[("POST", path)] = func
+                self._register("POST", path, func)
                 return func
             return decorator
         def resolve(self, event, context):
             method = event.get("requestContext", {}).get("http", {}).get("method", "GET")
             path = event.get("rawPath", "")
-            handler_fn = self._routes.get((method, path))
-            if handler_fn:
-                self.current_event = type("Event", (), {"json_body": json.loads(event.get("body", "{}") or "{}")})()
-                result = handler_fn()
-                if isinstance(result, dict):
-                    return {"statusCode": 200, "headers": {"Content-Type": "application/json"}, "body": json.dumps(result, cls=DecimalEncoder)}
-                return result
-            return {"statusCode": 404, "body": "Not Found"}
+            for route_method, pattern_re, param_names, handler_fn in self._routes:
+                if route_method != method:
+                    continue
+                m = pattern_re.match(path)
+                if m:
+                    self.current_event = type("Event", (), {"json_body": json.loads(event.get("body", "{}") or "{}")})()
+                    kwargs = {name: m.group(i + 1) for i, name in enumerate(param_names)}
+                    result = handler_fn(**kwargs)
+                    if isinstance(result, dict):
+                        return {"statusCode": 200, "headers": {"Content-Type": "application/json"}, "body": json.dumps(result, cls=DecimalEncoder)}
+                    if isinstance(result, Response):
+                        return {"statusCode": result.status_code, "headers": {"Content-Type": result.content_type}, "body": result.body}
+                    return result
+            return {"statusCode": 404, "body": json.dumps({"detail": f"Not Found: {method} {path}"})}
 
     class Response:
         def __init__(self, status_code=200, body="", content_type="application/json", headers=None):
@@ -117,6 +131,7 @@ except Exception as _e:
 # Uses urllib.request to call Azure AI's OpenAI-compatible chat completion API.
 import urllib.request
 import urllib.error
+import urllib.parse
 import ssl
 
 class _AzureAIMessage:
@@ -1222,34 +1237,342 @@ def run_single_agent(role: str, prompt: str, system_prompt: str) -> dict | None:
 
 # ============== Async Discovery Worker ==============
 
-# 10 agent roles across 8 unique models (Claude Opus handles 2 roles).
-# Runs sequentially within each round, each role generating 1 hypothesis.
-PHASE_ORDER = [
-    "explorer",    # Claude Opus 4.6 (Bedrock) — broad exploration
-    "reasoner",    # DeepSeek-R1 (Azure AI Foundry) — causal reasoning
-    "innovator",   # Cohere Command A (Azure AI Foundry) — creative innovation
-    "analyst",     # GPT-4o (Azure OpenAI) — literature analysis
-    "strategist",  # Kimi-K2-Thinking (Azure AI Foundry) — clinical strategy
-    "quant",       # Grok-4.1 Fast Reasoning (Azure AI Foundry) — quantitative modeling
-    "validator",   # o3-mini (Azure OpenAI) — rigorous validation
-    "critic",      # Mistral-Large-3 (Azure AI Foundry) — critical analysis
-    "architect",   # GPT-4.1 (Azure OpenAI) — systems architecture
-    "synthesizer", # Claude Opus 4.6 (Bedrock) — final synthesis
+# ============== 10-Stage Sequential Pipeline ==============
+# ALL 10 models work on ONE hypothesis sequentially before moving to the next.
+# 4 rounds × 3 hypotheses/round = 12 hypotheses, each maximally refined.
+#
+# Stage  Role          Model                  Purpose
+# ─────────────────────────────────────────────────────────
+#  1     seed          Claude Opus (Bedrock)    Generate initial hypothesis seed
+#  2     expand        DeepSeek-R1 (Azure AI)   Deep causal chain reasoning
+#  3     evidence      Cohere Command A         Literature + PubMed evidence
+#  4     counter       Mistral-Large-3          Counter-arguments & risks
+#  5     mechanism     o3-mini (Azure OpenAI)   Mechanistic deep dive
+#  6     validate      Kimi-K2-Thinking         Cross-validation
+#  7     ground        GPT-4.1 (Azure OpenAI)   Scientific grounding + FDA/ClinicalTrials
+#  8     score         GPT-4o (Azure OpenAI)    Multi-dimensional scoring
+#  9     refine        Grok-4.1-fast (Azure AI) Rapid refinement
+# 10     finalize      Claude Opus (Bedrock)    Final synthesis
+PIPELINE_STAGES = [
+    {"stage": 1,  "name": "seed",      "role": "explorer",    "purpose": "Generate initial hypothesis seed with novel pathways"},
+    {"stage": 2,  "name": "expand",    "role": "reasoner",    "purpose": "Expand with deep causal chain reasoning"},
+    {"stage": 3,  "name": "evidence",  "role": "innovator",   "purpose": "Add literature evidence and PubMed citations"},
+    {"stage": 4,  "name": "counter",   "role": "critic",      "purpose": "Generate counter-arguments, risks, and failure modes"},
+    {"stage": 5,  "name": "mechanism", "role": "validator",   "purpose": "Deep mechanistic dive with molecular cascades"},
+    {"stage": 6,  "name": "validate",  "role": "strategist",  "purpose": "Cross-validate claims and clinical feasibility"},
+    {"stage": 7,  "name": "ground",    "role": "architect",   "purpose": "Scientific grounding with real database evidence"},
+    {"stage": 8,  "name": "score",     "role": "analyst",     "purpose": "Multi-dimensional confidence scoring"},
+    {"stage": 9,  "name": "refine",    "role": "quant",       "purpose": "Quantitative refinement and dose-response modeling"},
+    {"stage": 10, "name": "finalize",  "role": "synthesizer", "purpose": "Final synthesis and integration"},
 ]
-NUM_ROUNDS = 4  # 4 rounds × 10 agents = 40 hypotheses
-TARGET_TOTAL_HYPOTHESES = 40
-MODEL_FALLBACKS: dict = {}  # No fallbacks — each model must work or fail explicitly
+# Fallback: if a stage's model is unavailable, try these alternatives
+STAGE_FALLBACKS = {
+    "reasoner": ["explorer"],           # DeepSeek → Claude Opus
+    "innovator": ["explorer"],          # Cohere → Claude Opus
+    "critic": ["explorer"],             # Mistral → Claude Opus
+    "strategist": ["analyst"],          # Kimi → GPT-4o
+    "quant": ["critic", "explorer"],    # Grok → Mistral → Claude Opus
+    "validator": ["analyst"],           # o3-mini → GPT-4o
+    "architect": ["analyst"],           # GPT-4.1 → GPT-4o
+    "analyst": ["explorer"],            # GPT-4o → Claude Opus
+}
+NUM_ROUNDS = 4
+HYPOTHESES_PER_ROUND = 3
+TARGET_TOTAL_HYPOTHESES = 12  # 4 rounds × 3 hypotheses
+
+
+# ============== Scientific Grounding (PubMed, ClinicalTrials.gov, FDA) ==============
+
+def _fetch_url(url: str, timeout: int = 15) -> str | None:
+    """Fetch a URL and return the response text, or None on failure."""
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Humanovo/1.0 (biomedical-discovery)"})
+        ctx = ssl.create_default_context()
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+            return resp.read().decode("utf-8", errors="replace")
+    except Exception as e:
+        logger.warning(f"Fetch failed for {url[:100]}: {e}")
+        return None
+
+
+def search_pubmed(query: str, max_results: int = 5) -> list[dict]:
+    """Search PubMed via E-utilities and return article metadata with PMIDs."""
+    results = []
+    try:
+        # Step 1: esearch to get PMIDs
+        search_url = (
+            f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+            f"?db=pubmed&term={urllib.parse.quote(query)}&retmax={max_results}&retmode=json"
+        )
+        search_text = _fetch_url(search_url)
+        if not search_text:
+            return results
+        search_data = json.loads(search_text)
+        pmids = search_data.get("esearchresult", {}).get("idlist", [])
+        if not pmids:
+            return results
+
+        # Step 2: efetch to get article details
+        ids_str = ",".join(pmids)
+        fetch_url = (
+            f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
+            f"?db=pubmed&id={ids_str}&retmode=json"
+        )
+        fetch_text = _fetch_url(fetch_url)
+        if not fetch_text:
+            return [{"pmid": p, "citation": f"PMID: {p}"} for p in pmids]
+
+        fetch_data = json.loads(fetch_text)
+        result_items = fetch_data.get("result", {})
+        for pmid in pmids:
+            article = result_items.get(pmid, {})
+            if isinstance(article, dict) and "title" in article:
+                authors = article.get("authors", [])
+                first_author = authors[0].get("name", "Unknown") if authors else "Unknown"
+                journal = article.get("source", "Unknown Journal")
+                pub_date = article.get("pubdate", "Unknown date")
+                title = article.get("title", "")
+                results.append({
+                    "pmid": pmid,
+                    "title": title,
+                    "citation": f"{first_author} et al., {journal} ({pub_date}). PMID: {pmid}",
+                    "journal": journal,
+                    "year": pub_date[:4] if pub_date else "",
+                    "doi": article.get("elocationid", ""),
+                })
+    except Exception as e:
+        logger.warning(f"PubMed search failed for '{query[:50]}': {e}")
+    return results
+
+
+def search_clinical_trials(query: str, max_results: int = 3) -> list[dict]:
+    """Search ClinicalTrials.gov v2 API for relevant trials."""
+    results = []
+    try:
+        url = (
+            f"https://clinicaltrials.gov/api/v2/studies"
+            f"?query.term={urllib.parse.quote(query)}&pageSize={max_results}"
+            f"&fields=NCTId,BriefTitle,OverallStatus,Phase,EnrollmentCount,StartDate,Condition,InterventionName"
+        )
+        text = _fetch_url(url)
+        if not text:
+            return results
+        data = json.loads(text)
+        for study in data.get("studies", []):
+            proto = study.get("protocolSection", {})
+            ident = proto.get("identificationModule", {})
+            status_mod = proto.get("statusModule", {})
+            design_mod = proto.get("designModule", {})
+            nct_id = ident.get("nctId", "")
+            title = ident.get("briefTitle", "")
+            status = status_mod.get("overallStatus", "")
+            phases = design_mod.get("phases", [])
+            phase_str = ", ".join(phases) if phases else "Not specified"
+            results.append({
+                "nct_id": nct_id,
+                "title": title,
+                "status": status,
+                "phase": phase_str,
+                "citation": f"{nct_id}: {title} (Phase: {phase_str}, Status: {status})",
+            })
+    except Exception as e:
+        logger.warning(f"ClinicalTrials.gov search failed for '{query[:50]}': {e}")
+    return results
+
+
+def search_fda(query: str, max_results: int = 3) -> list[dict]:
+    """Search openFDA drug label API."""
+    results = []
+    try:
+        url = (
+            f"https://api.fda.gov/drug/label.json"
+            f"?search={urllib.parse.quote(query)}&limit={max_results}"
+        )
+        text = _fetch_url(url)
+        if not text:
+            return results
+        data = json.loads(text)
+        for result in data.get("results", []):
+            brand = result.get("openfda", {}).get("brand_name", ["Unknown"])[0] if result.get("openfda", {}).get("brand_name") else "Unknown"
+            generic = result.get("openfda", {}).get("generic_name", ["Unknown"])[0] if result.get("openfda", {}).get("generic_name") else "Unknown"
+            indications = result.get("indications_and_usage", [""])[0][:200] if result.get("indications_and_usage") else ""
+            mechanism = result.get("mechanism_of_action", [""])[0][:200] if result.get("mechanism_of_action") else ""
+            results.append({
+                "brand_name": brand,
+                "generic_name": generic,
+                "indications": indications,
+                "mechanism": mechanism,
+                "citation": f"FDA: {generic} ({brand}) — {indications[:100]}",
+            })
+    except Exception as e:
+        logger.warning(f"FDA search failed for '{query[:50]}': {e}")
+    return results
+
+
+def search_uniprot(query: str, max_results: int = 3) -> list[dict]:
+    """Search UniProt for protein information."""
+    results = []
+    try:
+        url = (
+            f"https://rest.uniprot.org/uniprotkb/search"
+            f"?query={urllib.parse.quote(query)}+AND+organism_id:9606&size={max_results}&format=json"
+            f"&fields=accession,protein_name,gene_names,organism_name,cc_function"
+        )
+        text = _fetch_url(url)
+        if not text:
+            return results
+        data = json.loads(text)
+        for entry in data.get("results", []):
+            accession = entry.get("primaryAccession", "")
+            protein_name = entry.get("proteinDescription", {}).get("recommendedName", {}).get("fullName", {}).get("value", "Unknown")
+            genes = entry.get("genes", [])
+            gene_name = genes[0].get("geneName", {}).get("value", "") if genes else ""
+            function_comments = entry.get("comments", [])
+            function_text = ""
+            for c in function_comments:
+                if c.get("commentType") == "FUNCTION":
+                    texts = c.get("texts", [])
+                    if texts:
+                        function_text = texts[0].get("value", "")[:200]
+                    break
+            results.append({
+                "accession": accession,
+                "protein_name": protein_name,
+                "gene_name": gene_name,
+                "function": function_text,
+                "citation": f"UniProt {accession}: {protein_name} ({gene_name}) — {function_text[:100]}",
+            })
+    except Exception as e:
+        logger.warning(f"UniProt search failed for '{query[:50]}': {e}")
+    return results
+
+
+def search_reactome(query: str, max_results: int = 3) -> list[dict]:
+    """Search Reactome for biological pathways."""
+    results = []
+    try:
+        url = f"https://reactome.org/ContentService/search/query?query={urllib.parse.quote(query)}&types=Pathway&cluster=true"
+        text = _fetch_url(url)
+        if not text:
+            return results
+        data = json.loads(text)
+        entries = data.get("results", [])
+        count = 0
+        for group in entries:
+            for entry in group.get("entries", []):
+                if count >= max_results:
+                    break
+                st_id = entry.get("stId", "")
+                name = entry.get("name", "")
+                species = entry.get("species", [""])[0] if entry.get("species") else ""
+                results.append({
+                    "id": st_id,
+                    "name": name,
+                    "species": species,
+                    "citation": f"Reactome {st_id}: {name}",
+                })
+                count += 1
+    except Exception as e:
+        logger.warning(f"Reactome search failed for '{query[:50]}': {e}")
+    return results
+
+
+def ground_hypothesis_with_databases(disease: str, hypothesis_title: str, mechanism: str) -> dict:
+    """Query multiple scientific databases to ground a hypothesis with real evidence.
+
+    Returns a dict with pubmed, clinical_trials, fda, uniprot, and reactome results.
+    """
+    # Build targeted queries from hypothesis content
+    query_base = f"{disease} {hypothesis_title[:80]}"
+    mechanism_short = mechanism[:100] if mechanism else disease
+
+    grounding = {
+        "pubmed": [],
+        "clinical_trials": [],
+        "fda": [],
+        "uniprot": [],
+        "reactome": [],
+        "summary": [],
+    }
+
+    # PubMed — search both title keywords and mechanism
+    pubmed_results = search_pubmed(query_base, max_results=5)
+    if not pubmed_results:
+        pubmed_results = search_pubmed(disease, max_results=3)
+    grounding["pubmed"] = pubmed_results
+
+    # ClinicalTrials.gov
+    ct_results = search_clinical_trials(disease, max_results=3)
+    grounding["clinical_trials"] = ct_results
+
+    # FDA
+    fda_results = search_fda(disease, max_results=2)
+    grounding["fda"] = fda_results
+
+    # UniProt — search for key proteins mentioned
+    uniprot_results = search_uniprot(mechanism_short, max_results=2)
+    grounding["uniprot"] = uniprot_results
+
+    # Reactome — search for pathways
+    reactome_results = search_reactome(mechanism_short, max_results=2)
+    grounding["reactome"] = reactome_results
+
+    # Build summary citations
+    for src, items in grounding.items():
+        if src == "summary":
+            continue
+        for item in items:
+            if "citation" in item:
+                grounding["summary"].append(f"[{src.upper()}] {item['citation']}")
+
+    return grounding
+
+
+def format_grounding_for_prompt(grounding: dict) -> str:
+    """Format grounding results into text for injection into stage prompts."""
+    parts = []
+    if grounding.get("pubmed"):
+        parts.append("=== PubMed Citations ===")
+        for a in grounding["pubmed"]:
+            parts.append(f"  - {a.get('citation', '')}")
+            if a.get("title"):
+                parts.append(f"    Title: {a['title']}")
+
+    if grounding.get("clinical_trials"):
+        parts.append("=== ClinicalTrials.gov ===")
+        for t in grounding["clinical_trials"]:
+            parts.append(f"  - {t.get('citation', '')}")
+
+    if grounding.get("fda"):
+        parts.append("=== FDA Drug Labels ===")
+        for d in grounding["fda"]:
+            parts.append(f"  - {d.get('citation', '')}")
+            if d.get("mechanism"):
+                parts.append(f"    Mechanism: {d['mechanism']}")
+
+    if grounding.get("uniprot"):
+        parts.append("=== UniProt Proteins ===")
+        for p in grounding["uniprot"]:
+            parts.append(f"  - {p.get('citation', '')}")
+
+    if grounding.get("reactome"):
+        parts.append("=== Reactome Pathways ===")
+        for r in grounding["reactome"]:
+            parts.append(f"  - {r.get('citation', '')}")
+
+    return "\n".join(parts) if parts else "No external database results found."
 
 
 def run_discovery_worker(config: dict, continuation: dict | None = None):
-    """Run the AI discovery process. Called via async Lambda invocation.
+    """Run the AI discovery process via 10-stage sequential pipeline.
 
-    Supports continuation: if Lambda approaches its 900s timeout,
-    it saves state and self-invokes to continue from the next round.
+    Architecture: ALL 10 models work on ONE hypothesis at a time.
+    Each hypothesis passes through 10 specialized stages before
+    the pipeline moves to the next hypothesis.
 
-    10-agent sequential execution per round (8 unique models, 9 endpoints).
-    4 rounds × 10 agents = 40 hypotheses.
-    After completion, auto-creates a project with all hypotheses.
+    4 rounds × 3 hypotheses/round = 12 total hypotheses.
+    Rounds 1-2: Independent exploration from different starting angles.
+    Rounds 3-4: Refinement of the best hypotheses from earlier rounds.
     """
     disease = config.get("disease", "")
     discovery_type = config.get("discovery_type", "cure")
@@ -1257,381 +1580,457 @@ def run_discovery_worker(config: dict, continuation: dict | None = None):
     external_factors = config.get("external_factors", [])
     target_confidence = float(config.get("target_confidence", 0.95))
 
-    # Continuation support: resume from a previous invocation
+    # Continuation support
     start_round = 0
     prior_hypotheses = []
-    prior_paths = 0
+    prior_stages = 0
     time_offset = 0.0
     if continuation:
         start_round = continuation.get("start_round", 0)
         prior_hypotheses = continuation.get("existing_hypotheses", [])
-        prior_paths = continuation.get("paths_explored", 0)
+        prior_stages = continuation.get("stages_completed", 0)
         time_offset = float(continuation.get("total_start_time_offset", 0))
-        print(f"[WORKER] CONTINUATION: resuming from round {start_round+1}, {len(prior_hypotheses)} prior hypotheses, {time_offset:.0f}s prior elapsed")
+        print(f"[WORKER] CONTINUATION: resuming from round {start_round+1}, {len(prior_hypotheses)} prior hypotheses")
 
-    # Only include roles whose provider is available (including fallbacks)
-    def _role_available(role_name, cfg):
+    # Check which stages have available models
+    def _stage_role_available(role_name):
+        cfg = AGENT_MODELS.get(role_name)
+        if not cfg:
+            return False
         if cfg["provider"] == "bedrock":
             return bedrock_runtime is not None
         if cfg["provider"] == "azure_ai":
-            # Primary client available?
-            if _get_azure_client(cfg["model_id"]) is not None:
-                return True
-            # Any fallback available?
-            for fb in MODEL_FALLBACKS.get(cfg["model_id"], []):
-                if _get_azure_client(fb) is not None:
-                    return True
+            return _get_azure_client(cfg["model_id"]) is not None
         return False
 
-    roles = [r for r in PHASE_ORDER if r in AGENT_MODELS and _role_available(r, AGENT_MODELS[r])]
+    available_stages = []
+    for stage_info in PIPELINE_STAGES:
+        role = stage_info["role"]
+        if _stage_role_available(role):
+            available_stages.append(stage_info)
+        else:
+            # Try fallbacks
+            fallback_found = False
+            for fb_role in STAGE_FALLBACKS.get(role, []):
+                if _stage_role_available(fb_role):
+                    available_stages.append({**stage_info, "role": fb_role, "fallback_from": role})
+                    fallback_found = True
+                    break
+            if not fallback_found:
+                print(f"[WORKER] Stage {stage_info['stage']} ({stage_info['name']}) SKIPPED — no model available for {role}")
 
-    if not roles:
-        logger.error("No AI providers available — need Bedrock + Azure DeepSeek/Mistral endpoints")
-        update_discovery_state({"status": "failed", "error": "No AI models connected. Check AWS credentials (Bedrock) and AZURE_DEEPSEEK_ENDPOINT/KEY + AZURE_MISTRAL_ENDPOINT/KEY environment variables."})
+    if not available_stages:
+        update_discovery_state({"status": "failed", "error": "No AI models available."})
         return
 
-    num_rounds = NUM_ROUNDS
-    print(f"[WORKER] Starting: disease={disease!r} num_rounds={num_rounds} roles={roles} target_conf={target_confidence} start_round={start_round}")
+    stage_names = [s["name"] for s in available_stages]
+    print(f"[WORKER] Starting 10-stage sequential pipeline: disease={disease!r} stages={stage_names}")
+    print(f"[WORKER] Architecture: {NUM_ROUNDS} rounds × {HYPOTHESES_PER_ROUND} hypotheses = {NUM_ROUNDS * HYPOTHESES_PER_ROUND} total, each through {len(available_stages)} stages")
 
     start_time = time.time()
-    hypotheses = list(prior_hypotheses)  # Resume with prior hypotheses if continuing
-    paths_explored = prior_paths
+    hypotheses = list(prior_hypotheses)
+    stages_completed = prior_stages
 
-    # Each round+role gets a unique angle to ensure diversity across 40 hypotheses
-    angle_matrix = {
-        # === Explorer (Claude Opus 4.6 / Bedrock): broad novel discovery ===
-        ("explorer", 0): "Explore NOVEL molecular targets: phase separation condensates, mechanotransduction pathways, non-coding RNA regulatory networks, metabolic symbiosis between host and pathogen. Design clinical development strategy for the most promising.",
-        ("explorer", 1): "Focus on DRUG REPURPOSING: identify approved drugs from unrelated therapeutic areas with unexpected activity against this disease. Design rapid clinical validation (basket trial, platform study, adaptive design).",
-        ("explorer", 2): "Explore MICROBIOME-IMMUNE-METABOLISM axis. Design COMBINATION PROTOCOL leveraging gut-brain connections, bacterial metabolites, short-chain fatty acids, and ecological interventions.",
-        ("explorer", 3): "Explore GENE THERAPY and epigenetic reprogramming: CRISPR base editing, ASOs, siRNA, mRNA therapeutics. Design PRECISION MEDICINE stratification with molecular subtypes and biomarker panels.",
-        # === Reasoner (DeepSeek-R1 / Azure AI): rigorous causal chains ===
-        ("reasoner", 0): "Build rigorous IMMUNOTHERAPY causal chain. Map checkpoint interactions, T-cell exhaustion markers, neoantigen load, TME remodeling with exact IC50/EC50 values and binding affinities.",
-        ("reasoner", 1): "Build rigorous METABOLIC VULNERABILITY chain. Map synthetic lethality pairs, nutrient addiction, mitochondrial dependencies, Warburg effect exploitation with exact enzyme kinetics (Km, Vmax).",
-        ("reasoner", 2): "Build rigorous SIGNALING CASCADE chain. Map kinase networks, feedback loops, resistance mutations, and combination logic with quantitative ODE modeling and bifurcation analysis.",
-        ("reasoner", 3): "Build rigorous EPIGENETIC THERAPY chain. Map histone modification crosstalk, DNA methylation patterns, chromatin accessibility (ATAC-seq), and transcriptional consequences with dose-response curves.",
-        # === Innovator (Cohere Command A / Azure AI): creative cross-domain ===
-        ("innovator", 0): "Generate UNCONVENTIONAL therapeutic approaches by connecting insights from materials science, ecology, evolutionary biology, and computational physics to this disease. Think beyond traditional pharma.",
-        ("innovator", 1): "Propose COMBINATION STRATEGIES that exploit drug synergies across different mechanism classes. Include nutrient-drug interactions, chronotherapy schedules, and environmental modifiers.",
-        ("innovator", 2): "Explore BIOMIMETIC and NANOTECHNOLOGY solutions: exosome engineering, targeted delivery nanoparticles, BBB-crossing strategies, cell-membrane-coated nanocarriers, DNA origami drug delivery.",
-        ("innovator", 3): "Generate hypotheses from ADJACENT DISEASE MECHANISMS: what treatments from neurodegeneration, autoimmunity, aging, or infectious disease could be repurposed? Cross-pollinate mechanisms.",
-        # === Analyst (GPT-4o / Azure OpenAI): literature synthesis ===
-        ("analyst", 0): "Synthesize CLINICAL TRIAL EVIDENCE: meta-analyze published Phase I-III data for this disease area. Grade evidence quality (GRADE framework). Identify gaps where no trials exist but mechanistic rationale is strong.",
-        ("analyst", 1): "Map the GENOMIC LANDSCAPE: analyze GWAS hits, eQTL data, Mendelian randomization findings, and polygenic risk scores. Identify druggable targets validated by human genetics.",
-        ("analyst", 2): "Analyze REAL-WORLD EVIDENCE: electronic health records, insurance claims, patient registries. Identify unexpected drug effects, comorbidity patterns, and subpopulation responses.",
-        ("analyst", 3): "Review BIOMARKER DISCOVERY literature: identify validated and emerging biomarkers for early detection, treatment selection, and response monitoring. Design companion diagnostic strategy.",
-        # === Strategist (Kimi-K2-Thinking / Azure AI): clinical strategy ===
-        ("strategist", 0): "Design REGULATORY STRATEGY: FDA/EMA pathway selection, orphan drug designation potential, breakthrough therapy qualification, accelerated approval via surrogate endpoints, post-marketing commitments.",
-        ("strategist", 1): "Plan CLINICAL DEVELOPMENT TIMELINE: Phase I dose-escalation design, Phase II biomarker-guided adaptive design, Phase III pivotal trial with interim analysis, registration strategy.",
-        ("strategist", 2): "Develop MARKET ACCESS STRATEGY: health economics modeling (QALY, ICER), payer evidence requirements, value-based contracts, patient assistance programs, global pricing strategy.",
-        ("strategist", 3): "Design COMBINATION THERAPY DEVELOPMENT PLAN: which agents to combine, sequencing strategy, dose-finding for combinations, regulatory path for fixed-dose combinations vs co-administration.",
-        # === Quant (Grok-4.1 Fast Reasoning / Azure AI): mathematical modeling ===
-        ("quant", 0): "Build PHARMACOKINETIC/PHARMACODYNAMIC model: compartmental PK, receptor occupancy PD, exposure-response relationships, therapeutic window calculations with Monte Carlo simulation.",
-        ("quant", 1): "Perform STATISTICAL POWER ANALYSIS: sample size calculations for primary endpoints, adaptive design boundaries (O'Brien-Fleming, Haybittle-Peto), interim analysis rules, multiplicity adjustments.",
-        ("quant", 2): "Develop SYSTEMS BIOLOGY MODEL: ODE-based pathway modeling, parameter sensitivity analysis, bifurcation diagrams, stochastic noise assessment, predict emergent therapeutic effects.",
-        ("quant", 3): "Model DOSE-RESPONSE RELATIONSHIPS: sigmoidal Emax models, Hill equation fitting, therapeutic index calculations, population PK variability (CYP2D6 polymorphisms, renal/hepatic impairment adjustments).",
-        # === Validator (o3-mini / Azure OpenAI): rigorous verification ===
-        ("validator", 0): "VERIFY BIOLOGICAL PLAUSIBILITY: cross-check proposed mechanisms against known biochemistry, thermodynamic feasibility, binding affinity constraints, and evolutionary conservation.",
-        ("validator", 1): "VALIDATE CLINICAL FEASIBILITY: assess manufacturing scalability (CMC), supply chain requirements, cold chain logistics, administration route practicality, patient compliance factors.",
-        ("validator", 2): "CHECK LOGICAL CONSISTENCY: verify that proposed mechanisms don't contradict established pharmacology, ensure dose ranges are physiologically achievable, confirm bioavailability assumptions.",
-        ("validator", 3): "VERIFY SAFETY MARGINS: predict off-target effects via structural similarity analysis, CYP450 interaction risk, hERG channel liability, genotoxicity flags, immunogenicity assessment.",
-        # === Critic (Mistral-Large-3 / Azure AI): critical analysis ===
-        ("critic", 0): "Perform QUANTITATIVE PHARMACOLOGY critique: challenge receptor occupancy assumptions, PK/PD model validity, therapeutic index calculations, dose-response confidence intervals.",
-        ("critic", 1): "Evaluate STATISTICAL RIGOR: assess sample size adequacy, effect size plausibility, multiple comparison corrections, adaptive design boundary assumptions, p-hacking risks.",
-        ("critic", 2): "Assess SAFETY AND TOXICOLOGY risks: on/off-target effects, CYP450 interactions, immunogenicity, genotoxicity potential, black box warning likelihood, REMS requirements.",
-        ("critic", 3): "Evaluate CLINICAL TRANSLATABILITY: regulatory pathway feasibility, manufacturing scalability, IP landscape, market access barriers, competitor analysis, commercial viability.",
-        # === Architect (GPT-4.1 / Azure OpenAI): combination therapy design ===
-        ("architect", 0): "Design MULTI-TARGET COMBINATION protocol: select 2-3 synergistic agents from different mechanism classes, specify doses, schedules, and rationale for the sequence.",
-        ("architect", 1): "Design ADAPTIVE PLATFORM TRIAL: master protocol with multiple experimental arms, shared control, biomarker-guided arm allocation, seamless Phase II/III transition.",
-        ("architect", 2): "Design TRANSLATIONAL RESEARCH PIPELINE: from target validation through lead optimization, IND-enabling studies, first-in-human, and proof-of-concept trial with specific go/no-go criteria.",
-        ("architect", 3): "Design SYSTEMS MEDICINE APPROACH: integrate multi-omics data layers (genomics, proteomics, metabolomics) into a unified therapeutic framework with patient stratification algorithm.",
-        # === Synthesizer (Claude Opus 4.6 / Bedrock): final integration ===
-        ("synthesizer", 0): "INTEGRATE all round findings into a unified multi-modal combination therapy. Specify exact drugs, doses, schedules, synergy mechanisms, and monitoring protocol.",
-        ("synthesizer", 1): "INTEGRATE findings into PRECISION MEDICINE framework: molecular subtypes, biomarker panels, matched therapeutics, and adaptive treatment algorithms for each subtype.",
-        ("synthesizer", 2): "INTEGRATE findings into TEMPORAL TREATMENT CASCADE: design sequential phases exploiting therapy-induced vulnerabilities at each stage, from induction through maintenance.",
-        ("synthesizer", 3): "INTEGRATE all findings into a comprehensive CLINICAL TRANSLATION ROADMAP: Phase I→II→III design with biomarker-guided adaptive elements, companion diagnostics, and regulatory strategy.",
-    }
+    # Seed angle diversity matrix — different starting angles for each hypothesis
+    seed_angles = [
+        "Explore NOVEL molecular targets: phase separation condensates, mechanotransduction pathways, non-coding RNA regulatory networks, metabolic symbiosis.",
+        "Focus on DRUG REPURPOSING: identify approved drugs from unrelated therapeutic areas with unexpected activity against this disease.",
+        "Explore MICROBIOME-IMMUNE-METABOLISM axis: gut-brain connections, bacterial metabolites, short-chain fatty acids, ecological interventions.",
+        "Explore GENE THERAPY and epigenetic reprogramming: CRISPR base editing, ASOs, siRNA, mRNA therapeutics, precision medicine stratification.",
+        "Target IMMUNOTHERAPY: checkpoint interactions, T-cell exhaustion markers, neoantigen load, TME remodeling, CAR-T engineering.",
+        "Investigate METABOLIC VULNERABILITIES: synthetic lethality pairs, nutrient addiction, mitochondrial dependencies, Warburg effect exploitation.",
+        "Design NANOTECHNOLOGY solutions: exosome engineering, targeted nanoparticles, BBB-crossing strategies, DNA origami drug delivery.",
+        "Explore SIGNALING CASCADE interventions: kinase networks, feedback loops, resistance mutations, combination logic.",
+        "Map EPIGENETIC THERAPY: histone modification crosstalk, DNA methylation, chromatin accessibility, transcriptional reprogramming.",
+        "Investigate NEUROMODULATION and neural circuit-based therapies: optogenetics concepts, focused ultrasound, vagus nerve stimulation, brain-computer interfaces.",
+        "Analyze PROTEOSTASIS mechanisms: protein folding, ubiquitin-proteasome, autophagy induction, chaperone modulation, aggregation prevention.",
+        "Explore SENOLYTIC and aging-related pathways: cellular senescence, SASP factors, telomere biology, stem cell rejuvenation.",
+    ]
 
-    for round_num in range(start_round, num_rounds):
+    # Build shared context
+    focus_str = f"\nFocus entities: {', '.join(focus_entities)}" if focus_entities else ""
+    factors_str = ""
+    if external_factors:
+        factors_str = "\nExternal factors to consider:\n" + "\n".join(
+            f"- {f.get('name', '')} ({f.get('category', '')}): {f.get('interaction', 'analyze interaction')}"
+            for f in external_factors
+        )
+
+    for round_num in range(start_round, NUM_ROUNDS):
         # Check if stopped
         state = get_discovery_state()
         db_status = state.get("status", "?") if state else "NO_ITEM"
-        print(f"[WORKER] Round {round_num+1}/{num_rounds} db_status={db_status}")
         if state and state.get("status") in ["stopping", "stopped", "idle"]:
             print(f"[WORKER] Stopping: db_status={db_status}")
             break
-
         if state and state.get("status") == "paused":
-            logger.info("Discovery paused, waiting...")
             try:
                 _cancellable_sleep(5)
             except CancelledError:
-                print("[WORKER] Cancelled while paused")
                 break
             continue
 
-        # Build shared context strings
-        focus_str = f"\nFocus entities: {', '.join(focus_entities)}" if focus_entities else ""
-        factors_str = ""
-        if external_factors:
-            factors_str = "\nExternal factors to consider:\n" + "\n".join(
-                f"- {f.get('name', '')} ({f.get('category', '')}): {f.get('interaction', 'analyze interaction')}"
-                for f in external_factors
-            )
+        is_refinement = round_num >= 2
+        round_label = "Refinement" if is_refinement else "Exploration"
+        print(f"[WORKER] === ROUND {round_num+1}/{NUM_ROUNDS}: {round_label} ===")
 
-        # Context from previous hypotheses
-        prev_context = ""
-        if hypotheses:
-            top_3 = sorted(hypotheses, key=lambda x: x["confidence"], reverse=True)[:3]
-            prev_context = "\n\nPrevious high-confidence findings to build on:\n" + "\n".join(
-                f"- {h['title']} (confidence: {h['confidence']:.0%}): {h['description'][:150]}"
-                for h in top_3
-            )
+        # For refinement rounds, select top hypotheses to refine
+        refine_pool = []
+        if is_refinement and hypotheses:
+            refine_pool = sorted(hypotheses, key=lambda x: x["confidence"], reverse=True)
 
-        # Track what this round's earlier phases produced (for subsequent phases)
-        round_findings = []
-
-        # --- PHASED SEQUENTIAL EXECUTION ---
-        # Each role runs one at a time: Explorer → Synthesizer → Reasoner → Critic
         cancelled = False
-        for role in roles:
-            # Check status before each agent call
-            state = get_discovery_state()
-            if state and state.get("status") in ["stopping", "stopped", "idle"]:
-                print(f"[WORKER] Stopping mid-round: db_status={state.get('status')}")
+        for hyp_idx in range(HYPOTHESES_PER_ROUND):
+            if _is_cancelled():
                 cancelled = True
                 break
 
-            role_prompt = ROLE_PROMPTS.get(role, f"You are a {role.upper()} agent. Provide expert analysis from your specialized perspective.")
-            system_prompt = f"{MASTER_PROMPT}\n\n---\n\n{role_prompt}"
-            angle = angle_matrix.get((role, round_num), f"Generate a unique {role}-perspective hypothesis distinct from all others.")
+            hyp_num = round_num * HYPOTHESES_PER_ROUND + hyp_idx + 1
+            print(f"[WORKER] --- Hypothesis {hyp_num}/{NUM_ROUNDS * HYPOTHESES_PER_ROUND} (R{round_num+1}H{hyp_idx+1}) ---")
 
-            # Build phase-specific context from earlier phases in this round
-            phase_context = ""
-            if round_findings:
-                phase_context = "\n\nFindings from earlier phases in this round:\n" + "\n".join(
-                    f"- [{f['role'].upper()}] {f['title']} (conf={f['confidence']:.0%})"
-                    for f in round_findings
+            # For refinement rounds, the seed is a previous hypothesis to deepen
+            refine_context = ""
+            if is_refinement and refine_pool:
+                ref_idx = hyp_idx % len(refine_pool)
+                ref_h = refine_pool[ref_idx]
+                refine_context = f"""
+=== HYPOTHESIS TO REFINE AND DEEPEN ===
+Title: {ref_h.get('title', '')}
+Description: {ref_h.get('description', '')[:500]}
+Mechanism: {ref_h.get('mechanism', '')[:300]}
+Current Confidence: {ref_h.get('confidence', 0):.0%}
+Evidence: {'; '.join(ref_h.get('evidence_summary', [])[:3])}
+Risks: {'; '.join(ref_h.get('risks', [])[:3])}
+
+Your task: REFINE and DEEPEN this hypothesis. Make it more specific, better-evidenced, and clinically actionable.
+"""
+
+            # Previous hypotheses context (avoid duplication)
+            prev_context = ""
+            if hypotheses:
+                top_hyps = sorted(hypotheses, key=lambda x: x["confidence"], reverse=True)[:5]
+                prev_context = "\n\nPrevious hypotheses (avoid duplicating these — be novel):\n" + "\n".join(
+                    f"- {h['title']} (conf: {h['confidence']:.0%})"
+                    for h in top_hyps
                 )
 
-            prompt = f"""Investigate {disease} for {discovery_type} discovery.
+            # Accumulated stage output for this hypothesis
+            accumulated_context = ""
+            hypothesis_data = None
+            grounding_data = None
+            seed_angle = seed_angles[(round_num * HYPOTHESES_PER_ROUND + hyp_idx) % len(seed_angles)]
+
+            # ===== Run through ALL stages for this ONE hypothesis =====
+            for stage_info in available_stages:
+                if _is_cancelled():
+                    cancelled = True
+                    break
+
+                stage_num = stage_info["stage"]
+                stage_name = stage_info["name"]
+                role = stage_info["role"]
+                purpose = stage_info["purpose"]
+                fallback = stage_info.get("fallback_from", "")
+                model_config = AGENT_MODELS[role]
+
+                stage_label = f"Stage {stage_num}/{len(available_stages)} [{stage_name.upper()}]"
+                if fallback:
+                    stage_label += f" (fallback: {role} for {fallback})"
+                print(f"[WORKER] {stage_label}: calling {role}...")
+
+                # Build stage-specific prompt
+                if stage_num == 1:
+                    # SEED stage — generate initial hypothesis
+                    stage_prompt = f"""You are the SEED GENERATOR (Stage 1/10) in a 10-stage sequential hypothesis pipeline.
+
+DISEASE: {disease}
+DISCOVERY TYPE: {discovery_type}
 {focus_str}
 {factors_str}
 {prev_context}
-{phase_context}
+{refine_context}
 
-Round {round_num + 1}/{num_rounds}, Agent role: {role}
-SPECIFIC ANGLE FOR THIS ROUND: {angle}
+SEED ANGLE: {seed_angle}
+
+YOUR TASK: Generate ONE strong, specific, non-ambiguous hypothesis seed for {disease} {discovery_type}.
 
 REQUIREMENTS:
-- Your hypothesis MUST differ from all previous hypotheses in complexity, clinical scope, mechanistic precision, and overall concept
-- Every statement must be backed by specific published evidence (cite authors, journals, years, trial numbers)
-- No broad or vague language — every word must be surgical and microscopic-level precise
-- Name SPECIFIC molecules, genes, proteins, cell types, doses, and quantitative data
+- Title must name SPECIFIC molecules, genes, proteins, and mechanisms
 - Description must be 200+ words of dense, evidence-rich scientific content
-- Mechanism must trace a complete molecular cascade from intervention to clinical outcome
+- Mechanism must trace a complete molecular cascade
+- Include specific published evidence citations
 - Confidence MUST NOT exceed {target_confidence}
 
-Return ONLY a valid JSON object (no markdown fences, no commentary before/after the JSON):
-{{"has_hypothesis": true, "title": "...", "description": "200+ words with citations...", "mechanism": "Complete molecular cascade...", "confidence": 0.0-{target_confidence}, "evidence_summary": ["5+ specific cited evidence items..."], "risks": ["specific risks..."], "validation_steps": ["specific experiments..."], "novelty_score": 0.0-1.0}}"""
+Return ONLY valid JSON:
+{{"has_hypothesis": true, "title": "...", "description": "200+ words...", "mechanism": "Complete cascade...", "confidence": 0.0-{target_confidence}, "evidence_summary": ["5+ items..."], "risks": ["specific risks..."], "validation_steps": ["experiments..."], "novelty_score": 0.0-1.0}}"""
 
-            paths_explored += 1
-            print(f"[WORKER] Round {round_num+1} Phase {role}: calling model...")
+                elif stage_num == 3:
+                    # EVIDENCE stage — add PubMed/literature evidence + scientific grounding
+                    # Fetch real data from PubMed, ClinicalTrials.gov, FDA, UniProt, Reactome
+                    h_title = hypothesis_data.get("title", disease) if hypothesis_data else disease
+                    h_mechanism = hypothesis_data.get("mechanism", "") if hypothesis_data else ""
+                    print(f"[WORKER]   Querying PubMed, ClinicalTrials.gov, FDA, UniProt, Reactome...")
+                    grounding_data = ground_hypothesis_with_databases(disease, h_title, h_mechanism)
+                    grounding_text = format_grounding_for_prompt(grounding_data)
+                    num_citations = len(grounding_data.get("summary", []))
+                    print(f"[WORKER]   Found {num_citations} citations from scientific databases")
 
-            try:
-                hypothesis = run_single_agent(role, prompt, system_prompt)
-                if hypothesis:
-                    # Cap confidence at target_confidence
-                    hypothesis["confidence"] = min(hypothesis["confidence"], target_confidence)
-                    hypotheses.append(hypothesis)
-                    round_findings.append(hypothesis)
-                    print(f"[WORKER] {role} -> hypothesis: {hypothesis['title'][:80]} conf={hypothesis['confidence']}")
-                    metrics.add_metric(name="HypothesesDiscovered", unit="Count", value=1)
-                else:
-                    # Retry once if agent returned nothing (not a rate limit — just bad output)
-                    print(f"[WORKER] {role} -> no hypothesis, retrying once...")
-                    _cancellable_sleep(2)
-                    hypothesis = run_single_agent(role, prompt, system_prompt)
-                    if hypothesis:
-                        hypothesis["confidence"] = min(hypothesis["confidence"], target_confidence)
-                        hypotheses.append(hypothesis)
-                        round_findings.append(hypothesis)
-                        print(f"[WORKER] {role} -> RETRY SUCCESS: {hypothesis['title'][:80]} conf={hypothesis['confidence']}")
-                    else:
-                        print(f"[WORKER] {role} -> RETRY also returned no hypothesis")
-            except CancelledError:
-                print(f"[WORKER] {role} -> CANCELLED by user")
-                cancelled = True
-                break
-            except RateLimitError as e:
-                # Rate-limited after all retries — skip this agent, don't retry
-                print(f"[WORKER] {role} -> RATE LIMITED, skipping: {e}")
-                logger.warning(f"Agent {role} rate-limited in round {round_num}, skipping")
-            except Exception as e:
-                print(f"[WORKER] {role} -> EXCEPTION: {e}")
-                logger.error(f"Agent {role} round {round_num} failed: {e}")
+                    stage_prompt = f"""You are the EVIDENCE REVIEWER (Stage 3/10) in a 10-stage sequential hypothesis pipeline.
 
-            # Delay between sequential agent calls to respect rate limits.
-            model_config = AGENT_MODELS.get(role, {})
-            delay = 10 if model_config.get("provider") == "azure_ai" else 3
-            try:
-                _cancellable_sleep(delay)
-            except CancelledError:
-                print(f"[WORKER] Cancelled during inter-agent delay")
-                cancelled = True
-                break
+DISEASE: {disease}
+DISCOVERY TYPE: {discovery_type}
 
-            # Check if approaching Lambda timeout — self-invoke to continue
-            elapsed_now = time.time() - start_time
-            if elapsed_now > 720:
-                print(f"[WORKER] Approaching Lambda timeout ({elapsed_now:.0f}s) — saving state and self-invoking continuation")
-                # Save current progress
-                sorted_h_partial = sorted(hypotheses, key=lambda x: x["confidence"], reverse=True)
-                update_discovery_state({
-                    "status": "running",
-                    "hypotheses": sorted_h_partial[:50],
-                    "stats": {
-                        "total_agents": len(roles),
-                        "active_agents": len(roles),
-                        "hypotheses_found": len(hypotheses),
-                        "paths_explored": paths_explored,
-                        "high_confidence_discoveries": sum(1 for h in hypotheses if h["confidence"] >= 0.7),
-                        "current_best_confidence": max((h["confidence"] for h in hypotheses), default=0),
-                        "runtime_seconds": int(elapsed_now),
-                        "current_round": round_num + 1,
-                        "total_rounds": num_rounds,
-                    },
-                    # Store continuation state for next invocation
-                    "_continuation": {
-                        "completed_round": round_num,
-                        "completed_roles_in_round": [r for r in roles[:roles.index(role)+1]],
-                    },
-                })
-                # Self-invoke to continue — skip already-completed work
-                try:
-                    lambda_client.invoke(
-                        FunctionName=FUNCTION_NAME,
-                        InvocationType="Event",
-                        Payload=json.dumps({
-                            "source": "self-invoke",
-                            "action": "run_discovery",
-                            "config": config,
-                            "continuation": {
-                                "start_round": round_num + 1,  # Continue from next round
-                                "existing_hypotheses": hypotheses,
-                                "paths_explored": paths_explored,
-                                "total_start_time_offset": elapsed_now + time_offset,
-                            },
-                        }, cls=DecimalEncoder),
+=== CURRENT HYPOTHESIS (from previous stages) ===
+{accumulated_context}
+
+=== REAL SCIENTIFIC DATABASE EVIDENCE ===
+The following citations were retrieved from PubMed, ClinicalTrials.gov, FDA, UniProt, and Reactome:
+
+{grounding_text}
+
+YOUR TASK: Review and strengthen the hypothesis with REAL evidence. Use the actual PubMed PMIDs, ClinicalTrials.gov NCT numbers, FDA drug data, UniProt accessions, and Reactome pathways provided above. Add, correct, or refine citations. Grade evidence quality.
+
+Return ONLY valid JSON:
+{{"has_hypothesis": true, "title": "...", "description": "...", "mechanism": "...", "confidence": 0.0-{target_confidence}, "evidence_summary": ["PMID:xxx Author et al...", "NCT#: trial details...", "FDA: drug data...", "UniProt: protein...", "Reactome: pathway..."], "risks": ["..."], "validation_steps": ["..."], "novelty_score": 0.0-1.0, "key_citations": ["PMID:xxx", "NCT#xxx"]}}"""
+
+                elif stage_num == 7:
+                    # GROUND stage — deep scientific grounding with additional database queries
+                    h_title = hypothesis_data.get("title", disease) if hypothesis_data else disease
+                    h_mechanism = hypothesis_data.get("mechanism", "") if hypothesis_data else ""
+                    # Run a second grounding pass with more specific queries
+                    print(f"[WORKER]   Deep grounding: querying databases with refined terms...")
+                    deep_grounding = ground_hypothesis_with_databases(
+                        disease,
+                        h_title,
+                        h_mechanism
                     )
-                    print(f"[WORKER] Continuation invoke SUCCESS — handing off at round {round_num + 1}")
-                except Exception as cont_err:
-                    print(f"[WORKER] Continuation invoke FAILED: {cont_err}")
-                    logger.error(f"Continuation invoke failed: {cont_err}")
-                return  # Exit this invocation — continuation will pick up
+                    deep_grounding_text = format_grounding_for_prompt(deep_grounding)
+                    # Merge with earlier grounding
+                    if grounding_data:
+                        for src in ["pubmed", "clinical_trials", "fda", "uniprot", "reactome"]:
+                            existing_ids = {str(r.get("pmid", r.get("nct_id", r.get("accession", r.get("id", ""))))) for r in grounding_data.get(src, [])}
+                            for item in deep_grounding.get(src, []):
+                                item_id = str(item.get("pmid", item.get("nct_id", item.get("accession", item.get("id", "")))))
+                                if item_id not in existing_ids:
+                                    grounding_data[src].append(item)
+                                    grounding_data["summary"].append(f"[{src.upper()}] {item.get('citation', '')}")
 
-        # If cancelled mid-round, break out of the outer loop
+                    stage_prompt = f"""You are the SCIENTIFIC GROUNDER (Stage 7/10) in a 10-stage sequential hypothesis pipeline.
+
+DISEASE: {disease}
+DISCOVERY TYPE: {discovery_type}
+
+=== CURRENT HYPOTHESIS (refined through 6 prior stages) ===
+{accumulated_context}
+
+=== SCIENTIFIC DATABASE EVIDENCE (PubMed, ClinicalTrials.gov, FDA, UniProt, Reactome) ===
+{deep_grounding_text}
+
+YOUR TASK: Ground EVERY claim in the hypothesis to real scientific databases. For each key claim:
+1. Cite specific PubMed articles (PMID)
+2. Reference relevant clinical trials (NCT numbers)
+3. Link to FDA-approved drugs if applicable
+4. Reference UniProt protein entries and Reactome pathways
+5. Flag any claims that CANNOT be grounded — these reduce confidence
+
+Return ONLY valid JSON:
+{{"has_hypothesis": true, "title": "...", "description": "...", "mechanism": "...", "confidence": 0.0-{target_confidence}, "evidence_summary": ["PMID:xxx...", "NCT#xxx..."], "risks": ["..."], "validation_steps": ["..."], "novelty_score": 0.0-1.0, "key_citations": ["PMID:xxx", "NCT#xxx"], "fda_references": ["drug: indication"], "clinical_trial_references": ["NCT#: phase, status"]}}"""
+
+                else:
+                    # All other stages — work with accumulated context
+                    stage_instructions = {
+                        2: f"You are the CAUSAL EXPANDER (Stage 2/10). EXPAND the hypothesis with deep causal chain reasoning. Build COMPLETE causal chains: [Molecular Event] → [Protein Effect] → [Pathway Alteration] → [Cellular Phenotype] → [Tissue Effect] → [Clinical Outcome]. Include Kd values, IC50/EC50, expression levels, allele frequencies.",
+                        4: f"You are the COUNTER-ARGUMENT GENERATOR (Stage 4/10). Generate STRONG counter-arguments against this hypothesis. Identify: biological implausibility, pharmacological barriers, safety concerns, resistance mechanisms, manufacturing challenges, regulatory hurdles. Rate each as CRITICAL/MAJOR/MINOR.",
+                        5: f"You are the MECHANISTIC DEEP DIVER (Stage 5/10). Perform a MECHANISTIC DEEP DIVE. Trace the COMPLETE molecular cascade from intervention to clinical outcome. Include: binding kinetics, signal transduction, gene expression changes, protein modifications, cellular responses, tissue effects, systemic outcomes.",
+                        6: f"You are the CROSS-VALIDATOR (Stage 6/10). CROSS-VALIDATE every claim in this hypothesis. Check: known biochemistry, thermodynamic feasibility, binding affinities, evolutionary conservation, clinical trial precedent, regulatory feasibility, manufacturing scalability.",
+                        8: f"You are the CONFIDENCE SCORER (Stage 8/10). Perform MULTI-DIMENSIONAL SCORING: Evidence quality (0-1), Mechanism strength (0-1), Clinical translatability (0-1), Safety profile (0-1), Novelty (0-1), Feasibility (0-1). Calculate overall confidence as weighted average. Be rigorous — do not inflate scores.",
+                        9: f"You are the RAPID REFINER (Stage 9/10). REFINE the hypothesis: improve precision of molecular targets, tighten dose-response relationships, sharpen the clinical protocol, address remaining risks, add quantitative PK/PD modeling. Make every word count.",
+                        10: f"You are the FINAL SYNTHESIZER (Stage 10/10). Produce the DEFINITIVE version of this hypothesis. Integrate all improvements from stages 1-9. Ensure: title is precise, description is comprehensive (300+ words), mechanism is complete, evidence is cited, risks are addressed, validation plan is actionable. This is the final output.",
+                    }
+
+                    instruction = stage_instructions.get(stage_num, f"You are Stage {stage_num}/10. Improve the hypothesis from your specialized perspective: {purpose}.")
+
+                    stage_prompt = f"""{instruction}
+
+DISEASE: {disease}
+DISCOVERY TYPE: {discovery_type}
+
+=== CURRENT HYPOTHESIS (accumulated from prior stages) ===
+{accumulated_context}
+
+YOUR TASK: Take the hypothesis above and IMPROVE it from your specialized perspective. Do NOT generate a new hypothesis — refine the SAME one.
+
+Return ONLY valid JSON:
+{{"has_hypothesis": true, "title": "...", "description": "...", "mechanism": "...", "confidence": 0.0-{target_confidence}, "evidence_summary": ["..."], "risks": ["..."], "validation_steps": ["..."], "novelty_score": 0.0-1.0}}"""
+
+                # Build system prompt
+                role_prompt = ROLE_PROMPTS.get(role, f"You are a {role.upper()} specialist.")
+                system_prompt = f"{MASTER_PROMPT}\n\n---\n\n{role_prompt}"
+
+                # Call the model
+                try:
+                    result = run_single_agent(role, stage_prompt, system_prompt)
+                    if result:
+                        hypothesis_data = result
+                        # Update accumulated context for next stage
+                        accumulated_context = f"""Title: {result['title']}
+Description: {result['description'][:800]}
+Mechanism: {result['mechanism'][:500]}
+Confidence: {result['confidence']:.0%}
+Evidence: {'; '.join(result.get('evidence_summary', [])[:5])}
+Risks: {'; '.join(result.get('risks', [])[:3])}
+Validation: {'; '.join(result.get('validation_steps', [])[:3])}"""
+                        print(f"[WORKER]   {stage_name} -> refined: {result['title'][:70]} conf={result['confidence']:.2f}")
+                    else:
+                        print(f"[WORKER]   {stage_name} -> no output, keeping previous version")
+                except RateLimitError as e:
+                    print(f"[WORKER]   {stage_name} -> RATE LIMITED, skipping stage: {e}")
+                except CancelledError:
+                    cancelled = True
+                    break
+                except Exception as e:
+                    print(f"[WORKER]   {stage_name} -> ERROR: {e}, skipping stage")
+
+                stages_completed += 1
+
+                # Rate limit delay between stages
+                delay = 10 if model_config.get("provider") == "azure_ai" else 3
+                try:
+                    _cancellable_sleep(delay)
+                except CancelledError:
+                    cancelled = True
+                    break
+
+                # Check Lambda timeout — self-invoke to continue
+                elapsed_now = time.time() - start_time
+                if elapsed_now > 720:
+                    print(f"[WORKER] Approaching timeout ({elapsed_now:.0f}s) — self-invoking continuation")
+                    sorted_h = sorted(hypotheses, key=lambda x: x["confidence"], reverse=True)
+                    update_discovery_state({
+                        "status": "running",
+                        "hypotheses": sorted_h[:TARGET_TOTAL_HYPOTHESES],
+                        "stats": _build_stats(hypotheses, stages_completed, elapsed_now + time_offset, round_num, NUM_ROUNDS),
+                    })
+                    try:
+                        lambda_client.invoke(
+                            FunctionName=FUNCTION_NAME,
+                            InvocationType="Event",
+                            Payload=json.dumps({
+                                "source": "self-invoke",
+                                "action": "run_discovery",
+                                "config": config,
+                                "continuation": {
+                                    "start_round": round_num + 1,
+                                    "existing_hypotheses": hypotheses,
+                                    "stages_completed": stages_completed,
+                                    "total_start_time_offset": elapsed_now + time_offset,
+                                },
+                            }, cls=DecimalEncoder),
+                        )
+                        print(f"[WORKER] Continuation invoked at round {round_num + 1}")
+                    except Exception as cont_err:
+                        print(f"[WORKER] Continuation FAILED: {cont_err}")
+                    return
+
+            if cancelled:
+                break
+
+            # ===== Hypothesis complete — all stages done =====
+            if hypothesis_data:
+                hypothesis_data["confidence"] = min(hypothesis_data["confidence"], target_confidence)
+                hypothesis_data["stages_completed"] = len(available_stages)
+                hypothesis_data["round_number"] = round_num + 1
+
+                # Attach grounding citations
+                if grounding_data:
+                    # Merge database citations into evidence_summary
+                    existing_evidence = set(hypothesis_data.get("evidence_summary", []))
+                    for citation in grounding_data.get("summary", []):
+                        if citation not in existing_evidence:
+                            hypothesis_data.setdefault("evidence_summary", []).append(citation)
+                    hypothesis_data["key_citations"] = [
+                        a.get("citation", "") for a in grounding_data.get("pubmed", [])
+                    ]
+                    hypothesis_data["fda_references"] = [
+                        d.get("citation", "") for d in grounding_data.get("fda", [])
+                    ]
+                    hypothesis_data["clinical_trial_references"] = [
+                        t.get("citation", "") for t in grounding_data.get("clinical_trials", [])
+                    ]
+                    hypothesis_data["grounding_sources"] = {
+                        "pubmed_count": len(grounding_data.get("pubmed", [])),
+                        "clinical_trials_count": len(grounding_data.get("clinical_trials", [])),
+                        "fda_count": len(grounding_data.get("fda", [])),
+                        "uniprot_count": len(grounding_data.get("uniprot", [])),
+                        "reactome_count": len(grounding_data.get("reactome", [])),
+                    }
+
+                hypotheses.append(hypothesis_data)
+                print(f"[WORKER] Hypothesis {hyp_num} COMPLETE: {hypothesis_data['title'][:70]} conf={hypothesis_data['confidence']:.2f} ({len(available_stages)} stages)")
+                metrics.add_metric(name="HypothesesDiscovered", unit="Count", value=1)
+
+            # Update state after each hypothesis
+            elapsed = time.time() - start_time + time_offset
+            sorted_h = sorted(hypotheses, key=lambda x: x["confidence"], reverse=True)
+            update_discovery_state({
+                "status": "running",
+                "hypotheses": sorted_h[:TARGET_TOTAL_HYPOTHESES],
+                "stats": _build_stats(hypotheses, stages_completed, elapsed, round_num, NUM_ROUNDS),
+            })
+
         if cancelled:
             break
 
-        # Update state with partial results after each round
+        # Round complete
         elapsed = time.time() - start_time + time_offset
-        print(f"[WORKER] Round {round_num+1} done: {len(hypotheses)} hypotheses total, {elapsed:.1f}s elapsed")
+        print(f"[WORKER] Round {round_num+1} done: {len(hypotheses)} hypotheses, {elapsed:.1f}s")
 
-        # Re-check DB status BEFORE writing — never overwrite a stop signal
+        # Check DB status
         state = get_discovery_state()
         db_status = state.get("status", "?") if state else "?"
         if db_status in ("stopping", "stopped", "idle"):
-            print(f"[WORKER] Stop detected after round {round_num+1}: db_status={db_status} — halting")
-            # Transition to idle so frontend sees it's done
+            print(f"[WORKER] Stop detected after round {round_num+1}")
             sorted_h = sorted(hypotheses, key=lambda x: x["confidence"], reverse=True)
             update_discovery_state({
                 "status": "idle",
-                "hypotheses": sorted_h[:50],
-                "stats": {
-                    "total_agents": len(roles),
-                    "active_agents": 0,
-                    "hypotheses_found": len(hypotheses),
-                    "paths_explored": paths_explored,
-                    "high_confidence_discoveries": sum(1 for h in hypotheses if h["confidence"] >= 0.7),
-                    "current_best_confidence": max((h["confidence"] for h in hypotheses), default=0),
-                    "runtime_seconds": int(elapsed),
-                    "current_round": round_num + 1,
-                    "total_rounds": num_rounds,
-                },
+                "hypotheses": sorted_h[:TARGET_TOTAL_HYPOTHESES],
+                "stats": _build_stats(hypotheses, stages_completed, elapsed, round_num + 1, NUM_ROUNDS),
             })
-            return  # Exit worker entirely
+            return
 
         sorted_h = sorted(hypotheses, key=lambda x: x["confidence"], reverse=True)
         update_discovery_state({
             "status": "running",
-            "hypotheses": sorted_h[:50],
-            "stats": {
-                "total_agents": len(roles),
-                "active_agents": len(roles) if round_num < num_rounds - 1 else 0,
-                "hypotheses_found": len(hypotheses),
-                "paths_explored": paths_explored,
-                "high_confidence_discoveries": sum(1 for h in hypotheses if h["confidence"] >= 0.7),
-                "current_best_confidence": max((h["confidence"] for h in hypotheses), default=0),
-                "runtime_seconds": int(elapsed),
-                "current_round": round_num + 1,
-                "total_rounds": num_rounds,
-                "learning_stats": {
-                    "total_explored": paths_explored,
-                    "low_value_paths": sum(1 for h in hypotheses if h["confidence"] < 0.4),
-                    "high_value_paths": sum(1 for h in hypotheses if h["confidence"] >= 0.7),
-                    "avg_relation_score": sum(h["confidence"] for h in hypotheses) / len(hypotheses) if hypotheses else 0,
-                },
-            },
+            "hypotheses": sorted_h[:TARGET_TOTAL_HYPOTHESES],
+            "stats": _build_stats(hypotheses, stages_completed, elapsed, round_num + 1, NUM_ROUNDS),
         })
 
-        # Inter-round delay to prevent Azure rate limiting (cancellable)
-        if round_num < num_rounds - 1:
+        if round_num < NUM_ROUNDS - 1:
             try:
                 _cancellable_sleep(5)
             except CancelledError:
-                print("[WORKER] Cancelled during inter-round delay")
                 break
 
-    # ---- Check if we were stopped/cancelled ----
-    was_cancelled = _is_cancelled()
-    if was_cancelled:
-        # Save partial results and mark as stopped
+    # ---- Check cancellation ----
+    if _is_cancelled():
         elapsed = time.time() - start_time + time_offset
         sorted_h = sorted(hypotheses, key=lambda x: x["confidence"], reverse=True)
         final_hypotheses = sorted_h[:TARGET_TOTAL_HYPOTHESES]
-        print(f"[WORKER] STOPPED by user: {len(final_hypotheses)} hypotheses in {elapsed:.1f}s")
+        print(f"[WORKER] STOPPED: {len(final_hypotheses)} hypotheses in {elapsed:.1f}s")
         update_discovery_state({
             "status": "stopped",
             "hypotheses": final_hypotheses,
-            "stats": {
-                "total_agents": len(roles),
-                "active_agents": 0,
-                "hypotheses_found": len(final_hypotheses),
-                "paths_explored": paths_explored,
-                "high_confidence_discoveries": sum(1 for h in final_hypotheses if h["confidence"] >= 0.7),
-                "current_best_confidence": max((h["confidence"] for h in final_hypotheses), default=0),
-                "runtime_seconds": int(elapsed),
-                "current_round": round_num + 1,
-                "total_rounds": num_rounds,
-                "learning_stats": {
-                    "total_explored": paths_explored,
-                    "low_value_paths": sum(1 for h in final_hypotheses if h["confidence"] < 0.4),
-                    "high_value_paths": sum(1 for h in final_hypotheses if h["confidence"] >= 0.7),
-                    "avg_relation_score": sum(h["confidence"] for h in final_hypotheses) / len(final_hypotheses) if final_hypotheses else 0,
-                },
-            },
+            "stats": _build_stats(final_hypotheses, stages_completed, elapsed, NUM_ROUNDS, NUM_ROUNDS),
         })
-        logger.info(f"Discovery stopped by user: {len(final_hypotheses)} hypotheses, {elapsed:.0f}s")
         return
 
-    # ---- Discovery complete — finalize ----
+    # ---- Discovery complete ----
     elapsed = time.time() - start_time + time_offset
     sorted_h = sorted(hypotheses, key=lambda x: x["confidence"], reverse=True)
-    # Keep exactly TARGET_TOTAL_HYPOTHESES (20)
     final_hypotheses = sorted_h[:TARGET_TOTAL_HYPOTHESES]
-    print(f"[WORKER] DONE: {len(final_hypotheses)} hypotheses in {elapsed:.1f}s")
+    print(f"[WORKER] DONE: {len(final_hypotheses)} hypotheses in {elapsed:.1f}s (10-stage sequential pipeline)")
 
-    # ---- Auto-create project ----
+    # Auto-create project
     project_id = str(uuid4())
     now = datetime.utcnow().isoformat()
     project_name = f"Discovery: {disease}"
@@ -1640,22 +2039,22 @@ Return ONLY a valid JSON object (no markdown fences, no commentary before/after 
         proj_table.put_item(Item={
             "id": project_id,
             "name": project_name,
-            "description": f"Auto-generated project from AI discovery for {disease} ({discovery_type}). {len(final_hypotheses)} hypotheses generated across {num_rounds} rounds.",
+            "description": f"10-stage sequential pipeline discovery for {disease} ({discovery_type}). {len(final_hypotheses)} hypotheses, each refined through {len(available_stages)} specialized AI stages.",
             "disease_focus": disease,
             "research_question": f"{discovery_type.capitalize()} discovery for {disease}",
-            "tags": [disease, discovery_type, "ai-generated"],
+            "tags": [disease, discovery_type, "ai-generated", "10-stage-pipeline"],
             "hypothesis_count": len(final_hypotheses),
-            "evidence_count": 0,
+            "evidence_count": sum(len(h.get("evidence_summary", [])) for h in final_hypotheses),
             "user_id": "default",
             "created_at": now,
             "updated_at": now,
         })
-        print(f"[WORKER] Auto-created project: {project_id} name={project_name!r}")
+        print(f"[WORKER] Created project: {project_id}")
     except Exception as e:
-        logger.error(f"Failed to auto-create project: {e}")
-        project_id = "discovery"  # Fallback
+        logger.error(f"Failed to create project: {e}")
+        project_id = "discovery"
 
-    # ---- Save ALL hypotheses to hypotheses table ----
+    # Save hypotheses to DB
     hyp_table = dynamodb.Table(HYPOTHESES_TABLE)
     saved_count = 0
     for h in final_hypotheses:
@@ -1673,11 +2072,17 @@ Return ONLY a valid JSON object (no markdown fences, no commentary before/after 
                 "evidence_summary": h.get("evidence_summary", []),
                 "risks": h.get("risks", []),
                 "validation_steps": h.get("validation_steps", []),
+                "key_citations": h.get("key_citations", []),
+                "fda_references": h.get("fda_references", []),
+                "clinical_trial_references": h.get("clinical_trial_references", []),
+                "grounding_sources": h.get("grounding_sources", {}),
+                "stages_completed": h.get("stages_completed", 0),
+                "round_number": h.get("round_number", 0),
                 "contradiction_count": 0,
                 "supporting_count": 0,
-                "tags": [],
+                "tags": h.get("tags", []),
                 "version": 1,
-                "role": h.get("role", ""),
+                "role": "10-stage-pipeline",
                 "created_at": h.get("created_at", now),
                 "updated_at": now,
             })
@@ -1685,34 +2090,33 @@ Return ONLY a valid JSON object (no markdown fences, no commentary before/after 
         except Exception as e:
             logger.warning(f"Failed to save hypothesis: {e}")
 
-    print(f"[WORKER] Saved {saved_count}/{len(final_hypotheses)} hypotheses to DB, project={project_id}")
+    print(f"[WORKER] Saved {saved_count}/{len(final_hypotheses)} hypotheses, project={project_id}")
 
-    # ---- Mark as completed with project reference ----
     update_discovery_state({
         "status": "completed",
         "project_id": project_id,
         "project_name": project_name,
         "hypotheses": final_hypotheses,
-        "stats": {
-            "total_agents": len(roles),
-            "active_agents": 0,
-            "hypotheses_found": len(final_hypotheses),
-            "paths_explored": paths_explored,
-            "high_confidence_discoveries": sum(1 for h in final_hypotheses if h["confidence"] >= 0.7),
-            "current_best_confidence": max((h["confidence"] for h in final_hypotheses), default=0),
-            "runtime_seconds": int(elapsed),
-            "current_round": num_rounds,
-            "total_rounds": num_rounds,
-            "learning_stats": {
-                "total_explored": paths_explored,
-                "low_value_paths": sum(1 for h in final_hypotheses if h["confidence"] < 0.4),
-                "high_value_paths": sum(1 for h in final_hypotheses if h["confidence"] >= 0.7),
-                "avg_relation_score": sum(h["confidence"] for h in final_hypotheses) / len(final_hypotheses) if final_hypotheses else 0,
-            },
-        },
+        "stats": _build_stats(final_hypotheses, stages_completed, elapsed, NUM_ROUNDS, NUM_ROUNDS),
     })
-
     logger.info(f"Discovery completed: {len(final_hypotheses)} hypotheses, project={project_id}, {elapsed:.0f}s")
+
+
+def _build_stats(hypotheses: list, stages_completed: int, elapsed: float, current_round: int, total_rounds: int) -> dict:
+    """Build stats dict for DynamoDB updates."""
+    return {
+        "total_agents": len(PIPELINE_STAGES),
+        "active_agents": len(PIPELINE_STAGES) if current_round < total_rounds else 0,
+        "hypotheses_found": len(hypotheses),
+        "paths_explored": stages_completed,
+        "high_confidence_discoveries": sum(1 for h in hypotheses if h.get("confidence", 0) >= 0.7),
+        "current_best_confidence": max((h.get("confidence", 0) for h in hypotheses), default=0),
+        "runtime_seconds": int(elapsed),
+        "current_round": current_round,
+        "total_rounds": total_rounds,
+        "pipeline_architecture": "10-stage-sequential",
+        "stages_per_hypothesis": len(PIPELINE_STAGES),
+    }
 
 
 # ============== Save-to-Project Endpoint ==============

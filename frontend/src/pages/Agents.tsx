@@ -59,6 +59,18 @@ interface Hypothesis {
   risks?: string[]
   validation_steps?: string[]
   novelty_score?: number
+  key_citations?: string[]
+  fda_references?: string[]
+  clinical_trial_references?: string[]
+  grounding_sources?: {
+    pubmed_count?: number
+    clinical_trials_count?: number
+    fda_count?: number
+    uniprot_count?: number
+    reactome_count?: number
+  }
+  stages_completed?: number
+  round_number?: number
   created_at?: string
 }
 
@@ -1126,6 +1138,62 @@ export default function Agents() {
                   <p className="text-sm leading-relaxed">{selectedHypothesis.mechanism || 'Not specified'}</p>
                 </div>
 
+                {selectedHypothesis.evidence_summary && selectedHypothesis.evidence_summary.length > 0 && (
+                  <div>
+                    <h4 className="text-xs font-medium text-[var(--color-text-muted)] uppercase mb-1">
+                      Scientific Evidence ({selectedHypothesis.evidence_summary.length})
+                    </h4>
+                    <div className="space-y-1 max-h-48 overflow-y-auto">
+                      {selectedHypothesis.evidence_summary.map((evidence, i) => (
+                        <div key={i} className="text-xs p-2 bg-blue-500/10 border border-blue-500/20 rounded leading-relaxed">
+                          {evidence}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {selectedHypothesis.grounding_sources && (
+                  <div>
+                    <h4 className="text-xs font-medium text-[var(--color-text-muted)] uppercase mb-1">
+                      Grounding Sources
+                    </h4>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedHypothesis.grounding_sources.pubmed_count ? (
+                        <span className="text-xs px-2 py-1 bg-green-500/10 border border-green-500/20 rounded">
+                          PubMed: {selectedHypothesis.grounding_sources.pubmed_count}
+                        </span>
+                      ) : null}
+                      {selectedHypothesis.grounding_sources.clinical_trials_count ? (
+                        <span className="text-xs px-2 py-1 bg-cyan-500/10 border border-cyan-500/20 rounded">
+                          ClinicalTrials.gov: {selectedHypothesis.grounding_sources.clinical_trials_count}
+                        </span>
+                      ) : null}
+                      {selectedHypothesis.grounding_sources.fda_count ? (
+                        <span className="text-xs px-2 py-1 bg-orange-500/10 border border-orange-500/20 rounded">
+                          FDA: {selectedHypothesis.grounding_sources.fda_count}
+                        </span>
+                      ) : null}
+                      {selectedHypothesis.grounding_sources.uniprot_count ? (
+                        <span className="text-xs px-2 py-1 bg-purple-500/10 border border-purple-500/20 rounded">
+                          UniProt: {selectedHypothesis.grounding_sources.uniprot_count}
+                        </span>
+                      ) : null}
+                      {selectedHypothesis.grounding_sources.reactome_count ? (
+                        <span className="text-xs px-2 py-1 bg-pink-500/10 border border-pink-500/20 rounded">
+                          Reactome: {selectedHypothesis.grounding_sources.reactome_count}
+                        </span>
+                      ) : null}
+                    </div>
+                    {selectedHypothesis.stages_completed && (
+                      <p className="text-xs text-[var(--color-text-muted)] mt-1">
+                        Pipeline: {selectedHypothesis.stages_completed} stages completed
+                        {selectedHypothesis.round_number ? ` (Round ${selectedHypothesis.round_number})` : ''}
+                      </p>
+                    )}
+                  </div>
+                )}
+
                 {selectedHypothesis.risks && selectedHypothesis.risks.length > 0 && (
                   <div>
                     <h4 className="text-xs font-medium text-[var(--color-text-muted)] uppercase mb-1">
@@ -1183,22 +1251,37 @@ export default function Agents() {
                           description: selectedHypothesis.description,
                           mechanism: selectedHypothesis.mechanism,
                           confidence: selectedHypothesis.confidence,
+                          evidence_summary: selectedHypothesis.evidence_summary || [],
+                          risks: selectedHypothesis.risks || [],
+                          validation_steps: selectedHypothesis.validation_steps || [],
+                          key_citations: selectedHypothesis.key_citations || [],
+                          fda_references: selectedHypothesis.fda_references || [],
+                          clinical_trial_references: selectedHypothesis.clinical_trial_references || [],
                           disease: config.disease || 'Research',
                           discovery_type: config.discoveryType || 'treatment',
                         }),
                       })
                       if (res.ok) {
                         const data = await res.json()
-                        const byteChars = atob(data.pdf_base64)
-                        const byteArray = new Uint8Array(byteChars.length)
-                        for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i)
-                        const blob = new Blob([byteArray], { type: 'application/pdf' })
-                        const url = URL.createObjectURL(blob)
-                        const a = document.createElement('a')
-                        a.href = url
-                        a.download = data.filename || `humanovo-${selectedHypothesis.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase().slice(0, 50)}.pdf`
-                        a.click()
-                        URL.revokeObjectURL(url)
+                        if (data.pdf_base64) {
+                          const byteChars = atob(data.pdf_base64)
+                          const byteArray = new Uint8Array(byteChars.length)
+                          for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i)
+                          const blob = new Blob([byteArray], { type: 'application/pdf' })
+                          const url = URL.createObjectURL(blob)
+                          const a = document.createElement('a')
+                          a.href = url
+                          a.download = data.filename || `humanovo-${selectedHypothesis.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase().slice(0, 50)}.pdf`
+                          a.click()
+                          URL.revokeObjectURL(url)
+                        } else {
+                          console.error('PDF response missing pdf_base64:', data)
+                          alert('PDF generation failed — no PDF data returned')
+                        }
+                      } else {
+                        const errText = await res.text().catch(() => 'Unknown error')
+                        console.error('PDF export failed:', res.status, errText)
+                        alert(`PDF export failed (${res.status}): ${errText.slice(0, 200)}`)
                       }
                     }}
                     className="flex-1 btn bg-green-500 text-white hover:bg-green-600"
