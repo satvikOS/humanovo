@@ -691,8 +691,16 @@ class PdfRenderer:
                            alignment=TA_CENTER, leading=11),
         ))
 
-        doc.build(elements, onFirstPage=_on_first_page, onLaterPages=_on_page)
-        return buf.getvalue()
+        try:
+            doc.build(elements, onFirstPage=_on_first_page, onLaterPages=_on_page)
+        except Exception as build_err:
+            logger.error(f"ReportLab doc.build() failed: {build_err}")
+            raise RuntimeError(f"PDF rendering failed: {build_err}")
+
+        pdf_bytes = buf.getvalue()
+        if len(pdf_bytes) < 500:
+            logger.warning(f"PDF suspiciously small ({len(pdf_bytes)} bytes), may be blank")
+        return pdf_bytes
 
 
 # ============================================================================
@@ -764,9 +772,14 @@ class DocumentPipelineService:
             external_factors=external_factors or [],
         )
 
-        # Stage 2: Generate AI content (if enabled)
+        # Stage 2: Generate content
         if use_ai_content:
             bundle = await self._generate_ai_content(
+                bundle, hypotheses, stats, external_factors or [],
+            )
+        else:
+            # Lightweight (non-AI) sections for instant PDF generation
+            bundle = self._build_lightweight_sections(
                 bundle, hypotheses, stats, external_factors or [],
             )
 
@@ -848,8 +861,8 @@ class DocumentPipelineService:
             best_confidence=stats.get("current_best_confidence", 0.0),
             runtime_seconds=stats.get("runtime_seconds", 0.0),
             models_used=stats.get("models_active", []) or [
-                "Claude Opus 4.6", "DeepSeek-R1-0528", "Mistral-Large-3",
-                "GPT-4o", "Cohere Command A", "Kimi-K2-Thinking",
+                "Claude Opus 4.6", "Amazon Nova Premier", "Mistral-Large-3",
+                "GPT-4o", "Cohere Command A", "GPT-5.3-chat",
                 "o3-mini", "GPT-4.1",
             ],
             external_factors=external_factors,

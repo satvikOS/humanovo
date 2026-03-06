@@ -264,6 +264,7 @@ azure_o3mini_client = None
 azure_gpt41_client = None
 azure_phi4_client = None
 azure_grok_client = None
+azure_gpt53_client = None
 
 # Shared endpoint (both models at same Azure AI resource)
 AZURE_AI_ENDPOINT = os.environ.get("AZURE_AI_ENDPOINT", "")
@@ -288,6 +289,8 @@ AZURE_PHI4_ENDPOINT = os.environ.get("AZURE_PHI4_ENDPOINT", "") or AZURE_AI_ENDP
 AZURE_PHI4_KEY = os.environ.get("AZURE_PHI4_KEY", "") or AZURE_AI_KEY
 AZURE_GROK_ENDPOINT = os.environ.get("AZURE_GROK_ENDPOINT", "") or AZURE_AI_ENDPOINT
 AZURE_GROK_KEY = os.environ.get("AZURE_GROK_KEY", "") or AZURE_AI_KEY
+AZURE_GPT53_ENDPOINT = os.environ.get("AZURE_GPT53_ENDPOINT", "") or AZURE_GPT4O_ENDPOINT  # Same cognitiveservices host
+AZURE_GPT53_KEY = os.environ.get("AZURE_GPT53_KEY", "") or AZURE_GPT4O_KEY
 
 def _normalize_azure_ai_endpoint(endpoint: str) -> str:
     """Normalize Azure AI Foundry endpoint to base URL for /chat/completions.
@@ -399,6 +402,7 @@ azure_grok_client = _init_azure_client("Grok", AZURE_GROK_ENDPOINT, AZURE_GROK_K
 azure_gpt4o_client = _init_azure_openai_client("GPT-4o", AZURE_GPT4O_ENDPOINT, AZURE_GPT4O_KEY, "gpt-4o", "2025-01-01-preview")
 azure_o3mini_client = _init_azure_openai_client("o3-mini", AZURE_O3MINI_ENDPOINT, AZURE_O3MINI_KEY, "o3-mini", "2025-01-01-preview")
 azure_gpt41_client = _init_azure_openai_client("GPT-4.1", AZURE_GPT41_ENDPOINT, AZURE_GPT41_KEY, "gpt-4.1", "2025-01-01-preview")
+azure_gpt53_client = _init_azure_openai_client("GPT-5.3", AZURE_GPT53_ENDPOINT, AZURE_GPT53_KEY, "gpt-5.3-chat", "2025-04-01-preview")
 
 # Map model name patterns to their clients for routing
 AZURE_MODEL_CLIENTS = {
@@ -416,6 +420,9 @@ AZURE_MODEL_CLIENTS = {
     "phi-4": ("azure_phi4", lambda: azure_phi4_client),
     "phi4": ("azure_phi4", lambda: azure_phi4_client),
     "grok": ("azure_grok", lambda: azure_grok_client),
+    "gpt-5.3": ("azure_gpt53", lambda: azure_gpt53_client),
+    "gpt53": ("azure_gpt53", lambda: azure_gpt53_client),
+    "gpt-5.3-chat": ("azure_gpt53", lambda: azure_gpt53_client),
 }
 
 # Configuration
@@ -437,6 +444,7 @@ PAPER_TASK_KEY = "active-paper"
 # Azure AI Foundry: DeepSeek-R1 (Reasoner) + Mistral-Large-3 (Critic)
 
 BEDROCK_MODEL_CLAUDE_OPUS = os.environ.get("BEDROCK_MODEL_ID", "us.anthropic.claude-opus-4-6-v1")
+BEDROCK_MODEL_NOVA_PREMIER = os.environ.get("BEDROCK_NOVA_PREMIER_ID", "amazon.nova-premier-v1:0")
 AZURE_AI_REASONER_MODEL = os.environ.get("AZURE_AI_REASONER_MODEL", "DeepSeek-R1")
 AZURE_AI_CRITIC_MODEL = os.environ.get("AZURE_AI_CRITIC_MODEL", "Mistral-Large-3")
 AZURE_AI_GPT4O_MODEL = os.environ.get("AZURE_AI_GPT4O_MODEL", "gpt-4o")
@@ -446,6 +454,7 @@ AZURE_AI_O3MINI_MODEL = os.environ.get("AZURE_AI_O3MINI_MODEL", "o3-mini")
 AZURE_AI_GPT41_MODEL = os.environ.get("AZURE_AI_GPT41_MODEL", "gpt-4.1")
 AZURE_AI_PHI4_MODEL = os.environ.get("AZURE_AI_PHI4_MODEL", "Phi-4-reasoning")
 AZURE_AI_GROK_MODEL = os.environ.get("AZURE_AI_GROK_MODEL", "grok-4-1-fast-reasoning")
+AZURE_AI_GPT53_MODEL = os.environ.get("AZURE_AI_GPT53_MODEL", "gpt-5.3-chat")
 
 AGENT_MODELS = {
     # === Bedrock (Claude Opus 4.6) ===
@@ -463,10 +472,10 @@ AGENT_MODELS = {
         "temperature": 0.3,
         "role_description": "200K context synthesis — integrates all findings into unified hypotheses and publication-quality documents",
     },
-    # === Azure AI Foundry (services.ai.azure.com) ===
+    # === Bedrock (Amazon Nova Premier) ===
     "reasoner": {
-        "model_id": AZURE_AI_REASONER_MODEL,
-        "provider": "azure_ai",
+        "model_id": BEDROCK_MODEL_NOVA_PREMIER,
+        "provider": "bedrock",
         "max_tokens": 16_000,
         "temperature": 0.2,
         "role_description": "Causal chain reasoning — step-by-step logical analysis with formal justification",
@@ -486,7 +495,7 @@ AGENT_MODELS = {
         "role_description": "Creative innovation — generates unconventional therapeutic approaches and cross-domain connections",
     },
     "strategist": {
-        "model_id": AZURE_AI_KIMI_MODEL,
+        "model_id": AZURE_AI_GPT53_MODEL,
         "provider": "azure_ai",
         "max_tokens": 16_000,
         "temperature": 0.3,
@@ -540,7 +549,7 @@ def _safe_join(sep: str, items: list, limit: int | None = None) -> str:
 
 # ============== System Prompts ==============
 
-MASTER_PROMPT = """You are an advanced biomedical discovery AI agent on humanovo, part of a ten-agent parallel system using eight distinct models (Claude Opus 4.6 via AWS Bedrock, DeepSeek-R1, Mistral-Large-3, Cohere Command A, Kimi-K2-Thinking, Grok-4.1 Fast Reasoning via Azure AI Foundry, GPT-4o, o3-mini, GPT-4.1 via Azure OpenAI) designed to discover cures, treatments, and prevention strategies for human diseases.
+MASTER_PROMPT = """You are an advanced biomedical discovery AI agent on humanovo, part of a ten-agent parallel system using eight distinct models (Claude Opus 4.6 and Amazon Nova Premier via AWS Bedrock, Mistral-Large-3, Cohere Command A, GPT-5.3-chat, Grok-4.1 Fast Reasoning via Azure AI Foundry, GPT-4o, o3-mini, GPT-4.1 via Azure OpenAI) designed to discover cures, treatments, and prevention strategies for human diseases.
 
 ## OPERATING PRINCIPLES
 - Broad scientific scope: explore diverse pathways, mechanisms, and compounds for therapeutic discovery
@@ -628,8 +637,8 @@ GENOMIC & MULTI-OMICS EXPLORATION:
 
 Think like a postdoc who just found something unexpected in the data. Follow every thread.""",
 
-    "reasoner": """You are a REASONER agent running on DeepSeek-R1 via Azure AI Foundry.
-Your unique strength is DEEP, RIGOROUS logical analysis with formal causal reasoning.
+    "reasoner": """You are a REASONER agent running on Amazon Nova Premier via AWS Bedrock.
+Your unique strength is DEEP, RIGOROUS logical analysis with formal causal reasoning and complex multi-step reasoning over large contexts.
 
 MISSION: Construct complete, airtight causal chains from molecular mechanisms to clinical outcomes.
 
@@ -696,8 +705,8 @@ NEVER accept a hypothesis just because it's interesting. NEVER soft-pedal safety
 
 Think like an FDA reviewer combined with a pharma CMC expert — thorough, fair, uncompromising on safety.""",
 
-    "strategist": """You are a STRATEGIST agent running on Kimi-K2-Thinking via Azure AI Foundry.
-Your unique strength is LONG-HORIZON STRATEGIC THINKING with deep reasoning chains.
+    "strategist": """You are a STRATEGIST agent running on GPT-5.3-chat via Azure OpenAI.
+Your unique strength is LONG-HORIZON STRATEGIC THINKING with advanced reasoning and clinical planning.
 
 MISSION: Design comprehensive clinical development strategies and regulatory pathways.
 
@@ -1279,10 +1288,10 @@ PIPELINE_STAGES = [
 ]
 # Fallback: if a stage's model is unavailable, try these alternatives
 STAGE_FALLBACKS = {
-    "reasoner": ["explorer"],           # DeepSeek → Claude Opus
+    "reasoner": ["explorer"],           # Nova Premier → Claude Opus
     "innovator": ["explorer"],          # Cohere → Claude Opus
     "critic": ["explorer"],             # Mistral → Claude Opus
-    "strategist": ["analyst"],          # Kimi → GPT-4o
+    "strategist": ["analyst"],          # GPT-5.3 → GPT-4o
     "quant": ["critic", "explorer"],    # Grok → Mistral → Claude Opus
     "validator": ["analyst"],           # o3-mini → GPT-4o
     "architect": ["analyst"],           # GPT-4.1 → GPT-4o
