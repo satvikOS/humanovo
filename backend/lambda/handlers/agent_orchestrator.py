@@ -1922,9 +1922,27 @@ YOUR TASK: Take the hypothesis above and IMPROVE it from your specialized perspe
 Return ONLY valid JSON:
 {{"has_hypothesis": true, "title": "...", "description": "...", "mechanism": "...", "confidence": 0.0-{target_confidence}, "evidence_summary": ["..."], "risks": ["..."], "validation_steps": ["..."], "novelty_score": 0.0-1.0}}"""
 
-                # Build system prompt
+                # Build system prompt — use concise academic version for Azure OpenAI
+                # models to avoid content filter jailbreak false positives
                 role_prompt = ROLE_PROMPTS.get(role, f"You are a {role.upper()} specialist.")
-                system_prompt = f"{MASTER_PROMPT}\n\n---\n\n{role_prompt}"
+                model_config = AGENT_MODELS.get(role, {})
+                model_id = model_config.get("model_id", "")
+                if model_config.get("provider") == "azure_ai" and (
+                    "gpt-5" in model_id.lower() or "gpt-4o" in model_id.lower()
+                    or "gpt-4.1" in model_id.lower() or "o3" in model_id.lower()
+                ):
+                    # Concise academic prompt for Azure OpenAI — avoids content filter triggers
+                    system_prompt = (
+                        f"You are a biomedical research agent in a multi-model drug discovery pipeline. "
+                        f"Your role: analyze scientific hypotheses for {disease} ({discovery_type}). "
+                        f"Provide evidence-based analysis with specific molecular targets, published citations (PMID, NCT#), "
+                        f"quantitative data (IC50, HR, p-values), and clinical feasibility assessment.\n\n"
+                        f"Return ONLY valid JSON with: has_hypothesis, title, description (200+ words), "
+                        f"mechanism (complete molecular cascade), confidence (0-1), evidence_summary, "
+                        f"risks, validation_steps, novelty_score.\n\n---\n\n{role_prompt}"
+                    )
+                else:
+                    system_prompt = f"{MASTER_PROMPT}\n\n---\n\n{role_prompt}"
 
                 # Call the model
                 try:
