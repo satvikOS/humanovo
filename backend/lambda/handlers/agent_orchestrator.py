@@ -444,7 +444,7 @@ PAPER_TASK_KEY = "active-paper"
 # Azure AI Foundry: DeepSeek-R1 (Reasoner) + Mistral-Large-3 (Critic)
 
 BEDROCK_MODEL_CLAUDE_OPUS = os.environ.get("BEDROCK_MODEL_ID", "us.anthropic.claude-opus-4-6-v1")
-BEDROCK_MODEL_NOVA_PREMIER = os.environ.get("BEDROCK_NOVA_PREMIER_ID", "amazon.nova-premier-v1:0")
+BEDROCK_MODEL_NOVA_PREMIER = os.environ.get("BEDROCK_NOVA_PREMIER_ID", "us.amazon.nova-premier-v1:0")
 AZURE_AI_REASONER_MODEL = os.environ.get("AZURE_AI_REASONER_MODEL", "DeepSeek-R1")
 AZURE_AI_CRITIC_MODEL = os.environ.get("AZURE_AI_CRITIC_MODEL", "Mistral-Large-3")
 AZURE_AI_GPT4O_MODEL = os.environ.get("AZURE_AI_GPT4O_MODEL", "gpt-4o")
@@ -946,6 +946,20 @@ def _build_invoke_body(model_id: str, prompt: str, system_prompt: str,
             "temperature": temperature,
             "top_p": 0.9,
         }
+    elif provider == "amazon":
+        # Amazon Nova models require content as array of content blocks
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": [{"text": system_prompt}]})
+        messages.append({"role": "user", "content": [{"text": prompt}]})
+        return {
+            "messages": messages,
+            "inferenceConfig": {
+                "maxNewTokens": max_tokens,
+                "temperature": temperature,
+                "topP": 0.9,
+            },
+        }
     else:
         # OpenAI-compatible chat format (deepseek, moonshotai, openai)
         messages = []
@@ -968,6 +982,20 @@ def _parse_invoke_response(model_id: str, response_body: dict) -> str:
     if provider == "meta":
         if "generation" in response_body:
             return response_body["generation"]
+
+    # Amazon Nova format
+    if provider == "amazon":
+        output = response_body.get("output", {})
+        if isinstance(output, dict):
+            msg = output.get("message", {})
+            if isinstance(msg, dict) and "content" in msg:
+                content = msg["content"]
+                if isinstance(content, list) and content:
+                    block = content[0]
+                    if isinstance(block, dict) and "text" in block:
+                        return block["text"]
+                elif isinstance(content, str):
+                    return content
 
     # OpenAI-compatible choices format (deepseek, openai, moonshotai)
     if "choices" in response_body:
@@ -1103,8 +1131,8 @@ def call_azure_ai(model_name: str, prompt: str, system_prompt: str,
     max_retries = 5
     for attempt in range(max_retries + 1):
         try:
-            # o3-mini is a reasoning model: use max_completion_tokens, no temperature
-            if "o3" in model_name.lower():
+            # o3-mini and GPT-5.3+ require max_completion_tokens, no temperature
+            if "o3" in model_name.lower() or "gpt-5" in model_name.lower():
                 response = client.chat.completions.create(
                     model=model_name,
                     messages=messages,
