@@ -495,7 +495,7 @@ AGENT_MODELS = {
         "role_description": "Creative innovation — generates unconventional therapeutic approaches and cross-domain connections",
     },
     "strategist": {
-        "model_id": AZURE_AI_GPT53_MODEL,
+        "model_id": AZURE_AI_GPT41_MODEL,
         "provider": "azure_ai",
         "max_tokens": 16_000,
         "temperature": 0.3,
@@ -549,7 +549,7 @@ def _safe_join(sep: str, items: list, limit: int | None = None) -> str:
 
 # ============== System Prompts ==============
 
-MASTER_PROMPT = """You are an advanced biomedical discovery AI agent on humanovo, part of a ten-agent parallel system using eight distinct models (Claude Opus 4.6 and Amazon Nova Premier via AWS Bedrock, Mistral-Large-3, Cohere Command A, GPT-5.3-chat, Grok-4.1 Fast Reasoning via Azure AI Foundry, GPT-4o, o3-mini, GPT-4.1 via Azure OpenAI) designed to discover cures, treatments, and prevention strategies for human diseases.
+MASTER_PROMPT = """You are an advanced biomedical discovery AI agent on humanovo, part of a ten-agent parallel system using eight distinct models (Claude Opus 4.6 and Amazon Nova Premier via AWS Bedrock, Mistral-Large-3, Cohere Command A, Grok-4.1 Fast Reasoning via Azure AI Foundry, GPT-4o, o3-mini, GPT-4.1 via Azure OpenAI) designed to discover cures, treatments, and prevention strategies for human diseases.
 
 ## OPERATING PRINCIPLES
 - Broad scientific scope: explore diverse pathways, mechanisms, and compounds for therapeutic discovery
@@ -705,7 +705,7 @@ NEVER accept a hypothesis just because it's interesting. NEVER soft-pedal safety
 
 Think like an FDA reviewer combined with a pharma CMC expert — thorough, fair, uncompromising on safety.""",
 
-    "strategist": """You are a STRATEGIST agent running on GPT-5.3-chat via Azure OpenAI.
+    "strategist": """You are a STRATEGIST agent running on GPT-4.1 via Azure OpenAI.
 Your unique strength is LONG-HORIZON STRATEGIC THINKING with advanced reasoning and clinical planning.
 
 MISSION: Design comprehensive clinical development strategies and regulatory pathways.
@@ -1293,11 +1293,11 @@ def run_single_agent(role: str, prompt: str, system_prompt: str) -> dict | None:
 # Stage  Role          Model                  Purpose
 # ─────────────────────────────────────────────────────────
 #  1     seed          Claude Opus (Bedrock)    Generate initial hypothesis seed
-#  2     expand        DeepSeek-R1 (Azure AI)   Deep causal chain reasoning
+#  2     expand        Nova Premier (Bedrock)   Deep causal chain reasoning
 #  3     evidence      Cohere Command A         Literature + PubMed evidence
 #  4     counter       Mistral-Large-3          Counter-arguments & risks
 #  5     mechanism     o3-mini (Azure OpenAI)   Mechanistic deep dive
-#  6     validate      Kimi-K2-Thinking         Cross-validation
+#  6     validate      GPT-4.1 (Azure OpenAI)   Cross-validation & strategy
 #  7     ground        GPT-4.1 (Azure OpenAI)   Scientific grounding + FDA/ClinicalTrials
 #  8     score         GPT-4o (Azure OpenAI)    Multi-dimensional scoring
 #  9     refine        Grok-4.1-fast (Azure AI) Rapid refinement
@@ -1319,7 +1319,7 @@ STAGE_FALLBACKS = {
     "reasoner": ["explorer"],           # Nova Premier → Claude Opus
     "innovator": ["explorer"],          # Cohere → Claude Opus
     "critic": ["explorer"],             # Mistral → Claude Opus
-    "strategist": ["analyst"],          # GPT-5.3 → GPT-4o
+    "strategist": ["analyst"],          # GPT-4.1 → GPT-4o
     "quant": ["critic", "explorer"],    # Grok → Mistral → Claude Opus
     "validator": ["analyst"],           # o3-mini → GPT-4o
     "architect": ["analyst"],           # GPT-4.1 → GPT-4o

@@ -862,7 +862,7 @@ class DocumentPipelineService:
             runtime_seconds=stats.get("runtime_seconds", 0.0),
             models_used=stats.get("models_active", []) or [
                 "Claude Opus 4.6", "Amazon Nova Premier", "Mistral-Large-3",
-                "GPT-4o", "Cohere Command A", "GPT-5.3-chat",
+                "GPT-4o", "Cohere Command A", "Grok-4.1",
                 "o3-mini", "GPT-4.1",
             ],
             external_factors=external_factors,
