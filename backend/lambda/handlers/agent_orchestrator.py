@@ -1927,19 +1927,24 @@ Return ONLY valid JSON:
                 role_prompt = ROLE_PROMPTS.get(role, f"You are a {role.upper()} specialist.")
                 model_config = AGENT_MODELS.get(role, {})
                 model_id = model_config.get("model_id", "")
-                if model_config.get("provider") == "azure_ai" and (
+                _is_azure_openai = model_config.get("provider") == "azure_ai" and (
                     "gpt-5" in model_id.lower() or "gpt-4o" in model_id.lower()
                     or "gpt-4.1" in model_id.lower() or "o3" in model_id.lower()
-                ):
-                    # Concise academic prompt for Azure OpenAI — avoids content filter triggers
+                )
+                if _is_azure_openai:
+                    # Concise academic prompt for Azure OpenAI — no role prompt
+                    # appended to avoid content filter jailbreak false positives
+                    role_desc = model_config.get("role_description", role)
                     system_prompt = (
-                        f"You are a biomedical research agent in a multi-model drug discovery pipeline. "
-                        f"Your role: analyze scientific hypotheses for {disease} ({discovery_type}). "
-                        f"Provide evidence-based analysis with specific molecular targets, published citations (PMID, NCT#), "
-                        f"quantitative data (IC50, HR, p-values), and clinical feasibility assessment.\n\n"
-                        f"Return ONLY valid JSON with: has_hypothesis, title, description (200+ words), "
-                        f"mechanism (complete molecular cascade), confidence (0-1), evidence_summary, "
-                        f"risks, validation_steps, novelty_score.\n\n---\n\n{role_prompt}"
+                        f"You are a biomedical research analyst specializing in {role_desc}. "
+                        f"You are part of a collaborative drug discovery pipeline analyzing {disease} ({discovery_type}). "
+                        f"Provide evidence-based scientific analysis. Return ONLY valid JSON."
+                    )
+                    # Also sanitize stage prompt — remove directive capitals
+                    stage_prompt = stage_prompt.replace("YOUR TASK: ", "Task: ")
+                    stage_prompt = stage_prompt.replace(
+                        "Do NOT generate a new hypothesis — refine the SAME one.",
+                        "Please refine this hypothesis rather than generating a new one."
                     )
                 else:
                     system_prompt = f"{MASTER_PROMPT}\n\n---\n\n{role_prompt}"
