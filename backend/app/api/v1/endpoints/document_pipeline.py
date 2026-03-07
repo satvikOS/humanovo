@@ -56,6 +56,12 @@ class GenerateHypothesisPaperRequest(BaseModel):
     model_used: str = Field(default="unknown", description="Model that generated the hypothesis")
     tags: list[str] = Field(default_factory=list, description="Tags")
     external_factors: list[dict[str, Any]] = Field(default_factory=list, description="External factors")
+    evidence_summary: list[str] = Field(default_factory=list, description="Evidence summary entries")
+    risks: list[str] = Field(default_factory=list, description="Risk factors")
+    validation_steps: list[str] = Field(default_factory=list, description="Validation steps")
+    key_citations: list[str] = Field(default_factory=list, description="Key citations (PMID, DOI)")
+    fda_references: list[str] = Field(default_factory=list, description="FDA drug references")
+    clinical_trial_references: list[str] = Field(default_factory=list, description="Clinical trial references (NCT#)")
 
 
 # ============================================================================
@@ -198,6 +204,12 @@ async def generate_hypothesis_paper(
             "model_used": body.model_used,
             "validated": False,
             "external_factors": body.external_factors,
+            "evidence_summary": body.evidence_summary,
+            "risks": body.risks,
+            "validation_steps": body.validation_steps,
+            "key_citations": body.key_citations,
+            "fda_references": body.fda_references,
+            "clinical_trial_references": body.clinical_trial_references,
         }
     else:
         hypothesis_data = await _get_hypothesis_data(hypothesis_id)
@@ -228,11 +240,14 @@ async def generate_hypothesis_paper(
         logger.error(f"PDF generation failed for hypothesis {hypothesis_id}: {e}")
         raise HTTPException(status_code=500, detail=f"PDF generation failed: {e}")
 
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename={filename}"},
-    )
+    # Return base64-encoded JSON (frontend expects this format)
+    import base64
+    pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
+    return {
+        "pdf_base64": pdf_base64,
+        "filename": filename,
+        "size_bytes": len(pdf_bytes),
+    }
 
 
 @router.post("/hypothesis/{hypothesis_id}/html")
@@ -260,6 +275,12 @@ async def generate_hypothesis_paper_html(
             "model_used": body.model_used,
             "validated": False,
             "external_factors": body.external_factors,
+            "evidence_summary": body.evidence_summary,
+            "risks": body.risks,
+            "validation_steps": body.validation_steps,
+            "key_citations": body.key_citations,
+            "fda_references": body.fda_references,
+            "clinical_trial_references": body.clinical_trial_references,
         }
     else:
         hypothesis_data = await _get_hypothesis_data(hypothesis_id)

@@ -34,6 +34,10 @@ env:
   TF_VAR_azure_o3mini_key: ${{ secrets.AZURE_O3MINI_KEY }}
   TF_VAR_azure_gpt41_endpoint: ${{ secrets.AZURE_GPT41_ENDPOINT }}
   TF_VAR_azure_gpt41_key: ${{ secrets.AZURE_GPT41_KEY }}
+  TF_VAR_azure_phi4_endpoint: ${{ secrets.AZURE_PHI4_ENDPOINT }}
+  TF_VAR_azure_phi4_key: ${{ secrets.AZURE_PHI4_KEY }}
+  TF_VAR_azure_grok_endpoint: ${{ secrets.AZURE_GROK_ENDPOINT }}
+  TF_VAR_azure_grok_key: ${{ secrets.AZURE_GROK_KEY }}
 
 jobs:
   deploy-infra:
@@ -262,11 +266,11 @@ jobs:
               # Create __init__.py for the handlers package
               touch "/tmp/fn-$fn/handlers/__init__.py"
 
-              # Bundle openai + httpx directly into agent_orchestrator zip
+              # Bundle openai + reportlab directly into agent_orchestrator zip
               # (Lambda Layer may not refresh reliably due to Terraform lifecycle)
               if [ "$fn" = "agent_orchestrator" ]; then
-                echo "    Installing openai into $fn function zip..."
-                pip install "openai>=1.12.0,<2.0" -t "/tmp/fn-$fn/" --quiet 2>/dev/null
+                echo "    Installing openai + reportlab into $fn function zip..."
+                pip install "openai>=1.12.0,<2.0" "reportlab>=4.0,<5.0" -t "/tmp/fn-$fn/" --quiet 2>/dev/null
               fi
 
               cd "/tmp/fn-$fn" && zip -r "/tmp/$fn.zip" . -x '*.pyc' '*__pycache__*'
@@ -353,6 +357,10 @@ jobs:
           AZURE_O3MINI_KEY: ${{ secrets.AZURE_O3MINI_KEY }}
           AZURE_GPT41_ENDPOINT: ${{ secrets.AZURE_GPT41_ENDPOINT }}
           AZURE_GPT41_KEY: ${{ secrets.AZURE_GPT41_KEY }}
+          AZURE_PHI4_ENDPOINT: ${{ secrets.AZURE_PHI4_ENDPOINT }}
+          AZURE_PHI4_KEY: ${{ secrets.AZURE_PHI4_KEY }}
+          AZURE_GROK_ENDPOINT: ${{ secrets.AZURE_GROK_ENDPOINT }}
+          AZURE_GROK_KEY: ${{ secrets.AZURE_GROK_KEY }}
         run: |
           NAME_PREFIX="genup-${ENVIRONMENT}"
           FN_NAME="${NAME_PREFIX}-agent_orchestrator"
@@ -385,6 +393,10 @@ jobs:
           env['AZURE_O3MINI_KEY'] = os.environ.get('AZURE_O3MINI_KEY', '')
           env['AZURE_GPT41_ENDPOINT'] = os.environ.get('AZURE_GPT41_ENDPOINT', '')
           env['AZURE_GPT41_KEY'] = os.environ.get('AZURE_GPT41_KEY', '')
+          env['AZURE_PHI4_ENDPOINT'] = os.environ.get('AZURE_PHI4_ENDPOINT', '')
+          env['AZURE_PHI4_KEY'] = os.environ.get('AZURE_PHI4_KEY', '')
+          env['AZURE_GROK_ENDPOINT'] = os.environ.get('AZURE_GROK_ENDPOINT', '')
+          env['AZURE_GROK_KEY'] = os.environ.get('AZURE_GROK_KEY', '')
           print(json.dumps({'Variables': env}))
           ")
 

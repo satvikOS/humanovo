@@ -163,6 +163,99 @@ variable "azure_mistral_key" {
   sensitive   = true
 }
 
+# ==================== Azure OpenAI — Per-Model Endpoints ====================
+
+variable "azure_gpt4o_endpoint" {
+  description = "Azure OpenAI GPT-4o deployment endpoint"
+  type        = string
+  default     = ""
+}
+
+variable "azure_gpt4o_key" {
+  description = "Azure OpenAI GPT-4o API key"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "azure_cohere_endpoint" {
+  description = "Azure AI Cohere Command A endpoint"
+  type        = string
+  default     = ""
+}
+
+variable "azure_cohere_key" {
+  description = "Azure AI Cohere Command A API key"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "azure_kimi_endpoint" {
+  description = "Azure AI Kimi K2 Thinking endpoint"
+  type        = string
+  default     = ""
+}
+
+variable "azure_kimi_key" {
+  description = "Azure AI Kimi K2 Thinking API key"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "azure_o3mini_endpoint" {
+  description = "Azure OpenAI o3-mini endpoint"
+  type        = string
+  default     = ""
+}
+
+variable "azure_o3mini_key" {
+  description = "Azure OpenAI o3-mini API key"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "azure_gpt41_endpoint" {
+  description = "Azure OpenAI GPT-4.1 endpoint"
+  type        = string
+  default     = ""
+}
+
+variable "azure_gpt41_key" {
+  description = "Azure OpenAI GPT-4.1 API key"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "azure_phi4_endpoint" {
+  description = "Azure AI Phi-4 Reasoning endpoint"
+  type        = string
+  default     = ""
+}
+
+variable "azure_phi4_key" {
+  description = "Azure AI Phi-4 Reasoning API key"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "azure_grok_endpoint" {
+  description = "Azure AI Grok-4.1 Fast Reasoning endpoint"
+  type        = string
+  default     = ""
+}
+
+variable "azure_grok_key" {
+  description = "Azure AI Grok-4.1 Fast Reasoning API key"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
 # ==================== API Gateway ====================
 
 variable "cors_allowed_origins" {

@@ -274,6 +274,20 @@ module "lambda" {
   azure_deepseek_key      = var.azure_deepseek_key
   azure_mistral_endpoint  = var.azure_mistral_endpoint
   azure_mistral_key       = var.azure_mistral_key
+  azure_gpt4o_endpoint    = var.azure_gpt4o_endpoint
+  azure_gpt4o_key         = var.azure_gpt4o_key
+  azure_cohere_endpoint   = var.azure_cohere_endpoint
+  azure_cohere_key        = var.azure_cohere_key
+  azure_kimi_endpoint     = var.azure_kimi_endpoint
+  azure_kimi_key          = var.azure_kimi_key
+  azure_o3mini_endpoint   = var.azure_o3mini_endpoint
+  azure_o3mini_key        = var.azure_o3mini_key
+  azure_gpt41_endpoint    = var.azure_gpt41_endpoint
+  azure_gpt41_key         = var.azure_gpt41_key
+  azure_phi4_endpoint     = var.azure_phi4_endpoint
+  azure_phi4_key          = var.azure_phi4_key
+  azure_grok_endpoint     = var.azure_grok_endpoint
+  azure_grok_key          = var.azure_grok_key
   lambda_memory_size    = var.lambda_memory_size
   lambda_timeout        = var.lambda_timeout
 }

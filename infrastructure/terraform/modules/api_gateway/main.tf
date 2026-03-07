@@ -362,6 +362,37 @@ resource "aws_apigatewayv2_route" "orchestrator_save_to_project" {
   target    = "integrations/${aws_apigatewayv2_integration.lambda["agent_orchestrator"].id}"
 }
 
+resource "aws_apigatewayv2_route" "orchestrator_paper_status" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "GET /api/v1/orchestrator/paper-status"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda["agent_orchestrator"].id}"
+}
+
+resource "aws_apigatewayv2_route" "orchestrator_cancel_paper" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /api/v1/orchestrator/cancel-paper"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda["agent_orchestrator"].id}"
+}
+
+resource "aws_apigatewayv2_route" "orchestrator_paper_pdf" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /api/v1/orchestrator/generate-paper/pdf"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda["agent_orchestrator"].id}"
+}
+
+# Document endpoints (hypothesis PDF/HTML export via agent_orchestrator Lambda)
+resource "aws_apigatewayv2_route" "document_hypothesis_pdf" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /api/v1/documents/hypothesis/{hypothesisId}/pdf"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda["agent_orchestrator"].id}"
+}
+
+resource "aws_apigatewayv2_route" "document_hypothesis_html" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /api/v1/documents/hypothesis/{hypothesisId}/html"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda["agent_orchestrator"].id}"
+}
+
 # Embeddings
 resource "aws_apigatewayv2_route" "embeddings_create" {
   api_id             = aws_apigatewayv2_api.main.id

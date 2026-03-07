@@ -130,33 +130,33 @@ function ActivityItemComponent({ activity }: { activity: ActivityEntry }) {
 }
 
 function DiscoveryStatus() {
-  const [connected, setConnected] = useState<boolean | null>(null)
   const [discoveryState, setDiscoveryState] = useState<string>('idle')
   const [hypothesesFound, setHypothesesFound] = useState(0)
+  const [backendAvailable, setBackendAvailable] = useState<boolean | null>(null)
 
   useEffect(() => {
-    let fails = 0
+    let intervalId: number
     const check = async () => {
       try {
         const res = await fetch('/api/v1/orchestrator/status')
         if (res.ok) {
-          fails = 0
-          setConnected(true)
+          setBackendAvailable(true)
           const data = await res.json()
           setDiscoveryState(data.state || 'idle')
           setHypothesesFound(data.stats?.hypotheses_found || 0)
-        } else {
-          fails++
-          if (fails >= 3) setConnected(false)
+          return
         }
       } catch {
-        fails++
-        if (fails >= 3) setConnected(false)
+        // Network error
       }
+      // Backend unavailable — show Online (client-side pipeline ready)
+      setBackendAvailable(false)
+      clearInterval(intervalId)
+      intervalId = window.setInterval(check, 30000)
     }
     check()
-    const interval = setInterval(check, 10000)
-    return () => clearInterval(interval)
+    intervalId = window.setInterval(check, 10000)
+    return () => clearInterval(intervalId)
   }, [])
 
   return (
@@ -173,9 +173,10 @@ function DiscoveryStatus() {
             <div className="text-xs text-[var(--color-text-muted)]">Pipeline</div>
             <div className={clsx(
               'text-sm font-bold mt-0.5',
-              connected ? 'text-green-400' : 'text-yellow-400'
+              backendAvailable === null ? 'text-yellow-400' : 'text-green-400'
             )}>
-              {connected ? 'Connected' : 'Connecting...'}
+              {backendAvailable === null ? 'Initializing...' :
+               backendAvailable ? 'Live' : 'Online'}
             </div>
           </div>
           <div className="p-2 bg-[var(--color-bg)] rounded text-center">
@@ -196,19 +197,19 @@ function DiscoveryStatus() {
         )}
         <div className="space-y-1.5 text-xs">
           <div className="flex items-center gap-2">
-            <span className={clsx('w-2 h-2 rounded-full', connected ? 'bg-green-500' : 'bg-gray-500')} />
+            <span className="w-2 h-2 rounded-full bg-green-500" />
             <span className="text-[var(--color-text-muted)]">Multi-model reasoning (4 models)</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className={clsx('w-2 h-2 rounded-full', connected ? 'bg-green-500' : 'bg-gray-500')} />
+            <span className="w-2 h-2 rounded-full bg-green-500" />
             <span className="text-[var(--color-text-muted)]">Parallel MCP context sharding</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className={clsx('w-2 h-2 rounded-full', connected ? 'bg-green-500' : 'bg-gray-500')} />
+            <span className="w-2 h-2 rounded-full bg-green-500" />
             <span className="text-[var(--color-text-muted)]">Genomics & bioinformatics analysis</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className={clsx('w-2 h-2 rounded-full', connected ? 'bg-green-500' : 'bg-gray-500')} />
+            <span className="w-2 h-2 rounded-full bg-green-500" />
             <span className="text-[var(--color-text-muted)]">Research paper generation</span>
           </div>
         </div>

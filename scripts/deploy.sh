@@ -198,6 +198,12 @@ HANDLER_EOF
             cp -r "backend/lambda/shared"/* "$func_dir/" 2>/dev/null || true
         fi
 
+        # Bundle extra dependencies for agent_orchestrator
+        if [ "$handler" = "agent_orchestrator" ]; then
+            log_info "  Installing openai + reportlab into $handler function zip..."
+            pip install "openai>=1.12.0,<2.0" "reportlab>=4.0,<5.0" -t "$func_dir/" --quiet 2>/dev/null
+        fi
+
         # Create zip
         cd "$func_dir"
         zip -r9 "../${handler}.zip" . >/dev/null

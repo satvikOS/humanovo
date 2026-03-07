@@ -9,7 +9,6 @@ import {
   FiChevronDown,
   FiChevronUp,
   FiAward,
-  FiFileText,
   FiPlus,
   FiX,
   FiDownload,
@@ -60,6 +59,18 @@ interface Hypothesis {
   risks?: string[]
   validation_steps?: string[]
   novelty_score?: number
+  key_citations?: string[]
+  fda_references?: string[]
+  clinical_trial_references?: string[]
+  grounding_sources?: {
+    pubmed_count?: number
+    clinical_trials_count?: number
+    fda_count?: number
+    uniprot_count?: number
+    reactome_count?: number
+  }
+  stages_completed?: number
+  round_number?: number
   created_at?: string
 }
 
@@ -201,12 +212,6 @@ export default function Agents() {
   const [connectedAgents, setConnectedAgents] = useState(0)
   const [totalAgents, setTotalAgents] = useState(8)
 
-  // Paper generation
-  const [generatingPaper, setGeneratingPaper] = useState(false)
-  const [generatingPaperId, setGeneratingPaperId] = useState<string | null>(null)
-  const [paperMarkdown, setPaperMarkdown] = useState<string | null>(null)
-  const [, setPaperHypothesisTitle] = useState<string>('')
-
   // Configuration
   const [config, setConfig] = useState<DiscoveryConfig>({
     disease: '',
@@ -228,50 +233,51 @@ export default function Agents() {
   // Polling ref for persistent updates
   const pollRef = useRef<number | null>(null)
   const failCountRef = useRef(0)
-  const paperPollRef = useRef<number | null>(null)
-
   // Fetch status from backend (real connection check)
-  // Only mark disconnected after 3+ consecutive failures to avoid flicker
   const fetchStatus = useCallback(async () => {
     try {
       const response = await fetch(`${API_BASE}/orchestrator/status`)
       if (response.ok) {
         failCountRef.current = 0
-        // Mark connected FIRST — 200 OK means the backend is alive.
-        // Do this before response.json() so a body-parsing error can't block it.
         setAiConnected(true)
+        // Restore fast polling when backend comes back online
+        if (pollRef.current) {
+          clearInterval(pollRef.current)
+          pollRef.current = window.setInterval(fetchStatus, 3000)
+        }
         try {
           const data = await response.json()
           const newState = data.state || 'idle'
-          // When discovery finishes, clear hypotheses from discovery panel
-          // (they're already saved to project via saveHypothesisToProject)
           setState(prev => {
             if ((prev === 'running' || prev === 'paused' || prev === 'stopping') && newState === 'idle' && hypotheses.length > 0) {
               setHypotheses([])
             }
             return newState
           })
+          // Restore disease/discoveryType from backend if local config is empty
+          // (handles page refresh during continuation — prevents "— Treatment Research" trash project)
+          const effectiveDisease = config.disease || data.disease || ''
+          const effectiveDiscoveryType = config.discoveryType || data.discovery_type || 'treatment'
+          if (!config.disease && data.disease) {
+            setConfig(prev => ({ ...prev, disease: data.disease, discoveryType: data.discovery_type || prev.discoveryType }))
+          }
           if (data.stats) {
             setStats(data.stats)
-            // Auto-stop: when all rounds are completed, stop the pipeline
             const currentRound = data.stats.current_round || 0
             const totalRounds = data.stats.total_rounds || 0
             if (totalRounds > 0 && currentRound >= totalRounds && newState === 'running') {
-              // Rounds finished — auto-stop
               fetch(`${API_BASE}/orchestrator/stop`, { method: 'POST' }).catch(() => {})
             }
           }
           if (data.top_hypotheses && data.top_hypotheses.length > 0) {
             setHypotheses(prev => {
               const existingIds = new Set(prev.map(h => h.id))
-              // Filter out malformed hypotheses (system messages, raw JSON, reasoning tags)
               const incoming = data.top_hypotheses
                 .filter((h: Hypothesis) => !existingIds.has(h.id))
                 .filter(isValidHypothesis)
               if (incoming.length === 0) return prev
-              // Auto-save new hypotheses to project library
               for (const h of incoming) {
-                saveHypothesisToProject(h, config.disease, config.discoveryType)
+                saveHypothesisToProject(h, effectiveDisease, effectiveDiscoveryType)
               }
               return [...incoming, ...prev].sort((a: Hypothesis, b: Hypothesis) => b.confidence - a.confidence).slice(0, 100)
             })
@@ -281,68 +287,56 @@ export default function Agents() {
         }
       } else {
         failCountRef.current++
-        if (failCountRef.current >= 3) setAiConnected(false)
+        if (failCountRef.current >= 2) {
+          setAiConnected(false)
+          // Slow down polling when backend is down — stop flooding 500 errors
+          if (pollRef.current) {
+            clearInterval(pollRef.current)
+            pollRef.current = window.setInterval(fetchStatus, 30000)
+          }
+        }
       }
     } catch {
       failCountRef.current++
-      if (failCountRef.current >= 3) setAiConnected(false)
+      if (failCountRef.current >= 2) {
+        setAiConnected(false)
+        if (pollRef.current) {
+          clearInterval(pollRef.current)
+          pollRef.current = window.setInterval(fetchStatus, 30000)
+        }
+      }
     }
   }, [config.disease, config.discoveryType])
 
   // Check AI health on mount (returns connected count, never model names)
+  // Retries up to 3 times on failure (Lambda cold starts take time)
   useEffect(() => {
+    let retries = 0
+    const maxRetries = 3
     const checkHealth = async () => {
       try {
         const response = await fetch(`${API_BASE}/orchestrator/health`)
         if (response.ok) {
           const data = await response.json()
-          setConnectedAgents(data.connected_count || 0)
-          setTotalAgents(data.total_models || 4)
-          // Don't override aiConnected here — status polling handles that.
-          // Health check only updates model counts.
+          const count = data.connected_count || 0
+          setConnectedAgents(count)
+          setTotalAgents(data.total_models || 8)
+          setAiConnected(count > 0)
+          retries = 0
+        } else {
+          retries++
+          if (retries >= maxRetries) setAiConnected(false)
+          // else keep aiConnected as null (yellow/loading)
         }
       } catch {
-        // Health check failed, status polling will still set aiConnected
+        retries++
+        if (retries >= maxRetries) setAiConnected(false)
       }
     }
     checkHealth()
-  }, [])
-
-  // On mount, check if paper generation is still running (persists across navigation)
-  useEffect(() => {
-    const resumePaperPoll = async () => {
-      try {
-        const res = await fetch(`${API_BASE}/orchestrator/paper-status`)
-        if (!res.ok) return
-        const data = await res.json()
-        if (data.status === 'generating') {
-          // Paper gen is still running — resume the polling UI
-          setGeneratingPaper(true)
-          if (paperPollRef.current) clearInterval(paperPollRef.current)
-          paperPollRef.current = window.setInterval(async () => {
-            try {
-              const statusRes = await fetch(`${API_BASE}/orchestrator/paper-status`)
-              if (!statusRes.ok) return
-              const d = await statusRes.json()
-              if (d.status === 'done' && d.paper_html) {
-                if (paperPollRef.current) { clearInterval(paperPollRef.current); paperPollRef.current = null }
-                setPaperMarkdown(d.paper_html)
-                setGeneratingPaper(false)
-                setGeneratingPaperId(null)
-              } else if (d.status === 'failed' || d.status === 'idle') {
-                if (paperPollRef.current) { clearInterval(paperPollRef.current); paperPollRef.current = null }
-                if (d.status === 'failed') alert(`Paper generation failed: ${d.error || 'Unknown error'}`)
-                setGeneratingPaper(false)
-                setGeneratingPaperId(null)
-              }
-            } catch { /* poll error, keep trying */ }
-          }, 4000)
-        } else if (data.status === 'done' && data.paper_html) {
-          setPaperMarkdown(data.paper_html)
-        }
-      } catch { /* no paper status available */ }
-    }
-    resumePaperPoll()
+    // Re-check health every 20 seconds
+    const healthInterval = window.setInterval(checkHealth, 20000)
+    return () => clearInterval(healthInterval)
   }, [])
 
   // Poll for updates — persists across navigation (backend keeps running)
@@ -354,7 +348,6 @@ export default function Agents() {
 
     return () => {
       if (pollRef.current) clearInterval(pollRef.current)
-      if (paperPollRef.current) clearInterval(paperPollRef.current)
     }
   }, [fetchStatus])
 
@@ -383,7 +376,6 @@ export default function Agents() {
         setState('running')
         setShowConfig(false)
         setHypotheses([])
-        setPaperMarkdown(null)
         logActivity({
           type: 'discovery',
           action: 'started',
@@ -431,106 +423,6 @@ export default function Agents() {
       console.error('Failed to stop:', e)
     }
   }, [])
-
-  const generatePaper = useCallback(async (hypothesisId?: string, hypothesisTitle?: string) => {
-    setGeneratingPaper(true)
-    setGeneratingPaperId(hypothesisId || null)
-    setPaperHypothesisTitle(hypothesisTitle || config.disease)
-
-    try {
-      // Start async paper generation (returns immediately)
-      const response = await fetch(`${API_BASE}/orchestrator/generate-paper/markdown`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(hypothesisId ? { hypothesis_id: hypothesisId } : {}),
-      })
-
-      if (!response.ok) {
-        let detail = 'Unknown error'
-        try { const err = await response.json(); detail = err.detail || detail } catch { }
-        alert(`Paper generation failed: ${detail}`)
-        setGeneratingPaper(false)
-        setGeneratingPaperId(null)
-        return
-      }
-
-      // Poll for paper completion every 4 seconds
-      if (paperPollRef.current) clearInterval(paperPollRef.current)
-      paperPollRef.current = window.setInterval(async () => {
-        try {
-          const statusRes = await fetch(`${API_BASE}/orchestrator/paper-status`)
-          if (!statusRes.ok) return
-          const data = await statusRes.json()
-          if (data.status === 'done' && data.paper_html) {
-            if (paperPollRef.current) { clearInterval(paperPollRef.current); paperPollRef.current = null }
-            setPaperMarkdown(data.paper_html)
-            setGeneratingPaper(false)
-            setGeneratingPaperId(null)
-
-            // Auto-save paper to Evidence section
-            const evidenceItems = persistGet<Array<Record<string, unknown>>>('evidence', [])
-            const paperId = `ev-paper-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-            const diseaseTag = config.disease.toLowerCase().replace(/[^a-z0-9]+/g, '-')
-            evidenceItems.unshift({
-              id: paperId,
-              title: `AI-Generated Research Paper: ${config.disease} — ${config.discoveryType.replace(/_/g, ' ')}`,
-              source: 'Humanovo AI Pipeline',
-              sourceUrl: '',
-              type: 'paper',
-              status: 'pending',
-              date: new Date().toISOString().split('T')[0],
-              authors: ['Humanovo Multi-Model Discovery System'],
-              abstract: `Research paper generated by Humanovo's 8-model parallel AI pipeline (Claude Opus 4.6, DeepSeek-R1-0528, Mistral-Large-3, GPT-4o, Cohere Command A, Kimi-K2-Thinking, o3-mini, GPT-4.1) for ${config.disease} ${config.discoveryType} discovery. Contains ${hypotheses.length} hypotheses with PubMed-validated citations.`,
-              tags: ['internal-hypothesis-source', 'humanovo', 'ai-generated', diseaseTag, config.discoveryType, 'multi-model'],
-              citations: 0,
-              relevanceScore: 0.95,
-              publisher: 'Humanovo',
-              fullText: data.paper_html,
-            })
-            persistSet('evidence', evidenceItems.slice(0, 500))
-            logActivity({
-              type: 'evidence',
-              action: 'created',
-              title: `Auto-saved research paper: ${config.disease} ${config.discoveryType}`,
-              metadata: { source: 'paper-generation', disease: config.disease },
-            })
-          } else if (data.status === 'failed') {
-            if (paperPollRef.current) { clearInterval(paperPollRef.current); paperPollRef.current = null }
-            alert(`Paper generation failed: ${data.error || 'Unknown error'}`)
-            setGeneratingPaper(false)
-            setGeneratingPaperId(null)
-          }
-          // else status is 'generating' — keep polling
-        } catch { /* poll error, keep trying */ }
-      }, 4000)
-
-    } catch (e) {
-      console.error('Failed to start paper generation:', e)
-      alert('Failed to start paper generation')
-      setGeneratingPaper(false)
-      setGeneratingPaperId(null)
-    }
-  }, [config.disease])
-
-  const cancelPaper = useCallback(async () => {
-    try {
-      await fetch(`${API_BASE}/orchestrator/cancel-paper`, { method: 'POST' })
-    } catch { /* best effort */ }
-    if (paperPollRef.current) { clearInterval(paperPollRef.current); paperPollRef.current = null }
-    setGeneratingPaper(false)
-    setGeneratingPaperId(null)
-  }, [])
-
-  const downloadPaperHtml = useCallback(() => {
-    if (!paperMarkdown) return
-    const blob = new Blob([paperMarkdown], { type: 'text/html' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `humanovo-research-${config.disease.replace(/\s+/g, '-').toLowerCase()}-${new Date().toISOString().split('T')[0]}.html`
-    a.click()
-    URL.revokeObjectURL(url)
-  }, [paperMarkdown, config.disease])
 
   const addFocusEntity = useCallback(() => {
     if (focusEntityInput.trim() && !config.focusEntities.includes(focusEntityInput.trim())) {
@@ -606,22 +498,25 @@ export default function Agents() {
             <div>
               <h1 className="text-xl font-semibold">Discovery</h1>
               <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
-                8 parallel models &middot; multi-model pipeline
+                10 parallel agents &middot; 8 models &middot; multi-model pipeline
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            {/* AI Pipeline Status — real connection check */}
+            {/* AI Pipeline Status */}
             <div className={clsx(
               'flex items-center gap-1.5 px-2 py-1 rounded text-xs',
+              aiConnected === null ? 'bg-yellow-500/20 text-yellow-400' :
               aiConnected ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'
             )}>
               <div className={clsx(
                 'w-2 h-2 rounded-full',
+                aiConnected === null ? 'bg-yellow-500 animate-pulse' :
                 aiConnected ? 'bg-green-500' : 'bg-yellow-500 animate-pulse'
               )} />
-              {aiConnected ? `${connectedAgents}/${totalAgents} Agents` : 'Connecting...'}
+              {aiConnected === null ? 'Connecting...' :
+               aiConnected ? `${connectedAgents}/${totalAgents} Models Connected` : 'Reconnecting...'}
             </div>
 
             {/* Control Buttons */}
@@ -852,7 +747,7 @@ export default function Agents() {
                   <label className="text-xs text-[var(--color-text-muted)] block mb-1">
                     Max Agents: {config.maxAgents.toLocaleString()}
                     <span className="text-[var(--color-text-muted)] ml-1">
-                      ({Math.floor(config.maxAgents / 8).toLocaleString()} per model)
+                      ({Math.floor(config.maxAgents / 10).toLocaleString()} per agent)
                     </span>
                   </label>
                   <input
@@ -1026,106 +921,9 @@ export default function Agents() {
           )}
         </div>
 
-        {/* Main Content - Hypotheses or Paper */}
+        {/* Main Content - Hypotheses */}
         <div className="flex-1 overflow-y-auto">
-          {/* Global paper generation status bar */}
-          {generatingPaper && !paperMarkdown && (
-            <div className="mx-4 mt-4 p-4 bg-purple-500/10 border border-purple-500/30 rounded-lg">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-3">
-                  <div className="relative w-8 h-8">
-                    <div className="absolute inset-0 rounded-full border-2 border-secondary-700" />
-                    <div className="absolute inset-0 rounded-full border-2 border-t-purple-500 animate-spin" />
-                    <FiFileText className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-3.5 h-3.5 text-purple-400" />
-                  </div>
-                  <div>
-                    <span className="text-sm font-medium text-purple-300">
-                      Generating Research Paper
-                    </span>
-                    <span className="text-purple-400/60 text-xs ml-2">
-                      8-model pipeline &middot; runs in the background
-                    </span>
-                  </div>
-                </div>
-                <button
-                  onClick={cancelPaper}
-                  className="text-xs px-3 py-1.5 bg-red-500/20 text-red-400 rounded hover:bg-red-500/30 transition-colors flex items-center gap-1"
-                >
-                  <FiX className="w-3 h-3" />
-                  Cancel
-                </button>
-              </div>
-              {/* Phase progress */}
-              <div className="flex items-center gap-2 text-xs text-purple-300/80 mb-2">
-                <span>Phase 1: Abstract &amp; Intro</span>
-                <span className="text-secondary-600">&rarr;</span>
-                <span>Phase 2: Core Sections</span>
-                <span className="text-secondary-600">&rarr;</span>
-                <span>Phase 3: Synthesis</span>
-                <span className="text-secondary-600">&rarr;</span>
-                <span>Phase 4: QA Review</span>
-                <span className="text-secondary-600">&rarr;</span>
-                <span>PDF Render</span>
-              </div>
-              <div className="h-1.5 bg-secondary-700 rounded-full overflow-hidden">
-                <div className="h-full bg-purple-500 rounded-full animate-pulse" style={{ width: '60%' }} />
-              </div>
-            </div>
-          )}
-
-          {/* Paper View — rich HTML rendered in iframe */}
-          {paperMarkdown ? (
-            <div className="p-4 h-full flex flex-col">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-sm font-medium text-[var(--color-text-muted)] uppercase">
-                  Generated Research Paper
-                </h2>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={async () => {
-                      try {
-                        const res = await fetch(`${API_BASE}/orchestrator/generate-paper/pdf`, { method: 'POST' })
-                        if (!res.ok) { alert('PDF generation failed'); return }
-                        const blob = await res.blob()
-                        const url = URL.createObjectURL(blob)
-                        const a = document.createElement('a')
-                        a.href = url
-                        a.download = `humanovo-${config.disease.replace(/\s+/g, '-').toLowerCase()}-${new Date().toISOString().split('T')[0]}.pdf`
-                        a.click()
-                        URL.revokeObjectURL(url)
-                      } catch { alert('PDF generation failed') }
-                    }}
-                    className="btn btn-sm bg-red-500/20 text-red-400"
-                  >
-                    <FiDownload className="w-3.5 h-3.5" />
-                    Download PDF
-                  </button>
-                  <button
-                    onClick={downloadPaperHtml}
-                    className="btn btn-sm bg-purple-500/20 text-purple-400"
-                  >
-                    <FiDownload className="w-3.5 h-3.5" />
-                    Download HTML
-                  </button>
-                  <button
-                    onClick={() => setPaperMarkdown(null)}
-                    className="btn btn-sm bg-[var(--color-border)]"
-                  >
-                    Back to Hypotheses
-                  </button>
-                </div>
-              </div>
-
-              {/* Rich HTML Paper in iframe */}
-              <iframe
-                srcDoc={paperMarkdown}
-                className="flex-1 w-full rounded-lg border border-[var(--color-border)]"
-                style={{ minHeight: '85vh' }}
-                title="Research Paper"
-                sandbox="allow-same-origin"
-              />
-            </div>
-          ) : hypotheses.length > 0 ? (
+          {hypotheses.length > 0 ? (
             <div className="flex flex-col items-center justify-center h-full p-8">
               <div className="text-center space-y-4 max-w-md">
                 <div className="w-16 h-16 mx-auto rounded-full bg-green-500/20 flex items-center justify-center">
@@ -1136,9 +934,9 @@ export default function Agents() {
                 </h3>
                 <p className="text-sm text-[var(--color-text-muted)]">
                   All hypotheses have been automatically saved to their project folder.
-                  Navigate to <span className="text-primary-400">Projects</span> to view details and generate research papers.
+                  Select a hypothesis from the sidebar to view details and export PDF.
                 </p>
-                <div className="flex items-center justify-center gap-3 pt-2">
+                <div className="flex items-center justify-center gap-3">
                   <span className="text-xs text-green-400 bg-green-500/10 px-3 py-1.5 rounded-full">
                     Auto-saved to project
                   </span>
@@ -1299,7 +1097,7 @@ export default function Agents() {
         </div>
 
         {/* Right Panel - Hypothesis Detail */}
-        {selectedHypothesis && !paperMarkdown && (
+        {selectedHypothesis && (
           <div className="w-96 border-l border-[var(--color-border)] overflow-y-auto">
             <div className="p-4">
               <div className="flex items-start justify-between mb-4">
@@ -1339,6 +1137,62 @@ export default function Agents() {
                   </h4>
                   <p className="text-sm leading-relaxed">{selectedHypothesis.mechanism || 'Not specified'}</p>
                 </div>
+
+                {selectedHypothesis.evidence_summary && selectedHypothesis.evidence_summary.length > 0 && (
+                  <div>
+                    <h4 className="text-xs font-medium text-[var(--color-text-muted)] uppercase mb-1">
+                      Scientific Evidence ({selectedHypothesis.evidence_summary.length})
+                    </h4>
+                    <div className="space-y-1 max-h-48 overflow-y-auto">
+                      {selectedHypothesis.evidence_summary.map((evidence, i) => (
+                        <div key={i} className="text-xs p-2 bg-blue-500/10 border border-blue-500/20 rounded leading-relaxed">
+                          {evidence}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {selectedHypothesis.grounding_sources && (
+                  <div>
+                    <h4 className="text-xs font-medium text-[var(--color-text-muted)] uppercase mb-1">
+                      Grounding Sources
+                    </h4>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedHypothesis.grounding_sources.pubmed_count ? (
+                        <span className="text-xs px-2 py-1 bg-green-500/10 border border-green-500/20 rounded">
+                          PubMed: {selectedHypothesis.grounding_sources.pubmed_count}
+                        </span>
+                      ) : null}
+                      {selectedHypothesis.grounding_sources.clinical_trials_count ? (
+                        <span className="text-xs px-2 py-1 bg-cyan-500/10 border border-cyan-500/20 rounded">
+                          ClinicalTrials.gov: {selectedHypothesis.grounding_sources.clinical_trials_count}
+                        </span>
+                      ) : null}
+                      {selectedHypothesis.grounding_sources.fda_count ? (
+                        <span className="text-xs px-2 py-1 bg-orange-500/10 border border-orange-500/20 rounded">
+                          FDA: {selectedHypothesis.grounding_sources.fda_count}
+                        </span>
+                      ) : null}
+                      {selectedHypothesis.grounding_sources.uniprot_count ? (
+                        <span className="text-xs px-2 py-1 bg-purple-500/10 border border-purple-500/20 rounded">
+                          UniProt: {selectedHypothesis.grounding_sources.uniprot_count}
+                        </span>
+                      ) : null}
+                      {selectedHypothesis.grounding_sources.reactome_count ? (
+                        <span className="text-xs px-2 py-1 bg-pink-500/10 border border-pink-500/20 rounded">
+                          Reactome: {selectedHypothesis.grounding_sources.reactome_count}
+                        </span>
+                      ) : null}
+                    </div>
+                    {selectedHypothesis.stages_completed && (
+                      <p className="text-xs text-[var(--color-text-muted)] mt-1">
+                        Pipeline: {selectedHypothesis.stages_completed} stages completed
+                        {selectedHypothesis.round_number ? ` (Round ${selectedHypothesis.round_number})` : ''}
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 {selectedHypothesis.risks && selectedHypothesis.risks.length > 0 && (
                   <div>
@@ -1385,29 +1239,68 @@ export default function Agents() {
                   </div>
                 )}
 
-                {/* Per-Hypothesis Paper Generation */}
+                {/* Export PDF */}
                 <div className="flex gap-2 mt-2">
                   <button
-                    onClick={() => generatePaper(selectedHypothesis.id, selectedHypothesis.title)}
-                    disabled={generatingPaper}
-                    className="flex-1 btn bg-purple-500 text-white hover:bg-purple-600 disabled:opacity-50"
+                    onClick={async (e) => {
+                      const btn = e.currentTarget
+                      btn.disabled = true
+                      const origText = btn.textContent
+                      btn.textContent = 'Generating PDF...'
+                      try {
+                        const res = await fetch(`${API_BASE}/documents/hypothesis/${selectedHypothesis.id}/pdf?use_ai=false`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            title: selectedHypothesis.title,
+                            description: selectedHypothesis.description,
+                            mechanism: selectedHypothesis.mechanism,
+                            confidence: selectedHypothesis.confidence,
+                            evidence_summary: selectedHypothesis.evidence_summary || [],
+                            risks: selectedHypothesis.risks || [],
+                            validation_steps: selectedHypothesis.validation_steps || [],
+                            key_citations: selectedHypothesis.key_citations || [],
+                            fda_references: selectedHypothesis.fda_references || [],
+                            clinical_trial_references: selectedHypothesis.clinical_trial_references || [],
+                            disease: config.disease || 'Research',
+                            discovery_type: config.discoveryType || 'treatment',
+                          }),
+                        })
+                        if (res.ok) {
+                          const data = await res.json()
+                          if (data.pdf_base64) {
+                            const byteChars = atob(data.pdf_base64)
+                            const byteArray = new Uint8Array(byteChars.length)
+                            for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i)
+                            const blob = new Blob([byteArray], { type: 'application/pdf' })
+                            const url = URL.createObjectURL(blob)
+                            const a = document.createElement('a')
+                            a.href = url
+                            a.download = data.filename || `humanovo-${selectedHypothesis.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase().slice(0, 50)}.pdf`
+                            a.click()
+                            URL.revokeObjectURL(url)
+                          } else {
+                            console.error('PDF response missing pdf_base64:', data)
+                            alert('PDF generation failed — no PDF data returned')
+                          }
+                        } else {
+                          const errText = await res.text().catch(() => 'Unknown error')
+                          console.error('PDF export failed:', res.status, errText)
+                          alert(`PDF export failed (${res.status}): ${errText.slice(0, 200)}`)
+                        }
+                      } catch (err) {
+                        console.error('PDF export error:', err)
+                        alert('PDF export failed — network error')
+                      } finally {
+                        btn.disabled = false
+                        btn.textContent = origText || 'Export PDF'
+                      }
+                    }}
+                    className="flex-1 btn bg-green-500 text-white hover:bg-green-600 disabled:opacity-50"
                   >
-                    {generatingPaperId === selectedHypothesis.id ? (
-                      <FiRefreshCw className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <FiFileText className="w-4 h-4" />
-                    )}
-                    {generatingPaperId === selectedHypothesis.id ? 'Generating Paper...' : 'Generate Research Paper'}
+                    <FiDownload className="w-4 h-4" />
+                    Export PDF
                   </button>
-                  {generatingPaper && generatingPaperId === selectedHypothesis.id && (
-                    <button
-                      onClick={cancelPaper}
-                      className="btn bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/30"
-                    >
-                      <FiX className="w-4 h-4" />
-                      Cancel
-                    </button>
-                  )}
                 </div>
               </div>
             </div>
