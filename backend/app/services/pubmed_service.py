@@ -956,7 +956,8 @@ class ScientificGroundingService:
             + sum(len(v) for v in bio_data.values() if isinstance(v, list))
             + sum(extended_data.get(f"{src}_count", 0) for src in
                   ["elsevier", "springer", "chebi", "hca", "cell_ontology", "fma",
-                   "ncbi_gene", "clinvar", "kegg_disease", "kegg_drug", "kegg_compound"])
+                   "ncbi_gene", "ncbi_protein", "ncbi_snp", "ncbi_medgen",
+                   "clinvar", "kegg_disease", "kegg_drug", "kegg_compound"])
             if isinstance(extended_data, dict) else 0
         )
 

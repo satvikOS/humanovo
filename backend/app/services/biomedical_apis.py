@@ -860,16 +860,23 @@ class FMAService:
 
 class NCBIExtendedService:
     """
-    Extended NCBI E-utilities client.
+    Extended NCBI E-utilities client — uses the single NCBI API key (PUBMED_API_KEY)
+    for ALL NCBI databases.
 
-    Beyond PubMed, provides access to:
-    - Gene database — gene information and links
-    - Protein database — protein sequences and annotations
+    With API key: 10 requests/second across ALL databases.
+    Without API key: 3 requests/second.
+
+    Databases accessed:
+    - Gene — gene information, function, pathways
+    - Protein — protein sequences, annotations, domains
+    - ClinVar — clinical significance of genetic variants
     - SNP (dbSNP) — genetic variation data
-    - ClinVar — clinical significance of variants
     - OMIM — Mendelian inheritance in man
+    - Taxonomy — organism classification
+    - MedGen — medical genetics information
 
     API: https://www.ncbi.nlm.nih.gov/books/NBK25500/
+    All databases share the same E-utilities API (esearch/efetch/esummary/elink).
     """
 
     EUTILS_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
@@ -877,7 +884,10 @@ class NCBIExtendedService:
     def __init__(self):
         self._session = None
         self._last_request_time = 0.0
-        self._rate_limit_delay = 0.34
+        # With API key: 10 req/sec; without: 3 req/sec
+        api_key = settings.PUBMED_API_KEY
+        has_key = bool(api_key and (api_key.get_secret_value() if hasattr(api_key, 'get_secret_value') else str(api_key)))
+        self._rate_limit_delay = 0.1 if has_key else 0.34
 
     async def _get_session(self):
         if self._session is None:
@@ -1006,6 +1016,200 @@ class NCBIExtendedService:
 
         except Exception as e:
             logger.warning(f"ClinVar search failed: {e}")
+            return []
+
+    async def search_protein(self, query: str, max_results: int = 5) -> list[dict[str, Any]]:
+        """Search NCBI Protein database for protein sequences and annotations."""
+        await self._rate_limit()
+        session = await self._get_session()
+
+        params = self._build_params(
+            db="protein", term=f"({query}) AND Homo sapiens[Organism]",
+            retmax=str(max_results), retmode="json",
+        )
+
+        try:
+            async with session.get(f"{self.EUTILS_BASE}/esearch.fcgi", params=params) as resp:
+                if resp.status != 200:
+                    return []
+                data = await resp.json()
+
+            protein_ids = data.get("esearchresult", {}).get("idlist", [])
+            if not protein_ids:
+                return []
+
+            await self._rate_limit()
+            params = self._build_params(
+                db="protein", id=",".join(protein_ids[:10]), retmode="json",
+            )
+
+            async with session.get(f"{self.EUTILS_BASE}/esummary.fcgi", params=params) as resp:
+                if resp.status != 200:
+                    return []
+                data = await resp.json()
+
+            results = []
+            for pid in protein_ids:
+                info = data.get("result", {}).get(pid, {})
+                if not info or pid == "uids":
+                    continue
+                results.append({
+                    "protein_id": pid,
+                    "accession": info.get("caption", ""),
+                    "title": info.get("title", ""),
+                    "organism": info.get("organism", ""),
+                    "length": info.get("slen", 0),
+                    "source": "NCBI Protein",
+                })
+
+            logger.info(f"NCBI Protein search '{query[:40]}...' returned {len(results)} results")
+            return results
+
+        except Exception as e:
+            logger.warning(f"NCBI Protein search failed: {e}")
+            return []
+
+    async def search_snp(self, query: str, max_results: int = 5) -> list[dict[str, Any]]:
+        """Search NCBI dbSNP for genetic variation data."""
+        await self._rate_limit()
+        session = await self._get_session()
+
+        params = self._build_params(
+            db="snp", term=query, retmax=str(max_results), retmode="json",
+        )
+
+        try:
+            async with session.get(f"{self.EUTILS_BASE}/esearch.fcgi", params=params) as resp:
+                if resp.status != 200:
+                    return []
+                data = await resp.json()
+
+            snp_ids = data.get("esearchresult", {}).get("idlist", [])
+            if not snp_ids:
+                return []
+
+            await self._rate_limit()
+            params = self._build_params(
+                db="snp", id=",".join(snp_ids[:10]), retmode="json",
+            )
+
+            async with session.get(f"{self.EUTILS_BASE}/esummary.fcgi", params=params) as resp:
+                if resp.status != 200:
+                    return []
+                data = await resp.json()
+
+            results = []
+            for sid in snp_ids:
+                info = data.get("result", {}).get(sid, {})
+                if not info or sid == "uids":
+                    continue
+                results.append({
+                    "snp_id": f"rs{sid}",
+                    "gene_name": info.get("genes", [{}])[0].get("name", "") if info.get("genes") else "",
+                    "clinical_significance": info.get("clinical_significance", ""),
+                    "global_maf": info.get("global_maf", ""),
+                    "chromosome": info.get("chr", ""),
+                    "source": "NCBI dbSNP",
+                })
+
+            logger.info(f"NCBI dbSNP search '{query[:40]}...' returned {len(results)} results")
+            return results
+
+        except Exception as e:
+            logger.warning(f"NCBI dbSNP search failed: {e}")
+            return []
+
+    async def search_medgen(self, query: str, max_results: int = 5) -> list[dict[str, Any]]:
+        """Search NCBI MedGen for medical genetics concepts."""
+        await self._rate_limit()
+        session = await self._get_session()
+
+        params = self._build_params(
+            db="medgen", term=query, retmax=str(max_results), retmode="json",
+        )
+
+        try:
+            async with session.get(f"{self.EUTILS_BASE}/esearch.fcgi", params=params) as resp:
+                if resp.status != 200:
+                    return []
+                data = await resp.json()
+
+            medgen_ids = data.get("esearchresult", {}).get("idlist", [])
+            if not medgen_ids:
+                return []
+
+            await self._rate_limit()
+            params = self._build_params(
+                db="medgen", id=",".join(medgen_ids[:10]), retmode="json",
+            )
+
+            async with session.get(f"{self.EUTILS_BASE}/esummary.fcgi", params=params) as resp:
+                if resp.status != 200:
+                    return []
+                data = await resp.json()
+
+            results = []
+            for mid in medgen_ids:
+                info = data.get("result", {}).get(mid, {})
+                if not info or mid == "uids":
+                    continue
+                results.append({
+                    "medgen_id": mid,
+                    "concept_id": info.get("conceptid", ""),
+                    "title": info.get("title", ""),
+                    "definition": info.get("definition", "")[:300],
+                    "semantic_type": info.get("semantictype", ""),
+                    "source": "NCBI MedGen",
+                })
+
+            logger.info(f"NCBI MedGen search '{query[:40]}...' returned {len(results)} results")
+            return results
+
+        except Exception as e:
+            logger.warning(f"NCBI MedGen search failed: {e}")
+            return []
+
+    async def find_related(self, db_from: str, db_to: str, id_list: list[str]) -> list[dict[str, Any]]:
+        """Use NCBI ELink to find related records across databases.
+
+        E.g., Gene→PubMed, Gene→Protein, ClinVar→Gene, SNP→Gene.
+        """
+        if not id_list:
+            return []
+
+        await self._rate_limit()
+        session = await self._get_session()
+
+        params = self._build_params(
+            dbfrom=db_from, db=db_to,
+            id=",".join(id_list[:10]),
+            retmode="json",
+        )
+
+        try:
+            async with session.get(f"{self.EUTILS_BASE}/elink.fcgi", params=params) as resp:
+                if resp.status != 200:
+                    return []
+                data = await resp.json()
+
+            results = []
+            linksets = data.get("linksets", [])
+            for ls in linksets:
+                for linksetdb in ls.get("linksetdbs", []):
+                    link_name = linksetdb.get("linkname", "")
+                    linked_ids = [l.get("id", "") for l in linksetdb.get("links", [])][:5]
+                    results.append({
+                        "from_db": db_from,
+                        "to_db": db_to,
+                        "link_name": link_name,
+                        "linked_ids": linked_ids,
+                        "source": "NCBI ELink",
+                    })
+
+            return results
+
+        except Exception as e:
+            logger.warning(f"NCBI ELink failed: {e}")
             return []
 
     async def close(self):
@@ -1273,6 +1477,19 @@ class ExtendedGroundingService:
                 f"{entity} {disease}", max_results=2,
             )))
 
+        # NCBI Protein — protein targets
+        for entity in target_entities[:2]:
+            tasks.append(("ncbi_protein", self.ncbi_ext.search_protein(entity, max_results=2)))
+
+        # NCBI dbSNP — genetic variants
+        for entity in target_entities[:2]:
+            tasks.append(("ncbi_snp", self.ncbi_ext.search_snp(
+                f"{entity} {disease}", max_results=2,
+            )))
+
+        # NCBI MedGen — medical genetics concepts
+        tasks.append(("ncbi_medgen", self.ncbi_ext.search_medgen(disease, max_results=3)))
+
         # KEGG extended — disease, drug, compound linkages
         tasks.append(("kegg_disease", self.kegg_ext.search_disease(disease, max_results=3)))
         for entity in target_entities[:2]:
@@ -1295,6 +1512,9 @@ class ExtendedGroundingService:
             "cell_ontology": [],
             "fma": [],
             "ncbi_gene": [],
+            "ncbi_protein": [],
+            "ncbi_snp": [],
+            "ncbi_medgen": [],
             "clinvar": [],
             "kegg_disease": [],
             "kegg_drug": [],
@@ -1328,6 +1548,9 @@ class ExtendedGroundingService:
             "cell_ontology_count": len(evidence["cell_ontology"]),
             "fma_count": len(evidence["fma"]),
             "ncbi_gene_count": len(evidence["ncbi_gene"]),
+            "ncbi_protein_count": len(evidence["ncbi_protein"]),
+            "ncbi_snp_count": len(evidence["ncbi_snp"]),
+            "ncbi_medgen_count": len(evidence["ncbi_medgen"]),
             "clinvar_count": len(evidence["clinvar"]),
             "kegg_disease_count": len(evidence["kegg_disease"]),
             "kegg_drug_count": len(evidence["kegg_drug"]),
@@ -1390,6 +1613,27 @@ class ExtendedGroundingService:
                     parts.append(f"  {g['description'][:200]}")
                 if g.get("map_location"):
                     parts.append(f"  Location: {g['map_location']}")
+
+        if evidence.get("ncbi_protein"):
+            parts.append("\n## NCBI Protein Data")
+            for p in evidence["ncbi_protein"]:
+                parts.append(f"- **{p.get('title', 'Unknown')}** (Accession: {p.get('accession', '')})")
+                if p.get("length"):
+                    parts.append(f"  Length: {p['length']} aa")
+
+        if evidence.get("ncbi_snp"):
+            parts.append("\n## NCBI dbSNP Variants")
+            for s in evidence["ncbi_snp"]:
+                parts.append(f"- **{s.get('snp_id', 'Unknown')}** — Gene: {s.get('gene_name', 'N/A')}")
+                if s.get("clinical_significance"):
+                    parts.append(f"  Clinical significance: {s['clinical_significance']}")
+
+        if evidence.get("ncbi_medgen"):
+            parts.append("\n## NCBI MedGen Concepts")
+            for m in evidence["ncbi_medgen"]:
+                parts.append(f"- **{m.get('title', 'Unknown')}** ({m.get('concept_id', '')})")
+                if m.get("definition"):
+                    parts.append(f"  Definition: {m['definition'][:200]}")
 
         if evidence.get("clinvar"):
             parts.append("\n## ClinVar Variant Data")
