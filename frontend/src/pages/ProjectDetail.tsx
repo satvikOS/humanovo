@@ -7,6 +7,7 @@ import {
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import { persistGet, persistSet, logActivity } from '../utils/persistence'
+import HypothesisDocViewer from '../components/HypothesisDocViewer'
 
 const API_BASE = '/api/v1'
 
@@ -250,142 +251,58 @@ export default function ProjectDetail() {
   // ---- Full-page hypothesis doc viewer ----
   if (viewMode === 'hypothesis_viewer' && activeHypothesis) {
     return (
-      <div className="h-full flex flex-col bg-secondary-900">
-        {/* Breadcrumb header */}
-        <div className="px-4 py-2 border-b border-secondary-700 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-2">
-            <Link to="/projects" className="text-primary-400 hover:text-primary-300 text-sm">
-              <FiArrowLeft className="w-3.5 h-3.5 inline mr-1" />Projects
-            </Link>
-            <span className="text-secondary-600">/</span>
-            <button onClick={closeViewer} className="text-primary-400 hover:text-primary-300 text-sm">
-              {project.name}
-            </button>
-            <span className="text-secondary-600">/</span>
-            <span className="text-secondary-400 text-sm truncate max-w-xs">{activeHypothesis.title}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => generateHypothesisPaper(activeHypothesis)}
-              className="btn bg-purple-500 text-white hover:bg-purple-600 text-sm"
-            >
-              <FiFileText className="w-3.5 h-3.5" />
-              Generate Research Paper
-            </button>
-            <button
-              onClick={async () => {
-                const res = await fetch(`${API_BASE}/documents/hypothesis/${activeHypothesis.id}/pdf`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    title: activeHypothesis.title,
-                    description: activeHypothesis.description,
-                    mechanism: activeHypothesis.mechanism,
-                    confidence: activeHypothesis.confidence,
-                    disease: activeHypothesis.disease || project?.disease_focus || 'Research',
-                    discovery_type: activeHypothesis.discovery_type || 'treatment',
-                  }),
-                })
-                if (res.ok) {
-                  const data = await res.json()
-                  const byteChars = atob(data.pdf_base64)
-                  const byteArray = new Uint8Array(byteChars.length)
-                  for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i)
-                  const blob = new Blob([byteArray], { type: 'application/pdf' })
-                  const url = URL.createObjectURL(blob)
-                  const a = document.createElement('a')
-                  a.href = url
-                  a.download = data.filename || `humanovo-${activeHypothesis.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase().slice(0, 50)}.pdf`
-                  a.click()
-                  URL.revokeObjectURL(url)
-                }
-              }}
-              className="btn bg-green-500 text-white hover:bg-green-600 text-sm"
-            >
-              <FiDownload className="w-3.5 h-3.5" />
-              Export PDF
-            </button>
-            <button onClick={closeViewer} className="p-1.5 rounded hover:bg-secondary-700 text-secondary-400">
-              <FiX className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-
-        {/* Full-page doc content */}
-        <div className="flex-1 overflow-y-auto p-8">
-          <div className="max-w-4xl mx-auto">
-            {/* Title */}
-            <h1 className="text-2xl font-bold text-white mb-3">{activeHypothesis.title}</h1>
-
-            {/* Metadata bar */}
-            <div className="flex items-center gap-4 mb-6 flex-wrap">
-              <span className={clsx(
-                'px-3 py-1 rounded-full text-sm font-bold',
-                activeHypothesis.confidence >= 0.7 ? 'bg-green-500/20 text-green-400' :
-                activeHypothesis.confidence >= 0.5 ? 'bg-yellow-500/20 text-yellow-400' : 'bg-orange-500/20 text-orange-400'
-              )}>
-                {(activeHypothesis.confidence * 100).toFixed(1)}% Confidence
-              </span>
-              {activeHypothesis.model_used && (
-                <span className="text-secondary-400 text-sm">Model: {activeHypothesis.model_used}</span>
-              )}
-              {activeHypothesis.disease && (
-                <span className="text-secondary-400 text-sm">Disease: {activeHypothesis.disease}</span>
-              )}
-              {activeHypothesis.discovery_type && (
-                <span className="text-secondary-400 text-sm capitalize">Type: {activeHypothesis.discovery_type.replace(/_/g, ' ')}</span>
-              )}
-            </div>
-
-            {/* Description */}
-            {activeHypothesis.description && (
-              <div className="mb-6">
-                <h2 className="text-xs font-semibold text-secondary-400 uppercase tracking-wider mb-2">Description</h2>
-                <p className="text-secondary-200 leading-relaxed whitespace-pre-wrap">{activeHypothesis.description}</p>
-              </div>
-            )}
-
-            {/* Mechanism */}
-            {activeHypothesis.mechanism && (
-              <div className="mb-6">
-                <h2 className="text-xs font-semibold text-secondary-400 uppercase tracking-wider mb-2">Mechanism of Action</h2>
-                <div className="bg-secondary-800 border border-secondary-700 rounded-lg p-4">
-                  <p className="text-secondary-200 leading-relaxed whitespace-pre-wrap">{activeHypothesis.mechanism}</p>
-                </div>
-              </div>
-            )}
-
-            {/* Tags */}
-            {activeHypothesis.tags && activeHypothesis.tags.length > 0 && (
-              <div className="mb-6">
-                <h2 className="text-xs font-semibold text-secondary-400 uppercase tracking-wider mb-2">Tags</h2>
-                <div className="flex flex-wrap gap-2">
-                  {activeHypothesis.tags.map((tag) => (
-                    <span key={tag} className="px-2 py-0.5 rounded bg-primary-500/20 text-primary-400 text-xs">{tag}</span>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Generate Paper CTA */}
-            <div className="mt-8 p-6 bg-purple-500/10 border border-purple-500/30 rounded-lg text-center">
-              <FiFileText className="w-8 h-8 text-purple-400 mx-auto mb-3" />
-              <h3 className="text-white font-semibold mb-1">Generate FDA/R&D-Grade Research Paper</h3>
-              <p className="text-secondary-400 text-sm mb-4">
-                Produces a professional PDF with cover page, indexed TOC, numbered citations,
-                pathway diagrams, tables, and PubMed-verified references using 8 AI models.
-              </p>
-              <button
-                onClick={() => generateHypothesisPaper(activeHypothesis)}
-                className="btn bg-purple-500 text-white hover:bg-purple-600"
-              >
-                <FiFileText className="w-4 h-4" />
-                Generate Research Paper (PDF)
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
+      <HypothesisDocViewer
+        hypothesis={{
+          id: activeHypothesis.id,
+          title: activeHypothesis.title,
+          description: activeHypothesis.description,
+          mechanism: activeHypothesis.mechanism,
+          confidence: activeHypothesis.confidence,
+          tags: activeHypothesis.tags,
+          disease: activeHypothesis.disease || project?.disease_focus,
+          discovery_type: activeHypothesis.discovery_type,
+          model_used: activeHypothesis.model_used,
+          created_at: activeHypothesis.created_at,
+        }}
+        breadcrumbs={[
+          { label: 'Projects', onClick: () => { closeViewer(); /* navigate handled by Link */ } },
+          { label: project.name, onClick: closeViewer },
+          { label: activeHypothesis.title },
+        ]}
+        onClose={closeViewer}
+        onGenerateResearchPaper={() => generateHypothesisPaper(activeHypothesis)}
+        onExportPdf={async () => {
+          try {
+            const res = await fetch(`${API_BASE}/documents/hypothesis/${activeHypothesis.id}/pdf`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                title: activeHypothesis.title,
+                description: activeHypothesis.description,
+                mechanism: activeHypothesis.mechanism,
+                confidence: activeHypothesis.confidence,
+                disease: activeHypothesis.disease || project?.disease_focus || 'Research',
+                discovery_type: activeHypothesis.discovery_type || 'treatment',
+              }),
+            })
+            if (res.ok) {
+              const data = await res.json()
+              const byteChars = atob(data.pdf_base64)
+              const byteArray = new Uint8Array(byteChars.length)
+              for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i)
+              const blob = new Blob([byteArray], { type: 'application/pdf' })
+              const url = URL.createObjectURL(blob)
+              const a = document.createElement('a')
+              a.href = url
+              a.download = data.filename || `humanovo-${activeHypothesis.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase().slice(0, 50)}.pdf`
+              a.click()
+              URL.revokeObjectURL(url)
+            }
+          } catch (e) {
+            console.error('PDF export failed:', e)
+          }
+        }}
+      />
     )
   }
 
