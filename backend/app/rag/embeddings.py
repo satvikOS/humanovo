@@ -275,18 +275,32 @@ class AzureOpenAIEmbedder(BaseEmbedder):
             return
         try:
             from openai import AsyncAzureOpenAI
-            # Use the embedding-specific endpoint or fall back to GPT-4o endpoint
-            endpoint = settings.AZURE_OPENAI_ENDPOINT or getattr(settings, 'AZURE_GPT4O_ENDPOINT', '')
-            api_key = settings.azure_openai_api_key_value or getattr(settings, 'azure_gpt4o_key_value', None)
+            # Priority: dedicated embedding endpoint → shared cognitiveservices → legacy OpenAI → GPT-4o
+            endpoint = (
+                settings.AZURE_EMBEDDING_ENDPOINT
+                or settings.AZURE_OPENAI_ENDPOINT
+                or getattr(settings, 'AZURE_GPT4O_ENDPOINT', '')
+            )
+            api_key = (
+                settings.azure_embedding_key_value
+                or settings.azure_openai_api_key_value
+                or getattr(settings, 'azure_gpt4o_key_value', None)
+            )
+            api_version = settings.AZURE_EMBEDDING_API_VERSION
             if not endpoint or not api_key:
                 raise RuntimeError("Azure OpenAI endpoint/key not configured for embeddings")
             self._client = AsyncAzureOpenAI(
                 api_key=api_key,
                 azure_endpoint=endpoint,
-                api_version=settings.AZURE_OPENAI_API_VERSION,
+                api_version=api_version,
             )
             self._initialized = True
-            self.logger.info("Azure OpenAI embedder initialized", model=self.config.model.value)
+            self.logger.info(
+                "Azure OpenAI embedder initialized",
+                model=self.config.model.value,
+                endpoint=endpoint,
+                api_version=api_version,
+            )
         except ImportError:
             self.logger.error("openai package not installed")
             raise

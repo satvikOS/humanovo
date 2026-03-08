@@ -161,7 +161,12 @@ class Settings(BaseSettings):
     GROUNDING_RAG_TOP_K: int = 8  # Top-K chunks retrieved per stage
     GROUNDING_GATE_ENABLED: bool = True  # Enable semantic similarity gating between stages
 
-    # Azure OpenAI Embedding Deployment names
+    # Azure OpenAI Embedding — dedicated endpoint on cognitiveservices resource
+    # Deployment: text-embedding-3-large (150K TPM, 900 RPM)
+    # Resource: humanovo-openai.cognitiveservices.azure.com (shared with Cohere, Kimi, etc.)
+    AZURE_EMBEDDING_ENDPOINT: str = ""  # e.g. https://humanovo-openai.cognitiveservices.azure.com
+    AZURE_EMBEDDING_KEY: SecretStr | None = None
+    AZURE_EMBEDDING_API_VERSION: str = "2023-05-15"
     AZURE_OPENAI_EMBEDDING_DEPLOYMENT_LARGE: str = "text-embedding-3-large"
 
     # Celery
@@ -255,6 +260,11 @@ class Settings(BaseSettings):
     def azure_grok_key_value(self) -> str | None:
         """Azure Grok API key."""
         return self.AZURE_GROK_KEY.get_secret_value() if self.AZURE_GROK_KEY else None
+
+    @property
+    def azure_embedding_key_value(self) -> str | None:
+        """Azure Embedding API key."""
+        return self.AZURE_EMBEDDING_KEY.get_secret_value() if self.AZURE_EMBEDDING_KEY else None
 
 
 @lru_cache
