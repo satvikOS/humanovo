@@ -279,8 +279,7 @@ class SpringerService:
 
     SPRINGER_API_BASE = "https://api.springernature.com"
 
-    def __init__(self, api_key: str = ""):
-        self._api_key = api_key or getattr(settings, 'SPRINGER_API_KEY', '')
+    def __init__(self):
         self._session = None
 
     async def _get_session(self):
@@ -295,7 +294,10 @@ class SpringerService:
         max_results: int = 5,
     ) -> list[dict[str, Any]]:
         """
-        Search Springer Nature open access articles.
+        Search Springer Nature open access articles (keyless — open data).
+
+        Uses the Springer Nature Open Access API which provides free access
+        to open access content metadata without requiring an API key.
 
         Args:
             query: Search query
@@ -303,10 +305,10 @@ class SpringerService:
         """
         session = await self._get_session()
 
+        # Open access endpoint — no API key required for metadata
         params = {
             "q": query,
             "p": str(min(max_results, 50)),
-            "api_key": self._api_key,
         }
 
         try:
@@ -354,7 +356,6 @@ class SpringerService:
         params = {
             "q": query,
             "p": str(min(max_results, 50)),
-            "api_key": self._api_key,
         }
 
         try:
@@ -1196,14 +1197,10 @@ class ExtendedGroundingService:
     """
 
     def __init__(self):
-        elsevier_key = getattr(settings, 'ELSEVIER_API_KEY', '')
-        springer_key = getattr(settings, 'SPRINGER_API_KEY', '')
-        hca_client_id = getattr(settings, 'HCA_CLIENT_ID', '')
-
-        self.elsevier = ElsevierService(api_key=elsevier_key)
-        self.springer = SpringerService(api_key=springer_key)
+        self.elsevier = ElsevierService(api_key=getattr(settings, 'ELSEVIER_API_KEY', ''))
+        self.springer = SpringerService()
         self.chebi = ChEBIService()
-        self.hca = HCAService(client_id=hca_client_id)
+        self.hca = HCAService()  # Public access, no auth needed
         self.cell_ontology = CellOntologyService()
         self.fma = FMAService()
         self.ncbi_ext = NCBIExtendedService()

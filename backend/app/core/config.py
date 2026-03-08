@@ -147,6 +147,23 @@ class Settings(BaseSettings):
     PUBMED_API_KEY: SecretStr | None = None
     PUBMED_RATE_LIMIT: int = 10  # requests per second
 
+    # Elsevier Scopus / ScienceDirect API
+    ELSEVIER_API_KEY: str = ""  # Set via ELSEVIER_API_KEY env var or GitHub Actions secret
+
+    # HCA (Human Cell Atlas) — public Azul service, no auth needed
+    HCA_CLIENT_ID: str = ""  # Optional, for future OAuth; public access used by default
+
+    # Embedding Grounding Configuration
+    # Dual-model: Bedrock Cohere (biomedical) + Azure text-embedding-3-large (general)
+    GROUNDING_EMBEDDING_PRIMARY: str = "cohere.embed-english-v3"  # Bedrock Cohere Embed v3 (1024d)
+    GROUNDING_EMBEDDING_SECONDARY: str = "azure-text-embedding-3-large"  # Azure OpenAI (3072d)
+    GROUNDING_SIMILARITY_THRESHOLD: float = 0.4  # Min cosine similarity for claim grounding
+    GROUNDING_RAG_TOP_K: int = 8  # Top-K chunks retrieved per stage
+    GROUNDING_GATE_ENABLED: bool = True  # Enable semantic similarity gating between stages
+
+    # Azure OpenAI Embedding Deployment names
+    AZURE_OPENAI_EMBEDDING_DEPLOYMENT_LARGE: str = "text-embedding-3-large"
+
     # Celery
     CELERY_BROKER_URL: str = "redis://localhost:6379/1"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/2"

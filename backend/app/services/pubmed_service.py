@@ -829,8 +829,26 @@ class BiologicalDatabaseService:
 
 class ScientificGroundingService:
     """
-    Unified scientific grounding service combining PubMed, ClinicalTrials.gov, FDA,
-    and biological databases (UniProt, Reactome, KEGG, Ensembl, HMDB).
+    Unified scientific grounding service combining ALL available open data APIs.
+
+    Core APIs (always active):
+    - PubMed (NCBI E-utilities) — literature search, citation validation
+    - ClinicalTrials.gov v2 — clinical trial data
+    - openFDA — drug labels and adverse events
+    - UniProt — human proteome
+    - Reactome — biological pathways
+    - KEGG — metabolic pathways, diseases, drugs, compounds
+    - Ensembl — gene information
+    - HMDB — metabolite data
+
+    Extended APIs (from biomedical_apis):
+    - Elsevier Scopus/ScienceDirect — premium literature with citation counts
+    - Springer Nature — open access literature (keyless)
+    - ChEBI — chemical entity classification
+    - HCA (Human Cell Atlas) — single-cell genomics (public access)
+    - Cell Ontology (CL) — cell type ontology via OLS
+    - FMA — anatomical ontology via OLS
+    - NCBI Gene/ClinVar — gene and variant data
 
     Used by the 10-stage hypothesis pipeline to ground every hypothesis in
     real, verifiable scientific data from all reliable sources.
@@ -842,23 +860,36 @@ class ScientificGroundingService:
         self.fda = FDAService()
         self.bio_db = BiologicalDatabaseService()
 
+        # Extended APIs
+        from app.services.biomedical_apis import get_extended_grounding_service
+        self._extended = get_extended_grounding_service()
+
     async def ground_hypothesis(
         self,
         hypothesis_text: str,
         disease: str,
         target_entities: list[str] = None,
         target_pathways: list[str] = None,
+        target_chemicals: list[str] = None,
+        target_cell_types: list[str] = None,
+        target_organs: list[str] = None,
     ) -> dict[str, Any]:
         """
         Ground a hypothesis across ALL scientific databases:
-        PubMed, ClinicalTrials.gov, FDA, UniProt, Reactome, KEGG, Ensembl.
+
+        Core: PubMed, ClinicalTrials.gov, FDA, UniProt, Reactome, KEGG, Ensembl
+        Extended: Elsevier/Scopus, Springer Nature, ChEBI, HCA, Cell Ontology,
+                  FMA, NCBI Gene, ClinVar, KEGG Disease/Drug/Compound
 
         Returns consolidated evidence from all sources.
         """
         target_entities = target_entities or []
         target_pathways = target_pathways or []
+        target_chemicals = target_chemicals or []
+        target_cell_types = target_cell_types or []
+        target_organs = target_organs or []
 
-        # Run all searches in parallel
+        # Run CORE searches in parallel
         pubmed_task = self.pubmed.search_evidence(hypothesis_text, disease, max_articles=5)
         ct_task = self.clinical_trials.search_trials(
             query=f"{disease} {' '.join(target_entities[:3])}",
@@ -874,19 +905,31 @@ class ScientificGroundingService:
             for entity in target_entities[:3]
         ]
 
+        # Run EXTENDED searches in parallel (Elsevier, Springer, ChEBI, HCA, CL, FMA, Gene, ClinVar, KEGG ext)
+        extended_task = self._extended.ground_hypothesis_extended(
+            hypothesis_text=hypothesis_text,
+            disease=disease,
+            target_entities=target_entities,
+            target_pathways=target_pathways,
+            target_chemicals=target_chemicals,
+            target_cell_types=target_cell_types,
+            target_organs=target_organs,
+        )
+
         results = await asyncio.gather(
-            pubmed_task, ct_task, fda_task, bio_task, *entity_tasks,
+            pubmed_task, ct_task, fda_task, bio_task, extended_task, *entity_tasks,
             return_exceptions=True,
         )
 
-        # Parse results
+        # Parse core results
         pubmed_articles = results[0] if not isinstance(results[0], Exception) else []
         clinical_trials = results[1] if not isinstance(results[1], Exception) else []
         fda_drugs = results[2] if not isinstance(results[2], Exception) else []
         bio_data = results[3] if not isinstance(results[3], Exception) else {}
+        extended_data = results[4] if not isinstance(results[4], Exception) else {}
 
         # Merge entity-specific PubMed results
-        for i, result in enumerate(results[4:]):
+        for i, result in enumerate(results[5:]):
             if not isinstance(result, Exception) and result:
                 existing_pmids = {a.pmid for a in pubmed_articles}
                 for article in result:
@@ -894,20 +937,39 @@ class ScientificGroundingService:
                         pubmed_articles.append(article)
                         existing_pmids.add(article.pmid)
 
-        # Build combined evidence text
+        # Build combined evidence text — core + bio + extended
         evidence_text = self._format_evidence_text(pubmed_articles, clinical_trials, fda_drugs)
         bio_evidence_text = self.bio_db.format_bio_evidence(bio_data) if bio_data else ""
         if bio_evidence_text:
             evidence_text += f"\n\n{bio_evidence_text}"
+
+        # Append extended evidence (Elsevier, Springer, ChEBI, HCA, CL, FMA, Gene, ClinVar, KEGG)
+        extended_text = extended_data.get("extended_evidence_text", "") if isinstance(extended_data, dict) else ""
+        if extended_text:
+            evidence_text += f"\n\n{extended_text}"
+
+        # Count total sources
+        total_sources = (
+            len(pubmed_articles)
+            + len(clinical_trials)
+            + len(fda_drugs)
+            + sum(len(v) for v in bio_data.values() if isinstance(v, list))
+            + sum(extended_data.get(f"{src}_count", 0) for src in
+                  ["elsevier", "springer", "chebi", "hca", "cell_ontology", "fma",
+                   "ncbi_gene", "clinvar", "kegg_disease", "kegg_drug", "kegg_compound"])
+            if isinstance(extended_data, dict) else 0
+        )
 
         return {
             "pubmed_articles": [a.to_dict() for a in pubmed_articles],
             "clinical_trials": [t.to_dict() for t in clinical_trials],
             "fda_drugs": [d.to_dict() for d in fda_drugs],
             "biological_data": bio_data,
+            "extended_data": extended_data if isinstance(extended_data, dict) else {},
             "pubmed_count": len(pubmed_articles),
             "clinical_trials_count": len(clinical_trials),
             "fda_drugs_count": len(fda_drugs),
+            "total_sources_count": total_sources,
             "evidence_text": evidence_text,
         }
 
@@ -958,6 +1020,7 @@ class ScientificGroundingService:
             self.clinical_trials.close(),
             self.fda.close(),
             self.bio_db.close(),
+            self._extended.close(),
             return_exceptions=True,
         )
 

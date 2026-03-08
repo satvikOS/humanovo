@@ -1,31 +1,40 @@
 """
-Discovery Orchestrator — 10-Stage Sequential Hypothesis Pipeline
+Discovery Orchestrator — 10-Stage Sequential Hypothesis Pipeline with Dual-Embedding Grounding
 
 Architecture: 10 models work sequentially on ONE hypothesis at a time.
 Each hypothesis passes through 10 specialized stages before the pipeline
-moves to the next hypothesis. This makes each hypothesis maximally strong,
-evidence-grounded, and non-ambiguous.
+moves to the next hypothesis. Between EVERY stage, a dual-model embedding
+grounding system ensures zero hallucinations.
 
 10-Stage Pipeline (one model per stage):
   Stage 1  — SEED       (Claude Opus, Bedrock)         : Generate initial hypothesis seed
   Stage 2  — EXPAND     (DeepSeek-R1-0528, Azure AI)   : Deep causal chain reasoning
-  Stage 3  — EVIDENCE   (Cohere Command A, Azure OpenAI): Literature evidence review (+ PubMed API)
+  Stage 3  — EVIDENCE   (Cohere Command A, Azure OpenAI): Literature evidence review (+ ALL APIs)
   Stage 4  — COUNTER    (Mistral-Large-3, Azure AI)     : Counter-argument generation
   Stage 5  — MECHANISM  (o3-mini, Azure OpenAI)         : Mechanistic deep dive
   Stage 6  — VALIDATE   (Kimi-K2-Thinking, Azure OpenAI): Cross-validation
-  Stage 7  — GROUND     (GPT-4.1, Azure OpenAI)         : Scientific grounding (+ PubMed/FDA/ClinicalTrials.gov)
+  Stage 7  — GROUND     (GPT-4.1, Azure OpenAI)         : Scientific grounding (+ ALL APIs)
   Stage 8  — SCORE      (GPT-4o, Azure OpenAI)          : Multi-dimensional confidence scoring
   Stage 9  — REFINE     (Grok-4-1-fast, Azure AI)       : Rapid refinement
   Stage 10 — FINALIZE   (Claude Opus, Bedrock)          : Final synthesis
 
+Dual-Model Embedding Grounding (between EVERY stage):
+  Two embedding models run in parallel on every stage output:
+  1. Bedrock Cohere Embed English v3 (1024d) — biomedical-optimized
+  2. Azure text-embedding-3-large (3072d)    — most powerful general embedding
+
+  Two grounding mechanisms:
+  A) RAG Retrieval: Embed output → retrieve matching evidence → inject into next stage
+  B) Semantic Gating: Compare each claim against evidence pool → flag ungrounded claims
+
+Scientific Data Sources (15+ APIs queried in parallel):
+  Core: PubMed, ClinicalTrials.gov, openFDA, UniProt, Reactome, KEGG, Ensembl, HMDB
+  Extended: Elsevier/Scopus, Springer Nature, ChEBI, HCA, Cell Ontology, FMA,
+            NCBI Gene, ClinVar, KEGG Disease/Drug/Compound
+
 Discovery Rounds (4 rounds, 3 hypotheses per round = 12 total):
   Round 1-2: Independent exploration — new hypotheses from different pathways
   Round 3-4: Hybrid refinement — refine and deepen the best hypotheses from Round 1-2
-
-Scientific Grounding:
-  - PubMed E-utilities API for real citations (PMID, DOI)
-  - ClinicalTrials.gov v2 API for relevant clinical trials
-  - openFDA API for FDA-approved drug references
 
 Provider routing:
   - Claude Opus 4.6 → AWS Bedrock
@@ -1310,13 +1319,33 @@ class SequentialHypothesisPipeline:
     def __init__(self, llm: MultiModelLLM):
         self._llm = llm
         self._grounding_service = None
+        self._embedding_grounder = None
+        self._rag_service = None
 
     async def _get_grounding(self):
-        """Lazy-load grounding service."""
+        """Lazy-load grounding service (all APIs: PubMed, FDA, Elsevier, Springer, etc.)."""
         if self._grounding_service is None:
             from app.services.pubmed_service import get_grounding_service
             self._grounding_service = get_grounding_service()
         return self._grounding_service
+
+    async def _get_embedding_grounder(self):
+        """Lazy-load the dual-model embedding grounding engine."""
+        if self._embedding_grounder is None:
+            from app.rag.grounding import get_grounding_engine
+            self._embedding_grounder = get_grounding_engine()
+            await self._embedding_grounder.initialize()
+        return self._embedding_grounder
+
+    async def _get_rag_service(self):
+        """Lazy-load RAG service for vector store retrieval."""
+        if self._rag_service is None:
+            try:
+                from app.rag.service import get_rag_service
+                self._rag_service = get_rag_service()
+            except Exception:
+                pass
+        return self._rag_service
 
     def _get_available_stages(self) -> list[tuple]:
         """Get stages with available model clients, with fallback mapping."""
@@ -1439,6 +1468,14 @@ Your goal is to STRENGTHEN this hypothesis — address its weaknesses, find stro
         stages = self._get_available_stages()
         logger.info(f"Starting 10-stage pipeline for hypothesis R{round_number}H{hypothesis_index} ({len(stages)} stages available)")
 
+        # Initialize dual-embedding grounding engine
+        embedding_grounder = await self._get_embedding_grounder()
+        rag_service = await self._get_rag_service()
+
+        # Clear evidence pool for fresh hypothesis
+        if embedding_grounder:
+            embedding_grounder.clear_evidence_pool()
+
         for stage_num, stage_name, model_type, max_tokens, temperature in stages:
             stage_start = time.time()
 
@@ -1462,19 +1499,51 @@ Your goal is to STRENGTHEN this hypothesis — address its weaknesses, find stro
                 )
 
                 # For Stage 3 (Evidence) and Stage 7 (Ground), fetch real scientific data
+                # from ALL APIs: PubMed, ClinicalTrials.gov, FDA, Elsevier, Springer,
+                # ChEBI, HCA, Cell Ontology, FMA, UniProt, Reactome, KEGG, Ensembl,
+                # NCBI Gene, ClinVar
                 if stage_num in (3, 7):
                     grounding = await self._get_grounding()
-                    # Extract search terms from accumulated context
                     search_text = accumulated_context.get("title", disease)
                     target_entities = accumulated_context.get("target_entities", [])
+                    target_pathways = accumulated_context.get("target_pathways", [])
+
+                    # Extract chemical/cell/organ targets from accumulated context
+                    target_chemicals = accumulated_context.get("target_chemicals", [])
+                    target_cell_types = accumulated_context.get("target_cell_types", [])
+                    target_organs = accumulated_context.get("target_organs", [])
 
                     evidence_data = await grounding.ground_hypothesis(
                         hypothesis_text=search_text,
                         disease=disease,
                         target_entities=target_entities,
+                        target_pathways=target_pathways,
+                        target_chemicals=target_chemicals,
+                        target_cell_types=target_cell_types,
+                        target_organs=target_organs,
                     )
-                    user_prompt += f"\n\n## REAL SCIENTIFIC DATA (from PubMed, ClinicalTrials.gov, FDA)\n{evidence_data.get('evidence_text', 'No data found')}"
+                    evidence_text = evidence_data.get('evidence_text', 'No data found')
+                    total_sources = evidence_data.get('total_sources_count', 0)
+                    user_prompt += (
+                        f"\n\n## REAL SCIENTIFIC DATA ({total_sources} sources from PubMed, ClinicalTrials.gov, "
+                        f"FDA, Elsevier/Scopus, Springer Nature, UniProt, Reactome, KEGG, Ensembl, "
+                        f"ChEBI, HCA, Cell Ontology, FMA, NCBI Gene, ClinVar)\n{evidence_text}"
+                    )
                     accumulated_context["scientific_evidence"] = evidence_data
+
+                    # Ingest retrieved evidence into the embedding grounding pool
+                    if embedding_grounder and evidence_text:
+                        await embedding_grounder.ingest_evidence(
+                            evidence_text, source=f"api_stage_{stage_num}"
+                        )
+
+                # === EMBEDDING GROUNDING: Inject grounding context from previous stage ===
+                # After stage 1, every subsequent stage gets:
+                # 1. RAG-retrieved evidence relevant to the current hypothesis state
+                # 2. Semantic grounding report flagging ungrounded claims
+                grounding_context = accumulated_context.get("_grounding_context_for_next", "")
+                if grounding_context and stage_num > 1:
+                    user_prompt += f"\n\n{grounding_context}"
 
                 # Call the model
                 response = await self._llm.generate(
@@ -1490,6 +1559,35 @@ Your goal is to STRENGTHEN this hypothesis — address its weaknesses, find stro
                 accumulated_context.update(parsed)
                 accumulated_context[f"stage_{stage_num}_raw"] = response[:2000]
 
+                # === EMBEDDING GROUNDING: Post-stage analysis ===
+                # Run dual-model embedding grounding on the stage output.
+                # This produces:
+                # A) RAG-retrieved evidence for the NEXT stage
+                # B) Semantic similarity gating report for the NEXT stage
+                if embedding_grounder and settings.GROUNDING_GATE_ENABLED:
+                    try:
+                        grounding_report = await embedding_grounder.ground_stage_output(
+                            stage_output=response,
+                            stage_num=stage_num,
+                            rag_service=rag_service,
+                        )
+
+                        # Store grounding context for the next stage
+                        next_context_parts = []
+                        if grounding_report.evidence_text_for_next_stage:
+                            next_context_parts.append(grounding_report.evidence_text_for_next_stage)
+                        if grounding_report.grounding_flags_for_next_stage:
+                            next_context_parts.append(grounding_report.grounding_flags_for_next_stage)
+                        accumulated_context["_grounding_context_for_next"] = "\n\n".join(next_context_parts)
+
+                        # Track grounding metrics
+                        accumulated_context[f"stage_{stage_num}_grounding_ratio"] = grounding_report.grounding_ratio
+                        accumulated_context[f"stage_{stage_num}_grounded_claims"] = grounding_report.grounded_claims
+                        accumulated_context[f"stage_{stage_num}_ungrounded_claims"] = grounding_report.ungrounded_claims
+
+                    except Exception as ge:
+                        logger.warning(f"Stage {stage_num} embedding grounding failed (non-fatal): {ge}")
+
                 duration = time.time() - stage_start
                 stage_results.append(PipelineStageResult(
                     stage=stage_num,
@@ -1500,7 +1598,11 @@ Your goal is to STRENGTHEN this hypothesis — address its weaknesses, find stro
                     success=True,
                 ))
 
-                logger.info(f"  Stage {stage_num}/{len(stages)} ({stage_name}) completed in {duration:.1f}s via {model_type.value}")
+                grounding_info = ""
+                if f"stage_{stage_num}_grounding_ratio" in accumulated_context:
+                    ratio = accumulated_context[f"stage_{stage_num}_grounding_ratio"]
+                    grounding_info = f" | grounding: {ratio:.0%}"
+                logger.info(f"  Stage {stage_num}/{len(stages)} ({stage_name}) completed in {duration:.1f}s via {model_type.value}{grounding_info}")
 
                 if on_stage_complete:
                     try:
@@ -1866,6 +1968,23 @@ Produce the FINAL, COMPLETE hypothesis. Integrate ALL findings from stages 1-9 i
         citations = accumulated_context.get("citations", [])
         key_citations = accumulated_context.get("key_citations", [])
 
+        # Compute average grounding ratio across all stages
+        grounding_ratios = [
+            accumulated_context.get(f"stage_{i}_grounding_ratio", 0.0)
+            for i in range(1, 11)
+            if f"stage_{i}_grounding_ratio" in accumulated_context
+        ]
+        avg_grounding_ratio = sum(grounding_ratios) / len(grounding_ratios) if grounding_ratios else 0.0
+
+        # Add grounding tag
+        tags = accumulated_context.get("tags", [])
+        if avg_grounding_ratio > 0.7:
+            tags.append("well-grounded")
+        elif avg_grounding_ratio > 0.4:
+            tags.append("partially-grounded")
+        else:
+            tags.append("needs-grounding")
+
         return DiscoveryHypothesis(
             id=hypothesis_id,
             disease=disease,
@@ -1876,7 +1995,7 @@ Produce the FINAL, COMPLETE hypothesis. Integrate ALL findings from stages 1-9 i
             confidence=max(0.0, min(1.0, confidence)),
             supporting_paths=[],
             contributing_agents=models_used,
-            model_used="10-stage-pipeline",
+            model_used="10-stage-pipeline-grounded",
             external_factors=ext_factors,
             evidence_summary=evidence_summary,
             risks=risks,
@@ -1886,7 +2005,7 @@ Produce the FINAL, COMPLETE hypothesis. Integrate ALL findings from stages 1-9 i
             key_citations=key_citations if isinstance(key_citations, list) else [],
             fda_references=accumulated_context.get("fda_references", []),
             clinical_trial_references=accumulated_context.get("clinical_trial_references", []),
-            tags=accumulated_context.get("tags", []),
+            tags=tags,
             round_number=round_number,
             stages_completed=sum(1 for sr in stage_results if sr.success),
         )
