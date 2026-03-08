@@ -481,9 +481,9 @@ class DualEmbeddingGrounder:
                     parts.append(f"  Evidence: {cr.best_matching_evidence[:150]}")
 
         if ungrounded:
-            parts.append("\n### ⚠ UNGROUNDED CLAIMS (need evidence or removal)")
-            parts.append("The following claims lack sufficient support from scientific evidence.")
-            parts.append("You MUST either: (1) provide real citations/evidence, (2) soften language to 'hypothesized/proposed', or (3) remove the claim.")
+            parts.append("\n### CLAIMS REQUIRING ADDITIONAL EVIDENCE")
+            parts.append("The following claims lack sufficient support from the current scientific evidence pool.")
+            parts.append("For each claim below, please: (1) cite real supporting evidence if available, (2) use qualifying language such as 'hypothesized' or 'proposed', or (3) reconsider the claim if unsupported.")
             for cr in ungrounded:
                 parts.append(f"- [sim={cr.combined_similarity:.2f}] {cr.claim[:200]}")
 

@@ -129,7 +129,7 @@ class ElsevierService:
 
         params = {
             "query": query,
-            "count": str(min(max_results, 25)),
+            "count": str(min(max_results, 50)),
             "sort": sort,
             "field": "dc:title,dc:creator,prism:publicationName,prism:coverDate,prism:doi,dc:description,citedby-count,authkeywords",
         }
@@ -203,7 +203,7 @@ class ElsevierService:
 
         params = {
             "qs": query,
-            "count": str(min(max_results, 25)),
+            "count": str(min(max_results, 50)),
             "display": "standard",
         }
 
@@ -1434,68 +1434,73 @@ class ExtendedGroundingService:
 
         tasks = []
 
-        # Elsevier Scopus — literature with citation impact
+        # Elsevier Scopus — literature with citation impact (max depth)
         tasks.append(("elsevier", self.elsevier.search_evidence(
-            hypothesis_text, disease, max_articles=5,
+            hypothesis_text, disease, max_articles=25,
         )))
 
-        # Springer Nature — open access literature
+        # Springer Nature — open access literature (max depth)
         tasks.append(("springer", self.springer.search_open_access(
-            f"{disease} {' '.join(target_entities[:2])}", max_results=3,
+            f"{disease} {' '.join(target_entities[:3])}", max_results=25,
         )))
+        # Additional Springer query with pathway terms for broader coverage
+        if target_pathways:
+            tasks.append(("springer", self.springer.search_open_access(
+                f"{disease} {' '.join(target_pathways[:2])}", max_results=15,
+            )))
 
-        # ChEBI — chemical entities mentioned
-        for chem in target_chemicals[:3]:
-            tasks.append(("chebi", self.chebi.search(chem, max_results=2)))
+        # ChEBI — chemical entities mentioned (expanded)
+        for chem in target_chemicals[:5]:
+            tasks.append(("chebi", self.chebi.search(chem, max_results=10)))
 
-        # HCA — single-cell data for disease/organ
+        # HCA — single-cell data for disease/organ (expanded)
         if target_organs:
-            for organ in target_organs[:2]:
+            for organ in target_organs[:4]:
                 tasks.append(("hca", self.hca.search_projects(
-                    disease, organ=organ, disease=disease, max_results=2,
+                    disease, organ=organ, disease=disease, max_results=10,
                 )))
         else:
             tasks.append(("hca", self.hca.search_projects(
-                disease, disease=disease, max_results=3,
+                disease, disease=disease, max_results=15,
             )))
 
-        # Cell Ontology — cell types mentioned
-        for ct in target_cell_types[:3]:
-            tasks.append(("cell_ontology", self.cell_ontology.search(ct, max_results=2)))
+        # Cell Ontology — cell types mentioned (expanded)
+        for ct in target_cell_types[:5]:
+            tasks.append(("cell_ontology", self.cell_ontology.search(ct, max_results=10)))
 
-        # FMA — anatomical entities
-        for organ in target_organs[:3]:
-            tasks.append(("fma", self.fma.search(organ, max_results=2)))
+        # FMA — anatomical entities (expanded)
+        for organ in target_organs[:5]:
+            tasks.append(("fma", self.fma.search(organ, max_results=10)))
 
-        # NCBI Gene — gene targets
-        for entity in target_entities[:3]:
-            tasks.append(("ncbi_gene", self.ncbi_ext.search_gene(entity, max_results=2)))
+        # NCBI Gene — gene targets (expanded)
+        for entity in target_entities[:5]:
+            tasks.append(("ncbi_gene", self.ncbi_ext.search_gene(entity, max_results=10)))
 
-        # ClinVar — variant significance
-        for entity in target_entities[:2]:
+        # ClinVar — variant significance (expanded)
+        for entity in target_entities[:5]:
             tasks.append(("clinvar", self.ncbi_ext.search_clinvar(
-                f"{entity} {disease}", max_results=2,
+                f"{entity} {disease}", max_results=10,
             )))
 
-        # NCBI Protein — protein targets
-        for entity in target_entities[:2]:
-            tasks.append(("ncbi_protein", self.ncbi_ext.search_protein(entity, max_results=2)))
+        # NCBI Protein — protein targets (expanded)
+        for entity in target_entities[:5]:
+            tasks.append(("ncbi_protein", self.ncbi_ext.search_protein(entity, max_results=10)))
 
-        # NCBI dbSNP — genetic variants
-        for entity in target_entities[:2]:
+        # NCBI dbSNP — genetic variants (expanded)
+        for entity in target_entities[:4]:
             tasks.append(("ncbi_snp", self.ncbi_ext.search_snp(
-                f"{entity} {disease}", max_results=2,
+                f"{entity} {disease}", max_results=10,
             )))
 
-        # NCBI MedGen — medical genetics concepts
-        tasks.append(("ncbi_medgen", self.ncbi_ext.search_medgen(disease, max_results=3)))
+        # NCBI MedGen — medical genetics concepts (expanded)
+        tasks.append(("ncbi_medgen", self.ncbi_ext.search_medgen(disease, max_results=15)))
 
-        # KEGG extended — disease, drug, compound linkages
-        tasks.append(("kegg_disease", self.kegg_ext.search_disease(disease, max_results=3)))
-        for entity in target_entities[:2]:
-            tasks.append(("kegg_drug", self.kegg_ext.search_drug(entity, max_results=2)))
-        for chem in target_chemicals[:2]:
-            tasks.append(("kegg_compound", self.kegg_ext.search_compound(chem, max_results=2)))
+        # KEGG extended — disease, drug, compound linkages (expanded)
+        tasks.append(("kegg_disease", self.kegg_ext.search_disease(disease, max_results=10)))
+        for entity in target_entities[:4]:
+            tasks.append(("kegg_drug", self.kegg_ext.search_drug(entity, max_results=10)))
+        for chem in target_chemicals[:4]:
+            tasks.append(("kegg_compound", self.kegg_ext.search_compound(chem, max_results=10)))
 
         # Execute all in parallel
         results = await asyncio.gather(

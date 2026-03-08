@@ -759,20 +759,20 @@ class BiologicalDatabaseService:
         target_pathways = target_pathways or []
         tasks = []
 
-        # UniProt: search for each target entity (likely gene/protein names)
-        for entity in target_entities[:3]:
-            tasks.append(("uniprot", entity, self.search_uniprot(entity, max_results=2)))
+        # UniProt: search for each target entity (expanded)
+        for entity in target_entities[:5]:
+            tasks.append(("uniprot", entity, self.search_uniprot(entity, max_results=10)))
 
-        # Reactome: search for each pathway
-        for pathway in target_pathways[:2]:
-            tasks.append(("reactome", pathway, self.search_reactome(pathway, max_results=2)))
+        # Reactome: search for each pathway (expanded)
+        for pathway in target_pathways[:5]:
+            tasks.append(("reactome", pathway, self.search_reactome(pathway, max_results=10)))
 
-        # KEGG: search for each pathway
-        for pathway in target_pathways[:2]:
-            tasks.append(("kegg", pathway, self.search_kegg(pathway, max_results=2)))
+        # KEGG: search for each pathway (expanded)
+        for pathway in target_pathways[:5]:
+            tasks.append(("kegg", pathway, self.search_kegg(pathway, max_results=10)))
 
-        # Ensembl: search for each gene-like entity
-        for entity in target_entities[:3]:
+        # Ensembl: search for each gene-like entity (expanded)
+        for entity in target_entities[:5]:
             tasks.append(("ensembl", entity, self.search_ensembl(entity)))
 
         results = await asyncio.gather(
@@ -889,20 +889,20 @@ class ScientificGroundingService:
         target_cell_types = target_cell_types or []
         target_organs = target_organs or []
 
-        # Run CORE searches in parallel
-        pubmed_task = self.pubmed.search_evidence(hypothesis_text, disease, max_articles=5)
+        # Run CORE searches in parallel — maximized depth for comprehensive grounding
+        pubmed_task = self.pubmed.search_evidence(hypothesis_text, disease, max_articles=50)
         ct_task = self.clinical_trials.search_trials(
-            query=f"{disease} {' '.join(target_entities[:3])}",
+            query=f"{disease} {' '.join(target_entities[:5])}",
             condition=disease,
-            max_results=5,
+            max_results=20,
         )
-        fda_task = self.fda.search_by_indication(disease, max_results=3)
+        fda_task = self.fda.search_by_indication(disease, max_results=15)
         bio_task = self.bio_db.ground_entities(target_entities, target_pathways)
 
-        # Additional PubMed searches for each target entity
+        # Additional PubMed searches for each target entity (expanded)
         entity_tasks = [
-            self.pubmed.search_evidence(f"{entity} {disease}", disease, max_articles=2)
-            for entity in target_entities[:3]
+            self.pubmed.search_evidence(f"{entity} {disease}", disease, max_articles=10)
+            for entity in target_entities[:5]
         ]
 
         # Run EXTENDED searches in parallel (Elsevier, Springer, ChEBI, HCA, CL, FMA, Gene, ClinVar, KEGG ext)
