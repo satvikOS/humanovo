@@ -168,6 +168,7 @@ class Settings(BaseSettings):
     AZURE_EMBEDDING_KEY: SecretStr | None = None
     AZURE_EMBEDDING_API_VERSION: str = "2023-05-15"
     AZURE_OPENAI_EMBEDDING_DEPLOYMENT_LARGE: str = "text-embedding-3-large"
+    AZURE_OPENAI_EMBEDDING_DEPLOYMENT_SMALL: str = "text-embedding-3-small"
 
     # Celery
     CELERY_BROKER_URL: str = "redis://localhost:6379/1"

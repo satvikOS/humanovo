@@ -324,6 +324,8 @@ class AzureOpenAIEmbedder(BaseEmbedder):
     def _get_deployment(self) -> str:
         if self.config.model == EmbeddingModel.AZURE_EMBEDDING_LARGE:
             return getattr(settings, 'AZURE_OPENAI_EMBEDDING_DEPLOYMENT_LARGE', 'text-embedding-3-large')
+        if self.config.model == EmbeddingModel.AZURE_EMBEDDING_SMALL:
+            return getattr(settings, 'AZURE_OPENAI_EMBEDDING_DEPLOYMENT_SMALL', 'text-embedding-3-small')
         return settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT
 
     @property

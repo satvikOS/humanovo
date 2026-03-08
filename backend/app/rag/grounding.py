@@ -2,9 +2,9 @@
 Embedding Grounding Module — Dual-Model Semantic Grounding for the 10-Stage Pipeline
 
 Architecture:
-  Two embedding models run in parallel on every pipeline stage output:
-  1. Bedrock Cohere Embed English v3 (1024d) — biomedical-optimized, strong on scientific text
-  2. Azure text-embedding-3-large (3072d)    — most powerful general embedding, highest MTEB score
+  Two Azure OpenAI embedding models run in parallel on every pipeline stage output:
+  1. Azure text-embedding-3-large (3072d) — highest MTEB score, primary grounding model
+  2. Azure text-embedding-3-small (1536d) — fast complementary model, broad coverage
 
 Two grounding mechanisms operate between each pipeline stage:
 
@@ -44,8 +44,8 @@ logger = get_logger(__name__)
 class GroundingResult:
     """Result of semantic grounding for a single claim."""
     claim: str
-    max_similarity_primary: float  # Bedrock Cohere similarity
-    max_similarity_secondary: float  # Azure large similarity
+    max_similarity_primary: float  # Azure text-embedding-3-large similarity
+    max_similarity_secondary: float  # Azure text-embedding-3-small similarity
     combined_similarity: float  # Weighted average
     is_grounded: bool
     best_matching_evidence: str = ""
@@ -70,24 +70,24 @@ class DualEmbeddingGrounder:
     """
     Dual-model embedding grounding engine.
 
-    Runs Bedrock Cohere Embed v3 AND Azure text-embedding-3-large in parallel
+    Runs Azure text-embedding-3-large AND Azure text-embedding-3-small in parallel
     on every pipeline stage output to provide maximum grounding coverage.
 
     The two models complement each other:
-    - Cohere Embed v3: Trained on scientific/biomedical corpora, strong on
-      domain-specific terminology, protein names, pathway concepts
-    - Azure text-embedding-3-large: Highest general MTEB score (3072d),
-      captures broad semantic relationships, cross-domain connections
+    - text-embedding-3-large (3072d): Highest MTEB score, best semantic precision,
+      captures fine-grained biomedical relationships and cross-domain connections
+    - text-embedding-3-small (1536d): Fast, lightweight, broad semantic coverage,
+      provides complementary signal at lower latency and cost
     """
 
     # Weight for combining the two embedding similarities
-    # Cohere gets slightly higher weight for biomedical domain
-    PRIMARY_WEIGHT = 0.55    # Bedrock Cohere (biomedical-strong)
-    SECONDARY_WEIGHT = 0.45  # Azure large (general-strong)
+    # Large model gets higher weight for superior semantic precision
+    PRIMARY_WEIGHT = 0.55    # Azure text-embedding-3-large (high-precision)
+    SECONDARY_WEIGHT = 0.45  # Azure text-embedding-3-small (fast complementary)
 
     def __init__(self):
-        self._primary_embedder = None    # Bedrock Cohere
-        self._secondary_embedder = None  # Azure large
+        self._primary_embedder = None    # Azure text-embedding-3-large
+        self._secondary_embedder = None  # Azure text-embedding-3-small
         self._initialized = False
         self._evidence_embeddings_primary: list[tuple[str, str, list[float]]] = []  # (text, source, embedding)
         self._evidence_embeddings_secondary: list[tuple[str, str, list[float]]] = []
@@ -99,17 +99,17 @@ class DualEmbeddingGrounder:
 
         from app.rag.embeddings import (
             EmbeddingModel, EmbeddingConfig,
-            BedrockEmbedder, AzureOpenAIEmbedder,
+            AzureOpenAIEmbedder,
         )
 
-        # Primary: Bedrock Cohere Embed English v3
+        # Primary: Azure text-embedding-3-large (3072d, highest MTEB score)
         try:
-            primary_config = EmbeddingConfig.for_model(EmbeddingModel.BEDROCK_COHERE_ENGLISH)
-            self._primary_embedder = BedrockEmbedder(primary_config)
+            primary_config = EmbeddingConfig.for_model(EmbeddingModel.AZURE_EMBEDDING_LARGE)
+            self._primary_embedder = AzureOpenAIEmbedder(primary_config)
             await self._primary_embedder.initialize()
-            logger.info("Grounding primary embedder initialized: Bedrock Cohere Embed v3 (1024d)")
+            logger.info("Grounding primary embedder initialized: Azure text-embedding-3-large (3072d)")
         except Exception as e:
-            logger.warning(f"Primary embedder (Bedrock Cohere) failed to init: {e}")
+            logger.warning(f"Primary embedder (Azure large) failed to init: {e}")
             # Fallback to local BGE-large
             try:
                 from app.rag.embeddings import SentenceTransformerEmbedder
@@ -120,14 +120,14 @@ class DualEmbeddingGrounder:
             except Exception as e2:
                 logger.error(f"Primary embedder fallback also failed: {e2}")
 
-        # Secondary: Azure text-embedding-3-large
+        # Secondary: Azure text-embedding-3-small (1536d, fast complementary)
         try:
-            secondary_config = EmbeddingConfig.for_model(EmbeddingModel.AZURE_EMBEDDING_LARGE)
+            secondary_config = EmbeddingConfig.for_model(EmbeddingModel.AZURE_EMBEDDING_SMALL)
             self._secondary_embedder = AzureOpenAIEmbedder(secondary_config)
             await self._secondary_embedder.initialize()
-            logger.info("Grounding secondary embedder initialized: Azure text-embedding-3-large (3072d)")
+            logger.info("Grounding secondary embedder initialized: Azure text-embedding-3-small (1536d)")
         except Exception as e:
-            logger.warning(f"Secondary embedder (Azure large) failed to init: {e}")
+            logger.warning(f"Secondary embedder (Azure small) failed to init: {e}")
             # Fallback to local E5-large
             try:
                 from app.rag.embeddings import E5Embedder
@@ -453,7 +453,7 @@ class DualEmbeddingGrounder:
         if not chunks:
             return ""
 
-        parts = ["## EMBEDDING-GROUNDED EVIDENCE (retrieved via dual-model RAG)"]
+        parts = ["## EMBEDDING-GROUNDED EVIDENCE (retrieved via dual Azure embedding RAG)"]
         for i, chunk in enumerate(chunks, 1):
             parts.append(f"\n### Evidence #{i} (relevance: {chunk.get('relevance', 0):.2f}, source: {chunk.get('source', 'unknown')})")
             parts.append(chunk.get("text", ""))
@@ -468,7 +468,7 @@ class DualEmbeddingGrounder:
         ungrounded = [cr for cr in claim_results if not cr.is_grounded]
         well_grounded = [cr for cr in claim_results if cr.is_grounded and cr.combined_similarity > 0.6]
 
-        parts = ["## SEMANTIC GROUNDING REPORT (dual-model embedding analysis)"]
+        parts = ["## SEMANTIC GROUNDING REPORT (dual Azure embedding analysis)"]
         parts.append(f"Claims analyzed: {len(claim_results)} | "
                      f"Grounded: {sum(1 for cr in claim_results if cr.is_grounded)} | "
                      f"Ungrounded: {len(ungrounded)}")

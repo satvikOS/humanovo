@@ -1392,29 +1392,29 @@ class SequentialHypothesisPipeline:
     pipeline move to the next hypothesis.
 
     Stage → Model Assignment:
-      1. Seed       → Claude Opus (Bedrock)           — Explorer
-      2. Expand     → DeepSeek-R1-0528 (Azure AI)     — Deep Reasoner
+      1. Seed       → Claude Opus (Bedrock)            — Explorer
+      2. Expand     → o3-mini (Azure OpenAI)           — Deep Reasoner
       3. Evidence   → Cohere Command A (Azure OpenAI)  — Literature RAG
       4. Counter    → Mistral-Large-3 (Azure AI)       — Critic
-      5. Mechanism  → o3-mini (Azure OpenAI)           — Mechanistic Reasoner
-      6. Validate   → Kimi-K2-Thinking (Azure OpenAI)  — QA Validator
-      7. Ground     → GPT-4.1 (Azure OpenAI)           — Scientific Grounder
-      8. Score      → GPT-4o (Azure OpenAI)            — Confidence Scorer
-      9. Refine     → Grok-4-1-fast (Azure AI)         — Fast Refiner
+      5. Mechanism  → GPT-4.1 (Azure OpenAI)           — Mechanistic Reasoner
+      6. Validate   → GPT-4o (Azure OpenAI)            — QA Validator
+      7. Ground     → Grok-4-1-fast (Azure AI)         — Scientific Grounder
+      8. Score      → GPT-4.1 (Azure OpenAI)           — Confidence Scorer
+      9. Refine     → GPT-4o (Azure OpenAI)            — Fast Refiner
       10. Finalize  → Claude Opus (Bedrock)            — Final Synthesizer
     """
 
     # Stage definitions: (stage_number, name, model_type, max_tokens, temperature)
     STAGES = [
         (1,  "seed",      ModelType.CLAUDE_OPUS,       32_768, 0.4),
-        (2,  "expand",    ModelType.DEEPSEEK_R1_0528,  65_536, 0.2),
+        (2,  "expand",    ModelType.O3_MINI,           65_536, 0.2),
         (3,  "evidence",  ModelType.COHERE_COMMAND_A,    4_096, 0.2),
         (4,  "counter",   ModelType.MISTRAL_LARGE_3,   32_768, 0.3),
-        (5,  "mechanism", ModelType.O3_MINI,          100_000, 0.0),
-        (6,  "validate",  ModelType.KIMI_K2_THINKING,   4_096, 0.15),
-        (7,  "ground",    ModelType.GPT_41,            32_768, 0.25),
-        (8,  "score",     ModelType.GPT_4O_AZURE,      16_384, 0.25),
-        (9,  "refine",    ModelType.GROK_FAST,         16_384, 0.3),
+        (5,  "mechanism", ModelType.GPT_41,           100_000, 0.0),
+        (6,  "validate",  ModelType.GPT_4O_AZURE,       4_096, 0.15),
+        (7,  "ground",    ModelType.GROK_FAST,         32_768, 0.25),
+        (8,  "score",     ModelType.GPT_41,            16_384, 0.25),
+        (9,  "refine",    ModelType.GPT_4O_AZURE,      16_384, 0.3),
         (10, "finalize",  ModelType.CLAUDE_OPUS,       32_768, 0.3),
     ]
 
@@ -1454,14 +1454,12 @@ class SequentialHypothesisPipeline:
         available = []
         fallback_map = {
             # If a model is unavailable, fall back to another
+            ModelType.O3_MINI: ModelType.CLAUDE_OPUS,
             ModelType.COHERE_COMMAND_A: ModelType.CLAUDE_OPUS,
-            ModelType.O3_MINI: ModelType.DEEPSEEK_R1_0528,
-            ModelType.KIMI_K2_THINKING: ModelType.CLAUDE_OPUS,
+            ModelType.MISTRAL_LARGE_3: ModelType.CLAUDE_OPUS,
             ModelType.GPT_41: ModelType.CLAUDE_OPUS,
             ModelType.GPT_4O_AZURE: ModelType.CLAUDE_OPUS,
             ModelType.GROK_FAST: ModelType.MISTRAL_LARGE_3,
-            ModelType.DEEPSEEK_R1_0528: ModelType.CLAUDE_OPUS,
-            ModelType.MISTRAL_LARGE_3: ModelType.CLAUDE_OPUS,
         }
 
         for stage_num, name, model_type, max_tokens, temp in self.STAGES:
