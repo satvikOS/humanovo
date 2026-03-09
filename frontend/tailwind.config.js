@@ -8,21 +8,19 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Primary accent - Cyan/Teal for biomedical feel
         primary: {
-          50: '#ecfeff',
-          100: '#cffafe',
-          200: '#a5f3fc',
-          300: '#67e8f9',
-          400: '#22d3ee',
-          500: '#06b6d4',
-          600: '#0891b2',
-          700: '#0e7490',
-          800: '#155e75',
-          900: '#164e63',
-          950: '#083344',
+          50: '#fafafa',
+          100: '#f5f5f5',
+          200: '#e5e5e5',
+          300: '#d4d4d4',
+          400: '#a3a3a3',
+          500: '#737373',
+          600: '#525252',
+          700: '#404040',
+          800: '#262626',
+          900: '#171717',
+          950: '#0a0a0a',
         },
-        // OLED Black theme - true blacks for dark mode
         dark: {
           50: '#18181b',
           100: '#141414',
@@ -34,9 +32,8 @@ export default {
           700: '#030303',
           800: '#020202',
           900: '#010101',
-          950: '#000000', // True OLED black
+          950: '#000000',
         },
-        // Light theme - Blunt greys
         light: {
           50: '#ffffff',
           100: '#fafafa',
@@ -50,21 +47,16 @@ export default {
           900: '#262626',
           950: '#171717',
         },
-        // Secondary for both themes
-        secondary: {
-          50: '#f8fafc',
-          100: '#f1f5f9',
-          200: '#e2e8f0',
-          300: '#cbd5e1',
-          400: '#94a3b8',
-          500: '#64748b',
-          600: '#475569',
-          700: '#334155',
-          800: '#1e293b',
-          900: '#0f172a',
-          950: '#020617',
+        accent: {
+          blue: '#3b82f6',
+          green: '#22c55e',
+          purple: '#a855f7',
+          orange: '#f97316',
+          pink: '#ec4899',
+          cyan: '#06b6d4',
+          red: '#ef4444',
+          yellow: '#eab308',
         },
-        // Status colors
         success: {
           400: '#4ade80',
           500: '#22c55e',
@@ -80,13 +72,12 @@ export default {
           500: '#ef4444',
           600: '#dc2626',
         },
-        // Molecular visualization colors
         molecular: {
-          dna: '#3b82f6',      // Blue
-          rna: '#f97316',      // Orange
-          protein: '#8b5cf6',  // Purple
-          drug: '#10b981',     // Green
-          pathway: '#ec4899',  // Pink
+          dna: '#3b82f6',
+          rna: '#f97316',
+          protein: '#8b5cf6',
+          drug: '#10b981',
+          pathway: '#ec4899',
         },
       },
       fontFamily: {
@@ -94,28 +85,36 @@ export default {
         mono: ['JetBrains Mono', 'Fira Code', 'Consolas', 'monospace'],
       },
       fontSize: {
-        // Smaller readable sizes as requested
         'xxs': ['0.625rem', { lineHeight: '0.875rem' }],
-        'xs': ['0.6875rem', { lineHeight: '1rem' }],
-        'sm': ['0.75rem', { lineHeight: '1.125rem' }],
-        'base': ['0.8125rem', { lineHeight: '1.25rem' }],
-        'lg': ['0.875rem', { lineHeight: '1.375rem' }],
-        'xl': ['1rem', { lineHeight: '1.5rem' }],
-        '2xl': ['1.125rem', { lineHeight: '1.75rem' }],
-        '3xl': ['1.25rem', { lineHeight: '1.875rem' }],
-        '4xl': ['1.5rem', { lineHeight: '2rem' }],
+        'xs': ['0.75rem', { lineHeight: '1rem' }],
+        'sm': ['0.8125rem', { lineHeight: '1.25rem' }],
+        'base': ['0.875rem', { lineHeight: '1.5rem' }],
+        'lg': ['1rem', { lineHeight: '1.5rem' }],
+        'xl': ['1.125rem', { lineHeight: '1.75rem' }],
+        '2xl': ['1.25rem', { lineHeight: '1.75rem' }],
+        '3xl': ['1.5rem', { lineHeight: '2rem' }],
+        '4xl': ['1.875rem', { lineHeight: '2.25rem' }],
+        '5xl': ['2.25rem', { lineHeight: '2.5rem' }],
+      },
+      borderRadius: {
+        'xl': '12px',
+        '2xl': '16px',
       },
       boxShadow: {
-        'glow': '0 0 20px rgba(6, 182, 212, 0.3)',
-        'glow-sm': '0 0 10px rgba(6, 182, 212, 0.2)',
-        'inner-glow': 'inset 0 0 20px rgba(6, 182, 212, 0.1)',
+        'glass': '0 8px 32px rgba(0, 0, 0, 0.4)',
+        'glass-sm': '0 4px 16px rgba(0, 0, 0, 0.2)',
+        'glass-lg': '0 16px 48px rgba(0, 0, 0, 0.5)',
+        'glow': '0 0 24px rgba(255, 255, 255, 0.06)',
+        'glow-sm': '0 0 12px rgba(255, 255, 255, 0.04)',
+        'inner-glow': 'inset 0 1px 0 rgba(255, 255, 255, 0.04)',
       },
       animation: {
-        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
-        'spin-slow': 'spin 8s linear infinite',
         'fade-in': 'fadeIn 0.3s ease-out',
         'slide-up': 'slideUp 0.3s ease-out',
         'slide-down': 'slideDown 0.3s ease-out',
+        'scale-in': 'scaleIn 0.2s ease-out',
+        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+        'spin-slow': 'spin 8s linear infinite',
       },
       keyframes: {
         fadeIn: {
@@ -123,20 +122,24 @@ export default {
           '100%': { opacity: '1' },
         },
         slideUp: {
-          '0%': { transform: 'translateY(10px)', opacity: '0' },
+          '0%': { transform: 'translateY(8px)', opacity: '0' },
           '100%': { transform: 'translateY(0)', opacity: '1' },
         },
         slideDown: {
-          '0%': { transform: 'translateY(-10px)', opacity: '0' },
+          '0%': { transform: 'translateY(-8px)', opacity: '0' },
           '100%': { transform: 'translateY(0)', opacity: '1' },
+        },
+        scaleIn: {
+          '0%': { transform: 'scale(0.96)', opacity: '0' },
+          '100%': { transform: 'scale(1)', opacity: '1' },
         },
       },
       backgroundImage: {
         'gradient-radial': 'radial-gradient(var(--tw-gradient-stops))',
-        'grid-pattern': 'linear-gradient(rgba(6, 182, 212, 0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(6, 182, 212, 0.03) 1px, transparent 1px)',
+        'grid-pattern': 'linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px)',
       },
       backgroundSize: {
-        'grid': '20px 20px',
+        'grid': '24px 24px',
       },
     },
   },

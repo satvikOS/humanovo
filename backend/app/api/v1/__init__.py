@@ -7,6 +7,7 @@ Aggregates all v1 API endpoints.
 from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
+    activities,
     agents,
     auth,
     discovery,
@@ -17,6 +18,7 @@ from app.api.v1.endpoints import (
     ingestion_ws,
     knowledge,
     monitoring,
+    notebook,
     orchestrator,
     projects,
     rag,
@@ -48,3 +50,9 @@ router.include_router(orchestrator.router)
 
 # Document Pipeline (PDF research paper generation)
 router.include_router(document_pipeline.router)
+
+# Notebook
+router.include_router(notebook.router, prefix="/notebook", tags=["notebook"])
+
+# Activities / Timeline
+router.include_router(activities.router, prefix="/activities", tags=["activities"])

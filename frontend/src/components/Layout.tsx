@@ -1,16 +1,14 @@
-import { Outlet, NavLink, useNavigate } from 'react-router-dom'
-import { useState } from 'react'
+import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
+import { useState, useEffect, useCallback } from 'react'
 import {
   FiHome,
   FiFolder,
   FiZap,
-
   FiActivity,
   FiSettings,
   FiDatabase,
   FiSearch,
   FiBook,
-  FiUsers,
   FiClock,
   FiBox,
   FiSun,
@@ -20,7 +18,11 @@ import {
   FiBell,
   FiUser,
   FiChevronDown,
-  FiCommand
+  FiCommand,
+  FiArrowRight,
+  FiGlobe,
+  FiFileText,
+  FiTrendingUp,
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import { useTheme } from '../contexts/ThemeContext'
@@ -49,7 +51,7 @@ function TabIcon({ type }: { type: WorkspaceTab['type'] }) {
     workbench: FiBox,
     evidence: FiDatabase,
     notebook: FiBook,
-    agents: FiUsers,
+    agents: FiTrendingUp,
   }
   const Icon = icons[type] || FiFolder
   return <Icon className="w-3 h-3" />
@@ -60,37 +62,31 @@ function WorkspaceTabs() {
   const navigate = useNavigate()
 
   const handleAddTab = () => {
-    addTab({
-      type: 'project',
-      title: 'New Tab',
-    })
+    addTab({ type: 'project', title: 'New Tab' })
     navigate('/projects')
   }
 
   if (tabs.length === 0) return null
 
   return (
-    <div className="flex items-center h-8 px-2 border-b border-[var(--color-border)] bg-[var(--color-bg)]">
+    <div className="flex items-center h-9 px-2 border-b border-[var(--color-border)] bg-[var(--color-bg)]">
       <div className="flex items-center gap-0.5 overflow-x-auto hide-scrollbar">
         {tabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             className={clsx(
-              'group flex items-center gap-1.5 px-2 py-1 text-xs rounded-t transition-colors min-w-0',
+              'group flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-all duration-200 min-w-0',
               activeTabId === tab.id
-                ? 'bg-[var(--color-surface)] text-[var(--color-text)] border-t border-x border-[var(--color-border)]'
-                : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] hover:bg-[var(--color-surface)]/50'
+                ? 'bg-[var(--glass-bg-hover)] text-[var(--color-text)]'
+                : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] hover:bg-[var(--glass-bg)]'
             )}
           >
             <TabIcon type={tab.type} />
             <span className="truncate max-w-24">{tab.title}</span>
             <button
-              onClick={(e) => {
-                e.stopPropagation()
-                removeTab(tab.id)
-              }}
-              className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[var(--color-border)] rounded transition-opacity"
+              onClick={(e) => { e.stopPropagation(); removeTab(tab.id) }}
+              className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[var(--color-border-strong)] rounded transition-all"
             >
               <FiX className="w-2.5 h-2.5" />
             </button>
@@ -99,7 +95,7 @@ function WorkspaceTabs() {
       </div>
       <button
         onClick={handleAddTab}
-        className="ml-1 p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface)] rounded transition-colors"
+        className="ml-1 p-1.5 text-[var(--color-text-muted)] hover:text-[var(--color-text)] rounded-lg transition-all hover:bg-[var(--glass-bg)]"
         title="New Tab"
       >
         <FiPlus className="w-3 h-3" />
@@ -108,40 +104,85 @@ function WorkspaceTabs() {
   )
 }
 
+interface CommandAction {
+  label: string
+  icon: typeof FiFolder
+  description?: string
+  action: () => void
+  category: string
+}
+
 function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+  const [query, setQuery] = useState('')
+  const navigate = useNavigate()
+
+  const actions: CommandAction[] = [
+    { label: 'Go to Dashboard', icon: FiHome, category: 'Navigation', action: () => { navigate('/dashboard'); onClose() } },
+    { label: 'Go to Projects', icon: FiFolder, category: 'Navigation', action: () => { navigate('/projects'); onClose() } },
+    { label: 'Go to Evidence', icon: FiDatabase, category: 'Navigation', action: () => { navigate('/evidence'); onClose() } },
+    { label: 'Go to Discovery', icon: FiActivity, category: 'Navigation', action: () => { navigate('/agents'); onClose() } },
+    { label: 'Go to Notebook', icon: FiBook, category: 'Navigation', action: () => { navigate('/notebook'); onClose() } },
+    { label: 'Go to Search', icon: FiSearch, category: 'Navigation', action: () => { navigate('/search'); onClose() } },
+    { label: 'Go to Timeline', icon: FiClock, category: 'Navigation', action: () => { navigate('/timeline'); onClose() } },
+    { label: 'New Project', icon: FiPlus, description: 'Create a new research project', category: 'Actions', action: () => { navigate('/projects?new=1'); onClose() } },
+    { label: 'Start Discovery', icon: FiZap, description: 'Launch AI discovery pipeline', category: 'Actions', action: () => { navigate('/agents?start=1'); onClose() } },
+    { label: 'Global Search', icon: FiGlobe, description: 'Search across all data', category: 'Actions', action: () => { navigate('/search'); onClose() } },
+    { label: 'Open Settings', icon: FiSettings, category: 'Actions', action: () => { navigate('/settings'); onClose() } },
+  ]
+
+  const filtered = query
+    ? actions.filter(a => a.label.toLowerCase().includes(query.toLowerCase()) || a.description?.toLowerCase().includes(query.toLowerCase()))
+    : actions
+
+  const categories = [...new Set(filtered.map(a => a.category))]
+
+  useEffect(() => {
+    if (isOpen) setQuery('')
+  }, [isOpen])
+
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative w-full max-w-lg bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg shadow-2xl">
-        <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--color-border)]">
+    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[20vh] animate-fade-in">
+      <div className="absolute inset-0 modal-overlay" onClick={onClose} />
+      <div className="relative w-full max-w-xl glass-card-static overflow-hidden animate-scale-in" style={{ background: 'var(--color-surface-solid)', boxShadow: 'var(--glass-shadow)' }}>
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-[var(--color-border)]">
           <FiSearch className="w-4 h-4 text-[var(--color-text-muted)]" />
           <input
             type="text"
-            placeholder="Search commands, projects, hypotheses..."
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder="Type a command or search..."
             className="flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--color-text-muted)]"
             autoFocus
           />
-          <kbd className="px-1.5 py-0.5 text-xxs bg-[var(--color-bg)] rounded border border-[var(--color-border)]">ESC</kbd>
+          <kbd className="px-1.5 py-0.5 text-xxs text-[var(--color-text-muted)] bg-[var(--glass-bg)] rounded border border-[var(--color-border)]">ESC</kbd>
         </div>
-        <div className="p-2 max-h-80 overflow-y-auto">
-          <div className="text-xxs text-[var(--color-text-muted)] px-2 py-1">Quick Actions</div>
-          {[
-            { label: 'New Project', icon: FiFolder },
-            { label: 'Start Discovery', icon: FiZap },
-            { label: 'Run Simulation', icon: FiActivity },
-            { label: 'Open Workbench', icon: FiBox },
-          ].map((item) => (
-            <button
-              key={item.label}
-              className="flex items-center gap-2 w-full px-2 py-1.5 text-sm rounded hover:bg-[var(--color-border)] transition-colors"
-              onClick={onClose}
-            >
-              <item.icon className="w-3.5 h-3.5 text-[var(--color-text-muted)]" />
-              {item.label}
-            </button>
+        <div className="max-h-[320px] overflow-y-auto p-2">
+          {categories.map(cat => (
+            <div key={cat}>
+              <div className="text-xxs text-[var(--color-text-muted)] px-2 py-1.5 uppercase tracking-wider font-medium">{cat}</div>
+              {filtered.filter(a => a.category === cat).map(item => (
+                <button
+                  key={item.label}
+                  onClick={item.action}
+                  className="flex items-center gap-3 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--glass-bg-hover)] transition-all group"
+                >
+                  <item.icon className="w-4 h-4 text-[var(--color-text-muted)] group-hover:text-[var(--color-text)]" />
+                  <div className="flex-1 text-left">
+                    <span className="text-[var(--color-text-secondary)] group-hover:text-[var(--color-text)]">{item.label}</span>
+                    {item.description && (
+                      <span className="block text-xs text-[var(--color-text-muted)]">{item.description}</span>
+                    )}
+                  </div>
+                  <FiArrowRight className="w-3 h-3 text-[var(--color-text-muted)] opacity-0 group-hover:opacity-100 transition-opacity" />
+                </button>
+              ))}
+            </div>
           ))}
+          {filtered.length === 0 && (
+            <div className="text-center py-8 text-sm text-[var(--color-text-muted)]">No results found</div>
+          )}
         </div>
       </div>
     </div>
@@ -152,87 +193,124 @@ export default function Layout() {
   const { theme, toggleTheme } = useTheme()
   const [isCommandOpen, setIsCommandOpen] = useState(false)
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
+  const location = useLocation()
+
+  // Keyboard shortcut for command palette
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      e.preventDefault()
+      setIsCommandOpen(prev => !prev)
+    }
+    if (e.key === 'Escape') {
+      setIsCommandOpen(false)
+      setIsUserMenuOpen(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [handleKeyDown])
+
+  // Get current page title
+  const getPageTitle = () => {
+    const path = location.pathname
+    if (path === '/dashboard' || path === '/') return 'Dashboard'
+    if (path === '/projects') return 'Projects'
+    if (path.startsWith('/projects/')) return 'Project'
+    if (path === '/evidence') return 'Evidence'
+    if (path === '/agents') return 'Discovery'
+    if (path === '/workbench') return 'Workbench'
+    if (path === '/anatomy') return '3D Anatomy'
+    if (path === '/notebook') return 'Notebook'
+    if (path === '/timeline') return 'Timeline'
+    if (path === '/search') return 'Search'
+    if (path === '/settings') return 'Settings'
+    return ''
+  }
 
   return (
     <div className="flex h-screen bg-[var(--color-bg)]">
       {/* Sidebar */}
-      <aside className="w-48 flex flex-col border-r border-[var(--color-border)] bg-[var(--color-bg-elevated)]">
+      <aside className="w-52 flex flex-col glass-sidebar">
         {/* Logo */}
-        <div className="h-10 flex items-center px-3 border-b border-[var(--color-border)]">
-          <div className="flex items-center gap-2">
-            <div className="w-6 h-6 bg-gradient-to-br from-primary-400 to-primary-600 rounded flex items-center justify-center">
-              <span className="text-white font-bold text-xs">H</span>
+        <div className="h-12 flex items-center px-4 border-b border-[var(--color-border)]">
+          <div className="flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-[var(--color-text)] flex items-center justify-center">
+              <span className="text-[var(--color-bg)] font-bold text-xs">H</span>
             </div>
-            <span className="text-sm font-semibold text-[var(--color-text)]">humanovo</span>
-            <span className="badge badge-info ml-auto">v0.1</span>
+            <div className="flex flex-col">
+              <span className="text-sm font-semibold text-[var(--color-text)] tracking-tight">humanovo</span>
+              <span className="text-xxs text-[var(--color-text-muted)]">Research Platform</span>
+            </div>
           </div>
         </div>
 
         {/* Main Navigation */}
-        <nav className="flex-1 p-2 space-y-0.5 overflow-y-auto">
-          <div className="text-xxs text-[var(--color-text-muted)] px-2 py-1 uppercase tracking-wider">Main</div>
+        <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
+          <div className="text-xxs text-[var(--color-text-muted)] px-2 py-1.5 uppercase tracking-widest font-medium">Main</div>
           {mainNavItems.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
               className={({ isActive }) =>
                 clsx(
-                  'flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-colors group',
+                  'flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm transition-all duration-200 group',
                   isActive
-                    ? 'bg-primary-500/10 text-primary-400'
-                    : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]'
+                    ? 'bg-[var(--glass-bg-hover)] text-[var(--color-text)]'
+                    : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)]'
                 )
               }
             >
-              <item.icon className="w-3.5 h-3.5" />
-              <span className="flex-1">{item.label}</span>
-              <kbd className="hidden group-hover:inline text-xxs text-[var(--color-text-muted)]">{item.shortcut}</kbd>
+              <item.icon className="w-4 h-4" />
+              <span className="flex-1 font-medium">{item.label}</span>
+              <kbd className="hidden group-hover:inline text-xxs text-[var(--color-text-muted)] opacity-50">{item.shortcut}</kbd>
             </NavLink>
           ))}
 
-          <div className="text-xxs text-[var(--color-text-muted)] px-2 py-1 mt-3 uppercase tracking-wider">Tools</div>
+          <div className="text-xxs text-[var(--color-text-muted)] px-2 py-1.5 mt-4 uppercase tracking-widest font-medium">Tools</div>
           {secondaryNavItems.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
               className={({ isActive }) =>
                 clsx(
-                  'flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-colors',
+                  'flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm transition-all duration-200',
                   isActive
-                    ? 'bg-primary-500/10 text-primary-400'
-                    : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]'
+                    ? 'bg-[var(--glass-bg-hover)] text-[var(--color-text)]'
+                    : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)]'
                 )
               }
             >
-              <item.icon className="w-3.5 h-3.5" />
-              <span>{item.label}</span>
+              <item.icon className="w-4 h-4" />
+              <span className="font-medium">{item.label}</span>
             </NavLink>
           ))}
         </nav>
 
         {/* Bottom section */}
-        <div className="p-2 border-t border-[var(--color-border)] space-y-1">
+        <div className="p-3 border-t border-[var(--color-border)] space-y-1">
           <button
             onClick={() => setIsCommandOpen(true)}
-            className="flex items-center gap-2 w-full px-2 py-1.5 rounded text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface)] transition-colors"
+            className="flex items-center gap-2.5 w-full px-2.5 py-2 rounded-lg text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)] transition-all"
           >
-            <FiCommand className="w-3.5 h-3.5" />
-            <span>Command</span>
-            <kbd className="ml-auto text-xxs bg-[var(--color-bg)] px-1 rounded border border-[var(--color-border)]">K</kbd>
+            <FiCommand className="w-4 h-4" />
+            <span className="font-medium">Command</span>
+            <kbd className="ml-auto text-xxs text-[var(--color-text-muted)] bg-[var(--glass-bg)] px-1.5 py-0.5 rounded border border-[var(--color-border)]">⌘K</kbd>
           </button>
           <NavLink
             to="/settings"
             className={({ isActive }) =>
               clsx(
-                'flex items-center gap-2 w-full px-2 py-1.5 rounded text-xs transition-colors',
+                'flex items-center gap-2.5 w-full px-2.5 py-2 rounded-lg text-sm transition-all duration-200',
                 isActive
-                  ? 'bg-primary-500/10 text-primary-400'
-                  : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]'
+                  ? 'bg-[var(--glass-bg-hover)] text-[var(--color-text)]'
+                  : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)]'
               )
             }
           >
-            <FiSettings className="w-3.5 h-3.5" />
-            <span>Settings</span>
+            <FiSettings className="w-4 h-4" />
+            <span className="font-medium">Settings</span>
           </NavLink>
         </div>
       </aside>
@@ -240,61 +318,70 @@ export default function Layout() {
       {/* Main content area */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top bar */}
-        <header className="h-10 flex items-center justify-between px-3 border-b border-[var(--color-border)] bg-[var(--color-bg-elevated)]">
-          <div className="flex items-center gap-2">
+        <header className="h-12 flex items-center justify-between px-4 border-b border-[var(--color-border)] bg-[var(--color-bg)]">
+          <div className="flex items-center gap-3">
+            <h1 className="text-sm font-medium text-[var(--color-text)]">{getPageTitle()}</h1>
+            <span className="text-[var(--color-border-strong)]">/</span>
             <button
               onClick={() => setIsCommandOpen(true)}
-              className="flex items-center gap-2 px-2 py-1 text-xs text-[var(--color-text-muted)] bg-[var(--color-surface)] rounded border border-[var(--color-border)] hover:border-[var(--color-border-strong)] transition-colors"
+              className="flex items-center gap-2 px-3 py-1.5 text-xs text-[var(--color-text-muted)] bg-[var(--glass-bg)] rounded-lg border border-[var(--color-border)] hover:border-[var(--color-border-strong)] hover:bg-[var(--glass-bg-hover)] transition-all w-56"
             >
               <FiSearch className="w-3 h-3" />
-              <span>Search...</span>
-              <kbd className="text-xxs">Cmd+K</kbd>
+              <span className="flex-1 text-left">Search...</span>
+              <kbd className="text-xxs text-[var(--color-text-muted)]">⌘K</kbd>
             </button>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
             {/* Theme toggle */}
             <button
               onClick={toggleTheme}
-              className="p-1.5 text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface)] rounded transition-colors"
+              className="p-2 text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)] rounded-lg transition-all"
               title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
             >
-              {theme === 'dark' ? <FiSun className="w-3.5 h-3.5" /> : <FiMoon className="w-3.5 h-3.5" />}
+              {theme === 'dark' ? <FiSun className="w-4 h-4" /> : <FiMoon className="w-4 h-4" />}
             </button>
 
             {/* Notifications */}
-            <button className="p-1.5 text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface)] rounded transition-colors relative">
-              <FiBell className="w-3.5 h-3.5" />
-              <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 bg-primary-500 rounded-full" />
+            <button className="p-2 text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)] rounded-lg transition-all relative">
+              <FiBell className="w-4 h-4" />
+              <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-[var(--color-accent-blue)] rounded-full" />
             </button>
+
+            {/* Divider */}
+            <div className="w-px h-5 bg-[var(--color-border)] mx-1" />
 
             {/* User menu */}
             <div className="relative">
               <button
                 onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
-                className="flex items-center gap-1.5 px-2 py-1 text-xs hover:bg-[var(--color-surface)] rounded transition-colors"
+                className="flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-[var(--glass-bg)] rounded-lg transition-all"
               >
-                <div className="w-5 h-5 bg-primary-500/20 rounded-full flex items-center justify-center">
-                  <FiUser className="w-3 h-3 text-primary-400" />
+                <div className="w-6 h-6 bg-[var(--glass-bg-hover)] rounded-full flex items-center justify-center border border-[var(--color-border)]">
+                  <FiUser className="w-3 h-3 text-[var(--color-text-secondary)]" />
                 </div>
-                <span className="text-[var(--color-text-secondary)]">Researcher</span>
+                <span className="text-[var(--color-text-secondary)] text-sm">Researcher</span>
                 <FiChevronDown className="w-3 h-3 text-[var(--color-text-muted)]" />
               </button>
 
               {isUserMenuOpen && (
                 <>
                   <div className="fixed inset-0 z-40" onClick={() => setIsUserMenuOpen(false)} />
-                  <div className="absolute right-0 top-full mt-1 w-40 py-1 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg shadow-lg z-50">
-                    <button className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-border)] transition-colors">
-                      <FiUser className="w-3 h-3" />
+                  <div className="absolute right-0 top-full mt-1.5 w-44 py-1.5 glass-card-static z-50 animate-scale-in" style={{ background: 'var(--color-surface-solid)' }}>
+                    <button className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)] transition-all">
+                      <FiUser className="w-3.5 h-3.5" />
                       Profile
                     </button>
-                    <button className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-border)] transition-colors">
-                      <FiSettings className="w-3 h-3" />
+                    <button className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)] transition-all">
+                      <FiFileText className="w-3.5 h-3.5" />
+                      API Keys
+                    </button>
+                    <button className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)] transition-all">
+                      <FiSettings className="w-3.5 h-3.5" />
                       Preferences
                     </button>
                     <div className="my-1 border-t border-[var(--color-border)]" />
-                    <button className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-error-400 hover:bg-[var(--color-border)] transition-colors">
+                    <button className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-[var(--color-error)] hover:bg-[var(--glass-bg)] transition-all">
                       Sign Out
                     </button>
                   </div>
