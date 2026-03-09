@@ -38,6 +38,8 @@ env:
   TF_VAR_azure_phi4_key: ${{ secrets.AZURE_PHI4_KEY }}
   TF_VAR_azure_grok_endpoint: ${{ secrets.AZURE_GROK_ENDPOINT }}
   TF_VAR_azure_grok_key: ${{ secrets.AZURE_GROK_KEY }}
+  TF_VAR_azure_embedding_endpoint: ${{ secrets.AZURE_EMBEDDING_ENDPOINT }}
+  TF_VAR_azure_embedding_key: ${{ secrets.AZURE_EMBEDDING_KEY }}
 
 jobs:
   deploy-infra:

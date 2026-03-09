@@ -1,12 +1,13 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
-  FiArrowLeft, FiFileText, FiRefreshCw, FiX, FiDownload,
+  FiFileText, FiRefreshCw, FiX,
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import { api } from '../services/api'
 import { persistGet } from '../utils/persistence'
+import HypothesisDocViewer from '../components/HypothesisDocViewer'
 
 const API_BASE = '/api/v1'
 
@@ -69,10 +70,12 @@ ${h.tags && h.tags.length > 0 ? `<div class="section"><h2>Tags</h2><div class="t
 interface LocalHypothesis {
   id: string; title: string; description: string; mechanism: string;
   confidence: number; tags: string[]; disease?: string;
+  discovery_type?: string; model_used?: string; created_at?: string;
 }
 
 export default function HypothesisDetail() {
   const { hypothesisId } = useParams<{ hypothesisId: string }>()
+  const navigate = useNavigate()
 
   const [generatingPaper, setGeneratingPaper] = useState(false)
   const [paperHtml, setPaperHtml] = useState<string | null>(null)
@@ -81,7 +84,7 @@ export default function HypothesisDetail() {
   const [phaseProgress, setPhaseProgress] = useState(0)
   const progressTimerRef = useRef<number | null>(null)
 
-  const { data: apiHypothesis, isLoading, isError } = useQuery({
+  const { data: apiHypothesis, isLoading } = useQuery({
     queryKey: ['hypothesis', hypothesisId],
     queryFn: () => api.getHypothesis(hypothesisId!),
     enabled: !!hypothesisId,
@@ -110,7 +113,7 @@ export default function HypothesisDetail() {
     supporting_count: 0,
     tags: localHypothesis.tags || [],
     version: 1,
-    created_at: '',
+    created_at: localHypothesis.created_at || '',
     updated_at: '',
   } : null)
 
@@ -206,30 +209,34 @@ export default function HypothesisDetail() {
 
   const downloadPaper = useCallback(async () => {
     if (!hypothesis) return
-    const res = await fetch(`${API_BASE}/documents/hypothesis/${hypothesisId}/pdf`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        title: hypothesis.statement || '',
-        description: hypothesis.rationale || hypothesis.mechanism || '',
-        mechanism: hypothesis.mechanism || '',
-        confidence: hypothesis.confidence_score || 0,
-        disease: localHypothesis?.disease || 'Unknown',
-        tags: hypothesis.tags || [],
-      }),
-    })
-    if (res.ok) {
-      const data = await res.json()
-      const byteChars = atob(data.pdf_base64)
-      const byteArray = new Uint8Array(byteChars.length)
-      for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i)
-      const blob = new Blob([byteArray], { type: 'application/pdf' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = data.filename || `humanovo-hypothesis-${hypothesisId}.pdf`
-      a.click()
-      URL.revokeObjectURL(url)
+    try {
+      const res = await fetch(`${API_BASE}/documents/hypothesis/${hypothesisId}/pdf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: hypothesis.statement || '',
+          description: hypothesis.rationale || hypothesis.mechanism || '',
+          mechanism: hypothesis.mechanism || '',
+          confidence: hypothesis.confidence_score || 0,
+          disease: localHypothesis?.disease || 'Unknown',
+          tags: hypothesis.tags || [],
+        }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        const byteChars = atob(data.pdf_base64)
+        const byteArray = new Uint8Array(byteChars.length)
+        for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i)
+        const blob = new Blob([byteArray], { type: 'application/pdf' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = data.filename || `humanovo-hypothesis-${hypothesisId}.pdf`
+        a.click()
+        URL.revokeObjectURL(url)
+      }
+    } catch (e) {
+      console.error('PDF export failed:', e)
     }
   }, [hypothesisId, hypothesis, localHypothesis])
 
@@ -252,153 +259,108 @@ export default function HypothesisDetail() {
     )
   }
 
-  return (
-    <div className="h-full flex flex-col">
-      <div className="px-4 py-2 border-b border-secondary-700 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => window.history.back()}
-            className="text-primary-400 hover:text-primary-300 text-sm"
-          >
-            <FiArrowLeft className="w-3.5 h-3.5 inline mr-1" />Back
-          </button>
-          <span className="text-secondary-600">/</span>
-          <span className="text-secondary-400 text-sm truncate">{hypothesis.statement}</span>
+  // ---- Paper generation overlay (shown on top of doc viewer) ----
+  if (generatingPaper || paperHtml || paperError) {
+    return (
+      <div className="h-full flex flex-col">
+        <div className="px-4 py-2 border-b border-secondary-700 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => { setPaperHtml(null); setPaperError(null); setGeneratingPaper(false); stopPhaseAnimation() }}
+              className="text-primary-400 hover:text-primary-300 text-sm"
+            >
+              Back to Document
+            </button>
+            <span className="text-secondary-600">/</span>
+            <span className="text-secondary-400 text-sm truncate">Research Paper</span>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          {!generatingPaper && (
-            <>
-              {!paperHtml && (
-                <button onClick={generatePaper} className="btn btn-sm bg-purple-500 text-white hover:bg-purple-600">
-                  <FiFileText className="w-3.5 h-3.5" />
-                  Generate Research Paper
-                </button>
-              )}
-              <button onClick={downloadPaper} className="btn btn-sm bg-green-500 text-white hover:bg-green-600">
-                <FiDownload className="w-3.5 h-3.5" />
-                Export PDF
+
+        <div className="flex-1 min-h-0 relative">
+          {/* Loading animation with phases */}
+          {generatingPaper && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-secondary-900 z-10">
+              <div className="relative w-24 h-24 mb-6">
+                <div className="absolute inset-0 rounded-full border-4 border-secondary-700" />
+                <div className="absolute inset-0 rounded-full border-4 border-t-purple-500 animate-spin" />
+                <FiFileText className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 text-purple-400" />
+              </div>
+              <h3 className="text-lg font-semibold text-white mb-2">Generating Research Paper</h3>
+              <div className="mt-4 w-full max-w-lg px-8">
+                <p className="text-purple-300 text-sm font-medium text-center mb-1">
+                  {PAPER_PHASES[currentPhase]?.label || 'Processing...'}
+                </p>
+                <p className="text-secondary-500 text-xs text-center mb-3">
+                  Step {currentPhase + 1} of {PAPER_PHASES.length}
+                </p>
+                <div className="h-2 bg-secondary-700 rounded-full overflow-hidden mb-2">
+                  <div
+                    className="h-full bg-purple-500 rounded-full transition-all duration-200 ease-linear"
+                    style={{ width: `${((currentPhase + phaseProgress / 100) / PAPER_PHASES.length) * 100}%` }}
+                  />
+                </div>
+                <div className="flex justify-between px-1">
+                  {PAPER_PHASES.map((_, idx) => (
+                    <div
+                      key={idx}
+                      className={clsx(
+                        'w-2 h-2 rounded-full transition-colors',
+                        idx < currentPhase ? 'bg-purple-500' :
+                        idx === currentPhase ? 'bg-purple-400 animate-pulse' : 'bg-secondary-600'
+                      )}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Error */}
+          {paperError && !generatingPaper && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-secondary-900 z-10">
+              <FiX className="w-12 h-12 text-red-400 mb-4" />
+              <h3 className="text-lg font-semibold text-white mb-2">Generation Failed</h3>
+              <p className="text-red-400 text-sm mb-4 max-w-md text-center">{paperError}</p>
+              <button onClick={generatePaper} className="btn bg-purple-500 text-white hover:bg-purple-600">
+                <FiRefreshCw className="w-4 h-4" /> Retry
               </button>
-              {paperHtml && (
-                <button onClick={() => setPaperHtml(null)} className="btn btn-sm bg-secondary-700 text-secondary-400">
-                  Back
-                </button>
-              )}
-            </>
+            </div>
+          )}
+
+          {/* Paper viewer — HTML rendered in iframe */}
+          {paperHtml && !generatingPaper && (
+            <iframe
+              srcDoc={paperHtml}
+              className="w-full h-full"
+              title="Research Paper"
+              sandbox="allow-same-origin"
+            />
           )}
         </div>
       </div>
+    )
+  }
 
-      <div className="flex-1 min-h-0 relative">
-        {/* Loading animation with phases */}
-        {generatingPaper && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-secondary-900 z-10">
-            <div className="relative w-24 h-24 mb-6">
-              <div className="absolute inset-0 rounded-full border-4 border-secondary-700" />
-              <div className="absolute inset-0 rounded-full border-4 border-t-purple-500 animate-spin" />
-              <FiFileText className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 text-purple-400" />
-            </div>
-            <h3 className="text-lg font-semibold text-white mb-2">Generating Research Paper</h3>
-            <div className="mt-4 w-full max-w-lg px-8">
-              <p className="text-purple-300 text-sm font-medium text-center mb-1">
-                {PAPER_PHASES[currentPhase]?.label || 'Processing...'}
-              </p>
-              <p className="text-secondary-500 text-xs text-center mb-3">
-                Step {currentPhase + 1} of {PAPER_PHASES.length}
-              </p>
-              <div className="h-2 bg-secondary-700 rounded-full overflow-hidden mb-2">
-                <div
-                  className="h-full bg-purple-500 rounded-full transition-all duration-200 ease-linear"
-                  style={{ width: `${((currentPhase + phaseProgress / 100) / PAPER_PHASES.length) * 100}%` }}
-                />
-              </div>
-              <div className="flex justify-between px-1">
-                {PAPER_PHASES.map((_, idx) => (
-                  <div
-                    key={idx}
-                    className={clsx(
-                      'w-2 h-2 rounded-full transition-colors',
-                      idx < currentPhase ? 'bg-purple-500' :
-                      idx === currentPhase ? 'bg-purple-400 animate-pulse' : 'bg-secondary-600'
-                    )}
-                  />
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Error */}
-        {paperError && !generatingPaper && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-secondary-900 z-10">
-            <FiX className="w-12 h-12 text-red-400 mb-4" />
-            <h3 className="text-lg font-semibold text-white mb-2">Generation Failed</h3>
-            <p className="text-red-400 text-sm mb-4 max-w-md text-center">{paperError}</p>
-            <button onClick={generatePaper} className="btn bg-purple-500 text-white hover:bg-purple-600">
-              <FiRefreshCw className="w-4 h-4" /> Retry
-            </button>
-          </div>
-        )}
-
-        {/* Paper viewer — HTML rendered in iframe */}
-        {paperHtml && !generatingPaper && (
-          <iframe
-            srcDoc={paperHtml}
-            className="w-full h-full"
-            title="Research Paper"
-            sandbox="allow-same-origin"
-          />
-        )}
-
-        {/* Default: show hypothesis content */}
-        {!generatingPaper && !paperHtml && !paperError && (
-          <div className="overflow-y-auto p-8">
-            <div className="max-w-4xl mx-auto">
-              {isError && localHypothesis && (
-                <div className="mb-4 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-sm text-yellow-400">
-                  Loaded from local cache (backend is offline).
-                </div>
-              )}
-              <h1 className="text-2xl font-bold text-white mb-4">{hypothesis.statement}</h1>
-              <div className="flex items-center gap-3 mb-6">
-                <span className={clsx(
-                  'px-3 py-1 rounded-full text-sm font-bold',
-                  (hypothesis.confidence_score || 0) >= 0.7 ? 'bg-green-500/20 text-green-400' :
-                  (hypothesis.confidence_score || 0) >= 0.5 ? 'bg-yellow-500/20 text-yellow-400' : 'bg-orange-500/20 text-orange-400'
-                )}>
-                  {((hypothesis.confidence_score || 0) * 100).toFixed(1)}% Confidence
-                </span>
-              </div>
-              {hypothesis.rationale && (
-                <div className="mb-6">
-                  <h2 className="text-xs font-semibold text-secondary-400 uppercase tracking-wider mb-2">Rationale</h2>
-                  <p className="text-secondary-200 leading-relaxed whitespace-pre-wrap">{hypothesis.rationale}</p>
-                </div>
-              )}
-              {hypothesis.mechanism && (
-                <div className="mb-6">
-                  <h2 className="text-xs font-semibold text-secondary-400 uppercase tracking-wider mb-2">Mechanism</h2>
-                  <div className="bg-secondary-800 border border-secondary-700 rounded-lg p-4">
-                    <p className="text-secondary-200 leading-relaxed whitespace-pre-wrap">{hypothesis.mechanism}</p>
-                  </div>
-                </div>
-              )}
-
-              {/* Generate Paper CTA */}
-              <div className="mt-8 p-6 bg-purple-500/10 border border-purple-500/30 rounded-lg text-center">
-                <FiFileText className="w-8 h-8 text-purple-400 mx-auto mb-3" />
-                <h3 className="text-white font-semibold mb-1">Generate Research Paper</h3>
-                <p className="text-secondary-400 text-sm mb-4">
-                  Professional document with cover page, confidence analysis, and mechanism details.
-                </p>
-                <button onClick={generatePaper} className="btn bg-purple-500 text-white hover:bg-purple-600">
-                  <FiFileText className="w-4 h-4" />
-                  Generate Research Paper
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
+  // ---- Default: Document viewer ----
+  return (
+    <HypothesisDocViewer
+      hypothesis={{
+        id: hypothesis.id,
+        title: hypothesis.statement || '',
+        description: hypothesis.rationale || '',
+        mechanism: hypothesis.mechanism || '',
+        confidence: hypothesis.confidence_score || 0,
+        tags: hypothesis.tags || [],
+        disease: localHypothesis?.disease,
+        created_at: hypothesis.created_at,
+      }}
+      breadcrumbs={[
+        { label: 'Hypotheses', onClick: () => navigate(-1) },
+        { label: hypothesis.statement || 'Hypothesis' },
+      ]}
+      onClose={() => navigate(-1)}
+      onGenerateResearchPaper={generatePaper}
+      onExportPdf={downloadPaper}
+    />
   )
 }

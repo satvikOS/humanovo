@@ -256,6 +256,21 @@ variable "azure_grok_key" {
   sensitive   = true
 }
 
+# ==================== Azure OpenAI — Embedding Models ====================
+
+variable "azure_embedding_endpoint" {
+  description = "Azure OpenAI endpoint for embedding models (text-embedding-3-large + text-embedding-3-small)"
+  type        = string
+  default     = ""
+}
+
+variable "azure_embedding_key" {
+  description = "Azure OpenAI API key for embedding models"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
 # ==================== API Gateway ====================
 
 variable "cors_allowed_origins" {

@@ -186,6 +186,18 @@ variable "azure_grok_key" {
   sensitive = true
 }
 
+# Azure OpenAI Embedding endpoint (text-embedding-3-large + text-embedding-3-small)
+variable "azure_embedding_endpoint" {
+  type    = string
+  default = ""
+}
+
+variable "azure_embedding_key" {
+  type      = string
+  default   = ""
+  sensitive = true
+}
+
 variable "lambda_memory_size" {
   type    = number
   default = 1024
@@ -234,6 +246,8 @@ locals {
     AZURE_PHI4_KEY             = var.azure_phi4_key
     AZURE_GROK_ENDPOINT        = var.azure_grok_endpoint
     AZURE_GROK_KEY             = var.azure_grok_key
+    AZURE_EMBEDDING_ENDPOINT   = var.azure_embedding_endpoint
+    AZURE_EMBEDDING_KEY        = var.azure_embedding_key
     LOG_LEVEL                  = var.environment == "prod" ? "INFO" : "DEBUG"
     POWERTOOLS_SERVICE_NAME    = "genup"
     POWERTOOLS_METRICS_NAMESPACE = "GenUp"

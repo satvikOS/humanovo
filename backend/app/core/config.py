@@ -147,6 +147,29 @@ class Settings(BaseSettings):
     PUBMED_API_KEY: SecretStr | None = None
     PUBMED_RATE_LIMIT: int = 10  # requests per second
 
+    # Elsevier Scopus / ScienceDirect API
+    ELSEVIER_API_KEY: str = ""  # Set via ELSEVIER_API_KEY env var or GitHub Actions secret
+
+    # HCA (Human Cell Atlas) — public Azul service, no auth needed
+    HCA_CLIENT_ID: str = ""  # Optional, for future OAuth; public access used by default
+
+    # Embedding Grounding Configuration
+    # Dual-model: Bedrock Cohere (biomedical) + Azure text-embedding-3-large (general)
+    GROUNDING_EMBEDDING_PRIMARY: str = "cohere.embed-english-v3"  # Bedrock Cohere Embed v3 (1024d)
+    GROUNDING_EMBEDDING_SECONDARY: str = "azure-text-embedding-3-large"  # Azure OpenAI (3072d)
+    GROUNDING_SIMILARITY_THRESHOLD: float = 0.4  # Min cosine similarity for claim grounding
+    GROUNDING_RAG_TOP_K: int = 8  # Top-K chunks retrieved per stage
+    GROUNDING_GATE_ENABLED: bool = True  # Enable semantic similarity gating between stages
+
+    # Azure OpenAI Embedding — dedicated endpoint on cognitiveservices resource
+    # Deployment: text-embedding-3-large (150K TPM, 900 RPM)
+    # Resource: humanovo-openai.cognitiveservices.azure.com (shared with Cohere, Kimi, etc.)
+    AZURE_EMBEDDING_ENDPOINT: str = ""  # e.g. https://humanovo-openai.cognitiveservices.azure.com
+    AZURE_EMBEDDING_KEY: SecretStr | None = None
+    AZURE_EMBEDDING_API_VERSION: str = "2023-05-15"
+    AZURE_OPENAI_EMBEDDING_DEPLOYMENT_LARGE: str = "text-embedding-3-large"
+    AZURE_OPENAI_EMBEDDING_DEPLOYMENT_SMALL: str = "text-embedding-3-small"
+
     # Celery
     CELERY_BROKER_URL: str = "redis://localhost:6379/1"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/2"
@@ -238,6 +261,11 @@ class Settings(BaseSettings):
     def azure_grok_key_value(self) -> str | None:
         """Azure Grok API key."""
         return self.AZURE_GROK_KEY.get_secret_value() if self.AZURE_GROK_KEY else None
+
+    @property
+    def azure_embedding_key_value(self) -> str | None:
+        """Azure Embedding API key."""
+        return self.AZURE_EMBEDDING_KEY.get_secret_value() if self.AZURE_EMBEDDING_KEY else None
 
 
 @lru_cache
