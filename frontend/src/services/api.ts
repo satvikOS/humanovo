@@ -226,6 +226,8 @@ export interface OrchestratorStatus {
     high_value_paths: number
     avg_relation_score: number
   }
+  project_id?: string
+  project_name?: string
 }
 
 export interface DiscoveryHypothesis {
@@ -252,6 +254,7 @@ export interface DiscoveryConfig {
   min_confidence?: number
   max_rounds?: number
   models?: string[]
+  research_guidance?: string
 }
 
 // ─── RAG ───────────────────────────────────────────────────────────

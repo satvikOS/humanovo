@@ -12,6 +12,11 @@ import Notebook from './pages/Notebook'
 import Search from './pages/Search'
 import Timeline from './pages/Timeline'
 import Agents from './pages/Agents'
+import Simulations from './pages/Simulations'
+import LiteratureReview from './pages/LiteratureReview'
+import CitationManager from './pages/CitationManager'
+import ExperimentTracker from './pages/ExperimentTracker'
+import DataVisualization from './pages/DataVisualization'
 
 function App() {
   return (
@@ -26,7 +31,7 @@ function App() {
         {/* Hypotheses integrated into Discovery — redirect old routes */}
         <Route path="hypotheses" element={<Navigate to="/agents" replace />} />
         <Route path="hypotheses/:hypothesisId" element={<Navigate to="/agents" replace />} />
-        <Route path="simulations" element={<Navigate to="/agents" replace />} />
+        <Route path="simulations" element={<Simulations />} />
         <Route path="workbench" element={<Workbench />} />
         <Route path="anatomy" element={<HumanAnatomy />} />
         <Route path="notebook" element={<Notebook />} />
@@ -34,6 +39,10 @@ function App() {
         <Route path="timeline" element={<Timeline />} />
         <Route path="search" element={<Search />} />
         <Route path="settings" element={<Settings />} />
+        <Route path="literature-review" element={<LiteratureReview />} />
+        <Route path="citation-manager" element={<CitationManager />} />
+        <Route path="experiment-tracker" element={<ExperimentTracker />} />
+        <Route path="data-visualization" element={<DataVisualization />} />
       </Route>
     </Routes>
   )

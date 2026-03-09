@@ -209,12 +209,40 @@ export default function Notebook() {
     try {
       setLoading(true)
       const res = await api.getNotebookPages({ page_size: 100 })
-      setPages(res.items || [])
-      if (!activePage && res.items?.length > 0) {
-        selectPage(res.items[0])
+      const items = res.items || []
+      if (items.length > 0) {
+        setPages(items)
+        if (!activePage) selectPage(items[0])
+      } else {
+        // No pages returned — create a default local page
+        const defaultPage: NotebookPage = {
+          id: 'local-default',
+          title: 'Getting Started',
+          content: '# Welcome to HumaNovo Notebook\n\nThis is your research notebook. Use **Markdown** to write notes, embed evidence, and track your research.\n\n## Features\n- Rich Markdown editing with live preview\n- LaTeX math: $E = mc^2$\n- Link evidence and hypotheses\n- Version history\n- Export to PDF/Markdown\n\nStart writing below...',
+          content_type: 'markdown',
+          tags: ['getting-started'],
+          version: 1,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }
+        setPages([defaultPage])
+        selectPage(defaultPage)
       }
     } catch (err) {
       console.error('Failed to load notebook pages:', err)
+      // Fallback: create a local-only page so the UI isn't blank
+      const fallbackPage: NotebookPage = {
+        id: 'local-fallback',
+        title: 'Research Notes',
+        content: '# Research Notes\n\nStart writing your research notes here.\n\n> **Note:** The notebook backend is currently unavailable. Your notes will be available once the server is back online.\n',
+        content_type: 'markdown',
+        tags: [],
+        version: 1,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }
+      setPages([fallbackPage])
+      selectPage(fallbackPage)
     } finally {
       setLoading(false)
     }
@@ -258,6 +286,14 @@ export default function Notebook() {
     if (!activePage) return
     try {
       setSaving(true)
+      // For local/fallback pages, save in-memory only
+      if (activePage.id.startsWith('local-')) {
+        const updated = { ...activePage, title: editTitle, content: editContent, tags: editTags, updated_at: new Date().toISOString() }
+        setActivePage(updated)
+        setPages(prev => prev.map(p => p.id === updated.id ? updated : p))
+        setHasUnsavedChanges(false)
+        return
+      }
       const updated = await api.updateNotebookPage(activePage.id, {
         title: editTitle,
         content: editContent,
@@ -268,6 +304,11 @@ export default function Notebook() {
       setHasUnsavedChanges(false)
     } catch (err) {
       console.error('Failed to save page:', err)
+      // Save locally on failure
+      const updated = { ...activePage, title: editTitle, content: editContent, tags: editTags, updated_at: new Date().toISOString() }
+      setActivePage(updated)
+      setPages(prev => prev.map(p => p.id === updated.id ? updated : p))
+      setHasUnsavedChanges(false)
     } finally {
       setSaving(false)
     }

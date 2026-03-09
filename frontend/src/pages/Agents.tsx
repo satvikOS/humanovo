@@ -17,7 +17,10 @@ import {
   FiCheck,
   FiAlertTriangle,
   FiColumns,
+  FiExternalLink,
+  FiFolder,
 } from 'react-icons/fi'
+import { Link } from 'react-router-dom'
 import { BarChart, Bar, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import api from '../services/api'
 import type { OrchestratorStatus, DiscoveryConfig } from '../services/api'
@@ -113,7 +116,7 @@ export default function Agents() {
     focus_entities: [],
     max_results: 50,
     min_confidence: 0.3,
-    max_rounds: 10,
+    research_guidance: '',
   })
   const [focusInput, setFocusInput] = useState('')
   const [factors, setFactors] = useState<ExternalFactor[]>([])
@@ -125,6 +128,10 @@ export default function Agents() {
   const [discoveryHistory, setDiscoveryHistory] = useState<DiscoveryRun[]>(() => {
     try { return JSON.parse(localStorage.getItem('humanovo-discovery-history') || '[]') } catch { return [] }
   })
+
+  // Project tracking (auto-created by backend)
+  const [projectId, setProjectId] = useState<string>('')
+  const [, setProjectName] = useState<string>('')
 
   const pollRef = useRef<number | null>(null)
   const failRef = useRef(0)
@@ -141,6 +148,12 @@ export default function Agents() {
       // Restore config from backend
       if (!config.disease && (res as any).disease) {
         setConfig(prev => ({ ...prev, disease: (res as any).disease, discovery_type: (res as any).discovery_type || prev.discovery_type }))
+      }
+
+      // Track auto-created project
+      if ((res as any).project_id) {
+        setProjectId((res as any).project_id)
+        setProjectName((res as any).project_name || '')
       }
 
       // Merge hypotheses
@@ -388,11 +401,20 @@ export default function Agents() {
                   <input type="range" min="0.1" max="0.95" step="0.05" value={config.min_confidence} onChange={e => setConfig(prev => ({ ...prev, min_confidence: parseFloat(e.target.value) }))} disabled={!isIdle} className="w-full" />
                 </div>
 
+                {/* Research Guidance */}
                 <div>
-                  <label className="text-xs text-[var(--color-text-muted)] mb-1.5 flex justify-between font-medium">
-                    <span>Max Rounds</span><span>{config.max_rounds}</span>
-                  </label>
-                  <input type="range" min="1" max="50" step="1" value={config.max_rounds} onChange={e => setConfig(prev => ({ ...prev, max_rounds: parseInt(e.target.value) }))} disabled={!isIdle} className="w-full" />
+                  <label className="text-xs text-[var(--color-text-muted)] mb-1.5 block font-medium">Research Guidance</label>
+                  <textarea
+                    value={config.research_guidance || ''}
+                    onChange={e => setConfig(prev => ({ ...prev, research_guidance: e.target.value }))}
+                    disabled={!isIdle}
+                    placeholder="Add detailed guidance for the AI pipeline... e.g., focus on epigenetic mechanisms, prioritize FDA-approved compounds, explore immunotherapy combinations..."
+                    rows={4}
+                    className="input w-full text-xs disabled:opacity-50 resize-none"
+                  />
+                  <p className="text-xxs text-[var(--color-text-muted)] mt-1">
+                    Provide specific instructions to guide hypothesis generation
+                  </p>
                 </div>
 
                 {/* External Factors */}
@@ -514,10 +536,21 @@ export default function Agents() {
             <div>
               <h1 className="text-2xl font-semibold tracking-tight">Discovery</h1>
               <p className="text-sm text-[var(--color-text-muted)] mt-0.5">
-                {isRunning ? 'Discovery in progress...' : isPaused ? 'Discovery paused' : `${hypotheses.length} hypotheses discovered`}
+                {isRunning ? 'Discovery in progress...' : isPaused ? 'Discovery paused' : state === 'completed' ? 'Discovery complete' : `${hypotheses.length} hypotheses discovered`}
               </p>
             </div>
             <div className="flex items-center gap-2">
+              {projectId && projectId !== 'discovery' && (
+                <Link
+                  to={`/projects/${projectId}`}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-[var(--color-border)] hover:bg-[var(--glass-bg-hover)] transition-all"
+                  style={{ color: 'var(--color-accent-blue)' }}
+                >
+                  <FiFolder className="w-3.5 h-3.5" />
+                  View in Project
+                  <FiExternalLink className="w-3 h-3" />
+                </Link>
+              )}
               {isRunning && (
                 <span className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg" style={{ color: 'var(--color-success)', background: 'rgba(34, 197, 94, 0.08)' }}>
                   <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-success)] animate-pulse" /> Running

@@ -501,7 +501,7 @@ AGENT_MODELS = {
         "role_description": "Creative innovation — generates unconventional therapeutic approaches and cross-domain connections",
     },
     "strategist": {
-        "model_id": AZURE_AI_GPT41_MODEL,
+        "model_id": AZURE_AI_GPT4O_MODEL,
         "provider": "azure_ai",
         "max_tokens": 16_000,
         "temperature": 0.3,
@@ -530,7 +530,7 @@ AGENT_MODELS = {
         "role_description": "Validation reasoning — rigorous verification of claims, consistency checks, logical proofs",
     },
     "architect": {
-        "model_id": AZURE_AI_GPT41_MODEL,
+        "model_id": AZURE_AI_GPT4O_MODEL,
         "provider": "azure_ai",
         "max_tokens": 16_000,
         "temperature": 0.3,
@@ -711,7 +711,7 @@ NEVER accept a hypothesis just because it's interesting. NEVER soft-pedal safety
 
 Think like an FDA reviewer combined with a pharma CMC expert — thorough, fair, uncompromising on safety.""",
 
-    "strategist": """You are a STRATEGIST agent running on GPT-4.1 via Azure OpenAI.
+    "strategist": """You are a STRATEGIST agent running on GPT-4o via Azure OpenAI.
 Your unique strength is LONG-HORIZON STRATEGIC THINKING with advanced reasoning and clinical planning.
 
 MISSION: Design comprehensive clinical development strategies and regulatory pathways.
@@ -1619,8 +1619,8 @@ def run_single_agent(role: str, prompt: str, system_prompt: str) -> dict | None:
 #  3     evidence      Cohere Command A         Literature + PubMed evidence
 #  4     counter       Mistral-Large-3          Counter-arguments & risks
 #  5     mechanism     o3-mini (Azure OpenAI)   Mechanistic deep dive
-#  6     validate      GPT-4.1 (Azure OpenAI)   Cross-validation & strategy
-#  7     ground        GPT-4.1 (Azure OpenAI)   Scientific grounding + FDA/ClinicalTrials
+#  6     validate      GPT-4o (Azure OpenAI)    Cross-validation & strategy
+#  7     ground        GPT-4o (Azure OpenAI)    Scientific grounding + FDA/ClinicalTrials
 #  8     score         GPT-4o (Azure OpenAI)    Multi-dimensional scoring
 #  9     refine        Grok-4.1-fast (Azure AI) Rapid refinement
 # 10     finalize      Claude Opus (Bedrock)    Final synthesis
@@ -1641,10 +1641,10 @@ STAGE_FALLBACKS = {
     "reasoner": ["explorer"],           # Nova Premier → Claude Opus
     "innovator": ["explorer"],          # Cohere → Claude Opus
     "critic": ["explorer"],             # Mistral → Claude Opus
-    "strategist": ["analyst"],          # GPT-4.1 → GPT-4o
+    "strategist": ["explorer"],          # GPT-4o → Claude Opus
     "quant": ["critic", "explorer"],    # Grok → Mistral → Claude Opus
     "validator": ["analyst"],           # o3-mini → GPT-4o
-    "architect": ["analyst"],           # GPT-4.1 → GPT-4o
+    "architect": ["explorer"],           # GPT-4o → Claude Opus
     "analyst": ["explorer"],            # GPT-4o → Claude Opus
 }
 NUM_ROUNDS = 4
@@ -1960,6 +1960,7 @@ def run_discovery_worker(config: dict, continuation: dict | None = None):
     focus_entities = config.get("focus_entities", [])
     external_factors = config.get("external_factors", [])
     target_confidence = float(config.get("target_confidence", 0.95))
+    research_guidance = config.get("research_guidance", "")
 
     # Continuation support
     start_round = 0
@@ -2017,6 +2018,40 @@ def run_discovery_worker(config: dict, continuation: dict | None = None):
     start_time = time.time()
     hypotheses = list(prior_hypotheses)
     stages_completed = prior_stages
+
+    # Auto-create project at discovery start (or reuse from continuation)
+    project_id = continuation.get("project_id", "") if continuation else ""
+    project_name = continuation.get("project_name", "") if continuation else ""
+    if not project_id:
+        project_id = str(uuid4())
+        now_ts = datetime.utcnow()
+        project_name = f"{disease} — {discovery_type.replace('_', ' ').title()} Discovery — {now_ts.strftime('%b %d %Y %H:%M')}"
+        try:
+            proj_table = dynamodb.Table(PROJECTS_TABLE)
+            proj_table.put_item(Item={
+                "id": project_id,
+                "name": project_name,
+                "description": f"AI discovery pipeline for {disease} ({discovery_type}). Hypotheses auto-generated via 10-stage sequential pipeline.",
+                "disease_focus": disease,
+                "research_question": f"{discovery_type.capitalize()} discovery for {disease}",
+                "tags": [disease, discovery_type, "ai-generated", "10-stage-pipeline"],
+                "hypothesis_count": 0,
+                "evidence_count": 0,
+                "user_id": "default",
+                "status": "active",
+                "created_at": now_ts.isoformat(),
+                "updated_at": now_ts.isoformat(),
+            })
+            print(f"[WORKER] Auto-created project at start: {project_id} name={project_name}")
+        except Exception as e:
+            logger.error(f"Failed to auto-create project at start: {e}")
+            project_id = "discovery"
+        # Store project_id in discovery state so frontend can reference it
+        update_discovery_state({
+            "status": "running",
+            "project_id": project_id,
+            "project_name": project_name,
+        })
 
     # Seed angle diversity matrix — different starting angles for each hypothesis
     seed_angles = [
@@ -2137,6 +2172,7 @@ Your task: REFINE and DEEPEN this hypothesis. Make it more specific, better-evid
                 # Build stage-specific prompt
                 if stage_num == 1:
                     # SEED stage — generate initial hypothesis
+                    guidance_str = f"\nRESEARCHER GUIDANCE: {research_guidance}\n" if research_guidance else ""
                     stage_prompt = f"""You are the SEED GENERATOR (Stage 1/10) in a 10-stage sequential hypothesis pipeline.
 
 DISEASE: {disease}
@@ -2145,7 +2181,7 @@ DISCOVERY TYPE: {discovery_type}
 {factors_str}
 {prev_context}
 {refine_context}
-
+{guidance_str}
 SEED ANGLE: {seed_angle}
 
 YOUR TASK: Generate ONE strong, specific, non-ambiguous hypothesis seed for {disease} {discovery_type}.
@@ -2399,6 +2435,8 @@ Validation: {_safe_join('; ', result.get('validation_steps', []), 3)}"""
                                     "existing_hypotheses": hypotheses,
                                     "stages_completed": stages_completed,
                                     "total_start_time_offset": elapsed_now + time_offset,
+                                    "project_id": project_id,
+                                    "project_name": project_name,
                                 },
                             }, cls=DecimalEncoder),
                         )
@@ -2443,6 +2481,49 @@ Validation: {_safe_join('; ', result.get('validation_steps', []), 3)}"""
                 hypotheses.append(hypothesis_data)
                 print(f"[WORKER] Hypothesis {hyp_num} COMPLETE: {hypothesis_data['title'][:70]} conf={hypothesis_data['confidence']:.2f} ({len(available_stages)} stages)")
                 metrics.add_metric(name="HypothesesDiscovered", unit="Count", value=1)
+
+                # Auto-save hypothesis to project immediately
+                if project_id and project_id != "discovery":
+                    try:
+                        hyp_table = dynamodb.Table(HYPOTHESES_TABLE)
+                        save_now = datetime.utcnow().isoformat()
+                        hyp_table.put_item(Item={
+                            "id": hypothesis_data["id"],
+                            "project_id": project_id,
+                            "statement": hypothesis_data["title"],
+                            "mechanism": hypothesis_data.get("mechanism", ""),
+                            "rationale": hypothesis_data.get("description", ""),
+                            "status": "generated",
+                            "confidence_score": Decimal(str(round(hypothesis_data["confidence"], 4))),
+                            "novelty_score": Decimal(str(round(hypothesis_data.get("novelty_score", 0.5), 4))),
+                            "evidence_refs": [],
+                            "evidence_summary": hypothesis_data.get("evidence_summary", []),
+                            "risks": hypothesis_data.get("risks", []),
+                            "validation_steps": hypothesis_data.get("validation_steps", []),
+                            "key_citations": hypothesis_data.get("key_citations", []),
+                            "fda_references": hypothesis_data.get("fda_references", []),
+                            "clinical_trial_references": hypothesis_data.get("clinical_trial_references", []),
+                            "grounding_sources": hypothesis_data.get("grounding_sources", {}),
+                            "stages_completed": hypothesis_data.get("stages_completed", 0),
+                            "round_number": hypothesis_data.get("round_number", 0),
+                            "contradiction_count": 0,
+                            "supporting_count": 0,
+                            "tags": hypothesis_data.get("tags", []),
+                            "version": 1,
+                            "role": "10-stage-pipeline",
+                            "created_at": hypothesis_data.get("created_at", save_now),
+                            "updated_at": save_now,
+                        })
+                        # Update project hypothesis count
+                        proj_table = dynamodb.Table(PROJECTS_TABLE)
+                        proj_table.update_item(
+                            Key={"id": project_id},
+                            UpdateExpression="SET hypothesis_count = :c, updated_at = :u",
+                            ExpressionAttributeValues={":c": len(hypotheses), ":u": save_now},
+                        )
+                        print(f"[WORKER] Auto-saved hypothesis {hyp_num} to project {project_id}")
+                    except Exception as e:
+                        logger.warning(f"Failed to auto-save hypothesis to project: {e}")
 
             # Update state after each hypothesis
             elapsed = time.time() - start_time + time_offset
@@ -2505,67 +2586,24 @@ Validation: {_safe_join('; ', result.get('validation_steps', []), 3)}"""
     final_hypotheses = sorted_h[:TARGET_TOTAL_HYPOTHESES]
     print(f"[WORKER] DONE: {len(final_hypotheses)} hypotheses in {elapsed:.1f}s (10-stage sequential pipeline)")
 
-    # Auto-create project
-    project_id = str(uuid4())
+    # Update project with final counts (project was auto-created at start)
     now = datetime.utcnow().isoformat()
-    project_name = f"Discovery: {disease}"
-    try:
-        proj_table = dynamodb.Table(PROJECTS_TABLE)
-        proj_table.put_item(Item={
-            "id": project_id,
-            "name": project_name,
-            "description": f"10-stage sequential pipeline discovery for {disease} ({discovery_type}). {len(final_hypotheses)} hypotheses, each refined through {len(available_stages)} specialized AI stages.",
-            "disease_focus": disease,
-            "research_question": f"{discovery_type.capitalize()} discovery for {disease}",
-            "tags": [disease, discovery_type, "ai-generated", "10-stage-pipeline"],
-            "hypothesis_count": len(final_hypotheses),
-            "evidence_count": sum(len(h.get("evidence_summary", [])) for h in final_hypotheses),
-            "user_id": "default",
-            "created_at": now,
-            "updated_at": now,
-        })
-        print(f"[WORKER] Created project: {project_id}")
-    except Exception as e:
-        logger.error(f"Failed to create project: {e}")
-        project_id = "discovery"
-
-    # Save hypotheses to DB
-    hyp_table = dynamodb.Table(HYPOTHESES_TABLE)
-    saved_count = 0
-    for h in final_hypotheses:
+    if project_id and project_id != "discovery":
         try:
-            hyp_table.put_item(Item={
-                "id": h["id"],
-                "project_id": project_id,
-                "statement": h["title"],
-                "mechanism": h.get("mechanism", ""),
-                "rationale": h.get("description", ""),
-                "status": "generated",
-                "confidence_score": Decimal(str(round(h["confidence"], 4))),
-                "novelty_score": Decimal(str(round(h.get("novelty_score", 0.5), 4))),
-                "evidence_refs": [],
-                "evidence_summary": h.get("evidence_summary", []),
-                "risks": h.get("risks", []),
-                "validation_steps": h.get("validation_steps", []),
-                "key_citations": h.get("key_citations", []),
-                "fda_references": h.get("fda_references", []),
-                "clinical_trial_references": h.get("clinical_trial_references", []),
-                "grounding_sources": h.get("grounding_sources", {}),
-                "stages_completed": h.get("stages_completed", 0),
-                "round_number": h.get("round_number", 0),
-                "contradiction_count": 0,
-                "supporting_count": 0,
-                "tags": h.get("tags", []),
-                "version": 1,
-                "role": "10-stage-pipeline",
-                "created_at": h.get("created_at", now),
-                "updated_at": now,
-            })
-            saved_count += 1
+            proj_table = dynamodb.Table(PROJECTS_TABLE)
+            proj_table.update_item(
+                Key={"id": project_id},
+                UpdateExpression="SET hypothesis_count = :hc, evidence_count = :ec, updated_at = :u, description = :d",
+                ExpressionAttributeValues={
+                    ":hc": len(final_hypotheses),
+                    ":ec": sum(len(h.get("evidence_summary", [])) for h in final_hypotheses),
+                    ":u": now,
+                    ":d": f"10-stage sequential pipeline discovery for {disease} ({discovery_type}). {len(final_hypotheses)} hypotheses, each refined through {len(available_stages)} specialized AI stages.",
+                },
+            )
+            print(f"[WORKER] Updated project {project_id} with final counts")
         except Exception as e:
-            logger.warning(f"Failed to save hypothesis: {e}")
-
-    print(f"[WORKER] Saved {saved_count}/{len(final_hypotheses)} hypotheses, project={project_id}")
+            logger.warning(f"Failed to update project with final counts: {e}")
 
     update_discovery_state({
         "status": "completed",
@@ -2775,7 +2813,7 @@ def get_status():
             "disease": stored_config.get("disease", ""),
             "discovery_type": stored_config.get("discovery_type", ""),
         }
-        # Include project reference if discovery completed
+        # Include project reference (auto-created at discovery start)
         if state.get("project_id") and state["project_id"] != "discovery":
             result["project_id"] = state["project_id"]
             result["project_name"] = state.get("project_name", "")
@@ -2824,6 +2862,7 @@ def start_discovery():
             "max_agents": body.get("max_agents", 1000),
             "target_confidence": Decimal(str(body.get("target_confidence", 0.95))),
             "external_factors": body.get("external_factors", []),
+            "research_guidance": body.get("research_guidance", ""),
         }
 
         print(f"[START] Writing DynamoDB initial state...")
@@ -3008,6 +3047,70 @@ def health_check():
         "total_models": total,
         "debug": debug,
     }
+
+
+@app.post("/api/v1/orchestrator/chat")
+def constant_chat():
+    """Constant AI chat assistant — uses available pipeline models for research Q&A."""
+    try:
+        body = app.current_event.json_body
+        message = body.get("message", "")
+        context = body.get("context", "general")
+
+        if not message.strip():
+            return {"response": "Please ask me a question about your research."}
+
+        # Try to use Claude Opus via Bedrock for chat
+        chat_prompt = f"""You are Constant, an AI research assistant for the HumaNovo biomedical discovery platform.
+You help researchers with questions about hypotheses, experimental design, literature analysis,
+drug discovery, molecular biology, and scientific methodology.
+
+Be concise, helpful, and scientifically accurate. Reference specific mechanisms, genes, and pathways when relevant.
+
+User question: {message}"""
+
+        response_text = None
+        if bedrock_runtime:
+            try:
+                import json as json_mod
+                bedrock_response = bedrock_runtime.invoke_model(
+                    modelId=BEDROCK_MODEL_ID,
+                    contentType="application/json",
+                    accept="application/json",
+                    body=json_mod.dumps({
+                        "anthropic_version": "bedrock-2023-05-31",
+                        "max_tokens": 1024,
+                        "messages": [{"role": "user", "content": chat_prompt}],
+                    }),
+                )
+                result = json_mod.loads(bedrock_response["body"].read())
+                if result.get("content"):
+                    response_text = result["content"][0].get("text", "")
+            except Exception as e:
+                print(f"[CHAT] Bedrock error: {e}")
+
+        if not response_text:
+            # Fallback to Azure GPT-4o
+            try:
+                client = _get_azure_client(AZURE_AI_GPT4O_MODEL)
+                if client:
+                    azure_resp = client.complete(
+                        messages=[{"role": "user", "content": chat_prompt}],
+                        max_tokens=1024,
+                        temperature=0.7,
+                    )
+                    if azure_resp and azure_resp.choices:
+                        response_text = azure_resp.choices[0].message.content
+            except Exception as e:
+                print(f"[CHAT] Azure fallback error: {e}")
+
+        if not response_text:
+            response_text = "I'm currently unable to connect to the AI models. Please ensure the discovery pipeline is configured and try again."
+
+        return {"response": response_text}
+    except Exception as e:
+        print(f"[CHAT] Error: {e}")
+        return {"response": "I encountered an error processing your question. Please try again."}
 
 
 @app.post("/api/v1/orchestrator/generate-paper/pdf")
