@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import {
   FiDatabase,
   FiSearch,
@@ -11,537 +11,561 @@ import {
   FiAlertCircle,
   FiCalendar,
   FiUser,
-  FiMoreVertical,
-  FiBookOpen,
-  FiAward,
-  FiX
+  FiX,
+  FiEdit3,
+  FiSave,
+  FiTrash2,
+  FiLink,
+  FiMessageSquare,
+  FiLoader,
+  FiChevronLeft,
+  FiChevronRight,
+  FiTag,
 } from 'react-icons/fi'
-import clsx from 'clsx'
-import { usePersistentState, logActivity } from '../utils/persistence'
-import type { EvidenceItem } from '../data/evidence/evidenceRepository'
+import api from '../services/api'
+import type { Evidence as EvidenceType, Hypothesis } from '../services/api'
 
-const typeIcons: Record<EvidenceItem['type'], typeof FiFileText> = {
-  paper: FiFileText,
-  trial: FiDatabase,
-  dataset: FiDatabase,
-  patent: FiFileText,
+const sourceTypeColors: Record<string, string> = {
+  pubmed: 'var(--color-accent-blue)',
+  clinical_trial: 'var(--color-accent-green)',
+  preprint: 'var(--color-accent-purple)',
+  omics: 'var(--color-accent-orange)',
+  drug_database: 'var(--color-accent-cyan)',
+  pathway_database: 'var(--color-accent-pink)',
+  web_search: 'var(--color-text-muted)',
+  user_upload: 'var(--color-text-secondary)',
+  patent: 'var(--color-accent-yellow)',
+  paper: 'var(--color-accent-blue)',
+  trial: 'var(--color-accent-green)',
+  dataset: 'var(--color-accent-orange)',
 }
 
-const statusConfig: Record<EvidenceItem['status'], { icon: typeof FiCheckCircle; color: string; label: string }> = {
-  verified: { icon: FiCheckCircle, color: 'text-success-400', label: 'Verified' },
-  pending: { icon: FiClock, color: 'text-warning-400', label: 'Pending Review' },
-  disputed: { icon: FiAlertCircle, color: 'text-error-400', label: 'Disputed' },
-}
-
-interface IngestionItem {
-  id: number
-  source: string
-  status: 'processing' | 'queued' | 'completed'
-  progress: number
-  items: number
-}
-
-function IngestionQueue() {
-  const [queue] = useState<IngestionItem[]>([])
-
-  return (
-    <div className="card">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-medium">Ingestion Queue</h3>
-        <button className="btn btn-sm btn-secondary">
-          <FiRefreshCw className="w-3 h-3" />
-          Refresh
-        </button>
-      </div>
-      <div className="space-y-2">
-        {queue.length === 0 ? (
-          <div className="text-center py-4 text-[var(--color-text-muted)] text-xs">
-            No active ingestion jobs
-          </div>
-        ) : queue.map(item => (
-          <div key={item.id} className="flex items-center gap-3 p-2 bg-[var(--color-bg)] rounded">
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between text-xs mb-1">
-                <span className="font-medium">{item.source}</span>
-                <span className="text-[var(--color-text-muted)]">{item.items} items</span>
-              </div>
-              <div className="h-1.5 bg-[var(--color-border)] rounded-full overflow-hidden">
-                <div
-                  className={clsx(
-                    'h-full rounded-full transition-all',
-                    item.status === 'completed' ? 'bg-success-500' :
-                    item.status === 'processing' ? 'bg-primary-500' : 'bg-[var(--color-border-strong)]'
-                  )}
-                  style={{ width: `${item.progress}%` }}
-                />
-              </div>
-            </div>
-            <span className={clsx(
-              'text-xxs px-1.5 py-0.5 rounded',
-              item.status === 'completed' ? 'bg-success-500/20 text-success-400' :
-              item.status === 'processing' ? 'bg-primary-500/20 text-primary-400' : 'bg-[var(--color-border)] text-[var(--color-text-muted)]'
-            )}>
-              {item.status}
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function EvidenceCard({ item, isSelected, onSelect }: {
-  item: EvidenceItem
-  isSelected: boolean
-  onSelect: () => void
-}) {
-  const StatusIcon = statusConfig[item.status].icon
-  const TypeIcon = typeIcons[item.type]
-
-  return (
-    <div
-      onClick={onSelect}
-      className={clsx(
-        'card cursor-pointer transition-all',
-        isSelected ? 'ring-1 ring-primary-500 border-primary-500' : 'hover:border-[var(--color-border-strong)]'
-      )}
-    >
-      <div className="flex items-start gap-3">
-        <div className={clsx(
-          'w-8 h-8 rounded flex items-center justify-center flex-shrink-0',
-          item.type === 'paper' && 'bg-primary-500/20 text-primary-400',
-          item.type === 'trial' && 'bg-success-500/20 text-success-400',
-          item.type === 'dataset' && 'bg-warning-500/20 text-warning-400',
-          item.type === 'patent' && 'bg-error-500/20 text-error-400',
-        )}>
-          <TypeIcon className="w-4 h-4" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-start justify-between gap-2 mb-1">
-            <h4 className="text-sm font-medium line-clamp-2">{item.title}</h4>
-            <button className="p-1 hover:bg-[var(--color-border)] rounded flex-shrink-0">
-              <FiMoreVertical className="w-3.5 h-3.5" />
-            </button>
-          </div>
-          <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)] mb-2">
-            <span>{item.source}</span>
-            <span>-</span>
-            <span>{item.date}</span>
-            {item.citations && (
-              <>
-                <span>-</span>
-                <span>{item.citations} citations</span>
-              </>
-            )}
-          </div>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5">
-              <StatusIcon className={clsx('w-3.5 h-3.5', statusConfig[item.status].color)} />
-              <span className={clsx('text-xs', statusConfig[item.status].color)}>
-                {statusConfig[item.status].label}
-              </span>
-            </div>
-            <div className="flex items-center gap-1">
-              <div className="h-1.5 w-16 bg-[var(--color-border)] rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-primary-500 rounded-full"
-                  style={{ width: `${item.relevanceScore * 100}%` }}
-                />
-              </div>
-              <span className="text-xxs text-[var(--color-text-muted)]">
-                {Math.round(item.relevanceScore * 100)}%
-              </span>
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-1 mt-2">
-            {item.tags.slice(0, 3).map(tag => (
-              <span key={tag} className="badge badge-neutral">{tag}</span>
-            ))}
-            {item.tags.length > 3 && (
-              <span className="badge badge-neutral">+{item.tags.length - 3}</span>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function EvidenceDetail({ item }: { item: EvidenceItem | null }) {
-  if (!item) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full text-[var(--color-text-muted)]">
-        <FiDatabase className="w-8 h-8 mb-2" />
-        <span className="text-sm">Select evidence to view details</span>
-      </div>
-    )
-  }
-
-  return (
-    <div className="h-full overflow-y-auto">
-      <div className="p-4 border-b border-[var(--color-border)]">
-        <div className="flex items-start justify-between mb-3">
-          <h2 className="text-lg font-medium leading-tight">{item.title}</h2>
-          {item.sourceUrl && (
-            <a
-              href={item.sourceUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="btn btn-sm btn-secondary"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <FiExternalLink className="w-3 h-3" />
-              View Source
-            </a>
-          )}
-        </div>
-        <div className="flex items-center gap-4 text-xs text-[var(--color-text-muted)]">
-          <div className="flex items-center gap-1">
-            <FiCalendar className="w-3 h-3" />
-            {item.date}
-          </div>
-          <div className="flex items-center gap-1">
-            <FiDatabase className="w-3 h-3" />
-            {item.source}
-          </div>
-          {item.citations && (
-            <div className="flex items-center gap-1">
-              <FiFileText className="w-3 h-3" />
-              {item.citations} citations
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="p-4 space-y-4">
-        {item.authors && (
-          <div>
-            <div className="text-xxs text-[var(--color-text-muted)] uppercase tracking-wider mb-1">Authors</div>
-            <div className="flex flex-wrap gap-1">
-              {item.authors.map(author => (
-                <span key={author} className="flex items-center gap-1 text-xs px-2 py-1 bg-[var(--color-bg)] rounded">
-                  <FiUser className="w-3 h-3" />
-                  {author}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {item.abstract && (
-          <div>
-            <div className="text-xxs text-[var(--color-text-muted)] uppercase tracking-wider mb-1">Abstract</div>
-            <p className="text-xs text-[var(--color-text-secondary)] leading-relaxed">{item.abstract}</p>
-          </div>
-        )}
-
-        <div>
-          <div className="text-xxs text-[var(--color-text-muted)] uppercase tracking-wider mb-1">Tags</div>
-          <div className="flex flex-wrap gap-1">
-            {item.tags.map(tag => (
-              <span key={tag} className="badge badge-info">{tag}</span>
-            ))}
-            <button className="badge badge-neutral flex items-center gap-1">
-              <FiPlus className="w-2.5 h-2.5" />
-              Add Tag
-            </button>
-          </div>
-        </div>
-
-        <div>
-          <div className="text-xxs text-[var(--color-text-muted)] uppercase tracking-wider mb-1">Status</div>
-          <div className="flex items-center gap-2">
-            {(() => {
-              const StatusIcon = statusConfig[item.status].icon
-              return (
-                <>
-                  <StatusIcon className={clsx('w-4 h-4', statusConfig[item.status].color)} />
-                  <span className={clsx('text-sm', statusConfig[item.status].color)}>
-                    {statusConfig[item.status].label}
-                  </span>
-                </>
-              )
-            })()}
-          </div>
-        </div>
-
-        <div className="pt-2 flex gap-2">
-          <button className="btn btn-primary flex-1">
-            <FiCheckCircle className="w-3.5 h-3.5" />
-            Verify
-          </button>
-          <button className="btn btn-secondary flex-1">
-            <FiAlertCircle className="w-3.5 h-3.5" />
-            Dispute
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function AddEvidenceModal({ onClose, onAdd }: { onClose: () => void; onAdd: (item: EvidenceItem) => void }) {
-  const [form, setForm] = useState({
-    title: '',
-    source: '',
-    sourceUrl: '',
-    type: 'paper' as EvidenceItem['type'],
-    abstract: '',
-    authors: '',
-    tags: '',
-    date: new Date().toISOString().split('T')[0],
-  })
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    const newItem: EvidenceItem = {
-      id: `ev-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      title: form.title,
-      source: form.source || 'User Added',
-      sourceUrl: form.sourceUrl,
-      type: form.type,
-      status: 'pending',
-      date: form.date,
-      authors: form.authors ? form.authors.split(',').map(a => a.trim()) : [],
-      abstract: form.abstract,
-      tags: form.tags ? form.tags.split(',').map(t => t.trim()) : [],
-      citations: 0,
-      relevanceScore: 0.5,
-      publisher: form.source || 'User Added',
-    }
-    onAdd(newItem)
-    logActivity({ type: 'evidence', action: 'created', title: `Added evidence: ${form.title}` })
-    onClose()
-  }
-
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-[var(--color-surface)] rounded-xl border border-[var(--color-border)] w-full max-w-lg mx-4">
-        <div className="flex items-center justify-between p-4 border-b border-[var(--color-border)]">
-          <h2 className="text-lg font-semibold">Add Evidence</h2>
-          <button onClick={onClose} className="text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
-            <FiX className="w-5 h-5" />
-          </button>
-        </div>
-        <form onSubmit={handleSubmit} className="p-4 space-y-3">
-          <div>
-            <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Title *</label>
-            <input type="text" className="input w-full" value={form.title} onChange={e => setForm({...form, title: e.target.value})} required placeholder="Paper or evidence title" />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Source</label>
-              <input type="text" className="input w-full" value={form.source} onChange={e => setForm({...form, source: e.target.value})} placeholder="e.g., Nature, PubMed" />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Type</label>
-              <select className="input w-full" value={form.type} onChange={e => setForm({...form, type: e.target.value as EvidenceItem['type']})}>
-                <option value="paper">Paper</option>
-                <option value="trial">Clinical Trial</option>
-                <option value="dataset">Dataset</option>
-                <option value="patent">Patent</option>
-              </select>
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">URL</label>
-            <input type="url" className="input w-full" value={form.sourceUrl} onChange={e => setForm({...form, sourceUrl: e.target.value})} placeholder="https://..." />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Authors (comma separated)</label>
-            <input type="text" className="input w-full" value={form.authors} onChange={e => setForm({...form, authors: e.target.value})} placeholder="Author A, Author B" />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Abstract</label>
-            <textarea className="input w-full h-20 resize-none" value={form.abstract} onChange={e => setForm({...form, abstract: e.target.value})} placeholder="Brief description..." />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Tags (comma separated)</label>
-            <input type="text" className="input w-full" value={form.tags} onChange={e => setForm({...form, tags: e.target.value})} placeholder="genomics, cancer, ..." />
-          </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <button type="button" onClick={onClose} className="btn btn-secondary">Cancel</button>
-            <button type="submit" className="btn btn-primary">Add Evidence</button>
-          </div>
-        </form>
-      </div>
-    </div>
-  )
+const statusConfig: Record<string, { icon: typeof FiCheckCircle; color: string; label: string }> = {
+  verified: { icon: FiCheckCircle, color: 'var(--color-success)', label: 'Verified' },
+  pending: { icon: FiClock, color: 'var(--color-warning)', label: 'Pending' },
+  disputed: { icon: FiAlertCircle, color: 'var(--color-error)', label: 'Disputed' },
 }
 
 export default function Evidence() {
-  const [evidence, setEvidence] = usePersistentState<EvidenceItem[]>('evidence', [])
+  const [evidence, setEvidence] = useState<EvidenceType[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
-  const [filterType, setFilterType] = useState<string>('all')
-  const [filterStatus, setFilterStatus] = useState<string>('all')
+  const [filterType, setFilterType] = useState('all')
+  const [_filterStatus] = useState('all')
   const [page, setPage] = useState(1)
+  const [totalItems, setTotalItems] = useState(0)
+  const [loading, setLoading] = useState(true)
   const [showAddModal, setShowAddModal] = useState(false)
-  const pageSize = 50
+  const [editField, setEditField] = useState<string | null>(null)
+  const [editValue, setEditValue] = useState('')
+  const [noteText, setNoteText] = useState('')
+  const [showNoteInput, setShowNoteInput] = useState(false)
+  const [newTag, setNewTag] = useState('')
+  const [linkingHypothesis, setLinkingHypothesis] = useState(false)
+  const [hypotheses, setHypotheses] = useState<Hypothesis[]>([])
+  const [saving, setSaving] = useState(false)
+  const pageSize = 30
 
-  const addEvidence = useCallback((item: EvidenceItem) => {
-    setEvidence(prev => [item, ...prev])
-  }, [setEvidence])
-
-  const stats = useMemo(() => {
-    const byType: Record<string, number> = {}
-    const byStatus: Record<string, number> = {}
-    for (const e of evidence) {
-      byType[e.type] = (byType[e.type] || 0) + 1
-      byStatus[e.status] = (byStatus[e.status] || 0) + 1
+  const fetchEvidence = useCallback(async () => {
+    setLoading(true)
+    try {
+      if (searchQuery.trim()) {
+        const res = await api.searchEvidence(searchQuery, {
+          source_types: filterType !== 'all' ? [filterType] : undefined,
+          limit: pageSize,
+        })
+        setEvidence(res.items || [])
+        setTotalItems(res.total || 0)
+      } else {
+        const res = await api.getEvidenceList({
+          page,
+          page_size: pageSize,
+          source_type: filterType !== 'all' ? filterType : undefined,
+        })
+        setEvidence(res.items || [])
+        setTotalItems(res.total || 0)
+      }
+    } catch (err) {
+      console.error('Failed to fetch evidence:', err)
     }
-    return { total: evidence.length, byType, byStatus }
-  }, [evidence])
+    setLoading(false)
+  }, [searchQuery, filterType, page])
+
+  useEffect(() => { fetchEvidence() }, [fetchEvidence])
 
   const selectedItem = evidence.find(e => e.id === selectedId) || null
 
-  const filteredEvidence = useMemo(() => {
-    let items = evidence
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase()
-      items = items.filter(e =>
-        e.title.toLowerCase().includes(q) ||
-        e.abstract?.toLowerCase().includes(q) ||
-        e.tags.some(t => t.toLowerCase().includes(q)) ||
-        e.authors?.some(a => a.toLowerCase().includes(q))
-      )
+  const handleUpdateField = async (field: string, value: any) => {
+    if (!selectedId) return
+    setSaving(true)
+    try {
+      const updated = await api.updateEvidence(selectedId, { [field]: value })
+      setEvidence(prev => prev.map(e => e.id === selectedId ? { ...e, ...updated } : e))
+      setEditField(null)
+    } catch (err) {
+      console.error('Failed to update:', err)
     }
-    if (filterType !== 'all') items = items.filter(e => e.type === filterType)
-    if (filterStatus !== 'all') items = items.filter(e => e.status === filterStatus)
-    return items
-  }, [evidence, searchQuery, filterType, filterStatus])
+    setSaving(false)
+  }
 
-  const paginatedEvidence = useMemo(() => {
-    const start = (page - 1) * pageSize
-    return filteredEvidence.slice(start, start + pageSize)
-  }, [filteredEvidence, page])
+  const handleStatusChange = async (newStatus: string) => {
+    if (!selectedId) return
+    setSaving(true)
+    try {
+      const updated = await api.updateEvidence(selectedId, { status: newStatus })
+      setEvidence(prev => prev.map(e => e.id === selectedId ? { ...e, ...updated } : e))
+    } catch (err) {
+      console.error('Failed to update status:', err)
+    }
+    setSaving(false)
+  }
 
-  const totalPages = Math.ceil(filteredEvidence.length / pageSize)
+  const handleAddTag = async () => {
+    if (!selectedId || !newTag.trim()) return
+    const item = evidence.find(e => e.id === selectedId)
+    if (!item) return
+    const tags = [...(item.tags || []), newTag.trim()]
+    await handleUpdateField('tags', tags)
+    setNewTag('')
+  }
+
+  const handleRemoveTag = async (tag: string) => {
+    if (!selectedId) return
+    const item = evidence.find(e => e.id === selectedId)
+    if (!item) return
+    const tags = (item.tags || []).filter(t => t !== tag)
+    await handleUpdateField('tags', tags)
+  }
+
+  const handleSaveNote = async () => {
+    if (!selectedId) return
+    await handleUpdateField('notes', noteText)
+    setShowNoteInput(false)
+  }
+
+  const handleDelete = async (id: string) => {
+    try {
+      await api.deleteEvidence(id)
+      setEvidence(prev => prev.filter(e => e.id !== id))
+      if (selectedId === id) setSelectedId(null)
+    } catch (err) {
+      console.error('Failed to delete evidence:', err)
+    }
+  }
+
+  const handleLinkToHypothesis = async (hypothesisId: string, linkType: 'supporting' | 'contradicting' | 'neutral') => {
+    if (!selectedId) return
+    try {
+      await api.addEvidenceToHypothesis(hypothesisId, {
+        evidence_id: selectedId,
+        evidence_type: linkType,
+        relevance_score: 0.8,
+      })
+      setLinkingHypothesis(false)
+    } catch (err) {
+      console.error('Failed to link evidence:', err)
+    }
+  }
+
+  const openLinkDialog = async () => {
+    try {
+      const res = await api.getHypotheses({ page_size: 50 })
+      setHypotheses(res.items || [])
+      setLinkingHypothesis(true)
+    } catch (err) {
+      console.error('Failed to fetch hypotheses:', err)
+    }
+  }
+
+  const handleAddEvidence = async (form: any) => {
+    try {
+      const created = await api.createEvidence({
+        title: form.title,
+        source_type: form.type,
+        source_url: form.sourceUrl,
+        abstract: form.abstract,
+        authors: form.authors ? form.authors.split(',').map((a: string) => a.trim()) : [],
+        tags: form.tags ? form.tags.split(',').map((t: string) => t.trim()) : [],
+        publication_date: form.date,
+      })
+      setEvidence(prev => [created, ...prev])
+      setShowAddModal(false)
+    } catch (err) {
+      console.error('Failed to create evidence:', err)
+    }
+  }
+
+  const totalPages = Math.ceil(totalItems / pageSize)
 
   return (
     <div className="flex h-full">
       {/* Main list */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Header */}
-        <div className="p-4 border-b border-[var(--color-border)]">
-          <div className="flex items-center justify-between mb-3">
-            <h1 className="text-lg font-semibold">Evidence Repository</h1>
-            <div className="flex items-center gap-2">
-              <button className="btn btn-primary" onClick={() => setShowAddModal(true)}>
-                <FiPlus className="w-3.5 h-3.5" />
-                Add Evidence
-              </button>
-            </div>
+        <div className="p-6 border-b border-[var(--color-border)]">
+          <div className="flex items-center justify-between mb-4">
+            <h1 className="text-2xl font-semibold tracking-tight">Evidence</h1>
+            <button onClick={() => setShowAddModal(true)} className="btn text-sm border border-[var(--color-border)]" style={{ color: 'var(--color-text)' }}>
+              <FiPlus className="w-4 h-4" /> Add Evidence
+            </button>
           </div>
 
-          {/* Search and filters */}
           <div className="flex items-center gap-2">
             <div className="relative flex-1">
-              <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--color-text-muted)]" />
+              <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-text-muted)]" />
               <input
                 type="text"
                 placeholder="Search evidence..."
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="input w-full pl-9"
+                onChange={e => { setSearchQuery(e.target.value); setPage(1) }}
+                onKeyDown={e => e.key === 'Enter' && fetchEvidence()}
+                className="input w-full pl-10"
               />
             </div>
-            <select
-              value={filterType}
-              onChange={(e) => setFilterType(e.target.value)}
-              className="input"
-            >
+            <select value={filterType} onChange={e => { setFilterType(e.target.value); setPage(1) }} className="input">
               <option value="all">All Types</option>
-              <option value="paper">Papers</option>
-              <option value="trial">Trials</option>
-              <option value="dataset">Datasets</option>
-              <option value="patent">Patents</option>
+              <option value="pubmed">PubMed</option>
+              <option value="clinical_trial">Clinical Trial</option>
+              <option value="preprint">Preprint</option>
+              <option value="patent">Patent</option>
+              <option value="user_upload">User Upload</option>
             </select>
-            <select
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value)}
-              className="input"
-            >
-              <option value="all">All Status</option>
-              <option value="verified">Verified</option>
-              <option value="pending">Pending</option>
-              <option value="disputed">Disputed</option>
-            </select>
+            <button onClick={fetchEvidence} className="btn p-2" title="Refresh">
+              <FiRefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            </button>
           </div>
         </div>
 
-        {/* Stats bar */}
-        <div className="px-4 py-2 bg-[var(--color-surface)] border-b border-[var(--color-border)] flex items-center justify-between text-xs">
-          <div className="flex items-center gap-4">
-            <span className="text-[var(--color-text-muted)]">
-              <span className="font-medium text-[var(--color-text)]">{filteredEvidence.length.toLocaleString()}</span> results
-              {searchQuery && ` for "${searchQuery}"`}
-            </span>
-            <span className="text-[var(--color-text-muted)]">
-              Repository: <span className="font-medium text-primary-400">{stats.total.toLocaleString()}</span> items
-            </span>
-          </div>
-          <div className="flex items-center gap-3 text-[var(--color-text-muted)]">
-            <span><FiFileText className="inline w-3 h-3 mr-1" />{stats.byType.paper || 0} papers</span>
-            <span><FiDatabase className="inline w-3 h-3 mr-1" />{stats.byType.trial || 0} trials</span>
-            <span><FiBookOpen className="inline w-3 h-3 mr-1" />{stats.byType.dataset || 0} datasets</span>
-            <span><FiAward className="inline w-3 h-3 mr-1" />{stats.byType.patent || 0} patents</span>
-          </div>
+        {/* Stats */}
+        <div className="px-6 py-2 border-b border-[var(--color-border)] flex items-center justify-between text-xs text-[var(--color-text-muted)]">
+          <span><span className="text-[var(--color-text)] font-medium">{totalItems}</span> items total</span>
+          <span>Page {page} of {Math.max(1, totalPages)}</span>
         </div>
 
-        {/* Evidence list */}
+        {/* List */}
         <div className="flex-1 overflow-y-auto p-4">
-          <div className="grid gap-3">
-            {paginatedEvidence.map(item => (
-              <EvidenceCard
-                key={item.id}
-                item={item}
-                isSelected={selectedId === item.id}
-                onSelect={() => setSelectedId(item.id)}
-              />
-            ))}
-          </div>
+          {loading && evidence.length === 0 ? (
+            <div className="text-center py-16">
+              <FiLoader className="w-8 h-8 animate-spin mx-auto mb-3 text-[var(--color-text-muted)]" />
+            </div>
+          ) : evidence.length === 0 ? (
+            <div className="text-center py-16">
+              <FiDatabase className="w-10 h-10 mx-auto mb-3 text-[var(--color-text-muted)] opacity-30" />
+              <p className="text-sm text-[var(--color-text-muted)]">No evidence found</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {evidence.map(item => {
+                const color = sourceTypeColors[item.source_type] || 'var(--color-text-muted)'
+                const status = statusConfig[item.status || 'pending'] || statusConfig.pending
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => setSelectedId(item.id)}
+                    className={`w-full text-left glass-card p-4 transition-all ${selectedId === item.id ? 'border-[var(--color-border-strong)] bg-[var(--glass-bg-hover)]' : ''}`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="p-2 rounded-lg flex-shrink-0" style={{ background: `${color}12` }}>
+                        <FiFileText className="w-4 h-4" style={{ color }} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h4 className="text-sm font-medium line-clamp-1">{item.title}</h4>
+                        <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)] mt-1">
+                          <span style={{ color }}>{item.source_type}</span>
+                          {item.publication_date && <span>{item.publication_date}</span>}
+                          {item.citation_count !== undefined && <span>{item.citation_count} citations</span>}
+                        </div>
+                        <div className="flex items-center justify-between mt-2">
+                          <div className="flex items-center gap-1.5">
+                            <status.icon className="w-3 h-3" style={{ color: status.color }} />
+                            <span className="text-xs" style={{ color: status.color }}>{status.label}</span>
+                          </div>
+                          {item.relevance_score !== undefined && (
+                            <div className="flex items-center gap-1">
+                              <div className="h-1 w-12 rounded-full overflow-hidden bg-[var(--color-border)]">
+                                <div className="h-full rounded-full" style={{ width: `${item.relevance_score * 100}%`, background: color }} />
+                              </div>
+                              <span className="text-xxs text-[var(--color-text-muted)]">{Math.round(item.relevance_score * 100)}%</span>
+                            </div>
+                          )}
+                        </div>
+                        {item.tags && item.tags.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-2">
+                            {item.tags.slice(0, 3).map(tag => (
+                              <span key={tag} className="text-xxs px-1.5 py-0.5 rounded bg-[var(--glass-bg)] text-[var(--color-text-muted)]">{tag}</span>
+                            ))}
+                            {item.tags.length > 3 && <span className="text-xxs text-[var(--color-text-muted)]">+{item.tags.length - 3}</span>}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+          )}
 
-          {/* Pagination */}
           {totalPages > 1 && (
-            <div className="flex items-center justify-center gap-2 mt-4 pt-4 border-t border-[var(--color-border)]">
-              <button
-                onClick={() => setPage(p => Math.max(1, p - 1))}
-                disabled={page === 1}
-                className="btn btn-sm btn-secondary disabled:opacity-50"
-              >
-                Previous
+            <div className="flex items-center justify-center gap-3 mt-4 pt-4 border-t border-[var(--color-border)]">
+              <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1} className="btn btn-sm disabled:opacity-30">
+                <FiChevronLeft className="w-4 h-4" /> Previous
               </button>
-              <span className="text-sm text-[var(--color-text-muted)]">
-                Page {page} of {totalPages}
-              </span>
-              <button
-                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                disabled={page === totalPages}
-                className="btn btn-sm btn-secondary disabled:opacity-50"
-              >
-                Next
+              <span className="text-xs text-[var(--color-text-muted)]">Page {page} of {totalPages}</span>
+              <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages} className="btn btn-sm disabled:opacity-30">
+                Next <FiChevronRight className="w-4 h-4" />
               </button>
             </div>
           )}
         </div>
       </div>
 
-      {/* Right sidebar */}
-      <div className="w-80 border-l border-[var(--color-border)] bg-[var(--color-bg-elevated)] flex flex-col">
-        <div className="flex-1">
-          <EvidenceDetail item={selectedItem} />
-        </div>
+      {/* Detail sidebar */}
+      <div className="w-96 border-l border-[var(--color-border)] flex flex-col overflow-hidden">
+        {selectedItem ? (
+          <div className="flex-1 overflow-y-auto">
+            <div className="p-5 border-b border-[var(--color-border)]">
+              <div className="flex items-start justify-between mb-3">
+                {editField === 'title' ? (
+                  <div className="flex-1 flex items-center gap-2">
+                    <input value={editValue} onChange={e => setEditValue(e.target.value)} className="input flex-1 text-sm" autoFocus />
+                    <button onClick={() => handleUpdateField('title', editValue)} className="btn btn-sm" style={{ color: 'var(--color-success)' }}><FiSave className="w-3 h-3" /></button>
+                    <button onClick={() => setEditField(null)} className="btn btn-sm"><FiX className="w-3 h-3" /></button>
+                  </div>
+                ) : (
+                  <h2 className="text-lg font-medium leading-tight group cursor-pointer" onClick={() => { setEditField('title'); setEditValue(selectedItem.title) }}>
+                    {selectedItem.title}
+                    <FiEdit3 className="inline w-3 h-3 ml-2 opacity-0 group-hover:opacity-100 text-[var(--color-text-muted)]" />
+                  </h2>
+                )}
+              </div>
 
-        {/* Ingestion queue */}
-        <div className="p-4 border-t border-[var(--color-border)]">
-          <IngestionQueue />
-        </div>
+              <div className="flex items-center gap-3 text-xs text-[var(--color-text-muted)]">
+                {selectedItem.publication_date && <span className="flex items-center gap-1"><FiCalendar className="w-3 h-3" />{selectedItem.publication_date}</span>}
+                <span className="flex items-center gap-1"><FiDatabase className="w-3 h-3" />{selectedItem.source_type}</span>
+                {selectedItem.citation_count !== undefined && <span>{selectedItem.citation_count} citations</span>}
+              </div>
+
+              <div className="flex items-center gap-2 mt-3">
+                {selectedItem.source_url && (
+                  <a href={selectedItem.source_url} target="_blank" rel="noopener noreferrer" className="btn btn-sm border border-[var(--color-border)]">
+                    <FiExternalLink className="w-3 h-3" /> Source
+                  </a>
+                )}
+                <button onClick={openLinkDialog} className="btn btn-sm" style={{ color: 'var(--color-accent-purple)' }}>
+                  <FiLink className="w-3 h-3" /> Link to Hypothesis
+                </button>
+                <button onClick={() => handleDelete(selectedItem.id)} className="btn btn-sm ml-auto" style={{ color: 'var(--color-error)' }}>
+                  <FiTrash2 className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-5 space-y-5">
+              {/* Authors (editable) */}
+              {selectedItem.authors && selectedItem.authors.length > 0 && (
+                <div>
+                  <div className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-2 font-medium">Authors</div>
+                  <div className="flex flex-wrap gap-1">
+                    {selectedItem.authors.map(author => (
+                      <span key={author} className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg bg-[var(--glass-bg)] border border-[var(--color-border)]">
+                        <FiUser className="w-3 h-3 text-[var(--color-text-muted)]" /> {author}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Abstract (editable) */}
+              <div>
+                <div className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-2 font-medium flex items-center justify-between">
+                  Abstract
+                  <button onClick={() => { setEditField('abstract'); setEditValue(selectedItem.abstract || '') }} className="text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
+                    <FiEdit3 className="w-3 h-3" />
+                  </button>
+                </div>
+                {editField === 'abstract' ? (
+                  <div>
+                    <textarea value={editValue} onChange={e => setEditValue(e.target.value)} className="input w-full h-32 resize-none text-xs" />
+                    <div className="flex gap-2 mt-2">
+                      <button onClick={() => handleUpdateField('abstract', editValue)} className="btn btn-sm" style={{ color: 'var(--color-success)' }}>Save</button>
+                      <button onClick={() => setEditField(null)} className="btn btn-sm text-[var(--color-text-muted)]">Cancel</button>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-[var(--color-text-secondary)] leading-relaxed">{selectedItem.abstract || 'No abstract available'}</p>
+                )}
+              </div>
+
+              {/* Tags (editable) */}
+              <div>
+                <div className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-2 font-medium">Tags</div>
+                <div className="flex flex-wrap gap-1">
+                  {(selectedItem.tags || []).map(tag => (
+                    <span key={tag} className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-md bg-[var(--glass-bg)] text-[var(--color-text-secondary)] group">
+                      {tag}
+                      <button onClick={() => handleRemoveTag(tag)} className="opacity-0 group-hover:opacity-100 text-[var(--color-text-muted)] hover:text-[var(--color-error)]">
+                        <FiX className="w-2.5 h-2.5" />
+                      </button>
+                    </span>
+                  ))}
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="text"
+                      value={newTag}
+                      onChange={e => setNewTag(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && handleAddTag()}
+                      placeholder="Add tag..."
+                      className="text-xs bg-transparent outline-none w-16 text-[var(--color-text-muted)]"
+                    />
+                    {newTag && <button onClick={handleAddTag} className="text-[var(--color-text-muted)]"><FiTag className="w-3 h-3" /></button>}
+                  </div>
+                </div>
+              </div>
+
+              {/* Status (changeable) */}
+              <div>
+                <div className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-2 font-medium">Status</div>
+                <div className="flex items-center gap-2">
+                  {Object.entries(statusConfig).map(([key, config]) => {
+                    const active = selectedItem.status === key
+                    return (
+                      <button
+                        key={key}
+                        onClick={() => handleStatusChange(key)}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs transition-all border ${active ? 'border-[var(--color-border-strong)]' : 'border-transparent hover:bg-[var(--glass-bg)]'}`}
+                        style={{ color: config.color, background: active ? `${config.color}12` : undefined }}
+                      >
+                        <config.icon className="w-3 h-3" />
+                        {config.label}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* Notes */}
+              <div>
+                <div className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-2 font-medium flex items-center justify-between">
+                  Notes
+                  <button onClick={() => { setShowNoteInput(true); setNoteText(selectedItem.notes || '') }} className="text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
+                    <FiMessageSquare className="w-3 h-3" />
+                  </button>
+                </div>
+                {showNoteInput ? (
+                  <div>
+                    <textarea value={noteText} onChange={e => setNoteText(e.target.value)} placeholder="Add notes..." className="input w-full h-20 resize-none text-xs" autoFocus />
+                    <div className="flex gap-2 mt-2">
+                      <button onClick={handleSaveNote} className="btn btn-sm" style={{ color: 'var(--color-success)' }}>Save</button>
+                      <button onClick={() => setShowNoteInput(false)} className="btn btn-sm text-[var(--color-text-muted)]">Cancel</button>
+                    </div>
+                  </div>
+                ) : selectedItem.notes ? (
+                  <p className="text-xs text-[var(--color-text-secondary)] p-3 rounded-lg bg-[var(--glass-bg)] border border-[var(--color-border)]">{selectedItem.notes}</p>
+                ) : (
+                  <p className="text-xs text-[var(--color-text-muted)]">No notes yet</p>
+                )}
+              </div>
+
+              {saving && <div className="text-xs text-[var(--color-text-muted)] flex items-center gap-1"><FiLoader className="w-3 h-3 animate-spin" /> Saving...</div>}
+            </div>
+          </div>
+        ) : (
+          <div className="flex-1 flex flex-col items-center justify-center text-[var(--color-text-muted)]">
+            <FiDatabase className="w-8 h-8 mb-3 opacity-30" />
+            <p className="text-sm">Select evidence to view details</p>
+          </div>
+        )}
       </div>
 
-      {showAddModal && (
-        <AddEvidenceModal onClose={() => setShowAddModal(false)} onAdd={addEvidence} />
+      {/* Add Evidence Modal */}
+      {showAddModal && <AddEvidenceModal onClose={() => setShowAddModal(false)} onAdd={handleAddEvidence} />}
+
+      {/* Link to Hypothesis Modal */}
+      {linkingHypothesis && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center modal-overlay animate-fade-in">
+          <div className="glass-card-static p-6 w-full max-w-md mx-4 animate-scale-in" style={{ background: 'var(--color-surface-solid)' }}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-medium">Link Evidence to Hypothesis</h3>
+              <button onClick={() => setLinkingHypothesis(false)} className="text-[var(--color-text-muted)] hover:text-[var(--color-text)]"><FiX className="w-4 h-4" /></button>
+            </div>
+            {hypotheses.length === 0 ? (
+              <p className="text-xs text-[var(--color-text-muted)] py-4 text-center">No hypotheses found</p>
+            ) : (
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {hypotheses.map(h => (
+                  <div key={h.id} className="p-3 rounded-lg bg-[var(--glass-bg)] border border-[var(--color-border)]">
+                    <p className="text-xs font-medium mb-2 line-clamp-2">{h.statement}</p>
+                    <div className="flex gap-1">
+                      <button onClick={() => handleLinkToHypothesis(h.id, 'supporting')} className="btn btn-sm" style={{ color: 'var(--color-success)' }}>Supporting</button>
+                      <button onClick={() => handleLinkToHypothesis(h.id, 'contradicting')} className="btn btn-sm" style={{ color: 'var(--color-error)' }}>Contradicting</button>
+                      <button onClick={() => handleLinkToHypothesis(h.id, 'neutral')} className="btn btn-sm text-[var(--color-text-muted)]">Neutral</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       )}
+    </div>
+  )
+}
+
+function AddEvidenceModal({ onClose, onAdd }: { onClose: () => void; onAdd: (form: any) => void }) {
+  const [form, setForm] = useState({
+    title: '', source: '', sourceUrl: '', type: 'pubmed',
+    abstract: '', authors: '', tags: '', date: new Date().toISOString().split('T')[0],
+  })
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center modal-overlay animate-fade-in">
+      <div className="glass-card-static w-full max-w-lg mx-4 animate-scale-in" style={{ background: 'var(--color-surface-solid)' }}>
+        <div className="flex items-center justify-between p-5 border-b border-[var(--color-border)]">
+          <h2 className="text-lg font-semibold">Add Evidence</h2>
+          <button onClick={onClose} className="text-[var(--color-text-muted)] hover:text-[var(--color-text)]"><FiX className="w-5 h-5" /></button>
+        </div>
+        <form onSubmit={e => { e.preventDefault(); onAdd(form) }} className="p-5 space-y-4">
+          <div>
+            <label className="block text-xs text-[var(--color-text-muted)] mb-1 font-medium">Title *</label>
+            <input type="text" className="input w-full" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} required />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-[var(--color-text-muted)] mb-1 font-medium">Source</label>
+              <input type="text" className="input w-full" value={form.source} onChange={e => setForm({ ...form, source: e.target.value })} />
+            </div>
+            <div>
+              <label className="block text-xs text-[var(--color-text-muted)] mb-1 font-medium">Type</label>
+              <select className="input w-full" value={form.type} onChange={e => setForm({ ...form, type: e.target.value })}>
+                <option value="pubmed">PubMed</option>
+                <option value="clinical_trial">Clinical Trial</option>
+                <option value="preprint">Preprint</option>
+                <option value="patent">Patent</option>
+                <option value="user_upload">User Upload</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs text-[var(--color-text-muted)] mb-1 font-medium">URL</label>
+            <input type="url" className="input w-full" value={form.sourceUrl} onChange={e => setForm({ ...form, sourceUrl: e.target.value })} />
+          </div>
+          <div>
+            <label className="block text-xs text-[var(--color-text-muted)] mb-1 font-medium">Authors (comma separated)</label>
+            <input type="text" className="input w-full" value={form.authors} onChange={e => setForm({ ...form, authors: e.target.value })} />
+          </div>
+          <div>
+            <label className="block text-xs text-[var(--color-text-muted)] mb-1 font-medium">Abstract</label>
+            <textarea className="input w-full h-20 resize-none" value={form.abstract} onChange={e => setForm({ ...form, abstract: e.target.value })} />
+          </div>
+          <div>
+            <label className="block text-xs text-[var(--color-text-muted)] mb-1 font-medium">Tags (comma separated)</label>
+            <input type="text" className="input w-full" value={form.tags} onChange={e => setForm({ ...form, tags: e.target.value })} />
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <button type="button" onClick={onClose} className="btn text-[var(--color-text-muted)]">Cancel</button>
+            <button type="submit" className="btn border border-[var(--color-border)]" style={{ color: 'var(--color-text)' }}>Add Evidence</button>
+          </div>
+        </form>
+      </div>
     </div>
   )
 }

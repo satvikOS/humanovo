@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   FiSearch,
   FiCalendar,
@@ -6,151 +7,219 @@ import {
   FiZap,
   FiFileText,
   FiFolder,
-  FiExternalLink,
   FiBookmark,
   FiClock,
-  FiSliders
+  FiSliders,
+  FiGlobe,
+  FiLoader,
+  FiX,
+  FiStar,
 } from 'react-icons/fi'
-import clsx from 'clsx'
+import api from '../services/api'
+import type { SearchResult } from '../services/api'
 
-interface SearchResult {
-  id: string
-  type: 'evidence' | 'hypothesis' | 'project' | 'entity'
-  title: string
-  snippet: string
-  source?: string
-  date?: string
-  relevance: number
-  metadata?: Record<string, unknown>
+type SearchMode = 'hybrid' | 'semantic' | 'keyword'
+type SortBy = 'relevance' | 'date' | 'citations'
+
+const SOURCE_COLORS: Record<string, { color: string; bg: string; label: string }> = {
+  evidence: { color: 'var(--color-accent-blue)', bg: 'rgba(59, 130, 246, 0.08)', label: 'Evidence' },
+  hypothesis: { color: 'var(--color-accent-purple)', bg: 'rgba(168, 85, 247, 0.08)', label: 'Hypothesis' },
+  project: { color: 'var(--color-accent-green)', bg: 'rgba(34, 197, 94, 0.08)', label: 'Project' },
+  entity: { color: 'var(--color-accent-orange)', bg: 'rgba(249, 115, 22, 0.08)', label: 'Entity' },
+  notebook: { color: 'var(--color-accent-cyan)', bg: 'rgba(6, 182, 212, 0.08)', label: 'Notebook' },
+  gene: { color: 'var(--color-accent-orange)', bg: 'rgba(249, 115, 22, 0.08)', label: 'Gene' },
+  protein: { color: 'var(--color-accent-pink)', bg: 'rgba(236, 72, 153, 0.08)', label: 'Protein' },
+  drug: { color: 'var(--color-accent-cyan)', bg: 'rgba(6, 182, 212, 0.08)', label: 'Drug' },
+  disease: { color: 'var(--color-accent-red)', bg: 'rgba(239, 68, 68, 0.08)', label: 'Disease' },
+  pathway: { color: 'var(--color-accent-yellow)', bg: 'rgba(234, 179, 8, 0.08)', label: 'Pathway' },
+  pubmed: { color: 'var(--color-accent-blue)', bg: 'rgba(59, 130, 246, 0.08)', label: 'PubMed' },
+  clinical_trial: { color: 'var(--color-accent-green)', bg: 'rgba(34, 197, 94, 0.08)', label: 'Clinical Trial' },
+  rag: { color: 'var(--color-text-muted)', bg: 'var(--glass-bg)', label: 'RAG' },
+  unknown: { color: 'var(--color-text-muted)', bg: 'var(--glass-bg)', label: 'Other' },
 }
 
-type EntityType = 'all' | 'evidence' | 'hypothesis' | 'project' | 'gene' | 'protein' | 'drug'
-type SearchMode = 'hybrid' | 'semantic' | 'keyword'
+const getSourceStyle = (sourceType: string) => {
+  return SOURCE_COLORS[sourceType] || SOURCE_COLORS['unknown']
+}
 
-// Search results fetched from API (empty by default)
+const typeIcons: Record<string, typeof FiDatabase> = {
+  evidence: FiDatabase,
+  hypothesis: FiZap,
+  project: FiFolder,
+  entity: FiGlobe,
+  notebook: FiFileText,
+}
 
-const entityTypes: { value: EntityType; label: string; icon: typeof FiDatabase }[] = [
-  { value: 'all', label: 'All Types', icon: FiSearch },
+const FILTER_TYPES = [
+  { value: '', label: 'All Types', icon: FiSearch },
   { value: 'evidence', label: 'Evidence', icon: FiDatabase },
   { value: 'hypothesis', label: 'Hypotheses', icon: FiZap },
   { value: 'project', label: 'Projects', icon: FiFolder },
-  { value: 'gene', label: 'Genes', icon: FiFileText },
-  { value: 'protein', label: 'Proteins', icon: FiFileText },
-  { value: 'drug', label: 'Drugs', icon: FiFileText },
+  { value: 'entity', label: 'Entities', icon: FiGlobe },
 ]
 
 export default function Search() {
+  const navigate = useNavigate()
   const [query, setQuery] = useState('')
   const [searchMode, setSearchMode] = useState<SearchMode>('hybrid')
-  const [entityType, setEntityType] = useState<EntityType>('all')
-  const [dateRange, setDateRange] = useState<{ from: string; to: string }>({ from: '', to: '' })
+  const [filterType, setFilterType] = useState('')
+  const [dateRange, setDateRange] = useState({ from: '', to: '' })
   const [minRelevance, setMinRelevance] = useState(0)
+  const [sortBy, setSortBy] = useState<SortBy>('relevance')
   const [results, setResults] = useState<SearchResult[]>([])
   const [isSearching, setIsSearching] = useState(false)
   const [showFilters, setShowFilters] = useState(true)
-  const [savedSearches] = useState<string[]>([])
+  const [totalResults, setTotalResults] = useState(0)
+  const [recentSearches, setRecentSearches] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('humanovo-recent-searches') || '[]')
+    } catch { return [] }
+  })
+  const [savedSearches, setSavedSearches] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('humanovo-saved-searches') || '[]')
+    } catch { return [] }
+  })
 
-  const handleSearch = async () => {
-    if (!query.trim()) return
+  const handleSearch = useCallback(async (searchQuery?: string) => {
+    const q = searchQuery || query
+    if (!q.trim()) return
     setIsSearching(true)
-    // TODO: Integrate with actual search API
-    await new Promise(resolve => setTimeout(resolve, 500))
-    // Results will be populated from API
-    setResults([])
+
+    // Save to recent
+    const updated = [q, ...recentSearches.filter(s => s !== q)].slice(0, 10)
+    setRecentSearches(updated)
+    localStorage.setItem('humanovo-recent-searches', JSON.stringify(updated))
+
+    try {
+      const res = await api.globalSearch(q, {
+        types: filterType ? [filterType] : undefined,
+        date_from: dateRange.from || undefined,
+        date_to: dateRange.to || undefined,
+        min_relevance: minRelevance > 0 ? minRelevance / 100 : undefined,
+        limit: 30,
+      })
+
+      let sorted = res.results || []
+
+      // Client-side sort
+      if (sortBy === 'date') {
+        sorted = sorted.sort((a, b) => {
+          if (!a.created_at) return 1
+          if (!b.created_at) return -1
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        })
+      } else if (sortBy === 'citations') {
+        sorted = sorted.sort((a, b) => ((b.metadata?.citation_count as number) || 0) - ((a.metadata?.citation_count as number) || 0))
+      }
+
+      setResults(sorted)
+      setTotalResults(res.total)
+    } catch (err) {
+      console.error('Search error:', err)
+      setResults([])
+      setTotalResults(0)
+    }
+
     setIsSearching(false)
-  }
+  }, [query, filterType, dateRange, minRelevance, sortBy, recentSearches])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      handleSearch()
+    if (e.key === 'Enter') handleSearch()
+  }
+
+  const saveSearch = () => {
+    if (!query.trim()) return
+    const updated = [query, ...savedSearches.filter(s => s !== query)].slice(0, 20)
+    setSavedSearches(updated)
+    localStorage.setItem('humanovo-saved-searches', JSON.stringify(updated))
+  }
+
+  const removeSavedSearch = (s: string) => {
+    const updated = savedSearches.filter(x => x !== s)
+    setSavedSearches(updated)
+    localStorage.setItem('humanovo-saved-searches', JSON.stringify(updated))
+  }
+
+  const navigateToResult = (result: SearchResult) => {
+    switch (result.type) {
+      case 'project': navigate(`/projects/${result.id}`); break
+      case 'evidence': navigate(`/evidence?id=${result.id}`); break
+      case 'hypothesis': navigate(`/agents?hypothesis=${result.id}`); break
+      default: break
     }
   }
 
-  const clearFilters = () => {
-    setEntityType('all')
-    setDateRange({ from: '', to: '' })
-    setMinRelevance(0)
-  }
-
-  const getTypeIcon = (type: SearchResult['type']) => {
-    switch (type) {
-      case 'evidence': return FiDatabase
-      case 'hypothesis': return FiZap
-      case 'project': return FiFolder
-      default: return FiFileText
-    }
-  }
-
-  const getTypeColor = (type: SearchResult['type']) => {
-    switch (type) {
-      case 'evidence': return 'text-primary-400 bg-primary-500/20'
-      case 'hypothesis': return 'text-warning-400 bg-warning-500/20'
-      case 'project': return 'text-success-400 bg-success-500/20'
-      default: return 'text-[var(--color-text-muted)] bg-[var(--color-border)]'
-    }
+  // Highlight matching text
+  const highlightMatch = (text: string, q: string) => {
+    if (!q.trim() || !text) return text
+    const regex = new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi')
+    const parts = text.split(regex)
+    return parts.map((part, i) =>
+      regex.test(part) ? <mark key={i} className="bg-[var(--color-accent-yellow)] bg-opacity-20 text-[var(--color-text)] rounded px-0.5">{part}</mark> : part
+    )
   }
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
       {/* Search Header */}
-      <div className="p-4 border-b border-[var(--color-border)] bg-[var(--color-bg-elevated)]">
+      <div className="p-6 border-b border-[var(--color-border)]">
         <div className="max-w-4xl mx-auto">
           <div className="flex items-center gap-3">
             <div className="flex-1 relative">
-              <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[var(--color-text-muted)]" />
+              <FiSearch className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-[var(--color-text-muted)]" />
               <input
                 type="text"
                 value={query}
-                onChange={(e) => setQuery(e.target.value)}
+                onChange={e => setQuery(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="Search evidence, hypotheses, genes, proteins, drugs..."
-                className="w-full pl-11 pr-4 py-3 bg-[var(--color-bg)] border border-[var(--color-border)] rounded-lg focus:outline-none focus:border-primary-500 text-sm"
+                className="w-full pl-12 pr-4 py-3.5 bg-[var(--glass-bg)] border border-[var(--color-border)] rounded-xl focus:outline-none focus:border-[var(--color-border-strong)] text-sm transition-all"
+                autoFocus
               />
             </div>
             <button
-              onClick={handleSearch}
+              onClick={() => handleSearch()}
               disabled={isSearching}
-              className="btn bg-primary-500 text-white hover:bg-primary-600 px-6 py-3"
+              className="btn px-6 py-3.5 text-sm font-medium rounded-xl border border-[var(--color-border)] hover:border-[var(--color-border-strong)]"
+              style={{ color: 'var(--color-text)' }}
             >
-              {isSearching ? 'Searching...' : 'Search'}
+              {isSearching ? <FiLoader className="w-4 h-4 animate-spin" /> : 'Search'}
+            </button>
+            <button
+              onClick={saveSearch}
+              className="btn p-3.5 rounded-xl border border-[var(--color-border)]"
+              title="Save search"
+            >
+              <FiBookmark className="w-4 h-4" />
             </button>
             <button
               onClick={() => setShowFilters(!showFilters)}
-              className={clsx(
-                'p-3 rounded-lg border transition-colors',
-                showFilters
-                  ? 'border-primary-500 bg-primary-500/10 text-primary-400'
-                  : 'border-[var(--color-border)] hover:border-[var(--color-border-strong)]'
-              )}
+              className={`btn p-3.5 rounded-xl border transition-all ${showFilters ? 'border-[var(--color-border-strong)] bg-[var(--glass-bg-hover)]' : 'border-[var(--color-border)]'}`}
               title="Toggle Filters"
             >
-              <FiSliders className="w-5 h-5" />
+              <FiSliders className="w-4 h-4" />
             </button>
           </div>
 
-          {/* Search Mode Toggle */}
+          {/* Search Mode */}
           <div className="flex items-center gap-4 mt-3">
             <span className="text-xs text-[var(--color-text-muted)]">Mode:</span>
-            <div className="flex items-center gap-1 bg-[var(--color-bg)] rounded-lg p-1">
+            <div className="flex items-center gap-1 bg-[var(--glass-bg)] rounded-lg p-0.5">
               {(['hybrid', 'semantic', 'keyword'] as SearchMode[]).map(mode => (
                 <button
                   key={mode}
                   onClick={() => setSearchMode(mode)}
-                  className={clsx(
-                    'px-3 py-1 text-xs rounded transition-colors capitalize',
-                    searchMode === mode
-                      ? 'bg-primary-500/20 text-primary-400'
-                      : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
-                  )}
+                  className={`px-3 py-1.5 text-xs rounded-md transition-all capitalize ${searchMode === mode ? 'bg-[var(--glass-bg-hover)] text-[var(--color-text)]' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'}`}
                 >
                   {mode}
                 </button>
               ))}
             </div>
             <span className="text-xs text-[var(--color-text-muted)]">
-              {searchMode === 'hybrid' && 'Combines semantic understanding with keyword matching'}
-              {searchMode === 'semantic' && 'Uses AI to understand meaning and context'}
-              {searchMode === 'keyword' && 'Traditional exact keyword matching'}
+              {searchMode === 'hybrid' && 'Combines semantic + keyword matching'}
+              {searchMode === 'semantic' && 'AI-powered meaning-based search'}
+              {searchMode === 'keyword' && 'Exact keyword matching'}
             </span>
           </div>
         </div>
@@ -159,31 +228,23 @@ export default function Search() {
       <div className="flex-1 flex overflow-hidden">
         {/* Filters Sidebar */}
         {showFilters && (
-          <div className="w-64 border-r border-[var(--color-border)] bg-[var(--color-bg-elevated)] p-4 overflow-y-auto">
-            <div className="flex items-center justify-between mb-4">
+          <div className="w-64 border-r border-[var(--color-border)] p-5 overflow-y-auto">
+            <div className="flex items-center justify-between mb-5">
               <h3 className="text-sm font-medium">Filters</h3>
-              <button
-                onClick={clearFilters}
-                className="text-xs text-primary-400 hover:text-primary-300"
-              >
+              <button onClick={() => { setFilterType(''); setDateRange({ from: '', to: '' }); setMinRelevance(0) }} className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
                 Clear all
               </button>
             </div>
 
-            {/* Entity Type */}
+            {/* Type */}
             <div className="mb-6">
               <label className="text-xs text-[var(--color-text-muted)] mb-2 block">Type</label>
-              <div className="space-y-1">
-                {entityTypes.map(({ value, label, icon: Icon }) => (
+              <div className="space-y-0.5">
+                {FILTER_TYPES.map(({ value, label, icon: Icon }) => (
                   <button
                     key={value}
-                    onClick={() => setEntityType(value)}
-                    className={clsx(
-                      'w-full flex items-center gap-2 px-3 py-2 rounded text-sm transition-colors',
-                      entityType === value
-                        ? 'bg-primary-500/20 text-primary-400'
-                        : 'hover:bg-[var(--color-border)] text-[var(--color-text-muted)]'
-                    )}
+                    onClick={() => setFilterType(value)}
+                    className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-all ${filterType === value ? 'bg-[var(--glass-bg-hover)] text-[var(--color-text)]' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)]'}`}
                   >
                     <Icon className="w-4 h-4" />
                     {label}
@@ -195,163 +256,201 @@ export default function Search() {
             {/* Date Range */}
             <div className="mb-6">
               <label className="text-xs text-[var(--color-text-muted)] mb-2 block flex items-center gap-1">
-                <FiCalendar className="w-3 h-3" />
-                Date Range
+                <FiCalendar className="w-3 h-3" /> Date Range
               </label>
               <div className="space-y-2">
-                <input
-                  type="date"
-                  value={dateRange.from}
-                  onChange={(e) => setDateRange(prev => ({ ...prev, from: e.target.value }))}
-                  className="w-full px-3 py-2 bg-[var(--color-bg)] border border-[var(--color-border)] rounded text-xs"
-                  placeholder="From"
-                />
-                <input
-                  type="date"
-                  value={dateRange.to}
-                  onChange={(e) => setDateRange(prev => ({ ...prev, to: e.target.value }))}
-                  className="w-full px-3 py-2 bg-[var(--color-bg)] border border-[var(--color-border)] rounded text-xs"
-                  placeholder="To"
-                />
+                <input type="date" value={dateRange.from} onChange={e => setDateRange(p => ({ ...p, from: e.target.value }))} className="input w-full text-xs" />
+                <input type="date" value={dateRange.to} onChange={e => setDateRange(p => ({ ...p, to: e.target.value }))} className="input w-full text-xs" />
               </div>
             </div>
 
-            {/* Relevance Threshold */}
+            {/* Relevance */}
             <div className="mb-6">
-              <label className="text-xs text-[var(--color-text-muted)] mb-2 flex items-center justify-between">
+              <label className="text-xs text-[var(--color-text-muted)] mb-2 flex justify-between">
                 <span>Min Relevance</span>
                 <span>{minRelevance}%</span>
               </label>
-              <input
-                type="range"
-                min="0"
-                max="100"
-                value={minRelevance}
-                onChange={(e) => setMinRelevance(Number(e.target.value))}
-                className="w-full"
-              />
+              <input type="range" min="0" max="100" value={minRelevance} onChange={e => setMinRelevance(Number(e.target.value))} className="w-full" />
             </div>
 
             {/* Saved Searches */}
-            <div>
-              <label className="text-xs text-[var(--color-text-muted)] mb-2 block flex items-center gap-1">
-                <FiBookmark className="w-3 h-3" />
-                Recent Searches
-              </label>
-              <div className="space-y-1">
-                {savedSearches.map(search => (
-                  <button
-                    key={search}
-                    onClick={() => setQuery(search)}
-                    className="w-full flex items-center gap-2 px-3 py-2 rounded text-xs hover:bg-[var(--color-border)] text-left text-[var(--color-text-muted)]"
-                  >
-                    <FiClock className="w-3 h-3" />
-                    {search}
-                  </button>
-                ))}
+            {savedSearches.length > 0 && (
+              <div className="mb-6">
+                <label className="text-xs text-[var(--color-text-muted)] mb-2 block flex items-center gap-1">
+                  <FiStar className="w-3 h-3" /> Saved Searches
+                </label>
+                <div className="space-y-0.5">
+                  {savedSearches.map(s => (
+                    <div key={s} className="flex items-center gap-1 group">
+                      <button onClick={() => { setQuery(s); handleSearch(s) }} className="flex-1 text-left text-xs px-3 py-1.5 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)] truncate">
+                        {s}
+                      </button>
+                      <button onClick={() => removeSavedSearch(s)} className="p-1 text-[var(--color-text-muted)] opacity-0 group-hover:opacity-100 hover:text-[var(--color-error)]">
+                        <FiX className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
+
+            {/* Recent Searches */}
+            {recentSearches.length > 0 && (
+              <div>
+                <label className="text-xs text-[var(--color-text-muted)] mb-2 block flex items-center gap-1">
+                  <FiClock className="w-3 h-3" /> Recent
+                </label>
+                <div className="space-y-0.5">
+                  {recentSearches.slice(0, 5).map(s => (
+                    <button key={s} onClick={() => { setQuery(s); handleSearch(s) }} className="w-full text-left text-xs px-3 py-1.5 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)] truncate">
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
         {/* Results */}
-        <div className="flex-1 overflow-y-auto p-4">
+        <div className="flex-1 overflow-y-auto p-6">
           <div className="max-w-4xl mx-auto">
-            {/* Results Header */}
+            {/* Results header */}
             <div className="flex items-center justify-between mb-4">
               <span className="text-sm text-[var(--color-text-muted)]">
-                {results.length} results {query && `for "${query}"`}
+                {totalResults > 0 ? `${totalResults} results` : ''} {query && totalResults > 0 && `for "${query}"`}
               </span>
-              <select className="text-xs bg-[var(--color-bg)] border border-[var(--color-border)] rounded px-2 py-1">
-                <option>Sort by Relevance</option>
-                <option>Sort by Date</option>
-                <option>Sort by Citations</option>
+              <select
+                value={sortBy}
+                onChange={e => setSortBy(e.target.value as SortBy)}
+                className="input text-xs py-1.5"
+              >
+                <option value="relevance">Sort by Relevance</option>
+                <option value="date">Sort by Date</option>
+                <option value="citations">Sort by Citations</option>
               </select>
             </div>
 
+            {/* Source legend */}
+            {results.length > 0 && (
+              <div className="flex flex-wrap items-center gap-3 mb-4">
+                {[...new Set(results.map(r => r.source_type || r.type))].map(source => {
+                  const style = getSourceStyle(source)
+                  return (
+                    <div key={source} className="flex items-center gap-1.5 text-xs">
+                      <span className="w-2 h-2 rounded-full" style={{ background: style.color }} />
+                      <span style={{ color: style.color }}>{style.label}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
             {/* Results List */}
-            <div className="space-y-3">
+            <div className="space-y-2">
               {results.map(result => {
-                const TypeIcon = getTypeIcon(result.type)
+                const Icon = typeIcons[result.type] || FiFileText
+                const sourceStyle = getSourceStyle(result.source_type || result.source || result.type)
+                const typeStyle = getSourceStyle(result.type)
+
                 return (
-                  <div
+                  <button
                     key={result.id}
-                    className="card hover:border-[var(--color-border-strong)] transition-colors cursor-pointer"
+                    onClick={() => navigateToResult(result)}
+                    className="w-full text-left glass-card p-4 transition-all hover:bg-[var(--glass-bg-hover)] group"
                   >
                     <div className="flex items-start gap-3">
-                      <div className={clsx('p-2 rounded', getTypeColor(result.type))}>
-                        <TypeIcon className="w-4 h-4" />
+                      {/* Type indicator with color */}
+                      <div className="p-2 rounded-lg flex-shrink-0" style={{ background: typeStyle.bg }}>
+                        <Icon className="w-4 h-4" style={{ color: typeStyle.color }} />
                       </div>
+
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-start justify-between gap-2">
-                          <h3 className="text-sm font-medium hover:text-primary-400">
-                            {result.title}
+                        <div className="flex items-start justify-between gap-3">
+                          <h3 className="text-sm font-medium group-hover:text-[var(--color-text)] transition-colors">
+                            {highlightMatch(result.title, query)}
                           </h3>
                           <div className="flex items-center gap-2 flex-shrink-0">
-                            <span className={clsx(
-                              'text-xxs px-1.5 py-0.5 rounded capitalize',
-                              getTypeColor(result.type)
-                            )}>
-                              {result.type}
+                            {/* Source badge with color */}
+                            <span className="text-xs px-2 py-0.5 rounded-md" style={{ color: sourceStyle.color, background: sourceStyle.bg }}>
+                              {sourceStyle.label}
                             </span>
-                            <span className="text-xxs text-[var(--color-text-muted)]">
-                              {Math.round(result.relevance * 100)}% match
+                            {/* Relevance */}
+                            <span className="text-xs text-[var(--color-text-muted)]">
+                              {Math.round((result.relevance_score || 0) * 100)}%
                             </span>
                           </div>
                         </div>
-                        <p className="text-xs text-[var(--color-text-muted)] mt-1 line-clamp-2">
-                          {result.snippet}
-                        </p>
+
+                        {result.snippet && (
+                          <p className="text-xs text-[var(--color-text-muted)] mt-1.5 line-clamp-2">
+                            {highlightMatch(result.snippet, query)}
+                          </p>
+                        )}
+
                         <div className="flex items-center gap-4 mt-2 text-xs text-[var(--color-text-muted)]">
-                          {result.source && (
-                            <span className="flex items-center gap-1">
-                              <FiExternalLink className="w-3 h-3" />
-                              {result.source}
-                            </span>
-                          )}
-                          {result.date && (
+                          {/* Source origin color line */}
+                          <span className="w-1 h-4 rounded-full" style={{ background: sourceStyle.color }} />
+                          <span style={{ color: sourceStyle.color }}>{result.source || result.source_type}</span>
+
+                          {result.created_at && (
                             <span className="flex items-center gap-1">
                               <FiCalendar className="w-3 h-3" />
-                              {result.date}
+                              {new Date(result.created_at).toLocaleDateString()}
                             </span>
                           )}
-                          {result.metadata?.citations !== undefined && (
-                            <span>{String(result.metadata.citations)} citations</span>
+                          {result.metadata?.citation_count !== undefined && (
+                            <span>{String(result.metadata.citation_count)} citations</span>
                           )}
                           {result.metadata?.confidence !== undefined && (
-                            <span>
-                              Confidence: {Math.round(Number(result.metadata.confidence) * 100)}%
-                            </span>
+                            <span>Confidence: {Math.round(Number(result.metadata.confidence) * 100)}%</span>
+                          )}
+                          {result.metadata?.entity_type && (
+                            <span className="capitalize">{String(result.metadata.entity_type)}</span>
                           )}
                         </div>
+
+                        {/* Tags */}
+                        {result.tags && result.tags.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-2">
+                            {result.tags.slice(0, 4).map(tag => (
+                              <span key={tag} className="text-xxs px-1.5 py-0.5 rounded bg-[var(--glass-bg)] text-[var(--color-text-muted)]">
+                                {tag}
+                              </span>
+                            ))}
+                            {result.tags.length > 4 && (
+                              <span className="text-xxs px-1.5 py-0.5 text-[var(--color-text-muted)]">+{result.tags.length - 4}</span>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
-                  </div>
+                  </button>
                 )
               })}
             </div>
 
-            {results.length === 0 && query && (
-              <div className="text-center py-12">
-                <FiSearch className="w-12 h-12 text-[var(--color-border)] mx-auto mb-4" />
-                <p className="text-[var(--color-text-muted)]">
-                  No results found for "{query}"
-                </p>
-                <p className="text-xs text-[var(--color-text-muted)] mt-2">
-                  Try adjusting your filters or search terms
-                </p>
+            {/* Empty states */}
+            {results.length === 0 && query && !isSearching && (
+              <div className="text-center py-16">
+                <FiSearch className="w-10 h-10 mx-auto mb-3 text-[var(--color-text-muted)] opacity-30" />
+                <p className="text-sm text-[var(--color-text-muted)]">No results found for "{query}"</p>
+                <p className="text-xs text-[var(--color-text-muted)] mt-1">Try adjusting your filters or search terms</p>
               </div>
             )}
 
-            {!query && (
-              <div className="text-center py-12">
-                <FiSearch className="w-12 h-12 text-[var(--color-border)] mx-auto mb-4" />
-                <p className="text-[var(--color-text-muted)]">
-                  Enter a search query to find evidence, hypotheses, and more
-                </p>
-                <p className="text-xs text-[var(--color-text-muted)] mt-2">
-                  Use semantic search to find related concepts even without exact keywords
-                </p>
+            {isSearching && (
+              <div className="text-center py-16">
+                <FiLoader className="w-8 h-8 mx-auto mb-3 animate-spin text-[var(--color-text-muted)]" />
+                <p className="text-sm text-[var(--color-text-muted)]">Searching across all sources...</p>
+              </div>
+            )}
+
+            {!query && !isSearching && (
+              <div className="text-center py-16">
+                <FiSearch className="w-10 h-10 mx-auto mb-3 text-[var(--color-text-muted)] opacity-30" />
+                <p className="text-sm text-[var(--color-text-muted)]">Enter a search query to find evidence, hypotheses, and more</p>
+                <p className="text-xs text-[var(--color-text-muted)] mt-1">Search across evidence, knowledge graph entities, projects, and RAG-indexed documents</p>
               </div>
             )}
           </div>

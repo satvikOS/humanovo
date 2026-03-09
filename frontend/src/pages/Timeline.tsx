@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import {
   FiFolder,
   FiZap,
@@ -8,16 +8,23 @@ import {
   FiClock,
   FiCalendar,
   FiRefreshCw,
-  FiFileText
+  FiFileText,
+  FiTrash2,
+  FiEdit3,
+  FiMessageSquare,
+  FiSave,
+  FiX,
+  FiTrendingUp,
+  FiLoader,
 } from 'react-icons/fi'
-import clsx from 'clsx'
-import { getActivityLog, type ActivityEntry } from '../utils/persistence'
+import api from '../services/api'
+import type { Activity } from '../services/api'
 
-type FilterType = 'all' | 'project' | 'hypothesis' | 'evidence' | 'simulation' | 'notebook' | 'discovery'
+type FilterType = '' | 'project' | 'hypothesis' | 'evidence' | 'simulation' | 'notebook' | 'discovery'
 type TimeRange = 'today' | 'week' | 'month' | 'all'
 
 const filterOptions: { value: FilterType; label: string; icon: typeof FiFolder }[] = [
-  { value: 'all', label: 'All Activity', icon: FiClock },
+  { value: '', label: 'All', icon: FiClock },
   { value: 'project', label: 'Projects', icon: FiFolder },
   { value: 'hypothesis', label: 'Hypotheses', icon: FiZap },
   { value: 'evidence', label: 'Evidence', icon: FiDatabase },
@@ -26,145 +33,130 @@ const filterOptions: { value: FilterType; label: string; icon: typeof FiFolder }
   { value: 'discovery', label: 'Discoveries', icon: FiCheckCircle },
 ]
 
-const timeRanges: { value: TimeRange; label: string }[] = [
-  { value: 'today', label: 'Today' },
-  { value: 'week', label: 'This Week' },
-  { value: 'month', label: 'This Month' },
-  { value: 'all', label: 'All Time' },
-]
+const typeIcons: Record<string, typeof FiZap> = {
+  project: FiFolder, hypothesis: FiZap, evidence: FiDatabase,
+  simulation: FiActivity, notebook: FiFileText, discovery: FiTrendingUp,
+}
+
+const typeColors: Record<string, string> = {
+  project: 'var(--color-text-secondary)', hypothesis: 'var(--color-accent-purple)',
+  evidence: 'var(--color-accent-blue)', simulation: 'var(--color-accent-green)',
+  notebook: 'var(--color-accent-orange)', discovery: 'var(--color-accent-cyan)',
+}
+
+const actionColors: Record<string, string> = {
+  created: 'var(--color-accent-blue)', updated: 'var(--color-text-muted)',
+  completed: 'var(--color-success)', validated: 'var(--color-success)',
+  rejected: 'var(--color-error)', imported: 'var(--color-accent-cyan)',
+  started: 'var(--color-warning)', deleted: 'var(--color-error)',
+}
 
 function formatRelativeTime(dateStr: string): string {
-  const date = new Date(dateStr)
-  const now = new Date()
-  const diffMs = now.getTime() - date.getTime()
-  const diffMins = Math.floor(diffMs / (1000 * 60))
-  const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
-
-  if (diffMins < 60) return `${diffMins} minutes ago`
-  if (diffHours < 24) return `${diffHours} hours ago`
-  if (diffDays === 1) return 'Yesterday'
-  if (diffDays < 7) return `${diffDays} days ago`
-  return date.toLocaleDateString()
-}
-
-function getEventIcon(type: ActivityEntry['type']) {
-  switch (type) {
-    case 'project': return FiFolder
-    case 'hypothesis': return FiZap
-    case 'evidence': return FiDatabase
-    case 'simulation': return FiActivity
-    case 'notebook': return FiFileText
-    case 'discovery': return FiCheckCircle
-    default: return FiClock
-  }
-}
-
-function getEventColor(type: ActivityEntry['type'], action: ActivityEntry['action']) {
-  if (action === 'rejected' || action === 'deleted') return 'text-error-400 bg-error-500/20'
-  if (action === 'validated' || action === 'completed') return 'text-success-400 bg-success-500/20'
-
-  switch (type) {
-    case 'project': return 'text-primary-400 bg-primary-500/20'
-    case 'hypothesis': return 'text-warning-400 bg-warning-500/20'
-    case 'evidence': return 'text-primary-400 bg-primary-500/20'
-    case 'simulation': return 'text-success-400 bg-success-500/20'
-    case 'notebook': return 'text-purple-400 bg-purple-500/20'
-    case 'discovery': return 'text-warning-400 bg-warning-500/20'
-    default: return 'text-[var(--color-text-muted)] bg-[var(--color-border)]'
-  }
-}
-
-function getActionBadge(action: ActivityEntry['action']) {
-  const badges: Record<string, { color: string; label: string }> = {
-    created: { color: 'bg-primary-500/20 text-primary-400', label: 'Created' },
-    updated: { color: 'bg-[var(--color-border)] text-[var(--color-text-muted)]', label: 'Updated' },
-    completed: { color: 'bg-success-500/20 text-success-400', label: 'Completed' },
-    validated: { color: 'bg-success-500/20 text-success-400', label: 'Validated' },
-    rejected: { color: 'bg-error-500/20 text-error-400', label: 'Rejected' },
-    imported: { color: 'bg-primary-500/20 text-primary-400', label: 'Imported' },
-    started: { color: 'bg-warning-500/20 text-warning-400', label: 'Started' },
-    deleted: { color: 'bg-error-500/20 text-error-400', label: 'Deleted' },
-  }
-  return badges[action] || { color: 'bg-[var(--color-border)]', label: action }
+  const diff = Date.now() - new Date(dateStr).getTime()
+  const mins = Math.floor(diff / 60000)
+  if (mins < 1) return 'Just now'
+  if (mins < 60) return `${mins}m ago`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `${hrs}h ago`
+  const days = Math.floor(hrs / 24)
+  if (days === 1) return 'Yesterday'
+  if (days < 7) return `${days}d ago`
+  return new Date(dateStr).toLocaleDateString()
 }
 
 export default function Timeline() {
-  const [filterType, setFilterType] = useState<FilterType>('all')
+  const [activities, setActivities] = useState<Activity[]>([])
+  const [filterType, setFilterType] = useState<FilterType>('')
   const [timeRange, setTimeRange] = useState<TimeRange>('all')
-  const [refreshKey, setRefreshKey] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editDescription, setEditDescription] = useState('')
+  const [annotatingId, setAnnotatingId] = useState<string | null>(null)
+  const [annotationText, setAnnotationText] = useState('')
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
 
-  // Read activity log from localStorage (refreshable)
-  const events = useMemo(() => {
-    void refreshKey
-    return getActivityLog()
-  }, [refreshKey])
-
-  // Filter events
-  const filteredEvents = useMemo(() => {
-    return events.filter(event => {
-      if (filterType !== 'all' && event.type !== filterType) return false
+  const fetchActivities = useCallback(async () => {
+    setLoading(true)
+    try {
+      const params: any = { page_size: 200 }
+      if (filterType) params.type = filterType
       if (timeRange !== 'all') {
         const now = new Date()
-        const eventDate = new Date(event.timestamp)
-        if (timeRange === 'today') {
-          if (eventDate.toDateString() !== now.toDateString()) return false
-        } else if (timeRange === 'week') {
-          const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
-          if (eventDate < weekAgo) return false
-        } else if (timeRange === 'month') {
-          const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
-          if (eventDate < monthAgo) return false
-        }
+        if (timeRange === 'today') params.date_from = new Date(now.setHours(0, 0, 0, 0)).toISOString()
+        else if (timeRange === 'week') params.date_from = new Date(Date.now() - 7 * 86400000).toISOString()
+        else if (timeRange === 'month') params.date_from = new Date(Date.now() - 30 * 86400000).toISOString()
       }
-      return true
-    })
-  }, [events, filterType, timeRange])
+      const res = await api.getActivities(params)
+      setActivities(res.items || [])
+    } catch (err) {
+      console.error('Failed to fetch activities:', err)
+    }
+    setLoading(false)
+  }, [filterType, timeRange])
 
-  // Group events by date
-  const groupedEvents = useMemo(() => {
-    return filteredEvents.reduce((groups, event) => {
-      const dateKey = new Date(event.timestamp).toDateString()
-      if (!groups[dateKey]) groups[dateKey] = []
-      groups[dateKey].push(event)
-      return groups
-    }, {} as Record<string, ActivityEntry[]>)
-  }, [filteredEvents])
+  useEffect(() => { fetchActivities() }, [fetchActivities])
+
+  const handleDelete = async (id: string) => {
+    try {
+      await api.deleteActivity(id)
+      setActivities(prev => prev.filter(a => a.id !== id))
+      setDeleteConfirm(null)
+    } catch (err) {
+      console.error('Failed to delete activity:', err)
+    }
+  }
+
+  const handleEditSave = async (id: string) => {
+    try {
+      const updated = await api.updateActivity(id, { description: editDescription })
+      setActivities(prev => prev.map(a => a.id === id ? updated : a))
+      setEditingId(null)
+    } catch (err) {
+      console.error('Failed to update activity:', err)
+    }
+  }
+
+  const handleAnnotationSave = async (id: string) => {
+    try {
+      const updated = await api.updateActivity(id, { annotation: annotationText })
+      setActivities(prev => prev.map(a => a.id === id ? updated : a))
+      setAnnotatingId(null)
+    } catch (err) {
+      console.error('Failed to save annotation:', err)
+    }
+  }
+
+  // Group by date
+  const grouped = activities.reduce((acc, activity) => {
+    const dateKey = new Date(activity.created_at).toDateString()
+    if (!acc[dateKey]) acc[dateKey] = []
+    acc[dateKey].push(activity)
+    return acc
+  }, {} as Record<string, Activity[]>)
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
       {/* Header */}
-      <div className="p-4 border-b border-[var(--color-border)]">
+      <div className="p-6 border-b border-[var(--color-border)]">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h1 className="text-xl font-semibold">Discovery Timeline</h1>
-            <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
-              Track all research activity across your projects
-            </p>
+            <h1 className="text-2xl font-semibold tracking-tight">Timeline</h1>
+            <p className="text-sm text-[var(--color-text-muted)] mt-1">Track all research activity across your projects</p>
           </div>
-          <button
-            className="btn btn-sm bg-[var(--color-border)] hover:bg-[var(--color-border-strong)]"
-            onClick={() => setRefreshKey(k => k + 1)}
-          >
-            <FiRefreshCw className="w-3.5 h-3.5" />
+          <button onClick={fetchActivities} className="btn text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+            <FiRefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             Refresh
           </button>
         </div>
 
         {/* Filters */}
         <div className="flex items-center gap-4">
-          {/* Type Filter */}
-          <div className="flex items-center gap-1 bg-[var(--color-bg)] rounded-lg p-1">
+          <div className="flex items-center gap-0.5 bg-[var(--glass-bg)] rounded-lg p-0.5">
             {filterOptions.map(({ value, label, icon: Icon }) => (
               <button
                 key={value}
                 onClick={() => setFilterType(value)}
-                className={clsx(
-                  'flex items-center gap-1.5 px-3 py-1.5 text-xs rounded transition-colors',
-                  filterType === value
-                    ? 'bg-primary-500/20 text-primary-400'
-                    : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
-                )}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md transition-all ${filterType === value ? 'bg-[var(--glass-bg-hover)] text-[var(--color-text)]' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'}`}
               >
                 <Icon className="w-3.5 h-3.5" />
                 {label}
@@ -172,126 +164,199 @@ export default function Timeline() {
             ))}
           </div>
 
-          <div className="w-px h-6 bg-[var(--color-border)]" />
+          <div className="w-px h-5 bg-[var(--color-border)]" />
 
-          {/* Time Range */}
           <div className="flex items-center gap-2">
             <FiCalendar className="w-4 h-4 text-[var(--color-text-muted)]" />
             <select
               value={timeRange}
-              onChange={(e) => setTimeRange(e.target.value as TimeRange)}
-              className="text-xs bg-[var(--color-bg)] border border-[var(--color-border)] rounded px-2 py-1.5"
+              onChange={e => setTimeRange(e.target.value as TimeRange)}
+              className="input text-xs py-1.5"
             >
-              {timeRanges.map(({ value, label }) => (
-                <option key={value} value={value}>{label}</option>
-              ))}
+              <option value="today">Today</option>
+              <option value="week">This Week</option>
+              <option value="month">This Month</option>
+              <option value="all">All Time</option>
             </select>
           </div>
+
+          <span className="text-xs text-[var(--color-text-muted)] ml-auto">{activities.length} events</span>
         </div>
       </div>
 
       {/* Timeline */}
-      <div className="flex-1 overflow-y-auto p-4">
+      <div className="flex-1 overflow-y-auto p-6">
         <div className="max-w-3xl mx-auto">
-          {Object.entries(groupedEvents).map(([dateKey, dayEvents]) => (
-            <div key={dateKey} className="mb-8">
-              {/* Date Header */}
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 rounded-full bg-[var(--color-border)] flex items-center justify-center">
-                  <FiCalendar className="w-5 h-5 text-[var(--color-text-muted)]" />
-                </div>
-                <div>
-                  <div className="text-sm font-medium">
-                    {new Date(dateKey).toLocaleDateString('en-US', {
-                      weekday: 'long',
-                      month: 'long',
-                      day: 'numeric'
-                    })}
+          {loading && activities.length === 0 ? (
+            <div className="text-center py-16">
+              <FiLoader className="w-8 h-8 animate-spin mx-auto mb-3 text-[var(--color-text-muted)]" />
+              <p className="text-sm text-[var(--color-text-muted)]">Loading timeline...</p>
+            </div>
+          ) : Object.entries(grouped).length === 0 ? (
+            <div className="text-center py-16">
+              <FiClock className="w-10 h-10 mx-auto mb-3 text-[var(--color-text-muted)] opacity-30" />
+              <p className="text-sm text-[var(--color-text-muted)]">No activity found</p>
+              <p className="text-xs text-[var(--color-text-muted)] mt-1">Start a discovery or create a project to see activity here</p>
+            </div>
+          ) : (
+            Object.entries(grouped).map(([dateKey, dayActivities]) => (
+              <div key={dateKey} className="mb-8">
+                {/* Date header */}
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 rounded-xl bg-[var(--glass-bg)] flex items-center justify-center border border-[var(--color-border)]">
+                    <FiCalendar className="w-4 h-4 text-[var(--color-text-muted)]" />
                   </div>
-                  <div className="text-xs text-[var(--color-text-muted)]">
-                    {dayEvents.length} events
+                  <div>
+                    <div className="text-sm font-medium">
+                      {new Date(dateKey).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+                    </div>
+                    <div className="text-xs text-[var(--color-text-muted)]">{dayActivities.length} events</div>
                   </div>
                 </div>
-              </div>
 
-              {/* Events */}
-              <div className="ml-5 border-l-2 border-[var(--color-border)] pl-8 space-y-4">
-                {dayEvents.map(event => {
-                  const Icon = getEventIcon(event.type)
-                  const colorClass = getEventColor(event.type, event.action)
-                  const actionBadge = getActionBadge(event.action)
+                {/* Events */}
+                <div className="ml-5 border-l border-[var(--color-border)] pl-8 space-y-3">
+                  {dayActivities.map(activity => {
+                    const Icon = typeIcons[activity.type] || FiClock
+                    const color = typeColors[activity.type] || 'var(--color-text-muted)'
+                    const actionColor = actionColors[activity.action] || 'var(--color-text-muted)'
+                    const isEditing = editingId === activity.id
+                    const isAnnotating = annotatingId === activity.id
+                    const isDeleting = deleteConfirm === activity.id
 
-                  return (
-                    <div
-                      key={event.id}
-                      className="relative card hover:border-[var(--color-border-strong)] transition-colors"
-                    >
-                      {/* Timeline dot */}
-                      <div className={clsx(
-                        'absolute -left-[2.85rem] top-4 w-4 h-4 rounded-full border-2 border-[var(--color-bg-elevated)]',
-                        colorClass
-                      )} />
+                    return (
+                      <div key={activity.id} className="relative glass-card p-4 group transition-all">
+                        {/* Timeline dot */}
+                        <div className="absolute -left-[2.15rem] top-5 w-3 h-3 rounded-full border-2 border-[var(--color-bg)]" style={{ background: color }} />
 
-                      <div className="flex items-start gap-3">
-                        <div className={clsx('p-2 rounded', colorClass)}>
-                          <Icon className="w-4 h-4" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-start justify-between gap-2">
-                            <div>
-                              <h3 className="text-sm font-medium">{event.title}</h3>
-                              {event.project && (
-                                <p className="text-xs text-[var(--color-text-muted)] mt-1">
-                                  <FiFolder className="inline w-3 h-3 mr-1" />
-                                  {event.project}
-                                </p>
-                              )}
+                        <div className="flex items-start gap-3">
+                          <div className="p-2 rounded-lg flex-shrink-0" style={{ background: `${color}12` }}>
+                            <Icon className="w-4 h-4" style={{ color }} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex-1">
+                                <h3 className="text-sm font-medium">{activity.title}</h3>
+
+                                {/* Editable description */}
+                                {isEditing ? (
+                                  <div className="mt-2 flex items-center gap-2">
+                                    <input
+                                      type="text"
+                                      value={editDescription}
+                                      onChange={e => setEditDescription(e.target.value)}
+                                      className="input flex-1 text-xs"
+                                      autoFocus
+                                    />
+                                    <button onClick={() => handleEditSave(activity.id)} className="btn btn-sm" style={{ color: 'var(--color-success)' }}>
+                                      <FiSave className="w-3 h-3" />
+                                    </button>
+                                    <button onClick={() => setEditingId(null)} className="btn btn-sm text-[var(--color-text-muted)]">
+                                      <FiX className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                ) : activity.description && (
+                                  <p className="text-xs text-[var(--color-text-muted)] mt-1">{activity.description}</p>
+                                )}
+
+                                {activity.project_name && (
+                                  <p className="text-xs text-[var(--color-text-muted)] mt-1 flex items-center gap-1">
+                                    <FiFolder className="w-3 h-3" /> {activity.project_name}
+                                  </p>
+                                )}
+                              </div>
+
+                              <div className="flex items-center gap-2 flex-shrink-0">
+                                <span className="text-xs px-2 py-0.5 rounded-md" style={{ color: actionColor, background: `${actionColor}12` }}>
+                                  {activity.action}
+                                </span>
+
+                                {/* Action buttons (visible on hover) */}
+                                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <button
+                                    onClick={() => { setEditingId(activity.id); setEditDescription(activity.description || '') }}
+                                    className="p-1 rounded text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)]"
+                                    title="Edit description"
+                                  >
+                                    <FiEdit3 className="w-3 h-3" />
+                                  </button>
+                                  <button
+                                    onClick={() => { setAnnotatingId(activity.id); setAnnotationText(activity.annotation || '') }}
+                                    className="p-1 rounded text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)]"
+                                    title="Add annotation"
+                                  >
+                                    <FiMessageSquare className="w-3 h-3" />
+                                  </button>
+                                  <button
+                                    onClick={() => setDeleteConfirm(activity.id)}
+                                    className="p-1 rounded text-[var(--color-text-muted)] hover:text-[var(--color-error)] hover:bg-[var(--glass-bg)]"
+                                    title="Delete"
+                                  >
+                                    <FiTrash2 className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              </div>
                             </div>
-                            <span className={clsx('text-xxs px-1.5 py-0.5 rounded flex-shrink-0', actionBadge.color)}>
-                              {actionBadge.label}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-4 mt-2 text-xs text-[var(--color-text-muted)]">
-                            <span className="flex items-center gap-1">
-                              <FiClock className="w-3 h-3" />
-                              {formatRelativeTime(event.timestamp)}
-                            </span>
-                          </div>
-                          {event.metadata && (
-                            <div className="flex items-center gap-3 mt-2 text-xs">
-                              {event.metadata.confidence !== undefined && (
-                                <span className="text-warning-400">
-                                  Confidence: {Math.round(Number(event.metadata.confidence) * 100)}%
+
+                            {/* Annotation */}
+                            {isAnnotating ? (
+                              <div className="mt-3 p-3 rounded-lg bg-[var(--glass-bg)] border border-[var(--color-border)]">
+                                <textarea
+                                  value={annotationText}
+                                  onChange={e => setAnnotationText(e.target.value)}
+                                  placeholder="Add a note or annotation..."
+                                  className="w-full bg-transparent text-xs outline-none resize-none"
+                                  rows={2}
+                                  autoFocus
+                                />
+                                <div className="flex justify-end gap-2 mt-2">
+                                  <button onClick={() => setAnnotatingId(null)} className="btn btn-sm text-[var(--color-text-muted)]">Cancel</button>
+                                  <button onClick={() => handleAnnotationSave(activity.id)} className="btn btn-sm" style={{ color: 'var(--color-success)' }}>Save Note</button>
+                                </div>
+                              </div>
+                            ) : activity.annotation && (
+                              <div className="mt-2 p-2.5 rounded-lg bg-[var(--glass-bg)] border border-[var(--color-border)]">
+                                <div className="flex items-center gap-1 text-xs text-[var(--color-text-muted)] mb-1">
+                                  <FiMessageSquare className="w-3 h-3" /> Note
+                                </div>
+                                <p className="text-xs text-[var(--color-text-secondary)]">{activity.annotation}</p>
+                              </div>
+                            )}
+
+                            {/* Delete confirmation */}
+                            {isDeleting && (
+                              <div className="mt-2 p-3 rounded-lg border border-[var(--color-error)] bg-[rgba(239,68,68,0.05)]">
+                                <p className="text-xs text-[var(--color-error)] mb-2">Delete this activity entry?</p>
+                                <div className="flex gap-2">
+                                  <button onClick={() => handleDelete(activity.id)} className="btn btn-sm" style={{ color: 'var(--color-error)' }}>Delete</button>
+                                  <button onClick={() => setDeleteConfirm(null)} className="btn btn-sm text-[var(--color-text-muted)]">Cancel</button>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Metadata & time */}
+                            <div className="flex items-center gap-4 mt-2 text-xs text-[var(--color-text-muted)]">
+                              <span className="flex items-center gap-1">
+                                <FiClock className="w-3 h-3" />
+                                {formatRelativeTime(activity.created_at)}
+                              </span>
+                              {activity.metadata?.confidence !== undefined && (
+                                <span style={{ color: 'var(--color-accent-purple)' }}>
+                                  Confidence: {Math.round(Number(activity.metadata.confidence) * 100)}%
                                 </span>
                               )}
-                              {event.metadata.count !== undefined && (
-                                <span className="text-primary-400">
-                                  {String(event.metadata.count)} items
-                                </span>
+                              {activity.metadata?.count !== undefined && (
+                                <span>{String(activity.metadata.count)} items</span>
                               )}
                             </div>
-                          )}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  )
-                })}
+                    )
+                  })}
+                </div>
               </div>
-            </div>
-          ))}
-
-          {filteredEvents.length === 0 && (
-            <div className="text-center py-12">
-              <FiClock className="w-12 h-12 text-[var(--color-border)] mx-auto mb-4" />
-              <p className="text-[var(--color-text-muted)]">
-                {events.length === 0
-                  ? 'No activity yet — create a project, add evidence, or start a discovery'
-                  : 'No activity found for the selected filters'}
-              </p>
-              <p className="text-xs text-[var(--color-text-muted)] mt-2">
-                All your research actions are automatically tracked here
-              </p>
-            </div>
+            ))
           )}
         </div>
       </div>
