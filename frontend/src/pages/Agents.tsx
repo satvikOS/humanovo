@@ -24,6 +24,7 @@ import { Link } from 'react-router-dom'
 import { BarChart, Bar, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import api from '../services/api'
 import type { OrchestratorStatus, DiscoveryConfig } from '../services/api'
+import { persistSet, persistGet } from '../utils/persistence'
 
 // Types
 interface Hypothesis {
@@ -150,19 +151,71 @@ export default function Agents() {
         setConfig(prev => ({ ...prev, disease: (res as any).disease, discovery_type: (res as any).discovery_type || prev.discovery_type }))
       }
 
-      // Track auto-created project
-      if ((res as any).project_id) {
-        setProjectId((res as any).project_id)
-        setProjectName((res as any).project_name || '')
+      // Track auto-created project and sync to localStorage for ProjectDetail
+      if ((res as any).project_id && (res as any).project_id !== 'discovery') {
+        const pid = (res as any).project_id
+        const pname = (res as any).project_name || ''
+        setProjectId(pid)
+        setProjectName(pname)
+
+        // Save project to localStorage so ProjectDetail can find it
+        const existingProjects = persistGet<any[]>('projects', [])
+        if (!existingProjects.find((p: any) => p.id === pid)) {
+          const projectEntry = {
+            id: pid,
+            name: pname,
+            description: `Auto-generated discovery project for ${(res as any).disease || config.disease}`,
+            disease_focus: (res as any).disease || config.disease,
+            research_question: `${config.discovery_type?.replace('_', ' ')} discovery for ${(res as any).disease || config.disease}`,
+            tags: ['discovery', 'auto-generated'],
+            status: state === 'completed' ? 'completed' : 'active',
+            hypothesis_count: (res as any).top_hypotheses?.length || 0,
+            evidence_count: 0,
+            simulation_count: 0,
+            hypotheses: [],
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          }
+          persistSet('projects', [...existingProjects, projectEntry])
+        } else {
+          // Update hypothesis count and status
+          const updated = existingProjects.map((p: any) =>
+            p.id === pid ? {
+              ...p,
+              hypothesis_count: (res as any).top_hypotheses?.length || p.hypothesis_count,
+              status: state === 'completed' ? 'completed' : p.status,
+              updated_at: new Date().toISOString(),
+            } : p
+          )
+          persistSet('projects', updated)
+        }
       }
 
-      // Merge hypotheses
+      // Merge hypotheses and sync to localStorage
       if ((res as any).top_hypotheses?.length > 0) {
+        const pid = (res as any).project_id || ''
         setHypotheses(prev => {
           const ids = new Set(prev.map(h => h.id))
           const incoming = (res as any).top_hypotheses.filter((h: Hypothesis) => !ids.has(h.id)).filter(isValidHypothesis)
           if (!incoming.length) return prev
-          return [...incoming, ...prev].sort((a: Hypothesis, b: Hypothesis) => b.confidence - a.confidence).slice(0, 100)
+          const merged = [...incoming, ...prev].sort((a: Hypothesis, b: Hypothesis) => b.confidence - a.confidence).slice(0, 100)
+
+          // Save hypotheses to localStorage with project_id for ProjectDetail
+          if (pid && pid !== 'discovery') {
+            const savedHypotheses = persistGet<any[]>('hypotheses', [])
+            const existingIds = new Set(savedHypotheses.map((h: any) => h.id))
+            const newEntries = merged.filter(h => !existingIds.has(h.id)).map(h => ({
+              ...h,
+              project_id: pid,
+              disease: (res as any).disease || config.disease,
+              discovery_type: config.discovery_type || 'treatment',
+            }))
+            if (newEntries.length > 0) {
+              persistSet('hypotheses', [...savedHypotheses, ...newEntries])
+            }
+          }
+
+          return merged
         })
       }
 

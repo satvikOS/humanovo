@@ -450,6 +450,7 @@ PAPER_TASK_KEY = "active-paper"
 # Azure AI Foundry: DeepSeek-R1 (Reasoner) + Mistral-Large-3 (Critic)
 
 BEDROCK_MODEL_CLAUDE_OPUS = os.environ.get("BEDROCK_MODEL_ID", "us.anthropic.claude-opus-4-6-v1")
+BEDROCK_MODEL_CLAUDE_SONNET = os.environ.get("BEDROCK_SONNET_ID", "us.anthropic.claude-sonnet-4-6-v1")
 BEDROCK_MODEL_NOVA_PREMIER = os.environ.get("BEDROCK_NOVA_PREMIER_ID", "us.amazon.nova-premier-v1:0")
 AZURE_AI_REASONER_MODEL = os.environ.get("AZURE_AI_REASONER_MODEL", "DeepSeek-R1")
 AZURE_AI_CRITIC_MODEL = os.environ.get("AZURE_AI_CRITIC_MODEL", "Mistral-Large-3")
@@ -501,8 +502,8 @@ AGENT_MODELS = {
         "role_description": "Creative innovation — generates unconventional therapeutic approaches and cross-domain connections",
     },
     "strategist": {
-        "model_id": AZURE_AI_GPT4O_MODEL,
-        "provider": "azure_ai",
+        "model_id": BEDROCK_MODEL_CLAUDE_SONNET,
+        "provider": "bedrock",
         "max_tokens": 16_000,
         "temperature": 0.3,
         "role_description": "Strategic thinking — long-horizon clinical development planning and regulatory strategy",
@@ -516,8 +517,8 @@ AGENT_MODELS = {
     },
     # === Azure OpenAI (cognitiveservices.azure.com) ===
     "analyst": {
-        "model_id": AZURE_AI_GPT4O_MODEL,
-        "provider": "azure_ai",
+        "model_id": BEDROCK_MODEL_CLAUDE_SONNET,
+        "provider": "bedrock",
         "max_tokens": 16_000,
         "temperature": 0.3,
         "role_description": "Multi-modal analysis — literature synthesis, pathway mapping, evidence grading",
@@ -530,8 +531,8 @@ AGENT_MODELS = {
         "role_description": "Validation reasoning — rigorous verification of claims, consistency checks, logical proofs",
     },
     "architect": {
-        "model_id": AZURE_AI_GPT4O_MODEL,
-        "provider": "azure_ai",
+        "model_id": BEDROCK_MODEL_CLAUDE_SONNET,
+        "provider": "bedrock",
         "max_tokens": 16_000,
         "temperature": 0.3,
         "role_description": "Systems architecture — designs combination therapies, protocol structures, and translational frameworks",
@@ -555,7 +556,7 @@ def _safe_join(sep: str, items: list, limit: int | None = None) -> str:
 
 # ============== System Prompts ==============
 
-MASTER_PROMPT = """You are an advanced biomedical discovery AI agent on humanovo, part of a ten-agent parallel system using eight distinct models (Claude Opus 4.6 and Amazon Nova Premier via AWS Bedrock, Mistral-Large-3, Cohere Command A, Grok-4.1 Fast Reasoning via Azure AI Foundry, GPT-4o, o3-mini, GPT-4.1 via Azure OpenAI) designed to discover cures, treatments, and prevention strategies for human diseases.
+MASTER_PROMPT = """You are an advanced biomedical discovery AI agent on humanovo, part of a ten-agent parallel system using models (Claude Opus 4.6, Claude Sonnet 4.6, and Amazon Nova Premier via AWS Bedrock, Mistral-Large-3, Cohere Command A, Grok-4.1 Fast Reasoning via Azure AI Foundry, o3-mini via Azure OpenAI) designed to discover cures, treatments, and prevention strategies for human diseases.
 
 ## OPERATING PRINCIPLES
 - Broad scientific scope: explore diverse pathways, mechanisms, and compounds for therapeutic discovery
@@ -711,7 +712,7 @@ NEVER accept a hypothesis just because it's interesting. NEVER soft-pedal safety
 
 Think like an FDA reviewer combined with a pharma CMC expert — thorough, fair, uncompromising on safety.""",
 
-    "strategist": """You are a STRATEGIST agent running on GPT-4o via Azure OpenAI.
+    "strategist": """You are a STRATEGIST agent running on Claude Sonnet 4.6 via AWS Bedrock.
 Your unique strength is LONG-HORIZON STRATEGIC THINKING with advanced reasoning and clinical planning.
 
 MISSION: Design comprehensive clinical development strategies and regulatory pathways.
@@ -743,7 +744,7 @@ SPECIFIC INSTRUCTIONS:
 
 Think like an inventor at the intersection of biology, chemistry, and engineering — no idea is too unconventional if the science supports it.""",
 
-    "analyst": """You are an ANALYST agent running on GPT-4o via Azure OpenAI.
+    "analyst": """You are an ANALYST agent running on Claude Sonnet 4.6 via AWS Bedrock.
 Your unique strength is STRUCTURED MULTI-MODAL ANALYSIS — synthesizing diverse evidence sources into graded assessments.
 
 MISSION: Analyze published literature, clinical trial data, and real-world evidence to grade hypothesis viability.
@@ -791,7 +792,7 @@ SPECIFIC INSTRUCTIONS:
 
 Think like a peer reviewer for Nature Medicine — rigorous but constructive.""",
 
-    "architect": """You are an ARCHITECT agent running on GPT-4.1 via Azure OpenAI.
+    "architect": """You are an ARCHITECT agent running on Claude Sonnet 4.6 via AWS Bedrock.
 Your unique strength is SYSTEMS DESIGN — creating comprehensive therapeutic frameworks and combination protocols.
 
 MISSION: Design combination therapy protocols, adaptive trial architectures, and translational research frameworks.
@@ -1619,9 +1620,9 @@ def run_single_agent(role: str, prompt: str, system_prompt: str) -> dict | None:
 #  3     evidence      Cohere Command A         Literature + PubMed evidence
 #  4     counter       Mistral-Large-3          Counter-arguments & risks
 #  5     mechanism     o3-mini (Azure OpenAI)   Mechanistic deep dive
-#  6     validate      GPT-4o (Azure OpenAI)    Cross-validation & strategy
-#  7     ground        GPT-4o (Azure OpenAI)    Scientific grounding + FDA/ClinicalTrials
-#  8     score         GPT-4o (Azure OpenAI)    Multi-dimensional scoring
+#  6     validate      Claude Sonnet 4.6 (Bedrock) Cross-validation & strategy
+#  7     ground        Claude Sonnet 4.6 (Bedrock) Scientific grounding + FDA/ClinicalTrials
+#  8     score         Claude Sonnet 4.6 (Bedrock) Multi-dimensional scoring
 #  9     refine        Grok-4.1-fast (Azure AI) Rapid refinement
 # 10     finalize      Claude Opus (Bedrock)    Final synthesis
 PIPELINE_STAGES = [
@@ -1641,11 +1642,11 @@ STAGE_FALLBACKS = {
     "reasoner": ["explorer"],           # Nova Premier → Claude Opus
     "innovator": ["explorer"],          # Cohere → Claude Opus
     "critic": ["explorer"],             # Mistral → Claude Opus
-    "strategist": ["explorer"],          # GPT-4o → Claude Opus
+    "strategist": ["explorer"],          # Claude Sonnet → Claude Opus
     "quant": ["critic", "explorer"],    # Grok → Mistral → Claude Opus
-    "validator": ["analyst"],           # o3-mini → GPT-4o
-    "architect": ["explorer"],           # GPT-4o → Claude Opus
-    "analyst": ["explorer"],            # GPT-4o → Claude Opus
+    "validator": ["analyst"],           # o3-mini → Claude Sonnet
+    "architect": ["explorer"],           # Claude Sonnet → Claude Opus
+    "analyst": ["explorer"],            # Claude Sonnet → Claude Opus
 }
 NUM_ROUNDS = 4
 HYPOTHESES_PER_ROUND = 3
@@ -3090,19 +3091,25 @@ User question: {message}"""
                 print(f"[CHAT] Bedrock error: {e}")
 
         if not response_text:
-            # Fallback to Azure GPT-4o
+            # Fallback to Claude Sonnet 4.6 via Bedrock
             try:
-                client = _get_azure_client(AZURE_AI_GPT4O_MODEL)
-                if client:
-                    azure_resp = client.complete(
-                        messages=[{"role": "user", "content": chat_prompt}],
-                        max_tokens=1024,
-                        temperature=0.7,
+                if bedrock_runtime:
+                    import json as json_mod
+                    sonnet_resp = bedrock_runtime.invoke_model(
+                        modelId=BEDROCK_MODEL_CLAUDE_SONNET,
+                        contentType="application/json",
+                        accept="application/json",
+                        body=json_mod.dumps({
+                            "anthropic_version": "bedrock-2023-05-31",
+                            "max_tokens": 1024,
+                            "messages": [{"role": "user", "content": chat_prompt}],
+                        }),
                     )
-                    if azure_resp and azure_resp.choices:
-                        response_text = azure_resp.choices[0].message.content
+                    sonnet_result = json_mod.loads(sonnet_resp["body"].read())
+                    if sonnet_result.get("content"):
+                        response_text = sonnet_result["content"][0].get("text", "")
             except Exception as e:
-                print(f"[CHAT] Azure fallback error: {e}")
+                print(f"[CHAT] Sonnet fallback error: {e}")
 
         if not response_text:
             response_text = "I'm currently unable to connect to the AI models. Please ensure the discovery pipeline is configured and try again."

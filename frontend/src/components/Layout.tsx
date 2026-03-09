@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   FiHome,
   FiFolder,
@@ -213,6 +213,11 @@ function ConstantChat() {
   ])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const chatEndRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages, loading])
 
   const sendMessage = async () => {
     if (!input.trim() || loading) return
@@ -221,7 +226,7 @@ function ConstantChat() {
     setMessages(prev => [...prev, { role: 'user', text: userMsg }])
     setLoading(true)
 
-    // Call the backend AI endpoint
+    // Call the backend AI endpoint (routes to FastAPI → Bedrock)
     try {
       const res = await fetch('/api/v1/orchestrator/chat', {
         method: 'POST',
@@ -232,10 +237,10 @@ function ConstantChat() {
         const data = await res.json()
         setMessages(prev => [...prev, { role: 'assistant', text: data.response || 'I\'m not sure about that. Could you rephrase?' }])
       } else {
-        setMessages(prev => [...prev, { role: 'assistant', text: 'I\'m currently processing. The chat endpoint will be fully connected once the AI pipeline models are available. For now, I can help with navigation — try the Command palette (⌘K).' }])
+        setMessages(prev => [...prev, { role: 'assistant', text: 'I\'m currently processing. Please ensure the AI pipeline is configured and try again.' }])
       }
     } catch {
-      setMessages(prev => [...prev, { role: 'assistant', text: 'I\'m having trouble connecting to the AI backend. The chat functionality will be available when the pipeline is running. In the meantime, explore the platform using the sidebar navigation.' }])
+      setMessages(prev => [...prev, { role: 'assistant', text: 'I\'m having trouble connecting to the AI backend. Please ensure AWS Bedrock is configured and the backend server is running.' }])
     } finally {
       setLoading(false)
     }
@@ -267,6 +272,7 @@ function ConstantChat() {
                 <span className="animate-pulse">Thinking...</span>
               </div>
             )}
+            <div ref={chatEndRef} />
           </div>
           <div className="flex items-center gap-1 p-1.5 border-t border-[var(--color-border)]">
             <input

@@ -800,6 +800,83 @@ async def websocket_endpoint(websocket: WebSocket):
         manager.disconnect(websocket)
 
 
+class ChatRequest(BaseModel):
+    """Request for Constant AI chat."""
+    message: str
+    context: str = "general"
+
+
+@router.post("/chat")
+async def constant_chat(request: ChatRequest):
+    """
+    Constant AI chat assistant — uses AWS Bedrock models for research Q&A.
+    Grounded to the platform context for biomedical research assistance.
+    """
+    if not request.message.strip():
+        return {"response": "Please ask me a question about your research."}
+
+    chat_prompt = f"""You are Constant, an AI research assistant for the HumaNovo biomedical discovery platform.
+You help researchers with questions about hypotheses, experimental design, literature analysis,
+drug discovery, molecular biology, and scientific methodology.
+
+Be concise, helpful, and scientifically accurate. Reference specific mechanisms, genes, and pathways when relevant.
+
+User question: {request.message}"""
+
+    response_text = None
+
+    # Try Claude Sonnet 4.6 via Bedrock
+    try:
+        import boto3
+        bedrock = boto3.client("bedrock-runtime", region_name="us-east-1")
+        import json as json_mod
+        bedrock_response = bedrock.invoke_model(
+            modelId="us.anthropic.claude-sonnet-4-6-v1",
+            contentType="application/json",
+            accept="application/json",
+            body=json_mod.dumps({
+                "anthropic_version": "bedrock-2023-05-31",
+                "max_tokens": 1024,
+                "messages": [{"role": "user", "content": chat_prompt}],
+            }),
+        )
+        result = json_mod.loads(bedrock_response["body"].read())
+        if result.get("content"):
+            response_text = result["content"][0].get("text", "")
+    except Exception as e:
+        logger.warning(f"Bedrock Sonnet chat error: {e}")
+
+    # Fallback to Claude Opus
+    if not response_text:
+        try:
+            import boto3
+            bedrock = boto3.client("bedrock-runtime", region_name="us-east-1")
+            import json as json_mod
+            bedrock_response = bedrock.invoke_model(
+                modelId="us.anthropic.claude-opus-4-6-v1",
+                contentType="application/json",
+                accept="application/json",
+                body=json_mod.dumps({
+                    "anthropic_version": "bedrock-2023-05-31",
+                    "max_tokens": 1024,
+                    "messages": [{"role": "user", "content": chat_prompt}],
+                }),
+            )
+            result = json_mod.loads(bedrock_response["body"].read())
+            if result.get("content"):
+                response_text = result["content"][0].get("text", "")
+        except Exception as e:
+            logger.warning(f"Bedrock Opus chat error: {e}")
+
+    if not response_text:
+        response_text = (
+            "I'm currently unable to connect to the AI models. "
+            "Please ensure AWS Bedrock is configured and try again."
+        )
+
+    return {"response": response_text}
+
+
 # Simulation integration - run simulations through orchestrator
 @router.post("/simulate")
 async def run_simulation(request: StartDiscoveryRequest):
