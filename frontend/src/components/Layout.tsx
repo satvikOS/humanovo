@@ -691,12 +691,8 @@ export default function Layout() {
                     </button>
                     <div className="my-1 border-t border-[var(--color-border)]" />
                     <button
-                      onClick={async () => {
+                      onClick={() => {
                         setIsUserMenuOpen(false)
-                        try {
-                          const { api } = await import('../services/api')
-                          await api.logout()
-                        } catch { /* ignore */ }
                         localStorage.clear()
                         window.location.href = '/dashboard'
                       }}
