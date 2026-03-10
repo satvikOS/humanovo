@@ -211,7 +211,7 @@ async def list_projects(
                     status_enum = ProjectStatus(status)
                     query = query.where(Project.status == status_enum)
                 except ValueError:
-                    pass
+                    logger.debug("Invalid project status filter ignored", status=status)
             count_query = select(func.count()).select_from(query.subquery())
             total_result = await db.execute(count_query)
             total = total_result.scalar() or 0

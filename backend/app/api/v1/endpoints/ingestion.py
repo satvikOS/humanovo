@@ -26,6 +26,10 @@ from app.models.ingestion_job import (
 logger = get_logger(__name__)
 router = APIRouter()
 
+# In-memory tracking for agent status and source configs
+_agent_tracker: dict[str, dict[str, Any]] = {}
+_source_configs: dict[str, dict[str, Any]] = {}
+
 
 class IngestionPriority(str, Enum):
     """Priority levels for ingestion tasks."""
@@ -288,6 +292,16 @@ async def _execute_ingestion_job(job_id: UUID, config: IngestionJobCreate) -> No
             # Convert source strings to SourceType enums
             source_types = [SourceType(s) for s in config.sources]
 
+            # Track agent status
+            for st in source_types:
+                _agent_tracker[st.value] = {
+                    "status": "running",
+                    "current_query": config.query,
+                    "records_processed": 0,
+                    "last_activity": datetime.utcnow(),
+                    "errors_count": 0,
+                }
+
             orchestrator = IngestionOrchestrator(
                 sources=source_types,
                 parallel=True,
@@ -316,6 +330,16 @@ async def _execute_ingestion_job(job_id: UUID, config: IngestionJobCreate) -> No
             job.complete()
             await db.commit()
 
+            # Update agent tracker to idle with final counts
+            for st in source_types:
+                _agent_tracker[st.value] = {
+                    "status": "idle",
+                    "current_query": None,
+                    "records_processed": _agent_tracker.get(st.value, {}).get("records_processed", 0) + job.items_indexed,
+                    "last_activity": datetime.utcnow(),
+                    "errors_count": _agent_tracker.get(st.value, {}).get("errors_count", 0),
+                }
+
             logger.info(
                 "Ingestion job completed",
                 job_id=str(job_id),
@@ -326,6 +350,13 @@ async def _execute_ingestion_job(job_id: UUID, config: IngestionJobCreate) -> No
             logger.error("Ingestion job failed", job_id=str(job_id), error=str(e))
             job.fail(str(e))
             await db.commit()
+
+            # Update agent tracker with error
+            for s in config.sources:
+                if s in _agent_tracker:
+                    _agent_tracker[s]["status"] = "error"
+                    _agent_tracker[s]["errors_count"] = _agent_tracker[s].get("errors_count", 0) + 1
+                    _agent_tracker[s]["last_activity"] = datetime.utcnow()
 
 
 @router.get("/jobs", response_model=IngestionJobListResponse)
@@ -345,7 +376,7 @@ async def list_ingestion_jobs(
             status_enum = IngestionJobStatusModel(status)
             query = query.where(IngestionJob.status == status_enum)
         except ValueError:
-            pass
+            logger.debug("Invalid status filter ignored", status=status)
     if source:
         query = query.where(IngestionJob.source == map_source_to_model(source))
 
@@ -356,7 +387,7 @@ async def list_ingestion_jobs(
             status_enum = IngestionJobStatusModel(status)
             count_query = count_query.where(IngestionJob.status == status_enum)
         except ValueError:
-            pass
+            logger.debug("Invalid status filter ignored for count", status=status)
     if source:
         count_query = count_query.where(IngestionJob.source == map_source_to_model(source))
 
@@ -656,15 +687,16 @@ async def get_agents_status(
     statuses = []
 
     for source_type in SourceType:
+        tracked = _agent_tracker.get(source_type.value, {})
         statuses.append(
             AgentStatusResponse(
                 agent_type=source_type.value,
-                status="idle",
-                current_query=None,
-                records_processed=0,
-                last_activity=None,
+                status=tracked.get("status", "idle"),
+                current_query=tracked.get("current_query"),
+                records_processed=tracked.get("records_processed", 0),
+                last_activity=tracked.get("last_activity"),
                 rate_limit_remaining=100,
-                errors_count=0,
+                errors_count=tracked.get("errors_count", 0),
             )
         )
 
@@ -842,10 +874,32 @@ async def update_source_config(
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Invalid source type: {source_type}")
 
+    # Persist config in memory
+    config_data = config.model_dump()
+    config_data["updated_at"] = datetime.utcnow().isoformat()
+    _source_configs[source_type] = config_data
+
     return {
         "status": "updated",
         "source_type": source_type,
-        "config": config.model_dump(),
+        "config": config_data,
+    }
+
+
+@router.get("/sources/{source_type}/config")
+async def get_source_config(
+    source_type: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Get configuration for a data source."""
+    try:
+        SourceType(source_type)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid source type: {source_type}")
+
+    return {
+        "source_type": source_type,
+        "config": _source_configs.get(source_type, {}),
     }
 
 

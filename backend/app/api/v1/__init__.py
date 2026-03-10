@@ -22,6 +22,7 @@ from app.api.v1.endpoints import (
     orchestrator,
     projects,
     rag,
+    simulation,
     websocket,
 )
 
@@ -45,7 +46,10 @@ router.include_router(monitoring.router, prefix="/monitoring", tags=["monitoring
 # Disease Discovery endpoint
 router.include_router(discovery.router)
 
-# Parallel Discovery Orchestrator (replaces simulation)
+# Simulation endpoints
+router.include_router(simulation.router, prefix="/simulation", tags=["simulation"])
+
+# Parallel Discovery Orchestrator
 router.include_router(orchestrator.router)
 
 # Document Pipeline (PDF research paper generation)

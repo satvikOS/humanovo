@@ -33,11 +33,14 @@ const mainNavItems = [
   { to: '/projects', icon: FiFolder, label: 'Projects', shortcut: '2' },
   { to: '/evidence', icon: FiDatabase, label: 'Evidence', shortcut: '3' },
   { to: '/agents', icon: FiActivity, label: 'Discovery', shortcut: '4' },
-  { to: '/workbench', icon: FiBox, label: 'Workbench', shortcut: '5' },
-  { to: '/anatomy', icon: FiUser, label: '3D Anatomy', shortcut: '6' },
+  { to: '/knowledge-graph', icon: FiGlobe, label: 'Knowledge Graph', shortcut: '5' },
+  { to: '/workbench', icon: FiBox, label: 'Workbench', shortcut: '6' },
+  { to: '/anatomy', icon: FiUser, label: '3D Anatomy', shortcut: '7' },
 ]
 
 const secondaryNavItems = [
+  { to: '/hypotheses', icon: FiZap, label: 'Hypotheses' },
+  { to: '/simulations', icon: FiTrendingUp, label: 'Simulations' },
   { to: '/notebook', icon: FiBook, label: 'Notebook' },
   { to: '/timeline', icon: FiClock, label: 'Timeline' },
   { to: '/search', icon: FiSearch, label: 'Search' },
@@ -121,6 +124,9 @@ function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
     { label: 'Go to Projects', icon: FiFolder, category: 'Navigation', action: () => { navigate('/projects'); onClose() } },
     { label: 'Go to Evidence', icon: FiDatabase, category: 'Navigation', action: () => { navigate('/evidence'); onClose() } },
     { label: 'Go to Discovery', icon: FiActivity, category: 'Navigation', action: () => { navigate('/agents'); onClose() } },
+    { label: 'Go to Knowledge Graph', icon: FiGlobe, category: 'Navigation', action: () => { navigate('/knowledge-graph'); onClose() } },
+    { label: 'Go to Hypotheses', icon: FiZap, category: 'Navigation', action: () => { navigate('/hypotheses'); onClose() } },
+    { label: 'Go to Simulations', icon: FiTrendingUp, category: 'Navigation', action: () => { navigate('/simulations'); onClose() } },
     { label: 'Go to Notebook', icon: FiBook, category: 'Navigation', action: () => { navigate('/notebook'); onClose() } },
     { label: 'Go to Search', icon: FiSearch, category: 'Navigation', action: () => { navigate('/search'); onClose() } },
     { label: 'Go to Timeline', icon: FiClock, category: 'Navigation', action: () => { navigate('/timeline'); onClose() } },
@@ -193,7 +199,40 @@ export default function Layout() {
   const { theme, toggleTheme } = useTheme()
   const [isCommandOpen, setIsCommandOpen] = useState(false)
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false)
+  const [notifications, setNotifications] = useState<Array<{ id: string; title: string; description: string; time: string }>>([])
+  const [hasUnread, setHasUnread] = useState(false)
   const location = useLocation()
+  const navigate = useNavigate()
+
+  // Fetch recent activities as notifications
+  useEffect(() => {
+    const fetchNotifications = async () => {
+      try {
+        const { api } = await import('../services/api')
+        const result = await api.getActivities({ page: 1, page_size: 5 })
+        if (result?.items && result.items.length > 0) {
+          const lastRead = localStorage.getItem('humanovo-notifs-read') || '0'
+          setNotifications(result.items.map((a: any) => ({
+            id: a.id,
+            title: (a.activity_type || 'activity').replace(/_/g, ' '),
+            description: a.description || '',
+            time: a.created_at ? new Date(a.created_at).toLocaleString() : '',
+          })))
+          const newestTime = result.items[0]?.created_at || ''
+          setHasUnread(newestTime > lastRead)
+        }
+      } catch {
+        // Activities endpoint may not be available yet
+      }
+    }
+    fetchNotifications()
+  }, [location.pathname])
+
+  const markAllRead = () => {
+    setHasUnread(false)
+    localStorage.setItem('humanovo-notifs-read', new Date().toISOString())
+  }
 
   // Keyboard shortcut for command palette
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -204,6 +243,7 @@ export default function Layout() {
     if (e.key === 'Escape') {
       setIsCommandOpen(false)
       setIsUserMenuOpen(false)
+      setIsNotificationsOpen(false)
     }
   }, [])
 
@@ -220,6 +260,10 @@ export default function Layout() {
     if (path.startsWith('/projects/')) return 'Project'
     if (path === '/evidence') return 'Evidence'
     if (path === '/agents') return 'Discovery'
+    if (path === '/knowledge-graph') return 'Knowledge Graph'
+    if (path === '/hypotheses') return 'Hypotheses'
+    if (path.startsWith('/hypotheses/')) return 'Hypothesis Detail'
+    if (path === '/simulations') return 'Simulations'
     if (path === '/workbench') return 'Workbench'
     if (path === '/anatomy') return '3D Anatomy'
     if (path === '/notebook') return 'Notebook'
@@ -343,10 +387,59 @@ export default function Layout() {
             </button>
 
             {/* Notifications */}
-            <button className="p-2 text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)] rounded-lg transition-all relative">
-              <FiBell className="w-4 h-4" />
-              <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-[var(--color-accent-blue)] rounded-full" />
-            </button>
+            <div className="relative">
+              <button
+                onClick={() => { setIsNotificationsOpen(!isNotificationsOpen); setIsUserMenuOpen(false) }}
+                className="p-2 text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)] rounded-lg transition-all relative"
+              >
+                <FiBell className="w-4 h-4" />
+                {hasUnread && (
+                  <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-[var(--color-accent-blue)] rounded-full" />
+                )}
+              </button>
+
+              {isNotificationsOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setIsNotificationsOpen(false)} />
+                  <div className="absolute right-0 top-full mt-1.5 w-80 py-1.5 glass-card-static z-50 animate-scale-in" style={{ background: 'var(--color-surface-solid)' }}>
+                    <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--color-border)]">
+                      <span className="text-sm font-medium text-[var(--color-text)]">Notifications</span>
+                      {hasUnread && (
+                        <button
+                          onClick={markAllRead}
+                          className="text-xxs text-[var(--color-accent-blue)] hover:underline"
+                        >
+                          Mark all read
+                        </button>
+                      )}
+                    </div>
+                    {notifications.length > 0 ? (
+                      <div className="max-h-64 overflow-y-auto">
+                        {notifications.map(n => (
+                          <div key={n.id} className="px-3 py-2 hover:bg-[var(--glass-bg)] transition-all">
+                            <div className="text-xs font-medium text-[var(--color-text-secondary)] capitalize">{n.title}</div>
+                            <div className="text-xxs text-[var(--color-text-muted)] mt-0.5 truncate">{n.description}</div>
+                            <div className="text-xxs text-[var(--color-text-muted)] mt-0.5">{n.time}</div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="px-3 py-6 text-center text-xs text-[var(--color-text-muted)]">
+                        No notifications yet
+                      </div>
+                    )}
+                    <div className="border-t border-[var(--color-border)] px-3 py-2">
+                      <button
+                        onClick={() => { navigate('/timeline'); setIsNotificationsOpen(false) }}
+                        className="text-xs text-[var(--color-accent-blue)] hover:underline w-full text-center"
+                      >
+                        View all activity
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
 
             {/* Divider */}
             <div className="w-px h-5 bg-[var(--color-border)] mx-1" />
@@ -354,7 +447,7 @@ export default function Layout() {
             {/* User menu */}
             <div className="relative">
               <button
-                onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+                onClick={() => { setIsUserMenuOpen(!isUserMenuOpen); setIsNotificationsOpen(false) }}
                 className="flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-[var(--glass-bg)] rounded-lg transition-all"
               >
                 <div className="w-6 h-6 bg-[var(--glass-bg-hover)] rounded-full flex items-center justify-center border border-[var(--color-border)]">
@@ -368,20 +461,40 @@ export default function Layout() {
                 <>
                   <div className="fixed inset-0 z-40" onClick={() => setIsUserMenuOpen(false)} />
                   <div className="absolute right-0 top-full mt-1.5 w-44 py-1.5 glass-card-static z-50 animate-scale-in" style={{ background: 'var(--color-surface-solid)' }}>
-                    <button className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)] transition-all">
+                    <button
+                      onClick={() => { navigate('/settings'); setIsUserMenuOpen(false) }}
+                      className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)] transition-all"
+                    >
                       <FiUser className="w-3.5 h-3.5" />
                       Profile
                     </button>
-                    <button className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)] transition-all">
+                    <button
+                      onClick={() => { navigate('/settings?tab=api'); setIsUserMenuOpen(false) }}
+                      className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)] transition-all"
+                    >
                       <FiFileText className="w-3.5 h-3.5" />
                       API Keys
                     </button>
-                    <button className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)] transition-all">
+                    <button
+                      onClick={() => { navigate('/settings?tab=appearance'); setIsUserMenuOpen(false) }}
+                      className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)] transition-all"
+                    >
                       <FiSettings className="w-3.5 h-3.5" />
                       Preferences
                     </button>
                     <div className="my-1 border-t border-[var(--color-border)]" />
-                    <button className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-[var(--color-error)] hover:bg-[var(--glass-bg)] transition-all">
+                    <button
+                      onClick={async () => {
+                        setIsUserMenuOpen(false)
+                        try {
+                          const { api } = await import('../services/api')
+                          await api.logout()
+                        } catch { /* ignore */ }
+                        localStorage.clear()
+                        window.location.href = '/dashboard'
+                      }}
+                      className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-[var(--color-error)] hover:bg-[var(--glass-bg)] transition-all"
+                    >
                       Sign Out
                     </button>
                   </div>

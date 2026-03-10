@@ -249,11 +249,6 @@ async def list_discovery_types():
                 "description": "Identify ways to prevent disease onset",
             },
             {
-                "id": "treatment",
-                "name": "Treatment Options",
-                "description": "Find treatments to manage symptoms and progression",
-            },
-            {
                 "id": "biomarker",
                 "name": "Biomarker Discovery",
                 "description": "Identify biomarkers for early detection and monitoring",

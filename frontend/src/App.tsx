@@ -12,6 +12,10 @@ import Notebook from './pages/Notebook'
 import Search from './pages/Search'
 import Timeline from './pages/Timeline'
 import Agents from './pages/Agents'
+import KnowledgeGraph from './pages/KnowledgeGraph'
+import Simulations from './pages/Simulations'
+import Hypotheses from './pages/Hypotheses'
+import HypothesisDetail from './pages/HypothesisDetail'
 
 function App() {
   return (
@@ -22,11 +26,10 @@ function App() {
         <Route path="projects" element={<Projects />} />
         <Route path="projects/:projectId" element={<ProjectDetail />} />
         <Route path="evidence" element={<Evidence />} />
-
-        {/* Hypotheses integrated into Discovery — redirect old routes */}
-        <Route path="hypotheses" element={<Navigate to="/agents" replace />} />
-        <Route path="hypotheses/:hypothesisId" element={<Navigate to="/agents" replace />} />
-        <Route path="simulations" element={<Navigate to="/agents" replace />} />
+        <Route path="hypotheses" element={<Hypotheses />} />
+        <Route path="hypotheses/:hypothesisId" element={<HypothesisDetail />} />
+        <Route path="simulations" element={<Simulations />} />
+        <Route path="knowledge-graph" element={<KnowledgeGraph />} />
         <Route path="workbench" element={<Workbench />} />
         <Route path="anatomy" element={<HumanAnatomy />} />
         <Route path="notebook" element={<Notebook />} />
