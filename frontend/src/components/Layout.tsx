@@ -30,6 +30,14 @@ import {
   FiMessageCircle,
   FiSend,
   FiChevronUp,
+  FiCpu,
+  FiImage,
+  FiShield,
+  FiPackage,
+  FiShare2,
+  FiTarget,
+  FiHeart,
+  FiGrid,
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import { useTheme } from '../contexts/ThemeContext'
@@ -56,6 +64,23 @@ const researchNavItems = [
   { to: '/experiment-tracker', icon: FiClipboard, label: 'Experiments' },
   { to: '/data-visualization', icon: FiBarChart2, label: 'Visualization' },
   { to: '/simulations', icon: FiActivity, label: 'Simulations' },
+]
+
+const analysisNavItems = [
+  { to: '/statistical-analysis', icon: FiTarget, label: 'Statistics' },
+  { to: '/genomics', icon: FiHeart, label: 'Genomics' },
+  { to: '/knowledge-graph-viewer', icon: FiShare2, label: 'Knowledge Graph' },
+  { to: '/ml-models', icon: FiCpu, label: 'ML Models' },
+]
+
+const managementNavItems = [
+  { to: '/data-manager', icon: FiDatabase, label: 'Data Manager' },
+  { to: '/clinical-trials', icon: FiClipboard, label: 'Clinical Trials' },
+  { to: '/manuscripts', icon: FiFileText, label: 'Manuscripts' },
+  { to: '/biobank', icon: FiPackage, label: 'Biobank' },
+  { to: '/collaboration', icon: FiGrid, label: 'Collaboration' },
+  { to: '/regulatory', icon: FiShield, label: 'Regulatory' },
+  { to: '/imaging', icon: FiImage, label: 'Imaging' },
 ]
 
 function TabIcon({ type }: { type: WorkspaceTab['type'] }) {
@@ -339,6 +364,17 @@ export default function Layout() {
     if (path === '/citation-manager') return 'Citation Manager'
     if (path === '/experiment-tracker') return 'Experiment Tracker'
     if (path === '/data-visualization') return 'Data Visualization'
+    if (path === '/statistical-analysis') return 'Statistical Analysis'
+    if (path === '/data-manager') return 'Data Manager'
+    if (path === '/collaboration') return 'Collaboration'
+    if (path === '/knowledge-graph-viewer') return 'Knowledge Graph'
+    if (path === '/clinical-trials') return 'Clinical Trials'
+    if (path === '/genomics') return 'Genomics Analysis'
+    if (path === '/manuscripts') return 'Manuscripts'
+    if (path === '/regulatory') return 'Regulatory & Compliance'
+    if (path === '/imaging') return 'Research Imaging'
+    if (path === '/ml-models') return 'ML Models'
+    if (path === '/biobank') return 'Biobank'
     return ''
   }
 
@@ -402,6 +438,44 @@ export default function Layout() {
 
           <div className="text-xxs text-[var(--color-text-muted)] px-2 py-1.5 mt-4 uppercase tracking-widest font-medium">Research</div>
           {researchNavItems.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              className={({ isActive }) =>
+                clsx(
+                  'flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm transition-all duration-200',
+                  isActive
+                    ? 'bg-[var(--glass-bg-hover)] text-[var(--color-text)]'
+                    : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)]'
+                )
+              }
+            >
+              <item.icon className="w-4 h-4" />
+              <span className="font-medium">{item.label}</span>
+            </NavLink>
+          ))}
+
+          <div className="text-xxs text-[var(--color-text-muted)] px-2 py-1.5 mt-4 uppercase tracking-widest font-medium">Analysis</div>
+          {analysisNavItems.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              className={({ isActive }) =>
+                clsx(
+                  'flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm transition-all duration-200',
+                  isActive
+                    ? 'bg-[var(--glass-bg-hover)] text-[var(--color-text)]'
+                    : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)]'
+                )
+              }
+            >
+              <item.icon className="w-4 h-4" />
+              <span className="font-medium">{item.label}</span>
+            </NavLink>
+          ))}
+
+          <div className="text-xxs text-[var(--color-text-muted)] px-2 py-1.5 mt-4 uppercase tracking-widest font-medium">Management</div>
+          {managementNavItems.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}

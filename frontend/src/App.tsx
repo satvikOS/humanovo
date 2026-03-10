@@ -17,6 +17,17 @@ import LiteratureReview from './pages/LiteratureReview'
 import CitationManager from './pages/CitationManager'
 import ExperimentTracker from './pages/ExperimentTracker'
 import DataVisualization from './pages/DataVisualization'
+import StatisticalAnalysis from './pages/StatisticalAnalysis'
+import DataManager from './pages/DataManager'
+import Collaboration from './pages/Collaboration'
+import KnowledgeGraphViewer from './pages/KnowledgeGraphViewer'
+import ClinicalTrials from './pages/ClinicalTrials'
+import GenomicsAnalysis from './pages/GenomicsAnalysis'
+import ManuscriptManager from './pages/ManuscriptManager'
+import RegulatoryCompliance from './pages/RegulatoryCompliance'
+import ResearchImaging from './pages/ResearchImaging'
+import MLModelManager from './pages/MLModelManager'
+import BiobankManager from './pages/BiobankManager'
 
 function App() {
   return (
@@ -43,6 +54,17 @@ function App() {
         <Route path="citation-manager" element={<CitationManager />} />
         <Route path="experiment-tracker" element={<ExperimentTracker />} />
         <Route path="data-visualization" element={<DataVisualization />} />
+        <Route path="statistical-analysis" element={<StatisticalAnalysis />} />
+        <Route path="data-manager" element={<DataManager />} />
+        <Route path="collaboration" element={<Collaboration />} />
+        <Route path="knowledge-graph-viewer" element={<KnowledgeGraphViewer />} />
+        <Route path="clinical-trials" element={<ClinicalTrials />} />
+        <Route path="genomics" element={<GenomicsAnalysis />} />
+        <Route path="manuscripts" element={<ManuscriptManager />} />
+        <Route path="regulatory" element={<RegulatoryCompliance />} />
+        <Route path="imaging" element={<ResearchImaging />} />
+        <Route path="ml-models" element={<MLModelManager />} />
+        <Route path="biobank" element={<BiobankManager />} />
       </Route>
     </Routes>
   )
