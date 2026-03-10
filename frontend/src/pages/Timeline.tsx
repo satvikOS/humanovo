@@ -64,6 +64,16 @@ function formatRelativeTime(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString()
 }
 
+function formatMilestoneTime(dateStr: string): string {
+  const d = new Date(dateStr)
+  return d.toLocaleString('en-US', {
+    month: 'short', day: 'numeric', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true,
+  })
+}
+
+const MILESTONE_ACTIONS = new Set(['created', 'completed', 'validated', 'started', 'rejected'])
+
 export default function Timeline() {
   const [activities, setActivities] = useState<Activity[]>([])
   const [filterType, setFilterType] = useState<FilterType>('')
@@ -338,7 +348,9 @@ export default function Timeline() {
                             <div className="flex items-center gap-4 mt-2 text-xs text-[var(--color-text-muted)]">
                               <span className="flex items-center gap-1">
                                 <FiClock className="w-3 h-3" />
-                                {formatRelativeTime(activity.created_at)}
+                                {MILESTONE_ACTIONS.has(activity.action)
+                                  ? formatMilestoneTime(activity.created_at)
+                                  : formatRelativeTime(activity.created_at)}
                               </span>
                               {activity.metadata?.confidence !== undefined && (
                                 <span style={{ color: 'var(--color-accent-purple)' }}>

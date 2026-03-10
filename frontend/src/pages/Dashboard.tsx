@@ -180,14 +180,14 @@ function SimulationsWidget() {
     <div className="glass-card p-5 h-full">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-sm font-medium">Active Simulations</h3>
-        <Link to="/agents" className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] flex items-center gap-1 transition-colors">
+        <Link to="/simulations" className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] flex items-center gap-1 transition-colors">
           View All <FiArrowRight className="w-3 h-3" />
         </Link>
       </div>
       {simulations.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-8 text-[var(--color-text-muted)]">
           <FiActivity className="w-6 h-6 mb-2 opacity-40" />
-          <p className="text-sm">No active simulations</p>
+          <p className="text-sm">Coming Soon...</p>
         </div>
       ) : (
         <div className="space-y-3">

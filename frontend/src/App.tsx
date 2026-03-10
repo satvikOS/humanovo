@@ -12,6 +12,22 @@ import Notebook from './pages/Notebook'
 import Search from './pages/Search'
 import Timeline from './pages/Timeline'
 import Agents from './pages/Agents'
+import Simulations from './pages/Simulations'
+import LiteratureReview from './pages/LiteratureReview'
+import CitationManager from './pages/CitationManager'
+import ExperimentTracker from './pages/ExperimentTracker'
+import DataVisualization from './pages/DataVisualization'
+import StatisticalAnalysis from './pages/StatisticalAnalysis'
+import DataManager from './pages/DataManager'
+import Collaboration from './pages/Collaboration'
+import KnowledgeGraphViewer from './pages/KnowledgeGraphViewer'
+import ClinicalTrials from './pages/ClinicalTrials'
+import GenomicsAnalysis from './pages/GenomicsAnalysis'
+import ManuscriptManager from './pages/ManuscriptManager'
+import RegulatoryCompliance from './pages/RegulatoryCompliance'
+import ResearchImaging from './pages/ResearchImaging'
+import MLModelManager from './pages/MLModelManager'
+import BiobankManager from './pages/BiobankManager'
 
 function App() {
   return (
@@ -26,7 +42,7 @@ function App() {
         {/* Hypotheses integrated into Discovery — redirect old routes */}
         <Route path="hypotheses" element={<Navigate to="/agents" replace />} />
         <Route path="hypotheses/:hypothesisId" element={<Navigate to="/agents" replace />} />
-        <Route path="simulations" element={<Navigate to="/agents" replace />} />
+        <Route path="simulations" element={<Simulations />} />
         <Route path="workbench" element={<Workbench />} />
         <Route path="anatomy" element={<HumanAnatomy />} />
         <Route path="notebook" element={<Notebook />} />
@@ -34,6 +50,21 @@ function App() {
         <Route path="timeline" element={<Timeline />} />
         <Route path="search" element={<Search />} />
         <Route path="settings" element={<Settings />} />
+        <Route path="literature-review" element={<LiteratureReview />} />
+        <Route path="citation-manager" element={<CitationManager />} />
+        <Route path="experiment-tracker" element={<ExperimentTracker />} />
+        <Route path="data-visualization" element={<DataVisualization />} />
+        <Route path="statistical-analysis" element={<StatisticalAnalysis />} />
+        <Route path="data-manager" element={<DataManager />} />
+        <Route path="collaboration" element={<Collaboration />} />
+        <Route path="knowledge-graph-viewer" element={<KnowledgeGraphViewer />} />
+        <Route path="clinical-trials" element={<ClinicalTrials />} />
+        <Route path="genomics" element={<GenomicsAnalysis />} />
+        <Route path="manuscripts" element={<ManuscriptManager />} />
+        <Route path="regulatory" element={<RegulatoryCompliance />} />
+        <Route path="imaging" element={<ResearchImaging />} />
+        <Route path="ml-models" element={<MLModelManager />} />
+        <Route path="biobank" element={<BiobankManager />} />
       </Route>
     </Routes>
   )

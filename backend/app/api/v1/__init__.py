@@ -10,18 +10,29 @@ from app.api.v1.endpoints import (
     activities,
     agents,
     auth,
+    biobank,
+    clinical_trials,
+    collaboration,
+    datasets,
     discovery,
     document_pipeline,
     evidence,
+    genomics,
     hypotheses,
+    imaging,
     ingestion,
     ingestion_ws,
     knowledge,
+    knowledge_graph,
+    manuscripts,
+    ml_models,
     monitoring,
     notebook,
     orchestrator,
     projects,
     rag,
+    regulatory,
+    statistics,
     websocket,
 )
 
@@ -56,3 +67,16 @@ router.include_router(notebook.router, prefix="/notebook", tags=["notebook"])
 
 # Activities / Timeline
 router.include_router(activities.router, prefix="/activities", tags=["activities"])
+
+# New feature modules
+router.include_router(statistics.router, prefix="/statistics", tags=["statistics"])
+router.include_router(datasets.router, prefix="/datasets", tags=["datasets"])
+router.include_router(collaboration.router, prefix="/collaboration", tags=["collaboration"])
+router.include_router(knowledge_graph.router, prefix="/knowledge-graph", tags=["knowledge-graph"])
+router.include_router(clinical_trials.router, prefix="/clinical-trials", tags=["clinical-trials"])
+router.include_router(genomics.router, prefix="/genomics", tags=["genomics"])
+router.include_router(manuscripts.router, prefix="/manuscripts", tags=["manuscripts"])
+router.include_router(regulatory.router, prefix="/regulatory", tags=["regulatory"])
+router.include_router(imaging.router, prefix="/imaging", tags=["imaging"])
+router.include_router(ml_models.router, prefix="/ml-models", tags=["ml-models"])
+router.include_router(biobank.router, prefix="/biobank", tags=["biobank"])
