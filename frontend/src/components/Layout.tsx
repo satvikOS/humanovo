@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   FiHome,
   FiFolder,
@@ -23,6 +23,21 @@ import {
   FiGlobe,
   FiFileText,
   FiTrendingUp,
+  FiBookOpen,
+  FiList,
+  FiClipboard,
+  FiBarChart2,
+  FiMessageCircle,
+  FiSend,
+  FiChevronUp,
+  FiCpu,
+  FiImage,
+  FiShield,
+  FiPackage,
+  FiShare2,
+  FiTarget,
+  FiHeart,
+  FiGrid,
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import { useTheme } from '../contexts/ThemeContext'
@@ -44,6 +59,31 @@ const secondaryNavItems = [
   { to: '/notebook', icon: FiBook, label: 'Notebook' },
   { to: '/timeline', icon: FiClock, label: 'Timeline' },
   { to: '/search', icon: FiSearch, label: 'Search' },
+]
+
+const researchNavItems = [
+  { to: '/literature-review', icon: FiBookOpen, label: 'Lit Review' },
+  { to: '/citation-manager', icon: FiList, label: 'Citations' },
+  { to: '/experiment-tracker', icon: FiClipboard, label: 'Experiments' },
+  { to: '/data-visualization', icon: FiBarChart2, label: 'Visualization' },
+  { to: '/simulations', icon: FiActivity, label: 'Simulations' },
+]
+
+const analysisNavItems = [
+  { to: '/statistical-analysis', icon: FiTarget, label: 'Statistics' },
+  { to: '/genomics', icon: FiHeart, label: 'Genomics' },
+  { to: '/knowledge-graph-viewer', icon: FiShare2, label: 'Knowledge Graph' },
+  { to: '/ml-models', icon: FiCpu, label: 'ML Models' },
+]
+
+const managementNavItems = [
+  { to: '/data-manager', icon: FiDatabase, label: 'Data Manager' },
+  { to: '/clinical-trials', icon: FiClipboard, label: 'Clinical Trials' },
+  { to: '/manuscripts', icon: FiFileText, label: 'Manuscripts' },
+  { to: '/biobank', icon: FiPackage, label: 'Biobank' },
+  { to: '/collaboration', icon: FiGrid, label: 'Collaboration' },
+  { to: '/regulatory', icon: FiShield, label: 'Regulatory' },
+  { to: '/imaging', icon: FiImage, label: 'Imaging' },
 ]
 
 function TabIcon({ type }: { type: WorkspaceTab['type'] }) {
@@ -195,6 +235,99 @@ function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
   )
 }
 
+// ── Constant AI Chat ─────────────────────────────────────────────
+
+function ConstantChat() {
+  const [isOpen, setIsOpen] = useState(false)
+  const [messages, setMessages] = useState<{ role: 'user' | 'assistant'; text: string }[]>([
+    { role: 'assistant', text: 'Hello! I\'m Constant, your AI research assistant. Ask me about your hypotheses, papers, experimental design, or anything research-related.' },
+  ])
+  const [input, setInput] = useState('')
+  const [loading, setLoading] = useState(false)
+  const chatEndRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages, loading])
+
+  const sendMessage = async () => {
+    if (!input.trim() || loading) return
+    const userMsg = input.trim()
+    setInput('')
+    setMessages(prev => [...prev, { role: 'user', text: userMsg }])
+    setLoading(true)
+
+    // Call the backend AI endpoint (routes to FastAPI → Bedrock)
+    try {
+      const res = await fetch('/api/v1/orchestrator/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: userMsg, context: 'general' }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setMessages(prev => [...prev, { role: 'assistant', text: data.response || 'I\'m not sure about that. Could you rephrase?' }])
+      } else {
+        setMessages(prev => [...prev, { role: 'assistant', text: 'I\'m currently processing. Please ensure the AI pipeline is configured and try again.' }])
+      }
+    } catch {
+      setMessages(prev => [...prev, { role: 'assistant', text: 'I\'m having trouble connecting to the AI backend. Please ensure AWS Bedrock is configured and the backend server is running.' }])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="mb-1">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="flex items-center gap-2.5 w-full px-2.5 py-2 rounded-lg text-sm transition-all duration-200 text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)]"
+      >
+        <FiMessageCircle className="w-4 h-4" style={{ color: 'var(--color-accent-purple)' }} />
+        <span className="font-medium">Constant</span>
+        {isOpen ? <FiChevronDown className="w-3 h-3 ml-auto" /> : <FiChevronUp className="w-3 h-3 ml-auto" />}
+      </button>
+
+      {isOpen && (
+        <div className="mt-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-solid)] overflow-hidden animate-slide-down">
+          <div className="h-48 overflow-y-auto p-2 space-y-2">
+            {messages.map((msg, i) => (
+              <div key={i} className={`text-xxs p-2 rounded-lg leading-relaxed ${msg.role === 'assistant' ? 'bg-[var(--glass-bg)] text-[var(--color-text-secondary)]' : 'bg-[var(--color-accent-purple)]12 text-[var(--color-text)] ml-4'}`} style={msg.role === 'user' ? { background: 'rgba(168, 85, 247, 0.08)' } : {}}>
+                {msg.role === 'assistant' && <span className="text-[var(--color-accent-purple)] font-medium">Constant: </span>}
+                {msg.text}
+              </div>
+            ))}
+            {loading && (
+              <div className="text-xxs p-2 rounded-lg bg-[var(--glass-bg)] text-[var(--color-text-muted)]">
+                <span className="text-[var(--color-accent-purple)] font-medium">Constant: </span>
+                <span className="animate-pulse">Thinking...</span>
+              </div>
+            )}
+            <div ref={chatEndRef} />
+          </div>
+          <div className="flex items-center gap-1 p-1.5 border-t border-[var(--color-border)]">
+            <input
+              type="text"
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && sendMessage()}
+              placeholder="Ask Constant..."
+              className="flex-1 text-xxs bg-transparent border-none outline-none px-1.5 py-1 placeholder:text-[var(--color-text-muted)]"
+            />
+            <button
+              onClick={sendMessage}
+              disabled={!input.trim() || loading}
+              className="p-1 rounded text-[var(--color-accent-purple)] hover:bg-[var(--glass-bg)] disabled:opacity-30 transition-all"
+            >
+              <FiSend className="w-3 h-3" />
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function Layout() {
   const { theme, toggleTheme } = useTheme()
   const [isCommandOpen, setIsCommandOpen] = useState(false)
@@ -270,6 +403,22 @@ export default function Layout() {
     if (path === '/timeline') return 'Timeline'
     if (path === '/search') return 'Search'
     if (path === '/settings') return 'Settings'
+    if (path === '/simulations') return 'Simulations'
+    if (path === '/literature-review') return 'Literature Review'
+    if (path === '/citation-manager') return 'Citation Manager'
+    if (path === '/experiment-tracker') return 'Experiment Tracker'
+    if (path === '/data-visualization') return 'Data Visualization'
+    if (path === '/statistical-analysis') return 'Statistical Analysis'
+    if (path === '/data-manager') return 'Data Manager'
+    if (path === '/collaboration') return 'Collaboration'
+    if (path === '/knowledge-graph-viewer') return 'Knowledge Graph'
+    if (path === '/clinical-trials') return 'Clinical Trials'
+    if (path === '/genomics') return 'Genomics Analysis'
+    if (path === '/manuscripts') return 'Manuscripts'
+    if (path === '/regulatory') return 'Regulatory & Compliance'
+    if (path === '/imaging') return 'Research Imaging'
+    if (path === '/ml-models') return 'ML Models'
+    if (path === '/biobank') return 'Biobank'
     return ''
   }
 
@@ -330,10 +479,68 @@ export default function Layout() {
               <span className="font-medium">{item.label}</span>
             </NavLink>
           ))}
+
+          <div className="text-xxs text-[var(--color-text-muted)] px-2 py-1.5 mt-4 uppercase tracking-widest font-medium">Research</div>
+          {researchNavItems.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              className={({ isActive }) =>
+                clsx(
+                  'flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm transition-all duration-200',
+                  isActive
+                    ? 'bg-[var(--glass-bg-hover)] text-[var(--color-text)]'
+                    : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)]'
+                )
+              }
+            >
+              <item.icon className="w-4 h-4" />
+              <span className="font-medium">{item.label}</span>
+            </NavLink>
+          ))}
+
+          <div className="text-xxs text-[var(--color-text-muted)] px-2 py-1.5 mt-4 uppercase tracking-widest font-medium">Analysis</div>
+          {analysisNavItems.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              className={({ isActive }) =>
+                clsx(
+                  'flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm transition-all duration-200',
+                  isActive
+                    ? 'bg-[var(--glass-bg-hover)] text-[var(--color-text)]'
+                    : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)]'
+                )
+              }
+            >
+              <item.icon className="w-4 h-4" />
+              <span className="font-medium">{item.label}</span>
+            </NavLink>
+          ))}
+
+          <div className="text-xxs text-[var(--color-text-muted)] px-2 py-1.5 mt-4 uppercase tracking-widest font-medium">Management</div>
+          {managementNavItems.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              className={({ isActive }) =>
+                clsx(
+                  'flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm transition-all duration-200',
+                  isActive
+                    ? 'bg-[var(--glass-bg-hover)] text-[var(--color-text)]'
+                    : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)]'
+                )
+              }
+            >
+              <item.icon className="w-4 h-4" />
+              <span className="font-medium">{item.label}</span>
+            </NavLink>
+          ))}
         </nav>
 
         {/* Bottom section */}
         <div className="p-3 border-t border-[var(--color-border)] space-y-1">
+          <ConstantChat />
           <button
             onClick={() => setIsCommandOpen(true)}
             className="flex items-center gap-2.5 w-full px-2.5 py-2 rounded-lg text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)] transition-all"

@@ -30,78 +30,31 @@ function SimulationCard({ simulation }: { simulation: Simulation }) {
     : 0
 
   return (
-    <div className="card">
-      <div className="flex items-start justify-between">
-        <div className="flex items-center space-x-3">
-          <div className={clsx('p-2 rounded-lg', status.bg)}>
-            <StatusIcon className={clsx('w-5 h-5', status.color)} />
-          </div>
-          <div>
-            <h3 className="font-semibold text-white">{simulation.name}</h3>
-            <p className="text-secondary-400 text-sm">{simulation.simulation_type}</p>
-          </div>
+    <div className={clsx('card hover:border-secondary-600 transition-all cursor-pointer')}>
+      <div className="flex items-start justify-between mb-3">
+        <div>
+          <h3 className="font-semibold text-white">{simulation.name}</h3>
+          <p className="text-sm text-secondary-400 mt-1">{simulation.simulation_type}</p>
         </div>
-        <span className={clsx('badge', {
-          'badge-success': simulation.status === 'completed',
-          'badge-warning': simulation.status === 'running',
-          'badge-error': simulation.status === 'failed',
-        })}>
+        <div className={clsx('flex items-center gap-1.5 px-2 py-1 rounded-full text-xs', status.bg, status.color)}>
+          <StatusIcon className="w-3 h-3" />
           {simulation.status}
-        </span>
+        </div>
       </div>
-
       {simulation.description && (
-        <p className="text-secondary-400 text-sm mt-3">{simulation.description}</p>
+        <p className="text-sm text-secondary-400 mb-3">{simulation.description}</p>
       )}
-
-      {/* Progress bar for running simulations */}
-      {simulation.status === 'running' && (
-        <div className="mt-4">
-          <div className="flex justify-between text-sm mb-1">
-            <span className="text-secondary-400">Progress</span>
-            <span className="text-white">
-              {simulation.iterations_completed.toLocaleString()} / {simulation.iterations.toLocaleString()}
-            </span>
-          </div>
-          <div className="h-2 bg-secondary-700 rounded-full">
-            <div
-              className="h-full bg-blue-500 rounded-full transition-all duration-300"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
+      <div className="space-y-2">
+        <div className="flex justify-between text-xs text-secondary-400">
+          <span>Progress</span>
+          <span>{simulation.iterations_completed} / {simulation.iterations}</span>
         </div>
-      )}
-
-      {/* Outcomes for completed simulations */}
-      {simulation.status === 'completed' && simulation.outcomes.length > 0 && (
-        <div className="mt-4 space-y-2">
-          <h4 className="text-sm font-medium text-secondary-300">Results</h4>
-          {simulation.outcomes.slice(0, 3).map((outcome, i) => (
-            <div key={i} className="flex justify-between text-sm">
-              <span className="text-secondary-400">{outcome.name}</span>
-              <span className="text-white">
-                {outcome.mean.toFixed(3)} (95% CI: {outcome.ci_lower.toFixed(3)} - {outcome.ci_upper.toFixed(3)})
-              </span>
-            </div>
-          ))}
+        <div className="w-full bg-secondary-700 rounded-full h-1.5">
+          <div
+            className="bg-blue-500 h-1.5 rounded-full transition-all"
+            style={{ width: `${progress}%` }}
+          />
         </div>
-      )}
-
-      {simulation.summary && (
-        <p className="text-secondary-300 text-sm mt-3 p-2 bg-secondary-800 rounded">
-          {simulation.summary}
-        </p>
-      )}
-
-      <div className="mt-4 pt-4 border-t border-secondary-700 flex justify-between text-sm">
-        <span className="text-secondary-500">
-          {simulation.iterations.toLocaleString()} iterations
-        </span>
-        {simulation.runtime_seconds && (
-          <span className="text-secondary-500">
-            {simulation.runtime_seconds.toFixed(1)}s runtime
-          </span>
-        )}
       </div>
     </div>
   )
