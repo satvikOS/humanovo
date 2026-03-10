@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.agents.discovery_orchestrator import (
     DiscoveryOrchestrator,
@@ -825,44 +826,51 @@ User question: {request.message}"""
 
     response_text = None
 
-    # Try Claude Sonnet 4.6 via Bedrock
+    # Build Bedrock client with explicit credentials from settings
+    bedrock = None
     try:
         import boto3
-        bedrock = boto3.client("bedrock-runtime", region_name="us-east-1")
-        import json as json_mod
-        bedrock_response = bedrock.invoke_model(
-            modelId="us.anthropic.claude-sonnet-4-6-v1",
-            contentType="application/json",
-            accept="application/json",
-            body=json_mod.dumps({
-                "anthropic_version": "bedrock-2023-05-31",
-                "max_tokens": 1024,
-                "messages": [{"role": "user", "content": chat_prompt}],
-            }),
-        )
-        result = json_mod.loads(bedrock_response["body"].read())
-        if result.get("content"):
-            response_text = result["content"][0].get("text", "")
+        client_kwargs: dict = {"region_name": settings.AWS_REGION}
+        if settings.aws_access_key_value and settings.aws_secret_key_value:
+            client_kwargs["aws_access_key_id"] = settings.aws_access_key_value
+            client_kwargs["aws_secret_access_key"] = settings.aws_secret_key_value
+        bedrock = boto3.client("bedrock-runtime", **client_kwargs)
     except Exception as e:
-        logger.warning(f"Bedrock Sonnet chat error: {e}")
+        logger.warning(f"Failed to create Bedrock client: {e}")
 
-    # Fallback to Claude Opus
-    if not response_text:
+    # Try Claude Sonnet 4.6 via Bedrock
+    if bedrock:
         try:
-            import boto3
-            bedrock = boto3.client("bedrock-runtime", region_name="us-east-1")
-            import json as json_mod
             bedrock_response = bedrock.invoke_model(
-                modelId="us.anthropic.claude-opus-4-6-v1",
+                modelId="us.anthropic.claude-sonnet-4-6-v1:0",
                 contentType="application/json",
                 accept="application/json",
-                body=json_mod.dumps({
+                body=json.dumps({
                     "anthropic_version": "bedrock-2023-05-31",
                     "max_tokens": 1024,
                     "messages": [{"role": "user", "content": chat_prompt}],
                 }),
             )
-            result = json_mod.loads(bedrock_response["body"].read())
+            result = json.loads(bedrock_response["body"].read())
+            if result.get("content"):
+                response_text = result["content"][0].get("text", "")
+        except Exception as e:
+            logger.warning(f"Bedrock Sonnet chat error: {e}")
+
+    # Fallback to Claude Opus
+    if not response_text and bedrock:
+        try:
+            bedrock_response = bedrock.invoke_model(
+                modelId=settings.BEDROCK_MODEL_CLAUDE_OPUS,
+                contentType="application/json",
+                accept="application/json",
+                body=json.dumps({
+                    "anthropic_version": "bedrock-2023-05-31",
+                    "max_tokens": 1024,
+                    "messages": [{"role": "user", "content": chat_prompt}],
+                }),
+            )
+            result = json.loads(bedrock_response["body"].read())
             if result.get("content"):
                 response_text = result["content"][0].get("text", "")
         except Exception as e:
@@ -870,8 +878,8 @@ User question: {request.message}"""
 
     if not response_text:
         response_text = (
-            "I'm currently unable to connect to the AI models. "
-            "Please ensure AWS Bedrock is configured and try again."
+            "I'm having trouble connecting to the AI backend. "
+            "Please ensure AWS Bedrock is configured and the backend server is running."
         )
 
     return {"response": response_text}

@@ -109,6 +109,33 @@ jobs:
             -backend-config="dynamodb_table=$TF_LOCK_TABLE" \
             -backend-config="encrypt=true"
 
+      - name: Force Unlock Stale Terraform State Lock
+        working-directory: infrastructure/terraform
+        continue-on-error: true
+        run: |
+          echo "Checking for stale Terraform state locks..."
+          LOCK_ITEM=$(aws dynamodb get-item \
+            --table-name "$TF_LOCK_TABLE" \
+            --key '{"LockID": {"S": "genup-terraform-state/infrastructure/terraform.tfstate"}}' \
+            --output json 2>/dev/null || echo '{}')
+
+          LOCK_ID=$(echo "$LOCK_ITEM" | python3 -c "
+          import json, sys
+          try:
+              item = json.load(sys.stdin)
+              info = json.loads(item.get('Item', {}).get('Info', {}).get('S', '{}'))
+              print(info.get('ID', ''))
+          except Exception:
+              print('')
+          " 2>/dev/null)
+
+          if [ -n "$LOCK_ID" ]; then
+            echo "Found stale lock: $LOCK_ID — force-unlocking..."
+            terraform force-unlock -force "$LOCK_ID" || echo "Force-unlock returned non-zero (lock may already be released)"
+          else
+            echo "No stale lock found"
+          fi
+
       - name: Clean Terraform State for Re-import
         working-directory: infrastructure/terraform
         continue-on-error: true
