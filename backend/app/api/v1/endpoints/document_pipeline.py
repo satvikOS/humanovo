@@ -525,8 +525,8 @@ async def _get_hypothesis_data(hypothesis_id: UUID) -> dict[str, Any]:
                         "disease": _current_orchestrator._disease or "Unknown",
                         "hypothesis_type": _current_orchestrator._discovery_type or "treatment",
                     }
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Orchestrator hypothesis lookup failed", error=str(e))
 
     # Try database
     db_ok = await _check_db_available()

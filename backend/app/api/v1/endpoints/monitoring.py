@@ -569,7 +569,7 @@ async def get_ingestion_metrics(
 ) -> IngestionMetricsResponse:
     """Get ingestion-specific metrics."""
     from app.agents.ingestion.base import SourceType
-    from app.api.v1.endpoints.ingestion import _ingestion_jobs
+    from sqlalchemy import select, func
 
     # Calculate agent metrics
     agents = []
@@ -593,27 +593,49 @@ async def get_ingestion_metrics(
             )
         )
 
-    # Calculate job statistics
+    # Calculate job statistics from database
     now = datetime.utcnow()
     day_ago = now - timedelta(hours=24)
 
-    active_jobs = sum(1 for j in _ingestion_jobs.values() if j["status"] == "running")
-    completed_24h = sum(
-        1
-        for j in _ingestion_jobs.values()
-        if j["status"] == "completed" and j.get("completed_at") and j["completed_at"] > day_ago
-    )
-    failed_24h = sum(
-        1
-        for j in _ingestion_jobs.values()
-        if j["status"] == "failed" and j.get("completed_at") and j["completed_at"] > day_ago
-    )
+    active_jobs = 0
+    completed_24h = 0
+    failed_24h = 0
+    total_indexed_24h = 0
 
-    total_indexed_24h = sum(
-        j.get("records_indexed", 0)
-        for j in _ingestion_jobs.values()
-        if j.get("completed_at") and j["completed_at"] > day_ago
-    )
+    try:
+        from app.models.ingestion_job import IngestionJob as IngestionJobModel
+        from app.models.ingestion_job import IngestionJobStatus as JobStatus
+
+        # Count active (running/fetching/processing/indexing) jobs
+        result = await db.execute(
+            select(func.count()).select_from(IngestionJobModel).where(
+                IngestionJobModel.status.in_([
+                    JobStatus.FETCHING, JobStatus.PROCESSING, JobStatus.INDEXING
+                ])
+            )
+        )
+        active_jobs = result.scalar() or 0
+
+        # Count completed jobs in last 24h
+        result = await db.execute(
+            select(func.count()).select_from(IngestionJobModel).where(
+                IngestionJobModel.status == JobStatus.COMPLETED,
+                IngestionJobModel.completed_at >= day_ago,
+            )
+        )
+        completed_24h = result.scalar() or 0
+
+        # Count failed jobs in last 24h
+        result = await db.execute(
+            select(func.count()).select_from(IngestionJobModel).where(
+                IngestionJobModel.status == JobStatus.FAILED,
+                IngestionJobModel.completed_at >= day_ago,
+            )
+        )
+        failed_24h = result.scalar() or 0
+
+    except Exception as e:
+        logger.debug("Could not query ingestion jobs from DB", error=str(e))
 
     # Get queue depth
     try:
@@ -622,6 +644,7 @@ async def get_ingestion_metrics(
         queue_stats = get_scheduler().get_queue_stats()
         queue_depth = queue_stats.get("pending", 0)
     except Exception:
+        logger.debug("Scheduler not available for queue depth")
         queue_depth = 0
 
     return IngestionMetricsResponse(

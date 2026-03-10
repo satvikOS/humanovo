@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   FiSettings,
   FiUser,
@@ -16,6 +17,37 @@ import {
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import { useTheme } from '../contexts/ThemeContext'
+
+const SETTINGS_KEY = 'humanovo-appearance-settings'
+
+interface AppearancePrefs {
+  fontSize: string
+  compactMode: boolean
+  animations: boolean
+}
+
+function loadAppearancePrefs(): AppearancePrefs {
+  try {
+    const stored = localStorage.getItem(SETTINGS_KEY)
+    if (stored) return JSON.parse(stored)
+  } catch { /* ignore */ }
+  return { fontSize: 'medium', compactMode: false, animations: true }
+}
+
+function saveAppearancePrefs(prefs: AppearancePrefs) {
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(prefs))
+}
+
+function applyAppearancePrefs(prefs: AppearancePrefs) {
+  const root = document.documentElement
+  const fontSizeMap: Record<string, string> = { small: '13px', medium: '14px', large: '16px' }
+  root.style.fontSize = fontSizeMap[prefs.fontSize] || '14px'
+  document.body.classList.toggle('compact-mode', prefs.compactMode)
+  root.style.setProperty('--animation-duration', prefs.animations ? '200ms' : '0ms')
+}
+
+// Apply on initial load
+applyAppearancePrefs(loadAppearancePrefs())
 
 const settingsSections = [
   { id: 'appearance', label: 'Appearance', icon: FiMonitor },
@@ -66,9 +98,23 @@ function SettingRow({ title, description, children }: {
 
 function AppearanceSettings() {
   const { theme, setTheme } = useTheme()
-  const [fontSize, setFontSize] = useState('medium')
-  const [compactMode, setCompactMode] = useState(false)
-  const [animations, setAnimations] = useState(true)
+  const [prefs, setPrefs] = useState<AppearancePrefs>(loadAppearancePrefs)
+
+  const updatePref = useCallback(<K extends keyof AppearancePrefs>(key: K, value: AppearancePrefs[K]) => {
+    setPrefs(prev => {
+      const next = { ...prev, [key]: value }
+      saveAppearancePrefs(next)
+      applyAppearancePrefs(next)
+      return next
+    })
+  }, [])
+
+  const fontSize = prefs.fontSize
+  const setFontSize = (v: string) => updatePref('fontSize', v)
+  const compactMode = prefs.compactMode
+  const setCompactMode = (v: boolean) => updatePref('compactMode', v)
+  const animations = prefs.animations
+  const setAnimations = (v: boolean) => updatePref('animations', v)
 
   return (
     <div className="space-y-6">
@@ -320,7 +366,17 @@ function APISettings() {
 }
 
 export default function Settings() {
-  const [activeSection, setActiveSection] = useState('appearance')
+  const [searchParams] = useSearchParams()
+  const tabParam = searchParams.get('tab')
+  const [activeSection, setActiveSection] = useState(
+    tabParam && settingsSections.some(s => s.id === tabParam) ? tabParam : 'appearance'
+  )
+
+  useEffect(() => {
+    if (tabParam && settingsSections.some(s => s.id === tabParam)) {
+      setActiveSection(tabParam)
+    }
+  }, [tabParam])
 
   const renderContent = () => {
     switch (activeSection) {
