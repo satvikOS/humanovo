@@ -69,6 +69,9 @@ services:
       - NEO4J_PASSWORD=neo4jpassword
       - CELERY_BROKER_URL=redis://redis:6379/1
       - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
       - DEBUG=false
       - LOG_LEVEL=INFO
     ports:

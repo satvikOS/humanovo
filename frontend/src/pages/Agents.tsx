@@ -297,7 +297,17 @@ export default function Agents() {
         }),
       })
       if (res.ok) {
-        const blob = await res.blob()
+        const contentType = res.headers.get('content-type') || ''
+        let blob: Blob
+        if (contentType.includes('application/json')) {
+          const data = await res.json()
+          const byteChars = atob(data.pdf_base64)
+          const byteArray = new Uint8Array(byteChars.length)
+          for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i)
+          blob = new Blob([byteArray], { type: 'application/pdf' })
+        } else {
+          blob = await res.blob()
+        }
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
         a.href = url; a.download = `${h.title.slice(0, 50)}.pdf`; a.click()

@@ -195,7 +195,25 @@ export default function ProjectDetail() {
       stopPhaseAnimation()
 
       if (res.ok) {
-        const blob = await res.blob()
+        const contentType = res.headers.get('content-type') || ''
+        let blob: Blob
+
+        if (contentType.includes('application/json')) {
+          // Backend returns base64-encoded PDF in JSON
+          const data = await res.json()
+          if (!data.pdf_base64) {
+            setPaperError('Server returned empty PDF. Check backend logs for errors.')
+            setGeneratingPaper(false)
+            return
+          }
+          const byteChars = atob(data.pdf_base64)
+          const byteArray = new Uint8Array(byteChars.length)
+          for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i)
+          blob = new Blob([byteArray], { type: 'application/pdf' })
+        } else {
+          blob = await res.blob()
+        }
+
         if (blob.size === 0) {
           setPaperError('Server returned empty PDF. Check backend logs for errors.')
           setGeneratingPaper(false)
