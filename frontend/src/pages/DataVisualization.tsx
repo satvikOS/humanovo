@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import {
   FiBarChart2,
   FiPieChart,
@@ -6,6 +6,8 @@ import {
   FiPlus,
   FiTrash2,
   FiGrid,
+  FiDownload,
+  FiCopy,
 } from 'react-icons/fi'
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
@@ -41,6 +43,46 @@ export default function DataVisualization() {
   })
   const [showAdd, setShowAdd] = useState(false)
   const [selected, setSelected] = useState<ChartConfig | null>(null)
+  const chartRefs = useRef<Record<string, HTMLDivElement | null>>({})
+
+  const exportChartPng = useCallback((chartId: string, title: string) => {
+    const container = chartRefs.current[chartId]
+    if (!container) return
+    const svg = container.querySelector('svg')
+    if (!svg) return
+    const svgData = new XMLSerializer().serializeToString(svg)
+    const canvas = document.createElement('canvas')
+    const svgRect = svg.getBoundingClientRect()
+    canvas.width = svgRect.width * 2
+    canvas.height = svgRect.height * 2
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.scale(2, 2)
+    ctx.fillStyle = '#1a1a2e'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    const img = new Image()
+    img.onload = () => {
+      ctx.drawImage(img, 0, 0)
+      const a = document.createElement('a')
+      a.download = `${title.replace(/\s+/g, '-').toLowerCase()}.png`
+      a.href = canvas.toDataURL('image/png')
+      a.click()
+    }
+    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)))
+  }, [])
+
+  const exportChartCsv = useCallback((chart: ChartConfig) => {
+    const rows = ['label,value' + (chart.data.some(d => d.category) ? ',category' : '')]
+    chart.data.forEach(d => {
+      rows.push(`"${d.label}",${d.value}${d.category ? `,"${d.category}"` : ''}`)
+    })
+    const blob = new Blob([rows.join('\n')], { type: 'text/csv' })
+    const a = document.createElement('a')
+    a.download = `${chart.title.replace(/\s+/g, '-').toLowerCase()}.csv`
+    a.href = URL.createObjectURL(blob)
+    a.click()
+    URL.revokeObjectURL(a.href)
+  }, [])
 
   const [form, setForm] = useState({
     title: '', type: 'bar' as ChartConfig['type'],
@@ -220,12 +262,20 @@ export default function DataVisualization() {
                     <h3 className="text-sm font-medium">{chart.title}</h3>
                   </div>
                   <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button onClick={() => deleteChart(chart.id)} className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-error)]">
+                    <button onClick={() => exportChartPng(chart.id, chart.title)} className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-accent-blue)]" title="Download PNG">
+                      <FiDownload className="w-3.5 h-3.5" />
+                    </button>
+                    <button onClick={() => exportChartCsv(chart)} className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-accent-green)]" title="Export CSV">
+                      <FiCopy className="w-3.5 h-3.5" />
+                    </button>
+                    <button onClick={() => deleteChart(chart.id)} className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-error)]" title="Delete">
                       <FiTrash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>
-                {renderChart(chart, 250)}
+                <div ref={el => { chartRefs.current[chart.id] = el }}>
+                  {renderChart(chart, 250)}
+                </div>
                 <div className="flex items-center gap-2 mt-3 text-xxs text-[var(--color-text-muted)]">
                   <span>{chart.data.length} data points</span>
                   <span>{chart.type}</span>

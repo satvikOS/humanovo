@@ -810,8 +810,8 @@ class ChatRequest(BaseModel):
 @router.post("/chat")
 async def constant_chat(request: ChatRequest):
     """
-    Constant AI chat assistant — uses AWS Bedrock models for research Q&A.
-    Grounded to the platform context for biomedical research assistance.
+    Constant AI chat assistant — uses AWS Bedrock or Azure AI for research Q&A.
+    Tries Bedrock Claude first, falls back to Azure GPT-4o / GPT-4.1.
     """
     if not request.message.strip():
         return {"response": "Please ask me a question about your research."}
@@ -826,8 +826,7 @@ User question: {request.message}"""
 
     response_text = None
 
-    # Build Bedrock client with explicit credentials from settings
-    bedrock = None
+    # --- Attempt 1: AWS Bedrock (Claude Opus) ---
     try:
         import boto3
         client_kwargs: dict = {"region_name": settings.AWS_REGION}
@@ -835,51 +834,78 @@ User question: {request.message}"""
             client_kwargs["aws_access_key_id"] = settings.aws_access_key_value
             client_kwargs["aws_secret_access_key"] = settings.aws_secret_key_value
         bedrock = boto3.client("bedrock-runtime", **client_kwargs)
+        bedrock_response = bedrock.invoke_model(
+            modelId=settings.BEDROCK_MODEL_CLAUDE_OPUS,
+            contentType="application/json",
+            accept="application/json",
+            body=json.dumps({
+                "anthropic_version": "bedrock-2023-05-31",
+                "max_tokens": 1024,
+                "messages": [{"role": "user", "content": chat_prompt}],
+            }),
+        )
+        result = json.loads(bedrock_response["body"].read())
+        if result.get("content"):
+            response_text = result["content"][0].get("text", "")
     except Exception as e:
-        logger.warning(f"Failed to create Bedrock client: {e}")
+        logger.warning(f"Bedrock chat error: {e}")
 
-    # Try Claude Opus 4.6 via Bedrock (confirmed working in discovery pipeline)
-    if bedrock:
+    # --- Attempt 2: Azure GPT-4o ---
+    if not response_text and settings.AZURE_GPT4O_ENDPOINT and settings.AZURE_GPT4O_KEY:
         try:
-            bedrock_response = bedrock.invoke_model(
-                modelId=settings.BEDROCK_MODEL_CLAUDE_OPUS,
-                contentType="application/json",
-                accept="application/json",
-                body=json.dumps({
-                    "anthropic_version": "bedrock-2023-05-31",
-                    "max_tokens": 1024,
-                    "messages": [{"role": "user", "content": chat_prompt}],
-                }),
-            )
-            result = json.loads(bedrock_response["body"].read())
-            if result.get("content"):
-                response_text = result["content"][0].get("text", "")
+            import httpx
+            azure_url = settings.AZURE_GPT4O_ENDPOINT.rstrip("/")
+            deploy = settings.AZURE_GPT4O_DEPLOYMENT
+            api_ver = settings.AZURE_GPT4O_API_VERSION
+            url = f"{azure_url}/openai/deployments/{deploy}/chat/completions?api-version={api_ver}"
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(
+                    url,
+                    headers={"api-key": settings.AZURE_GPT4O_KEY.get_secret_value()},
+                    json={
+                        "messages": [{"role": "user", "content": chat_prompt}],
+                        "max_tokens": 1024,
+                        "temperature": 0.7,
+                    },
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    choices = data.get("choices", [])
+                    if choices:
+                        response_text = choices[0].get("message", {}).get("content", "")
         except Exception as e:
-            logger.warning(f"Bedrock Opus chat error: {e}")
+            logger.warning(f"Azure GPT-4o chat error: {e}")
 
-    # Fallback to Claude Sonnet
-    if not response_text and bedrock:
+    # --- Attempt 3: Azure GPT-4.1 ---
+    if not response_text and settings.AZURE_GPT41_ENDPOINT and settings.AZURE_GPT41_KEY:
         try:
-            bedrock_response = bedrock.invoke_model(
-                modelId=settings.BEDROCK_MODEL_CLAUDE_SONNET,
-                contentType="application/json",
-                accept="application/json",
-                body=json.dumps({
-                    "anthropic_version": "bedrock-2023-05-31",
-                    "max_tokens": 1024,
-                    "messages": [{"role": "user", "content": chat_prompt}],
-                }),
-            )
-            result = json.loads(bedrock_response["body"].read())
-            if result.get("content"):
-                response_text = result["content"][0].get("text", "")
+            import httpx
+            azure_url = settings.AZURE_GPT41_ENDPOINT.rstrip("/")
+            deploy = settings.AZURE_GPT41_DEPLOYMENT
+            api_ver = settings.AZURE_GPT41_API_VERSION
+            url = f"{azure_url}/openai/deployments/{deploy}/chat/completions?api-version={api_ver}"
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(
+                    url,
+                    headers={"api-key": settings.AZURE_GPT41_KEY.get_secret_value()},
+                    json={
+                        "messages": [{"role": "user", "content": chat_prompt}],
+                        "max_tokens": 1024,
+                        "temperature": 0.7,
+                    },
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    choices = data.get("choices", [])
+                    if choices:
+                        response_text = choices[0].get("message", {}).get("content", "")
         except Exception as e:
-            logger.warning(f"Bedrock Sonnet chat error: {e}")
+            logger.warning(f"Azure GPT-4.1 chat error: {e}")
 
     if not response_text:
         response_text = (
             "I'm having trouble connecting to the AI backend. "
-            "Please ensure AWS Bedrock is configured and the backend server is running."
+            "Please ensure AWS Bedrock or Azure AI is configured and the backend server is running."
         )
 
     return {"response": response_text}
