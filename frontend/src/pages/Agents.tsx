@@ -149,7 +149,7 @@ export default function Agents() {
       setStats(res)
 
       // Log discovery completion
-      if ((newState === 'completed' || newState === 'stopped') && prevStateRef.current === 'running') {
+      if ((newState === 'completed' || newState === 'stopping') && prevStateRef.current === 'running') {
         logActivity({
           type: 'discovery', action: 'completed',
           title: `Discovery ${newState}: ${(res as any).disease || config.disease} — ${(res as any).top_hypotheses?.length || 0} hypotheses`,
