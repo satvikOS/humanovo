@@ -838,27 +838,8 @@ User question: {request.message}"""
     except Exception as e:
         logger.warning(f"Failed to create Bedrock client: {e}")
 
-    # Try Claude Sonnet 4.6 via Bedrock
+    # Try Claude Opus 4.6 via Bedrock (confirmed working in discovery pipeline)
     if bedrock:
-        try:
-            bedrock_response = bedrock.invoke_model(
-                modelId="us.anthropic.claude-sonnet-4-6-v1:0",
-                contentType="application/json",
-                accept="application/json",
-                body=json.dumps({
-                    "anthropic_version": "bedrock-2023-05-31",
-                    "max_tokens": 1024,
-                    "messages": [{"role": "user", "content": chat_prompt}],
-                }),
-            )
-            result = json.loads(bedrock_response["body"].read())
-            if result.get("content"):
-                response_text = result["content"][0].get("text", "")
-        except Exception as e:
-            logger.warning(f"Bedrock Sonnet chat error: {e}")
-
-    # Fallback to Claude Opus
-    if not response_text and bedrock:
         try:
             bedrock_response = bedrock.invoke_model(
                 modelId=settings.BEDROCK_MODEL_CLAUDE_OPUS,
@@ -875,6 +856,25 @@ User question: {request.message}"""
                 response_text = result["content"][0].get("text", "")
         except Exception as e:
             logger.warning(f"Bedrock Opus chat error: {e}")
+
+    # Fallback to Claude Sonnet
+    if not response_text and bedrock:
+        try:
+            bedrock_response = bedrock.invoke_model(
+                modelId=settings.BEDROCK_MODEL_CLAUDE_SONNET,
+                contentType="application/json",
+                accept="application/json",
+                body=json.dumps({
+                    "anthropic_version": "bedrock-2023-05-31",
+                    "max_tokens": 1024,
+                    "messages": [{"role": "user", "content": chat_prompt}],
+                }),
+            )
+            result = json.loads(bedrock_response["body"].read())
+            if result.get("content"):
+                response_text = result["content"][0].get("text", "")
+        except Exception as e:
+            logger.warning(f"Bedrock Sonnet chat error: {e}")
 
     if not response_text:
         response_text = (
