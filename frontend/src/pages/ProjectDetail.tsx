@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import {
   FiArrowLeft, FiActivity, FiTarget,
   FiChevronRight, FiFileText, FiRefreshCw,
-  FiTrash2, FiBook, FiX, FiDownload,
+  FiTrash2, FiBook, FiX, FiPrinter,
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import api, { Project } from '../services/api'
@@ -40,15 +40,15 @@ interface SavedHypothesis {
 type ViewMode = 'list' | 'hypothesis_viewer' | 'hypothesis_paper'
 
 const PAPER_PHASES = [
-  { label: 'Initializing 8-model pipeline...', duration: 2000 },
-  { label: 'Phase 1: Generating abstract & introduction (Claude Opus 4.6)...', duration: 8000 },
-  { label: 'Phase 2: Bench science — mechanism, evidence, targets (Grok, Mistral)...', duration: 10000 },
+  { label: 'Initializing research pipeline...', duration: 2000 },
+  { label: 'Phase 1: Generating abstract & introduction...', duration: 8000 },
+  { label: 'Phase 2: Bench science — mechanism, evidence, targets...', duration: 10000 },
   { label: 'Phase 3: Translational roadmap — T0 Basic Research, T1 First-in-Human...', duration: 12000 },
-  { label: 'Phase 4: Clinical phases — T2 Trials, T3 Implementation (GPT-4o, Cohere)...', duration: 12000 },
-  { label: 'Phase 5: Population & global — T4 Community, T5 Global Impact...', duration: 10000 },
-  { label: 'Phase 6: Regulatory strategy, risk analysis & commercialization (Claude Opus 4.6)...', duration: 10000 },
-  { label: 'Phase 7: Discussion, conclusion & QA review (o3-mini, GPT-4.1)...', duration: 10000 },
-  { label: 'Rendering research paper with ReportLab — cover, pipeline, tables, citations...', duration: 8000 },
+  { label: 'Phase 4: Clinical phases — T2 Trials, T3 Implementation...', duration: 12000 },
+  { label: 'Phase 5: Population & global health — T4 Community, T5 Global Impact...', duration: 10000 },
+  { label: 'Phase 6: Regulatory strategy, risk analysis & commercialization...', duration: 10000 },
+  { label: 'Phase 7: Discussion, conclusion & quality review...', duration: 10000 },
+  { label: 'Rendering final research paper — formatting, tables, citations...', duration: 8000 },
 ]
 
 export default function ProjectDetail() {
@@ -220,7 +220,19 @@ export default function ProjectDetail() {
       const triggerRes = await fetch(`${API_BASE}/orchestrator/generate-paper/markdown`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hypothesis_id: hypothesis.id }),
+        body: JSON.stringify({
+          hypothesis_id: hypothesis.id,
+          hypothesis_data: {
+            id: hypothesis.id,
+            title: hypothesis.title,
+            description: hypothesis.description,
+            mechanism: hypothesis.mechanism,
+            confidence: hypothesis.confidence,
+            disease: hypothesis.disease || project?.disease_focus || 'Unknown',
+            discovery_type: hypothesis.discovery_type || 'treatment',
+            tags: hypothesis.tags || [],
+          },
+        }),
       })
 
       if (triggerRes.ok) {
@@ -347,52 +359,22 @@ export default function ProjectDetail() {
     setRefresh(n => n + 1)
   }, [project])
 
-  const downloadPdf = useCallback(async () => {
-    if (!activeHypothesis) return
-
-    if (pdfBlobUrl) {
-      const a = document.createElement('a')
-      a.href = pdfBlobUrl
-      a.download = `humanovo-${(activeHypothesis.disease || 'research').replace(/\s+/g, '-').toLowerCase()}-${activeHypothesis.title.replace(/\s+/g, '-').toLowerCase().slice(0, 40)}.pdf`
-      a.click()
-      return
-    }
-
-    // If we only have HTML, request PDF from backend for download
-    if (paperHtml) {
-      try {
-        const res = await fetch(`${API_BASE}/documents/hypothesis/${activeHypothesis.id}/pdf?use_ai=true`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            title: activeHypothesis.title,
-            description: activeHypothesis.description,
-            mechanism: activeHypothesis.mechanism,
-            confidence: activeHypothesis.confidence,
-            disease: activeHypothesis.disease || project?.disease_focus || 'Unknown',
-            discovery_type: activeHypothesis.discovery_type || 'treatment',
-          }),
-        })
-        if (res.ok) {
-          const data = await res.json()
-          if (data.pdf_base64) {
-            const byteChars = atob(data.pdf_base64)
-            const byteArray = new Uint8Array(byteChars.length)
-            for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i)
-            const blob = new Blob([byteArray], { type: 'application/pdf' })
-            const url = URL.createObjectURL(blob)
-            const a = document.createElement('a')
-            a.href = url
-            a.download = data.filename || `humanovo-${(activeHypothesis.disease || 'research').replace(/\s+/g, '-').toLowerCase()}.pdf`
-            a.click()
-            URL.revokeObjectURL(url)
-          }
-        }
-      } catch (e) {
-        console.error('PDF download failed:', e)
+  const printPaper = useCallback(() => {
+    // Print the paper via the iframe's contentWindow
+    const iframe = document.querySelector('iframe[title="Research Paper"]') as HTMLIFrameElement
+    if (iframe?.contentWindow) {
+      iframe.contentWindow.print()
+    } else if (paperHtml) {
+      // Fallback: open in a new window and print
+      const printWindow = window.open('', '_blank')
+      if (printWindow) {
+        printWindow.document.write(paperHtml)
+        printWindow.document.close()
+        printWindow.focus()
+        printWindow.print()
       }
     }
-  }, [pdfBlobUrl, paperHtml, activeHypothesis, project])
+  }, [paperHtml])
 
   const closeViewer = useCallback(() => {
     if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl)
@@ -508,10 +490,10 @@ export default function ProjectDetail() {
             <span className="text-[var(--color-text-muted)] text-sm truncate max-w-xs">{activeHypothesis.title}</span>
           </div>
           <div className="flex items-center gap-2">
-            {(pdfBlobUrl || paperHtml) && (
-              <button onClick={downloadPdf} className="btn text-accent-purple hover:bg-accent-purple/10 text-sm">
-                <FiDownload className="w-3.5 h-3.5 mr-1" />
-                Download PDF
+            {paperHtml && (
+              <button onClick={printPaper} className="btn text-accent-purple hover:bg-accent-purple/10 text-sm">
+                <FiPrinter className="w-3.5 h-3.5 mr-1" />
+                Print
               </button>
             )}
             <button onClick={closeViewer} className="p-1.5 rounded hover:bg-white/5 text-[var(--color-text-muted)]">
@@ -558,7 +540,7 @@ export default function ProjectDetail() {
                   ))}
                 </div>
                 <p className="text-[var(--color-text-muted)] text-xs text-center mt-4">
-                  8 AI models generating content in parallel — this may take a few minutes
+                  Generating comprehensive research content — this may take a few minutes
                 </p>
               </div>
             </div>
@@ -591,7 +573,7 @@ export default function ProjectDetail() {
               srcDoc={paperHtml}
               className="w-full h-full border-0"
               title="Research Paper"
-              sandbox="allow-same-origin allow-popups"
+              sandbox="allow-same-origin allow-popups allow-modals"
               style={{ minHeight: '100%' }}
             />
           )}
@@ -599,11 +581,7 @@ export default function ProjectDetail() {
           {pdfBlobUrl && !paperHtml && (
             <object data={pdfBlobUrl} type="application/pdf" className="w-full h-full">
               <div className="flex flex-col items-center justify-center h-full">
-                <p className="text-[var(--color-text-muted)] mb-4">Unable to display PDF inline. Download it instead.</p>
-                <button onClick={downloadPdf} className="btn text-accent-purple hover:bg-accent-purple/10">
-                  <FiDownload className="w-4 h-4 mr-1" />
-                  Download PDF
-                </button>
+                <p className="text-[var(--color-text-muted)] mb-4">Unable to display PDF inline.</p>
               </div>
             </object>
           )}
