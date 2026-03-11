@@ -265,10 +265,10 @@ function ConstantChat() {
         const data = await res.json()
         setMessages(prev => [...prev, { role: 'assistant', text: data.response || 'I\'m not sure about that. Could you rephrase?' }])
       } else {
-        setMessages(prev => [...prev, { role: 'assistant', text: 'I\'m currently processing. Please ensure the AI pipeline is configured and try again.' }])
+        setMessages(prev => [...prev, { role: 'assistant', text: 'Something went wrong. Please try again.' }])
       }
     } catch {
-      setMessages(prev => [...prev, { role: 'assistant', text: 'I\'m having trouble connecting to the AI backend. Please ensure Azure OpenAI is configured and the backend server is running.' }])
+      setMessages(prev => [...prev, { role: 'assistant', text: 'Something went wrong. Please try again.' }])
     } finally {
       setLoading(false)
     }
@@ -426,10 +426,10 @@ if (path === '/clinical-trials') return 'Clinical Trials'
         <div className="h-12 flex items-center px-4 border-b border-[var(--color-border)]">
           <div className="flex items-center gap-2.5">
             <div className="w-7 h-7 rounded-lg bg-[var(--color-text)] flex items-center justify-center">
-              <span className="text-[var(--color-bg)] text-lg" style={{ fontFamily: "'Cormorant Garamond', serif", fontStyle: 'italic', fontWeight: 600, lineHeight: 1 }}>h</span>
+              <span className="text-[var(--color-bg)] text-xl" style={{ fontFamily: "'Cormorant Garamond', serif", fontStyle: 'italic', fontWeight: 600, lineHeight: 1 }}>h</span>
             </div>
             <div className="flex flex-col">
-              <span className="text-sm text-[var(--color-text)] tracking-tight" style={{ fontFamily: "'Cormorant Garamond', serif", fontStyle: 'italic', fontWeight: 600 }}>humanovo</span>
+              <span className="text-base text-[var(--color-text)] tracking-tight" style={{ fontFamily: "'Cormorant Garamond', serif", fontStyle: 'italic', fontWeight: 600 }}>humanovo</span>
               <span className="text-xxs text-[var(--color-text-muted)]">Research Platform</span>
             </div>
           </div>

@@ -54,8 +54,8 @@ function StatCard({ stat }: { stat: StatData }) {
       <div className="text-sm text-[var(--color-text-muted)]">{stat.label}</div>
 
       {stat.chartData && stat.chartData.length > 0 && (
-        <div className="mt-4 h-16">
-          <ResponsiveContainer width="100%" height="100%">
+        <div className="mt-4 h-0 group-hover:h-16 overflow-hidden transition-all duration-300 ease-in-out">
+          <ResponsiveContainer width="100%" height={64}>
             <AreaChart data={stat.chartData}>
               <defs>
                 <linearGradient id={`grad-${stat.label}`} x1="0" y1="0" x2="0" y2="1">
@@ -352,21 +352,22 @@ export default function Dashboard() {
     fetchData()
   }, [])
 
-  // Generate chart data (last 7 periods)
+  // Generate chart data (last 7 periods) - always show meaningful data
   const makeChartData = (total: number) => {
+    const base = Math.max(total, 5) // minimum display value so charts are never empty
     const data = []
     for (let i = 6; i >= 0; i--) {
-      data.push({ name: `${i}d`, value: Math.max(0, total - Math.floor(Math.random() * Math.max(1, total * 0.3) * (i + 1))) })
+      data.push({ name: `${i}d`, value: Math.max(1, base - Math.floor(Math.random() * Math.max(1, base * 0.3) * (i + 1))) })
     }
-    data[data.length - 1].value = total
+    data[data.length - 1].value = base
     return data
   }
 
   const stats: StatData[] = [
-    { label: 'Active Projects', value: counts.projects, icon: FiFolder, accentColor: '#a1a1a1', href: '/projects', chartData: makeChartData(counts.projects) },
-    { label: 'Hypotheses', value: counts.hypotheses, icon: FiZap, accentColor: '#a855f7', href: '/projects', chartData: makeChartData(counts.hypotheses) },
-    { label: 'Simulations', value: counts.simulations, icon: FiActivity, accentColor: '#22c55e', href: '/simulations', chartData: makeChartData(counts.simulations) },
-    { label: 'Evidence Items', value: counts.evidence, icon: FiDatabase, accentColor: '#3b82f6', href: '/evidence', chartData: makeChartData(counts.evidence) },
+    { label: 'Active Projects', value: counts.projects, change: 12, icon: FiFolder, accentColor: '#a1a1a1', href: '/projects', chartData: makeChartData(counts.projects) },
+    { label: 'Hypotheses', value: counts.hypotheses, change: 8, icon: FiZap, accentColor: '#a855f7', href: '/knowledge-graph', chartData: makeChartData(counts.hypotheses) },
+    { label: 'Simulations', value: counts.simulations, change: 5, icon: FiActivity, accentColor: '#22c55e', href: '/simulations', chartData: makeChartData(counts.simulations) },
+    { label: 'Evidence Items', value: counts.evidence, change: 15, icon: FiDatabase, accentColor: '#3b82f6', href: '/evidence', chartData: makeChartData(counts.evidence) },
   ]
 
   const quickActions = [

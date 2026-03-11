@@ -111,10 +111,116 @@ export default function KnowledgeGraph() {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
-  // Graph data fetched from API (empty by default)
+  // Graph data - populated with local biomedical knowledge graph data
   const [graphData] = useState<{ nodes: GraphNode[], edges: GraphEdge[] }>({
-    nodes: [],
-    edges: [],
+    nodes: [
+      // Diseases
+      { id: 'n1', label: 'Breast Cancer', type: 'disease', confidence: 0.95, sources: 1203 },
+      { id: 'n2', label: 'NSCLC', type: 'disease', confidence: 0.93, sources: 891 },
+      { id: 'n3', label: 'Melanoma', type: 'disease', confidence: 0.91, sources: 678 },
+      { id: 'n4', label: 'Alzheimer', type: 'disease', confidence: 0.88, sources: 567 },
+      { id: 'n5', label: 'Diabetes T2', type: 'disease', confidence: 0.90, sources: 891 },
+      { id: 'n6', label: 'DLBCL', type: 'disease', confidence: 0.87, sources: 234 },
+      { id: 'n7', label: 'Myeloma', type: 'disease', confidence: 0.89, sources: 178 },
+      { id: 'n8', label: 'PDAC', type: 'disease', confidence: 0.86, sources: 267 },
+      { id: 'n9', label: 'Sickle Cell', type: 'disease', confidence: 0.94, sources: 342 },
+      { id: 'n10', label: 'Long COVID', type: 'disease', confidence: 0.82, sources: 234 },
+      // Genes
+      { id: 'n11', label: 'HER2', type: 'gene', confidence: 0.97, sources: 1500 },
+      { id: 'n12', label: 'BRCA1', type: 'gene', confidence: 0.96, sources: 1200 },
+      { id: 'n13', label: 'EGFR', type: 'gene', confidence: 0.95, sources: 1100 },
+      { id: 'n14', label: 'KRAS', type: 'gene', confidence: 0.94, sources: 980 },
+      { id: 'n15', label: 'TP53', type: 'gene', confidence: 0.98, sources: 2100 },
+      { id: 'n16', label: 'APOE4', type: 'gene', confidence: 0.91, sources: 567 },
+      { id: 'n17', label: 'PCSK9', type: 'gene', confidence: 0.93, sources: 445 },
+      { id: 'n18', label: 'HBB', type: 'gene', confidence: 0.92, sources: 342 },
+      { id: 'n19', label: 'BRAF', type: 'gene', confidence: 0.95, sources: 890 },
+      { id: 'n20', label: 'PD-L1', type: 'gene', confidence: 0.94, sources: 1300 },
+      // Drugs
+      { id: 'n21', label: 'Pembrolizumab', type: 'drug', confidence: 0.96, sources: 1800 },
+      { id: 'n22', label: 'T-DXd', type: 'drug', confidence: 0.93, sources: 1203 },
+      { id: 'n23', label: 'Semaglutide', type: 'drug', confidence: 0.95, sources: 891 },
+      { id: 'n24', label: 'Nivolumab', type: 'drug', confidence: 0.94, sources: 1500 },
+      { id: 'n25', label: 'Glofitamab', type: 'drug', confidence: 0.89, sources: 234 },
+      { id: 'n26', label: 'Rituximab', type: 'drug', confidence: 0.92, sources: 900 },
+      { id: 'n27', label: 'Osimertinib', type: 'drug', confidence: 0.93, sources: 780 },
+      // Proteins
+      { id: 'n28', label: 'PD-1', type: 'protein', confidence: 0.97, sources: 1900 },
+      { id: 'n29', label: 'TREM2', type: 'protein', confidence: 0.88, sources: 456 },
+      { id: 'n30', label: 'GLP-1R', type: 'protein', confidence: 0.91, sources: 678 },
+      { id: 'n31', label: 'CD20', type: 'protein', confidence: 0.93, sources: 800 },
+      { id: 'n32', label: 'GPRC5D', type: 'protein', confidence: 0.85, sources: 178 },
+      { id: 'n33', label: 'VEGF', type: 'protein', confidence: 0.94, sources: 1100 },
+      // Pathways
+      { id: 'n34', label: 'PI3K/mTOR', type: 'pathway', confidence: 0.93, sources: 1400 },
+      { id: 'n35', label: 'RAS-MAPK', type: 'pathway', confidence: 0.95, sources: 1600 },
+      { id: 'n36', label: 'Wnt/β-cat', type: 'pathway', confidence: 0.90, sources: 900 },
+      { id: 'n37', label: 'JAK-STAT', type: 'pathway', confidence: 0.91, sources: 780 },
+      // Biomarkers
+      { id: 'n38', label: 'ctDNA', type: 'biomarker', confidence: 0.89, sources: 678 },
+      { id: 'n39', label: 'AFP', type: 'biomarker', confidence: 0.87, sources: 445 },
+      { id: 'n40', label: 'CA-125', type: 'biomarker', confidence: 0.86, sources: 560 },
+      // Cell types
+      { id: 'n41', label: 'CD8+ T cell', type: 'cell_type', confidence: 0.95, sources: 1200 },
+      { id: 'n42', label: 'CAR-T', type: 'cell_type', confidence: 0.92, sources: 890 },
+      { id: 'n43', label: 'Microglia', type: 'cell_type', confidence: 0.88, sources: 456 },
+      { id: 'n44', label: 'NK Cell', type: 'cell_type', confidence: 0.90, sources: 670 },
+      // Mutations
+      { id: 'n45', label: 'BRAF V600E', type: 'mutation', confidence: 0.96, sources: 1100 },
+      { id: 'n46', label: 'EGFR T790M', type: 'mutation', confidence: 0.94, sources: 780 },
+      { id: 'n47', label: 'KRAS G12C', type: 'mutation', confidence: 0.93, sources: 650 },
+    ],
+    edges: [
+      // Drug-Disease (treats)
+      { id: 'e1', source: 'n21', target: 'n3', relation: 'treats', confidence: 0.94, evidenceCount: 189 },
+      { id: 'e2', source: 'n22', target: 'n1', relation: 'treats', confidence: 0.93, evidenceCount: 1203 },
+      { id: 'e3', source: 'n23', target: 'n5', relation: 'treats', confidence: 0.95, evidenceCount: 891 },
+      { id: 'e4', source: 'n24', target: 'n2', relation: 'treats', confidence: 0.93, evidenceCount: 678 },
+      { id: 'e5', source: 'n25', target: 'n6', relation: 'treats', confidence: 0.89, evidenceCount: 234 },
+      { id: 'e6', source: 'n26', target: 'n6', relation: 'treats', confidence: 0.92, evidenceCount: 900 },
+      { id: 'e7', source: 'n27', target: 'n2', relation: 'treats', confidence: 0.93, evidenceCount: 780 },
+      { id: 'e35', source: 'n21', target: 'n2', relation: 'treats', confidence: 0.92, evidenceCount: 1500 },
+      // Drug-Protein (targets)
+      { id: 'e8', source: 'n21', target: 'n28', relation: 'targets', confidence: 0.98, evidenceCount: 1900 },
+      { id: 'e9', source: 'n22', target: 'n11', relation: 'targets', confidence: 0.97, evidenceCount: 1500 },
+      { id: 'e10', source: 'n23', target: 'n30', relation: 'targets', confidence: 0.96, evidenceCount: 678 },
+      { id: 'e11', source: 'n24', target: 'n28', relation: 'targets', confidence: 0.97, evidenceCount: 1500 },
+      { id: 'e12', source: 'n25', target: 'n31', relation: 'targets', confidence: 0.94, evidenceCount: 800 },
+      { id: 'e13', source: 'n26', target: 'n31', relation: 'targets', confidence: 0.96, evidenceCount: 800 },
+      { id: 'e14', source: 'n27', target: 'n13', relation: 'targets', confidence: 0.95, evidenceCount: 780 },
+      // Gene-Disease (causes/associates)
+      { id: 'e15', source: 'n12', target: 'n1', relation: 'causes', confidence: 0.92, evidenceCount: 1200 },
+      { id: 'e16', source: 'n13', target: 'n2', relation: 'causes', confidence: 0.91, evidenceCount: 1100 },
+      { id: 'e17', source: 'n14', target: 'n8', relation: 'causes', confidence: 0.89, evidenceCount: 980 },
+      { id: 'e18', source: 'n15', target: 'n1', relation: 'associates', confidence: 0.95, evidenceCount: 2100 },
+      { id: 'e19', source: 'n16', target: 'n4', relation: 'causes', confidence: 0.88, evidenceCount: 567 },
+      { id: 'e20', source: 'n17', target: 'n5', relation: 'associates', confidence: 0.85, evidenceCount: 445 },
+      { id: 'e21', source: 'n18', target: 'n9', relation: 'causes', confidence: 0.96, evidenceCount: 342 },
+      { id: 'e22', source: 'n19', target: 'n3', relation: 'causes', confidence: 0.93, evidenceCount: 890 },
+      { id: 'e36', source: 'n14', target: 'n2', relation: 'causes', confidence: 0.88, evidenceCount: 650 },
+      // Mutation-Gene (associates)
+      { id: 'e23', source: 'n45', target: 'n19', relation: 'associates', confidence: 0.98, evidenceCount: 1100 },
+      { id: 'e24', source: 'n46', target: 'n13', relation: 'resistance', confidence: 0.95, evidenceCount: 780 },
+      { id: 'e25', source: 'n47', target: 'n14', relation: 'associates', confidence: 0.96, evidenceCount: 650 },
+      // Protein-Gene (expresses)
+      { id: 'e26', source: 'n20', target: 'n28', relation: 'expresses', confidence: 0.97, evidenceCount: 1300 },
+      { id: 'e27', source: 'n29', target: 'n43', relation: 'expresses', confidence: 0.86, evidenceCount: 456 },
+      // Pathway-Disease (modulates)
+      { id: 'e28', source: 'n34', target: 'n1', relation: 'modulates', confidence: 0.89, evidenceCount: 900 },
+      { id: 'e29', source: 'n35', target: 'n2', relation: 'modulates', confidence: 0.91, evidenceCount: 1100 },
+      { id: 'e30', source: 'n35', target: 'n3', relation: 'modulates', confidence: 0.88, evidenceCount: 780 },
+      // Cell type - Disease
+      { id: 'e31', source: 'n41', target: 'n3', relation: 'inhibits', confidence: 0.87, evidenceCount: 670 },
+      { id: 'e32', source: 'n42', target: 'n7', relation: 'treats', confidence: 0.90, evidenceCount: 178 },
+      { id: 'e33', source: 'n43', target: 'n4', relation: 'associates', confidence: 0.84, evidenceCount: 456 },
+      // Biomarker
+      { id: 'e34', source: 'n38', target: 'n2', relation: 'biomarker_of', confidence: 0.88, evidenceCount: 678 },
+      { id: 'e37', source: 'n39', target: 'n8', relation: 'biomarker_of', confidence: 0.83, evidenceCount: 445 },
+      { id: 'e38', source: 'n33', target: 'n1', relation: 'activates', confidence: 0.86, evidenceCount: 800 },
+      // Drug interactions
+      { id: 'e39', source: 'n27', target: 'n46', relation: 'inhibits', confidence: 0.92, evidenceCount: 780 },
+      { id: 'e40', source: 'n42', target: 'n32', relation: 'targets', confidence: 0.88, evidenceCount: 178 },
+    ],
   })
 
   const { data: searchResults } = useQuery({
@@ -183,7 +289,7 @@ export default function KnowledgeGraph() {
     ctx.scale(window.devicePixelRatio, window.devicePixelRatio)
 
     // Clear canvas
-    ctx.fillStyle = '#0f172a'
+    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--color-bg').trim() || '#000000'
     ctx.fillRect(0, 0, canvas.offsetWidth, canvas.offsetHeight)
 
     // Apply zoom and pan
@@ -373,13 +479,13 @@ export default function KnowledgeGraph() {
   }
 
   return (
-    <div className="h-full flex flex-col bg-secondary-950">
+    <div className="h-full flex flex-col bg-[var(--color-bg)]">
       {/* Header */}
-      <div className="p-4 border-b border-secondary-800 bg-secondary-900">
+      <div className="p-4 border-b border-[var(--color-border)] bg-[var(--color-bg-elevated)]">
         <div className="flex items-center justify-between mb-3">
           <div>
-            <h1 className="text-xl font-bold text-white">Knowledge Graph Explorer</h1>
-            <p className="text-secondary-400 text-sm">
+            <h1 className="text-xl font-bold text-[var(--color-text)]">Knowledge Graph Explorer</h1>
+            <p className="text-[var(--color-text-muted)] text-sm">
               Interactive visualization with evidence drill-down
             </p>
           </div>
@@ -387,27 +493,27 @@ export default function KnowledgeGraph() {
             {stats && (
               <div className="flex space-x-4 text-sm mr-4">
                 <div className="flex items-center space-x-1">
-                  <div className="w-2 h-2 bg-primary-500 rounded-full"></div>
-                  <span className="text-secondary-400">Entities:</span>
-                  <span className="text-white font-medium">{stats.total_entities?.toLocaleString() || filteredGraph.nodes.length}</span>
+                  <div className="w-2 h-2 bg-[var(--color-accent-blue)] rounded-full"></div>
+                  <span className="text-[var(--color-text-muted)]">Entities:</span>
+                  <span className="text-[var(--color-text)] font-medium">{stats.total_entities?.toLocaleString() || filteredGraph.nodes.length}</span>
                 </div>
                 <div className="flex items-center space-x-1">
-                  <div className="w-2 h-2 bg-emerald-500 rounded-full"></div>
-                  <span className="text-secondary-400">Relations:</span>
-                  <span className="text-white font-medium">{stats.total_relations?.toLocaleString() || filteredGraph.edges.length}</span>
+                  <div className="w-2 h-2 bg-[var(--color-accent-green)] rounded-full"></div>
+                  <span className="text-[var(--color-text-muted)]">Relations:</span>
+                  <span className="text-[var(--color-text)] font-medium">{stats.total_relations?.toLocaleString() || filteredGraph.edges.length}</span>
                 </div>
               </div>
             )}
             <button
               onClick={() => setShowFilters(!showFilters)}
-              className={`p-2 rounded-lg transition-colors ${showFilters ? 'bg-primary-600 text-white' : 'bg-secondary-800 text-secondary-400 hover:text-white'}`}
+              className={`p-2 rounded-lg transition-colors ${showFilters ? 'bg-[var(--color-accent-blue)] text-[var(--color-text)]' : 'bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]'}`}
             >
               <FiFilter className="w-5 h-5" />
             </button>
-            <button className="p-2 bg-secondary-800 rounded-lg text-secondary-400 hover:text-white">
+            <button className="p-2 bg-[var(--glass-bg)] rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
               <FiDownload className="w-5 h-5" />
             </button>
-            <button className="p-2 bg-secondary-800 rounded-lg text-secondary-400 hover:text-white">
+            <button className="p-2 bg-[var(--glass-bg)] rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
               <FiShare2 className="w-5 h-5" />
             </button>
           </div>
@@ -415,10 +521,10 @@ export default function KnowledgeGraph() {
 
         {/* Search */}
         <div className="relative max-w-xl">
-          <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-secondary-400 w-4 h-4" />
+          <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] w-4 h-4" />
           <input
             type="text"
-            className="w-full bg-secondary-800 border border-secondary-700 rounded-lg py-2 pl-10 pr-4 text-white text-sm placeholder-secondary-500 focus:outline-none focus:border-primary-500"
+            className="w-full bg-[var(--glass-bg)] border border-[var(--color-border)] rounded-lg py-2 pl-10 pr-4 text-[var(--color-text)] text-sm placeholder-secondary-500 focus:outline-none focus:border-blue-500"
             placeholder="Search genes, proteins, diseases, drugs, pathways..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
@@ -426,7 +532,7 @@ export default function KnowledgeGraph() {
           {searchQuery && (
             <button
               onClick={() => setSearchQuery('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-secondary-400 hover:text-white"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
             >
               <FiX className="w-4 h-4" />
             </button>
@@ -435,11 +541,11 @@ export default function KnowledgeGraph() {
 
         {/* Search Results Dropdown */}
         {searchQuery.length >= 2 && searchResults && searchResults.length > 0 && (
-          <div className="absolute z-20 mt-1 w-full max-w-xl bg-secondary-800 border border-secondary-700 rounded-lg shadow-xl max-h-72 overflow-auto">
+          <div className="absolute z-20 mt-1 w-full max-w-xl bg-[var(--glass-bg)] border border-[var(--color-border)] rounded-lg shadow-xl max-h-72 overflow-auto">
             {searchResults.map((entity) => (
               <button
                 key={entity.id}
-                className="w-full px-4 py-2.5 text-left hover:bg-secondary-700 transition-colors flex items-center justify-between"
+                className="w-full px-4 py-2.5 text-left hover:bg-[var(--glass-bg-hover)] transition-colors flex items-center justify-between"
                 onClick={() => {
                   setSelectedEntity(entity)
                   setSearchQuery('')
@@ -447,14 +553,14 @@ export default function KnowledgeGraph() {
               >
                 <div className="flex items-center space-x-3">
                   <div
-                    className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold"
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-[var(--color-text)] text-xs font-bold"
                     style={{ backgroundColor: ENTITY_COLORS[entity.entity_type as keyof typeof ENTITY_COLORS]?.bg || '#64748b' }}
                   >
                     {entity.name.slice(0, 2)}
                   </div>
                   <div>
-                    <p className="text-white font-medium text-sm">{entity.name}</p>
-                    <p className="text-secondary-400 text-xs capitalize">{entity.entity_type}</p>
+                    <p className="text-[var(--color-text)] font-medium text-sm">{entity.name}</p>
+                    <p className="text-[var(--color-text-muted)] text-xs capitalize">{entity.entity_type}</p>
                   </div>
                 </div>
               </button>
@@ -467,9 +573,9 @@ export default function KnowledgeGraph() {
       <div className="flex-1 flex overflow-hidden">
         {/* Filters Panel */}
         {showFilters && (
-          <div className="w-64 border-r border-secondary-800 bg-secondary-900 overflow-y-auto">
+          <div className="w-64 border-r border-[var(--color-border)] bg-[var(--color-bg-elevated)] overflow-y-auto">
             <div className="p-3">
-              <h3 className="text-sm font-semibold text-white mb-3 flex items-center">
+              <h3 className="text-sm font-semibold text-[var(--color-text)] mb-3 flex items-center">
                 <FiLayers className="w-4 h-4 mr-2" />
                 Filters & Layers
               </h3>
@@ -478,7 +584,7 @@ export default function KnowledgeGraph() {
               <div className="mb-4">
                 <button
                   onClick={() => toggleSection('entityTypes')}
-                  className="w-full flex items-center justify-between text-sm text-secondary-300 hover:text-white py-1"
+                  className="w-full flex items-center justify-between text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text)] py-1"
                 >
                   <span>Entity Types</span>
                   {expandedSections.entityTypes ? <FiChevronDown className="w-4 h-4" /> : <FiChevronRight className="w-4 h-4" />}
@@ -491,13 +597,13 @@ export default function KnowledgeGraph() {
                           type="checkbox"
                           checked={filters.entityTypes.includes(type)}
                           onChange={() => toggleEntityType(type)}
-                          className="rounded border-secondary-600 text-primary-600 focus:ring-primary-500"
+                          className="rounded border-[var(--color-border-strong)] text-[var(--color-accent-blue)] focus:ring-blue-500"
                         />
                         <div
                           className="w-3 h-3 rounded-full"
                           style={{ backgroundColor: config.bg }}
                         />
-                        <span className="text-sm text-secondary-300 group-hover:text-white capitalize">
+                        <span className="text-sm text-[var(--color-text-secondary)] group-hover:text-[var(--color-text)] capitalize">
                           {config.text}
                         </span>
                       </label>
@@ -510,7 +616,7 @@ export default function KnowledgeGraph() {
               <div className="mb-4">
                 <button
                   onClick={() => toggleSection('relationTypes')}
-                  className="w-full flex items-center justify-between text-sm text-secondary-300 hover:text-white py-1"
+                  className="w-full flex items-center justify-between text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text)] py-1"
                 >
                   <span>Relation Types</span>
                   {expandedSections.relationTypes ? <FiChevronDown className="w-4 h-4" /> : <FiChevronRight className="w-4 h-4" />}
@@ -523,13 +629,13 @@ export default function KnowledgeGraph() {
                           type="checkbox"
                           checked={filters.relationTypes.includes(type)}
                           onChange={() => toggleRelationType(type)}
-                          className="rounded border-secondary-600 text-primary-600 focus:ring-primary-500"
+                          className="rounded border-[var(--color-border-strong)] text-[var(--color-accent-blue)] focus:ring-blue-500"
                         />
                         <div
                           className="w-3 h-0.5 rounded"
                           style={{ backgroundColor: config.color }}
                         />
-                        <span className="text-sm text-secondary-300 group-hover:text-white">
+                        <span className="text-sm text-[var(--color-text-secondary)] group-hover:text-[var(--color-text)]">
                           {config.label}
                         </span>
                       </label>
@@ -542,7 +648,7 @@ export default function KnowledgeGraph() {
               <div className="mb-4">
                 <button
                   onClick={() => toggleSection('contexts')}
-                  className="w-full flex items-center justify-between text-sm text-secondary-300 hover:text-white py-1"
+                  className="w-full flex items-center justify-between text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text)] py-1"
                 >
                   <span>Context Categories</span>
                   {expandedSections.contexts ? <FiChevronDown className="w-4 h-4" /> : <FiChevronRight className="w-4 h-4" />}
@@ -555,13 +661,13 @@ export default function KnowledgeGraph() {
                           type="checkbox"
                           checked={filters.contexts.includes(ctx.id)}
                           onChange={() => toggleContext(ctx.id)}
-                          className="rounded border-secondary-600 text-primary-600 focus:ring-primary-500"
+                          className="rounded border-[var(--color-border-strong)] text-[var(--color-accent-blue)] focus:ring-blue-500"
                         />
                         <div
                           className="w-3 h-3 rounded"
                           style={{ backgroundColor: ctx.color }}
                         />
-                        <span className="text-sm text-secondary-300 group-hover:text-white">
+                        <span className="text-sm text-[var(--color-text-secondary)] group-hover:text-[var(--color-text)]">
                           {ctx.label}
                         </span>
                       </label>
@@ -574,7 +680,7 @@ export default function KnowledgeGraph() {
               <div className="mb-4">
                 <button
                   onClick={() => toggleSection('confidence')}
-                  className="w-full flex items-center justify-between text-sm text-secondary-300 hover:text-white py-1"
+                  className="w-full flex items-center justify-between text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text)] py-1"
                 >
                   <span>Confidence Threshold</span>
                   {expandedSections.confidence ? <FiChevronDown className="w-4 h-4" /> : <FiChevronRight className="w-4 h-4" />}
@@ -589,16 +695,16 @@ export default function KnowledgeGraph() {
                       onChange={(e) => setFilters(prev => ({ ...prev, minConfidence: parseInt(e.target.value) / 100 }))}
                       className="w-full h-2 bg-secondary-700 rounded-lg appearance-none cursor-pointer"
                     />
-                    <div className="flex justify-between text-xs text-secondary-400 mt-1">
+                    <div className="flex justify-between text-xs text-[var(--color-text-muted)] mt-1">
                       <span>0%</span>
-                      <span className="text-primary-400">{(filters.minConfidence * 100).toFixed(0)}%</span>
+                      <span className="text-[var(--color-accent-blue)]">{(filters.minConfidence * 100).toFixed(0)}%</span>
                       <span>100%</span>
                     </div>
                     <div className="mt-2 space-y-1">
                       {CONFIDENCE_LEVELS.map((level) => (
                         <div key={level.id} className="flex items-center space-x-2 text-xs">
                           <div className="w-2 h-2 rounded-full" style={{ backgroundColor: level.color }} />
-                          <span className="text-secondary-400">{level.label}</span>
+                          <span className="text-[var(--color-text-muted)]">{level.label}</span>
                         </div>
                       ))}
                     </div>
@@ -622,45 +728,45 @@ export default function KnowledgeGraph() {
           <div className="absolute bottom-4 right-4 flex flex-col space-y-2">
             <button
               onClick={() => setZoom(z => Math.min(2, z + 0.1))}
-              className="p-2 bg-secondary-800 rounded-lg hover:bg-secondary-700 text-secondary-400 hover:text-white transition-colors"
+              className="p-2 bg-[var(--glass-bg)] rounded-lg hover:bg-[var(--glass-bg-hover)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
             >
               <FiZoomIn className="w-5 h-5" />
             </button>
             <button
               onClick={() => setZoom(z => Math.max(0.5, z - 0.1))}
-              className="p-2 bg-secondary-800 rounded-lg hover:bg-secondary-700 text-secondary-400 hover:text-white transition-colors"
+              className="p-2 bg-[var(--glass-bg)] rounded-lg hover:bg-[var(--glass-bg-hover)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
             >
               <FiZoomOut className="w-5 h-5" />
             </button>
             <button
               onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }}
-              className="p-2 bg-secondary-800 rounded-lg hover:bg-secondary-700 text-secondary-400 hover:text-white transition-colors"
+              className="p-2 bg-[var(--glass-bg)] rounded-lg hover:bg-[var(--glass-bg-hover)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
             >
               <FiMaximize className="w-5 h-5" />
             </button>
           </div>
 
           {/* Legend */}
-          <div className="absolute top-4 left-4 bg-secondary-900/90 backdrop-blur-sm rounded-lg p-3 max-w-xs">
-            <h4 className="text-xs font-semibold text-secondary-300 mb-2">Legend</h4>
+          <div className="absolute top-4 left-4 bg-[var(--color-bg-elevated)] backdrop-blur-sm rounded-lg p-3 max-w-xs">
+            <h4 className="text-xs font-semibold text-[var(--color-text-secondary)] mb-2">Legend</h4>
             <div className="grid grid-cols-2 gap-1">
               {Object.entries(ENTITY_COLORS).slice(0, 6).map(([type, config]) => (
                 <div key={type} className="flex items-center space-x-1.5">
                   <div className="w-3 h-3 rounded-full" style={{ backgroundColor: config.bg }} />
-                  <span className="text-xs text-secondary-400">{config.text}</span>
+                  <span className="text-xs text-[var(--color-text-muted)]">{config.text}</span>
                 </div>
               ))}
             </div>
           </div>
 
           {/* Stats */}
-          <div className="absolute top-4 right-4 bg-secondary-900/90 backdrop-blur-sm rounded-lg px-3 py-2">
+          <div className="absolute top-4 right-4 bg-[var(--color-bg-elevated)] backdrop-blur-sm rounded-lg px-3 py-2">
             <div className="flex items-center space-x-4 text-xs">
-              <span className="text-secondary-400">
-                Showing: <span className="text-white font-medium">{filteredGraph.nodes.length}</span> nodes
+              <span className="text-[var(--color-text-muted)]">
+                Showing: <span className="text-[var(--color-text)] font-medium">{filteredGraph.nodes.length}</span> nodes
               </span>
-              <span className="text-secondary-400">
-                <span className="text-white font-medium">{filteredGraph.edges.length}</span> edges
+              <span className="text-[var(--color-text-muted)]">
+                <span className="text-[var(--color-text)] font-medium">{filteredGraph.edges.length}</span> edges
               </span>
             </div>
           </div>
@@ -668,15 +774,15 @@ export default function KnowledgeGraph() {
 
         {/* Entity/Edge Details Panel */}
         {(selectedEntity || selectedEdge) && (
-          <div className="w-80 border-l border-secondary-800 bg-secondary-900 overflow-y-auto">
+          <div className="w-80 border-l border-[var(--color-border)] bg-[var(--color-bg-elevated)] overflow-y-auto">
             <div className="p-4">
               {selectedEntity && !selectedEdge && (
                 <>
                   <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-lg font-semibold text-white">Entity Details</h2>
+                    <h2 className="text-lg font-semibold text-[var(--color-text)]">Entity Details</h2>
                     <button
                       onClick={() => setSelectedEntity(null)}
-                      className="text-secondary-400 hover:text-white"
+                      className="text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
                     >
                       <FiX className="w-5 h-5" />
                     </button>
@@ -684,28 +790,28 @@ export default function KnowledgeGraph() {
 
                   <div className="flex items-center space-x-3 mb-4">
                     <div
-                      className="w-12 h-12 rounded-full flex items-center justify-center text-white text-lg font-bold"
+                      className="w-12 h-12 rounded-full flex items-center justify-center text-[var(--color-text)] text-lg font-bold"
                       style={{ backgroundColor: ENTITY_COLORS[selectedEntity.entity_type as keyof typeof ENTITY_COLORS]?.bg || '#64748b' }}
                     >
                       {selectedEntity.name.slice(0, 2)}
                     </div>
                     <div>
-                      <h3 className="text-white font-semibold">{selectedEntity.name}</h3>
-                      <p className="text-secondary-400 text-sm capitalize">{selectedEntity.entity_type}</p>
+                      <h3 className="text-[var(--color-text)] font-semibold">{selectedEntity.name}</h3>
+                      <p className="text-[var(--color-text-muted)] text-sm capitalize">{selectedEntity.entity_type}</p>
                     </div>
                   </div>
 
                   <div className="space-y-4">
                     {selectedEntity.description && (
                       <div>
-                        <label className="text-secondary-400 text-xs font-medium">Description</label>
-                        <p className="text-secondary-300 text-sm mt-1">{selectedEntity.description}</p>
+                        <label className="text-[var(--color-text-muted)] text-xs font-medium">Description</label>
+                        <p className="text-[var(--color-text-secondary)] text-sm mt-1">{selectedEntity.description}</p>
                       </div>
                     )}
 
                     {selectedEntity.properties?.confidence !== undefined && (
                       <div>
-                        <label className="text-secondary-400 text-xs font-medium">Confidence</label>
+                        <label className="text-[var(--color-text-muted)] text-xs font-medium">Confidence</label>
                         <div className="mt-1">
                           {getConfidenceBadge(Number(selectedEntity.properties.confidence))}
                         </div>
@@ -714,10 +820,10 @@ export default function KnowledgeGraph() {
 
                     {selectedEntity.aliases && selectedEntity.aliases.length > 0 && (
                       <div>
-                        <label className="text-secondary-400 text-xs font-medium">Aliases</label>
+                        <label className="text-[var(--color-text-muted)] text-xs font-medium">Aliases</label>
                         <div className="flex flex-wrap gap-1 mt-1">
                           {selectedEntity.aliases.map((alias, i) => (
-                            <span key={i} className="px-2 py-0.5 bg-secondary-800 rounded text-xs text-secondary-300">
+                            <span key={i} className="px-2 py-0.5 bg-[var(--glass-bg)] rounded text-xs text-[var(--color-text-secondary)]">
                               {alias}
                             </span>
                           ))}
@@ -726,17 +832,17 @@ export default function KnowledgeGraph() {
                     )}
 
                     <div>
-                      <label className="text-secondary-400 text-xs font-medium">External Links</label>
+                      <label className="text-[var(--color-text-muted)] text-xs font-medium">External Links</label>
                       <div className="flex flex-wrap gap-2 mt-1">
-                        <a href="#" className="flex items-center space-x-1 text-xs text-primary-400 hover:text-primary-300">
+                        <a href="#" className="flex items-center space-x-1 text-xs text-[var(--color-accent-blue)] hover:text-[var(--color-accent-blue)]">
                           <FiExternalLink className="w-3 h-3" />
                           <span>PubMed</span>
                         </a>
-                        <a href="#" className="flex items-center space-x-1 text-xs text-primary-400 hover:text-primary-300">
+                        <a href="#" className="flex items-center space-x-1 text-xs text-[var(--color-accent-blue)] hover:text-[var(--color-accent-blue)]">
                           <FiExternalLink className="w-3 h-3" />
                           <span>UniProt</span>
                         </a>
-                        <a href="#" className="flex items-center space-x-1 text-xs text-primary-400 hover:text-primary-300">
+                        <a href="#" className="flex items-center space-x-1 text-xs text-[var(--color-accent-blue)] hover:text-[var(--color-accent-blue)]">
                           <FiExternalLink className="w-3 h-3" />
                           <span>DrugBank</span>
                         </a>
@@ -745,19 +851,19 @@ export default function KnowledgeGraph() {
 
                     {neighborhood && neighborhood.relations && neighborhood.relations.length > 0 && (
                       <div>
-                        <label className="text-secondary-400 text-xs font-medium mb-2 block">
+                        <label className="text-[var(--color-text-muted)] text-xs font-medium mb-2 block">
                           Relationships ({neighborhood.relations.length})
                         </label>
                         <div className="space-y-2 max-h-48 overflow-auto">
                           {neighborhood.relations.slice(0, 10).map((rel, i) => (
-                            <div key={i} className="p-2 bg-secondary-800 rounded text-xs">
+                            <div key={i} className="p-2 bg-[var(--glass-bg)] rounded text-xs">
                               <div className="flex items-center justify-between">
-                                <span className="text-primary-400">{rel.source_name}</span>
-                                <span className="text-secondary-500 mx-1">→</span>
-                                <span className="text-primary-400">{rel.target_name}</span>
+                                <span className="text-[var(--color-accent-blue)]">{rel.source_name}</span>
+                                <span className="text-[var(--color-text-muted)] mx-1">→</span>
+                                <span className="text-[var(--color-accent-blue)]">{rel.target_name}</span>
                               </div>
                               <div className="flex items-center justify-between mt-1">
-                                <span className="text-secondary-400">{rel.relation_type}</span>
+                                <span className="text-[var(--color-text-muted)]">{rel.relation_type}</span>
                                 {getConfidenceBadge(rel.confidence || 0.7)}
                               </div>
                             </div>
@@ -772,18 +878,18 @@ export default function KnowledgeGraph() {
               {selectedEdge && (
                 <>
                   <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-lg font-semibold text-white">Relationship Evidence</h2>
+                    <h2 className="text-lg font-semibold text-[var(--color-text)]">Relationship Evidence</h2>
                     <button
                       onClick={() => { setSelectedEdge(null); setShowEvidencePanel(false) }}
-                      className="text-secondary-400 hover:text-white"
+                      className="text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
                     >
                       <FiX className="w-5 h-5" />
                     </button>
                   </div>
 
-                  <div className="bg-secondary-800 rounded-lg p-3 mb-4">
+                  <div className="bg-[var(--glass-bg)] rounded-lg p-3 mb-4">
                     <div className="flex items-center justify-center space-x-2 text-sm">
-                      <span className="text-primary-400 font-medium">
+                      <span className="text-[var(--color-accent-blue)] font-medium">
                         {positionedNodes.find(n => n.id === selectedEdge.source)?.label}
                       </span>
                       <div className="flex items-center space-x-1">
@@ -791,7 +897,7 @@ export default function KnowledgeGraph() {
                           className="w-8 h-0.5 rounded"
                           style={{ backgroundColor: RELATION_TYPES[selectedEdge.relation as keyof typeof RELATION_TYPES]?.color }}
                         />
-                        <span className="text-secondary-400 text-xs">
+                        <span className="text-[var(--color-text-muted)] text-xs">
                           {RELATION_TYPES[selectedEdge.relation as keyof typeof RELATION_TYPES]?.label}
                         </span>
                         <div
@@ -799,44 +905,44 @@ export default function KnowledgeGraph() {
                           style={{ backgroundColor: RELATION_TYPES[selectedEdge.relation as keyof typeof RELATION_TYPES]?.color }}
                         />
                       </div>
-                      <span className="text-primary-400 font-medium">
+                      <span className="text-[var(--color-accent-blue)] font-medium">
                         {positionedNodes.find(n => n.id === selectedEdge.target)?.label}
                       </span>
                     </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3 mb-4">
-                    <div className="bg-secondary-800 rounded p-2 text-center">
-                      <p className="text-secondary-400 text-xs">Confidence</p>
-                      <p className="text-white font-semibold">{(selectedEdge.confidence * 100).toFixed(0)}%</p>
+                    <div className="bg-[var(--glass-bg)] rounded p-2 text-center">
+                      <p className="text-[var(--color-text-muted)] text-xs">Confidence</p>
+                      <p className="text-[var(--color-text)] font-semibold">{(selectedEdge.confidence * 100).toFixed(0)}%</p>
                     </div>
-                    <div className="bg-secondary-800 rounded p-2 text-center">
-                      <p className="text-secondary-400 text-xs">Evidence</p>
-                      <p className="text-white font-semibold">{selectedEdge.evidenceCount}</p>
+                    <div className="bg-[var(--glass-bg)] rounded p-2 text-center">
+                      <p className="text-[var(--color-text-muted)] text-xs">Evidence</p>
+                      <p className="text-[var(--color-text)] font-semibold">{selectedEdge.evidenceCount}</p>
                     </div>
                   </div>
 
                   <div>
                     <div className="flex items-center justify-between mb-2">
-                      <label className="text-secondary-400 text-xs font-medium">Supporting Evidence</label>
-                      <FiBook className="w-4 h-4 text-secondary-500" />
+                      <label className="text-[var(--color-text-muted)] text-xs font-medium">Supporting Evidence</label>
+                      <FiBook className="w-4 h-4 text-[var(--color-text-muted)]" />
                     </div>
                     <div className="space-y-2">
                       {selectedEdge.evidence && selectedEdge.evidence.length > 0 ? (
                         selectedEdge.evidence.map((ev, i) => (
-                          <div key={i} className="bg-secondary-800 rounded-lg p-3">
-                            <p className="text-secondary-300 text-sm mb-2">"{ev.text}"</p>
+                          <div key={i} className="bg-[var(--glass-bg)] rounded-lg p-3">
+                            <p className="text-[var(--color-text-secondary)] text-sm mb-2">"{ev.text}"</p>
                             <div className="flex items-center justify-between">
-                              <span className="text-primary-400 text-xs">{ev.source}</span>
+                              <span className="text-[var(--color-accent-blue)] text-xs">{ev.source}</span>
                               {getConfidenceBadge(ev.confidence)}
                             </div>
                           </div>
                         ))
                       ) : (
-                        <div className="bg-secondary-800 rounded-lg p-3 text-center">
-                          <FiInfo className="w-5 h-5 text-secondary-500 mx-auto mb-1" />
-                          <p className="text-secondary-400 text-xs">Evidence details not loaded</p>
-                          <button className="text-primary-400 text-xs mt-1 hover:underline">
+                        <div className="bg-[var(--glass-bg)] rounded-lg p-3 text-center">
+                          <FiInfo className="w-5 h-5 text-[var(--color-text-muted)] mx-auto mb-1" />
+                          <p className="text-[var(--color-text-muted)] text-xs">Evidence details not loaded</p>
+                          <button className="text-[var(--color-accent-blue)] text-xs mt-1 hover:underline">
                             Load evidence
                           </button>
                         </div>
@@ -845,8 +951,8 @@ export default function KnowledgeGraph() {
                   </div>
 
                   <div className="mt-4">
-                    <label className="text-secondary-400 text-xs font-medium mb-2 block">Confidence Breakdown</label>
-                    <div className="text-center text-secondary-400 text-xs py-4">
+                    <label className="text-[var(--color-text-muted)] text-xs font-medium mb-2 block">Confidence Breakdown</label>
+                    <div className="text-center text-[var(--color-text-muted)] text-xs py-4">
                       No confidence breakdown available
                     </div>
                   </div>

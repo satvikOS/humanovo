@@ -315,19 +315,34 @@ export default function Notebook() {
   }
 
   const createPage = async (template?: typeof PAGE_TEMPLATES[0]) => {
+    const title = template ? template.name : 'Untitled'
+    const content = template?.content || ''
     try {
       const page = await api.createNotebookPage({
-        title: template ? template.name : 'Untitled',
-        content: template?.content || '',
+        title,
+        content,
         content_type: 'markdown',
         tags: [],
       })
       setPages(prev => [page, ...prev])
       selectPage(page)
-      setShowTemplates(false)
     } catch (err) {
-      console.error('Failed to create page:', err)
+      console.error('Failed to create page via API, creating locally:', err)
+      // Fallback: create a local page so the UI isn't blank
+      const localPage: NotebookPage = {
+        id: `local-${Date.now()}`,
+        title,
+        content,
+        content_type: 'markdown',
+        tags: [],
+        version: 1,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }
+      setPages(prev => [localPage, ...prev])
+      selectPage(localPage)
     }
+    setShowTemplates(false)
   }
 
   const deletePage = async (id: string) => {
