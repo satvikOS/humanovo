@@ -202,6 +202,7 @@ class DiscoveryHypothesis:
     tags: list[str] = field(default_factory=list)
     round_number: int = 0
     stages_completed: int = 0
+    translational_roadmap: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -2266,6 +2267,18 @@ Produce the FINAL, COMPLETE hypothesis. Integrate ALL findings from stages 1-9 i
         else:
             tags.append("needs-grounding")
 
+        # Extract translational roadmap from accumulated context
+        translational_roadmap = accumulated_context.get("translational_roadmap", {})
+        if not translational_roadmap:
+            # Try to build from individual phase keys
+            phases = {}
+            for phase_key in ["T0_BASIC_RESEARCH", "T1_TRANSLATION_TO_HUMANS", "T2_TRANSLATION_TO_PATIENTS",
+                              "T3_TRANSLATION_TO_PRACTICE", "T4_TRANSLATION_TO_COMMUNITY", "T5_GLOBAL_IMPACT"]:
+                if accumulated_context.get(phase_key):
+                    phases[phase_key] = accumulated_context[phase_key]
+            if phases:
+                translational_roadmap = {"phases": phases}
+
         return DiscoveryHypothesis(
             id=hypothesis_id,
             disease=disease,
@@ -2289,6 +2302,7 @@ Produce the FINAL, COMPLETE hypothesis. Integrate ALL findings from stages 1-9 i
             tags=tags,
             round_number=round_number,
             stages_completed=sum(1 for sr in stage_results if sr.success),
+            translational_roadmap=translational_roadmap,
         )
 
 

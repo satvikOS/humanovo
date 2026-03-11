@@ -328,6 +328,7 @@ class PaperGenerationService:
             "hypothesis_analyses": self._generate_hypothesis_deep_analyses(llm, paper),
             "external_factors_analysis": self._generate_external_factors_ai(llm, paper, substance_context),
             "molecular_mechanisms": self._generate_molecular_mechanisms_ai(llm, paper, hyp_context),
+            "translational_roadmap": self._generate_translational_roadmap_ai(llm, paper, hyp_context),
         }
 
         phase2_results = await asyncio.gather(
@@ -395,13 +396,24 @@ class PaperGenerationService:
         lines = []
         for i, h in enumerate(paper.hypotheses[:20], 1):
             conf = h.get("confidence", 0)
-            lines.append(
+            entry = (
                 f"Hypothesis {i}: {h.get('title', 'Untitled')}\n"
                 f"  Confidence: {conf:.1%} | Model: {h.get('model_used', 'unknown')}\n"
                 f"  Mechanism: {h.get('mechanism', 'Not specified')}\n"
                 f"  Description: {h.get('description', 'N/A')}\n"
                 f"  Validated: {'Yes' if h.get('validated') else 'No'}"
             )
+            # Include evidence and risks if available
+            evidence = h.get("evidence_summary", [])
+            if evidence:
+                entry += f"\n  Evidence: {'; '.join(str(e)[:100] for e in evidence[:3])}"
+            risks = h.get("risks", [])
+            if risks:
+                entry += f"\n  Risks: {'; '.join(str(r)[:100] for r in risks[:3])}"
+            validation_steps = h.get("validation_steps", [])
+            if validation_steps:
+                entry += f"\n  Next Steps: {'; '.join(str(v)[:100] for v in validation_steps[:3])}"
+            lines.append(entry)
         return "\n\n".join(lines)
 
     def _build_substance_context(self, paper: ResearchPaper) -> str:
@@ -886,6 +898,89 @@ IMPORTANT: Do NOT hallucinate. Only state well-established biomedical facts. Use
 Write as formal FDA/R&D-grade scientific text. No headers — flowing paragraphs."""
 
         return await llm.generate(ModelType.DEEPSEEK_R1_0528, prompt, temperature=0.15, max_tokens=65_536)
+
+    async def _generate_translational_roadmap_ai(self, llm, paper: ResearchPaper, hyp_context: str) -> str:
+        """Generate comprehensive T0-T5 translational roadmap section."""
+        from app.agents.discovery_orchestrator import ModelType
+
+        # Extract any existing translational data from hypotheses
+        roadmap_data = ""
+        for h in paper.hypotheses[:3]:
+            roadmap = h.get("translational_roadmap", {})
+            if roadmap and isinstance(roadmap, dict):
+                phases = roadmap.get("phases", {})
+                if phases:
+                    roadmap_data += f"\nHypothesis: {h.get('title', 'N/A')}\n"
+                    for phase_key, phase_val in phases.items():
+                        if isinstance(phase_val, dict):
+                            roadmap_data += f"  {phase_key}: {phase_val.get('title', '')} — {phase_val.get('description', '')[:200]}\n"
+
+        top_hyps = paper.hypotheses[:5]
+        prompt = f"""Write a comprehensive Translational Roadmap section (1500-2500 words) for a {paper.disease} research paper.
+
+This section covers the complete bench-to-bedside translational spectrum (T0-T5) for the top discovery hypotheses.
+
+Top hypotheses:
+{chr(10).join(f"- {h.get('title','N/A')}: {h.get('mechanism','N/A')[:200]}" for h in top_hyps)}
+
+{f"Existing translational data from pipeline:{chr(10)}{roadmap_data}" if roadmap_data else ""}
+
+Write DETAILED content for EACH of the following 6 translational phases:
+
+## T0: Basic Research & Target Validation (300+ words)
+- Target identification and validation experiments
+- In vitro/in vivo proof-of-concept studies
+- Mechanism elucidation experiments
+- Key assays and model systems required
+- Include specific experimental protocols and expected outcomes
+
+## T1: Translation to Humans — Preclinical Development (300+ words)
+- IND-enabling studies and GLP toxicology
+- Drug formulation and delivery optimization
+- Pharmacokinetic/pharmacodynamic (PK/PD) modeling
+- Biomarker development for patient selection
+- Regulatory pre-IND meeting strategy
+
+## T2: Translation to Patients — Clinical Trials (300+ words)
+- Phase I/II/III trial design with specific endpoints
+- Patient stratification and enrollment criteria
+- Adaptive trial design considerations
+- Safety monitoring and DSMB plan
+- Companion diagnostic development
+
+## T3: Translation to Practice — Clinical Implementation (200+ words)
+- Clinical practice guideline development
+- Provider education and training programs
+- Clinical decision support integration
+- Health system implementation strategy
+- Outcomes measurement framework
+
+## T4: Translation to Community — Population Health (200+ words)
+- Community-based implementation programs
+- Health equity and access considerations
+- Real-world evidence generation plan
+- Patient advocacy and engagement
+- Pharmacovigilance and post-market surveillance
+
+## T5: Global Impact (200+ words)
+- International regulatory strategy (EMA, PMDA, etc.)
+- LMIC adaptation and technology transfer
+- Global health policy recommendations
+- Pandemic/endemic preparedness applications
+- Global access and pricing strategy
+
+For each phase include:
+- Timeline estimates with milestones
+- Budget estimates
+- Key risks and mitigation strategies
+- Success criteria and go/no-go decision points
+- Specific regulatory requirements
+
+Use headers (##, ###) for each phase. Include tables for timelines and budgets.
+Write as formal publication-grade scientific text. Be specific to {paper.disease}.
+IMPORTANT: Do NOT hallucinate. Base all recommendations on established translational science frameworks."""
+
+        return await llm.generate(ModelType.CLAUDE_OPUS, prompt, temperature=0.25, max_tokens=32_768)
 
     async def _generate_discussion_ai(self, llm, paper: ResearchPaper, hyp_context: str) -> str:
         from app.agents.discovery_orchestrator import ModelType
@@ -1549,6 +1644,7 @@ Write as a professional analytical assessment. Be data-driven and actionable."""
             ("results_overview", "Results Overview", 0),
             ("hypothesis_analyses", "Detailed Hypothesis Analyses", 1),
             ("molecular_mechanisms", "Molecular Mechanisms", 1),
+            ("translational_roadmap", "Translational Roadmap (T0-T5)", 0),
             ("external_factors_analysis", "External Factors Analysis", 0),
             ("discussion", "Discussion", 0),
             ("limitations_future", "Limitations and Future Directions", 1),

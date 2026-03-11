@@ -924,6 +924,7 @@ class DocumentPipelineService:
                 ("results_overview", "Results", 0),
                 ("hypothesis_analyses", "Hypothesis Analyses", 1),
                 ("molecular_mechanisms", "Molecular Mechanisms", 1),
+                ("translational_roadmap", "Translational Roadmap (T0-T5)", 0),
                 ("external_factors_analysis", "External Factors Analysis", 0),
                 ("discussion", "Discussion", 0),
                 ("limitations_future", "Limitations & Future Directions", 1),
@@ -1198,9 +1199,47 @@ class DocumentPipelineService:
             content="\n\n---\n\n".join(hyp_lines),
         ))
 
+        # Translational Roadmap (T0-T5)
+        roadmap_content = ""
+        for h in sorted_hyps[:3]:
+            roadmap = h.get("translational_roadmap", {})
+            if roadmap and isinstance(roadmap, dict):
+                phases = roadmap.get("phases", {})
+                if phases:
+                    roadmap_content += f"\n\n### Translational Roadmap: {h.get('title', 'Hypothesis')}\n\n"
+                    roadmap_content += f"**Overall Timeline:** {roadmap.get('overall_timeline', 'TBD')}\n\n"
+                    roadmap_content += f"**Overall Budget:** {roadmap.get('overall_budget', 'TBD')}\n\n"
+                    for phase_key in ["T0_BASIC_RESEARCH", "T1_TRANSLATION_TO_HUMANS", "T2_TRANSLATION_TO_PATIENTS",
+                                      "T3_TRANSLATION_TO_PRACTICE", "T4_TRANSLATION_TO_COMMUNITY", "T5_GLOBAL_IMPACT"]:
+                        phase_data = phases.get(phase_key, {})
+                        if phase_data:
+                            roadmap_content += f"\n#### {phase_data.get('title', phase_key.replace('_', ' '))}\n\n"
+                            if phase_data.get("description"):
+                                roadmap_content += f"{phase_data['description']}\n\n"
+                            if phase_data.get("timeline"):
+                                roadmap_content += f"**Timeline:** {phase_data['timeline']}\n\n"
+                            if phase_data.get("estimated_cost"):
+                                roadmap_content += f"**Estimated Cost:** {phase_data['estimated_cost']}\n\n"
+                            objectives = phase_data.get("objectives", [])
+                            if objectives:
+                                roadmap_content += "**Objectives:**\n" + "\n".join(f"- {o}" for o in objectives[:5]) + "\n\n"
+                            milestones = phase_data.get("milestones", [])
+                            if milestones:
+                                roadmap_content += "**Milestones:**\n" + "\n".join(f"- {m}" for m in milestones[:5]) + "\n\n"
+                            risks = phase_data.get("risks", [])
+                            if risks:
+                                roadmap_content += "**Risks:**\n" + "\n".join(f"- {r}" for r in risks[:3]) + "\n\n"
+
+        if roadmap_content:
+            sections.append(DocumentSection(
+                key="translational_roadmap", title="Translational Roadmap (T0-T5)",
+                order=4, depth=0,
+                content=roadmap_content.strip(),
+            ))
+
         # Conclusion
         sections.append(DocumentSection(
-            key="conclusion", title="Conclusion", order=4, depth=0,
+            key="conclusion", title="Conclusion", order=5, depth=0,
             content=(
                 f"This study demonstrates the potential of multi-model AI pipelines "
                 f"for accelerated {bundle.discovery_type.replace('_', ' ')} discovery "
@@ -1208,7 +1247,8 @@ class DocumentPipelineService:
                 f"{len(bundle.models_used)} models, the system generated "
                 f"{bundle.num_hypotheses} hypotheses with {high_conf} achieving high "
                 f"confidence. These findings warrant experimental validation and "
-                f"further investigation."
+                f"further investigation through the translational pipeline from bench "
+                f"research (T0) through global health impact (T5)."
             ),
         ))
 

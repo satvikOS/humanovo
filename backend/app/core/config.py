@@ -114,7 +114,7 @@ class Settings(BaseSettings):
     # Bedrock Model IDs — Claude Opus 4.6 serves as Explorer + Synthesizer
     BEDROCK_MODEL_DEEPSEEK: str = "us.deepseek.r1-v1:0"
     BEDROCK_MODEL_CLAUDE_OPUS: str = "us.anthropic.claude-opus-4-6-v1:0"
-    BEDROCK_MODEL_CLAUDE_SONNET: str = "us.anthropic.claude-sonnet-4-6-v1:0"
+    BEDROCK_MODEL_CLAUDE_SONNET: str = "us.anthropic.claude-sonnet-4-20250514-v1:0"
 
     # Discovery Service Configuration
     DISCOVERY_LLM_PROVIDER: str = "azure_ai"  # azure_ai (primary), bedrock, azure (legacy)
