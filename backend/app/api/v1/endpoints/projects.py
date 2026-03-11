@@ -268,7 +268,7 @@ async def list_projects(
 
 @router.get("/{project_id}", response_model=ProjectResponse)
 async def get_project(project_id: UUID) -> ProjectResponse:
-    """Get a specific project by ID."""
+    """Get a specific project by ID, including its hypotheses."""
     db_ok = await _check_db_available()
     Project, ProjectStatus = _get_project_model()
 
@@ -278,7 +278,38 @@ async def get_project(project_id: UUID) -> ProjectResponse:
             project = result.scalar_one_or_none()
             if not project:
                 raise HTTPException(status_code=404, detail="Project not found")
-            return project_to_response(project)
+
+            # Fetch hypotheses linked to this project
+            hypotheses_list = None
+            try:
+                from app.models.hypothesis import Hypothesis
+                hyp_result = await db.execute(
+                    select(Hypothesis).where(Hypothesis.project_id == project_id)
+                )
+                db_hypotheses = hyp_result.scalars().all()
+                if db_hypotheses:
+                    hypotheses_list = []
+                    for h in db_hypotheses:
+                        hyp_dict = {
+                            "id": str(h.id),
+                            "title": h.statement,
+                            "description": h.rationale or "",
+                            "mechanism": h.mechanism or "",
+                            "confidence": h.confidence_score or 0.0,
+                            "model_used": (h.generation_context or {}).get("model_used", "unknown"),
+                            "validated": h.status.value == "validated" if hasattr(h.status, "value") else False,
+                            "external_factors": (h.generation_context or {}).get("external_factors", []),
+                            "created_at": h.created_at.isoformat() if h.created_at else None,
+                        }
+                        hypotheses_list.append(hyp_dict)
+            except Exception as e:
+                logger.warning("Failed to fetch hypotheses for project", error=str(e))
+
+            resp = project_to_response(project)
+            if hypotheses_list is not None:
+                resp.hypotheses = hypotheses_list
+                resp.hypothesis_count = len(hypotheses_list)
+            return resp
 
     # In-memory fallback
     pid = str(project_id)

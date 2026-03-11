@@ -72,7 +72,7 @@ const researchNavItems = [
 const analysisNavItems = [
   { to: '/statistical-analysis', icon: FiTarget, label: 'Statistics' },
   { to: '/genomics', icon: FiHeart, label: 'Genomics' },
-  { to: '/knowledge-graph-viewer', icon: FiShare2, label: 'Knowledge Graph' },
+  { to: '/knowledge-graph', icon: FiShare2, label: 'Knowledge Graph' },
   { to: '/ml-models', icon: FiCpu, label: 'ML Models' },
 ]
 
@@ -411,8 +411,7 @@ export default function Layout() {
     if (path === '/statistical-analysis') return 'Statistical Analysis'
     if (path === '/data-manager') return 'Data Manager'
     if (path === '/collaboration') return 'Collaboration'
-    if (path === '/knowledge-graph-viewer') return 'Knowledge Graph'
-    if (path === '/clinical-trials') return 'Clinical Trials'
+if (path === '/clinical-trials') return 'Clinical Trials'
     if (path === '/genomics') return 'Genomics Analysis'
     if (path === '/manuscripts') return 'Manuscripts'
     if (path === '/regulatory') return 'Regulatory & Compliance'

@@ -24,7 +24,7 @@ import { Link } from 'react-router-dom'
 import { BarChart, Bar, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import api from '../services/api'
 import type { OrchestratorStatus, DiscoveryConfig } from '../services/api'
-import { persistSet, persistGet } from '../utils/persistence'
+import { persistSet, persistGet, logActivity } from '../utils/persistence'
 
 // Types
 interface Hypothesis {
@@ -136,6 +136,7 @@ export default function Agents() {
 
   const pollRef = useRef<number | null>(null)
   const failRef = useRef(0)
+  const prevStateRef = useRef<string>('idle')
 
   // Polling
   const fetchStatus = useCallback(async () => {
@@ -143,8 +144,20 @@ export default function Agents() {
       const res = await api.getOrchestratorStatus()
       failRef.current = 0
       setConnected(true)
-      setState(res.state || 'idle')
+      const newState = res.state || 'idle'
+      setState(newState)
       setStats(res)
+
+      // Log discovery completion
+      if ((newState === 'completed' || newState === 'stopping') && prevStateRef.current === 'running') {
+        logActivity({
+          type: 'discovery', action: 'completed',
+          title: `Discovery ${newState}: ${(res as any).disease || config.disease} — ${(res as any).top_hypotheses?.length || 0} hypotheses`,
+          project: (res as any).project_name || config.disease,
+          metadata: { hypotheses_count: (res as any).top_hypotheses?.length || 0 },
+        })
+      }
+      prevStateRef.current = newState
 
       // Restore config from backend
       if (!config.disease && (res as any).disease) {
@@ -177,6 +190,11 @@ export default function Agents() {
             updated_at: new Date().toISOString(),
           }
           persistSet('projects', [...existingProjects, projectEntry])
+          logActivity({
+            type: 'project', action: 'created',
+            title: `Project auto-created: ${pname}`,
+            project: pname,
+          })
         } else {
           // Update hypothesis count and status
           const updated = existingProjects.map((p: any) =>
@@ -212,6 +230,14 @@ export default function Agents() {
             }))
             if (newEntries.length > 0) {
               persistSet('hypotheses', [...savedHypotheses, ...newEntries])
+              for (const h of newEntries) {
+                logActivity({
+                  type: 'hypothesis', action: 'created',
+                  title: `Hypothesis discovered: ${h.title?.slice(0, 80) || 'Untitled'}`,
+                  project: (res as any).project_name || config.disease,
+                  metadata: { confidence: h.confidence },
+                })
+              }
             }
           }
 
@@ -250,6 +276,11 @@ export default function Agents() {
       setState('running')
       setShowConfig(false)
       setHypotheses([])
+      logActivity({
+        type: 'discovery', action: 'started',
+        title: `Discovery started: ${config.disease} (${config.discovery_type || 'treatment'})`,
+        metadata: { disease: config.disease, discovery_type: config.discovery_type },
+      })
 
       // Save to history
       const run: DiscoveryRun = {
@@ -297,7 +328,17 @@ export default function Agents() {
         }),
       })
       if (res.ok) {
-        const blob = await res.blob()
+        const contentType = res.headers.get('content-type') || ''
+        let blob: Blob
+        if (contentType.includes('application/json')) {
+          const data = await res.json()
+          const byteChars = atob(data.pdf_base64)
+          const byteArray = new Uint8Array(byteChars.length)
+          for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i)
+          blob = new Blob([byteArray], { type: 'application/pdf' })
+        } else {
+          blob = await res.blob()
+        }
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
         a.href = url; a.download = `${h.title.slice(0, 50)}.pdf`; a.click()

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { FiPlus, FiFolder, FiX, FiTrash2, FiSearch, FiRefreshCw } from 'react-icons/fi'
 import clsx from 'clsx'
 import api, { Project, ProjectCreate } from '../services/api'
+import { persistGet } from '../utils/persistence'
 
 function CreateProjectModal({ onClose, onCreate }: { onClose: () => void; onCreate: (project: ProjectCreate) => void }) {
   const [formData, setFormData] = useState({
@@ -221,8 +222,44 @@ export default function Projects() {
   const loadProjects = async () => {
     try {
       setLoading(true)
-      const res = await api.getProjects({ page_size: 50, search: searchQuery || undefined })
-      setProjects(res.items || [])
+      let apiProjects: Project[] = []
+      try {
+        const res = await api.getProjects({ page_size: 50, search: searchQuery || undefined })
+        apiProjects = res.items || []
+      } catch {
+        // API may be unavailable
+      }
+
+      // Merge localStorage projects (created by discovery) that aren't in API
+      const localProjects = persistGet<any[]>('projects', [])
+      const apiIds = new Set(apiProjects.map(p => p.id))
+      const localOnly = localProjects
+        .filter((p: any) => p.id && !apiIds.has(p.id))
+        .map((p: any) => ({
+          id: p.id,
+          name: p.name || 'Untitled Project',
+          description: p.description,
+          disease_focus: p.disease_focus,
+          research_question: p.research_question,
+          tags: p.tags || [],
+          status: p.status || 'active',
+          hypothesis_count: p.hypothesis_count || 0,
+          evidence_count: p.evidence_count || 0,
+          hypotheses: p.hypotheses,
+          created_at: p.created_at || new Date().toISOString(),
+          updated_at: p.updated_at || new Date().toISOString(),
+        } as Project))
+
+      // Search filter for local projects
+      const filteredLocal = searchQuery
+        ? localOnly.filter(p =>
+            p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            (p.description || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+            (p.disease_focus || '').toLowerCase().includes(searchQuery.toLowerCase())
+          )
+        : localOnly
+
+      setProjects([...apiProjects, ...filteredLocal])
     } catch (err) {
       console.error('Failed to load projects:', err)
     } finally {

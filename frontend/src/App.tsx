@@ -23,7 +23,6 @@ import DataVisualization from './pages/DataVisualization'
 import StatisticalAnalysis from './pages/StatisticalAnalysis'
 import DataManager from './pages/DataManager'
 import Collaboration from './pages/Collaboration'
-import KnowledgeGraphViewer from './pages/KnowledgeGraphViewer'
 import ClinicalTrials from './pages/ClinicalTrials'
 import GenomicsAnalysis from './pages/GenomicsAnalysis'
 import ManuscriptManager from './pages/ManuscriptManager'
@@ -59,7 +58,7 @@ function App() {
         <Route path="statistical-analysis" element={<StatisticalAnalysis />} />
         <Route path="data-manager" element={<DataManager />} />
         <Route path="collaboration" element={<Collaboration />} />
-        <Route path="knowledge-graph-viewer" element={<KnowledgeGraphViewer />} />
+        <Route path="knowledge-graph-viewer" element={<Navigate to="/knowledge-graph" replace />} />
         <Route path="clinical-trials" element={<ClinicalTrials />} />
         <Route path="genomics" element={<GenomicsAnalysis />} />
         <Route path="manuscripts" element={<ManuscriptManager />} />

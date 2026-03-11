@@ -449,8 +449,8 @@ PAPER_TASK_KEY = "active-paper"
 # Bedrock: Claude Opus 4.6 (Explorer + Synthesizer) — restricted on Azure AI
 # Azure AI Foundry: DeepSeek-R1 (Reasoner) + Mistral-Large-3 (Critic)
 
-BEDROCK_MODEL_CLAUDE_OPUS = os.environ.get("BEDROCK_MODEL_ID", "us.anthropic.claude-opus-4-6-v1")
-BEDROCK_MODEL_CLAUDE_SONNET = os.environ.get("BEDROCK_SONNET_ID", "us.anthropic.claude-sonnet-4-6-v1")
+BEDROCK_MODEL_CLAUDE_OPUS = os.environ.get("BEDROCK_MODEL_ID", "us.anthropic.claude-opus-4-6-v1:0")
+BEDROCK_MODEL_CLAUDE_SONNET = os.environ.get("BEDROCK_SONNET_ID", "us.anthropic.claude-sonnet-4-6-v1:0")
 BEDROCK_MODEL_NOVA_PREMIER = os.environ.get("BEDROCK_NOVA_PREMIER_ID", "us.amazon.nova-premier-v1:0")
 AZURE_AI_REASONER_MODEL = os.environ.get("AZURE_AI_REASONER_MODEL", "DeepSeek-R1")
 AZURE_AI_CRITIC_MODEL = os.environ.get("AZURE_AI_CRITIC_MODEL", "Mistral-Large-3")
@@ -3859,6 +3859,9 @@ def generate_hypothesis_pdf(hypothesis_id: str):
     disease = body.get("disease", state.get("config", {}).get("disease", "Research") if state else "Research")
     discovery_type = body.get("discovery_type", "treatment")
 
+    print(f"[HYPOTHESIS-PDF] Generating PDF for hypothesis: {hypothesis.get('title', 'N/A')[:80]}")
+    print(f"[HYPOTHESIS-PDF] Disease: {disease}, Type: {discovery_type}")
+
     # Generate AI-expanded mini research paper using GPT-4o (fast model)
     ai_paper_text = None
     try:
@@ -3917,8 +3920,12 @@ Write with Nature Medicine rigor. Include specific molecular targets, dosing rat
     # Build enriched hypothesis with AI-expanded sections for ReportLab
     if ai_paper_text:
         hypothesis["ai_paper_text"] = ai_paper_text
+        print(f"[HYPOTHESIS-PDF] AI paper generated: {len(ai_paper_text)} chars")
+    else:
+        print("[HYPOTHESIS-PDF] No AI expansion — using raw hypothesis data for PDF")
 
     pdf_bytes = _generate_hypothesis_pdf_reportlab(hypothesis, disease, discovery_type)
+    print(f"[HYPOTHESIS-PDF] PDF generated: {len(pdf_bytes)} bytes")
 
     title_slug = hypothesis.get("title", "hypothesis")[:50].replace(" ", "-").lower()
     import re as _re
@@ -4108,6 +4115,26 @@ def _generate_paper_pdf_reportlab(paper_html: str, disease: str, discovery_type:
     return buf.getvalue()
 
 
+def _sanitize_rl(text: str) -> str:
+    """Sanitize text for ReportLab XML parser, preserving bold/italic tags."""
+    import re as _re
+    if not text:
+        return ""
+    safe = (text.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;"))
+    # Restore ReportLab-safe HTML tags
+    for tag in ("b", "i", "u", "sub", "sup", "br", "font"):
+        safe = safe.replace(f"&lt;{tag}&gt;", f"<{tag}>")
+        safe = safe.replace(f"&lt;/{tag}&gt;", f"</{tag}>")
+        # Handle font tags with attributes
+        safe = _re.sub(rf'&lt;({tag}\s[^&]*?)&gt;', r'<\1>', safe)
+    # Convert markdown bold **text** to <b>text</b>
+    safe = _re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', safe)
+    safe = _re.sub(r'\*(.+?)\*', r'<i>\1</i>', safe)
+    return safe
+
+
 def _generate_hypothesis_pdf_reportlab(hypothesis: dict, disease: str, discovery_type: str) -> bytes:
     """Generate a professional PDF for a hypothesis using ReportLab."""
     import io as _io
@@ -4201,11 +4228,11 @@ def _generate_hypothesis_pdf_reportlab(hypothesis: dict, disease: str, discovery
         spaceAfter=20, spaceBefore=10,
     ))
     elements.append(Paragraph(
-        hypothesis.get("title", "Untitled Hypothesis"),
+        _sanitize_rl(hypothesis.get("title", "Untitled Hypothesis")),
         title_style,
     ))
     elements.append(Paragraph(
-        f"{disease} — {discovery_type.replace('_', ' ').title()} Discovery",
+        _sanitize_rl(f"{disease} — {discovery_type.replace('_', ' ').title()} Discovery"),
         subtitle_style,
     ))
 
@@ -4241,7 +4268,7 @@ def _generate_hypothesis_pdf_reportlab(hypothesis: dict, disease: str, discovery
             heading_text = lines[0].strip().lstrip("#").strip()
             body_text = lines[1].strip() if len(lines) > 1 else ""
             if heading_text:
-                elements.append(Paragraph(heading_text, heading_style))
+                elements.append(Paragraph(_sanitize_rl(heading_text), heading_style))
             if body_text:
                 # Split paragraphs and render each
                 for para in body_text.split("\n\n"):
@@ -4253,42 +4280,45 @@ def _generate_hypothesis_pdf_reportlab(hypothesis: dict, disease: str, discovery
                         for bullet in para.split("\n"):
                             bullet = bullet.strip().lstrip("-*").strip()
                             if bullet:
-                                elements.append(Paragraph(f"• {bullet}", body_style))
+                                elements.append(Paragraph(f"&bull; {_sanitize_rl(bullet)}", body_style))
                     else:
-                        # Clean markdown bold/italic for ReportLab
-                        para = _re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', para)
-                        para = _re.sub(r'\*(.+?)\*', r'<i>\1</i>', para)
-                        para = para.replace("\n", " ")
-                        elements.append(Paragraph(para, body_style))
+                        safe = _sanitize_rl(para).replace("\n", " ")
+                        try:
+                            elements.append(Paragraph(safe, body_style))
+                        except Exception:
+                            # Last resort: strip all tags
+                            elements.append(Paragraph(
+                                para.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", " "),
+                                body_style))
     else:
-        # Fallback: render raw hypothesis fields
+        # Fallback: render raw hypothesis fields as structured journal sections
         desc = hypothesis.get("description", "")
         if desc:
-            elements.append(Paragraph("Description", heading_style))
-            elements.append(Paragraph(desc, body_style))
+            elements.append(Paragraph("Abstract", heading_style))
+            elements.append(Paragraph(_sanitize_rl(desc), body_style))
 
         mechanism = hypothesis.get("mechanism", "")
         if mechanism:
-            elements.append(Paragraph("Mechanism of Action", heading_style))
-            elements.append(Paragraph(mechanism, body_style))
+            elements.append(Paragraph("Proposed Mechanism of Action", heading_style))
+            elements.append(Paragraph(_sanitize_rl(mechanism), body_style))
 
         evidence = hypothesis.get("evidence_summary", [])
         if evidence:
             elements.append(Paragraph("Supporting Evidence", heading_style))
             for e in evidence:
-                elements.append(Paragraph(f"• {e}", body_style))
+                elements.append(Paragraph(f"&bull; {_sanitize_rl(str(e))}", body_style))
 
         risks = hypothesis.get("risks", [])
         if risks:
-            elements.append(Paragraph("Risks & Limitations", heading_style))
+            elements.append(Paragraph("Risk Assessment", heading_style))
             for r in risks:
-                elements.append(Paragraph(f"• {r}", body_style))
+                elements.append(Paragraph(f"&bull; {_sanitize_rl(str(r))}", body_style))
 
         validation = hypothesis.get("validation_steps", [])
         if validation:
-            elements.append(Paragraph("Validation Steps", heading_style))
+            elements.append(Paragraph("Validation Strategy", heading_style))
             for i, v in enumerate(validation, 1):
-                elements.append(Paragraph(f"{i}. {v}", body_style))
+                elements.append(Paragraph(f"{i}. {_sanitize_rl(str(v))}", body_style))
 
     # Confidence Analysis
     conf_tier = (
