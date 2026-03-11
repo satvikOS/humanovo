@@ -57,21 +57,20 @@ class ParsedRecord:
             "embedding_status": "pending",
         }
         if self.definition:
-            item["definition"] = self.definition[:2000]
+            item["definition"] = self.definition
         if self.synonyms:
-            item["synonyms"] = self.synonyms[:50]
+            item["synonyms"] = self.synonyms
         if self.parents:
-            item["parents"] = self.parents[:100]
+            item["parents"] = self.parents
         if self.external_ids:
             item["external_ids"] = self.external_ids
         if self.namespace:
             item["namespace"] = self.namespace
         if self.relations:
-            item["relations"] = self.relations[:100]
+            item["relations"] = self.relations
         if self.properties:
-            # Filter out non-serializable values
             item["properties"] = {
-                k: str(v) for k, v in list(self.properties.items())[:20]
+                k: str(v) for k, v in self.properties.items()
             }
         return item
 
@@ -274,7 +273,7 @@ class TSVParser:
         chunk_fields: list[str] | None = None,
         delimiter: str = "\t",
         skip_header: bool = True,
-        max_records: int = 500_000,
+        max_records: int = 0,  # 0 = unlimited
     ):
         self.source_dataset = source_dataset
         self.record_type = record_type
@@ -299,7 +298,7 @@ class TSVParser:
 
         count = 0
         for row in reader:
-            if count >= self.max_records:
+            if self.max_records and count >= self.max_records:
                 break
 
             record = self._build_record(row, count)
@@ -314,7 +313,7 @@ class TSVParser:
 
         count = 0
         for line in content.splitlines():
-            if count >= self.max_records:
+            if self.max_records and count >= self.max_records:
                 break
             line = line.strip()
             if not line or line.startswith("#"):

@@ -217,7 +217,7 @@ class BulkLoader:
     def load_all(
         self,
         datasets: list[str] | None = None,
-        max_records_per_dataset: int = 100_000,
+        max_records_per_dataset: int = 0,  # 0 = unlimited, load everything
         skip_download: bool = False,
     ) -> dict[str, Any]:
         """Load all (or specified) datasets into knowledge, evidence, and KG tables."""
@@ -254,7 +254,7 @@ class BulkLoader:
         self,
         dataset_key: str,
         config: DatasetConfig,
-        max_records: int = 100_000,
+        max_records: int = 0,  # 0 = unlimited
         skip_download: bool = False,
     ) -> None:
         """Download, parse, and load a single dataset into all 3 tables."""
@@ -321,7 +321,7 @@ class BulkLoader:
         )
 
         for record in records:
-            if total_loaded >= max_records:
+            if max_records and total_loaded >= max_records:
                 break
 
             now = datetime.utcnow().isoformat()
@@ -402,7 +402,7 @@ class BulkLoader:
 
             # --- 4. Knowledge Graph relations (KG UI) ---
             # Parent relations (is_a / part_of)
-            for parent_id in record.parents[:10]:
+            for parent_id in record.parents:
                 relation_type = "part_of"  # is_a maps to part_of in our KG
                 kg_relation = {
                     "entity_id": f"rel:{record.id}→{parent_id}",
@@ -420,7 +420,7 @@ class BulkLoader:
                 kg_relation_batch.append(kg_relation)
 
             # Explicit relations from the parsed record
-            for rel in record.relations[:10]:
+            for rel in record.relations:
                 rel_type_raw = rel.get("type", "associated_with")
                 relation_type = OBO_RELATION_TO_KG_RELATION.get(
                     rel_type_raw, "associated_with"
@@ -696,7 +696,7 @@ class BulkLoader:
 # Convenience functions
 # ================================================================
 
-def load_priority_datasets(max_records: int = 50_000) -> dict:
+def load_priority_datasets(max_records: int = 0) -> dict:
     """Load high-priority datasets (ontologies — small, free, high value)."""
     loader = BulkLoader()
     return loader.load_all(
@@ -712,7 +712,7 @@ def load_priority_datasets(max_records: int = 50_000) -> dict:
     )
 
 
-def load_all_datasets(max_records: int = 100_000) -> dict:
-    """Load all registered datasets."""
+def load_all_datasets(max_records: int = 0) -> dict:
+    """Load all registered datasets — every record, nothing skipped."""
     loader = BulkLoader()
     return loader.load_all(max_records_per_dataset=max_records)

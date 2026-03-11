@@ -49,12 +49,12 @@ def handler(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
         → loads priority datasets only (small ontologies)
 
       Full load:
-        {"schedule_type": "full", "max_records": 100000}
-        → loads all datasets
+        {"schedule_type": "full"}
+        → loads all datasets, every record
 
       Specific datasets:
-        {"datasets": ["gene_ontology", "chebi"], "max_records": 50000}
-        → loads only specified datasets
+        {"datasets": ["gene_ontology", "chebi"]}
+        → loads only specified datasets, every record
 
       Re-process (skip download):
         {"datasets": ["gene_ontology"], "skip_download": true}
@@ -62,7 +62,7 @@ def handler(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
     """
     schedule_type = event.get("schedule_type", "")
     specific_datasets = event.get("datasets")
-    max_records = event.get("max_records", 50_000)
+    max_records = event.get("max_records", 0)  # 0 = unlimited
     skip_download = event.get("skip_download", False)
 
     logger.info(

@@ -85,8 +85,8 @@ def main():
     parser.add_argument(
         "--max-records",
         type=int,
-        default=50_000,
-        help="Max records per dataset (default: 50000)",
+        default=0,
+        help="Max records per dataset (default: 0 = unlimited, loads everything)",
     )
     parser.add_argument(
         "--list",
@@ -146,7 +146,10 @@ def main():
     if args.download_only:
         print("Mode: Download to S3 only (no DynamoDB load)")
     else:
-        print(f"Mode: Full ETL (max {args.max_records:,} records per dataset)")
+        if args.max_records:
+            print(f"Mode: Full ETL (max {args.max_records:,} records per dataset)")
+        else:
+            print("Mode: Full ETL (ALL records, no limit)")
 
     # Confirm
     response = input("\nProceed? [y/N] ")
