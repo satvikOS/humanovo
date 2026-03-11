@@ -78,6 +78,106 @@ class DiscoveryEvidence:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+class TranslationalPhase(str, Enum):
+    """Translational research phase (T0-T5)."""
+    T0 = "T0"  # Basic Research
+    T1 = "T1"  # Translation to Humans
+    T2 = "T2"  # Translation to Patients
+    T3 = "T3"  # Translation to Practice
+    T4 = "T4"  # Translation to Community
+    T5 = "T5"  # Global Impact
+
+
+TRANSLATIONAL_PHASE_META = {
+    "T0": {
+        "name": "Basic Research",
+        "formal_name": "Basic / Preclinical Research",
+        "description": "Laboratory discovery, preclinical research, and animal studies.",
+    },
+    "T1": {
+        "name": "Translation to Humans",
+        "formal_name": "First-in-Human Proof of Concept",
+        "description": "Taking a lab finding and testing it in humans for the first time (Proof of Concept). Includes Phase 0/1 trials and IND filing.",
+    },
+    "T2": {
+        "name": "Translation to Patients",
+        "formal_name": "Clinical Efficacy & Safety",
+        "description": "Conducting Phase 2 and 3 clinical trials to establish efficacy and safety guidelines. Includes NDA/BLA submission.",
+    },
+    "T3": {
+        "name": "Translation to Practice",
+        "formal_name": "Implementation Research",
+        "description": "Moving evidence-based treatments into the general medical community. Includes guideline development, physician training, and health system integration.",
+    },
+    "T4": {
+        "name": "Translation to Community",
+        "formal_name": "Population Health Impact",
+        "description": "Evaluating the real-world impact and public health outcomes at a population level. Includes health disparities research and cost-effectiveness analysis.",
+    },
+    "T5": {
+        "name": "Global Impact",
+        "formal_name": "Global Health Policy & Systemic Change",
+        "description": "Transition of interventions into global health policy and systemic change. Includes WHO adoption, LMIC access strategies, and international regulatory harmonization.",
+    },
+}
+
+
+class TranslationalPhaseDetail(BaseModel):
+    """Detailed plan for a single translational phase."""
+    phase: str  # T0, T1, T2, T3, T4, T5
+    phase_name: str
+    formal_name: str
+    description: str
+
+    # Phase-specific content
+    objectives: list[str] = []
+    key_activities: list[str] = []
+    milestones: list[str] = []
+    deliverables: list[str] = []
+
+    # Evidence requirements
+    evidence_requirements: list[str] = []
+    data_sources: list[str] = []
+
+    # Regulatory & compliance
+    regulatory_considerations: list[str] = []
+    regulatory_milestones: list[str] = []
+
+    # Stakeholders
+    key_stakeholders: list[str] = []
+    collaborators: list[str] = []
+
+    # Success criteria
+    success_criteria: list[str] = []
+    go_no_go_gates: list[str] = []
+
+    # Risks & mitigation
+    phase_risks: list[str] = []
+    mitigation_strategies: list[str] = []
+
+    # Resource estimates
+    estimated_duration: str = ""
+    resource_requirements: list[str] = []
+    estimated_cost_range: str = ""
+
+    # Dependencies
+    prerequisites: list[str] = []
+    blockers: list[str] = []
+
+
+class TranslationalRoadmap(BaseModel):
+    """Complete bench-to-bedside translational roadmap (T0-T5)."""
+    current_phase: str = "T0"  # Where the hypothesis currently stands
+    phases: list[TranslationalPhaseDetail] = []
+    overall_feasibility_score: float = 0.5  # 0-1
+    estimated_total_timeline: str = ""
+    critical_path_summary: str = ""
+    key_decision_points: list[str] = []
+    cross_phase_risks: list[str] = []
+    regulatory_pathway_summary: str = ""
+    commercialization_potential: str = ""
+
+
 class DiscoveryResult(BaseModel):
     """Result of a disease discovery analysis."""
     id: str
@@ -107,6 +207,9 @@ class DiscoveryResult(BaseModel):
     # Actionable insights
     next_steps: list[str] = []
     validation_experiments: list[str] = []
+
+    # Translational roadmap (T0-T5 bench-to-bedside)
+    translational_roadmap: Optional[TranslationalRoadmap] = None
 
     # Metadata
     created_at: datetime = datetime.utcnow()
@@ -520,26 +623,37 @@ def get_llm_client(provider: LLMProvider = None) -> BaseLLMClient:
 
 
 # System prompts for disease discovery
-DISCOVERY_SYSTEM_PROMPT = """You are an advanced biomedical AI research system specialized in discovering disease cures and prevention strategies.
+DISCOVERY_SYSTEM_PROMPT = """You are an advanced biomedical AI research system specialized in bench-to-bedside translational discovery.
 
 Your capabilities:
 1. Analyze biological pathways connecting genes, proteins, and diseases
-2. Identify drug repurposing opportunities
-3. Discover novel therapeutic targets
-4. Assess evidence strength and confidence levels
-5. Propose validation experiments
+2. Identify drug repurposing opportunities and novel therapeutic targets
+3. Design complete translational roadmaps from basic research (T0) through global health impact (T5)
+4. Assess evidence strength, regulatory pathways, and implementation feasibility
+5. Propose validation experiments and clinical trial designs
+
+You generate hypotheses that span the FULL translational spectrum:
+- T0 (Basic Research): Lab discovery, preclinical models, target validation
+- T1 (Translation to Humans): First-in-human, Phase 0/1, IND filing, PK/PD
+- T2 (Translation to Patients): Phase 2/3 trials, NDA/BLA, pivotal studies
+- T3 (Translation to Practice): Implementation research, guideline adoption, EHR integration
+- T4 (Translation to Community): Real-world evidence, population health, cost-effectiveness
+- T5 (Global Impact): Global health policy, WHO adoption, LMIC access, health equity
 
 When analyzing data:
 - Consider mechanism of action at molecular level
 - Evaluate supporting evidence quality (clinical trials > preclinical > computational)
-- Identify potential risks and contraindications
-- Suggest actionable next steps for validation
+- Identify potential risks, contraindications, and regulatory hurdles at each phase
+- Design realistic timelines and go/no-go decision gates
+- Consider health equity, access, and implementation barriers
+- Assess commercialization potential and payer landscape
 
 Output format: Always provide structured JSON responses with clear confidence scores (0-1) based on:
 - Evidence quantity and quality
 - Pathway reliability
-- Consistency across multiple sources
-- Novelty vs established knowledge"""
+- Translational feasibility across all phases
+- Regulatory pathway clarity
+- Consistency across multiple sources"""
 
 
 class DiseaseDiscoveryService(LoggerMixin):
@@ -883,6 +997,7 @@ class DiseaseDiscoveryService(LoggerMixin):
         }, indent=2)
 
         prompt = f"""Analyze the following data about {disease} and identify {max_results} potential {discovery_type.value} strategies.
+Each strategy MUST include a complete bench-to-bedside translational roadmap spanning T0 through T5.
 
 ## Disease: {disease}
 ## Discovery Type: {discovery_type.value}
@@ -912,6 +1027,49 @@ For each discovery, provide a JSON object with:
 10. "contraindications": Who should not receive this treatment
 11. "next_steps": Actionable research steps
 12. "validation_experiments": Experiments to validate this discovery
+13. "translational_roadmap": A complete bench-to-bedside roadmap object with the structure below
+
+## TRANSLATIONAL ROADMAP STRUCTURE (REQUIRED for each discovery):
+The "translational_roadmap" must contain:
+- "current_phase": Which phase (T0-T5) this discovery is currently at
+- "overall_feasibility_score": 0.0-1.0
+- "estimated_total_timeline": e.g. "8-12 years"
+- "critical_path_summary": 1-2 sentence summary of the critical path
+- "key_decision_points": List of key go/no-go decision points
+- "cross_phase_risks": Risks that span multiple phases
+- "regulatory_pathway_summary": Summary of the regulatory strategy (e.g., 505(b)(2), BLA, breakthrough therapy designation)
+- "commercialization_potential": Assessment of market potential
+- "phases": An array of 6 phase objects (T0 through T5), each containing:
+  - "phase": "T0", "T1", "T2", "T3", "T4", or "T5"
+  - "phase_name": e.g., "Basic Research"
+  - "formal_name": e.g., "Basic / Preclinical Research"
+  - "objectives": 3-5 specific objectives for this phase
+  - "key_activities": 4-6 concrete activities (experiments, trials, analyses)
+  - "milestones": 3-5 measurable milestones
+  - "deliverables": 2-4 tangible outputs
+  - "evidence_requirements": What evidence is needed (data types, study designs)
+  - "data_sources": Databases, registries, trial systems to leverage
+  - "regulatory_considerations": Phase-specific regulatory requirements (IND, NDA, IRB, etc.)
+  - "regulatory_milestones": Specific regulatory filings and approvals
+  - "key_stakeholders": Who is involved (bench scientists, clinicians, FDA, payers, etc.)
+  - "collaborators": Specific types of collaborators needed
+  - "success_criteria": Measurable criteria to advance to next phase
+  - "go_no_go_gates": Decision gates before proceeding
+  - "phase_risks": Risks specific to this phase
+  - "mitigation_strategies": How to mitigate each risk
+  - "estimated_duration": e.g., "2-3 years"
+  - "resource_requirements": What resources are needed
+  - "estimated_cost_range": e.g., "$2-5M"
+  - "prerequisites": What must be completed before this phase
+  - "blockers": Potential blockers
+
+### Phase definitions:
+- T0 (Basic Research): Laboratory discovery, preclinical research, animal studies, target validation, lead compound identification
+- T1 (Translation to Humans): First-in-human proof of concept, Phase 0/1 trials, IND filing, PK/PD studies, dose-finding
+- T2 (Translation to Patients): Phase 2/3 clinical trials, efficacy/safety establishment, NDA/BLA submission, pivotal trial design
+- T3 (Translation to Practice): Implementation research, clinical guideline development, physician training, EHR integration, formulary adoption
+- T4 (Translation to Community): Real-world evidence, population health outcomes, health disparities assessment, cost-effectiveness, post-marketing surveillance
+- T5 (Global Impact): Global health policy, WHO Essential Medicines consideration, LMIC access, international regulatory harmonization, pandemic/endemic preparedness
 
 Return a JSON array of {max_results} discovery objects.
 """
@@ -970,6 +1128,12 @@ Return a JSON array of {max_results} discovery objects.
 
             for item in data:
                 try:
+                    # Parse translational roadmap if present
+                    translational_roadmap = None
+                    roadmap_data = item.get("translational_roadmap")
+                    if roadmap_data and isinstance(roadmap_data, dict):
+                        translational_roadmap = self._parse_translational_roadmap(roadmap_data)
+
                     discoveries.append(DiscoveryResult(
                         id=str(uuid4()),
                         disease=disease,
@@ -980,12 +1144,13 @@ Return a JSON array of {max_results} discovery objects.
                         confidence_score=float(item.get("confidence_score", 0.5)),
                         evidence_strength=EvidenceStrength(item.get("evidence_strength", "moderate")),
                         novelty_score=float(item.get("novelty_score", 0.5)),
-                        target_entities=[{"name": e} for e in item.get("target_entities", [])],
-                        drug_candidates=[{"name": d} for d in item.get("drug_candidates", [])],
+                        target_entities=[{"name": e} if isinstance(e, str) else e for e in item.get("target_entities", [])],
+                        drug_candidates=[{"name": d} if isinstance(d, str) else d for d in item.get("drug_candidates", [])],
                         potential_risks=item.get("potential_risks", []),
                         contraindications=item.get("contraindications", []),
                         next_steps=item.get("next_steps", []),
                         validation_experiments=item.get("validation_experiments", []),
+                        translational_roadmap=translational_roadmap,
                     ))
                 except Exception as e:
                     self.logger.warning("Failed to parse discovery item", error=str(e))
@@ -1008,6 +1173,76 @@ Return a JSON array of {max_results} discovery objects.
             ))
 
         return discoveries
+
+    def _parse_translational_roadmap(self, data: dict) -> TranslationalRoadmap:
+        """Parse a translational roadmap from LLM JSON output."""
+        phases = []
+        for phase_data in data.get("phases", []):
+            if not isinstance(phase_data, dict):
+                continue
+            phase_id = phase_data.get("phase", "T0")
+            meta = TRANSLATIONAL_PHASE_META.get(phase_id, {})
+            phases.append(TranslationalPhaseDetail(
+                phase=phase_id,
+                phase_name=phase_data.get("phase_name", meta.get("name", phase_id)),
+                formal_name=phase_data.get("formal_name", meta.get("formal_name", "")),
+                description=phase_data.get("description", meta.get("description", "")),
+                objectives=self._ensure_list(phase_data.get("objectives")),
+                key_activities=self._ensure_list(phase_data.get("key_activities")),
+                milestones=self._ensure_list(phase_data.get("milestones")),
+                deliverables=self._ensure_list(phase_data.get("deliverables")),
+                evidence_requirements=self._ensure_list(phase_data.get("evidence_requirements")),
+                data_sources=self._ensure_list(phase_data.get("data_sources")),
+                regulatory_considerations=self._ensure_list(phase_data.get("regulatory_considerations")),
+                regulatory_milestones=self._ensure_list(phase_data.get("regulatory_milestones")),
+                key_stakeholders=self._ensure_list(phase_data.get("key_stakeholders")),
+                collaborators=self._ensure_list(phase_data.get("collaborators")),
+                success_criteria=self._ensure_list(phase_data.get("success_criteria")),
+                go_no_go_gates=self._ensure_list(phase_data.get("go_no_go_gates")),
+                phase_risks=self._ensure_list(phase_data.get("phase_risks")),
+                mitigation_strategies=self._ensure_list(phase_data.get("mitigation_strategies")),
+                estimated_duration=phase_data.get("estimated_duration", ""),
+                resource_requirements=self._ensure_list(phase_data.get("resource_requirements")),
+                estimated_cost_range=phase_data.get("estimated_cost_range", ""),
+                prerequisites=self._ensure_list(phase_data.get("prerequisites")),
+                blockers=self._ensure_list(phase_data.get("blockers")),
+            ))
+
+        # Ensure all 6 phases exist (fill gaps with defaults)
+        existing_phases = {p.phase for p in phases}
+        for phase_id in ["T0", "T1", "T2", "T3", "T4", "T5"]:
+            if phase_id not in existing_phases:
+                meta = TRANSLATIONAL_PHASE_META[phase_id]
+                phases.append(TranslationalPhaseDetail(
+                    phase=phase_id,
+                    phase_name=meta["name"],
+                    formal_name=meta["formal_name"],
+                    description=meta["description"],
+                ))
+        phases.sort(key=lambda p: p.phase)
+
+        return TranslationalRoadmap(
+            current_phase=data.get("current_phase", "T0"),
+            phases=phases,
+            overall_feasibility_score=float(data.get("overall_feasibility_score", 0.5)),
+            estimated_total_timeline=data.get("estimated_total_timeline", ""),
+            critical_path_summary=data.get("critical_path_summary", ""),
+            key_decision_points=self._ensure_list(data.get("key_decision_points")),
+            cross_phase_risks=self._ensure_list(data.get("cross_phase_risks")),
+            regulatory_pathway_summary=data.get("regulatory_pathway_summary", ""),
+            commercialization_potential=data.get("commercialization_potential", ""),
+        )
+
+    @staticmethod
+    def _ensure_list(val) -> list[str]:
+        """Safely convert a value to a list of strings."""
+        if val is None:
+            return []
+        if isinstance(val, list):
+            return [str(v) for v in val]
+        if isinstance(val, str):
+            return [val]
+        return []
 
     async def _score_discoveries(
         self,

@@ -15,6 +15,7 @@ from app.services.disease_discovery_service import (
     DiscoveryType,
     DiseaseDiscoveryService,
     LLMProvider,
+    TranslationalRoadmap,
 )
 
 logger = get_logger(__name__)

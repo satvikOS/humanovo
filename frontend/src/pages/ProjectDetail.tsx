@@ -34,17 +34,21 @@ interface SavedHypothesis {
   project_id: string
   created_at: string
   model_used?: string
+  translational_roadmap?: any
 }
 
 type ViewMode = 'list' | 'hypothesis_viewer' | 'hypothesis_paper'
 
 const PAPER_PHASES = [
-  { label: 'Initializing 8-model pipeline...', duration: 3000 },
-  { label: 'Phase 1: Generating abstract & introduction (Claude Opus 4.6)...', duration: 12000 },
-  { label: 'Phase 2: Core sections — literature review, methods, results (DeepSeek, Mistral, GPT-4o, Cohere)...', duration: 25000 },
-  { label: 'Phase 3: Synthesis — discussion, molecular mechanisms, conclusion (Claude Opus 4.6)...', duration: 20000 },
-  { label: 'Phase 4: QA & review (Kimi-K2, o3-mini, GPT-4.1)...', duration: 15000 },
-  { label: 'Rendering PDF with ReportLab — cover page, tables, citations, diagrams...', duration: 8000 },
+  { label: 'Initializing 8-model pipeline...', duration: 2000 },
+  { label: 'Phase 1: Generating abstract & introduction (Claude Opus 4.6)...', duration: 8000 },
+  { label: 'Phase 2: Bench science — mechanism, evidence, targets (DeepSeek, Mistral)...', duration: 10000 },
+  { label: 'Phase 3: Translational roadmap — T0 Basic Research, T1 First-in-Human...', duration: 12000 },
+  { label: 'Phase 4: Clinical phases — T2 Trials, T3 Implementation (GPT-4o, Cohere)...', duration: 12000 },
+  { label: 'Phase 5: Population & global — T4 Community, T5 Global Impact...', duration: 10000 },
+  { label: 'Phase 6: Regulatory strategy, risk analysis & commercialization (Claude Opus 4.6)...', duration: 10000 },
+  { label: 'Phase 7: Discussion, conclusion & QA review (Kimi-K2, o3-mini, GPT-4.1)...', duration: 10000 },
+  { label: 'Rendering research paper with ReportLab — cover, pipeline, tables, citations...', duration: 8000 },
 ]
 
 export default function ProjectDetail() {
@@ -315,6 +319,7 @@ export default function ProjectDetail() {
           discovery_type: activeHypothesis.discovery_type,
           model_used: activeHypothesis.model_used,
           created_at: activeHypothesis.created_at,
+          translational_roadmap: activeHypothesis.translational_roadmap,
         }}
         breadcrumbs={[
           { label: 'Projects', onClick: () => { closeViewer() } },

@@ -107,6 +107,9 @@ class Hypothesis(BaseModel):
     generated_by = Column(String(50), nullable=True)  # 'user', 'ai', 'system'
     generation_context = Column(JSONB, nullable=True)
 
+    # Translational roadmap (T0-T5 bench-to-bedside)
+    translational_roadmap = Column(JSONB, nullable=True)
+
     # Relationships
     project = relationship("Project", back_populates="hypotheses")
     evidence_refs = relationship(
