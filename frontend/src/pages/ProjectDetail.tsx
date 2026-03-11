@@ -194,13 +194,15 @@ export default function ProjectDetail() {
     })
 
     try {
-      // Step 1: Check if paper already exists in Lambda DynamoDB
+      // Step 1: Check if paper for THIS hypothesis already exists in Lambda DynamoDB
       let cachedHtml = ''
       try {
         const statusRes = await fetch(`${API_BASE}/orchestrator/paper-status`)
         if (statusRes.ok) {
           const statusData = await statusRes.json()
-          if (statusData.status === 'done' && statusData.paper_html && statusData.paper_html.length > 100) {
+          // Only use cached paper if it matches this specific hypothesis
+          if (statusData.status === 'done' && statusData.paper_html && statusData.paper_html.length > 100
+              && statusData.hypothesis_id === hypothesis.id) {
             cachedHtml = statusData.paper_html
           }
         }
@@ -763,12 +765,14 @@ export default function ProjectDetail() {
                       key={paper.id}
                       className="flex items-center justify-between p-3 border border-[var(--color-border)] rounded-lg hover:border-white/10 transition-colors cursor-pointer"
                       onClick={async () => {
-                        // First try to fetch cached paper from Lambda DynamoDB (no regeneration)
+                        // First try to fetch cached paper for THIS hypothesis from Lambda DynamoDB
                         try {
                           const statusRes = await fetch(`${API_BASE}/orchestrator/paper-status`)
                           if (statusRes.ok) {
                             const statusData = await statusRes.json()
-                            if (statusData.status === 'done' && statusData.paper_html && statusData.paper_html.length > 100) {
+                            // Only use cached paper if it matches this specific hypothesis
+                            if (statusData.status === 'done' && statusData.paper_html && statusData.paper_html.length > 100
+                                && statusData.hypothesis_id === paper.hypothesis_id) {
                               setActiveHypothesis(hyp || {
                                 id: paper.hypothesis_id,
                                 title: paper.hypothesis_title,
@@ -789,7 +793,7 @@ export default function ProjectDetail() {
                         } catch (e) {
                           console.warn('Could not fetch cached paper, will regenerate:', e)
                         }
-                        // Fallback: regenerate
+                        // No cached paper for this hypothesis — run full pipeline
                         const h = hyp || {
                           id: paper.hypothesis_id,
                           title: paper.hypothesis_title,

@@ -712,16 +712,8 @@ IMPORTANT: This is an FDA/R&D-grade methods section. Include:
 - Precise temperature and top_p parameters for each model
 - Token pool configuration numbers
 - Confidence scoring formula with exact weights
-- Include a text-based flowchart of the pipeline using ASCII art:
-
-    Input Disease → Knowledge Graph Exploration → Agent Distribution (6 Models)
-         ↓                    ↓                        ↓
-    Claude Opus 4.6    GPT-4.1             Mistral-Large-3    GPT-4o    Cohere Command A    o3-mini    Grok-Fast  GPT-4.1
-    (Explorer/Synth)   (Abstract/Intro)    (Critic)           (Editorial) (Literature/RAG)  (QA)       (Mechanisms) (Analyst)
-         ↓                    ↓                 ↓                ↓            ↓               ↓           ↓          ↓
-         └─────────────→ Hypothesis Pool ←──────┴────────────────┴────────────┴───────────────┴───────────┘          │
-                           ↓                                                                                         │
-                  Confidence Scoring → Paper Generation (Phase 1-3) → QA + Review (Phase 4) ←───────────────────────┘
+- Do NOT include ASCII art flowcharts — pipeline diagrams are rendered as SVG figures separately
+- Describe the pipeline architecture in detailed scientific prose instead
 
 Write as formal Methods text. Use subsections with ### headers for: Multi-Model Discovery Platform, Agent Architecture, Token Pool Management, Knowledge Graph Integration, External Factor Simulation, Confidence Scoring, Research Paper Generation. Be technically precise. Do NOT hallucinate parameters — use only the values provided."""
 
@@ -777,14 +769,9 @@ External factor interactions: {json.dumps(hyp.get('external_factors', []))}
 
 Cover in your analysis:
 1. Scientific rationale and biological plausibility with specific pathway references
-2. Detailed mechanism of action at molecular level — MUST include text-based mechanism diagrams using arrows:
-
-   [Drug/Compound] → [Target Receptor] → [Signaling Cascade] → [Transcription Factor]
-        ↓                                        ↓
-   [Downstream Effects]              [Gene Expression Changes]
-        ↓                                        ↓
-   [Cellular Response]               [Therapeutic Phenotype]
-
+2. Detailed mechanism of action at molecular level — describe the full signaling cascade in scientific prose:
+   drug/compound binding to target receptor, signaling cascade activation, transcription factor regulation,
+   downstream gene expression changes, cellular response, and therapeutic phenotype
 3. Existing supporting evidence from literature (reference specific studies)
 4. Potential therapeutic modalities (small molecule, biologic, gene therapy, etc.)
 5. Key risks, toxicity concerns, and off-target effects
@@ -795,8 +782,8 @@ Cover in your analysis:
 Include for EACH hypothesis:
 - Molecular formula of key compounds (e.g., C₂₁H₃₀O₂)
 - IC50/Ki/Kd values where known (e.g., IC₅₀ = 2.3 nM)
-- Dose-response relationship text diagram if applicable
-- At least ONE pathway diagram in arrow notation (→, ↓)
+- Dose-response relationship description
+- Do NOT use ASCII art or text diagrams — describe pathways in prose with specific gene/protein names
 
 IMPORTANT: Do NOT hallucinate data. Only state well-established biomedical facts.
 
@@ -873,14 +860,9 @@ Organize by category (Nutrients, Compounds, Drugs, Chemicals, Elements).
 
 Include for each factor:
 - Molecular formula and structure description (e.g., Curcumin: C₂₁H₂₀O₆, MW: 368.38)
-- MUST include mechanism of action text diagram using arrow notation:
-
-    [Factor] → [Target Receptor/Enzyme] → [Signaling Pathway] → [Cellular Effect]
-         ↓                                       ↓
-    [Dose-Response]                    [Downstream Gene Expression]
-
+- Mechanism of action described in prose: target receptor/enzyme, signaling pathway, cellular effect, downstream gene expression
 - Known dosing ranges from literature (e.g., therapeutic window: 500-2000 mg/day)
-- Drug-factor interaction diagrams where relevant
+- Drug-factor interactions described in scientific detail
 
 IMPORTANT: Do NOT hallucinate. Only state well-established biomedical facts.
 Write as formal FDA/R&D-grade scientific text. Be specific about molecular mechanisms."""
@@ -905,20 +887,14 @@ Describe in scientific detail:
 6. Potential resistance mechanisms and how to overcome them
 7. Biomarker opportunities arising from these mechanisms
 
-Include MULTIPLE text-based pathway diagrams using arrow notation (→, ↓, ←) for each major pathway:
+Describe all pathways in detailed scientific prose (do NOT use ASCII art or text-based diagrams — figures are rendered as SVGs separately).
 
-Example format (use this style throughout):
-
-    Growth Factor → RTK → RAS → RAF → MEK → ERK → Transcription
-                                        ↓
-                              PI3K → AKT → mTOR → Protein Synthesis
-
-Also include:
+Include in your prose:
 - Chemical formulas for key compounds (e.g., C₂₁H₃₀O₂, IC₅₀ = 2.3 nM)
-- Receptor binding diagrams: [Ligand] + [Receptor] → [Complex] → [Signal]
-- Enzyme kinetics: Km, Kd, IC50, Ki values where well-established
-- Feedback loop diagrams showing positive/negative regulation
-- Cross-pathway interaction maps
+- Receptor binding descriptions: ligand-receptor complex formation and downstream signaling
+- Enzyme kinetics values: Km, Kd, IC50, Ki where well-established in literature
+- Feedback loop descriptions showing positive/negative regulation
+- Cross-pathway interaction descriptions with specific gene/protein names
 
 IMPORTANT: Do NOT hallucinate. Only state well-established biomedical facts. Use specific gene/protein names (with UniProt/HGNC identifiers where possible), pathway identifiers, and molecular interactions.
 
