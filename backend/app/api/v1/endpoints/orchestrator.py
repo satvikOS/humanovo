@@ -810,8 +810,7 @@ class ChatRequest(BaseModel):
 @router.post("/chat")
 async def constant_chat(request: ChatRequest):
     """
-    Constant AI chat assistant — uses AWS Bedrock or Azure AI for research Q&A.
-    Tries Bedrock Claude first, falls back to Azure GPT-4o / GPT-4.1.
+    Constant AI chat assistant — uses Azure GPT-4o (primary), falls back to Azure GPT-4.1.
     """
     if not request.message.strip():
         return {"response": "Please ask me a question about your research."}
@@ -826,32 +825,8 @@ User question: {request.message}"""
 
     response_text = None
 
-    # --- Attempt 1: AWS Bedrock (Claude Opus) ---
-    try:
-        import boto3
-        client_kwargs: dict = {"region_name": settings.AWS_REGION}
-        if settings.aws_access_key_value and settings.aws_secret_key_value:
-            client_kwargs["aws_access_key_id"] = settings.aws_access_key_value
-            client_kwargs["aws_secret_access_key"] = settings.aws_secret_key_value
-        bedrock = boto3.client("bedrock-runtime", **client_kwargs)
-        bedrock_response = bedrock.invoke_model(
-            modelId=settings.BEDROCK_MODEL_CLAUDE_OPUS,
-            contentType="application/json",
-            accept="application/json",
-            body=json.dumps({
-                "anthropic_version": "bedrock-2023-05-31",
-                "max_tokens": 1024,
-                "messages": [{"role": "user", "content": chat_prompt}],
-            }),
-        )
-        result = json.loads(bedrock_response["body"].read())
-        if result.get("content"):
-            response_text = result["content"][0].get("text", "")
-    except Exception as e:
-        logger.warning(f"Bedrock chat error: {e}")
-
-    # --- Attempt 2: Azure GPT-4o ---
-    if not response_text and settings.AZURE_GPT4O_ENDPOINT and settings.AZURE_GPT4O_KEY:
+    # --- Attempt 1: Azure GPT-4o (primary) ---
+    if settings.AZURE_GPT4O_ENDPOINT and settings.AZURE_GPT4O_KEY:
         try:
             import httpx
             azure_url = settings.AZURE_GPT4O_ENDPOINT.rstrip("/")
@@ -876,7 +851,7 @@ User question: {request.message}"""
         except Exception as e:
             logger.warning(f"Azure GPT-4o chat error: {e}")
 
-    # --- Attempt 3: Azure GPT-4.1 ---
+    # --- Attempt 2: Azure GPT-4.1 (fallback) ---
     if not response_text and settings.AZURE_GPT41_ENDPOINT and settings.AZURE_GPT41_KEY:
         try:
             import httpx
@@ -905,7 +880,7 @@ User question: {request.message}"""
     if not response_text:
         response_text = (
             "I'm having trouble connecting to the AI backend. "
-            "Please ensure AWS Bedrock or Azure AI is configured and the backend server is running."
+            "Please ensure Azure OpenAI (GPT-4o or GPT-4.1) is configured with valid endpoint and API key."
         )
 
     return {"response": response_text}

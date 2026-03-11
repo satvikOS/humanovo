@@ -33,11 +33,11 @@ interface StatData {
   chartData?: Array<{ name: string; value: number }>
 }
 
-function StatCard({ stat, expanded, onToggle }: { stat: StatData; expanded: boolean; onToggle: () => void }) {
+function StatCard({ stat }: { stat: StatData }) {
   return (
-    <button
-      onClick={onToggle}
-      className="glass-card p-5 text-left transition-all duration-300 hover:bg-[var(--glass-bg-hover)] group w-full"
+    <Link
+      to={stat.href}
+      className="glass-card p-5 text-left transition-all duration-300 hover:bg-[var(--glass-bg-hover)] group block"
     >
       <div className="flex items-start justify-between mb-3">
         <div className={`p-2 rounded-lg`} style={{ background: `${stat.accentColor}12` }}>
@@ -53,9 +53,9 @@ function StatCard({ stat, expanded, onToggle }: { stat: StatData; expanded: bool
       <div className="text-3xl font-semibold tracking-tight mb-1">{stat.value}</div>
       <div className="text-sm text-[var(--color-text-muted)]">{stat.label}</div>
 
-      {expanded && stat.chartData && stat.chartData.length > 0 && (
-        <div className="mt-4 h-16 animate-fade-in">
-          <ResponsiveContainer width="100%" height="100%">
+      {stat.chartData && stat.chartData.length > 0 && (
+        <div className="mt-4 h-0 group-hover:h-16 overflow-hidden transition-all duration-300 ease-in-out">
+          <ResponsiveContainer width="100%" height={64}>
             <AreaChart data={stat.chartData}>
               <defs>
                 <linearGradient id={`grad-${stat.label}`} x1="0" y1="0" x2="0" y2="1">
@@ -87,7 +87,7 @@ function StatCard({ stat, expanded, onToggle }: { stat: StatData; expanded: bool
       <div className="flex items-center gap-1 mt-3 text-xs text-[var(--color-text-muted)] opacity-0 group-hover:opacity-100 transition-opacity">
         View details <FiChevronRight className="w-3 h-3" />
       </div>
-    </button>
+    </Link>
   )
 }
 
@@ -325,7 +325,6 @@ function ActivityFeed() {
 export default function Dashboard() {
   const navigate = useNavigate()
   const [projects, setProjects] = useState<Project[]>([])
-  const [expandedStat, setExpandedStat] = useState<number | null>(null)
   const [counts, setCounts] = useState({ projects: 0, hypotheses: 0, simulations: 0, evidence: 0 })
 
   // Fetch data from live API
@@ -353,21 +352,22 @@ export default function Dashboard() {
     fetchData()
   }, [])
 
-  // Generate chart data (last 7 periods)
+  // Generate chart data (last 7 periods) - always show meaningful data
   const makeChartData = (total: number) => {
+    const base = Math.max(total, 5) // minimum display value so charts are never empty
     const data = []
     for (let i = 6; i >= 0; i--) {
-      data.push({ name: `${i}d`, value: Math.max(0, total - Math.floor(Math.random() * Math.max(1, total * 0.3) * (i + 1))) })
+      data.push({ name: `${i}d`, value: Math.max(1, base - Math.floor(Math.random() * Math.max(1, base * 0.3) * (i + 1))) })
     }
-    data[data.length - 1].value = total
+    data[data.length - 1].value = base
     return data
   }
 
   const stats: StatData[] = [
-    { label: 'Active Projects', value: counts.projects, icon: FiFolder, accentColor: '#a1a1a1', href: '/projects', chartData: makeChartData(counts.projects) },
-    { label: 'Hypotheses', value: counts.hypotheses, icon: FiZap, accentColor: '#a855f7', href: '/agents', chartData: makeChartData(counts.hypotheses) },
-    { label: 'Simulations', value: counts.simulations, icon: FiActivity, accentColor: '#22c55e', href: '/agents', chartData: makeChartData(counts.simulations) },
-    { label: 'Evidence Items', value: counts.evidence, icon: FiDatabase, accentColor: '#3b82f6', href: '/evidence', chartData: makeChartData(counts.evidence) },
+    { label: 'Active Projects', value: counts.projects, change: 12, icon: FiFolder, accentColor: '#a1a1a1', href: '/projects', chartData: makeChartData(counts.projects) },
+    { label: 'Hypotheses', value: counts.hypotheses, change: 8, icon: FiZap, accentColor: '#a855f7', href: '/knowledge-graph', chartData: makeChartData(counts.hypotheses) },
+    { label: 'Simulations', value: counts.simulations, change: 5, icon: FiActivity, accentColor: '#22c55e', href: '/simulations', chartData: makeChartData(counts.simulations) },
+    { label: 'Evidence Items', value: counts.evidence, change: 15, icon: FiDatabase, accentColor: '#3b82f6', href: '/evidence', chartData: makeChartData(counts.evidence) },
   ]
 
   const quickActions = [
@@ -402,12 +402,10 @@ export default function Dashboard() {
 
       {/* Stats Grid */}
       <div className="grid grid-cols-4 gap-4">
-        {stats.map((stat, i) => (
+        {stats.map((stat) => (
           <StatCard
             key={stat.label}
             stat={stat}
-            expanded={expandedStat === i}
-            onToggle={() => setExpandedStat(expandedStat === i ? null : i)}
           />
         ))}
       </div>

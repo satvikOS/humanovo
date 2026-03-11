@@ -48,13 +48,11 @@ const mainNavItems = [
   { to: '/projects', icon: FiFolder, label: 'Projects', shortcut: '2' },
   { to: '/evidence', icon: FiDatabase, label: 'Evidence', shortcut: '3' },
   { to: '/agents', icon: FiActivity, label: 'Discovery', shortcut: '4' },
-  { to: '/knowledge-graph', icon: FiGlobe, label: 'Knowledge Graph', shortcut: '5' },
-  { to: '/workbench', icon: FiBox, label: 'Workbench', shortcut: '6' },
-  { to: '/anatomy', icon: FiUser, label: '3D Anatomy', shortcut: '7' },
+  { to: '/workbench', icon: FiBox, label: 'Workbench', shortcut: '5' },
+  { to: '/anatomy', icon: FiUser, label: '3D Anatomy', shortcut: '6' },
 ]
 
 const secondaryNavItems = [
-  { to: '/hypotheses', icon: FiZap, label: 'Hypotheses' },
   { to: '/simulations', icon: FiTrendingUp, label: 'Simulations' },
   { to: '/notebook', icon: FiBook, label: 'Notebook' },
   { to: '/timeline', icon: FiClock, label: 'Timeline' },
@@ -77,13 +75,13 @@ const analysisNavItems = [
 ]
 
 const managementNavItems = [
-  { to: '/data-manager', icon: FiDatabase, label: 'Data Manager' },
-  { to: '/clinical-trials', icon: FiClipboard, label: 'Clinical Trials' },
-  { to: '/manuscripts', icon: FiFileText, label: 'Manuscripts' },
-  { to: '/biobank', icon: FiPackage, label: 'Biobank' },
-  { to: '/collaboration', icon: FiGrid, label: 'Collaboration' },
-  { to: '/regulatory', icon: FiShield, label: 'Regulatory' },
-  { to: '/imaging', icon: FiImage, label: 'Imaging' },
+  { to: '/data-manager', icon: FiDatabase, label: 'Data Manager', comingSoon: true },
+  { to: '/clinical-trials', icon: FiClipboard, label: 'Clinical Trials', comingSoon: true },
+  { to: '/manuscripts', icon: FiFileText, label: 'Manuscripts', comingSoon: true },
+  { to: '/biobank', icon: FiPackage, label: 'Biobank', comingSoon: true },
+  { to: '/collaboration', icon: FiGrid, label: 'Collaboration', comingSoon: true },
+  { to: '/regulatory', icon: FiShield, label: 'Regulatory', comingSoon: true },
+  { to: '/imaging', icon: FiImage, label: 'Imaging', comingSoon: true },
 ]
 
 function TabIcon({ type }: { type: WorkspaceTab['type'] }) {
@@ -165,7 +163,6 @@ function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
     { label: 'Go to Evidence', icon: FiDatabase, category: 'Navigation', action: () => { navigate('/evidence'); onClose() } },
     { label: 'Go to Discovery', icon: FiActivity, category: 'Navigation', action: () => { navigate('/agents'); onClose() } },
     { label: 'Go to Knowledge Graph', icon: FiGlobe, category: 'Navigation', action: () => { navigate('/knowledge-graph'); onClose() } },
-    { label: 'Go to Hypotheses', icon: FiZap, category: 'Navigation', action: () => { navigate('/hypotheses'); onClose() } },
     { label: 'Go to Simulations', icon: FiTrendingUp, category: 'Navigation', action: () => { navigate('/simulations'); onClose() } },
     { label: 'Go to Notebook', icon: FiBook, category: 'Navigation', action: () => { navigate('/notebook'); onClose() } },
     { label: 'Go to Search', icon: FiSearch, category: 'Navigation', action: () => { navigate('/search'); onClose() } },
@@ -268,10 +265,10 @@ function ConstantChat() {
         const data = await res.json()
         setMessages(prev => [...prev, { role: 'assistant', text: data.response || 'I\'m not sure about that. Could you rephrase?' }])
       } else {
-        setMessages(prev => [...prev, { role: 'assistant', text: 'I\'m currently processing. Please ensure the AI pipeline is configured and try again.' }])
+        setMessages(prev => [...prev, { role: 'assistant', text: 'Something went wrong. Please try again.' }])
       }
     } catch {
-      setMessages(prev => [...prev, { role: 'assistant', text: 'I\'m having trouble connecting to the AI backend. Please ensure AWS Bedrock is configured and the backend server is running.' }])
+      setMessages(prev => [...prev, { role: 'assistant', text: 'Something went wrong. Please try again.' }])
     } finally {
       setLoading(false)
     }
@@ -429,10 +426,10 @@ if (path === '/clinical-trials') return 'Clinical Trials'
         <div className="h-12 flex items-center px-4 border-b border-[var(--color-border)]">
           <div className="flex items-center gap-2.5">
             <div className="w-7 h-7 rounded-lg bg-[var(--color-text)] flex items-center justify-center">
-              <span className="text-[var(--color-bg)] font-bold text-xs">H</span>
+              <span className="text-[var(--color-bg)] text-xl" style={{ fontFamily: "'Cormorant Garamond', serif", fontStyle: 'italic', fontWeight: 600, lineHeight: 1 }}>h</span>
             </div>
             <div className="flex flex-col">
-              <span className="text-sm font-semibold text-[var(--color-text)] tracking-tight">humanovo</span>
+              <span className="text-base text-[var(--color-text)] tracking-tight" style={{ fontFamily: "'Cormorant Garamond', serif", fontStyle: 'italic', fontWeight: 600 }}>humanovo</span>
               <span className="text-xxs text-[var(--color-text-muted)]">Research Platform</span>
             </div>
           </div>
@@ -532,7 +529,10 @@ if (path === '/clinical-trials') return 'Clinical Trials'
               }
             >
               <item.icon className="w-4 h-4" />
-              <span className="font-medium">{item.label}</span>
+              <span className="font-medium flex-1">{item.label}</span>
+              {item.comingSoon && (
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-[var(--glass-bg)] text-[var(--color-text-muted)] border border-[var(--color-border)] whitespace-nowrap">Soon</span>
+              )}
             </NavLink>
           ))}
         </nav>
@@ -711,6 +711,12 @@ if (path === '/clinical-trials') return 'Clinical Trials'
 
         {/* Main content */}
         <main className="flex-1 overflow-auto bg-[var(--color-bg)]">
+          {['/data-manager', '/clinical-trials', '/manuscripts', '/biobank', '/collaboration', '/regulatory', '/imaging'].includes(location.pathname) && (
+            <div className="mx-6 mt-4 px-4 py-2.5 rounded-lg border border-[var(--color-border)] bg-[var(--glass-bg)] flex items-center gap-2">
+              <span className="text-xs font-medium px-2 py-0.5 rounded bg-[var(--color-accent-blue)] text-white" style={{ background: 'var(--color-accent-blue)' }}>Coming Soon</span>
+              <span className="text-xs text-[var(--color-text-muted)]">This feature is under active development and will be available in a future release.</span>
+            </div>
+          )}
           <Outlet />
         </main>
       </div>

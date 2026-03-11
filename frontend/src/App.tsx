@@ -14,8 +14,6 @@ import Timeline from './pages/Timeline'
 import Agents from './pages/Agents'
 import KnowledgeGraph from './pages/KnowledgeGraph'
 import Simulations from './pages/Simulations'
-import Hypotheses from './pages/Hypotheses'
-import HypothesisDetail from './pages/HypothesisDetail'
 import LiteratureReview from './pages/LiteratureReview'
 import CitationManager from './pages/CitationManager'
 import ExperimentTracker from './pages/ExperimentTracker'
@@ -40,8 +38,6 @@ function App() {
         <Route path="projects" element={<Projects />} />
         <Route path="projects/:projectId" element={<ProjectDetail />} />
         <Route path="evidence" element={<Evidence />} />
-        <Route path="hypotheses" element={<Hypotheses />} />
-        <Route path="hypotheses/:hypothesisId" element={<HypothesisDetail />} />
         <Route path="simulations" element={<Simulations />} />
         <Route path="knowledge-graph" element={<KnowledgeGraph />} />
         <Route path="workbench" element={<Workbench />} />

@@ -384,6 +384,13 @@ locals {
       memory      = 512
       timeout     = 300
     }
+
+    bulk_etl = {
+      description = "Bulk ETL for open biomedical datasets (ontologies, gene data)"
+      handler     = "handlers.bulk_etl.handler"
+      memory      = 1024
+      timeout     = 900  # 15 min max — processes one dataset per invocation
+    }
   }
 }
 
