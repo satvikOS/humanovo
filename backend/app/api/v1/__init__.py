@@ -29,6 +29,7 @@ from app.api.v1.endpoints import (
     monitoring,
     notebook,
     orchestrator,
+    pipeline_intelligence,
     projects,
     rag,
     regulatory,
@@ -84,3 +85,6 @@ router.include_router(regulatory.router, prefix="/regulatory", tags=["regulatory
 router.include_router(imaging.router, prefix="/imaging", tags=["imaging"])
 router.include_router(ml_models.router, prefix="/ml-models", tags=["ml-models"])
 router.include_router(biobank.router, prefix="/biobank", tags=["biobank"])
+
+# Pipeline Intelligence (Learning Memory, Cost Tracking, Benchmarks, Optimization)
+router.include_router(pipeline_intelligence.router)

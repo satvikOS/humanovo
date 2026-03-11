@@ -946,12 +946,17 @@ class MultiModelLLM:
         system_prompt: str = "",
         max_tokens: int = 4000,
         temperature: float = 0.3,
+        # Cost tracking context (optional, for per-call recording)
+        _cost_ctx: Optional[dict] = None,
     ) -> str:
         """Generate response from specified model via Azure AI, Bedrock, or Azure OpenAI.
 
         For Azure models, applies prompt sanitization to prevent content filter
         false positives. On content_filter rejection, retries once with a
         reformulated prompt.
+
+        When _cost_ctx is provided, records the actual token usage and cost
+        to the PostgreSQL cost tracking system.
         """
         if not self._initialized:
             await self.initialize()
@@ -965,8 +970,14 @@ class MultiModelLLM:
             prompt = self._sanitize_for_azure(prompt)
             system_prompt = self._sanitize_for_azure(system_prompt)
 
+        start_ms = int(time.time() * 1000)
+        is_retry = False
+
         try:
-            return await self._dispatch_generate(model_type, prompt, system_prompt, max_tokens, temperature)
+            text, usage = await self._dispatch_generate_tracked(model_type, prompt, system_prompt, max_tokens, temperature)
+            # Record cost if tracking context provided
+            await self._record_api_cost(model_type, usage, start_ms, _cost_ctx, is_retry=False)
+            return text
         except Exception as e:
             error_str = str(e)
             # On Azure content_filter rejection, retry with reformulated prompt
@@ -977,9 +988,11 @@ class MultiModelLLM:
                 )
                 reformed_prompt, reformed_system = self._reformulate_for_retry(prompt, system_prompt)
                 try:
-                    return await self._dispatch_generate(
+                    text, usage = await self._dispatch_generate_tracked(
                         model_type, reformed_prompt, reformed_system, max_tokens, temperature
                     )
+                    await self._record_api_cost(model_type, usage, start_ms, _cost_ctx, is_retry=True)
+                    return text
                 except Exception as retry_err:
                     logger.error(
                         f"Retry also failed for {model_type.value}: {retry_err}"
@@ -991,6 +1004,62 @@ class MultiModelLLM:
         finally:
             self._token_pool.release(model_type, max_tokens)
 
+    async def _record_api_cost(
+        self,
+        model_type: ModelType,
+        usage: dict,
+        start_ms: int,
+        cost_ctx: Optional[dict],
+        is_retry: bool,
+    ) -> None:
+        """Record API call cost to PostgreSQL if cost tracking is active."""
+        if not usage:
+            return
+        try:
+            from app.services.cost_tracking_service import get_cost_tracker
+            tracker = get_cost_tracker()
+
+            latency = int(time.time() * 1000) - start_ms
+            provider = usage.get("provider", "unknown")
+            model_name = usage.get("model_name", model_type.value)
+
+            ctx = cost_ctx or {}
+            await tracker.record_llm_call(
+                provider=provider,
+                model_name=model_name,
+                input_tokens=usage.get("input_tokens", 0),
+                output_tokens=usage.get("output_tokens", 0),
+                cached_tokens=usage.get("cached_tokens", 0),
+                latency_ms=latency,
+                discovery_run_id=ctx.get("discovery_run_id"),
+                stage_execution_id=ctx.get("stage_execution_id"),
+                stage_number=ctx.get("stage_number"),
+                stage_name=ctx.get("stage_name"),
+                hypothesis_id=ctx.get("hypothesis_id"),
+                round_number=ctx.get("round_number"),
+                is_retry=is_retry,
+            )
+        except Exception as e:
+            logger.debug(f"Cost tracking failed (non-fatal): {e}")
+
+    async def _dispatch_generate_tracked(
+        self,
+        model_type: ModelType,
+        prompt: str,
+        system_prompt: str,
+        max_tokens: int,
+        temperature: float,
+    ) -> tuple[str, dict]:
+        """Route generation and return (text, usage_dict) with actual token counts."""
+        if self._is_azure_ai_model(model_type):
+            return await self._generate_azure_ai_tracked(model_type, prompt, system_prompt, max_tokens, temperature)
+        elif self._is_azure_openai_model(model_type):
+            return await self._generate_azure_openai_tracked(model_type, prompt, system_prompt, max_tokens, temperature)
+        elif model_type in self.BEDROCK_MODELS and self._bedrock_client:
+            return await self._generate_bedrock_tracked(model_type, prompt, system_prompt, max_tokens, temperature)
+        else:
+            raise RuntimeError(f"No provider available for {model_type.value}. Check endpoint/key configuration.")
+
     async def _dispatch_generate(
         self,
         model_type: ModelType,
@@ -999,23 +1068,24 @@ class MultiModelLLM:
         max_tokens: int,
         temperature: float,
     ) -> str:
-        """Route generation to the correct provider."""
-        if self._is_azure_ai_model(model_type):
-            return await self._generate_azure_ai(model_type, prompt, system_prompt, max_tokens, temperature)
-        elif self._is_azure_openai_model(model_type):
-            return await self._generate_azure_openai(model_type, prompt, system_prompt, max_tokens, temperature)
-        elif model_type in self.BEDROCK_MODELS and self._bedrock_client:
-            return await self._generate_bedrock(model_type, prompt, system_prompt, max_tokens, temperature)
-        else:
-            raise RuntimeError(f"No provider available for {model_type.value}. Check endpoint/key configuration.")
+        """Route generation to the correct provider (backward-compatible, no usage tracking)."""
+        text, _ = await self._dispatch_generate_tracked(model_type, prompt, system_prompt, max_tokens, temperature)
+        return text
 
     async def _generate_azure_ai(
         self, model_type: ModelType, prompt: str, system_prompt: str,
         max_tokens: int, temperature: float,
     ) -> str:
-        """Invoke a model via its Azure AI model-specific endpoint.
+        """Invoke a model via its Azure AI model-specific endpoint."""
+        text, _ = await self._generate_azure_ai_tracked(model_type, prompt, system_prompt, max_tokens, temperature)
+        return text
 
-        Each model has its own client/endpoint/key — no shared Foundry layer.
+    async def _generate_azure_ai_tracked(
+        self, model_type: ModelType, prompt: str, system_prompt: str,
+        max_tokens: int, temperature: float,
+    ) -> tuple[str, dict]:
+        """Invoke a model via its Azure AI model-specific endpoint.
+        Returns (text, usage_dict) with actual token counts from API response.
         """
         if model_type == ModelType.DEEPSEEK_R1_0528:
             client = self._azure_deepseek_client
@@ -1043,18 +1113,38 @@ class MultiModelLLM:
             max_tokens=max_tokens,
             temperature=temperature,
         )
-        return response.choices[0].message.content
+        text = response.choices[0].message.content
+
+        # Extract actual usage from API response
+        usage = {"provider": "azure_ai", "model_name": model_name}
+        if hasattr(response, "usage") and response.usage:
+            usage["input_tokens"] = getattr(response.usage, "prompt_tokens", 0) or 0
+            usage["output_tokens"] = getattr(response.usage, "completion_tokens", 0) or 0
+            usage["cached_tokens"] = getattr(response.usage, "prompt_tokens_details", {})
+            if isinstance(usage["cached_tokens"], dict):
+                usage["cached_tokens"] = usage["cached_tokens"].get("cached_tokens", 0) or 0
+            elif hasattr(usage["cached_tokens"], "cached_tokens"):
+                usage["cached_tokens"] = usage["cached_tokens"].cached_tokens or 0
+            else:
+                usage["cached_tokens"] = 0
+
+        return text, usage
 
     async def _generate_azure_openai(
         self, model_type: ModelType, prompt: str, system_prompt: str,
         max_tokens: int, temperature: float,
     ) -> str:
-        """Invoke a model via Azure OpenAI (deployment-based routing).
+        """Invoke a model via Azure OpenAI (deployment-based routing)."""
+        text, _ = await self._generate_azure_openai_tracked(model_type, prompt, system_prompt, max_tokens, temperature)
+        return text
 
-        All new models (GPT-4o, Cohere Command A, Kimi-K2-Thinking, o3-mini, GPT-4.1) are deployed
-        on the same Azure OpenAI resource with separate deployment names.
+    async def _generate_azure_openai_tracked(
+        self, model_type: ModelType, prompt: str, system_prompt: str,
+        max_tokens: int, temperature: float,
+    ) -> tuple[str, dict]:
+        """Invoke a model via Azure OpenAI with actual usage tracking.
+        Returns (text, usage_dict).
         """
-        # Deployment-based models — each has its own AsyncAzureOpenAI client
         _deployment_clients = {
             ModelType.GPT_4O_AZURE: (self._azure_gpt4o_client, settings.AZURE_GPT4O_DEPLOYMENT),
             ModelType.COHERE_COMMAND_A: (self._azure_cohere_client, settings.AZURE_COHERE_DEPLOYMENT),
@@ -1062,6 +1152,8 @@ class MultiModelLLM:
             ModelType.O3_MINI: (self._azure_o3mini_client, settings.AZURE_O3MINI_DEPLOYMENT),
             ModelType.GPT_41: (self._azure_gpt41_client, settings.AZURE_GPT41_DEPLOYMENT),
         }
+
+        response = None
 
         if model_type in _deployment_clients:
             client, deployment = _deployment_clients[model_type]
@@ -1072,7 +1164,6 @@ class MultiModelLLM:
                 messages.append({"role": "system", "content": system_prompt})
             messages.append({"role": "user", "content": prompt})
 
-            # o3-mini is a reasoning model: use max_completion_tokens, no temperature
             if model_type == ModelType.O3_MINI:
                 response = await client.chat.completions.create(
                     model=deployment,
@@ -1086,51 +1177,76 @@ class MultiModelLLM:
                     max_tokens=max_tokens,
                     temperature=temperature,
                 )
-            return response.choices[0].message.content
-
-        # Legacy Azure OpenAI (o3, o1)
-        if not self._azure_client:
-            raise RuntimeError("Azure OpenAI client not initialized (legacy)")
-
-        deployment = self.AZURE_OPENAI_MODELS[model_type]
-        is_reasoning = model_type in (ModelType.O1, ModelType.O3_DEEP_RESEARCH)
-
-        if is_reasoning:
-            messages = []
-            if system_prompt:
-                messages.append({"role": "user", "content": f"[System Instructions]\n{system_prompt}"})
-            messages.append({"role": "user", "content": prompt})
-            response = await self._azure_client.chat.completions.create(
-                model=deployment,
-                messages=messages,
-                max_completion_tokens=max_tokens,
-            )
+            text = response.choices[0].message.content
+            model_name = deployment
         else:
-            messages = []
-            if system_prompt:
-                messages.append({"role": "system", "content": system_prompt})
-            messages.append({"role": "user", "content": prompt})
-            response = await self._azure_client.chat.completions.create(
-                model=deployment,
-                messages=messages,
-                max_tokens=max_tokens,
-                temperature=temperature,
-            )
+            # Legacy Azure OpenAI (o3, o1)
+            if not self._azure_client:
+                raise RuntimeError("Azure OpenAI client not initialized (legacy)")
 
-        return response.choices[0].message.content
+            deployment = self.AZURE_OPENAI_MODELS[model_type]
+            is_reasoning = model_type in (ModelType.O1, ModelType.O3_DEEP_RESEARCH)
+
+            if is_reasoning:
+                messages = []
+                if system_prompt:
+                    messages.append({"role": "user", "content": f"[System Instructions]\n{system_prompt}"})
+                messages.append({"role": "user", "content": prompt})
+                response = await self._azure_client.chat.completions.create(
+                    model=deployment,
+                    messages=messages,
+                    max_completion_tokens=max_tokens,
+                )
+            else:
+                messages = []
+                if system_prompt:
+                    messages.append({"role": "system", "content": system_prompt})
+                messages.append({"role": "user", "content": prompt})
+                response = await self._azure_client.chat.completions.create(
+                    model=deployment,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                )
+            text = response.choices[0].message.content
+            model_name = deployment
+
+        # Extract actual usage from API response
+        usage = {"provider": "azure_openai", "model_name": model_name}
+        if response and hasattr(response, "usage") and response.usage:
+            usage["input_tokens"] = getattr(response.usage, "prompt_tokens", 0) or 0
+            usage["output_tokens"] = getattr(response.usage, "completion_tokens", 0) or 0
+            cached_details = getattr(response.usage, "prompt_tokens_details", None)
+            if cached_details and hasattr(cached_details, "cached_tokens"):
+                usage["cached_tokens"] = cached_details.cached_tokens or 0
+            else:
+                usage["cached_tokens"] = 0
+
+        return text, usage
 
     async def _generate_bedrock(
         self, model_type: ModelType, prompt: str, system_prompt: str,
         max_tokens: int, temperature: float,
     ) -> str:
-        """Invoke any model via Bedrock. Tries Converse API, falls back to InvokeModel."""
+        """Invoke any model via Bedrock."""
+        text, _ = await self._generate_bedrock_tracked(model_type, prompt, system_prompt, max_tokens, temperature)
+        return text
+
+    async def _generate_bedrock_tracked(
+        self, model_type: ModelType, prompt: str, system_prompt: str,
+        max_tokens: int, temperature: float,
+    ) -> tuple[str, dict]:
+        """Invoke any model via Bedrock with actual usage tracking.
+        Tries Converse API, falls back to InvokeModel.
+        Returns (text, usage_dict).
+        """
         if not self._bedrock_client:
             raise RuntimeError("Bedrock client not initialized")
 
         model_id = self.BEDROCK_MODELS[model_type]
         loop = asyncio.get_event_loop()
 
-        # Try Converse API first
+        # Try Converse API first (it returns usage in response)
         try:
             response = await loop.run_in_executor(
                 None,
@@ -1141,7 +1257,16 @@ class MultiModelLLM:
                     inferenceConfig={"maxTokens": max_tokens, "temperature": temperature},
                 )
             )
-            return response["output"]["message"]["content"][0]["text"]
+            text = response["output"]["message"]["content"][0]["text"]
+
+            # Extract actual usage from Bedrock Converse API response
+            usage = {"provider": "aws_bedrock", "model_name": model_id}
+            bedrock_usage = response.get("usage", {})
+            usage["input_tokens"] = bedrock_usage.get("inputTokens", 0)
+            usage["output_tokens"] = bedrock_usage.get("outputTokens", 0)
+            usage["cached_tokens"] = 0
+
+            return text, usage
         except Exception as e:
             logger.warning(f"Converse failed for {model_id}: {e}, trying InvokeModel")
 
@@ -1157,7 +1282,22 @@ class MultiModelLLM:
             )
         )
         response_body = json.loads(response["body"].read())
-        return _parse_invoke_response(model_id, response_body)
+        text = _parse_invoke_response(model_id, response_body)
+
+        # InvokeModel doesn't always return usage; estimate from text
+        usage = {
+            "provider": "aws_bedrock",
+            "model_name": model_id,
+            "input_tokens": len(prompt) // 4,  # Estimate — InvokeModel may not return usage
+            "output_tokens": len(text) // 4,
+            "cached_tokens": 0,
+        }
+        # Try to extract from response body if available
+        if "usage" in response_body:
+            usage["input_tokens"] = response_body["usage"].get("input_tokens", usage["input_tokens"])
+            usage["output_tokens"] = response_body["usage"].get("output_tokens", usage["output_tokens"])
+
+        return text, usage
 
     async def parallel_reasoning(
         self, prompt: str, context: str = "",
@@ -1418,11 +1558,13 @@ class SequentialHypothesisPipeline:
         (10, "finalize",  ModelType.CLAUDE_OPUS,       32_768, 0.3),
     ]
 
-    def __init__(self, llm: MultiModelLLM):
+    def __init__(self, llm: MultiModelLLM, discovery_run_id: str = None):
         self._llm = llm
         self._grounding_service = None
         self._embedding_grounder = None
         self._rag_service = None
+        self._discovery_run_id = discovery_run_id
+        self._learning_memory = None
 
     async def _get_grounding(self):
         """Lazy-load grounding service (all APIs: PubMed, FDA, Elsevier, Springer, etc.)."""
@@ -1650,13 +1792,21 @@ Your goal is to STRENGTHEN this hypothesis — address its weaknesses, find stro
                 if grounding_context and stage_num > 1:
                     user_prompt += f"\n\n{grounding_context}"
 
-                # Call the model
+                # Call the model with cost tracking context
+                cost_ctx = {
+                    "discovery_run_id": self._discovery_run_id,
+                    "stage_number": stage_num,
+                    "stage_name": stage_name,
+                    "hypothesis_id": hypothesis_id,
+                    "round_number": round_number,
+                }
                 response = await self._llm.generate(
                     model_type=model_type,
                     prompt=user_prompt,
                     system_prompt=system_prompt,
                     max_tokens=max_tokens,
                     temperature=temperature,
+                    _cost_ctx=cost_ctx,
                 )
 
                 # Parse the response
@@ -1708,6 +1858,32 @@ Your goal is to STRENGTHEN this hypothesis — address its weaknesses, find stro
                     ratio = accumulated_context[f"stage_{stage_num}_grounding_ratio"]
                     grounding_info = f" | grounding: {ratio:.0%}"
                 logger.info(f"  Stage {stage_num}/{len(stages)} ({stage_name}) completed in {duration:.1f}s via {model_type.value}{grounding_info}")
+
+                # Record stage execution in learning memory
+                if self._discovery_run_id:
+                    try:
+                        from app.services.learning_memory_service import get_learning_memory
+                        lm = get_learning_memory()
+                        await lm.record_stage_execution(
+                            discovery_run_id=self._discovery_run_id,
+                            hypothesis_id=hypothesis_id,
+                            round_number=round_number,
+                            hypothesis_index=hypothesis_index,
+                            stage_number=stage_num,
+                            stage_name=stage_name,
+                            model_type=model_type.value,
+                            outcome="success",
+                            duration_seconds=duration,
+                            grounding_ratio=accumulated_context.get(f"stage_{stage_num}_grounding_ratio"),
+                            grounded_claims=accumulated_context.get(f"stage_{stage_num}_grounded_claims"),
+                            ungrounded_claims=accumulated_context.get(f"stage_{stage_num}_ungrounded_claims"),
+                            evidence_sources_used=accumulated_context.get("scientific_evidence", {}).get("total_sources_count", 0),
+                            parse_success=not parsed.get("parse_error", False),
+                            prompt_length_chars=len(user_prompt),
+                            output_length_chars=len(response),
+                        )
+                    except Exception as lm_err:
+                        logger.debug(f"Stage execution recording failed (non-fatal): {lm_err}")
 
                 if on_stage_complete:
                     try:
@@ -2394,6 +2570,28 @@ class DiscoveryOrchestrator(LoggerMixin):
         self._discovery_type = discovery_type
         self._external_factors = external_factors or []
 
+        # Create a discovery run in PostgreSQL for persistent tracking
+        self._discovery_run_id = None
+        try:
+            from app.services.learning_memory_service import get_learning_memory
+            lm = get_learning_memory()
+            self._discovery_run_id = await lm.create_discovery_run(
+                disease=disease,
+                discovery_type=discovery_type,
+                max_agents=self.max_agents,
+                target_confidence=self.target_confidence,
+                external_factors=external_factors,
+                focus_entities=focus_entities,
+                config_snapshot={
+                    "grounding_enabled": settings.GROUNDING_GATE_ENABLED,
+                    "grounding_threshold": settings.GROUNDING_SIMILARITY_THRESHOLD,
+                    "mcp_enabled": settings.MCP_ENABLED,
+                },
+            )
+            self.logger.info(f"Discovery run created: {self._discovery_run_id}")
+        except Exception as e:
+            self.logger.warning(f"Failed to create discovery run record: {e}")
+
         graph_data = await self._get_graph_data(disease, focus_entities)
         await self._create_agents()
 
@@ -2402,6 +2600,24 @@ class DiscoveryOrchestrator(LoggerMixin):
         finally:
             self.state = OrchestratorState.IDLE
             await self._save_memory()
+
+            # Complete the discovery run record
+            if self._discovery_run_id:
+                try:
+                    from app.services.learning_memory_service import get_learning_memory
+                    lm = get_learning_memory()
+                    await lm.complete_discovery_run(
+                        run_id=self._discovery_run_id,
+                        total_hypotheses=len(self._hypotheses),
+                        best_confidence=self._best_confidence,
+                        avg_confidence=sum(h.confidence for h in self._hypotheses) / max(len(self._hypotheses), 1),
+                        total_duration=time.time() - self._start_time if self._start_time else 0,
+                        stages_total=sum(1 for _ in self._hypotheses) * 10,
+                        stages_succeeded=sum(h.stages_completed for h in self._hypotheses),
+                        stages_failed=sum(10 - h.stages_completed for h in self._hypotheses),
+                    )
+                except Exception as e:
+                    self.logger.warning(f"Failed to complete discovery run record: {e}")
 
     async def _get_graph_data(
         self, disease: str, focus_entities: list[str] = None,
@@ -2600,8 +2816,11 @@ class DiscoveryOrchestrator(LoggerMixin):
             self.logger.warning("No entities to explore")
             return
 
-        # Initialize the sequential pipeline
-        pipeline = SequentialHypothesisPipeline(self.llm)
+        # Initialize the sequential pipeline with discovery run tracking
+        pipeline = SequentialHypothesisPipeline(
+            self.llm,
+            discovery_run_id=getattr(self, '_discovery_run_id', None),
+        )
 
         # Build pathway context from graph data
         pathway_context = self._build_pathway_context(graph_data)
