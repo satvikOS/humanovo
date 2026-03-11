@@ -280,6 +280,7 @@ jobs:
             ["embeddings_generator"]="embeddings_generator.py"
             ["rag_retrieval"]="rag_retrieval.py"
             ["ingestion_scheduler"]="ingestion_scheduler.py"
+            ["bulk_etl"]="bulk_etl.py"
           )
 
           # Functions that need placeholder (no handler file yet)
@@ -345,7 +346,7 @@ jobs:
 
           echo "Deploying Lambda function code..."
 
-          ALL_FUNCTIONS="api_core projects hypotheses evidence knowledge hypothesis_generation agent_orchestrator search_agent embeddings simulation simulation_worker ingestion pubmed_fetcher clinical_trials_fetcher brave_search_fetcher embeddings_generator rag_retrieval ingestion_scheduler"
+          ALL_FUNCTIONS="api_core projects hypotheses evidence knowledge hypothesis_generation agent_orchestrator search_agent embeddings simulation simulation_worker ingestion pubmed_fetcher clinical_trials_fetcher brave_search_fetcher embeddings_generator rag_retrieval ingestion_scheduler bulk_etl"
 
           for fn in $ALL_FUNCTIONS; do
             echo "  Updating ${NAME_PREFIX}-${fn}..."
