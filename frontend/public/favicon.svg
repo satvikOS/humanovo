@@ -6,5 +6,6 @@
     </linearGradient>
   </defs>
   <rect width="32" height="32" rx="6" fill="url(#grad)"/>
-  <text x="16" y="22" font-family="Arial, sans-serif" font-size="18" font-weight="bold" fill="white" text-anchor="middle">G</text>
+  <!-- Cursive lowercase 'h' path -->
+  <path d="M10 6 C10 6, 9.5 7, 10 8 L10 16 C10 16, 10 14, 12.5 12.5 C15 11, 17 11.5, 18 13 C19 14.5, 19 16, 19 17 L19 25 C19 25.5, 19.5 26.5, 20.5 26 M10 8 L10 25 C10 25.5, 9.5 26.5, 8.5 26" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
 </svg>

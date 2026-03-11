@@ -21,9 +21,11 @@ import {
   FiChevronLeft,
   FiChevronRight,
   FiTag,
+  FiGlobe,
+  FiShare2,
 } from 'react-icons/fi'
 import api from '../services/api'
-import type { Evidence as EvidenceType, Hypothesis } from '../services/api'
+import type { Evidence as EvidenceType, Hypothesis, Entity } from '../services/api'
 
 const sourceTypeColors: Record<string, string> = {
   pubmed: 'var(--color-accent-blue)',
@@ -46,6 +48,116 @@ const statusConfig: Record<string, { icon: typeof FiCheckCircle; color: string; 
   disputed: { icon: FiAlertCircle, color: 'var(--color-error)', label: 'Disputed' },
 }
 
+// Knowledge Base status panel — shows dataset counts from the graph
+function KnowledgeBaseStatus({ stats }: { stats: { total_entities: number; total_relations: number; entity_counts: Record<string, number>; relation_counts: Record<string, number> } | null }) {
+  const [expanded, setExpanded] = useState(false)
+  if (!stats) return null
+
+  const entityTypes = Object.entries(stats.entity_counts || {}).sort((a, b) => b[1] - a[1])
+  const relationTypes = Object.entries(stats.relation_counts || {}).sort((a, b) => b[1] - a[1])
+
+  const entityColors: Record<string, string> = {
+    gene: '#3B82F6', protein: '#8B5CF6', disease: '#EF4444', drug: '#10B981',
+    pathway: '#F59E0B', biomarker: '#EC4899', cell_type: '#6366F1', mutation: '#F97316',
+  }
+
+  return (
+    <div className="mx-6 mt-4 glass-card p-4">
+      <button onClick={() => setExpanded(!expanded)} className="flex items-center justify-between w-full text-left">
+        <div className="flex items-center gap-2">
+          <FiGlobe className="w-4 h-4 text-[var(--color-accent-blue)]" />
+          <span className="text-sm font-medium">Knowledge Base</span>
+          <span className="text-xs text-[var(--color-text-muted)]">
+            {stats.total_entities.toLocaleString()} entities &middot; {stats.total_relations.toLocaleString()} relations
+          </span>
+        </div>
+        <FiChevronRight className={`w-3.5 h-3.5 text-[var(--color-text-muted)] transition-transform ${expanded ? 'rotate-90' : ''}`} />
+      </button>
+
+      {expanded && (
+        <div className="mt-3 pt-3 border-t border-[var(--color-border)] animate-fade-in">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <div className="text-xxs text-[var(--color-text-muted)] uppercase tracking-wider mb-2 font-medium">Entity Types</div>
+              <div className="space-y-1.5">
+                {entityTypes.map(([type, count]) => (
+                  <div key={type} className="flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full" style={{ background: entityColors[type] || 'var(--color-text-muted)' }} />
+                      <span className="text-[var(--color-text-secondary)] capitalize">{type.replace(/_/g, ' ')}</span>
+                    </div>
+                    <span className="text-[var(--color-text-muted)] font-mono">{count.toLocaleString()}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div className="text-xxs text-[var(--color-text-muted)] uppercase tracking-wider mb-2 font-medium">Relation Types</div>
+              <div className="space-y-1.5">
+                {relationTypes.map(([type, count]) => (
+                  <div key={type} className="flex items-center justify-between text-xs">
+                    <span className="text-[var(--color-text-secondary)] capitalize">{type.replace(/_/g, ' ')}</span>
+                    <span className="text-[var(--color-text-muted)] font-mono">{count.toLocaleString()}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+          <p className="text-xxs text-[var(--color-text-muted)] mt-3 pt-2 border-t border-[var(--color-border)]">
+            Evidence and discoveries are grounded against this knowledge base. Data sourced from Gene Ontology, HPO, MeSH, Disease Ontology, ChEBI, DisGeNET, HGNC, Reactome, DrugBank, and ClinVar.
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Linked entities panel for evidence detail sidebar
+function LinkedEntities({ entities, onEntityClick }: { entities: Entity[]; onEntityClick?: (e: Entity) => void }) {
+  if (!entities || entities.length === 0) return null
+
+  const entityColors: Record<string, string> = {
+    gene: '#3B82F6', protein: '#8B5CF6', disease: '#EF4444', drug: '#10B981',
+    pathway: '#F59E0B', biomarker: '#EC4899', cell_type: '#6366F1', mutation: '#F97316',
+  }
+
+  return (
+    <div>
+      <div className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-2 font-medium flex items-center gap-1.5">
+        <FiShare2 className="w-3 h-3" /> Linked Entities
+      </div>
+      <div className="space-y-1.5">
+        {entities.map(entity => {
+          const color = entityColors[entity.entity_type] || 'var(--color-text-muted)'
+          return (
+            <button
+              key={entity.id}
+              onClick={() => onEntityClick?.(entity)}
+              className="w-full text-left p-2 rounded-lg bg-[var(--glass-bg)] border border-[var(--color-border)] hover:border-[var(--color-border-strong)] transition-all group"
+            >
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: color }} />
+                <span className="text-xs font-medium truncate">{entity.name}</span>
+                <span className="text-xxs px-1.5 py-0.5 rounded bg-[var(--glass-bg)] text-[var(--color-text-muted)] capitalize ml-auto flex-shrink-0">{entity.entity_type}</span>
+              </div>
+              {entity.description && (
+                <p className="text-xxs text-[var(--color-text-muted)] mt-1 line-clamp-2 ml-4">{entity.description}</p>
+              )}
+              {entity.external_ids && Object.keys(entity.external_ids).length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-1 ml-4">
+                  {Object.entries(entity.external_ids).slice(0, 3).map(([db, id]) => (
+                    <span key={db} className="text-xxs text-[var(--color-text-muted)]">{db}: {String(id)}</span>
+                  ))}
+                </div>
+              )}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 export default function Evidence() {
   const [evidence, setEvidence] = useState<EvidenceType[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -64,6 +176,8 @@ export default function Evidence() {
   const [linkingHypothesis, setLinkingHypothesis] = useState(false)
   const [hypotheses, setHypotheses] = useState<Hypothesis[]>([])
   const [saving, setSaving] = useState(false)
+  const [graphStats, setGraphStats] = useState<{ total_entities: number; total_relations: number; entity_counts: Record<string, number>; relation_counts: Record<string, number> } | null>(null)
+  const [linkedEntities, setLinkedEntities] = useState<Entity[]>([])
   const pageSize = 30
 
   const fetchEvidence = useCallback(async () => {
@@ -92,6 +206,39 @@ export default function Evidence() {
   }, [searchQuery, filterType, page])
 
   useEffect(() => { fetchEvidence() }, [fetchEvidence])
+
+  // Fetch knowledge base stats on mount
+  useEffect(() => {
+    api.getGraphStats().then(setGraphStats).catch(() => {})
+  }, [])
+
+  // Fetch linked entities when an evidence item is selected
+  useEffect(() => {
+    if (!selectedId) { setLinkedEntities([]); return }
+    const item = evidence.find(e => e.id === selectedId)
+    if (!item) return
+    // Search for entities mentioned in the evidence title/entities field
+    const searchTerms = [...(item.entities || []), ...(item.tags || [])].filter(Boolean)
+    if (searchTerms.length === 0 && item.title) {
+      // Fallback: search by title keywords
+      api.searchEntities(item.title, { limit: 5 }).then(setLinkedEntities).catch(() => setLinkedEntities([]))
+    } else if (searchTerms.length > 0) {
+      Promise.allSettled(
+        searchTerms.slice(0, 5).map(term => api.searchEntities(term, { limit: 2 }))
+      ).then(results => {
+        const entities: Entity[] = []
+        const seen = new Set<string>()
+        results.forEach(r => {
+          if (r.status === 'fulfilled') {
+            r.value.forEach((e: Entity) => {
+              if (!seen.has(e.id)) { seen.add(e.id); entities.push(e) }
+            })
+          }
+        })
+        setLinkedEntities(entities.slice(0, 10))
+      })
+    }
+  }, [selectedId, evidence])
 
   const selectedItem = evidence.find(e => e.id === selectedId) || null
 
@@ -234,6 +381,9 @@ export default function Evidence() {
             </button>
           </div>
         </div>
+
+        {/* Knowledge Base Status */}
+        <KnowledgeBaseStatus stats={graphStats} />
 
         {/* Stats */}
         <div className="px-6 py-2 border-b border-[var(--color-border)] flex items-center justify-between text-xs text-[var(--color-text-muted)]">
@@ -420,6 +570,9 @@ export default function Evidence() {
                   </div>
                 </div>
               </div>
+
+              {/* Linked Entities from Knowledge Graph */}
+              <LinkedEntities entities={linkedEntities} />
 
               {/* Status (changeable) */}
               <div>
