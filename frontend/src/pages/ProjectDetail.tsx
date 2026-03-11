@@ -42,12 +42,12 @@ type ViewMode = 'list' | 'hypothesis_viewer' | 'hypothesis_paper'
 const PAPER_PHASES = [
   { label: 'Initializing 8-model pipeline...', duration: 2000 },
   { label: 'Phase 1: Generating abstract & introduction (Claude Opus 4.6)...', duration: 8000 },
-  { label: 'Phase 2: Bench science — mechanism, evidence, targets (DeepSeek, Mistral)...', duration: 10000 },
+  { label: 'Phase 2: Bench science — mechanism, evidence, targets (Grok, Mistral)...', duration: 10000 },
   { label: 'Phase 3: Translational roadmap — T0 Basic Research, T1 First-in-Human...', duration: 12000 },
   { label: 'Phase 4: Clinical phases — T2 Trials, T3 Implementation (GPT-4o, Cohere)...', duration: 12000 },
   { label: 'Phase 5: Population & global — T4 Community, T5 Global Impact...', duration: 10000 },
   { label: 'Phase 6: Regulatory strategy, risk analysis & commercialization (Claude Opus 4.6)...', duration: 10000 },
-  { label: 'Phase 7: Discussion, conclusion & QA review (Kimi-K2, o3-mini, GPT-4.1)...', duration: 10000 },
+  { label: 'Phase 7: Discussion, conclusion & QA review (o3-mini, GPT-4.1)...', duration: 10000 },
   { label: 'Rendering research paper with ReportLab — cover, pipeline, tables, citations...', duration: 8000 },
 ]
 
@@ -194,14 +194,78 @@ export default function ProjectDetail() {
     })
 
     try {
-      // Primary: Generate HTML paper (renders reliably in iframe)
+      // Step 1: Check if paper already exists in Lambda DynamoDB
+      let cachedHtml = ''
+      try {
+        const statusRes = await fetch(`${API_BASE}/orchestrator/paper-status`)
+        if (statusRes.ok) {
+          const statusData = await statusRes.json()
+          if (statusData.status === 'done' && statusData.paper_html && statusData.paper_html.length > 100) {
+            cachedHtml = statusData.paper_html
+          }
+        }
+      } catch { /* ignore — will generate fresh */ }
+
+      if (cachedHtml) {
+        stopPhaseAnimation()
+        setPaperHtml(cachedHtml)
+        setGeneratingPaper(false)
+        _saveResearchPaper(hypothesis)
+        return
+      }
+
+      // Step 2: Trigger Lambda paper generation (the pipeline that actually works)
+      const triggerRes = await fetch(`${API_BASE}/orchestrator/generate-paper/markdown`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hypothesis_id: hypothesis.id }),
+      })
+
+      if (triggerRes.ok) {
+        // Poll for completion (Lambda generates async, stores HTML in DynamoDB)
+        const pollInterval = 5000 // 5 seconds
+        const maxPolls = 120     // 10 minutes max
+        let pollCount = 0
+
+        const pollForPaper = async (): Promise<boolean> => {
+          while (pollCount < maxPolls) {
+            pollCount++
+            await new Promise(r => setTimeout(r, pollInterval))
+            try {
+              const pollRes = await fetch(`${API_BASE}/orchestrator/paper-status`)
+              if (pollRes.ok) {
+                const pollData = await pollRes.json()
+                if (pollData.status === 'done' && pollData.paper_html && pollData.paper_html.length > 100) {
+                  stopPhaseAnimation()
+                  setPaperHtml(pollData.paper_html)
+                  setGeneratingPaper(false)
+                  _saveResearchPaper(hypothesis)
+                  return true
+                }
+                if (pollData.status === 'failed') {
+                  stopPhaseAnimation()
+                  setPaperError(`Paper generation failed: ${pollData.error || 'Unknown error'}`)
+                  setGeneratingPaper(false)
+                  return true
+                }
+                // Still generating — continue polling
+              }
+            } catch { /* network hiccup, keep polling */ }
+          }
+          return false
+        }
+
+        const completed = await pollForPaper()
+        if (completed) return
+      }
+
+      // Step 3: Fallback — try FastAPI HTML endpoint
+      stopPhaseAnimation()
       const htmlRes = await fetch(`${API_BASE}/documents/hypothesis/${hypothesis.id}/html`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: bodyPayload,
       })
-
-      stopPhaseAnimation()
 
       if (htmlRes.ok) {
         const contentType = htmlRes.headers.get('content-type') || ''
@@ -216,7 +280,7 @@ export default function ProjectDetail() {
         }
       }
 
-      // Fallback: Try PDF endpoint
+      // Step 4: Last resort — try PDF endpoint
       const pdfRes = await fetch(`${API_BASE}/documents/hypothesis/${hypothesis.id}/pdf?use_ai=true`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -254,9 +318,7 @@ export default function ProjectDetail() {
         return
       }
 
-      let detail = 'Unknown error'
-      try { const err = await htmlRes.json(); detail = err.detail || detail } catch {}
-      setPaperError(`Paper generation failed (${htmlRes.status}): ${detail}`)
+      setPaperError('Paper generation failed. Check backend logs.')
       setGeneratingPaper(false)
     } catch (e) {
       stopPhaseAnimation()
@@ -700,24 +762,47 @@ export default function ProjectDetail() {
                     <div
                       key={paper.id}
                       className="flex items-center justify-between p-3 border border-[var(--color-border)] rounded-lg hover:border-white/10 transition-colors cursor-pointer"
-                      onClick={() => {
-                        if (hyp) {
-                          generateHypothesisPaper(hyp)
-                        } else {
-                          // Construct minimal hypothesis from saved paper metadata
-                          generateHypothesisPaper({
-                            id: paper.hypothesis_id,
-                            title: paper.hypothesis_title,
-                            description: '',
-                            mechanism: '',
-                            confidence: 0.5,
-                            tags: [],
-                            disease: paper.disease,
-                            discovery_type: 'treatment',
-                            project_id: paper.project_id,
-                            created_at: paper.generated_at,
-                          })
+                      onClick={async () => {
+                        // First try to fetch cached paper from Lambda DynamoDB (no regeneration)
+                        try {
+                          const statusRes = await fetch(`${API_BASE}/orchestrator/paper-status`)
+                          if (statusRes.ok) {
+                            const statusData = await statusRes.json()
+                            if (statusData.status === 'done' && statusData.paper_html && statusData.paper_html.length > 100) {
+                              setActiveHypothesis(hyp || {
+                                id: paper.hypothesis_id,
+                                title: paper.hypothesis_title,
+                                description: '',
+                                mechanism: '',
+                                confidence: 0.5,
+                                tags: [],
+                                disease: paper.disease,
+                                discovery_type: 'treatment',
+                                project_id: paper.project_id,
+                                created_at: paper.generated_at,
+                              })
+                              setPaperHtml(statusData.paper_html)
+                              setViewMode('hypothesis_paper')
+                              return
+                            }
+                          }
+                        } catch (e) {
+                          console.warn('Could not fetch cached paper, will regenerate:', e)
                         }
+                        // Fallback: regenerate
+                        const h = hyp || {
+                          id: paper.hypothesis_id,
+                          title: paper.hypothesis_title,
+                          description: '',
+                          mechanism: '',
+                          confidence: 0.5,
+                          tags: [],
+                          disease: paper.disease,
+                          discovery_type: 'treatment',
+                          project_id: paper.project_id,
+                          created_at: paper.generated_at,
+                        }
+                        generateHypothesisPaper(h)
                       }}
                     >
                       <div className="flex items-center gap-3 min-w-0">

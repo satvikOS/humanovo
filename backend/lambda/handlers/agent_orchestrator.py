@@ -447,7 +447,7 @@ PAPER_TASK_KEY = "active-paper"
 # Mixed provider routing — model IDs are NEVER sent to frontend (unbiasing).
 #
 # Bedrock: Claude Opus 4.6 (Explorer + Synthesizer) — restricted on Azure AI
-# Azure AI Foundry: DeepSeek-R1 (Reasoner) + Mistral-Large-3 (Critic)
+# Azure AI Foundry: Grok-4-1-Fast (Reasoner) + Mistral-Large-3 (Critic)
 
 BEDROCK_MODEL_CLAUDE_OPUS = os.environ.get("BEDROCK_MODEL_ID", "us.anthropic.claude-opus-4-6-v1:0")
 BEDROCK_MODEL_CLAUDE_SONNET = os.environ.get("BEDROCK_SONNET_ID", "us.anthropic.claude-sonnet-4-20250514-v1:0")
@@ -3278,9 +3278,9 @@ PAPER_SECTIONS = {
     },
     "introduction": {
         "heading": "1. Introduction",
-        "model": "deepseek",
-        "model_id": lambda: AZURE_AI_REASONER_MODEL,
-        "client": lambda: azure_deepseek_client,
+        "model": "gpt41",
+        "model_id": lambda: AZURE_AI_GPT41_MODEL,
+        "client": lambda: azure_gpt41_client,
         "provider": "azure_ai",
         "system": "You are an expert in epidemiology and disease biology. Write a comprehensive introduction (800+ words) covering: disease epidemiology with specific statistics, current standard of care and its limitations, unmet medical needs, and the scientific rationale for the proposed approach. Cite specific studies with author names and years.",
     },
@@ -3294,9 +3294,9 @@ PAPER_SECTIONS = {
     },
     "results_mechanism": {
         "heading": "3. Results — Molecular Mechanism & Target Validation",
-        "model": "kimi",
-        "model_id": lambda: AZURE_AI_KIMI_MODEL,
-        "client": lambda: azure_kimi_client,
+        "model": "grok",
+        "model_id": lambda: AZURE_AI_GROK_MODEL,
+        "client": lambda: azure_grok_client,
         "provider": "azure_ai",
         "system": "You are a molecular biologist. Write a detailed Results subsection (800+ words) analyzing: molecular targets identified, mechanism of action cascades, protein-protein interactions, signaling pathway maps, binding affinities (IC50/EC50/Ki values), and structural biology insights. Include specific gene names, protein structures, and pathway identifiers.",
     },
@@ -3381,13 +3381,14 @@ def run_paper_worker(hypothesis_id: str | None, config: dict, continuation: dict
     """Multi-model research paper pipeline.
 
     Architecture (section-per-model for variety and no single-model bias):
-      Phase 1: Parallel section generation — 6 models write sections concurrently
+      Phase 1: Parallel section generation — 8 models write sections concurrently
         - GPT-4o → Abstract (structured, concise)
-        - DeepSeek-R1 → Introduction (epidemiology, rationale)
-        - Kimi-K2 → Results: Molecular Mechanism & Target Validation
+        - GPT-4.1 → Introduction (epidemiology, rationale)
+        - Grok-4-1-Fast → Results: Molecular Mechanism & Target Validation
         - Cohere Command A → Results: Preclinical & Clinical Evidence
         - Mistral-Large-3 → Discussion (critical, balanced)
         - o3-mini → Safety, Regulatory & Market Analysis
+      Phase 1.5: Dual-model embedding grounding — validates all claims via Azure embeddings
       Phase 2: Claude Opus synthesis — combines all sections into final cohesive paper
         - Adds Methods, Therapeutic Protocol, Conclusion
         - Unifies voice, cross-references, adds tables/figures
@@ -3459,7 +3460,11 @@ CRITICAL GROUNDING REQUIREMENT: Every major claim MUST be grounded in real scien
 - When discussing epidemiology, cite WHO, CDC, or national registry statistics
 Do NOT fabricate references — if uncertain, state the general finding without a specific citation."""
 
-    total_phases = 4  # parallel sections, synthesis, HTML conversion, done
+    total_phases = 5  # parallel sections, embedding grounding, synthesis, HTML conversion, done
+
+    # Initialize dual-model embedding pools for grounding validation
+    embedding_pool_large: list[tuple[str, list[float]]] = []
+    embedding_pool_small: list[tuple[str, list[float]]] = []
 
     # Support continuation from Phase 2 (section results already generated)
     section_results = {}
@@ -3533,7 +3538,7 @@ Write in markdown format with ## for section heading and ### for subsections."""
         elapsed = time.time() - paper_start_time
         if elapsed > 600:
             print(f"[PAPER] Phase 1 took {elapsed:.0f}s — approaching Lambda timeout, self-invoking for Phase 2")
-            _update_paper_phase(table, "Continuing synthesis in new invocation...", 1, total_phases)
+            _update_paper_phase(table, "Continuing synthesis in new invocation...", 2, total_phases)
             try:
                 lambda_client.invoke(
                     FunctionName=FUNCTION_NAME,
@@ -3555,6 +3560,40 @@ Write in markdown format with ## for section heading and ### for subsections."""
             else:
                 return  # Exit — Phase 2 will run in the new invocation
 
+    # Check cancellation before grounding
+    paper_state = table.get_item(Key={"id": PAPER_TASK_KEY}).get("Item", {})
+    if paper_state.get("status") in ("cancelled", "idle"):
+        print("[PAPER] Cancelled before grounding")
+        return
+
+    # ---- Phase 1.5: Embedding Grounding Validation ----
+    _update_paper_phase(table, "Running dual-model embedding grounding on sections...", 1, total_phases)
+    print("[PAPER] Phase 1.5: Dual-model embedding grounding validation")
+
+    grounding_context_parts = []
+    if AZURE_EMBEDDING_ENDPOINT and AZURE_EMBEDDING_KEY:
+        for section_key, section_text in section_results.items():
+            try:
+                grounding_report, rag_evidence = run_embedding_grounding(
+                    stage_output=section_text,
+                    evidence_text=section_text,
+                    stage_num=list(section_results.keys()).index(section_key),
+                    evidence_pool_large=embedding_pool_large,
+                    evidence_pool_small=embedding_pool_small,
+                )
+                if grounding_report:
+                    grounding_context_parts.append(f"--- Grounding for {PAPER_SECTIONS.get(section_key, {}).get('heading', section_key)} ---\n{grounding_report}")
+                if rag_evidence:
+                    grounding_context_parts.append(rag_evidence)
+                print(f"[EMBEDDING] Paper section '{section_key}' grounded (pool: {len(embedding_pool_large)} large, {len(embedding_pool_small)} small)")
+            except Exception as ge:
+                print(f"[EMBEDDING] Paper section '{section_key}' grounding failed (non-fatal): {ge}")
+    else:
+        print("[EMBEDDING] Skipping — no Azure embedding credentials configured")
+
+    embedding_grounding_text = "\n\n".join(grounding_context_parts) if grounding_context_parts else ""
+    print(f"[PAPER] Embedding grounding complete: {len(grounding_context_parts)} sections grounded, {len(embedding_grounding_text)} chars context")
+
     # Check cancellation before synthesis
     paper_state = table.get_item(Key={"id": PAPER_TASK_KEY}).get("Item", {})
     if paper_state.get("status") in ("cancelled", "idle"):
@@ -3562,7 +3601,7 @@ Write in markdown format with ## for section heading and ### for subsections."""
         return
 
     # ---- Phase 2: Claude Opus synthesis ----
-    _update_paper_phase(table, "Claude Opus synthesizing final paper...", 1, total_phases)
+    _update_paper_phase(table, "Claude Opus synthesizing final paper...", 2, total_phases)
     print("[PAPER] Phase 2: Claude Opus synthesis pass")
 
     # Assemble section drafts
@@ -3589,6 +3628,8 @@ Below are section drafts written by different AI models for a research paper. Yo
 
 SECTION DRAFTS FROM MULTIPLE MODELS:
 {section_drafts}
+
+{f"EMBEDDING GROUNDING VALIDATION RESULTS:{chr(10)}{embedding_grounding_text}{chr(10)}{chr(10)}Use the grounding results above to validate and strengthen all claims. Remove or qualify any claims that are not supported by the grounding evidence. Prioritize grounded, verified facts over speculative statements." if embedding_grounding_text else ""}
 
 Write the COMPLETE final paper in markdown format. Start with:
 # {h.get('title', disease)} — {discovery_type.title()} Discovery Report
@@ -3628,12 +3669,12 @@ Use ## for major sections, ### for subsections. Include ALL sections from Abstra
             raise last_err or RuntimeError("Paper synthesis failed after retries")
         print(f"[PAPER] Synthesis complete: {len(paper_md)} chars")
 
-        # ---- Phase 3: Convert to rich HTML ----
-        _update_paper_phase(table, "Rendering final document...", 2, total_phases)
+        # ---- Phase 4: Convert to rich HTML ----
+        _update_paper_phase(table, "Rendering final document...", 3, total_phases)
         paper_html = _markdown_to_rich_html(paper_md, disease, discovery_type, hypotheses_for_paper)
 
-        # ---- Phase 4: Store in DynamoDB ----
-        _update_paper_phase(table, "Done", 3, total_phases)
+        # ---- Phase 5: Store in DynamoDB ----
+        _update_paper_phase(table, "Done", 4, total_phases)
         table.update_item(
             Key={"id": PAPER_TASK_KEY},
             UpdateExpression="SET #s = :s, #p = :p, #u = :u",
