@@ -11,6 +11,19 @@ from app.models.hypothesis import EvidenceReference, Hypothesis, HypothesisStatu
 from app.models.ingestion_job import IngestionJob, IngestionJobStatus, IngestionSource
 from app.models.project import Project
 from app.models.simulation import Simulation, SimulationStatus, SimulationType
+from app.models.learning_memory import (
+    APICostRecord,
+    BenchmarkResult,
+    BenchmarkRun,
+    BenchmarkTestCase,
+    DiscoveryRun,
+    HypothesisFeedback,
+    LearningMemoryState,
+    ModelPricing,
+    PipelineOptimization,
+    StageExecution,
+    StagePerformanceAggregate,
+)
 from app.models.user import User, UserRole
 
 __all__ = [
@@ -33,4 +46,16 @@ __all__ = [
     "IngestionJob",
     "IngestionJobStatus",
     "IngestionSource",
+    # Pipeline Intelligence
+    "DiscoveryRun",
+    "StageExecution",
+    "APICostRecord",
+    "ModelPricing",
+    "HypothesisFeedback",
+    "LearningMemoryState",
+    "StagePerformanceAggregate",
+    "BenchmarkTestCase",
+    "BenchmarkRun",
+    "BenchmarkResult",
+    "PipelineOptimization",
 ]
