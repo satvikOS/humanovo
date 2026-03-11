@@ -18,7 +18,6 @@ import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
   FunnelChart, Funnel, LabelList,
-  ComposedChart,
   Treemap,
 } from 'recharts'
 
