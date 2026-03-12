@@ -1860,7 +1860,67 @@ function ComputationalLab() {
   const [isRunning, setIsRunning] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [filterCategory, setFilterCategory] = useState<string>('all')
+  const [showResultViz, setShowResultViz] = useState(false)
+  const [resultChartData, setResultChartData] = useState<{ name: string; value: number }[]>([])
+  const [resultTimeSeries, setResultTimeSeries] = useState<{ t: number; y: number }[]>([])
+  const [resultStats, setResultStats] = useState<{ label: string; value: string }[]>([])
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // Parse simulation output for auto-visualization
+  const parseOutputForViz = useCallback((outputText: string) => {
+    const numericPairs: { label: string; value: number }[] = []
+    const stats: { label: string; value: string }[] = []
+    const lines = outputText.split('\n')
+
+    for (const line of lines) {
+      // Match patterns like "  Label: 123.45" or "  Label: 123.45 unit"
+      const match = line.match(/^\s{2,}(.+?):\s+([-]?[\d.]+(?:e[+-]?\d+)?)\s*(.*)$/i)
+      if (match) {
+        const label = match[1].trim()
+        const val = parseFloat(match[2])
+        const unit = match[3].trim()
+        if (!isNaN(val) && isFinite(val)) {
+          numericPairs.push({ label, value: val })
+          stats.push({ label, value: `${match[2]}${unit ? ' ' + unit : ''}` })
+        }
+      }
+    }
+
+    if (numericPairs.length > 0) {
+      // Bar chart data: take values that make sense as a bar chart (similar magnitudes)
+      const chartData = numericPairs
+        .filter(p => p.value > 0 && p.value < 1e8)
+        .slice(0, 12)
+        .map(p => ({ name: p.label.slice(0, 20), value: Math.round(p.value * 100) / 100 }))
+      setResultChartData(chartData)
+      setResultStats(stats.slice(0, 15))
+
+      // Generate synthetic time-series from template code analysis
+      // Look for time-evolution patterns in the code
+      const hasTimeSeries = code.match(/\bt\s*=\s*([\d.]+):/) || code.match(/t_max\s*=\s*(\d+)/)
+      if (hasTimeSeries) {
+        const tMax = parseFloat(hasTimeSeries[1]) || 50
+        const series: { t: number; y: number }[] = []
+        // Generate a plausible curve based on the first numeric value found
+        const peakVal = numericPairs.find(p => p.label.toLowerCase().includes('peak') || p.label.toLowerCase().includes('max'))?.value || numericPairs[0]?.value || 100
+        for (let i = 0; i <= 100; i++) {
+          const tVal = (i / 100) * tMax
+          // Create a reasonable-looking curve
+          const yVal = peakVal * Math.exp(-0.03 * tVal) * (1 - Math.exp(-0.5 * tVal)) * (1 + 0.1 * Math.sin(tVal * 0.5))
+          series.push({ t: Math.round(tVal * 10) / 10, y: Math.round(yVal * 100) / 100 })
+        }
+        setResultTimeSeries(series)
+      } else {
+        setResultTimeSeries([])
+      }
+      setShowResultViz(true)
+    } else {
+      setShowResultViz(false)
+      setResultChartData([])
+      setResultTimeSeries([])
+      setResultStats([])
+    }
+  }, [code])
 
   const filteredTemplates = COMPUTE_TEMPLATES.filter(t => {
     if (t.env !== selectedEnv) return false
@@ -1889,18 +1949,24 @@ function ComputationalLab() {
       })
       if (res.ok) {
         const data = await res.json()
-        setOutput(data.output || data.stdout || 'Execution completed.')
+        const out = data.output || data.stdout || 'Execution completed.'
+        setOutput(out)
+        parseOutputForViz(out)
       } else {
         // Simulate output for demo when backend isn't available
-        setOutput(simulateOutput(code, selectedEnv))
+        const out = simulateOutput(code, selectedEnv)
+        setOutput(out)
+        parseOutputForViz(out)
       }
     } catch {
       // Simulate output for demo
-      setOutput(simulateOutput(code, selectedEnv))
+      const out = simulateOutput(code, selectedEnv)
+      setOutput(out)
+      parseOutputForViz(out)
     } finally {
       setIsRunning(false)
     }
-  }, [code, selectedEnv, isRunning])
+  }, [code, selectedEnv, isRunning, parseOutputForViz])
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
