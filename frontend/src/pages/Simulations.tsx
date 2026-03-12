@@ -9,7 +9,7 @@ import {
 } from 'react-icons/fi'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, AreaChart, Area, Legend
+  ResponsiveContainer, AreaChart, Area
 } from 'recharts'
 import { api, Simulation } from '../services/api'
 import clsx from 'clsx'
