@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import {
-  FiActivity, FiPlay,
+  FiActivity, FiPlay, FiUpload,
 } from 'react-icons/fi'
 import {
   ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -24,6 +24,37 @@ export default function GenomicsAnalysis() {
   const [variants, setVariants] = useState('')
 
   const [biomarkerData, setBiomarkerData] = useState('')
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const handleCSVUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string
+      if (!text) return
+      const lines = text.split('\n').filter(l => l.trim())
+      if (lines.length === 0) return
+      const firstRow = lines[0].split(',')
+      const isHeader = firstRow.some(v => isNaN(parseFloat(v.trim())))
+      const dataLines = isHeader ? lines.slice(1) : lines
+      if (tab === 'pathway') {
+        // Single column of gene names
+        const allGenes = dataLines.flatMap(l => l.split(',').map(v => v.trim())).filter(Boolean)
+        setGenes(allGenes.join(', '))
+      } else if (tab === 'gsea') {
+        // gene,score per line
+        setRankedGenes(dataLines.join('\n'))
+      } else if (tab === 'variants') {
+        // gene,position,ref,alt per line
+        setVariants(dataLines.join('\n'))
+      } else if (tab === 'biomarkers') {
+        setBiomarkerData(dataLines.join('\n'))
+      }
+    }
+    reader.readAsText(file)
+    e.target.value = ''
+  }
 
   const run = async () => {
     setLoading(true); setError(''); setResult(null)
@@ -92,7 +123,11 @@ export default function GenomicsAnalysis() {
               <div><label className="text-xs text-[var(--color-text-muted)] mb-1 block">Expression data (gene,group1vals;group2vals per line)</label>
                 <textarea value={biomarkerData} onChange={e => setBiomarkerData(e.target.value)} rows={6} placeholder={"e.g.,\nTP53,2.1,3.5,1.8;5.6,7.2,6.1\nBRCA1,1.5,2.0;1.7,2.1"} className="input w-full text-xs font-mono resize-none" /></div>
             )}
-            <button onClick={run} disabled={loading} className="btn text-xs" style={{ color: 'var(--color-accent-blue)' }}><FiPlay className="w-3.5 h-3.5" /> {loading ? 'Running...' : 'Run Analysis'}</button>
+            <div className="flex gap-2">
+              <button onClick={run} disabled={loading} className="btn text-xs flex items-center gap-1.5" style={{ color: 'var(--color-accent-blue)' }}><FiPlay className="w-3.5 h-3.5" /> {loading ? 'Running...' : 'Run Analysis'}</button>
+              <input ref={fileInputRef} type="file" accept=".csv,.tsv,.txt" onChange={handleCSVUpload} className="hidden" />
+              <button onClick={() => fileInputRef.current?.click()} className="btn text-xs flex items-center gap-1.5 text-[var(--color-text-muted)]"><FiUpload className="w-3.5 h-3.5" /> Upload CSV</button>
+            </div>
           </div>
 
           {/* Results */}

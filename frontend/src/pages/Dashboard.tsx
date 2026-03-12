@@ -298,8 +298,8 @@ export default function Dashboard() {
         let apiProjects: Project[] = []
         try {
           const res = await api.getProjects({ page_size: 50 })
-          apiProjects = res.items || []
-        } catch { /* API may be unavailable */ }
+          apiProjects = res?.items || []
+        } catch (err) { console.warn('Dashboard: projects API unavailable', err) }
 
         const apiIds = new Set(apiProjects.map(p => p.id))
         const localOnly = localProjects

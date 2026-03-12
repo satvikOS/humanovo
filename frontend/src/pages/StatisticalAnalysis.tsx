@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import {
   FiBarChart2, FiTrendingUp, FiGrid, FiActivity, FiTarget,
-  FiPlay, FiSave, FiCopy, FiChevronDown, FiChevronUp,
+  FiPlay, FiSave, FiCopy, FiChevronDown, FiChevronUp, FiUpload,
 } from 'react-icons/fi'
 import {
   BarChart, Bar, LineChart, Line,
@@ -185,6 +185,66 @@ export default function StatisticalAnalysis() {
 
   const [hypTest, setHypTest] = useState('ttest')
   const [regMode, setRegMode] = useState('regression')
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const handleCSVUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string
+      if (!text) return
+      const lines = text.split('\n').filter(l => l.trim())
+      if (lines.length === 0) return
+      // Try to detect if first row is header
+      const firstRow = lines[0].split(',')
+      const isHeader = firstRow.some(v => isNaN(parseFloat(v.trim())))
+      const dataLines = isHeader ? lines.slice(1) : lines
+      if (tab === 'descriptive') {
+        // Single column: flatten all values
+        const vals = dataLines.flatMap(l => l.split(',').map(v => v.trim())).filter(v => v && !isNaN(parseFloat(v)))
+        setDescData(vals.join(', '))
+        if (isHeader && firstRow[0]) setDescLabel(firstRow[0].trim())
+      } else if (tab === 'hypothesis') {
+        if (hypTest === 'ttest') {
+          // Two columns = two groups
+          const col1: string[] = [], col2: string[] = []
+          dataLines.forEach(l => { const parts = l.split(',').map(v => v.trim()); if (parts[0]) col1.push(parts[0]); if (parts[1]) col2.push(parts[1]) })
+          setG1(col1.filter(v => !isNaN(parseFloat(v))).join(', '))
+          setG2(col2.filter(v => !isNaN(parseFloat(v))).join(', '))
+          if (isHeader) { setLabel1(firstRow[0]?.trim() || ''); setLabel2(firstRow[1]?.trim() || '') }
+        } else if (hypTest === 'anova') {
+          setAnovaGroups(dataLines.join('\n'))
+          if (isHeader) setAnovaLabels(firstRow.join(', '))
+        } else {
+          setChiData(dataLines.join('\n'))
+          if (isHeader) setChiColLabels(firstRow.join(', '))
+        }
+      } else if (tab === 'regression') {
+        if (regMode === 'correlation') {
+          setCorrVars(dataLines.join('\n'))
+          if (isHeader) setCorrLabels(firstRow.join(', '))
+        } else {
+          // Last column is Y, rest are X
+          const xRows: string[] = [], yVals: string[] = []
+          dataLines.forEach(l => { const parts = l.split(',').map(v => v.trim()); yVals.push(parts.pop() || ''); xRows.push(parts.join(',')) })
+          setRegX(xRows.join('\n'))
+          setRegY(yVals.join(', '))
+          if (isHeader) { const names = [...firstRow]; names.pop(); setRegFeatureNames(names.join(', ')) }
+        }
+      } else if (tab === 'survival') {
+        // Columns: time, event, [group]
+        const times: string[] = [], events: string[] = [], groups: string[] = []
+        dataLines.forEach(l => { const parts = l.split(',').map(v => v.trim()); times.push(parts[0] || ''); events.push(parts[1] || ''); if (parts[2]) groups.push(parts[2]) })
+        setSurvTimes(times.join(', '))
+        setSurvEvents(events.join(', '))
+        if (groups.length > 0) setSurvGroups(groups.join(', '))
+      }
+    }
+    reader.readAsText(file)
+    // Reset so the same file can be re-uploaded
+    e.target.value = ''
+  }
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -405,6 +465,10 @@ export default function StatisticalAnalysis() {
             <div className="flex gap-2 pt-2">
               <button onClick={runAnalysis} disabled={loading} className="btn text-xs flex items-center gap-1.5" style={{ color: 'var(--color-accent-blue)' }}>
                 <FiPlay className="w-3.5 h-3.5" /> {loading ? 'Running...' : 'Run Analysis'}
+              </button>
+              <input ref={fileInputRef} type="file" accept=".csv,.tsv,.txt" onChange={handleCSVUpload} className="hidden" />
+              <button onClick={() => fileInputRef.current?.click()} className="btn text-xs flex items-center gap-1.5 text-[var(--color-text-muted)]">
+                <FiUpload className="w-3.5 h-3.5" /> Upload CSV
               </button>
             </div>
           </div>
