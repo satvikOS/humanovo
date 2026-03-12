@@ -451,6 +451,7 @@ PAPER_TASK_KEY = "active-paper"
 
 BEDROCK_MODEL_CLAUDE_OPUS = os.environ.get("BEDROCK_MODEL_ID", "us.anthropic.claude-opus-4-6-v1:0")
 BEDROCK_MODEL_CLAUDE_SONNET = os.environ.get("BEDROCK_SONNET_ID", "us.anthropic.claude-sonnet-4-20250514-v1:0")
+BEDROCK_MODEL_CLAUDE_OPUS_45 = os.environ.get("BEDROCK_OPUS_45_ID", "us.anthropic.claude-opus-4-5-20250610-v1:0")
 BEDROCK_MODEL_NOVA_PREMIER = os.environ.get("BEDROCK_NOVA_PREMIER_ID", "us.amazon.nova-premier-v1:0")
 AZURE_AI_REASONER_MODEL = os.environ.get("AZURE_AI_REASONER_MODEL", "DeepSeek-R1")
 AZURE_AI_CRITIC_MODEL = os.environ.get("AZURE_AI_CRITIC_MODEL", "Mistral-Large-3")
@@ -3674,35 +3675,24 @@ Use ## for major sections, ### for subsections. Include ALL sections from Abstra
                 last_err = retry_err
                 err_str = str(retry_err).lower()
                 if "throttl" in err_str or "too many tokens" in err_str or "rate" in err_str:
-                    print(f"[PAPER] Bedrock throttled (attempt {attempt+1}/3): {str(retry_err)[:120]}")
-                    # Fall back to Azure GPT-5.3 or GPT-4.1 for synthesis
-                    fallback_model = None
-                    fallback_name = None
-                    if azure_gpt53_client is not None:
-                        fallback_model = AZURE_AI_GPT53_MODEL
-                        fallback_name = "GPT-5.3"
-                    elif azure_gpt41_client is not None:
-                        fallback_model = AZURE_AI_GPT41_MODEL
-                        fallback_name = "GPT-4.1"
-                    if fallback_model:
-                        print(f"[PAPER] Falling back to Azure {fallback_name} for synthesis...")
-                        _update_paper_phase(table, f"Synthesizing with {fallback_name}...", 2, total_phases)
-                        try:
-                            paper_md = call_azure_ai(
-                                model_name=fallback_model,
-                                prompt=synthesis_prompt,
-                                system_prompt=synthesis_system,
-                                max_tokens=32_768,
-                                temperature=0.3,
-                            )
-                            print(f"[PAPER] {fallback_name} synthesis complete: {len(paper_md)} chars")
-                            break
-                        except Exception as fb_err:
-                            print(f"[PAPER] {fallback_name} fallback also failed: {fb_err}")
-                            last_err = fb_err
-                            continue
-                    else:
-                        time.sleep(5)
+                    print(f"[PAPER] Bedrock Opus 4.6 throttled (attempt {attempt+1}/3): {str(retry_err)[:120]}")
+                    # Fall back to Claude Opus 4.5 via Bedrock
+                    print(f"[PAPER] Falling back to Claude Opus 4.5 for synthesis...")
+                    _update_paper_phase(table, "Synthesizing with Claude Opus 4.5...", 2, total_phases)
+                    try:
+                        paper_md = call_bedrock(
+                            model_id=BEDROCK_MODEL_CLAUDE_OPUS_45,
+                            prompt=synthesis_prompt,
+                            system_prompt=synthesis_system,
+                            max_tokens=32_768,
+                            temperature=0.3,
+                            client=_paper_client,
+                        )
+                        print(f"[PAPER] Opus 4.5 synthesis complete: {len(paper_md)} chars")
+                        break
+                    except Exception as fb_err:
+                        print(f"[PAPER] Opus 4.5 fallback also failed: {fb_err}")
+                        last_err = fb_err
                         continue
                 elif "timeout" in err_str or "timed out" in err_str:
                     print(f"[PAPER] Synthesis attempt {attempt+1}/3 timed out, retrying...")
