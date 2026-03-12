@@ -1,14 +1,150 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   FiActivity, FiPlay, FiPause, FiCheck, FiX, FiPlus,
   FiCpu, FiCode, FiGrid, FiBarChart2, FiZap, FiDatabase,
   FiUpload, FiDownload, FiMaximize2, FiMinimize2,
   FiTerminal, FiLayers, FiTrendingUp, FiTarget,
-  FiHeart
+  FiHeart, FiRefreshCw, FiClipboard
 } from 'react-icons/fi'
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, AreaChart, Area, Legend
+} from 'recharts'
 import { api, Simulation } from '../services/api'
 import clsx from 'clsx'
+
+// ── Equation Parser / Evaluator ─────────────────────────────────
+function evaluateExpression(expr: string, xMin: number, xMax: number, steps: number = 200): { x: number; y: number }[] {
+  const results: { x: number; y: number }[] = []
+  const step = (xMax - xMin) / steps
+  for (let x = xMin; x <= xMax; x += step) {
+    try {
+      const safeExpr = expr
+        .replace(/\bsin\b/g, 'Math.sin')
+        .replace(/\bcos\b/g, 'Math.cos')
+        .replace(/\btan\b/g, 'Math.tan')
+        .replace(/\bexp\b/g, 'Math.exp')
+        .replace(/\blog\b/g, 'Math.log')
+        .replace(/\bsqrt\b/g, 'Math.sqrt')
+        .replace(/\babs\b/g, 'Math.abs')
+        .replace(/\bpow\b/g, 'Math.pow')
+        .replace(/\bPI\b/g, 'Math.PI')
+        .replace(/\be\b/g, 'Math.E')
+        .replace(/\^/g, '**')
+      const fn = new Function('x', `return ${safeExpr}`)
+      const y = fn(x)
+      if (typeof y === 'number' && isFinite(y)) {
+        results.push({ x: Math.round(x * 1000) / 1000, y: Math.round(y * 1000) / 1000 })
+      }
+    } catch { /* skip invalid */ }
+  }
+  return results
+}
+
+// ── Predefined Pharmacokinetic / Scientific Equations ────────────
+interface PredefinedEquation {
+  id: string
+  name: string
+  category: string
+  expression: string
+  xMin: number
+  xMax: number
+  description: string
+}
+
+const PREDEFINED_EQUATIONS: PredefinedEquation[] = [
+  {
+    id: 'pk-one-compartment',
+    name: 'One-Compartment PK',
+    category: 'Pharmacokinetics',
+    expression: '100/50 * exp(-0.15*x)',
+    xMin: 0,
+    xMax: 48,
+    description: 'C(t) = D/V * exp(-k*t) -- Single IV bolus elimination (D=100mg, V=50L, k=0.15/h)',
+  },
+  {
+    id: 'pk-two-compartment',
+    name: 'Two-Compartment PK',
+    category: 'Pharmacokinetics',
+    expression: '1.5 * exp(-0.4*x) + 0.5 * exp(-0.05*x)',
+    xMin: 0,
+    xMax: 72,
+    description: 'C(t) = A*exp(-alpha*t) + B*exp(-beta*t) -- Biexponential disposition',
+  },
+  {
+    id: 'pk-oral-absorption',
+    name: 'Oral Absorption PK',
+    category: 'Pharmacokinetics',
+    expression: '(100*1.5)/(50*(1.5-0.15)) * (exp(-0.15*x) - exp(-1.5*x))',
+    xMin: 0,
+    xMax: 48,
+    description: 'Bateman equation: C(t) = F*D*ka / (V*(ka-ke)) * (exp(-ke*t) - exp(-ka*t))',
+  },
+  {
+    id: 'michaelis-menten',
+    name: 'Michaelis-Menten Kinetics',
+    category: 'Enzyme Kinetics',
+    expression: '100*x/(10+x)',
+    xMin: 0,
+    xMax: 100,
+    description: 'v = Vmax*[S]/(Km+[S]) -- Enzyme saturation kinetics (Vmax=100, Km=10)',
+  },
+  {
+    id: 'hill-equation',
+    name: 'Hill Equation',
+    category: 'Dose-Response',
+    expression: '100 * pow(x, 2) / (pow(10, 2) + pow(x, 2))',
+    xMin: 0,
+    xMax: 50,
+    description: 'E = Emax * [D]^n / (EC50^n + [D]^n) -- Sigmoidal dose-response (n=2, EC50=10)',
+  },
+  {
+    id: 'logistic-growth',
+    name: 'Logistic Tumor Growth',
+    category: 'Systems Biology',
+    expression: '1000 / (1 + 99*exp(-0.1*x))',
+    xMin: 0,
+    xMax: 100,
+    description: 'N(t) = K / (1 + ((K-N0)/N0)*exp(-r*t)) -- Logistic growth (K=1000, N0=10, r=0.1)',
+  },
+  {
+    id: 'gompertz-growth',
+    name: 'Gompertz Tumor Growth',
+    category: 'Systems Biology',
+    expression: '1000 * exp(log(10/1000) * exp(-0.05*x))',
+    xMin: 0,
+    xMax: 120,
+    description: 'N(t) = K * exp(ln(N0/K) * exp(-a*t)) -- Gompertz growth model',
+  },
+  {
+    id: 'emax-model',
+    name: 'Emax Dose-Response',
+    category: 'Dose-Response',
+    expression: '5 + 95 * x / (25 + x)',
+    xMin: 0,
+    xMax: 200,
+    description: 'E = E0 + Emax*D/(ED50+D) -- Emax model with baseline (E0=5, Emax=95, ED50=25)',
+  },
+  {
+    id: 'biexponential-decay',
+    name: 'Biexponential Decay',
+    category: 'Pharmacokinetics',
+    expression: '80*exp(-0.5*x) + 20*exp(-0.02*x)',
+    xMin: 0,
+    xMax: 100,
+    description: 'f(t) = A1*exp(-k1*t) + A2*exp(-k2*t) -- Distribution + elimination phases',
+  },
+  {
+    id: 'damped-oscillation',
+    name: 'Damped Oscillation',
+    category: 'Systems Biology',
+    expression: 'exp(-0.1*x) * sin(x)',
+    xMin: 0,
+    xMax: 40,
+    description: 'Damped oscillatory response -- circadian rhythm / feedback loop decay',
+  },
+]
 
 // ── Simulation Types ────────────────────────────────────────────
 const SIMULATION_TYPES = [
@@ -563,6 +699,399 @@ fprintf('  Time above MEC: %.1f h\\n', time_above_MEC);
 fprintf('  Time in therapeutic window: %.1f h\\n', time_in_window);
 `,
   },
+  // Additional Octave templates — Pharmacokinetics, Systems Biology, Dose-Response
+  {
+    id: 'octave-pk-population',
+    name: 'Population PK Modeling',
+    description: 'Non-linear mixed effects population PK: inter-individual variability, covariate modeling, and VPC (Visual Predictive Check) generation.',
+    env: 'octave' as ComputeEnv,
+    category: 'Pharmacokinetics',
+    icon: FiHeart,
+    color: '#0790C0',
+    code: `% Population Pharmacokinetic Model (NLME approximation)
+% Simulates inter-individual variability in PK parameters
+
+% Population parameters (typical values)
+tv_CL = 5.0;      % Typical clearance (L/h)
+tv_V1 = 50;       % Typical central volume (L)
+tv_ka = 1.2;      % Typical absorption rate (1/h)
+tv_F = 0.8;       % Typical bioavailability
+
+% Inter-individual variability (log-normal)
+omega_CL = 0.3;   % CV ~30%
+omega_V1 = 0.25;  % CV ~25%
+omega_ka = 0.4;   % CV ~40%
+
+% Residual error
+sigma_prop = 0.1;  % Proportional error 10%
+sigma_add = 0.5;   % Additive error (mg/L)
+
+% Study design
+n_subjects = 50;
+dose = 500;        % mg oral
+dt = 0.1;
+t_max = 48;
+t = 0:dt:t_max;
+n_t = length(t);
+
+% Sampling times
+t_obs = [0.5, 1, 2, 4, 6, 8, 12, 24, 36, 48];
+
+% Simulate population
+Cp_pop = zeros(n_subjects, n_t);
+params = zeros(n_subjects, 3);  % CL, V1, ka
+
+for subj = 1:n_subjects
+    % Individual parameters (log-normal distribution)
+    CL_i = tv_CL * exp(omega_CL * randn());
+    V1_i = tv_V1 * exp(omega_V1 * randn());
+    ka_i = tv_ka * exp(omega_ka * randn());
+    params(subj,:) = [CL_i, V1_i, ka_i];
+
+    ke_i = CL_i / V1_i;
+
+    % Analytical solution: one-compartment oral
+    for j = 1:n_t
+        Cp_pop(subj,j) = (tv_F * dose * ka_i) / (V1_i * (ka_i - ke_i)) * ...
+                          (exp(-ke_i * t(j)) - exp(-ka_i * t(j)));
+        % Add residual error
+        eps_prop = sigma_prop * randn();
+        eps_add = sigma_add * randn();
+        Cp_pop(subj,j) = Cp_pop(subj,j) * (1 + eps_prop) + eps_add;
+        Cp_pop(subj,j) = max(0, Cp_pop(subj,j));
+    end
+end
+
+% Population statistics
+median_Cp = median(Cp_pop);
+pct5 = quantile(Cp_pop, 0.05);
+pct95 = quantile(Cp_pop, 0.95);
+[Cmax_med, tmax_idx] = max(median_Cp);
+
+fprintf('Population PK Simulation Results:\\n');
+fprintf('  Subjects: %d\\n', n_subjects);
+fprintf('  Dose: %d mg oral\\n', dose);
+fprintf('  Median Cmax: %.2f mg/L at t=%.1f h\\n', Cmax_med, t(tmax_idx));
+fprintf('  90%% prediction interval Cmax: [%.2f, %.2f] mg/L\\n', max(pct5), max(pct95));
+fprintf('  Parameter estimates (median [IQR]):\\n');
+fprintf('    CL: %.2f [%.2f-%.2f] L/h\\n', median(params(:,1)), quantile(params(:,1),0.25), quantile(params(:,1),0.75));
+fprintf('    V1: %.1f [%.1f-%.1f] L\\n', median(params(:,2)), quantile(params(:,2),0.25), quantile(params(:,2),0.75));
+fprintf('    ka: %.2f [%.2f-%.2f] 1/h\\n', median(params(:,3)), quantile(params(:,3),0.25), quantile(params(:,3),0.75));
+`,
+  },
+  {
+    id: 'octave-pk-infusion',
+    name: 'IV Infusion PK Model',
+    description: 'Steady-state IV infusion with loading dose, accumulation kinetics, and therapeutic drug monitoring.',
+    env: 'octave' as ComputeEnv,
+    category: 'Pharmacokinetics',
+    icon: FiActivity,
+    color: '#0790C0',
+    code: `% IV Infusion Pharmacokinetics with Multiple Dosing
+% Steady-state accumulation and TDM simulation
+
+% Drug parameters
+CL = 4.0;         % Clearance (L/h)
+V = 35;           % Volume of distribution (L)
+ke = CL / V;      % Elimination rate constant
+t_half = log(2)/ke;
+
+% Dosing regimen
+infusion_rate = 100;  % mg/h
+infusion_duration = 1; % h (intermittent infusion)
+dose_interval = 8;     % h (q8h)
+n_doses = 10;
+
+% Time setup
+dt = 0.01;
+t_max = n_doses * dose_interval + 24;  % extra 24h washout
+t = 0:dt:t_max;
+n = length(t);
+Cp = zeros(1, n);
+
+% Simulate multiple intermittent infusions
+for d = 0:n_doses-1
+    t_start = d * dose_interval;
+    t_end_inf = t_start + infusion_duration;
+
+    for i = 1:n
+        if t(i) >= t_start && t(i) < t_end_inf
+            % During infusion
+            t_inf = t(i) - t_start;
+            Cp(i) = Cp(i) + (infusion_rate/CL) * (1 - exp(-ke * t_inf));
+        elseif t(i) >= t_end_inf
+            % Post infusion
+            t_post = t(i) - t_end_inf;
+            C_end_inf = (infusion_rate/CL) * (1 - exp(-ke * infusion_duration));
+            Cp(i) = Cp(i) + C_end_inf * exp(-ke * t_post);
+        end
+    end
+end
+
+% Steady-state analysis
+ss_start = (n_doses-2) * dose_interval;
+ss_end = (n_doses-1) * dose_interval;
+ss_mask = t >= ss_start & t < ss_end;
+Css_max = max(Cp(ss_mask));
+Css_min = min(Cp(ss_mask));
+Css_avg = mean(Cp(ss_mask));
+
+% Accumulation factor
+R_acc = 1 / (1 - exp(-ke * dose_interval));
+
+fprintf('IV Infusion PK Results:\\n');
+fprintf('  Drug t1/2: %.1f h\\n', t_half);
+fprintf('  Dosing: %.0f mg/h x %.0f h q%.0fh\\n', infusion_rate, infusion_duration, dose_interval);
+fprintf('  Total dose/interval: %.0f mg\\n', infusion_rate * infusion_duration);
+fprintf('  Accumulation factor: %.2f\\n', R_acc);
+fprintf('  Steady-state Cmax: %.2f mg/L\\n', Css_max);
+fprintf('  Steady-state Cmin: %.2f mg/L\\n', Css_min);
+fprintf('  Steady-state Cavg: %.2f mg/L\\n', Css_avg);
+fprintf('  Peak-trough ratio: %.2f\\n', Css_max/Css_min);
+fprintf('  Time to ~steady-state: %.1f h (5 x t1/2)\\n', 5 * t_half);
+`,
+  },
+  {
+    id: 'octave-systems-bio',
+    name: 'Systems Biology - Pathway Model',
+    description: 'ODE-based signaling pathway simulation: MAPK cascade, receptor-ligand binding, and feedback regulation dynamics.',
+    env: 'octave' as ComputeEnv,
+    category: 'Systems Biology',
+    icon: FiRefreshCw,
+    color: '#0790C0',
+    code: `% MAPK Signaling Cascade Simulation
+% Three-tier kinase cascade with feedback
+
+% Rate constants
+k1 = 0.1;    % Ras activation
+k2 = 0.05;   % Ras deactivation
+k3 = 0.5;    % RAF activation by Ras
+k4 = 0.2;    % RAF deactivation
+k5 = 0.3;    % MEK activation by RAF
+k6 = 0.1;    % MEK deactivation
+k7 = 0.4;    % ERK activation by MEK
+k8 = 0.15;   % ERK deactivation
+k_fb = 0.08; % Negative feedback (ERK -> Ras)
+
+% Total protein concentrations (arbitrary units)
+Ras_total = 100;
+RAF_total = 100;
+MEK_total = 200;
+ERK_total = 300;
+
+% Time setup
+dt = 0.01;
+t_max = 100;
+t = 0:dt:t_max;
+n = length(t);
+
+% State variables (active forms)
+Ras = zeros(1,n); RAF = zeros(1,n);
+MEK = zeros(1,n); ERK = zeros(1,n);
+
+% Stimulus: EGF pulse
+EGF = zeros(1,n);
+EGF(t >= 5 & t <= 10) = 1.0;   % 5-unit pulse
+EGF(t >= 50 & t <= 52) = 0.5;  % Second smaller pulse
+
+% Euler integration of ODE system
+for i = 1:n-1
+    Ras_inactive = Ras_total - Ras(i);
+    RAF_inactive = RAF_total - RAF(i);
+    MEK_inactive = MEK_total - MEK(i);
+    ERK_inactive = ERK_total - ERK(i);
+
+    % Negative feedback from ERK reduces Ras activation
+    fb = 1 / (1 + k_fb * ERK(i));
+
+    dRas = k1 * EGF(i) * Ras_inactive * fb - k2 * Ras(i);
+    dRAF = k3 * Ras(i) * RAF_inactive / (50 + RAF_inactive) - k4 * RAF(i);
+    dMEK = k5 * RAF(i) * MEK_inactive / (100 + MEK_inactive) - k6 * MEK(i);
+    dERK = k7 * MEK(i) * ERK_inactive / (150 + ERK_inactive) - k8 * ERK(i);
+
+    Ras(i+1) = max(0, min(Ras_total, Ras(i) + dt * dRas));
+    RAF(i+1) = max(0, min(RAF_total, RAF(i) + dt * dRAF));
+    MEK(i+1) = max(0, min(MEK_total, MEK(i) + dt * dMEK));
+    ERK(i+1) = max(0, min(ERK_total, ERK(i) + dt * dERK));
+end
+
+% Analysis
+[peak_ERK, peak_idx] = max(ERK);
+peak_time = t(peak_idx);
+duration_active = sum(ERK > 0.1 * peak_ERK) * dt;
+signal_amplification = peak_ERK / max(EGF);
+
+fprintf('MAPK Cascade Simulation Results:\\n');
+fprintf('  Stimulus: EGF pulse (5-10s, 50-52s)\\n');
+fprintf('  Peak Ras*: %.1f / %d (%.0f%%)\\n', max(Ras), Ras_total, 100*max(Ras)/Ras_total);
+fprintf('  Peak RAF*: %.1f / %d (%.0f%%)\\n', max(RAF), RAF_total, 100*max(RAF)/RAF_total);
+fprintf('  Peak MEK*: %.1f / %d (%.0f%%)\\n', max(MEK), MEK_total, 100*max(MEK)/MEK_total);
+fprintf('  Peak ERK*: %.1f / %d (%.0f%%)\\n', peak_ERK, ERK_total, 100*peak_ERK/ERK_total);
+fprintf('  Time to peak ERK: %.1f s\\n', peak_time);
+fprintf('  ERK active duration (>10%%): %.1f s\\n', duration_active);
+fprintf('  Signal amplification: %.1fx\\n', signal_amplification);
+`,
+  },
+  {
+    id: 'octave-dose-response-analysis',
+    name: 'Dose-Response Curve Fitting',
+    description: 'Four-parameter logistic (4PL) dose-response fitting, EC50/IC50 estimation, therapeutic index calculation.',
+    env: 'octave' as ComputeEnv,
+    category: 'Dose-Response',
+    icon: FiTrendingUp,
+    color: '#0790C0',
+    code: `% Dose-Response Analysis: 4-Parameter Logistic Model
+% EC50 estimation and therapeutic index calculation
+
+% True parameters for simulation
+E0_true = 5;        % Baseline response
+Emax_true = 95;     % Maximum effect
+EC50_true = 10;     % Half-maximal concentration
+n_true = 1.5;       % Hill coefficient
+
+% Dose levels (log-spaced)
+doses = [0, 0.1, 0.3, 1, 3, 10, 30, 100, 300, 1000];
+n_doses = length(doses);
+n_replicates = 6;
+
+% Generate noisy response data
+responses = zeros(n_doses, n_replicates);
+sigma_noise = 5;  % Response variability
+
+for d = 1:n_doses
+    true_effect = E0_true + (Emax_true - E0_true) * doses(d)^n_true / (EC50_true^n_true + doses(d)^n_true);
+    responses(d, :) = true_effect + sigma_noise * randn(1, n_replicates);
+end
+
+% Mean and SEM per dose
+mean_response = mean(responses, 2)';
+sem_response = std(responses, 0, 2)' / sqrt(n_replicates);
+
+% Grid search for 4PL fit (simplified - no optimization toolbox needed)
+best_sse = Inf;
+best_params = [0, 100, 10, 1];
+
+for E0_try = 0:2:10
+    for Emax_try = 80:5:100
+        for EC50_try = [1, 3, 5, 8, 10, 15, 20, 30]
+            for n_try = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0]
+                predicted = E0_try + (Emax_try - E0_try) .* doses.^n_try ./ (EC50_try^n_try + doses.^n_try);
+                sse = sum((mean_response - predicted).^2);
+                if sse < best_sse
+                    best_sse = sse;
+                    best_params = [E0_try, Emax_try, EC50_try, n_try];
+                end
+            end
+        end
+    end
+end
+
+% Fitted parameters
+E0_fit = best_params(1); Emax_fit = best_params(2);
+EC50_fit = best_params(3); n_fit = best_params(4);
+
+% Derived metrics
+EC20 = EC50_fit * (20/80)^(1/n_fit);
+EC80 = EC50_fit * (80/20)^(1/n_fit);
+
+% Therapeutic index (assume toxic at higher doses)
+TC50 = EC50_fit * 15;  % Simulated toxic concentration
+TI = TC50 / EC50_fit;
+
+% R-squared
+fitted = E0_fit + (Emax_fit - E0_fit) .* doses.^n_fit ./ (EC50_fit^n_fit + doses.^n_fit);
+SS_res = sum((mean_response - fitted).^2);
+SS_tot = sum((mean_response - mean(mean_response)).^2);
+R2 = 1 - SS_res / SS_tot;
+
+fprintf('Dose-Response Analysis (4PL Model):\\n');
+fprintf('  True EC50: %.1f | Fitted EC50: %.1f\\n', EC50_true, EC50_fit);
+fprintf('  True Hill coeff: %.1f | Fitted: %.1f\\n', n_true, n_fit);
+fprintf('  E0: %.1f, Emax: %.1f\\n', E0_fit, Emax_fit);
+fprintf('  EC20: %.2f, EC80: %.2f\\n', EC20, EC80);
+fprintf('  Selectivity window (EC20-EC80): %.1f-fold\\n', EC80/EC20);
+fprintf('  R-squared: %.4f\\n', R2);
+fprintf('  Therapeutic Index (TC50/EC50): %.1f\\n', TI);
+fprintf('  Safety margin: %.1f-fold\\n', TC50/EC80);
+`,
+  },
+  {
+    id: 'octave-tumor-immune',
+    name: 'Tumor-Immune Dynamics',
+    description: 'ODE model of tumor-immune system interactions: tumor growth, immune response, checkpoint inhibition, and treatment scheduling.',
+    env: 'octave' as ComputeEnv,
+    category: 'Systems Biology',
+    icon: FiTarget,
+    color: '#0790C0',
+    code: `% Tumor-Immune System ODE Model
+% With checkpoint inhibitor therapy simulation
+
+% Parameters
+r = 0.05;         % Tumor growth rate (1/day)
+K = 1e9;          % Carrying capacity (cells)
+a = 1e-7;         % Immune killing rate
+b = 1e-9;         % Immune stimulation by tumor
+d = 0.02;         % Immune cell death rate
+s = 1e4;          % Basal immune cell production (cells/day)
+g = 0.5;          % Checkpoint inhibitor effect (0=none, 1=full)
+
+% Simulation setup
+dt = 0.1;         % days
+t_max = 365;      % 1 year
+t = 0:dt:t_max;
+n = length(t);
+
+% State: Tumor cells (T), Immune cells (I)
+T = zeros(1,n); I = zeros(1,n);
+T(1) = 1e6;     % Initial tumor burden
+I(1) = 1e5;     % Initial immune cells
+
+% Treatment schedule: checkpoint inhibitor q3w for 6 cycles
+treatment = zeros(1,n);
+for cycle = 0:5
+    t_dose = 30 + cycle * 21;  % Start day 30, q3 weeks
+    mask = t >= t_dose & t < t_dose + 7;  % Drug active for ~7 days
+    treatment(mask) = 1;
+end
+
+% Simulate with Euler method
+for i = 1:n-1
+    % Effective immune killing with checkpoint modulation
+    kill_rate = a * (1 + g * treatment(i));
+
+    dT = r * T(i) * (1 - T(i)/K) - kill_rate * T(i) * I(i);
+    dI = s + b * T(i) * I(i) - d * I(i);
+
+    T(i+1) = max(0, T(i) + dt * dT);
+    I(i+1) = max(0, I(i) + dt * dI);
+end
+
+% Simulate untreated comparison
+T_untr = zeros(1,n); I_untr = zeros(1,n);
+T_untr(1) = 1e6; I_untr(1) = 1e5;
+for i = 1:n-1
+    dT = r * T_untr(i) * (1 - T_untr(i)/K) - a * T_untr(i) * I_untr(i);
+    dI = s + b * T_untr(i) * I_untr(i) - d * I_untr(i);
+    T_untr(i+1) = max(0, T_untr(i) + dt * dT);
+    I_untr(i+1) = max(0, I_untr(i) + dt * dI);
+end
+
+% Outcomes
+response_ratio = T(end) / T_untr(end);
+nadir = min(T(t>30));  % Minimum tumor after treatment starts
+time_to_nadir = t(find(T == nadir, 1));
+
+fprintf('Tumor-Immune Simulation Results:\\n');
+fprintf('  Initial tumor: %.2e cells\\n', T(1));
+fprintf('  Treatment: Checkpoint inhibitor q3w x 6 cycles\\n');
+fprintf('  Final tumor (treated): %.2e cells\\n', T(end));
+fprintf('  Final tumor (untreated): %.2e cells\\n', T_untr(end));
+fprintf('  Response ratio: %.3f (%.0f%% reduction)\\n', response_ratio, (1-response_ratio)*100);
+fprintf('  Tumor nadir: %.2e cells at day %.0f\\n', nadir, time_to_nadir);
+fprintf('  Peak immune cells: %.2e\\n', max(I));
+fprintf('  Immune ratio (treated/untreated): %.2f\\n', max(I)/max(I_untr));
+`,
+  },
   // Python templates
   {
     id: 'python-genomics',
@@ -1005,6 +1534,319 @@ function NewSimulationForm({ onClose }: { onClose: () => void }) {
         </div>
         {createMutation.isError && <p className="text-sm text-red-400">Failed to create simulation. Please try again.</p>}
       </form>
+    </div>
+  )
+}
+
+// ── Equation Plotter / MATLAB Engine ────────────────────────────
+function EquationPlotter() {
+  const [equationExpr, setEquationExpr] = useState('sin(x) * exp(-x/5)')
+  const [xMin, setXMin] = useState(-2)
+  const [xMax, setXMax] = useState(20)
+  const [plotData, setPlotData] = useState<{ x: number; y: number }[]>([])
+  const [selectedPreset, setSelectedPreset] = useState<PredefinedEquation | null>(null)
+  const [plotHistory, setPlotHistory] = useState<{ expr: string; data: { x: number; y: number }[] }[]>([])
+  const [showOverlay, setShowOverlay] = useState(false)
+
+  const equationCategories = useMemo(() => {
+    const cats: Record<string, PredefinedEquation[]> = {}
+    PREDEFINED_EQUATIONS.forEach(eq => {
+      if (!cats[eq.category]) cats[eq.category] = []
+      cats[eq.category].push(eq)
+    })
+    return cats
+  }, [])
+
+  const handlePlot = useCallback(() => {
+    if (!equationExpr.trim()) return
+    const data = evaluateExpression(equationExpr, xMin, xMax)
+    setPlotData(data)
+    if (data.length > 0) {
+      setPlotHistory(prev => {
+        const next = [{ expr: equationExpr, data }, ...prev.filter(h => h.expr !== equationExpr)]
+        return next.slice(0, 10)
+      })
+    }
+  }, [equationExpr, xMin, xMax])
+
+  const loadPreset = useCallback((eq: PredefinedEquation) => {
+    setSelectedPreset(eq)
+    setEquationExpr(eq.expression)
+    setXMin(eq.xMin)
+    setXMax(eq.xMax)
+    const data = evaluateExpression(eq.expression, eq.xMin, eq.xMax)
+    setPlotData(data)
+    setPlotHistory(prev => {
+      const next = [{ expr: eq.expression, data }, ...prev.filter(h => h.expr !== eq.expression)]
+      return next.slice(0, 10)
+    })
+  }, [])
+
+  // Summary statistics for current plot
+  const stats = useMemo(() => {
+    if (plotData.length === 0) return null
+    const ys = plotData.map(p => p.y)
+    const yMin = Math.min(...ys)
+    const yMax = Math.max(...ys)
+    const yMean = ys.reduce((a, b) => a + b, 0) / ys.length
+    const xAtMax = plotData[ys.indexOf(yMax)]?.x
+    const xAtMin = plotData[ys.indexOf(yMin)]?.x
+    return {
+      yMin: Math.round(yMin * 1000) / 1000,
+      yMax: Math.round(yMax * 1000) / 1000,
+      yMean: Math.round(yMean * 1000) / 1000,
+      xAtMax: Math.round((xAtMax ?? 0) * 1000) / 1000,
+      xAtMin: Math.round((xAtMin ?? 0) * 1000) / 1000,
+      nPoints: plotData.length,
+    }
+  }, [plotData])
+
+  const exportCSV = useCallback(() => {
+    if (plotData.length === 0) return
+    const csv = 'x,y\n' + plotData.map(p => `${p.x},${p.y}`).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `plot_${equationExpr.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [plotData, equationExpr])
+
+  return (
+    <div className="flex flex-col gap-4">
+      {/* Equation Input Section */}
+      <div className="glass-card p-5">
+        <div className="flex items-center gap-2 mb-4">
+          <FiCpu className="w-5 h-5 text-[#0790C0]" />
+          <h3 className="text-sm font-semibold text-[var(--color-text)]">MATLAB / Octave Equation Engine</h3>
+          <span className="text-xxs px-2 py-0.5 rounded-full bg-[#0790C0]/20 text-[#0790C0]">Interactive</span>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          {/* Equation input */}
+          <div className="lg:col-span-2 space-y-3">
+            <div>
+              <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
+                f(x) =
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={equationExpr}
+                  onChange={e => { setEquationExpr(e.target.value); setSelectedPreset(null) }}
+                  placeholder="e.g. sin(x) * exp(-x/5), x^2 - 3*x + 2, 100*x/(10+x)"
+                  className="flex-1 px-3 py-2 text-sm font-mono bg-[var(--glass-bg)] border border-[var(--color-border)] rounded-lg text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[#0790C0]"
+                  onKeyDown={e => { if (e.key === 'Enter') handlePlot() }}
+                />
+                <button
+                  onClick={handlePlot}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium text-white bg-[#0790C0] hover:opacity-90 transition-all"
+                >
+                  <FiPlay className="w-3.5 h-3.5" />
+                  Plot
+                </button>
+              </div>
+              <p className="text-xxs text-[var(--color-text-muted)] mt-1">
+                Supported: sin, cos, tan, exp, log, sqrt, abs, pow, PI, e. Use ^ for exponents.
+              </p>
+            </div>
+
+            <div className="flex gap-3">
+              <div className="flex-1">
+                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">x min</label>
+                <input
+                  type="number"
+                  value={xMin}
+                  onChange={e => setXMin(parseFloat(e.target.value) || 0)}
+                  className="w-full px-3 py-1.5 text-sm bg-[var(--glass-bg)] border border-[var(--color-border)] rounded-lg text-[var(--color-text)] focus:outline-none focus:border-[#0790C0]"
+                />
+              </div>
+              <div className="flex-1">
+                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">x max</label>
+                <input
+                  type="number"
+                  value={xMax}
+                  onChange={e => setXMax(parseFloat(e.target.value) || 10)}
+                  className="w-full px-3 py-1.5 text-sm bg-[var(--glass-bg)] border border-[var(--color-border)] rounded-lg text-[var(--color-text)] focus:outline-none focus:border-[#0790C0]"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Predefined Equations Sidebar */}
+          <div className="space-y-2">
+            <label className="block text-xs font-medium text-[var(--color-text-secondary)]">Predefined Equations</label>
+            <div className="max-h-48 overflow-y-auto space-y-1 pr-1">
+              {Object.entries(equationCategories).map(([cat, eqs]) => (
+                <div key={cat}>
+                  <p className="text-xxs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider mt-2 mb-1">{cat}</p>
+                  {eqs.map(eq => (
+                    <button
+                      key={eq.id}
+                      onClick={() => loadPreset(eq)}
+                      className={clsx(
+                        'w-full text-left px-2 py-1.5 rounded text-xs transition-all',
+                        selectedPreset?.id === eq.id
+                          ? 'bg-[#0790C0]/20 text-[#0790C0] border border-[#0790C0]/40'
+                          : 'hover:bg-[var(--glass-bg)] text-[var(--color-text-secondary)] border border-transparent'
+                      )}
+                    >
+                      {eq.name}
+                    </button>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {selectedPreset && (
+          <div className="mt-3 p-2.5 rounded-lg bg-[var(--glass-bg)] border border-[var(--color-border)]">
+            <p className="text-xs text-[var(--color-text-secondary)]">
+              <span className="font-medium text-[var(--color-text)]">{selectedPreset.name}:</span>{' '}
+              {selectedPreset.description}
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Plot + Results */}
+      {plotData.length > 0 && (
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+          {/* Chart */}
+          <div className="xl:col-span-2 glass-card p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h4 className="text-sm font-medium text-[var(--color-text)]">Plot Output</h4>
+                <p className="text-xxs text-[var(--color-text-muted)] font-mono mt-0.5">
+                  y = {equationExpr}
+                </p>
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setShowOverlay(!showOverlay)}
+                  className={clsx(
+                    'px-2 py-1 rounded text-xxs transition-all border',
+                    showOverlay
+                      ? 'border-[#0790C0]/40 bg-[#0790C0]/20 text-[#0790C0]'
+                      : 'border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
+                  )}
+                >
+                  <FiLayers className="w-3 h-3 inline mr-1" />
+                  Overlay
+                </button>
+                <button
+                  onClick={exportCSV}
+                  className="px-2 py-1 rounded text-xxs border border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-all"
+                >
+                  <FiDownload className="w-3 h-3 inline mr-1" />
+                  CSV
+                </button>
+              </div>
+            </div>
+            <ResponsiveContainer width="100%" height={320}>
+              <AreaChart data={plotData} margin={{ top: 5, right: 20, bottom: 20, left: 10 }}>
+                <defs>
+                  <linearGradient id="eqPlotGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#0790C0" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#0790C0" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                <XAxis
+                  dataKey="x"
+                  stroke="var(--color-text-muted)"
+                  tick={{ fontSize: 10 }}
+                  label={{ value: 'x', position: 'insideBottom', offset: -10, style: { fill: 'var(--color-text-muted)', fontSize: 11 } }}
+                />
+                <YAxis
+                  stroke="var(--color-text-muted)"
+                  tick={{ fontSize: 10 }}
+                  label={{ value: 'f(x)', angle: -90, position: 'insideLeft', offset: 5, style: { fill: 'var(--color-text-muted)', fontSize: 11 } }}
+                />
+                <Tooltip
+                  contentStyle={{ background: 'var(--glass-bg)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '11px' }}
+                  labelStyle={{ color: 'var(--color-text)' }}
+                  itemStyle={{ color: '#0790C0' }}
+                />
+                <Area type="monotone" dataKey="y" stroke="#0790C0" strokeWidth={2} fill="url(#eqPlotGradient)" name="f(x)" dot={false} />
+                {showOverlay && plotHistory.slice(1, 4).map((h, idx) => (
+                  <Line
+                    key={idx}
+                    data={h.data}
+                    type="monotone"
+                    dataKey="y"
+                    stroke={['#22c55e', '#a855f7', '#f59e0b'][idx]}
+                    strokeWidth={1.5}
+                    strokeDasharray="4 2"
+                    dot={false}
+                    name={h.expr.slice(0, 25)}
+                  />
+                ))}
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Stats + History */}
+          <div className="flex flex-col gap-4">
+            {/* Summary Statistics */}
+            {stats && (
+              <div className="glass-card p-4">
+                <h4 className="text-sm font-medium text-[var(--color-text)] mb-3">
+                  <FiBarChart2 className="w-3.5 h-3.5 inline mr-1.5" />
+                  Summary Statistics
+                </h4>
+                <div className="space-y-2">
+                  {[
+                    { label: 'y max', value: stats.yMax, sub: `at x = ${stats.xAtMax}` },
+                    { label: 'y min', value: stats.yMin, sub: `at x = ${stats.xAtMin}` },
+                    { label: 'y mean', value: stats.yMean, sub: '' },
+                    { label: 'Range', value: `[${xMin}, ${xMax}]`, sub: `${stats.nPoints} pts` },
+                  ].map(s => (
+                    <div key={s.label} className="flex items-center justify-between py-1 border-b border-[var(--color-border)] last:border-0">
+                      <span className="text-xs text-[var(--color-text-muted)]">{s.label}</span>
+                      <div className="text-right">
+                        <span className="text-xs font-mono text-[var(--color-text)]">{s.value}</span>
+                        {s.sub && <span className="text-xxs text-[var(--color-text-muted)] ml-1.5">{s.sub}</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Plot History */}
+            {plotHistory.length > 1 && (
+              <div className="glass-card p-4">
+                <h4 className="text-xs font-medium text-[var(--color-text)] mb-2">
+                  <FiClipboard className="w-3 h-3 inline mr-1.5" />
+                  Recent Plots
+                </h4>
+                <div className="space-y-1 max-h-32 overflow-y-auto">
+                  {plotHistory.map((h, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => {
+                        setEquationExpr(h.expr)
+                        setPlotData(h.data)
+                      }}
+                      className={clsx(
+                        'w-full text-left px-2 py-1 rounded text-xxs font-mono transition-all truncate',
+                        idx === 0
+                          ? 'bg-[#0790C0]/10 text-[#0790C0]'
+                          : 'text-[var(--color-text-muted)] hover:bg-[var(--glass-bg)]'
+                      )}
+                    >
+                      {h.expr}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

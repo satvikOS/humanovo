@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import {
-  FiActivity, FiPlay,
+  FiActivity, FiPlay, FiUpload,
 } from 'react-icons/fi'
 import {
   ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -8,7 +8,7 @@ import {
 } from 'recharts'
 
 type TabId = 'pathway' | 'gsea' | 'variants' | 'biomarkers'
-const API = '/api/genomics'
+const API = '/api/v1/genomics'
 
 export default function GenomicsAnalysis() {
   const [tab, setTab] = useState<TabId>('pathway')
@@ -24,6 +24,49 @@ export default function GenomicsAnalysis() {
   const [variants, setVariants] = useState('TP53,7577539,G,A\nBRCA1,41276045,C,T\nEGFR,55249071,T,G\nKRAS,25398284,C,A')
 
   const [biomarkerData, setBiomarkerData] = useState('TP53,2.1,3.5,1.8,4.2,2.9;5.6,7.2,6.1,8.3,6.8\nBRCA1,1.5,2.0,1.8,2.3,1.6;1.7,2.1,1.9,2.4,1.8\nEGFR,10.2,12.5,11.0,13.1,10.8;3.5,4.2,3.8,4.0,3.6\nKRAS,5.0,5.5,4.8,5.2,5.1;8.2,9.1,8.5,8.8,9.3')
+
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string
+      if (!text) return
+      const delimiter = file.name.endsWith('.tsv') ? '\t' : ','
+      const lines = text.trim().split('\n')
+
+      if (tab === 'pathway') {
+        // Expect a list of genes, one per line or comma-separated
+        const allGenes = lines.flatMap(l => l.split(delimiter).map(g => g.trim())).filter(Boolean)
+        setGenes(allGenes.join(', '))
+      } else if (tab === 'gsea') {
+        // Expect gene,score per line
+        const ranked = lines.map(l => {
+          const parts = l.split(delimiter).map(v => v.trim())
+          if (parts.length >= 2 && !isNaN(parseFloat(parts[1]))) return `${parts[0]},${parts[1]}`
+          return null
+        }).filter(Boolean).join('\n')
+        setRankedGenes(ranked)
+      } else if (tab === 'variants') {
+        // Expect gene,position,ref,alt per line
+        const vars = lines.map(l => {
+          const parts = l.split(delimiter).map(v => v.trim())
+          if (parts.length >= 4) return parts.slice(0, 4).join(',')
+          return null
+        }).filter(Boolean).join('\n')
+        setVariants(vars)
+      } else if (tab === 'biomarkers') {
+        // Expect gene,group1val1,group1val2,...;group2val1,group2val2,...
+        // Or CSV with gene, then values for group1 and group2 separated by a blank column or header
+        const parsed = lines.filter(l => l.trim()).map(l => l.trim())
+        setBiomarkerData(parsed.join('\n'))
+      }
+    }
+    reader.readAsText(file)
+    e.target.value = ''
+  }
 
   const run = async () => {
     setLoading(true); setError(''); setResult(null)
@@ -73,6 +116,13 @@ export default function GenomicsAnalysis() {
           {/* Input */}
           <div className="glass-card p-5 space-y-4">
             <h3 className="text-sm font-medium">Input</h3>
+            <div className="flex items-center gap-2 mb-2">
+              <input ref={fileInputRef} type="file" accept=".csv,.tsv,.txt" onChange={handleFileUpload} className="hidden" />
+              <button onClick={() => fileInputRef.current?.click()} className="btn text-xs flex items-center gap-1.5 text-[var(--color-text-muted)]">
+                <FiUpload className="w-3.5 h-3.5" /> Upload CSV/TSV
+              </button>
+              <span className="text-xxs text-[var(--color-text-muted)]">or enter data manually below</span>
+            </div>
             {tab === 'pathway' && (
               <>
                 <div><label className="text-xs text-[var(--color-text-muted)] mb-1 block">Gene List (comma-separated)</label>

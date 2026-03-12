@@ -208,8 +208,8 @@ export default function Notebook() {
   const loadPages = async () => {
     try {
       setLoading(true)
-      const res = await api.getNotebookPages({ page_size: 100 })
-      const items = res.items || []
+      const res = await api.getNotebookPages({ page_size: 100 }) || {}
+      const items = Array.isArray(res.items) ? res.items : []
       if (items.length > 0) {
         setPages(items)
         if (!activePage) selectPage(items[0])
@@ -252,7 +252,7 @@ export default function Notebook() {
     setActivePage(page)
     setEditContent(page.content)
     setEditTitle(page.title)
-    setEditTags(page.tags || [])
+    setEditTags(Array.isArray(page.tags) ? page.tags : [])
     setHasUnsavedChanges(false)
     setShowVersions(false)
   }, [])
@@ -442,7 +442,7 @@ export default function Notebook() {
     return pages.filter(p =>
       p.title.toLowerCase().includes(q) ||
       p.content.toLowerCase().includes(q) ||
-      p.tags?.some(t => t.toLowerCase().includes(q))
+      (Array.isArray(p.tags) && p.tags.some(t => t.toLowerCase().includes(q)))
     )
   }, [pages, searchQuery])
 
@@ -521,7 +521,7 @@ export default function Notebook() {
                   {new Date(page.updated_at).toLocaleDateString()}
                 </span>
               </div>
-              {page.tags?.length > 0 && (
+              {Array.isArray(page.tags) && page.tags.length > 0 && (
                 <div className="flex gap-1 mt-1 flex-wrap">
                   {page.tags.slice(0, 3).map(tag => (
                     <span key={tag} className="text-xxs px-1 py-0.5 rounded bg-white/5 text-[var(--color-text-muted)]">

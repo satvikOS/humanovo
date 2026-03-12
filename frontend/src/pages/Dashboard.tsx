@@ -54,7 +54,7 @@ function StatCard({ stat }: { stat: StatData }) {
       <div className="text-sm text-[var(--color-text-muted)]">{stat.label}</div>
 
       {stat.chartData && stat.chartData.length > 0 && (
-        <div className="mt-4 h-0 group-hover:h-16 overflow-hidden transition-all duration-300 ease-in-out">
+        <div className="mt-4 h-16 overflow-hidden transition-all duration-300 ease-in-out">
           <ResponsiveContainer width="100%" height={64}>
             <AreaChart data={stat.chartData}>
               <defs>

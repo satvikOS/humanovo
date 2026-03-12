@@ -247,6 +247,17 @@ function ConstantChat() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, loading])
 
+  const getLocalContext = () => {
+    try {
+      const projects = JSON.parse(localStorage.getItem('humanovo-projects') || '[]')
+      const hypotheses = JSON.parse(localStorage.getItem('humanovo-hypotheses') || '[]')
+      return {
+        projects: projects.slice(0, 5).map((p: any) => p.name || p.title).filter(Boolean),
+        hypotheses: hypotheses.slice(0, 5).map((h: any) => h.statement || h.title).filter(Boolean),
+      }
+    } catch { return {} }
+  }
+
   const sendMessage = async () => {
     if (!input.trim() || loading) return
     const userMsg = input.trim()
@@ -254,12 +265,13 @@ function ConstantChat() {
     setMessages(prev => [...prev, { role: 'user', text: userMsg }])
     setLoading(true)
 
-    // Call the backend AI endpoint (routes to FastAPI → Bedrock)
+    // Call the backend AI endpoint (routes to FastAPI → Bedrock Claude)
     try {
+      const platformContext = getLocalContext()
       const res = await fetch('/api/v1/orchestrator/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userMsg, context: 'general' }),
+        body: JSON.stringify({ message: userMsg, context: 'general', platform_context: platformContext }),
       })
       if (res.ok) {
         const data = await res.json()
@@ -286,16 +298,16 @@ function ConstantChat() {
       </button>
 
       {isOpen && (
-        <div className="mt-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-solid)] overflow-hidden animate-slide-down">
+        <div className="mt-1 rounded-lg border border-[var(--color-border)] overflow-hidden animate-slide-down" style={{ background: 'rgba(17, 17, 17, 0.7)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)' }}>
           <div className="h-48 overflow-y-auto p-2 space-y-2">
             {messages.map((msg, i) => (
-              <div key={i} className={`text-xxs p-2 rounded-lg leading-relaxed ${msg.role === 'assistant' ? 'bg-[var(--glass-bg)] text-[var(--color-text-secondary)]' : 'bg-[var(--color-accent-purple)]12 text-[var(--color-text)] ml-4'}`} style={msg.role === 'user' ? { background: 'rgba(168, 85, 247, 0.08)' } : {}}>
+              <div key={i} className={`text-xxs p-2 rounded-lg leading-relaxed ${msg.role === 'assistant' ? 'text-[var(--color-text-secondary)]' : 'text-[var(--color-text)] ml-4'}`} style={msg.role === 'user' ? { background: 'rgba(168, 85, 247, 0.08)' } : { background: 'rgba(255, 255, 255, 0.03)' }}>
                 {msg.role === 'assistant' && <span className="text-[var(--color-accent-purple)] font-medium">Constant: </span>}
                 {msg.text}
               </div>
             ))}
             {loading && (
-              <div className="text-xxs p-2 rounded-lg bg-[var(--glass-bg)] text-[var(--color-text-muted)]">
+              <div className="text-xxs p-2 rounded-lg text-[var(--color-text-muted)]" style={{ background: 'rgba(255, 255, 255, 0.03)' }}>
                 <span className="text-[var(--color-accent-purple)] font-medium">Constant: </span>
                 <span className="animate-pulse">Thinking...</span>
               </div>

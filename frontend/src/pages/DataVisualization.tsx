@@ -38,6 +38,66 @@ interface ChartConfig {
   createdAt: string
 }
 
+function smartDownsample(data: DataPoint[], maxPoints: number = 100): DataPoint[] {
+  if (data.length <= maxPoints) return data
+
+  // Check if data is purely numeric labels (time series)
+  const isTimeSeries = data.every(d => !isNaN(Number(d.label)))
+
+  if (isTimeSeries) {
+    // Bin into groups and average
+    const binSize = Math.ceil(data.length / maxPoints)
+    const binned: DataPoint[] = []
+    for (let i = 0; i < data.length; i += binSize) {
+      const chunk = data.slice(i, i + binSize)
+      const avgVal = chunk.reduce((s, d) => s + d.value, 0) / chunk.length
+      const minLabel = chunk[0].label
+      const maxLabel = chunk[chunk.length - 1].label
+      binned.push({ label: chunk.length > 1 ? `${minLabel}-${maxLabel}` : minLabel, value: Math.round(avgVal * 100) / 100 })
+    }
+    return binned
+  }
+
+  // For categorical: take top N by value, aggregate rest into "Other"
+  const sorted = [...data].sort((a, b) => b.value - a.value)
+  const top = sorted.slice(0, maxPoints - 1)
+  const rest = sorted.slice(maxPoints - 1)
+  const otherVal = rest.reduce((s, d) => s + d.value, 0)
+  return [...top, { label: `Other (${rest.length})`, value: Math.round(otherVal * 100) / 100 }]
+}
+
+function suggestChartType(data: DataPoint[]): ChartType {
+  if (data.length === 0) return 'bar'
+
+  const n = data.length
+  const hasCategories = data.some(d => d.category)
+  const isTimeSeries = data.every(d => !isNaN(Number(d.label))) || data.every(d => /^\d{4}[-\/]/.test(d.label))
+  const allPositive = data.every(d => d.value >= 0)
+  const sumClose100 = Math.abs(data.reduce((s, d) => s + d.value, 0) - 100) < 5
+
+  // Pie chart: small count, positive values, percentages
+  if (n <= 8 && allPositive && (sumClose100 || n <= 5)) return 'pie'
+
+  // Stacked bar: has categories
+  if (hasCategories) return 'stacked_bar'
+
+  // Area/Line: time series
+  if (isTimeSeries && n > 5) return n > 50 ? 'area' : 'line'
+
+  // Funnel: monotonically decreasing, small count
+  const isDecreasing = data.every((d, i) => i === 0 || d.value <= data[i - 1].value)
+  if (isDecreasing && n >= 3 && n <= 10) return 'funnel'
+
+  // Treemap: many categories with sizes
+  if (n > 10 && allPositive) return 'treemap'
+
+  // Radar: small count, multiple dimensions
+  if (n >= 3 && n <= 12) return 'radar'
+
+  // Default: bar
+  return 'bar'
+}
+
 const CHART_COLORS = [
   'var(--color-accent-blue)', 'var(--color-accent-purple)', 'var(--color-accent-green)',
   'var(--color-accent-orange)', 'var(--color-accent-cyan)', 'var(--color-error)',
@@ -173,7 +233,24 @@ export default function DataVisualization() {
   }
 
   const renderChart = (chart: ChartConfig, height = 300) => {
-    const { data, type, color } = chart
+    const { type, color } = chart
+    const maxPoints = type === 'scatter' ? 500 : 100
+    const displayData = smartDownsample(chart.data, maxPoints)
+    const wasDownsampled = displayData.length < chart.data.length
+    const data = displayData
+    return (
+      <>
+        {wasDownsampled && (
+          <div className="text-xxs text-[var(--color-text-muted)] bg-[var(--glass-bg)] border border-[var(--color-border)] rounded px-2 py-1 mb-2 flex items-center gap-1">
+            <span>Downsampled from {chart.data.length} to {displayData.length} points for display</span>
+          </div>
+        )}
+        {renderChartInner(data, type, color, height)}
+      </>
+    )
+  }
+
+  const renderChartInner = (data: DataPoint[], type: ChartType, color: string, height: number) => {
     switch (type) {
       case 'bar':
         return (
@@ -398,6 +475,19 @@ export default function DataVisualization() {
                 <option value="funnel">Funnel Chart</option>
                 <option value="treemap">Treemap</option>
               </select>
+              <button
+                type="button"
+                onClick={() => {
+                  const data = parseData(form.dataText)
+                  if (data.length > 0) setForm(f => ({ ...f, type: suggestChartType(data) }))
+                }}
+                disabled={!form.dataText.trim()}
+                className="btn text-xs border border-[var(--color-border)] disabled:opacity-30 whitespace-nowrap"
+                style={{ color: 'var(--color-accent-purple)' }}
+                title="Analyze data and suggest the best chart type"
+              >
+                Suggest
+              </button>
               <select value={form.color} onChange={e => setForm(f => ({ ...f, color: e.target.value }))} className="input text-xs w-32">
                 {CHART_COLORS.map(c => <option key={c} value={c}>{c.replace('var(--color-', '').replace(')', '')}</option>)}
               </select>

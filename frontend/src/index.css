@@ -96,7 +96,7 @@ body {
   letter-spacing: -0.011em;
 }
 
-/* Custom scrollbar */
+/* Custom scrollbar - dark themed */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -107,12 +107,63 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--color-border-strong);
+  background: rgba(255, 255, 255, 0.12);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-border-hover);
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.light ::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.light ::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.25);
+}
+
+/* Firefox scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+}
+
+.light * {
+  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
+}
+
+/* Dark themed dropdowns / selects */
+select,
+select option {
+  background-color: var(--color-surface-solid);
+  color: var(--color-text);
+}
+
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23666666' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  padding-right: 28px;
+}
+
+select:focus {
+  outline: none;
+  border-color: var(--color-border-strong);
+}
+
+/* Frosted glass dropdown menus */
+select option {
+  background: var(--color-surface-solid);
+  color: var(--color-text);
+  padding: 8px;
+}
+
+select option:hover,
+select option:checked {
+  background: var(--glass-bg-hover);
 }
 
 /* Selection */

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import {
   FiBox,
   FiZoomIn,
@@ -24,7 +24,16 @@ import {
   FiCpu,
   FiActivity,
   FiPlay,
-  FiPause
+  FiPause,
+  FiPlus,
+  FiTrash2,
+  FiMessageSquare,
+  FiSend,
+  FiEdit3,
+  FiLink,
+  FiX,
+  FiSave,
+  FiImage
 } from 'react-icons/fi'
 import clsx from 'clsx'
 
@@ -1236,261 +1245,362 @@ const biologicalStructures: BiologicalComponent[] = [
   { id: 'rsv_f_protein', name: 'RSV F Protein', category: 'vaccine_target', subcategory: 'Viral Surface', visible: true, color: '#115e59', tags: ['RSV', 'respiratory', 'infants', 'elderly', 'prefusion'], description: 'RSV fusion protein that mediates viral entry. Prefusion-stabilized F protein is the basis of recently approved RSV vaccines.', diseaseRelevance: 'RSV is leading cause of infant hospitalization. New vaccines approved for elderly and maternal immunization.', therapeuticTargets: ['Arexvy (GSK)', 'Abrysvo (Pfizer)', 'Nirsevimab (mAb for infants)'], keyFacts: ['Prefusion conformation induces more potent antibodies', 'Structure-based vaccine design breakthrough', 'Maternal vaccination protects newborns', 'Nirsevimab: single-dose mAb for all infants'] },
 ]
 
-// ==================== COMPONENTS ====================
+// ==================== GRAPH NODE TYPES ====================
 
-function Canvas3D({ components, selectedId, onSelect: _onSelect }: {
-  components: BiologicalComponent[]
-  selectedId: string | null
-  onSelect: (id: string | null) => void
+interface GraphNode {
+  id: string
+  entityId: string
+  name: string
+  category: BiologicalCategory
+  color: string
+  x: number
+  y: number
+  width: number
+  height: number
+  notes: string
+  expanded: boolean
+}
+
+interface GraphEdge {
+  id: string
+  sourceId: string
+  targetId: string
+  label: string
+  color: string
+}
+
+interface GraphState {
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+}
+
+const STORAGE_KEY = 'humanovo-workbench-graph'
+
+function loadGraphState(): GraphState {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (raw) return JSON.parse(raw)
+  } catch { /* ignore */ }
+  return { nodes: [], edges: [] }
+}
+
+function saveGraphState(state: GraphState) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+  } catch { /* ignore */ }
+}
+
+// ==================== NODE SHAPE HELPER ====================
+
+function getNodeShape(category: BiologicalCategory, x: number, y: number, w: number, h: number): string {
+  const cx = x + w / 2
+  const cy = y + h / 2
+  const rx = w / 2
+  const ry = h / 2
+  switch (category) {
+    case 'pathway':
+      // Diamond
+      return `M ${cx} ${y} L ${x + w} ${cy} L ${cx} ${y + h} L ${x} ${cy} Z`
+    case 'gene':
+      // Octagon
+      {
+        const inset = Math.min(w, h) * 0.25
+        return `M ${x + inset} ${y} L ${x + w - inset} ${y} L ${x + w} ${y + inset} L ${x + w} ${y + h - inset} L ${x + w - inset} ${y + h} L ${x + inset} ${y + h} L ${x} ${y + h - inset} L ${x} ${y + inset} Z`
+      }
+    case 'biomolecule':
+      // Hexagon
+      {
+        const pts: string[] = []
+        for (let i = 0; i < 6; i++) {
+          const angle = (Math.PI / 3) * i - Math.PI / 2
+          pts.push(`${cx + rx * Math.cos(angle)} ${cy + ry * Math.sin(angle)}`)
+        }
+        return `M ${pts.join(' L ')} Z`
+      }
+    default:
+      // Rounded rect as path
+      {
+        const r = 8
+        return `M ${x + r} ${y} L ${x + w - r} ${y} Q ${x + w} ${y} ${x + w} ${y + r} L ${x + w} ${y + h - r} Q ${x + w} ${y + h} ${x + w - r} ${y + h} L ${x + r} ${y + h} Q ${x} ${y + h} ${x} ${y + h - r} L ${x} ${y + r} Q ${x} ${y} ${x + r} ${y} Z`
+      }
+  }
+}
+
+// ==================== CATEGORY ICON TEXT ====================
+
+function getCategoryIcon(category: BiologicalCategory): string {
+  switch (category) {
+    case 'organ_system': return '\u2665' // heart
+    case 'cell_type': return '\u25CB'    // circle
+    case 'cellular_component': return '\u25A1' // square
+    case 'biomolecule': return '\u2B22'  // hexagon
+    case 'pathway': return '\u2192'      // arrow
+    case 'receptor': return '\u0059'     // Y
+    case 'antigen': return '\u2316'      // target
+    case 'gene': return '\u2622'         // helix-ish
+    case 'drug_target': return '\u2295'  // circled plus
+    case 'vaccine_target': return '\u2694' // shield
+    default: return '\u25CF'
+  }
+}
+
+// ==================== BEZIER EDGE PATH ====================
+
+function edgePath(x1: number, y1: number, x2: number, y2: number): string {
+  const dx = Math.abs(x2 - x1) * 0.5
+  return `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`
+}
+
+// ==================== SVG NODE GRAPH CANVAS ====================
+
+function NodeGraphCanvas({
+  nodes,
+  edges,
+  selectedNode,
+  connectingFrom,
+  mousePos,
+  zoom,
+  canvasOffset,
+  onNodeMouseDown,
+  onCanvasMouseMove,
+  onCanvasMouseUp,
+  onCanvasMouseDown,
+  onNodeClick,
+  onNodeDoubleClick,
+  onEdgeClick,
+  onWheel,
+  svgRef,
+}: {
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+  selectedNode: string | null
+  connectingFrom: string | null
+  mousePos: { x: number; y: number }
+  zoom: number
+  canvasOffset: { x: number; y: number }
+  onNodeMouseDown: (e: React.MouseEvent, nodeId: string) => void
+  onCanvasMouseMove: (e: React.MouseEvent) => void
+  onCanvasMouseUp: (e: React.MouseEvent) => void
+  onCanvasMouseDown: (e: React.MouseEvent) => void
+  onNodeClick: (nodeId: string) => void
+  onNodeDoubleClick: (nodeId: string) => void
+  onEdgeClick: (edgeId: string) => void
+  onWheel: (e: React.WheelEvent) => void
+  svgRef: React.RefObject<SVGSVGElement | null>
 }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const [rotation, setRotation] = useState({ x: 0.3, y: 0.5 })
-  const [zoom, setZoom] = useState(1)
-  const [isDragging, setIsDragging] = useState(false)
-  const [lastMouse, setLastMouse] = useState({ x: 0, y: 0 })
-
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-
-    const draw = () => {
-      const { width, height } = canvas
-      ctx.clearRect(0, 0, width, height)
-
-      // Draw grid
-      ctx.strokeStyle = 'rgba(6, 182, 212, 0.05)'
-      ctx.lineWidth = 1
-      const gridSize = 30 * zoom
-      for (let x = 0; x < width; x += gridSize) {
-        ctx.beginPath()
-        ctx.moveTo(x, 0)
-        ctx.lineTo(x, height)
-        ctx.stroke()
-      }
-      for (let y = 0; y < height; y += gridSize) {
-        ctx.beginPath()
-        ctx.moveTo(0, y)
-        ctx.lineTo(width, y)
-        ctx.stroke()
-      }
-
-      // Draw biological components
-      const centerX = width / 2
-      const centerY = height / 2
-      const visibleComponents = components.filter(c => c.visible)
-
-      // Group by category for visual organization
-      const categoryGroups = visibleComponents.reduce((acc, comp) => {
-        if (!acc[comp.category]) acc[comp.category] = []
-        acc[comp.category].push(comp)
-        return acc
-      }, {} as Record<string, BiologicalComponent[]>)
-
-      Object.entries(categoryGroups).forEach(([_category, comps], categoryIndex) => {
-        const categoryAngle = (categoryIndex / Object.keys(categoryGroups).length) * Math.PI * 2
-        const categoryRadius = 180 * zoom
-
-        comps.forEach((component, compIndex) => {
-          const localAngle = (compIndex / comps.length) * Math.PI * 0.5 - Math.PI * 0.25
-          const angle = categoryAngle + localAngle + rotation.y
-          const radius = (80 + compIndex * 25) * zoom
-
-          const x = centerX + Math.cos(angle) * radius
-          const y = centerY + Math.sin(angle) * radius * 0.6 + Math.sin(rotation.x) * 30
-
-          // Draw connecting lines to category center
-          const catX = centerX + Math.cos(categoryAngle + rotation.y) * categoryRadius * 0.3
-          const catY = centerY + Math.sin(categoryAngle + rotation.y) * categoryRadius * 0.3 * 0.6
-
-          ctx.strokeStyle = component.color + '30'
-          ctx.lineWidth = 1
-          ctx.beginPath()
-          ctx.moveTo(catX, catY)
-          ctx.lineTo(x, y)
-          ctx.stroke()
-
-          // Draw component node
-          const size = 20 * zoom
-          const isSelected = selectedId === component.id
-
-          if (isSelected) {
-            ctx.shadowColor = component.color
-            ctx.shadowBlur = 15
-          }
-
-          ctx.fillStyle = component.color + (isSelected ? 'ff' : 'aa')
-          ctx.beginPath()
-
-          // Different shapes by category
-          if (component.category === 'organ_system') {
-            // Large circle
-            ctx.arc(x, y, size * 1.2, 0, Math.PI * 2)
-          } else if (component.category === 'cell_type') {
-            // Circle with inner structure
-            ctx.arc(x, y, size, 0, Math.PI * 2)
-          } else if (component.category === 'pathway') {
-            // Diamond
-            ctx.moveTo(x, y - size)
-            ctx.lineTo(x + size, y)
-            ctx.lineTo(x, y + size)
-            ctx.lineTo(x - size, y)
-            ctx.closePath()
-          } else if (component.category === 'gene') {
-            // Double helix representation
-            ctx.ellipse(x, y, size * 0.5, size, 0, 0, Math.PI * 2)
-          } else if (component.category === 'biomolecule') {
-            // Hexagon
-            for (let i = 0; i < 6; i++) {
-              const hx = x + Math.cos(i * Math.PI / 3) * size
-              const hy = y + Math.sin(i * Math.PI / 3) * size
-              if (i === 0) ctx.moveTo(hx, hy)
-              else ctx.lineTo(hx, hy)
-            }
-            ctx.closePath()
-          } else if (component.category === 'receptor' || component.category === 'antigen') {
-            // Y-shape for antibody/receptor
-            ctx.arc(x, y, size * 0.8, 0, Math.PI * 2)
-          } else {
-            // Default circle
-            ctx.arc(x, y, size * 0.7, 0, Math.PI * 2)
-          }
-          ctx.fill()
-          ctx.shadowBlur = 0
-
-          // Draw label
-          ctx.fillStyle = 'var(--color-text)'
-          ctx.font = `${9 * zoom}px Inter`
-          ctx.textAlign = 'center'
-          const shortName = component.name.length > 15 ? component.name.slice(0, 15) + '...' : component.name
-          ctx.fillText(shortName, x, y + size + 12)
-        })
-      })
-
-      // Draw center hub
-      ctx.fillStyle = 'rgba(6, 182, 212, 0.1)'
-      ctx.beginPath()
-      ctx.arc(centerX, centerY, 40 * zoom, 0, Math.PI * 2)
-      ctx.fill()
-
-      ctx.strokeStyle = 'rgba(6, 182, 212, 0.3)'
-      ctx.lineWidth = 2
-      ctx.setLineDash([5, 5])
-      ctx.beginPath()
-      ctx.arc(centerX, centerY, 40 * zoom, 0, Math.PI * 2)
-      ctx.stroke()
-      ctx.setLineDash([])
-
-      ctx.fillStyle = 'var(--color-text-muted)'
-      ctx.font = `${10 * zoom}px Inter`
-      ctx.textAlign = 'center'
-      ctx.fillText('Disease Research', centerX, centerY - 5)
-      ctx.fillText('Structures', centerX, centerY + 10)
-    }
-
-    draw()
-  }, [components, rotation, zoom, selectedId])
-
-  const handleMouseDown = (e: React.MouseEvent) => {
-    setIsDragging(true)
-    setLastMouse({ x: e.clientX, y: e.clientY })
-  }
-
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDragging) return
-    const dx = e.clientX - lastMouse.x
-    const dy = e.clientY - lastMouse.y
-    setRotation(prev => ({
-      x: prev.x + dy * 0.01,
-      y: prev.y + dx * 0.01,
-    }))
-    setLastMouse({ x: e.clientX, y: e.clientY })
-  }
-
-  const handleMouseUp = () => {
-    setIsDragging(false)
-  }
-
-  const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault()
-    setZoom(prev => Math.max(0.5, Math.min(2, prev - e.deltaY * 0.001)))
-  }
+  // Compute edge endpoints based on node centers
+  const nodeMap = new Map(nodes.map(n => [n.id, n]))
 
   return (
-    <div className="relative w-full h-full canvas-container">
-      <canvas
-        ref={canvasRef}
-        width={800}
-        height={600}
-        className="w-full h-full cursor-grab active:cursor-grabbing"
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
-        onWheel={handleWheel}
-      />
+    <svg
+      ref={svgRef}
+      className="w-full h-full grid-bg cursor-crosshair"
+      style={{ background: 'var(--color-bg)' }}
+      onMouseMove={onCanvasMouseMove}
+      onMouseUp={onCanvasMouseUp}
+      onMouseDown={onCanvasMouseDown}
+      onWheel={onWheel}
+      onContextMenu={e => e.preventDefault()}
+    >
+      <defs>
+        <filter id="node-glow">
+          <feDropShadow dx="0" dy="0" stdDeviation="6" floodOpacity="0.6" />
+        </filter>
+        <filter id="node-glow-selected">
+          <feDropShadow dx="0" dy="2" stdDeviation="8" floodOpacity="0.8" />
+        </filter>
+        <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+          <polygon points="0 0, 10 3.5, 0 7" fill="rgba(255,255,255,0.4)" />
+        </marker>
+      </defs>
 
-      <div className="absolute bottom-4 left-4 flex items-center gap-1 bg-[var(--color-surface)]/90 backdrop-blur rounded-lg border border-[var(--color-border)] p-1">
-        <button
-          onClick={() => setZoom(z => Math.min(2, z + 0.1))}
-          className="p-1.5 hover:bg-[var(--color-border)] rounded transition-colors"
-          title="Zoom In"
-        >
-          <FiZoomIn className="w-3.5 h-3.5" />
-        </button>
-        <span className="px-2 text-xs text-[var(--color-text-muted)]">{Math.round(zoom * 100)}%</span>
-        <button
-          onClick={() => setZoom(z => Math.max(0.5, z - 0.1))}
-          className="p-1.5 hover:bg-[var(--color-border)] rounded transition-colors"
-          title="Zoom Out"
-        >
-          <FiZoomOut className="w-3.5 h-3.5" />
-        </button>
-        <div className="w-px h-4 bg-[var(--color-border)] mx-1" />
-        <button
-          onClick={() => setRotation({ x: 0.3, y: 0.5 })}
-          className="p-1.5 hover:bg-[var(--color-border)] rounded transition-colors"
-          title="Reset View"
-        >
-          <FiRotateCw className="w-3.5 h-3.5" />
-        </button>
-        <button
-          className="p-1.5 hover:bg-[var(--color-border)] rounded transition-colors"
-          title="Center View"
-        >
-          <FiCrosshair className="w-3.5 h-3.5" />
-        </button>
-      </div>
+      <g transform={`translate(${canvasOffset.x}, ${canvasOffset.y}) scale(${zoom})`}>
+        {/* Edges */}
+        {edges.map(edge => {
+          const src = nodeMap.get(edge.sourceId)
+          const tgt = nodeMap.get(edge.targetId)
+          if (!src || !tgt) return null
+          const x1 = src.x + src.width / 2
+          const y1 = src.y + src.height / 2
+          const x2 = tgt.x + tgt.width / 2
+          const y2 = tgt.y + tgt.height / 2
+          const midX = (x1 + x2) / 2
+          const midY = (y1 + y2) / 2
+          return (
+            <g key={edge.id} onClick={() => onEdgeClick(edge.id)} className="cursor-pointer">
+              <path
+                d={edgePath(x1, y1, x2, y2)}
+                fill="none"
+                stroke={edge.color || 'rgba(255,255,255,0.25)'}
+                strokeWidth={2}
+                markerEnd="url(#arrowhead)"
+                className="transition-all duration-200"
+              />
+              {/* Invisible wider path for easier clicking */}
+              <path
+                d={edgePath(x1, y1, x2, y2)}
+                fill="none"
+                stroke="transparent"
+                strokeWidth={12}
+              />
+              {edge.label && (
+                <g transform={`translate(${midX}, ${midY})`}>
+                  <rect
+                    x={-edge.label.length * 3.5 - 6}
+                    y={-10}
+                    width={edge.label.length * 7 + 12}
+                    height={20}
+                    rx={4}
+                    fill="rgba(0,0,0,0.7)"
+                    stroke={edge.color || 'rgba(255,255,255,0.15)'}
+                    strokeWidth={1}
+                  />
+                  <text
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    fill="rgba(255,255,255,0.7)"
+                    fontSize={10}
+                    fontFamily="Inter, sans-serif"
+                  >
+                    {edge.label}
+                  </text>
+                </g>
+              )}
+            </g>
+          )
+        })}
 
-      <div className="absolute top-4 left-4 flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
-        <FiBox className="w-3.5 h-3.5" />
-        <span>Biological Structures Workbench</span>
-      </div>
+        {/* Temporary connection line */}
+        {connectingFrom && (() => {
+          const src = nodeMap.get(connectingFrom)
+          if (!src) return null
+          const x1 = src.x + src.width / 2
+          const y1 = src.y + src.height / 2
+          const mx = (mousePos.x - canvasOffset.x) / zoom
+          const my = (mousePos.y - canvasOffset.y) / zoom
+          return (
+            <path
+              d={edgePath(x1, y1, mx, my)}
+              fill="none"
+              stroke="rgba(6, 182, 212, 0.6)"
+              strokeWidth={2}
+              strokeDasharray="6,4"
+              pointerEvents="none"
+            />
+          )
+        })()}
 
-      {/* Category legend */}
-      <div className="absolute top-4 right-4 bg-[var(--color-surface)]/90 backdrop-blur rounded-lg border border-[var(--color-border)] p-2 text-xxs">
-        <div className="font-medium mb-1.5 text-[var(--color-text-muted)]">Categories</div>
-        <div className="space-y-1">
-          {Object.entries(categoryConfig).slice(0, 5).map(([key, config]) => (
-            <div key={key} className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full" style={{ backgroundColor: config.color }} />
-              <span>{config.label}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
+        {/* Nodes */}
+        {nodes.map(node => {
+          const isSelected = selectedNode === node.id
+          const isConnecting = connectingFrom === node.id
+          return (
+            <g
+              key={node.id}
+              onMouseDown={(e) => onNodeMouseDown(e, node.id)}
+              onClick={(e) => { e.stopPropagation(); onNodeClick(node.id) }}
+              onDoubleClick={(e) => { e.stopPropagation(); onNodeDoubleClick(node.id) }}
+              className="cursor-grab active:cursor-grabbing"
+            >
+              {/* Node shape */}
+              <path
+                d={getNodeShape(node.category, node.x, node.y, node.width, node.height)}
+                fill={isSelected ? node.color + '30' : 'rgba(15, 15, 20, 0.85)'}
+                stroke={node.color}
+                strokeWidth={isSelected ? 2.5 : 1.5}
+                filter={isSelected ? 'url(#node-glow-selected)' : undefined}
+                style={{ transition: 'stroke-width 0.15s, fill 0.15s' }}
+              />
+              {/* Category icon */}
+              <text
+                x={node.x + 12}
+                y={node.y + 18}
+                fill={node.color}
+                fontSize={12}
+                fontFamily="Inter, sans-serif"
+              >
+                {getCategoryIcon(node.category)}
+              </text>
+              {/* Node name */}
+              <text
+                x={node.x + 26}
+                y={node.y + 18}
+                fill="rgba(255,255,255,0.9)"
+                fontSize={11}
+                fontWeight={600}
+                fontFamily="Inter, sans-serif"
+              >
+                {node.name.length > 22 ? node.name.slice(0, 20) + '...' : node.name}
+              </text>
+              {/* Category label */}
+              <text
+                x={node.x + 12}
+                y={node.y + 34}
+                fill="rgba(255,255,255,0.4)"
+                fontSize={9}
+                fontFamily="Inter, sans-serif"
+              >
+                {categoryConfig[node.category]?.label || node.category}
+              </text>
+              {/* Notes indicator */}
+              {node.notes && (
+                <circle
+                  cx={node.x + node.width - 10}
+                  cy={node.y + 10}
+                  r={4}
+                  fill="#eab308"
+                />
+              )}
+              {/* Connection handle (right side) */}
+              <circle
+                cx={node.x + node.width}
+                cy={node.y + node.height / 2}
+                r={5}
+                fill={isConnecting ? '#06b6d4' : 'rgba(255,255,255,0.15)'}
+                stroke={isConnecting ? '#06b6d4' : 'rgba(255,255,255,0.3)'}
+                strokeWidth={1.5}
+                className="hover:fill-[#06b6d4] transition-colors"
+              />
+              {/* Connection handle (left side) */}
+              <circle
+                cx={node.x}
+                cy={node.y + node.height / 2}
+                r={5}
+                fill="rgba(255,255,255,0.15)"
+                stroke="rgba(255,255,255,0.3)"
+                strokeWidth={1.5}
+                className="hover:fill-[#06b6d4] transition-colors"
+              />
+              {/* Expanded details */}
+              {node.expanded && (
+                <foreignObject
+                  x={node.x}
+                  y={node.y + 42}
+                  width={node.width}
+                  height={node.height - 42}
+                >
+                  <div className="px-2 pb-1 text-[9px] text-white/50 overflow-hidden leading-tight">
+                    {node.notes ? node.notes.slice(0, 80) : 'No notes'}
+                  </div>
+                </foreignObject>
+              )}
+            </g>
+          )
+        })}
+      </g>
+    </svg>
   )
 }
 
-function ComponentTree({ components, selectedId, onSelect, onToggleVisibility, searchTerm }: {
+// ==================== SIDEBAR COMPONENT TREE ====================
+
+function ComponentTree({ components, selectedId, onSelect, onToggleVisibility, searchTerm, onAddToCanvas }: {
   components: BiologicalComponent[]
   selectedId: string | null
   onSelect: (id: string) => void
   onToggleVisibility: (id: string) => void
   searchTerm: string
+  onAddToCanvas?: (comp: BiologicalComponent) => void
 }) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({
     organ_system: true,
@@ -1544,7 +1654,7 @@ function ComponentTree({ components, selectedId, onSelect, onToggleVisibility, s
                     key={comp.id}
                     onClick={() => onSelect(comp.id)}
                     className={clsx(
-                      'flex items-center gap-1.5 px-2 py-1 text-xs rounded cursor-pointer transition-colors',
+                      'group flex items-center gap-1.5 px-2 py-1 text-xs rounded cursor-pointer transition-colors',
                       selectedId === comp.id
                         ? 'bg-primary-500/20 text-primary-400'
                         : 'hover:bg-[var(--color-border)] text-[var(--color-text-secondary)]'
@@ -1566,6 +1676,15 @@ function ComponentTree({ components, selectedId, onSelect, onToggleVisibility, s
                     <span className={clsx('truncate flex-1', !comp.visible && 'text-[var(--color-text-muted)]')}>
                       {comp.name}
                     </span>
+                    {onAddToCanvas && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onAddToCanvas(comp) }}
+                        className="p-0.5 hover:bg-primary-500/20 rounded text-primary-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                        title="Add to Canvas"
+                      >
+                        <FiPlus className="w-3 h-3" />
+                      </button>
+                    )}
                     {comp.therapeuticTargets && comp.therapeuticTargets.length > 0 && (
                       <FiTarget className="w-3 h-3 text-[var(--color-text-muted)]" title="Has therapeutic targets" />
                     )}
@@ -2041,6 +2160,13 @@ export default function Workbench() {
   const [selectedLibraryId, setSelectedLibraryId] = useState<string | null>(null)
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set(['molecular_level', 'cellular_level']))
 
+  // Constant AI chat state
+  const [showConstant, setShowConstant] = useState(false)
+  const [constantMessages, setConstantMessages] = useState<{ role: 'user' | 'assistant'; content: string }[]>([])
+  const [constantInput, setConstantInput] = useState('')
+  const [constantLoading, setConstantLoading] = useState(false)
+  const constantEndRef = useRef<HTMLDivElement>(null)
+
   const selectedComponent = components.find(c => c.id === selectedId) || null
   const selectedLibraryElement = selectedLibraryId ? findElementById(selectedLibraryId) ?? null : null
 
@@ -2063,6 +2189,36 @@ export default function Workbench() {
     setComponents(prev =>
       prev.map(c => c.id === id ? { ...c, visible: !c.visible } : c)
     )
+  }
+
+  const sendConstantMessage = async () => {
+    const msg = constantInput.trim()
+    if (!msg || constantLoading) return
+    setConstantInput('')
+    setConstantMessages(prev => [...prev, { role: 'user', content: msg }])
+    setConstantLoading(true)
+    try {
+      const context: Record<string, any> = { section: 'workbench' }
+      if (selectedComponent) {
+        context.selected_node = { id: selectedComponent.id, name: selectedComponent.name, type: selectedComponent.type, category: selectedComponent.category }
+      }
+      if (selectedLibraryElement) {
+        context.selected_library_element = { id: selectedLibraryElement.id, name: selectedLibraryElement.name, type: selectedLibraryElement.type }
+      }
+      const res = await fetch('/api/v1/orchestrator/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: msg, context: 'workbench', platform_context: context }),
+      })
+      if (!res.ok) throw new Error('Failed')
+      const data = await res.json()
+      setConstantMessages(prev => [...prev, { role: 'assistant', content: data.response || data.message || 'No response' }])
+    } catch {
+      setConstantMessages(prev => [...prev, { role: 'assistant', content: 'Sorry, I could not process that request. Please try again.' }])
+    } finally {
+      setConstantLoading(false)
+      setTimeout(() => constantEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
+    }
   }
 
   const visibleCount = components.filter(c => c.visible).length
@@ -2233,6 +2389,15 @@ export default function Workbench() {
             <button className="btn btn-sm btn-secondary">
               <FiMaximize2 className="w-3 h-3" />
             </button>
+            <div className="w-px h-5 bg-[var(--color-border)] mx-2" />
+            <button
+              onClick={() => setShowConstant(!showConstant)}
+              className={clsx('btn btn-sm', showConstant ? 'btn-primary' : 'btn-secondary')}
+              title="Constant AI Assistant"
+            >
+              <FiMessageSquare className="w-3 h-3" />
+              Constant
+            </button>
           </div>
         </div>
 
@@ -2245,6 +2410,66 @@ export default function Workbench() {
           />
         </div>
       </div>
+
+      {/* Constant AI Panel */}
+      {showConstant && (
+        <div className="w-80 border-l border-[var(--color-border)] bg-[var(--color-bg-elevated)] flex flex-col">
+          <div className="p-3 border-b border-[var(--color-border)] flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+              <h3 className="text-sm font-medium">Constant AI</h3>
+            </div>
+            <button onClick={() => setShowConstant(false)} className="p-1 hover:bg-[var(--color-surface)] rounded transition-colors">
+              <FiX className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          {selectedComponent && (
+            <div className="px-3 py-2 border-b border-[var(--color-border)] bg-cyan-500/5">
+              <p className="text-[10px] text-cyan-400">Context: {selectedComponent.name}</p>
+            </div>
+          )}
+          <div className="flex-1 overflow-y-auto p-3 space-y-3">
+            {constantMessages.length === 0 && (
+              <div className="text-center py-8 text-[var(--color-text-muted)]">
+                <FiMessageSquare className="w-8 h-8 mx-auto mb-2 opacity-20" />
+                <p className="text-xs">Ask Constant about your workbench entities, connections, or biological structures.</p>
+                <div className="mt-3 space-y-1">
+                  {['Explain this pathway', 'Suggest connections', 'What proteins interact with this?', 'Analyze this structure'].map(s => (
+                    <button key={s} onClick={() => { setConstantInput(s); }} className="block w-full text-left text-[10px] px-2 py-1.5 rounded hover:bg-[var(--color-surface)] text-[var(--color-text-muted)] transition-colors">
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {constantMessages.map((m, i) => (
+              <div key={i} className={clsx('text-xs rounded-lg px-3 py-2 max-w-[95%]', m.role === 'user' ? 'ml-auto bg-cyan-500/20 text-cyan-100' : 'bg-[var(--color-surface)]')}>
+                <p className="whitespace-pre-wrap">{m.content}</p>
+              </div>
+            ))}
+            {constantLoading && (
+              <div className="bg-[var(--color-surface)] rounded-lg px-3 py-2 text-xs max-w-[95%]">
+                <span className="animate-pulse">Thinking...</span>
+              </div>
+            )}
+            <div ref={constantEndRef} />
+          </div>
+          <div className="p-3 border-t border-[var(--color-border)]">
+            <div className="flex gap-2" style={{ background: 'rgba(17, 17, 17, 0.7)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', borderRadius: '8px', padding: '6px' }}>
+              <input
+                value={constantInput}
+                onChange={e => setConstantInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendConstantMessage()}
+                placeholder="Ask Constant..."
+                className="flex-1 bg-transparent text-xs outline-none px-2"
+              />
+              <button onClick={sendConstantMessage} disabled={constantLoading || !constantInput.trim()} className="p-1.5 rounded hover:bg-[var(--color-surface)] transition-colors disabled:opacity-30">
+                <FiSend className="w-3.5 h-3.5 text-cyan-400" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Right panel - Properties / Library Details */}
       <div className="w-80 border-l border-[var(--color-border)] bg-[var(--color-bg-elevated)] flex flex-col">
