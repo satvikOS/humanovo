@@ -1,4 +1,5 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
+import { Component, type ReactNode } from 'react'
 import Layout from './components/Layout'
 import Dashboard from './pages/Dashboard'
 import Projects from './pages/Projects'
@@ -26,42 +27,84 @@ import GenomicsAnalysis from './pages/GenomicsAnalysis'
 import ManuscriptManager from './pages/ManuscriptManager'
 import RegulatoryCompliance from './pages/RegulatoryCompliance'
 import ResearchImaging from './pages/ResearchImaging'
-import MLModelManager from './pages/MLModelManager'
+// ML Models removed
 import BiobankManager from './pages/BiobankManager'
+
+// Error boundary to prevent blank pages on runtime errors
+class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; error: string }> {
+  constructor(props: { children: ReactNode }) {
+    super(props)
+    this.state = { hasError: false, error: '' }
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error: error.message }
+  }
+
+  componentDidCatch(error: Error, info: { componentStack?: string | null }) {
+    console.error('Page error:', error, info.componentStack)
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex items-center justify-center h-full p-8">
+          <div className="text-center max-w-md">
+            <div className="text-4xl mb-4 opacity-20">⚠</div>
+            <h2 className="text-lg font-semibold mb-2" style={{ color: 'var(--color-text)' }}>Something went wrong</h2>
+            <p className="text-sm mb-4" style={{ color: 'var(--color-text-muted)' }}>{this.state.error}</p>
+            <button
+              onClick={() => { this.setState({ hasError: false, error: '' }); window.location.reload() }}
+              className="btn text-sm"
+              style={{ color: 'var(--color-accent-blue)' }}
+            >
+              Reload Page
+            </button>
+          </div>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
+function PageWrapper({ children }: { children: ReactNode }) {
+  return <ErrorBoundary>{children}</ErrorBoundary>
+}
 
 function App() {
   return (
     <Routes>
       <Route path="/" element={<Layout />}>
         <Route index element={<Navigate to="/dashboard" replace />} />
-        <Route path="dashboard" element={<Dashboard />} />
-        <Route path="projects" element={<Projects />} />
-        <Route path="projects/:projectId" element={<ProjectDetail />} />
-        <Route path="evidence" element={<Evidence />} />
-        <Route path="simulations" element={<Simulations />} />
-        <Route path="knowledge-graph" element={<KnowledgeGraph />} />
-        <Route path="workbench" element={<Workbench />} />
-        <Route path="anatomy" element={<HumanAnatomy />} />
-        <Route path="notebook" element={<Notebook />} />
-        <Route path="agents" element={<Agents />} />
-        <Route path="timeline" element={<Timeline />} />
-        <Route path="search" element={<Search />} />
-        <Route path="settings" element={<Settings />} />
-        <Route path="literature-review" element={<LiteratureReview />} />
-        <Route path="citation-manager" element={<CitationManager />} />
-        <Route path="experiment-tracker" element={<ExperimentTracker />} />
-        <Route path="data-visualization" element={<DataVisualization />} />
-        <Route path="statistical-analysis" element={<StatisticalAnalysis />} />
-        <Route path="data-manager" element={<DataManager />} />
-        <Route path="collaboration" element={<Collaboration />} />
+        <Route path="dashboard" element={<PageWrapper><Dashboard /></PageWrapper>} />
+        <Route path="projects" element={<PageWrapper><Projects /></PageWrapper>} />
+        <Route path="projects/:projectId" element={<PageWrapper><ProjectDetail /></PageWrapper>} />
+        <Route path="evidence" element={<PageWrapper><Evidence /></PageWrapper>} />
+        <Route path="simulations" element={<PageWrapper><Simulations /></PageWrapper>} />
+        <Route path="knowledge-graph" element={<PageWrapper><KnowledgeGraph /></PageWrapper>} />
+        <Route path="workbench" element={<PageWrapper><Workbench /></PageWrapper>} />
+        <Route path="anatomy" element={<PageWrapper><HumanAnatomy /></PageWrapper>} />
+        <Route path="notebook" element={<PageWrapper><Notebook /></PageWrapper>} />
+        <Route path="agents" element={<PageWrapper><Agents /></PageWrapper>} />
+        <Route path="timeline" element={<PageWrapper><Timeline /></PageWrapper>} />
+        <Route path="search" element={<PageWrapper><Search /></PageWrapper>} />
+        <Route path="settings" element={<PageWrapper><Settings /></PageWrapper>} />
+        <Route path="literature-review" element={<PageWrapper><LiteratureReview /></PageWrapper>} />
+        <Route path="citation-manager" element={<PageWrapper><CitationManager /></PageWrapper>} />
+        <Route path="experiment-tracker" element={<PageWrapper><ExperimentTracker /></PageWrapper>} />
+        <Route path="data-visualization" element={<PageWrapper><DataVisualization /></PageWrapper>} />
+        <Route path="statistical-analysis" element={<PageWrapper><StatisticalAnalysis /></PageWrapper>} />
+        <Route path="data-manager" element={<PageWrapper><DataManager /></PageWrapper>} />
+        <Route path="collaboration" element={<PageWrapper><Collaboration /></PageWrapper>} />
         <Route path="knowledge-graph-viewer" element={<Navigate to="/knowledge-graph" replace />} />
-        <Route path="clinical-trials" element={<ClinicalTrials />} />
-        <Route path="genomics" element={<GenomicsAnalysis />} />
-        <Route path="manuscripts" element={<ManuscriptManager />} />
-        <Route path="regulatory" element={<RegulatoryCompliance />} />
-        <Route path="imaging" element={<ResearchImaging />} />
-        <Route path="ml-models" element={<MLModelManager />} />
-        <Route path="biobank" element={<BiobankManager />} />
+        <Route path="clinical-trials" element={<PageWrapper><ClinicalTrials /></PageWrapper>} />
+        <Route path="genomics" element={<PageWrapper><GenomicsAnalysis /></PageWrapper>} />
+        <Route path="manuscripts" element={<PageWrapper><ManuscriptManager /></PageWrapper>} />
+        <Route path="regulatory" element={<PageWrapper><RegulatoryCompliance /></PageWrapper>} />
+        <Route path="imaging" element={<PageWrapper><ResearchImaging /></PageWrapper>} />
+        {/* ML Models removed */}
+        <Route path="biobank" element={<PageWrapper><BiobankManager /></PageWrapper>} />
       </Route>
     </Routes>
   )

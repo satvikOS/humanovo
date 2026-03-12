@@ -524,6 +524,15 @@ async def _get_hypothesis_data(hypothesis_id: UUID) -> dict[str, Any]:
                         "external_factors": h.external_factors,
                         "disease": _current_orchestrator._disease or "Unknown",
                         "hypothesis_type": _current_orchestrator._discovery_type or "treatment",
+                        "evidence_summary": getattr(h, "evidence_summary", []),
+                        "risks": getattr(h, "risks", []),
+                        "validation_steps": getattr(h, "validation_steps", []),
+                        "novelty_score": getattr(h, "novelty_score", 0.0),
+                        "citations": getattr(h, "citations", []),
+                        "fda_references": getattr(h, "fda_references", []),
+                        "clinical_trial_references": getattr(h, "clinical_trial_references", []),
+                        "tags": getattr(h, "tags", []),
+                        "translational_roadmap": getattr(h, "translational_roadmap", {}),
                     }
     except Exception as e:
         logger.debug("Orchestrator hypothesis lookup failed", error=str(e))
@@ -566,6 +575,10 @@ async def _get_hypothesis_data(hypothesis_id: UUID) -> dict[str, Any]:
                     "external_factors": (h.generation_context or {}).get("external_factors", []),
                     "disease": disease,
                     "disease_focus": disease,
+                    "evidence_summary": [],
+                    "risks": [],
+                    "validation_steps": [],
+                    "translational_roadmap": getattr(h, "translational_roadmap", None) or {},
                 }
         except HTTPException:
             raise

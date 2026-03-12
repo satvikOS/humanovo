@@ -27,6 +27,44 @@ import type { OrchestratorStatus, DiscoveryConfig } from '../services/api'
 import { persistSet, persistGet, logActivity } from '../utils/persistence'
 
 // Types
+interface TranslationalPhaseDetail {
+  phase: string
+  phase_name: string
+  formal_name: string
+  description: string
+  objectives?: string[]
+  key_activities?: string[]
+  milestones?: string[]
+  deliverables?: string[]
+  evidence_requirements?: string[]
+  data_sources?: string[]
+  regulatory_considerations?: string[]
+  regulatory_milestones?: string[]
+  key_stakeholders?: string[]
+  collaborators?: string[]
+  success_criteria?: string[]
+  go_no_go_gates?: string[]
+  phase_risks?: string[]
+  mitigation_strategies?: string[]
+  estimated_duration?: string
+  resource_requirements?: string[]
+  estimated_cost_range?: string
+  prerequisites?: string[]
+  blockers?: string[]
+}
+
+interface TranslationalRoadmap {
+  current_phase: string
+  phases: TranslationalPhaseDetail[]
+  overall_feasibility_score: number
+  estimated_total_timeline: string
+  critical_path_summary: string
+  key_decision_points?: string[]
+  cross_phase_risks?: string[]
+  regulatory_pathway_summary?: string
+  commercialization_potential?: string
+}
+
 interface Hypothesis {
   id: string
   title: string
@@ -52,6 +90,7 @@ interface Hypothesis {
   stages_completed?: number
   round_number?: number
   created_at?: string
+  translational_roadmap?: TranslationalRoadmap
 }
 
 interface ExternalFactor {
@@ -87,6 +126,15 @@ const discoveryTypes = [
 ]
 
 const factorCategories = ['nutrient', 'chemical', 'drug', 'compound', 'element'] as const
+
+const PHASE_META: Record<string, { label: string; color: string; icon: string; category: string }> = {
+  T0: { label: 'Basic Research', color: '#8b5cf6', icon: '\u{1F9EA}', category: 'Bench' },
+  T1: { label: 'Translation to Humans', color: '#6366f1', icon: '\u{1F9EC}', category: 'Translational' },
+  T2: { label: 'Translation to Patients', color: '#3b82f6', icon: '\u{1F3E5}', category: 'Clinical' },
+  T3: { label: 'Translation to Practice', color: '#0ea5e9', icon: '\u{1FA7A}', category: 'Implementation' },
+  T4: { label: 'Translation to Community', color: '#14b8a6', icon: '\u{1F30D}', category: 'Implementation' },
+  T5: { label: 'Global Impact', color: '#22c55e', icon: '\u{1F30F}', category: 'Implementation' },
+}
 
 function confidenceColor(c: number) {
   if (c >= 0.8) return 'var(--color-success)'
@@ -688,6 +736,21 @@ export default function Agents() {
               <p className="text-sm">No hypotheses yet</p>
               <p className="text-xs mt-1">Configure a disease target and start discovery</p>
             </div>
+          ) : !isRunning && !isPaused && projectId && projectId !== 'discovery' ? (
+            <div className="flex flex-col items-center justify-center h-full text-[var(--color-text-muted)]">
+              <FiCheck className="w-12 h-12 mb-4" style={{ color: 'var(--color-success)', opacity: 0.6 }} />
+              <p className="text-sm font-medium text-[var(--color-text)]">{hypotheses.length} hypotheses saved to project</p>
+              <p className="text-xs mt-1 mb-4">Discovery complete. All hypotheses have been saved.</p>
+              <Link
+                to={`/projects/${projectId}`}
+                className="flex items-center gap-2 text-sm px-4 py-2 rounded-lg border border-[var(--color-border)] hover:bg-[var(--glass-bg-hover)] transition-all"
+                style={{ color: 'var(--color-accent-blue)' }}
+              >
+                <FiFolder className="w-4 h-4" />
+                View in Project
+                <FiExternalLink className="w-3.5 h-3.5" />
+              </Link>
+            </div>
           ) : (
             <div className="space-y-2">
               {sortedHypotheses.map(h => (
@@ -714,6 +777,11 @@ export default function Agents() {
                       </div>
                       <p className="text-xs text-[var(--color-text-muted)] mt-1 line-clamp-2">{h.description}</p>
                       <div className="flex items-center gap-3 mt-2 text-xxs text-[var(--color-text-muted)]">
+                        {h.translational_roadmap && (
+                          <span className="flex items-center gap-1 px-1.5 py-0.5 rounded" style={{ background: `${PHASE_META[h.translational_roadmap.current_phase]?.color || '#666'}12`, color: PHASE_META[h.translational_roadmap.current_phase]?.color || '#666' }}>
+                            {h.translational_roadmap.current_phase} {PHASE_META[h.translational_roadmap.current_phase]?.category || ''}
+                          </span>
+                        )}
                         {h.evidence_summary && <span>{h.evidence_summary.length} evidence</span>}
                         {h.risks && <span>{h.risks.length} risks</span>}
                         {h.round_number && <span>Round {h.round_number}</span>}
@@ -751,6 +819,10 @@ export default function Agents() {
 // ── Hypothesis Detail ───────────────────────────────────────────
 
 function HypothesisDetail({ hypothesis: h, onClose, onExport }: { hypothesis: Hypothesis; onClose: () => void; onExport: () => void }) {
+  const [expandedPhase, setExpandedPhase] = useState<string | null>(null)
+  const roadmap = h.translational_roadmap
+  const currentPhaseIdx = roadmap ? ['T0','T1','T2','T3','T4','T5'].indexOf(roadmap.current_phase) : 0
+
   return (
     <div className="animate-slide-up">
       <div className="p-5 border-b border-[var(--color-border)] flex items-center justify-between">
@@ -772,6 +844,149 @@ function HypothesisDetail({ hypothesis: h, onClose, onExport }: { hypothesis: Hy
           <div>
             <h4 className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-2 font-medium">Mechanism</h4>
             <p className="text-xs text-[var(--color-text-secondary)] leading-relaxed p-3 rounded-lg bg-[var(--glass-bg)] border border-[var(--color-border)]">{h.mechanism}</p>
+          </div>
+        )}
+
+        {/* ── Translational Roadmap Pipeline ── */}
+        {roadmap && roadmap.phases && roadmap.phases.length > 0 && (
+          <div>
+            <h4 className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-3 font-medium">
+              Bench-to-Bedside Translational Roadmap
+            </h4>
+
+            {/* Phase category labels */}
+            <div className="flex items-center gap-3 mb-2 text-xxs">
+              <span className="px-2 py-0.5 rounded" style={{ background: 'rgba(139,92,246,0.12)', color: '#8b5cf6' }}>Bench</span>
+              <span className="px-2 py-0.5 rounded" style={{ background: 'rgba(99,102,241,0.12)', color: '#6366f1' }}>Translational</span>
+              <span className="px-2 py-0.5 rounded" style={{ background: 'rgba(59,130,246,0.12)', color: '#3b82f6' }}>Clinical</span>
+              <span className="px-2 py-0.5 rounded" style={{ background: 'rgba(20,184,166,0.12)', color: '#14b8a6' }}>Implementation</span>
+            </div>
+
+            {/* Pipeline stepper */}
+            <div className="flex items-center mb-3">
+              {['T0','T1','T2','T3','T4','T5'].map((phaseId, idx) => {
+                const meta = PHASE_META[phaseId]
+                const isActive = idx <= currentPhaseIdx
+                const isCurrent = phaseId === roadmap.current_phase
+                return (
+                  <div key={phaseId} className="flex items-center flex-1">
+                    <div
+                      className="flex flex-col items-center cursor-pointer group"
+                      onClick={() => setExpandedPhase(expandedPhase === phaseId ? null : phaseId)}
+                      title={meta.label}
+                    >
+                      <div
+                        className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all"
+                        style={{
+                          background: isActive ? meta.color : 'var(--glass-bg)',
+                          color: isActive ? '#fff' : 'var(--color-text-muted)',
+                          border: isCurrent ? `2px solid ${meta.color}` : '2px solid transparent',
+                          boxShadow: isCurrent ? `0 0 8px ${meta.color}40` : 'none',
+                        }}
+                      >
+                        {phaseId}
+                      </div>
+                      <span className="text-xxs mt-1 text-center leading-tight" style={{ color: isActive ? meta.color : 'var(--color-text-muted)', maxWidth: '52px' }}>
+                        {meta.label.split(' ').slice(0, 2).join(' ')}
+                      </span>
+                    </div>
+                    {idx < 5 && (
+                      <div className="flex-1 h-0.5 mx-1" style={{ background: idx < currentPhaseIdx ? PHASE_META[['T0','T1','T2','T3','T4','T5'][idx+1]].color : 'var(--glass-bg)' }} />
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Roadmap summary */}
+            <div className="grid grid-cols-2 gap-2 mb-3">
+              {roadmap.estimated_total_timeline && (
+                <div className="p-2 rounded-lg bg-[var(--glass-bg)] text-xxs">
+                  <span className="text-[var(--color-text-muted)]">Timeline:</span>
+                  <span className="ml-1 font-medium">{roadmap.estimated_total_timeline}</span>
+                </div>
+              )}
+              <div className="p-2 rounded-lg bg-[var(--glass-bg)] text-xxs">
+                <span className="text-[var(--color-text-muted)]">Feasibility:</span>
+                <span className="ml-1 font-medium">{Math.round(roadmap.overall_feasibility_score * 100)}%</span>
+              </div>
+            </div>
+            {roadmap.regulatory_pathway_summary && (
+              <div className="p-2 rounded-lg bg-[var(--glass-bg)] text-xxs mb-3">
+                <span className="text-[var(--color-text-muted)]">Regulatory:</span>
+                <span className="ml-1">{roadmap.regulatory_pathway_summary}</span>
+              </div>
+            )}
+
+            {/* Expanded phase detail */}
+            {expandedPhase && (() => {
+              const phase = roadmap.phases.find(p => p.phase === expandedPhase)
+              if (!phase) return null
+              const meta = PHASE_META[expandedPhase] || { label: expandedPhase, color: '#666' }
+              return (
+                <div className="rounded-lg border border-[var(--color-border)] overflow-hidden mb-2 animate-slide-down" style={{ borderColor: `${meta.color}30` }}>
+                  <div className="p-3 flex items-center justify-between" style={{ background: `${meta.color}10` }}>
+                    <div>
+                      <span className="text-xs font-bold" style={{ color: meta.color }}>{expandedPhase}</span>
+                      <span className="text-xs font-medium ml-2">{phase.phase_name}</span>
+                      {phase.formal_name && <span className="text-xxs text-[var(--color-text-muted)] ml-1">({phase.formal_name})</span>}
+                    </div>
+                    {phase.estimated_duration && <span className="text-xxs px-2 py-0.5 rounded" style={{ background: `${meta.color}15`, color: meta.color }}>{phase.estimated_duration}</span>}
+                  </div>
+                  <div className="p-3 space-y-3 text-xs">
+                    {phase.description && <p className="text-[var(--color-text-secondary)] leading-relaxed">{phase.description}</p>}
+
+                    {phase.objectives && phase.objectives.length > 0 && (
+                      <div>
+                        <span className="text-xxs text-[var(--color-text-muted)] uppercase font-medium">Objectives</span>
+                        <ul className="mt-1 space-y-1">{phase.objectives.map((o, i) => <li key={i} className="text-[var(--color-text-secondary)] flex gap-1.5"><span style={{ color: meta.color }}>&#x25B8;</span>{o}</li>)}</ul>
+                      </div>
+                    )}
+                    {phase.key_activities && phase.key_activities.length > 0 && (
+                      <div>
+                        <span className="text-xxs text-[var(--color-text-muted)] uppercase font-medium">Key Activities</span>
+                        <ul className="mt-1 space-y-1">{phase.key_activities.map((a, i) => <li key={i} className="text-[var(--color-text-secondary)] flex gap-1.5"><span style={{ color: meta.color }}>&#x25B8;</span>{a}</li>)}</ul>
+                      </div>
+                    )}
+                    {phase.milestones && phase.milestones.length > 0 && (
+                      <div>
+                        <span className="text-xxs text-[var(--color-text-muted)] uppercase font-medium">Milestones</span>
+                        <ul className="mt-1 space-y-1">{phase.milestones.map((m, i) => <li key={i} className="text-[var(--color-text-secondary)] flex gap-1.5"><FiCheck className="w-3 h-3 flex-shrink-0 mt-0.5" style={{ color: meta.color }} />{m}</li>)}</ul>
+                      </div>
+                    )}
+                    {phase.regulatory_considerations && phase.regulatory_considerations.length > 0 && (
+                      <div>
+                        <span className="text-xxs text-[var(--color-text-muted)] uppercase font-medium">Regulatory</span>
+                        <ul className="mt-1 space-y-1">{phase.regulatory_considerations.map((r, i) => <li key={i} className="text-[var(--color-text-secondary)] flex gap-1.5"><span style={{ color: meta.color }}>&#x25B8;</span>{r}</li>)}</ul>
+                      </div>
+                    )}
+                    {phase.key_stakeholders && phase.key_stakeholders.length > 0 && (
+                      <div>
+                        <span className="text-xxs text-[var(--color-text-muted)] uppercase font-medium">Key Stakeholders</span>
+                        <div className="flex flex-wrap gap-1 mt-1">{phase.key_stakeholders.map((s, i) => <span key={i} className="text-xxs px-2 py-0.5 rounded" style={{ background: `${meta.color}10`, color: meta.color }}>{s}</span>)}</div>
+                      </div>
+                    )}
+                    {phase.success_criteria && phase.success_criteria.length > 0 && (
+                      <div>
+                        <span className="text-xxs text-[var(--color-text-muted)] uppercase font-medium">Go/No-Go Criteria</span>
+                        <ul className="mt-1 space-y-1">{phase.success_criteria.map((c, i) => <li key={i} className="text-[var(--color-text-secondary)] flex gap-1.5"><span style={{ color: meta.color }}>&#x25B8;</span>{c}</li>)}</ul>
+                      </div>
+                    )}
+                    {phase.phase_risks && phase.phase_risks.length > 0 && (
+                      <div>
+                        <span className="text-xxs text-[var(--color-text-muted)] uppercase font-medium">Risks</span>
+                        <ul className="mt-1 space-y-1">{phase.phase_risks.map((r, i) => <li key={i} className="text-[var(--color-text-secondary)] flex gap-1.5"><FiAlertTriangle className="w-3 h-3 flex-shrink-0 mt-0.5" style={{ color: 'var(--color-error)' }} />{r}</li>)}</ul>
+                      </div>
+                    )}
+                    {phase.estimated_cost_range && (
+                      <div className="text-xxs text-[var(--color-text-muted)]">
+                        Est. Cost: <span className="font-medium text-[var(--color-text-secondary)]">{phase.estimated_cost_range}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )
+            })()}
           </div>
         )}
 

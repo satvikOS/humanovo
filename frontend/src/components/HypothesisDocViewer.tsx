@@ -9,6 +9,40 @@ import clsx from 'clsx'
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
 
+export interface TranslationalPhaseDoc {
+  phase: string
+  phase_name: string
+  formal_name: string
+  description: string
+  objectives?: string[]
+  key_activities?: string[]
+  milestones?: string[]
+  deliverables?: string[]
+  evidence_requirements?: string[]
+  regulatory_considerations?: string[]
+  regulatory_milestones?: string[]
+  key_stakeholders?: string[]
+  success_criteria?: string[]
+  go_no_go_gates?: string[]
+  phase_risks?: string[]
+  mitigation_strategies?: string[]
+  estimated_duration?: string
+  resource_requirements?: string[]
+  estimated_cost_range?: string
+}
+
+export interface TranslationalRoadmapDoc {
+  current_phase: string
+  phases: TranslationalPhaseDoc[]
+  overall_feasibility_score: number
+  estimated_total_timeline: string
+  critical_path_summary: string
+  key_decision_points?: string[]
+  cross_phase_risks?: string[]
+  regulatory_pathway_summary?: string
+  commercialization_potential?: string
+}
+
 export interface HypothesisDocData {
   id: string
   title: string
@@ -20,6 +54,7 @@ export interface HypothesisDocData {
   discovery_type?: string
   model_used?: string
   created_at?: string
+  translational_roadmap?: TranslationalRoadmapDoc
 }
 
 interface HypothesisDocViewerProps {
@@ -189,6 +224,18 @@ function buildDocumentHtml(h: HypothesisDocData): string {
     letter-spacing: 1px;
     text-transform: uppercase;
   }
+  .cover .roadmap-badge {
+    display: inline-block;
+    margin-top: 16px;
+    padding: 6px 20px;
+    border: 2px solid #2563eb;
+    border-radius: 4px;
+    color: #2563eb;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
 
   /* ---- Content pages ---- */
   .content-page {
@@ -320,6 +367,141 @@ function buildDocumentHtml(h: HypothesisDocData): string {
     padding-top: 12px;
   }
 
+  /* Translational roadmap styles */
+  .roadmap-pipeline {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin: 24px 0;
+    padding: 20px 0;
+  }
+  .phase-node {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex: 1;
+    position: relative;
+  }
+  .phase-circle {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 6px;
+    position: relative;
+    z-index: 2;
+  }
+  .phase-circle.inactive {
+    background: #e5e7eb;
+    color: #9ca3af;
+  }
+  .phase-circle.current {
+    box-shadow: 0 0 0 4px rgba(37,99,235,0.2);
+  }
+  .phase-label {
+    font-size: 9px;
+    text-align: center;
+    color: #6b7280;
+    font-weight: 600;
+    line-height: 1.2;
+    max-width: 80px;
+  }
+  .phase-category {
+    font-size: 8px;
+    color: #9ca3af;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-top: 2px;
+  }
+  .phase-connector {
+    flex: 1;
+    height: 3px;
+    margin-top: 19px;
+    position: relative;
+  }
+
+  /* Phase detail sections */
+  .phase-detail {
+    margin-bottom: 28px;
+    page-break-inside: avoid;
+  }
+  .phase-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid #e5e7eb;
+  }
+  .phase-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    font-size: 12px;
+    font-weight: 700;
+    color: #fff;
+    flex-shrink: 0;
+  }
+  .phase-title-group h3 {
+    font-size: 16px;
+    font-weight: 700;
+    color: #111827;
+    margin: 0;
+  }
+  .phase-title-group .formal {
+    font-size: 12px;
+    color: #6b7280;
+    margin-top: 2px;
+  }
+  .phase-duration {
+    margin-left: auto;
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 4px;
+    font-weight: 600;
+  }
+  .phase-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-top: 12px;
+  }
+  .phase-card {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    padding: 12px;
+  }
+  .phase-card h4 {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #6b7280;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  .phase-card ul {
+    margin: 0;
+    padding-left: 14px;
+    font-size: 11px;
+    color: #374151;
+    line-height: 1.5;
+  }
+  .phase-card li {
+    margin-bottom: 3px;
+  }
+  .phase-card.full-width {
+    grid-column: 1 / -1;
+  }
+
   @media print {
     .page { box-shadow: none; }
   }
@@ -354,6 +536,7 @@ function buildDocumentHtml(h: HypothesisDocData): string {
   </div>
 
   <div class="classification">Research Use Only</div>
+  ${h.translational_roadmap ? '<div class="roadmap-badge">Bench-to-Bedside Translational Hypothesis (T0&ndash;T5)</div>' : ''}
 
   <div class="page-footer">
     <span>Humanovo &mdash; AI-Powered Biomedical Discovery</span>
@@ -427,8 +610,185 @@ function buildDocumentHtml(h: HypothesisDocData): string {
   </div>
 </div>
 
+${h.translational_roadmap ? buildTranslationalPages(h.translational_roadmap, 3) : ''}
+
 </body>
 </html>`
+}
+
+/* ------------------------------------------------------------------ */
+/*  Build translational roadmap pages                                  */
+/* ------------------------------------------------------------------ */
+
+const PHASE_COLORS: Record<string, string> = {
+  T0: '#8b5cf6', T1: '#6366f1', T2: '#3b82f6',
+  T3: '#0ea5e9', T4: '#14b8a6', T5: '#22c55e',
+}
+const PHASE_CATEGORIES: Record<string, string> = {
+  T0: 'Bench', T1: 'Translational', T2: 'Clinical',
+  T3: 'Implementation', T4: 'Implementation', T5: 'Implementation',
+}
+
+function buildTranslationalPages(roadmap: NonNullable<HypothesisDocData['translational_roadmap']>, startPage: number): string {
+  const phases = roadmap.phases || []
+  const currentIdx = ['T0','T1','T2','T3','T4','T5'].indexOf(roadmap.current_phase)
+  let pageNum = startPage
+
+  // Overview page with pipeline visualization
+  let html = `
+<div class="page content-page">
+  <div class="section">
+    <h2><span class="section-num">${pageNum === startPage ? (startPage) : pageNum}</span>Translational Roadmap: Bench to Bedside (T0&ndash;T5)</h2>
+    <p>This section presents the complete translational roadmap for advancing this hypothesis from basic research through global health impact, following the extended translational spectrum (T0&ndash;T5).</p>
+
+    <!-- Pipeline visualization -->
+    <div class="roadmap-pipeline">
+      ${['T0','T1','T2','T3','T4','T5'].map((pid, idx) => {
+        const phase = phases.find(p => p.phase === pid)
+        const color = PHASE_COLORS[pid]
+        const isActive = idx <= currentIdx
+        const isCurrent = pid === roadmap.current_phase
+        return `
+        <div class="phase-node">
+          <div class="phase-circle ${isActive ? '' : 'inactive'} ${isCurrent ? 'current' : ''}" style="${isActive ? `background:${color}` : ''}">
+            ${pid}
+          </div>
+          <div class="phase-label">${phase?.phase_name || pid}</div>
+          <div class="phase-category">${PHASE_CATEGORIES[pid]}</div>
+        </div>
+        ${idx < 5 ? `<div class="phase-connector" style="background:${idx < currentIdx ? PHASE_COLORS[['T0','T1','T2','T3','T4','T5'][idx+1]] : '#e5e7eb'}"></div>` : ''}`
+      }).join('')}
+    </div>
+
+    <!-- Roadmap summary table -->
+    <table class="info-table">
+      <tbody>
+        <tr><th>Current Phase</th><td><strong>${esc(roadmap.current_phase)}</strong> &mdash; ${esc(phases.find(p => p.phase === roadmap.current_phase)?.phase_name || '')}</td></tr>
+        ${roadmap.estimated_total_timeline ? `<tr><th>Estimated Timeline</th><td>${esc(roadmap.estimated_total_timeline)}</td></tr>` : ''}
+        <tr><th>Overall Feasibility</th><td>${(roadmap.overall_feasibility_score * 100).toFixed(0)}%</td></tr>
+        ${roadmap.regulatory_pathway_summary ? `<tr><th>Regulatory Pathway</th><td>${esc(roadmap.regulatory_pathway_summary)}</td></tr>` : ''}
+        ${roadmap.commercialization_potential ? `<tr><th>Commercialization</th><td>${esc(roadmap.commercialization_potential)}</td></tr>` : ''}
+      </tbody>
+    </table>
+
+    ${roadmap.critical_path_summary ? `<div class="mechanism-box"><p><strong>Critical Path:</strong> ${esc(roadmap.critical_path_summary)}</p></div>` : ''}
+
+    ${roadmap.key_decision_points && roadmap.key_decision_points.length > 0 ? `
+    <h3>Key Decision Points</h3>
+    <ul style="font-size:13px;color:#374151;padding-left:20px;margin-top:8px">
+      ${roadmap.key_decision_points.map(d => `<li>${esc(d)}</li>`).join('')}
+    </ul>` : ''}
+
+    ${roadmap.cross_phase_risks && roadmap.cross_phase_risks.length > 0 ? `
+    <h3>Cross-Phase Risks</h3>
+    <ul style="font-size:13px;color:#374151;padding-left:20px;margin-top:8px">
+      ${roadmap.cross_phase_risks.map(r => `<li>${esc(r)}</li>`).join('')}
+    </ul>` : ''}
+  </div>
+
+  <div class="page-footer">
+    <span>Humanovo &mdash; AI-Powered Biomedical Discovery</span>
+    <span>Page ${pageNum}</span>
+  </div>
+</div>`
+
+  // Individual phase pages (2 phases per page)
+  for (let i = 0; i < phases.length; i += 2) {
+    pageNum++
+    html += `\n<div class="page content-page">`
+
+    for (let j = i; j < Math.min(i + 2, phases.length); j++) {
+      const phase = phases[j]
+      const color = PHASE_COLORS[phase.phase] || '#666'
+      const category = PHASE_CATEGORIES[phase.phase] || ''
+      const isActive = ['T0','T1','T2','T3','T4','T5'].indexOf(phase.phase) <= currentIdx
+
+      html += `
+  <div class="phase-detail">
+    <div class="phase-header">
+      <div class="phase-badge" style="background:${isActive ? color : '#d1d5db'}">${esc(phase.phase)}</div>
+      <div class="phase-title-group">
+        <h3>${esc(phase.phase_name)} <span style="font-size:11px;color:${color};font-weight:600">[${category}]</span></h3>
+        ${phase.formal_name ? `<div class="formal">${esc(phase.formal_name)}</div>` : ''}
+      </div>
+      ${phase.estimated_duration ? `<div class="phase-duration" style="background:${color}10;color:${color}">${esc(phase.estimated_duration)}</div>` : ''}
+    </div>
+
+    ${phase.description ? `<p style="font-size:13px;color:#374151;margin-bottom:12px">${esc(phase.description)}</p>` : ''}
+
+    <div class="phase-grid">
+      ${phase.objectives && phase.objectives.length > 0 ? `
+      <div class="phase-card">
+        <h4>Objectives</h4>
+        <ul>${phase.objectives.map(o => `<li>${esc(o)}</li>`).join('')}</ul>
+      </div>` : ''}
+
+      ${phase.key_activities && phase.key_activities.length > 0 ? `
+      <div class="phase-card">
+        <h4>Key Activities</h4>
+        <ul>${phase.key_activities.map(a => `<li>${esc(a)}</li>`).join('')}</ul>
+      </div>` : ''}
+
+      ${phase.milestones && phase.milestones.length > 0 ? `
+      <div class="phase-card">
+        <h4>Milestones</h4>
+        <ul>${phase.milestones.map(m => `<li>${esc(m)}</li>`).join('')}</ul>
+      </div>` : ''}
+
+      ${phase.regulatory_considerations && phase.regulatory_considerations.length > 0 ? `
+      <div class="phase-card">
+        <h4>Regulatory Considerations</h4>
+        <ul>${phase.regulatory_considerations.map(r => `<li>${esc(r)}</li>`).join('')}</ul>
+      </div>` : ''}
+
+      ${phase.key_stakeholders && phase.key_stakeholders.length > 0 ? `
+      <div class="phase-card">
+        <h4>Key Stakeholders</h4>
+        <ul>${phase.key_stakeholders.map(s => `<li>${esc(s)}</li>`).join('')}</ul>
+      </div>` : ''}
+
+      ${phase.success_criteria && phase.success_criteria.length > 0 ? `
+      <div class="phase-card">
+        <h4>Success Criteria / Go-No-Go Gates</h4>
+        <ul>${phase.success_criteria.map(c => `<li>${esc(c)}</li>`).join('')}</ul>
+      </div>` : ''}
+
+      ${phase.evidence_requirements && phase.evidence_requirements.length > 0 ? `
+      <div class="phase-card">
+        <h4>Evidence Requirements</h4>
+        <ul>${phase.evidence_requirements.map(e => `<li>${esc(e)}</li>`).join('')}</ul>
+      </div>` : ''}
+
+      ${phase.phase_risks && phase.phase_risks.length > 0 ? `
+      <div class="phase-card">
+        <h4>Risks & Mitigation</h4>
+        <ul>
+          ${phase.phase_risks.map((r, ri) => `<li><strong>Risk:</strong> ${esc(r)}${phase.mitigation_strategies && phase.mitigation_strategies[ri] ? ` <br/><em>Mitigation: ${esc(phase.mitigation_strategies[ri])}</em>` : ''}</li>`).join('')}
+        </ul>
+      </div>` : ''}
+
+      ${phase.estimated_cost_range ? `
+      <div class="phase-card">
+        <h4>Resource Estimates</h4>
+        <ul>
+          <li><strong>Cost Range:</strong> ${esc(phase.estimated_cost_range)}</li>
+          ${phase.estimated_duration ? `<li><strong>Duration:</strong> ${esc(phase.estimated_duration)}</li>` : ''}
+          ${(phase.resource_requirements || []).map(r => `<li>${esc(r)}</li>`).join('')}
+        </ul>
+      </div>` : ''}
+    </div>
+  </div>`
+    }
+
+    html += `
+  <div class="page-footer">
+    <span>Humanovo &mdash; AI-Powered Biomedical Discovery</span>
+    <span>Page ${pageNum}</span>
+  </div>
+</div>`
+  }
+
+  return html
 }
 
 /* ------------------------------------------------------------------ */
@@ -625,7 +985,7 @@ export default function HypothesisDocViewer({
                 sandbox="allow-same-origin"
                 style={{
                   width: '210mm',
-                  minHeight: '594mm', /* 2 A4 pages */
+                  minHeight: hypothesis.translational_roadmap ? '2376mm' : '594mm', /* 8 A4 pages for translational, 2 for basic */
                   border: 'none',
                   display: 'block',
                   background: '#fff',

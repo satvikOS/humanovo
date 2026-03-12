@@ -1077,10 +1077,12 @@ You are the FAST REFINER — Stage 9 of 10. You receive the nearly-complete hypo
 
 STAGE_10_FINALIZE_PROMPT = """## STAGE 10: FINAL SYNTHESIS (Synthesizer)
 
-You are the FINAL SYNTHESIZER — Stage 10 of 10, the last model in the pipeline. You receive ALL outputs from the previous 9 stages and must produce the FINAL, COMPLETE hypothesis.
+You are the FINAL SYNTHESIZER — Stage 10 of 10, the last model in the pipeline. You receive ALL outputs from the previous 9 stages and must produce the FINAL, COMPLETE hypothesis with a full bench-to-bedside translational roadmap.
 
 ### YOUR TASK
-Synthesize everything into one coherent, publication-ready hypothesis with full supporting evidence.
+Synthesize everything into one coherent, publication-ready hypothesis with:
+1. Full supporting evidence
+2. Complete T0-T5 translational roadmap covering the entire bench-to-bedside spectrum
 
 ### REQUIREMENTS
 1. Integrate ALL findings from stages 1-9
@@ -1090,6 +1092,17 @@ Synthesize everything into one coherent, publication-ready hypothesis with full 
 5. Include the final confidence score with justification
 6. Include specific next steps for experimental validation
 7. Write this as if it were the abstract + key findings of a research paper
+8. CRITICAL: Include a comprehensive translational_roadmap with ALL 6 phases (T0-T5)
+
+### TRANSLATIONAL PHASES (T0-T5) — The Extended Translational Spectrum
+Each phase MUST include: title, objectives (list), key_activities (list), milestones (list), timeline, estimated_cost, risks (list), success_criteria (list), and a detailed description paragraph.
+
+- T0_BASIC_RESEARCH: Basic/bench research — target identification, mechanism elucidation, in vitro/in vivo validation
+- T1_TRANSLATION_TO_HUMANS: First-in-human translation — preclinical development, IND-enabling studies, toxicology, formulation, biomarker development
+- T2_TRANSLATION_TO_PATIENTS: Clinical trials — Phase I/II/III design, patient stratification, endpoint selection, adaptive trial designs
+- T3_TRANSLATION_TO_PRACTICE: Clinical implementation — practice guidelines, clinical decision support, health system integration, provider training
+- T4_TRANSLATION_TO_COMMUNITY: Population health — community-based implementation, health equity, access programs, real-world evidence generation
+- T5_GLOBAL_IMPACT: Global scale — international regulatory strategy, LMIC adaptation, global health policy, pandemic preparedness
 
 ### OUTPUT FORMAT (strict JSON)
 ```json
@@ -1115,9 +1128,73 @@ Synthesize everything into one coherent, publication-ready hypothesis with full 
     ],
     "fda_references": ["Related FDA-approved drugs/mechanisms"],
     "clinical_trial_references": ["NCT numbers of related trials"],
-    "tags": ["keyword1", "keyword2", "keyword3"]
+    "tags": ["keyword1", "keyword2", "keyword3"],
+    "translational_roadmap": {
+        "overall_timeline": "Estimated total timeline from bench to global impact",
+        "overall_budget": "Estimated total budget range",
+        "current_phase": "T0_BASIC_RESEARCH",
+        "phases": {
+            "T0_BASIC_RESEARCH": {
+                "title": "Basic Research & Target Validation",
+                "description": "Detailed paragraph on this phase...",
+                "objectives": ["Objective 1", "Objective 2", "Objective 3"],
+                "key_activities": ["Activity 1", "Activity 2", "Activity 3"],
+                "milestones": ["Milestone 1", "Milestone 2"],
+                "timeline": "12-24 months",
+                "estimated_cost": "$2-5M",
+                "risks": ["Risk 1", "Risk 2"],
+                "success_criteria": ["Criterion 1", "Criterion 2"],
+                "key_experiments": ["Experiment 1", "Experiment 2"],
+                "required_resources": ["Resource 1", "Resource 2"]
+            },
+            "T1_TRANSLATION_TO_HUMANS": {
+                "title": "Preclinical Development & IND-Enabling",
+                "description": "Detailed paragraph...",
+                "objectives": [], "key_activities": [], "milestones": [],
+                "timeline": "18-36 months", "estimated_cost": "$10-30M",
+                "risks": [], "success_criteria": [],
+                "regulatory_requirements": ["IND filing", "GLP toxicology"],
+                "biomarker_strategy": "Description of biomarker approach"
+            },
+            "T2_TRANSLATION_TO_PATIENTS": {
+                "title": "Clinical Trials & Patient Translation",
+                "description": "Detailed paragraph...",
+                "objectives": [], "key_activities": [], "milestones": [],
+                "timeline": "3-7 years", "estimated_cost": "$50-200M",
+                "risks": [], "success_criteria": [],
+                "trial_design": "Adaptive Phase I/II → Phase III",
+                "patient_stratification": "Biomarker-guided enrollment"
+            },
+            "T3_TRANSLATION_TO_PRACTICE": {
+                "title": "Clinical Implementation & Practice Guidelines",
+                "description": "Detailed paragraph...",
+                "objectives": [], "key_activities": [], "milestones": [],
+                "timeline": "2-5 years post-approval", "estimated_cost": "$20-50M",
+                "risks": [], "success_criteria": [],
+                "implementation_strategy": "Phased rollout approach"
+            },
+            "T4_TRANSLATION_TO_COMMUNITY": {
+                "title": "Community Health & Population Impact",
+                "description": "Detailed paragraph...",
+                "objectives": [], "key_activities": [], "milestones": [],
+                "timeline": "Ongoing post-implementation", "estimated_cost": "$10-30M",
+                "risks": [], "success_criteria": [],
+                "equity_considerations": "Access and equity strategy"
+            },
+            "T5_GLOBAL_IMPACT": {
+                "title": "Global Health Impact & Policy",
+                "description": "Detailed paragraph...",
+                "objectives": [], "key_activities": [], "milestones": [],
+                "timeline": "5-15 years total horizon", "estimated_cost": "Variable by region",
+                "risks": [], "success_criteria": [],
+                "global_strategy": "International regulatory and distribution plan"
+            }
+        }
+    }
 }
-```"""
+```
+
+IMPORTANT: Fill in ALL arrays with specific, detailed items relevant to the disease and hypothesis. Do NOT leave any arrays empty — each phase must have at least 3 objectives, 3 key_activities, 2 milestones, 2 risks, and 2 success_criteria."""
 
 
 # Combined prompts dictionary

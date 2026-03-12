@@ -1,25 +1,23 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   FiFolder,
   FiZap,
   FiActivity,
-  FiDatabase,
+  FiFileText,
   FiClock,
   FiArrowRight,
   FiArrowUpRight,
   FiArrowDownRight,
-  FiCheckCircle,
-  FiRefreshCw,
   FiSearch,
   FiBook,
   FiChevronRight,
-  FiTrendingUp,
   FiCpu,
 } from 'react-icons/fi'
-import { AreaChart, Area, ResponsiveContainer, Tooltip } from 'recharts'
+import { AreaChart, Area, ResponsiveContainer } from 'recharts'
 import api from '../services/api'
-import type { Project, Activity, Simulation, OrchestratorStatus } from '../services/api'
+import type { Project, OrchestratorStatus } from '../services/api'
+import { persistGet, getActivityLog, type ActivityEntry } from '../utils/persistence'
 
 // ── Stat Card (expandable) ──────────────────────────────────────
 
@@ -43,9 +41,9 @@ function StatCard({ stat }: { stat: StatData }) {
         <div className={`p-2 rounded-lg`} style={{ background: `${stat.accentColor}12` }}>
           <stat.icon className="w-4 h-4" style={{ color: stat.accentColor }} />
         </div>
-        {stat.change !== undefined && (
-          <span className="flex items-center gap-0.5 text-xs" style={{ color: stat.change >= 0 ? 'var(--color-success)' : 'var(--color-error)' }}>
-            {stat.change >= 0 ? <FiArrowUpRight className="w-3 h-3" /> : <FiArrowDownRight className="w-3 h-3" />}
+        {stat.change !== undefined && stat.change !== 0 && (
+          <span className="flex items-center gap-0.5 text-xs" style={{ color: stat.change > 0 ? 'var(--color-success)' : 'var(--color-error)' }}>
+            {stat.change > 0 ? <FiArrowUpRight className="w-3 h-3" /> : <FiArrowDownRight className="w-3 h-3" />}
             {Math.abs(stat.change)}%
           </span>
         )}
@@ -54,8 +52,8 @@ function StatCard({ stat }: { stat: StatData }) {
       <div className="text-sm text-[var(--color-text-muted)]">{stat.label}</div>
 
       {stat.chartData && stat.chartData.length > 0 && (
-        <div className="mt-4 h-0 group-hover:h-16 overflow-hidden transition-all duration-300 ease-in-out">
-          <ResponsiveContainer width="100%" height={64}>
+        <div className="mt-3 h-12">
+          <ResponsiveContainer width="100%" height={48}>
             <AreaChart data={stat.chartData}>
               <defs>
                 <linearGradient id={`grad-${stat.label}`} x1="0" y1="0" x2="0" y2="1">
@@ -70,21 +68,12 @@ function StatCard({ stat }: { stat: StatData }) {
                 fill={`url(#grad-${stat.label})`}
                 strokeWidth={1.5}
               />
-              <Tooltip
-                contentStyle={{
-                  background: 'var(--color-surface-solid)',
-                  border: '1px solid var(--color-border)',
-                  borderRadius: '8px',
-                  fontSize: '12px',
-                  color: 'var(--color-text)',
-                }}
-              />
             </AreaChart>
           </ResponsiveContainer>
         </div>
       )}
 
-      <div className="flex items-center gap-1 mt-3 text-xs text-[var(--color-text-muted)] opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="flex items-center gap-1 mt-2 text-xs text-[var(--color-text-muted)] opacity-0 group-hover:opacity-100 transition-opacity">
         View details <FiChevronRight className="w-3 h-3" />
       </div>
     </Link>
@@ -165,80 +154,18 @@ function DiscoveryWidget() {
   )
 }
 
-// ── Simulations Widget ──────────────────────────────────────────
-
-function SimulationsWidget() {
-  const [simulations, setSimulations] = useState<Simulation[]>([])
-
-  useEffect(() => {
-    api.getSimulations({ page_size: 5, status: 'running' })
-      .then(res => setSimulations(res.items || []))
-      .catch(() => {})
-  }, [])
-
-  return (
-    <div className="glass-card p-5 h-full">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-sm font-medium">Active Simulations</h3>
-        <Link to="/simulations" className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] flex items-center gap-1 transition-colors">
-          View All <FiArrowRight className="w-3 h-3" />
-        </Link>
-      </div>
-      {simulations.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-8 text-[var(--color-text-muted)]">
-          <FiActivity className="w-6 h-6 mb-2 opacity-40" />
-          <p className="text-sm">Coming Soon...</p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {simulations.map(sim => (
-            <div key={sim.id} className="p-3 rounded-lg bg-[var(--glass-bg)]">
-              <div className="flex items-center justify-between text-sm mb-2">
-                <span className="font-medium truncate">{sim.name}</span>
-                {sim.status === 'completed' ? (
-                  <FiCheckCircle className="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'var(--color-success)' }} />
-                ) : (
-                  <FiRefreshCw className="w-3.5 h-3.5 animate-spin flex-shrink-0" style={{ color: 'var(--color-accent-blue)' }} />
-                )}
-              </div>
-              <div className="h-1.5 rounded-full overflow-hidden bg-[var(--color-border)]">
-                <div
-                  className="h-full rounded-full transition-all duration-500"
-                  style={{
-                    width: `${Math.round((sim.iterations_completed / sim.iterations) * 100)}%`,
-                    background: sim.status === 'completed' ? 'var(--color-success)' : 'var(--color-accent-blue)',
-                  }}
-                />
-              </div>
-              <div className="text-xs text-[var(--color-text-muted)] mt-1">
-                {sim.iterations_completed}/{sim.iterations} iterations
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── Activity Feed ───────────────────────────────────────────────
+// ── Activity Feed (from localStorage) ──────────────────────────
 
 function ActivityFeed() {
-  const [activities, setActivities] = useState<Activity[]>([])
-
-  useEffect(() => {
-    api.getActivities({ page_size: 8 })
-      .then(res => setActivities(res.items || []))
-      .catch(() => {})
-  }, [])
+  const activities = useMemo(() => getActivityLog().slice(0, 10), [])
 
   const typeIcons: Record<string, typeof FiZap> = {
     hypothesis: FiZap,
     simulation: FiActivity,
-    evidence: FiDatabase,
+    evidence: FiFileText,
     project: FiFolder,
     notebook: FiBook,
-    discovery: FiTrendingUp,
+    discovery: FiCpu,
   }
 
   const typeColors: Record<string, string> = {
@@ -299,10 +226,10 @@ function ActivityFeed() {
                 <div className="flex-1 min-w-0">
                   <div className="text-sm truncate">{activity.title}</div>
                   <div className="flex items-center gap-2 mt-0.5">
-                    {activity.project_name && (
-                      <span className="text-xs text-[var(--color-text-muted)]">{activity.project_name}</span>
+                    {activity.project && (
+                      <span className="text-xs text-[var(--color-text-muted)]">{activity.project}</span>
                     )}
-                    <span className="text-xs text-[var(--color-text-muted)]">{formatTime(activity.created_at)}</span>
+                    <span className="text-xs text-[var(--color-text-muted)]">{formatTime(activity.timestamp)}</span>
                   </div>
                 </div>
                 <span
@@ -320,54 +247,116 @@ function ActivityFeed() {
   )
 }
 
+// ── Helpers for real stats ──────────────────────────────────────
+
+function computeChangePercent(activities: ActivityEntry[], type: string): number {
+  const now = Date.now()
+  const weekAgo = now - 7 * 86400000
+  const twoWeeksAgo = now - 14 * 86400000
+  const thisWeek = activities.filter(a => a.type === type && new Date(a.timestamp).getTime() >= weekAgo).length
+  const lastWeek = activities.filter(a => a.type === type && new Date(a.timestamp).getTime() >= twoWeeksAgo && new Date(a.timestamp).getTime() < weekAgo).length
+  if (lastWeek === 0) return thisWeek > 0 ? 100 : 0
+  return Math.round(((thisWeek - lastWeek) / lastWeek) * 100)
+}
+
+function buildChartData(activities: ActivityEntry[], type: string): Array<{ name: string; value: number }> {
+  const now = new Date()
+  const days: Array<{ name: string; value: number }> = []
+  for (let i = 6; i >= 0; i--) {
+    const dayStart = new Date(now)
+    dayStart.setDate(dayStart.getDate() - i)
+    dayStart.setHours(0, 0, 0, 0)
+    const dayEnd = new Date(dayStart)
+    dayEnd.setDate(dayEnd.getDate() + 1)
+    const count = activities.filter(a => {
+      if (a.type !== type) return false
+      const t = new Date(a.timestamp).getTime()
+      return t >= dayStart.getTime() && t < dayEnd.getTime()
+    }).length
+    const dayLabel = dayStart.toLocaleDateString('en-US', { weekday: 'short' })
+    days.push({ name: dayLabel, value: count })
+  }
+  return days
+}
+
 // ── Main Dashboard ──────────────────────────────────────────────
 
 export default function Dashboard() {
   const navigate = useNavigate()
   const [projects, setProjects] = useState<Project[]>([])
-  const [counts, setCounts] = useState({ projects: 0, hypotheses: 0, simulations: 0, evidence: 0 })
 
-  // Fetch data from live API
+  // Get real counts from localStorage
+  const allActivities = useMemo(() => getActivityLog(), [])
+  const localProjects = useMemo(() => persistGet<any[]>('projects', []), [])
+  const localHypotheses = useMemo(() => persistGet<any[]>('hypotheses', []), [])
+  const localPapers = useMemo(() => persistGet<any[]>('research-papers', []), [])
+
+  // Fetch API projects, merge with localStorage
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [projectsRes, hypothesesRes, simsRes, evidenceRes] = await Promise.allSettled([
-          api.getProjects({ page_size: 8 }),
-          api.getHypotheses({ page_size: 1 }),
-          api.getSimulations({ page_size: 1 }),
-          api.getEvidenceList({ page_size: 1 }),
-        ])
+        let apiProjects: Project[] = []
+        try {
+          const res = await api.getProjects({ page_size: 50 })
+          apiProjects = res?.items || []
+        } catch (err) { console.warn('Dashboard: projects API unavailable', err) }
 
-        if (projectsRes.status === 'fulfilled') {
-          setProjects(projectsRes.value.items || [])
-          setCounts(prev => ({ ...prev, projects: projectsRes.value.total }))
-        }
-        if (hypothesesRes.status === 'fulfilled') setCounts(prev => ({ ...prev, hypotheses: hypothesesRes.value.total }))
-        if (simsRes.status === 'fulfilled') setCounts(prev => ({ ...prev, simulations: simsRes.value.total }))
-        if (evidenceRes.status === 'fulfilled') setCounts(prev => ({ ...prev, evidence: evidenceRes.value.total }))
+        const apiIds = new Set(apiProjects.map(p => p.id))
+        const localOnly = localProjects
+          .filter((p: any) => p.id && !apiIds.has(p.id))
+          .map((p: any) => ({
+            id: p.id,
+            name: p.name || 'Untitled Project',
+            description: p.description,
+            disease_focus: p.disease_focus,
+            research_question: p.research_question,
+            tags: p.tags || [],
+            status: p.status || 'active',
+            hypothesis_count: p.hypothesis_count || 0,
+            evidence_count: p.evidence_count || 0,
+            created_at: p.created_at || new Date().toISOString(),
+            updated_at: p.updated_at || new Date().toISOString(),
+          } as Project))
+
+        const all = [...apiProjects, ...localOnly]
+        all.sort((a, b) => new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime())
+        setProjects(all)
       } catch (e) {
         console.error('Dashboard fetch error:', e)
       }
     }
     fetchData()
-  }, [])
+  }, [localProjects])
 
-  // Generate chart data (last 7 periods) - always show meaningful data
-  const makeChartData = (total: number) => {
-    const base = Math.max(total, 5) // minimum display value so charts are never empty
-    const data = []
-    for (let i = 6; i >= 0; i--) {
-      data.push({ name: `${i}d`, value: Math.max(1, base - Math.floor(Math.random() * Math.max(1, base * 0.3) * (i + 1))) })
-    }
-    data[data.length - 1].value = base
-    return data
-  }
+  const totalProjects = projects.length
+  const totalHypotheses = localHypotheses.length
+  const totalPapers = localPapers.length
 
   const stats: StatData[] = [
-    { label: 'Active Projects', value: counts.projects, change: 12, icon: FiFolder, accentColor: '#a1a1a1', href: '/projects', chartData: makeChartData(counts.projects) },
-    { label: 'Hypotheses', value: counts.hypotheses, change: 8, icon: FiZap, accentColor: '#a855f7', href: '/knowledge-graph', chartData: makeChartData(counts.hypotheses) },
-    { label: 'Simulations', value: counts.simulations, change: 5, icon: FiActivity, accentColor: '#22c55e', href: '/simulations', chartData: makeChartData(counts.simulations) },
-    { label: 'Evidence Items', value: counts.evidence, change: 15, icon: FiDatabase, accentColor: '#3b82f6', href: '/evidence', chartData: makeChartData(counts.evidence) },
+    {
+      label: 'Active Projects', value: totalProjects,
+      change: computeChangePercent(allActivities, 'project'),
+      icon: FiFolder, accentColor: '#a1a1a1', href: '/projects',
+      chartData: buildChartData(allActivities, 'project'),
+    },
+    {
+      label: 'Hypotheses', value: totalHypotheses,
+      change: computeChangePercent(allActivities, 'hypothesis'),
+      icon: FiZap, accentColor: '#a855f7', href: '/agents',
+      chartData: buildChartData(allActivities, 'hypothesis'),
+    },
+    {
+      label: 'Research Papers', value: totalPapers,
+      change: computeChangePercent(allActivities, 'evidence'),
+      icon: FiFileText, accentColor: '#22c55e', href: '/projects',
+      chartData: buildChartData(allActivities, 'evidence'),
+    },
+    {
+      label: 'Discoveries', value: allActivities.filter(a => a.type === 'discovery').length,
+      change: computeChangePercent(allActivities, 'discovery'),
+      icon: FiCpu, accentColor: '#3b82f6', href: '/agents',
+      chartData: buildChartData(allActivities, 'discovery'),
+    },
   ]
 
   const quickActions = [
@@ -403,10 +392,7 @@ export default function Dashboard() {
       {/* Stats Grid */}
       <div className="grid grid-cols-4 gap-4">
         {stats.map((stat) => (
-          <StatCard
-            key={stat.label}
-            stat={stat}
-          />
+          <StatCard key={stat.label} stat={stat} />
         ))}
       </div>
 
@@ -423,65 +409,55 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
-        {/* Simulations */}
-        <div>
-          <SimulationsWidget />
+      {/* Recent Projects */}
+      <div className="glass-card p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-medium">Recent Projects</h3>
+          <Link to="/projects" className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] flex items-center gap-1 transition-colors">
+            View All <FiArrowRight className="w-3 h-3" />
+          </Link>
         </div>
-
-        {/* Recent Projects */}
-        <div className="col-span-2">
-          <div className="glass-card p-5">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-medium">Recent Projects</h3>
-              <Link to="/projects" className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] flex items-center gap-1 transition-colors">
-                View All <FiArrowRight className="w-3 h-3" />
-              </Link>
-            </div>
-            {projects.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-12 text-[var(--color-text-muted)]">
-                <FiFolder className="w-8 h-8 mb-3 opacity-30" />
-                <p className="text-sm">No projects yet</p>
-                <button
-                  onClick={() => navigate('/projects?new=1')}
-                  className="text-sm mt-2 text-[var(--color-text)] hover:text-[var(--color-text-secondary)] transition-colors"
-                >
-                  Create your first project
-                </button>
-              </div>
-            ) : (
-              <div className="grid grid-cols-2 gap-3">
-                {projects.slice(0, 6).map(project => (
-                  <Link
-                    key={project.id}
-                    to={`/projects/${project.id}`}
-                    className="p-4 rounded-xl bg-[var(--glass-bg)] hover:bg-[var(--glass-bg-hover)] border border-[var(--color-border)] hover:border-[var(--color-border-strong)] transition-all group"
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <FiFolder className="w-4 h-4 text-[var(--color-text-muted)]" />
-                        {project.status && (
-                          <span className="text-xs" style={{ color: project.status === 'active' ? 'var(--color-success)' : 'var(--color-text-muted)' }}>
-                            {project.status}
-                          </span>
-                        )}
-                      </div>
-                      <FiArrowUpRight className="w-3.5 h-3.5 text-[var(--color-text-muted)] opacity-0 group-hover:opacity-100 transition-opacity" />
-                    </div>
-                    <div className="text-sm font-medium mb-1 truncate">{project.name}</div>
-                    {project.disease_focus && (
-                      <div className="text-xs text-[var(--color-text-muted)] mb-2 truncate">{project.disease_focus}</div>
-                    )}
-                    <div className="flex items-center gap-4 text-xs text-[var(--color-text-muted)]">
-                      <span>{project.hypothesis_count} hypotheses</span>
-                      <span>{project.evidence_count} evidence</span>
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            )}
+        {projects.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-12 text-[var(--color-text-muted)]">
+            <FiFolder className="w-8 h-8 mb-3 opacity-30" />
+            <p className="text-sm">No projects yet</p>
+            <button
+              onClick={() => navigate('/projects?new=1')}
+              className="text-sm mt-2 text-[var(--color-text)] hover:text-[var(--color-text-secondary)] transition-colors"
+            >
+              Create your first project
+            </button>
           </div>
-        </div>
+        ) : (
+          <div className="grid grid-cols-3 gap-3">
+            {projects.slice(0, 6).map(project => (
+              <Link
+                key={project.id}
+                to={`/projects/${project.id}`}
+                className="p-4 rounded-xl bg-[var(--glass-bg)] hover:bg-[var(--glass-bg-hover)] border border-[var(--color-border)] hover:border-[var(--color-border-strong)] transition-all group"
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <FiFolder className="w-4 h-4 text-[var(--color-text-muted)]" />
+                    {project.status && (
+                      <span className="text-xs" style={{ color: project.status === 'active' ? 'var(--color-success)' : 'var(--color-text-muted)' }}>
+                        {project.status}
+                      </span>
+                    )}
+                  </div>
+                  <FiArrowUpRight className="w-3.5 h-3.5 text-[var(--color-text-muted)] opacity-0 group-hover:opacity-100 transition-opacity" />
+                </div>
+                <div className="text-sm font-medium mb-1 truncate">{project.name}</div>
+                {project.disease_focus && (
+                  <div className="text-xs text-[var(--color-text-muted)] mb-2 truncate">{project.disease_focus}</div>
+                )}
+                <div className="flex items-center gap-4 text-xs text-[var(--color-text-muted)]">
+                  <span>{project.hypothesis_count} hypotheses</span>
+                </div>
+              </Link>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )

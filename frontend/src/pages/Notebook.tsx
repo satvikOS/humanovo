@@ -250,8 +250,8 @@ export default function Notebook() {
 
   const selectPage = useCallback((page: NotebookPage) => {
     setActivePage(page)
-    setEditContent(page.content)
-    setEditTitle(page.title)
+    setEditContent(page.content || '')
+    setEditTitle(page.title || '')
     setEditTags(page.tags || [])
     setHasUnsavedChanges(false)
     setShowVersions(false)
@@ -423,7 +423,8 @@ export default function Notebook() {
     const start = textarea.selectionStart
     const end = textarea.selectionEnd
     const text = SNIPPET_INSERT[key]
-    const newContent = editContent.slice(0, start) + text + editContent.slice(end)
+    const currentContent = editContent || ''
+    const newContent = currentContent.slice(0, start) + text + currentContent.slice(end)
     setEditContent(newContent)
     scheduleAutoSave()
     setTimeout(() => {
@@ -440,8 +441,8 @@ export default function Notebook() {
     if (!searchQuery) return pages
     const q = searchQuery.toLowerCase()
     return pages.filter(p =>
-      p.title.toLowerCase().includes(q) ||
-      p.content.toLowerCase().includes(q) ||
+      (p.title || '').toLowerCase().includes(q) ||
+      (p.content || '').toLowerCase().includes(q) ||
       p.tags?.some(t => t.toLowerCase().includes(q))
     )
   }, [pages, searchQuery])
@@ -521,9 +522,9 @@ export default function Notebook() {
                   {new Date(page.updated_at).toLocaleDateString()}
                 </span>
               </div>
-              {page.tags?.length > 0 && (
+              {(page.tags?.length ?? 0) > 0 && (
                 <div className="flex gap-1 mt-1 flex-wrap">
-                  {page.tags.slice(0, 3).map(tag => (
+                  {(page.tags ?? []).slice(0, 3).map(tag => (
                     <span key={tag} className="text-xxs px-1 py-0.5 rounded bg-white/5 text-[var(--color-text-muted)]">
                       {tag}
                     </span>
@@ -737,13 +738,13 @@ Supports:
           <div className="px-4 py-1 border-t border-[var(--color-border)] flex items-center justify-between text-xxs text-[var(--color-text-muted)] shrink-0">
             <div className="flex items-center gap-3">
               <span>Markdown</span>
-              <span>{editContent.length} chars</span>
-              <span>{editContent.split('\n').length} lines</span>
-              <span>{editContent.split(/\s+/).filter(Boolean).length} words</span>
+              <span>{(editContent || '').length} chars</span>
+              <span>{(editContent || '').split('\n').length} lines</span>
+              <span>{(editContent || '').split(/\s+/).filter(Boolean).length} words</span>
             </div>
             <div className="flex items-center gap-3">
-              <span>v{activePage.version}</span>
-              <span>Last saved {new Date(activePage.updated_at).toLocaleTimeString()}</span>
+              <span>v{activePage.version ?? 1}</span>
+              <span>Last saved {activePage.updated_at ? new Date(activePage.updated_at).toLocaleTimeString() : '—'}</span>
             </div>
           </div>
         </div>
@@ -825,7 +826,7 @@ Supports:
                         {new Date(ver.created_at).toLocaleString()}
                       </div>
                       <div className="text-xxs text-[var(--color-text-muted)] mt-0.5 line-clamp-1">
-                        {ver.content.slice(0, 100)}...
+                        {(ver.content || '').slice(0, 100)}...
                       </div>
                     </div>
                     <button

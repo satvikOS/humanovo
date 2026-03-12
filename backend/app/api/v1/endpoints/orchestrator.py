@@ -130,6 +130,15 @@ async def start_discovery_endpoint(request: StartDiscoveryRequest):
                     "model_used": hypothesis.model_used,
                     "external_factors": hypothesis.external_factors,
                     "validated": hypothesis.validated,
+                    "evidence_summary": getattr(hypothesis, "evidence_summary", []),
+                    "risks": getattr(hypothesis, "risks", []),
+                    "validation_steps": getattr(hypothesis, "validation_steps", []),
+                    "novelty_score": getattr(hypothesis, "novelty_score", 0.0),
+                    "citations": getattr(hypothesis, "citations", []),
+                    "fda_references": getattr(hypothesis, "fda_references", []),
+                    "clinical_trial_references": getattr(hypothesis, "clinical_trial_references", []),
+                    "tags": getattr(hypothesis, "tags", []),
+                    "translational_roadmap": getattr(hypothesis, "translational_roadmap", {}),
                 }
             })
 
@@ -270,6 +279,15 @@ async def get_discovery_status():
                     "model_used": h.model_used,
                     "validated": h.validated,
                     "external_factors": h.external_factors,
+                    "evidence_summary": getattr(h, "evidence_summary", []),
+                    "risks": getattr(h, "risks", []),
+                    "validation_steps": getattr(h, "validation_steps", []),
+                    "novelty_score": getattr(h, "novelty_score", 0.0),
+                    "citations": getattr(h, "citations", []),
+                    "fda_references": getattr(h, "fda_references", []),
+                    "clinical_trial_references": getattr(h, "clinical_trial_references", []),
+                    "tags": getattr(h, "tags", []),
+                    "translational_roadmap": getattr(h, "translational_roadmap", {}),
                 }
                 for h in hypotheses
             ],
@@ -310,6 +328,15 @@ async def get_hypotheses(
                 "external_factors": h.external_factors,
                 "created_at": h.created_at.isoformat(),
                 "validated": h.validated,
+                "evidence_summary": getattr(h, "evidence_summary", []),
+                "risks": getattr(h, "risks", []),
+                "validation_steps": getattr(h, "validation_steps", []),
+                "novelty_score": getattr(h, "novelty_score", 0.0),
+                "citations": getattr(h, "citations", []),
+                "fda_references": getattr(h, "fda_references", []),
+                "clinical_trial_references": getattr(h, "clinical_trial_references", []),
+                "tags": getattr(h, "tags", []),
+                "translational_roadmap": getattr(h, "translational_roadmap", {}),
             }
             for h in hypotheses
         ],
@@ -355,6 +382,10 @@ async def generate_research_paper():
             "model_used": h.model_used,
             "validated": h.validated,
             "external_factors": h.external_factors,
+            "evidence_summary": getattr(h, "evidence_summary", []),
+            "risks": getattr(h, "risks", []),
+            "validation_steps": getattr(h, "validation_steps", []),
+            "translational_roadmap": getattr(h, "translational_roadmap", {}),
         }
         for h in hypotheses
     ]
@@ -405,6 +436,10 @@ async def generate_research_paper_markdown():
             "model_used": h.model_used,
             "validated": h.validated,
             "external_factors": h.external_factors,
+            "evidence_summary": getattr(h, "evidence_summary", []),
+            "risks": getattr(h, "risks", []),
+            "validation_steps": getattr(h, "validation_steps", []),
+            "translational_roadmap": getattr(h, "translational_roadmap", {}),
         }
         for h in hypotheses
     ]
@@ -487,6 +522,10 @@ async def generate_research_paper_pdf():
             "model_used": h.model_used,
             "validated": h.validated,
             "external_factors": h.external_factors,
+            "evidence_summary": getattr(h, "evidence_summary", []),
+            "risks": getattr(h, "risks", []),
+            "validation_steps": getattr(h, "validation_steps", []),
+            "translational_roadmap": getattr(h, "translational_roadmap", {}),
         }
         for h in hypotheses
     ]
