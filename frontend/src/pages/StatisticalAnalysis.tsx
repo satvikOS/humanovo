@@ -601,7 +601,7 @@ export default function StatisticalAnalysis() {
                 )}
 
                 {/* Correlation matrix */}
-                {result.matrix && (
+                {Array.isArray(result.matrix) && (
                   <div className="overflow-x-auto">
                     <table className="w-full text-xs">
                       <thead>
@@ -667,7 +667,7 @@ export default function StatisticalAnalysis() {
                 )}
 
                 {/* Sample size results */}
-                {result.total_n !== undefined && result.recommendations && (
+                {result.total_n !== undefined && Array.isArray(result.recommendations) && (
                   <div className="space-y-3">
                     <div className="grid grid-cols-2 gap-3 text-xs">
                       <div className="p-3 rounded-lg bg-[var(--glass-bg)] border border-[var(--color-border)] text-center">

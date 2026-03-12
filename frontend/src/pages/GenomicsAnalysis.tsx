@@ -65,10 +65,10 @@ export default function GenomicsAnalysis() {
         body = { genes: genes.split(',').map(g => g.trim()).filter(Boolean), database }
       } else if (tab === 'gsea') {
         endpoint = '/gsea'
-        body = { ranked_genes: rankedGenes.split('\n').filter(l => l.trim()).map(l => { const [gene, score] = l.split(','); return { gene: gene.trim(), score: parseFloat(score) || 0 } }), gene_set: database }
+        body = { ranked_genes: rankedGenes.split('\n').filter(l => l.trim()).map(l => { const parts = l.split(','); return { gene: (parts[0] || '').trim(), score: parseFloat(parts[1]) || 0 } }), gene_set: database }
       } else if (tab === 'variants') {
         endpoint = '/variant-annotation'
-        body = { variants: variants.split('\n').filter(l => l.trim()).map(l => { const [gene, pos, ref, alt] = l.split(',').map(s => s.trim()); return { gene, position: parseInt(pos) || 0, ref, alt } }) }
+        body = { variants: variants.split('\n').filter(l => l.trim()).map(l => { const parts = l.split(',').map(s => s.trim()); return { gene: parts[0] || '', position: parseInt(parts[1]) || 0, ref: parts[2] || '', alt: parts[3] || '' } }) }
       } else {
         endpoint = '/biomarker-discovery'
         body = { expression_data: biomarkerData.split('\n').filter(l => l.trim()).map(l => { const [gene, rest] = l.split(',', 2).map(s => s.trim()); const groups = (rest || '').split(';'); return { gene, group1_values: groups[0]?.split(',').map(Number) || [], group2_values: groups[1]?.split(',').map(Number) || [] } }) }
@@ -143,7 +143,7 @@ export default function GenomicsAnalysis() {
                   <div key={r.pathway_id} className={`p-3 rounded-lg ${r.significant ? 'bg-green-500/5 border border-green-500/20' : 'bg-[var(--glass-bg)]'}`}>
                     <div className="flex items-center justify-between"><span className="text-xs font-medium">{r.pathway_name}</span><span className="text-xxs font-mono">p={r.p_value}</span></div>
                     <div className="text-xxs text-[var(--color-text-muted)] mt-1">Overlap: {r.overlap_count}/{r.pathway_size} | Fold: {r.fold_enrichment}x</div>
-                    <div className="text-xxs text-[var(--color-text-muted)]">Genes: {r.overlap_genes.join(', ')}</div>
+                    <div className="text-xxs text-[var(--color-text-muted)]">Genes: {(r.overlap_genes || []).join(', ')}</div>
                   </div>
                 ))}
               </div>
@@ -156,7 +156,7 @@ export default function GenomicsAnalysis() {
                   <div key={r.pathway_id} className="p-3 rounded-lg bg-[var(--glass-bg)]">
                     <div className="text-xs font-medium">{r.pathway_name}</div>
                     <div className="text-xxs text-[var(--color-text-muted)]">NES: {r.normalized_es} | Hits: {r.hits}</div>
-                    <div className="text-xxs text-[var(--color-text-muted)]">Leading edge: {r.leading_edge_genes.join(', ')}</div>
+                    <div className="text-xxs text-[var(--color-text-muted)]">Leading edge: {(r.leading_edge_genes || []).join(', ')}</div>
                   </div>
                 ))}
               </div>
@@ -177,7 +177,7 @@ export default function GenomicsAnalysis() {
             {result && tab === 'biomarkers' && (
               <div className="space-y-3">
                 <div className="text-xs text-[var(--color-text-muted)]">{result.significant_biomarkers} significant from {result.total_genes} genes</div>
-                {result.volcano_data && result.volcano_data.length > 0 && (
+                {Array.isArray(result.volcano_data) && result.volcano_data.length > 0 && (
                   <div>
                     <p className="text-xs text-[var(--color-text-muted)] mb-2">Volcano Plot</p>
                     <ResponsiveContainer width="100%" height={200}>
