@@ -377,6 +377,10 @@ export default function ProjectDetail() {
 
   const _saveResearchPaper = useCallback((hypothesis: SavedHypothesis) => {
     const papers = persistGet<SavedResearchPaper[]>('research-papers', [])
+    // Don't save a duplicate if a paper for this hypothesis already exists
+    if (papers.some(p => p.hypothesis_id === hypothesis.id)) {
+      return
+    }
     const paper: SavedResearchPaper = {
       id: `rp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       hypothesis_id: hypothesis.id,
