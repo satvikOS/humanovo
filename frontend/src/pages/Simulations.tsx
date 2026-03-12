@@ -2106,15 +2106,117 @@ function ComputationalLab() {
             />
           </div>
 
-          {/* Output */}
-          <div className="h-48 flex flex-col glass-card p-0 overflow-hidden flex-shrink-0">
+          {/* Output + Result Visualization */}
+          <div className={clsx('flex flex-col glass-card p-0 overflow-hidden flex-shrink-0', showResultViz ? 'h-auto' : 'h-48')}>
             <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--color-border)]">
-              <span className="text-xs font-medium text-[var(--color-text-secondary)]">Output</span>
-              <button onClick={() => setOutput('')} className="text-xxs text-[var(--color-text-muted)] hover:text-[var(--color-text)]">Clear</button>
+              <div className="flex items-center gap-3">
+                <span className="text-xs font-medium text-[var(--color-text-secondary)]">Output</span>
+                {resultChartData.length > 0 && (
+                  <button
+                    onClick={() => setShowResultViz(!showResultViz)}
+                    className={clsx(
+                      'flex items-center gap-1 px-2 py-0.5 rounded text-xxs transition-all border',
+                      showResultViz
+                        ? 'border-[var(--color-accent-green)]/40 bg-[var(--color-accent-green)]/10 text-[var(--color-accent-green)]'
+                        : 'border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
+                    )}
+                  >
+                    <FiBarChart2 className="w-3 h-3" />
+                    Visualize
+                  </button>
+                )}
+              </div>
+              <button onClick={() => { setOutput(''); setShowResultViz(false); setResultChartData([]); setResultTimeSeries([]); setResultStats([]) }} className="text-xxs text-[var(--color-text-muted)] hover:text-[var(--color-text)]">Clear</button>
             </div>
-            <pre className="flex-1 p-4 overflow-auto text-xs font-mono text-[var(--color-accent-green)] leading-relaxed whitespace-pre-wrap">
+
+            {/* Text Output */}
+            <pre className={clsx('p-4 overflow-auto text-xs font-mono text-[var(--color-accent-green)] leading-relaxed whitespace-pre-wrap', showResultViz ? 'max-h-40' : 'flex-1')}>
               {output || 'Run code to see output here...'}
             </pre>
+
+            {/* Result Visualization Panel */}
+            {showResultViz && resultChartData.length > 0 && (
+              <div className="border-t border-[var(--color-border)]">
+                <div className="p-3 border-b border-[var(--color-border)] flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <FiTrendingUp className="w-3.5 h-3.5 text-[var(--color-accent-blue)]" />
+                    <span className="text-xs font-medium text-[var(--color-text)]">Result Visualization</span>
+                  </div>
+                  <button
+                    onClick={() => {
+                      const csv = 'Metric,Value\n' + resultStats.map(s => `"${s.label}",${s.value}`).join('\n')
+                      const blob = new Blob([csv], { type: 'text/csv' })
+                      const url = URL.createObjectURL(blob)
+                      const a = document.createElement('a')
+                      a.href = url; a.download = 'simulation_results.csv'; a.click()
+                      URL.revokeObjectURL(url)
+                    }}
+                    className="flex items-center gap-1 px-2 py-0.5 rounded text-xxs border border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-all"
+                  >
+                    <FiDownload className="w-3 h-3" />
+                    Export
+                  </button>
+                </div>
+
+                <div className="p-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
+                  {/* Bar Chart of parsed numeric results */}
+                  <div>
+                    <h5 className="text-xxs font-medium text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Parsed Metrics</h5>
+                    <ResponsiveContainer width="100%" height={200}>
+                      <LineChart data={resultChartData} margin={{ top: 5, right: 10, bottom: 5, left: 10 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                        <XAxis dataKey="name" stroke="var(--color-text-muted)" tick={{ fontSize: 8 }} angle={-30} textAnchor="end" height={50} />
+                        <YAxis stroke="var(--color-text-muted)" tick={{ fontSize: 9 }} />
+                        <Tooltip
+                          contentStyle={{ background: 'var(--glass-bg)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '11px' }}
+                          labelStyle={{ color: 'var(--color-text)' }}
+                        />
+                        <Line type="monotone" dataKey="value" stroke="var(--color-accent-green)" strokeWidth={2} dot={{ fill: 'var(--color-accent-green)', r: 3 }} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+
+                  {/* Time-series if available, otherwise stats table */}
+                  <div>
+                    {resultTimeSeries.length > 0 ? (
+                      <>
+                        <h5 className="text-xxs font-medium text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Simulated Time Course</h5>
+                        <ResponsiveContainer width="100%" height={200}>
+                          <AreaChart data={resultTimeSeries} margin={{ top: 5, right: 10, bottom: 5, left: 10 }}>
+                            <defs>
+                              <linearGradient id="resultAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="var(--color-accent-blue)" stopOpacity={0.3} />
+                                <stop offset="95%" stopColor="var(--color-accent-blue)" stopOpacity={0} />
+                              </linearGradient>
+                            </defs>
+                            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                            <XAxis dataKey="t" stroke="var(--color-text-muted)" tick={{ fontSize: 9 }} label={{ value: 'Time', position: 'insideBottom', offset: -3, style: { fill: 'var(--color-text-muted)', fontSize: 10 } }} />
+                            <YAxis stroke="var(--color-text-muted)" tick={{ fontSize: 9 }} />
+                            <Tooltip
+                              contentStyle={{ background: 'var(--glass-bg)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '11px' }}
+                              labelStyle={{ color: 'var(--color-text)' }}
+                            />
+                            <Area type="monotone" dataKey="y" stroke="var(--color-accent-blue)" strokeWidth={2} fill="url(#resultAreaGrad)" dot={false} />
+                          </AreaChart>
+                        </ResponsiveContainer>
+                      </>
+                    ) : (
+                      <>
+                        <h5 className="text-xxs font-medium text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Summary Statistics</h5>
+                        <div className="max-h-[200px] overflow-y-auto space-y-1">
+                          {resultStats.map((s, idx) => (
+                            <div key={idx} className="flex items-center justify-between py-1 px-2 rounded text-xs hover:bg-[var(--glass-bg)] transition-all">
+                              <span className="text-[var(--color-text-muted)] truncate mr-2">{s.label}</span>
+                              <span className="text-[var(--color-text)] font-mono text-xxs flex-shrink-0">{s.value}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -2178,7 +2280,7 @@ function simulateOutput(code: string, env: ComputeEnv): string {
 // ── Main Simulations Page ───────────────────────────────────────
 export default function Simulations() {
   const [showCreate, setShowCreate] = useState(false)
-  const [activeTab, setActiveTab] = useState<'simulations' | 'computational-lab'>('simulations')
+  const [activeTab, setActiveTab] = useState<'simulations' | 'computational-lab' | 'matlab-engine'>('simulations')
 
   const { data, isLoading } = useQuery({
     queryKey: ['simulations'],
@@ -2233,6 +2335,18 @@ export default function Simulations() {
           <FiTerminal className="w-4 h-4 inline mr-2" />
           Computational Lab
         </button>
+        <button
+          onClick={() => setActiveTab('matlab-engine')}
+          className={clsx(
+            'px-4 py-2.5 text-sm font-medium transition-all border-b-2 -mb-px',
+            activeTab === 'matlab-engine'
+              ? 'border-[var(--color-text)] text-[var(--color-text)]'
+              : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
+          )}
+        >
+          <FiCpu className="w-4 h-4 inline mr-2" />
+          MATLAB Engine
+        </button>
       </div>
 
       {/* Content */}
@@ -2269,6 +2383,8 @@ export default function Simulations() {
         )}
 
         {activeTab === 'computational-lab' && <ComputationalLab />}
+
+        {activeTab === 'matlab-engine' && <EquationPlotter />}
       </div>
     </div>
   )
