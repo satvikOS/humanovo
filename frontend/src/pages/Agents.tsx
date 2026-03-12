@@ -736,6 +736,21 @@ export default function Agents() {
               <p className="text-sm">No hypotheses yet</p>
               <p className="text-xs mt-1">Configure a disease target and start discovery</p>
             </div>
+          ) : !isRunning && !isPaused && projectId && projectId !== 'discovery' ? (
+            <div className="flex flex-col items-center justify-center h-full text-[var(--color-text-muted)]">
+              <FiCheck className="w-12 h-12 mb-4" style={{ color: 'var(--color-success)', opacity: 0.6 }} />
+              <p className="text-sm font-medium text-[var(--color-text)]">{hypotheses.length} hypotheses saved to project</p>
+              <p className="text-xs mt-1 mb-4">Discovery complete. All hypotheses have been saved.</p>
+              <Link
+                to={`/projects/${projectId}`}
+                className="flex items-center gap-2 text-sm px-4 py-2 rounded-lg border border-[var(--color-border)] hover:bg-[var(--glass-bg-hover)] transition-all"
+                style={{ color: 'var(--color-accent-blue)' }}
+              >
+                <FiFolder className="w-4 h-4" />
+                View in Project
+                <FiExternalLink className="w-3.5 h-3.5" />
+              </Link>
+            </div>
           ) : (
             <div className="space-y-2">
               {sortedHypotheses.map(h => (

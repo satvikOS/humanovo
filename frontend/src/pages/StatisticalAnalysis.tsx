@@ -28,41 +28,41 @@ export default function StatisticalAnalysis() {
   const [showSaved, setShowSaved] = useState(false)
 
   // ── Descriptive state ──
-  const [descData, setDescData] = useState('23, 45, 67, 34, 56, 78, 12, 90, 43, 65, 38, 71, 29, 84, 51')
-  const [descLabel, setDescLabel] = useState('Sample Variable')
+  const [descData, setDescData] = useState('')
+  const [descLabel, setDescLabel] = useState('')
 
   // ── T-test state ──
-  const [g1, setG1] = useState('23, 45, 67, 34, 56, 78, 12')
-  const [g2, setG2] = useState('34, 56, 78, 90, 43, 65, 88')
+  const [g1, setG1] = useState('')
+  const [g2, setG2] = useState('')
   const [paired, setPaired] = useState(false)
-  const [label1, setLabel1] = useState('Control')
-  const [label2, setLabel2] = useState('Treatment')
+  const [label1, setLabel1] = useState('')
+  const [label2, setLabel2] = useState('')
 
   // ── ANOVA state ──
-  const [anovaGroups, setAnovaGroups] = useState('23,45,67,34\n56,78,90,43\n12,34,56,78')
-  const [anovaLabels, setAnovaLabels] = useState('Group A, Group B, Group C')
+  const [anovaGroups, setAnovaGroups] = useState('')
+  const [anovaLabels, setAnovaLabels] = useState('')
 
   // ── Chi-square state ──
-  const [chiData, setChiData] = useState('40,20\n30,10')
-  const [chiRowLabels, setChiRowLabels] = useState('Male, Female')
-  const [chiColLabels, setChiColLabels] = useState('Yes, No')
+  const [chiData, setChiData] = useState('')
+  const [chiRowLabels, setChiRowLabels] = useState('')
+  const [chiColLabels, setChiColLabels] = useState('')
 
   // ── Correlation state ──
-  const [corrVars, setCorrVars] = useState('23,45,67,34,56\n34,56,78,90,43\n12,34,56,78,90')
-  const [corrLabels, setCorrLabels] = useState('Age, BMI, Score')
+  const [corrVars, setCorrVars] = useState('')
+  const [corrLabels, setCorrLabels] = useState('')
   const [corrMethod, setCorrMethod] = useState<'pearson' | 'spearman'>('pearson')
 
   // ── Regression state ──
-  const [regX, setRegX] = useState('1,2\n2,3\n3,4\n4,5\n5,6\n6,7\n7,8')
-  const [regY, setRegY] = useState('2.1, 4.0, 5.8, 8.1, 10.2, 11.9, 14.1')
-  const [regFeatureNames, setRegFeatureNames] = useState('X1, X2')
+  const [regX, setRegX] = useState('')
+  const [regY, setRegY] = useState('')
+  const [regFeatureNames, setRegFeatureNames] = useState('')
   const [regType, setRegType] = useState<'linear' | 'logistic'>('linear')
 
   // ── Survival state ──
-  const [survTimes, setSurvTimes] = useState('1,2,3,4,5,6,7,8,9,10,11,12')
-  const [survEvents, setSurvEvents] = useState('1,0,1,1,0,1,0,1,1,0,1,0')
-  const [survGroups, setSurvGroups] = useState('0,0,0,0,0,0,1,1,1,1,1,1')
-  const [survGroupLabels, setSurvGroupLabels] = useState('Standard, Experimental')
+  const [survTimes, setSurvTimes] = useState('')
+  const [survEvents, setSurvEvents] = useState('')
+  const [survGroups, setSurvGroups] = useState('')
+  const [survGroupLabels, setSurvGroupLabels] = useState('')
 
   // ── Sample size state ──
   const [ssEffect, setSsEffect] = useState(0.5)
@@ -236,11 +236,11 @@ export default function StatisticalAnalysis() {
               <>
                 <div>
                   <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Variable Label</label>
-                  <input value={descLabel} onChange={e => setDescLabel(e.target.value)} className="input w-full text-xs" />
+                  <input value={descLabel} onChange={e => setDescLabel(e.target.value)} placeholder="e.g., Sample Variable" className="input w-full text-xs" />
                 </div>
                 <div>
                   <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Data (comma-separated numbers)</label>
-                  <textarea value={descData} onChange={e => setDescData(e.target.value)} rows={4} className="input w-full text-xs font-mono resize-none" />
+                  <textarea value={descData} onChange={e => setDescData(e.target.value)} rows={4} placeholder="e.g., 23, 45, 67, 34, 56, 78, 12, 90, 43, 65" className="input w-full text-xs font-mono resize-none" />
                 </div>
               </>
             )}
@@ -258,16 +258,16 @@ export default function StatisticalAnalysis() {
                 {hypTest === 'ttest' && (
                   <>
                     <div className="grid grid-cols-2 gap-2">
-                      <input value={label1} onChange={e => setLabel1(e.target.value)} placeholder="Group 1 label" className="input text-xs" />
-                      <input value={label2} onChange={e => setLabel2(e.target.value)} placeholder="Group 2 label" className="input text-xs" />
+                      <input value={label1} onChange={e => setLabel1(e.target.value)} placeholder="e.g., Control" className="input text-xs" />
+                      <input value={label2} onChange={e => setLabel2(e.target.value)} placeholder="e.g., Treatment" className="input text-xs" />
                     </div>
                     <div>
                       <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Group 1 data</label>
-                      <textarea value={g1} onChange={e => setG1(e.target.value)} rows={2} className="input w-full text-xs font-mono resize-none" />
+                      <textarea value={g1} onChange={e => setG1(e.target.value)} rows={2} placeholder="e.g., 23, 45, 67, 34, 56, 78, 12" className="input w-full text-xs font-mono resize-none" />
                     </div>
                     <div>
                       <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Group 2 data</label>
-                      <textarea value={g2} onChange={e => setG2(e.target.value)} rows={2} className="input w-full text-xs font-mono resize-none" />
+                      <textarea value={g2} onChange={e => setG2(e.target.value)} rows={2} placeholder="e.g., 34, 56, 78, 90, 43, 65, 88" className="input w-full text-xs font-mono resize-none" />
                     </div>
                     <label className="flex items-center gap-2 text-xs">
                       <input type="checkbox" checked={paired} onChange={e => setPaired(e.target.checked)} className="rounded" /> Paired t-test
@@ -278,11 +278,11 @@ export default function StatisticalAnalysis() {
                   <>
                     <div>
                       <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Group Labels (comma-separated)</label>
-                      <input value={anovaLabels} onChange={e => setAnovaLabels(e.target.value)} className="input w-full text-xs" />
+                      <input value={anovaLabels} onChange={e => setAnovaLabels(e.target.value)} placeholder="e.g., Group A, Group B, Group C" className="input w-full text-xs" />
                     </div>
                     <div>
                       <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Groups (one per line, comma-separated)</label>
-                      <textarea value={anovaGroups} onChange={e => setAnovaGroups(e.target.value)} rows={4} className="input w-full text-xs font-mono resize-none" />
+                      <textarea value={anovaGroups} onChange={e => setAnovaGroups(e.target.value)} rows={4} placeholder={"e.g.,\n23,45,67,34\n56,78,90,43\n12,34,56,78"} className="input w-full text-xs font-mono resize-none" />
                     </div>
                   </>
                 )}
@@ -291,16 +291,16 @@ export default function StatisticalAnalysis() {
                     <div className="grid grid-cols-2 gap-2">
                       <div>
                         <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Row Labels</label>
-                        <input value={chiRowLabels} onChange={e => setChiRowLabels(e.target.value)} className="input w-full text-xs" />
+                        <input value={chiRowLabels} onChange={e => setChiRowLabels(e.target.value)} placeholder="e.g., Male, Female" className="input w-full text-xs" />
                       </div>
                       <div>
                         <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Column Labels</label>
-                        <input value={chiColLabels} onChange={e => setChiColLabels(e.target.value)} className="input w-full text-xs" />
+                        <input value={chiColLabels} onChange={e => setChiColLabels(e.target.value)} placeholder="e.g., Yes, No" className="input w-full text-xs" />
                       </div>
                     </div>
                     <div>
                       <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Observed data (rows of comma-separated integers)</label>
-                      <textarea value={chiData} onChange={e => setChiData(e.target.value)} rows={3} className="input w-full text-xs font-mono resize-none" />
+                      <textarea value={chiData} onChange={e => setChiData(e.target.value)} rows={3} placeholder={"e.g.,\n40,20\n30,10"} className="input w-full text-xs font-mono resize-none" />
                     </div>
                   </>
                 )}
@@ -320,15 +320,15 @@ export default function StatisticalAnalysis() {
                   <>
                     <div>
                       <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Feature Names</label>
-                      <input value={regFeatureNames} onChange={e => setRegFeatureNames(e.target.value)} className="input w-full text-xs" />
+                      <input value={regFeatureNames} onChange={e => setRegFeatureNames(e.target.value)} placeholder="e.g., X1, X2" className="input w-full text-xs" />
                     </div>
                     <div>
                       <label className="text-xs text-[var(--color-text-muted)] mb-1 block">X data (rows = observations, comma-separated features)</label>
-                      <textarea value={regX} onChange={e => setRegX(e.target.value)} rows={4} className="input w-full text-xs font-mono resize-none" />
+                      <textarea value={regX} onChange={e => setRegX(e.target.value)} rows={4} placeholder={"e.g.,\n1,2\n2,3\n3,4\n4,5"} className="input w-full text-xs font-mono resize-none" />
                     </div>
                     <div>
                       <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Y data (comma-separated)</label>
-                      <textarea value={regY} onChange={e => setRegY(e.target.value)} rows={2} className="input w-full text-xs font-mono resize-none" />
+                      <textarea value={regY} onChange={e => setRegY(e.target.value)} rows={2} placeholder="e.g., 2.1, 4.0, 5.8, 8.1" className="input w-full text-xs font-mono resize-none" />
                     </div>
                     <select value={regType} onChange={e => setRegType(e.target.value as any)} className="input text-xs">
                       <option value="linear">Linear Regression</option>
@@ -339,11 +339,11 @@ export default function StatisticalAnalysis() {
                   <>
                     <div>
                       <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Variable Labels</label>
-                      <input value={corrLabels} onChange={e => setCorrLabels(e.target.value)} className="input w-full text-xs" />
+                      <input value={corrLabels} onChange={e => setCorrLabels(e.target.value)} placeholder="e.g., Age, BMI, Score" className="input w-full text-xs" />
                     </div>
                     <div>
                       <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Variables (one per line, comma-separated values)</label>
-                      <textarea value={corrVars} onChange={e => setCorrVars(e.target.value)} rows={4} className="input w-full text-xs font-mono resize-none" />
+                      <textarea value={corrVars} onChange={e => setCorrVars(e.target.value)} rows={4} placeholder={"e.g.,\n23,45,67,34,56\n34,56,78,90,43"} className="input w-full text-xs font-mono resize-none" />
                     </div>
                     <select value={corrMethod} onChange={e => setCorrMethod(e.target.value as any)} className="input text-xs">
                       <option value="pearson">Pearson</option>
@@ -358,19 +358,19 @@ export default function StatisticalAnalysis() {
               <>
                 <div>
                   <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Times (comma-separated)</label>
-                  <textarea value={survTimes} onChange={e => setSurvTimes(e.target.value)} rows={2} className="input w-full text-xs font-mono resize-none" />
+                  <textarea value={survTimes} onChange={e => setSurvTimes(e.target.value)} rows={2} placeholder="e.g., 1,2,3,4,5,6,7,8,9,10,11,12" className="input w-full text-xs font-mono resize-none" />
                 </div>
                 <div>
                   <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Events (1=event, 0=censored)</label>
-                  <textarea value={survEvents} onChange={e => setSurvEvents(e.target.value)} rows={2} className="input w-full text-xs font-mono resize-none" />
+                  <textarea value={survEvents} onChange={e => setSurvEvents(e.target.value)} rows={2} placeholder="e.g., 1,0,1,1,0,1,0,1,1,0,1,0" className="input w-full text-xs font-mono resize-none" />
                 </div>
                 <div>
                   <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Groups (optional, integers)</label>
-                  <textarea value={survGroups} onChange={e => setSurvGroups(e.target.value)} rows={2} className="input w-full text-xs font-mono resize-none" />
+                  <textarea value={survGroups} onChange={e => setSurvGroups(e.target.value)} rows={2} placeholder="e.g., 0,0,0,0,0,0,1,1,1,1,1,1" className="input w-full text-xs font-mono resize-none" />
                 </div>
                 <div>
                   <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Group Labels</label>
-                  <input value={survGroupLabels} onChange={e => setSurvGroupLabels(e.target.value)} className="input w-full text-xs" />
+                  <input value={survGroupLabels} onChange={e => setSurvGroupLabels(e.target.value)} placeholder="e.g., Standard, Experimental" className="input w-full text-xs" />
                 </div>
               </>
             )}

@@ -16,14 +16,14 @@ export default function GenomicsAnalysis() {
   const [result, setResult] = useState<any>(null)
   const [error, setError] = useState('')
 
-  const [genes, setGenes] = useState('TP53, BRCA1, EGFR, KRAS, PIK3CA, AKT1, BRAF, CDK2')
+  const [genes, setGenes] = useState('')
   const [database, setDatabase] = useState('kegg')
 
-  const [rankedGenes, setRankedGenes] = useState('TP53,2.5\nBRCA1,1.8\nEGFR,1.5\nKRAS,-0.5\nBAX,1.2\nBCL2,-1.8\nCDK2,0.8\nPTEN,-2.1\nMAPK1,0.3\nMTOR,-0.7')
+  const [rankedGenes, setRankedGenes] = useState('')
 
-  const [variants, setVariants] = useState('TP53,7577539,G,A\nBRCA1,41276045,C,T\nEGFR,55249071,T,G\nKRAS,25398284,C,A')
+  const [variants, setVariants] = useState('')
 
-  const [biomarkerData, setBiomarkerData] = useState('TP53,2.1,3.5,1.8,4.2,2.9;5.6,7.2,6.1,8.3,6.8\nBRCA1,1.5,2.0,1.8,2.3,1.6;1.7,2.1,1.9,2.4,1.8\nEGFR,10.2,12.5,11.0,13.1,10.8;3.5,4.2,3.8,4.0,3.6\nKRAS,5.0,5.5,4.8,5.2,5.1;8.2,9.1,8.5,8.8,9.3')
+  const [biomarkerData, setBiomarkerData] = useState('')
 
   const run = async () => {
     setLoading(true); setError(''); setResult(null)
@@ -76,21 +76,21 @@ export default function GenomicsAnalysis() {
             {tab === 'pathway' && (
               <>
                 <div><label className="text-xs text-[var(--color-text-muted)] mb-1 block">Gene List (comma-separated)</label>
-                  <textarea value={genes} onChange={e => setGenes(e.target.value)} rows={3} className="input w-full text-xs font-mono resize-none" /></div>
+                  <textarea value={genes} onChange={e => setGenes(e.target.value)} rows={3} placeholder="e.g., TP53, BRCA1, EGFR, KRAS, PIK3CA, AKT1" className="input w-full text-xs font-mono resize-none" /></div>
                 <select value={database} onChange={e => setDatabase(e.target.value)} className="input text-xs"><option value="kegg">KEGG</option><option value="reactome">Reactome</option></select>
               </>
             )}
             {tab === 'gsea' && (
               <div><label className="text-xs text-[var(--color-text-muted)] mb-1 block">Ranked genes (gene,score per line)</label>
-                <textarea value={rankedGenes} onChange={e => setRankedGenes(e.target.value)} rows={6} className="input w-full text-xs font-mono resize-none" /></div>
+                <textarea value={rankedGenes} onChange={e => setRankedGenes(e.target.value)} rows={6} placeholder={"e.g.,\nTP53,2.5\nBRCA1,1.8\nEGFR,1.5\nKRAS,-0.5"} className="input w-full text-xs font-mono resize-none" /></div>
             )}
             {tab === 'variants' && (
               <div><label className="text-xs text-[var(--color-text-muted)] mb-1 block">Variants (gene,position,ref,alt per line)</label>
-                <textarea value={variants} onChange={e => setVariants(e.target.value)} rows={5} className="input w-full text-xs font-mono resize-none" /></div>
+                <textarea value={variants} onChange={e => setVariants(e.target.value)} rows={5} placeholder={"e.g.,\nTP53,7577539,G,A\nBRCA1,41276045,C,T"} className="input w-full text-xs font-mono resize-none" /></div>
             )}
             {tab === 'biomarkers' && (
               <div><label className="text-xs text-[var(--color-text-muted)] mb-1 block">Expression data (gene,group1vals;group2vals per line)</label>
-                <textarea value={biomarkerData} onChange={e => setBiomarkerData(e.target.value)} rows={6} className="input w-full text-xs font-mono resize-none" /></div>
+                <textarea value={biomarkerData} onChange={e => setBiomarkerData(e.target.value)} rows={6} placeholder={"e.g.,\nTP53,2.1,3.5,1.8;5.6,7.2,6.1\nBRCA1,1.5,2.0;1.7,2.1"} className="input w-full text-xs font-mono resize-none" /></div>
             )}
             <button onClick={run} disabled={loading} className="btn text-xs" style={{ color: 'var(--color-accent-blue)' }}><FiPlay className="w-3.5 h-3.5" /> {loading ? 'Running...' : 'Run Analysis'}</button>
           </div>

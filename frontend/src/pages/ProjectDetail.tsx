@@ -890,8 +890,8 @@ export default function ProjectDetail() {
                 <dd className="text-white font-medium">{uniqueHypotheses.length}</dd>
               </div>
               <div className="flex justify-between">
-                <dt className="text-[var(--color-text-muted)]">Evidence</dt>
-                <dd className="text-white font-medium">{project.evidence_count || 0}</dd>
+                <dt className="text-[var(--color-text-muted)]">Research Papers</dt>
+                <dd className="text-white font-medium">{projectPapers.length}</dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-[var(--color-text-muted)]">Status</dt>

@@ -387,7 +387,7 @@ async def descriptive_stats(request: DescriptiveRequest):
     """Compute descriptive statistics for a dataset."""
     data = request.data
     if not data:
-        raise HTTPException(status_code=400, detail="Data array cannot be empty")
+        raise HTTPException(status_code=422, detail="Data array cannot be empty")
 
     n = len(data)
     s = sorted(data)
@@ -437,11 +437,11 @@ def _histogram(data: list[float], bins: int = 10) -> list[dict]:
 async def t_test(request: TTestRequest):
     """Perform independent or paired t-test."""
     if len(request.group1) < 2 or len(request.group2) < 2:
-        raise HTTPException(status_code=400, detail="Each group must have at least 2 observations")
+        raise HTTPException(status_code=422, detail="Each group must have at least 2 observations")
 
     if request.paired:
         if len(request.group1) != len(request.group2):
-            raise HTTPException(status_code=400, detail="Paired t-test requires equal group sizes")
+            raise HTTPException(status_code=422, detail="Paired t-test requires equal group sizes")
         t_stat, p_value, df = _paired_t(request.group1, request.group2)
         test_name = "Paired t-test"
     else:
@@ -470,10 +470,10 @@ async def t_test(request: TTestRequest):
 async def one_way_anova(request: AnovaRequest):
     """Perform one-way ANOVA."""
     if len(request.groups) < 2:
-        raise HTTPException(status_code=400, detail="ANOVA requires at least 2 groups")
+        raise HTTPException(status_code=422, detail="ANOVA requires at least 2 groups")
     for i, g in enumerate(request.groups):
         if len(g) < 2:
-            raise HTTPException(status_code=400, detail=f"Group {i+1} must have at least 2 observations")
+            raise HTTPException(status_code=422, detail=f"Group {i+1} must have at least 2 observations")
 
     f_stat, p_value, df_between, df_within = _f_statistic(request.groups)
     labels = request.labels if request.labels else [f"Group {i+1}" for i in range(len(request.groups))]
@@ -501,7 +501,7 @@ async def one_way_anova(request: AnovaRequest):
 async def chi_square_test(request: ChiSquareRequest):
     """Perform chi-square test of independence."""
     if not request.observed or not request.observed[0]:
-        raise HTTPException(status_code=400, detail="Observed data cannot be empty")
+        raise HTTPException(status_code=422, detail="Observed data cannot be empty")
 
     chi2, p_value, df = _chi_square(request.observed)
     sig = "statistically significant" if p_value < 0.05 else "not statistically significant"
@@ -532,7 +532,7 @@ async def chi_square_test(request: ChiSquareRequest):
 async def correlation_matrix(request: CorrelationRequest):
     """Compute correlation matrix."""
     if len(request.variables) < 2:
-        raise HTTPException(status_code=400, detail="Need at least 2 variables")
+        raise HTTPException(status_code=422, detail="Need at least 2 variables")
 
     n_vars = len(request.variables)
     labels = request.labels if len(request.labels) == n_vars else [f"Var {i+1}" for i in range(n_vars)]
@@ -569,9 +569,9 @@ async def correlation_matrix(request: CorrelationRequest):
 async def regression_analysis(request: RegressionRequest):
     """Perform linear or logistic regression."""
     if not request.x or not request.y:
-        raise HTTPException(status_code=400, detail="X and y data required")
+        raise HTTPException(status_code=422, detail="X and y data required")
     if len(request.x) != len(request.y):
-        raise HTTPException(status_code=400, detail="X and y must have same length")
+        raise HTTPException(status_code=422, detail="X and y must have same length")
 
     feature_names = request.feature_names if request.feature_names else [f"X{i+1}" for i in range(len(request.x[0]) if request.x else 0)]
 
@@ -615,9 +615,9 @@ async def regression_analysis(request: RegressionRequest):
 async def survival_analysis(request: SurvivalRequest):
     """Kaplan-Meier survival analysis."""
     if not request.times or not request.events:
-        raise HTTPException(status_code=400, detail="Times and events data required")
+        raise HTTPException(status_code=422, detail="Times and events data required")
     if len(request.times) != len(request.events):
-        raise HTTPException(status_code=400, detail="Times and events must have same length")
+        raise HTTPException(status_code=422, detail="Times and events must have same length")
 
     def _kaplan_meier(times: list[float], events: list[int]) -> list[dict]:
         combined = sorted(zip(times, events), key=lambda x: x[0])

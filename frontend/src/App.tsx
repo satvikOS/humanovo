@@ -26,7 +26,7 @@ import GenomicsAnalysis from './pages/GenomicsAnalysis'
 import ManuscriptManager from './pages/ManuscriptManager'
 import RegulatoryCompliance from './pages/RegulatoryCompliance'
 import ResearchImaging from './pages/ResearchImaging'
-import MLModelManager from './pages/MLModelManager'
+// ML Models removed
 import BiobankManager from './pages/BiobankManager'
 
 function App() {
@@ -60,7 +60,7 @@ function App() {
         <Route path="manuscripts" element={<ManuscriptManager />} />
         <Route path="regulatory" element={<RegulatoryCompliance />} />
         <Route path="imaging" element={<ResearchImaging />} />
-        <Route path="ml-models" element={<MLModelManager />} />
+        {/* ML Models removed */}
         <Route path="biobank" element={<BiobankManager />} />
       </Route>
     </Routes>

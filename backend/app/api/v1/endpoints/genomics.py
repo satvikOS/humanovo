@@ -61,6 +61,8 @@ class BiomarkerRequest(BaseModel):
 
 @router.post("/pathway-analysis")
 async def pathway_analysis(request: GeneListRequest):
+    if not request.genes:
+        raise HTTPException(status_code=422, detail="Gene list cannot be empty")
     query_genes = set(g.upper() for g in request.genes)
     pathways = KEGG_PATHWAYS if request.database == "kegg" else REACTOME_PATHWAYS
 
@@ -117,6 +119,8 @@ async def pathway_analysis(request: GeneListRequest):
 
 @router.post("/gsea")
 async def gene_set_enrichment(request: GSEARequest):
+    if not request.ranked_genes:
+        raise HTTPException(status_code=422, detail="Ranked gene list cannot be empty")
     ranked = sorted(request.ranked_genes, key=lambda g: g.get("score", 0), reverse=True)
     gene_names = [g["gene"].upper() for g in ranked]
     pathways = KEGG_PATHWAYS if request.gene_set == "kegg" else REACTOME_PATHWAYS
@@ -167,6 +171,8 @@ async def gene_set_enrichment(request: GSEARequest):
 
 @router.post("/variant-annotation")
 async def annotate_variants(request: VariantRequest):
+    if not request.variants:
+        raise HTTPException(status_code=422, detail="Variant list cannot be empty")
     annotations = []
     for v in request.variants:
         gene = v.get("gene", "Unknown")
@@ -211,6 +217,8 @@ async def annotate_variants(request: VariantRequest):
 
 @router.post("/biomarker-discovery")
 async def discover_biomarkers(request: BiomarkerRequest):
+    if not request.expression_data:
+        raise HTTPException(status_code=422, detail="Expression data cannot be empty")
     results = []
     for entry in request.expression_data:
         gene = entry.get("gene", "Unknown")
