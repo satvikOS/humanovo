@@ -191,6 +191,14 @@ const LOCAL_GRAPH_STATS = {
   relation_counts: { targets: 8934, treats: 6721, inhibits: 5432, activates: 4876, causes: 4321, associates: 3987, expresses: 3654, modulates: 3432, resistance: 3321, biomarker_of: 3714 } as Record<string, number>,
 }
 
+function getEvidenceSearchUrl(item: EvidenceType): string {
+  const title = encodeURIComponent(item.title)
+  if (item.source_type === 'pubmed') return `https://pubmed.ncbi.nlm.nih.gov/?term=${title}`
+  if (item.source_type === 'clinical_trial') return `https://clinicaltrials.gov/search?term=${title}`
+  if (item.source_type === 'preprint') return `https://www.biorxiv.org/search/${title}`
+  return `https://scholar.google.com/scholar?q=${title}`
+}
+
 export default function Evidence() {
   const [evidence, setEvidence] = useState<EvidenceType[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -489,6 +497,10 @@ export default function Evidence() {
                           <span style={{ color }}>{item.source_type}</span>
                           {item.publication_date && <span>{item.publication_date}</span>}
                           {item.citation_count !== undefined && <span>{item.citation_count} citations</span>}
+                          <a href={item.source_url || getEvidenceSearchUrl(item)} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
+                            className="ml-auto flex items-center gap-0.5 text-[var(--color-accent-blue)] hover:underline flex-shrink-0">
+                            <FiExternalLink className="w-3 h-3" /> View
+                          </a>
                         </div>
                         <div className="flex items-center justify-between mt-2">
                           <div className="flex items-center gap-1.5">
@@ -561,11 +573,9 @@ export default function Evidence() {
               </div>
 
               <div className="flex items-center gap-2 mt-3">
-                {selectedItem.source_url && (
-                  <a href={selectedItem.source_url} target="_blank" rel="noopener noreferrer" className="btn btn-sm border border-[var(--color-border)]">
-                    <FiExternalLink className="w-3 h-3" /> Source
-                  </a>
-                )}
+                <a href={selectedItem.source_url || getEvidenceSearchUrl(selectedItem)} target="_blank" rel="noopener noreferrer" className="btn btn-sm border border-[var(--color-border)]">
+                  <FiExternalLink className="w-3 h-3" /> {selectedItem.source_url ? 'Source' : 'Search'}
+                </a>
                 <button onClick={openLinkDialog} className="btn btn-sm" style={{ color: 'var(--color-accent-purple)' }}>
                   <FiLink className="w-3 h-3" /> Link to Hypothesis
                 </button>

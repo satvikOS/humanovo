@@ -5,6 +5,16 @@ import clsx from 'clsx'
 import api, { Project, ProjectCreate } from '../services/api'
 import { persistGet } from '../utils/persistence'
 
+interface SavedResearchPaper {
+  id: string
+  hypothesis_id: string
+  hypothesis_title: string
+  project_id: string
+  disease: string
+  generated_at: string
+  filename: string
+}
+
 function CreateProjectModal({ onClose, onCreate }: { onClose: () => void; onCreate: (project: ProjectCreate) => void }) {
   const [formData, setFormData] = useState({
     name: '',
@@ -146,6 +156,8 @@ function CreateProjectModal({ onClose, onCreate }: { onClose: () => void; onCrea
 }
 
 function ProjectCard({ project, onDelete }: { project: Project; onDelete: (id: string) => void }) {
+  const allPapers = persistGet<SavedResearchPaper[]>('research-papers', [])
+  const paperCount = allPapers.filter(p => p.project_id === project.id).length
   return (
     <div className="glass-card hover:border-white/10 transition-colors group relative p-4">
       <Link to={`/projects/${project.id}`} className="block">
@@ -177,7 +189,7 @@ function ProjectCard({ project, onDelete }: { project: Project; onDelete: (id: s
               <span className="text-white font-medium">{project.hypothesis_count}</span> hypotheses
             </span>
             <span className="text-[var(--color-text-muted)]">
-              <span className="text-white font-medium">{project.evidence_count}</span> evidence
+              <span className="text-white font-medium">{paperCount}</span> papers
             </span>
           </div>
           <span className="text-[var(--color-text-muted)] text-xs">
@@ -259,7 +271,10 @@ export default function Projects() {
           )
         : localOnly
 
-      setProjects([...apiProjects, ...filteredLocal])
+      // Sort all projects by most recent first
+      const all = [...apiProjects, ...filteredLocal]
+      all.sort((a, b) => new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime())
+      setProjects(all)
     } catch (err) {
       console.error('Failed to load projects:', err)
     } finally {

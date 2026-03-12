@@ -16,16 +16,45 @@ export default function GenomicsAnalysis() {
   const [result, setResult] = useState<any>(null)
   const [error, setError] = useState('')
 
-  const [genes, setGenes] = useState('TP53, BRCA1, EGFR, KRAS, PIK3CA, AKT1, BRAF, CDK2')
+  const [genes, setGenes] = useState('')
   const [database, setDatabase] = useState('kegg')
 
-  const [rankedGenes, setRankedGenes] = useState('TP53,2.5\nBRCA1,1.8\nEGFR,1.5\nKRAS,-0.5\nBAX,1.2\nBCL2,-1.8\nCDK2,0.8\nPTEN,-2.1\nMAPK1,0.3\nMTOR,-0.7')
+  const [rankedGenes, setRankedGenes] = useState('')
 
-  const [variants, setVariants] = useState('TP53,7577539,G,A\nBRCA1,41276045,C,T\nEGFR,55249071,T,G\nKRAS,25398284,C,A')
+  const [variants, setVariants] = useState('')
 
-  const [biomarkerData, setBiomarkerData] = useState('TP53,2.1,3.5,1.8,4.2,2.9;5.6,7.2,6.1,8.3,6.8\nBRCA1,1.5,2.0,1.8,2.3,1.6;1.7,2.1,1.9,2.4,1.8\nEGFR,10.2,12.5,11.0,13.1,10.8;3.5,4.2,3.8,4.0,3.6\nKRAS,5.0,5.5,4.8,5.2,5.1;8.2,9.1,8.5,8.8,9.3')
-
+  const [biomarkerData, setBiomarkerData] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const handleCSVUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string
+      if (!text) return
+      const lines = text.split('\n').filter(l => l.trim())
+      if (lines.length === 0) return
+      const firstRow = lines[0].split(',')
+      const isHeader = firstRow.some(v => isNaN(parseFloat(v.trim())))
+      const dataLines = isHeader ? lines.slice(1) : lines
+      if (tab === 'pathway') {
+        // Single column of gene names
+        const allGenes = dataLines.flatMap(l => l.split(',').map(v => v.trim())).filter(Boolean)
+        setGenes(allGenes.join(', '))
+      } else if (tab === 'gsea') {
+        // gene,score per line
+        setRankedGenes(dataLines.join('\n'))
+      } else if (tab === 'variants') {
+        // gene,position,ref,alt per line
+        setVariants(dataLines.join('\n'))
+      } else if (tab === 'biomarkers') {
+        setBiomarkerData(dataLines.join('\n'))
+      }
+    }
+    reader.readAsText(file)
+    e.target.value = ''
+  }
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -77,10 +106,10 @@ export default function GenomicsAnalysis() {
         body = { genes: genes.split(',').map(g => g.trim()).filter(Boolean), database }
       } else if (tab === 'gsea') {
         endpoint = '/gsea'
-        body = { ranked_genes: rankedGenes.split('\n').filter(l => l.trim()).map(l => { const [gene, score] = l.split(','); return { gene: gene.trim(), score: parseFloat(score) || 0 } }), gene_set: database }
+        body = { ranked_genes: rankedGenes.split('\n').filter(l => l.trim()).map(l => { const parts = l.split(','); return { gene: (parts[0] || '').trim(), score: parseFloat(parts[1]) || 0 } }), gene_set: database }
       } else if (tab === 'variants') {
         endpoint = '/variant-annotation'
-        body = { variants: variants.split('\n').filter(l => l.trim()).map(l => { const [gene, pos, ref, alt] = l.split(',').map(s => s.trim()); return { gene, position: parseInt(pos) || 0, ref, alt } }) }
+        body = { variants: variants.split('\n').filter(l => l.trim()).map(l => { const parts = l.split(',').map(s => s.trim()); return { gene: parts[0] || '', position: parseInt(parts[1]) || 0, ref: parts[2] || '', alt: parts[3] || '' } }) }
       } else {
         endpoint = '/biomarker-discovery'
         body = { expression_data: biomarkerData.split('\n').filter(l => l.trim()).map(l => { const [gene, rest] = l.split(',', 2).map(s => s.trim()); const groups = (rest || '').split(';'); return { gene, group1_values: groups[0]?.split(',').map(Number) || [], group2_values: groups[1]?.split(',').map(Number) || [] } }) }
@@ -126,23 +155,27 @@ export default function GenomicsAnalysis() {
             {tab === 'pathway' && (
               <>
                 <div><label className="text-xs text-[var(--color-text-muted)] mb-1 block">Gene List (comma-separated)</label>
-                  <textarea value={genes} onChange={e => setGenes(e.target.value)} rows={3} className="input w-full text-xs font-mono resize-none" /></div>
+                  <textarea value={genes} onChange={e => setGenes(e.target.value)} rows={3} placeholder="e.g., TP53, BRCA1, EGFR, KRAS, PIK3CA, AKT1" className="input w-full text-xs font-mono resize-none" /></div>
                 <select value={database} onChange={e => setDatabase(e.target.value)} className="input text-xs"><option value="kegg">KEGG</option><option value="reactome">Reactome</option></select>
               </>
             )}
             {tab === 'gsea' && (
               <div><label className="text-xs text-[var(--color-text-muted)] mb-1 block">Ranked genes (gene,score per line)</label>
-                <textarea value={rankedGenes} onChange={e => setRankedGenes(e.target.value)} rows={6} className="input w-full text-xs font-mono resize-none" /></div>
+                <textarea value={rankedGenes} onChange={e => setRankedGenes(e.target.value)} rows={6} placeholder={"e.g.,\nTP53,2.5\nBRCA1,1.8\nEGFR,1.5\nKRAS,-0.5"} className="input w-full text-xs font-mono resize-none" /></div>
             )}
             {tab === 'variants' && (
               <div><label className="text-xs text-[var(--color-text-muted)] mb-1 block">Variants (gene,position,ref,alt per line)</label>
-                <textarea value={variants} onChange={e => setVariants(e.target.value)} rows={5} className="input w-full text-xs font-mono resize-none" /></div>
+                <textarea value={variants} onChange={e => setVariants(e.target.value)} rows={5} placeholder={"e.g.,\nTP53,7577539,G,A\nBRCA1,41276045,C,T"} className="input w-full text-xs font-mono resize-none" /></div>
             )}
             {tab === 'biomarkers' && (
               <div><label className="text-xs text-[var(--color-text-muted)] mb-1 block">Expression data (gene,group1vals;group2vals per line)</label>
-                <textarea value={biomarkerData} onChange={e => setBiomarkerData(e.target.value)} rows={6} className="input w-full text-xs font-mono resize-none" /></div>
+                <textarea value={biomarkerData} onChange={e => setBiomarkerData(e.target.value)} rows={6} placeholder={"e.g.,\nTP53,2.1,3.5,1.8;5.6,7.2,6.1\nBRCA1,1.5,2.0;1.7,2.1"} className="input w-full text-xs font-mono resize-none" /></div>
             )}
-            <button onClick={run} disabled={loading} className="btn text-xs" style={{ color: 'var(--color-accent-blue)' }}><FiPlay className="w-3.5 h-3.5" /> {loading ? 'Running...' : 'Run Analysis'}</button>
+            <div className="flex gap-2">
+              <button onClick={run} disabled={loading} className="btn text-xs flex items-center gap-1.5" style={{ color: 'var(--color-accent-blue)' }}><FiPlay className="w-3.5 h-3.5" /> {loading ? 'Running...' : 'Run Analysis'}</button>
+              <input ref={fileInputRef} type="file" accept=".csv,.tsv,.txt" onChange={handleCSVUpload} className="hidden" />
+              <button onClick={() => fileInputRef.current?.click()} className="btn text-xs flex items-center gap-1.5 text-[var(--color-text-muted)]"><FiUpload className="w-3.5 h-3.5" /> Upload CSV</button>
+            </div>
           </div>
 
           {/* Results */}
@@ -158,7 +191,7 @@ export default function GenomicsAnalysis() {
                   <div key={r.pathway_id} className={`p-3 rounded-lg ${r.significant ? 'bg-green-500/5 border border-green-500/20' : 'bg-[var(--glass-bg)]'}`}>
                     <div className="flex items-center justify-between"><span className="text-xs font-medium">{r.pathway_name}</span><span className="text-xxs font-mono">p={r.p_value}</span></div>
                     <div className="text-xxs text-[var(--color-text-muted)] mt-1">Overlap: {r.overlap_count}/{r.pathway_size} | Fold: {r.fold_enrichment}x</div>
-                    <div className="text-xxs text-[var(--color-text-muted)]">Genes: {r.overlap_genes.join(', ')}</div>
+                    <div className="text-xxs text-[var(--color-text-muted)]">Genes: {(r.overlap_genes || []).join(', ')}</div>
                   </div>
                 ))}
               </div>
@@ -171,7 +204,7 @@ export default function GenomicsAnalysis() {
                   <div key={r.pathway_id} className="p-3 rounded-lg bg-[var(--glass-bg)]">
                     <div className="text-xs font-medium">{r.pathway_name}</div>
                     <div className="text-xxs text-[var(--color-text-muted)]">NES: {r.normalized_es} | Hits: {r.hits}</div>
-                    <div className="text-xxs text-[var(--color-text-muted)]">Leading edge: {r.leading_edge_genes.join(', ')}</div>
+                    <div className="text-xxs text-[var(--color-text-muted)]">Leading edge: {(r.leading_edge_genes || []).join(', ')}</div>
                   </div>
                 ))}
               </div>
@@ -192,7 +225,7 @@ export default function GenomicsAnalysis() {
             {result && tab === 'biomarkers' && (
               <div className="space-y-3">
                 <div className="text-xs text-[var(--color-text-muted)]">{result.significant_biomarkers} significant from {result.total_genes} genes</div>
-                {result.volcano_data && result.volcano_data.length > 0 && (
+                {Array.isArray(result.volcano_data) && result.volcano_data.length > 0 && (
                   <div>
                     <p className="text-xs text-[var(--color-text-muted)] mb-2">Volcano Plot</p>
                     <ResponsiveContainer width="100%" height={200}>

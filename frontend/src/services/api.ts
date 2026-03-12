@@ -45,6 +45,44 @@ export interface ProjectCreate {
 
 // ─── Hypotheses ────────────────────────────────────────────────────
 
+export interface TranslationalPhaseDetail {
+  phase: string  // T0, T1, T2, T3, T4, T5
+  phase_name: string
+  formal_name: string
+  description: string
+  objectives: string[]
+  key_activities: string[]
+  milestones: string[]
+  deliverables: string[]
+  evidence_requirements: string[]
+  data_sources: string[]
+  regulatory_considerations: string[]
+  regulatory_milestones: string[]
+  key_stakeholders: string[]
+  collaborators: string[]
+  success_criteria: string[]
+  go_no_go_gates: string[]
+  phase_risks: string[]
+  mitigation_strategies: string[]
+  estimated_duration: string
+  resource_requirements: string[]
+  estimated_cost_range: string
+  prerequisites: string[]
+  blockers: string[]
+}
+
+export interface TranslationalRoadmap {
+  current_phase: string
+  phases: TranslationalPhaseDetail[]
+  overall_feasibility_score: number
+  estimated_total_timeline: string
+  critical_path_summary: string
+  key_decision_points: string[]
+  cross_phase_risks: string[]
+  regulatory_pathway_summary: string
+  commercialization_potential: string
+}
+
 export interface Hypothesis {
   id: string
   project_id: string
@@ -58,6 +96,7 @@ export interface Hypothesis {
   contradiction_count: number
   supporting_count: number
   simulation_results?: SimulationResult
+  translational_roadmap?: TranslationalRoadmap
   tags: string[]
   user_notes?: string
   version: number

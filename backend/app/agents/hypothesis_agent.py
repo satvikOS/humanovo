@@ -22,7 +22,7 @@ logger = get_logger(__name__)
 
 
 class GeneratedHypothesis:
-    """A generated hypothesis with metadata."""
+    """A generated hypothesis with metadata and translational roadmap."""
 
     def __init__(
         self,
@@ -33,6 +33,7 @@ class GeneratedHypothesis:
         novelty_score: float = 0.5,
         supporting_evidence: list[dict[str, Any]] = None,
         entities: list[str] = None,
+        translational_roadmap: dict[str, Any] = None,
     ):
         self.id = uuid4()
         self.statement = statement
@@ -42,6 +43,7 @@ class GeneratedHypothesis:
         self.novelty_score = novelty_score
         self.supporting_evidence = supporting_evidence or []
         self.entities = entities or []
+        self.translational_roadmap = translational_roadmap
         self.created_at = datetime.utcnow()
 
     def to_dict(self) -> dict[str, Any]:
@@ -54,6 +56,7 @@ class GeneratedHypothesis:
             "novelty_score": self.novelty_score,
             "supporting_evidence": self.supporting_evidence,
             "entities": self.entities,
+            "translational_roadmap": self.translational_roadmap,
             "created_at": self.created_at.isoformat(),
         }
 
@@ -250,6 +253,7 @@ class HypothesisGenerationAgent(BaseAgent):
                     novelty_score=h_data.get("novelty_score", 0.5),
                     supporting_evidence=h_data.get("supporting_evidence", []),
                     entities=h_data.get("entities", []),
+                    translational_roadmap=h_data.get("translational_roadmap"),
                 )
             )
 
@@ -378,6 +382,7 @@ class HypothesisGenerationAgent(BaseAgent):
             )
 
             prompt = f"""Based on the following research question and available evidence, generate {max_hypotheses} novel, testable hypotheses.
+Each hypothesis MUST include a complete bench-to-bedside translational roadmap (T0-T5).
 
 Research Question: {query}
 
@@ -391,11 +396,21 @@ For each hypothesis, provide:
 1. A clear statement of the hypothesis
 2. The proposed mechanism
 3. A brief rationale citing relevant evidence
+4. A translational roadmap with phases T0 through T5
 
 Format each hypothesis as:
 HYPOTHESIS: [statement]
 MECHANISM: [proposed mechanism]
 RATIONALE: [why this hypothesis is plausible]
+T0_BASIC_RESEARCH: [Laboratory discovery, preclinical research, animal studies needed. Include: key experiments, model systems, target validation approach, estimated timeline]
+T1_TRANSLATION_TO_HUMANS: [First-in-human proof of concept. Include: Phase 0/1 trial design, IND requirements, PK/PD studies, safety monitoring plan, estimated timeline]
+T2_TRANSLATION_TO_PATIENTS: [Phase 2/3 clinical trials. Include: trial design, endpoints, patient population, regulatory pathway (NDA/BLA/505(b)(2)), estimated timeline]
+T3_TRANSLATION_TO_PRACTICE: [Implementation research. Include: guideline development, physician training needs, EHR integration, formulary adoption strategy, estimated timeline]
+T4_TRANSLATION_TO_COMMUNITY: [Population health impact. Include: real-world evidence plan, health disparities considerations, cost-effectiveness analysis, post-marketing surveillance, estimated timeline]
+T5_GLOBAL_IMPACT: [Global health policy. Include: WHO considerations, LMIC access strategy, international regulatory harmonization, health equity implications, estimated timeline]
+CURRENT_PHASE: [T0, T1, T2, T3, T4, or T5 — where this hypothesis currently stands]
+FEASIBILITY: [0.0-1.0 overall feasibility score]
+TOTAL_TIMELINE: [estimated total timeline from T0 to T5]
 ---
 """
 
@@ -404,7 +419,7 @@ RATIONALE: [why this hypothesis is plausible]
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a biomedical research assistant that generates novel, scientifically grounded hypotheses based on available evidence.",
+                        "content": "You are a translational biomedical research assistant that generates novel, scientifically grounded hypotheses with complete bench-to-bedside translational roadmaps (T0-T5). Each hypothesis must span from basic research through global health impact.",
                     },
                     {"role": "user", "content": prompt},
                 ],
@@ -427,11 +442,30 @@ RATIONALE: [why this hypothesis is plausible]
         response: str,
         evidence: list[dict[str, Any]],
     ) -> list[GeneratedHypothesis]:
-        """Parse LLM response into hypothesis objects."""
+        """Parse LLM response into hypothesis objects with translational roadmaps."""
         hypotheses = []
 
         # Split by separator
         blocks = response.split("---")
+
+        # Field mapping for translational phases
+        phase_fields = {
+            "T0_BASIC_RESEARCH": "T0",
+            "T1_TRANSLATION_TO_HUMANS": "T1",
+            "T2_TRANSLATION_TO_PATIENTS": "T2",
+            "T3_TRANSLATION_TO_PRACTICE": "T3",
+            "T4_TRANSLATION_TO_COMMUNITY": "T4",
+            "T5_GLOBAL_IMPACT": "T5",
+        }
+
+        phase_names = {
+            "T0": ("Basic Research", "Basic / Preclinical Research"),
+            "T1": ("Translation to Humans", "First-in-Human Proof of Concept"),
+            "T2": ("Translation to Patients", "Clinical Efficacy & Safety"),
+            "T3": ("Translation to Practice", "Implementation Research"),
+            "T4": ("Translation to Community", "Population Health Impact"),
+            "T5": ("Global Impact", "Global Health Policy & Systemic Change"),
+        }
 
         for block in blocks:
             if not block.strip():
@@ -441,6 +475,10 @@ RATIONALE: [why this hypothesis is plausible]
             statement = ""
             mechanism = ""
             rationale = ""
+            phase_content = {}
+            current_phase = "T0"
+            feasibility = 0.5
+            total_timeline = ""
 
             lines = block.strip().split("\n")
             current_field = None
@@ -456,20 +494,75 @@ RATIONALE: [why this hypothesis is plausible]
                 elif line.startswith("RATIONALE:"):
                     current_field = "rationale"
                     rationale = line.replace("RATIONALE:", "").strip()
-                elif current_field == "statement":
-                    statement += " " + line
-                elif current_field == "mechanism":
-                    mechanism += " " + line
-                elif current_field == "rationale":
-                    rationale += " " + line
+                elif line.startswith("CURRENT_PHASE:"):
+                    current_field = None
+                    current_phase = line.replace("CURRENT_PHASE:", "").strip()
+                elif line.startswith("FEASIBILITY:"):
+                    current_field = None
+                    try:
+                        feasibility = float(line.replace("FEASIBILITY:", "").strip())
+                    except ValueError:
+                        feasibility = 0.5
+                elif line.startswith("TOTAL_TIMELINE:"):
+                    current_field = None
+                    total_timeline = line.replace("TOTAL_TIMELINE:", "").strip()
+                else:
+                    # Check for phase field prefixes
+                    matched_phase = False
+                    for prefix, phase_id in phase_fields.items():
+                        if line.startswith(f"{prefix}:"):
+                            current_field = phase_id
+                            phase_content[phase_id] = line.replace(f"{prefix}:", "").strip()
+                            matched_phase = True
+                            break
+
+                    if not matched_phase:
+                        if current_field == "statement":
+                            statement += " " + line
+                        elif current_field == "mechanism":
+                            mechanism += " " + line
+                        elif current_field == "rationale":
+                            rationale += " " + line
+                        elif current_field in phase_fields.values():
+                            phase_content[current_field] = phase_content.get(current_field, "") + " " + line
 
             if statement:
+                # Build translational roadmap
+                roadmap_phases = []
+                for phase_id in ["T0", "T1", "T2", "T3", "T4", "T5"]:
+                    name, formal = phase_names[phase_id]
+                    content = phase_content.get(phase_id, "")
+                    roadmap_phases.append({
+                        "phase": phase_id,
+                        "phase_name": name,
+                        "formal_name": formal,
+                        "description": content.strip(),
+                        "objectives": [content.strip()] if content.strip() else [],
+                        "key_activities": [],
+                        "milestones": [],
+                        "success_criteria": [],
+                        "estimated_duration": "",
+                    })
+
+                translational_roadmap = {
+                    "current_phase": current_phase if current_phase in ["T0", "T1", "T2", "T3", "T4", "T5"] else "T0",
+                    "phases": roadmap_phases,
+                    "overall_feasibility_score": feasibility,
+                    "estimated_total_timeline": total_timeline,
+                    "critical_path_summary": "",
+                    "key_decision_points": [],
+                    "cross_phase_risks": [],
+                    "regulatory_pathway_summary": "",
+                    "commercialization_potential": "",
+                }
+
                 hypotheses.append(
                     GeneratedHypothesis(
                         statement=statement.strip(),
                         mechanism=mechanism.strip(),
                         rationale=rationale.strip(),
                         supporting_evidence=evidence[:5],
+                        translational_roadmap=translational_roadmap,
                     )
                 )
 

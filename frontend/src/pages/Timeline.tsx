@@ -1,24 +1,17 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useMemo } from 'react'
 import {
   FiFolder,
   FiZap,
   FiDatabase,
   FiActivity,
-  FiCheckCircle,
   FiClock,
   FiCalendar,
   FiRefreshCw,
   FiFileText,
   FiTrash2,
-  FiEdit3,
-  FiMessageSquare,
-  FiSave,
-  FiX,
   FiTrendingUp,
-  FiLoader,
 } from 'react-icons/fi'
-import api from '../services/api'
-import type { Activity } from '../services/api'
+import { getActivityLog, persistGet, persistSet, type ActivityEntry } from '../utils/persistence'
 
 type FilterType = '' | 'project' | 'hypothesis' | 'evidence' | 'simulation' | 'notebook' | 'discovery'
 type TimeRange = 'today' | 'week' | 'month' | 'all'
@@ -30,7 +23,7 @@ const filterOptions: { value: FilterType; label: string; icon: typeof FiFolder }
   { value: 'evidence', label: 'Evidence', icon: FiDatabase },
   { value: 'simulation', label: 'Simulations', icon: FiActivity },
   { value: 'notebook', label: 'Notebooks', icon: FiFileText },
-  { value: 'discovery', label: 'Discoveries', icon: FiCheckCircle },
+  { value: 'discovery', label: 'Discoveries', icon: FiTrendingUp },
 ]
 
 const typeIcons: Record<string, typeof FiZap> = {
@@ -75,74 +68,52 @@ function formatMilestoneTime(dateStr: string): string {
 const MILESTONE_ACTIONS = new Set(['created', 'completed', 'validated', 'started', 'rejected'])
 
 export default function Timeline() {
-  const [activities, setActivities] = useState<Activity[]>([])
   const [filterType, setFilterType] = useState<FilterType>('')
   const [timeRange, setTimeRange] = useState<TimeRange>('all')
-  const [loading, setLoading] = useState(true)
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [editDescription, setEditDescription] = useState('')
-  const [annotatingId, setAnnotatingId] = useState<string | null>(null)
-  const [annotationText, setAnnotationText] = useState('')
+  const [refreshKey, setRefreshKey] = useState(0)
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
 
-  const fetchActivities = useCallback(async () => {
-    setLoading(true)
-    try {
-      const params: any = { page_size: 200 }
-      if (filterType) params.type = filterType
-      if (timeRange !== 'all') {
-        const now = new Date()
-        if (timeRange === 'today') params.date_from = new Date(now.setHours(0, 0, 0, 0)).toISOString()
-        else if (timeRange === 'week') params.date_from = new Date(Date.now() - 7 * 86400000).toISOString()
-        else if (timeRange === 'month') params.date_from = new Date(Date.now() - 30 * 86400000).toISOString()
+  const activities = useMemo(() => {
+    const all = getActivityLog()
+    let filtered = all
+
+    if (filterType) {
+      filtered = filtered.filter(a => a.type === filterType)
+    }
+
+    if (timeRange !== 'all') {
+      const now = Date.now()
+      let cutoff = 0
+      if (timeRange === 'today') {
+        const today = new Date()
+        today.setHours(0, 0, 0, 0)
+        cutoff = today.getTime()
+      } else if (timeRange === 'week') {
+        cutoff = now - 7 * 86400000
+      } else if (timeRange === 'month') {
+        cutoff = now - 30 * 86400000
       }
-      const res = await api.getActivities(params)
-      setActivities(res.items || [])
-    } catch (err) {
-      console.error('Failed to fetch activities:', err)
+      filtered = filtered.filter(a => new Date(a.timestamp).getTime() >= cutoff)
     }
-    setLoading(false)
-  }, [filterType, timeRange])
 
-  useEffect(() => { fetchActivities() }, [fetchActivities])
+    return filtered
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterType, timeRange, refreshKey])
 
-  const handleDelete = async (id: string) => {
-    try {
-      await api.deleteActivity(id)
-      setActivities(prev => prev.filter(a => a.id !== id))
-      setDeleteConfirm(null)
-    } catch (err) {
-      console.error('Failed to delete activity:', err)
-    }
-  }
-
-  const handleEditSave = async (id: string) => {
-    try {
-      const updated = await api.updateActivity(id, { description: editDescription })
-      setActivities(prev => prev.map(a => a.id === id ? updated : a))
-      setEditingId(null)
-    } catch (err) {
-      console.error('Failed to update activity:', err)
-    }
-  }
-
-  const handleAnnotationSave = async (id: string) => {
-    try {
-      const updated = await api.updateActivity(id, { annotation: annotationText })
-      setActivities(prev => prev.map(a => a.id === id ? updated : a))
-      setAnnotatingId(null)
-    } catch (err) {
-      console.error('Failed to save annotation:', err)
-    }
+  const handleDelete = (id: string) => {
+    const all = persistGet<ActivityEntry[]>('activity-log', [])
+    persistSet('activity-log', all.filter(a => a.id !== id))
+    setDeleteConfirm(null)
+    setRefreshKey(n => n + 1)
   }
 
   // Group by date
   const grouped = activities.reduce((acc, activity) => {
-    const dateKey = new Date(activity.created_at).toDateString()
+    const dateKey = new Date(activity.timestamp).toDateString()
     if (!acc[dateKey]) acc[dateKey] = []
     acc[dateKey].push(activity)
     return acc
-  }, {} as Record<string, Activity[]>)
+  }, {} as Record<string, ActivityEntry[]>)
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -153,8 +124,8 @@ export default function Timeline() {
             <h1 className="text-2xl font-semibold tracking-tight">Timeline</h1>
             <p className="text-sm text-[var(--color-text-muted)] mt-1">Track all research activity across your projects</p>
           </div>
-          <button onClick={fetchActivities} className="btn text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-            <FiRefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          <button onClick={() => setRefreshKey(n => n + 1)} className="btn text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+            <FiRefreshCw className="w-4 h-4" />
             Refresh
           </button>
         </div>
@@ -197,12 +168,7 @@ export default function Timeline() {
       {/* Timeline */}
       <div className="flex-1 overflow-y-auto p-6">
         <div className="max-w-3xl mx-auto">
-          {loading && activities.length === 0 ? (
-            <div className="text-center py-16">
-              <FiLoader className="w-8 h-8 animate-spin mx-auto mb-3 text-[var(--color-text-muted)]" />
-              <p className="text-sm text-[var(--color-text-muted)]">Loading timeline...</p>
-            </div>
-          ) : Object.entries(grouped).length === 0 ? (
+          {Object.entries(grouped).length === 0 ? (
             <div className="text-center py-16">
               <FiClock className="w-10 h-10 mx-auto mb-3 text-[var(--color-text-muted)] opacity-30" />
               <p className="text-sm text-[var(--color-text-muted)]">No activity found</p>
@@ -230,8 +196,6 @@ export default function Timeline() {
                     const Icon = typeIcons[activity.type] || FiClock
                     const color = typeColors[activity.type] || 'var(--color-text-muted)'
                     const actionColor = actionColors[activity.action] || 'var(--color-text-muted)'
-                    const isEditing = editingId === activity.id
-                    const isAnnotating = annotatingId === activity.id
                     const isDeleting = deleteConfirm === activity.id
 
                     return (
@@ -247,31 +211,9 @@ export default function Timeline() {
                             <div className="flex items-start justify-between gap-2">
                               <div className="flex-1">
                                 <h3 className="text-sm font-medium">{activity.title}</h3>
-
-                                {/* Editable description */}
-                                {isEditing ? (
-                                  <div className="mt-2 flex items-center gap-2">
-                                    <input
-                                      type="text"
-                                      value={editDescription}
-                                      onChange={e => setEditDescription(e.target.value)}
-                                      className="input flex-1 text-xs"
-                                      autoFocus
-                                    />
-                                    <button onClick={() => handleEditSave(activity.id)} className="btn btn-sm" style={{ color: 'var(--color-success)' }}>
-                                      <FiSave className="w-3 h-3" />
-                                    </button>
-                                    <button onClick={() => setEditingId(null)} className="btn btn-sm text-[var(--color-text-muted)]">
-                                      <FiX className="w-3 h-3" />
-                                    </button>
-                                  </div>
-                                ) : activity.description && (
-                                  <p className="text-xs text-[var(--color-text-muted)] mt-1">{activity.description}</p>
-                                )}
-
-                                {activity.project_name && (
+                                {activity.project && (
                                   <p className="text-xs text-[var(--color-text-muted)] mt-1 flex items-center gap-1">
-                                    <FiFolder className="w-3 h-3" /> {activity.project_name}
+                                    <FiFolder className="w-3 h-3" /> {activity.project}
                                   </p>
                                 )}
                               </div>
@@ -280,23 +222,7 @@ export default function Timeline() {
                                 <span className="text-xs px-2 py-0.5 rounded-md" style={{ color: actionColor, background: `${actionColor}12` }}>
                                   {activity.action}
                                 </span>
-
-                                {/* Action buttons (visible on hover) */}
                                 <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                                  <button
-                                    onClick={() => { setEditingId(activity.id); setEditDescription(activity.description || '') }}
-                                    className="p-1 rounded text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)]"
-                                    title="Edit description"
-                                  >
-                                    <FiEdit3 className="w-3 h-3" />
-                                  </button>
-                                  <button
-                                    onClick={() => { setAnnotatingId(activity.id); setAnnotationText(activity.annotation || '') }}
-                                    className="p-1 rounded text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)]"
-                                    title="Add annotation"
-                                  >
-                                    <FiMessageSquare className="w-3 h-3" />
-                                  </button>
                                   <button
                                     onClick={() => setDeleteConfirm(activity.id)}
                                     className="p-1 rounded text-[var(--color-text-muted)] hover:text-[var(--color-error)] hover:bg-[var(--glass-bg)]"
@@ -307,31 +233,6 @@ export default function Timeline() {
                                 </div>
                               </div>
                             </div>
-
-                            {/* Annotation */}
-                            {isAnnotating ? (
-                              <div className="mt-3 p-3 rounded-lg bg-[var(--glass-bg)] border border-[var(--color-border)]">
-                                <textarea
-                                  value={annotationText}
-                                  onChange={e => setAnnotationText(e.target.value)}
-                                  placeholder="Add a note or annotation..."
-                                  className="w-full bg-transparent text-xs outline-none resize-none"
-                                  rows={2}
-                                  autoFocus
-                                />
-                                <div className="flex justify-end gap-2 mt-2">
-                                  <button onClick={() => setAnnotatingId(null)} className="btn btn-sm text-[var(--color-text-muted)]">Cancel</button>
-                                  <button onClick={() => handleAnnotationSave(activity.id)} className="btn btn-sm" style={{ color: 'var(--color-success)' }}>Save Note</button>
-                                </div>
-                              </div>
-                            ) : activity.annotation && (
-                              <div className="mt-2 p-2.5 rounded-lg bg-[var(--glass-bg)] border border-[var(--color-border)]">
-                                <div className="flex items-center gap-1 text-xs text-[var(--color-text-muted)] mb-1">
-                                  <FiMessageSquare className="w-3 h-3" /> Note
-                                </div>
-                                <p className="text-xs text-[var(--color-text-secondary)]">{activity.annotation}</p>
-                              </div>
-                            )}
 
                             {/* Delete confirmation */}
                             {isDeleting && (
@@ -349,16 +250,13 @@ export default function Timeline() {
                               <span className="flex items-center gap-1">
                                 <FiClock className="w-3 h-3" />
                                 {MILESTONE_ACTIONS.has(activity.action)
-                                  ? formatMilestoneTime(activity.created_at)
-                                  : formatRelativeTime(activity.created_at)}
+                                  ? formatMilestoneTime(activity.timestamp)
+                                  : formatRelativeTime(activity.timestamp)}
                               </span>
                               {activity.metadata?.confidence !== undefined && (
                                 <span style={{ color: 'var(--color-accent-purple)' }}>
                                   Confidence: {Math.round(Number(activity.metadata.confidence) * 100)}%
                                 </span>
-                              )}
-                              {activity.metadata?.count !== undefined && (
-                                <span>{String(activity.metadata.count)} items</span>
                               )}
                             </div>
                           </div>

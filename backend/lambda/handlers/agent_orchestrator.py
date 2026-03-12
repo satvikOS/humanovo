@@ -447,10 +447,11 @@ PAPER_TASK_KEY = "active-paper"
 # Mixed provider routing — model IDs are NEVER sent to frontend (unbiasing).
 #
 # Bedrock: Claude Opus 4.6 (Explorer + Synthesizer) — restricted on Azure AI
-# Azure AI Foundry: DeepSeek-R1 (Reasoner) + Mistral-Large-3 (Critic)
+# Azure AI Foundry: Grok-4-1-Fast (Reasoner) + Mistral-Large-3 (Critic)
 
 BEDROCK_MODEL_CLAUDE_OPUS = os.environ.get("BEDROCK_MODEL_ID", "us.anthropic.claude-opus-4-6-v1:0")
-BEDROCK_MODEL_CLAUDE_SONNET = os.environ.get("BEDROCK_SONNET_ID", "us.anthropic.claude-sonnet-4-6-v1:0")
+BEDROCK_MODEL_CLAUDE_SONNET = os.environ.get("BEDROCK_SONNET_ID", "us.anthropic.claude-sonnet-4-20250514-v1:0")
+BEDROCK_MODEL_CLAUDE_OPUS_45 = os.environ.get("BEDROCK_OPUS_45_ID", "us.anthropic.claude-opus-4-5-20251101-v1:0")
 BEDROCK_MODEL_NOVA_PREMIER = os.environ.get("BEDROCK_NOVA_PREMIER_ID", "us.amazon.nova-premier-v1:0")
 AZURE_AI_REASONER_MODEL = os.environ.get("AZURE_AI_REASONER_MODEL", "DeepSeek-R1")
 AZURE_AI_CRITIC_MODEL = os.environ.get("AZURE_AI_CRITIC_MODEL", "Mistral-Large-3")
@@ -502,7 +503,7 @@ AGENT_MODELS = {
         "role_description": "Creative innovation — generates unconventional therapeutic approaches and cross-domain connections",
     },
     "strategist": {
-        "model_id": BEDROCK_MODEL_CLAUDE_SONNET,
+        "model_id": BEDROCK_MODEL_CLAUDE_OPUS,
         "provider": "bedrock",
         "max_tokens": 16_000,
         "temperature": 0.3,
@@ -517,7 +518,7 @@ AGENT_MODELS = {
     },
     # === Azure OpenAI (cognitiveservices.azure.com) ===
     "analyst": {
-        "model_id": BEDROCK_MODEL_CLAUDE_SONNET,
+        "model_id": BEDROCK_MODEL_CLAUDE_OPUS,
         "provider": "bedrock",
         "max_tokens": 16_000,
         "temperature": 0.3,
@@ -531,7 +532,7 @@ AGENT_MODELS = {
         "role_description": "Validation reasoning — rigorous verification of claims, consistency checks, logical proofs",
     },
     "architect": {
-        "model_id": BEDROCK_MODEL_CLAUDE_SONNET,
+        "model_id": BEDROCK_MODEL_CLAUDE_OPUS,
         "provider": "bedrock",
         "max_tokens": 16_000,
         "temperature": 0.3,
@@ -3176,9 +3177,34 @@ def generate_paper():
 
     config = state.get("config", {})
     hypothesis_id = body.get("hypothesis_id")
+    hypothesis_data = body.get("hypothesis_data")  # Full hypothesis from frontend
+
+    # Check for existing paper or in-progress generation
+    table = get_task_table()
+    try:
+        existing = table.get_item(Key={"id": PAPER_TASK_KEY}).get("Item")
+        if existing:
+            ex_status = existing.get("status", "")
+            ex_hyp = existing.get("hypothesis_id", "")
+            ex_html = existing.get("paper_html", "")
+            ex_updated = existing.get("updated_at", "")
+            # If a completed paper exists for this hypothesis, return it immediately
+            if ex_status == "done" and ex_hyp == (hypothesis_id or "all") and ex_html and len(ex_html) > 100:
+                print(f"[PAPER] Returning existing completed paper for hypothesis={hypothesis_id}")
+                return {"status": "already_done", "hypothesis_id": hypothesis_id or "all"}
+            # If generation is already in progress and not stale, don't restart
+            if ex_status == "generating" and ex_updated:
+                try:
+                    age = (datetime.utcnow() - datetime.fromisoformat(ex_updated)).total_seconds()
+                    if age < 960:  # Less than 16 min — still running
+                        print(f"[PAPER] Generation already in progress (age={age:.0f}s), not restarting")
+                        return {"status": "generating", "hypothesis_id": ex_hyp}
+                except Exception:
+                    pass
+    except Exception:
+        pass  # Proceed with fresh generation
 
     # Store paper task in DynamoDB
-    table = get_task_table()
     table.put_item(Item={
         "id": PAPER_TASK_KEY,
         "status": "generating",
@@ -3199,6 +3225,7 @@ def generate_paper():
                 "source": "self-invoke",
                 "action": "generate_paper",
                 "hypothesis_id": hypothesis_id,
+                "hypothesis_data": hypothesis_data,
                 "config": config,
             }, cls=DecimalEncoder),
         )
@@ -3249,13 +3276,34 @@ def get_paper_status():
         # Treat cancelled as idle for the frontend
         if status == "cancelled":
             status = "idle"
+        # Detect stale "generating" — if updated_at is older than 16 minutes,
+        # the Lambda likely timed out without writing a final status.
+        if status == "generating":
+            updated_at = item.get("updated_at", "")
+            if updated_at:
+                try:
+                    last_update = datetime.fromisoformat(updated_at)
+                    age_seconds = (datetime.utcnow() - last_update).total_seconds()
+                    if age_seconds > 960:  # 16 minutes (Lambda max is 15 min)
+                        status = "failed"
+                        error_msg = "Paper generation timed out. Please try again."
+                        table.update_item(
+                            Key={"id": PAPER_TASK_KEY},
+                            UpdateExpression="SET #s = :s, #e = :e",
+                            ExpressionAttributeNames={"#s": "status", "#e": "error"},
+                            ExpressionAttributeValues={":s": "failed", ":e": error_msg},
+                        )
+                        print(f"[PAPER] Detected stale generating status (age={age_seconds:.0f}s), marked as failed")
+                except Exception:
+                    pass
         return serialize({
             "status": status,
             "paper_html": item.get("paper_html", ""),
             "error": item.get("error", ""),
             "current_phase": item.get("current_phase", ""),
             "phase_num": item.get("phase_num", 0),
-            "total_phases": item.get("total_phases", 4),
+            "total_phases": item.get("total_phases", 5),
+            "hypothesis_id": item.get("hypothesis_id", ""),
         })
     except Exception as e:
         logger.error(f"Paper status error: {e}")
@@ -3278,9 +3326,9 @@ PAPER_SECTIONS = {
     },
     "introduction": {
         "heading": "1. Introduction",
-        "model": "deepseek",
-        "model_id": lambda: AZURE_AI_REASONER_MODEL,
-        "client": lambda: azure_deepseek_client,
+        "model": "gpt41",
+        "model_id": lambda: AZURE_AI_GPT41_MODEL,
+        "client": lambda: azure_gpt41_client,
         "provider": "azure_ai",
         "system": "You are an expert in epidemiology and disease biology. Write a comprehensive introduction (800+ words) covering: disease epidemiology with specific statistics, current standard of care and its limitations, unmet medical needs, and the scientific rationale for the proposed approach. Cite specific studies with author names and years.",
     },
@@ -3290,13 +3338,13 @@ PAPER_SECTIONS = {
         "model_id": lambda: AZURE_AI_GROK_MODEL,
         "client": lambda: azure_grok_client,
         "provider": "azure_ai",
-        "system": "You are a computational biology methodologist. Write a detailed Methods section (800+ words) with subsections: 2.1 Multi-Agent AI Discovery Architecture (describe the 10-agent system), 2.2 Knowledge Integration Framework (how evidence is synthesized), 2.3 Confidence Scoring Methodology (statistical approach), 2.4 Hypothesis Generation Protocol. Be quantitatively precise.",
+        "system": "You are a computational biology methodologist. Write a detailed Methods section (800+ words) with subsections: 2.1 Literature Review and Evidence Synthesis (systematic review methodology), 2.2 Knowledge Integration Framework (how evidence from multiple sources is synthesized), 2.3 Statistical Analysis Methodology (confidence scoring, meta-analysis approach), 2.4 Hypothesis Development Protocol. Be quantitatively precise. Do not mention any software tools, automated systems, or computational pipelines.",
     },
     "results_mechanism": {
         "heading": "3. Results — Molecular Mechanism & Target Validation",
-        "model": "kimi",
-        "model_id": lambda: AZURE_AI_KIMI_MODEL,
-        "client": lambda: azure_kimi_client,
+        "model": "grok",
+        "model_id": lambda: AZURE_AI_GROK_MODEL,
+        "client": lambda: azure_grok_client,
         "provider": "azure_ai",
         "system": "You are a molecular biologist. Write a detailed Results subsection (800+ words) analyzing: molecular targets identified, mechanism of action cascades, protein-protein interactions, signaling pathway maps, binding affinities (IC50/EC50/Ki values), and structural biology insights. Include specific gene names, protein structures, and pathway identifiers.",
     },
@@ -3377,17 +3425,18 @@ def _call_model_for_section(section_key: str, section_cfg: dict, prompt: str) ->
         return (section_key, "", str(e))
 
 
-def run_paper_worker(hypothesis_id: str | None, config: dict, continuation: dict | None = None):
+def run_paper_worker(hypothesis_id: str | None, config: dict, continuation: dict | None = None, hypothesis_data: dict | None = None):
     """Multi-model research paper pipeline.
 
     Architecture (section-per-model for variety and no single-model bias):
-      Phase 1: Parallel section generation — 6 models write sections concurrently
+      Phase 1: Parallel section generation — 8 models write sections concurrently
         - GPT-4o → Abstract (structured, concise)
-        - DeepSeek-R1 → Introduction (epidemiology, rationale)
-        - Kimi-K2 → Results: Molecular Mechanism & Target Validation
+        - GPT-4.1 → Introduction (epidemiology, rationale)
+        - Grok-4-1-Fast → Results: Molecular Mechanism & Target Validation
         - Cohere Command A → Results: Preclinical & Clinical Evidence
         - Mistral-Large-3 → Discussion (critical, balanced)
         - o3-mini → Safety, Regulatory & Market Analysis
+      Phase 1.5: Dual-model embedding grounding — validates all claims via Azure embeddings
       Phase 2: Claude Opus synthesis — combines all sections into final cohesive paper
         - Adds Methods, Therapeutic Protocol, Conclusion
         - Unifies voice, cross-references, adds tables/figures
@@ -3400,13 +3449,25 @@ def run_paper_worker(hypothesis_id: str | None, config: dict, continuation: dict
     timeout, saves section results and self-invokes to continue at Phase 2.
     """
     paper_start_time = time.time()
-    print(f"[PAPER-WORKER] Starting multi-model pipeline for hypothesis={hypothesis_id or 'all'}")
+    print(f"[PAPER-WORKER] Starting paper generation for hypothesis={hypothesis_id or 'all'}")
     table = get_task_table()
     disease = config.get("disease", "Unknown Disease")
     discovery_type = config.get("discovery_type", "cure")
 
     state = get_discovery_state()
-    if not state or not state.get("hypotheses"):
+
+    # Priority: use hypothesis_data from frontend (works across projects/discovery runs)
+    # Fallback: look up in discovery state
+    if hypothesis_data and isinstance(hypothesis_data, dict) and hypothesis_data.get("title"):
+        hypotheses_for_paper = [hypothesis_data]
+        print(f"[PAPER] Using hypothesis data from frontend: {hypothesis_data.get('title', 'N/A')[:70]}")
+    elif state and state.get("hypotheses"):
+        if hypothesis_id and hypothesis_id != "all":
+            target = next((h for h in state["hypotheses"] if h.get("id") == hypothesis_id), None)
+            hypotheses_for_paper = [target] if target else state["hypotheses"][:1]
+        else:
+            hypotheses_for_paper = state["hypotheses"][:5]
+    else:
         table.update_item(
             Key={"id": PAPER_TASK_KEY},
             UpdateExpression="SET #s = :s, #e = :e",
@@ -3414,13 +3475,6 @@ def run_paper_worker(hypothesis_id: str | None, config: dict, continuation: dict
             ExpressionAttributeValues={":s": "failed", ":e": "No hypotheses found"},
         )
         return
-
-    # Select hypothesis
-    if hypothesis_id and hypothesis_id != "all":
-        target = next((h for h in state["hypotheses"] if h.get("id") == hypothesis_id), None)
-        hypotheses_for_paper = [target] if target else state["hypotheses"][:1]
-    else:
-        hypotheses_for_paper = state["hypotheses"][:5]
 
     h = hypotheses_for_paper[0]
     evidence = h.get("evidence_summary", [])
@@ -3459,7 +3513,11 @@ CRITICAL GROUNDING REQUIREMENT: Every major claim MUST be grounded in real scien
 - When discussing epidemiology, cite WHO, CDC, or national registry statistics
 Do NOT fabricate references — if uncertain, state the general finding without a specific citation."""
 
-    total_phases = 4  # parallel sections, synthesis, HTML conversion, done
+    total_phases = 5  # parallel sections, embedding grounding, synthesis, HTML conversion, done
+
+    # Initialize dual-model embedding pools for grounding validation
+    embedding_pool_large: list[tuple[str, list[float]]] = []
+    embedding_pool_small: list[tuple[str, list[float]]] = []
 
     # Support continuation from Phase 2 (section results already generated)
     section_results = {}
@@ -3489,7 +3547,10 @@ Write the section: ## {cfg['heading']}
 Write this section for a full research paper to be published in a top-tier journal (Nature Medicine, The Lancet, NEJM).
 Be exhaustive, specific, and quantitative. Minimum 600 words. Use formal academic prose.
 Reference real studies, drugs, genes, and clinical data wherever possible.
-Write in markdown format with ## for section heading and ### for subsections."""
+Write in markdown format with ## for section heading and ### for subsections.
+Do NOT use ASCII art, box diagrams, or text-based flowcharts. Figures and diagrams are generated separately.
+Instead, describe mechanisms, pathways, and processes in detailed scientific prose with proper chemical formulas (e.g., C₂₁H₃₀O₂),
+receptor names (e.g., NMDA, TLR4), gene symbols (HUGO nomenclature), and pathway identifiers (KEGG, Reactome)."""
 
         # Run all sections in parallel using ThreadPoolExecutor
         section_errors = []
@@ -3533,7 +3594,7 @@ Write in markdown format with ## for section heading and ### for subsections."""
         elapsed = time.time() - paper_start_time
         if elapsed > 600:
             print(f"[PAPER] Phase 1 took {elapsed:.0f}s — approaching Lambda timeout, self-invoking for Phase 2")
-            _update_paper_phase(table, "Continuing synthesis in new invocation...", 1, total_phases)
+            _update_paper_phase(table, "Continuing synthesis in new invocation...", 2, total_phases)
             try:
                 lambda_client.invoke(
                     FunctionName=FUNCTION_NAME,
@@ -3555,6 +3616,40 @@ Write in markdown format with ## for section heading and ### for subsections."""
             else:
                 return  # Exit — Phase 2 will run in the new invocation
 
+    # Check cancellation before grounding
+    paper_state = table.get_item(Key={"id": PAPER_TASK_KEY}).get("Item", {})
+    if paper_state.get("status") in ("cancelled", "idle"):
+        print("[PAPER] Cancelled before grounding")
+        return
+
+    # ---- Phase 1.5: Embedding Grounding Validation ----
+    _update_paper_phase(table, "Running dual-model embedding grounding on sections...", 1, total_phases)
+    print("[PAPER] Phase 1.5: Dual-model embedding grounding validation")
+
+    grounding_context_parts = []
+    if AZURE_EMBEDDING_ENDPOINT and AZURE_EMBEDDING_KEY:
+        for section_key, section_text in section_results.items():
+            try:
+                grounding_report, rag_evidence = run_embedding_grounding(
+                    stage_output=section_text,
+                    evidence_text=section_text,
+                    stage_num=list(section_results.keys()).index(section_key),
+                    evidence_pool_large=embedding_pool_large,
+                    evidence_pool_small=embedding_pool_small,
+                )
+                if grounding_report:
+                    grounding_context_parts.append(f"--- Grounding for {PAPER_SECTIONS.get(section_key, {}).get('heading', section_key)} ---\n{grounding_report}")
+                if rag_evidence:
+                    grounding_context_parts.append(rag_evidence)
+                print(f"[EMBEDDING] Paper section '{section_key}' grounded (pool: {len(embedding_pool_large)} large, {len(embedding_pool_small)} small)")
+            except Exception as ge:
+                print(f"[EMBEDDING] Paper section '{section_key}' grounding failed (non-fatal): {ge}")
+    else:
+        print("[EMBEDDING] Skipping — no Azure embedding credentials configured")
+
+    embedding_grounding_text = "\n\n".join(grounding_context_parts) if grounding_context_parts else ""
+    print(f"[PAPER] Embedding grounding complete: {len(grounding_context_parts)} sections grounded, {len(embedding_grounding_text)} chars context")
+
     # Check cancellation before synthesis
     paper_state = table.get_item(Key={"id": PAPER_TASK_KEY}).get("Item", {})
     if paper_state.get("status") in ("cancelled", "idle"):
@@ -3562,7 +3657,7 @@ Write in markdown format with ## for section heading and ### for subsections."""
         return
 
     # ---- Phase 2: Claude Opus synthesis ----
-    _update_paper_phase(table, "Claude Opus synthesizing final paper...", 1, total_phases)
+    _update_paper_phase(table, "Claude Opus synthesizing final paper...", 2, total_phases)
     print("[PAPER] Phase 2: Claude Opus synthesis pass")
 
     # Assemble section drafts
@@ -3574,28 +3669,32 @@ Write in markdown format with ## for section heading and ### for subsections."""
 
     synthesis_prompt = f"""{hypothesis_context}
 
-Below are section drafts written by different AI models for a research paper. Your task is to:
+Below are section drafts for a research paper. Your task is to:
 
 1. SYNTHESIZE these into a single cohesive, publication-ready research paper
-2. ADD the sections that are missing: Methods (2. Methods with subsections), Proposed Therapeutic Protocol, Conclusion, Tables, Figures, and References
+2. ADD the sections that are missing: Methods (2. Methods with subsections), Proposed Therapeutic Protocol, Conclusion, and References
 3. UNIFY the voice and style across all sections (Nature Medicine standard)
 4. ADD cross-references between sections (e.g., "As discussed in Section 3.1...")
 5. ADD 30+ REAL references in the format: [N] Author et al., "Title," Journal, vol(issue):pages, year. DOI:10.xxxx/xxxxx
-6. ADD 3 tables: Hypothesis Comparison, Biomarker Panel, Drug Properties (use markdown table format)
-7. ADD 3 figures as ASCII box diagrams: Disease Pathway, Mechanism of Action Flowchart, Clinical Trial Design
+6. PLACE all tables INLINE within the section where they are most relevant — do NOT create separate "Tables" or "Figures" sections. Each table should appear right after the paragraph that references it.
+7. Do NOT include ASCII art, box diagrams, or text-based flowcharts — figures are rendered separately
 8. ENSURE total paper is 15-25 pages when printed (8000-12000 words)
+9. Describe all mechanisms, pathways, and processes in detailed scientific prose with chemical formulas, gene symbols, and pathway IDs
+10. Do NOT mention computational tools, software pipelines, scoring systems, or automated methods used in the analysis. Write as if the research was conducted by human researchers using standard scientific methodology.
 
 {grounding_instruction}
 
-SECTION DRAFTS FROM MULTIPLE MODELS:
+SECTION DRAFTS:
 {section_drafts}
+
+{f"EMBEDDING GROUNDING VALIDATION RESULTS:{chr(10)}{embedding_grounding_text}{chr(10)}{chr(10)}Use the grounding results above to validate and strengthen all claims. Remove or qualify any claims that are not supported by the grounding evidence. Prioritize grounded, verified facts over speculative statements." if embedding_grounding_text else ""}
 
 Write the COMPLETE final paper in markdown format. Start with:
 # {h.get('title', disease)} — {discovery_type.title()} Discovery Report
 
-Use ## for major sections, ### for subsections. Include ALL sections from Abstract through References."""
+Use ## for major sections, ### for subsections. Include ALL sections from Abstract through References. Place all tables inline within relevant sections."""
 
-    synthesis_system = """You are an elite scientific editor at Nature Medicine. You are synthesizing section drafts written by different expert AI models into a single publication-ready research paper. Maintain the strongest insights from each section while creating a unified voice. Every claim must be grounded in real scientific literature. The paper must read as if written by a single expert author team. Write the LONGEST, most DETAILED paper possible. Use every available token."""
+    synthesis_system = """You are an elite scientific editor at Nature Medicine. You are synthesizing section drafts into a single publication-ready research paper. Maintain the strongest insights from each section while creating a unified voice. Every claim must be grounded in real scientific literature. The paper must read as if written by a single expert author team. Do not reference any computational tools, automated systems, or analytical pipelines — present all findings as standard scientific research. Write the LONGEST, most DETAILED paper possible. Use every available token."""
 
     try:
         _paper_client = bedrock_long or bedrock_runtime
@@ -3619,7 +3718,27 @@ Use ## for major sections, ### for subsections. Include ALL sections from Abstra
             except Exception as retry_err:
                 last_err = retry_err
                 err_str = str(retry_err).lower()
-                if "timeout" in err_str or "timed out" in err_str:
+                if "throttl" in err_str or "too many tokens" in err_str or "rate" in err_str:
+                    print(f"[PAPER] Bedrock Opus 4.6 throttled (attempt {attempt+1}/3): {str(retry_err)[:120]}")
+                    # Fall back to Claude Opus 4.5 via Bedrock
+                    print(f"[PAPER] Falling back to Claude Opus 4.5 for synthesis...")
+                    _update_paper_phase(table, "Synthesizing with Claude Opus 4.5...", 2, total_phases)
+                    try:
+                        paper_md = call_bedrock(
+                            model_id=BEDROCK_MODEL_CLAUDE_OPUS_45,
+                            prompt=synthesis_prompt,
+                            system_prompt=synthesis_system,
+                            max_tokens=32_768,
+                            temperature=0.3,
+                            client=_paper_client,
+                        )
+                        print(f"[PAPER] Opus 4.5 synthesis complete: {len(paper_md)} chars")
+                        break
+                    except Exception as fb_err:
+                        print(f"[PAPER] Opus 4.5 fallback also failed: {fb_err}")
+                        last_err = fb_err
+                        continue
+                elif "timeout" in err_str or "timed out" in err_str:
                     print(f"[PAPER] Synthesis attempt {attempt+1}/3 timed out, retrying...")
                     time.sleep(2)
                     continue
@@ -3628,12 +3747,12 @@ Use ## for major sections, ### for subsections. Include ALL sections from Abstra
             raise last_err or RuntimeError("Paper synthesis failed after retries")
         print(f"[PAPER] Synthesis complete: {len(paper_md)} chars")
 
-        # ---- Phase 3: Convert to rich HTML ----
-        _update_paper_phase(table, "Rendering final document...", 2, total_phases)
+        # ---- Phase 4: Convert to rich HTML ----
+        _update_paper_phase(table, "Rendering final document...", 3, total_phases)
         paper_html = _markdown_to_rich_html(paper_md, disease, discovery_type, hypotheses_for_paper)
 
-        # ---- Phase 4: Store in DynamoDB ----
-        _update_paper_phase(table, "Done", 3, total_phases)
+        # ---- Phase 5: Store in DynamoDB ----
+        _update_paper_phase(table, "Done", 4, total_phases)
         table.update_item(
             Key={"id": PAPER_TASK_KEY},
             UpdateExpression="SET #s = :s, #p = :p, #u = :u",
@@ -3657,165 +3776,310 @@ Use ## for major sections, ### for subsections. Include ALL sections from Abstra
         )
 
 
-def _markdown_to_rich_html(md: str, disease: str, discovery_type: str, hypotheses: list) -> str:
-    """Convert markdown paper to rich HTML with cover page, typography, diagrams."""
-    date_str = datetime.utcnow().strftime("%B %d, %Y")
-    title = hypotheses[0].get("title", disease) if hypotheses else disease
+def _build_dynamic_mechanism_svg(h0: dict, disease: str, discovery_type: str) -> str:
+    """Build SVG pathway diagram dynamically from actual hypothesis data.
 
-    # Extract title from markdown if present
+    Parses the hypothesis mechanism text to extract real molecular targets,
+    pathways, and processes — then renders them as a context-accurate SVG.
+    """
+    import re as _re_svg
+
+    mechanism = h0.get("mechanism", "") or ""
+    description = h0.get("description", "") or ""
+    hyp_title = h0.get("title", "") or ""
+
+    # Extract pathway steps from mechanism text
+    # Split on common scientific pathway delimiters
+    steps = []
+    if mechanism:
+        # Try splitting on arrows first
+        if "→" in mechanism or "->" in mechanism:
+            raw = mechanism.replace("->", "→")
+            steps = [s.strip() for s in raw.split("→") if s.strip()]
+        else:
+            # Split on phrases like "leading to", "resulting in", "which", "through", "via", "causing"
+            parts = _re_svg.split(
+                r'\s*(?:,\s*(?:which|leading to|resulting in|causing|through|via|thereby|that)\s+|;\s*|,\s+leading to\s+|,\s+resulting in\s+|,\s+which\s+|,\s+causing\s+)',
+                mechanism,
+                flags=_re_svg.IGNORECASE,
+            )
+            steps = [s.strip().rstrip('.') for s in parts if s and len(s.strip()) > 3]
+
+    # If we couldn't parse steps, extract key noun phrases from mechanism + description
+    if len(steps) < 2:
+        combined = f"{mechanism} {description}"
+        # Extract capitalized terms, gene symbols, protein names
+        terms = _re_svg.findall(r'\b([A-Z][A-Z0-9]{1,8}(?:-[A-Z0-9]+)?)\b', combined)
+        # Also extract quoted or parenthesized terms
+        paren_terms = _re_svg.findall(r'\(([^)]{3,40})\)', combined)
+        all_terms = list(dict.fromkeys(terms + paren_terms))  # dedupe, preserve order
+        if all_terms:
+            steps = all_terms[:6]
+        else:
+            # Last resort: split mechanism into sentence fragments
+            sentences = _re_svg.split(r'[.;]', mechanism or description)
+            steps = [s.strip()[:50] for s in sentences if s.strip()][:5]
+
+    # Cap at 6 steps for visual clarity, ensure minimum of 2
+    steps = steps[:6]
+    if len(steps) < 2:
+        steps = [disease, discovery_type.title() + " Outcome"]
+
+    # Truncate long labels
+    steps = [s[:35] + "..." if len(s) > 38 else s for s in steps]
+
+    # Color palette for pathway nodes
+    colors = [
+        ("#ede9fe", "#7c3aed", "#5b21b6"),  # purple
+        ("#dbeafe", "#2563eb", "#1e40af"),  # blue
+        ("#d1fae5", "#059669", "#065f46"),  # green
+        ("#fef3c7", "#d97706", "#92400e"),  # amber
+        ("#fce7f3", "#be185d", "#9d174d"),  # pink
+        ("#e0e7ff", "#4f46e5", "#3730a3"),  # indigo
+    ]
+
+    n = len(steps)
+    box_w = 120
+    gap = 25
+    total_w = n * box_w + (n - 1) * gap + 20
+    svg_w = max(total_w, 400)
+
+    # Build SVG elements
+    svg_parts = [
+        f'<div class="figure-box">',
+        f'  <svg viewBox="0 0 {svg_w} 160" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:{svg_w}px;height:auto;">',
+        '    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#374151"/></marker></defs>',
+    ]
+
+    for i, step in enumerate(steps):
+        x = 10 + i * (box_w + gap)
+        fill, stroke, text_color = colors[i % len(colors)]
+
+        # Split long labels into two lines
+        if len(step) > 20:
+            mid = len(step) // 2
+            # Find nearest space to midpoint
+            space_pos = step.rfind(' ', 0, mid + 5)
+            if space_pos > 5:
+                line1 = step[:space_pos]
+                line2 = step[space_pos + 1:]
+            else:
+                line1 = step[:mid]
+                line2 = step[mid:]
+            svg_parts.append(
+                f'    <rect x="{x}" y="30" width="{box_w}" height="50" rx="6" fill="{fill}" stroke="{stroke}" stroke-width="1.2"/>'
+            )
+            svg_parts.append(
+                f'    <text x="{x + box_w // 2}" y="50" text-anchor="middle" font-size="8.5" fill="{text_color}" font-weight="700">{_svg_escape(line1)}</text>'
+            )
+            svg_parts.append(
+                f'    <text x="{x + box_w // 2}" y="65" text-anchor="middle" font-size="8" fill="{stroke}">{_svg_escape(line2)}</text>'
+            )
+        else:
+            svg_parts.append(
+                f'    <rect x="{x}" y="30" width="{box_w}" height="50" rx="6" fill="{fill}" stroke="{stroke}" stroke-width="1.2"/>'
+            )
+            svg_parts.append(
+                f'    <text x="{x + box_w // 2}" y="60" text-anchor="middle" font-size="9" fill="{text_color}" font-weight="700">{_svg_escape(step)}</text>'
+            )
+
+        # Arrow to next node
+        if i < n - 1:
+            x_end = x + box_w
+            x_next = x_end + gap
+            svg_parts.append(
+                f'    <line x1="{x_end}" y1="55" x2="{x_next}" y2="55" stroke="#374151" stroke-width="1.2" marker-end="url(#arr)"/>'
+            )
+
+    # Outcome bar at bottom
+    outcome_label = f"Therapeutic Outcome: {disease}"
+    bar_w = min(svg_w - 40, n * (box_w + gap))
+    bar_x = (svg_w - bar_w) // 2
+    mid_x = svg_w // 2
+    svg_parts.append(f'    <line x1="{mid_x}" y1="80" x2="{mid_x}" y2="105" stroke="#374151" stroke-width="1.2" marker-end="url(#arr)"/>')
+    svg_parts.append(f'    <rect x="{bar_x}" y="108" width="{bar_w}" height="34" rx="6" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.5"/>')
+    svg_parts.append(f'    <text x="{mid_x}" y="130" text-anchor="middle" font-size="10" fill="#14532d" font-weight="700">{_svg_escape(outcome_label)}</text>')
+
+    svg_parts.append('  </svg>')
+    svg_parts.append(f'  <p class="fig-caption"><strong>Figure 1.</strong> Proposed mechanism of action — {_svg_escape(hyp_title or disease)}.</p>')
+    svg_parts.append('</div>')
+
+    return "\n".join(svg_parts)
+
+
+def _svg_escape(text: str) -> str:
+    """Escape text for safe SVG rendering."""
+    return (text
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;"))
+
+
+def _markdown_to_rich_html(md: str, disease: str, discovery_type: str, hypotheses: list) -> str:
+    """Convert markdown paper to scientific journal-style HTML (clean white, no AI/pipeline references)."""
+    import re as _re_html
+    date_str = datetime.utcnow().strftime("%B %d, %Y")
+    h0 = hypotheses[0] if hypotheses else {}
+    title = h0.get("title", disease)
+
+    # Extract title from markdown — use first # heading, then strip it from body
+    extracted_title = None
     for line in md.split("\n"):
         if line.startswith("# "):
-            title = line[2:].strip()
+            extracted_title = line[2:].strip()
             break
+    if extracted_title:
+        title = extracted_title
 
-    # Convert markdown to HTML
+    # --- Convert markdown body to HTML ---
     body = md
+
+    # Remove duplicate title line from body (it's shown in header)
+    if extracted_title:
+        body = body.replace(f"# {extracted_title}", "", 1).strip()
+
     # Tables: convert markdown tables to HTML tables
-    import re
     def _convert_table(match):
         lines = match.group(0).strip().split("\n")
         if len(lines) < 2:
             return match.group(0)
-        html_parts = ['<table>']
+        html_parts = ['<table class="data-table">']
         for idx, line in enumerate(lines):
-            if set(line.strip().replace("|", "").replace("-", "").replace(":", "").strip()) == set():
-                continue  # Skip separator line
+            stripped = line.strip().replace("|", "").replace("-", "").replace(":", "").strip()
+            if not stripped:
+                continue
             cells = [c.strip() for c in line.strip().strip("|").split("|")]
             tag = "th" if idx == 0 else "td"
             html_parts.append("<tr>" + "".join(f"<{tag}>{c}</{tag}>" for c in cells) + "</tr>")
         html_parts.append("</table>")
         return "\n".join(html_parts)
 
-    body = re.sub(r'(?:^\|.+\|$\n?){2,}', _convert_table, body, flags=re.MULTILINE)
+    body = _re_html.sub(r'(?:^\|.+\|$\n?){2,}', _convert_table, body, flags=_re_html.MULTILINE)
 
     # Headers
-    body = re.sub(r'^#### (.+)$', r'<h4>\1</h4>', body, flags=re.MULTILINE)
-    body = re.sub(r'^### (.+)$', r'<h3>\1</h3>', body, flags=re.MULTILINE)
-    body = re.sub(r'^## (.+)$', r'<h2>\1</h2>', body, flags=re.MULTILINE)
-    body = re.sub(r'^# (.+)$', r'<h1>\1</h1>', body, flags=re.MULTILINE)
+    body = _re_html.sub(r'^#### (.+)$', r'<h4>\1</h4>', body, flags=_re_html.MULTILINE)
+    body = _re_html.sub(r'^### (.+)$', r'<h3>\1</h3>', body, flags=_re_html.MULTILINE)
+    body = _re_html.sub(r'^## (.+)$', r'<h2>\1</h2>', body, flags=_re_html.MULTILINE)
+    body = _re_html.sub(r'^# (.+)$', r'<h1>\1</h1>', body, flags=_re_html.MULTILINE)
     # Bold and italic
-    body = re.sub(r'\*\*\*(.+?)\*\*\*', r'<strong><em>\1</em></strong>', body)
-    body = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', body)
-    body = re.sub(r'\*(.+?)\*', r'<em>\1</em>', body)
+    body = _re_html.sub(r'\*\*\*(.+?)\*\*\*', r'<strong><em>\1</em></strong>', body)
+    body = _re_html.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', body)
+    body = _re_html.sub(r'\*(.+?)\*', r'<em>\1</em>', body)
     # Lists
-    body = re.sub(r'^- (.+)$', r'<li>\1</li>', body, flags=re.MULTILINE)
-    body = re.sub(r'(<li>.*?</li>\n?)+', lambda m: f'<ul>{m.group(0)}</ul>', body)
-    body = re.sub(r'^\d+\.\s+(.+)$', r'<li>\1</li>', body, flags=re.MULTILINE)
-    # Code blocks (ASCII diagrams)
-    body = re.sub(r'```[\w]*\n(.*?)```', r'<pre class="diagram">\1</pre>', body, flags=re.DOTALL)
+    body = _re_html.sub(r'^- (.+)$', r'<li>\1</li>', body, flags=_re_html.MULTILINE)
+    body = _re_html.sub(r'(<li>.*?</li>\n?)+', lambda m: f'<ul>{m.group(0)}</ul>', body)
+    body = _re_html.sub(r'^\d+\.\s+(.+)$', r'<li>\1</li>', body, flags=_re_html.MULTILINE)
+    # Code blocks
+    body = _re_html.sub(r'```[\w]*\n(.*?)```', r'<pre class="code-block">\1</pre>', body, flags=_re_html.DOTALL)
     # Inline code
-    body = re.sub(r'`([^`]+)`', r'<code>\1</code>', body)
-    # Arrow notation in mechanisms
-    body = body.replace("→", '<span class="arrow">→</span>')
-    # References [N]
-    body = re.sub(r'\[(\d+)\]', r'<sup class="ref">[\1]</sup>', body)
+    body = _re_html.sub(r'`([^`]+)`', r'<code>\1</code>', body)
+    # Chemical arrows
+    body = body.replace("→", '<span class="chem-arrow">&rarr;</span>')
+    # References [N] → superscript
+    body = _re_html.sub(r'\[(\d+)\]', r'<sup class="ref-num">\1</sup>', body)
     # Paragraphs
-    body = re.sub(r'\n{2,}', '</p><p>', body)
-    body = re.sub(r'\n', '<br/>', body)
+    body = _re_html.sub(r'\n{2,}', '</p>\n<p>', body)
+    body = _re_html.sub(r'\n', '<br/>', body)
 
-    # Build confidence badge
-    conf = hypotheses[0].get("confidence", 0) if hypotheses else 0
-    conf_color = "#22c55e" if conf >= 0.8 else "#eab308" if conf >= 0.6 else "#f97316"
+    # Build dynamic mechanism SVG from actual hypothesis data (not hardcoded)
+    mechanism_svg = _build_dynamic_mechanism_svg(h0, disease, discovery_type)
 
     return f"""<!DOCTYPE html>
 <html lang="en">
-<head><meta charset="UTF-8"><title>{title}</title>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>{title}</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400;1,600&display=swap" rel="stylesheet">
 <style>
-@page {{ margin: 0.8in; size: A4; }}
-@media print {{ .no-print {{ display: none; }} .page-break {{ page-break-before: always; }} }}
-:root {{ --brand: #6c63ff; --brand-light: #8b85ff; --dark: #0f0f1a; --text: #e2e2e8; --muted: #8888aa; --surface: #1a1a2e; --border: #2a2a3e; }}
-* {{ box-sizing: border-box; margin: 0; padding: 0; }}
-body {{ font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: var(--dark); color: var(--text); line-height: 1.8; }}
-.paper {{ max-width: 900px; margin: 0 auto; background: var(--surface); min-height: 100vh; }}
+@page {{ margin: 1in; size: A4; }}
+@media print {{ .no-print {{ display: none !important; }} body {{ font-size: 10pt; }} }}
+* {{ margin: 0; padding: 0; box-sizing: border-box; }}
+body {{ font-family: Georgia, 'Times New Roman', 'DejaVu Serif', serif; color: #1a1a1a; background: #fff; line-height: 1.65; font-size: 11pt; }}
+.paper {{ max-width: 8in; margin: 0 auto; padding: 1in 0.9in; }}
 
-/* Cover Page */
-.cover {{ min-height: 100vh; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 80px 60px; background: linear-gradient(135deg, #0f0f1a 0%, #1a1a3e 50%, #0f0f1a 100%); border-bottom: 4px solid var(--brand); position: relative; overflow: hidden; }}
-.cover::before {{ content: ''; position: absolute; top: -50%; right: -50%; width: 100%; height: 100%; background: radial-gradient(circle, rgba(108,99,255,0.08) 0%, transparent 70%); }}
-.cover-logo {{ font-size: 13px; letter-spacing: 10px; text-transform: uppercase; color: var(--brand); font-weight: 800; margin-bottom: 60px; position: relative; }}
-.cover-line {{ width: 80px; height: 3px; background: linear-gradient(90deg, transparent, var(--brand), transparent); margin: 24px auto; }}
-.cover-title {{ font-size: 28px; font-weight: 700; color: #fff; line-height: 1.3; margin-bottom: 20px; max-width: 700px; }}
-.cover-subtitle {{ font-size: 15px; color: var(--muted); margin-bottom: 40px; }}
-.cover-conf {{ display: inline-block; padding: 6px 20px; border-radius: 20px; font-size: 14px; font-weight: 700; color: #fff; background: {conf_color}33; border: 1px solid {conf_color}; margin-bottom: 40px; }}
-.cover-author {{ font-size: 16px; font-weight: 600; color: #fff; margin-bottom: 6px; }}
-.cover-affil {{ font-size: 12px; letter-spacing: 4px; text-transform: uppercase; color: var(--brand-light); margin-bottom: 30px; }}
-.cover-date {{ font-size: 13px; color: var(--muted); }}
+/* Title block — journal style */
+.title-block {{ margin-bottom: 1.8rem; }}
+.paper-title {{ font-size: 18pt; font-weight: 700; color: #111; line-height: 1.25; margin-bottom: 0.6rem; }}
+.authors {{ font-size: 10pt; color: #333; margin-bottom: 0.3rem; }}
+.authors .brand {{ font-family: 'Cormorant Garamond', Georgia, serif; font-style: italic; }}
+.affiliations {{ font-size: 8.5pt; color: #666; line-height: 1.4; margin-bottom: 0.2rem; }}
+.paper-date {{ font-size: 8.5pt; color: #888; margin-bottom: 1.2rem; }}
+.title-rule {{ border: none; border-top: 1px solid #ccc; margin: 0.5rem 0 1.5rem; }}
 
-/* Content */
-.content {{ padding: 48px 56px; }}
-h1 {{ font-size: 22px; color: #fff; border-bottom: 2px solid var(--brand); padding-bottom: 10px; margin: 40px 0 20px; font-weight: 700; }}
-h2 {{ font-size: 19px; color: var(--brand-light); margin: 36px 0 16px; font-weight: 600; }}
-h3 {{ font-size: 16px; color: #ccc; margin: 28px 0 12px; font-weight: 600; }}
-h4 {{ font-size: 14px; color: var(--muted); margin: 20px 0 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }}
-p {{ margin-bottom: 14px; font-size: 14px; }}
-strong {{ color: #fff; }}
-em {{ color: var(--brand-light); }}
-code {{ background: #2a2a3e; padding: 2px 6px; border-radius: 3px; font-size: 13px; color: var(--brand-light); }}
-.arrow {{ color: var(--brand); font-weight: bold; font-size: 16px; }}
-sup.ref {{ color: var(--brand); font-size: 10px; cursor: pointer; }}
-ul, ol {{ padding-left: 24px; margin: 12px 0; }}
-li {{ margin-bottom: 8px; font-size: 14px; }}
+/* Abstract */
+.abstract {{ margin-bottom: 1.5rem; padding: 0; }}
+.abstract-heading {{ font-size: 12pt; font-weight: 700; margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; }}
+.abstract-body {{ font-size: 10pt; text-align: justify; }}
+.abstract-body .label {{ font-weight: 700; }}
+
+/* Section headings */
+h1 {{ font-size: 14pt; font-weight: 700; color: #111; margin: 1.8rem 0 0.6rem; }}
+h2 {{ font-size: 13pt; font-weight: 700; color: #111; margin: 1.5rem 0 0.5rem; }}
+h3 {{ font-size: 11pt; font-weight: 700; color: #222; margin: 1.2rem 0 0.4rem; }}
+h4 {{ font-size: 10pt; font-weight: 700; color: #333; margin: 1rem 0 0.3rem; }}
+
+/* Body */
+p {{ margin-bottom: 0.65rem; text-align: justify; }}
+ul, ol {{ margin: 0.4rem 0 0.65rem 1.5rem; }}
+li {{ margin-bottom: 0.2rem; font-size: 10.5pt; }}
+strong {{ font-weight: 700; }}
+em {{ font-style: italic; }}
+code {{ font-family: 'Courier New', Courier, monospace; background: #f4f4f4; padding: 1px 3px; border-radius: 2px; font-size: 0.88em; }}
+.chem-arrow {{ font-weight: bold; }}
+sup.ref-num {{ color: #1a56db; font-size: 7.5pt; font-weight: 600; line-height: 0; position: relative; top: -0.4em; }}
+
+/* Code blocks */
+.code-block {{ font-family: 'Courier New', monospace; font-size: 8.5pt; line-height: 1.35; background: #f8f8f8; border: 1px solid #ddd; padding: 10px 14px; margin: 0.8rem 0; overflow-x: auto; white-space: pre; border-radius: 3px; }}
 
 /* Tables */
-table {{ width: 100%; border-collapse: collapse; margin: 24px 0; font-size: 13px; }}
-th {{ background: var(--brand); color: #fff; padding: 10px 14px; text-align: left; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }}
-td {{ padding: 10px 14px; border-bottom: 1px solid var(--border); }}
-tr:nth-child(even) td {{ background: rgba(108,99,255,0.04); }}
-tr:hover td {{ background: rgba(108,99,255,0.08); }}
+.data-table {{ width: 100%; border-collapse: collapse; font-size: 9pt; margin: 0.6rem 0 1rem; }}
+.data-table th {{ background: #f0f0f0; padding: 6px 10px; text-align: left; font-weight: 700; font-size: 8.5pt; border: 1px solid #ccc; }}
+.data-table td {{ padding: 5px 10px; border: 1px solid #ccc; vertical-align: top; }}
+.data-table tr:nth-child(even) td {{ background: #fafafa; }}
 
-/* Diagrams */
-pre.diagram {{ background: #0d0d1a; border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin: 20px 0; font-family: 'Fira Code', 'Consolas', monospace; font-size: 12px; line-height: 1.6; color: var(--brand-light); overflow-x: auto; white-space: pre; }}
+/* Figures */
+.figure-box {{ margin: 1rem 0 1.2rem; text-align: center; page-break-inside: avoid; }}
+.figure-box svg {{ border: 1px solid #e0e0e0; border-radius: 4px; }}
+.fig-caption {{ font-size: 9pt; color: #444; margin-top: 4px; text-align: left; padding: 0 1rem; }}
+
+/* References */
+.ref-entry {{ font-size: 8.5pt; line-height: 1.45; margin-bottom: 3px; padding-left: 1.8em; text-indent: -1.8em; }}
 
 /* Footer */
-.footer {{ text-align: center; padding: 30px; border-top: 1px solid var(--border); font-size: 11px; color: var(--muted); margin-top: 60px; }}
+.doc-footer {{ margin-top: 2rem; padding-top: 0.8rem; border-top: 1px solid #ccc; font-size: 8pt; color: #999; text-align: center; }}
+.doc-footer .brand {{ font-family: 'Cormorant Garamond', Georgia, serif; font-style: italic; }}
 
-/* Index/TOC */
-.toc {{ background: rgba(108,99,255,0.05); border: 1px solid var(--border); border-radius: 8px; padding: 24px 32px; margin: 30px 0; }}
-.toc-title {{ font-size: 14px; font-weight: 700; color: var(--brand); margin-bottom: 16px; text-transform: uppercase; letter-spacing: 2px; }}
-.toc-item {{ display: block; padding: 4px 0; font-size: 13px; color: var(--text); text-decoration: none; border-bottom: 1px dotted var(--border); }}
-.toc-item:hover {{ color: var(--brand); }}
-.toc-section {{ font-weight: 600; }}
-.toc-sub {{ padding-left: 20px; color: var(--muted); }}
+/* Page numbers (print) */
+@media print {{
+  .paper {{ padding: 0; }}
+  @page {{ @bottom-center {{ content: counter(page) " / " counter(pages); font-size: 8pt; color: #999; }} }}
+}}
 </style></head>
 <body>
 <div class="paper">
-  <!-- Cover Page -->
-  <div class="cover">
-    <div class="cover-logo">humanovo</div>
-    <div class="cover-line"></div>
-    <div class="cover-title">{title}</div>
-    <div class="cover-subtitle">{discovery_type.title()} Discovery Report for {disease}</div>
-    <div class="cover-conf">Confidence: {conf:.0%}</div>
-    <div class="cover-line"></div>
-    <div class="cover-author">By humanovo</div>
-    <div class="cover-affil">AI-Driven Biomedical Research Platform</div>
-    <div class="cover-date">{date_str}</div>
-  </div>
 
-  <!-- Table of Contents -->
-  <div class="content">
-    <div class="toc">
-      <div class="toc-title">Table of Contents</div>
-      <span class="toc-item toc-section">Abstract</span>
-      <span class="toc-item toc-section">1. Introduction</span>
-      <span class="toc-item toc-section">2. Methods</span>
-      <span class="toc-item toc-sub">2.1 Multi-Agent AI Architecture</span>
-      <span class="toc-item toc-sub">2.2 Knowledge Integration</span>
-      <span class="toc-item toc-sub">2.3 Confidence Scoring</span>
-      <span class="toc-item toc-section">3. Results</span>
-      <span class="toc-item toc-section">4. Discussion</span>
-      <span class="toc-item toc-section">5. Conclusion</span>
-      <span class="toc-item toc-section">Tables &amp; Figures</span>
-      <span class="toc-item toc-section">References</span>
-    </div>
+<!-- Title Block -->
+<div class="title-block">
+  <div class="paper-title">{title}</div>
+  <div class="authors"><span class="brand">humanovo</span> Research Platform</div>
+  <div class="affiliations">Computational Biomedical Research &mdash; Translational Discovery Platform</div>
+  <div class="paper-date">{date_str}</div>
+  <hr class="title-rule"/>
+</div>
 
-    <!-- Paper Body -->
-    <p>{body}</p>
-  </div>
+<!-- Mechanism of Action Figure (inline after first major Results section) -->
+<!-- Inserted via body content flow below -->
 
-  <div class="footer">
-    Generated by <strong>humanovo</strong> — Multi-Model Parallel AI Discovery System — {date_str}<br/>
-    This paper was generated using {len(hypotheses)} AI-discovered hypothesis/hypotheses analyzed across 4 parallel agents.
-  </div>
+<!-- Paper Body -->
+<p>{body}</p>
+
+<!-- Inline Mechanism Figure (appended at end of results if not caught by section flow) -->
+{mechanism_svg}
+
+<!-- Footer -->
+<div class="doc-footer">
+  <span class="brand">humanovo</span> &mdash; Computational Biomedical Research &mdash; {date_str}
+</div>
+
 </div>
 </body></html>"""
 
@@ -4476,9 +4740,10 @@ def handler(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
                 hypothesis_id = event.get("hypothesis_id")
                 paper_config = event.get("config", {})
                 paper_continuation = event.get("continuation")
-                print(f"[HANDLER] Starting paper worker: hypothesis={hypothesis_id}, continuation={'yes' if paper_continuation else 'no'}")
+                hypothesis_data = event.get("hypothesis_data")
+                print(f"[HANDLER] Starting paper worker: hypothesis={hypothesis_id}, continuation={'yes' if paper_continuation else 'no'}, has_data={'yes' if hypothesis_data else 'no'}")
                 try:
-                    run_paper_worker(hypothesis_id, paper_config, continuation=paper_continuation)
+                    run_paper_worker(hypothesis_id, paper_config, continuation=paper_continuation, hypothesis_data=hypothesis_data)
                     print(f"[HANDLER] Paper worker completed successfully")
                 except Exception as paper_err:
                     print(f"[HANDLER] Paper worker CRASHED: {paper_err}")

@@ -94,6 +94,48 @@ class SimulationResultSchema(BaseModel):
     summary: str
 
 
+class TranslationalPhaseSchema(BaseModel):
+    """Schema for a single translational phase."""
+
+    phase: str
+    phase_name: str
+    formal_name: str = ""
+    description: str = ""
+    objectives: list[str] = []
+    key_activities: list[str] = []
+    milestones: list[str] = []
+    deliverables: list[str] = []
+    evidence_requirements: list[str] = []
+    data_sources: list[str] = []
+    regulatory_considerations: list[str] = []
+    regulatory_milestones: list[str] = []
+    key_stakeholders: list[str] = []
+    collaborators: list[str] = []
+    success_criteria: list[str] = []
+    go_no_go_gates: list[str] = []
+    phase_risks: list[str] = []
+    mitigation_strategies: list[str] = []
+    estimated_duration: str = ""
+    resource_requirements: list[str] = []
+    estimated_cost_range: str = ""
+    prerequisites: list[str] = []
+    blockers: list[str] = []
+
+
+class TranslationalRoadmapSchema(BaseModel):
+    """Schema for the complete T0-T5 translational roadmap."""
+
+    current_phase: str = "T0"
+    phases: list[TranslationalPhaseSchema] = []
+    overall_feasibility_score: float = 0.5
+    estimated_total_timeline: str = ""
+    critical_path_summary: str = ""
+    key_decision_points: list[str] = []
+    cross_phase_risks: list[str] = []
+    regulatory_pathway_summary: str = ""
+    commercialization_potential: str = ""
+
+
 class HypothesisResponse(BaseModel):
     """Schema for hypothesis response."""
 
@@ -109,6 +151,7 @@ class HypothesisResponse(BaseModel):
     contradiction_count: int
     supporting_count: int
     simulation_results: SimulationResultSchema | None
+    translational_roadmap: TranslationalRoadmapSchema | None = None
     tags: list[str]
     user_notes: str | None
     version: int
@@ -163,6 +206,14 @@ def hypothesis_to_response(h: Hypothesis) -> HypothesisResponse:
             summary=h.simulation_results["summary"],
         )
 
+    # Parse translational roadmap from JSONB
+    translational_roadmap = None
+    if h.translational_roadmap and isinstance(h.translational_roadmap, dict):
+        try:
+            translational_roadmap = TranslationalRoadmapSchema(**h.translational_roadmap)
+        except Exception:
+            pass
+
     return HypothesisResponse(
         id=h.id,
         project_id=h.project_id,
@@ -176,6 +227,7 @@ def hypothesis_to_response(h: Hypothesis) -> HypothesisResponse:
         contradiction_count=h.contradiction_count,
         supporting_count=h.supporting_count,
         simulation_results=simulation_results,
+        translational_roadmap=translational_roadmap,
         tags=h.tags or [],
         user_notes=h.user_notes,
         version=h.version,
@@ -279,6 +331,15 @@ async def _run_hypothesis_generation(task_id: UUID, request: HypothesisGenerate)
         # Store generated hypotheses in database
         async with async_session_factory() as db:
             for h in hypotheses:
+                # Extract translational roadmap if available
+                translational_roadmap_data = None
+                raw_roadmap = getattr(h, "translational_roadmap", None)
+                if raw_roadmap:
+                    if hasattr(raw_roadmap, "model_dump"):
+                        translational_roadmap_data = raw_roadmap.model_dump()
+                    elif isinstance(raw_roadmap, dict):
+                        translational_roadmap_data = raw_roadmap
+
                 db_hypothesis = Hypothesis(
                     id=h.id if hasattr(h, "id") else uuid4(),
                     project_id=request.project_id,
@@ -297,6 +358,7 @@ async def _run_hypothesis_generation(task_id: UUID, request: HypothesisGenerate)
                         "query": request.query,
                         "focus_entities": request.focus_entities,
                     },
+                    translational_roadmap=translational_roadmap_data,
                 )
                 db.add(db_hypothesis)
                 _generation_tasks[task_id]["hypotheses_generated"] += 1

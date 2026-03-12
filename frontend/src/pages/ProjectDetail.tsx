@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import {
   FiArrowLeft, FiActivity, FiTarget,
   FiChevronRight, FiFileText, FiRefreshCw,
-  FiTrash2, FiBook, FiX, FiDownload,
+  FiTrash2, FiBook, FiX, FiPrinter,
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import api, { Project } from '../services/api'
@@ -34,22 +34,27 @@ interface SavedHypothesis {
   project_id: string
   created_at: string
   model_used?: string
+  translational_roadmap?: any
 }
 
 type ViewMode = 'list' | 'hypothesis_viewer' | 'hypothesis_paper'
 
 const PAPER_PHASES = [
-  { label: 'Initializing 8-model pipeline...', duration: 3000 },
-  { label: 'Phase 1: Generating abstract & introduction (Claude Opus 4.6)...', duration: 12000 },
-  { label: 'Phase 2: Core sections — literature review, methods, results (DeepSeek, Mistral, GPT-4o, Cohere)...', duration: 25000 },
-  { label: 'Phase 3: Synthesis — discussion, molecular mechanisms, conclusion (Claude Opus 4.6)...', duration: 20000 },
-  { label: 'Phase 4: QA & review (Kimi-K2, o3-mini, GPT-4.1)...', duration: 15000 },
-  { label: 'Rendering PDF with ReportLab — cover page, tables, citations, diagrams...', duration: 8000 },
+  { label: 'Initializing research pipeline...', duration: 2000 },
+  { label: 'Phase 1: Generating abstract & introduction...', duration: 8000 },
+  { label: 'Phase 2: Bench science — mechanism, evidence, targets...', duration: 10000 },
+  { label: 'Phase 3: Translational roadmap — T0 Basic Research, T1 First-in-Human...', duration: 12000 },
+  { label: 'Phase 4: Clinical phases — T2 Trials, T3 Implementation...', duration: 12000 },
+  { label: 'Phase 5: Population & global health — T4 Community, T5 Global Impact...', duration: 10000 },
+  { label: 'Phase 6: Regulatory strategy, risk analysis & commercialization...', duration: 10000 },
+  { label: 'Phase 7: Discussion, conclusion & quality review...', duration: 10000 },
+  { label: 'Rendering final research paper — formatting, tables, citations...', duration: 8000 },
 ]
 
 export default function ProjectDetail() {
   const { projectId } = useParams<{ projectId: string }>()
   const [generatingPaper, setGeneratingPaper] = useState(false)
+  const generatingPaperRef = useRef(false)
   const [, setRefresh] = useState(0)
 
   // Project from API
@@ -59,6 +64,7 @@ export default function ProjectDetail() {
   // Document viewer state
   const [viewMode, setViewMode] = useState<ViewMode>('list')
   const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null)
+  const [paperHtml, setPaperHtml] = useState<string | null>(null)
   const [paperError, setPaperError] = useState<string | null>(null)
   const [activeHypothesis, setActiveHypothesis] = useState<SavedHypothesis | null>(null)
 
@@ -166,43 +172,176 @@ export default function ProjectDetail() {
     setPaperError(null)
   }, [])
 
+  const cancelPaperGeneration = useCallback(async () => {
+    generatingPaperRef.current = false
+    setGeneratingPaper(false)
+    stopPhaseAnimation()
+    try {
+      await fetch(`${API_BASE}/orchestrator/cancel-paper`, { method: 'POST' })
+    } catch { /* best-effort */ }
+    setPaperError(null)
+  }, [stopPhaseAnimation])
+
   const generateHypothesisPaper = useCallback(async (hypothesis: SavedHypothesis) => {
+    generatingPaperRef.current = true
     setGeneratingPaper(true)
     setActiveHypothesis(hypothesis)
     setViewMode('hypothesis_paper')
     setPdfBlobUrl(null)
+    setPaperHtml(null)
     setPaperError(null)
     setShowChooser(false)
     startPhaseAnimation()
 
+    const bodyPayload = JSON.stringify({
+      title: hypothesis.title,
+      description: hypothesis.description,
+      mechanism: hypothesis.mechanism,
+      confidence: hypothesis.confidence,
+      disease: hypothesis.disease || project?.disease_focus || 'Unknown',
+      discovery_type: hypothesis.discovery_type || 'treatment',
+      model_used: hypothesis.model_used || 'unknown',
+      tags: hypothesis.tags || [],
+      external_factors: [],
+    })
+
     try {
-      const res = await fetch(`${API_BASE}/documents/hypothesis/${hypothesis.id}/pdf?use_ai=true`, {
+      // Step 1: Check if paper for THIS hypothesis already exists in Lambda DynamoDB
+      let cachedHtml = ''
+      try {
+        const statusRes = await fetch(`${API_BASE}/orchestrator/paper-status`)
+        if (statusRes.ok) {
+          const statusData = await statusRes.json()
+          // Only use cached paper if it matches this specific hypothesis
+          if (statusData.status === 'done' && statusData.paper_html && statusData.paper_html.length > 100
+              && statusData.hypothesis_id === hypothesis.id) {
+            cachedHtml = statusData.paper_html
+          }
+        }
+      } catch { /* ignore — will generate fresh */ }
+
+      if (cachedHtml) {
+        stopPhaseAnimation()
+        setPaperHtml(cachedHtml)
+        setGeneratingPaper(false)
+        _saveResearchPaper(hypothesis)
+        return
+      }
+
+      // Step 2: Trigger Lambda paper generation (the pipeline that actually works)
+      const triggerRes = await fetch(`${API_BASE}/orchestrator/generate-paper/markdown`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: hypothesis.title,
-          description: hypothesis.description,
-          mechanism: hypothesis.mechanism,
-          confidence: hypothesis.confidence,
-          disease: hypothesis.disease || project?.disease_focus || 'Unknown',
-          discovery_type: hypothesis.discovery_type || 'treatment',
-          model_used: hypothesis.model_used || 'unknown',
-          tags: hypothesis.tags || [],
-          external_factors: [],
+          hypothesis_id: hypothesis.id,
+          hypothesis_data: {
+            id: hypothesis.id,
+            title: hypothesis.title,
+            description: hypothesis.description,
+            mechanism: hypothesis.mechanism,
+            confidence: hypothesis.confidence,
+            disease: hypothesis.disease || project?.disease_focus || 'Unknown',
+            discovery_type: hypothesis.discovery_type || 'treatment',
+            tags: hypothesis.tags || [],
+          },
         }),
       })
 
-      stopPhaseAnimation()
+      if (triggerRes.ok) {
+        const triggerData = await triggerRes.json()
 
-      if (res.ok) {
-        const contentType = res.headers.get('content-type') || ''
+        // If backend says paper already exists, fetch it immediately
+        if (triggerData.status === 'already_done') {
+          const doneRes = await fetch(`${API_BASE}/orchestrator/paper-status`)
+          if (doneRes.ok) {
+            const doneData = await doneRes.json()
+            if (doneData.paper_html && doneData.paper_html.length > 100) {
+              stopPhaseAnimation()
+              setPaperHtml(doneData.paper_html)
+              setGeneratingPaper(false)
+              _saveResearchPaper(hypothesis)
+              return
+            }
+          }
+        }
+
+        // Poll for completion (Lambda generates async, stores HTML in DynamoDB)
+        const pollInterval = 5000 // 5 seconds
+        const maxPolls = 120     // 10 minutes max
+        let pollCount = 0
+
+        const pollForPaper = async (): Promise<boolean> => {
+          while (pollCount < maxPolls) {
+            pollCount++
+            await new Promise(r => setTimeout(r, pollInterval))
+            // Check if user cancelled
+            if (!generatingPaperRef.current) {
+              return true
+            }
+            try {
+              const pollRes = await fetch(`${API_BASE}/orchestrator/paper-status`)
+              if (pollRes.ok) {
+                const pollData = await pollRes.json()
+                if (pollData.status === 'done' && pollData.paper_html && pollData.paper_html.length > 100) {
+                  stopPhaseAnimation()
+                  setPaperHtml(pollData.paper_html)
+                  setGeneratingPaper(false)
+                  _saveResearchPaper(hypothesis)
+                  return true
+                }
+                if (pollData.status === 'failed' || pollData.status === 'idle') {
+                  stopPhaseAnimation()
+                  setPaperError(`Paper generation failed: ${pollData.error || 'Unknown error'}`)
+                  setGeneratingPaper(false)
+                  return true
+                }
+                // Still generating — continue polling
+              }
+            } catch { /* network hiccup, keep polling */ }
+          }
+          return false
+        }
+
+        const completed = await pollForPaper()
+        if (completed) return
+      }
+
+      // Step 3: Fallback — try FastAPI HTML endpoint
+      stopPhaseAnimation()
+      const htmlRes = await fetch(`${API_BASE}/documents/hypothesis/${hypothesis.id}/html`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: bodyPayload,
+      })
+
+      if (htmlRes.ok) {
+        const contentType = htmlRes.headers.get('content-type') || ''
+        if (contentType.includes('text/html')) {
+          const html = await htmlRes.text()
+          if (html && html.length > 100) {
+            setPaperHtml(html)
+            setGeneratingPaper(false)
+            _saveResearchPaper(hypothesis)
+            return
+          }
+        }
+      }
+
+      // Step 4: Last resort — try PDF endpoint
+      const pdfRes = await fetch(`${API_BASE}/documents/hypothesis/${hypothesis.id}/pdf?use_ai=true`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: bodyPayload,
+      })
+
+      if (pdfRes.ok) {
+        const contentType = pdfRes.headers.get('content-type') || ''
         let blob: Blob
 
         if (contentType.includes('application/json')) {
-          // Backend returns base64-encoded PDF in JSON
-          const data = await res.json()
+          const data = await pdfRes.json()
           if (!data.pdf_base64) {
-            setPaperError('Server returned empty PDF. Check backend logs for errors.')
+            setPaperError('Server returned empty paper. Check backend logs for errors.')
             setGeneratingPaper(false)
             return
           }
@@ -211,11 +350,11 @@ export default function ProjectDetail() {
           for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i)
           blob = new Blob([byteArray], { type: 'application/pdf' })
         } else {
-          blob = await res.blob()
+          blob = await pdfRes.blob()
         }
 
         if (blob.size === 0) {
-          setPaperError('Server returned empty PDF. Check backend logs for errors.')
+          setPaperError('Server returned empty paper. Check backend logs for errors.')
           setGeneratingPaper(false)
           return
         }
@@ -226,9 +365,7 @@ export default function ProjectDetail() {
         return
       }
 
-      let detail = 'Unknown error'
-      try { const err = await res.json(); detail = err.detail || detail } catch {}
-      setPaperError(`Paper generation failed (${res.status}): ${detail}`)
+      setPaperError('Paper generation failed. Check backend logs.')
       setGeneratingPaper(false)
     } catch (e) {
       stopPhaseAnimation()
@@ -240,6 +377,10 @@ export default function ProjectDetail() {
 
   const _saveResearchPaper = useCallback((hypothesis: SavedHypothesis) => {
     const papers = persistGet<SavedResearchPaper[]>('research-papers', [])
+    // Don't save a duplicate if a paper for this hypothesis already exists
+    if (papers.some(p => p.hypothesis_id === hypothesis.id)) {
+      return
+    }
     const paper: SavedResearchPaper = {
       id: `rp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       hypothesis_id: hypothesis.id,
@@ -255,18 +396,29 @@ export default function ProjectDetail() {
     setRefresh(n => n + 1)
   }, [project])
 
-  const downloadPdf = useCallback(() => {
-    if (!pdfBlobUrl || !activeHypothesis) return
-    const a = document.createElement('a')
-    a.href = pdfBlobUrl
-    a.download = `humanovo-${(activeHypothesis.disease || 'research').replace(/\s+/g, '-').toLowerCase()}-${activeHypothesis.title.replace(/\s+/g, '-').toLowerCase().slice(0, 40)}.pdf`
-    a.click()
-  }, [pdfBlobUrl, activeHypothesis])
+  const printPaper = useCallback(() => {
+    // Print the paper via the iframe's contentWindow
+    const iframe = document.querySelector('iframe[title="Research Paper"]') as HTMLIFrameElement
+    if (iframe?.contentWindow) {
+      iframe.contentWindow.print()
+    } else if (paperHtml) {
+      // Fallback: open in a new window and print
+      const printWindow = window.open('', '_blank')
+      if (printWindow) {
+        printWindow.document.write(paperHtml)
+        printWindow.document.close()
+        printWindow.focus()
+        printWindow.print()
+      }
+    }
+  }, [paperHtml])
 
   const closeViewer = useCallback(() => {
     if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl)
+    generatingPaperRef.current = false
     stopPhaseAnimation()
     setPdfBlobUrl(null)
+    setPaperHtml(null)
     setPaperError(null)
     setActiveHypothesis(null)
     setViewMode('list')
@@ -315,6 +467,7 @@ export default function ProjectDetail() {
           discovery_type: activeHypothesis.discovery_type,
           model_used: activeHypothesis.model_used,
           created_at: activeHypothesis.created_at,
+          translational_roadmap: activeHypothesis.translational_roadmap,
         }}
         breadcrumbs={[
           { label: 'Projects', onClick: () => { closeViewer() } },
@@ -375,10 +528,10 @@ export default function ProjectDetail() {
             <span className="text-[var(--color-text-muted)] text-sm truncate max-w-xs">{activeHypothesis.title}</span>
           </div>
           <div className="flex items-center gap-2">
-            {pdfBlobUrl && (
-              <button onClick={downloadPdf} className="btn text-accent-purple hover:bg-accent-purple/10 text-sm">
-                <FiDownload className="w-3.5 h-3.5 mr-1" />
-                Download PDF
+            {paperHtml && (
+              <button onClick={printPaper} className="btn text-accent-purple hover:bg-accent-purple/10 text-sm">
+                <FiPrinter className="w-3.5 h-3.5 mr-1" />
+                Print
               </button>
             )}
             <button onClick={closeViewer} className="p-1.5 rounded hover:bg-white/5 text-[var(--color-text-muted)]">
@@ -388,7 +541,7 @@ export default function ProjectDetail() {
         </div>
 
         <div className="flex-1 min-h-0 relative">
-          {generatingPaper && !pdfBlobUrl && (
+          {generatingPaper && !pdfBlobUrl && !paperHtml && (
             <div className="absolute inset-0 flex flex-col items-center justify-center z-10">
               <div className="relative w-24 h-24 mb-6">
                 <div className="absolute inset-0 rounded-full border-4 border-white/10" />
@@ -425,8 +578,17 @@ export default function ProjectDetail() {
                   ))}
                 </div>
                 <p className="text-[var(--color-text-muted)] text-xs text-center mt-4">
-                  8 AI models generating content in parallel — this may take a few minutes
+                  Generating comprehensive research content — this may take a few minutes
                 </p>
+                <div className="flex justify-center mt-5">
+                  <button
+                    onClick={cancelPaperGeneration}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors text-sm"
+                  >
+                    <FiX className="w-4 h-4" />
+                    Stop Generation
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -453,14 +615,20 @@ export default function ProjectDetail() {
             </div>
           )}
 
-          {pdfBlobUrl && (
+          {paperHtml && (
+            <iframe
+              srcDoc={paperHtml}
+              className="w-full h-full border-0"
+              title="Research Paper"
+              sandbox="allow-same-origin allow-popups allow-modals"
+              style={{ minHeight: '100%' }}
+            />
+          )}
+
+          {pdfBlobUrl && !paperHtml && (
             <object data={pdfBlobUrl} type="application/pdf" className="w-full h-full">
               <div className="flex flex-col items-center justify-center h-full">
-                <p className="text-[var(--color-text-muted)] mb-4">Unable to display PDF inline. Download it instead.</p>
-                <button onClick={downloadPdf} className="btn text-accent-purple hover:bg-accent-purple/10">
-                  <FiDownload className="w-4 h-4 mr-1" />
-                  Download PDF
-                </button>
+                <p className="text-[var(--color-text-muted)] mb-4">Unable to display PDF inline.</p>
               </div>
             </object>
           )}
@@ -615,46 +783,94 @@ export default function ProjectDetail() {
 
             {projectPapers.length > 0 ? (
               <div className="space-y-2">
-                {projectPapers.map(paper => (
-                  <div
-                    key={paper.id}
-                    className="flex items-center justify-between p-3 border border-[var(--color-border)] rounded-lg hover:border-white/10 transition-colors"
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <FiFileText className="w-4 h-4 text-accent-purple shrink-0" />
-                      <div className="min-w-0">
-                        <p className="text-white text-sm font-medium truncate">{paper.hypothesis_title}</p>
-                        <p className="text-[var(--color-text-muted)] text-xs">
-                          {new Date(paper.generated_at).toLocaleDateString()} &middot; {paper.disease}
-                        </p>
+                {projectPapers.map(paper => {
+                  const hyp = uniqueHypotheses.find(h => h.id === paper.hypothesis_id)
+                  return (
+                    <div
+                      key={paper.id}
+                      className="flex items-center justify-between p-3 border border-[var(--color-border)] rounded-lg hover:border-white/10 transition-colors cursor-pointer"
+                      onClick={async () => {
+                        // First try to fetch cached paper for THIS hypothesis from Lambda DynamoDB
+                        try {
+                          const statusRes = await fetch(`${API_BASE}/orchestrator/paper-status`)
+                          if (statusRes.ok) {
+                            const statusData = await statusRes.json()
+                            // Only use cached paper if it matches this specific hypothesis
+                            if (statusData.status === 'done' && statusData.paper_html && statusData.paper_html.length > 100
+                                && statusData.hypothesis_id === paper.hypothesis_id) {
+                              setActiveHypothesis(hyp || {
+                                id: paper.hypothesis_id,
+                                title: paper.hypothesis_title,
+                                description: '',
+                                mechanism: '',
+                                confidence: 0.5,
+                                tags: [],
+                                disease: paper.disease,
+                                discovery_type: 'treatment',
+                                project_id: paper.project_id,
+                                created_at: paper.generated_at,
+                              })
+                              setPaperHtml(statusData.paper_html)
+                              setViewMode('hypothesis_paper')
+                              return
+                            }
+                          }
+                        } catch (e) {
+                          console.warn('Could not fetch cached paper, will regenerate:', e)
+                        }
+                        // No cached paper for this hypothesis — run full pipeline
+                        const h = hyp || {
+                          id: paper.hypothesis_id,
+                          title: paper.hypothesis_title,
+                          description: '',
+                          mechanism: '',
+                          confidence: 0.5,
+                          tags: [],
+                          disease: paper.disease,
+                          discovery_type: 'treatment',
+                          project_id: paper.project_id,
+                          created_at: paper.generated_at,
+                        }
+                        generateHypothesisPaper(h)
+                      }}
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <FiFileText className="w-4 h-4 text-accent-purple shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-white text-sm font-medium truncate">{paper.hypothesis_title}</p>
+                          <p className="text-[var(--color-text-muted)] text-xs">
+                            {new Date(paper.generated_at).toLocaleDateString()} &middot; {paper.disease}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            if (hyp) generateHypothesisPaper(hyp)
+                          }}
+                          disabled={generatingPaper}
+                          className="p-1.5 rounded hover:bg-white/5 text-[var(--color-text-muted)] hover:text-accent-purple transition-colors"
+                          title="Regenerate & view"
+                        >
+                          <FiRefreshCw className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            const updated = persistGet<SavedResearchPaper[]>('research-papers', []).filter(p => p.id !== paper.id)
+                            persistSet('research-papers', updated)
+                            setRefresh(n => n + 1)
+                          }}
+                          className="p-1.5 rounded hover:bg-white/5 text-[var(--color-text-muted)] hover:text-red-400 transition-colors"
+                          title="Remove"
+                        >
+                          <FiTrash2 className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                     </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <button
-                        onClick={() => {
-                          const hyp = uniqueHypotheses.find(h => h.id === paper.hypothesis_id)
-                          if (hyp) generateHypothesisPaper(hyp)
-                        }}
-                        disabled={generatingPaper}
-                        className="p-1.5 rounded hover:bg-white/5 text-[var(--color-text-muted)] hover:text-accent-purple transition-colors"
-                        title="Regenerate & view"
-                      >
-                        <FiRefreshCw className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={() => {
-                          const updated = persistGet<SavedResearchPaper[]>('research-papers', []).filter(p => p.id !== paper.id)
-                          persistSet('research-papers', updated)
-                          setRefresh(n => n + 1)
-                        }}
-                        className="p-1.5 rounded hover:bg-white/5 text-[var(--color-text-muted)] hover:text-red-400 transition-colors"
-                        title="Remove"
-                      >
-                        <FiTrash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             ) : (
               <p className="text-[var(--color-text-muted)] text-sm">
@@ -674,8 +890,8 @@ export default function ProjectDetail() {
                 <dd className="text-white font-medium">{uniqueHypotheses.length}</dd>
               </div>
               <div className="flex justify-between">
-                <dt className="text-[var(--color-text-muted)]">Evidence</dt>
-                <dd className="text-white font-medium">{project.evidence_count || 0}</dd>
+                <dt className="text-[var(--color-text-muted)]">Research Papers</dt>
+                <dd className="text-white font-medium">{projectPapers.length}</dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-[var(--color-text-muted)]">Status</dt>
