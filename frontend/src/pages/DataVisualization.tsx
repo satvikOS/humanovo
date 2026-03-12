@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useMemo } from 'react'
 import {
-  FiBarChart2, FiPieChart, FiTrendingUp, FiPlus, FiTrash2, FiGrid,
-  FiDownload, FiUpload, FiTarget, FiLayers, FiSettings, FiSave, FiX,
+  FiBarChart2, FiPlus, FiTrash2,
+  FiDownload, FiUpload, FiSettings, FiSave, FiX,
   FiMaximize2, FiMinimize2, FiEdit3, FiCopy, FiDroplet,
 } from 'react-icons/fi'
 import {
@@ -429,7 +429,7 @@ export default function DataVisualization() {
             <BarChart data={waterfallData}>
               {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}
               <Bar dataKey="end" fill="transparent" stackId="w">
-                {waterfallData.map((d, i) => <Cell key={i} fill="transparent" />)}
+                {waterfallData.map((_, i) => <Cell key={i} fill="transparent" />)}
               </Bar>
               <Bar dataKey="value" stackId="w2" radius={[3, 3, 0, 0]}>
                 {waterfallData.map((d, i) => <Cell key={i} fill={d.fill} />)}

@@ -10,7 +10,6 @@ import {
   FiFileText,
   FiTrash2,
   FiTrendingUp,
-  FiLoader,
 } from 'react-icons/fi'
 import { getActivityLog, persistGet, persistSet, type ActivityEntry } from '../utils/persistence'
 
