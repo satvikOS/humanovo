@@ -3673,7 +3673,38 @@ Use ## for major sections, ### for subsections. Include ALL sections from Abstra
             except Exception as retry_err:
                 last_err = retry_err
                 err_str = str(retry_err).lower()
-                if "timeout" in err_str or "timed out" in err_str:
+                if "throttl" in err_str or "too many tokens" in err_str or "rate" in err_str:
+                    print(f"[PAPER] Bedrock throttled (attempt {attempt+1}/3): {str(retry_err)[:120]}")
+                    # Fall back to Azure GPT-5.3 or GPT-4.1 for synthesis
+                    fallback_model = None
+                    fallback_name = None
+                    if azure_gpt53_client is not None:
+                        fallback_model = AZURE_AI_GPT53_MODEL
+                        fallback_name = "GPT-5.3"
+                    elif azure_gpt41_client is not None:
+                        fallback_model = AZURE_AI_GPT41_MODEL
+                        fallback_name = "GPT-4.1"
+                    if fallback_model:
+                        print(f"[PAPER] Falling back to Azure {fallback_name} for synthesis...")
+                        _update_paper_phase(table, f"Synthesizing with {fallback_name}...", 2, total_phases)
+                        try:
+                            paper_md = call_azure_ai(
+                                model_name=fallback_model,
+                                prompt=synthesis_prompt,
+                                system_prompt=synthesis_system,
+                                max_tokens=32_768,
+                                temperature=0.3,
+                            )
+                            print(f"[PAPER] {fallback_name} synthesis complete: {len(paper_md)} chars")
+                            break
+                        except Exception as fb_err:
+                            print(f"[PAPER] {fallback_name} fallback also failed: {fb_err}")
+                            last_err = fb_err
+                            continue
+                    else:
+                        time.sleep(5)
+                        continue
+                elif "timeout" in err_str or "timed out" in err_str:
                     print(f"[PAPER] Synthesis attempt {attempt+1}/3 timed out, retrying...")
                     time.sleep(2)
                     continue
