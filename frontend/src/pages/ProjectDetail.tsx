@@ -54,6 +54,7 @@ const PAPER_PHASES = [
 export default function ProjectDetail() {
   const { projectId } = useParams<{ projectId: string }>()
   const [generatingPaper, setGeneratingPaper] = useState(false)
+  const generatingPaperRef = useRef(false)
   const [, setRefresh] = useState(0)
 
   // Project from API
@@ -171,7 +172,18 @@ export default function ProjectDetail() {
     setPaperError(null)
   }, [])
 
+  const cancelPaperGeneration = useCallback(async () => {
+    generatingPaperRef.current = false
+    setGeneratingPaper(false)
+    stopPhaseAnimation()
+    try {
+      await fetch(`${API_BASE}/orchestrator/cancel-paper`, { method: 'POST' })
+    } catch { /* best-effort */ }
+    setPaperError(null)
+  }, [stopPhaseAnimation])
+
   const generateHypothesisPaper = useCallback(async (hypothesis: SavedHypothesis) => {
+    generatingPaperRef.current = true
     setGeneratingPaper(true)
     setActiveHypothesis(hypothesis)
     setViewMode('hypothesis_paper')
@@ -236,6 +248,23 @@ export default function ProjectDetail() {
       })
 
       if (triggerRes.ok) {
+        const triggerData = await triggerRes.json()
+
+        // If backend says paper already exists, fetch it immediately
+        if (triggerData.status === 'already_done') {
+          const doneRes = await fetch(`${API_BASE}/orchestrator/paper-status`)
+          if (doneRes.ok) {
+            const doneData = await doneRes.json()
+            if (doneData.paper_html && doneData.paper_html.length > 100) {
+              stopPhaseAnimation()
+              setPaperHtml(doneData.paper_html)
+              setGeneratingPaper(false)
+              _saveResearchPaper(hypothesis)
+              return
+            }
+          }
+        }
+
         // Poll for completion (Lambda generates async, stores HTML in DynamoDB)
         const pollInterval = 5000 // 5 seconds
         const maxPolls = 120     // 10 minutes max
@@ -245,6 +274,10 @@ export default function ProjectDetail() {
           while (pollCount < maxPolls) {
             pollCount++
             await new Promise(r => setTimeout(r, pollInterval))
+            // Check if user cancelled
+            if (!generatingPaperRef.current) {
+              return true
+            }
             try {
               const pollRes = await fetch(`${API_BASE}/orchestrator/paper-status`)
               if (pollRes.ok) {
@@ -256,7 +289,7 @@ export default function ProjectDetail() {
                   _saveResearchPaper(hypothesis)
                   return true
                 }
-                if (pollData.status === 'failed') {
+                if (pollData.status === 'failed' || pollData.status === 'idle') {
                   stopPhaseAnimation()
                   setPaperError(`Paper generation failed: ${pollData.error || 'Unknown error'}`)
                   setGeneratingPaper(false)
@@ -378,6 +411,7 @@ export default function ProjectDetail() {
 
   const closeViewer = useCallback(() => {
     if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl)
+    generatingPaperRef.current = false
     stopPhaseAnimation()
     setPdfBlobUrl(null)
     setPaperHtml(null)
@@ -542,6 +576,15 @@ export default function ProjectDetail() {
                 <p className="text-[var(--color-text-muted)] text-xs text-center mt-4">
                   Generating comprehensive research content — this may take a few minutes
                 </p>
+                <div className="flex justify-center mt-5">
+                  <button
+                    onClick={cancelPaperGeneration}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors text-sm"
+                  >
+                    <FiX className="w-4 h-4" />
+                    Stop Generation
+                  </button>
+                </div>
               </div>
             </div>
           )}

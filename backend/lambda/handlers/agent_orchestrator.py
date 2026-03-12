@@ -3179,8 +3179,32 @@ def generate_paper():
     hypothesis_id = body.get("hypothesis_id")
     hypothesis_data = body.get("hypothesis_data")  # Full hypothesis from frontend
 
-    # Store paper task in DynamoDB
+    # Check for existing paper or in-progress generation
     table = get_task_table()
+    try:
+        existing = table.get_item(Key={"id": PAPER_TASK_KEY}).get("Item")
+        if existing:
+            ex_status = existing.get("status", "")
+            ex_hyp = existing.get("hypothesis_id", "")
+            ex_html = existing.get("paper_html", "")
+            ex_updated = existing.get("updated_at", "")
+            # If a completed paper exists for this hypothesis, return it immediately
+            if ex_status == "done" and ex_hyp == (hypothesis_id or "all") and ex_html and len(ex_html) > 100:
+                print(f"[PAPER] Returning existing completed paper for hypothesis={hypothesis_id}")
+                return {"status": "already_done", "hypothesis_id": hypothesis_id or "all"}
+            # If generation is already in progress and not stale, don't restart
+            if ex_status == "generating" and ex_updated:
+                try:
+                    age = (datetime.utcnow() - datetime.fromisoformat(ex_updated)).total_seconds()
+                    if age < 960:  # Less than 16 min — still running
+                        print(f"[PAPER] Generation already in progress (age={age:.0f}s), not restarting")
+                        return {"status": "generating", "hypothesis_id": ex_hyp}
+                except Exception:
+                    pass
+    except Exception:
+        pass  # Proceed with fresh generation
+
+    # Store paper task in DynamoDB
     table.put_item(Item={
         "id": PAPER_TASK_KEY,
         "status": "generating",
@@ -3252,6 +3276,26 @@ def get_paper_status():
         # Treat cancelled as idle for the frontend
         if status == "cancelled":
             status = "idle"
+        # Detect stale "generating" — if updated_at is older than 16 minutes,
+        # the Lambda likely timed out without writing a final status.
+        if status == "generating":
+            updated_at = item.get("updated_at", "")
+            if updated_at:
+                try:
+                    last_update = datetime.fromisoformat(updated_at)
+                    age_seconds = (datetime.utcnow() - last_update).total_seconds()
+                    if age_seconds > 960:  # 16 minutes (Lambda max is 15 min)
+                        status = "failed"
+                        error_msg = "Paper generation timed out. Please try again."
+                        table.update_item(
+                            Key={"id": PAPER_TASK_KEY},
+                            UpdateExpression="SET #s = :s, #e = :e",
+                            ExpressionAttributeNames={"#s": "status", "#e": "error"},
+                            ExpressionAttributeValues={":s": "failed", ":e": error_msg},
+                        )
+                        print(f"[PAPER] Detected stale generating status (age={age_seconds:.0f}s), marked as failed")
+                except Exception:
+                    pass
         return serialize({
             "status": status,
             "paper_html": item.get("paper_html", ""),
