@@ -194,7 +194,14 @@ function computeHistogram(values: number[], bins = 15): { label: string; count: 
 
 // ─── Component ──────────────────────────────────────────────────
 export default function DataVisualization() {
-  const [charts, setCharts] = useState<ChartConfig[]>(() => persistGet<ChartConfig[]>('charts', []))
+  const [charts, setCharts] = useState<ChartConfig[]>(() => {
+    const raw = persistGet<any[]>('charts', [])
+    // Migrate old charts that lack the `options` field
+    return raw.map((c: any) => ({
+      ...c,
+      options: c.options ? { ...defaultOptions, ...c.options } : { ...defaultOptions, color: c.color || defaultOptions.color },
+    }))
+  })
   const [showAdd, setShowAdd] = useState(false)
   const [showSettings, setShowSettings] = useState<string | null>(null)
   const [expandedChart, setExpandedChart] = useState<string | null>(null)

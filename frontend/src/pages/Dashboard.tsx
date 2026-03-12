@@ -14,7 +14,7 @@ import {
   FiChevronRight,
   FiCpu,
 } from 'react-icons/fi'
-import { AreaChart, Area, ResponsiveContainer, Tooltip } from 'recharts'
+import { AreaChart, Area, ResponsiveContainer } from 'recharts'
 import api from '../services/api'
 import type { Project, OrchestratorStatus } from '../services/api'
 import { persistGet, getActivityLog, type ActivityEntry } from '../utils/persistence'
@@ -52,8 +52,8 @@ function StatCard({ stat }: { stat: StatData }) {
       <div className="text-sm text-[var(--color-text-muted)]">{stat.label}</div>
 
       {stat.chartData && stat.chartData.length > 0 && (
-        <div className="mt-4 h-0 group-hover:h-16 overflow-hidden transition-all duration-300 ease-in-out">
-          <ResponsiveContainer width="100%" height={64}>
+        <div className="mt-3 h-12">
+          <ResponsiveContainer width="100%" height={48}>
             <AreaChart data={stat.chartData}>
               <defs>
                 <linearGradient id={`grad-${stat.label}`} x1="0" y1="0" x2="0" y2="1">
@@ -68,21 +68,12 @@ function StatCard({ stat }: { stat: StatData }) {
                 fill={`url(#grad-${stat.label})`}
                 strokeWidth={1.5}
               />
-              <Tooltip
-                contentStyle={{
-                  background: 'var(--color-surface-solid)',
-                  border: '1px solid var(--color-border)',
-                  borderRadius: '8px',
-                  fontSize: '12px',
-                  color: 'var(--color-text)',
-                }}
-              />
             </AreaChart>
           </ResponsiveContainer>
         </div>
       )}
 
-      <div className="flex items-center gap-1 mt-3 text-xs text-[var(--color-text-muted)] opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="flex items-center gap-1 mt-2 text-xs text-[var(--color-text-muted)] opacity-0 group-hover:opacity-100 transition-opacity">
         View details <FiChevronRight className="w-3 h-3" />
       </div>
     </Link>

@@ -1,5 +1,6 @@
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import {
   FiHome,
   FiFolder,
@@ -258,6 +259,29 @@ function ConstantChat() {
     return () => window.removeEventListener('keydown', handler)
   }, [isOpen])
 
+  const generateFallbackResponse = (query: string): string => {
+    const q = query.toLowerCase()
+    if (q.includes('hypothesis') || q.includes('hypotheses'))
+      return 'You can view and manage your hypotheses in the Discovery section. Navigate there from the sidebar or press ⌘K and search "Discovery". Each hypothesis is generated with supporting evidence, confidence scores, and can be exported as a research paper.'
+    if (q.includes('paper') || q.includes('publication') || q.includes('manuscript'))
+      return 'Research papers are auto-generated from validated hypotheses. You can find them in your Project folder. Each paper includes introduction, methods, results, and discussion sections with proper citations.'
+    if (q.includes('project'))
+      return 'Projects organize your research — they contain hypotheses, evidence, and papers. Create a new project from the Dashboard or Projects page, then run Discovery to generate hypotheses for it.'
+    if (q.includes('evidence'))
+      return 'The Evidence section contains curated biomedical literature from PubMed, clinical trials, and other sources. Evidence is automatically linked to hypotheses during the discovery process.'
+    if (q.includes('statistic') || q.includes('analysis') || q.includes('t-test') || q.includes('anova'))
+      return 'The Statistical Analysis tool supports descriptive statistics, t-tests, ANOVA, chi-square tests, correlation matrices, regression, survival analysis, and sample size calculations. Enter your data and run the analysis.'
+    if (q.includes('genomic') || q.includes('pathway') || q.includes('gene'))
+      return 'The Genomics Analysis tool supports pathway enrichment analysis (KEGG/Reactome), gene set enrichment analysis (GSEA), variant annotation, and biomarker discovery with volcano plots.'
+    if (q.includes('visuali') || q.includes('chart') || q.includes('plot') || q.includes('graph'))
+      return 'The Data Visualization engine supports 29 chart types including bar, line, scatter, pie, radar, heatmap, box plots, and more. Upload a CSV or enter data manually, then customize with color palettes, axis labels, and export as PNG/SVG.'
+    if (q.includes('notebook'))
+      return 'The Notebook is a Markdown-based research journal with LaTeX math support, templates for research notes and experiment logs, version history, and export options.'
+    if (q.includes('hello') || q.includes('hi ') || q.includes('hey'))
+      return 'Hello! I\'m Constant, your AI research assistant. I can help you navigate the platform, explain features, and answer questions about your research workflow. What would you like to know?'
+    return 'I can help you navigate the platform and answer questions about your research. Try asking about hypotheses, projects, evidence, statistical analysis, genomics, visualizations, or any other feature. For AI-powered discovery, head to the Discovery section.'
+  }
+
   const sendMessage = async () => {
     if (!input.trim() || loading) return
     const userMsg = input.trim()
@@ -275,14 +299,94 @@ function ConstantChat() {
         const data = await res.json()
         setMessages(prev => [...prev, { role: 'assistant', text: data.response || 'I\'m not sure about that. Could you rephrase?' }])
       } else {
-        setMessages(prev => [...prev, { role: 'assistant', text: 'Something went wrong. Please try again.' }])
+        // API returned error — provide helpful fallback
+        setMessages(prev => [...prev, { role: 'assistant', text: generateFallbackResponse(userMsg) }])
       }
     } catch {
-      setMessages(prev => [...prev, { role: 'assistant', text: 'Something went wrong. Please try again.' }])
+      // API unreachable — provide helpful fallback
+      setMessages(prev => [...prev, { role: 'assistant', text: generateFallbackResponse(userMsg) }])
     } finally {
       setLoading(false)
     }
   }
+
+  const modal = isOpen ? createPortal(
+    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[12vh] animate-fade-in">
+      <div className="absolute inset-0 modal-overlay bg-black/50 backdrop-blur-sm" onClick={() => setIsOpen(false)} />
+      <div className="relative w-full max-w-2xl h-[70vh] mx-4 flex flex-col rounded-2xl border border-[var(--color-border)] overflow-hidden animate-scale-in" style={{ background: 'var(--color-surface-solid)', boxShadow: 'var(--glass-shadow)' }}>
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--color-border)]">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'rgba(168, 85, 247, 0.1)' }}>
+              <FiMessageCircle className="w-4 h-4" style={{ color: 'var(--color-accent-purple)' }} />
+            </div>
+            <div>
+              <h2 className="text-sm font-semibold text-[var(--color-text)]">Constant</h2>
+              <p className="text-xxs text-[var(--color-text-muted)]">AI Research Assistant</p>
+            </div>
+          </div>
+          <button onClick={() => setIsOpen(false)} className="p-2 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)] transition-all">
+            <FiX className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+          {messages.map((msg, i) => (
+            <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              <div
+                className={`max-w-[80%] px-4 py-3 rounded-2xl text-sm leading-relaxed ${
+                  msg.role === 'assistant'
+                    ? 'bg-[var(--glass-bg)] text-[var(--color-text-secondary)] rounded-tl-md'
+                    : 'rounded-tr-md text-[var(--color-text)]'
+                }`}
+                style={msg.role === 'user' ? { background: 'rgba(168, 85, 247, 0.1)' } : {}}
+              >
+                {msg.role === 'assistant' && (
+                  <span className="text-[var(--color-accent-purple)] font-medium text-xs block mb-1">Constant</span>
+                )}
+                {msg.text}
+              </div>
+            </div>
+          ))}
+          {loading && (
+            <div className="flex justify-start">
+              <div className="max-w-[80%] px-4 py-3 rounded-2xl rounded-tl-md bg-[var(--glass-bg)] text-[var(--color-text-muted)] text-sm">
+                <span className="text-[var(--color-accent-purple)] font-medium text-xs block mb-1">Constant</span>
+                <span className="animate-pulse">Thinking...</span>
+              </div>
+            </div>
+          )}
+          <div ref={chatEndRef} />
+        </div>
+
+        {/* Input */}
+        <div className="px-5 py-4 border-t border-[var(--color-border)]">
+          <div className="flex items-center gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--glass-bg)] px-4 py-3">
+            <input
+              ref={inputRef}
+              type="text"
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && sendMessage()}
+              placeholder="Ask Constant about your research..."
+              className="flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--color-text-muted)]"
+            />
+            <button
+              onClick={sendMessage}
+              disabled={!input.trim() || loading}
+              className="p-2 rounded-lg text-white disabled:opacity-30 transition-all"
+              style={{ background: 'var(--color-accent-purple)' }}
+            >
+              <FiSend className="w-4 h-4" />
+            </button>
+          </div>
+          <p className="text-xxs text-[var(--color-text-muted)] mt-2 text-center">Press Enter to send, Escape to close</p>
+        </div>
+      </div>
+    </div>,
+    document.body
+  ) : null
 
   return (
     <div className="mb-1">
@@ -294,84 +398,7 @@ function ConstantChat() {
         <FiMessageCircle className="w-4 h-4" style={{ color: 'var(--color-accent-purple)' }} />
         <span className="font-medium">Constant</span>
       </button>
-
-      {/* Full-screen centered modal */}
-      {isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center animate-fade-in">
-          <div className="absolute inset-0 modal-overlay bg-black/50 backdrop-blur-sm" onClick={() => setIsOpen(false)} />
-          <div className="relative w-full max-w-2xl h-[70vh] mx-4 flex flex-col rounded-2xl border border-[var(--color-border)] overflow-hidden animate-scale-in" style={{ background: 'var(--color-surface-solid)', boxShadow: 'var(--glass-shadow)' }}>
-            {/* Header */}
-            <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--color-border)]">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'rgba(168, 85, 247, 0.1)' }}>
-                  <FiMessageCircle className="w-4 h-4" style={{ color: 'var(--color-accent-purple)' }} />
-                </div>
-                <div>
-                  <h2 className="text-sm font-semibold text-[var(--color-text)]">Constant</h2>
-                  <p className="text-xxs text-[var(--color-text-muted)]">AI Research Assistant</p>
-                </div>
-              </div>
-              <button onClick={() => setIsOpen(false)} className="p-2 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)] transition-all">
-                <FiX className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Messages */}
-            <div className="flex-1 overflow-y-auto p-5 space-y-4">
-              {messages.map((msg, i) => (
-                <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div
-                    className={`max-w-[80%] px-4 py-3 rounded-2xl text-sm leading-relaxed ${
-                      msg.role === 'assistant'
-                        ? 'bg-[var(--glass-bg)] text-[var(--color-text-secondary)] rounded-tl-md'
-                        : 'rounded-tr-md text-[var(--color-text)]'
-                    }`}
-                    style={msg.role === 'user' ? { background: 'rgba(168, 85, 247, 0.1)' } : {}}
-                  >
-                    {msg.role === 'assistant' && (
-                      <span className="text-[var(--color-accent-purple)] font-medium text-xs block mb-1">Constant</span>
-                    )}
-                    {msg.text}
-                  </div>
-                </div>
-              ))}
-              {loading && (
-                <div className="flex justify-start">
-                  <div className="max-w-[80%] px-4 py-3 rounded-2xl rounded-tl-md bg-[var(--glass-bg)] text-[var(--color-text-muted)] text-sm">
-                    <span className="text-[var(--color-accent-purple)] font-medium text-xs block mb-1">Constant</span>
-                    <span className="animate-pulse">Thinking...</span>
-                  </div>
-                </div>
-              )}
-              <div ref={chatEndRef} />
-            </div>
-
-            {/* Input */}
-            <div className="px-5 py-4 border-t border-[var(--color-border)]">
-              <div className="flex items-center gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--glass-bg)] px-4 py-3">
-                <input
-                  ref={inputRef}
-                  type="text"
-                  value={input}
-                  onChange={e => setInput(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && sendMessage()}
-                  placeholder="Ask Constant about your research..."
-                  className="flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--color-text-muted)]"
-                />
-                <button
-                  onClick={sendMessage}
-                  disabled={!input.trim() || loading}
-                  className="p-2 rounded-lg text-white disabled:opacity-30 transition-all"
-                  style={{ background: 'var(--color-accent-purple)' }}
-                >
-                  <FiSend className="w-4 h-4" />
-                </button>
-              </div>
-              <p className="text-xxs text-[var(--color-text-muted)] mt-2 text-center">Press Enter to send, Escape to close</p>
-            </div>
-          </div>
-        </div>
-      )}
+      {modal}
     </div>
   )
 }
