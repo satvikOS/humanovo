@@ -451,7 +451,7 @@ PAPER_TASK_KEY = "active-paper"
 
 BEDROCK_MODEL_CLAUDE_OPUS = os.environ.get("BEDROCK_MODEL_ID", "us.anthropic.claude-opus-4-6-v1:0")
 BEDROCK_MODEL_CLAUDE_SONNET = os.environ.get("BEDROCK_SONNET_ID", "us.anthropic.claude-sonnet-4-20250514-v1:0")
-BEDROCK_MODEL_CLAUDE_OPUS_45 = os.environ.get("BEDROCK_OPUS_45_ID", "us.anthropic.claude-opus-4-5-20250610-v1:0")
+BEDROCK_MODEL_CLAUDE_OPUS_45 = os.environ.get("BEDROCK_OPUS_45_ID", "us.anthropic.claude-opus-4-5-20251101-v1:0")
 BEDROCK_MODEL_NOVA_PREMIER = os.environ.get("BEDROCK_NOVA_PREMIER_ID", "us.amazon.nova-premier-v1:0")
 AZURE_AI_REASONER_MODEL = os.environ.get("AZURE_AI_REASONER_MODEL", "DeepSeek-R1")
 AZURE_AI_CRITIC_MODEL = os.environ.get("AZURE_AI_CRITIC_MODEL", "Mistral-Large-3")
