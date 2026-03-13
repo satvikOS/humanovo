@@ -4,7 +4,8 @@ import {
   FiEdit3, FiEye, FiColumns, FiFileText,
   FiCode, FiHash, FiRotateCcw, FiX, FiSearch,
   FiCopy, FiBookOpen, FiGrid, FiList,
-  FiPrinter, FiClipboard, FiTarget, FiActivity
+  FiPrinter, FiClipboard, FiTarget, FiActivity,
+  FiBold, FiItalic, FiImage, FiLink, FiType
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import ReactMarkdown from 'react-markdown'
@@ -12,7 +13,24 @@ import remarkMath from 'remark-math'
 import remarkGfm from 'remark-gfm'
 import rehypeKatex from 'rehype-katex'
 import 'katex/dist/katex.min.css'
+import { marked } from 'marked'
+import TurndownService from 'turndown'
 import api, { NotebookPage, NotebookVersion } from '../services/api'
+
+// Configure turndown for HTML-to-markdown conversion
+const turndownService = new TurndownService({
+  headingStyle: 'atx',
+  codeBlockStyle: 'fenced',
+  emDelimiter: '*',
+})
+// Keep images with base64 data URIs
+turndownService.addRule('base64images', {
+  filter: (node: any) => node.nodeName === 'IMG' && node.getAttribute('src')?.startsWith('data:'),
+  replacement: (_content: string, node: any) => `![${node.getAttribute('alt') || 'Image'}](${node.getAttribute('src')})`,
+})
+
+// Configure marked for markdown-to-HTML
+marked.setOptions({ gfm: true, breaks: true })
 
 type ViewMode = 'edit' | 'preview' | 'split'
 type CitationStyle = 'apa' | 'mla' | 'chicago' | 'vancouver' | 'harvard'
@@ -1170,6 +1188,73 @@ export default function Notebook() {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const saveTimerRef = useRef<number | null>(null)
   const editorRef = useRef<HTMLTextAreaElement>(null)
+  const richEditorRef = useRef<HTMLDivElement>(null)
+  const isUpdatingRef = useRef(false)
+
+  // Convert markdown to HTML for the WYSIWYG editor
+  const richEditorHtml = useMemo(() => {
+    if (!editContent) return ''
+    try {
+      return marked.parse(editContent) as string
+    } catch {
+      return `<p>${editContent}</p>`
+    }
+  }, [editContent])
+
+  // Sync rich editor HTML changes back to markdown
+  const handleRichEditorInput = useCallback(() => {
+    if (isUpdatingRef.current) return
+    const el = richEditorRef.current
+    if (!el) return
+    try {
+      isUpdatingRef.current = true
+      const html = el.innerHTML
+      const md = turndownService.turndown(html)
+      setEditContent(md)
+      setHasUnsavedChanges(true)
+      scheduleAutoSave()
+    } finally {
+      isUpdatingRef.current = false
+    }
+  }, [scheduleAutoSave])
+
+  // Handle paste in rich editor: intercept images and render them inline
+  const handleRichPaste = useCallback((e: React.ClipboardEvent<HTMLDivElement>) => {
+    const items = e.clipboardData?.items
+    if (!items) return
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith('image/')) {
+        e.preventDefault()
+        const file = items[i].getAsFile()
+        if (!file) return
+        const reader = new FileReader()
+        reader.onload = () => {
+          const base64 = reader.result as string
+          document.execCommand('insertImage', false, base64)
+          // Sync back to markdown after a small delay
+          setTimeout(() => handleRichEditorInput(), 50)
+        }
+        reader.readAsDataURL(file)
+        return
+      }
+    }
+  }, [handleRichEditorInput])
+
+  // When editContent changes externally (template selection, version restore), update the rich editor
+  useEffect(() => {
+    if (isUpdatingRef.current) return
+    const el = richEditorRef.current
+    if (!el) return
+    // Only update if content actually differs to avoid cursor jumping
+    try {
+      const currentMd = turndownService.turndown(el.innerHTML)
+      if (currentMd !== editContent) {
+        el.innerHTML = richEditorHtml
+      }
+    } catch {
+      el.innerHTML = richEditorHtml
+    }
+  }, [richEditorHtml])
 
   // Load pages
   useEffect(() => {
@@ -1320,26 +1405,26 @@ export default function Notebook() {
   const createPage = async (template?: typeof templates[0]) => {
     const title = template ? template.name : 'Untitled'
     const content = template?.content || ''
+    const categoryTag = template?.category ? `category:${template.category}` : 'category:general'
+    const tags = [categoryTag]
     try {
       const page = await api.createNotebookPage({
         title,
         content,
         content_type: 'markdown',
-        tags: [],
+        tags,
       })
-      // Ensure content from template is preserved even if API doesn't return it
-      const pageWithContent = { ...page, content: page.content || content }
+      const pageWithContent = { ...page, content: page.content || content, tags: page.tags?.length ? page.tags : tags }
       setPages(prev => [pageWithContent, ...prev])
       selectPage(pageWithContent)
     } catch (err) {
       console.error('Failed to create page via API, creating locally:', err)
-      // Fallback: create a local page so the UI isn't blank
       const localPage: NotebookPage = {
         id: `local-${Date.now()}`,
         title,
         content,
         content_type: 'markdown',
-        tags: [],
+        tags,
         version: 1,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -1348,6 +1433,12 @@ export default function Notebook() {
       selectPage(localPage)
     }
     setShowTemplates(false)
+  }
+
+  // Helper to extract template category from page tags
+  const getPageCategory = (page: NotebookPage | null): TemplateCategory => {
+    const catTag = (page?.tags || []).find(t => t.startsWith('category:'))
+    return (catTag?.replace('category:', '') as TemplateCategory) || 'general'
   }
 
   const deletePage = async (id: string) => {
@@ -1538,6 +1629,7 @@ export default function Notebook() {
               )}
             >
               <div className="flex items-center justify-between">
+                <div className="w-1.5 h-1.5 rounded-full shrink-0 mr-1.5" style={{ background: TEMPLATE_CATEGORY_COLORS[getPageCategory(page)] || '#94a3b8' }} />
                 <span className="text-xs font-medium truncate flex-1">{page.title}</span>
                 <button
                   onClick={e => { e.stopPropagation(); deletePage(page.id) }}
@@ -1588,8 +1680,20 @@ export default function Notebook() {
       {/* Main content */}
       {activePage ? (
         <div className="flex-1 flex flex-col min-w-0">
+          {/* Category color band */}
+          <div className="h-1 shrink-0" style={{ background: TEMPLATE_CATEGORY_COLORS[getPageCategory(activePage)] || '#94a3b8' }} />
           {/* Toolbar */}
           <div className="px-4 py-2 border-b border-[var(--color-border)] flex items-center gap-2 shrink-0">
+            {/* Category badge */}
+            <span
+              className="text-xxs px-1.5 py-0.5 rounded font-medium shrink-0"
+              style={{
+                background: (TEMPLATE_CATEGORY_COLORS[getPageCategory(activePage)] || '#94a3b8') + '20',
+                color: TEMPLATE_CATEGORY_COLORS[getPageCategory(activePage)] || '#94a3b8',
+              }}
+            >
+              {TEMPLATE_CATEGORY_LABELS[getPageCategory(activePage)] || 'General'}
+            </span>
             {/* Title */}
             <input
               type="text"
@@ -1720,28 +1824,60 @@ export default function Notebook() {
 
           {/* Editor / Preview area */}
           <div className="flex-1 flex min-h-0 overflow-hidden">
-            {/* Editor pane */}
+            {/* Left pane: WYSIWYG rich text editor OR raw markdown */}
             {(viewMode === 'edit' || viewMode === 'split') && (
               <div className={clsx('flex-1 flex flex-col min-w-0', viewMode === 'split' && 'border-r border-[var(--color-border)]')}>
-                <textarea
-                  ref={editorRef}
-                  value={editContent}
-                  onChange={e => handleContentChange(e.target.value)}
-                  onPaste={handlePaste}
-                  className="flex-1 w-full p-4 bg-transparent text-sm font-mono resize-none outline-none leading-relaxed"
-                  placeholder="Start writing in Markdown...
-
-Supports:
-- **Bold**, *italic*, ~~strikethrough~~
-- LaTeX: $E = mc^2$ or $$\int_0^\infty$$
-- Tables, code blocks, lists
-- Links, images, and more"
-                  spellCheck={false}
+                {/* Mini formatting toolbar */}
+                <div className="flex items-center gap-0.5 px-3 py-1 border-b border-[var(--color-border)] bg-[var(--color-surface)] shrink-0">
+                  <button onClick={() => { document.execCommand('bold') }} className="p-1 rounded hover:bg-white/10 text-[var(--color-text-muted)] hover:text-white" title="Bold"><FiBold className="w-3 h-3" /></button>
+                  <button onClick={() => { document.execCommand('italic') }} className="p-1 rounded hover:bg-white/10 text-[var(--color-text-muted)] hover:text-white" title="Italic"><FiItalic className="w-3 h-3" /></button>
+                  <div className="w-px h-3.5 bg-[var(--color-border)] mx-1" />
+                  <button onClick={() => { document.execCommand('formatBlock', false, 'h1') }} className="p-1 rounded hover:bg-white/10 text-[var(--color-text-muted)] hover:text-white text-xxs font-bold" title="Heading 1">H1</button>
+                  <button onClick={() => { document.execCommand('formatBlock', false, 'h2') }} className="p-1 rounded hover:bg-white/10 text-[var(--color-text-muted)] hover:text-white text-xxs font-bold" title="Heading 2">H2</button>
+                  <button onClick={() => { document.execCommand('formatBlock', false, 'h3') }} className="p-1 rounded hover:bg-white/10 text-[var(--color-text-muted)] hover:text-white text-xxs font-bold" title="Heading 3">H3</button>
+                  <div className="w-px h-3.5 bg-[var(--color-border)] mx-1" />
+                  <button onClick={() => { document.execCommand('insertUnorderedList') }} className="p-1 rounded hover:bg-white/10 text-[var(--color-text-muted)] hover:text-white text-xxs" title="Bullet List">List</button>
+                  <button onClick={() => { document.execCommand('insertOrderedList') }} className="p-1 rounded hover:bg-white/10 text-[var(--color-text-muted)] hover:text-white text-xxs" title="Numbered List">1.</button>
+                  <div className="w-px h-3.5 bg-[var(--color-border)] mx-1" />
+                  <button onClick={() => {
+                    const url = prompt('Enter link URL:')
+                    if (url) document.execCommand('createLink', false, url)
+                  }} className="p-1 rounded hover:bg-white/10 text-[var(--color-text-muted)] hover:text-white" title="Insert Link"><FiLink className="w-3 h-3" /></button>
+                  <button onClick={() => {
+                    const input = document.createElement('input')
+                    input.type = 'file'
+                    input.accept = 'image/*'
+                    input.onchange = (e: any) => {
+                      const file = e.target.files?.[0]
+                      if (!file) return
+                      const reader = new FileReader()
+                      reader.onload = () => { document.execCommand('insertImage', false, reader.result as string) }
+                      reader.readAsDataURL(file)
+                    }
+                    input.click()
+                  }} className="p-1 rounded hover:bg-white/10 text-[var(--color-text-muted)] hover:text-white" title="Insert Image"><FiImage className="w-3 h-3" /></button>
+                  <div className="w-px h-3.5 bg-[var(--color-border)] mx-1" />
+                  <button onClick={() => setViewMode(viewMode === 'edit' ? 'split' : 'edit')} className="p-1 rounded hover:bg-white/10 text-[var(--color-text-muted)] hover:text-white" title="Toggle raw markdown">
+                    <FiCode className="w-3 h-3" />
+                  </button>
+                  <span className="text-xxs text-[var(--color-text-muted)] ml-auto">Rich Editor</span>
+                </div>
+                {/* WYSIWYG contenteditable editor */}
+                <div
+                  ref={richEditorRef as any}
+                  contentEditable
+                  suppressContentEditableWarning
+                  className="flex-1 w-full p-4 overflow-y-auto text-sm leading-relaxed outline-none rich-editor-pane"
+                  style={{ minHeight: 0, wordBreak: 'break-word' }}
+                  onInput={handleRichEditorInput}
+                  onPaste={handleRichPaste}
+                  onBlur={handleRichEditorInput}
+                  dangerouslySetInnerHTML={{ __html: richEditorHtml }}
                 />
               </div>
             )}
 
-            {/* Preview pane */}
+            {/* Right pane: rendered document view (read-only styled) */}
             {(viewMode === 'preview' || viewMode === 'split') && (
               <div className="flex-1 overflow-y-auto min-w-0">
                 <div className="notebook-preview-pane p-6 max-w-3xl mx-auto prose prose-invert prose-sm

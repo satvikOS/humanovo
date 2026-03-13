@@ -115,6 +115,10 @@ export default function GenomicsAnalysis() {
         body = { expression_data: biomarkerData.split('\n').filter(l => l.trim()).map(l => { const [gene, rest] = l.split(',', 2).map(s => s.trim()); const groups = (rest || '').split(';'); return { gene, group1_values: groups[0]?.split(',').map(Number) || [], group2_values: groups[1]?.split(',').map(Number) || [] } }) }
       }
       const res = await fetch(`${API}${endpoint}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      const contentType = res.headers.get('content-type') || ''
+      if (!contentType.includes('application/json')) {
+        throw new Error('Backend API is not available. Please ensure the server is running.')
+      }
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Analysis failed')
       setResult(await res.json())
     } catch (e: any) { setError(e.message) } finally { setLoading(false) }
