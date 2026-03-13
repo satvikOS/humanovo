@@ -3,6 +3,7 @@ import {
   FiBarChart2, FiPlus, FiTrash2,
   FiDownload, FiUpload, FiSettings, FiSave, FiX,
   FiMaximize2, FiMinimize2, FiEdit3, FiCopy, FiDroplet,
+  FiClipboard, FiCheck,
 } from 'react-icons/fi'
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
@@ -374,6 +375,43 @@ export default function DataVisualization() {
     const a = document.createElement('a')
     a.download = `${chart.title.replace(/\s+/g, '-').toLowerCase()}.csv`
     a.href = URL.createObjectURL(blob); a.click(); URL.revokeObjectURL(a.href)
+  }, [])
+
+  // ─── Copy chart to clipboard as image ──────────────────────
+  const [copiedChart, setCopiedChart] = useState<string | null>(null)
+
+  const copyChartToClipboard = useCallback(async (id: string) => {
+    const el = chartRefs.current[id]
+    if (!el) return
+    const svg = el.querySelector('svg')
+    if (!svg) return
+    const svgData = new XMLSerializer().serializeToString(svg)
+    const canvas = document.createElement('canvas')
+    const r = svg.getBoundingClientRect()
+    canvas.width = r.width * 2; canvas.height = r.height * 2
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.scale(2, 2)
+    ctx.fillStyle = '#0f172a'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    const img = new Image()
+    img.onload = async () => {
+      ctx.drawImage(img, 0, 0)
+      try {
+        const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
+        if (blob) {
+          await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+          setCopiedChart(id)
+          setTimeout(() => setCopiedChart(null), 2000)
+        }
+      } catch {
+        // Fallback: copy SVG markup
+        await navigator.clipboard.writeText(svgData)
+        setCopiedChart(id)
+        setTimeout(() => setCopiedChart(null), 2000)
+      }
+    }
+    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)))
   }, [])
 
   // ─── Grouped chart types for dropdown ───────────────────────
@@ -1122,6 +1160,10 @@ export default function DataVisualization() {
                     <button onClick={() => exportCsv(chart)}
                       className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-accent-orange)]" title="CSV">
                       <FiCopy className="w-3.5 h-3.5" />
+                    </button>
+                    <button onClick={() => copyChartToClipboard(chart.id)}
+                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-accent-cyan)]" title="Copy to clipboard">
+                      {copiedChart === chart.id ? <FiCheck className="w-3.5 h-3.5 text-[var(--color-success)]" /> : <FiClipboard className="w-3.5 h-3.5" />}
                     </button>
                     <button onClick={() => duplicateChart(chart)}
                       className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="Duplicate">
