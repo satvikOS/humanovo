@@ -759,13 +759,6 @@ if (path === '/clinical-trials') return 'Clinical Trials'
                       Profile
                     </button>
                     <button
-                      onClick={() => { navigate('/settings?tab=api'); setIsUserMenuOpen(false) }}
-                      className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)] transition-all"
-                    >
-                      <FiFileText className="w-3.5 h-3.5" />
-                      API Keys
-                    </button>
-                    <button
                       onClick={() => { navigate('/settings?tab=appearance'); setIsUserMenuOpen(false) }}
                       className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)] transition-all"
                     >

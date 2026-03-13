@@ -552,7 +552,31 @@ function MCSimulationForm({ onResult, onClose }: { onResult: (r: MCResult) => vo
 // ── MC Simulation Result Card ───────────────────────────────────
 function MCSimulationCard({ result, onDelete }: { result: MCResult; onDelete: (id: string) => void }) {
   const [expanded, setExpanded] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const chartRef = useRef<HTMLDivElement>(null)
   const typeLabel = SIMULATION_TYPES.find(t => t.id === result.simulationType)?.label || result.simulationType
+
+  const copyChartsToClipboard = useCallback(async () => {
+    const el = chartRef.current
+    if (!el) return
+    try {
+      const canvas = await html2canvas(el, {
+        backgroundColor: '#0f0f14',
+        scale: 2,
+        useCORS: true,
+        logging: false,
+      })
+      const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
+      if (blob) {
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+      }
+    } catch {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }
+  }, [])
 
   return (
     <div className="glass-card p-5 hover:bg-[var(--glass-bg-hover)] transition-all">
@@ -603,39 +627,51 @@ function MCSimulationCard({ result, onDelete }: { result: MCResult; onDelete: (i
 
       {expanded && (
         <div className="space-y-4 mt-3">
-          {/* Histogram */}
-          <div>
-            <h4 className="text-xs font-medium text-[var(--color-text-secondary)] mb-2 uppercase tracking-wider">Result Distribution</h4>
-            <div className="h-48">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={result.histogramData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                  <XAxis dataKey="bin" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} interval="preserveStartEnd" />
-                  <YAxis tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} />
-                  <Tooltip contentStyle={{ backgroundColor: 'var(--glass-bg)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '12px', color: 'var(--color-text)' }} />
-                  <Bar dataKey="count" fill="var(--color-accent-blue)" radius={[2, 2, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+          <div ref={chartRef} className="space-y-4 p-2 rounded-lg" style={{ background: '#0f0f14' }}>
+            {/* Histogram */}
+            <div>
+              <h4 className="text-xs font-medium text-[var(--color-text-secondary)] mb-2 uppercase tracking-wider">Result Distribution</h4>
+              <div className="h-48">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={result.histogramData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                    <XAxis dataKey="bin" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} interval="preserveStartEnd" />
+                    <YAxis tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} />
+                    <Tooltip contentStyle={{ backgroundColor: 'var(--glass-bg)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '12px', color: 'var(--color-text)' }} />
+                    <Bar dataKey="count" fill="var(--color-accent-blue)" radius={[2, 2, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* Convergence plot */}
+            <div>
+              <h4 className="text-xs font-medium text-[var(--color-text-secondary)] mb-2 uppercase tracking-wider">Convergence (Running Mean)</h4>
+              <div className="h-40">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={result.convergenceData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                    <XAxis dataKey="iteration" tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} />
+                    <YAxis tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} domain={['auto', 'auto']} />
+                    <Tooltip contentStyle={{ backgroundColor: 'var(--glass-bg)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '12px', color: 'var(--color-text)' }} />
+                    <Line type="monotone" dataKey="mean" stroke="var(--color-accent-green)" strokeWidth={1.5} dot={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
             </div>
           </div>
 
-          {/* Convergence plot */}
-          <div>
-            <h4 className="text-xs font-medium text-[var(--color-text-secondary)] mb-2 uppercase tracking-wider">Convergence (Running Mean)</h4>
-            <div className="h-40">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={result.convergenceData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                  <XAxis dataKey="iteration" tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} />
-                  <YAxis tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} domain={['auto', 'auto']} />
-                  <Tooltip contentStyle={{ backgroundColor: 'var(--glass-bg)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '12px', color: 'var(--color-text)' }} />
-                  <Line type="monotone" dataKey="mean" stroke="var(--color-accent-green)" strokeWidth={1.5} dot={false} />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
+          <div className="flex items-center justify-between">
+            <p className="text-[10px] text-[var(--color-text-muted)]">Created: {new Date(result.createdAt).toLocaleString()}</p>
+            <button
+              onClick={copyChartsToClipboard}
+              className="flex items-center gap-1 px-2 py-1 text-xs rounded hover:bg-white/5 text-[var(--color-text-muted)] hover:text-white transition-all"
+              title="Copy charts to clipboard"
+            >
+              {copied ? <FiCheck className="w-3 h-3 text-[var(--color-accent-green)]" /> : <FiClipboard className="w-3 h-3" />}
+              {copied ? 'Copied!' : 'Copy Charts'}
+            </button>
           </div>
-
-          <p className="text-[10px] text-[var(--color-text-muted)]">Created: {new Date(result.createdAt).toLocaleString()}</p>
         </div>
       )}
     </div>

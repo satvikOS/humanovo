@@ -78,7 +78,7 @@ function citationPlaceholders(style: CitationStyle): { example1: string; example
   }
 }
 
-type TemplateCategory = 'general' | 'research' | 'clinical' | 'analysis' | 'collaboration'
+type TemplateCategory = 'general' | 'research' | 'clinical' | 'analysis' | 'collaboration' | 'publication'
 
 const TEMPLATE_CATEGORY_COLORS: Record<TemplateCategory, string> = {
   general: '#94a3b8',
@@ -86,6 +86,7 @@ const TEMPLATE_CATEGORY_COLORS: Record<TemplateCategory, string> = {
   clinical: '#ef4444',
   analysis: '#22c55e',
   collaboration: '#f59e0b',
+  publication: '#a855f7',
 }
 
 const TEMPLATE_CATEGORY_LABELS: Record<TemplateCategory, string> = {
@@ -94,6 +95,7 @@ const TEMPLATE_CATEGORY_LABELS: Record<TemplateCategory, string> = {
   clinical: 'Clinical',
   analysis: 'Analysis',
   collaboration: 'Collaboration',
+  publication: 'Publication',
 }
 
 function buildTemplates(style: CitationStyle): { name: string; icon: React.ReactNode; description: string; content: string; category: TemplateCategory }[] {
@@ -1153,6 +1155,341 @@ $$
 2. ${cite.example2}
 `,
   },
+  {
+    name: 'Journal Article',
+    icon: <FiFileText className="w-4 h-4" />,
+    description: 'IMRAD-format journal article manuscript',
+    category: 'publication' as TemplateCategory,
+    content: `# [Article Title]
+
+> **Authors:** [Author 1], [Author 2], [Author 3]
+> **Affiliations:** [Department, Institution, City, Country]
+> **Corresponding author:** [Email]
+
+---
+
+## Abstract
+
+**Background:** [1-2 sentences on context and knowledge gap]
+
+**Methods:** [1-2 sentences on study design and approach]
+
+**Results:** [2-3 sentences on key findings with quantitative data]
+
+**Conclusions:** [1-2 sentences on implications]
+
+**Keywords:** [keyword 1], [keyword 2], [keyword 3], [keyword 4], [keyword 5]
+
+---
+
+## 1. Introduction
+
+[Paragraph 1: Broad context — what is the field and why does it matter?]
+
+[Paragraph 2: What is currently known — key findings from prior work]
+
+[Paragraph 3: What is the gap — what remains unknown or unresolved?]
+
+[Paragraph 4: Study objective — what does this paper aim to address?]
+
+## 2. Methods
+
+### 2.1 Study Design
+[Study type, setting, time period, ethical approvals]
+
+### 2.2 Participants / Samples
+[Selection criteria, sample size, demographics]
+
+### 2.3 Procedures
+[Experimental or clinical procedures, instruments used]
+
+### 2.4 Statistical Analysis
+[Tests used, significance thresholds, software]
+
+## 3. Results
+
+### 3.1 [Primary Outcome]
+
+| Group | n | Outcome (Mean ± SD) | p-value |
+|-------|---|---------------------|---------|
+| Control | | | |
+| Treatment | | | |
+
+### 3.2 [Secondary Outcomes]
+[Additional findings]
+
+## 4. Discussion
+
+[Summary of key findings, comparison with literature, strengths, limitations, implications]
+
+## 5. Conclusions
+
+[Concise summary of main findings and their significance]
+
+## Acknowledgments
+
+[Funding sources, contributors]
+
+## Conflict of Interest
+
+The authors declare no conflicts of interest.
+
+## References (${cite.format})
+
+1. ${cite.example1}
+2. ${cite.example2}
+`,
+  },
+  {
+    name: 'Thesis / Dissertation',
+    icon: <FiBookOpen className="w-4 h-4" />,
+    description: 'Graduate thesis or dissertation chapter structure',
+    category: 'publication' as TemplateCategory,
+    content: `# [Thesis Title]
+
+> **Author:** [Full Name]
+> **Degree:** [PhD / MSc / MD] in [Field]
+> **Institution:** [University Name]
+> **Supervisor:** [Name, Title]
+> **Date:** ${new Date().toISOString().split('T')[0]}
+
+---
+
+## Abstract
+
+[250-350 word summary covering background, objectives, methods, results, and conclusions]
+
+**Keywords:** [keyword 1], [keyword 2], [keyword 3], [keyword 4], [keyword 5]
+
+---
+
+## Chapter 1: Introduction
+
+### 1.1 Background
+[Broad overview of the research area]
+
+### 1.2 Problem Statement
+[Specific problem this thesis addresses]
+
+### 1.3 Research Questions
+1. [Research question 1]
+2. [Research question 2]
+3. [Research question 3]
+
+### 1.4 Objectives
+**Primary objective:** [Main aim]
+
+**Secondary objectives:**
+- [Objective 1]
+- [Objective 2]
+
+### 1.5 Thesis Structure
+[Brief overview of each chapter]
+
+---
+
+## Chapter 2: Literature Review
+
+### 2.1 [Major Theme 1]
+[Review of relevant literature]
+
+### 2.2 [Major Theme 2]
+[Review of relevant literature]
+
+### 2.3 Summary and Research Gap
+[Synthesis and identification of the gap this thesis fills]
+
+---
+
+## Chapter 3: Methodology
+
+### 3.1 Research Design
+[Overall approach and justification]
+
+### 3.2 Data Collection
+[Sources, instruments, sampling strategy]
+
+### 3.3 Data Analysis
+[Analytical methods, software, statistical tests]
+
+### 3.4 Ethical Considerations
+[IRB approval, informed consent, data handling]
+
+---
+
+## Chapter 4: Results
+
+### 4.1 [Result Set 1]
+[Findings with tables and figures]
+
+### 4.2 [Result Set 2]
+[Findings with tables and figures]
+
+---
+
+## Chapter 5: Discussion
+
+### 5.1 Summary of Findings
+### 5.2 Comparison with Literature
+### 5.3 Implications
+### 5.4 Limitations
+### 5.5 Future Research
+
+---
+
+## Chapter 6: Conclusions
+
+[Final synthesis of the thesis contribution]
+
+---
+
+## References (${cite.format})
+
+1. ${cite.example1}
+2. ${cite.example2}
+
+## Appendices
+
+### Appendix A: [Title]
+[Supplementary material]
+`,
+  },
+  {
+    name: 'Book Chapter',
+    icon: <FiHash className="w-4 h-4" />,
+    description: 'Contributed book chapter with section structure',
+    category: 'publication' as TemplateCategory,
+    content: `# [Chapter Title]
+
+> **Authors:** [Author 1], [Author 2]
+> **Book:** [Book Title]
+> **Editors:** [Editor 1], [Editor 2]
+> **Publisher:** [Publisher Name]
+
+---
+
+## 1. Introduction
+
+[Opening paragraph establishing the chapter's topic within the broader book context]
+
+## 2. [Main Section Title]
+
+### 2.1 [Subsection]
+[Content with appropriate depth for a book chapter audience]
+
+### 2.2 [Subsection]
+[Content]
+
+## 3. [Main Section Title]
+
+### 3.1 [Subsection]
+[Content]
+
+### 3.2 [Subsection]
+[Content]
+
+## 4. [Main Section Title]
+
+[Content]
+
+## 5. Current Challenges and Future Directions
+
+[Discussion of open questions and emerging trends]
+
+## 6. Summary
+
+**Key takeaways:**
+- [Point 1]
+- [Point 2]
+- [Point 3]
+
+## Glossary
+
+| Term | Definition |
+|------|-----------|
+| [Term 1] | [Definition] |
+| [Term 2] | [Definition] |
+
+## References (${cite.format})
+
+1. ${cite.example1}
+2. ${cite.example2}
+`,
+  },
+  {
+    name: 'Review Article',
+    icon: <FiList className="w-4 h-4" />,
+    description: 'Narrative or systematic review article',
+    category: 'publication' as TemplateCategory,
+    content: `# [Review Title]: A [Systematic / Narrative] Review
+
+> **Authors:** [Author 1], [Author 2]
+> **Target journal:** [Journal Name]
+> **Date:** ${new Date().toISOString().split('T')[0]}
+
+---
+
+## Abstract
+
+**Purpose:** [What does this review aim to summarize?]
+
+**Methods:** [Search strategy, databases, criteria]
+
+**Findings:** [Key themes and conclusions]
+
+**Implications:** [What the evidence means for practice]
+
+**Keywords:** [keyword 1], [keyword 2], [keyword 3], [keyword 4]
+
+---
+
+## 1. Introduction
+
+[Context, rationale, and scope of the review]
+
+## 2. Search Methodology
+
+| Parameter | Details |
+|-----------|---------|
+| Databases | [PubMed, Embase, Scopus, etc.] |
+| Date range | [Start] – [End] |
+| Search terms | [Terms] |
+| Articles identified | [Number] |
+| Articles included | [Number] |
+
+## 3. [Thematic Section 1]
+
+### 3.1 [Subtopic]
+[Synthesis of evidence]
+
+### 3.2 [Subtopic]
+[Synthesis of evidence]
+
+## 4. [Thematic Section 2]
+
+### 4.1 [Subtopic]
+[Synthesis of evidence]
+
+## 5. [Thematic Section 3]
+
+[Synthesis of evidence]
+
+## 6. Discussion
+
+### 6.1 Summary of Evidence
+### 6.2 Gaps in the Literature
+### 6.3 Implications for Practice
+
+## 7. Conclusions
+
+[Concise synthesis]
+
+## References (${cite.format})
+
+1. ${cite.example1}
+2. ${cite.example2}
+`,
+  },
 ]
   return PAGE_TEMPLATES
 }
@@ -1200,17 +1537,17 @@ export default function Notebook() {
     }, 2000)
   }, [activePage?.id])
 
-  // Convert markdown to HTML for the WYSIWYG editor
-  const richEditorHtml = useMemo(() => {
-    if (!editContent) return ''
+  // Convert markdown to HTML for rendering
+  const contentToHtml = useCallback((md: string): string => {
+    if (!md) return ''
     try {
-      return marked.parse(editContent) as string
+      return marked.parse(md) as string
     } catch {
-      return `<p>${editContent}</p>`
+      return `<p>${md}</p>`
     }
-  }, [editContent])
+  }, [])
 
-  // Sync rich editor HTML changes back to markdown
+  // Sync rich editor HTML changes back to markdown (does NOT re-render the editor)
   const handleRichEditorInput = useCallback(() => {
     if (isUpdatingRef.current) return
     const el = richEditorRef.current
@@ -1249,21 +1586,27 @@ export default function Notebook() {
     }
   }, [handleRichEditorInput])
 
-  // When editContent changes externally (template selection, version restore), update the rich editor
+  // Set rich editor content imperatively only when content changes externally
+  // (template selection, version restore, page switch) - never during typing
+  const lastExternalContent = useRef('')
   useEffect(() => {
     if (isUpdatingRef.current) return
     const el = richEditorRef.current
     if (!el) return
-    // Only update if content actually differs to avoid cursor jumping
-    try {
-      const currentMd = turndownService.turndown(el.innerHTML)
-      if (currentMd !== editContent) {
-        el.innerHTML = richEditorHtml
+    // Only update when content changed from outside (not from typing)
+    if (lastExternalContent.current !== editContent) {
+      // Check if editor content already matches
+      try {
+        const currentMd = turndownService.turndown(el.innerHTML)
+        if (currentMd !== editContent) {
+          el.innerHTML = contentToHtml(editContent)
+        }
+      } catch {
+        el.innerHTML = contentToHtml(editContent)
       }
-    } catch {
-      el.innerHTML = richEditorHtml
+      lastExternalContent.current = editContent
     }
-  }, [richEditorHtml])
+  }, [editContent, contentToHtml])
 
   // Load pages
   useEffect(() => {
@@ -1315,11 +1658,14 @@ export default function Notebook() {
 
   const selectPage = useCallback((page: NotebookPage) => {
     setActivePage(page)
-    setEditContent(page.content || '')
+    const content = page.content || ''
+    setEditContent(content)
     setEditTitle(page.title || '')
     setEditTags(Array.isArray(page.tags) ? page.tags : [])
     setHasUnsavedChanges(false)
     setShowVersions(false)
+    // Force editor content refresh on page switch
+    lastExternalContent.current = ''
   }, [])
 
   useEffect(() => {
@@ -1499,8 +1845,13 @@ export default function Notebook() {
   const printPage = useCallback(() => {
     const printWindow = window.open('', '_blank')
     if (!printWindow) return
-    const previewEl = document.querySelector('.notebook-preview-pane')
-    const htmlContent = previewEl ? previewEl.innerHTML : `<pre>${editContent}</pre>`
+    // Generate HTML from markdown directly to ensure images are included
+    let htmlContent: string
+    try {
+      htmlContent = marked.parse(editContent) as string
+    } catch {
+      htmlContent = `<pre>${editContent}</pre>`
+    }
     printWindow.document.write(`<!DOCTYPE html>
 <html><head><title>${editTitle || 'Notebook Page'}</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
@@ -1516,7 +1867,7 @@ export default function Notebook() {
   pre { background: #f8f9fa; border: 1px solid #e5e7eb; border-radius: 6px; padding: 12px; overflow-x: auto; }
   pre code { background: none; padding: 0; }
   blockquote { border-left: 3px solid #3b82f6; margin-left: 0; padding-left: 16px; color: #4b5563; }
-  img { max-width: 100%; height: auto; border-radius: 8px; }
+  img { max-width: 100%; height: auto; border-radius: 8px; margin: 8px 0; display: block; }
   @media print { body { margin: 0; } }
 </style></head><body>${htmlContent}</body></html>`)
     printWindow.document.close()
@@ -1545,7 +1896,7 @@ export default function Notebook() {
   }
 
   return (
-    <div className="flex h-full overflow-hidden">
+    <div className="flex overflow-hidden" style={{ height: 'calc(100vh - 7rem)' }}>
       {/* Sidebar */}
       <div className="w-64 border-r border-[var(--color-border)] bg-[var(--color-bg-elevated)] flex flex-col shrink-0">
         <div className="p-3 border-b border-[var(--color-border)]">
@@ -1825,7 +2176,7 @@ export default function Notebook() {
                   </button>
                   <span className="text-xxs text-[var(--color-text-muted)] ml-auto">Rich Editor</span>
                 </div>
-                {/* WYSIWYG contenteditable editor */}
+                {/* WYSIWYG contenteditable editor - no dangerouslySetInnerHTML to avoid re-render/cursor reset */}
                 <div
                   ref={richEditorRef as any}
                   contentEditable
@@ -1835,7 +2186,6 @@ export default function Notebook() {
                   onInput={handleRichEditorInput}
                   onPaste={handleRichPaste}
                   onBlur={handleRichEditorInput}
-                  dangerouslySetInnerHTML={{ __html: richEditorHtml }}
                 />
               </div>
             )}
@@ -1862,13 +2212,13 @@ export default function Notebook() {
                     <ReactMarkdown
                       remarkPlugins={[remarkMath, remarkGfm]}
                       rehypePlugins={[rehypeKatex]}
+                      urlTransform={(url) => url}
                       components={{
-                        img: ({ src, alt, ...props }) => (
+                        img: ({ src, alt }) => (
                           <img
-                            src={src}
+                            src={src || ''}
                             alt={alt || 'Image'}
-                            style={{ maxWidth: '100%', height: 'auto', borderRadius: '8px', margin: '8px 0' }}
-                            {...props}
+                            style={{ maxWidth: '100%', height: 'auto', borderRadius: '8px', margin: '8px 0', display: 'block' }}
                           />
                         ),
                       }}
