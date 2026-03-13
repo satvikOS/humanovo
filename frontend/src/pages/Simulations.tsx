@@ -1923,7 +1923,7 @@ function EquationPlotter() {
     if (!el) return
     try {
       const canvas = await html2canvas(el, {
-        backgroundColor: '#ffffff',
+        backgroundColor: '#0f0f14',
         scale: 2,
         useCORS: true,
         logging: false,
@@ -2548,7 +2548,7 @@ function ComputationalLab() {
                         if (!vizEl) return
                         try {
                           const canvas = await html2canvas(vizEl, {
-                            backgroundColor: '#ffffff',
+                            backgroundColor: '#0f0f14',
                             scale: 2,
                             useCORS: true,
                             logging: false,
@@ -2579,20 +2579,20 @@ function ComputationalLab() {
                   </div>
                 </div>
 
-                <div id="result-viz-container" className="p-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
+                <div id="result-viz-container" className="p-4 grid grid-cols-1 xl:grid-cols-2 gap-4" style={{ backgroundColor: 'var(--color-bg)', color: 'var(--color-text)' }}>
                   {/* Bar Chart of parsed numeric results */}
                   <div>
-                    <h5 className="text-xxs font-medium text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Parsed Metrics</h5>
-                    <ResponsiveContainer width="100%" height={200}>
-                      <LineChart data={resultChartData} margin={{ top: 5, right: 10, bottom: 5, left: 10 }}>
+                    <h5 className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Parsed Metrics</h5>
+                    <ResponsiveContainer width="100%" height={250}>
+                      <LineChart data={resultChartData} margin={{ top: 10, right: 20, bottom: 20, left: 15 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                        <XAxis dataKey="name" stroke="var(--color-text-muted)" tick={{ fontSize: 8 }} angle={-30} textAnchor="end" height={50} />
-                        <YAxis stroke="var(--color-text-muted)" tick={{ fontSize: 9 }} />
+                        <XAxis dataKey="name" stroke="var(--color-text-muted)" tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} angle={-25} textAnchor="end" height={70} interval={0} />
+                        <YAxis stroke="var(--color-text-muted)" tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} />
                         <Tooltip
                           contentStyle={{ background: 'var(--glass-bg)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '11px' }}
                           labelStyle={{ color: 'var(--color-text)' }}
                         />
-                        <Line type="monotone" dataKey="value" stroke="var(--color-accent-green)" strokeWidth={2} dot={{ fill: 'var(--color-accent-green)', r: 3 }} />
+                        <Line type="monotone" dataKey="value" stroke="var(--color-accent-green)" strokeWidth={2} dot={{ fill: 'var(--color-accent-green)', r: 4 }} />
                       </LineChart>
                     </ResponsiveContainer>
                   </div>
@@ -2623,12 +2623,12 @@ function ComputationalLab() {
                       </>
                     ) : (
                       <>
-                        <h5 className="text-xxs font-medium text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Summary Statistics</h5>
-                        <div className="max-h-[200px] overflow-y-auto space-y-1">
+                        <h5 className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Summary Statistics</h5>
+                        <div className="max-h-[300px] overflow-y-auto space-y-1">
                           {resultStats.map((s, idx) => (
-                            <div key={idx} className="flex items-center justify-between py-1 px-2 rounded text-xs hover:bg-[var(--glass-bg)] transition-all">
-                              <span className="text-[var(--color-text-muted)] truncate mr-2">{s.label}</span>
-                              <span className="text-[var(--color-text)] font-mono text-xxs flex-shrink-0">{s.value}</span>
+                            <div key={idx} className="flex items-center justify-between py-1.5 px-2 rounded text-xs hover:bg-[var(--glass-bg)] transition-all gap-3">
+                              <span className="text-[var(--color-text-muted)] whitespace-nowrap">{s.label}</span>
+                              <span className="text-[var(--color-text)] font-mono text-xs flex-shrink-0">{s.value}</span>
                             </div>
                           ))}
                         </div>
