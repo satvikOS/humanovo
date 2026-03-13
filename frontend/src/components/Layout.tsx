@@ -242,11 +242,29 @@ function ConstantChat() {
 
   const getLocalContext = () => {
     try {
-      const projects = JSON.parse(localStorage.getItem('humanovo-projects') || '[]')
-      const hypotheses = JSON.parse(localStorage.getItem('humanovo-hypotheses') || '[]')
+      const projects = JSON.parse(localStorage.getItem('projects') || localStorage.getItem('humanovo-projects') || '[]')
+      const hypotheses = JSON.parse(localStorage.getItem('hypotheses') || localStorage.getItem('humanovo-hypotheses') || '[]')
+      const papers = JSON.parse(localStorage.getItem('research-papers') || '[]')
+      const evidence = JSON.parse(localStorage.getItem('evidence') || '[]')
       return {
-        projects: projects.slice(0, 5).map((p: any) => p.name || p.title).filter(Boolean),
-        hypotheses: hypotheses.slice(0, 5).map((h: any) => h.statement || h.title).filter(Boolean),
+        projects: projects.slice(0, 8).map((p: any) => ({
+          name: p.name || p.title,
+          disease: p.disease_focus || p.disease,
+          hypotheses: p.hypothesis_count,
+          status: p.status,
+        })).filter((p: any) => p.name),
+        hypotheses: hypotheses.slice(0, 8).map((h: any) => ({
+          title: h.statement || h.title,
+          mechanism: h.mechanism,
+          confidence: h.confidence || h.confidence_score,
+          disease: h.disease,
+          tags: h.tags?.slice(0, 3),
+        })).filter((h: any) => h.title),
+        papers: papers.slice(0, 5).map((p: any) => ({
+          title: p.hypothesis_title,
+          disease: p.disease,
+        })).filter((p: any) => p.title),
+        evidence: evidence.slice(0, 5).map((e: any) => e.title).filter(Boolean),
       }
     } catch { return {} }
   }

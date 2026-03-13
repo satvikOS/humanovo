@@ -18,7 +18,6 @@ import {
 import api from '../services/api'
 import type { SearchResult } from '../services/api'
 
-type SearchMode = 'hybrid' | 'semantic' | 'keyword'
 type SortBy = 'relevance' | 'date' | 'citations'
 
 const SOURCE_COLORS: Record<string, { color: string; bg: string; label: string }> = {
@@ -61,7 +60,6 @@ const FILTER_TYPES = [
 export default function Search() {
   const navigate = useNavigate()
   const [query, setQuery] = useState('')
-  const [searchMode, setSearchMode] = useState<SearchMode>('hybrid')
   const [filterType, setFilterType] = useState('')
   const [dateRange, setDateRange] = useState({ from: '', to: '' })
   const [minRelevance, setMinRelevance] = useState(0)
@@ -202,25 +200,10 @@ export default function Search() {
             </button>
           </div>
 
-          {/* Search Mode */}
-          <div className="flex items-center gap-4 mt-3">
-            <span className="text-xs text-[var(--color-text-muted)]">Mode:</span>
-            <div className="flex items-center gap-1 bg-[var(--glass-bg)] rounded-lg p-0.5">
-              {(['hybrid', 'semantic', 'keyword'] as SearchMode[]).map(mode => (
-                <button
-                  key={mode}
-                  onClick={() => setSearchMode(mode)}
-                  className={`px-3 py-1.5 text-xs rounded-md transition-all capitalize ${searchMode === mode ? 'bg-[var(--glass-bg-hover)] text-[var(--color-text)]' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'}`}
-                >
-                  {mode}
-                </button>
-              ))}
-            </div>
-            <span className="text-xs text-[var(--color-text-muted)]">
-              {searchMode === 'hybrid' && 'Combines semantic + keyword matching'}
-              {searchMode === 'semantic' && 'AI-powered meaning-based search'}
-              {searchMode === 'keyword' && 'Exact keyword matching'}
-            </span>
+          {/* Smart Search indicator */}
+          <div className="flex items-center gap-2 mt-3">
+            <FiZap className="w-3.5 h-3.5 text-[var(--color-accent-purple)]" />
+            <span className="text-xs text-[var(--color-text-muted)]">Smart search — combines semantic + keyword matching across all platform data</span>
           </div>
         </div>
       </div>

@@ -20,6 +20,7 @@ interface SavedResearchPaper {
   disease: string
   generated_at: string
   filename: string
+  paper_html?: string
 }
 
 interface SavedHypothesis {
@@ -224,7 +225,7 @@ export default function ProjectDetail() {
         stopPhaseAnimation()
         setPaperHtml(cachedHtml)
         setGeneratingPaper(false)
-        _saveResearchPaper(hypothesis)
+        _saveResearchPaper(hypothesis, cachedHtml)
         return
       }
 
@@ -259,7 +260,7 @@ export default function ProjectDetail() {
               stopPhaseAnimation()
               setPaperHtml(doneData.paper_html)
               setGeneratingPaper(false)
-              _saveResearchPaper(hypothesis)
+              _saveResearchPaper(hypothesis, doneData.paper_html)
               return
             }
           }
@@ -286,7 +287,7 @@ export default function ProjectDetail() {
                   stopPhaseAnimation()
                   setPaperHtml(pollData.paper_html)
                   setGeneratingPaper(false)
-                  _saveResearchPaper(hypothesis)
+                  _saveResearchPaper(hypothesis, pollData.paper_html)
                   return true
                 }
                 if (pollData.status === 'failed' || pollData.status === 'idle') {
@@ -321,7 +322,7 @@ export default function ProjectDetail() {
           if (html && html.length > 100) {
             setPaperHtml(html)
             setGeneratingPaper(false)
-            _saveResearchPaper(hypothesis)
+            _saveResearchPaper(hypothesis, html)
             return
           }
         }
@@ -375,10 +376,16 @@ export default function ProjectDetail() {
     }
   }, [project, startPhaseAnimation, stopPhaseAnimation])
 
-  const _saveResearchPaper = useCallback((hypothesis: SavedHypothesis) => {
+  const _saveResearchPaper = useCallback((hypothesis: SavedHypothesis, html?: string) => {
     const papers = persistGet<SavedResearchPaper[]>('research-papers', [])
-    // Don't save a duplicate if a paper for this hypothesis already exists
-    if (papers.some(p => p.hypothesis_id === hypothesis.id)) {
+    // If paper already exists, update its HTML if we have new HTML
+    const existingIdx = papers.findIndex(p => p.hypothesis_id === hypothesis.id)
+    if (existingIdx >= 0) {
+      if (html) {
+        papers[existingIdx].paper_html = html
+        persistSet('research-papers', papers)
+        setRefresh(n => n + 1)
+      }
       return
     }
     const paper: SavedResearchPaper = {
@@ -389,6 +396,7 @@ export default function ProjectDetail() {
       disease: hypothesis.disease || project?.disease_focus || 'Unknown',
       generated_at: new Date().toISOString(),
       filename: `humanovo-${hypothesis.title.replace(/\s+/g, '-').toLowerCase().slice(0, 50)}.pdf`,
+      paper_html: html,
     }
     papers.unshift(paper)
     persistSet('research-papers', papers.slice(0, 200))
@@ -789,36 +797,8 @@ export default function ProjectDetail() {
                     <div
                       key={paper.id}
                       className="flex items-center justify-between p-3 border border-[var(--color-border)] rounded-lg hover:border-white/10 transition-colors cursor-pointer"
-                      onClick={async () => {
-                        // First try to fetch cached paper for THIS hypothesis from Lambda DynamoDB
-                        try {
-                          const statusRes = await fetch(`${API_BASE}/orchestrator/paper-status`)
-                          if (statusRes.ok) {
-                            const statusData = await statusRes.json()
-                            // Only use cached paper if it matches this specific hypothesis
-                            if (statusData.status === 'done' && statusData.paper_html && statusData.paper_html.length > 100
-                                && statusData.hypothesis_id === paper.hypothesis_id) {
-                              setActiveHypothesis(hyp || {
-                                id: paper.hypothesis_id,
-                                title: paper.hypothesis_title,
-                                description: '',
-                                mechanism: '',
-                                confidence: 0.5,
-                                tags: [],
-                                disease: paper.disease,
-                                discovery_type: 'treatment',
-                                project_id: paper.project_id,
-                                created_at: paper.generated_at,
-                              })
-                              setPaperHtml(statusData.paper_html)
-                              setViewMode('hypothesis_paper')
-                              return
-                            }
-                          }
-                        } catch (e) {
-                          console.warn('Could not fetch cached paper, will regenerate:', e)
-                        }
-                        // No cached paper for this hypothesis — run full pipeline
+                      onClick={() => {
+                        // Open the already-generated research paper from localStorage
                         const h = hyp || {
                           id: paper.hypothesis_id,
                           title: paper.hypothesis_title,
@@ -831,7 +811,34 @@ export default function ProjectDetail() {
                           project_id: paper.project_id,
                           created_at: paper.generated_at,
                         }
-                        generateHypothesisPaper(h)
+                        setActiveHypothesis(h)
+
+                        // Load stored HTML from the paper record
+                        if (paper.paper_html && paper.paper_html.length > 100) {
+                          setPaperHtml(paper.paper_html)
+                          setViewMode('hypothesis_paper')
+                          return
+                        }
+
+                        // Fallback: try fetching cached paper from Lambda without triggering regeneration
+                        fetch(`${API_BASE}/orchestrator/paper-status`)
+                          .then(res => res.ok ? res.json() : null)
+                          .then(data => {
+                            if (data && data.status === 'done' && data.paper_html && data.paper_html.length > 100
+                                && data.hypothesis_id === paper.hypothesis_id) {
+                              setPaperHtml(data.paper_html)
+                              // Also save the HTML for next time
+                              _saveResearchPaper(h, data.paper_html)
+                            } else {
+                              // No cached paper found — show the hypothesis detail view instead
+                              setViewMode('hypothesis_viewer')
+                            }
+                          })
+                          .catch(() => {
+                            // Network error — show hypothesis detail view
+                            setViewMode('hypothesis_viewer')
+                          })
+                        setViewMode('hypothesis_paper')
                       }}
                     >
                       <div className="flex items-center gap-3 min-w-0">
