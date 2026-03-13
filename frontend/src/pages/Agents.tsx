@@ -207,8 +207,8 @@ export default function Agents() {
       }
       prevStateRef.current = newState
 
-      // Restore config from backend
-      if (!config.disease && (res as any).disease) {
+      // Restore config from backend only if discovery is actively running
+      if (!config.disease && (res as any).disease && newState === 'running') {
         setConfig(prev => ({ ...prev, disease: (res as any).disease, discovery_type: (res as any).discovery_type || prev.discovery_type }))
       }
 
@@ -257,8 +257,8 @@ export default function Agents() {
         }
       }
 
-      // Merge hypotheses and sync to localStorage
-      if ((res as any).top_hypotheses?.length > 0) {
+      // Merge hypotheses only during active discovery, not from stale completed state
+      if ((res as any).top_hypotheses?.length > 0 && (newState === 'running' || newState === 'stopping')) {
         const pid = (res as any).project_id || ''
         setHypotheses(prev => {
           const ids = new Set(prev.map(h => h.id))

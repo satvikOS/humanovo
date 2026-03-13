@@ -1382,7 +1382,7 @@ function NodeGraphCanvas({
   onWheel: (e: React.WheelEvent) => void
   svgRef: React.RefObject<SVGSVGElement | null>
 }) {
-  // Compute edge endpoints based on node centers
+  // Compute edge endpoints at connection handle circles (node edges, not centers)
   const nodeMap = new Map(nodes.map(n => [n.id, n]))
 
   return (
@@ -1417,9 +1417,13 @@ function NodeGraphCanvas({
           const src = nodeMap.get(edge.sourceId)
           const tgt = nodeMap.get(edge.targetId)
           if (!src || !tgt) return null
-          const x1 = src.x + src.width / 2
+          // Connect at the endpoint circles (connection handles) rather than node centers
+          const srcCx = src.x + src.width / 2
+          const tgtCx = tgt.x + tgt.width / 2
+          // Determine which handles to use based on relative node positions
+          const x1 = srcCx < tgtCx ? src.x + src.width : src.x
           const y1 = src.y + src.height / 2
-          const x2 = tgt.x + tgt.width / 2
+          const x2 = srcCx < tgtCx ? tgt.x : tgt.x + tgt.width
           const y2 = tgt.y + tgt.height / 2
           const midX = (x1 + x2) / 2
           const midY = (y1 + y2) / 2
@@ -1471,10 +1475,12 @@ function NodeGraphCanvas({
         {connectingFrom && (() => {
           const src = nodeMap.get(connectingFrom)
           if (!src) return null
-          const x1 = src.x + src.width / 2
-          const y1 = src.y + src.height / 2
           const mx = (mousePos.x - canvasOffset.x) / zoom
           const my = (mousePos.y - canvasOffset.y) / zoom
+          // Start from the nearest connection handle circle
+          const srcCx = src.x + src.width / 2
+          const x1 = mx > srcCx ? src.x + src.width : src.x
+          const y1 = src.y + src.height / 2
           return (
             <path
               d={edgePath(x1, y1, mx, my)}

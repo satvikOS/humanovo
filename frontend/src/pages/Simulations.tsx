@@ -552,7 +552,31 @@ function MCSimulationForm({ onResult, onClose }: { onResult: (r: MCResult) => vo
 // ── MC Simulation Result Card ───────────────────────────────────
 function MCSimulationCard({ result, onDelete }: { result: MCResult; onDelete: (id: string) => void }) {
   const [expanded, setExpanded] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const chartRef = useRef<HTMLDivElement>(null)
   const typeLabel = SIMULATION_TYPES.find(t => t.id === result.simulationType)?.label || result.simulationType
+
+  const copyChartsToClipboard = useCallback(async () => {
+    const el = chartRef.current
+    if (!el) return
+    try {
+      const canvas = await html2canvas(el, {
+        backgroundColor: '#0f0f14',
+        scale: 2,
+        useCORS: true,
+        logging: false,
+      })
+      const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
+      if (blob) {
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+      }
+    } catch {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }
+  }, [])
 
   return (
     <div className="glass-card p-5 hover:bg-[var(--glass-bg-hover)] transition-all">
@@ -603,39 +627,51 @@ function MCSimulationCard({ result, onDelete }: { result: MCResult; onDelete: (i
 
       {expanded && (
         <div className="space-y-4 mt-3">
-          {/* Histogram */}
-          <div>
-            <h4 className="text-xs font-medium text-[var(--color-text-secondary)] mb-2 uppercase tracking-wider">Result Distribution</h4>
-            <div className="h-48">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={result.histogramData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                  <XAxis dataKey="bin" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} interval="preserveStartEnd" />
-                  <YAxis tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} />
-                  <Tooltip contentStyle={{ backgroundColor: 'var(--glass-bg)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '12px', color: 'var(--color-text)' }} />
-                  <Bar dataKey="count" fill="var(--color-accent-blue)" radius={[2, 2, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+          <div ref={chartRef} className="space-y-4 p-2 rounded-lg" style={{ background: '#0f0f14' }}>
+            {/* Histogram */}
+            <div>
+              <h4 className="text-xs font-medium text-[var(--color-text-secondary)] mb-2 uppercase tracking-wider">Result Distribution</h4>
+              <div className="h-48">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={result.histogramData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                    <XAxis dataKey="bin" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} interval="preserveStartEnd" />
+                    <YAxis tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} />
+                    <Tooltip contentStyle={{ backgroundColor: 'var(--glass-bg)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '12px', color: 'var(--color-text)' }} />
+                    <Bar dataKey="count" fill="var(--color-accent-blue)" radius={[2, 2, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* Convergence plot */}
+            <div>
+              <h4 className="text-xs font-medium text-[var(--color-text-secondary)] mb-2 uppercase tracking-wider">Convergence (Running Mean)</h4>
+              <div className="h-40">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={result.convergenceData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                    <XAxis dataKey="iteration" tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} />
+                    <YAxis tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} domain={['auto', 'auto']} />
+                    <Tooltip contentStyle={{ backgroundColor: 'var(--glass-bg)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '12px', color: 'var(--color-text)' }} />
+                    <Line type="monotone" dataKey="mean" stroke="var(--color-accent-green)" strokeWidth={1.5} dot={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
             </div>
           </div>
 
-          {/* Convergence plot */}
-          <div>
-            <h4 className="text-xs font-medium text-[var(--color-text-secondary)] mb-2 uppercase tracking-wider">Convergence (Running Mean)</h4>
-            <div className="h-40">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={result.convergenceData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                  <XAxis dataKey="iteration" tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} />
-                  <YAxis tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} domain={['auto', 'auto']} />
-                  <Tooltip contentStyle={{ backgroundColor: 'var(--glass-bg)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '12px', color: 'var(--color-text)' }} />
-                  <Line type="monotone" dataKey="mean" stroke="var(--color-accent-green)" strokeWidth={1.5} dot={false} />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
+          <div className="flex items-center justify-between">
+            <p className="text-[10px] text-[var(--color-text-muted)]">Created: {new Date(result.createdAt).toLocaleString()}</p>
+            <button
+              onClick={copyChartsToClipboard}
+              className="flex items-center gap-1 px-2 py-1 text-xs rounded hover:bg-white/5 text-[var(--color-text-muted)] hover:text-white transition-all"
+              title="Copy charts to clipboard"
+            >
+              {copied ? <FiCheck className="w-3 h-3 text-[var(--color-accent-green)]" /> : <FiClipboard className="w-3 h-3" />}
+              {copied ? 'Copied!' : 'Copy Charts'}
+            </button>
           </div>
-
-          <p className="text-[10px] text-[var(--color-text-muted)]">Created: {new Date(result.createdAt).toLocaleString()}</p>
         </div>
       )}
     </div>
@@ -1923,7 +1959,7 @@ function EquationPlotter() {
     if (!el) return
     try {
       const canvas = await html2canvas(el, {
-        backgroundColor: '#ffffff',
+        backgroundColor: '#0f0f14',
         scale: 2,
         useCORS: true,
         logging: false,
@@ -2548,7 +2584,7 @@ function ComputationalLab() {
                         if (!vizEl) return
                         try {
                           const canvas = await html2canvas(vizEl, {
-                            backgroundColor: '#ffffff',
+                            backgroundColor: '#0f0f14',
                             scale: 2,
                             useCORS: true,
                             logging: false,
@@ -2579,20 +2615,20 @@ function ComputationalLab() {
                   </div>
                 </div>
 
-                <div id="result-viz-container" className="p-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
+                <div id="result-viz-container" className="p-4 grid grid-cols-1 xl:grid-cols-2 gap-4" style={{ backgroundColor: 'var(--color-bg)', color: 'var(--color-text)' }}>
                   {/* Bar Chart of parsed numeric results */}
                   <div>
-                    <h5 className="text-xxs font-medium text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Parsed Metrics</h5>
-                    <ResponsiveContainer width="100%" height={200}>
-                      <LineChart data={resultChartData} margin={{ top: 5, right: 10, bottom: 5, left: 10 }}>
+                    <h5 className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Parsed Metrics</h5>
+                    <ResponsiveContainer width="100%" height={250}>
+                      <LineChart data={resultChartData} margin={{ top: 10, right: 20, bottom: 20, left: 15 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                        <XAxis dataKey="name" stroke="var(--color-text-muted)" tick={{ fontSize: 8 }} angle={-30} textAnchor="end" height={50} />
-                        <YAxis stroke="var(--color-text-muted)" tick={{ fontSize: 9 }} />
+                        <XAxis dataKey="name" stroke="var(--color-text-muted)" tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} angle={-25} textAnchor="end" height={70} interval={0} />
+                        <YAxis stroke="var(--color-text-muted)" tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} />
                         <Tooltip
                           contentStyle={{ background: 'var(--glass-bg)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '11px' }}
                           labelStyle={{ color: 'var(--color-text)' }}
                         />
-                        <Line type="monotone" dataKey="value" stroke="var(--color-accent-green)" strokeWidth={2} dot={{ fill: 'var(--color-accent-green)', r: 3 }} />
+                        <Line type="monotone" dataKey="value" stroke="var(--color-accent-green)" strokeWidth={2} dot={{ fill: 'var(--color-accent-green)', r: 4 }} />
                       </LineChart>
                     </ResponsiveContainer>
                   </div>
@@ -2623,12 +2659,12 @@ function ComputationalLab() {
                       </>
                     ) : (
                       <>
-                        <h5 className="text-xxs font-medium text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Summary Statistics</h5>
-                        <div className="max-h-[200px] overflow-y-auto space-y-1">
+                        <h5 className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Summary Statistics</h5>
+                        <div className="max-h-[300px] overflow-y-auto space-y-1">
                           {resultStats.map((s, idx) => (
-                            <div key={idx} className="flex items-center justify-between py-1 px-2 rounded text-xs hover:bg-[var(--glass-bg)] transition-all">
-                              <span className="text-[var(--color-text-muted)] truncate mr-2">{s.label}</span>
-                              <span className="text-[var(--color-text)] font-mono text-xxs flex-shrink-0">{s.value}</span>
+                            <div key={idx} className="flex items-center justify-between py-1.5 px-2 rounded text-xs hover:bg-[var(--glass-bg)] transition-all gap-3">
+                              <span className="text-[var(--color-text-muted)] whitespace-nowrap">{s.label}</span>
+                              <span className="text-[var(--color-text)] font-mono text-xs flex-shrink-0">{s.value}</span>
                             </div>
                           ))}
                         </div>

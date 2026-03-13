@@ -8,12 +8,10 @@ import {
   FiBell,
   FiShield,
   FiDatabase,
-  FiKey,
   FiGlobe,
   FiMonitor,
   FiChevronRight,
-  FiCheck,
-  FiInfo
+  FiCheck
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import { useTheme } from '../contexts/ThemeContext'
@@ -55,7 +53,6 @@ const settingsSections = [
   { id: 'notifications', label: 'Notifications', icon: FiBell },
   { id: 'privacy', label: 'Privacy & Security', icon: FiShield },
   { id: 'data', label: 'Data & Storage', icon: FiDatabase },
-  { id: 'api', label: 'API Keys', icon: FiKey },
   { id: 'integrations', label: 'Integrations', icon: FiGlobe },
 ]
 
@@ -318,52 +315,6 @@ function DataSettings() {
   )
 }
 
-function APISettings() {
-  const [apiKeys] = useState([
-    { id: '1', name: 'Development Key', prefix: 'hnv_dev_...abc123', created: '2024-01-15', lastUsed: '2024-03-20' },
-    { id: '2', name: 'Production Key', prefix: 'hnv_prod_...xyz789', created: '2024-02-01', lastUsed: '2024-03-21' },
-  ])
-
-  return (
-    <div className="space-y-6">
-      <div>
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-base font-medium">API Keys</h3>
-          <button className="btn text-accent-blue hover:bg-accent-blue/10 text-xs">Create New Key</button>
-        </div>
-
-        <div className="space-y-2">
-          {apiKeys.map(key => (
-            <div key={key.id} className="glass-card">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-sm font-medium">{key.name}</div>
-                  <div className="text-xs font-mono text-[var(--color-text-muted)] mt-0.5">
-                    {key.prefix}
-                  </div>
-                </div>
-                <button className="btn text-red-400 hover:bg-red-400/10 text-xs">Revoke</button>
-              </div>
-              <div className="flex items-center gap-4 mt-2 text-xxs text-[var(--color-text-muted)]">
-                <span>Created: {key.created}</span>
-                <span>Last used: {key.lastUsed}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="p-3 bg-accent-blue/5 rounded-lg border border-accent-blue/10">
-        <div className="flex items-start gap-2">
-          <FiInfo className="w-4 h-4 text-accent-blue flex-shrink-0 mt-0.5" />
-          <div className="text-xs text-[var(--color-text-secondary)]">
-            API keys provide programmatic access to your HumaNovo data. Keep them secure and never share them publicly.
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
 
 export default function Settings() {
   const [searchParams] = useSearchParams()
@@ -386,8 +337,6 @@ export default function Settings() {
         return <NotificationSettings />
       case 'data':
         return <DataSettings />
-      case 'api':
-        return <APISettings />
       default:
         return (
           <div className="flex items-center justify-center h-64 text-[var(--color-text-muted)]">

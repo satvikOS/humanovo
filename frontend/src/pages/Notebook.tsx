@@ -3,7 +3,9 @@ import {
   FiPlus, FiTrash2, FiSave, FiDownload, FiClock, FiTag,
   FiEdit3, FiEye, FiColumns, FiFileText,
   FiCode, FiHash, FiRotateCcw, FiX, FiSearch,
-  FiCopy, FiBookOpen, FiGrid, FiList
+  FiCopy, FiBookOpen, FiGrid, FiList,
+  FiPrinter, FiClipboard, FiTarget, FiActivity,
+  FiBold, FiItalic, FiImage, FiLink
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import ReactMarkdown from 'react-markdown'
@@ -11,7 +13,24 @@ import remarkMath from 'remark-math'
 import remarkGfm from 'remark-gfm'
 import rehypeKatex from 'rehype-katex'
 import 'katex/dist/katex.min.css'
+import { marked } from 'marked'
+import TurndownService from 'turndown'
 import api, { NotebookPage, NotebookVersion } from '../services/api'
+
+// Configure turndown for HTML-to-markdown conversion
+const turndownService = new TurndownService({
+  headingStyle: 'atx',
+  codeBlockStyle: 'fenced',
+  emDelimiter: '*',
+})
+// Keep images with base64 data URIs
+turndownService.addRule('base64images', {
+  filter: (node: any) => node.nodeName === 'IMG' && node.getAttribute('src')?.startsWith('data:'),
+  replacement: (_content: string, node: any) => `![${node.getAttribute('alt') || 'Image'}](${node.getAttribute('src')})`,
+})
+
+// Configure marked for markdown-to-HTML
+marked.setOptions({ gfm: true, breaks: true })
 
 type ViewMode = 'edit' | 'preview' | 'split'
 type CitationStyle = 'apa' | 'mla' | 'chicago' | 'vancouver' | 'harvard'
@@ -59,20 +78,42 @@ function citationPlaceholders(style: CitationStyle): { example1: string; example
   }
 }
 
-function buildTemplates(style: CitationStyle): { name: string; icon: React.ReactNode; description: string; content: string }[] {
+type TemplateCategory = 'general' | 'research' | 'clinical' | 'analysis' | 'collaboration' | 'publication'
+
+const TEMPLATE_CATEGORY_COLORS: Record<TemplateCategory, string> = {
+  general: '#94a3b8',
+  research: '#3b82f6',
+  clinical: '#ef4444',
+  analysis: '#22c55e',
+  collaboration: '#f59e0b',
+  publication: '#a855f7',
+}
+
+const TEMPLATE_CATEGORY_LABELS: Record<TemplateCategory, string> = {
+  general: 'General',
+  research: 'Research',
+  clinical: 'Clinical',
+  analysis: 'Analysis',
+  collaboration: 'Collaboration',
+  publication: 'Publication',
+}
+
+function buildTemplates(style: CitationStyle): { name: string; icon: React.ReactNode; description: string; content: string; category: TemplateCategory }[] {
   const cite = citationPlaceholders(style)
 
-const PAGE_TEMPLATES: { name: string; icon: React.ReactNode; description: string; content: string }[] = [
+const PAGE_TEMPLATES: { name: string; icon: React.ReactNode; description: string; content: string; category: TemplateCategory }[] = [
   {
     name: 'Blank',
     icon: <FiFileText className="w-4 h-4" />,
     description: 'Start from scratch',
     content: '',
+    category: 'general',
   },
   {
     name: 'Research Notes',
     icon: <FiBookOpen className="w-4 h-4" />,
     description: 'Structured lab notebook with FAIR data principles',
+    category: 'research' as TemplateCategory,
     content: `# Research Notes — [Project Title]
 
 > **PI:** [Principal Investigator]
@@ -187,6 +228,7 @@ import scipy.stats as stats
     name: 'Experiment Log',
     icon: <FiCode className="w-4 h-4" />,
     description: 'GLP-compliant experiment log with chain of custody',
+    category: 'research' as TemplateCategory,
     content: `# Experiment Log — [Experiment Title]
 
 > **Experiment ID:** EXP-${Date.now().toString(36).toUpperCase()}
@@ -330,6 +372,7 @@ $$
     name: 'Literature Review',
     icon: <FiBookOpen className="w-4 h-4" />,
     description: 'Systematic review following PRISMA guidelines',
+    category: 'research' as TemplateCategory,
     content: `# Systematic Literature Review — [Topic]
 
 > **Review ID:** LR-${Date.now().toString(36).toUpperCase()}
@@ -497,6 +540,7 @@ $$
     name: 'Data Analysis',
     icon: <FiGrid className="w-4 h-4" />,
     description: 'Reproducible analysis report with statistical framework',
+    category: 'analysis' as TemplateCategory,
     content: `# Data Analysis Report — [Study Title]
 
 > **Analysis ID:** DA-${Date.now().toString(36).toUpperCase()}
@@ -680,6 +724,772 @@ $$
 2. ${cite.example2}
 `,
   },
+  {
+    name: 'Clinical Protocol',
+    icon: <FiActivity className="w-4 h-4" />,
+    description: 'Clinical trial protocol with regulatory framework',
+    category: 'clinical' as TemplateCategory,
+    content: `# Clinical Protocol — [Study Title]
+
+> **Protocol ID:** CP-${Date.now().toString(36).toUpperCase()}
+> **Version:** 1.0
+> **Date:** ${new Date().toISOString().split('T')[0]}
+> **Sponsor:** [Organization]
+> **Principal Investigator:** [Name, credentials]
+
+---
+
+## 1. Study Synopsis
+
+| Element | Description |
+|---------|-------------|
+| Title | [Full study title] |
+| Phase | [Phase I / II / III / IV] |
+| Design | [Randomized, double-blind, placebo-controlled] |
+| Population | [Target population, key inclusion criteria] |
+| Sample Size | N = [number] ([power calculation basis]) |
+| Duration | [Enrollment period] + [Follow-up period] |
+| Primary Endpoint | [Primary efficacy/safety endpoint] |
+| Secondary Endpoints | [List key secondary endpoints] |
+
+## 2. Background & Rationale
+
+**Disease overview:** [Brief description of condition, prevalence, unmet need]
+
+**Investigational product:** [Drug/device name, mechanism of action, preclinical/clinical data summary]
+
+**Risk-benefit assessment:** [Justify the study based on available evidence]
+
+## 3. Study Objectives
+
+### Primary Objective
+- To evaluate [efficacy/safety] of [intervention] compared to [comparator] in [population]
+
+### Secondary Objectives
+- To assess [secondary efficacy measure]
+- To characterize [pharmacokinetic/pharmacodynamic profile]
+- To evaluate [patient-reported outcomes]
+
+## 4. Study Population
+
+### 4.1 Inclusion Criteria
+1. Age ≥ [min] and ≤ [max] years
+2. Confirmed diagnosis of [condition] by [diagnostic criteria]
+3. [Disease severity/stage requirement]
+4. Adequate organ function: [specify lab values]
+5. Written informed consent
+
+### 4.2 Exclusion Criteria
+1. Prior treatment with [specified therapy] within [time period]
+2. Known hypersensitivity to [study drug or excipients]
+3. Active [comorbid condition]
+4. Pregnant or breastfeeding
+5. Participation in another clinical trial within [time period]
+
+## 5. Study Design & Treatment
+
+### 5.1 Treatment Arms
+
+| Arm | Intervention | Dose | Route | Schedule |
+|-----|-------------|------|-------|----------|
+| A (Active) | [Drug name] | [Dose] | [PO/IV/SC] | [Frequency, duration] |
+| B (Control) | [Placebo/SOC] | [Dose] | [PO/IV/SC] | [Frequency, duration] |
+
+### 5.2 Randomization & Blinding
+- **Randomization ratio:** [1:1 / 2:1]
+- **Stratification factors:** [List factors]
+- **Blinding:** [Double-blind / Open-label]
+- **Unblinding procedures:** [Emergency unblinding criteria]
+
+## 6. Study Assessments
+
+### 6.1 Schedule of Assessments
+
+| Assessment | Screening | Baseline | Week 4 | Week 8 | Week 12 | End of Study |
+|-----------|:---------:|:--------:|:------:|:------:|:-------:|:------------:|
+| Informed consent | X | | | | | |
+| Medical history | X | | | | | |
+| Physical exam | X | X | | X | | X |
+| Vital signs | X | X | X | X | X | X |
+| Lab tests | X | X | X | X | X | X |
+| Primary endpoint | | X | | X | | X |
+| Adverse events | | X | X | X | X | X |
+
+## 7. Safety Monitoring
+
+### 7.1 Adverse Event Reporting
+- **AE collection period:** From first dose to [time period] after last dose
+- **SAE reporting:** Within 24 hours to sponsor and IRB/EC
+- **DSMB reviews:** [Frequency and trigger criteria]
+
+### 7.2 Stopping Rules
+1. [Toxicity threshold for individual subject withdrawal]
+2. [Futility criteria for study termination]
+3. [Safety signal threshold]
+
+## 8. Statistical Considerations
+
+### 8.1 Sample Size Calculation
+Based on [effect size], with α = 0.05 (two-sided), power = 80%:
+$$
+n = \\frac{(Z_{\\alpha/2} + Z_{\\beta})^2 (\\sigma_1^2 + \\sigma_2^2)}{\\Delta^2} = [\\text{calculated value per arm}]
+$$
+
+### 8.2 Analysis Populations
+- **ITT:** All randomized subjects
+- **mITT:** All randomized subjects who received ≥1 dose
+- **Per-protocol:** mITT excluding major protocol violations
+- **Safety:** All subjects who received ≥1 dose
+
+## 9. Ethical Considerations
+
+- [ ] IRB/EC approval obtained
+- [ ] Informed consent form finalized
+- [ ] Data monitoring committee established
+- [ ] Insurance/indemnity in place
+- [ ] GCP training completed for all site staff
+
+## 10. References (${cite.format})
+
+1. ${cite.example1}
+2. ${cite.example2}
+`,
+  },
+  {
+    name: 'Meeting Notes',
+    icon: <FiClipboard className="w-4 h-4" />,
+    description: 'Structured meeting minutes with action items',
+    category: 'collaboration' as TemplateCategory,
+    content: `# Meeting Notes — [Meeting Title]
+
+> **Date:** ${new Date().toISOString().split('T')[0]}
+> **Time:** [Start time] — [End time]
+> **Location:** [Room / Virtual link]
+> **Facilitator:** [Name]
+> **Note-taker:** [Name]
+
+---
+
+## Attendees
+
+| Name | Role | Present |
+|------|------|:-------:|
+| [Name 1] | [PI / Lead] | Yes |
+| [Name 2] | [Researcher] | Yes |
+| [Name 3] | [Collaborator] | No |
+
+## Agenda
+
+1. [Topic 1 — Presenter name] (15 min)
+2. [Topic 2 — Presenter name] (20 min)
+3. [Topic 3 — Presenter name] (10 min)
+4. Open discussion (15 min)
+
+---
+
+## Discussion Summary
+
+### Topic 1: [Title]
+
+**Key points:**
+- [Point 1]
+- [Point 2]
+
+**Decisions made:**
+- [Decision 1]
+
+### Topic 2: [Title]
+
+**Key points:**
+- [Point 1]
+
+**Questions raised:**
+- [Question — who will follow up]
+
+### Topic 3: [Title]
+
+**Key points:**
+- [Point 1]
+
+---
+
+## Action Items
+
+| # | Action | Owner | Due Date | Status |
+|---|--------|-------|----------|--------|
+| 1 | [Action description] | [Name] | [Date] | Pending |
+| 2 | [Action description] | [Name] | [Date] | Pending |
+| 3 | [Action description] | [Name] | [Date] | Pending |
+
+## Follow-up Items
+
+- [ ] Schedule next meeting for [date]
+- [ ] Distribute meeting notes to attendees
+- [ ] [Additional follow-up]
+
+## Next Meeting
+
+**Date:** [Proposed date]
+**Agenda preview:**
+1. Review action items from this meeting
+2. [Upcoming topic]
+`,
+  },
+  {
+    name: 'Grant Proposal',
+    icon: <FiTarget className="w-4 h-4" />,
+    description: 'Research grant proposal outline with budget framework',
+    category: 'collaboration' as TemplateCategory,
+    content: `# Grant Proposal — [Project Title]
+
+> **PI:** [Name, credentials, institution]
+> **Co-investigators:** [Names]
+> **Funding agency:** [NIH / NSF / ERC / Other]
+> **Mechanism:** [R01 / R21 / R03 / K award / Other]
+> **Requested amount:** $[Amount] over [Duration] years
+> **Submission deadline:** [Date]
+
+---
+
+## 1. Specific Aims
+
+**Long-term goal:** [Broad research vision]
+
+**Overall objective:** [What this specific project will accomplish]
+
+**Central hypothesis:** [Testable hypothesis based on preliminary data]
+
+**Rationale:** [Why this work is important and timely]
+
+### Aim 1: [Concise aim statement]
+**Hypothesis:** [Specific testable hypothesis]
+**Approach:** [Brief method description]
+**Expected outcome:** [Anticipated results]
+
+### Aim 2: [Concise aim statement]
+**Hypothesis:** [Specific testable hypothesis]
+**Approach:** [Brief method description]
+**Expected outcome:** [Anticipated results]
+
+### Aim 3: [Concise aim statement]
+**Hypothesis:** [Specific testable hypothesis]
+**Approach:** [Brief method description]
+**Expected outcome:** [Anticipated results]
+
+**Impact:** [How completion of aims will advance the field]
+
+## 2. Significance
+
+**Burden of disease:** [Epidemiology, unmet need, societal impact]
+
+**Current gaps:** [What is unknown or inadequately addressed]
+
+**Innovation:** [How this project differs from existing approaches]
+
+**Expected impact:** [How this work will change clinical practice/scientific understanding]
+
+## 3. Innovation
+
+- **Conceptual innovation:** [Novel hypothesis or theoretical framework]
+- **Technical innovation:** [New methods, tools, or approaches]
+- **Applied innovation:** [New applications or translational potential]
+
+## 4. Approach
+
+### 4.1 Preliminary Data
+
+[Summarize key preliminary results that support feasibility]
+
+### 4.2 Research Design
+
+**Aim 1 detailed approach:**
+- [Methods, models, analysis plan]
+- [Controls and validation strategy]
+- [Timeline: months 1-12]
+
+**Aim 2 detailed approach:**
+- [Methods, models, analysis plan]
+- [Controls and validation strategy]
+- [Timeline: months 6-24]
+
+**Aim 3 detailed approach:**
+- [Methods, models, analysis plan]
+- [Controls and validation strategy]
+- [Timeline: months 18-36]
+
+### 4.3 Potential Problems & Alternative Strategies
+
+| Potential Problem | Alternative Strategy |
+|-------------------|---------------------|
+| [Problem 1] | [Contingency plan] |
+| [Problem 2] | [Contingency plan] |
+| [Problem 3] | [Contingency plan] |
+
+### 4.4 Timeline
+
+| Activity | Y1 Q1 | Y1 Q2 | Y1 Q3 | Y1 Q4 | Y2 Q1 | Y2 Q2 | Y2 Q3 | Y2 Q4 |
+|----------|:------:|:------:|:------:|:------:|:------:|:------:|:------:|:------:|
+| Aim 1 | X | X | X | X | | | | |
+| Aim 2 | | | X | X | X | X | | |
+| Aim 3 | | | | | | X | X | X |
+| Manuscripts | | | | X | | | | X |
+
+## 5. Budget Overview
+
+| Category | Year 1 | Year 2 | Total |
+|----------|--------|--------|-------|
+| Personnel | | | |
+| Equipment | | | |
+| Supplies | | | |
+| Travel | | | |
+| Other | | | |
+| **Total direct** | | | |
+| F&A ([rate]%) | | | |
+| **Total** | | | |
+
+## 6. References (${cite.format})
+
+1. ${cite.example1}
+2. ${cite.example2}
+`,
+  },
+  {
+    name: 'Case Report',
+    icon: <FiActivity className="w-4 h-4" />,
+    description: 'Clinical case report following CARE guidelines',
+    category: 'clinical' as TemplateCategory,
+    content: `# Clinical Case Report — [Brief Title]
+
+> **Report ID:** CR-${Date.now().toString(36).toUpperCase()}
+> **Date:** ${new Date().toISOString().split('T')[0]}
+> **Author(s):** [Names, affiliations]
+> **Institution:** [Hospital/clinic name]
+> **IRB/Ethics:** [Approval number or waiver]
+
+---
+
+## 1. Introduction
+
+**Background:** [Disease/condition context, incidence, why this case is noteworthy]
+
+**Rationale for reporting:** [Novel presentation / Rare condition / Unexpected outcome / Diagnostic challenge]
+
+## 2. Patient Information
+
+| Attribute | Details |
+|-----------|---------|
+| Age | [Years] |
+| Sex | [M/F/Other] |
+| Ethnicity | [If relevant] |
+| Occupation | [If relevant] |
+| Key comorbidities | [List] |
+| Relevant family history | [Details] |
+| Relevant social history | [Details] |
+
+**Chief complaint:** [Primary symptom in patient's words]
+
+## 3. Clinical Findings
+
+### 3.1 History of Present Illness
+[Chronological narrative of symptom onset, duration, character, associated symptoms, aggravating/relieving factors]
+
+### 3.2 Physical Examination
+| System | Findings |
+|--------|----------|
+| General | [Appearance, vitals] |
+| [Relevant system 1] | [Findings] |
+| [Relevant system 2] | [Findings] |
+
+### 3.3 Diagnostic Workup
+
+| Test | Result | Reference Range | Interpretation |
+|------|--------|-----------------|----------------|
+| [Lab test 1] | [Value] | [Range] | [Normal/Abnormal] |
+| [Lab test 2] | [Value] | [Range] | [Normal/Abnormal] |
+| [Imaging 1] | [Findings] | — | [Interpretation] |
+
+## 4. Diagnostic Assessment
+
+**Primary diagnosis:** [Diagnosis with ICD code if applicable]
+
+**Differential diagnosis considered:**
+1. [Diagnosis 1] — [Why ruled in/out]
+2. [Diagnosis 2] — [Why ruled in/out]
+3. [Diagnosis 3] — [Why ruled in/out]
+
+**Diagnostic reasoning:** [How the final diagnosis was reached]
+
+## 5. Treatment & Interventions
+
+| Intervention | Details | Start Date | Duration |
+|-------------|---------|------------|----------|
+| [Medication 1] | [Dose, route, frequency] | [Date] | [Duration] |
+| [Procedure] | [Description] | [Date] | — |
+| [Supportive care] | [Details] | [Date] | [Duration] |
+
+## 6. Outcome & Follow-up
+
+### Timeline
+| Time Point | Status | Key Findings |
+|-----------|--------|-------------|
+| Baseline | [Condition] | [Key metrics] |
+| [Week/Month X] | [Improved/Stable/Worsened] | [Key metrics] |
+| [Final follow-up] | [Outcome] | [Key metrics] |
+
+**Patient perspective:** [Patient's reported experience, if available]
+
+## 7. Discussion
+
+**Key learning points:**
+1. [Teaching point 1]
+2. [Teaching point 2]
+3. [Teaching point 3]
+
+**Literature context:** [How this case compares to published literature]
+
+**Limitations:** [Limitations of single case reports, missing data]
+
+## 8. References (${cite.format})
+
+1. ${cite.example1}
+2. ${cite.example2}
+`,
+  },
+  {
+    name: 'Journal Article',
+    icon: <FiFileText className="w-4 h-4" />,
+    description: 'IMRAD-format journal article manuscript',
+    category: 'publication' as TemplateCategory,
+    content: `# [Article Title]
+
+> **Authors:** [Author 1], [Author 2], [Author 3]
+> **Affiliations:** [Department, Institution, City, Country]
+> **Corresponding author:** [Email]
+
+---
+
+## Abstract
+
+**Background:** [1-2 sentences on context and knowledge gap]
+
+**Methods:** [1-2 sentences on study design and approach]
+
+**Results:** [2-3 sentences on key findings with quantitative data]
+
+**Conclusions:** [1-2 sentences on implications]
+
+**Keywords:** [keyword 1], [keyword 2], [keyword 3], [keyword 4], [keyword 5]
+
+---
+
+## 1. Introduction
+
+[Paragraph 1: Broad context — what is the field and why does it matter?]
+
+[Paragraph 2: What is currently known — key findings from prior work]
+
+[Paragraph 3: What is the gap — what remains unknown or unresolved?]
+
+[Paragraph 4: Study objective — what does this paper aim to address?]
+
+## 2. Methods
+
+### 2.1 Study Design
+[Study type, setting, time period, ethical approvals]
+
+### 2.2 Participants / Samples
+[Selection criteria, sample size, demographics]
+
+### 2.3 Procedures
+[Experimental or clinical procedures, instruments used]
+
+### 2.4 Statistical Analysis
+[Tests used, significance thresholds, software]
+
+## 3. Results
+
+### 3.1 [Primary Outcome]
+
+| Group | n | Outcome (Mean ± SD) | p-value |
+|-------|---|---------------------|---------|
+| Control | | | |
+| Treatment | | | |
+
+### 3.2 [Secondary Outcomes]
+[Additional findings]
+
+## 4. Discussion
+
+[Summary of key findings, comparison with literature, strengths, limitations, implications]
+
+## 5. Conclusions
+
+[Concise summary of main findings and their significance]
+
+## Acknowledgments
+
+[Funding sources, contributors]
+
+## Conflict of Interest
+
+The authors declare no conflicts of interest.
+
+## References (${cite.format})
+
+1. ${cite.example1}
+2. ${cite.example2}
+`,
+  },
+  {
+    name: 'Thesis / Dissertation',
+    icon: <FiBookOpen className="w-4 h-4" />,
+    description: 'Graduate thesis or dissertation chapter structure',
+    category: 'publication' as TemplateCategory,
+    content: `# [Thesis Title]
+
+> **Author:** [Full Name]
+> **Degree:** [PhD / MSc / MD] in [Field]
+> **Institution:** [University Name]
+> **Supervisor:** [Name, Title]
+> **Date:** ${new Date().toISOString().split('T')[0]}
+
+---
+
+## Abstract
+
+[250-350 word summary covering background, objectives, methods, results, and conclusions]
+
+**Keywords:** [keyword 1], [keyword 2], [keyword 3], [keyword 4], [keyword 5]
+
+---
+
+## Chapter 1: Introduction
+
+### 1.1 Background
+[Broad overview of the research area]
+
+### 1.2 Problem Statement
+[Specific problem this thesis addresses]
+
+### 1.3 Research Questions
+1. [Research question 1]
+2. [Research question 2]
+3. [Research question 3]
+
+### 1.4 Objectives
+**Primary objective:** [Main aim]
+
+**Secondary objectives:**
+- [Objective 1]
+- [Objective 2]
+
+### 1.5 Thesis Structure
+[Brief overview of each chapter]
+
+---
+
+## Chapter 2: Literature Review
+
+### 2.1 [Major Theme 1]
+[Review of relevant literature]
+
+### 2.2 [Major Theme 2]
+[Review of relevant literature]
+
+### 2.3 Summary and Research Gap
+[Synthesis and identification of the gap this thesis fills]
+
+---
+
+## Chapter 3: Methodology
+
+### 3.1 Research Design
+[Overall approach and justification]
+
+### 3.2 Data Collection
+[Sources, instruments, sampling strategy]
+
+### 3.3 Data Analysis
+[Analytical methods, software, statistical tests]
+
+### 3.4 Ethical Considerations
+[IRB approval, informed consent, data handling]
+
+---
+
+## Chapter 4: Results
+
+### 4.1 [Result Set 1]
+[Findings with tables and figures]
+
+### 4.2 [Result Set 2]
+[Findings with tables and figures]
+
+---
+
+## Chapter 5: Discussion
+
+### 5.1 Summary of Findings
+### 5.2 Comparison with Literature
+### 5.3 Implications
+### 5.4 Limitations
+### 5.5 Future Research
+
+---
+
+## Chapter 6: Conclusions
+
+[Final synthesis of the thesis contribution]
+
+---
+
+## References (${cite.format})
+
+1. ${cite.example1}
+2. ${cite.example2}
+
+## Appendices
+
+### Appendix A: [Title]
+[Supplementary material]
+`,
+  },
+  {
+    name: 'Book Chapter',
+    icon: <FiHash className="w-4 h-4" />,
+    description: 'Contributed book chapter with section structure',
+    category: 'publication' as TemplateCategory,
+    content: `# [Chapter Title]
+
+> **Authors:** [Author 1], [Author 2]
+> **Book:** [Book Title]
+> **Editors:** [Editor 1], [Editor 2]
+> **Publisher:** [Publisher Name]
+
+---
+
+## 1. Introduction
+
+[Opening paragraph establishing the chapter's topic within the broader book context]
+
+## 2. [Main Section Title]
+
+### 2.1 [Subsection]
+[Content with appropriate depth for a book chapter audience]
+
+### 2.2 [Subsection]
+[Content]
+
+## 3. [Main Section Title]
+
+### 3.1 [Subsection]
+[Content]
+
+### 3.2 [Subsection]
+[Content]
+
+## 4. [Main Section Title]
+
+[Content]
+
+## 5. Current Challenges and Future Directions
+
+[Discussion of open questions and emerging trends]
+
+## 6. Summary
+
+**Key takeaways:**
+- [Point 1]
+- [Point 2]
+- [Point 3]
+
+## Glossary
+
+| Term | Definition |
+|------|-----------|
+| [Term 1] | [Definition] |
+| [Term 2] | [Definition] |
+
+## References (${cite.format})
+
+1. ${cite.example1}
+2. ${cite.example2}
+`,
+  },
+  {
+    name: 'Review Article',
+    icon: <FiList className="w-4 h-4" />,
+    description: 'Narrative or systematic review article',
+    category: 'publication' as TemplateCategory,
+    content: `# [Review Title]: A [Systematic / Narrative] Review
+
+> **Authors:** [Author 1], [Author 2]
+> **Target journal:** [Journal Name]
+> **Date:** ${new Date().toISOString().split('T')[0]}
+
+---
+
+## Abstract
+
+**Purpose:** [What does this review aim to summarize?]
+
+**Methods:** [Search strategy, databases, criteria]
+
+**Findings:** [Key themes and conclusions]
+
+**Implications:** [What the evidence means for practice]
+
+**Keywords:** [keyword 1], [keyword 2], [keyword 3], [keyword 4]
+
+---
+
+## 1. Introduction
+
+[Context, rationale, and scope of the review]
+
+## 2. Search Methodology
+
+| Parameter | Details |
+|-----------|---------|
+| Databases | [PubMed, Embase, Scopus, etc.] |
+| Date range | [Start] – [End] |
+| Search terms | [Terms] |
+| Articles identified | [Number] |
+| Articles included | [Number] |
+
+## 3. [Thematic Section 1]
+
+### 3.1 [Subtopic]
+[Synthesis of evidence]
+
+### 3.2 [Subtopic]
+[Synthesis of evidence]
+
+## 4. [Thematic Section 2]
+
+### 4.1 [Subtopic]
+[Synthesis of evidence]
+
+## 5. [Thematic Section 3]
+
+[Synthesis of evidence]
+
+## 6. Discussion
+
+### 6.1 Summary of Evidence
+### 6.2 Gaps in the Literature
+### 6.3 Implications for Practice
+
+## 7. Conclusions
+
+[Concise synthesis]
+
+## References (${cite.format})
+
+1. ${cite.example1}
+2. ${cite.example2}
+`,
+  },
 ]
   return PAGE_TEMPLATES
 }
@@ -696,7 +1506,7 @@ const SNIPPET_INSERT = {
 export default function Notebook() {
   const [pages, setPages] = useState<NotebookPage[]>([])
   const [activePage, setActivePage] = useState<NotebookPage | null>(null)
-  const [viewMode, setViewMode] = useState<ViewMode>('edit')
+  const [viewMode, setViewMode] = useState<ViewMode>('split')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [editContent, setEditContent] = useState('')
@@ -715,6 +1525,88 @@ export default function Notebook() {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const saveTimerRef = useRef<number | null>(null)
   const editorRef = useRef<HTMLTextAreaElement>(null)
+  const richEditorRef = useRef<HTMLDivElement>(null)
+  const isUpdatingRef = useRef(false)
+
+  // Auto-save with debounce
+  const scheduleAutoSave = useCallback(() => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    setHasUnsavedChanges(true)
+    saveTimerRef.current = window.setTimeout(() => {
+      savePage()
+    }, 2000)
+  }, [activePage?.id])
+
+  // Convert markdown to HTML for rendering
+  const contentToHtml = useCallback((md: string): string => {
+    if (!md) return ''
+    try {
+      return marked.parse(md) as string
+    } catch {
+      return `<p>${md}</p>`
+    }
+  }, [])
+
+  // Sync rich editor HTML changes back to markdown (does NOT re-render the editor)
+  const handleRichEditorInput = useCallback(() => {
+    if (isUpdatingRef.current) return
+    const el = richEditorRef.current
+    if (!el) return
+    try {
+      isUpdatingRef.current = true
+      const html = el.innerHTML
+      const md = turndownService.turndown(html)
+      setEditContent(md)
+      setHasUnsavedChanges(true)
+      scheduleAutoSave()
+    } finally {
+      isUpdatingRef.current = false
+    }
+  }, [scheduleAutoSave])
+
+  // Handle paste in rich editor: intercept images and render them inline
+  const handleRichPaste = useCallback((e: React.ClipboardEvent<HTMLDivElement>) => {
+    const items = e.clipboardData?.items
+    if (!items) return
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith('image/')) {
+        e.preventDefault()
+        const file = items[i].getAsFile()
+        if (!file) return
+        const reader = new FileReader()
+        reader.onload = () => {
+          const base64 = reader.result as string
+          document.execCommand('insertImage', false, base64)
+          // Sync back to markdown after a small delay
+          setTimeout(() => handleRichEditorInput(), 50)
+        }
+        reader.readAsDataURL(file)
+        return
+      }
+    }
+  }, [handleRichEditorInput])
+
+  // Set rich editor content imperatively only when content changes externally
+  // (template selection, version restore, page switch) - never during typing
+  const lastExternalContent = useRef('')
+  useEffect(() => {
+    if (isUpdatingRef.current) return
+    const el = richEditorRef.current
+    if (!el) return
+    // Only update when content changed from outside (not from typing)
+    if (lastExternalContent.current !== editContent) {
+      // Check if editor content already matches
+      try {
+        const currentMd = turndownService.turndown(el.innerHTML)
+        if (currentMd !== editContent) {
+          el.innerHTML = contentToHtml(editContent)
+        }
+      } catch {
+        el.innerHTML = contentToHtml(editContent)
+      }
+      lastExternalContent.current = editContent
+    }
+  }, [editContent, contentToHtml])
 
   // Load pages
   useEffect(() => {
@@ -766,60 +1658,21 @@ export default function Notebook() {
 
   const selectPage = useCallback((page: NotebookPage) => {
     setActivePage(page)
-    setEditContent(page.content || '')
+    const content = page.content || ''
+    setEditContent(content)
     setEditTitle(page.title || '')
     setEditTags(Array.isArray(page.tags) ? page.tags : [])
     setHasUnsavedChanges(false)
     setShowVersions(false)
+    // Force editor content refresh on page switch
+    lastExternalContent.current = ''
   }, [])
-
-  // Auto-save with debounce
-  const scheduleAutoSave = useCallback(() => {
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    setHasUnsavedChanges(true)
-    saveTimerRef.current = window.setTimeout(() => {
-      savePage()
-    }, 2000)
-  }, [activePage?.id])
 
   useEffect(() => {
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     }
   }, [])
-
-  const handleContentChange = (value: string) => {
-    setEditContent(value)
-    scheduleAutoSave()
-  }
-
-  const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    const items = e.clipboardData?.items
-    if (!items) return
-    for (let i = 0; i < items.length; i++) {
-      if (items[i].type.startsWith('image/')) {
-        e.preventDefault()
-        const file = items[i].getAsFile()
-        if (!file) return
-        const reader = new FileReader()
-        reader.onload = () => {
-          const base64 = reader.result as string
-          const imgMarkdown = `![Pasted image](${base64})\n`
-          const textarea = editorRef.current
-          if (textarea) {
-            const start = textarea.selectionStart
-            const end = textarea.selectionEnd
-            const newContent = editContent.slice(0, start) + imgMarkdown + editContent.slice(end)
-            handleContentChange(newContent)
-          } else {
-            handleContentChange(editContent + '\n' + imgMarkdown)
-          }
-        }
-        reader.readAsDataURL(file)
-        return
-      }
-    }
-  }, [editContent, handleContentChange])
 
   const handleTitleChange = (value: string) => {
     setEditTitle(value)
@@ -861,26 +1714,26 @@ export default function Notebook() {
   const createPage = async (template?: typeof templates[0]) => {
     const title = template ? template.name : 'Untitled'
     const content = template?.content || ''
+    const categoryTag = template?.category ? `category:${template.category}` : 'category:general'
+    const tags = [categoryTag]
     try {
       const page = await api.createNotebookPage({
         title,
         content,
         content_type: 'markdown',
-        tags: [],
+        tags,
       })
-      // Ensure content from template is preserved even if API doesn't return it
-      const pageWithContent = { ...page, content: page.content || content }
+      const pageWithContent = { ...page, content: page.content || content, tags: page.tags?.length ? page.tags : tags }
       setPages(prev => [pageWithContent, ...prev])
       selectPage(pageWithContent)
     } catch (err) {
       console.error('Failed to create page via API, creating locally:', err)
-      // Fallback: create a local page so the UI isn't blank
       const localPage: NotebookPage = {
         id: `local-${Date.now()}`,
         title,
         content,
         content_type: 'markdown',
-        tags: [],
+        tags,
         version: 1,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -889,6 +1742,12 @@ export default function Notebook() {
       selectPage(localPage)
     }
     setShowTemplates(false)
+  }
+
+  // Helper to extract template category from page tags
+  const getPageCategory = (page: NotebookPage | null): TemplateCategory => {
+    const catTag = (page?.tags || []).find(t => t.startsWith('category:'))
+    return (catTag?.replace('category:', '') as TemplateCategory) || 'general'
   }
 
   const deletePage = async (id: string) => {
@@ -983,6 +1842,38 @@ export default function Notebook() {
     navigator.clipboard.writeText(editContent)
   }
 
+  const printPage = useCallback(() => {
+    const printWindow = window.open('', '_blank')
+    if (!printWindow) return
+    // Generate HTML from markdown directly to ensure images are included
+    let htmlContent: string
+    try {
+      htmlContent = marked.parse(editContent) as string
+    } catch {
+      htmlContent = `<pre>${editContent}</pre>`
+    }
+    printWindow.document.write(`<!DOCTYPE html>
+<html><head><title>${editTitle || 'Notebook Page'}</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<style>
+  body { font-family: Georgia, 'Times New Roman', serif; max-width: 800px; margin: 40px auto; padding: 0 20px; color: #1a1a1a; line-height: 1.7; font-size: 14px; }
+  h1, h2, h3, h4 { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin-top: 1.5em; }
+  h1 { font-size: 24px; border-bottom: 2px solid #e5e7eb; padding-bottom: 8px; }
+  h2 { font-size: 20px; border-bottom: 1px solid #e5e7eb; padding-bottom: 4px; }
+  table { border-collapse: collapse; width: 100%; margin: 1em 0; }
+  th, td { border: 1px solid #d1d5db; padding: 8px 12px; text-align: left; font-size: 13px; }
+  th { background: #f3f4f6; font-weight: 600; }
+  code { background: #f3f4f6; padding: 2px 5px; border-radius: 3px; font-size: 13px; }
+  pre { background: #f8f9fa; border: 1px solid #e5e7eb; border-radius: 6px; padding: 12px; overflow-x: auto; }
+  pre code { background: none; padding: 0; }
+  blockquote { border-left: 3px solid #3b82f6; margin-left: 0; padding-left: 16px; color: #4b5563; }
+  img { max-width: 100%; height: auto; border-radius: 8px; margin: 8px 0; display: block; }
+  @media print { body { margin: 0; } }
+</style></head><body>${htmlContent}</body></html>`)
+    printWindow.document.close()
+    printWindow.onload = () => { printWindow.print() }
+  }, [editContent, editTitle])
+
   const filteredPages = useMemo(() => {
     if (!searchQuery) return pages
     const q = searchQuery.toLowerCase()
@@ -1005,7 +1896,8 @@ export default function Notebook() {
   }
 
   return (
-    <div className="flex h-full overflow-hidden">
+    <div className="relative w-full" style={{ height: 'calc(100vh - 3rem)' }}>
+      <div className="absolute inset-0 flex overflow-hidden">
       {/* Sidebar */}
       <div className="w-64 border-r border-[var(--color-border)] bg-[var(--color-bg-elevated)] flex flex-col shrink-0">
         <div className="p-3 border-b border-[var(--color-border)]">
@@ -1052,6 +1944,7 @@ export default function Notebook() {
               )}
             >
               <div className="flex items-center justify-between">
+                <div className="w-1.5 h-1.5 rounded-full shrink-0 mr-1.5" style={{ background: TEMPLATE_CATEGORY_COLORS[getPageCategory(page)] || '#94a3b8' }} />
                 <span className="text-xs font-medium truncate flex-1">{page.title}</span>
                 <button
                   onClick={e => { e.stopPropagation(); deletePage(page.id) }}
@@ -1102,8 +1995,20 @@ export default function Notebook() {
       {/* Main content */}
       {activePage ? (
         <div className="flex-1 flex flex-col min-w-0">
+          {/* Category color band */}
+          <div className="h-1 shrink-0" style={{ background: TEMPLATE_CATEGORY_COLORS[getPageCategory(activePage)] || '#94a3b8' }} />
           {/* Toolbar */}
           <div className="px-4 py-2 border-b border-[var(--color-border)] flex items-center gap-2 shrink-0">
+            {/* Category badge */}
+            <span
+              className="text-xxs px-1.5 py-0.5 rounded font-medium shrink-0"
+              style={{
+                background: (TEMPLATE_CATEGORY_COLORS[getPageCategory(activePage)] || '#94a3b8') + '20',
+                color: TEMPLATE_CATEGORY_COLORS[getPageCategory(activePage)] || '#94a3b8',
+              }}
+            >
+              {TEMPLATE_CATEGORY_LABELS[getPageCategory(activePage)] || 'General'}
+            </span>
             {/* Title */}
             <input
               type="text"
@@ -1184,6 +2089,13 @@ export default function Notebook() {
                 <FiDownload className="w-3.5 h-3.5" />
               </button>
               <button
+                onClick={printPage}
+                className="p-1.5 rounded hover:bg-white/5 text-[var(--color-text-muted)] hover:text-white"
+                title="Print page"
+              >
+                <FiPrinter className="w-3.5 h-3.5" />
+              </button>
+              <button
                 onClick={savePage}
                 disabled={saving}
                 className={clsx(
@@ -1227,31 +2139,62 @@ export default function Notebook() {
 
           {/* Editor / Preview area */}
           <div className="flex-1 flex min-h-0 overflow-hidden">
-            {/* Editor pane */}
+            {/* Left pane: WYSIWYG rich text editor OR raw markdown */}
             {(viewMode === 'edit' || viewMode === 'split') && (
               <div className={clsx('flex-1 flex flex-col min-w-0', viewMode === 'split' && 'border-r border-[var(--color-border)]')}>
-                <textarea
-                  ref={editorRef}
-                  value={editContent}
-                  onChange={e => handleContentChange(e.target.value)}
-                  onPaste={handlePaste}
-                  className="flex-1 w-full p-4 bg-transparent text-sm font-mono resize-none outline-none leading-relaxed"
-                  placeholder="Start writing in Markdown...
-
-Supports:
-- **Bold**, *italic*, ~~strikethrough~~
-- LaTeX: $E = mc^2$ or $$\int_0^\infty$$
-- Tables, code blocks, lists
-- Links, images, and more"
-                  spellCheck={false}
+                {/* Mini formatting toolbar */}
+                <div className="flex items-center gap-0.5 px-3 py-1 border-b border-[var(--color-border)] bg-[var(--color-surface)] shrink-0">
+                  <button onClick={() => { document.execCommand('bold') }} className="p-1 rounded hover:bg-white/10 text-[var(--color-text-muted)] hover:text-white" title="Bold"><FiBold className="w-3 h-3" /></button>
+                  <button onClick={() => { document.execCommand('italic') }} className="p-1 rounded hover:bg-white/10 text-[var(--color-text-muted)] hover:text-white" title="Italic"><FiItalic className="w-3 h-3" /></button>
+                  <div className="w-px h-3.5 bg-[var(--color-border)] mx-1" />
+                  <button onClick={() => { document.execCommand('formatBlock', false, 'h1') }} className="p-1 rounded hover:bg-white/10 text-[var(--color-text-muted)] hover:text-white text-xxs font-bold" title="Heading 1">H1</button>
+                  <button onClick={() => { document.execCommand('formatBlock', false, 'h2') }} className="p-1 rounded hover:bg-white/10 text-[var(--color-text-muted)] hover:text-white text-xxs font-bold" title="Heading 2">H2</button>
+                  <button onClick={() => { document.execCommand('formatBlock', false, 'h3') }} className="p-1 rounded hover:bg-white/10 text-[var(--color-text-muted)] hover:text-white text-xxs font-bold" title="Heading 3">H3</button>
+                  <div className="w-px h-3.5 bg-[var(--color-border)] mx-1" />
+                  <button onClick={() => { document.execCommand('insertUnorderedList') }} className="p-1 rounded hover:bg-white/10 text-[var(--color-text-muted)] hover:text-white text-xxs" title="Bullet List">List</button>
+                  <button onClick={() => { document.execCommand('insertOrderedList') }} className="p-1 rounded hover:bg-white/10 text-[var(--color-text-muted)] hover:text-white text-xxs" title="Numbered List">1.</button>
+                  <div className="w-px h-3.5 bg-[var(--color-border)] mx-1" />
+                  <button onClick={() => {
+                    const url = prompt('Enter link URL:')
+                    if (url) document.execCommand('createLink', false, url)
+                  }} className="p-1 rounded hover:bg-white/10 text-[var(--color-text-muted)] hover:text-white" title="Insert Link"><FiLink className="w-3 h-3" /></button>
+                  <button onClick={() => {
+                    const input = document.createElement('input')
+                    input.type = 'file'
+                    input.accept = 'image/*'
+                    input.onchange = (e: any) => {
+                      const file = e.target.files?.[0]
+                      if (!file) return
+                      const reader = new FileReader()
+                      reader.onload = () => { document.execCommand('insertImage', false, reader.result as string) }
+                      reader.readAsDataURL(file)
+                    }
+                    input.click()
+                  }} className="p-1 rounded hover:bg-white/10 text-[var(--color-text-muted)] hover:text-white" title="Insert Image"><FiImage className="w-3 h-3" /></button>
+                  <div className="w-px h-3.5 bg-[var(--color-border)] mx-1" />
+                  <button onClick={() => setViewMode(viewMode === 'edit' ? 'split' : 'edit')} className="p-1 rounded hover:bg-white/10 text-[var(--color-text-muted)] hover:text-white" title="Toggle raw markdown">
+                    <FiCode className="w-3 h-3" />
+                  </button>
+                  <span className="text-xxs text-[var(--color-text-muted)] ml-auto">Rich Editor</span>
+                </div>
+                {/* WYSIWYG contenteditable editor - no dangerouslySetInnerHTML to avoid re-render/cursor reset */}
+                <div
+                  ref={richEditorRef as any}
+                  contentEditable
+                  suppressContentEditableWarning
+                  className="flex-1 w-full p-4 overflow-y-auto text-sm leading-relaxed outline-none rich-editor-pane"
+                  style={{ minHeight: 0, wordBreak: 'break-word' }}
+                  onInput={handleRichEditorInput}
+                  onPaste={handleRichPaste}
+                  onBlur={handleRichEditorInput}
                 />
               </div>
             )}
 
-            {/* Preview pane */}
+            {/* Right pane: rendered document view (read-only styled) */}
             {(viewMode === 'preview' || viewMode === 'split') && (
               <div className="flex-1 overflow-y-auto min-w-0">
-                <div className="p-6 max-w-3xl mx-auto prose prose-invert prose-sm
+                <div className="notebook-preview-pane p-6 max-w-3xl mx-auto prose prose-invert prose-sm
                   prose-headings:text-white prose-headings:font-semibold
                   prose-p:text-[var(--color-text-secondary)]
                   prose-a:text-accent-blue prose-a:no-underline hover:prose-a:underline
@@ -1270,6 +2213,16 @@ Supports:
                     <ReactMarkdown
                       remarkPlugins={[remarkMath, remarkGfm]}
                       rehypePlugins={[rehypeKatex]}
+                      urlTransform={(url) => url}
+                      components={{
+                        img: ({ src, alt }) => (
+                          <img
+                            src={src || ''}
+                            alt={alt || 'Image'}
+                            style={{ maxWidth: '100%', height: 'auto', borderRadius: '8px', margin: '8px 0', display: 'block' }}
+                          />
+                        ),
+                      }}
                     >
                       {editContent}
                     </ReactMarkdown>
@@ -1318,30 +2271,52 @@ Supports:
       {/* Template picker modal */}
       {showTemplates && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setShowTemplates(false)}>
-          <div className="glass-card w-full max-w-md mx-4 p-0" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-4 border-b border-[var(--color-border)]">
+          <div className="glass-card w-full max-w-lg mx-4 p-0 max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b border-[var(--color-border)] shrink-0">
               <h2 className="text-sm font-semibold">New Page</h2>
               <button onClick={() => setShowTemplates(false)} className="p-1 rounded hover:bg-white/5 text-[var(--color-text-muted)]">
                 <FiX className="w-4 h-4" />
               </button>
             </div>
-            <div className="p-2">
-              {templates.map(template => (
-                <button
-                  key={template.name}
-                  onClick={() => createPage(template)}
-                  className="w-full text-left p-3 rounded hover:bg-white/5 transition-colors flex items-center gap-3"
-                >
-                  <div className="p-2 rounded bg-white/5 text-[var(--color-text-muted)]">
-                    {template.icon}
+            <div className="p-3 overflow-y-auto">
+              {Object.entries(
+                templates.reduce<Record<string, typeof templates>>((acc, t) => {
+                  const cat = t.category || 'general'
+                  if (!acc[cat]) acc[cat] = []
+                  acc[cat].push(t)
+                  return acc
+                }, {})
+              ).map(([cat, tmpls]) => (
+                <div key={cat} className="mb-3">
+                  <div className="flex items-center gap-2 mb-1.5 px-1">
+                    <div className="w-2 h-2 rounded-full" style={{ background: TEMPLATE_CATEGORY_COLORS[cat as TemplateCategory] || '#94a3b8' }} />
+                    <span className="text-xxs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+                      {TEMPLATE_CATEGORY_LABELS[cat as TemplateCategory] || cat}
+                    </span>
                   </div>
-                  <div>
-                    <div className="text-sm font-medium">{template.name}</div>
-                    <div className="text-xxs text-[var(--color-text-muted)]">
-                      {template.description}
-                    </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {tmpls.map(template => (
+                      <button
+                        key={template.name}
+                        onClick={() => createPage(template)}
+                        className="text-left p-3 rounded-lg border border-[var(--color-border)] hover:border-white/20 hover:bg-white/5 transition-all flex items-start gap-2.5"
+                      >
+                        <div
+                          className="p-1.5 rounded"
+                          style={{ background: (TEMPLATE_CATEGORY_COLORS[template.category] || '#94a3b8') + '20', color: TEMPLATE_CATEGORY_COLORS[template.category] || '#94a3b8' }}
+                        >
+                          {template.icon}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-xs font-medium">{template.name}</div>
+                          <div className="text-xxs text-[var(--color-text-muted)] mt-0.5 line-clamp-2">
+                            {template.description}
+                          </div>
+                        </div>
+                      </button>
+                    ))}
                   </div>
-                </button>
+                </div>
               ))}
             </div>
           </div>
@@ -1396,6 +2371,7 @@ Supports:
           </div>
         </div>
       )}
+      </div>
     </div>
   )
 }
