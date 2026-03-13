@@ -16,7 +16,7 @@ import {
 } from 'react-icons/fi'
 import { AreaChart, Area, ResponsiveContainer } from 'recharts'
 import api from '../services/api'
-import type { Project, OrchestratorStatus } from '../services/api'
+import type { Project } from '../services/api'
 import { persistGet, getActivityLog, type ActivityEntry } from '../utils/persistence'
 
 // ── Stat Card (expandable) ──────────────────────────────────────
@@ -81,76 +81,175 @@ function StatCard({ stat }: { stat: StatData }) {
   )
 }
 
-// ── Discovery Status ────────────────────────────────────────────
+// ── Recent Simulations ──────────────────────────────────────────
 
-function DiscoveryWidget() {
-  const [status, setStatus] = useState<OrchestratorStatus | null>(null)
-  const [connected, setConnected] = useState<boolean | null>(null)
+interface SimulationSummary {
+  id: string
+  name: string
+  simulationType: string
+  stats: { mean: number; median: number; std: number; ci95Lower: number; ci95Upper: number }
+  createdAt: string
+}
 
-  useEffect(() => {
-    let interval: number
-    const poll = async () => {
-      try {
-        const data = await api.getOrchestratorStatus()
-        setStatus(data)
-        setConnected(true)
-      } catch {
-        setConnected(false)
-      }
-    }
-    poll()
-    interval = window.setInterval(poll, 10000)
-    return () => clearInterval(interval)
+const SIM_TYPE_LABELS: Record<string, string> = {
+  clinical_outcome: 'Clinical',
+  drug_efficacy: 'Drug Efficacy',
+  biomarker: 'Biomarker',
+  pathway: 'Pathway',
+  population: 'Population',
+}
+
+const SIM_TYPE_COLORS: Record<string, string> = {
+  clinical_outcome: 'var(--color-accent-green)',
+  drug_efficacy: 'var(--color-accent-blue)',
+  biomarker: 'var(--color-accent-purple)',
+  pathway: 'var(--color-accent-orange)',
+  population: 'var(--color-accent-cyan)',
+}
+
+function formatTimeAgo(ts: string) {
+  const diff = Date.now() - new Date(ts).getTime()
+  const mins = Math.floor(diff / 60000)
+  if (mins < 1) return 'Just now'
+  if (mins < 60) return `${mins}m ago`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `${hrs}h ago`
+  return `${Math.floor(hrs / 24)}d ago`
+}
+
+function RecentSimulationsWidget() {
+  const navigate = useNavigate()
+  const simulations = useMemo(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem('humanovo-mc-simulations') || '[]') as SimulationSummary[]
+      return stored.slice(0, 3)
+    } catch { return [] }
   }, [])
 
-  const stateLabel = status?.state === 'running' ? 'Running' : status?.state === 'paused' ? 'Paused' : status?.state === 'completed' ? 'Complete' : 'Idle'
-  const stateColor = status?.state === 'running' ? 'var(--color-success)' : status?.state === 'paused' ? 'var(--color-warning)' : 'var(--color-text-muted)'
-
   return (
-    <div className="glass-card p-5 h-full">
-      <div className="flex items-center justify-between mb-4">
+    <div className="glass-card p-4 h-full flex flex-col">
+      <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <FiCpu className="w-4 h-4 text-[var(--color-text-muted)]" />
-          <h3 className="text-sm font-medium">Discovery Engine</h3>
+          <FiActivity className="w-3.5 h-3.5 text-[var(--color-text-muted)]" />
+          <h3 className="text-sm font-medium">Recent Simulations</h3>
         </div>
-        <Link to="/agents" className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] flex items-center gap-1 transition-colors">
-          Open <FiArrowRight className="w-3 h-3" />
+        <Link to="/simulations" className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] flex items-center gap-1 transition-colors">
+          All <FiArrowRight className="w-3 h-3" />
         </Link>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 mb-4">
-        <div className="p-3 rounded-lg bg-[var(--glass-bg)]">
-          <div className="text-xs text-[var(--color-text-muted)] mb-1">Pipeline</div>
-          <div className="text-sm font-semibold" style={{ color: connected ? 'var(--color-success)' : connected === false ? 'var(--color-text-muted)' : 'var(--color-warning)' }}>
-            {connected === null ? 'Connecting...' : connected ? 'Live' : 'Offline'}
-          </div>
+      {simulations.length === 0 ? (
+        <div className="text-center py-4 text-[var(--color-text-muted)]">
+          <FiActivity className="w-5 h-5 mx-auto mb-1.5 opacity-40" />
+          <p className="text-xs">No simulations yet</p>
+          <button onClick={() => navigate('/simulations')} className="text-xs mt-1 text-[var(--color-text)] hover:text-[var(--color-text-secondary)] transition-colors">
+            Run a simulation
+          </button>
         </div>
-        <div className="p-3 rounded-lg bg-[var(--glass-bg)]">
-          <div className="text-xs text-[var(--color-text-muted)] mb-1">State</div>
-          <div className="text-sm font-semibold" style={{ color: stateColor }}>{stateLabel}</div>
-        </div>
-      </div>
-
-      {status && status.hypotheses_found > 0 && (
-        <div className="p-3 rounded-lg bg-[var(--glass-bg)] mb-4 text-center">
-          <div className="text-xs text-[var(--color-text-muted)]">Hypotheses Found</div>
-          <div className="text-2xl font-bold mt-1" style={{ color: 'var(--color-accent-purple)' }}>{status.hypotheses_found}</div>
+      ) : (
+        <div className="space-y-0">
+          {simulations.map(sim => {
+            const color = SIM_TYPE_COLORS[sim.simulationType] || 'var(--color-text-muted)'
+            return (
+              <button
+                key={sim.id}
+                onClick={() => navigate('/simulations')}
+                className="w-full text-left flex items-center gap-2.5 py-2.5 border-b border-[var(--color-border)] last:border-0 hover:bg-[var(--glass-bg)] rounded-lg px-2 transition-all"
+              >
+                <div className="p-1 rounded-md flex-shrink-0" style={{ background: `${color}12` }}>
+                  <FiActivity className="w-3 h-3" style={{ color }} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-medium truncate">{sim.name}</div>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span className="text-xxs px-1 py-0.5 rounded" style={{ color, background: `${color}12` }}>
+                      {SIM_TYPE_LABELS[sim.simulationType] || sim.simulationType}
+                    </span>
+                    <span className="text-xxs text-[var(--color-text-muted)]">{formatTimeAgo(sim.createdAt)}</span>
+                  </div>
+                </div>
+              </button>
+            )
+          })}
         </div>
       )}
+    </div>
+  )
+}
 
-      <div className="space-y-2">
-        {[
-          { label: 'Multi-model reasoning', active: true },
-          { label: 'MCP context sharding', active: true },
-          { label: 'Genomics analysis', active: true },
-          { label: 'Paper generation', active: true },
-        ].map(cap => (
-          <div key={cap.label} className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
-            <span className="w-1.5 h-1.5 rounded-full" style={{ background: cap.active ? 'var(--color-success)' : 'var(--color-text-muted)' }} />
-            {cap.label}
-          </div>
-        ))}
+// ── Recent Notebooks ────────────────────────────────────────────
+
+interface NotebookSummary {
+  id: string
+  title: string
+  updated_at: string
+  tags: string[]
+}
+
+function RecentNotebooksWidget() {
+  const navigate = useNavigate()
+  const [notebooks, setNotebooks] = useState<NotebookSummary[]>([])
+
+  useEffect(() => {
+    const fetchNotebooks = async () => {
+      try {
+        const res = await api.getNotebookPages({ page_size: 4 })
+        const pages = res?.items || []
+        setNotebooks(pages.map(p => ({ id: p.id, title: p.title, updated_at: p.updated_at, tags: p.tags || [] })))
+      } catch {
+        // API unavailable — no notebooks to show
+        setNotebooks([])
+      }
+    }
+    fetchNotebooks()
+  }, [])
+
+  return (
+    <div className="glass-card p-4 h-full flex flex-col">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <FiBook className="w-3.5 h-3.5 text-[var(--color-text-muted)]" />
+          <h3 className="text-sm font-medium">Recent Notebooks</h3>
+        </div>
+        <Link to="/notebook" className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] flex items-center gap-1 transition-colors">
+          All <FiArrowRight className="w-3 h-3" />
+        </Link>
       </div>
+
+      {notebooks.length === 0 ? (
+        <div className="text-center py-4 text-[var(--color-text-muted)]">
+          <FiBook className="w-5 h-5 mx-auto mb-1.5 opacity-40" />
+          <p className="text-xs">No notebooks yet</p>
+          <button onClick={() => navigate('/notebook')} className="text-xs mt-1 text-[var(--color-text)] hover:text-[var(--color-text-secondary)] transition-colors">
+            Create a notebook
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-0">
+          {notebooks.map(nb => (
+            <button
+              key={nb.id}
+              onClick={() => navigate('/notebook')}
+              className="w-full text-left flex items-center gap-2.5 py-2.5 border-b border-[var(--color-border)] last:border-0 hover:bg-[var(--glass-bg)] rounded-lg px-2 transition-all"
+            >
+              <div className="p-1 rounded-md flex-shrink-0" style={{ background: 'rgba(249, 115, 22, 0.08)' }}>
+                <FiBook className="w-3 h-3" style={{ color: 'var(--color-accent-orange)' }} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-medium truncate">{nb.title}</div>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  {nb.tags.slice(0, 2).map(tag => (
+                    <span key={tag} className="text-xxs px-1 py-0.5 rounded bg-[var(--glass-bg)] text-[var(--color-text-muted)]">
+                      {tag}
+                    </span>
+                  ))}
+                  <span className="text-xxs text-[var(--color-text-muted)]">{formatTimeAgo(nb.updated_at)}</span>
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -286,11 +385,14 @@ export default function Dashboard() {
   const navigate = useNavigate()
   const [projects, setProjects] = useState<Project[]>([])
 
-  // Get real counts from localStorage
+  // Get real counts from localStorage (all use 'humanovo-' prefix via persistGet)
   const allActivities = useMemo(() => getActivityLog(), [])
   const localProjects = useMemo(() => persistGet<any[]>('projects', []), [])
   const localHypotheses = useMemo(() => persistGet<any[]>('hypotheses', []), [])
   const localPapers = useMemo(() => persistGet<any[]>('research-papers', []), [])
+  const localSimulations = useMemo(() => {
+    try { return JSON.parse(localStorage.getItem('humanovo-mc-simulations') || '[]') } catch { return [] }
+  }, [])
 
   // Fetch API projects, merge with localStorage
   useEffect(() => {
@@ -329,7 +431,8 @@ export default function Dashboard() {
     fetchData()
   }, [localProjects])
 
-  const totalProjects = projects.length
+  // Use localStorage counts directly for accuracy (not API-merged state)
+  const totalProjects = Math.max(projects.length, localProjects.length)
   const totalHypotheses = localHypotheses.length
   const totalPapers = localPapers.length
 
@@ -353,10 +456,10 @@ export default function Dashboard() {
       chartData: buildChartData(allActivities, 'evidence'),
     },
     {
-      label: 'Discoveries', value: allActivities.filter(a => a.type === 'discovery').length,
-      change: computeChangePercent(allActivities, 'discovery'),
-      icon: FiCpu, accentColor: '#3b82f6', href: '/agents',
-      chartData: buildChartData(allActivities, 'discovery'),
+      label: 'Simulations', value: localSimulations.length,
+      change: computeChangePercent(allActivities, 'simulation'),
+      icon: FiActivity, accentColor: '#3b82f6', href: '/simulations',
+      chartData: buildChartData(allActivities, 'simulation'),
     },
   ]
 
@@ -404,9 +507,14 @@ export default function Dashboard() {
           <ActivityFeed />
         </div>
 
-        {/* Discovery Widget */}
-        <div>
-          <DiscoveryWidget />
+        {/* Recent Simulations + Notebooks — fill height equally */}
+        <div className="flex flex-col gap-4 h-full">
+          <div className="flex-1 min-h-0">
+            <RecentSimulationsWidget />
+          </div>
+          <div className="flex-1 min-h-0">
+            <RecentNotebooksWidget />
+          </div>
         </div>
       </div>
 

@@ -18,7 +18,6 @@ import {
 import api from '../services/api'
 import type { SearchResult } from '../services/api'
 
-type SearchMode = 'hybrid' | 'semantic' | 'keyword'
 type SortBy = 'relevance' | 'date' | 'citations'
 
 const SOURCE_COLORS: Record<string, { color: string; bg: string; label: string }> = {
@@ -61,7 +60,6 @@ const FILTER_TYPES = [
 export default function Search() {
   const navigate = useNavigate()
   const [query, setQuery] = useState('')
-  const [searchMode, setSearchMode] = useState<SearchMode>('hybrid')
   const [filterType, setFilterType] = useState('')
   const [dateRange, setDateRange] = useState({ from: '', to: '' })
   const [minRelevance, setMinRelevance] = useState(0)
@@ -81,6 +79,120 @@ export default function Search() {
     } catch { return [] }
   })
 
+  // Fuzzy text match: checks if all words in query appear in the target text
+  const fuzzyMatch = useCallback((text: string, q: string): number => {
+    if (!text || !q) return 0
+    const lower = text.toLowerCase()
+    const queryLower = q.toLowerCase()
+
+    // Exact substring match = highest score
+    if (lower.includes(queryLower)) return 1.0
+
+    // Check each query word individually
+    const words = queryLower.split(/\s+/).filter(w => w.length > 1)
+    if (words.length === 0) return 0
+    const matched = words.filter(w => lower.includes(w)).length
+    return matched / words.length
+  }, [])
+
+  // Search localStorage for projects, hypotheses, papers, evidence
+  // NOTE: All platform data uses 'humanovo-' prefix via persistGet/persistSet
+  const searchLocalStorage = useCallback((q: string): SearchResult[] => {
+    const localResults: SearchResult[] = []
+
+    // Search projects (stored at 'humanovo-projects')
+    try {
+      const projects = JSON.parse(localStorage.getItem('humanovo-projects') || '[]')
+      projects.forEach((p: any) => {
+        const searchText = [p.name, p.description, p.disease_focus, p.research_question, ...(p.tags || [])].filter(Boolean).join(' ')
+        const score = fuzzyMatch(searchText, q)
+        if (score > 0.3) {
+          localResults.push({
+            id: p.id, type: 'project', title: p.name || 'Untitled Project',
+            snippet: p.description || p.research_question || p.disease_focus || '',
+            source: 'project', source_type: 'project', relevance_score: score,
+            metadata: { disease_focus: p.disease_focus, hypothesis_count: p.hypothesis_count },
+            created_at: p.created_at, tags: p.tags,
+          })
+        }
+      })
+    } catch { /* ignore */ }
+
+    // Search hypotheses (stored at 'humanovo-hypotheses')
+    try {
+      const hypotheses = JSON.parse(localStorage.getItem('humanovo-hypotheses') || '[]')
+      hypotheses.forEach((h: any) => {
+        const searchText = [h.title, h.statement, h.description, h.mechanism, h.disease, ...(h.tags || [])].filter(Boolean).join(' ')
+        const score = fuzzyMatch(searchText, q)
+        if (score > 0.2) {
+          localResults.push({
+            id: h.id, type: 'hypothesis', title: h.title || h.statement || 'Untitled Hypothesis',
+            snippet: h.mechanism || h.description || '',
+            source: 'hypothesis', source_type: 'hypothesis', relevance_score: score,
+            metadata: { confidence: h.confidence || h.confidence_score, disease: h.disease },
+            created_at: h.created_at, tags: h.tags,
+          })
+        }
+      })
+    } catch { /* ignore */ }
+
+    // Search research papers (stored at 'humanovo-research-papers')
+    try {
+      const papers = JSON.parse(localStorage.getItem('humanovo-research-papers') || '[]')
+      papers.forEach((p: any) => {
+        const searchText = [p.hypothesis_title, p.disease, p.filename].filter(Boolean).join(' ')
+        const score = fuzzyMatch(searchText, q)
+        if (score > 0.2) {
+          localResults.push({
+            id: p.id || p.hypothesis_id, type: 'evidence',
+            title: `Research Paper: ${p.hypothesis_title || 'Untitled'}`,
+            snippet: `Disease: ${p.disease || 'Unknown'} | Generated: ${p.generated_at ? new Date(p.generated_at).toLocaleDateString() : 'Unknown'}`,
+            source: 'research_paper', source_type: 'evidence', relevance_score: score,
+            metadata: { disease: p.disease },
+            created_at: p.generated_at, tags: [],
+          })
+        }
+      })
+    } catch { /* ignore */ }
+
+    // Search discovery history (stored at 'humanovo-discovery-history')
+    try {
+      const history = JSON.parse(localStorage.getItem('humanovo-discovery-history') || '[]')
+      history.forEach((d: any) => {
+        const searchText = [d.disease, d.discoveryType, ...(d.factors || [])].filter(Boolean).join(' ')
+        const score = fuzzyMatch(searchText, q)
+        if (score > 0.3) {
+          localResults.push({
+            id: d.id || `disc-${d.timestamp}`, type: 'project',
+            title: `Discovery: ${d.disease || 'Unknown'}`,
+            snippet: `Type: ${d.discoveryType || 'treatment'} | ${d.hypothesesCount || 0} hypotheses`,
+            source: 'discovery', source_type: 'project', relevance_score: score,
+            metadata: {}, created_at: d.timestamp, tags: [],
+          })
+        }
+      })
+    } catch { /* ignore */ }
+
+    // Search simulations
+    try {
+      const sims = JSON.parse(localStorage.getItem('humanovo-mc-simulations') || '[]')
+      sims.forEach((s: any) => {
+        const searchText = [s.name, s.simulationType].filter(Boolean).join(' ')
+        const score = fuzzyMatch(searchText, q)
+        if (score > 0.3) {
+          localResults.push({
+            id: s.id, type: 'project', title: `Simulation: ${s.name || 'Untitled'}`,
+            snippet: `Type: ${s.simulationType} | Mean: ${s.stats?.mean?.toFixed(2) || 'N/A'}`,
+            source: 'simulation', source_type: 'project', relevance_score: score,
+            metadata: {}, created_at: s.createdAt, tags: [],
+          })
+        }
+      })
+    } catch { /* ignore */ }
+
+    return localResults.sort((a, b) => (b.relevance_score || 0) - (a.relevance_score || 0))
+  }, [fuzzyMatch])
+
   const handleSearch = useCallback(async (searchQuery?: string) => {
     const q = searchQuery || query
     if (!q.trim()) return
@@ -91,6 +203,11 @@ export default function Search() {
     setRecentSearches(updated)
     localStorage.setItem('humanovo-recent-searches', JSON.stringify(updated))
 
+    // Always search localStorage first for instant results
+    const localResults = searchLocalStorage(q)
+
+    // Try API search and merge results
+    let apiResults: SearchResult[] = []
     try {
       const res = await api.globalSearch(q, {
         types: filterType ? [filterType] : undefined,
@@ -99,30 +216,46 @@ export default function Search() {
         min_relevance: minRelevance > 0 ? minRelevance / 100 : undefined,
         limit: 30,
       })
-
-      let sorted = res.results || []
-
-      // Client-side sort
-      if (sortBy === 'date') {
-        sorted = sorted.sort((a, b) => {
-          if (!a.created_at) return 1
-          if (!b.created_at) return -1
-          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        })
-      } else if (sortBy === 'citations') {
-        sorted = sorted.sort((a, b) => ((b.metadata?.citation_count as number) || 0) - ((a.metadata?.citation_count as number) || 0))
-      }
-
-      setResults(sorted)
-      setTotalResults(res.total)
-    } catch (err) {
-      console.error('Search error:', err)
-      setResults([])
-      setTotalResults(0)
+      apiResults = res.results || []
+    } catch {
+      // API unavailable — localStorage results will be used
     }
 
+    // Merge and deduplicate: API results + localStorage results
+    const seenIds = new Set<string>()
+    const merged: SearchResult[] = []
+    for (const r of [...apiResults, ...localResults]) {
+      if (!seenIds.has(r.id)) {
+        seenIds.add(r.id)
+        merged.push(r)
+      }
+    }
+
+    // Apply type filter
+    let filtered = filterType ? merged.filter(r => r.type === filterType) : merged
+
+    // Apply relevance filter
+    if (minRelevance > 0) {
+      filtered = filtered.filter(r => (r.relevance_score || 0) >= minRelevance / 100)
+    }
+
+    // Sort
+    if (sortBy === 'date') {
+      filtered.sort((a, b) => {
+        if (!a.created_at) return 1
+        if (!b.created_at) return -1
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      })
+    } else if (sortBy === 'citations') {
+      filtered.sort((a, b) => ((b.metadata?.citation_count as number) || 0) - ((a.metadata?.citation_count as number) || 0))
+    } else {
+      filtered.sort((a, b) => (b.relevance_score || 0) - (a.relevance_score || 0))
+    }
+
+    setResults(filtered)
+    setTotalResults(filtered.length)
     setIsSearching(false)
-  }, [query, filterType, dateRange, minRelevance, sortBy, recentSearches])
+  }, [query, filterType, dateRange, minRelevance, sortBy, recentSearches, searchLocalStorage])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') handleSearch()
@@ -202,25 +335,10 @@ export default function Search() {
             </button>
           </div>
 
-          {/* Search Mode */}
-          <div className="flex items-center gap-4 mt-3">
-            <span className="text-xs text-[var(--color-text-muted)]">Mode:</span>
-            <div className="flex items-center gap-1 bg-[var(--glass-bg)] rounded-lg p-0.5">
-              {(['hybrid', 'semantic', 'keyword'] as SearchMode[]).map(mode => (
-                <button
-                  key={mode}
-                  onClick={() => setSearchMode(mode)}
-                  className={`px-3 py-1.5 text-xs rounded-md transition-all capitalize ${searchMode === mode ? 'bg-[var(--glass-bg-hover)] text-[var(--color-text)]' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'}`}
-                >
-                  {mode}
-                </button>
-              ))}
-            </div>
-            <span className="text-xs text-[var(--color-text-muted)]">
-              {searchMode === 'hybrid' && 'Combines semantic + keyword matching'}
-              {searchMode === 'semantic' && 'AI-powered meaning-based search'}
-              {searchMode === 'keyword' && 'Exact keyword matching'}
-            </span>
+          {/* Smart Search indicator */}
+          <div className="flex items-center gap-2 mt-3">
+            <FiZap className="w-3.5 h-3.5 text-[var(--color-accent-purple)]" />
+            <span className="text-xs text-[var(--color-text-muted)]">Smart search — combines semantic + keyword matching across all platform data</span>
           </div>
         </div>
       </div>

@@ -847,35 +847,142 @@ class ChatRequest(BaseModel):
     platform_context: dict = {}
 
 
-CONSTANT_SYSTEM_PROMPT = """You are Constant, an AI research assistant built into the HumaNovo biomedical discovery platform.
+CONSTANT_SYSTEM_PROMPT = """You are Constant, an AI research assistant built into the HumaNovo biomedical discovery platform. You are exclusively grounded to the HumaNovo platform — you ONLY answer questions using knowledge from the platform's data, projects, hypotheses, evidence, and research papers. You do NOT answer general knowledge questions or anything outside the platform's scope.
 
-HumaNovo is a platform for biomedical hypothesis generation, evidence gathering, and drug discovery. It uses multi-model AI orchestration (Claude, DeepSeek, Mistral, GPT, Cohere, Kimi) to explore biological pathways and discover potential treatments.
+HumaNovo is a platform for biomedical hypothesis generation, evidence gathering, and drug discovery. It uses multi-model AI orchestration (Claude, DeepSeek, Mistral, GPT, Cohere, Kimi, Grok) across a 10-stage discovery pipeline to explore biological pathways and discover potential treatments.
 
 Your capabilities:
-- Help researchers formulate and refine hypotheses about disease mechanisms
-- Explain molecular biology, pharmacology, genetics, and biochemistry concepts
-- Suggest experimental designs and validation strategies
-- Analyze and discuss drug repurposing, combination therapies, and biomarkers
-- Provide guidance on using the HumaNovo platform (projects, discovery runs, simulations, evidence search)
+- Help researchers formulate and refine hypotheses about disease mechanisms using platform data
+- Explain molecular biology, pharmacology, genetics, and biochemistry concepts in the context of the user's research
+- Suggest experimental designs and validation strategies based on platform evidence
+- Analyze and discuss drug repurposing, combination therapies, and biomarkers from discovered hypotheses
+- Provide guidance on using the HumaNovo platform (projects, discovery runs, simulations, evidence search, research papers, workbench, notebook)
+- Discuss and reference specific hypotheses, evidence, and projects that exist in the platform
 
 Guidelines:
+- Be conversational and natural — talk like a knowledgeable research colleague, not a robot
 - Be concise and scientifically accurate
 - Reference specific genes, proteins, pathways, and mechanisms when relevant
 - When discussing hypotheses, consider confidence levels, supporting evidence, and potential confounders
-- If the user mentions specific projects or hypotheses from their platform context, incorporate that knowledge
-- Format responses clearly with short paragraphs; use markdown sparingly"""
+- If the user provides platform context (projects, hypotheses, evidence), use it extensively in your response
+- If RAG context is provided below, use it as your primary source of truth for answering
+- If the user asks something completely outside the platform's scope, politely redirect them to platform-relevant topics
+- Format responses clearly with short paragraphs; use markdown sparingly
+- Never fabricate data — if you don't have enough platform context, say so and suggest running a discovery or searching evidence"""
+
+
+async def _retrieve_rag_context(query: str) -> str:
+    """
+    Retrieve relevant platform knowledge via Azure text-embedding-3-large
+    embeddings and hybrid RAG search to ground Constant's responses.
+    """
+    rag_chunks: list[str] = []
+
+    # --- RAG retrieval via Azure text-embedding-3-large embeddings ---
+    if settings.AZURE_EMBEDDING_ENDPOINT and settings.AZURE_EMBEDDING_KEY:
+        try:
+            import httpx
+
+            # Step 1: Generate embedding for the user query using text-embedding-3-large
+            embed_url = settings.AZURE_EMBEDDING_ENDPOINT.rstrip("/")
+            deploy = settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT_LARGE
+            api_ver = settings.AZURE_EMBEDDING_API_VERSION
+            url = f"{embed_url}/openai/deployments/{deploy}/embeddings?api-version={api_ver}"
+
+            async with httpx.AsyncClient(timeout=15) as client:
+                embed_resp = await client.post(
+                    url,
+                    headers={"api-key": settings.AZURE_EMBEDDING_KEY.get_secret_value()},
+                    json={"input": query, "model": deploy},
+                )
+                if embed_resp.status_code == 200:
+                    embed_data = embed_resp.json()
+                    query_embedding = embed_data.get("data", [{}])[0].get("embedding", [])
+
+                    if query_embedding:
+                        # Step 2: Search ChromaDB vector store with the embedding
+                        try:
+                            import chromadb
+
+                            chroma_client = chromadb.PersistentClient(
+                                path=settings.CHROMA_PERSIST_DIRECTORY
+                            )
+                            # Try to get the main evidence collection
+                            for collection_name in ["evidence", "documents", "humanovo_evidence", "default"]:
+                                try:
+                                    collection = chroma_client.get_collection(collection_name)
+                                    results = collection.query(
+                                        query_embeddings=[query_embedding],
+                                        n_results=settings.GROUNDING_RAG_TOP_K,
+                                        include=["documents", "metadatas"],
+                                    )
+                                    if results and results.get("documents"):
+                                        for docs in results["documents"]:
+                                            for doc in docs:
+                                                if doc and len(doc.strip()) > 20:
+                                                    rag_chunks.append(doc.strip())
+                                    break  # Found a valid collection
+                                except Exception:
+                                    continue
+                        except Exception as e:
+                            logger.debug(f"ChromaDB retrieval skipped: {e}")
+
+        except Exception as e:
+            logger.warning(f"RAG embedding retrieval error: {e}")
+
+    # --- Also search local platform data (hypotheses, projects, evidence) ---
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=10, base_url="http://localhost:8000/api/v1") as client:
+            # Search evidence
+            try:
+                resp = await client.post("/evidence/search", json={"query": query, "limit": 5})
+                if resp.status_code == 200:
+                    items = resp.json().get("items", [])
+                    for item in items[:5]:
+                        title = item.get("title", "")
+                        abstract = item.get("abstract", item.get("snippet", ""))
+                        if title:
+                            rag_chunks.append(f"Evidence: {title}. {abstract}")
+            except Exception:
+                pass
+
+            # Search hypotheses
+            try:
+                resp = await client.get("/hypotheses", params={"page_size": 10})
+                if resp.status_code == 200:
+                    items = resp.json().get("items", [])
+                    for item in items:
+                        statement = item.get("statement", "")
+                        mechanism = item.get("mechanism", "")
+                        confidence = item.get("confidence_score", 0)
+                        if statement and query.lower() in (statement + mechanism).lower():
+                            rag_chunks.append(
+                                f"Hypothesis (confidence: {confidence:.0%}): {statement}. Mechanism: {mechanism}"
+                            )
+            except Exception:
+                pass
+    except Exception as e:
+        logger.debug(f"Platform data retrieval skipped: {e}")
+
+    return "\n\n".join(rag_chunks[:10]) if rag_chunks else ""
 
 
 @router.post("/chat")
 async def constant_chat(request: ChatRequest):
     """
-    Constant AI chat assistant — uses AWS Bedrock Claude (primary),
-    falls back to Azure GPT-4o, then Azure GPT-4.1.
+    Constant AI chat assistant — uses AWS Bedrock Claude Opus 4.6 (primary)
+    with RAG grounding via Azure text-embedding-3-large embeddings.
+    Falls back to Azure GPT-4o, then Azure GPT-4.1.
     """
     if not request.message.strip():
         return {"response": "Please ask me a question about your research."}
 
-    # Build platform context string from frontend-provided data
+    # Step 1: Retrieve RAG context using text-embedding-3-large
+    rag_context = await _retrieve_rag_context(request.message)
+
+    # Step 2: Build platform context string from frontend-provided data
     context_parts = []
     if request.context and request.context != "general":
         context_parts.append(f"Current context: {request.context}")
@@ -889,13 +996,18 @@ async def constant_chat(request: ChatRequest):
 
     platform_context_str = "\n".join(context_parts) if context_parts else ""
 
-    user_content = request.message
+    # Step 3: Compose the full grounded user message
+    user_content_parts = []
+    if rag_context:
+        user_content_parts.append(f"[RAG Knowledge Base Context — use this as your primary source of truth]\n{rag_context}")
     if platform_context_str:
-        user_content = f"[Platform context]\n{platform_context_str}\n\n[User question]\n{request.message}"
+        user_content_parts.append(f"[Platform context]\n{platform_context_str}")
+    user_content_parts.append(f"[User question]\n{request.message}")
+    user_content = "\n\n".join(user_content_parts)
 
     response_text = None
 
-    # --- Attempt 1: AWS Bedrock Claude (primary) ---
+    # --- Attempt 1: AWS Bedrock Claude Opus 4.6 (primary) ---
     if settings.aws_access_key_value and settings.aws_secret_key_value:
         try:
             import boto3
@@ -906,8 +1018,7 @@ async def constant_chat(request: ChatRequest):
                 aws_secret_access_key=settings.aws_secret_key_value,
             )
 
-            # Use the converse API for Claude on Bedrock
-            model_id = "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+            model_id = settings.BEDROCK_MODEL_CLAUDE_OPUS  # us.anthropic.claude-opus-4-6-v1:0
 
             converse_response = bedrock_client.converse(
                 modelId=model_id,
@@ -919,8 +1030,8 @@ async def constant_chat(request: ChatRequest):
                     }
                 ],
                 inferenceConfig={
-                    "maxTokens": 1024,
-                    "temperature": 0.7,
+                    "maxTokens": 2048,
+                    "temperature": 0.5,
                 },
             )
 
@@ -930,7 +1041,7 @@ async def constant_chat(request: ChatRequest):
                 response_text = content_blocks[0].get("text", "")
 
         except Exception as e:
-            logger.warning(f"AWS Bedrock Claude chat error: {e}")
+            logger.warning(f"AWS Bedrock Claude Opus chat error: {e}")
 
     # --- Attempt 2: Azure GPT-4o (fallback) ---
     if not response_text and settings.AZURE_GPT4O_ENDPOINT and settings.AZURE_GPT4O_KEY:
@@ -949,8 +1060,8 @@ async def constant_chat(request: ChatRequest):
                             {"role": "system", "content": CONSTANT_SYSTEM_PROMPT},
                             {"role": "user", "content": user_content},
                         ],
-                        "max_tokens": 1024,
-                        "temperature": 0.7,
+                        "max_tokens": 2048,
+                        "temperature": 0.5,
                     },
                 )
                 if resp.status_code == 200:
@@ -978,8 +1089,8 @@ async def constant_chat(request: ChatRequest):
                             {"role": "system", "content": CONSTANT_SYSTEM_PROMPT},
                             {"role": "user", "content": user_content},
                         ],
-                        "max_tokens": 1024,
-                        "temperature": 0.7,
+                        "max_tokens": 2048,
+                        "temperature": 0.5,
                     },
                 )
                 if resp.status_code == 200:
@@ -993,7 +1104,7 @@ async def constant_chat(request: ChatRequest):
     if not response_text:
         response_text = (
             "I'm having trouble connecting to the AI backend. "
-            "Please ensure AWS Bedrock (Claude) or Azure OpenAI is configured with valid credentials."
+            "Please ensure AWS Bedrock (Claude Opus) or Azure OpenAI is configured with valid credentials."
         )
 
     return {"response": response_text}

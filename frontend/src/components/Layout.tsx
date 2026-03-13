@@ -242,11 +242,33 @@ function ConstantChat() {
 
   const getLocalContext = () => {
     try {
+      // All platform data uses 'humanovo-' prefix via persistGet/persistSet
       const projects = JSON.parse(localStorage.getItem('humanovo-projects') || '[]')
       const hypotheses = JSON.parse(localStorage.getItem('humanovo-hypotheses') || '[]')
+      const papers = JSON.parse(localStorage.getItem('humanovo-research-papers') || '[]')
+      const simulations = JSON.parse(localStorage.getItem('humanovo-mc-simulations') || '[]')
       return {
-        projects: projects.slice(0, 5).map((p: any) => p.name || p.title).filter(Boolean),
-        hypotheses: hypotheses.slice(0, 5).map((h: any) => h.statement || h.title).filter(Boolean),
+        totalProjects: projects.length,
+        totalHypotheses: hypotheses.length,
+        totalPapers: papers.length,
+        totalSimulations: simulations.length,
+        projects: projects.map((p: any) => ({
+          name: p.name || p.title,
+          disease: p.disease_focus || p.disease,
+          hypotheses: p.hypothesis_count,
+          status: p.status,
+        })).filter((p: any) => p.name),
+        hypotheses: hypotheses.map((h: any) => ({
+          title: h.statement || h.title,
+          mechanism: h.mechanism,
+          confidence: h.confidence || h.confidence_score,
+          disease: h.disease,
+          tags: h.tags?.slice(0, 5),
+        })).filter((h: any) => h.title),
+        papers: papers.map((p: any) => ({
+          title: p.hypothesis_title,
+          disease: p.disease,
+        })).filter((p: any) => p.title),
       }
     } catch { return {} }
   }
@@ -265,27 +287,135 @@ function ConstantChat() {
     return () => window.removeEventListener('keydown', handler)
   }, [isOpen])
 
-  const generateFallbackResponse = (query: string): string => {
+  const generateSmartFallbackResponse = (query: string): string => {
     const q = query.toLowerCase()
-    if (q.includes('hypothesis') || q.includes('hypotheses'))
-      return 'You can view and manage your hypotheses in the Discovery section. Navigate there from the sidebar or press ⌘K and search "Discovery". Each hypothesis is generated with supporting evidence, confidence scores, and can be exported as a research paper.'
-    if (q.includes('paper') || q.includes('publication') || q.includes('manuscript'))
-      return 'Research papers are auto-generated from validated hypotheses. You can find them in your Project folder. Each paper includes introduction, methods, results, and discussion sections with proper citations.'
-    if (q.includes('project'))
-      return 'Projects organize your research — they contain hypotheses, evidence, and papers. Create a new project from the Dashboard or Projects page, then run Discovery to generate hypotheses for it.'
-    if (q.includes('evidence'))
-      return 'The Evidence section contains curated biomedical literature from PubMed, clinical trials, and other sources. Evidence is automatically linked to hypotheses during the discovery process.'
-    if (q.includes('statistic') || q.includes('analysis') || q.includes('t-test') || q.includes('anova'))
-      return 'The Statistical Analysis tool supports descriptive statistics, t-tests, ANOVA, chi-square tests, correlation matrices, regression, survival analysis, and sample size calculations. Enter your data and run the analysis.'
-    if (q.includes('genomic') || q.includes('pathway') || q.includes('gene'))
-      return 'The Genomics Analysis tool supports pathway enrichment analysis (KEGG/Reactome), gene set enrichment analysis (GSEA), variant annotation, and biomarker discovery with volcano plots.'
-    if (q.includes('visuali') || q.includes('chart') || q.includes('plot') || q.includes('graph'))
-      return 'The Data Visualization engine supports 29 chart types including bar, line, scatter, pie, radar, heatmap, box plots, and more. Upload a CSV or enter data manually, then customize with color palettes, axis labels, and export as PNG/SVG.'
-    if (q.includes('notebook'))
-      return 'The Notebook is a Markdown-based research journal with LaTeX math support, templates for research notes and experiment logs, version history, and export options.'
-    if (q.includes('hello') || q.includes('hi ') || q.includes('hey'))
-      return 'Hello! I\'m Constant, your AI research assistant. I can help you navigate the platform, explain features, and answer questions about your research workflow. What would you like to know?'
-    return 'I can help you navigate the platform and answer questions about your research. Try asking about hypotheses, projects, evidence, statistical analysis, genomics, visualizations, or any other feature. For AI-powered discovery, head to the Discovery section.'
+    const ctx = getLocalContext() as any
+    const parts: string[] = []
+
+    const totalProjects = ctx.totalProjects || 0
+    const totalHypotheses = ctx.totalHypotheses || 0
+    const totalPapers = ctx.totalPapers || 0
+    const totalSimulations = ctx.totalSimulations || 0
+    const projects = (ctx.projects as any[]) || []
+    const hypotheses = (ctx.hypotheses as any[]) || []
+    const papers = (ctx.papers as any[]) || []
+
+    // Greet naturally
+    if (q.includes('hello') || q.includes('hi ') || q.includes('hey') || q.match(/^hi$/)) {
+      parts.push('Hey there! I\'m Constant, your research assistant on HumaNovo.')
+      if (totalProjects > 0) parts.push(`You currently have **${totalProjects}** projects on the platform.`)
+      if (totalHypotheses > 0) parts.push(`There are **${totalHypotheses}** hypotheses generated so far.`)
+      if (totalPapers > 0) parts.push(`You've generated **${totalPapers}** research papers.`)
+      if (totalSimulations > 0) parts.push(`And **${totalSimulations}** simulations have been run.`)
+      parts.push('What would you like to explore?')
+      return parts.join(' ')
+    }
+
+    // Search user's actual data for relevant context
+    // Find matching hypotheses by checking title, mechanism, disease, tags
+    const matchingHyps = hypotheses.filter((h: any) => {
+      const searchable = [h.title, h.mechanism, h.disease, ...(h.tags || [])].filter(Boolean).join(' ').toLowerCase()
+      return q.split(/\s+/).some(word => word.length > 2 && searchable.includes(word))
+    })
+
+    // Find matching projects
+    const matchingProjects = projects.filter((p: any) => {
+      const searchable = [p.name, p.disease].filter(Boolean).join(' ').toLowerCase()
+      return q.split(/\s+/).some(word => word.length > 2 && searchable.includes(word))
+    })
+
+    if (matchingHyps.length > 0) {
+      parts.push(`I found **${matchingHyps.length}** relevant hypothesis${matchingHyps.length > 1 ? 'es' : ''} in your platform data:\n`)
+      matchingHyps.slice(0, 5).forEach((h: any, i: number) => {
+        parts.push(`${i + 1}. **${h.title}**${h.confidence ? ` (confidence: ${Math.round(h.confidence * 100)}%)` : ''}`)
+        if (h.mechanism) parts.push(`   Mechanism: ${h.mechanism.slice(0, 150)}${h.mechanism.length > 150 ? '...' : ''}`)
+        if (h.disease) parts.push(`   Disease: ${h.disease}`)
+      })
+      if (matchingHyps.length > 5) parts.push(`\n...and ${matchingHyps.length - 5} more. Check the Discovery section for all of them.`)
+      parts.push('\nYou can view these in the Discovery section or generate a research paper from any of them.')
+      return parts.join('\n')
+    }
+
+    if (matchingProjects.length > 0) {
+      parts.push(`Found **${matchingProjects.length}** related project(s):\n`)
+      matchingProjects.slice(0, 5).forEach((p: any, i: number) => {
+        parts.push(`${i + 1}. **${p.name}**${p.disease ? ` — ${p.disease}` : ''}${p.hypotheses ? ` (${p.hypotheses} hypotheses)` : ''}`)
+      })
+      return parts.join('\n')
+    }
+
+    // General context-aware response
+    if (q.includes('hypothesis') || q.includes('hypotheses')) {
+      if (totalHypotheses > 0) {
+        parts.push(`You have **${totalHypotheses}** hypotheses in the platform. Here are the most recent:\n`)
+        hypotheses.slice(0, 5).forEach((h: any, i: number) => {
+          parts.push(`${i + 1}. **${h.title}**${h.confidence ? ` — ${Math.round(h.confidence * 100)}% confidence` : ''}`)
+        })
+        if (totalHypotheses > 5) parts.push(`\n...and ${totalHypotheses - 5} more.`)
+        parts.push('\nGo to the Discovery section to view details or generate research papers from these.')
+      } else {
+        parts.push('No hypotheses have been generated yet. Start a discovery run from the Discovery section to generate hypotheses for your disease of interest.')
+      }
+      return parts.join('\n')
+    }
+
+    if (q.includes('project')) {
+      if (totalProjects > 0) {
+        parts.push(`You have **${totalProjects}** project(s). Here are the most recent:\n`)
+        projects.slice(0, 5).forEach((p: any, i: number) => {
+          parts.push(`${i + 1}. **${p.name}**${p.disease ? ` — ${p.disease}` : ''}${p.hypotheses ? ` (${p.hypotheses} hypotheses)` : ''}`)
+        })
+        if (totalProjects > 5) parts.push(`\n...and ${totalProjects - 5} more. Visit the Projects page to see all of them.`)
+      } else {
+        parts.push('No projects yet. Create one from the Projects page to organize your research.')
+      }
+      return parts.join('\n')
+    }
+
+    if (q.includes('paper') || q.includes('publication')) {
+      if (totalPapers > 0) {
+        parts.push(`You have **${totalPapers}** generated research paper(s):\n`)
+        papers.slice(0, 5).forEach((p: any, i: number) => {
+          parts.push(`${i + 1}. **${p.title}**${p.disease ? ` — ${p.disease}` : ''}`)
+        })
+        parts.push('\nFind them in your Project folder.')
+      } else {
+        parts.push('No research papers generated yet. Generate one by clicking "Generate Research Paper" on any hypothesis in your project.')
+      }
+      return parts.join('\n')
+    }
+
+    if (q.includes('simulation')) {
+      if (totalSimulations > 0) {
+        parts.push(`You have **${totalSimulations}** simulation(s). Head to the Simulations page to view results and run new ones.`)
+      } else {
+        parts.push('No simulations yet. Go to the Simulations page to run Monte Carlo simulations on your hypotheses.')
+      }
+      return parts.join('\n')
+    }
+
+    // How many / count questions
+    if (q.includes('how many') || q.includes('count') || q.includes('total') || q.includes('number')) {
+      parts.push('Here\'s your platform overview:\n')
+      parts.push(`- **${totalProjects}** projects`)
+      parts.push(`- **${totalHypotheses}** hypotheses`)
+      parts.push(`- **${totalPapers}** research papers`)
+      parts.push(`- **${totalSimulations}** simulations`)
+      return parts.join('\n')
+    }
+
+    // Default: summarize platform state and try to match any data
+    const summary: string[] = ['Here\'s your current research overview:']
+    summary.push(`- **${totalProjects}** projects`)
+    summary.push(`- **${totalHypotheses}** hypotheses`)
+    summary.push(`- **${totalPapers}** research papers`)
+    summary.push(`- **${totalSimulations}** simulations`)
+    if (totalProjects === 0 && totalHypotheses === 0) {
+      summary.push('\nYour platform is empty right now. Start by creating a project and running a discovery!')
+    } else {
+      summary.push('\nTry asking about a specific disease, hypothesis, or project name. I\'m currently in offline mode, so my responses are based on your local platform data.')
+    }
+    return summary.join('\n')
   }
 
   const sendMessage = async () => {
@@ -307,12 +437,12 @@ function ConstantChat() {
         const data = await res.json()
         setMessages(prev => [...prev, { role: 'assistant', text: data.response || 'I\'m not sure about that. Could you rephrase?' }])
       } else {
-        // API returned error — provide helpful fallback
-        setMessages(prev => [...prev, { role: 'assistant', text: generateFallbackResponse(userMsg) }])
+        // API returned error — smart fallback using platform data
+        setMessages(prev => [...prev, { role: 'assistant', text: generateSmartFallbackResponse(userMsg) }])
       }
     } catch {
-      // API unreachable — provide helpful fallback
-      setMessages(prev => [...prev, { role: 'assistant', text: generateFallbackResponse(userMsg) }])
+      // API unreachable — smart fallback using platform data
+      setMessages(prev => [...prev, { role: 'assistant', text: generateSmartFallbackResponse(userMsg) }])
     } finally {
       setLoading(false)
     }
