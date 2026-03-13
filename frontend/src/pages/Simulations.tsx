@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
+import { formatDateTime } from '../utils/persistence'
 import '@tanstack/react-query' // kept to preserve dependency
 import {
   FiActivity, FiPlay, FiPause, FiCheck, FiX, FiPlus,
@@ -662,7 +663,7 @@ function MCSimulationCard({ result, onDelete }: { result: MCResult; onDelete: (i
           </div>
 
           <div className="flex items-center justify-between">
-            <p className="text-[10px] text-[var(--color-text-muted)]">Created: {new Date(result.createdAt).toLocaleString()}</p>
+            <p className="text-[10px] text-[var(--color-text-muted)]">Created: {formatDateTime(result.createdAt)}</p>
             <button
               onClick={copyChartsToClipboard}
               className="flex items-center gap-1 px-2 py-1 text-xs rounded hover:bg-white/5 text-[var(--color-text-muted)] hover:text-white transition-all"
@@ -2751,8 +2752,16 @@ export default function Simulations() {
     setShowCreate(false)
   }
 
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+
   const handleDelete = (id: string) => {
-    setMcSimulations(prev => prev.filter(s => s.id !== id))
+    setDeleteConfirmId(id)
+  }
+
+  const confirmDelete = () => {
+    if (!deleteConfirmId) return
+    setMcSimulations(prev => prev.filter(s => s.id !== deleteConfirmId))
+    setDeleteConfirmId(null)
   }
 
   return (
@@ -2848,6 +2857,27 @@ export default function Simulations() {
 
         {activeTab === 'equation-plotter' && <EquationPlotter />}
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      {deleteConfirmId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="glass-card p-6 max-w-sm mx-4 text-center" style={{ background: 'var(--color-surface-solid)' }}>
+            <FiX className="w-8 h-8 text-red-400 mx-auto mb-3" />
+            <h3 className="text-lg font-semibold mb-2">Delete Simulation?</h3>
+            <p className="text-sm text-[var(--color-text-muted)] mb-4">
+              This will permanently delete this simulation and its results. This action cannot be undone.
+            </p>
+            <div className="flex gap-3 justify-center">
+              <button onClick={() => setDeleteConfirmId(null)} className="btn px-4 py-2 text-sm text-[var(--color-text-muted)]">
+                Cancel
+              </button>
+              <button onClick={confirmDelete} className="btn px-4 py-2 text-sm bg-red-500/10 text-red-400 hover:bg-red-500/20">
+                Delete Permanently
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

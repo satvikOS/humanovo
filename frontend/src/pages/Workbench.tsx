@@ -2554,10 +2554,10 @@ export default function Workbench() {
     if (node) setEditingNode(node)
   }, [nodes])
 
+  const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'node' | 'edge' | 'graph'; id?: string } | null>(null)
+
   const handleEdgeClick = useCallback((edgeId: string) => {
-    if (confirm('Delete this connection?')) {
-      setEdges(prev => prev.filter(e => e.id !== edgeId))
-    }
+    setDeleteConfirm({ type: 'edge', id: edgeId })
   }, [])
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
@@ -2589,10 +2589,197 @@ export default function Workbench() {
   // --- Delete selected node ---
   const deleteSelectedNode = useCallback(() => {
     if (!selectedNode) return
-    setNodes(prev => prev.filter(n => n.id !== selectedNode))
-    setEdges(prev => prev.filter(e => e.sourceId !== selectedNode && e.targetId !== selectedNode))
-    setSelectedNode(null)
+    setDeleteConfirm({ type: 'node', id: selectedNode })
   }, [selectedNode])
+
+  const confirmDeleteAction = useCallback(() => {
+    if (!deleteConfirm) return
+    if (deleteConfirm.type === 'edge' && deleteConfirm.id) {
+      setEdges(prev => prev.filter(e => e.id !== deleteConfirm.id))
+    } else if (deleteConfirm.type === 'node' && deleteConfirm.id) {
+      setNodes(prev => prev.filter(n => n.id !== deleteConfirm.id))
+      setEdges(prev => prev.filter(e => e.sourceId !== deleteConfirm.id && e.targetId !== deleteConfirm.id))
+      setSelectedNode(null)
+    } else if (deleteConfirm.type === 'graph') {
+      setNodes([])
+      setEdges([])
+      setSelectedNode(null)
+    }
+    setDeleteConfirm(null)
+  }, [deleteConfirm])
+
+  // --- Constant AI: intelligent fallback for workbench ---
+  const generateWorkbenchFallback = useCallback((query: string): string => {
+    const q = query.toLowerCase()
+    const nodeNames = nodes.map(n => n.name)
+
+    // Known biological relationships database for common biological entities
+    const relationships: Record<string, Record<string, { label: string; explanation: string }>> = {
+      'immune & lymphatic system': {
+        't cell': { label: 'contains', explanation: 'The immune system contains T cells as primary adaptive immune effector cells. T cells mature in the thymus and mediate cellular immunity.' },
+        'b cell': { label: 'contains', explanation: 'B cells are lymphocytes within the immune system that produce antibodies and mediate humoral immunity.' },
+        'macrophage': { label: 'contains', explanation: 'Macrophages are innate immune cells that phagocytose pathogens and present antigens to T cells.' },
+        'nk cell': { label: 'contains', explanation: 'Natural Killer cells provide innate immune surveillance against virally-infected and tumor cells.' },
+      },
+      'tp53': {
+        'bax': { label: 'activates', explanation: 'p53 transcriptionally activates BAX, a pro-apoptotic BCL-2 family member that forms pores in the mitochondrial outer membrane, triggering cytochrome c release and apoptosis.' },
+        'mdm2': { label: 'inhibited by', explanation: 'MDM2 is a negative regulator of p53. It ubiquitinates p53 for proteasomal degradation. In turn, p53 transcriptionally activates MDM2, creating a negative feedback loop.' },
+        'p21': { label: 'activates', explanation: 'p53 directly activates p21 (CDKN1A) transcription. p21 inhibits cyclin-CDK complexes, causing G1/S cell cycle arrest to allow DNA repair.' },
+        'apoptosis': { label: 'induces', explanation: 'p53 induces apoptosis through transcriptional activation of pro-apoptotic genes (BAX, PUMA, NOXA) and direct mitochondrial membrane permeabilization.' },
+      },
+      'brca1': {
+        'dna repair': { label: 'mediates', explanation: 'BRCA1 is essential for homologous recombination (HR) DNA repair. It forms the BRCA1-PALB2-BRCA2-RAD51 complex that repairs double-strand breaks.' },
+        'tp53': { label: 'cooperates with', explanation: 'BRCA1 and p53 cooperate in DNA damage response. BRCA1 facilitates p53 phosphorylation and stabilization after DNA damage.' },
+      },
+      'egfr': {
+        'ras': { label: 'activates', explanation: 'EGFR activation leads to RAS-GTP loading via SOS/GRB2 adaptors, initiating the MAPK signaling cascade (RAS→RAF→MEK→ERK).' },
+        'pi3k': { label: 'activates', explanation: 'EGFR activates PI3K directly or via RAS, leading to AKT phosphorylation and promotion of cell survival and proliferation.' },
+        'kras': { label: 'activates', explanation: 'EGFR signals through KRAS via GRB2-SOS complex, activating the MAPK pathway. KRAS mutations can make this pathway constitutively active independent of EGFR.' },
+      },
+      'pi3k-akt signaling': {
+        'mtor': { label: 'activates', explanation: 'PI3K→AKT signaling activates mTOR (mechanistic target of rapamycin), promoting protein synthesis, cell growth, and proliferation via S6K and 4E-BP1.' },
+        'apoptosis': { label: 'inhibits', explanation: 'PI3K-AKT signaling phosphorylates and inactivates pro-apoptotic proteins (BAD, caspase-9), promoting cell survival.' },
+      },
+    }
+
+    // Try to auto-connect nodes
+    if (q.includes('connect') || q.includes('relationship') || q.includes('link') || q.includes('relate') || q.includes('between')) {
+      if (nodes.length < 2) {
+        return 'Add at least 2 nodes to the canvas and I\'ll help you find biological relationships between them. Try dragging components from the left panel.'
+      }
+
+      const foundConnections: string[] = []
+      const edgesToAdd: { sourceId: string; targetId: string; label: string }[] = []
+
+      for (let i = 0; i < nodes.length; i++) {
+        for (let j = i + 1; j < nodes.length; j++) {
+          const n1 = nodes[i], n2 = nodes[j]
+          const n1Lower = n1.name.toLowerCase()
+          const n2Lower = n2.name.toLowerCase()
+
+          // Check known relationships
+          for (const [entity, rels] of Object.entries(relationships)) {
+            for (const [target, rel] of Object.entries(rels)) {
+              if ((n1Lower.includes(entity) && n2Lower.includes(target)) ||
+                  (n1Lower.includes(target) && n2Lower.includes(entity))) {
+                const isForward = n1Lower.includes(entity)
+                const srcId = isForward ? n1.id : n2.id
+                const tgtId = isForward ? n2.id : n1.id
+                // Check if edge already exists
+                const edgeExists = edges.some(e =>
+                  (e.sourceId === srcId && e.targetId === tgtId) ||
+                  (e.sourceId === tgtId && e.targetId === srcId)
+                )
+                if (!edgeExists) {
+                  edgesToAdd.push({ sourceId: srcId, targetId: tgtId, label: rel.label })
+                  foundConnections.push(`**${isForward ? n1.name : n2.name}** → *${rel.label}* → **${isForward ? n2.name : n1.name}**: ${rel.explanation}`)
+                } else {
+                  foundConnections.push(`**${isForward ? n1.name : n2.name}** → *${rel.label}* → **${isForward ? n2.name : n1.name}** (already connected): ${rel.explanation}`)
+                }
+              }
+            }
+          }
+
+          // Category-based relationships
+          if (foundConnections.length === 0) {
+            if (n1.category === 'pathway' && n2.category === 'biomolecule') {
+              edgesToAdd.push({ sourceId: n1.id, targetId: n2.id, label: 'involves' })
+              foundConnections.push(`**${n1.name}** → *involves* → **${n2.name}**: This pathway likely involves or regulates this biomolecule.`)
+            } else if (n1.category === 'gene' && n2.category === 'pathway') {
+              edgesToAdd.push({ sourceId: n1.id, targetId: n2.id, label: 'participates in' })
+              foundConnections.push(`**${n1.name}** → *participates in* → **${n2.name}**: This gene product likely participates in this signaling pathway.`)
+            } else if (n1.category === 'drug_target' && n2.category === 'receptor') {
+              edgesToAdd.push({ sourceId: n1.id, targetId: n2.id, label: 'targets' })
+              foundConnections.push(`**${n1.name}** → *targets* → **${n2.name}**: This therapeutic target acts on this receptor.`)
+            }
+          }
+        }
+      }
+
+      // Actually add the edges to the graph
+      if (edgesToAdd.length > 0) {
+        const newEdges = edgesToAdd.map(e => ({
+          id: `edge_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          sourceId: e.sourceId,
+          targetId: e.targetId,
+          label: e.label,
+          color: nodes.find(n => n.id === e.sourceId)?.color || 'rgba(255,255,255,0.3)',
+        }))
+        setEdges(prev => [...prev, ...newEdges])
+      }
+
+      if (foundConnections.length > 0) {
+        const connectMsg = edgesToAdd.length > 0 ? `I've added **${edgesToAdd.length}** connection(s) to your graph:\n\n` : ''
+        return connectMsg + foundConnections.join('\n\n')
+      }
+
+      return `I analyzed your ${nodes.length} nodes but couldn't find known biological relationships between them in my offline database. When connected to the backend AI, I can discover relationships between any biological entities. You can also manually connect nodes by clicking the circles on node edges.`
+    }
+
+    // Explain a specific node
+    if (q.includes('explain') || q.includes('what is') || q.includes('tell me about') || q.includes('describe')) {
+      const matchedNode = nodes.find(n => q.includes(n.name.toLowerCase()))
+      if (matchedNode) {
+        const comp = components.find(c => c.id === matchedNode.entityId)
+        if (comp) {
+          const parts = [`**${comp.name}** (${categoryConfig[comp.category]?.label || comp.category})\n`]
+          if (comp.description) parts.push(comp.description)
+          if (comp.diseaseRelevance) parts.push(`\n**Disease relevance:** ${comp.diseaseRelevance}`)
+          if (comp.therapeuticTargets?.length) parts.push(`\n**Therapeutic targets:** ${comp.therapeuticTargets.join(', ')}`)
+          if (comp.clinicalSignificance) parts.push(`\n**Clinical significance:** ${comp.clinicalSignificance}`)
+          if (comp.keyFacts?.length) parts.push(`\n**Key facts:**\n${comp.keyFacts.map(f => `- ${f}`).join('\n')}`)
+          return parts.join('\n')
+        }
+      }
+      return 'Select a node on the canvas or specify a node name. I can explain its biology, disease relevance, therapeutic potential, and how it connects to other elements.'
+    }
+
+    // Suggest nodes to add
+    if (q.includes('suggest') || q.includes('recommend') || q.includes('what should') || q.includes('add')) {
+      if (nodes.length === 0) {
+        return 'Start by adding biological structures from the left panel. Good starting points:\n\n- **Immune System** — for immunology research\n- **TP53** — for cancer biology\n- **PI3K-AKT Signaling** — for cell survival pathways\n- **EGFR** — for targeted therapy research\n\nDrag any structure onto the canvas to begin building your knowledge graph.'
+      }
+      const categories = new Set(nodes.map(n => n.category))
+      const suggestions: string[] = [`Based on your ${nodes.length} nodes, I suggest adding:`]
+      if (categories.has('pathway') && !categories.has('drug_target')) suggestions.push('- **Therapeutic targets** — to explore druggable nodes in your pathways')
+      if (categories.has('gene') && !categories.has('pathway')) suggestions.push('- **Signaling pathways** — to see how your genes participate in larger networks')
+      if (categories.has('receptor') && !categories.has('biomolecule')) suggestions.push('- **Ligands/biomolecules** — to see what activates your receptors')
+      if (categories.has('organ_system') && !categories.has('cell_type')) suggestions.push('- **Cell types** — to see which cells make up your organ systems')
+      suggestions.push('\nBrowse the Structures panel or Master Library on the left to find relevant components.')
+      return suggestions.join('\n')
+    }
+
+    // Analyze the graph
+    if (q.includes('analyze') || q.includes('analysis') || q.includes('summary') || q.includes('overview')) {
+      if (nodes.length === 0) return 'Your canvas is empty. Add biological structures to begin analysis.'
+      const catCounts = new Map<string, number>()
+      nodes.forEach(n => catCounts.set(n.category, (catCounts.get(n.category) || 0) + 1))
+      const parts = [`**Graph Analysis** — ${nodes.length} nodes, ${edges.length} connections\n`]
+      parts.push('**Node categories:**')
+      catCounts.forEach((count, cat) => parts.push(`- ${categoryConfig[cat]?.label || cat}: ${count}`))
+      if (edges.length > 0) {
+        parts.push('\n**Connections:**')
+        edges.forEach(e => {
+          const src = nodes.find(n => n.id === e.sourceId)
+          const tgt = nodes.find(n => n.id === e.targetId)
+          if (src && tgt) parts.push(`- ${src.name} → *${e.label}* → ${tgt.name}`)
+        })
+      }
+      const isolatedNodes = nodes.filter(n => !edges.some(e => e.sourceId === n.id || e.targetId === n.id))
+      if (isolatedNodes.length > 0) {
+        parts.push(`\n**Isolated nodes** (no connections): ${isolatedNodes.map(n => n.name).join(', ')}`)
+        parts.push('Try asking me to "connect these nodes" to find biological relationships.')
+      }
+      return parts.join('\n')
+    }
+
+    // Default helpful response
+    if (nodes.length === 0) {
+      return 'Welcome to the Workbench! I can help you:\n\n- **Build** a knowledge graph by adding biological structures from the left panel\n- **Connect** nodes by finding biological relationships\n- **Explain** any biological entity in detail\n- **Analyze** your graph structure and suggest improvements\n\nStart by adding some nodes from the Structures panel.'
+    }
+
+    return `Your graph has **${nodes.length}** nodes and **${edges.length}** connections. I can:\n\n- **"Connect these nodes"** — auto-discover biological relationships\n- **"Explain [node name]"** — get detailed info about a specific entity\n- **"Suggest nodes to add"** — get recommendations\n- **"Analyze my graph"** — get a summary and insights\n\nTry one of these, or ask me about the biology of your graph nodes!`
+  }, [nodes, edges, components])
 
   // --- Constant AI send ---
   const sendConstantMessage = useCallback(async () => {
@@ -2609,7 +2796,9 @@ export default function Workbench() {
       return src && tgt ? `${src.name} --[${e.label}]--> ${tgt.name}` : ''
     }).filter(Boolean).join('; ')
 
-    const contextPrompt = `The user is building a biomedical research graph. Current nodes on canvas: ${nodeNames || 'none'}. Current connections: ${edgeDescs || 'none'}. User question: ${userMsg}`
+    const contextPrompt = `The user is building a biomedical research graph in the Workbench. Current nodes on canvas: ${nodeNames || 'none'}. Current connections: ${edgeDescs || 'none'}. User request: ${userMsg}
+
+IMPORTANT: If the user asks you to connect nodes, suggest connections, or explain relationships, provide specific biological relationship details. If they ask to add/edit/remove nodes, describe what should be done. Always be specific about mechanisms and pathways.`
 
     try {
       const resp = await fetch('/api/v1/orchestrator/chat', {
@@ -2619,16 +2808,22 @@ export default function Workbench() {
       })
       if (resp.ok) {
         const data = await resp.json()
-        setConstantMessages(prev => [...prev, { role: 'assistant', text: data.response || data.message || 'I can help you explore biological relationships. Try adding more nodes and asking about their connections.' }])
+        const responseText = data.response || data.message
+        if (responseText && responseText !== 'I can help you explore biological relationships. Try adding more nodes and asking about their connections.') {
+          setConstantMessages(prev => [...prev, { role: 'assistant', text: responseText }])
+        } else {
+          // Backend returned generic fallback — use smart fallback
+          setConstantMessages(prev => [...prev, { role: 'assistant', text: generateWorkbenchFallback(userMsg) }])
+        }
       } else {
-        setConstantMessages(prev => [...prev, { role: 'assistant', text: 'I can help you explore biological relationships. Try adding more nodes and asking about their connections.' }])
+        setConstantMessages(prev => [...prev, { role: 'assistant', text: generateWorkbenchFallback(userMsg) }])
       }
     } catch {
-      setConstantMessages(prev => [...prev, { role: 'assistant', text: 'I can help you explore biological relationships. Try adding more nodes and asking about their connections.' }])
+      setConstantMessages(prev => [...prev, { role: 'assistant', text: generateWorkbenchFallback(userMsg) }])
     } finally {
       setConstantLoading(false)
     }
-  }, [constantInput, constantLoading, nodes, edges])
+  }, [constantInput, constantLoading, nodes, edges, generateWorkbenchFallback])
 
   // --- Export graph as JSON ---
   const exportGraphJSON = useCallback(() => {
@@ -2697,11 +2892,7 @@ export default function Workbench() {
   // --- Clear graph ---
   const clearGraph = useCallback(() => {
     if (nodes.length === 0 && edges.length === 0) return
-    if (confirm('Clear all nodes and connections from the canvas?')) {
-      setNodes([])
-      setEdges([])
-      setSelectedNode(null)
-    }
+    setDeleteConfirm({ type: 'graph' })
   }, [nodes, edges])
 
   return (
@@ -3067,6 +3258,30 @@ export default function Workbench() {
           onSubmit={handleEdgeLabelSubmit}
           onClose={() => setPendingEdge(null)}
         />
+      )}
+
+      {/* Delete Confirmation Dialog */}
+      {deleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setDeleteConfirm(null)}>
+          <div className="bg-[var(--color-bg-elevated)] border border-[var(--color-border)] rounded-xl p-5 w-80 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <h3 className="text-sm font-semibold mb-2 text-red-400">
+              {deleteConfirm.type === 'graph' ? 'Clear Entire Graph?' : deleteConfirm.type === 'node' ? 'Delete Node?' : 'Delete Connection?'}
+            </h3>
+            <p className="text-xs text-[var(--color-text-muted)] mb-4">
+              {deleteConfirm.type === 'graph'
+                ? 'This will remove all nodes and connections from the canvas. This action cannot be undone.'
+                : deleteConfirm.type === 'node'
+                ? 'This will remove the node and all its connections. This action cannot be undone.'
+                : 'This will remove the connection between these nodes. This action cannot be undone.'}
+            </p>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setDeleteConfirm(null)} className="btn btn-sm btn-secondary">Cancel</button>
+              <button onClick={confirmDeleteAction} className="btn btn-sm text-red-400 bg-red-500/10 hover:bg-red-500/20">
+                <FiTrash2 className="w-3 h-3" /> Delete
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

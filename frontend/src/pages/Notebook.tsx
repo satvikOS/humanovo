@@ -16,6 +16,7 @@ import 'katex/dist/katex.min.css'
 import { marked } from 'marked'
 import TurndownService from 'turndown'
 import api, { NotebookPage, NotebookVersion } from '../services/api'
+import { persistGet, persistSet, formatDate, formatDateTime } from '../utils/persistence'
 
 // Configure turndown for HTML-to-markdown conversion
 const turndownService = new TurndownService({
@@ -117,7 +118,7 @@ const PAGE_TEMPLATES: { name: string; icon: React.ReactNode; description: string
     content: `# Research Notes — [Project Title]
 
 > **PI:** [Principal Investigator]
-> **Date:** ${new Date().toISOString().split('T')[0]}
+> **Date:** ${formatDate(new Date())}
 > **Notebook ID:** RN-${Date.now().toString(36).toUpperCase()}
 > **Status:** Draft
 
@@ -232,7 +233,7 @@ import scipy.stats as stats
     content: `# Experiment Log — [Experiment Title]
 
 > **Experiment ID:** EXP-${Date.now().toString(36).toUpperCase()}
-> **Date initiated:** ${new Date().toISOString().split('T')[0]}
+> **Date initiated:** ${formatDate(new Date())}
 > **Date completed:** [Pending]
 > **Researcher:** [Name, ORCID]
 > **Supervisor:** [Name]
@@ -376,7 +377,7 @@ $$
     content: `# Systematic Literature Review — [Topic]
 
 > **Review ID:** LR-${Date.now().toString(36).toUpperCase()}
-> **Date initiated:** ${new Date().toISOString().split('T')[0]}
+> **Date initiated:** ${formatDate(new Date())}
 > **Reviewer(s):** [Name 1, Name 2]
 > **PROSPERO registration:** [If applicable]
 
@@ -399,7 +400,7 @@ $$
 
 | Database | Date searched | Results |
 |----------|-------------|---------|
-| PubMed / MEDLINE | ${new Date().toISOString().split('T')[0]} | [n] |
+| PubMed / MEDLINE | ${formatDate(new Date())} | [n] |
 | Embase | | [n] |
 | Cochrane Library | | [n] |
 | Web of Science | | [n] |
@@ -545,7 +546,7 @@ $$
 
 > **Analysis ID:** DA-${Date.now().toString(36).toUpperCase()}
 > **Analyst:** [Name, affiliation]
-> **Date:** ${new Date().toISOString().split('T')[0]}
+> **Date:** ${formatDate(new Date())}
 > **Software:** Python 3.x / R 4.x / [Other]
 > **Repository:** [Link to code repository]
 
@@ -733,7 +734,7 @@ $$
 
 > **Protocol ID:** CP-${Date.now().toString(36).toUpperCase()}
 > **Version:** 1.0
-> **Date:** ${new Date().toISOString().split('T')[0]}
+> **Date:** ${formatDate(new Date())}
 > **Sponsor:** [Organization]
 > **Principal Investigator:** [Name, credentials]
 
@@ -862,7 +863,7 @@ $$
     category: 'collaboration' as TemplateCategory,
     content: `# Meeting Notes — [Meeting Title]
 
-> **Date:** ${new Date().toISOString().split('T')[0]}
+> **Date:** ${formatDate(new Date())}
 > **Time:** [Start time] — [End time]
 > **Location:** [Room / Virtual link]
 > **Facilitator:** [Name]
@@ -1061,7 +1062,7 @@ $$
     content: `# Clinical Case Report — [Brief Title]
 
 > **Report ID:** CR-${Date.now().toString(36).toUpperCase()}
-> **Date:** ${new Date().toISOString().split('T')[0]}
+> **Date:** ${formatDate(new Date())}
 > **Author(s):** [Names, affiliations]
 > **Institution:** [Hospital/clinic name]
 > **IRB/Ethics:** [Approval number or waiver]
@@ -1251,7 +1252,7 @@ The authors declare no conflicts of interest.
 > **Degree:** [PhD / MSc / MD] in [Field]
 > **Institution:** [University Name]
 > **Supervisor:** [Name, Title]
-> **Date:** ${new Date().toISOString().split('T')[0]}
+> **Date:** ${formatDate(new Date())}
 
 ---
 
@@ -1425,7 +1426,7 @@ The authors declare no conflicts of interest.
 
 > **Authors:** [Author 1], [Author 2]
 > **Target journal:** [Journal Name]
-> **Date:** ${new Date().toISOString().split('T')[0]}
+> **Date:** ${formatDate(new Date())}
 
 ---
 
@@ -1504,10 +1505,19 @@ const SNIPPET_INSERT = {
 }
 
 export default function Notebook() {
-  const [pages, setPages] = useState<NotebookPage[]>([])
+  const [pages, setPagesRaw] = useState<NotebookPage[]>(() => persistGet<NotebookPage[]>('notebook-pages', []))
   const [activePage, setActivePage] = useState<NotebookPage | null>(null)
   const [viewMode, setViewMode] = useState<ViewMode>('split')
   const [loading, setLoading] = useState(true)
+
+  // Persist pages to localStorage whenever they change
+  const setPages = useCallback((updater: NotebookPage[] | ((prev: NotebookPage[]) => NotebookPage[])) => {
+    setPagesRaw(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater
+      persistSet('notebook-pages', next)
+      return next
+    })
+  }, [])
   const [saving, setSaving] = useState(false)
   const [editContent, setEditContent] = useState('')
   const [editTitle, setEditTitle] = useState('')
@@ -1616,13 +1626,26 @@ export default function Notebook() {
   const loadPages = async () => {
     try {
       setLoading(true)
-      const res = await api.getNotebookPages({ page_size: 100 }) || {}
-      const items = Array.isArray(res.items) ? res.items : []
-      if (items.length > 0) {
-        setPages(items)
-        if (!activePage) selectPage(items[0])
+      const cachedPages = persistGet<NotebookPage[]>('notebook-pages', [])
+      let apiItems: NotebookPage[] = []
+      try {
+        const res = await api.getNotebookPages({ page_size: 100 }) || {}
+        apiItems = Array.isArray(res.items) ? res.items : []
+      } catch {
+        // API unavailable — use cached pages
+      }
+
+      // Merge API pages with locally-created pages
+      const apiIds = new Set(apiItems.map(p => p.id))
+      const localOnly = cachedPages.filter(p => !apiIds.has(p.id))
+      const merged = [...apiItems, ...localOnly]
+      merged.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+
+      if (merged.length > 0) {
+        setPages(merged)
+        if (!activePage) selectPage(merged[0])
       } else {
-        // No pages returned — create a default local page
+        // No pages at all — create a default local page
         const defaultPage: NotebookPage = {
           id: 'local-default',
           title: 'Getting Started',
@@ -1638,19 +1661,25 @@ export default function Notebook() {
       }
     } catch (err) {
       console.error('Failed to load notebook pages:', err)
-      // Fallback: create a local-only page so the UI isn't blank
-      const fallbackPage: NotebookPage = {
-        id: 'local-fallback',
-        title: 'Research Notes',
-        content: '# Research Notes\n\nStart writing your research notes here.\n\n> **Note:** The notebook backend is currently unavailable. Your notes will be available once the server is back online.\n',
-        content_type: 'markdown',
-        tags: [],
-        version: 1,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+      // Use cached pages if available, otherwise create fallback
+      const cachedPages = persistGet<NotebookPage[]>('notebook-pages', [])
+      if (cachedPages.length > 0) {
+        setPages(cachedPages)
+        if (!activePage) selectPage(cachedPages[0])
+      } else {
+        const fallbackPage: NotebookPage = {
+          id: 'local-fallback',
+          title: 'Research Notes',
+          content: '# Research Notes\n\nStart writing your research notes here.\n\n> **Note:** The notebook backend is currently unavailable. Your notes will be available once the server is back online.\n',
+          content_type: 'markdown',
+          tags: [],
+          version: 1,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }
+        setPages([fallbackPage])
+        selectPage(fallbackPage)
       }
-      setPages([fallbackPage])
-      selectPage(fallbackPage)
     } finally {
       setLoading(false)
     }
@@ -1750,9 +1779,18 @@ export default function Notebook() {
     return (catTag?.replace('category:', '') as TemplateCategory) || 'general'
   }
 
-  const deletePage = async (id: string) => {
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+
+  const deletePage = (id: string) => {
+    setDeleteConfirmId(id)
+  }
+
+  const confirmDeletePage = async () => {
+    if (!deleteConfirmId) return
+    const id = deleteConfirmId
+    setDeleteConfirmId(null)
     try {
-      await api.deleteNotebookPage(id)
+      try { await api.deleteNotebookPage(id) } catch { /* API may be unavailable */ }
       setPages(prev => prev.filter(p => p.id !== id))
       if (activePage?.id === id) {
         const remaining = pages.filter(p => p.id !== id)
@@ -1958,7 +1996,7 @@ export default function Notebook() {
                   v{page.version}
                 </span>
                 <span className="text-xxs text-[var(--color-text-muted)]">
-                  {new Date(page.updated_at).toLocaleDateString()}
+                  {formatDate(page.updated_at)}
                 </span>
               </div>
               {Array.isArray(page.tags) && page.tags.length > 0 && (
@@ -2345,7 +2383,7 @@ export default function Notebook() {
                         v{ver.version} — {ver.title}
                       </div>
                       <div className="text-xxs text-[var(--color-text-muted)]">
-                        {new Date(ver.created_at).toLocaleString()}
+                        {formatDateTime(ver.created_at)}
                       </div>
                       <div className="text-xxs text-[var(--color-text-muted)] mt-0.5 line-clamp-1">
                         {(ver.content || '').slice(0, 100)}...
@@ -2372,6 +2410,27 @@ export default function Notebook() {
         </div>
       )}
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      {deleteConfirmId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="glass-card p-6 max-w-sm mx-4 text-center" style={{ background: 'var(--color-surface-solid)' }}>
+            <FiTrash2 className="w-8 h-8 text-red-400 mx-auto mb-3" />
+            <h3 className="text-lg font-semibold mb-2">Delete Notebook Page?</h3>
+            <p className="text-sm text-[var(--color-text-muted)] mb-4">
+              This will permanently delete this page and its content. This action cannot be undone.
+            </p>
+            <div className="flex gap-3 justify-center">
+              <button onClick={() => setDeleteConfirmId(null)} className="btn px-4 py-2 text-sm text-[var(--color-text-muted)]">
+                Cancel
+              </button>
+              <button onClick={confirmDeletePage} className="btn px-4 py-2 text-sm bg-red-500/10 text-red-400 hover:bg-red-500/20">
+                Delete Permanently
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

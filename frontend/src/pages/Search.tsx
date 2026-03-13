@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { formatDate } from '../utils/persistence'
 import {
   FiSearch,
   FiCalendar,
@@ -146,7 +147,7 @@ export default function Search() {
           localResults.push({
             id: p.id || p.hypothesis_id, type: 'evidence',
             title: `Research Paper: ${p.hypothesis_title || 'Untitled'}`,
-            snippet: `Disease: ${p.disease || 'Unknown'} | Generated: ${p.generated_at ? new Date(p.generated_at).toLocaleDateString() : 'Unknown'}`,
+            snippet: `Disease: ${p.disease || 'Unknown'} | Generated: ${p.generated_at ? formatDate(p.generated_at) : 'Unknown'}`,
             source: 'research_paper', source_type: 'evidence', relevance_score: score,
             metadata: { disease: p.disease },
             created_at: p.generated_at, tags: [],
@@ -514,7 +515,7 @@ export default function Search() {
                           {result.created_at && (
                             <span className="flex items-center gap-1">
                               <FiCalendar className="w-3 h-3" />
-                              {new Date(result.created_at).toLocaleDateString()}
+                              {formatDate(result.created_at)}
                             </span>
                           )}
                           {result.metadata?.citation_count !== undefined && (

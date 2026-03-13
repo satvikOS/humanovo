@@ -15,7 +15,7 @@ import {
   RadialBarChart, RadialBar,
 } from 'recharts'
 import html2canvas from 'html2canvas'
-import { persistGet, persistSet } from '../utils/persistence'
+import { persistGet, persistSet, formatDate } from '../utils/persistence'
 
 // ─── Types ──────────────────────────────────────────────────────
 interface DataPoint {
@@ -1172,7 +1172,7 @@ export default function DataVisualization() {
                 <div className="px-4 pb-3 flex items-center gap-3 text-xxs text-[var(--color-text-muted)]">
                   <span>{chart.data.length} pts</span>
                   <span>{chart.options.colorPalette}</span>
-                  <span>{new Date(chart.createdAt).toLocaleDateString()}</span>
+                  <span>{formatDate(chart.createdAt)}</span>
                 </div>
 
                 {/* Settings panel */}

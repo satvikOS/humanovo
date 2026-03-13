@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { FiPlus, FiFolder, FiX, FiTrash2, FiSearch, FiRefreshCw } from 'react-icons/fi'
 import clsx from 'clsx'
 import api, { Project, ProjectCreate } from '../services/api'
-import { persistGet } from '../utils/persistence'
+import { persistGet, persistSet, formatDateTime } from '../utils/persistence'
 
 interface SavedResearchPaper {
   id: string
@@ -193,7 +193,7 @@ function ProjectCard({ project, onDelete }: { project: Project; onDelete: (id: s
             </span>
           </div>
           <span className="text-[var(--color-text-muted)] text-xs">
-            {new Date(project.updated_at).toLocaleDateString()}
+            {formatDateTime(project.updated_at)}
           </span>
         </div>
 
@@ -291,10 +291,28 @@ export default function Projects() {
     }
   }
 
-  const handleDelete = async (id: string) => {
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+
+  const handleDeleteRequest = (id: string) => {
+    setDeleteConfirmId(id)
+  }
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteConfirmId) return
+    const id = deleteConfirmId
+    setDeleteConfirmId(null)
     try {
-      await api.deleteProject(id)
+      try { await api.deleteProject(id) } catch { /* API may be unavailable */ }
       setProjects(prev => prev.filter(p => p.id !== id))
+      // Also remove from localStorage
+      const localProjects = persistGet<any[]>('projects', [])
+      persistSet('projects', localProjects.filter((p: any) => p.id !== id))
+      // Remove associated research papers
+      const papers = persistGet<any[]>('research-papers', [])
+      persistSet('research-papers', papers.filter((p: any) => p.project_id !== id))
+      // Remove associated hypotheses
+      const hypotheses = persistGet<any[]>('hypotheses', [])
+      persistSet('hypotheses', hypotheses.filter((h: any) => h.project_id !== id))
     } catch (err) {
       console.error('Failed to delete project:', err)
     }
@@ -343,7 +361,7 @@ export default function Projects() {
       ) : projects.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {projects.map(project => (
-            <ProjectCard key={project.id} project={project} onDelete={handleDelete} />
+            <ProjectCard key={project.id} project={project} onDelete={handleDeleteRequest} />
           ))}
         </div>
       ) : (
@@ -365,6 +383,27 @@ export default function Projects() {
       {/* Create Modal */}
       {showCreateModal && (
         <CreateProjectModal onClose={() => setShowCreateModal(false)} onCreate={handleCreate} />
+      )}
+
+      {/* Delete Confirmation Dialog */}
+      {deleteConfirmId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="glass-card p-6 max-w-sm mx-4 text-center">
+            <FiTrash2 className="w-8 h-8 text-red-400 mx-auto mb-3" />
+            <h3 className="text-lg font-semibold mb-2">Delete Project?</h3>
+            <p className="text-sm text-[var(--color-text-muted)] mb-4">
+              This will permanently delete this project, its hypotheses, and research papers. This action cannot be undone.
+            </p>
+            <div className="flex gap-3 justify-center">
+              <button onClick={() => setDeleteConfirmId(null)} className="btn px-4 py-2 text-sm text-[var(--color-text-muted)]">
+                Cancel
+              </button>
+              <button onClick={handleDeleteConfirm} className="btn px-4 py-2 text-sm bg-red-500/10 text-red-400 hover:bg-red-500/20">
+                Delete Permanently
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

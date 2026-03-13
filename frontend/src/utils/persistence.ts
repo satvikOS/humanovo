@@ -76,3 +76,29 @@ export function logActivity(entry: Omit<ActivityEntry, 'id' | 'timestamp'>): voi
 export function getActivityLog(): ActivityEntry[] {
   return persistGet<ActivityEntry[]>('activity-log', [])
 }
+
+/**
+ * Format a date string or Date to MM/DD/YYYY format.
+ */
+export function formatDate(date: string | Date): string {
+  const d = typeof date === 'string' ? new Date(date) : date
+  if (isNaN(d.getTime())) return ''
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  const year = d.getFullYear()
+  return `${month}/${day}/${year}`
+}
+
+/**
+ * Format a date string or Date to MM/DD/YYYY with time (HH:MM AM/PM).
+ */
+export function formatDateTime(date: string | Date): string {
+  const d = typeof date === 'string' ? new Date(date) : date
+  if (isNaN(d.getTime())) return ''
+  const dateStr = formatDate(d)
+  const hours = d.getHours()
+  const mins = String(d.getMinutes()).padStart(2, '0')
+  const ampm = hours >= 12 ? 'PM' : 'AM'
+  const h12 = hours % 12 || 12
+  return `${dateStr} ${h12}:${mins} ${ampm}`
+}

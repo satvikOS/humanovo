@@ -81,13 +81,21 @@ function confidenceTier(c: number) {
   return { label: 'Preliminary', color: '#9a3412', bg: '#fed7aa' }
 }
 
-function formatDate(dateStr?: string): string {
+function formatDocDate(dateStr?: string): string {
   if (dateStr) {
     try {
-      return new Date(dateStr).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+      const d = new Date(dateStr)
+      if (!isNaN(d.getTime())) {
+        const month = String(d.getMonth() + 1).padStart(2, '0')
+        const day = String(d.getDate()).padStart(2, '0')
+        return `${month}/${day}/${d.getFullYear()}`
+      }
     } catch { /* fall through */ }
   }
-  return new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+  const d = new Date()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${month}/${day}/${d.getFullYear()}`
 }
 
 /** Escape HTML entities */
@@ -108,7 +116,7 @@ function textToHtml(text: string): string {
 /* ------------------------------------------------------------------ */
 
 function buildDocumentHtml(h: HypothesisDocData): string {
-  const date = formatDate(h.created_at)
+  const date = formatDocDate(h.created_at)
   const tier = confidenceTier(h.confidence)
   const confPct = (h.confidence * 100).toFixed(1)
 

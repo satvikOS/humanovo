@@ -1,4 +1,5 @@
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
+import { formatDateTime } from '../utils/persistence'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import {
@@ -229,7 +230,7 @@ function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
 function ConstantChat() {
   const [isOpen, setIsOpen] = useState(false)
   const [messages, setMessages] = useState<{ role: 'user' | 'assistant'; text: string }[]>([
-    { role: 'assistant', text: 'Hello! I\'m Constant, your AI research assistant. Ask me about your hypotheses, papers, experimental design, or anything research-related.' },
+    { role: 'assistant', text: 'Hello! I\'m Constant, your AI research tutor and assistant. Ask me about biology, research methods, your hypotheses, experimental design, statistics, genomics, or anything you want to learn about your research.' },
   ])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -404,7 +405,35 @@ function ConstantChat() {
       return parts.join('\n')
     }
 
-    // Default: summarize platform state and try to match any data
+    // Educational / tutoring queries
+    if (q.includes('what is') || q.includes('explain') || q.includes('teach') || q.includes('how does') || q.includes('define') || q.includes('tell me about') || q.includes('what are') || q.includes('why do') || q.includes('how do')) {
+      const topics: Record<string, string> = {
+        'p53': '**TP53 (p53)** is a tumor suppressor protein known as the "guardian of the genome." It activates DNA repair, arrests the cell cycle at G1/S checkpoint, and triggers apoptosis when DNA damage is irreparable. Mutations in TP53 are found in ~50% of all human cancers. Key downstream targets include p21 (cell cycle arrest), BAX (apoptosis), and MDM2 (negative feedback).',
+        'brca': '**BRCA1/BRCA2** are tumor suppressor genes critical for homologous recombination DNA repair. Germline mutations increase risk of breast (60-80%) and ovarian (20-40%) cancers. BRCA-deficient tumors are sensitive to PARP inhibitors (e.g., olaparib) due to synthetic lethality — they cannot repair double-strand breaks via alternative pathways.',
+        'crispr': '**CRISPR-Cas9** is a gene editing tool derived from bacterial immune systems. The guide RNA (gRNA) directs Cas9 nuclease to a specific genomic locus where it creates a double-strand break. The cell repairs this via NHEJ (creating knockouts) or HDR (precise edits with a donor template). Applications include gene therapy, functional genomics screens, and disease modeling.',
+        't-test': '**T-test** compares means between two groups. Use an **independent t-test** for two separate groups and a **paired t-test** for before/after measurements on the same subjects. Assumptions: normal distribution, equal variances (use Welch\'s if unequal). p < 0.05 suggests the means differ significantly. Report effect size (Cohen\'s d) alongside p-value.',
+        'anova': '**ANOVA (Analysis of Variance)** compares means across 3+ groups simultaneously. It tests whether at least one group mean differs from others. One-way ANOVA uses one factor; two-way uses two. If significant (p < 0.05), use post-hoc tests (Tukey, Bonferroni) to identify which groups differ. Assumptions: normality, homogeneity of variance, independence.',
+        'regression': '**Regression analysis** models the relationship between dependent and independent variables. **Linear regression** predicts a continuous outcome (Y = β₀ + β₁X + ε). **Logistic regression** predicts binary outcomes. Key metrics: R² (variance explained), p-values for coefficients, residual analysis for model fit.',
+        'pathway': '**Pathway enrichment analysis** identifies biological pathways overrepresented in your gene list. KEGG and Reactome are common databases. Input a gene list (e.g., differentially expressed genes), and the tool tests if any pathway has more genes than expected by chance (hypergeometric test). Significant pathways suggest biological processes involved in your condition.',
+        'gsea': '**GSEA (Gene Set Enrichment Analysis)** determines whether predefined gene sets show statistically significant, concordant differences between two biological states. Unlike pathway analysis, GSEA uses ALL genes ranked by expression change, not just significant ones. This captures subtle but coordinated changes.',
+        'survival': '**Survival analysis** (Kaplan-Meier) estimates time-to-event probabilities. The curve shows the probability of surviving past each time point. The log-rank test compares survival between groups. Cox proportional hazards regression identifies factors that influence survival. Censored data (subjects lost to follow-up) is handled natively.',
+        'hypothesis': 'A **scientific hypothesis** must be testable, falsifiable, and based on existing evidence. Structure: "If [independent variable] is [changed], then [dependent variable] will [predicted change] because [mechanism]." Start with a broad research question, review literature, identify gaps, then formulate a specific, mechanistic hypothesis.',
+        'biomarker': '**Biomarkers** are measurable indicators of biological processes, pathogenic processes, or treatment responses. Types: diagnostic (detect disease), prognostic (predict outcome), predictive (predict treatment response), pharmacodynamic (measure drug effect). Discovery typically involves comparing molecular profiles between groups and validating in independent cohorts.',
+        'apoptosis': '**Apoptosis** (programmed cell death) occurs via intrinsic (mitochondrial) or extrinsic (death receptor) pathways. Intrinsic: cellular stress → BAX/BAK pore formation → cytochrome c release → caspase-9 → caspase-3. Extrinsic: FAS/TRAIL ligand → death receptor → FADD → caspase-8 → caspase-3. Both converge on executioner caspases that dismantle the cell.',
+        'kinase': '**Kinases** are enzymes that transfer phosphate groups from ATP to target proteins (phosphorylation), regulating their activity. Major families: receptor tyrosine kinases (EGFR, HER2), serine/threonine kinases (RAF, AKT), and MAP kinases (ERK, JNK). Kinase inhibitors (imatinib, erlotinib) are major cancer therapeutics.',
+        'sample size': '**Sample size calculation** determines how many subjects you need. Key inputs: effect size (expected difference), significance level (α, typically 0.05), power (1-β, typically 0.80), and variability (SD). Formula for two-sample t-test: n = 2(Zα/2 + Zβ)²σ²/Δ². Underpowered studies risk missing real effects; overpowered studies waste resources.',
+      }
+
+      for (const [key, explanation] of Object.entries(topics)) {
+        if (q.includes(key)) {
+          return explanation + '\n\nWant me to explain further or connect this to your research?'
+        }
+      }
+
+      return 'Great question! I can teach you about many biomedical and research topics. Try asking about:\n\n- **Biology:** p53, BRCA, CRISPR, apoptosis, kinases, biomarkers\n- **Statistics:** t-tests, ANOVA, regression, survival analysis, sample size\n- **Genomics:** pathway analysis, GSEA, variant annotation\n- **Research methods:** hypothesis design, experimental controls, clinical trials\n\nI\'m currently in offline mode for detailed tutoring. When connected to the backend, I can provide comprehensive explanations on any topic. Try being specific — e.g., "What is p53?" or "Explain ANOVA"'
+    }
+
+    // Default: summarize platform state and offer tutoring
     const summary: string[] = ['Here\'s your current research overview:']
     summary.push(`- **${totalProjects}** projects`)
     summary.push(`- **${totalHypotheses}** hypotheses`)
@@ -413,8 +442,9 @@ function ConstantChat() {
     if (totalProjects === 0 && totalHypotheses === 0) {
       summary.push('\nYour platform is empty right now. Start by creating a project and running a discovery!')
     } else {
-      summary.push('\nTry asking about a specific disease, hypothesis, or project name. I\'m currently in offline mode, so my responses are based on your local platform data.')
+      summary.push('\nTry asking about a specific disease, hypothesis, or project name.')
     }
+    summary.push('\nI\'m also your research tutor! Ask me to explain any biology concept, statistical method, or research technique.')
     return summary.join('\n')
   }
 
@@ -460,7 +490,7 @@ function ConstantChat() {
             </div>
             <div>
               <h2 className="text-sm font-semibold text-[var(--color-text)]">Constant</h2>
-              <p className="text-xxs text-[var(--color-text-muted)]">AI Research Assistant</p>
+              <p className="text-xxs text-[var(--color-text-muted)]">AI Research Tutor & Assistant</p>
             </div>
           </div>
           <button onClick={() => setIsOpen(false)} className="p-2 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)] transition-all">
@@ -507,7 +537,7 @@ function ConstantChat() {
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && sendMessage()}
-              placeholder="Ask Constant about your research..."
+              placeholder="Ask Constant anything — research, biology, stats..."
               className="flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--color-text-muted)]"
             />
             <button
@@ -563,7 +593,7 @@ export default function Layout() {
             id: a.id,
             title: (a.activity_type || 'activity').replace(/_/g, ' '),
             description: a.description || '',
-            time: a.created_at ? new Date(a.created_at).toLocaleString() : '',
+            time: a.created_at ? formatDateTime(a.created_at) : '',
           })))
           const newestTime = result.items[0]?.created_at || ''
           setHasUnread(newestTime > lastRead)
@@ -643,8 +673,7 @@ if (path === '/clinical-trials') return 'Clinical Trials'
               <span className="text-[var(--color-bg)] text-xl" style={{ fontFamily: "'Cormorant Garamond', serif", fontStyle: 'italic', fontWeight: 600, lineHeight: 1 }}>h</span>
             </div>
             <div className="flex flex-col">
-              <span className="text-base text-[var(--color-text)] tracking-tight" style={{ fontFamily: "'Cormorant Garamond', serif", fontStyle: 'italic', fontWeight: 600 }}>humanovo</span>
-              <span className="text-xxs text-[var(--color-text-muted)]">Research Platform</span>
+              <span className="text-lg text-[var(--color-text)] tracking-tight" style={{ fontFamily: "'Cormorant Garamond', serif", fontStyle: 'italic', fontWeight: 700, lineHeight: 1.2 }}>humanovo</span>
             </div>
           </div>
         </div>

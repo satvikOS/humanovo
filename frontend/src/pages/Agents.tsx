@@ -24,7 +24,7 @@ import { Link } from 'react-router-dom'
 import { BarChart, Bar, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import api from '../services/api'
 import type { OrchestratorStatus, DiscoveryConfig } from '../services/api'
-import { persistSet, persistGet, logActivity } from '../utils/persistence'
+import { persistSet, persistGet, logActivity, formatDate } from '../utils/persistence'
 
 // Types
 interface TranslationalPhaseDetail {
@@ -660,7 +660,7 @@ export default function Agents() {
                       <span className="text-[var(--color-text-muted)]">{run.discoveryType}</span>
                     </div>
                     <div className="flex items-center justify-between text-xxs text-[var(--color-text-muted)] mt-1">
-                      <span>{new Date(run.timestamp).toLocaleDateString()}</span>
+                      <span>{formatDate(run.timestamp)}</span>
                       <span>{run.hypothesesCount} hypotheses</span>
                     </div>
                   </div>

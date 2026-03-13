@@ -6,7 +6,7 @@ import {
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import { api } from '../services/api'
-import { persistGet } from '../utils/persistence'
+import { persistGet, formatDate } from '../utils/persistence'
 import HypothesisDocViewer from '../components/HypothesisDocViewer'
 
 const API_BASE = '/api/v1'
@@ -28,7 +28,7 @@ function buildHypothesisPaperHtml(h: {
   title: string; description?: string; mechanism?: string; confidence: number;
   disease?: string; tags?: string[]; translational_roadmap?: TranslationalRoadmapLocal;
 }): string {
-  const date = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+  const d = new Date(); const date = `${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}/${d.getFullYear()}`
   const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
   const confTier = h.confidence >= 0.8 ? 'very high' : h.confidence >= 0.7 ? 'high' : h.confidence >= 0.5 ? 'moderate' : 'preliminary'
   const confClass = h.confidence >= 0.7 ? 'badge-high' : h.confidence >= 0.5 ? 'badge-med' : 'badge-low'

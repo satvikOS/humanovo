@@ -300,67 +300,156 @@ export default function GenomicsAnalysis() {
 
             {result && tab === 'pathway' && (
               <div className="space-y-3">
-                <div className="text-xs text-[var(--color-text-muted)]">{result.significant_pathways} significant pathways from {result.pathways_tested} tested</div>
-                {result.results?.map((r: any) => (
-                  <div key={r.pathway_id} className={`p-3 rounded-lg ${r.significant ? 'bg-green-500/5 border border-green-500/20' : 'bg-[var(--glass-bg)]'}`}>
-                    <div className="flex items-center justify-between"><span className="text-xs font-medium">{r.pathway_name}</span><span className="text-xxs font-mono">p={r.p_value}</span></div>
-                    <div className="text-xxs text-[var(--color-text-muted)] mt-1">Overlap: {r.overlap_count}/{r.pathway_size} | Fold: {r.fold_enrichment}x</div>
-                    <div className="text-xxs text-[var(--color-text-muted)]">Genes: {(r.overlap_genes || []).join(', ')}</div>
-                  </div>
-                ))}
+                {(() => {
+                  const pathways = result.results || result.pathways || []
+                  const sigCount = result.significant_pathways ?? pathways.filter((p: any) => p.p_value < 0.05).length
+                  const totalTested = result.pathways_tested ?? pathways.length
+                  return (
+                    <>
+                      <div className="text-xs text-[var(--color-text-muted)]">{sigCount} significant pathways from {totalTested} tested</div>
+                      {pathways.map((r: any) => (
+                        <div key={r.pathway_id} className={`p-3 rounded-lg ${(r.significant || r.p_value < 0.05) ? 'bg-green-500/5 border border-green-500/20' : 'bg-[var(--glass-bg)]'}`}>
+                          <div className="flex items-center justify-between"><span className="text-xs font-medium">{r.pathway_name}</span><span className="text-xxs font-mono">p={typeof r.p_value === 'number' ? r.p_value.toFixed(4) : r.p_value}</span></div>
+                          <div className="text-xxs text-[var(--color-text-muted)] mt-1">
+                            Overlap: {r.overlap_count || r.overlap || 0}/{r.pathway_size || r.gene_count || 0}
+                            {r.fold_enrichment && ` | Fold: ${r.fold_enrichment}x`}
+                            {r.enrichment_score && ` | Score: ${r.enrichment_score.toFixed(2)}`}
+                          </div>
+                          <div className="text-xxs text-[var(--color-text-muted)]">Genes: {(r.overlap_genes || r.matched_genes || []).join(', ')}</div>
+                        </div>
+                      ))}
+                    </>
+                  )
+                })()}
               </div>
             )}
 
             {result && tab === 'gsea' && (
               <div className="space-y-3">
-                <div className="text-xs text-[var(--color-text-muted)]">{result.total_genes} genes, {result.gene_sets_tested} gene sets</div>
-                {result.results?.map((r: any) => (
-                  <div key={r.pathway_id} className="p-3 rounded-lg bg-[var(--glass-bg)]">
-                    <div className="text-xs font-medium">{r.pathway_name}</div>
-                    <div className="text-xxs text-[var(--color-text-muted)]">NES: {r.normalized_es} | Hits: {r.hits}</div>
-                    <div className="text-xxs text-[var(--color-text-muted)]">Leading edge: {(r.leading_edge_genes || []).join(', ')}</div>
-                  </div>
-                ))}
+                {(() => {
+                  const gseaResults = result.results || []
+                  return (
+                    <>
+                      <div className="text-xs text-[var(--color-text-muted)]">{result.total_genes || result.n_genes || '?'} genes analyzed</div>
+                      <div className="grid grid-cols-2 gap-3 text-xs mb-2">
+                        <div className="p-2 rounded bg-[var(--glass-bg)]"><span className="text-[var(--color-text-muted)]">ES</span> <span className="font-mono float-right">{result.enrichment_score?.toFixed(3) || '-'}</span></div>
+                        <div className="p-2 rounded bg-[var(--glass-bg)]"><span className="text-[var(--color-text-muted)]">NES</span> <span className="font-mono float-right">{result.normalized_es?.toFixed(3) || '-'}</span></div>
+                        <div className="p-2 rounded bg-[var(--glass-bg)]"><span className="text-[var(--color-text-muted)]">p-value</span> <span className="font-mono float-right">{result.p_value?.toFixed(4) || '-'}</span></div>
+                        <div className="p-2 rounded bg-[var(--glass-bg)]"><span className="text-[var(--color-text-muted)]">FDR</span> <span className="font-mono float-right">{result.fdr?.toFixed(4) || '-'}</span></div>
+                      </div>
+                      {result.enrichment_plot && result.enrichment_plot.length > 0 && (
+                        <div>
+                          <p className="text-xs text-[var(--color-text-muted)] mb-2">Enrichment Plot</p>
+                          <ResponsiveContainer width="100%" height={150}>
+                            <ScatterChart>
+                              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                              <XAxis dataKey="rank" name="Rank" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
+                              <YAxis dataKey="running_es" name="Running ES" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
+                              <Tooltip contentStyle={{ background: 'var(--color-surface-solid)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '11px', color: 'var(--color-text)' }} />
+                              <Scatter data={result.enrichment_plot} fill="var(--color-accent-blue)" />
+                            </ScatterChart>
+                          </ResponsiveContainer>
+                        </div>
+                      )}
+                      {result.leading_edge_genes && (
+                        <div className="text-xxs text-[var(--color-text-muted)]">Leading edge ({result.leading_edge_size} genes): {result.leading_edge_genes.join(', ')}</div>
+                      )}
+                      {gseaResults.map((r: any) => (
+                        <div key={r.pathway_id || r.gene_set} className="p-3 rounded-lg bg-[var(--glass-bg)]">
+                          <div className="text-xs font-medium">{r.pathway_name || r.gene_set}</div>
+                          <div className="text-xxs text-[var(--color-text-muted)]">NES: {r.normalized_es} | Hits: {r.hits || r.leading_edge_size}</div>
+                          <div className="text-xxs text-[var(--color-text-muted)]">Leading edge: {(r.leading_edge_genes || []).join(', ')}</div>
+                        </div>
+                      ))}
+                    </>
+                  )
+                })()}
               </div>
             )}
 
             {result && tab === 'variants' && (
               <div className="space-y-2">
-                <div className="text-xs text-[var(--color-text-muted)]">{result.variants_annotated} annotated | {result.high_impact} high impact | {result.pathogenic} pathogenic</div>
-                {result.annotations?.map((a: any, i: number) => (
-                  <div key={i} className={`p-3 rounded-lg ${a.impact === 'HIGH' ? 'bg-red-500/5 border border-red-500/20' : a.impact === 'MODERATE' ? 'bg-yellow-500/5 border border-yellow-500/20' : 'bg-[var(--glass-bg)]'}`}>
-                    <div className="flex items-center justify-between"><span className="text-xs font-medium font-mono">{a.change}</span><span className={`text-xxs px-1.5 py-0.5 rounded ${a.impact === 'HIGH' ? 'bg-red-500/10 text-red-400' : 'bg-[var(--glass-bg)]'}`}>{a.impact}</span></div>
-                    <div className="text-xxs text-[var(--color-text-muted)] mt-1">{a.consequence} | {a.clinical_significance} | AF: {a.allele_frequency}</div>
-                  </div>
-                ))}
+                {(() => {
+                  const annotations = result.annotations || []
+                  const nVariants = result.variants_annotated || result.n_variants || annotations.length
+                  const highImpact = result.high_impact ?? result.summary?.high_impact ?? annotations.filter((a: any) => a.impact === 'HIGH').length
+                  const pathogenic = result.pathogenic ?? result.summary?.pathogenic ?? annotations.filter((a: any) => a.clinical_significance === 'pathogenic').length
+                  return (
+                    <>
+                      <div className="text-xs text-[var(--color-text-muted)]">{nVariants} annotated | {highImpact} high impact | {pathogenic} pathogenic</div>
+                      {annotations.map((a: any, i: number) => (
+                        <div key={i} className={`p-3 rounded-lg ${a.impact === 'HIGH' ? 'bg-red-500/5 border border-red-500/20' : a.impact === 'MODERATE' ? 'bg-yellow-500/5 border border-yellow-500/20' : 'bg-[var(--glass-bg)]'}`}>
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-medium font-mono">{a.change || `${a.gene}:${a.position} ${a.ref}>${a.alt}`}</span>
+                            <span className={`text-xxs px-1.5 py-0.5 rounded ${a.impact === 'HIGH' ? 'bg-red-500/10 text-red-400' : a.impact === 'MODERATE' ? 'bg-yellow-500/10 text-yellow-400' : 'bg-[var(--glass-bg)]'}`}>{a.impact}</span>
+                          </div>
+                          <div className="text-xxs text-[var(--color-text-muted)] mt-1">{a.consequence} | {a.clinical_significance} | SIFT: {a.sift || '-'} | PolyPhen: {a.polyphen || '-'}</div>
+                          {a.cadd_score !== undefined && <div className="text-xxs text-[var(--color-text-muted)]">CADD: {a.cadd_score?.toFixed(1)} | gnomAD AF: {a.gnomad_af?.toFixed(4) || a.allele_frequency || '-'}</div>}
+                        </div>
+                      ))}
+                    </>
+                  )
+                })()}
               </div>
             )}
 
             {result && tab === 'biomarkers' && (
               <div className="space-y-3">
-                <div className="text-xs text-[var(--color-text-muted)]">{result.significant_biomarkers} significant from {result.total_genes} genes</div>
-                {Array.isArray(result.volcano_data) && result.volcano_data.length > 0 && (
-                  <div>
-                    <p className="text-xs text-[var(--color-text-muted)] mb-2">Volcano Plot</p>
-                    <ResponsiveContainer width="100%" height={200}>
-                      <ScatterChart>
-                        <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                        <XAxis dataKey="x" name="log2FC" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
-                        <YAxis dataKey="y" name="-log10(p)" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
-                        <Tooltip contentStyle={{ background: 'var(--color-surface-solid)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '11px', color: 'var(--color-text)' }} />
-                        <Scatter data={result.volcano_data} fill="var(--color-accent-blue)">
-                          {result.volcano_data.map((d: any, i: number) => <Cell key={i} fill={d.significant ? '#ef4444' : 'var(--color-accent-blue)'} />)}
-                        </Scatter>
-                      </ScatterChart>
-                    </ResponsiveContainer>
-                  </div>
-                )}
-                {result.results?.filter((r: any) => r.significant).map((r: any) => (
-                  <div key={r.gene} className="p-3 rounded-lg bg-green-500/5 border border-green-500/20">
-                    <div className="flex items-center justify-between"><span className="text-xs font-medium">{r.gene}</span><span className={`text-xxs px-1.5 py-0.5 rounded ${r.direction === 'up' ? 'bg-red-500/10 text-red-400' : 'bg-blue-500/10 text-blue-400'}`}>{r.direction === 'up' ? '↑' : '↓'} {r.direction}</span></div>
-                    <div className="text-xxs text-[var(--color-text-muted)]">log2FC: {r.log2_fold_change} | p: {r.p_value}</div>
-                  </div>
-                ))}
+                {(() => {
+                  const volcanoData = result.volcano_data || []
+                  const nSig = result.significant_biomarkers ?? result.n_significant ?? volcanoData.filter((d: any) => d.significant).length
+                  const nTotal = result.total_genes ?? result.n_genes ?? volcanoData.length
+                  // Map data for scatter chart: x = log2FC, y = -log10(p)
+                  const scatterData = volcanoData.map((d: any) => ({
+                    ...d,
+                    x: d.x ?? d.log2_fold_change ?? 0,
+                    y: d.y ?? d.neg_log10_p ?? (d.p_value ? -Math.log10(d.p_value) : 0),
+                  }))
+                  return (
+                    <>
+                      <div className="text-xs text-[var(--color-text-muted)]">{nSig} significant from {nTotal} genes</div>
+                      {scatterData.length > 0 && (
+                        <div>
+                          <p className="text-xs text-[var(--color-text-muted)] mb-2">Volcano Plot</p>
+                          <ResponsiveContainer width="100%" height={200}>
+                            <ScatterChart>
+                              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                              <XAxis dataKey="x" name="log2FC" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
+                              <YAxis dataKey="y" name="-log10(p)" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
+                              <Tooltip contentStyle={{ background: 'var(--color-surface-solid)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '11px', color: 'var(--color-text)' }} />
+                              <Scatter data={scatterData} fill="var(--color-accent-blue)">
+                                {scatterData.map((d: any, i: number) => <Cell key={i} fill={d.significant ? '#ef4444' : 'var(--color-accent-blue)'} />)}
+                              </Scatter>
+                            </ScatterChart>
+                          </ResponsiveContainer>
+                        </div>
+                      )}
+                      {/* Show top significant genes */}
+                      {(result.top_upregulated || result.top_downregulated || result.results?.filter((r: any) => r.significant)) && (
+                        <div className="space-y-2">
+                          {(result.top_upregulated || []).map((r: any) => (
+                            <div key={r.gene} className="p-3 rounded-lg bg-red-500/5 border border-red-500/20">
+                              <div className="flex items-center justify-between"><span className="text-xs font-medium">{r.gene}</span><span className="text-xxs px-1.5 py-0.5 rounded bg-red-500/10 text-red-400">up</span></div>
+                              <div className="text-xxs text-[var(--color-text-muted)]">log2FC: {r.log2_fold_change?.toFixed(3)} | p: {r.p_value?.toFixed(4)}</div>
+                            </div>
+                          ))}
+                          {(result.top_downregulated || []).map((r: any) => (
+                            <div key={r.gene} className="p-3 rounded-lg bg-blue-500/5 border border-blue-500/20">
+                              <div className="flex items-center justify-between"><span className="text-xs font-medium">{r.gene}</span><span className="text-xxs px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400">down</span></div>
+                              <div className="text-xxs text-[var(--color-text-muted)]">log2FC: {r.log2_fold_change?.toFixed(3)} | p: {r.p_value?.toFixed(4)}</div>
+                            </div>
+                          ))}
+                          {(result.results?.filter((r: any) => r.significant) || []).map((r: any) => (
+                            <div key={r.gene} className="p-3 rounded-lg bg-green-500/5 border border-green-500/20">
+                              <div className="flex items-center justify-between"><span className="text-xs font-medium">{r.gene}</span><span className={`text-xxs px-1.5 py-0.5 rounded ${r.direction === 'up' ? 'bg-red-500/10 text-red-400' : 'bg-blue-500/10 text-blue-400'}`}>{r.direction === 'up' ? 'up' : 'down'}</span></div>
+                              <div className="text-xxs text-[var(--color-text-muted)]">log2FC: {r.log2_fold_change} | p: {r.p_value}</div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )
+                })()}
               </div>
             )}
           </div>

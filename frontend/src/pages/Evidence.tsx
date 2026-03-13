@@ -364,7 +364,16 @@ export default function Evidence() {
     setShowNoteInput(false)
   }
 
-  const handleDelete = async (id: string) => {
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+
+  const handleDelete = (id: string) => {
+    setDeleteConfirmId(id)
+  }
+
+  const confirmDelete = async () => {
+    if (!deleteConfirmId) return
+    const id = deleteConfirmId
+    setDeleteConfirmId(null)
     try {
       await api.deleteEvidence(id)
       setEvidence(prev => prev.filter(e => e.id !== id))
@@ -732,6 +741,26 @@ export default function Evidence() {
                 ))}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Dialog */}
+      {deleteConfirmId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="glass-card p-6 max-w-sm mx-4 text-center" style={{ background: 'var(--color-surface-solid)' }}>
+            <h3 className="text-lg font-semibold mb-2">Delete Evidence?</h3>
+            <p className="text-sm text-[var(--color-text-muted)] mb-4">
+              This will permanently delete this evidence item. This action cannot be undone.
+            </p>
+            <div className="flex gap-3 justify-center">
+              <button onClick={() => setDeleteConfirmId(null)} className="btn px-4 py-2 text-sm text-[var(--color-text-muted)]">
+                Cancel
+              </button>
+              <button onClick={confirmDelete} className="btn px-4 py-2 text-sm bg-red-500/10 text-red-400 hover:bg-red-500/20">
+                Delete Permanently
+              </button>
+            </div>
           </div>
         </div>
       )}

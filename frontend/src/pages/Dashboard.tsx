@@ -193,12 +193,25 @@ function RecentNotebooksWidget() {
   useEffect(() => {
     const fetchNotebooks = async () => {
       try {
-        const res = await api.getNotebookPages({ page_size: 4 })
-        const pages = res?.items || []
-        setNotebooks(pages.map(p => ({ id: p.id, title: p.title, updated_at: p.updated_at, tags: p.tags || [] })))
+        // Get locally persisted notebooks
+        const cachedPages = persistGet<any[]>('notebook-pages', [])
+        let apiPages: any[] = []
+        try {
+          const res = await api.getNotebookPages({ page_size: 4 })
+          apiPages = res?.items || []
+        } catch {
+          // API unavailable
+        }
+        // Merge: API pages + local-only pages
+        const apiIds = new Set(apiPages.map((p: any) => p.id))
+        const localOnly = cachedPages.filter((p: any) => !apiIds.has(p.id))
+        const merged = [...apiPages, ...localOnly]
+        merged.sort((a: any, b: any) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+        setNotebooks(merged.slice(0, 4).map((p: any) => ({ id: p.id, title: p.title, updated_at: p.updated_at, tags: p.tags || [] })))
       } catch {
-        // API unavailable — no notebooks to show
-        setNotebooks([])
+        // Fallback to cached only
+        const cachedPages = persistGet<any[]>('notebook-pages', [])
+        setNotebooks(cachedPages.slice(0, 4).map((p: any) => ({ id: p.id, title: p.title, updated_at: p.updated_at, tags: p.tags || [] })))
       }
     }
     fetchNotebooks()
@@ -388,8 +401,6 @@ export default function Dashboard() {
   // Get real counts from localStorage (all use 'humanovo-' prefix via persistGet)
   const allActivities = useMemo(() => getActivityLog(), [])
   const localProjects = useMemo(() => persistGet<any[]>('projects', []), [])
-  const localHypotheses = useMemo(() => persistGet<any[]>('hypotheses', []), [])
-  const localPapers = useMemo(() => persistGet<any[]>('research-papers', []), [])
   const localSimulations = useMemo(() => {
     try { return JSON.parse(localStorage.getItem('humanovo-mc-simulations') || '[]') } catch { return [] }
   }, [])
@@ -431,10 +442,22 @@ export default function Dashboard() {
     fetchData()
   }, [localProjects])
 
-  // Use localStorage counts directly for accuracy (not API-merged state)
+  // Derive counts from actual project data for accuracy
   const totalProjects = Math.max(projects.length, localProjects.length)
-  const totalHypotheses = localHypotheses.length
-  const totalPapers = localPapers.length
+  // Count hypotheses from projects' own hypothesis arrays/counts
+  const totalHypotheses = useMemo(() => {
+    return projects.reduce((sum, p) => {
+      if (p.hypotheses && Array.isArray(p.hypotheses)) return sum + p.hypotheses.length
+      return sum + (p.hypothesis_count || 0)
+    }, 0)
+  }, [projects])
+  // Count research papers from localStorage but only those belonging to current projects
+  const totalPapers = useMemo(() => {
+    const allPapers = persistGet<any[]>('research-papers', [])
+    const projectIds = new Set(projects.map(p => p.id))
+    // Only count papers that belong to an existing project
+    return allPapers.filter(p => p.project_id && projectIds.has(p.project_id)).length
+  }, [projects])
 
   const stats: StatData[] = [
     {
