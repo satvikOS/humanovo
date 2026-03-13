@@ -127,7 +127,7 @@ function RecentSimulationsWidget() {
   }, [])
 
   return (
-    <div className="glass-card p-4">
+    <div className="glass-card p-4 h-full flex flex-col">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <FiActivity className="w-3.5 h-3.5 text-[var(--color-text-muted)]" />
@@ -205,7 +205,7 @@ function RecentNotebooksWidget() {
   }, [])
 
   return (
-    <div className="glass-card p-4">
+    <div className="glass-card p-4 h-full flex flex-col">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <FiBook className="w-3.5 h-3.5 text-[var(--color-text-muted)]" />
@@ -385,11 +385,14 @@ export default function Dashboard() {
   const navigate = useNavigate()
   const [projects, setProjects] = useState<Project[]>([])
 
-  // Get real counts from localStorage
+  // Get real counts from localStorage (all use 'humanovo-' prefix via persistGet)
   const allActivities = useMemo(() => getActivityLog(), [])
   const localProjects = useMemo(() => persistGet<any[]>('projects', []), [])
   const localHypotheses = useMemo(() => persistGet<any[]>('hypotheses', []), [])
   const localPapers = useMemo(() => persistGet<any[]>('research-papers', []), [])
+  const localSimulations = useMemo(() => {
+    try { return JSON.parse(localStorage.getItem('humanovo-mc-simulations') || '[]') } catch { return [] }
+  }, [])
 
   // Fetch API projects, merge with localStorage
   useEffect(() => {
@@ -428,7 +431,8 @@ export default function Dashboard() {
     fetchData()
   }, [localProjects])
 
-  const totalProjects = projects.length
+  // Use localStorage counts directly for accuracy (not API-merged state)
+  const totalProjects = Math.max(projects.length, localProjects.length)
   const totalHypotheses = localHypotheses.length
   const totalPapers = localPapers.length
 
@@ -452,10 +456,10 @@ export default function Dashboard() {
       chartData: buildChartData(allActivities, 'evidence'),
     },
     {
-      label: 'Discoveries', value: allActivities.filter(a => a.type === 'discovery').length,
-      change: computeChangePercent(allActivities, 'discovery'),
-      icon: FiCpu, accentColor: '#3b82f6', href: '/agents',
-      chartData: buildChartData(allActivities, 'discovery'),
+      label: 'Simulations', value: localSimulations.length,
+      change: computeChangePercent(allActivities, 'simulation'),
+      icon: FiActivity, accentColor: '#3b82f6', href: '/simulations',
+      chartData: buildChartData(allActivities, 'simulation'),
     },
   ]
 
@@ -503,10 +507,14 @@ export default function Dashboard() {
           <ActivityFeed />
         </div>
 
-        {/* Recent Simulations + Notebooks */}
-        <div className="space-y-4">
-          <RecentSimulationsWidget />
-          <RecentNotebooksWidget />
+        {/* Recent Simulations + Notebooks — fill height equally */}
+        <div className="flex flex-col gap-4 h-full">
+          <div className="flex-1 min-h-0">
+            <RecentSimulationsWidget />
+          </div>
+          <div className="flex-1 min-h-0">
+            <RecentNotebooksWidget />
+          </div>
         </div>
       </div>
 

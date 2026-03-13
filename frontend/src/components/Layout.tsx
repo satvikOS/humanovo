@@ -242,29 +242,33 @@ function ConstantChat() {
 
   const getLocalContext = () => {
     try {
-      const projects = JSON.parse(localStorage.getItem('projects') || localStorage.getItem('humanovo-projects') || '[]')
-      const hypotheses = JSON.parse(localStorage.getItem('hypotheses') || localStorage.getItem('humanovo-hypotheses') || '[]')
-      const papers = JSON.parse(localStorage.getItem('research-papers') || '[]')
-      const evidence = JSON.parse(localStorage.getItem('evidence') || '[]')
+      // All platform data uses 'humanovo-' prefix via persistGet/persistSet
+      const projects = JSON.parse(localStorage.getItem('humanovo-projects') || '[]')
+      const hypotheses = JSON.parse(localStorage.getItem('humanovo-hypotheses') || '[]')
+      const papers = JSON.parse(localStorage.getItem('humanovo-research-papers') || '[]')
+      const simulations = JSON.parse(localStorage.getItem('humanovo-mc-simulations') || '[]')
       return {
-        projects: projects.slice(0, 8).map((p: any) => ({
+        totalProjects: projects.length,
+        totalHypotheses: hypotheses.length,
+        totalPapers: papers.length,
+        totalSimulations: simulations.length,
+        projects: projects.map((p: any) => ({
           name: p.name || p.title,
           disease: p.disease_focus || p.disease,
           hypotheses: p.hypothesis_count,
           status: p.status,
         })).filter((p: any) => p.name),
-        hypotheses: hypotheses.slice(0, 8).map((h: any) => ({
+        hypotheses: hypotheses.map((h: any) => ({
           title: h.statement || h.title,
           mechanism: h.mechanism,
           confidence: h.confidence || h.confidence_score,
           disease: h.disease,
-          tags: h.tags?.slice(0, 3),
+          tags: h.tags?.slice(0, 5),
         })).filter((h: any) => h.title),
-        papers: papers.slice(0, 5).map((p: any) => ({
+        papers: papers.map((p: any) => ({
           title: p.hypothesis_title,
           disease: p.disease,
         })).filter((p: any) => p.title),
-        evidence: evidence.slice(0, 5).map((e: any) => e.title).filter(Boolean),
       }
     } catch { return {} }
   }
@@ -285,27 +289,29 @@ function ConstantChat() {
 
   const generateSmartFallbackResponse = (query: string): string => {
     const q = query.toLowerCase()
-    const ctx = getLocalContext()
+    const ctx = getLocalContext() as any
     const parts: string[] = []
+
+    const totalProjects = ctx.totalProjects || 0
+    const totalHypotheses = ctx.totalHypotheses || 0
+    const totalPapers = ctx.totalPapers || 0
+    const totalSimulations = ctx.totalSimulations || 0
+    const projects = (ctx.projects as any[]) || []
+    const hypotheses = (ctx.hypotheses as any[]) || []
+    const papers = (ctx.papers as any[]) || []
 
     // Greet naturally
     if (q.includes('hello') || q.includes('hi ') || q.includes('hey') || q.match(/^hi$/)) {
       parts.push('Hey there! I\'m Constant, your research assistant on HumaNovo.')
-      if ((ctx.projects as any[])?.length > 0) {
-        parts.push(`You currently have ${(ctx.projects as any[]).length} project(s) in the platform.`)
-      }
-      if ((ctx.hypotheses as any[])?.length > 0) {
-        parts.push(`There are ${(ctx.hypotheses as any[]).length} hypothesis/hypotheses generated so far.`)
-      }
+      if (totalProjects > 0) parts.push(`You currently have **${totalProjects}** projects on the platform.`)
+      if (totalHypotheses > 0) parts.push(`There are **${totalHypotheses}** hypotheses generated so far.`)
+      if (totalPapers > 0) parts.push(`You've generated **${totalPapers}** research papers.`)
+      if (totalSimulations > 0) parts.push(`And **${totalSimulations}** simulations have been run.`)
       parts.push('What would you like to explore?')
       return parts.join(' ')
     }
 
     // Search user's actual data for relevant context
-    const projects = (ctx.projects as any[]) || []
-    const hypotheses = (ctx.hypotheses as any[]) || []
-    const papers = (ctx.papers as any[]) || []
-
     // Find matching hypotheses by checking title, mechanism, disease, tags
     const matchingHyps = hypotheses.filter((h: any) => {
       const searchable = [h.title, h.mechanism, h.disease, ...(h.tags || [])].filter(Boolean).join(' ').toLowerCase()
@@ -319,19 +325,20 @@ function ConstantChat() {
     })
 
     if (matchingHyps.length > 0) {
-      parts.push(`I found ${matchingHyps.length} relevant hypothesis${matchingHyps.length > 1 ? 'es' : ''} in your platform data:\n`)
-      matchingHyps.slice(0, 3).forEach((h: any, i: number) => {
+      parts.push(`I found **${matchingHyps.length}** relevant hypothesis${matchingHyps.length > 1 ? 'es' : ''} in your platform data:\n`)
+      matchingHyps.slice(0, 5).forEach((h: any, i: number) => {
         parts.push(`${i + 1}. **${h.title}**${h.confidence ? ` (confidence: ${Math.round(h.confidence * 100)}%)` : ''}`)
         if (h.mechanism) parts.push(`   Mechanism: ${h.mechanism.slice(0, 150)}${h.mechanism.length > 150 ? '...' : ''}`)
         if (h.disease) parts.push(`   Disease: ${h.disease}`)
       })
+      if (matchingHyps.length > 5) parts.push(`\n...and ${matchingHyps.length - 5} more. Check the Discovery section for all of them.`)
       parts.push('\nYou can view these in the Discovery section or generate a research paper from any of them.')
       return parts.join('\n')
     }
 
     if (matchingProjects.length > 0) {
-      parts.push(`Found ${matchingProjects.length} related project(s):\n`)
-      matchingProjects.slice(0, 3).forEach((p: any, i: number) => {
+      parts.push(`Found **${matchingProjects.length}** related project(s):\n`)
+      matchingProjects.slice(0, 5).forEach((p: any, i: number) => {
         parts.push(`${i + 1}. **${p.name}**${p.disease ? ` — ${p.disease}` : ''}${p.hypotheses ? ` (${p.hypotheses} hypotheses)` : ''}`)
       })
       return parts.join('\n')
@@ -339,11 +346,12 @@ function ConstantChat() {
 
     // General context-aware response
     if (q.includes('hypothesis') || q.includes('hypotheses')) {
-      if (hypotheses.length > 0) {
-        parts.push(`You have ${hypotheses.length} hypotheses in the platform. Here are the most recent ones:\n`)
-        hypotheses.slice(0, 3).forEach((h: any, i: number) => {
+      if (totalHypotheses > 0) {
+        parts.push(`You have **${totalHypotheses}** hypotheses in the platform. Here are the most recent:\n`)
+        hypotheses.slice(0, 5).forEach((h: any, i: number) => {
           parts.push(`${i + 1}. **${h.title}**${h.confidence ? ` — ${Math.round(h.confidence * 100)}% confidence` : ''}`)
         })
+        if (totalHypotheses > 5) parts.push(`\n...and ${totalHypotheses - 5} more.`)
         parts.push('\nGo to the Discovery section to view details or generate research papers from these.')
       } else {
         parts.push('No hypotheses have been generated yet. Start a discovery run from the Discovery section to generate hypotheses for your disease of interest.')
@@ -352,11 +360,12 @@ function ConstantChat() {
     }
 
     if (q.includes('project')) {
-      if (projects.length > 0) {
-        parts.push(`You have ${projects.length} project(s):\n`)
-        projects.slice(0, 3).forEach((p: any, i: number) => {
-          parts.push(`${i + 1}. **${p.name}**${p.disease ? ` — ${p.disease}` : ''}`)
+      if (totalProjects > 0) {
+        parts.push(`You have **${totalProjects}** project(s). Here are the most recent:\n`)
+        projects.slice(0, 5).forEach((p: any, i: number) => {
+          parts.push(`${i + 1}. **${p.name}**${p.disease ? ` — ${p.disease}` : ''}${p.hypotheses ? ` (${p.hypotheses} hypotheses)` : ''}`)
         })
+        if (totalProjects > 5) parts.push(`\n...and ${totalProjects - 5} more. Visit the Projects page to see all of them.`)
       } else {
         parts.push('No projects yet. Create one from the Projects page to organize your research.')
       }
@@ -364,9 +373,9 @@ function ConstantChat() {
     }
 
     if (q.includes('paper') || q.includes('publication')) {
-      if (papers.length > 0) {
-        parts.push(`You have ${papers.length} generated research paper(s):\n`)
-        papers.slice(0, 3).forEach((p: any, i: number) => {
+      if (totalPapers > 0) {
+        parts.push(`You have **${totalPapers}** generated research paper(s):\n`)
+        papers.slice(0, 5).forEach((p: any, i: number) => {
           parts.push(`${i + 1}. **${p.title}**${p.disease ? ` — ${p.disease}` : ''}`)
         })
         parts.push('\nFind them in your Project folder.')
@@ -376,15 +385,35 @@ function ConstantChat() {
       return parts.join('\n')
     }
 
-    // Default: summarize what we know about the user's platform state
-    const summary: string[] = ['Here\'s what I know about your current research:']
-    if (projects.length > 0) summary.push(`- **${projects.length}** project(s)`)
-    if (hypotheses.length > 0) summary.push(`- **${hypotheses.length}** hypothesis/hypotheses`)
-    if (papers.length > 0) summary.push(`- **${papers.length}** research paper(s)`)
-    if (summary.length === 1) {
-      summary.push('Your platform is empty right now. Start by creating a project and running a discovery to generate hypotheses!')
+    if (q.includes('simulation')) {
+      if (totalSimulations > 0) {
+        parts.push(`You have **${totalSimulations}** simulation(s). Head to the Simulations page to view results and run new ones.`)
+      } else {
+        parts.push('No simulations yet. Go to the Simulations page to run Monte Carlo simulations on your hypotheses.')
+      }
+      return parts.join('\n')
+    }
+
+    // How many / count questions
+    if (q.includes('how many') || q.includes('count') || q.includes('total') || q.includes('number')) {
+      parts.push('Here\'s your platform overview:\n')
+      parts.push(`- **${totalProjects}** projects`)
+      parts.push(`- **${totalHypotheses}** hypotheses`)
+      parts.push(`- **${totalPapers}** research papers`)
+      parts.push(`- **${totalSimulations}** simulations`)
+      return parts.join('\n')
+    }
+
+    // Default: summarize platform state and try to match any data
+    const summary: string[] = ['Here\'s your current research overview:']
+    summary.push(`- **${totalProjects}** projects`)
+    summary.push(`- **${totalHypotheses}** hypotheses`)
+    summary.push(`- **${totalPapers}** research papers`)
+    summary.push(`- **${totalSimulations}** simulations`)
+    if (totalProjects === 0 && totalHypotheses === 0) {
+      summary.push('\nYour platform is empty right now. Start by creating a project and running a discovery!')
     } else {
-      summary.push('\nAsk me about any specific hypothesis, project, or disease to get more details. Note: I\'m currently offline from the AI backend, so my responses are based on your local platform data.')
+      summary.push('\nTry asking about a specific disease, hypothesis, or project name. I\'m currently in offline mode, so my responses are based on your local platform data.')
     }
     return summary.join('\n')
   }

@@ -96,12 +96,13 @@ export default function Search() {
   }, [])
 
   // Search localStorage for projects, hypotheses, papers, evidence
+  // NOTE: All platform data uses 'humanovo-' prefix via persistGet/persistSet
   const searchLocalStorage = useCallback((q: string): SearchResult[] => {
     const localResults: SearchResult[] = []
 
-    // Search projects
+    // Search projects (stored at 'humanovo-projects')
     try {
-      const projects = JSON.parse(localStorage.getItem('projects') || '[]')
+      const projects = JSON.parse(localStorage.getItem('humanovo-projects') || '[]')
       projects.forEach((p: any) => {
         const searchText = [p.name, p.description, p.disease_focus, p.research_question, ...(p.tags || [])].filter(Boolean).join(' ')
         const score = fuzzyMatch(searchText, q)
@@ -117,9 +118,9 @@ export default function Search() {
       })
     } catch { /* ignore */ }
 
-    // Search hypotheses (including description, mechanism, disease, tags)
+    // Search hypotheses (stored at 'humanovo-hypotheses')
     try {
-      const hypotheses = JSON.parse(localStorage.getItem('hypotheses') || '[]')
+      const hypotheses = JSON.parse(localStorage.getItem('humanovo-hypotheses') || '[]')
       hypotheses.forEach((h: any) => {
         const searchText = [h.title, h.statement, h.description, h.mechanism, h.disease, ...(h.tags || [])].filter(Boolean).join(' ')
         const score = fuzzyMatch(searchText, q)
@@ -135,9 +136,9 @@ export default function Search() {
       })
     } catch { /* ignore */ }
 
-    // Search research papers
+    // Search research papers (stored at 'humanovo-research-papers')
     try {
-      const papers = JSON.parse(localStorage.getItem('research-papers') || '[]')
+      const papers = JSON.parse(localStorage.getItem('humanovo-research-papers') || '[]')
       papers.forEach((p: any) => {
         const searchText = [p.hypothesis_title, p.disease, p.filename].filter(Boolean).join(' ')
         const score = fuzzyMatch(searchText, q)
@@ -154,19 +155,19 @@ export default function Search() {
       })
     } catch { /* ignore */ }
 
-    // Search evidence from localStorage
+    // Search discovery history (stored at 'humanovo-discovery-history')
     try {
-      const evidence = JSON.parse(localStorage.getItem('evidence') || '[]')
-      evidence.forEach((e: any) => {
-        const searchText = [e.title, e.abstract, e.snippet, ...(e.tags || [])].filter(Boolean).join(' ')
+      const history = JSON.parse(localStorage.getItem('humanovo-discovery-history') || '[]')
+      history.forEach((d: any) => {
+        const searchText = [d.disease, d.discoveryType, ...(d.factors || [])].filter(Boolean).join(' ')
         const score = fuzzyMatch(searchText, q)
-        if (score > 0.2) {
+        if (score > 0.3) {
           localResults.push({
-            id: e.id, type: 'evidence', title: e.title || 'Untitled Evidence',
-            snippet: e.abstract || e.snippet || '',
-            source: e.source_type || 'evidence', source_type: 'evidence', relevance_score: score,
-            metadata: { citation_count: e.citation_count, confidence: e.relevance_score },
-            created_at: e.created_at, tags: e.tags,
+            id: d.id || `disc-${d.timestamp}`, type: 'project',
+            title: `Discovery: ${d.disease || 'Unknown'}`,
+            snippet: `Type: ${d.discoveryType || 'treatment'} | ${d.hypothesesCount || 0} hypotheses`,
+            source: 'discovery', source_type: 'project', relevance_score: score,
+            metadata: {}, created_at: d.timestamp, tags: [],
           })
         }
       })
