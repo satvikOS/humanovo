@@ -704,7 +704,8 @@ export default function Notebook() {
   const [showTemplates, setShowTemplates] = useState(false)
 
   // Build templates dynamically based on selected citation style
-  const templates = useMemo(() => buildTemplates(getCitationStyle()), [])
+  // Re-read citation style from localStorage each time the template modal opens
+  const templates = useMemo(() => buildTemplates(getCitationStyle()), [showTemplates])
   const [showVersions, setShowVersions] = useState(false)
   const [versions, setVersions] = useState<NotebookVersion[]>([])
   const [tagInput, setTagInput] = useState('')

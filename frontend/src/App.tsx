@@ -13,7 +13,6 @@ import Notebook from './pages/Notebook'
 import Search from './pages/Search'
 import Timeline from './pages/Timeline'
 import Agents from './pages/Agents'
-import KnowledgeGraph from './pages/KnowledgeGraph'
 import Simulations from './pages/Simulations'
 import LiteratureReview from './pages/LiteratureReview'
 import CitationManager from './pages/CitationManager'
@@ -82,7 +81,6 @@ function App() {
         <Route path="projects/:projectId" element={<PageWrapper><ProjectDetail /></PageWrapper>} />
         <Route path="evidence" element={<PageWrapper><Evidence /></PageWrapper>} />
         <Route path="simulations" element={<PageWrapper><Simulations /></PageWrapper>} />
-        <Route path="knowledge-graph" element={<PageWrapper><KnowledgeGraph /></PageWrapper>} />
         <Route path="workbench" element={<PageWrapper><Workbench /></PageWrapper>} />
         <Route path="anatomy" element={<PageWrapper><HumanAnatomy /></PageWrapper>} />
         <Route path="notebook" element={<PageWrapper><Notebook /></PageWrapper>} />
@@ -97,7 +95,6 @@ function App() {
         <Route path="statistical-analysis" element={<PageWrapper><StatisticalAnalysis /></PageWrapper>} />
         <Route path="data-manager" element={<PageWrapper><DataManager /></PageWrapper>} />
         <Route path="collaboration" element={<PageWrapper><Collaboration /></PageWrapper>} />
-        <Route path="knowledge-graph-viewer" element={<Navigate to="/knowledge-graph" replace />} />
         <Route path="clinical-trials" element={<PageWrapper><ClinicalTrials /></PageWrapper>} />
         <Route path="genomics" element={<PageWrapper><GenomicsAnalysis /></PageWrapper>} />
         <Route path="manuscripts" element={<PageWrapper><ManuscriptManager /></PageWrapper>} />

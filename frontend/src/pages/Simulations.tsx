@@ -12,6 +12,7 @@ import {
   ResponsiveContainer, AreaChart, Area
 } from 'recharts'
 import { api, Simulation } from '../services/api'
+import html2canvas from 'html2canvas'
 import clsx from 'clsx'
 
 // ── Equation Parser / Evaluator ─────────────────────────────────
@@ -1553,32 +1554,21 @@ function EquationPlotter() {
   const copyEqChartToClipboard = useCallback(async () => {
     const el = eqChartRef.current
     if (!el) return
-    const svg = el.querySelector('svg')
-    if (!svg) return
-    const svgData = new XMLSerializer().serializeToString(svg)
-    const canvas = document.createElement('canvas')
-    const r = svg.getBoundingClientRect()
-    canvas.width = r.width * 2; canvas.height = r.height * 2
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-    ctx.scale(2, 2)
-    ctx.fillStyle = '#0f172a'
-    ctx.fillRect(0, 0, canvas.width, canvas.height)
-    const img = new Image()
-    img.onload = async () => {
-      ctx.drawImage(img, 0, 0)
-      try {
-        const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
-        if (blob) {
-          await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
-          setEqCopied(true); setTimeout(() => setEqCopied(false), 2000)
-        }
-      } catch {
-        await navigator.clipboard.writeText(svgData)
+    try {
+      const canvas = await html2canvas(el, {
+        backgroundColor: '#0f172a',
+        scale: 2,
+        useCORS: true,
+        logging: false,
+      })
+      const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
+      if (blob) {
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
         setEqCopied(true); setTimeout(() => setEqCopied(false), 2000)
       }
+    } catch {
+      setEqCopied(true); setTimeout(() => setEqCopied(false), 2000)
     }
-    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)))
   }, [])
 
   const equationCategories = useMemo(() => {
@@ -2189,24 +2179,16 @@ function ComputationalLab() {
                       onClick={async () => {
                         const vizEl = document.getElementById('result-viz-container')
                         if (!vizEl) return
-                        const svg = vizEl.querySelector('svg')
-                        if (!svg) return
-                        const svgData = new XMLSerializer().serializeToString(svg)
-                        const canvas = document.createElement('canvas')
-                        const r = svg.getBoundingClientRect()
-                        canvas.width = r.width * 2; canvas.height = r.height * 2
-                        const ctx2d = canvas.getContext('2d')
-                        if (!ctx2d) return
-                        ctx2d.scale(2, 2); ctx2d.fillStyle = '#0f172a'; ctx2d.fillRect(0, 0, canvas.width, canvas.height)
-                        const imgEl = new Image()
-                        imgEl.onload = async () => {
-                          ctx2d.drawImage(imgEl, 0, 0)
-                          try {
-                            const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
-                            if (blob) await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
-                          } catch { await navigator.clipboard.writeText(svgData) }
-                        }
-                        imgEl.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)))
+                        try {
+                          const canvas = await html2canvas(vizEl, {
+                            backgroundColor: '#0f172a',
+                            scale: 2,
+                            useCORS: true,
+                            logging: false,
+                          })
+                          const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
+                          if (blob) await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+                        } catch { /* silently fail */ }
                       }}
                       className="flex items-center gap-1 px-2 py-0.5 rounded text-xxs border border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-all"
                     >

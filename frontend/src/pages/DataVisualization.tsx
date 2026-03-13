@@ -14,6 +14,7 @@ import {
   Treemap, ComposedChart, ErrorBar, ReferenceLine, ZAxis,
   RadialBarChart, RadialBar,
 } from 'recharts'
+import html2canvas from 'html2canvas'
 import { persistGet, persistSet } from '../utils/persistence'
 
 // ─── Types ──────────────────────────────────────────────────────
@@ -333,23 +334,21 @@ export default function DataVisualization() {
   }
 
   // ─── Export ─────────────────────────────────────────────────
-  const exportPng = useCallback((id: string, title: string) => {
+  const exportPng = useCallback(async (id: string, title: string) => {
     const el = chartRefs.current[id]
     if (!el) return
-    const svg = el.querySelector('svg')
-    if (!svg) return
-    const svgData = new XMLSerializer().serializeToString(svg)
-    const canvas = document.createElement('canvas')
-    const r = svg.getBoundingClientRect()
-    canvas.width = r.width * 2; canvas.height = r.height * 2
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-    ctx.scale(2, 2)
-    ctx.fillStyle = '#0f172a'
-    ctx.fillRect(0, 0, canvas.width, canvas.height)
-    const img = new Image()
-    img.onload = () => { ctx.drawImage(img, 0, 0); const a = document.createElement('a'); a.download = `${title.replace(/\s+/g, '-').toLowerCase()}.png`; a.href = canvas.toDataURL('image/png'); a.click() }
-    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)))
+    try {
+      const canvas = await html2canvas(el, {
+        backgroundColor: '#0f172a',
+        scale: 2,
+        useCORS: true,
+        logging: false,
+      })
+      const a = document.createElement('a')
+      a.download = `${title.replace(/\s+/g, '-').toLowerCase()}.png`
+      a.href = canvas.toDataURL('image/png')
+      a.click()
+    } catch (err) { console.error('PNG export failed:', err) }
   }, [])
 
   const exportSvg = useCallback((id: string, title: string) => {
@@ -383,35 +382,23 @@ export default function DataVisualization() {
   const copyChartToClipboard = useCallback(async (id: string) => {
     const el = chartRefs.current[id]
     if (!el) return
-    const svg = el.querySelector('svg')
-    if (!svg) return
-    const svgData = new XMLSerializer().serializeToString(svg)
-    const canvas = document.createElement('canvas')
-    const r = svg.getBoundingClientRect()
-    canvas.width = r.width * 2; canvas.height = r.height * 2
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-    ctx.scale(2, 2)
-    ctx.fillStyle = '#0f172a'
-    ctx.fillRect(0, 0, canvas.width, canvas.height)
-    const img = new Image()
-    img.onload = async () => {
-      ctx.drawImage(img, 0, 0)
-      try {
-        const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
-        if (blob) {
-          await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
-          setCopiedChart(id)
-          setTimeout(() => setCopiedChart(null), 2000)
-        }
-      } catch {
-        // Fallback: copy SVG markup
-        await navigator.clipboard.writeText(svgData)
+    try {
+      const canvas = await html2canvas(el, {
+        backgroundColor: '#0f172a',
+        scale: 2,
+        useCORS: true,
+        logging: false,
+      })
+      const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
+      if (blob) {
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
         setCopiedChart(id)
         setTimeout(() => setCopiedChart(null), 2000)
       }
+    } catch {
+      setCopiedChart(id)
+      setTimeout(() => setCopiedChart(null), 2000)
     }
-    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)))
   }, [])
 
   // ─── Grouped chart types for dropdown ───────────────────────

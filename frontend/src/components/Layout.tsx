@@ -33,7 +33,6 @@ import {
   FiImage,
   FiShield,
   FiPackage,
-  FiShare2,
   FiTarget,
   FiHeart,
   FiGrid,
@@ -68,7 +67,6 @@ const researchNavItems = [
 const analysisNavItems = [
   { to: '/statistical-analysis', icon: FiTarget, label: 'Statistics' },
   { to: '/genomics', icon: FiHeart, label: 'Genomics' },
-  { to: '/knowledge-graph', icon: FiShare2, label: 'Knowledge Graph' },
 ]
 
 const managementNavItems = [
@@ -159,7 +157,6 @@ function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
     { label: 'Go to Projects', icon: FiFolder, category: 'Navigation', action: () => { navigate('/projects'); onClose() } },
     { label: 'Go to Evidence', icon: FiDatabase, category: 'Navigation', action: () => { navigate('/evidence'); onClose() } },
     { label: 'Go to Discovery', icon: FiActivity, category: 'Navigation', action: () => { navigate('/agents'); onClose() } },
-    { label: 'Go to Knowledge Graph', icon: FiGlobe, category: 'Navigation', action: () => { navigate('/knowledge-graph'); onClose() } },
     { label: 'Go to Simulations', icon: FiTrendingUp, category: 'Navigation', action: () => { navigate('/simulations'); onClose() } },
     { label: 'Go to Notebook', icon: FiBook, category: 'Navigation', action: () => { navigate('/notebook'); onClose() } },
     { label: 'Go to Search', icon: FiSearch, category: 'Navigation', action: () => { navigate('/search'); onClose() } },
@@ -481,7 +478,6 @@ export default function Layout() {
     if (path.startsWith('/projects/')) return 'Project'
     if (path === '/evidence') return 'Evidence'
     if (path === '/agents') return 'Discovery'
-    if (path === '/knowledge-graph') return 'Knowledge Graph'
     if (path === '/hypotheses') return 'Hypotheses'
     if (path.startsWith('/hypotheses/')) return 'Hypothesis Detail'
     if (path === '/simulations') return 'Simulations'

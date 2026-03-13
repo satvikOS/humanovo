@@ -1545,25 +1545,25 @@ function NodeGraphCanvas({
                   fill="#eab308"
                 />
               )}
-              {/* Connection handle (right side) */}
+              {/* Connection handle (right side) — drag from here to connect */}
               <circle
                 cx={node.x + node.width}
                 cy={node.y + node.height / 2}
-                r={5}
-                fill={isConnecting ? '#06b6d4' : 'rgba(255,255,255,0.15)'}
-                stroke={isConnecting ? '#06b6d4' : 'rgba(255,255,255,0.3)'}
-                strokeWidth={1.5}
-                className="hover:fill-[#06b6d4] transition-colors"
+                r={7}
+                fill={isConnecting ? '#06b6d4' : 'rgba(255,255,255,0.2)'}
+                stroke={isConnecting ? '#06b6d4' : 'rgba(255,255,255,0.4)'}
+                strokeWidth={2}
+                className="connect-handle hover:fill-[#06b6d4] hover:stroke-[#06b6d4] transition-colors cursor-crosshair"
               />
-              {/* Connection handle (left side) */}
+              {/* Connection handle (left side) — drag from here to connect */}
               <circle
                 cx={node.x}
                 cy={node.y + node.height / 2}
-                r={5}
-                fill="rgba(255,255,255,0.15)"
-                stroke="rgba(255,255,255,0.3)"
-                strokeWidth={1.5}
-                className="hover:fill-[#06b6d4] transition-colors"
+                r={7}
+                fill="rgba(255,255,255,0.2)"
+                stroke="rgba(255,255,255,0.4)"
+                strokeWidth={2}
+                className="connect-handle hover:fill-[#06b6d4] hover:stroke-[#06b6d4] transition-colors cursor-crosshair"
               />
               {/* Expanded details */}
               {node.expanded && (
@@ -2439,6 +2439,12 @@ export default function Workbench() {
   // --- Node interaction handlers ---
   const handleNodeMouseDown = useCallback((e: React.MouseEvent, nodeId: string) => {
     e.stopPropagation()
+    // Check if click is on a connection handle (circle elements at node edges)
+    const target = e.target as SVGElement
+    if (target.tagName === 'circle' && target.classList.contains('connect-handle')) {
+      setConnectingFrom(nodeId)
+      return
+    }
     if (e.shiftKey) {
       setConnectingFrom(nodeId)
       return
@@ -2876,7 +2882,7 @@ export default function Workbench() {
               {/* Connection hint */}
               {connectingFrom && (
                 <div className="absolute top-3 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-full bg-cyan-500/20 text-cyan-400 text-xxs border border-cyan-500/30 backdrop-blur">
-                  Release over another node to connect, or click empty space to cancel
+                  Drag to another node to connect, or release on empty space to cancel
                 </div>
               )}
               {/* Empty state */}
