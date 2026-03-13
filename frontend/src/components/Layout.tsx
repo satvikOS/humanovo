@@ -787,7 +787,7 @@ if (path === '/clinical-trials') return 'Clinical Trials'
         <WorkspaceTabs />
 
         {/* Main content */}
-        <main className="flex-1 overflow-auto bg-[var(--color-bg)]">
+        <main className="flex-1 min-h-0 overflow-auto bg-[var(--color-bg)]">
           {['/data-manager', '/clinical-trials', '/manuscripts', '/biobank', '/collaboration', '/regulatory', '/imaging'].includes(location.pathname) && (
             <div className="mx-6 mt-4 px-4 py-2.5 rounded-lg border border-[var(--color-border)] bg-[var(--glass-bg)] flex items-center gap-2">
               <span className="text-xs font-medium px-2 py-0.5 rounded bg-[var(--color-accent-blue)] text-white" style={{ background: 'var(--color-accent-blue)' }}>Coming Soon</span>
