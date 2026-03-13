@@ -1896,7 +1896,8 @@ export default function Notebook() {
   }
 
   return (
-    <div className="flex h-full overflow-hidden">
+    <div className="relative w-full" style={{ height: 'calc(100vh - 3rem)' }}>
+      <div className="absolute inset-0 flex overflow-hidden">
       {/* Sidebar */}
       <div className="w-64 border-r border-[var(--color-border)] bg-[var(--color-bg-elevated)] flex flex-col shrink-0">
         <div className="p-3 border-b border-[var(--color-border)]">
@@ -2370,6 +2371,7 @@ export default function Notebook() {
           </div>
         </div>
       )}
+      </div>
     </div>
   )
 }
