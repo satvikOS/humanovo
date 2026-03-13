@@ -91,94 +91,163 @@ interface SimulationSummary {
   createdAt: string
 }
 
+const SIM_TYPE_LABELS: Record<string, string> = {
+  clinical_outcome: 'Clinical',
+  drug_efficacy: 'Drug Efficacy',
+  biomarker: 'Biomarker',
+  pathway: 'Pathway',
+  population: 'Population',
+}
+
+const SIM_TYPE_COLORS: Record<string, string> = {
+  clinical_outcome: 'var(--color-accent-green)',
+  drug_efficacy: 'var(--color-accent-blue)',
+  biomarker: 'var(--color-accent-purple)',
+  pathway: 'var(--color-accent-orange)',
+  population: 'var(--color-accent-cyan)',
+}
+
+function formatTimeAgo(ts: string) {
+  const diff = Date.now() - new Date(ts).getTime()
+  const mins = Math.floor(diff / 60000)
+  if (mins < 1) return 'Just now'
+  if (mins < 60) return `${mins}m ago`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `${hrs}h ago`
+  return `${Math.floor(hrs / 24)}d ago`
+}
+
 function RecentSimulationsWidget() {
   const navigate = useNavigate()
   const simulations = useMemo(() => {
     try {
       const stored = JSON.parse(localStorage.getItem('humanovo-mc-simulations') || '[]') as SimulationSummary[]
-      return stored.slice(0, 5)
+      return stored.slice(0, 3)
     } catch { return [] }
   }, [])
 
-  const typeLabels: Record<string, string> = {
-    clinical_outcome: 'Clinical Outcome',
-    drug_efficacy: 'Drug Efficacy',
-    biomarker: 'Biomarker',
-    pathway: 'Pathway',
-    population: 'Population',
-  }
-
-  const typeColors: Record<string, string> = {
-    clinical_outcome: 'var(--color-accent-green)',
-    drug_efficacy: 'var(--color-accent-blue)',
-    biomarker: 'var(--color-accent-purple)',
-    pathway: 'var(--color-accent-orange)',
-    population: 'var(--color-accent-cyan)',
-  }
-
-  const formatTime = (ts: string) => {
-    const diff = Date.now() - new Date(ts).getTime()
-    const mins = Math.floor(diff / 60000)
-    if (mins < 1) return 'Just now'
-    if (mins < 60) return `${mins}m ago`
-    const hrs = Math.floor(mins / 60)
-    if (hrs < 24) return `${hrs}h ago`
-    return `${Math.floor(hrs / 24)}d ago`
-  }
-
   return (
-    <div className="glass-card p-5 h-full">
-      <div className="flex items-center justify-between mb-4">
+    <div className="glass-card p-4">
+      <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <FiActivity className="w-4 h-4 text-[var(--color-text-muted)]" />
+          <FiActivity className="w-3.5 h-3.5 text-[var(--color-text-muted)]" />
           <h3 className="text-sm font-medium">Recent Simulations</h3>
         </div>
         <Link to="/simulations" className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] flex items-center gap-1 transition-colors">
-          View All <FiArrowRight className="w-3 h-3" />
+          All <FiArrowRight className="w-3 h-3" />
         </Link>
       </div>
 
       {simulations.length === 0 ? (
-        <div className="text-center py-8 text-[var(--color-text-muted)]">
-          <FiActivity className="w-6 h-6 mx-auto mb-2 opacity-40" />
-          <p className="text-sm">No simulations yet</p>
-          <button
-            onClick={() => navigate('/simulations')}
-            className="text-sm mt-2 text-[var(--color-text)] hover:text-[var(--color-text-secondary)] transition-colors"
-          >
-            Run your first simulation
+        <div className="text-center py-4 text-[var(--color-text-muted)]">
+          <FiActivity className="w-5 h-5 mx-auto mb-1.5 opacity-40" />
+          <p className="text-xs">No simulations yet</p>
+          <button onClick={() => navigate('/simulations')} className="text-xs mt-1 text-[var(--color-text)] hover:text-[var(--color-text-secondary)] transition-colors">
+            Run a simulation
           </button>
         </div>
       ) : (
         <div className="space-y-0">
           {simulations.map(sim => {
-            const color = typeColors[sim.simulationType] || 'var(--color-text-muted)'
+            const color = SIM_TYPE_COLORS[sim.simulationType] || 'var(--color-text-muted)'
             return (
               <button
                 key={sim.id}
                 onClick={() => navigate('/simulations')}
-                className="w-full text-left flex items-start gap-3 py-3 border-b border-[var(--color-border)] last:border-0 hover:bg-[var(--glass-bg)] rounded-lg px-2 transition-all"
+                className="w-full text-left flex items-center gap-2.5 py-2.5 border-b border-[var(--color-border)] last:border-0 hover:bg-[var(--glass-bg)] rounded-lg px-2 transition-all"
               >
-                <div className="p-1.5 rounded-lg flex-shrink-0" style={{ background: `${color}12` }}>
-                  <FiActivity className="w-3.5 h-3.5" style={{ color }} />
+                <div className="p-1 rounded-md flex-shrink-0" style={{ background: `${color}12` }}>
+                  <FiActivity className="w-3 h-3" style={{ color }} />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm truncate">{sim.name}</div>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <span className="text-xs px-1.5 py-0.5 rounded-md" style={{ color, background: `${color}12` }}>
-                      {typeLabels[sim.simulationType] || sim.simulationType}
+                  <div className="text-xs font-medium truncate">{sim.name}</div>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span className="text-xxs px-1 py-0.5 rounded" style={{ color, background: `${color}12` }}>
+                      {SIM_TYPE_LABELS[sim.simulationType] || sim.simulationType}
                     </span>
-                    <span className="text-xs text-[var(--color-text-muted)]">{formatTime(sim.createdAt)}</span>
+                    <span className="text-xxs text-[var(--color-text-muted)]">{formatTimeAgo(sim.createdAt)}</span>
                   </div>
-                  {sim.stats && (
-                    <div className="text-xs text-[var(--color-text-muted)] mt-1">
-                      Mean: {sim.stats.mean.toFixed(2)} | CI95: [{sim.stats.ci95Lower.toFixed(2)}, {sim.stats.ci95Upper.toFixed(2)}]
-                    </div>
-                  )}
                 </div>
               </button>
             )
           })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Recent Notebooks ────────────────────────────────────────────
+
+interface NotebookSummary {
+  id: string
+  title: string
+  updated_at: string
+  tags: string[]
+}
+
+function RecentNotebooksWidget() {
+  const navigate = useNavigate()
+  const [notebooks, setNotebooks] = useState<NotebookSummary[]>([])
+
+  useEffect(() => {
+    const fetchNotebooks = async () => {
+      try {
+        const res = await api.getNotebookPages({ page_size: 4 })
+        const pages = res?.items || []
+        setNotebooks(pages.map(p => ({ id: p.id, title: p.title, updated_at: p.updated_at, tags: p.tags || [] })))
+      } catch {
+        // API unavailable — no notebooks to show
+        setNotebooks([])
+      }
+    }
+    fetchNotebooks()
+  }, [])
+
+  return (
+    <div className="glass-card p-4">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <FiBook className="w-3.5 h-3.5 text-[var(--color-text-muted)]" />
+          <h3 className="text-sm font-medium">Recent Notebooks</h3>
+        </div>
+        <Link to="/notebook" className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] flex items-center gap-1 transition-colors">
+          All <FiArrowRight className="w-3 h-3" />
+        </Link>
+      </div>
+
+      {notebooks.length === 0 ? (
+        <div className="text-center py-4 text-[var(--color-text-muted)]">
+          <FiBook className="w-5 h-5 mx-auto mb-1.5 opacity-40" />
+          <p className="text-xs">No notebooks yet</p>
+          <button onClick={() => navigate('/notebook')} className="text-xs mt-1 text-[var(--color-text)] hover:text-[var(--color-text-secondary)] transition-colors">
+            Create a notebook
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-0">
+          {notebooks.map(nb => (
+            <button
+              key={nb.id}
+              onClick={() => navigate('/notebook')}
+              className="w-full text-left flex items-center gap-2.5 py-2.5 border-b border-[var(--color-border)] last:border-0 hover:bg-[var(--glass-bg)] rounded-lg px-2 transition-all"
+            >
+              <div className="p-1 rounded-md flex-shrink-0" style={{ background: 'rgba(249, 115, 22, 0.08)' }}>
+                <FiBook className="w-3 h-3" style={{ color: 'var(--color-accent-orange)' }} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-medium truncate">{nb.title}</div>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  {nb.tags.slice(0, 2).map(tag => (
+                    <span key={tag} className="text-xxs px-1 py-0.5 rounded bg-[var(--glass-bg)] text-[var(--color-text-muted)]">
+                      {tag}
+                    </span>
+                  ))}
+                  <span className="text-xxs text-[var(--color-text-muted)]">{formatTimeAgo(nb.updated_at)}</span>
+                </div>
+              </div>
+            </button>
+          ))}
         </div>
       )}
     </div>
@@ -434,9 +503,10 @@ export default function Dashboard() {
           <ActivityFeed />
         </div>
 
-        {/* Recent Simulations */}
-        <div>
+        {/* Recent Simulations + Notebooks */}
+        <div className="space-y-4">
           <RecentSimulationsWidget />
+          <RecentNotebooksWidget />
         </div>
       </div>
 

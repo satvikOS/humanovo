@@ -603,18 +603,22 @@ export default function ProjectDetail() {
 
           {paperError && !generatingPaper && (
             <div className="absolute inset-0 flex flex-col items-center justify-center z-10">
-              <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center mb-4">
-                <FiX className="w-8 h-8 text-red-400" />
+              <div className="w-16 h-16 rounded-full bg-accent-purple/10 flex items-center justify-center mb-4">
+                <FiFileText className="w-8 h-8 text-accent-purple" />
               </div>
-              <h3 className="text-lg font-semibold text-white mb-2">Generation Failed</h3>
-              <p className="text-red-400 text-sm mb-4 max-w-md text-center">{paperError}</p>
+              <h3 className="text-lg font-semibold text-white mb-2">
+                {paperError.includes('not cached') ? 'Paper Not Cached' : 'Generation Failed'}
+              </h3>
+              <p className={`text-sm mb-4 max-w-md text-center ${paperError.includes('not cached') ? 'text-[var(--color-text-muted)]' : 'text-red-400'}`}>
+                {paperError}
+              </p>
               <div className="flex gap-3">
                 <button
                   onClick={() => generateHypothesisPaper(activeHypothesis)}
                   className="btn text-accent-purple hover:bg-accent-purple/10"
                 >
                   <FiRefreshCw className="w-4 h-4 mr-1" />
-                  Retry
+                  {paperError.includes('not cached') ? 'Regenerate Paper' : 'Retry'}
                 </button>
                 <button onClick={closeViewer} className="btn text-[var(--color-text-secondary)] hover:bg-white/5">
                   Back
@@ -797,8 +801,8 @@ export default function ProjectDetail() {
                     <div
                       key={paper.id}
                       className="flex items-center justify-between p-3 border border-[var(--color-border)] rounded-lg hover:border-white/10 transition-colors cursor-pointer"
-                      onClick={() => {
-                        // Open the already-generated research paper from localStorage
+                      onClick={async () => {
+                        // Open the already-generated research paper
                         const h = hyp || {
                           id: paper.hypothesis_id,
                           title: paper.hypothesis_title,
@@ -812,32 +816,40 @@ export default function ProjectDetail() {
                           created_at: paper.generated_at,
                         }
                         setActiveHypothesis(h)
+                        setPaperError(null)
+                        setGeneratingPaper(false)
+                        setPdfBlobUrl(null)
 
-                        // Load stored HTML from the paper record
-                        if (paper.paper_html && paper.paper_html.length > 100) {
-                          setPaperHtml(paper.paper_html)
+                        // Re-read from localStorage to get latest paper_html
+                        const freshPapers = persistGet<SavedResearchPaper[]>('research-papers', [])
+                        const freshPaper = freshPapers.find(p => p.hypothesis_id === paper.hypothesis_id)
+                        const storedHtml = freshPaper?.paper_html || paper.paper_html
+
+                        if (storedHtml && storedHtml.length > 100) {
+                          setPaperHtml(storedHtml)
                           setViewMode('hypothesis_paper')
                           return
                         }
 
-                        // Fallback: try fetching cached paper from Lambda without triggering regeneration
-                        fetch(`${API_BASE}/orchestrator/paper-status`)
-                          .then(res => res.ok ? res.json() : null)
-                          .then(data => {
-                            if (data && data.status === 'done' && data.paper_html && data.paper_html.length > 100
+                        // Try fetching from Lambda cache
+                        try {
+                          const statusRes = await fetch(`${API_BASE}/orchestrator/paper-status`)
+                          if (statusRes.ok) {
+                            const data = await statusRes.json()
+                            if (data?.status === 'done' && data.paper_html?.length > 100
                                 && data.hypothesis_id === paper.hypothesis_id) {
                               setPaperHtml(data.paper_html)
-                              // Also save the HTML for next time
                               _saveResearchPaper(h, data.paper_html)
-                            } else {
-                              // No cached paper found — show the hypothesis detail view instead
-                              setViewMode('hypothesis_viewer')
+                              setViewMode('hypothesis_paper')
+                              return
                             }
-                          })
-                          .catch(() => {
-                            // Network error — show hypothesis detail view
-                            setViewMode('hypothesis_viewer')
-                          })
+                          }
+                        } catch { /* Lambda unavailable */ }
+
+                        // No cached paper found — show paper view with a "not cached" message
+                        // so user can regenerate explicitly
+                        setPaperHtml(null)
+                        setPaperError('This paper was generated in a previous session and the content was not cached. Click "Regenerate" below to generate it again.')
                         setViewMode('hypothesis_paper')
                       }}
                     >
