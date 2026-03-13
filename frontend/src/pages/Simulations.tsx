@@ -1,5 +1,5 @@
-import { useState, useRef, useCallback, useMemo } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
+import '@tanstack/react-query' // kept to preserve dependency
 import {
   FiActivity, FiPlay, FiPause, FiCheck, FiX, FiPlus,
   FiCpu, FiCode, FiGrid, FiBarChart2, FiZap, FiDatabase,
@@ -9,9 +9,9 @@ import {
 } from 'react-icons/fi'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, AreaChart, Area
+  ResponsiveContainer, AreaChart, Area, BarChart, Bar
 } from 'recharts'
-import { api, Simulation } from '../services/api'
+import '../services/api' // kept to preserve dependency
 import html2canvas from 'html2canvas'
 import clsx from 'clsx'
 
@@ -156,6 +156,491 @@ const SIMULATION_TYPES = [
   { id: 'drug_interaction', label: 'Drug Interaction' },
   { id: 'survival_analysis', label: 'Survival Analysis' },
 ]
+
+// ── Monte Carlo Engine ──────────────────────────────────────────
+
+interface MCParams { [key: string]: number | string }
+
+interface MCResult {
+  id: string
+  name: string
+  simulationType: string
+  params: MCParams
+  iterations: number
+  distribution: number[]
+  histogramData: { bin: string; count: number }[]
+  convergenceData: { iteration: number; mean: number }[]
+  stats: { mean: number; median: number; std: number; ci95Lower: number; ci95Upper: number }
+  createdAt: string
+}
+
+const MC_PARAM_CONFIGS: Record<string, { key: string; label: string; default: number | string; type: 'number' | 'select'; min?: number; max?: number; step?: number; options?: { value: string; label: string }[] }[]> = {
+  clinical_outcome: [
+    { key: 'sampleSize', label: 'Sample Size', default: 200, type: 'number', min: 20, max: 10000, step: 10 },
+    { key: 'baselineRate', label: 'Baseline Rate', default: 0.3, type: 'number', min: 0.01, max: 0.99, step: 0.01 },
+    { key: 'treatmentEffect', label: 'Treatment Effect', default: 0.15, type: 'number', min: 0.01, max: 0.5, step: 0.01 },
+  ],
+  dose_response: [
+    { key: 'ec50', label: 'EC50', default: 10, type: 'number', min: 0.1, max: 100, step: 0.5 },
+    { key: 'hillCoeff', label: 'Hill Coefficient', default: 1.5, type: 'number', min: 0.5, max: 5, step: 0.1 },
+    { key: 'emax', label: 'Emax', default: 100, type: 'number', min: 10, max: 500, step: 5 },
+    { key: 'noiseSD', label: 'Noise SD', default: 5, type: 'number', min: 0.1, max: 50, step: 0.5 },
+  ],
+  survival_analysis: [
+    { key: 'medianSurvivalControl', label: 'Median Survival (Control, months)', default: 12, type: 'number', min: 1, max: 60, step: 1 },
+    { key: 'hazardRatio', label: 'Hazard Ratio', default: 0.7, type: 'number', min: 0.1, max: 2, step: 0.05 },
+    { key: 'sampleSize', label: 'Sample Size', default: 100, type: 'number', min: 20, max: 5000, step: 10 },
+  ],
+  epidemiological: [
+    { key: 'population', label: 'Population', default: 10000, type: 'number', min: 100, max: 1000000, step: 100 },
+    { key: 'initialInfected', label: 'Initial Infected', default: 10, type: 'number', min: 1, max: 1000, step: 1 },
+    { key: 'beta', label: 'Beta (transmission)', default: 0.3, type: 'number', min: 0.01, max: 1, step: 0.01 },
+    { key: 'gamma', label: 'Gamma (recovery)', default: 0.1, type: 'number', min: 0.01, max: 1, step: 0.01 },
+  ],
+  pathway_dynamics: [
+    { key: 'transcriptionRate', label: 'Transcription Rate', default: 10, type: 'number', min: 1, max: 100, step: 1 },
+    { key: 'degradationRate', label: 'Degradation Rate', default: 1, type: 'number', min: 0.1, max: 10, step: 0.1 },
+    { key: 'translationRate', label: 'Translation Rate', default: 5, type: 'number', min: 0.5, max: 50, step: 0.5 },
+  ],
+  drug_interaction: [
+    { key: 'drugA_effect', label: 'Drug A Effect', default: 0.6, type: 'number', min: 0.05, max: 0.95, step: 0.05 },
+    { key: 'drugB_effect', label: 'Drug B Effect', default: 0.5, type: 'number', min: 0.05, max: 0.95, step: 0.05 },
+    { key: 'interactionType', label: 'Interaction Type', default: 'additive', type: 'select', options: [
+      { value: 'synergistic', label: 'Synergistic' },
+      { value: 'antagonistic', label: 'Antagonistic' },
+      { value: 'additive', label: 'Additive' },
+    ]},
+  ],
+}
+
+// Box-Muller transform for normal random variates
+function randNorm(mean = 0, sd = 1): number {
+  let u = 0, v = 0
+  while (u === 0) u = Math.random()
+  while (v === 0) v = Math.random()
+  return mean + sd * Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v)
+}
+
+// Binomial sample
+function randBinomial(n: number, p: number): number {
+  let successes = 0
+  for (let i = 0; i < n; i++) {
+    if (Math.random() < p) successes++
+  }
+  return successes
+}
+
+// Exponential random variate
+function randExponential(rate: number): number {
+  return -Math.log(1 - Math.random()) / rate
+}
+
+function computeStats(values: number[]): MCResult['stats'] {
+  const n = values.length
+  const sorted = [...values].sort((a, b) => a - b)
+  const mean = values.reduce((s, v) => s + v, 0) / n
+  const median = n % 2 === 0 ? (sorted[n / 2 - 1] + sorted[n / 2]) / 2 : sorted[Math.floor(n / 2)]
+  const variance = values.reduce((s, v) => s + (v - mean) ** 2, 0) / (n - 1)
+  const std = Math.sqrt(variance)
+  const ci95Lower = sorted[Math.max(0, Math.floor(n * 0.025))]
+  const ci95Upper = sorted[Math.min(n - 1, Math.floor(n * 0.975))]
+  return { mean, median, std, ci95Lower, ci95Upper }
+}
+
+function buildHistogram(values: number[], bins = 30): MCResult['histogramData'] {
+  const min = Math.min(...values)
+  const max = Math.max(...values)
+  const range = max - min || 1
+  const binWidth = range / bins
+  const counts = new Array(bins).fill(0)
+  for (const v of values) {
+    const idx = Math.min(Math.floor((v - min) / binWidth), bins - 1)
+    counts[idx]++
+  }
+  return counts.map((count, i) => ({
+    bin: (min + (i + 0.5) * binWidth).toPrecision(3),
+    count,
+  }))
+}
+
+function buildConvergence(values: number[], points = 100): MCResult['convergenceData'] {
+  const step = Math.max(1, Math.floor(values.length / points))
+  const data: MCResult['convergenceData'] = []
+  let sum = 0
+  for (let i = 0; i < values.length; i++) {
+    sum += values[i]
+    if ((i + 1) % step === 0 || i === values.length - 1) {
+      data.push({ iteration: i + 1, mean: sum / (i + 1) })
+    }
+  }
+  return data
+}
+
+// Individual simulation models
+function mcClinicalOutcome(p: MCParams): number {
+  const n = Number(p.sampleSize)
+  const half = Math.floor(n / 2)
+  const baseRate = Number(p.baselineRate)
+  const effect = Number(p.treatmentEffect)
+  const control = randBinomial(half, baseRate) / half
+  const treatment = randBinomial(half, Math.max(0, Math.min(1, baseRate - effect))) / half
+  return control - treatment
+}
+
+function mcDoseResponse(p: MCParams): number {
+  const ec50True = Number(p.ec50)
+  const hill = Number(p.hillCoeff)
+  const emax = Number(p.emax)
+  const noise = Number(p.noiseSD)
+  const doses = [0.1, 0.5, 1, 2, 5, 10, 20, 50, 100]
+  const responses = doses.map(d => {
+    const expected = emax * Math.pow(d, hill) / (Math.pow(ec50True, hill) + Math.pow(d, hill))
+    return expected + randNorm(0, noise)
+  })
+  // Estimate EC50 by finding dose where response ~ emax/2 via linear interpolation
+  const halfMax = emax / 2
+  let ec50Est = ec50True
+  for (let i = 0; i < responses.length - 1; i++) {
+    if ((responses[i] <= halfMax && responses[i + 1] >= halfMax) || (responses[i] >= halfMax && responses[i + 1] <= halfMax)) {
+      const frac = (halfMax - responses[i]) / (responses[i + 1] - responses[i])
+      ec50Est = doses[i] + frac * (doses[i + 1] - doses[i])
+      break
+    }
+  }
+  return ec50Est
+}
+
+function mcSurvivalAnalysis(p: MCParams): number {
+  const medianControl = Number(p.medianSurvivalControl)
+  const trueHR = Number(p.hazardRatio)
+  const n = Number(p.sampleSize)
+  const half = Math.floor(n / 2)
+  const lambdaControl = Math.log(2) / medianControl
+  const lambdaTreatment = lambdaControl * trueHR
+  let controlEvents = 0, treatmentEvents = 0
+  let controlTotal = 0, treatmentTotal = 0
+  const censorTime = medianControl * 2
+  for (let i = 0; i < half; i++) {
+    const tc = randExponential(lambdaControl)
+    const tt = randExponential(lambdaTreatment)
+    controlTotal += Math.min(tc, censorTime)
+    treatmentTotal += Math.min(tt, censorTime)
+    if (tc <= censorTime) controlEvents++
+    if (tt <= censorTime) treatmentEvents++
+  }
+  // Simple HR estimate: (events_t / totalTime_t) / (events_c / totalTime_c)
+  const rateC = controlEvents / (controlTotal || 1)
+  const rateT = treatmentEvents / (treatmentTotal || 1)
+  return rateT / (rateC || 0.001)
+}
+
+function mcEpidemiological(p: MCParams): number {
+  const pop = Number(p.population)
+  const initI = Number(p.initialInfected)
+  const beta = Number(p.beta)
+  const gamma = Number(p.gamma)
+  let S = pop - initI, I = initI, peakI = initI
+  const dt = 0.1
+  for (let t = 0; t < 200 && I > 0.5; t += dt) {
+    const newInf = beta * S * I / pop * dt + randNorm(0, Math.sqrt(beta * S * I / pop * dt + 0.01))
+    const newRec = gamma * I * dt + randNorm(0, Math.sqrt(gamma * I * dt + 0.01))
+    const actualNewInf = Math.max(0, Math.min(S, newInf))
+    const actualNewRec = Math.max(0, Math.min(I, newRec))
+    S -= actualNewInf
+    I += actualNewInf - actualNewRec
+    if (I > peakI) peakI = I
+  }
+  return Math.round(peakI)
+}
+
+function mcPathwayDynamics(p: MCParams): number {
+  const kTx = Number(p.transcriptionRate)
+  const kDeg = Number(p.degradationRate)
+  const kTl = Number(p.translationRate)
+  // Gillespie-like: simulate mRNA and protein levels
+  let mRNA = 0, protein = 0, t = 0
+  const tMax = 50
+  while (t < tMax) {
+    const rTx = kTx
+    const rDegM = kDeg * mRNA
+    const rTlP = kTl * mRNA
+    const rDegP = 0.5 * protein
+    const totalRate = rTx + rDegM + rTlP + rDegP
+    if (totalRate <= 0) break
+    t += randExponential(totalRate)
+    const r = Math.random() * totalRate
+    if (r < rTx) mRNA++
+    else if (r < rTx + rDegM) mRNA = Math.max(0, mRNA - 1)
+    else if (r < rTx + rDegM + rTlP) protein++
+    else protein = Math.max(0, protein - 1)
+  }
+  return protein
+}
+
+function mcDrugInteraction(p: MCParams): number {
+  const eA = Number(p.drugA_effect) + randNorm(0, 0.05)
+  const eB = Number(p.drugB_effect) + randNorm(0, 0.05)
+  const clampA = Math.max(0.01, Math.min(0.99, eA))
+  const clampB = Math.max(0.01, Math.min(0.99, eB))
+  const blissExpected = clampA + clampB - clampA * clampB
+  let modifier = 0
+  if (p.interactionType === 'synergistic') modifier = 0.15 + randNorm(0, 0.03)
+  else if (p.interactionType === 'antagonistic') modifier = -0.15 + randNorm(0, 0.03)
+  else modifier = randNorm(0, 0.02)
+  const observed = Math.max(0, Math.min(1, blissExpected + modifier))
+  // Combination index: expected / observed (CI < 1 = synergy)
+  return blissExpected / (observed || 0.01)
+}
+
+const MC_RUNNERS: Record<string, (p: MCParams) => number> = {
+  clinical_outcome: mcClinicalOutcome,
+  dose_response: mcDoseResponse,
+  survival_analysis: mcSurvivalAnalysis,
+  epidemiological: mcEpidemiological,
+  pathway_dynamics: mcPathwayDynamics,
+  drug_interaction: mcDrugInteraction,
+}
+
+const LS_KEY = 'humanovo-mc-simulations'
+
+function loadSavedSimulations(): MCResult[] {
+  try {
+    const raw = localStorage.getItem(LS_KEY)
+    return raw ? JSON.parse(raw) : []
+  } catch { return [] }
+}
+
+function saveSimulations(sims: MCResult[]) {
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify(sims))
+  } catch { /* quota exceeded - ignore */ }
+}
+
+// ── MC Simulation Form ──────────────────────────────────────────
+function MCSimulationForm({ onResult, onClose }: { onResult: (r: MCResult) => void; onClose: () => void }) {
+  const [name, setName] = useState('')
+  const [simType, setSimType] = useState('clinical_outcome')
+  const [iterations, setIterations] = useState(1000)
+  const [params, setParams] = useState<MCParams>(() => {
+    const cfg = MC_PARAM_CONFIGS['clinical_outcome']
+    const p: MCParams = {}
+    cfg.forEach(c => { p[c.key] = c.default })
+    return p
+  })
+  const [running, setRunning] = useState(false)
+  const [progress, setProgress] = useState(0)
+
+  const handleTypeChange = (newType: string) => {
+    setSimType(newType)
+    const cfg = MC_PARAM_CONFIGS[newType] || []
+    const p: MCParams = {}
+    cfg.forEach(c => { p[c.key] = c.default })
+    setParams(p)
+  }
+
+  const handleRun = () => {
+    if (!name.trim()) return
+    setRunning(true)
+    setProgress(0)
+
+    const batchSize = Math.max(50, Math.floor(iterations / 100))
+    const allResults: number[] = []
+    let completed = 0
+    const runner = MC_RUNNERS[simType]
+    if (!runner) { setRunning(false); return }
+
+    function processBatch() {
+      const end = Math.min(completed + batchSize, iterations)
+      for (let i = completed; i < end; i++) {
+        allResults.push(runner(params))
+      }
+      completed = end
+      setProgress(Math.round((completed / iterations) * 100))
+
+      if (completed < iterations) {
+        requestAnimationFrame(processBatch)
+      } else {
+        const stats = computeStats(allResults)
+        const result: MCResult = {
+          id: crypto.randomUUID ? crypto.randomUUID() : `mc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          name: name.trim(),
+          simulationType: simType,
+          params: { ...params },
+          iterations,
+          distribution: allResults,
+          histogramData: buildHistogram(allResults),
+          convergenceData: buildConvergence(allResults),
+          stats,
+          createdAt: new Date().toISOString(),
+        }
+        setRunning(false)
+        onResult(result)
+      }
+    }
+    requestAnimationFrame(processBatch)
+  }
+
+  const paramConfigs = MC_PARAM_CONFIGS[simType] || []
+
+  return (
+    <div className="glass-card p-6 mb-6">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-lg font-semibold text-[var(--color-text)]">New Monte Carlo Simulation</h3>
+        <button onClick={onClose} className="p-1 hover:bg-[var(--glass-bg)] rounded transition-all" disabled={running}>
+          <FiX className="w-4 h-4 text-[var(--color-text-muted)]" />
+        </button>
+      </div>
+      <div className="space-y-4">
+        <div>
+          <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">Simulation Name</label>
+          <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Drug efficacy MC run" className="w-full px-3 py-2 text-sm bg-[var(--glass-bg)] border border-[var(--color-border)] rounded-lg text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-accent-blue)]" disabled={running} />
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">Simulation Type</label>
+            <select value={simType} onChange={e => handleTypeChange(e.target.value)} className="w-full px-3 py-2 text-sm bg-[var(--glass-bg)] border border-[var(--color-border)] rounded-lg text-[var(--color-text)] focus:outline-none focus:border-[var(--color-accent-blue)]" disabled={running}>
+              {SIMULATION_TYPES.map(t => (<option key={t.id} value={t.id}>{t.label}</option>))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">Iterations</label>
+            <input type="number" value={iterations} onChange={e => setIterations(Math.max(100, Math.min(100000, parseInt(e.target.value) || 1000)))} min={100} max={100000} className="w-full px-3 py-2 text-sm bg-[var(--glass-bg)] border border-[var(--color-border)] rounded-lg text-[var(--color-text)] focus:outline-none focus:border-[var(--color-accent-blue)]" disabled={running} />
+          </div>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-2">Model Parameters</label>
+          <div className="grid grid-cols-2 gap-3">
+            {paramConfigs.map(cfg => (
+              <div key={cfg.key}>
+                <label className="block text-xs text-[var(--color-text-muted)] mb-1">{cfg.label}</label>
+                {cfg.type === 'select' ? (
+                  <select value={String(params[cfg.key])} onChange={e => setParams(prev => ({ ...prev, [cfg.key]: e.target.value }))} className="w-full px-2 py-1.5 text-sm bg-[var(--glass-bg)] border border-[var(--color-border)] rounded text-[var(--color-text)] focus:outline-none focus:border-[var(--color-accent-blue)]" disabled={running}>
+                    {cfg.options?.map(o => (<option key={o.value} value={o.value}>{o.label}</option>))}
+                  </select>
+                ) : (
+                  <input type="number" value={Number(params[cfg.key])} onChange={e => setParams(prev => ({ ...prev, [cfg.key]: parseFloat(e.target.value) || cfg.default }))} min={cfg.min} max={cfg.max} step={cfg.step} className="w-full px-2 py-1.5 text-sm bg-[var(--glass-bg)] border border-[var(--color-border)] rounded text-[var(--color-text)] focus:outline-none focus:border-[var(--color-accent-blue)]" disabled={running} />
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {running && (
+          <div className="space-y-1">
+            <div className="flex justify-between text-xs text-[var(--color-text-muted)]">
+              <span>Running simulation...</span>
+              <span>{progress}%</span>
+            </div>
+            <div className="w-full bg-[var(--color-border)] rounded-full h-2">
+              <div className="bg-[var(--color-accent-blue)] h-2 rounded-full transition-all" style={{ width: `${progress}%` }} />
+            </div>
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2 pt-2">
+          <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)] rounded-lg transition-all" disabled={running}>Cancel</button>
+          <button onClick={handleRun} disabled={!name.trim() || running} className="px-4 py-2 text-sm bg-[var(--color-accent-blue)] text-white rounded-lg hover:opacity-90 transition-all disabled:opacity-50 flex items-center gap-1.5">
+            <FiPlay className="w-3.5 h-3.5" />
+            {running ? `Running (${progress}%)...` : 'Run Simulation'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── MC Simulation Result Card ───────────────────────────────────
+function MCSimulationCard({ result, onDelete }: { result: MCResult; onDelete: (id: string) => void }) {
+  const [expanded, setExpanded] = useState(false)
+  const typeLabel = SIMULATION_TYPES.find(t => t.id === result.simulationType)?.label || result.simulationType
+
+  return (
+    <div className="glass-card p-5 hover:bg-[var(--glass-bg-hover)] transition-all">
+      <div className="flex items-start justify-between mb-3">
+        <div className="cursor-pointer flex-1" onClick={() => setExpanded(!expanded)}>
+          <h3 className="font-semibold text-[var(--color-text)]">{result.name}</h3>
+          <p className="text-sm text-[var(--color-text-muted)] mt-1">{typeLabel} &middot; {result.iterations.toLocaleString()} iterations</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 px-2 py-1 rounded-full text-xs bg-green-600/20 text-[var(--color-accent-green)]">
+            <FiCheck className="w-3 h-3" />
+            completed
+          </div>
+          <button onClick={() => onDelete(result.id)} className="p-1 hover:bg-red-600/20 rounded transition-all" title="Delete simulation">
+            <FiX className="w-3.5 h-3.5 text-[var(--color-text-muted)] hover:text-red-400" />
+          </button>
+        </div>
+      </div>
+
+      {/* Summary stats always visible */}
+      <div className="grid grid-cols-5 gap-2 mb-3">
+        {[
+          { label: 'Mean', value: result.stats.mean.toPrecision(4) },
+          { label: 'Median', value: result.stats.median.toPrecision(4) },
+          { label: 'Std Dev', value: result.stats.std.toPrecision(4) },
+          { label: '95% CI Low', value: result.stats.ci95Lower.toPrecision(4) },
+          { label: '95% CI High', value: result.stats.ci95Upper.toPrecision(4) },
+        ].map(s => (
+          <div key={s.label} className="bg-[var(--glass-bg)] rounded p-2 text-center">
+            <div className="text-[10px] text-[var(--color-text-muted)] uppercase tracking-wider">{s.label}</div>
+            <div className="text-sm font-mono font-semibold text-[var(--color-text)] mt-0.5">{s.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Parameters */}
+      <div className="flex flex-wrap gap-1.5 mb-3">
+        {Object.entries(result.params).map(([k, v]) => (
+          <span key={k} className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--glass-bg)] text-[var(--color-text-muted)]">
+            {k}: {String(v)}
+          </span>
+        ))}
+      </div>
+
+      <button onClick={() => setExpanded(!expanded)} className="text-xs text-[var(--color-accent-blue)] hover:underline mb-2">
+        {expanded ? 'Hide charts' : 'Show charts'}
+      </button>
+
+      {expanded && (
+        <div className="space-y-4 mt-3">
+          {/* Histogram */}
+          <div>
+            <h4 className="text-xs font-medium text-[var(--color-text-secondary)] mb-2 uppercase tracking-wider">Result Distribution</h4>
+            <div className="h-48">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={result.histogramData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                  <XAxis dataKey="bin" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} interval="preserveStartEnd" />
+                  <YAxis tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} />
+                  <Tooltip contentStyle={{ backgroundColor: 'var(--glass-bg)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '12px', color: 'var(--color-text)' }} />
+                  <Bar dataKey="count" fill="var(--color-accent-blue)" radius={[2, 2, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          {/* Convergence plot */}
+          <div>
+            <h4 className="text-xs font-medium text-[var(--color-text-secondary)] mb-2 uppercase tracking-wider">Convergence (Running Mean)</h4>
+            <div className="h-40">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={result.convergenceData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                  <XAxis dataKey="iteration" tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} />
+                  <YAxis tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} domain={['auto', 'auto']} />
+                  <Tooltip contentStyle={{ backgroundColor: 'var(--glass-bg)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '12px', color: 'var(--color-text)' }} />
+                  <Line type="monotone" dataKey="mean" stroke="var(--color-accent-green)" strokeWidth={1.5} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          <p className="text-[10px] text-[var(--color-text-muted)]">Created: {new Date(result.createdAt).toLocaleString()}</p>
+        </div>
+      )}
+    </div>
+  )
+}
 
 // ── Computational Environment Templates ─────────────────────────
 type ComputeEnv = 'octave' | 'python' | 'r' | 'julia'
@@ -1421,124 +1906,6 @@ println("Herd immunity threshold: $(round(100*(1-1/R0_eff), digits=1))%")
   },
 ]
 
-// ── Simulation Card ─────────────────────────────────────────────
-function SimulationCard({ simulation }: { simulation: Simulation }) {
-  const statusConfig: Record<string, { icon: typeof FiPause; color: string; bg: string }> = {
-    queued: { icon: FiPause, color: 'text-[var(--color-text-muted)]', bg: 'bg-[var(--glass-bg)]' },
-    running: { icon: FiPlay, color: 'text-[var(--color-accent-blue)]', bg: 'bg-blue-600/20' },
-    completed: { icon: FiCheck, color: 'text-[var(--color-accent-green)]', bg: 'bg-green-600/20' },
-    failed: { icon: FiX, color: 'text-red-400', bg: 'bg-red-600/20' },
-    cancelled: { icon: FiX, color: 'text-[var(--color-text-muted)]', bg: 'bg-[var(--glass-bg)]' },
-  }
-
-  const status = statusConfig[simulation.status] || statusConfig.queued
-  const StatusIcon = status.icon
-
-  const progress = simulation.iterations > 0
-    ? (simulation.iterations_completed / simulation.iterations) * 100
-    : 0
-
-  return (
-    <div className="glass-card p-5 hover:bg-[var(--glass-bg-hover)] transition-all cursor-pointer">
-      <div className="flex items-start justify-between mb-3">
-        <div>
-          <h3 className="font-semibold text-[var(--color-text)]">{simulation.name}</h3>
-          <p className="text-sm text-[var(--color-text-muted)] mt-1">{simulation.simulation_type}</p>
-        </div>
-        <div className={clsx('flex items-center gap-1.5 px-2 py-1 rounded-full text-xs', status.bg, status.color)}>
-          <StatusIcon className="w-3 h-3" />
-          {simulation.status}
-        </div>
-      </div>
-      {simulation.description && (
-        <p className="text-sm text-[var(--color-text-muted)] mb-3">{simulation.description}</p>
-      )}
-      <div className="space-y-2">
-        <div className="flex justify-between text-xs text-[var(--color-text-muted)]">
-          <span>Progress</span>
-          <span>{simulation.iterations_completed} / {simulation.iterations}</span>
-        </div>
-        <div className="w-full bg-[var(--color-border)] rounded-full h-1.5">
-          <div
-            className="bg-[var(--color-accent-blue)] h-1.5 rounded-full transition-all"
-            style={{ width: `${progress}%` }}
-          />
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ── New Simulation Form ─────────────────────────────────────────
-function NewSimulationForm({ onClose }: { onClose: () => void }) {
-  const queryClient = useQueryClient()
-  const [name, setName] = useState('')
-  const [description, setDescription] = useState('')
-  const [simulationType, setSimulationType] = useState('clinical_outcome')
-  const [iterations, setIterations] = useState(1000)
-
-  const createMutation = useMutation({
-    mutationFn: (data: Parameters<typeof api.createSimulation>[0]) => api.createSimulation(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['simulations'] })
-      onClose()
-    },
-  })
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!name.trim()) return
-    createMutation.mutate({
-      name: name.trim(),
-      description: description.trim() || undefined,
-      simulation_type: simulationType,
-      project_id: 'default',
-      parameters: [],
-      iterations,
-    })
-  }
-
-  return (
-    <div className="glass-card p-6 mb-6">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-semibold text-[var(--color-text)]">New Simulation</h3>
-        <button onClick={onClose} className="p-1 hover:bg-[var(--glass-bg)] rounded transition-all">
-          <FiX className="w-4 h-4 text-[var(--color-text-muted)]" />
-        </button>
-      </div>
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">Name</label>
-          <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Drug efficacy simulation" className="w-full px-3 py-2 text-sm bg-[var(--glass-bg)] border border-[var(--color-border)] rounded-lg text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-accent-blue)]" required />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">Description</label>
-          <textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="Describe what this simulation tests..." rows={2} className="w-full px-3 py-2 text-sm bg-[var(--glass-bg)] border border-[var(--color-border)] rounded-lg text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-accent-blue)] resize-none" />
-        </div>
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">Type</label>
-            <select value={simulationType} onChange={e => setSimulationType(e.target.value)} className="w-full px-3 py-2 text-sm bg-[var(--glass-bg)] border border-[var(--color-border)] rounded-lg text-[var(--color-text)] focus:outline-none focus:border-[var(--color-accent-blue)]">
-              {SIMULATION_TYPES.map(t => (<option key={t.id} value={t.id}>{t.label}</option>))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">Iterations</label>
-            <input type="number" value={iterations} onChange={e => setIterations(parseInt(e.target.value) || 1000)} min={100} max={100000} className="w-full px-3 py-2 text-sm bg-[var(--glass-bg)] border border-[var(--color-border)] rounded-lg text-[var(--color-text)] focus:outline-none focus:border-[var(--color-accent-blue)]" />
-          </div>
-        </div>
-        <div className="flex justify-end gap-2 pt-2">
-          <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)] rounded-lg transition-all">Cancel</button>
-          <button type="submit" disabled={!name.trim() || createMutation.isPending} className="px-4 py-2 text-sm bg-[var(--color-accent-blue)] text-white rounded-lg hover:opacity-90 transition-all disabled:opacity-50">
-            {createMutation.isPending ? 'Creating...' : 'Create & Run'}
-          </button>
-        </div>
-        {createMutation.isError && <p className="text-sm text-red-400">Failed to create simulation. Please try again.</p>}
-      </form>
-    </div>
-  )
-}
-
 // ── Equation Plotter / Symbolic Math Engine ────────────────────
 function EquationPlotter() {
   const [equationExpr, setEquationExpr] = useState('sin(x) * exp(-x/5)')
@@ -1556,7 +1923,7 @@ function EquationPlotter() {
     if (!el) return
     try {
       const canvas = await html2canvas(el, {
-        backgroundColor: '#0f172a',
+        backgroundColor: '#ffffff',
         scale: 2,
         useCORS: true,
         logging: false,
@@ -2181,7 +2548,7 @@ function ComputationalLab() {
                         if (!vizEl) return
                         try {
                           const canvas = await html2canvas(vizEl, {
-                            backgroundColor: '#0f172a',
+                            backgroundColor: '#ffffff',
                             scale: 2,
                             useCORS: true,
                             logging: false,
@@ -2336,11 +2703,21 @@ function simulateOutput(code: string, env: ComputeEnv): string {
 export default function Simulations() {
   const [showCreate, setShowCreate] = useState(false)
   const [activeTab, setActiveTab] = useState<'simulations' | 'computational-lab' | 'equation-plotter'>('simulations')
+  const [mcSimulations, setMcSimulations] = useState<MCResult[]>(() => loadSavedSimulations())
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['simulations'],
-    queryFn: () => api.getSimulations({ page: 1, page_size: 50 }),
-  })
+  // Persist to localStorage whenever simulations change
+  useEffect(() => {
+    saveSimulations(mcSimulations)
+  }, [mcSimulations])
+
+  const handleNewResult = (result: MCResult) => {
+    setMcSimulations(prev => [result, ...prev])
+    setShowCreate(false)
+  }
+
+  const handleDelete = (id: string) => {
+    setMcSimulations(prev => prev.filter(s => s.id !== id))
+  }
 
   return (
     <div className="p-6 flex flex-col h-full">
@@ -2408,18 +2785,12 @@ export default function Simulations() {
       <div className="flex-1 min-h-0 overflow-auto">
         {activeTab === 'simulations' && (
           <>
-            {showCreate && <NewSimulationForm onClose={() => setShowCreate(false)} />}
+            {showCreate && <MCSimulationForm onResult={handleNewResult} onClose={() => setShowCreate(false)} />}
 
-            {isLoading ? (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                {[1, 2, 3].map(i => (
-                  <div key={i} className="animate-pulse bg-[var(--glass-bg)] h-48 rounded-lg" />
-                ))}
-              </div>
-            ) : data?.items && data.items.length > 0 ? (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                {data.items.map(simulation => (
-                  <SimulationCard key={simulation.id} simulation={simulation} />
+            {mcSimulations.length > 0 ? (
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                {mcSimulations.map(sim => (
+                  <MCSimulationCard key={sim.id} result={sim} onDelete={handleDelete} />
                 ))}
               </div>
             ) : (

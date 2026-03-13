@@ -24,7 +24,6 @@ import {
   FiGlobe,
   FiFileText,
   FiTrendingUp,
-  FiBookOpen,
   FiList,
   FiClipboard,
   FiBarChart2,
@@ -57,8 +56,7 @@ const secondaryNavItems = [
 ]
 
 const researchNavItems = [
-  { to: '/literature-review', icon: FiBookOpen, label: 'Lit Review' },
-  { to: '/citation-manager', icon: FiList, label: 'Citations' },
+{ to: '/citation-manager', icon: FiList, label: 'Citations' },
   { to: '/experiment-tracker', icon: FiClipboard, label: 'Experiments' },
   { to: '/data-visualization', icon: FiBarChart2, label: 'Visualization' },
   { to: '/simulations', icon: FiActivity, label: 'Simulations' },

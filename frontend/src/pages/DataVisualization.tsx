@@ -339,7 +339,7 @@ export default function DataVisualization() {
     if (!el) return
     try {
       const canvas = await html2canvas(el, {
-        backgroundColor: '#0f172a',
+        backgroundColor: '#ffffff',
         scale: 2,
         useCORS: true,
         logging: false,
@@ -384,7 +384,7 @@ export default function DataVisualization() {
     if (!el) return
     try {
       const canvas = await html2canvas(el, {
-        backgroundColor: '#0f172a',
+        backgroundColor: '#ffffff',
         scale: 2,
         useCORS: true,
         logging: false,

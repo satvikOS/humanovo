@@ -696,7 +696,7 @@ const SNIPPET_INSERT = {
 export default function Notebook() {
   const [pages, setPages] = useState<NotebookPage[]>([])
   const [activePage, setActivePage] = useState<NotebookPage | null>(null)
-  const [viewMode, setViewMode] = useState<ViewMode>('split')
+  const [viewMode, setViewMode] = useState<ViewMode>('edit')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [editContent, setEditContent] = useState('')
@@ -793,6 +793,34 @@ export default function Notebook() {
     scheduleAutoSave()
   }
 
+  const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items
+    if (!items) return
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith('image/')) {
+        e.preventDefault()
+        const file = items[i].getAsFile()
+        if (!file) return
+        const reader = new FileReader()
+        reader.onload = () => {
+          const base64 = reader.result as string
+          const imgMarkdown = `![Pasted image](${base64})\n`
+          const textarea = editorRef.current
+          if (textarea) {
+            const start = textarea.selectionStart
+            const end = textarea.selectionEnd
+            const newContent = editContent.slice(0, start) + imgMarkdown + editContent.slice(end)
+            handleContentChange(newContent)
+          } else {
+            handleContentChange(editContent + '\n' + imgMarkdown)
+          }
+        }
+        reader.readAsDataURL(file)
+        return
+      }
+    }
+  }, [editContent, handleContentChange])
+
   const handleTitleChange = (value: string) => {
     setEditTitle(value)
     scheduleAutoSave()
@@ -840,8 +868,10 @@ export default function Notebook() {
         content_type: 'markdown',
         tags: [],
       })
-      setPages(prev => [page, ...prev])
-      selectPage(page)
+      // Ensure content from template is preserved even if API doesn't return it
+      const pageWithContent = { ...page, content: page.content || content }
+      setPages(prev => [pageWithContent, ...prev])
+      selectPage(pageWithContent)
     } catch (err) {
       console.error('Failed to create page via API, creating locally:', err)
       // Fallback: create a local page so the UI isn't blank
@@ -1204,6 +1234,7 @@ export default function Notebook() {
                   ref={editorRef}
                   value={editContent}
                   onChange={e => handleContentChange(e.target.value)}
+                  onPaste={handlePaste}
                   className="flex-1 w-full p-4 bg-transparent text-sm font-mono resize-none outline-none leading-relaxed"
                   placeholder="Start writing in Markdown...
 

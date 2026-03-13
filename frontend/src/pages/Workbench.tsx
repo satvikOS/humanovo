@@ -1403,6 +1403,9 @@ function NodeGraphCanvas({
         <filter id="node-glow-selected">
           <feDropShadow dx="0" dy="2" stdDeviation="8" floodOpacity="0.8" />
         </filter>
+        <filter id="node-blur">
+          <feGaussianBlur stdDeviation="2" />
+        </filter>
         <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
           <polygon points="0 0, 10 3.5, 0 7" fill="rgba(255,255,255,0.4)" />
         </marker>
@@ -1488,6 +1491,7 @@ function NodeGraphCanvas({
         {nodes.map(node => {
           const isSelected = selectedNode === node.id
           const isConnecting = connectingFrom === node.id
+          const isConnectTarget = connectingFrom !== null && connectingFrom !== node.id
           return (
             <g
               key={node.id}
@@ -1495,15 +1499,16 @@ function NodeGraphCanvas({
               onClick={(e) => { e.stopPropagation(); onNodeClick(node.id) }}
               onDoubleClick={(e) => { e.stopPropagation(); onNodeDoubleClick(node.id) }}
               className="cursor-grab active:cursor-grabbing"
+              style={{ opacity: connectingFrom && !isConnecting ? 0.5 : 1, transition: 'opacity 0.2s' }}
             >
               {/* Node shape */}
               <path
                 d={getNodeShape(node.category, node.x, node.y, node.width, node.height)}
                 fill={isSelected ? node.color + '30' : 'rgba(15, 15, 20, 0.85)'}
-                stroke={node.color}
-                strokeWidth={isSelected ? 2.5 : 1.5}
+                stroke={isConnectTarget ? '#06b6d4' : node.color}
+                strokeWidth={isSelected ? 2.5 : isConnectTarget ? 2 : 1.5}
                 filter={isSelected ? 'url(#node-glow-selected)' : undefined}
-                style={{ transition: 'stroke-width 0.15s, fill 0.15s' }}
+                style={{ transition: 'stroke-width 0.15s, fill 0.15s, stroke 0.2s' }}
               />
               {/* Category icon */}
               <text
@@ -1545,26 +1550,41 @@ function NodeGraphCanvas({
                   fill="#eab308"
                 />
               )}
-              {/* Connection handle (right side) — drag from here to connect */}
+              {/* Connection handle (right side) — click to start/complete connection */}
               <circle
                 cx={node.x + node.width}
                 cy={node.y + node.height / 2}
-                r={7}
-                fill={isConnecting ? '#06b6d4' : 'rgba(255,255,255,0.2)'}
-                stroke={isConnecting ? '#06b6d4' : 'rgba(255,255,255,0.4)'}
-                strokeWidth={2}
-                className="connect-handle hover:fill-[#06b6d4] hover:stroke-[#06b6d4] transition-colors cursor-crosshair"
+                r={isConnecting ? 9 : isConnectTarget ? 10 : 7}
+                fill={isConnecting ? '#06b6d4' : isConnectTarget ? 'rgba(6, 182, 212, 0.4)' : 'rgba(255,255,255,0.2)'}
+                stroke={isConnecting || isConnectTarget ? '#06b6d4' : 'rgba(255,255,255,0.4)'}
+                strokeWidth={isConnectTarget ? 3 : 2}
+                className="connect-handle hover:fill-[#06b6d4] hover:stroke-[#06b6d4] transition-all cursor-crosshair"
+                style={{ transition: 'r 0.2s, fill 0.2s, stroke 0.2s, stroke-width 0.2s' }}
               />
-              {/* Connection handle (left side) — drag from here to connect */}
+              {/* Connection handle (left side) — click to start/complete connection */}
               <circle
                 cx={node.x}
                 cy={node.y + node.height / 2}
-                r={7}
-                fill="rgba(255,255,255,0.2)"
-                stroke="rgba(255,255,255,0.4)"
-                strokeWidth={2}
-                className="connect-handle hover:fill-[#06b6d4] hover:stroke-[#06b6d4] transition-colors cursor-crosshair"
+                r={isConnecting ? 9 : isConnectTarget ? 10 : 7}
+                fill={isConnecting ? '#06b6d4' : isConnectTarget ? 'rgba(6, 182, 212, 0.4)' : 'rgba(255,255,255,0.2)'}
+                stroke={isConnecting || isConnectTarget ? '#06b6d4' : 'rgba(255,255,255,0.4)'}
+                strokeWidth={isConnectTarget ? 3 : 2}
+                className="connect-handle hover:fill-[#06b6d4] hover:stroke-[#06b6d4] transition-all cursor-crosshair"
+                style={{ transition: 'r 0.2s, fill 0.2s, stroke 0.2s, stroke-width 0.2s' }}
               />
+              {/* Pulsing ring on target handles when in connect mode */}
+              {isConnectTarget && (
+                <>
+                  <circle cx={node.x + node.width} cy={node.y + node.height / 2} r={14} fill="none" stroke="#06b6d4" strokeWidth={1} opacity={0.4}>
+                    <animate attributeName="r" from="10" to="18" dur="1.2s" repeatCount="indefinite" />
+                    <animate attributeName="opacity" from="0.5" to="0" dur="1.2s" repeatCount="indefinite" />
+                  </circle>
+                  <circle cx={node.x} cy={node.y + node.height / 2} r={14} fill="none" stroke="#06b6d4" strokeWidth={1} opacity={0.4}>
+                    <animate attributeName="r" from="10" to="18" dur="1.2s" repeatCount="indefinite" />
+                    <animate attributeName="opacity" from="0.5" to="0" dur="1.2s" repeatCount="indefinite" />
+                  </circle>
+                </>
+              )}
               {/* Expanded details */}
               {node.expanded && (
                 <foreignObject
@@ -2442,7 +2462,23 @@ export default function Workbench() {
     // Check if click is on a connection handle (circle elements at node edges)
     const target = e.target as SVGElement
     if (target.tagName === 'circle' && target.classList.contains('connect-handle')) {
-      setConnectingFrom(nodeId)
+      if (connectingFrom && connectingFrom !== nodeId) {
+        // Clicking a target handle while in connect mode — complete connection
+        setPendingEdge({ sourceId: connectingFrom, targetId: nodeId })
+        setConnectingFrom(null)
+      } else if (connectingFrom === nodeId) {
+        // Clicking own handle again — cancel
+        setConnectingFrom(null)
+      } else {
+        // Start connection mode
+        setConnectingFrom(nodeId)
+      }
+      return
+    }
+    // If in connect mode and clicking a node body (not handle), complete connection
+    if (connectingFrom && connectingFrom !== nodeId) {
+      setPendingEdge({ sourceId: connectingFrom, targetId: nodeId })
+      setConnectingFrom(null)
       return
     }
     if (e.shiftKey) {
@@ -2459,7 +2495,7 @@ export default function Workbench() {
       }
       setDragOffset({ x: svgPt.x - node.x, y: svgPt.y - node.y })
     }
-  }, [nodes, canvasOffset, zoom])
+  }, [nodes, canvasOffset, zoom, connectingFrom])
 
   const handleCanvasMouseMove = useCallback((e: React.MouseEvent) => {
     setMousePos({ x: e.clientX, y: e.clientY })
@@ -2481,32 +2517,25 @@ export default function Workbench() {
     }
   }, [draggingNode, panStart, canvasOffset, zoom, dragOffset])
 
-  const handleCanvasMouseUp = useCallback((e: React.MouseEvent) => {
-    if (connectingFrom) {
-      const svgPt = {
-        x: (e.clientX - canvasOffset.x) / zoom,
-        y: (e.clientY - canvasOffset.y) / zoom,
-      }
-      const targetNode = nodes.find(n =>
-        n.id !== connectingFrom &&
-        svgPt.x >= n.x && svgPt.x <= n.x + n.width &&
-        svgPt.y >= n.y && svgPt.y <= n.y + n.height
-      )
-      if (targetNode) {
-        setPendingEdge({ sourceId: connectingFrom, targetId: targetNode.id })
-      }
-      setConnectingFrom(null)
+  const handleCanvasMouseUp = useCallback((_e: React.MouseEvent) => {
+    // In click-to-connect mode, don't cancel on mouse up — only cancel on empty canvas click
+    if (draggingNode) {
+      setDraggingNode(null)
     }
-    setDraggingNode(null)
     setPanStart(null)
-  }, [connectingFrom, nodes, canvasOffset, zoom])
+  }, [draggingNode])
 
   const handleCanvasMouseDown = useCallback((e: React.MouseEvent) => {
     if (e.target === svgRef.current || (e.target as SVGElement).tagName === 'svg') {
+      if (connectingFrom) {
+        // Cancel connection mode on empty canvas click
+        setConnectingFrom(null)
+        return
+      }
       setSelectedNode(null)
       setPanStart({ x: e.clientX, y: e.clientY, ox: canvasOffset.x, oy: canvasOffset.y })
     }
-  }, [canvasOffset])
+  }, [canvasOffset, connectingFrom])
 
   const handleNodeClick = useCallback((nodeId: string) => {
     setSelectedNode(nodeId)
@@ -2881,8 +2910,8 @@ export default function Workbench() {
               />
               {/* Connection hint */}
               {connectingFrom && (
-                <div className="absolute top-3 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-full bg-cyan-500/20 text-cyan-400 text-xxs border border-cyan-500/30 backdrop-blur">
-                  Drag to another node to connect, or release on empty space to cancel
+                <div className="absolute top-3 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-full bg-cyan-500/20 text-cyan-400 text-xxs border border-cyan-500/30 backdrop-blur animate-pulse">
+                  Click a pulsing handle on another node to connect, or click empty space to cancel
                 </div>
               )}
               {/* Empty state */}
@@ -2893,7 +2922,7 @@ export default function Workbench() {
                     <p className="text-sm font-medium mb-1">Node Graph Canvas</p>
                     <p className="text-xs opacity-60 max-w-xs">
                       Add biological structures from the sidebar library to start building your research graph.
-                      Hold Shift + drag from a node to create connections.
+                      Click a node's circle handle to start connecting.
                     </p>
                   </div>
                 </div>
@@ -2910,7 +2939,7 @@ export default function Workbench() {
                   ))}
                 </div>
                 <div className="mt-1.5 pt-1.5 border-t border-[var(--color-border)] text-[var(--color-text-muted)]">
-                  Shift+drag to connect
+                  Click handle to connect
                 </div>
               </div>
             </div>
