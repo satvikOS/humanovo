@@ -8,7 +8,7 @@ import {
 } from 'recharts'
 
 type TabId = 'pathway' | 'gsea' | 'variants' | 'biomarkers'
-const API = '/api/genomics'
+const API = '/api/v1/genomics'
 
 export default function GenomicsAnalysis() {
   const [tab, setTab] = useState<TabId>('pathway')
@@ -50,6 +50,47 @@ export default function GenomicsAnalysis() {
         setVariants(dataLines.join('\n'))
       } else if (tab === 'biomarkers') {
         setBiomarkerData(dataLines.join('\n'))
+      }
+    }
+    reader.readAsText(file)
+    e.target.value = ''
+  }
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string
+      if (!text) return
+      const delimiter = file.name.endsWith('.tsv') ? '\t' : ','
+      const lines = text.trim().split('\n')
+
+      if (tab === 'pathway') {
+        // Expect a list of genes, one per line or comma-separated
+        const allGenes = lines.flatMap(l => l.split(delimiter).map(g => g.trim())).filter(Boolean)
+        setGenes(allGenes.join(', '))
+      } else if (tab === 'gsea') {
+        // Expect gene,score per line
+        const ranked = lines.map(l => {
+          const parts = l.split(delimiter).map(v => v.trim())
+          if (parts.length >= 2 && !isNaN(parseFloat(parts[1]))) return `${parts[0]},${parts[1]}`
+          return null
+        }).filter(Boolean).join('\n')
+        setRankedGenes(ranked)
+      } else if (tab === 'variants') {
+        // Expect gene,position,ref,alt per line
+        const vars = lines.map(l => {
+          const parts = l.split(delimiter).map(v => v.trim())
+          if (parts.length >= 4) return parts.slice(0, 4).join(',')
+          return null
+        }).filter(Boolean).join('\n')
+        setVariants(vars)
+      } else if (tab === 'biomarkers') {
+        // Expect gene,group1val1,group1val2,...;group2val1,group2val2,...
+        // Or CSV with gene, then values for group1 and group2 separated by a blank column or header
+        const parsed = lines.filter(l => l.trim()).map(l => l.trim())
+        setBiomarkerData(parsed.join('\n'))
       }
     }
     reader.readAsText(file)
@@ -104,6 +145,13 @@ export default function GenomicsAnalysis() {
           {/* Input */}
           <div className="glass-card p-5 space-y-4">
             <h3 className="text-sm font-medium">Input</h3>
+            <div className="flex items-center gap-2 mb-2">
+              <input ref={fileInputRef} type="file" accept=".csv,.tsv,.txt" onChange={handleFileUpload} className="hidden" />
+              <button onClick={() => fileInputRef.current?.click()} className="btn text-xs flex items-center gap-1.5 text-[var(--color-text-muted)]">
+                <FiUpload className="w-3.5 h-3.5" /> Upload CSV/TSV
+              </button>
+              <span className="text-xxs text-[var(--color-text-muted)]">or enter data manually below</span>
+            </div>
             {tab === 'pathway' && (
               <>
                 <div><label className="text-xs text-[var(--color-text-muted)] mb-1 block">Gene List (comma-separated)</label>

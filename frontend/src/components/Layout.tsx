@@ -24,7 +24,6 @@ import {
   FiGlobe,
   FiFileText,
   FiTrendingUp,
-  FiBookOpen,
   FiList,
   FiClipboard,
   FiBarChart2,
@@ -33,7 +32,6 @@ import {
   FiImage,
   FiShield,
   FiPackage,
-  FiShare2,
   FiTarget,
   FiHeart,
   FiGrid,
@@ -58,8 +56,7 @@ const secondaryNavItems = [
 ]
 
 const researchNavItems = [
-  { to: '/literature-review', icon: FiBookOpen, label: 'Lit Review' },
-  { to: '/citation-manager', icon: FiList, label: 'Citations' },
+{ to: '/citation-manager', icon: FiList, label: 'Citations' },
   { to: '/experiment-tracker', icon: FiClipboard, label: 'Experiments' },
   { to: '/data-visualization', icon: FiBarChart2, label: 'Visualization' },
   { to: '/simulations', icon: FiActivity, label: 'Simulations' },
@@ -68,7 +65,6 @@ const researchNavItems = [
 const analysisNavItems = [
   { to: '/statistical-analysis', icon: FiTarget, label: 'Statistics' },
   { to: '/genomics', icon: FiHeart, label: 'Genomics' },
-  { to: '/knowledge-graph', icon: FiShare2, label: 'Knowledge Graph' },
 ]
 
 const managementNavItems = [
@@ -159,7 +155,6 @@ function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
     { label: 'Go to Projects', icon: FiFolder, category: 'Navigation', action: () => { navigate('/projects'); onClose() } },
     { label: 'Go to Evidence', icon: FiDatabase, category: 'Navigation', action: () => { navigate('/evidence'); onClose() } },
     { label: 'Go to Discovery', icon: FiActivity, category: 'Navigation', action: () => { navigate('/agents'); onClose() } },
-    { label: 'Go to Knowledge Graph', icon: FiGlobe, category: 'Navigation', action: () => { navigate('/knowledge-graph'); onClose() } },
     { label: 'Go to Simulations', icon: FiTrendingUp, category: 'Navigation', action: () => { navigate('/simulations'); onClose() } },
     { label: 'Go to Notebook', icon: FiBook, category: 'Navigation', action: () => { navigate('/notebook'); onClose() } },
     { label: 'Go to Search', icon: FiSearch, category: 'Navigation', action: () => { navigate('/search'); onClose() } },
@@ -245,6 +240,17 @@ function ConstantChat() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, loading])
 
+  const getLocalContext = () => {
+    try {
+      const projects = JSON.parse(localStorage.getItem('humanovo-projects') || '[]')
+      const hypotheses = JSON.parse(localStorage.getItem('humanovo-hypotheses') || '[]')
+      return {
+        projects: projects.slice(0, 5).map((p: any) => p.name || p.title).filter(Boolean),
+        hypotheses: hypotheses.slice(0, 5).map((h: any) => h.statement || h.title).filter(Boolean),
+      }
+    } catch { return {} }
+  }
+
   useEffect(() => {
     if (isOpen) {
       setTimeout(() => inputRef.current?.focus(), 100)
@@ -289,11 +295,13 @@ function ConstantChat() {
     setMessages(prev => [...prev, { role: 'user', text: userMsg }])
     setLoading(true)
 
+    // Call the backend AI endpoint (routes to FastAPI → Bedrock Claude)
     try {
+      const platformContext = getLocalContext()
       const res = await fetch('/api/v1/orchestrator/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userMsg, context: 'general' }),
+        body: JSON.stringify({ message: userMsg, context: 'general', platform_context: platformContext }),
       })
       if (res.ok) {
         const data = await res.json()
@@ -468,7 +476,6 @@ export default function Layout() {
     if (path.startsWith('/projects/')) return 'Project'
     if (path === '/evidence') return 'Evidence'
     if (path === '/agents') return 'Discovery'
-    if (path === '/knowledge-graph') return 'Knowledge Graph'
     if (path === '/hypotheses') return 'Hypotheses'
     if (path.startsWith('/hypotheses/')) return 'Hypothesis Detail'
     if (path === '/simulations') return 'Simulations'

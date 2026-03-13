@@ -52,9 +52,9 @@ function StatCard({ stat }: { stat: StatData }) {
       <div className="text-sm text-[var(--color-text-muted)]">{stat.label}</div>
 
       {stat.chartData && stat.chartData.length > 0 && (
-        <div className="mt-3 h-12">
-          <ResponsiveContainer width="100%" height={48}>
-            <AreaChart data={stat.chartData}>
+        <div className="mt-3 h-0 group-hover:h-16 overflow-visible transition-all duration-300 ease-in-out opacity-0 group-hover:opacity-100">
+          <ResponsiveContainer width="100%" height={64}>
+            <AreaChart data={stat.chartData} margin={{ top: 2, right: 4, bottom: 8, left: 4 }}>
               <defs>
                 <linearGradient id={`grad-${stat.label}`} x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor={stat.accentColor} stopOpacity={0.2} />
@@ -67,6 +67,7 @@ function StatCard({ stat }: { stat: StatData }) {
                 stroke={stat.accentColor}
                 fill={`url(#grad-${stat.label})`}
                 strokeWidth={1.5}
+                isAnimationActive={false}
               />
             </AreaChart>
           </ResponsiveContainer>

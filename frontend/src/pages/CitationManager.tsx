@@ -54,7 +54,9 @@ export default function CitationManager() {
   })
   const [searchQuery, setSearchQuery] = useState('')
   const [showAddForm, setShowAddForm] = useState(false)
-  const [citationStyle, setCitationStyle] = useState<CitationStyle>('apa')
+  const [citationStyle, setCitationStyle] = useState<CitationStyle>(() => {
+    try { const s = localStorage.getItem('humanovo-citation-style'); if (s && ['apa','mla','chicago','vancouver','harvard'].includes(s)) return s as CitationStyle } catch {} return 'apa'
+  })
   const [copied, setCopied] = useState<string | null>(null)
   const [filterType, setFilterType] = useState<string>('')
 
@@ -124,7 +126,7 @@ export default function CitationManager() {
             <p className="text-sm text-[var(--color-text-muted)] mt-1">Manage references and generate bibliographies</p>
           </div>
           <div className="flex items-center gap-2">
-            <select value={citationStyle} onChange={e => setCitationStyle(e.target.value as CitationStyle)} className="input text-xs py-1.5">
+            <select value={citationStyle} onChange={e => { const s = e.target.value as CitationStyle; setCitationStyle(s); localStorage.setItem('humanovo-citation-style', s) }} className="input text-xs py-1.5">
               <option value="apa">APA 7th</option>
               <option value="mla">MLA 9th</option>
               <option value="chicago">Chicago</option>

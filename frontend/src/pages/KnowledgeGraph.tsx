@@ -4,7 +4,7 @@ import {
   FiSearch, FiZoomIn, FiZoomOut, FiMaximize, FiFilter,
   FiDownload, FiShare2, FiLayers,
   FiChevronRight, FiChevronDown, FiExternalLink, FiX,
-  FiInfo, FiBook
+  FiInfo, FiBook, FiLink, FiCheck
 } from 'react-icons/fi'
 import { api, Entity } from '../services/api'
 
@@ -108,11 +108,15 @@ export default function KnowledgeGraph() {
   })
   const [zoom, setZoom] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
+  const [connectMode, setConnectMode] = useState(false)
+  const [connectSource, setConnectSource] = useState<GraphNode | null>(null)
+  const [connectRelation, setConnectRelation] = useState<string>('associates')
+  const [showConnectDialog, setShowConnectDialog] = useState<{ source: GraphNode; target: GraphNode } | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
   // Graph data - populated with local biomedical knowledge graph data
-  const [graphData] = useState<{ nodes: GraphNode[], edges: GraphEdge[] }>({
+  const [graphData, setGraphData] = useState<{ nodes: GraphNode[], edges: GraphEdge[] }>({
     nodes: [
       // Diseases
       { id: 'n1', label: 'Breast Cancer', type: 'disease', confidence: 0.95, sources: 1203 },
@@ -297,7 +301,7 @@ export default function KnowledgeGraph() {
     ctx.translate(pan.x, pan.y)
     ctx.scale(zoom, zoom)
 
-    // Draw edges
+    // Draw edges as curved bezier lines
     filteredGraph.edges.forEach(edge => {
       const sourceNode = positionedNodes.find(n => n.id === edge.source)
       const targetNode = positionedNodes.find(n => n.id === edge.target)
@@ -307,17 +311,33 @@ export default function KnowledgeGraph() {
       const color = relationConfig?.color || '#64748b'
       const alpha = Math.max(0.3, edge.confidence)
 
+      // Calculate control point for quadratic bezier curve
+      const midX = (sourceNode.x! + targetNode.x!) / 2
+      const midY = (sourceNode.y! + targetNode.y!) / 2
+      const dx = targetNode.x! - sourceNode.x!
+      const dy = targetNode.y! - sourceNode.y!
+      const dist = Math.sqrt(dx * dx + dy * dy)
+      // Perpendicular offset for curve — scales with distance
+      const curvature = Math.min(dist * 0.2, 40)
+      const nx = -dy / dist  // normal x
+      const ny = dx / dist   // normal y
+      const cpX = midX + nx * curvature
+      const cpY = midY + ny * curvature
+
       ctx.beginPath()
       ctx.moveTo(sourceNode.x!, sourceNode.y!)
-      ctx.lineTo(targetNode.x!, targetNode.y!)
+      ctx.quadraticCurveTo(cpX, cpY, targetNode.x!, targetNode.y!)
       ctx.strokeStyle = color
       ctx.globalAlpha = alpha
       ctx.lineWidth = selectedEdge?.id === edge.id ? 3 : 1.5
       ctx.stroke()
       ctx.globalAlpha = 1
 
-      // Draw arrow
-      const angle = Math.atan2(targetNode.y! - sourceNode.y!, targetNode.x! - sourceNode.x!)
+      // Draw arrow at the target end, tangent to the curve
+      const t = 0.92  // point near the end of the curve to compute tangent
+      const bx = (1 - t) * (1 - t) * sourceNode.x! + 2 * (1 - t) * t * cpX + t * t * targetNode.x!
+      const by = (1 - t) * (1 - t) * sourceNode.y! + 2 * (1 - t) * t * cpY + t * t * targetNode.y!
+      const angle = Math.atan2(targetNode.y! - by, targetNode.x! - bx)
       const arrowSize = 8
       const arrowX = targetNode.x! - 25 * Math.cos(angle)
       const arrowY = targetNode.y! - 25 * Math.sin(angle)
@@ -336,6 +356,23 @@ export default function KnowledgeGraph() {
       ctx.fillStyle = color
       ctx.fill()
     })
+
+    // Draw in-progress connection line when in connect mode
+    if (connectMode && connectSource) {
+      const srcNode = positionedNodes.find(n => n.id === connectSource.id)
+      if (srcNode) {
+        ctx.beginPath()
+        ctx.setLineDash([6, 4])
+        ctx.moveTo(srcNode.x!, srcNode.y!)
+        // Draw to cursor position (approximate center if no mouse tracking)
+        ctx.strokeStyle = '#3B82F6'
+        ctx.globalAlpha = 0.6
+        ctx.lineWidth = 2
+        ctx.stroke()
+        ctx.setLineDash([])
+        ctx.globalAlpha = 1
+      }
+    }
 
     // Draw nodes
     positionedNodes.forEach(node => {
@@ -376,6 +413,22 @@ export default function KnowledgeGraph() {
     ctx.restore()
   }, [filteredGraph, positionedNodes, zoom, pan, selectedEntity, selectedEdge])
 
+  // Add a new edge between two nodes
+  const addEdge = useCallback((source: GraphNode, target: GraphNode, relation: string) => {
+    const newEdge: GraphEdge = {
+      id: `e-custom-${Date.now()}`,
+      source: source.id,
+      target: target.id,
+      relation,
+      confidence: 0.75,
+      evidenceCount: 0,
+    }
+    setGraphData(prev => ({
+      ...prev,
+      edges: [...prev.edges, newEdge],
+    }))
+  }, [])
+
   // Handle canvas click
   const handleCanvasClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current
@@ -389,6 +442,16 @@ export default function KnowledgeGraph() {
     for (const node of positionedNodes) {
       const dist = Math.sqrt((x - node.x!) ** 2 + (y - node.y!) ** 2)
       if (dist < 25) {
+        // Connect mode: select source then target
+        if (connectMode) {
+          if (!connectSource) {
+            setConnectSource(node)
+          } else if (node.id !== connectSource.id) {
+            // Show dialog to pick relation type
+            setShowConnectDialog({ source: connectSource, target: node })
+          }
+          return
+        }
         setSelectedEntity({
           id: node.id,
           name: node.label,
@@ -414,9 +477,12 @@ export default function KnowledgeGraph() {
     }
 
     // Clicked on empty space
+    if (connectMode) {
+      setConnectSource(null)
+    }
     setSelectedEntity(null)
     setSelectedEdge(null)
-  }, [positionedNodes, filteredGraph.edges, zoom, pan])
+  }, [positionedNodes, filteredGraph.edges, zoom, pan, connectMode, connectSource])
 
   // Helper function for point-to-line distance
   function pointToLineDistance(px: number, py: number, x1: number, y1: number, x2: number, y2: number) {
@@ -504,6 +570,18 @@ export default function KnowledgeGraph() {
                 </div>
               </div>
             )}
+            <button
+              onClick={() => {
+                setConnectMode(!connectMode)
+                setConnectSource(null)
+                setShowConnectDialog(null)
+              }}
+              className={`p-2 rounded-lg transition-colors flex items-center gap-1.5 text-sm ${connectMode ? 'bg-[var(--color-accent-green)] text-white' : 'bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]'}`}
+              title="Connect two nodes"
+            >
+              <FiLink className="w-5 h-5" />
+              {connectMode && <span className="text-xs font-medium">{connectSource ? 'Select target' : 'Select source'}</span>}
+            </button>
             <button
               onClick={() => setShowFilters(!showFilters)}
               className={`p-2 rounded-lg transition-colors ${showFilters ? 'bg-[var(--color-accent-blue)] text-[var(--color-text)]' : 'bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]'}`}
@@ -962,6 +1040,60 @@ export default function KnowledgeGraph() {
           </div>
         )}
       </div>
+
+      {/* Connect Nodes Dialog */}
+      {showConnectDialog && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => { setShowConnectDialog(null); setConnectSource(null) }}>
+          <div className="bg-[var(--color-bg-elevated)] border border-[var(--color-border)] rounded-xl w-full max-w-sm mx-4 p-0 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b border-[var(--color-border)]">
+              <h2 className="text-sm font-semibold text-[var(--color-text)]">Connect Nodes</h2>
+              <button onClick={() => { setShowConnectDialog(null); setConnectSource(null) }} className="p-1 rounded hover:bg-white/5 text-[var(--color-text-muted)]">
+                <FiX className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-4">
+              <div className="flex items-center justify-center gap-3 mb-4">
+                <div className="px-3 py-1.5 rounded-lg text-sm font-medium" style={{ backgroundColor: ENTITY_COLORS[showConnectDialog.source.type as keyof typeof ENTITY_COLORS]?.bg + '30', color: ENTITY_COLORS[showConnectDialog.source.type as keyof typeof ENTITY_COLORS]?.bg }}>
+                  {showConnectDialog.source.label}
+                </div>
+                <span className="text-[var(--color-text-muted)]">→</span>
+                <div className="px-3 py-1.5 rounded-lg text-sm font-medium" style={{ backgroundColor: ENTITY_COLORS[showConnectDialog.target.type as keyof typeof ENTITY_COLORS]?.bg + '30', color: ENTITY_COLORS[showConnectDialog.target.type as keyof typeof ENTITY_COLORS]?.bg }}>
+                  {showConnectDialog.target.label}
+                </div>
+              </div>
+              <label className="text-xs text-[var(--color-text-muted)] font-medium block mb-2">Relation Type</label>
+              <select
+                value={connectRelation}
+                onChange={e => setConnectRelation(e.target.value)}
+                className="w-full bg-[var(--glass-bg)] border border-[var(--color-border)] rounded-lg py-2 px-3 text-sm text-[var(--color-text)] focus:outline-none focus:border-blue-500 mb-4"
+              >
+                {Object.entries(RELATION_TYPES).map(([key, config]) => (
+                  <option key={key} value={key}>{config.label}</option>
+                ))}
+              </select>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    addEdge(showConnectDialog.source, showConnectDialog.target, connectRelation)
+                    setShowConnectDialog(null)
+                    setConnectSource(null)
+                    setConnectMode(false)
+                  }}
+                  className="flex-1 py-2 px-3 bg-[var(--color-accent-blue)] text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity flex items-center justify-center gap-1.5"
+                >
+                  <FiCheck className="w-4 h-4" /> Create Connection
+                </button>
+                <button
+                  onClick={() => { setShowConnectDialog(null); setConnectSource(null) }}
+                  className="py-2 px-3 bg-[var(--glass-bg)] text-[var(--color-text-muted)] rounded-lg text-sm hover:bg-[var(--glass-bg-hover)] transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

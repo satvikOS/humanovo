@@ -14,163 +14,675 @@ import 'katex/dist/katex.min.css'
 import api, { NotebookPage, NotebookVersion } from '../services/api'
 
 type ViewMode = 'edit' | 'preview' | 'split'
+type CitationStyle = 'apa' | 'mla' | 'chicago' | 'vancouver' | 'harvard'
 
-const PAGE_TEMPLATES: { name: string; icon: React.ReactNode; content: string }[] = [
+function getCitationStyle(): CitationStyle {
+  try {
+    const stored = localStorage.getItem('humanovo-citation-style')
+    if (stored && ['apa', 'mla', 'chicago', 'vancouver', 'harvard'].includes(stored)) return stored as CitationStyle
+  } catch { /* ignore */ }
+  return 'apa'
+}
+
+function citationPlaceholders(style: CitationStyle): { example1: string; example2: string; format: string } {
+  switch (style) {
+    case 'apa':
+      return {
+        format: 'APA 7th Edition',
+        example1: 'Smith, J. A., & Lee, K. (2024). Targeting HER2 in breast cancer. *Nature Medicine*, 30(4), 112–125. https://doi.org/10.1038/nm.xxxx',
+        example2: 'Chen, W., et al. (2023). CRISPR-based gene therapy advances. *Cell*, 186(8), 1580–1595. https://doi.org/10.1016/j.cell.xxxx',
+      }
+    case 'mla':
+      return {
+        format: 'MLA 9th Edition',
+        example1: 'Smith, James A., and Kyung Lee. "Targeting HER2 in Breast Cancer." Nature Medicine 30.4 (2024): 112–125.',
+        example2: 'Chen, Wei, et al. "CRISPR-Based Gene Therapy Advances." Cell 186.8 (2023): 1580–1595.',
+      }
+    case 'chicago':
+      return {
+        format: 'Chicago Manual of Style',
+        example1: 'Smith, James A., and Kyung Lee. "Targeting HER2 in Breast Cancer." Nature Medicine 30, no. 4 (2024): 112–125.',
+        example2: 'Chen, Wei, et al. "CRISPR-Based Gene Therapy Advances." Cell 186, no. 8 (2023): 1580–1595.',
+      }
+    case 'vancouver':
+      return {
+        format: 'Vancouver (ICMJE)',
+        example1: '1. Smith JA, Lee K. Targeting HER2 in breast cancer. Nat Med. 2024;30(4):112-125.',
+        example2: '2. Chen W, et al. CRISPR-based gene therapy advances. Cell. 2023;186(8):1580-1595.',
+      }
+    case 'harvard':
+      return {
+        format: 'Harvard Referencing',
+        example1: "Smith, J.A. and Lee, K. (2024) 'Targeting HER2 in breast cancer', Nature Medicine, vol. 30, no. 4, pp. 112–125.",
+        example2: "Chen, W. et al. (2023) 'CRISPR-based gene therapy advances', Cell, vol. 186, no. 8, pp. 1580–1595.",
+      }
+  }
+}
+
+function buildTemplates(style: CitationStyle): { name: string; icon: React.ReactNode; description: string; content: string }[] {
+  const cite = citationPlaceholders(style)
+
+const PAGE_TEMPLATES: { name: string; icon: React.ReactNode; description: string; content: string }[] = [
   {
     name: 'Blank',
     icon: <FiFileText className="w-4 h-4" />,
+    description: 'Start from scratch',
     content: '',
   },
   {
     name: 'Research Notes',
     icon: <FiBookOpen className="w-4 h-4" />,
-    content: `# Research Notes
+    description: 'Structured lab notebook with FAIR data principles',
+    content: `# Research Notes — [Project Title]
 
-## Objective
+> **PI:** [Principal Investigator]
+> **Date:** ${new Date().toISOString().split('T')[0]}
+> **Notebook ID:** RN-${Date.now().toString(36).toUpperCase()}
+> **Status:** Draft
 
+---
 
-## Background
+## 1. Research Objective
 
+**Primary question:** What is the effect of [independent variable] on [dependent variable] in [model system]?
 
-## Key Findings
+**Specific aims:**
+1. Characterize the [mechanism/phenotype] under [condition]
+2. Quantify the relationship between [variable A] and [variable B]
+3. Validate findings using [orthogonal approach]
 
-1.
-2.
-3.
+## 2. Background & Rationale
 
-## Methods
+**Current state of knowledge:**
+- [Author et al., Year] demonstrated that [key finding]
+- The [pathway/mechanism] is known to regulate [process] via [mechanism]
+- A critical gap exists in understanding [specific gap]
 
+**Significance:** This work addresses [unmet need] and may inform [clinical/translational application].
 
-## Results
+## 3. Hypothesis
 
+$$
+H_0: \\mu_{\\text{treatment}} = \\mu_{\\text{control}}
+$$
+$$
+H_1: \\mu_{\\text{treatment}} \\neq \\mu_{\\text{control}}
+$$
 
-## Discussion
+**Predicted outcome:** We expect [treatment] to [increase/decrease] [outcome measure] by approximately [effect size] based on [preliminary data/literature].
 
+## 4. Methods
 
-## References
+### 4.1 Study Design
 
--
+| Parameter | Specification |
+|-----------|---------------|
+| Design | [RCT / Cohort / Case-control / Cross-sectional] |
+| Sample size | n = [number], power = 0.80, α = 0.05 |
+| Primary endpoint | [Measurable outcome] |
+| Secondary endpoints | [List endpoints] |
+| Controls | [Positive/negative/vehicle controls] |
+| Blinding | [Single / Double / None] |
+
+### 4.2 Materials
+
+| Reagent / Resource | Identifier | Source | Concentration |
+|---------------------|-----------|--------|---------------|
+| [Antibody/compound] | [Cat#/RRID] | [Vendor] | [Working conc.] |
+| [Cell line] | [RRID/ATCC#] | [Source] | [Passage #] |
+| [Instrument] | [Model#] | [Manufacturer] | [Settings] |
+
+### 4.3 Protocol
+
+1. **Preparation:** [Sample prep, buffer composition, calibration steps]
+2. **Treatment:** [Dosing regimen, exposure time, environmental conditions]
+3. **Measurement:** [Data acquisition parameters, instrument settings]
+4. **Quality control:** [Standards, replicates, internal controls]
+
+## 5. Results
+
+### 5.1 Primary Findings
+
+| Group | n | Mean ± SD | Median (IQR) | p-value |
+|-------|---|-----------|--------------|---------|
+| Control | | | | |
+| Treatment | | | | |
+
+### 5.2 Statistical Analysis
+
+\`\`\`python
+# Analysis code
+import scipy.stats as stats
+# t_stat, p_value = stats.ttest_ind(control, treatment)
+\`\`\`
+
+### 5.3 Figures
+
+*[Insert or reference figure files with descriptive captions]*
+
+## 6. Discussion
+
+**Key interpretation:** [How do results relate to hypothesis?]
+
+**Consistency with literature:** [Agreement/disagreement with published findings]
+
+**Limitations:**
+- [Technical limitation]
+- [Sample size / selection bias]
+- [Generalizability concern]
+
+## 7. Next Steps
+
+- [ ] Repeat experiment with n = [larger sample]
+- [ ] Test [alternative condition/compound]
+- [ ] Submit for [internal review / collaboration]
+
+## 8. References (${cite.format})
+
+1. ${cite.example1}
+2. ${cite.example2}
 `,
   },
   {
     name: 'Experiment Log',
     icon: <FiCode className="w-4 h-4" />,
-    content: `# Experiment Log
+    description: 'GLP-compliant experiment log with chain of custody',
+    content: `# Experiment Log — [Experiment Title]
 
-**Date:** ${new Date().toISOString().split('T')[0]}
-**Researcher:**
+> **Experiment ID:** EXP-${Date.now().toString(36).toUpperCase()}
+> **Date initiated:** ${new Date().toISOString().split('T')[0]}
+> **Date completed:** [Pending]
+> **Researcher:** [Name, ORCID]
+> **Supervisor:** [Name]
+> **Lab:** [Lab name / Room #]
 
-## Hypothesis
+---
 
+## 1. Hypothesis
 
-## Materials & Methods
+**Null hypothesis (H₀):** [Treatment] has no effect on [outcome] in [system].
 
-| Parameter | Value |
-|-----------|-------|
-|           |       |
+**Alternative hypothesis (H₁):** [Treatment] [increases/decreases/alters] [outcome] by [predicted magnitude].
 
-## Protocol
+**Rationale:** Based on [preliminary data / literature finding], we predict [expected result] because [mechanistic reasoning].
 
-1.
-2.
-3.
+## 2. Experimental Design
 
-## Observations
+### 2.1 Variables
 
+| Variable | Type | Levels / Range | Measurement |
+|----------|------|----------------|-------------|
+| [Treatment dose] | Independent | 0, 1, 10, 100 µM | Prepared from stock |
+| [Incubation time] | Independent | 24, 48, 72 h | Timer-controlled |
+| [Cell viability] | Dependent | 0–100% | MTT assay (OD 570nm) |
+| [Passage number] | Controlled | P5–P10 | Logged per flask |
+| [Temperature] | Controlled | 37 ± 0.5°C | Incubator monitored |
 
-## Data
+### 2.2 Sample Layout
 
-\`\`\`
-# Raw data or code here
-\`\`\`
+| | Col 1 (Vehicle) | Col 2 (1 µM) | Col 3 (10 µM) | Col 4 (100 µM) |
+|------|-----------------|--------------|----------------|----------------|
+| Row A | Control rep 1 | Low rep 1 | Mid rep 1 | High rep 1 |
+| Row B | Control rep 2 | Low rep 2 | Mid rep 2 | High rep 2 |
+| Row C | Control rep 3 | Low rep 3 | Mid rep 3 | High rep 3 |
+| Row D | Blank | Blank | Pos. control | Neg. control |
 
-## Analysis
+### 2.3 Power Analysis
 
 $$
-\\text{Result} = \\frac{\\text{observed}}{\\text{expected}}
+n = \\frac{(Z_{\\alpha/2} + Z_{\\beta})^2 \\cdot 2\\sigma^2}{\\Delta^2}
 $$
 
-## Conclusions
+With α = 0.05, β = 0.20, σ = [estimated SD], Δ = [minimum detectable difference]:
+**Required n per group:** [calculated value]
 
+## 3. Materials & Reagents
+
+| Item | Catalog # | Lot # | Vendor | Expiry | Storage |
+|------|-----------|-------|--------|--------|---------|
+| [Drug compound] | | | | | -20°C |
+| [Culture medium] | | | | | 4°C |
+| [Assay kit] | | | | | RT |
+| [Antibody] | | [RRID] | | | -20°C |
+
+## 4. Detailed Protocol
+
+### Step 1: Cell Preparation (Day -1)
+- [ ] Thaw cells from passage [P#], verify >90% viability by trypan blue
+- [ ] Seed [cell density] cells/well in [plate format]
+- [ ] Incubate overnight at 37°C, 5% CO₂, 95% humidity
+
+### Step 2: Treatment (Day 0)
+- [ ] Prepare fresh drug dilutions from [stock concentration] in [vehicle]
+- [ ] Replace medium and add treatments according to plate layout
+- [ ] Record exact treatment time: [HH:MM]
+- [ ] Photograph plate under microscope (4× objective)
+
+### Step 3: Data Collection (Day [n])
+- [ ] Aspirate medium, wash 2× with PBS
+- [ ] Add assay reagent, incubate [duration] at [temperature]
+- [ ] Read plate at [wavelength] using [instrument name]
+- [ ] Export raw data as .csv to [file path]
+
+### Step 4: Analysis
+- [ ] Normalize to vehicle control (set as 100%)
+- [ ] Calculate IC₅₀ using 4-parameter logistic fit
+- [ ] Run one-way ANOVA with post-hoc [Tukey/Dunnett] test
+
+## 5. Raw Observations
+
+### Day 0 — Treatment
+| Time | Observation | Action taken |
+|------|-------------|--------------|
+| | Cell confluence ~[X]% | Proceeded with treatment |
+| | [Any anomaly] | [Corrective action] |
+
+### Day [n] — Data Collection
+| Time | Observation | Notes |
+|------|-------------|-------|
+| | | |
+
+## 6. Results
+
+### 6.1 Raw Data Summary
+
+| Condition | Rep 1 | Rep 2 | Rep 3 | Mean ± SEM |
+|-----------|-------|-------|-------|------------|
+| Vehicle | | | | |
+| 1 µM | | | | |
+| 10 µM | | | | |
+| 100 µM | | | | |
+
+### 6.2 Statistical Output
+
+\`\`\`
+# Paste statistical output here
+# ANOVA table, post-hoc results, effect sizes
+\`\`\`
+
+### 6.3 Derived Parameters
+
+$$
+\\text{IC}_{50} = \\text{[value]} \\pm \\text{[CI]} \\; \\mu\\text{M}
+$$
+
+## 7. Conclusions
+
+**Result:** [Supports / Does not support] the hypothesis.
+
+**Key findings:**
+1. [Finding with statistical support]
+2. [Unexpected observation]
+
+**Deviations from protocol:** [Document any deviations and their potential impact]
+
+## 8. Sign-off
+
+| Role | Name | Date | Signature |
+|------|------|------|-----------|
+| Researcher | | | |
+| Reviewer | | | |
+
+> **Citation format:** ${cite.format}
 `,
   },
   {
     name: 'Literature Review',
     icon: <FiBookOpen className="w-4 h-4" />,
-    content: `# Literature Review
+    description: 'Systematic review following PRISMA guidelines',
+    content: `# Systematic Literature Review — [Topic]
 
-## Topic
+> **Review ID:** LR-${Date.now().toString(36).toUpperCase()}
+> **Date initiated:** ${new Date().toISOString().split('T')[0]}
+> **Reviewer(s):** [Name 1, Name 2]
+> **PROSPERO registration:** [If applicable]
 
+---
 
-## Search Strategy
+## 1. Review Question (PICO Framework)
 
-- Databases: PubMed, Google Scholar
-- Keywords:
-- Date range:
+| Component | Description |
+|-----------|-------------|
+| **P**opulation | [Target population / disease / condition] |
+| **I**ntervention | [Treatment / exposure / diagnostic test] |
+| **C**omparison | [Control / alternative intervention / placebo] |
+| **O**utcome | [Primary and secondary outcomes] |
 
-## Summary of Findings
+**Structured question:** In [population], does [intervention] compared to [comparison] improve [outcome]?
 
-### Paper 1
-- **Title:**
-- **Authors:**
-- **Year:**
-- **Key findings:**
-- **Relevance:**
+## 2. Search Strategy
 
-### Paper 2
-- **Title:**
-- **Authors:**
-- **Year:**
-- **Key findings:**
-- **Relevance:**
+### 2.1 Databases Searched
 
-## Synthesis
+| Database | Date searched | Results |
+|----------|-------------|---------|
+| PubMed / MEDLINE | ${new Date().toISOString().split('T')[0]} | [n] |
+| Embase | | [n] |
+| Cochrane Library | | [n] |
+| Web of Science | | [n] |
+| Scopus | | [n] |
+| ClinicalTrials.gov | | [n] |
+| bioRxiv / medRxiv | | [n] |
 
+### 2.2 Search Query (PubMed)
 
-## Knowledge Gaps
+\`\`\`
+(("term 1"[MeSH Terms] OR "term 1"[Title/Abstract])
+AND ("term 2"[MeSH Terms] OR "term 2"[Title/Abstract])
+AND ("term 3"[MeSH Terms] OR "term 3"[Title/Abstract]))
+Filters: Humans, English, 2019-2025
+\`\`\`
 
+### 2.3 Inclusion / Exclusion Criteria
 
-## References
+| Criterion | Include | Exclude |
+|-----------|---------|---------|
+| Study design | RCTs, prospective cohorts | Case reports, editorials, reviews |
+| Population | Adults (≥18 y), confirmed [diagnosis] | Pediatric, pregnant, comorbid [condition] |
+| Intervention | [Specific treatment at any dose] | [Related but distinct intervention] |
+| Outcome | [Primary endpoint reported] | No quantitative outcome data |
+| Language | English | Non-English without translation |
+| Date | 2019–present | Before 2019 |
 
+## 3. PRISMA Flow Diagram
+
+\`\`\`
+Records identified (n = ___)
+  ├── Database searching (n = ___)
+  └── Other sources (n = ___)
+          │
+  Records after deduplication (n = ___)
+          │
+  Records screened (title/abstract) (n = ___)
+  ├── Excluded (n = ___) — Reasons: [not relevant, wrong population, etc.]
+          │
+  Full-text articles assessed (n = ___)
+  ├── Excluded (n = ___) — Reasons: [no outcome data, wrong design, etc.]
+          │
+  Studies included in qualitative synthesis (n = ___)
+          │
+  Studies included in meta-analysis (n = ___)
+\`\`\`
+
+## 4. Data Extraction
+
+### Study 1: [Author et al., Year]
+
+| Field | Details |
+|-------|---------|
+| **Citation** | [Full citation] |
+| **Design** | [RCT / Cohort / Cross-sectional] |
+| **N** | [Sample size, treatment vs control] |
+| **Population** | [Demographics, disease stage] |
+| **Intervention** | [Drug, dose, duration, route] |
+| **Comparator** | [Placebo / SOC / active control] |
+| **Primary outcome** | [Result with 95% CI, p-value] |
+| **Secondary outcomes** | [Key secondary results] |
+| **Adverse events** | [Incidence, severity] |
+| **Risk of bias** | [Low / Some concerns / High] |
+| **Notes** | [Funding source, conflicts, limitations] |
+
+### Study 2: [Author et al., Year]
+
+| Field | Details |
+|-------|---------|
+| **Citation** | |
+| **Design** | |
+| **N** | |
+| **Population** | |
+| **Intervention** | |
+| **Comparator** | |
+| **Primary outcome** | |
+| **Secondary outcomes** | |
+| **Adverse events** | |
+| **Risk of bias** | |
+| **Notes** | |
+
+## 5. Quality Assessment (Risk of Bias)
+
+### Cochrane RoB 2.0 Summary
+
+| Study | Randomization | Deviations | Missing data | Measurement | Selection | Overall |
+|-------|:---:|:---:|:---:|:---:|:---:|:---:|
+| [Study 1] | 🟢 | 🟡 | 🟢 | 🟢 | 🟢 | Low |
+| [Study 2] | 🟡 | 🟢 | 🔴 | 🟢 | 🟡 | Some concerns |
+
+*🟢 Low risk, 🟡 Some concerns, 🔴 High risk*
+
+## 6. Synthesis of Findings
+
+### 6.1 Summary of Evidence
+
+**Direction of effect:** [Consistent benefit / Mixed / No effect / Harm]
+
+**Effect magnitude:**
+$$
+\\text{Pooled OR} = [\\text{value}] \\;(95\\%\\; CI: [\\text{lower}]-[\\text{upper}]), \\; I^2 = [\\text{value}]\\%
+$$
+
+### 6.2 Heterogeneity
+
+- $I^2$ = [value]% — [low (<25%) / moderate (25–75%) / high (>75%)]
+- Sources of heterogeneity: [dose, population, follow-up duration]
+
+### 6.3 Subgroup Analyses
+
+| Subgroup | k | Effect (95% CI) | p-interaction |
+|----------|---|-----------------|---------------|
+| [Age <65 vs ≥65] | | | |
+| [Dose low vs high] | | | |
+| [Region] | | | |
+
+## 7. GRADE Evidence Assessment
+
+| Outcome | Studies | Certainty | Effect estimate | Rationale |
+|---------|---------|-----------|-----------------|-----------|
+| [Primary] | k = [n] | ⊕⊕⊕⊕ High | [Summary] | [No serious limitations] |
+| [Secondary] | k = [n] | ⊕⊕⊕◯ Moderate | [Summary] | [Downgraded: imprecision] |
+
+## 8. Knowledge Gaps & Future Directions
+
+1. **Gap:** [Underrepresented population / missing long-term data]
+   - **Needed:** [Study type and design to address gap]
+2. **Gap:** [Mechanistic uncertainty]
+   - **Needed:** [Translational / preclinical studies]
+
+## 9. References (${cite.format})
+
+1. ${cite.example1}
+2. ${cite.example2}
 `,
   },
   {
     name: 'Data Analysis',
     icon: <FiGrid className="w-4 h-4" />,
-    content: `# Data Analysis
+    description: 'Reproducible analysis report with statistical framework',
+    content: `# Data Analysis Report — [Study Title]
 
-## Dataset Description
+> **Analysis ID:** DA-${Date.now().toString(36).toUpperCase()}
+> **Analyst:** [Name, affiliation]
+> **Date:** ${new Date().toISOString().split('T')[0]}
+> **Software:** Python 3.x / R 4.x / [Other]
+> **Repository:** [Link to code repository]
 
-| Feature | Type | Description |
-|---------|------|-------------|
-|         |      |             |
+---
 
-## Statistical Summary
+## 1. Objective
+
+**Primary analysis goal:** Determine whether [variable/treatment] is associated with [outcome] after adjusting for [confounders].
+
+**Pre-registration:** [Link or N/A]
+
+## 2. Dataset Description
+
+### 2.1 Data Source
+
+| Attribute | Description |
+|-----------|-------------|
+| Source | [Database name / clinical trial / registry] |
+| Collection period | [Start date] – [End date] |
+| Total records | N = [number] |
+| After cleaning | n = [number] (excluded [m] records) |
+| Format | [CSV / Parquet / SQL database] |
+| Access | [Public / Restricted / IRB-approved] |
+
+### 2.2 Variable Dictionary
+
+| Variable | Type | Unit | Range / Categories | Missing (%) | Role |
+|----------|------|------|-------------------|-------------|------|
+| patient_id | Identifier | — | Unique | 0% | Key |
+| age | Continuous | years | 18–95 | 2.1% | Covariate |
+| sex | Binary | — | M / F | 0% | Covariate |
+| treatment | Categorical | — | A / B / Placebo | 0% | Exposure |
+| biomarker_x | Continuous | ng/mL | 0.1–500 | 8.4% | Predictor |
+| outcome | Binary | — | 0 (no event) / 1 (event) | 0% | Outcome |
+| survival_days | Continuous | days | 1–2,190 | 3.2% | Time-to-event |
+
+### 2.3 Missing Data Assessment
+
+| Pattern | Count | Strategy |
+|---------|-------|----------|
+| MCAR (Little's test p > 0.05) | [n variables] | Complete case analysis |
+| MAR | [n variables] | Multiple imputation (m = 20, MICE) |
+| MNAR suspected | [variable] | Sensitivity analysis (tipping point) |
+
+## 3. Exploratory Data Analysis
+
+### 3.1 Descriptive Statistics
+
+| Variable | Overall (N=[n]) | Group A (n=[n]) | Group B (n=[n]) | p-value |
+|----------|----------------|-----------------|-----------------|---------|
+| Age, mean (SD) | | | | |
+| Sex, n (%) female | | | | |
+| BMI, median (IQR) | | | | |
+| Biomarker, mean (SD) | | | | |
+| Outcome, n (%) | | | | |
+
+### 3.2 Distribution Checks
+
+\`\`\`python
+import pandas as pd
+import numpy as np
+from scipy import stats
+
+# Normality tests
+for col in continuous_vars:
+    stat, p = stats.shapiro(df[col].dropna())
+    print(f"{col}: Shapiro-Wilk W={stat:.4f}, p={p:.4f}")
+
+# Correlation matrix
+corr = df[continuous_vars].corr(method='spearman')
+\`\`\`
+
+### 3.3 Outlier Detection
+
+| Variable | Method | Threshold | Outliers (n) | Action |
+|----------|--------|-----------|-------------|--------|
+| biomarker_x | IQR × 1.5 | >[value] | [n] | Winsorized at 99th percentile |
+| age | Clinical range | >110 y | [n] | Excluded (data entry error) |
+
+## 4. Statistical Methods
+
+### 4.1 Primary Analysis
+
+**Model:** [Logistic regression / Cox PH / Mixed-effects / etc.]
 
 $$
-\\bar{x} = \\frac{1}{n}\\sum_{i=1}^{n} x_i
+\\log\\left(\\frac{p}{1-p}\\right) = \\beta_0 + \\beta_1 X_{\\text{treatment}} + \\beta_2 X_{\\text{age}} + \\beta_3 X_{\\text{sex}} + \\beta_4 X_{\\text{biomarker}}
 $$
 
-## Methodology
+**Assumptions tested:**
+- [ ] Linearity of log-odds (Box-Tidwell test)
+- [ ] No multicollinearity (VIF < 5 for all predictors)
+- [ ] Influential observations (Cook's D < 4/n)
+- [ ] Goodness-of-fit (Hosmer-Lemeshow p > 0.05)
 
+### 4.2 Multiple Testing Correction
 
-## Results
+| Method | Applied to | Threshold |
+|--------|-----------|-----------|
+| Bonferroni | Primary endpoints (k=[n]) | α = [0.05/k] |
+| Benjamini-Hochberg | Secondary/exploratory | FDR < 0.05 |
 
-### Visualization Notes
+### 4.3 Sensitivity Analyses
 
+1. **Per-protocol analysis** — excluding protocol violations
+2. **Imputation sensitivity** — complete case vs. multiple imputation
+3. **Propensity score matching** — to address selection bias
+4. **E-value** — for unmeasured confounding
 
-### Key Metrics
+## 5. Results
 
-| Metric | Value | 95% CI |
-|--------|-------|--------|
-|        |       |        |
+### 5.1 Primary Outcome
 
-## Interpretation
+| Predictor | OR (95% CI) | β (SE) | p-value |
+|-----------|-------------|--------|---------|
+| Treatment B vs A | | | |
+| Age (per 10 y) | | | |
+| Sex (F vs M) | | | |
+| Biomarker (per SD) | | | |
 
+**Model performance:**
+- AUC-ROC = [value] (95% CI: [range])
+- Brier score = [value]
+- Calibration slope = [value]
 
+### 5.2 Secondary Analyses
+
+\`\`\`python
+# Survival analysis
+from lifelines import CoxPHFitter
+cph = CoxPHFitter()
+cph.fit(df, duration_col='survival_days', event_col='outcome')
+cph.print_summary()
+\`\`\`
+
+### 5.3 Key Visualizations
+
+*[Reference figure files — Kaplan-Meier curves, forest plots, calibration plots]*
+
+| Figure | Description | Key finding |
+|--------|-------------|-------------|
+| Fig 1 | Kaplan-Meier by treatment arm | [Median survival difference] |
+| Fig 2 | Forest plot of subgroups | [Consistent effect / interaction] |
+| Fig 3 | Calibration plot | [Well-calibrated / overfit] |
+
+## 6. Interpretation
+
+**Effect summary:** Treatment B was associated with a [X]% [increase/reduction] in [outcome] (OR = [value], 95% CI: [range], p = [value]).
+
+**Clinical significance:** The observed effect size of [value] exceeds the minimal clinically important difference of [MCID value].
+
+**Number needed to treat:**
+$$
+\\text{NNT} = \\frac{1}{\\text{ARR}} = \\frac{1}{|p_{\\text{control}} - p_{\\text{treatment}}|} = [\\text{value}]
+$$
+
+**Limitations:**
+1. [Residual confounding from unmeasured variables]
+2. [Single-center / specific population]
+3. [Missing data — sensitivity analysis findings]
+
+## 7. Reproducibility
+
+| Component | Location |
+|-----------|----------|
+| Raw data | [Path / DOI] |
+| Cleaning script | [Path / DOI] |
+| Analysis script | [Path / DOI] |
+| Environment | [requirements.txt / renv.lock] |
+| Random seed | [42 / specified seed] |
+| Session info | [Appended below] |
+
+## 8. References (${cite.format})
+
+1. ${cite.example1}
+2. ${cite.example2}
 `,
   },
 ]
+  return PAGE_TEMPLATES
+}
 
 const SNIPPET_INSERT = {
   latex: '$$\n\\alpha + \\beta = \\gamma\n$$',
@@ -184,12 +696,16 @@ const SNIPPET_INSERT = {
 export default function Notebook() {
   const [pages, setPages] = useState<NotebookPage[]>([])
   const [activePage, setActivePage] = useState<NotebookPage | null>(null)
-  const [viewMode, setViewMode] = useState<ViewMode>('split')
+  const [viewMode, setViewMode] = useState<ViewMode>('edit')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [editContent, setEditContent] = useState('')
   const [editTitle, setEditTitle] = useState('')
   const [showTemplates, setShowTemplates] = useState(false)
+
+  // Build templates dynamically based on selected citation style
+  // Re-read citation style from localStorage each time the template modal opens
+  const templates = useMemo(() => buildTemplates(getCitationStyle()), [showTemplates])
   const [showVersions, setShowVersions] = useState(false)
   const [versions, setVersions] = useState<NotebookVersion[]>([])
   const [tagInput, setTagInput] = useState('')
@@ -208,8 +724,8 @@ export default function Notebook() {
   const loadPages = async () => {
     try {
       setLoading(true)
-      const res = await api.getNotebookPages({ page_size: 100 })
-      const items = res.items || []
+      const res = await api.getNotebookPages({ page_size: 100 }) || {}
+      const items = Array.isArray(res.items) ? res.items : []
       if (items.length > 0) {
         setPages(items)
         if (!activePage) selectPage(items[0])
@@ -252,7 +768,7 @@ export default function Notebook() {
     setActivePage(page)
     setEditContent(page.content || '')
     setEditTitle(page.title || '')
-    setEditTags(page.tags || [])
+    setEditTags(Array.isArray(page.tags) ? page.tags : [])
     setHasUnsavedChanges(false)
     setShowVersions(false)
   }, [])
@@ -276,6 +792,34 @@ export default function Notebook() {
     setEditContent(value)
     scheduleAutoSave()
   }
+
+  const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items
+    if (!items) return
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith('image/')) {
+        e.preventDefault()
+        const file = items[i].getAsFile()
+        if (!file) return
+        const reader = new FileReader()
+        reader.onload = () => {
+          const base64 = reader.result as string
+          const imgMarkdown = `![Pasted image](${base64})\n`
+          const textarea = editorRef.current
+          if (textarea) {
+            const start = textarea.selectionStart
+            const end = textarea.selectionEnd
+            const newContent = editContent.slice(0, start) + imgMarkdown + editContent.slice(end)
+            handleContentChange(newContent)
+          } else {
+            handleContentChange(editContent + '\n' + imgMarkdown)
+          }
+        }
+        reader.readAsDataURL(file)
+        return
+      }
+    }
+  }, [editContent, handleContentChange])
 
   const handleTitleChange = (value: string) => {
     setEditTitle(value)
@@ -314,7 +858,7 @@ export default function Notebook() {
     }
   }
 
-  const createPage = async (template?: typeof PAGE_TEMPLATES[0]) => {
+  const createPage = async (template?: typeof templates[0]) => {
     const title = template ? template.name : 'Untitled'
     const content = template?.content || ''
     try {
@@ -324,8 +868,10 @@ export default function Notebook() {
         content_type: 'markdown',
         tags: [],
       })
-      setPages(prev => [page, ...prev])
-      selectPage(page)
+      // Ensure content from template is preserved even if API doesn't return it
+      const pageWithContent = { ...page, content: page.content || content }
+      setPages(prev => [pageWithContent, ...prev])
+      selectPage(pageWithContent)
     } catch (err) {
       console.error('Failed to create page via API, creating locally:', err)
       // Fallback: create a local page so the UI isn't blank
@@ -443,7 +989,7 @@ export default function Notebook() {
     return pages.filter(p =>
       (p.title || '').toLowerCase().includes(q) ||
       (p.content || '').toLowerCase().includes(q) ||
-      p.tags?.some(t => t.toLowerCase().includes(q))
+      (Array.isArray(p.tags) && p.tags.some(t => t.toLowerCase().includes(q)))
     )
   }, [pages, searchQuery])
 
@@ -522,7 +1068,7 @@ export default function Notebook() {
                   {new Date(page.updated_at).toLocaleDateString()}
                 </span>
               </div>
-              {(page.tags?.length ?? 0) > 0 && (
+              {Array.isArray(page.tags) && page.tags.length > 0 && (
                 <div className="flex gap-1 mt-1 flex-wrap">
                   {(page.tags ?? []).slice(0, 3).map(tag => (
                     <span key={tag} className="text-xxs px-1 py-0.5 rounded bg-white/5 text-[var(--color-text-muted)]">
@@ -688,6 +1234,7 @@ export default function Notebook() {
                   ref={editorRef}
                   value={editContent}
                   onChange={e => handleContentChange(e.target.value)}
+                  onPaste={handlePaste}
                   className="flex-1 w-full p-4 bg-transparent text-sm font-mono resize-none outline-none leading-relaxed"
                   placeholder="Start writing in Markdown...
 
@@ -779,7 +1326,7 @@ Supports:
               </button>
             </div>
             <div className="p-2">
-              {PAGE_TEMPLATES.map(template => (
+              {templates.map(template => (
                 <button
                   key={template.name}
                   onClick={() => createPage(template)}
@@ -791,7 +1338,7 @@ Supports:
                   <div>
                     <div className="text-sm font-medium">{template.name}</div>
                     <div className="text-xxs text-[var(--color-text-muted)]">
-                      {template.content ? 'Pre-filled template' : 'Start from scratch'}
+                      {template.description}
                     </div>
                   </div>
                 </button>

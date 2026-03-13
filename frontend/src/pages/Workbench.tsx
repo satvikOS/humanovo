@@ -1,18 +1,12 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import {
   FiBox,
   FiZoomIn,
   FiZoomOut,
-  FiRotateCw,
-  FiMove,
   FiEye,
   FiEyeOff,
-  FiTag,
   FiDownload,
   FiUpload,
-  FiMaximize2,
-  FiGrid,
-  FiLayers,
   FiSettings,
   FiChevronRight,
   FiChevronDown,
@@ -24,7 +18,16 @@ import {
   FiCpu,
   FiActivity,
   FiPlay,
-  FiPause
+  FiPause,
+  FiPlus,
+  FiTrash2,
+  FiMessageSquare,
+  FiSend,
+  FiEdit3,
+  FiLink,
+  FiX,
+  FiSave,
+  FiImage
 } from 'react-icons/fi'
 import clsx from 'clsx'
 
@@ -1236,261 +1239,382 @@ const biologicalStructures: BiologicalComponent[] = [
   { id: 'rsv_f_protein', name: 'RSV F Protein', category: 'vaccine_target', subcategory: 'Viral Surface', visible: true, color: '#115e59', tags: ['RSV', 'respiratory', 'infants', 'elderly', 'prefusion'], description: 'RSV fusion protein that mediates viral entry. Prefusion-stabilized F protein is the basis of recently approved RSV vaccines.', diseaseRelevance: 'RSV is leading cause of infant hospitalization. New vaccines approved for elderly and maternal immunization.', therapeuticTargets: ['Arexvy (GSK)', 'Abrysvo (Pfizer)', 'Nirsevimab (mAb for infants)'], keyFacts: ['Prefusion conformation induces more potent antibodies', 'Structure-based vaccine design breakthrough', 'Maternal vaccination protects newborns', 'Nirsevimab: single-dose mAb for all infants'] },
 ]
 
-// ==================== COMPONENTS ====================
+// ==================== GRAPH NODE TYPES ====================
 
-function Canvas3D({ components, selectedId, onSelect: _onSelect }: {
-  components: BiologicalComponent[]
-  selectedId: string | null
-  onSelect: (id: string | null) => void
+interface GraphNode {
+  id: string
+  entityId: string
+  name: string
+  category: BiologicalCategory
+  color: string
+  x: number
+  y: number
+  width: number
+  height: number
+  notes: string
+  expanded: boolean
+}
+
+interface GraphEdge {
+  id: string
+  sourceId: string
+  targetId: string
+  label: string
+  color: string
+}
+
+interface GraphState {
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+}
+
+const STORAGE_KEY = 'humanovo-workbench-graph'
+
+function loadGraphState(): GraphState {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (raw) return JSON.parse(raw)
+  } catch { /* ignore */ }
+  return { nodes: [], edges: [] }
+}
+
+function saveGraphState(state: GraphState) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+  } catch { /* ignore */ }
+}
+
+// ==================== NODE SHAPE HELPER ====================
+
+function getNodeShape(category: BiologicalCategory, x: number, y: number, w: number, h: number): string {
+  const cx = x + w / 2
+  const cy = y + h / 2
+  const rx = w / 2
+  const ry = h / 2
+  switch (category) {
+    case 'pathway':
+      // Diamond
+      return `M ${cx} ${y} L ${x + w} ${cy} L ${cx} ${y + h} L ${x} ${cy} Z`
+    case 'gene':
+      // Octagon
+      {
+        const inset = Math.min(w, h) * 0.25
+        return `M ${x + inset} ${y} L ${x + w - inset} ${y} L ${x + w} ${y + inset} L ${x + w} ${y + h - inset} L ${x + w - inset} ${y + h} L ${x + inset} ${y + h} L ${x} ${y + h - inset} L ${x} ${y + inset} Z`
+      }
+    case 'biomolecule':
+      // Hexagon
+      {
+        const pts: string[] = []
+        for (let i = 0; i < 6; i++) {
+          const angle = (Math.PI / 3) * i - Math.PI / 2
+          pts.push(`${cx + rx * Math.cos(angle)} ${cy + ry * Math.sin(angle)}`)
+        }
+        return `M ${pts.join(' L ')} Z`
+      }
+    default:
+      // Rounded rect as path
+      {
+        const r = 8
+        return `M ${x + r} ${y} L ${x + w - r} ${y} Q ${x + w} ${y} ${x + w} ${y + r} L ${x + w} ${y + h - r} Q ${x + w} ${y + h} ${x + w - r} ${y + h} L ${x + r} ${y + h} Q ${x} ${y + h} ${x} ${y + h - r} L ${x} ${y + r} Q ${x} ${y} ${x + r} ${y} Z`
+      }
+  }
+}
+
+// ==================== CATEGORY ICON TEXT ====================
+
+function getCategoryIcon(category: BiologicalCategory): string {
+  switch (category) {
+    case 'organ_system': return '\u2665' // heart
+    case 'cell_type': return '\u25CB'    // circle
+    case 'cellular_component': return '\u25A1' // square
+    case 'biomolecule': return '\u2B22'  // hexagon
+    case 'pathway': return '\u2192'      // arrow
+    case 'receptor': return '\u0059'     // Y
+    case 'antigen': return '\u2316'      // target
+    case 'gene': return '\u2622'         // helix-ish
+    case 'drug_target': return '\u2295'  // circled plus
+    case 'vaccine_target': return '\u2694' // shield
+    default: return '\u25CF'
+  }
+}
+
+// ==================== BEZIER EDGE PATH ====================
+
+function edgePath(x1: number, y1: number, x2: number, y2: number): string {
+  const dx = Math.abs(x2 - x1) * 0.5
+  return `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`
+}
+
+// ==================== SVG NODE GRAPH CANVAS ====================
+
+function NodeGraphCanvas({
+  nodes,
+  edges,
+  selectedNode,
+  connectingFrom,
+  mousePos,
+  zoom,
+  canvasOffset,
+  onNodeMouseDown,
+  onCanvasMouseMove,
+  onCanvasMouseUp,
+  onCanvasMouseDown,
+  onNodeClick,
+  onNodeDoubleClick,
+  onEdgeClick,
+  onWheel,
+  svgRef,
+}: {
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+  selectedNode: string | null
+  connectingFrom: string | null
+  mousePos: { x: number; y: number }
+  zoom: number
+  canvasOffset: { x: number; y: number }
+  onNodeMouseDown: (e: React.MouseEvent, nodeId: string) => void
+  onCanvasMouseMove: (e: React.MouseEvent) => void
+  onCanvasMouseUp: (e: React.MouseEvent) => void
+  onCanvasMouseDown: (e: React.MouseEvent) => void
+  onNodeClick: (nodeId: string) => void
+  onNodeDoubleClick: (nodeId: string) => void
+  onEdgeClick: (edgeId: string) => void
+  onWheel: (e: React.WheelEvent) => void
+  svgRef: React.RefObject<SVGSVGElement | null>
 }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const [rotation, setRotation] = useState({ x: 0.3, y: 0.5 })
-  const [zoom, setZoom] = useState(1)
-  const [isDragging, setIsDragging] = useState(false)
-  const [lastMouse, setLastMouse] = useState({ x: 0, y: 0 })
-
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-
-    const draw = () => {
-      const { width, height } = canvas
-      ctx.clearRect(0, 0, width, height)
-
-      // Draw grid
-      ctx.strokeStyle = 'rgba(6, 182, 212, 0.05)'
-      ctx.lineWidth = 1
-      const gridSize = 30 * zoom
-      for (let x = 0; x < width; x += gridSize) {
-        ctx.beginPath()
-        ctx.moveTo(x, 0)
-        ctx.lineTo(x, height)
-        ctx.stroke()
-      }
-      for (let y = 0; y < height; y += gridSize) {
-        ctx.beginPath()
-        ctx.moveTo(0, y)
-        ctx.lineTo(width, y)
-        ctx.stroke()
-      }
-
-      // Draw biological components
-      const centerX = width / 2
-      const centerY = height / 2
-      const visibleComponents = components.filter(c => c.visible)
-
-      // Group by category for visual organization
-      const categoryGroups = visibleComponents.reduce((acc, comp) => {
-        if (!acc[comp.category]) acc[comp.category] = []
-        acc[comp.category].push(comp)
-        return acc
-      }, {} as Record<string, BiologicalComponent[]>)
-
-      Object.entries(categoryGroups).forEach(([_category, comps], categoryIndex) => {
-        const categoryAngle = (categoryIndex / Object.keys(categoryGroups).length) * Math.PI * 2
-        const categoryRadius = 180 * zoom
-
-        comps.forEach((component, compIndex) => {
-          const localAngle = (compIndex / comps.length) * Math.PI * 0.5 - Math.PI * 0.25
-          const angle = categoryAngle + localAngle + rotation.y
-          const radius = (80 + compIndex * 25) * zoom
-
-          const x = centerX + Math.cos(angle) * radius
-          const y = centerY + Math.sin(angle) * radius * 0.6 + Math.sin(rotation.x) * 30
-
-          // Draw connecting lines to category center
-          const catX = centerX + Math.cos(categoryAngle + rotation.y) * categoryRadius * 0.3
-          const catY = centerY + Math.sin(categoryAngle + rotation.y) * categoryRadius * 0.3 * 0.6
-
-          ctx.strokeStyle = component.color + '30'
-          ctx.lineWidth = 1
-          ctx.beginPath()
-          ctx.moveTo(catX, catY)
-          ctx.lineTo(x, y)
-          ctx.stroke()
-
-          // Draw component node
-          const size = 20 * zoom
-          const isSelected = selectedId === component.id
-
-          if (isSelected) {
-            ctx.shadowColor = component.color
-            ctx.shadowBlur = 15
-          }
-
-          ctx.fillStyle = component.color + (isSelected ? 'ff' : 'aa')
-          ctx.beginPath()
-
-          // Different shapes by category
-          if (component.category === 'organ_system') {
-            // Large circle
-            ctx.arc(x, y, size * 1.2, 0, Math.PI * 2)
-          } else if (component.category === 'cell_type') {
-            // Circle with inner structure
-            ctx.arc(x, y, size, 0, Math.PI * 2)
-          } else if (component.category === 'pathway') {
-            // Diamond
-            ctx.moveTo(x, y - size)
-            ctx.lineTo(x + size, y)
-            ctx.lineTo(x, y + size)
-            ctx.lineTo(x - size, y)
-            ctx.closePath()
-          } else if (component.category === 'gene') {
-            // Double helix representation
-            ctx.ellipse(x, y, size * 0.5, size, 0, 0, Math.PI * 2)
-          } else if (component.category === 'biomolecule') {
-            // Hexagon
-            for (let i = 0; i < 6; i++) {
-              const hx = x + Math.cos(i * Math.PI / 3) * size
-              const hy = y + Math.sin(i * Math.PI / 3) * size
-              if (i === 0) ctx.moveTo(hx, hy)
-              else ctx.lineTo(hx, hy)
-            }
-            ctx.closePath()
-          } else if (component.category === 'receptor' || component.category === 'antigen') {
-            // Y-shape for antibody/receptor
-            ctx.arc(x, y, size * 0.8, 0, Math.PI * 2)
-          } else {
-            // Default circle
-            ctx.arc(x, y, size * 0.7, 0, Math.PI * 2)
-          }
-          ctx.fill()
-          ctx.shadowBlur = 0
-
-          // Draw label
-          ctx.fillStyle = 'var(--color-text)'
-          ctx.font = `${9 * zoom}px Inter`
-          ctx.textAlign = 'center'
-          const shortName = component.name.length > 15 ? component.name.slice(0, 15) + '...' : component.name
-          ctx.fillText(shortName, x, y + size + 12)
-        })
-      })
-
-      // Draw center hub
-      ctx.fillStyle = 'rgba(6, 182, 212, 0.1)'
-      ctx.beginPath()
-      ctx.arc(centerX, centerY, 40 * zoom, 0, Math.PI * 2)
-      ctx.fill()
-
-      ctx.strokeStyle = 'rgba(6, 182, 212, 0.3)'
-      ctx.lineWidth = 2
-      ctx.setLineDash([5, 5])
-      ctx.beginPath()
-      ctx.arc(centerX, centerY, 40 * zoom, 0, Math.PI * 2)
-      ctx.stroke()
-      ctx.setLineDash([])
-
-      ctx.fillStyle = 'var(--color-text-muted)'
-      ctx.font = `${10 * zoom}px Inter`
-      ctx.textAlign = 'center'
-      ctx.fillText('Disease Research', centerX, centerY - 5)
-      ctx.fillText('Structures', centerX, centerY + 10)
-    }
-
-    draw()
-  }, [components, rotation, zoom, selectedId])
-
-  const handleMouseDown = (e: React.MouseEvent) => {
-    setIsDragging(true)
-    setLastMouse({ x: e.clientX, y: e.clientY })
-  }
-
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDragging) return
-    const dx = e.clientX - lastMouse.x
-    const dy = e.clientY - lastMouse.y
-    setRotation(prev => ({
-      x: prev.x + dy * 0.01,
-      y: prev.y + dx * 0.01,
-    }))
-    setLastMouse({ x: e.clientX, y: e.clientY })
-  }
-
-  const handleMouseUp = () => {
-    setIsDragging(false)
-  }
-
-  const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault()
-    setZoom(prev => Math.max(0.5, Math.min(2, prev - e.deltaY * 0.001)))
-  }
+  // Compute edge endpoints based on node centers
+  const nodeMap = new Map(nodes.map(n => [n.id, n]))
 
   return (
-    <div className="relative w-full h-full canvas-container">
-      <canvas
-        ref={canvasRef}
-        width={800}
-        height={600}
-        className="w-full h-full cursor-grab active:cursor-grabbing"
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
-        onWheel={handleWheel}
-      />
+    <svg
+      ref={svgRef as React.LegacyRef<SVGSVGElement>}
+      className="w-full h-full grid-bg cursor-crosshair"
+      style={{ background: 'var(--color-bg)' }}
+      onMouseMove={onCanvasMouseMove}
+      onMouseUp={onCanvasMouseUp}
+      onMouseDown={onCanvasMouseDown}
+      onWheel={onWheel}
+      onContextMenu={e => e.preventDefault()}
+    >
+      <defs>
+        <filter id="node-glow">
+          <feDropShadow dx="0" dy="0" stdDeviation="6" floodOpacity="0.6" />
+        </filter>
+        <filter id="node-glow-selected">
+          <feDropShadow dx="0" dy="2" stdDeviation="8" floodOpacity="0.8" />
+        </filter>
+        <filter id="node-blur">
+          <feGaussianBlur stdDeviation="2" />
+        </filter>
+        <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+          <polygon points="0 0, 10 3.5, 0 7" fill="rgba(255,255,255,0.4)" />
+        </marker>
+      </defs>
 
-      <div className="absolute bottom-4 left-4 flex items-center gap-1 bg-[var(--color-surface)]/90 backdrop-blur rounded-lg border border-[var(--color-border)] p-1">
-        <button
-          onClick={() => setZoom(z => Math.min(2, z + 0.1))}
-          className="p-1.5 hover:bg-[var(--color-border)] rounded transition-colors"
-          title="Zoom In"
-        >
-          <FiZoomIn className="w-3.5 h-3.5" />
-        </button>
-        <span className="px-2 text-xs text-[var(--color-text-muted)]">{Math.round(zoom * 100)}%</span>
-        <button
-          onClick={() => setZoom(z => Math.max(0.5, z - 0.1))}
-          className="p-1.5 hover:bg-[var(--color-border)] rounded transition-colors"
-          title="Zoom Out"
-        >
-          <FiZoomOut className="w-3.5 h-3.5" />
-        </button>
-        <div className="w-px h-4 bg-[var(--color-border)] mx-1" />
-        <button
-          onClick={() => setRotation({ x: 0.3, y: 0.5 })}
-          className="p-1.5 hover:bg-[var(--color-border)] rounded transition-colors"
-          title="Reset View"
-        >
-          <FiRotateCw className="w-3.5 h-3.5" />
-        </button>
-        <button
-          className="p-1.5 hover:bg-[var(--color-border)] rounded transition-colors"
-          title="Center View"
-        >
-          <FiCrosshair className="w-3.5 h-3.5" />
-        </button>
-      </div>
+      <g transform={`translate(${canvasOffset.x}, ${canvasOffset.y}) scale(${zoom})`}>
+        {/* Edges */}
+        {edges.map(edge => {
+          const src = nodeMap.get(edge.sourceId)
+          const tgt = nodeMap.get(edge.targetId)
+          if (!src || !tgt) return null
+          const x1 = src.x + src.width / 2
+          const y1 = src.y + src.height / 2
+          const x2 = tgt.x + tgt.width / 2
+          const y2 = tgt.y + tgt.height / 2
+          const midX = (x1 + x2) / 2
+          const midY = (y1 + y2) / 2
+          return (
+            <g key={edge.id} onClick={() => onEdgeClick(edge.id)} className="cursor-pointer">
+              <path
+                d={edgePath(x1, y1, x2, y2)}
+                fill="none"
+                stroke={edge.color || 'rgba(255,255,255,0.25)'}
+                strokeWidth={2}
+                markerEnd="url(#arrowhead)"
+                className="transition-all duration-200"
+              />
+              {/* Invisible wider path for easier clicking */}
+              <path
+                d={edgePath(x1, y1, x2, y2)}
+                fill="none"
+                stroke="transparent"
+                strokeWidth={12}
+              />
+              {edge.label && (
+                <g transform={`translate(${midX}, ${midY})`}>
+                  <rect
+                    x={-edge.label.length * 3.5 - 6}
+                    y={-10}
+                    width={edge.label.length * 7 + 12}
+                    height={20}
+                    rx={4}
+                    fill="rgba(0,0,0,0.7)"
+                    stroke={edge.color || 'rgba(255,255,255,0.15)'}
+                    strokeWidth={1}
+                  />
+                  <text
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    fill="rgba(255,255,255,0.7)"
+                    fontSize={10}
+                    fontFamily="Inter, sans-serif"
+                  >
+                    {edge.label}
+                  </text>
+                </g>
+              )}
+            </g>
+          )
+        })}
 
-      <div className="absolute top-4 left-4 flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
-        <FiBox className="w-3.5 h-3.5" />
-        <span>Biological Structures Workbench</span>
-      </div>
+        {/* Temporary connection line */}
+        {connectingFrom && (() => {
+          const src = nodeMap.get(connectingFrom)
+          if (!src) return null
+          const x1 = src.x + src.width / 2
+          const y1 = src.y + src.height / 2
+          const mx = (mousePos.x - canvasOffset.x) / zoom
+          const my = (mousePos.y - canvasOffset.y) / zoom
+          return (
+            <path
+              d={edgePath(x1, y1, mx, my)}
+              fill="none"
+              stroke="rgba(6, 182, 212, 0.6)"
+              strokeWidth={2}
+              strokeDasharray="6,4"
+              pointerEvents="none"
+            />
+          )
+        })()}
 
-      {/* Category legend */}
-      <div className="absolute top-4 right-4 bg-[var(--color-surface)]/90 backdrop-blur rounded-lg border border-[var(--color-border)] p-2 text-xxs">
-        <div className="font-medium mb-1.5 text-[var(--color-text-muted)]">Categories</div>
-        <div className="space-y-1">
-          {Object.entries(categoryConfig).slice(0, 5).map(([key, config]) => (
-            <div key={key} className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full" style={{ backgroundColor: config.color }} />
-              <span>{config.label}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
+        {/* Nodes */}
+        {nodes.map(node => {
+          const isSelected = selectedNode === node.id
+          const isConnecting = connectingFrom === node.id
+          const isConnectTarget = connectingFrom !== null && connectingFrom !== node.id
+          return (
+            <g
+              key={node.id}
+              onMouseDown={(e) => onNodeMouseDown(e, node.id)}
+              onClick={(e) => { e.stopPropagation(); onNodeClick(node.id) }}
+              onDoubleClick={(e) => { e.stopPropagation(); onNodeDoubleClick(node.id) }}
+              className="cursor-grab active:cursor-grabbing"
+              style={{ opacity: connectingFrom && !isConnecting ? 0.5 : 1, transition: 'opacity 0.2s' }}
+            >
+              {/* Node shape */}
+              <path
+                d={getNodeShape(node.category, node.x, node.y, node.width, node.height)}
+                fill={isSelected ? node.color + '30' : 'rgba(15, 15, 20, 0.85)'}
+                stroke={isConnectTarget ? '#06b6d4' : node.color}
+                strokeWidth={isSelected ? 2.5 : isConnectTarget ? 2 : 1.5}
+                filter={isSelected ? 'url(#node-glow-selected)' : undefined}
+                style={{ transition: 'stroke-width 0.15s, fill 0.15s, stroke 0.2s' }}
+              />
+              {/* Category icon */}
+              <text
+                x={node.x + 12}
+                y={node.y + 18}
+                fill={node.color}
+                fontSize={12}
+                fontFamily="Inter, sans-serif"
+              >
+                {getCategoryIcon(node.category)}
+              </text>
+              {/* Node name */}
+              <text
+                x={node.x + 26}
+                y={node.y + 18}
+                fill="rgba(255,255,255,0.9)"
+                fontSize={11}
+                fontWeight={600}
+                fontFamily="Inter, sans-serif"
+              >
+                {node.name.length > 22 ? node.name.slice(0, 20) + '...' : node.name}
+              </text>
+              {/* Category label */}
+              <text
+                x={node.x + 12}
+                y={node.y + 34}
+                fill="rgba(255,255,255,0.4)"
+                fontSize={9}
+                fontFamily="Inter, sans-serif"
+              >
+                {categoryConfig[node.category]?.label || node.category}
+              </text>
+              {/* Notes indicator */}
+              {node.notes && (
+                <circle
+                  cx={node.x + node.width - 10}
+                  cy={node.y + 10}
+                  r={4}
+                  fill="#eab308"
+                />
+              )}
+              {/* Connection handle (right side) — click to start/complete connection */}
+              <circle
+                cx={node.x + node.width}
+                cy={node.y + node.height / 2}
+                r={isConnecting ? 9 : isConnectTarget ? 10 : 7}
+                fill={isConnecting ? '#06b6d4' : isConnectTarget ? 'rgba(6, 182, 212, 0.4)' : 'rgba(255,255,255,0.2)'}
+                stroke={isConnecting || isConnectTarget ? '#06b6d4' : 'rgba(255,255,255,0.4)'}
+                strokeWidth={isConnectTarget ? 3 : 2}
+                className="connect-handle hover:fill-[#06b6d4] hover:stroke-[#06b6d4] transition-all cursor-crosshair"
+                style={{ transition: 'r 0.2s, fill 0.2s, stroke 0.2s, stroke-width 0.2s' }}
+              />
+              {/* Connection handle (left side) — click to start/complete connection */}
+              <circle
+                cx={node.x}
+                cy={node.y + node.height / 2}
+                r={isConnecting ? 9 : isConnectTarget ? 10 : 7}
+                fill={isConnecting ? '#06b6d4' : isConnectTarget ? 'rgba(6, 182, 212, 0.4)' : 'rgba(255,255,255,0.2)'}
+                stroke={isConnecting || isConnectTarget ? '#06b6d4' : 'rgba(255,255,255,0.4)'}
+                strokeWidth={isConnectTarget ? 3 : 2}
+                className="connect-handle hover:fill-[#06b6d4] hover:stroke-[#06b6d4] transition-all cursor-crosshair"
+                style={{ transition: 'r 0.2s, fill 0.2s, stroke 0.2s, stroke-width 0.2s' }}
+              />
+              {/* Pulsing ring on target handles when in connect mode */}
+              {isConnectTarget && (
+                <>
+                  <circle cx={node.x + node.width} cy={node.y + node.height / 2} r={14} fill="none" stroke="#06b6d4" strokeWidth={1} opacity={0.4}>
+                    <animate attributeName="r" from="10" to="18" dur="1.2s" repeatCount="indefinite" />
+                    <animate attributeName="opacity" from="0.5" to="0" dur="1.2s" repeatCount="indefinite" />
+                  </circle>
+                  <circle cx={node.x} cy={node.y + node.height / 2} r={14} fill="none" stroke="#06b6d4" strokeWidth={1} opacity={0.4}>
+                    <animate attributeName="r" from="10" to="18" dur="1.2s" repeatCount="indefinite" />
+                    <animate attributeName="opacity" from="0.5" to="0" dur="1.2s" repeatCount="indefinite" />
+                  </circle>
+                </>
+              )}
+              {/* Expanded details */}
+              {node.expanded && (
+                <foreignObject
+                  x={node.x}
+                  y={node.y + 42}
+                  width={node.width}
+                  height={node.height - 42}
+                >
+                  <div className="px-2 pb-1 text-[9px] text-white/50 overflow-hidden leading-tight">
+                    {node.notes ? node.notes.slice(0, 80) : 'No notes'}
+                  </div>
+                </foreignObject>
+              )}
+            </g>
+          )
+        })}
+      </g>
+    </svg>
   )
 }
 
-function ComponentTree({ components, selectedId, onSelect, onToggleVisibility, searchTerm }: {
+// ==================== SIDEBAR COMPONENT TREE ====================
+
+function ComponentTree({ components, selectedId, onSelect, onToggleVisibility, searchTerm, onAddToCanvas }: {
   components: BiologicalComponent[]
   selectedId: string | null
   onSelect: (id: string) => void
   onToggleVisibility: (id: string) => void
   searchTerm: string
+  onAddToCanvas?: (comp: BiologicalComponent) => void
 }) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({
     organ_system: true,
@@ -1544,7 +1668,7 @@ function ComponentTree({ components, selectedId, onSelect, onToggleVisibility, s
                     key={comp.id}
                     onClick={() => onSelect(comp.id)}
                     className={clsx(
-                      'flex items-center gap-1.5 px-2 py-1 text-xs rounded cursor-pointer transition-colors',
+                      'group flex items-center gap-1.5 px-2 py-1 text-xs rounded cursor-pointer transition-colors',
                       selectedId === comp.id
                         ? 'bg-primary-500/20 text-primary-400'
                         : 'hover:bg-[var(--color-border)] text-[var(--color-text-secondary)]'
@@ -1566,6 +1690,15 @@ function ComponentTree({ components, selectedId, onSelect, onToggleVisibility, s
                     <span className={clsx('truncate flex-1', !comp.visible && 'text-[var(--color-text-muted)]')}>
                       {comp.name}
                     </span>
+                    {onAddToCanvas && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onAddToCanvas(comp) }}
+                        className="p-0.5 hover:bg-primary-500/20 rounded text-primary-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                        title="Add to Canvas"
+                      >
+                        <FiPlus className="w-3 h-3" />
+                      </button>
+                    )}
                     {comp.therapeuticTargets && comp.therapeuticTargets.length > 0 && (
                       <FiTarget className="w-3 h-3 text-[var(--color-text-muted)]" title="Has therapeutic targets" />
                     )}
@@ -2026,256 +2159,909 @@ function MasterLibraryDetails({ element }: { element: MasterLibraryElement | nul
   )
 }
 
+// ==================== CONSTANT AI PANEL ====================
+
+function ConstantPanel({
+  messages,
+  input,
+  onInputChange,
+  onSend,
+  onToggle,
+  loading,
+}: {
+  messages: { role: 'user' | 'assistant'; text: string }[]
+  input: string
+  onInputChange: (v: string) => void
+  onSend: () => void
+  onToggle: () => void
+  loading: boolean
+}) {
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
+  return (
+    <div className="w-80 border-l border-[var(--color-border)] bg-[var(--color-bg-elevated)] flex flex-col">
+      <div className="p-3 border-b border-[var(--color-border)] flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <div className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+          <h3 className="text-sm font-medium">Constant AI</h3>
+        </div>
+        <button onClick={onToggle} className="p-1 hover:bg-[var(--color-surface)] rounded transition-colors">
+          <FiX className="w-3.5 h-3.5" />
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+        {messages.length === 0 && (
+          <div className="text-center py-8 text-[var(--color-text-muted)]">
+            <FiMessageSquare className="w-8 h-8 mx-auto mb-2 opacity-20" />
+            <p className="text-xs">Ask Constant about your graph nodes, connections, or biological structures.</p>
+            <div className="mt-3 space-y-1">
+              {['Suggest connections between my nodes', 'Explain this pathway', 'What proteins interact here?', 'Analyze my research graph'].map(s => (
+                <button key={s} onClick={() => onInputChange(s)} className="block w-full text-left text-[10px] px-2 py-1.5 rounded hover:bg-[var(--color-surface)] text-[var(--color-text-muted)] transition-colors">
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {messages.map((msg, i) => (
+          <div
+            key={i}
+            className={clsx(
+              'text-xs leading-relaxed rounded-lg px-3 py-2 max-w-[95%]',
+              msg.role === 'user'
+                ? 'ml-auto bg-cyan-500/20 text-cyan-100'
+                : 'bg-[var(--color-surface)] text-[var(--color-text-secondary)]'
+            )}
+          >
+            <p className="whitespace-pre-wrap">{msg.text}</p>
+          </div>
+        ))}
+        {loading && (
+          <div className="bg-[var(--color-surface)] rounded-lg px-3 py-2 text-xs max-w-[95%]">
+            <span className="animate-pulse">Thinking...</span>
+          </div>
+        )}
+        <div ref={messagesEndRef} />
+      </div>
+      <div className="p-3 border-t border-[var(--color-border)]">
+        <div className="flex gap-2" style={{ background: 'rgba(17, 17, 17, 0.7)', backdropFilter: 'blur(16px)', borderRadius: '8px', padding: '6px' }}>
+          <input
+            type="text"
+            value={input}
+            onChange={e => onInputChange(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && input.trim()) onSend() }}
+            placeholder="Ask Constant..."
+            className="flex-1 bg-transparent text-xs outline-none px-2"
+          />
+          <button onClick={onSend} disabled={loading || !input.trim()} className="p-1.5 rounded hover:bg-[var(--color-surface)] transition-colors disabled:opacity-30">
+            <FiSend className="w-3.5 h-3.5 text-cyan-400" />
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ==================== NODE EDIT MODAL ====================
+
+function NodeEditModal({
+  node,
+  onSave,
+  onClose,
+}: {
+  node: GraphNode
+  onSave: (updated: GraphNode) => void
+  onClose: () => void
+}) {
+  const [name, setName] = useState(node.name)
+  const [notes, setNotes] = useState(node.notes)
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
+      <div
+        className="bg-[var(--color-bg-elevated)] border border-[var(--color-border)] rounded-xl p-5 w-96 shadow-2xl"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-semibold flex items-center gap-2">
+            <FiEdit3 className="w-4 h-4 text-primary-400" />
+            Edit Node
+          </h3>
+          <button onClick={onClose} className="p-1 hover:bg-[var(--color-surface)] rounded transition-colors">
+            <FiX className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="space-y-3">
+          <div>
+            <label className="text-xxs text-[var(--color-text-muted)] uppercase tracking-wider mb-1 block">Name</label>
+            <input
+              type="text"
+              value={name}
+              onChange={e => setName(e.target.value)}
+              className="input w-full text-xs"
+            />
+          </div>
+          <div>
+            <label className="text-xxs text-[var(--color-text-muted)] uppercase tracking-wider mb-1 block">Category</label>
+            <div className="flex items-center gap-2 text-xs">
+              <span className="w-3 h-3 rounded-full" style={{ backgroundColor: node.color }} />
+              <span>{categoryConfig[node.category]?.label || node.category}</span>
+            </div>
+          </div>
+          <div>
+            <label className="text-xxs text-[var(--color-text-muted)] uppercase tracking-wider mb-1 block">Notes</label>
+            <textarea
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              rows={4}
+              className="input w-full text-xs resize-none"
+              placeholder="Add research notes, observations..."
+            />
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 mt-4">
+          <button onClick={onClose} className="btn btn-sm btn-secondary">Cancel</button>
+          <button
+            onClick={() => onSave({ ...node, name, notes })}
+            className="btn btn-sm btn-primary"
+          >
+            <FiSave className="w-3 h-3" />
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ==================== EDGE LABEL MODAL ====================
+
+function EdgeLabelModal({
+  onSubmit,
+  onClose,
+}: {
+  onSubmit: (label: string) => void
+  onClose: () => void
+}) {
+  const [label, setLabel] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+  useEffect(() => { inputRef.current?.focus() }, [])
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
+      <div
+        className="bg-[var(--color-bg-elevated)] border border-[var(--color-border)] rounded-xl p-5 w-80 shadow-2xl"
+        onClick={e => e.stopPropagation()}
+      >
+        <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+          <FiLink className="w-4 h-4 text-cyan-400" />
+          Connection Label
+        </h3>
+        <input
+          ref={inputRef}
+          type="text"
+          value={label}
+          onChange={e => setLabel(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') onSubmit(label) }}
+          placeholder="e.g., activates, inhibits, binds to..."
+          className="input w-full text-xs mb-3"
+        />
+        <div className="flex flex-wrap gap-1 mb-3">
+          {['activates', 'inhibits', 'binds to', 'regulates', 'produces', 'targets', 'expresses', 'mutates'].map(sug => (
+            <button
+              key={sug}
+              onClick={() => onSubmit(sug)}
+              className="text-xxs px-2 py-0.5 rounded-full bg-[var(--color-surface)] text-[var(--color-text-secondary)] hover:bg-primary-500/20 hover:text-primary-400 transition-colors"
+            >
+              {sug}
+            </button>
+          ))}
+        </div>
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="btn btn-sm btn-secondary">Cancel</button>
+          <button onClick={() => onSubmit(label)} className="btn btn-sm btn-primary">Add</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ==================== MAIN WORKBENCH COMPONENT ====================
 
 export default function Workbench() {
   const [components, setComponents] = useState<BiologicalComponent[]>(biologicalStructures)
   const [leftPanelTab, setLeftPanelTab] = useState<'structures' | 'library'>('structures')
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [showGrid, setShowGrid] = useState(true)
-  const [showLabels, setShowLabels] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
 
   // Master Library state
   const [librarySearchTerm, setLibrarySearchTerm] = useState('')
   const [selectedLibraryId, setSelectedLibraryId] = useState<string | null>(null)
-  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set(['molecular_level', 'cellular_level']))
+  const [expandedLibraryNodes, setExpandedLibraryNodes] = useState<Set<string>>(new Set(['molecular_level', 'cellular_level']))
+
+  // --- Node Graph State ---
+  const initialGraph = useMemo(() => loadGraphState(), [])
+  const [nodes, setNodes] = useState<GraphNode[]>(initialGraph.nodes)
+  const [edges, setEdges] = useState<GraphEdge[]>(initialGraph.edges)
+  const [selectedNode, setSelectedNode] = useState<string | null>(null)
+  const [draggingNode, setDraggingNode] = useState<string | null>(null)
+  const [connectingFrom, setConnectingFrom] = useState<string | null>(null)
+  const [mousePos, setMousePos] = useState({ x: 0, y: 0 })
+  const [canvasOffset, setCanvasOffset] = useState({ x: 0, y: 0 })
+  const [zoom, setZoom] = useState(1)
+  const [editingNode, setEditingNode] = useState<GraphNode | null>(null)
+  const [pendingEdge, setPendingEdge] = useState<{ sourceId: string; targetId: string } | null>(null)
+  const [panStart, setPanStart] = useState<{ x: number; y: number; ox: number; oy: number } | null>(null)
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
+
+  // Constant AI state
+  const [showConstant, setShowConstant] = useState(false)
+  const [constantMessages, setConstantMessages] = useState<{ role: 'user' | 'assistant'; text: string }[]>([])
+  const [constantInput, setConstantInput] = useState('')
+  const [constantLoading, setConstantLoading] = useState(false)
+
+  const svgRef = useRef<SVGSVGElement>(null)
 
   const selectedComponent = components.find(c => c.id === selectedId) || null
   const selectedLibraryElement = selectedLibraryId ? findElementById(selectedLibraryId) ?? null : null
-
-  // Library search results
   const librarySearchResults = librarySearchTerm.length > 2 ? searchElements(librarySearchTerm) : []
+  const selectedGraphNode = nodes.find(n => n.id === selectedNode) || null
+  const selectedGraphEntity = selectedGraphNode ? components.find(c => c.id === selectedGraphNode.entityId) || null : null
 
-  const toggleLibraryNode = (id: string) => {
-    setExpandedNodes(prev => {
+  // Persist graph state
+  useEffect(() => {
+    saveGraphState({ nodes, edges })
+  }, [nodes, edges])
+
+  // --- Library helpers ---
+  const toggleLibraryNode = useCallback((id: string) => {
+    setExpandedLibraryNodes(prev => {
       const next = new Set(prev)
-      if (next.has(id)) {
-        next.delete(id)
-      } else {
-        next.add(id)
-      }
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
       return next
     })
-  }
+  }, [])
 
-  const toggleVisibility = (id: string) => {
-    setComponents(prev =>
-      prev.map(c => c.id === id ? { ...c, visible: !c.visible } : c)
-    )
-  }
+  const toggleVisibility = useCallback((id: string) => {
+    setComponents(prev => prev.map(c => c.id === id ? { ...c, visible: !c.visible } : c))
+  }, [])
 
   const visibleCount = components.filter(c => c.visible).length
 
+  // --- Add node to canvas ---
+  const addToCanvas = useCallback((comp: BiologicalComponent) => {
+    const existing = nodes.find(n => n.entityId === comp.id)
+    if (existing) {
+      setSelectedNode(existing.id)
+      return
+    }
+    const newNode: GraphNode = {
+      id: `node_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      entityId: comp.id,
+      name: comp.name,
+      category: comp.category,
+      color: comp.color,
+      x: 200 + Math.random() * 400 - canvasOffset.x / zoom,
+      y: 150 + Math.random() * 300 - canvasOffset.y / zoom,
+      width: 180,
+      height: 48,
+      notes: '',
+      expanded: false,
+    }
+    setNodes(prev => [...prev, newNode])
+    setSelectedNode(newNode.id)
+  }, [nodes, canvasOffset, zoom])
+
+  // --- Node interaction handlers ---
+  const handleNodeMouseDown = useCallback((e: React.MouseEvent, nodeId: string) => {
+    e.stopPropagation()
+    // Check if click is on a connection handle (circle elements at node edges)
+    const target = e.target as SVGElement
+    if (target.tagName === 'circle' && target.classList.contains('connect-handle')) {
+      if (connectingFrom && connectingFrom !== nodeId) {
+        // Clicking a target handle while in connect mode — complete connection
+        setPendingEdge({ sourceId: connectingFrom, targetId: nodeId })
+        setConnectingFrom(null)
+      } else if (connectingFrom === nodeId) {
+        // Clicking own handle again — cancel
+        setConnectingFrom(null)
+      } else {
+        // Start connection mode
+        setConnectingFrom(nodeId)
+      }
+      return
+    }
+    // If in connect mode and clicking a node body (not handle), complete connection
+    if (connectingFrom && connectingFrom !== nodeId) {
+      setPendingEdge({ sourceId: connectingFrom, targetId: nodeId })
+      setConnectingFrom(null)
+      return
+    }
+    if (e.shiftKey) {
+      setConnectingFrom(nodeId)
+      return
+    }
+    setDraggingNode(nodeId)
+    setSelectedNode(nodeId)
+    const node = nodes.find(n => n.id === nodeId)
+    if (node) {
+      const svgPt = {
+        x: (e.clientX - canvasOffset.x) / zoom,
+        y: (e.clientY - canvasOffset.y) / zoom,
+      }
+      setDragOffset({ x: svgPt.x - node.x, y: svgPt.y - node.y })
+    }
+  }, [nodes, canvasOffset, zoom, connectingFrom])
+
+  const handleCanvasMouseMove = useCallback((e: React.MouseEvent) => {
+    setMousePos({ x: e.clientX, y: e.clientY })
+    if (draggingNode) {
+      const svgPt = {
+        x: (e.clientX - canvasOffset.x) / zoom,
+        y: (e.clientY - canvasOffset.y) / zoom,
+      }
+      setNodes(prev => prev.map(n =>
+        n.id === draggingNode
+          ? { ...n, x: svgPt.x - dragOffset.x, y: svgPt.y - dragOffset.y }
+          : n
+      ))
+    } else if (panStart) {
+      setCanvasOffset({
+        x: panStart.ox + (e.clientX - panStart.x),
+        y: panStart.oy + (e.clientY - panStart.y),
+      })
+    }
+  }, [draggingNode, panStart, canvasOffset, zoom, dragOffset])
+
+  const handleCanvasMouseUp = useCallback((_e: React.MouseEvent) => {
+    // In click-to-connect mode, don't cancel on mouse up — only cancel on empty canvas click
+    if (draggingNode) {
+      setDraggingNode(null)
+    }
+    setPanStart(null)
+  }, [draggingNode])
+
+  const handleCanvasMouseDown = useCallback((e: React.MouseEvent) => {
+    if (e.target === svgRef.current || (e.target as SVGElement).tagName === 'svg') {
+      if (connectingFrom) {
+        // Cancel connection mode on empty canvas click
+        setConnectingFrom(null)
+        return
+      }
+      setSelectedNode(null)
+      setPanStart({ x: e.clientX, y: e.clientY, ox: canvasOffset.x, oy: canvasOffset.y })
+    }
+  }, [canvasOffset, connectingFrom])
+
+  const handleNodeClick = useCallback((nodeId: string) => {
+    setSelectedNode(nodeId)
+    const node = nodes.find(n => n.id === nodeId)
+    if (node) setSelectedId(node.entityId)
+  }, [nodes])
+
+  const handleNodeDoubleClick = useCallback((nodeId: string) => {
+    const node = nodes.find(n => n.id === nodeId)
+    if (node) setEditingNode(node)
+  }, [nodes])
+
+  const handleEdgeClick = useCallback((edgeId: string) => {
+    if (confirm('Delete this connection?')) {
+      setEdges(prev => prev.filter(e => e.id !== edgeId))
+    }
+  }, [])
+
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault()
+    setZoom(prev => Math.max(0.2, Math.min(3, prev - e.deltaY * 0.001)))
+  }, [])
+
+  // --- Edge creation ---
+  const handleEdgeLabelSubmit = useCallback((label: string) => {
+    if (!pendingEdge) return
+    const src = nodes.find(n => n.id === pendingEdge.sourceId)
+    const newEdge: GraphEdge = {
+      id: `edge_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      sourceId: pendingEdge.sourceId,
+      targetId: pendingEdge.targetId,
+      label: label || '',
+      color: src?.color || 'rgba(255,255,255,0.3)',
+    }
+    setEdges(prev => [...prev, newEdge])
+    setPendingEdge(null)
+  }, [pendingEdge, nodes])
+
+  // --- Node edit save ---
+  const handleNodeSave = useCallback((updated: GraphNode) => {
+    setNodes(prev => prev.map(n => n.id === updated.id ? updated : n))
+    setEditingNode(null)
+  }, [])
+
+  // --- Delete selected node ---
+  const deleteSelectedNode = useCallback(() => {
+    if (!selectedNode) return
+    setNodes(prev => prev.filter(n => n.id !== selectedNode))
+    setEdges(prev => prev.filter(e => e.sourceId !== selectedNode && e.targetId !== selectedNode))
+    setSelectedNode(null)
+  }, [selectedNode])
+
+  // --- Constant AI send ---
+  const sendConstantMessage = useCallback(async () => {
+    if (!constantInput.trim() || constantLoading) return
+    const userMsg = constantInput.trim()
+    setConstantMessages(prev => [...prev, { role: 'user', text: userMsg }])
+    setConstantInput('')
+    setConstantLoading(true)
+
+    const nodeNames = nodes.map(n => `${n.name} (${categoryConfig[n.category]?.label || n.category})`).join(', ')
+    const edgeDescs = edges.map(e => {
+      const src = nodes.find(n => n.id === e.sourceId)
+      const tgt = nodes.find(n => n.id === e.targetId)
+      return src && tgt ? `${src.name} --[${e.label}]--> ${tgt.name}` : ''
+    }).filter(Boolean).join('; ')
+
+    const contextPrompt = `The user is building a biomedical research graph. Current nodes on canvas: ${nodeNames || 'none'}. Current connections: ${edgeDescs || 'none'}. User question: ${userMsg}`
+
+    try {
+      const resp = await fetch('/api/v1/orchestrator/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: contextPrompt, context: 'workbench', platform_context: { section: 'workbench', graph_nodes: nodeNames, graph_edges: edgeDescs } }),
+      })
+      if (resp.ok) {
+        const data = await resp.json()
+        setConstantMessages(prev => [...prev, { role: 'assistant', text: data.response || data.message || 'I can help you explore biological relationships. Try adding more nodes and asking about their connections.' }])
+      } else {
+        setConstantMessages(prev => [...prev, { role: 'assistant', text: 'I can help you explore biological relationships. Try adding more nodes and asking about their connections.' }])
+      }
+    } catch {
+      setConstantMessages(prev => [...prev, { role: 'assistant', text: 'I can help you explore biological relationships. Try adding more nodes and asking about their connections.' }])
+    } finally {
+      setConstantLoading(false)
+    }
+  }, [constantInput, constantLoading, nodes, edges])
+
+  // --- Export graph as JSON ---
+  const exportGraphJSON = useCallback(() => {
+    const data = JSON.stringify({ nodes, edges }, null, 2)
+    const blob = new Blob([data], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'humanovo-graph.json'
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [nodes, edges])
+
+  // --- Import graph from JSON ---
+  const importGraphJSON = useCallback(() => {
+    const inp = document.createElement('input')
+    inp.type = 'file'
+    inp.accept = '.json'
+    inp.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0]
+      if (!file) return
+      try {
+        const text = await file.text()
+        const data = JSON.parse(text) as GraphState
+        if (data.nodes && data.edges) {
+          setNodes(data.nodes)
+          setEdges(data.edges)
+        }
+      } catch { /* ignore bad files */ }
+    }
+    inp.click()
+  }, [])
+
+  // --- Export graph as PNG ---
+  const exportGraphPNG = useCallback(() => {
+    const svg = svgRef.current
+    if (!svg) return
+    const serializer = new XMLSerializer()
+    const svgString = serializer.serializeToString(svg)
+    const canvas = document.createElement('canvas')
+    const rect = svg.getBoundingClientRect()
+    canvas.width = rect.width * 2
+    canvas.height = rect.height * 2
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.scale(2, 2)
+    const img = new Image()
+    img.onload = () => {
+      ctx.fillStyle = '#0a0a0f'
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      ctx.drawImage(img, 0, 0, rect.width, rect.height)
+      const a = document.createElement('a')
+      a.href = canvas.toDataURL('image/png')
+      a.download = 'humanovo-graph.png'
+      a.click()
+    }
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgString)
+  }, [])
+
+  // --- Reset view ---
+  const resetView = useCallback(() => {
+    setCanvasOffset({ x: 0, y: 0 })
+    setZoom(1)
+  }, [])
+
+  // --- Clear graph ---
+  const clearGraph = useCallback(() => {
+    if (nodes.length === 0 && edges.length === 0) return
+    if (confirm('Clear all nodes and connections from the canvas?')) {
+      setNodes([])
+      setEdges([])
+      setSelectedNode(null)
+    }
+  }, [nodes, edges])
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* Main Workbench Area */}
       <div className="flex flex-1 min-h-0">
-      {/* Left panel - Component Tree / Master Library */}
-      <div className="w-72 border-r border-[var(--color-border)] bg-[var(--color-bg-elevated)] flex flex-col">
-        {/* Tab switcher */}
-        <div className="flex border-b border-[var(--color-border)]">
-          <button
-            onClick={() => setLeftPanelTab('structures')}
-            className={clsx(
-              'flex-1 px-3 py-2 text-xs font-medium transition-colors border-b-2',
-              leftPanelTab === 'structures'
-                ? 'border-primary-500 text-primary-400 bg-primary-500/10'
-                : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
-            )}
-          >
-            <FiTarget className="w-3.5 h-3.5 inline mr-1.5" />
-            Structures
-          </button>
-          <button
-            onClick={() => setLeftPanelTab('library')}
-            className={clsx(
-              'flex-1 px-3 py-2 text-xs font-medium transition-colors border-b-2',
-              leftPanelTab === 'library'
-                ? 'border-primary-500 text-primary-400 bg-primary-500/10'
-                : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
-            )}
-          >
-            <FiDatabase className="w-3.5 h-3.5 inline mr-1.5" />
-            Master Library
-          </button>
-        </div>
-
-        {leftPanelTab === 'structures' ? (
-          <>
-            <div className="p-3 border-b border-[var(--color-border)]">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-sm font-medium">Disease Structures</h3>
-                <span className="text-xxs text-[var(--color-text-muted)]">{visibleCount} visible</span>
-              </div>
-              <div className="relative">
-                <FiSearch className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--color-text-muted)]" />
-                <input
-                  type="text"
-                  placeholder="Search structures..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="input w-full text-xs pl-7"
-                />
-              </div>
-            </div>
-            <div className="flex-1 overflow-y-auto p-2">
-              <ComponentTree
-                components={components}
-                selectedId={selectedId}
-                onSelect={setSelectedId}
-                onToggleVisibility={toggleVisibility}
-                searchTerm={searchTerm}
-              />
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="p-3 border-b border-[var(--color-border)]">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-sm font-medium">Master Human Library</h3>
-                <span className="text-xxs text-green-400">{libraryStats.totalElements} elements</span>
-              </div>
-              <div className="relative">
-                <FiSearch className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--color-text-muted)]" />
-                <input
-                  type="text"
-                  placeholder="Search all elements..."
-                  value={librarySearchTerm}
-                  onChange={(e) => setLibrarySearchTerm(e.target.value)}
-                  className="input w-full text-xs pl-7"
-                />
-              </div>
-              {librarySearchTerm.length > 0 && librarySearchTerm.length < 3 && (
-                <div className="text-xxs text-[var(--color-text-muted)] mt-1">Type 3+ characters to search</div>
+        {/* Left panel - Component Tree / Master Library */}
+        <div className="w-72 border-r border-[var(--color-border)] bg-[var(--color-bg-elevated)] flex flex-col">
+          {/* Tab switcher */}
+          <div className="flex border-b border-[var(--color-border)]">
+            <button
+              onClick={() => setLeftPanelTab('structures')}
+              className={clsx(
+                'flex-1 px-3 py-2 text-xs font-medium transition-colors border-b-2',
+                leftPanelTab === 'structures'
+                  ? 'border-primary-500 text-primary-400 bg-primary-500/10'
+                  : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
               )}
-            </div>
-            <div className="flex-1 overflow-y-auto p-2">
-              {librarySearchResults.length > 0 ? (
-                <div className="space-y-0.5">
-                  <div className="text-xxs text-[var(--color-text-muted)] px-2 py-1">
-                    {librarySearchResults.length} results found
-                  </div>
-                  {librarySearchResults.slice(0, 50).map(elem => (
-                    <div
-                      key={elem.id}
-                      onClick={() => setSelectedLibraryId(elem.id)}
-                      className={clsx(
-                        'flex items-center gap-2 py-1.5 px-2 rounded text-xs cursor-pointer transition-colors',
-                        selectedLibraryId === elem.id
-                          ? 'bg-primary-500/20 text-primary-400'
-                          : 'hover:bg-[var(--color-surface)] text-[var(--color-text-secondary)]'
-                      )}
-                    >
-                      {elem.aiSimulationReady && <FiCpu className="w-3 h-3 text-green-400" />}
-                      <span className="truncate flex-1">{elem.name}</span>
-                      <span className="text-xxs text-[var(--color-text-muted)]">{elem.category.split('_')[0]}</span>
-                    </div>
-                  ))}
+            >
+              <FiTarget className="w-3.5 h-3.5 inline mr-1.5" />
+              Structures
+            </button>
+            <button
+              onClick={() => setLeftPanelTab('library')}
+              className={clsx(
+                'flex-1 px-3 py-2 text-xs font-medium transition-colors border-b-2',
+                leftPanelTab === 'library'
+                  ? 'border-primary-500 text-primary-400 bg-primary-500/10'
+                  : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
+              )}
+            >
+              <FiDatabase className="w-3.5 h-3.5 inline mr-1.5" />
+              Master Library
+            </button>
+          </div>
+
+          {leftPanelTab === 'structures' ? (
+            <>
+              <div className="p-3 border-b border-[var(--color-border)]">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-medium">Disease Structures</h3>
+                  <span className="text-xxs text-[var(--color-text-muted)]">{visibleCount} visible</span>
                 </div>
-              ) : (
-                <MasterLibraryTree
-                  nodes={masterLibraryTree}
-                  onSelect={setSelectedLibraryId}
-                  selectedId={selectedLibraryId}
-                  expandedNodes={expandedNodes}
-                  onToggleExpand={toggleLibraryNode}
+                <div className="relative">
+                  <FiSearch className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--color-text-muted)]" />
+                  <input
+                    type="text"
+                    placeholder="Search structures..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="input w-full text-xs pl-7"
+                  />
+                </div>
+              </div>
+              <div className="flex-1 overflow-y-auto p-2">
+                <ComponentTree
+                  components={components}
+                  selectedId={selectedId}
+                  onSelect={setSelectedId}
+                  onToggleVisibility={toggleVisibility}
+                  searchTerm={searchTerm}
+                  onAddToCanvas={addToCanvas}
                 />
-              )}
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* Main viewport */}
-      <div className="flex-1 flex flex-col">
-        {/* Toolbar */}
-        <div className="h-10 flex items-center justify-between px-3 border-b border-[var(--color-border)] bg-[var(--color-bg-elevated)]">
-          <div className="flex items-center gap-1">
-            <button className="btn btn-sm btn-secondary">
-              <FiMove className="w-3 h-3" />
-              Pan
-            </button>
-            <button className="btn btn-sm btn-secondary">
-              <FiRotateCw className="w-3 h-3" />
-              Rotate
-            </button>
-            <button className="btn btn-sm btn-secondary">
-              <FiZoomIn className="w-3 h-3" />
-              Zoom
-            </button>
-            <div className="w-px h-5 bg-[var(--color-border)] mx-2" />
-            <button
-              onClick={() => setShowGrid(!showGrid)}
-              className={clsx('btn btn-sm', showGrid ? 'btn-primary' : 'btn-secondary')}
-            >
-              <FiGrid className="w-3 h-3" />
-            </button>
-            <button
-              onClick={() => setShowLabels(!showLabels)}
-              className={clsx('btn btn-sm', showLabels ? 'btn-primary' : 'btn-secondary')}
-            >
-              <FiTag className="w-3 h-3" />
-            </button>
-            <button className="btn btn-sm btn-secondary">
-              <FiLayers className="w-3 h-3" />
-            </button>
-          </div>
-          <div className="flex items-center gap-1">
-            <button className="btn btn-sm btn-secondary">
-              <FiUpload className="w-3 h-3" />
-              Import
-            </button>
-            <button className="btn btn-sm btn-secondary">
-              <FiDownload className="w-3 h-3" />
-              Export
-            </button>
-            <button className="btn btn-sm btn-secondary">
-              <FiMaximize2 className="w-3 h-3" />
-            </button>
-          </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="p-3 border-b border-[var(--color-border)]">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-medium">Master Human Library</h3>
+                  <span className="text-xxs text-green-400">{libraryStats.totalElements} elements</span>
+                </div>
+                <div className="relative">
+                  <FiSearch className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--color-text-muted)]" />
+                  <input
+                    type="text"
+                    placeholder="Search all elements..."
+                    value={librarySearchTerm}
+                    onChange={(e) => setLibrarySearchTerm(e.target.value)}
+                    className="input w-full text-xs pl-7"
+                  />
+                </div>
+                {librarySearchTerm.length > 0 && librarySearchTerm.length < 3 && (
+                  <div className="text-xxs text-[var(--color-text-muted)] mt-1">Type 3+ characters to search</div>
+                )}
+              </div>
+              <div className="flex-1 overflow-y-auto p-2">
+                {librarySearchResults.length > 0 ? (
+                  <div className="space-y-0.5">
+                    <div className="text-xxs text-[var(--color-text-muted)] px-2 py-1">
+                      {librarySearchResults.length} results found
+                    </div>
+                    {librarySearchResults.slice(0, 50).map(elem => (
+                      <div
+                        key={elem.id}
+                        onClick={() => setSelectedLibraryId(elem.id)}
+                        className={clsx(
+                          'flex items-center gap-2 py-1.5 px-2 rounded text-xs cursor-pointer transition-colors',
+                          selectedLibraryId === elem.id
+                            ? 'bg-primary-500/20 text-primary-400'
+                            : 'hover:bg-[var(--color-surface)] text-[var(--color-text-secondary)]'
+                        )}
+                      >
+                        {elem.aiSimulationReady && <FiCpu className="w-3 h-3 text-green-400" />}
+                        <span className="truncate flex-1">{elem.name}</span>
+                        <span className="text-xxs text-[var(--color-text-muted)]">{elem.category.split('_')[0]}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <MasterLibraryTree
+                    nodes={masterLibraryTree}
+                    onSelect={setSelectedLibraryId}
+                    selectedId={selectedLibraryId}
+                    expandedNodes={expandedLibraryNodes}
+                    onToggleExpand={toggleLibraryNode}
+                  />
+                )}
+              </div>
+            </>
+          )}
         </div>
 
-        {/* 3D Canvas */}
-        <div className="flex-1 relative">
-          <Canvas3D
-            components={components}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
-          />
-        </div>
-      </div>
-
-      {/* Right panel - Properties / Library Details */}
-      <div className="w-80 border-l border-[var(--color-border)] bg-[var(--color-bg-elevated)] flex flex-col">
-        <div className="p-3 border-b border-[var(--color-border)]">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-medium">
-              {leftPanelTab === 'library' ? 'Element Details' : 'Properties'}
-            </h3>
+        {/* Main viewport - SVG Node Graph Canvas */}
+        <div className="flex-1 flex flex-col">
+          {/* Toolbar */}
+          <div className="h-10 flex items-center justify-between px-3 border-b border-[var(--color-border)] bg-[var(--color-bg-elevated)]">
             <div className="flex items-center gap-1">
-              {leftPanelTab === 'library' && selectedLibraryElement && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-400">
-                  {selectedLibraryElement.aiSimulationReady ? 'AI Ready' : 'Manual'}
-                </span>
+              <div className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)] mr-3">
+                <FiBox className="w-3.5 h-3.5" />
+                <span>{nodes.length} nodes</span>
+                <span className="text-[var(--color-border)]">|</span>
+                <FiLink className="w-3 h-3" />
+                <span>{edges.length} edges</span>
+              </div>
+              <div className="w-px h-5 bg-[var(--color-border)] mx-1" />
+              <button onClick={() => setZoom(z => Math.min(3, z + 0.15))} className="btn btn-sm btn-secondary" title="Zoom In">
+                <FiZoomIn className="w-3 h-3" />
+              </button>
+              <span className="text-xxs text-[var(--color-text-muted)] w-10 text-center">{Math.round(zoom * 100)}%</span>
+              <button onClick={() => setZoom(z => Math.max(0.2, z - 0.15))} className="btn btn-sm btn-secondary" title="Zoom Out">
+                <FiZoomOut className="w-3 h-3" />
+              </button>
+              <button onClick={resetView} className="btn btn-sm btn-secondary" title="Reset View">
+                <FiCrosshair className="w-3 h-3" />
+              </button>
+              <div className="w-px h-5 bg-[var(--color-border)] mx-1" />
+              {selectedNode && (
+                <>
+                  <button
+                    onClick={() => { const n = nodes.find(nd => nd.id === selectedNode); if (n) setEditingNode(n) }}
+                    className="btn btn-sm btn-secondary" title="Edit Node"
+                  >
+                    <FiEdit3 className="w-3 h-3" />
+                  </button>
+                  <button onClick={deleteSelectedNode} className="btn btn-sm btn-secondary text-red-400" title="Delete Node">
+                    <FiTrash2 className="w-3 h-3" />
+                  </button>
+                  <div className="w-px h-5 bg-[var(--color-border)] mx-1" />
+                </>
               )}
-              <button className="p-1 hover:bg-[var(--color-surface)] rounded transition-colors">
-                <FiSettings className="w-3.5 h-3.5" />
+              <button onClick={clearGraph} className="btn btn-sm btn-secondary" title="Clear Canvas">
+                <FiTrash2 className="w-3 h-3" />
+                Clear
+              </button>
+            </div>
+            <div className="flex items-center gap-1">
+              <button onClick={importGraphJSON} className="btn btn-sm btn-secondary" title="Import JSON">
+                <FiUpload className="w-3 h-3" />
+                Import
+              </button>
+              <button onClick={exportGraphJSON} className="btn btn-sm btn-secondary" title="Export JSON">
+                <FiDownload className="w-3 h-3" />
+                JSON
+              </button>
+              <button onClick={exportGraphPNG} className="btn btn-sm btn-secondary" title="Export PNG">
+                <FiImage className="w-3 h-3" />
+                PNG
+              </button>
+              <div className="w-px h-5 bg-[var(--color-border)] mx-1" />
+              <button
+                onClick={() => setShowConstant(s => !s)}
+                className={clsx('btn btn-sm', showConstant ? 'btn-primary' : 'btn-secondary')}
+                title="Toggle Constant AI"
+              >
+                <FiMessageSquare className="w-3 h-3" />
+                Constant
               </button>
             </div>
           </div>
-        </div>
-        <div className="flex-1 overflow-y-auto">
-          {leftPanelTab === 'library' ? (
-            <MasterLibraryDetails element={selectedLibraryElement} />
-          ) : (
-            <div className="p-3">
-              <PropertiesPanel component={selectedComponent} />
+
+          {/* Canvas + optional bottom properties */}
+          <div className="flex-1 flex flex-col relative">
+            {/* SVG Canvas */}
+            <div className="flex-1 relative overflow-hidden">
+              <NodeGraphCanvas
+                nodes={nodes}
+                edges={edges}
+                selectedNode={selectedNode}
+                connectingFrom={connectingFrom}
+                mousePos={mousePos}
+                zoom={zoom}
+                canvasOffset={canvasOffset}
+                onNodeMouseDown={handleNodeMouseDown}
+                onCanvasMouseMove={handleCanvasMouseMove}
+                onCanvasMouseUp={handleCanvasMouseUp}
+                onCanvasMouseDown={handleCanvasMouseDown}
+                onNodeClick={handleNodeClick}
+                onNodeDoubleClick={handleNodeDoubleClick}
+                onEdgeClick={handleEdgeClick}
+                onWheel={handleWheel}
+                svgRef={svgRef}
+              />
+              {/* Connection hint */}
+              {connectingFrom && (
+                <div className="absolute top-3 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-full bg-cyan-500/20 text-cyan-400 text-xxs border border-cyan-500/30 backdrop-blur animate-pulse">
+                  Click a pulsing handle on another node to connect, or click empty space to cancel
+                </div>
+              )}
+              {/* Empty state */}
+              {nodes.length === 0 && (
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div className="text-center text-[var(--color-text-muted)]">
+                    <FiBox className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                    <p className="text-sm font-medium mb-1">Node Graph Canvas</p>
+                    <p className="text-xs opacity-60 max-w-xs">
+                      Add biological structures from the sidebar library to start building your research graph.
+                      Click a node's circle handle to start connecting.
+                    </p>
+                  </div>
+                </div>
+              )}
+              {/* Category legend */}
+              <div className="absolute bottom-3 left-3 bg-[var(--color-surface)]/90 backdrop-blur rounded-lg border border-[var(--color-border)] p-2 text-xxs">
+                <div className="font-medium mb-1.5 text-[var(--color-text-muted)]">Categories</div>
+                <div className="space-y-0.5">
+                  {Object.entries(categoryConfig).slice(0, 5).map(([key, config]) => (
+                    <div key={key} className="flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full" style={{ backgroundColor: config.color }} />
+                      <span>{config.label}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-1.5 pt-1.5 border-t border-[var(--color-border)] text-[var(--color-text-muted)]">
+                  Click handle to connect
+                </div>
+              </div>
             </div>
-          )}
+
+            {/* Bottom properties panel for selected node */}
+            {selectedGraphEntity && selectedGraphNode && (
+              <div className="h-44 border-t border-[var(--color-border)] bg-[var(--color-bg-elevated)] overflow-y-auto">
+                <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--color-border)]">
+                  <div className="flex items-center gap-2">
+                    <span className="w-3 h-3 rounded-full" style={{ backgroundColor: selectedGraphNode.color }} />
+                    <span className="text-sm font-medium">{selectedGraphNode.name}</span>
+                    <span className="text-xxs text-[var(--color-text-muted)]">
+                      {categoryConfig[selectedGraphNode.category]?.label}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => setEditingNode(selectedGraphNode)}
+                      className="p-1 hover:bg-[var(--color-surface)] rounded transition-colors"
+                      title="Edit"
+                    >
+                      <FiEdit3 className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => setSelectedNode(null)}
+                      className="p-1 hover:bg-[var(--color-surface)] rounded transition-colors"
+                    >
+                      <FiX className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+                <div className="px-3 py-2 grid grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <div className="text-xxs text-[var(--color-text-muted)] uppercase tracking-wider mb-1">Description</div>
+                    <p className="text-[var(--color-text-secondary)] leading-relaxed text-xxs">{selectedGraphEntity.description}</p>
+                  </div>
+                  <div>
+                    {selectedGraphNode.notes && (
+                      <div className="mb-2">
+                        <div className="text-xxs text-[var(--color-text-muted)] uppercase tracking-wider mb-1">Notes</div>
+                        <p className="text-[var(--color-text-secondary)] leading-relaxed text-xxs">{selectedGraphNode.notes}</p>
+                      </div>
+                    )}
+                    {selectedGraphEntity.therapeuticTargets && selectedGraphEntity.therapeuticTargets.length > 0 && (
+                      <div>
+                        <div className="text-xxs text-[var(--color-text-muted)] uppercase tracking-wider mb-1">Therapeutic Targets</div>
+                        <div className="flex flex-wrap gap-1">
+                          {selectedGraphEntity.therapeuticTargets.slice(0, 4).map(t => (
+                            <span key={t} className="badge" style={{ backgroundColor: '#10b98120', color: '#10b981' }}>{t}</span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    <div className="mt-1">
+                      <div className="text-xxs text-[var(--color-text-muted)] uppercase tracking-wider mb-1">Connections</div>
+                      <span className="text-xxs text-[var(--color-text-secondary)]">
+                        {edges.filter(e => e.sourceId === selectedNode || e.targetId === selectedNode).length} connections
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
+
+        {/* Right panel - Constant AI or Properties */}
+        {showConstant ? (
+          <ConstantPanel
+            messages={constantMessages}
+            input={constantInput}
+            onInputChange={setConstantInput}
+            onSend={sendConstantMessage}
+            onToggle={() => setShowConstant(false)}
+            loading={constantLoading}
+          />
+        ) : (
+          <div className="w-80 border-l border-[var(--color-border)] bg-[var(--color-bg-elevated)] flex flex-col">
+            <div className="p-3 border-b border-[var(--color-border)]">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-medium">
+                  {leftPanelTab === 'library' ? 'Element Details' : 'Properties'}
+                </h3>
+                <div className="flex items-center gap-1">
+                  {leftPanelTab === 'library' && selectedLibraryElement && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-400">
+                      {selectedLibraryElement.aiSimulationReady ? 'AI Ready' : 'Manual'}
+                    </span>
+                  )}
+                  <button className="p-1 hover:bg-[var(--color-surface)] rounded transition-colors">
+                    <FiSettings className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {leftPanelTab === 'library' ? (
+                <MasterLibraryDetails element={selectedLibraryElement} />
+              ) : (
+                <div className="p-3">
+                  <PropertiesPanel component={selectedComponent} />
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
-      </div>
+
+      {/* Modals */}
+      {editingNode && (
+        <NodeEditModal
+          node={editingNode}
+          onSave={handleNodeSave}
+          onClose={() => setEditingNode(null)}
+        />
+      )}
+      {pendingEdge && (
+        <EdgeLabelModal
+          onSubmit={handleEdgeLabelSubmit}
+          onClose={() => setPendingEdge(null)}
+        />
+      )}
     </div>
   )
 }

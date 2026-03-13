@@ -17,7 +17,7 @@ interface SavedAnalysis {
   created_at: string
 }
 
-const API = '/api/statistics'
+const API = '/api/v1/statistics'
 
 export default function StatisticalAnalysis() {
   const [tab, setTab] = useState<TabId>('descriptive')
@@ -246,6 +246,76 @@ export default function StatisticalAnalysis() {
     e.target.value = ''
   }
 
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string
+      if (!text) return
+      const delimiter = file.name.endsWith('.tsv') ? '\t' : ','
+      const lines = text.trim().split('\n')
+
+      if (tab === 'descriptive') {
+        // If single column, treat as data; if multiple, take first numeric column
+        const rows = lines.map(l => l.split(delimiter).map(v => v.trim()))
+        const hasHeader = isNaN(parseFloat(rows[0]?.[0]))
+        const dataRows = hasHeader ? rows.slice(1) : rows
+        if (hasHeader && rows[0]?.[0]) setDescLabel(rows[0][0])
+        // Find first numeric column
+        const numCol = (dataRows[0] || []).findIndex(v => !isNaN(parseFloat(v)))
+        const values = dataRows.map(r => r[numCol >= 0 ? numCol : 0]).filter(v => !isNaN(parseFloat(v)))
+        setDescData(values.join(', '))
+      } else if (tab === 'hypothesis') {
+        const rows = lines.map(l => l.split(delimiter).map(v => v.trim()))
+        const hasHeader = isNaN(parseFloat(rows[0]?.[0]))
+        const dataRows = hasHeader ? rows.slice(1) : rows
+        if (hypTest === 'ttest') {
+          if (rows[0]?.length >= 2) {
+            if (hasHeader) { setLabel1(rows[0][0]); setLabel2(rows[0][1]) }
+            setG1(dataRows.map(r => r[0]).filter(v => !isNaN(parseFloat(v))).join(', '))
+            setG2(dataRows.map(r => r[1]).filter(v => !isNaN(parseFloat(v))).join(', '))
+          }
+        } else if (hypTest === 'anova') {
+          if (hasHeader) setAnovaLabels(rows[0].join(', '))
+          const groups = rows[0]?.length ? Array.from({ length: rows[0].length }, (_, c) => dataRows.map(r => r[c]).filter(v => !isNaN(parseFloat(v))).join(',')) : []
+          setAnovaGroups(groups.join('\n'))
+        } else {
+          const intRows = dataRows.map(r => r.map(v => v.replace(/[^0-9]/g, '')).join(',')).join('\n')
+          if (hasHeader) { setChiRowLabels(rows[0].slice(1).join(', ')); }
+          setChiData(intRows)
+        }
+      } else if (tab === 'regression') {
+        const rows = lines.map(l => l.split(delimiter).map(v => v.trim()))
+        const hasHeader = isNaN(parseFloat(rows[0]?.[0]))
+        const dataRows = hasHeader ? rows.slice(1) : rows
+        if (regMode === 'regression') {
+          const cols = (rows[0] || []).length
+          if (hasHeader) setRegFeatureNames(rows[0].slice(0, -1).join(', '))
+          setRegX(dataRows.map(r => r.slice(0, -1).join(',')).join('\n'))
+          setRegY(dataRows.map(r => r[cols - 1]).join(', '))
+        } else {
+          if (hasHeader) setCorrLabels(rows[0].join(', '))
+          const vars = rows[0]?.length ? Array.from({ length: rows[0].length }, (_, c) => dataRows.map(r => r[c]).join(',')) : []
+          setCorrVars(vars.join('\n'))
+        }
+      } else if (tab === 'survival') {
+        const rows = lines.map(l => l.split(delimiter).map(v => v.trim()))
+        const hasHeader = isNaN(parseFloat(rows[0]?.[0]))
+        const dataRows = hasHeader ? rows.slice(1) : rows
+        if (dataRows[0]?.length >= 2) {
+          setSurvTimes(dataRows.map(r => r[0]).join(','))
+          setSurvEvents(dataRows.map(r => r[1]).join(','))
+          if (dataRows[0].length >= 3) {
+            setSurvGroups(dataRows.map(r => r[2]).join(','))
+          }
+        }
+      }
+    }
+    reader.readAsText(file)
+    e.target.value = '' // Reset so same file can be re-uploaded
+  }
+
   return (
     <div className="h-full flex flex-col overflow-hidden">
       {/* Header */}
@@ -291,6 +361,13 @@ export default function StatisticalAnalysis() {
           {/* Input Panel */}
           <div className="glass-card p-5 space-y-4">
             <h3 className="text-sm font-medium mb-3">Input Data</h3>
+            <div className="flex items-center gap-2 mb-2">
+              <input ref={fileInputRef} type="file" accept=".csv,.tsv,.txt" onChange={handleFileUpload} className="hidden" />
+              <button onClick={() => fileInputRef.current?.click()} className="btn text-xs flex items-center gap-1.5 text-[var(--color-text-muted)]">
+                <FiUpload className="w-3.5 h-3.5" /> Upload CSV/TSV
+              </button>
+              <span className="text-xxs text-[var(--color-text-muted)]">or enter data manually below</span>
+            </div>
 
             {tab === 'descriptive' && (
               <>

@@ -3,6 +3,7 @@ import {
   FiBarChart2, FiPlus, FiTrash2,
   FiDownload, FiUpload, FiSettings, FiSave, FiX,
   FiMaximize2, FiMinimize2, FiEdit3, FiCopy, FiDroplet,
+  FiClipboard, FiCheck,
 } from 'react-icons/fi'
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
@@ -13,6 +14,7 @@ import {
   Treemap, ComposedChart, ErrorBar, ReferenceLine, ZAxis,
   RadialBarChart, RadialBar,
 } from 'recharts'
+import html2canvas from 'html2canvas'
 import { persistGet, persistSet } from '../utils/persistence'
 
 // ─── Types ──────────────────────────────────────────────────────
@@ -70,6 +72,71 @@ interface ChartOptions {
   startAngle: number
   smooth: boolean
 }
+
+function smartDownsample(data: DataPoint[], maxPoints: number = 100): DataPoint[] {
+  if (data.length <= maxPoints) return data
+
+  // Check if data is purely numeric labels (time series)
+  const isTimeSeries = data.every(d => !isNaN(Number(d.label)))
+
+  if (isTimeSeries) {
+    // Bin into groups and average
+    const binSize = Math.ceil(data.length / maxPoints)
+    const binned: DataPoint[] = []
+    for (let i = 0; i < data.length; i += binSize) {
+      const chunk = data.slice(i, i + binSize)
+      const avgVal = chunk.reduce((s, d) => s + d.value, 0) / chunk.length
+      const minLabel = chunk[0].label
+      const maxLabel = chunk[chunk.length - 1].label
+      binned.push({ label: chunk.length > 1 ? `${minLabel}-${maxLabel}` : minLabel, value: Math.round(avgVal * 100) / 100 })
+    }
+    return binned
+  }
+
+  // For categorical: take top N by value, aggregate rest into "Other"
+  const sorted = [...data].sort((a, b) => b.value - a.value)
+  const top = sorted.slice(0, maxPoints - 1)
+  const rest = sorted.slice(maxPoints - 1)
+  const otherVal = rest.reduce((s, d) => s + d.value, 0)
+  return [...top, { label: `Other (${rest.length})`, value: Math.round(otherVal * 100) / 100 }]
+}
+
+function suggestChartType(data: DataPoint[]): ChartType {
+  if (data.length === 0) return 'bar'
+
+  const n = data.length
+  const hasCategories = data.some(d => d.category)
+  const isTimeSeries = data.every(d => !isNaN(Number(d.label))) || data.every(d => /^\d{4}[-\/]/.test(d.label))
+  const allPositive = data.every(d => d.value >= 0)
+  const sumClose100 = Math.abs(data.reduce((s, d) => s + d.value, 0) - 100) < 5
+
+  // Pie chart: small count, positive values, percentages
+  if (n <= 8 && allPositive && (sumClose100 || n <= 5)) return 'pie'
+
+  // Stacked bar: has categories
+  if (hasCategories) return 'stacked_bar'
+
+  // Area/Line: time series
+  if (isTimeSeries && n > 5) return n > 50 ? 'area' : 'line'
+
+  // Funnel: monotonically decreasing, small count
+  const isDecreasing = data.every((d, i) => i === 0 || d.value <= data[i - 1].value)
+  if (isDecreasing && n >= 3 && n <= 10) return 'funnel'
+
+  // Treemap: many categories with sizes
+  if (n > 10 && allPositive) return 'treemap'
+
+  // Radar: small count, multiple dimensions
+  if (n >= 3 && n <= 12) return 'radar'
+
+  // Default: bar
+  return 'bar'
+}
+
+const CHART_COLORS = [
+  'var(--color-accent-blue)', 'var(--color-accent-purple)', 'var(--color-accent-green)',
+  'var(--color-accent-orange)', 'var(--color-accent-cyan)', 'var(--color-error)',
+]
 
 const defaultOptions: ChartOptions = {
   color: 'var(--color-accent-blue)',
@@ -267,23 +334,21 @@ export default function DataVisualization() {
   }
 
   // ─── Export ─────────────────────────────────────────────────
-  const exportPng = useCallback((id: string, title: string) => {
+  const exportPng = useCallback(async (id: string, title: string) => {
     const el = chartRefs.current[id]
     if (!el) return
-    const svg = el.querySelector('svg')
-    if (!svg) return
-    const svgData = new XMLSerializer().serializeToString(svg)
-    const canvas = document.createElement('canvas')
-    const r = svg.getBoundingClientRect()
-    canvas.width = r.width * 2; canvas.height = r.height * 2
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-    ctx.scale(2, 2)
-    ctx.fillStyle = '#0f172a'
-    ctx.fillRect(0, 0, canvas.width, canvas.height)
-    const img = new Image()
-    img.onload = () => { ctx.drawImage(img, 0, 0); const a = document.createElement('a'); a.download = `${title.replace(/\s+/g, '-').toLowerCase()}.png`; a.href = canvas.toDataURL('image/png'); a.click() }
-    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)))
+    try {
+      const canvas = await html2canvas(el, {
+        backgroundColor: '#ffffff',
+        scale: 2,
+        useCORS: true,
+        logging: false,
+      })
+      const a = document.createElement('a')
+      a.download = `${title.replace(/\s+/g, '-').toLowerCase()}.png`
+      a.href = canvas.toDataURL('image/png')
+      a.click()
+    } catch (err) { console.error('PNG export failed:', err) }
   }, [])
 
   const exportSvg = useCallback((id: string, title: string) => {
@@ -311,6 +376,31 @@ export default function DataVisualization() {
     a.href = URL.createObjectURL(blob); a.click(); URL.revokeObjectURL(a.href)
   }, [])
 
+  // ─── Copy chart to clipboard as image ──────────────────────
+  const [copiedChart, setCopiedChart] = useState<string | null>(null)
+
+  const copyChartToClipboard = useCallback(async (id: string) => {
+    const el = chartRefs.current[id]
+    if (!el) return
+    try {
+      const canvas = await html2canvas(el, {
+        backgroundColor: '#ffffff',
+        scale: 2,
+        useCORS: true,
+        logging: false,
+      })
+      const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
+      if (blob) {
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+        setCopiedChart(id)
+        setTimeout(() => setCopiedChart(null), 2000)
+      }
+    } catch {
+      setCopiedChart(id)
+      setTimeout(() => setCopiedChart(null), 2000)
+    }
+  }, [])
+
   // ─── Grouped chart types for dropdown ───────────────────────
   const chartTypeGroups = useMemo(() => {
     const groups: Record<string, typeof CHART_TYPES> = {}
@@ -320,7 +410,11 @@ export default function DataVisualization() {
 
   // ─── Render any chart ───────────────────────────────────────
   const renderChart = (chart: ChartConfig, height = 300) => {
-    const { data, type, options: o } = chart
+    const { type, options: o } = chart
+    const maxPoints = type === 'scatter' ? 500 : 100
+    const displayData = smartDownsample(chart.data, maxPoints)
+    const wasDownsampled = displayData.length < chart.data.length
+    const data = displayData
     const colors = getPalette(o.colorPalette)
     const gridEl = o.showGrid ? <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" /> : null
     const tooltipEl = <Tooltip contentStyle={TOOLTIP_STYLE} />
@@ -328,7 +422,7 @@ export default function DataVisualization() {
     const xAxisEl = <XAxis dataKey="label" tick={AXIS_TICK} label={o.xLabel ? { value: o.xLabel, position: 'insideBottom', offset: -5, style: { fontSize: 11, fill: 'var(--color-text-muted)' } } : undefined} scale={o.logScaleX ? 'log' : 'auto'} />
     const yAxisEl = <YAxis tick={AXIS_TICK} label={o.yLabel ? { value: o.yLabel, angle: -90, position: 'insideLeft', style: { fontSize: 11, fill: 'var(--color-text-muted)' } } : undefined} scale={o.logScaleY ? 'log' : 'auto'} domain={o.logScaleY ? ['auto', 'auto'] : undefined} />
 
-    switch (type) {
+    const renderChartSwitch = (): React.ReactNode => { switch (type) {
       // ── BAR CHARTS ──────────────────────────────────────────
       case 'bar':
         return (
@@ -814,7 +908,18 @@ export default function DataVisualization() {
 
       default:
         return <div className="text-center text-xs text-[var(--color-text-muted)] py-8">Chart type "{type}" not yet rendered</div>
-    }
+    } }
+
+    return (
+      <>
+        {wasDownsampled && (
+          <div className="text-xxs text-[var(--color-text-muted)] bg-[var(--glass-bg)] border border-[var(--color-border)] rounded px-2 py-1 mb-2 flex items-center gap-1">
+            <span>Downsampled from {chart.data.length} to {displayData.length} points for display</span>
+          </div>
+        )}
+        {renderChartSwitch()}
+      </>
+    )
   }
 
   // ─── Settings Panel ─────────────────────────────────────────
@@ -945,6 +1050,22 @@ export default function DataVisualization() {
                   </optgroup>
                 ))}
               </select>
+              <button
+                type="button"
+                onClick={() => {
+                  const data = parseCSV(form.dataText)
+                  if (data.length > 0) setForm(f => ({ ...f, type: suggestChartType(data) }))
+                }}
+                disabled={!form.dataText.trim()}
+                className="btn text-xs border border-[var(--color-border)] disabled:opacity-30 whitespace-nowrap"
+                style={{ color: 'var(--color-accent-purple)' }}
+                title="Analyze data and suggest the best chart type"
+              >
+                Suggest
+              </button>
+              <select value={form.options.color} onChange={e => setForm(f => ({ ...f, options: { ...f.options, color: e.target.value } }))} className="input text-xs w-32">
+                {CHART_COLORS.map(c => <option key={c} value={c}>{c.replace('var(--color-', '').replace(')', '')}</option>)}
+              </select>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <select value={form.options.colorPalette} onChange={e => setForm(f => ({ ...f, options: { ...f.options, colorPalette: e.target.value } }))} className="input text-xs">
@@ -1026,6 +1147,10 @@ export default function DataVisualization() {
                     <button onClick={() => exportCsv(chart)}
                       className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-accent-orange)]" title="CSV">
                       <FiCopy className="w-3.5 h-3.5" />
+                    </button>
+                    <button onClick={() => copyChartToClipboard(chart.id)}
+                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-accent-cyan)]" title="Copy to clipboard">
+                      {copiedChart === chart.id ? <FiCheck className="w-3.5 h-3.5 text-[var(--color-success)]" /> : <FiClipboard className="w-3.5 h-3.5" />}
                     </button>
                     <button onClick={() => duplicateChart(chart)}
                       className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="Duplicate">

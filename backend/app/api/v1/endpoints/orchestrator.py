@@ -844,28 +844,96 @@ class ChatRequest(BaseModel):
     """Request for Constant AI chat."""
     message: str
     context: str = "general"
+    platform_context: dict = {}
+
+
+CONSTANT_SYSTEM_PROMPT = """You are Constant, an AI research assistant built into the HumaNovo biomedical discovery platform.
+
+HumaNovo is a platform for biomedical hypothesis generation, evidence gathering, and drug discovery. It uses multi-model AI orchestration (Claude, DeepSeek, Mistral, GPT, Cohere, Kimi) to explore biological pathways and discover potential treatments.
+
+Your capabilities:
+- Help researchers formulate and refine hypotheses about disease mechanisms
+- Explain molecular biology, pharmacology, genetics, and biochemistry concepts
+- Suggest experimental designs and validation strategies
+- Analyze and discuss drug repurposing, combination therapies, and biomarkers
+- Provide guidance on using the HumaNovo platform (projects, discovery runs, simulations, evidence search)
+
+Guidelines:
+- Be concise and scientifically accurate
+- Reference specific genes, proteins, pathways, and mechanisms when relevant
+- When discussing hypotheses, consider confidence levels, supporting evidence, and potential confounders
+- If the user mentions specific projects or hypotheses from their platform context, incorporate that knowledge
+- Format responses clearly with short paragraphs; use markdown sparingly"""
 
 
 @router.post("/chat")
 async def constant_chat(request: ChatRequest):
     """
-    Constant AI chat assistant — uses Azure GPT-4o (primary), falls back to Azure GPT-4.1.
+    Constant AI chat assistant — uses AWS Bedrock Claude (primary),
+    falls back to Azure GPT-4o, then Azure GPT-4.1.
     """
     if not request.message.strip():
         return {"response": "Please ask me a question about your research."}
 
-    chat_prompt = f"""You are Constant, an AI research assistant for the HumaNovo biomedical discovery platform.
-You help researchers with questions about hypotheses, experimental design, literature analysis,
-drug discovery, molecular biology, and scientific methodology.
+    # Build platform context string from frontend-provided data
+    context_parts = []
+    if request.context and request.context != "general":
+        context_parts.append(f"Current context: {request.context}")
+    if request.platform_context:
+        projects = request.platform_context.get("projects", [])
+        hypotheses = request.platform_context.get("hypotheses", [])
+        if projects:
+            context_parts.append(f"User's active projects: {', '.join(str(p) for p in projects[:5])}")
+        if hypotheses:
+            context_parts.append(f"User's recent hypotheses: {', '.join(str(h) for h in hypotheses[:5])}")
 
-Be concise, helpful, and scientifically accurate. Reference specific mechanisms, genes, and pathways when relevant.
+    platform_context_str = "\n".join(context_parts) if context_parts else ""
 
-User question: {request.message}"""
+    user_content = request.message
+    if platform_context_str:
+        user_content = f"[Platform context]\n{platform_context_str}\n\n[User question]\n{request.message}"
 
     response_text = None
 
-    # --- Attempt 1: Azure GPT-4o (primary) ---
-    if settings.AZURE_GPT4O_ENDPOINT and settings.AZURE_GPT4O_KEY:
+    # --- Attempt 1: AWS Bedrock Claude (primary) ---
+    if settings.aws_access_key_value and settings.aws_secret_key_value:
+        try:
+            import boto3
+            bedrock_client = boto3.client(
+                "bedrock-runtime",
+                region_name=settings.AWS_REGION,
+                aws_access_key_id=settings.aws_access_key_value,
+                aws_secret_access_key=settings.aws_secret_key_value,
+            )
+
+            # Use the converse API for Claude on Bedrock
+            model_id = "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+
+            converse_response = bedrock_client.converse(
+                modelId=model_id,
+                system=[{"text": CONSTANT_SYSTEM_PROMPT}],
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [{"text": user_content}],
+                    }
+                ],
+                inferenceConfig={
+                    "maxTokens": 1024,
+                    "temperature": 0.7,
+                },
+            )
+
+            output_message = converse_response.get("output", {}).get("message", {})
+            content_blocks = output_message.get("content", [])
+            if content_blocks:
+                response_text = content_blocks[0].get("text", "")
+
+        except Exception as e:
+            logger.warning(f"AWS Bedrock Claude chat error: {e}")
+
+    # --- Attempt 2: Azure GPT-4o (fallback) ---
+    if not response_text and settings.AZURE_GPT4O_ENDPOINT and settings.AZURE_GPT4O_KEY:
         try:
             import httpx
             azure_url = settings.AZURE_GPT4O_ENDPOINT.rstrip("/")
@@ -877,7 +945,10 @@ User question: {request.message}"""
                     url,
                     headers={"api-key": settings.AZURE_GPT4O_KEY.get_secret_value()},
                     json={
-                        "messages": [{"role": "user", "content": chat_prompt}],
+                        "messages": [
+                            {"role": "system", "content": CONSTANT_SYSTEM_PROMPT},
+                            {"role": "user", "content": user_content},
+                        ],
                         "max_tokens": 1024,
                         "temperature": 0.7,
                     },
@@ -890,7 +961,7 @@ User question: {request.message}"""
         except Exception as e:
             logger.warning(f"Azure GPT-4o chat error: {e}")
 
-    # --- Attempt 2: Azure GPT-4.1 (fallback) ---
+    # --- Attempt 3: Azure GPT-4.1 (fallback) ---
     if not response_text and settings.AZURE_GPT41_ENDPOINT and settings.AZURE_GPT41_KEY:
         try:
             import httpx
@@ -903,7 +974,10 @@ User question: {request.message}"""
                     url,
                     headers={"api-key": settings.AZURE_GPT41_KEY.get_secret_value()},
                     json={
-                        "messages": [{"role": "user", "content": chat_prompt}],
+                        "messages": [
+                            {"role": "system", "content": CONSTANT_SYSTEM_PROMPT},
+                            {"role": "user", "content": user_content},
+                        ],
                         "max_tokens": 1024,
                         "temperature": 0.7,
                     },
@@ -919,7 +993,7 @@ User question: {request.message}"""
     if not response_text:
         response_text = (
             "I'm having trouble connecting to the AI backend. "
-            "Please ensure Azure OpenAI (GPT-4o or GPT-4.1) is configured with valid endpoint and API key."
+            "Please ensure AWS Bedrock (Claude) or Azure OpenAI is configured with valid credentials."
         )
 
     return {"response": response_text}
