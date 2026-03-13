@@ -5,7 +5,7 @@ import {
   FiCode, FiHash, FiRotateCcw, FiX, FiSearch,
   FiCopy, FiBookOpen, FiGrid, FiList,
   FiPrinter, FiClipboard, FiTarget, FiActivity,
-  FiBold, FiItalic, FiImage, FiLink, FiType
+  FiBold, FiItalic, FiImage, FiLink
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import ReactMarkdown from 'react-markdown'
@@ -1191,6 +1191,15 @@ export default function Notebook() {
   const richEditorRef = useRef<HTMLDivElement>(null)
   const isUpdatingRef = useRef(false)
 
+  // Auto-save with debounce
+  const scheduleAutoSave = useCallback(() => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    setHasUnsavedChanges(true)
+    saveTimerRef.current = window.setTimeout(() => {
+      savePage()
+    }, 2000)
+  }, [activePage?.id])
+
   // Convert markdown to HTML for the WYSIWYG editor
   const richEditorHtml = useMemo(() => {
     if (!editContent) return ''
@@ -1313,57 +1322,11 @@ export default function Notebook() {
     setShowVersions(false)
   }, [])
 
-  // Auto-save with debounce
-  const scheduleAutoSave = useCallback(() => {
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    setHasUnsavedChanges(true)
-    saveTimerRef.current = window.setTimeout(() => {
-      savePage()
-    }, 2000)
-  }, [activePage?.id])
-
   useEffect(() => {
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     }
   }, [])
-
-  const handleContentChange = (value: string) => {
-    setEditContent(value)
-    scheduleAutoSave()
-  }
-
-  const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    const items = e.clipboardData?.items
-    if (!items) return
-    for (let i = 0; i < items.length; i++) {
-      if (items[i].type.startsWith('image/')) {
-        e.preventDefault()
-        const file = items[i].getAsFile()
-        if (!file) return
-        // Capture cursor position synchronously before async FileReader
-        const textarea = editorRef.current
-        const cursorStart = textarea ? textarea.selectionStart : -1
-        const cursorEnd = textarea ? textarea.selectionEnd : -1
-        const reader = new FileReader()
-        reader.onload = () => {
-          const base64 = reader.result as string
-          const imgMarkdown = `\n![Pasted image](${base64})\n`
-          // Use functional state update to avoid stale closure issues
-          setEditContent(prev => {
-            const newContent = cursorStart >= 0
-              ? prev.slice(0, cursorStart) + imgMarkdown + prev.slice(cursorEnd)
-              : prev + '\n' + imgMarkdown
-            return newContent
-          })
-          setHasUnsavedChanges(true)
-          scheduleAutoSave()
-        }
-        reader.readAsDataURL(file)
-        return
-      }
-    }
-  }, [scheduleAutoSave])
 
   const handleTitleChange = (value: string) => {
     setEditTitle(value)
