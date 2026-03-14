@@ -2611,7 +2611,6 @@ export default function Workbench() {
   // --- Constant AI: intelligent fallback for workbench ---
   const generateWorkbenchFallback = useCallback((query: string): string => {
     const q = query.toLowerCase()
-    const nodeNames = nodes.map(n => n.name)
 
     // Known biological relationships database for common biological entities
     const relationships: Record<string, Record<string, { label: string; explanation: string }>> = {
@@ -2756,7 +2755,7 @@ export default function Workbench() {
       nodes.forEach(n => catCounts.set(n.category, (catCounts.get(n.category) || 0) + 1))
       const parts = [`**Graph Analysis** — ${nodes.length} nodes, ${edges.length} connections\n`]
       parts.push('**Node categories:**')
-      catCounts.forEach((count, cat) => parts.push(`- ${categoryConfig[cat]?.label || cat}: ${count}`))
+      catCounts.forEach((count, cat) => parts.push(`- ${categoryConfig[cat as BiologicalCategory]?.label || cat}: ${count}`))
       if (edges.length > 0) {
         parts.push('\n**Connections:**')
         edges.forEach(e => {

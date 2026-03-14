@@ -6,7 +6,7 @@ import {
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import { api } from '../services/api'
-import { persistGet, formatDate } from '../utils/persistence'
+import { persistGet } from '../utils/persistence'
 import HypothesisDocViewer from '../components/HypothesisDocViewer'
 
 const API_BASE = '/api/v1'
