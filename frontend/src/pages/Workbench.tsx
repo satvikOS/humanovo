@@ -2641,10 +2641,94 @@ export default function Workbench() {
       },
     }
 
+    // --- Topic-based graph building suggestions ---
+    // When user asks to "make a graph for X" or "build nodes for X", suggest specific structures
+    const topicSuggestions: Record<string, { nodes: string[]; relationships: string[] }> = {
+      'digestion': {
+        nodes: ['Gastrointestinal Tract (organ system)', 'Stomach (organ)', 'Small Intestine (organ)', 'Pancreas (organ)', 'Liver (organ)', 'Pepsin (biomolecule)', 'Amylase (biomolecule)', 'Bile (biomolecule)', 'Insulin (biomolecule)', 'Enteric Nervous System (pathway)'],
+        relationships: [
+          'Stomach → *secretes* → Pepsin (breaks down proteins via pepsinogen activation at pH 2)',
+          'Pancreas → *secretes* → Amylase (digests starch into maltose in the duodenum)',
+          'Liver → *produces* → Bile (emulsifies fats for lipase digestion)',
+          'Pancreas → *secretes* → Insulin (regulates blood glucose after nutrient absorption)',
+          'Small Intestine → *absorbs* → Nutrients (villi and microvilli increase surface area ~600x)',
+          'Enteric Nervous System → *regulates* → Gastrointestinal Tract (peristalsis, secretion, blood flow)',
+        ],
+      },
+      'cancer': {
+        nodes: ['TP53 (gene)', 'KRAS (gene)', 'EGFR (receptor)', 'PI3K-AKT Signaling (pathway)', 'RAS/MAPK Signaling (pathway)', 'Apoptosis (pathway)', 'Cell Cycle (pathway)', 'Tumor Microenvironment (organ system)'],
+        relationships: [
+          'TP53 → *activates* → Apoptosis (via BAX, PUMA, NOXA)',
+          'KRAS → *activates* → RAS/MAPK Signaling (constitutive when mutated)',
+          'EGFR → *activates* → PI3K-AKT Signaling (cell survival)',
+          'PI3K-AKT Signaling → *inhibits* → Apoptosis (phosphorylates BAD)',
+          'TP53 → *arrests* → Cell Cycle (via p21/CDKN1A)',
+        ],
+      },
+      'immune': {
+        nodes: ['Immune & Lymphatic System (organ system)', 'CD4+ T Cell (cell type)', 'CD8+ T Cell (cell type)', 'B Cell (cell type)', 'Macrophage (cell type)', 'Dendritic Cell (cell type)', 'NK Cell (cell type)', 'MHC-I (biomolecule)', 'MHC-II (biomolecule)', 'Cytokines (biomolecule)'],
+        relationships: [
+          'Dendritic Cell → *presents antigen to* → CD4+ T Cell (via MHC-II)',
+          'CD4+ T Cell → *helps* → B Cell (T-cell dependent antibody production)',
+          'CD8+ T Cell → *kills* → Infected Cells (via perforin/granzyme)',
+          'Macrophage → *phagocytoses* → Pathogens (innate immune defense)',
+          'NK Cell → *kills* → Tumor Cells (missing-self recognition)',
+        ],
+      },
+      'neuroscience': {
+        nodes: ['Neuron (cell type)', 'Synapse (cellular component)', 'Glutamate (biomolecule)', 'GABA (biomolecule)', 'Dopamine (biomolecule)', 'Serotonin (biomolecule)', 'Hippocampus (organ)', 'Prefrontal Cortex (organ)', 'Blood-Brain Barrier (cellular component)'],
+        relationships: [
+          'Neuron → *communicates via* → Synapse (neurotransmitter release)',
+          'Glutamate → *excites* → Neuron (main excitatory neurotransmitter)',
+          'GABA → *inhibits* → Neuron (main inhibitory neurotransmitter)',
+          'Hippocampus → *processes* → Memory (spatial and episodic)',
+          'Blood-Brain Barrier → *protects* → Brain (selective permeability)',
+        ],
+      },
+      'cardiovascular': {
+        nodes: ['Heart (organ)', 'Blood Vessels (organ system)', 'Endothelium (cell type)', 'VEGF (biomolecule)', 'Nitric Oxide (biomolecule)', 'ACE (biomolecule)', 'Angiotensin II (biomolecule)', 'Platelets (cell type)'],
+        relationships: [
+          'Endothelium → *produces* → Nitric Oxide (vasodilation)',
+          'VEGF → *stimulates* → Angiogenesis (new blood vessel formation)',
+          'ACE → *converts* → Angiotensin II (vasoconstriction)',
+          'Platelets → *mediate* → Coagulation (hemostasis)',
+        ],
+      },
+      'respiratory': {
+        nodes: ['Lungs (organ)', 'Alveoli (cellular component)', 'Bronchi (organ)', 'Diaphragm (organ)', 'Surfactant (biomolecule)', 'Hemoglobin (biomolecule)', 'CO2 (biomolecule)', 'O2 (biomolecule)'],
+        relationships: [
+          'Alveoli → *exchanges* → O2/CO2 (across respiratory membrane)',
+          'Surfactant → *reduces* → Surface tension (prevents alveolar collapse)',
+          'Hemoglobin → *binds* → O2 (cooperative binding, sigmoid curve)',
+          'Diaphragm → *drives* → Ventilation (contracts to create negative pressure)',
+        ],
+      },
+    }
+
+    // Check if user is asking to build/create a graph for a topic
+    if (/\b(make|create|build|construct|design|set up|model|map|diagram)\b/i.test(q) && /(graph|node|relationship|network|map|model|diagram|pathway)/i.test(q)) {
+      for (const [topic, suggestion] of Object.entries(topicSuggestions)) {
+        if (q.includes(topic)) {
+          return `Great idea! Here's how to build a **${topic}** knowledge graph:\n\n**Suggested nodes** (search for these in the Library panel on the left):\n${suggestion.nodes.map(n => `- ${n}`).join('\n')}\n\n**Key relationships to create:**\n${suggestion.relationships.map(r => `- ${r}`).join('\n')}\n\nDrag the structures from the Library onto the canvas, then ask me to "connect these nodes" and I'll create the relationships for you!`
+        }
+      }
+      // Generic topic request
+      return `I'd be happy to help you build a knowledge graph! While I can't auto-create nodes yet, here's how to get started:\n\n1. **Open the Library** tab in the left panel\n2. **Search** for biological structures related to your topic\n3. **Drag** them onto the canvas\n4. Once you have nodes, ask me to **"connect these nodes"** and I'll find biological relationships\n\nI have built-in knowledge for topics like cancer biology, immunology, neuroscience, cardiovascular, respiratory, and digestion. Try asking about one of these!`
+    }
+
+    // Also catch requests like "human digestion" or "tell me about digestion nodes"
+    if (nodes.length === 0 || (/\b(for|about|on)\b/i.test(q) && nodes.length < 2)) {
+      for (const [topic, suggestion] of Object.entries(topicSuggestions)) {
+        if (q.includes(topic)) {
+          return `To build a **${topic}** graph, search for these structures in the **Library** panel on the left:\n\n${suggestion.nodes.map(n => `- ${n}`).join('\n')}\n\nDrag them onto the canvas, and then I can help connect them with these biological relationships:\n${suggestion.relationships.slice(0, 3).map(r => `- ${r}`).join('\n')}\n${suggestion.relationships.length > 3 ? `- ...and ${suggestion.relationships.length - 3} more connections\n` : ''}\nOnce the nodes are on the canvas, just say **"connect these nodes"**!`
+        }
+      }
+    }
+
     // Try to auto-connect nodes
     if (q.includes('connect') || q.includes('relationship') || q.includes('link') || q.includes('relate') || q.includes('between')) {
       if (nodes.length < 2) {
-        return 'Add at least 2 nodes to the canvas and I\'ll help you find biological relationships between them. Try dragging components from the left panel.'
+        return 'Add at least 2 nodes to the canvas first! Drag structures from the **Library** panel on the left, then I can find biological relationships between them.'
       }
 
       const foundConnections: string[] = []
@@ -2664,7 +2748,6 @@ export default function Workbench() {
                 const isForward = n1Lower.includes(entity)
                 const srcId = isForward ? n1.id : n2.id
                 const tgtId = isForward ? n2.id : n1.id
-                // Check if edge already exists
                 const edgeExists = edges.some(e =>
                   (e.sourceId === srcId && e.targetId === tgtId) ||
                   (e.sourceId === tgtId && e.targetId === srcId)
@@ -2679,17 +2762,34 @@ export default function Workbench() {
             }
           }
 
-          // Category-based relationships
+          // Category-based smart relationships
           if (foundConnections.length === 0) {
-            if (n1.category === 'pathway' && n2.category === 'biomolecule') {
-              edgesToAdd.push({ sourceId: n1.id, targetId: n2.id, label: 'involves' })
-              foundConnections.push(`**${n1.name}** → *involves* → **${n2.name}**: This pathway likely involves or regulates this biomolecule.`)
-            } else if (n1.category === 'gene' && n2.category === 'pathway') {
-              edgesToAdd.push({ sourceId: n1.id, targetId: n2.id, label: 'participates in' })
-              foundConnections.push(`**${n1.name}** → *participates in* → **${n2.name}**: This gene product likely participates in this signaling pathway.`)
-            } else if (n1.category === 'drug_target' && n2.category === 'receptor') {
-              edgesToAdd.push({ sourceId: n1.id, targetId: n2.id, label: 'targets' })
-              foundConnections.push(`**${n1.name}** → *targets* → **${n2.name}**: This therapeutic target acts on this receptor.`)
+            const catPairs: [string, string, string, string][] = [
+              ['pathway', 'biomolecule', 'involves', 'This pathway likely involves or regulates this biomolecule.'],
+              ['gene', 'pathway', 'participates in', 'This gene product likely participates in this signaling pathway.'],
+              ['drug_target', 'receptor', 'targets', 'This therapeutic agent acts on this receptor.'],
+              ['organ_system', 'cell_type', 'contains', 'This organ system contains these cell types.'],
+              ['cell_type', 'biomolecule', 'produces', 'This cell type produces or secretes this biomolecule.'],
+              ['receptor', 'biomolecule', 'binds', 'This receptor binds this ligand/biomolecule.'],
+              ['gene', 'biomolecule', 'encodes', 'This gene encodes this protein/biomolecule.'],
+              ['pathway', 'cell_type', 'regulates', 'This pathway regulates this cell type behavior.'],
+              ['biomolecule', 'pathway', 'activates', 'This biomolecule activates this signaling pathway.'],
+            ]
+            for (const [cat1, cat2, label, explanation] of catPairs) {
+              if ((n1.category === cat1 && n2.category === cat2) || (n1.category === cat2 && n2.category === cat1)) {
+                const isForward = n1.category === cat1
+                const srcId = isForward ? n1.id : n2.id
+                const tgtId = isForward ? n2.id : n1.id
+                const edgeExists = edges.some(e =>
+                  (e.sourceId === srcId && e.targetId === tgtId) ||
+                  (e.sourceId === tgtId && e.targetId === srcId)
+                )
+                if (!edgeExists) {
+                  edgesToAdd.push({ sourceId: srcId, targetId: tgtId, label })
+                  foundConnections.push(`**${isForward ? n1.name : n2.name}** → *${label}* → **${isForward ? n2.name : n1.name}**: ${explanation}`)
+                }
+                break
+              }
             }
           }
         }
@@ -2712,7 +2812,7 @@ export default function Workbench() {
         return connectMsg + foundConnections.join('\n\n')
       }
 
-      return `I analyzed your ${nodes.length} nodes but couldn't find known biological relationships between them in my offline database. When connected to the backend AI, I can discover relationships between any biological entities. You can also manually connect nodes by clicking the circles on node edges.`
+      return `I looked at your ${nodes.length} nodes but couldn't auto-detect relationships between them. You can still connect them manually — **click a node's edge circle**, then **click another node** to draw a connection.\n\nTip: Adding nodes from related categories (e.g., a gene and its pathway) makes it easier for me to find relationships.`
     }
 
     // Explain a specific node
@@ -2725,32 +2825,34 @@ export default function Workbench() {
           if (comp.description) parts.push(comp.description)
           if (comp.diseaseRelevance) parts.push(`\n**Disease relevance:** ${comp.diseaseRelevance}`)
           if (comp.therapeuticTargets?.length) parts.push(`\n**Therapeutic targets:** ${comp.therapeuticTargets.join(', ')}`)
-          if (comp.clinicalSignificance) parts.push(`\n**Clinical significance:** ${comp.clinicalSignificance}`)
+          if ((comp as any).clinicalSignificance) parts.push(`\n**Clinical significance:** ${(comp as any).clinicalSignificance}`)
           if (comp.keyFacts?.length) parts.push(`\n**Key facts:**\n${comp.keyFacts.map(f => `- ${f}`).join('\n')}`)
           return parts.join('\n')
         }
       }
-      return 'Select a node on the canvas or specify a node name. I can explain its biology, disease relevance, therapeutic potential, and how it connects to other elements.'
+      return 'I can explain any node on your canvas — just mention it by name! For example: "Explain TP53" or "What is PI3K-AKT signaling?"'
     }
 
     // Suggest nodes to add
-    if (q.includes('suggest') || q.includes('recommend') || q.includes('what should') || q.includes('add')) {
+    if (q.includes('suggest') || q.includes('recommend') || q.includes('what should') || /\badd\b/.test(q)) {
       if (nodes.length === 0) {
-        return 'Start by adding biological structures from the left panel. Good starting points:\n\n- **Immune System** — for immunology research\n- **TP53** — for cancer biology\n- **PI3K-AKT Signaling** — for cell survival pathways\n- **EGFR** — for targeted therapy research\n\nDrag any structure onto the canvas to begin building your knowledge graph.'
+        return 'Here are some great starting points for your knowledge graph:\n\n- **Immune System** — for immunology research\n- **TP53** — for cancer biology\n- **PI3K-AKT Signaling** — for cell survival pathways\n- **EGFR** — for targeted therapy research\n\nSearch in the **Library** tab on the left and drag structures onto the canvas!'
       }
       const categories = new Set(nodes.map(n => n.category))
-      const suggestions: string[] = [`Based on your ${nodes.length} nodes, I suggest adding:`]
-      if (categories.has('pathway') && !categories.has('drug_target')) suggestions.push('- **Therapeutic targets** — to explore druggable nodes in your pathways')
-      if (categories.has('gene') && !categories.has('pathway')) suggestions.push('- **Signaling pathways** — to see how your genes participate in larger networks')
-      if (categories.has('receptor') && !categories.has('biomolecule')) suggestions.push('- **Ligands/biomolecules** — to see what activates your receptors')
-      if (categories.has('organ_system') && !categories.has('cell_type')) suggestions.push('- **Cell types** — to see which cells make up your organ systems')
-      suggestions.push('\nBrowse the Structures panel or Master Library on the left to find relevant components.')
+      const suggestions: string[] = [`Based on your ${nodes.length} nodes, consider adding:`]
+      if (categories.has('pathway') && !categories.has('drug_target')) suggestions.push('- **Drug targets** — explore druggable nodes in your pathways')
+      if (categories.has('gene') && !categories.has('pathway')) suggestions.push('- **Signaling pathways** — see how your genes participate in larger networks')
+      if (categories.has('receptor') && !categories.has('biomolecule')) suggestions.push('- **Ligands/biomolecules** — see what activates your receptors')
+      if (categories.has('organ_system') && !categories.has('cell_type')) suggestions.push('- **Cell types** — see which cells make up your organ systems')
+      if (categories.has('cell_type') && !categories.has('biomolecule')) suggestions.push('- **Biomolecules** — add the proteins and signaling molecules these cells use')
+      if (suggestions.length === 1) suggestions.push('- Try adding nodes from different categories to create more interesting connections!')
+      suggestions.push('\nSearch the **Library** tab on the left to find more components.')
       return suggestions.join('\n')
     }
 
     // Analyze the graph
     if (q.includes('analyze') || q.includes('analysis') || q.includes('summary') || q.includes('overview')) {
-      if (nodes.length === 0) return 'Your canvas is empty. Add biological structures to begin analysis.'
+      if (nodes.length === 0) return 'Your canvas is empty! Start by adding structures from the Library panel on the left.'
       const catCounts = new Map<string, number>()
       nodes.forEach(n => catCounts.set(n.category, (catCounts.get(n.category) || 0) + 1))
       const parts = [`**Graph Analysis** — ${nodes.length} nodes, ${edges.length} connections\n`]
@@ -2766,18 +2868,27 @@ export default function Workbench() {
       }
       const isolatedNodes = nodes.filter(n => !edges.some(e => e.sourceId === n.id || e.targetId === n.id))
       if (isolatedNodes.length > 0) {
-        parts.push(`\n**Isolated nodes** (no connections): ${isolatedNodes.map(n => n.name).join(', ')}`)
-        parts.push('Try asking me to "connect these nodes" to find biological relationships.')
+        parts.push(`\n**Unconnected nodes:** ${isolatedNodes.map(n => n.name).join(', ')}`)
+        parts.push('\nSay **"connect these nodes"** and I\'ll try to find relationships!')
       }
       return parts.join('\n')
     }
 
-    // Default helpful response
-    if (nodes.length === 0) {
-      return 'Welcome to the Workbench! I can help you:\n\n- **Build** a knowledge graph by adding biological structures from the left panel\n- **Connect** nodes by finding biological relationships\n- **Explain** any biological entity in detail\n- **Analyze** your graph structure and suggest improvements\n\nStart by adding some nodes from the Structures panel.'
+    // Conversational handling
+    if (/^(hi|hey|hello)[\s!.?]*$/i.test(q)) {
+      return nodes.length > 0
+        ? `Hey! You've got ${nodes.length} node${nodes.length > 1 ? 's' : ''} on the canvas. Want me to connect them, analyze your graph, or suggest what to add next?`
+        : 'Hey! I\'m here to help you build a biological knowledge graph. Search for structures in the **Library** panel on the left and drag them onto the canvas. Then I can help you connect them!'
     }
 
-    return `Your graph has **${nodes.length}** nodes and **${edges.length}** connections. I can:\n\n- **"Connect these nodes"** — auto-discover biological relationships\n- **"Explain [node name]"** — get detailed info about a specific entity\n- **"Suggest nodes to add"** — get recommendations\n- **"Analyze my graph"** — get a summary and insights\n\nTry one of these, or ask me about the biology of your graph nodes!`
+    if (/thank|thanks|thx/i.test(q)) return 'Happy to help! Let me know if you need anything else with your graph.'
+
+    // Default helpful response
+    if (nodes.length === 0) {
+      return 'Welcome to the Workbench! Here\'s how to get started:\n\n1. Open the **Library** tab on the left panel\n2. Search for biological structures (genes, pathways, cell types, etc.)\n3. **Drag** them onto the canvas\n4. Ask me to **"connect these nodes"** to find relationships\n\nI know about many biological systems — try asking me to help build a graph for cancer, immunology, digestion, neuroscience, or cardiovascular biology!'
+    }
+
+    return `Your graph has **${nodes.length}** node${nodes.length > 1 ? 's' : ''} and **${edges.length}** connection${edges.length !== 1 ? 's' : ''}. I can:\n\n- **"Connect these nodes"** — find biological relationships\n- **"Explain [node name]"** — get detailed info\n- **"Suggest what to add"** — get recommendations\n- **"Analyze my graph"** — get a summary\n\nOr ask me about a specific topic and I'll suggest nodes to build!`
   }, [nodes, edges, components])
 
   // --- Constant AI send ---

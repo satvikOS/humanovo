@@ -1557,11 +1557,16 @@ export default function Notebook() {
     }
   }, [])
 
+  // Track whether the rich editor is being initialized (to prevent input handlers from wiping content)
+  const editorInitializingRef = useRef(false)
+
   // Sync rich editor HTML changes back to markdown (does NOT re-render the editor)
   const handleRichEditorInput = useCallback(() => {
-    if (isUpdatingRef.current) return
+    if (isUpdatingRef.current || editorInitializingRef.current) return
     const el = richEditorRef.current
     if (!el) return
+    // Don't sync if editor is empty and we have content (editor just mounted)
+    if (!el.innerHTML.trim() && editContent.trim()) return
     try {
       isUpdatingRef.current = true
       const html = el.innerHTML
@@ -1572,7 +1577,7 @@ export default function Notebook() {
     } finally {
       isUpdatingRef.current = false
     }
-  }, [scheduleAutoSave])
+  }, [scheduleAutoSave, editContent])
 
   // Handle paste in rich editor: intercept images and render them inline
   const handleRichPaste = useCallback((e: React.ClipboardEvent<HTMLDivElement>) => {
@@ -1597,26 +1602,29 @@ export default function Notebook() {
   }, [handleRichEditorInput])
 
   // Set rich editor content imperatively only when content changes externally
-  // (template selection, version restore, page switch) - never during typing
+  // (template selection, version restore, page switch, view mode switch) - never during typing
   const lastExternalContent = useRef('')
   useEffect(() => {
     if (isUpdatingRef.current) return
     const el = richEditorRef.current
     if (!el) return
-    // Only update when content changed from outside (not from typing)
-    if (lastExternalContent.current !== editContent) {
-      // Check if editor content already matches
+    // Update when content changed from outside OR when editor just remounted (empty innerHTML)
+    const editorIsEmpty = !el.innerHTML.trim()
+    if (lastExternalContent.current !== editContent || editorIsEmpty) {
       try {
-        const currentMd = turndownService.turndown(el.innerHTML)
+        editorInitializingRef.current = true
+        const currentMd = editorIsEmpty ? '' : turndownService.turndown(el.innerHTML)
         if (currentMd !== editContent) {
           el.innerHTML = contentToHtml(editContent)
         }
       } catch {
         el.innerHTML = contentToHtml(editContent)
+      } finally {
+        editorInitializingRef.current = false
       }
       lastExternalContent.current = editContent
     }
-  }, [editContent, contentToHtml])
+  }, [editContent, contentToHtml, viewMode])
 
   // Load pages
   useEffect(() => {
@@ -1971,11 +1979,14 @@ export default function Notebook() {
 
         <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
           {filteredPages.map(page => (
-            <button
+            <div
               key={page.id}
+              role="button"
+              tabIndex={0}
               onClick={() => selectPage(page)}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') selectPage(page) }}
               className={clsx(
-                'w-full text-left p-2 rounded transition-colors group',
+                'w-full text-left p-2 rounded transition-colors group cursor-pointer',
                 activePage?.id === page.id
                   ? 'bg-white/10 text-white'
                   : 'text-[var(--color-text-secondary)] hover:bg-white/5'
@@ -2008,7 +2019,7 @@ export default function Notebook() {
                   ))}
                 </div>
               )}
-            </button>
+            </div>
           ))}
 
           {filteredPages.length === 0 && (

@@ -230,7 +230,7 @@ function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
 function ConstantChat() {
   const [isOpen, setIsOpen] = useState(false)
   const [messages, setMessages] = useState<{ role: 'user' | 'assistant'; text: string }[]>([
-    { role: 'assistant', text: 'Hello! I\'m Constant, your AI research tutor and assistant. Ask me about biology, research methods, your hypotheses, experimental design, statistics, genomics, or anything you want to learn about your research.' },
+    { role: 'assistant', text: 'Hey! I\'m Constant, your research companion on HumaNovo. I can help you navigate the platform, explain biology and statistics concepts, or dig into your research data. What would you like to do?' },
   ])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -289,9 +289,8 @@ function ConstantChat() {
   }, [isOpen])
 
   const generateSmartFallbackResponse = (query: string): string => {
-    const q = query.toLowerCase()
+    const q = query.toLowerCase().trim()
     const ctx = getLocalContext() as any
-    const parts: string[] = []
 
     const totalProjects = ctx.totalProjects || 0
     const totalHypotheses = ctx.totalHypotheses || 0
@@ -301,151 +300,185 @@ function ConstantChat() {
     const hypotheses = (ctx.hypotheses as any[]) || []
     const papers = (ctx.papers as any[]) || []
 
-    // Greet naturally
-    if (q.includes('hello') || q.includes('hi ') || q.includes('hey') || q.match(/^hi$/)) {
-      parts.push('Hey there! I\'m Constant, your research assistant on HumaNovo.')
-      if (totalProjects > 0) parts.push(`You currently have **${totalProjects}** projects on the platform.`)
-      if (totalHypotheses > 0) parts.push(`There are **${totalHypotheses}** hypotheses generated so far.`)
-      if (totalPapers > 0) parts.push(`You've generated **${totalPapers}** research papers.`)
-      if (totalSimulations > 0) parts.push(`And **${totalSimulations}** simulations have been run.`)
-      parts.push('What would you like to explore?')
-      return parts.join(' ')
+    // --- Conversational responses: greetings, introductions, casual chat ---
+    if (/^(hi|hey|hello|howdy|yo|sup|what'?s up|good (morning|afternoon|evening))[\s!.?]*$/i.test(q) || q === 'hi' || q === 'hey') {
+      const greetings = [
+        'Hey! Great to see you.',
+        'Hi there! How can I help today?',
+        'Hello! What are you working on?',
+        'Hey! Ready to dive into some research?',
+      ]
+      const greeting = greetings[Math.floor(Math.random() * greetings.length)]
+      if (totalProjects > 0 || totalHypotheses > 0) {
+        return `${greeting} You've got **${totalProjects}** project${totalProjects !== 1 ? 's' : ''} and **${totalHypotheses}** hypothes${totalHypotheses !== 1 ? 'es' : 'is'} going. What would you like to work on?`
+      }
+      return `${greeting} I'm Constant — I can help you navigate the platform, explain research concepts, or get you started with your first project. What's on your mind?`
     }
 
-    // Search user's actual data for relevant context
-    // Find matching hypotheses by checking title, mechanism, disease, tags
+    // Handle personal introductions
+    if (/^(i am|i'm|my name is|this is|call me)\s/i.test(q)) {
+      const nameMatch = q.match(/(?:i am|i'm|my name is|this is|call me)\s+(.+)/i)
+      const name = nameMatch ? nameMatch[1].replace(/[.!?]+$/, '').trim() : 'there'
+      return `Nice to meet you, ${name}! I'm Constant, your research companion here on HumaNovo. I can help you with:\n\n- **Navigating the platform** — finding tools, projects, or features\n- **Research tutoring** — explaining biology, statistics, genomics concepts\n- **Your data** — searching your hypotheses, projects, and papers\n\nWhat are you interested in working on?`
+    }
+
+    // Handle "thank you" / politeness
+    if (/^(thanks?|thank you|thx|ty|cheers|appreciate)[\s!.]*$/i.test(q)) {
+      return 'You\'re welcome! Let me know if there\'s anything else I can help with.'
+    }
+
+    // Handle "how are you" type questions
+    if (/how are you|how('?re| are) (you|u) doing|how('?s| is) it going/i.test(q)) {
+      return 'I\'m doing great, thanks for asking! I\'m here whenever you need help with your research. What can I do for you?'
+    }
+
+    // Handle "what can you do" / help
+    if (/what (can|do) you do|help me|how (can|do) (you|i) (use|start)|what('?s| is) this|tour|guide/i.test(q)) {
+      return `Great question! Here's what I can help with:\n\n**Navigate the platform:**\n- **Dashboard** — see your research overview and recent activity\n- **Discovery** — run AI-powered hypothesis generation for any disease\n- **Projects** — organize hypotheses and generate research papers\n- **Workbench** — build biological knowledge graphs visually\n- **Notebook** — write and organize research notes with Markdown\n- **Simulations** — run Monte Carlo simulations on hypotheses\n- **Statistics** — run t-tests, ANOVA, regression, survival analysis\n- **Genomics** — pathway enrichment, GSEA, variant annotation\n\n**Learn and explore:**\n- Ask me to explain any biology, statistics, or research concept\n- Ask about your existing projects, hypotheses, or papers\n\nJust ask naturally — I'm here to help!`
+    }
+
+    // --- Navigation requests ---
+    if (/where (can i|do i|is|are)|how (do i|to|can i) (find|get|go|navigate|access|open|use|start|create|make|run|see|view)/i.test(q) || /take me to|go to|open|navigate to|show me/i.test(q)) {
+      const navMap: [RegExp, string, string][] = [
+        [/dashboard/i, 'Dashboard', 'Head to the **Dashboard** from the sidebar — it shows your research overview, recent activity, and quick stats.'],
+        [/project/i, 'Projects', 'Go to **Projects** in the sidebar. You can create new projects, organize hypotheses, and generate research papers from there.'],
+        [/discover|hypothes/i, 'Discovery', 'Open **Discovery** in the sidebar. Enter a disease or research area, then click "Start" to generate AI-powered hypotheses.'],
+        [/workbench|graph|knowledge/i, 'Workbench', 'Open the **Workbench** from the sidebar. Drag biological structures from the library onto the canvas and connect them to build knowledge graphs.'],
+        [/notebook|note/i, 'Notebook', 'Go to **Notebook** in the sidebar under Tools. You can create pages using templates (research notes, experiment logs, protocols) and write in Markdown.'],
+        [/simulat/i, 'Simulations', 'Head to **Simulations** in the sidebar under Tools. You can run Monte Carlo simulations to test hypothesis robustness.'],
+        [/statistic|t-test|anova|regression/i, 'Statistics', 'Go to **Statistics** under Analysis in the sidebar. It has tabs for descriptive stats, hypothesis testing, regression, survival analysis, and sample size calculation.'],
+        [/genom|pathway|gsea|variant/i, 'Genomics', 'Open **Genomics** under Analysis. You can run pathway enrichment, GSEA, variant annotation, and biomarker discovery.'],
+        [/timeline|activity|history/i, 'Timeline', 'Check the **Timeline** in the sidebar under Tools to see your complete research activity history.'],
+        [/search/i, 'Search', 'Use **Search** in the sidebar or press **Cmd+K** to search across all your projects, hypotheses, and papers.'],
+        [/citation/i, 'Citations', 'Go to **Citations** under Research in the sidebar to manage your reference library.'],
+        [/experiment|tracker/i, 'Experiments', 'Check **Experiments** under Research to track your experimental protocols and results.'],
+        [/visual|chart|plot/i, 'Visualization', 'Open **Visualization** under Research to create custom charts and plots from your data.'],
+        [/evidence/i, 'Evidence', 'Go to **Evidence** in the sidebar to browse and manage your research evidence base.'],
+        [/anatomy|3d|body/i, '3D Anatomy', 'Open **3D Anatomy** in the sidebar for an interactive 3D human anatomy explorer.'],
+        [/setting/i, 'Settings', 'Go to **Settings** at the bottom of the sidebar to customize your experience.'],
+      ]
+      for (const [pattern, , response] of navMap) {
+        if (pattern.test(q)) return response
+      }
+      return 'I can help you find anything on the platform! Try asking about a specific section — like "How do I start a discovery?" or "Where are my projects?"'
+    }
+
+    // --- Search user data for relevant context ---
     const matchingHyps = hypotheses.filter((h: any) => {
       const searchable = [h.title, h.mechanism, h.disease, ...(h.tags || [])].filter(Boolean).join(' ').toLowerCase()
-      return q.split(/\s+/).some(word => word.length > 2 && searchable.includes(word))
+      return q.split(/\s+/).some((word: string) => word.length > 3 && searchable.includes(word))
     })
 
-    // Find matching projects
     const matchingProjects = projects.filter((p: any) => {
       const searchable = [p.name, p.disease].filter(Boolean).join(' ').toLowerCase()
-      return q.split(/\s+/).some(word => word.length > 2 && searchable.includes(word))
+      return q.split(/\s+/).some((word: string) => word.length > 3 && searchable.includes(word))
     })
 
     if (matchingHyps.length > 0) {
-      parts.push(`I found **${matchingHyps.length}** relevant hypothesis${matchingHyps.length > 1 ? 'es' : ''} in your platform data:\n`)
-      matchingHyps.slice(0, 5).forEach((h: any, i: number) => {
-        parts.push(`${i + 1}. **${h.title}**${h.confidence ? ` (confidence: ${Math.round(h.confidence * 100)}%)` : ''}`)
-        if (h.mechanism) parts.push(`   Mechanism: ${h.mechanism.slice(0, 150)}${h.mechanism.length > 150 ? '...' : ''}`)
-        if (h.disease) parts.push(`   Disease: ${h.disease}`)
-      })
-      if (matchingHyps.length > 5) parts.push(`\n...and ${matchingHyps.length - 5} more. Check the Discovery section for all of them.`)
-      parts.push('\nYou can view these in the Discovery section or generate a research paper from any of them.')
-      return parts.join('\n')
+      const intro = matchingHyps.length === 1
+        ? 'I found a relevant hypothesis in your data:'
+        : `I found **${matchingHyps.length}** relevant hypotheses in your data:`
+      const items = matchingHyps.slice(0, 3).map((h: any, i: number) => {
+        let item = `${i + 1}. **${h.title}**`
+        if (h.confidence) item += ` (${Math.round(h.confidence * 100)}% confidence)`
+        if (h.disease) item += `\n   Disease: ${h.disease}`
+        if (h.mechanism) item += `\n   Mechanism: ${h.mechanism.slice(0, 120)}${h.mechanism.length > 120 ? '...' : ''}`
+        return item
+      }).join('\n\n')
+      const more = matchingHyps.length > 3 ? `\n\n...and ${matchingHyps.length - 3} more in your data.` : ''
+      return `${intro}\n\n${items}${more}\n\nYou can explore these in the **Discovery** section or open the related project to generate research papers.`
     }
 
     if (matchingProjects.length > 0) {
-      parts.push(`Found **${matchingProjects.length}** related project(s):\n`)
-      matchingProjects.slice(0, 5).forEach((p: any, i: number) => {
-        parts.push(`${i + 1}. **${p.name}**${p.disease ? ` — ${p.disease}` : ''}${p.hypotheses ? ` (${p.hypotheses} hypotheses)` : ''}`)
-      })
-      return parts.join('\n')
+      const items = matchingProjects.slice(0, 5).map((p: any, i: number) =>
+        `${i + 1}. **${p.name}**${p.disease ? ` — ${p.disease}` : ''}${p.hypotheses ? ` (${p.hypotheses} hypotheses)` : ''}`
+      ).join('\n')
+      return `I found ${matchingProjects.length} related project${matchingProjects.length > 1 ? 's' : ''}:\n\n${items}\n\nOpen **Projects** in the sidebar to view details.`
     }
 
-    // General context-aware response
-    if (q.includes('hypothesis') || q.includes('hypotheses')) {
+    // --- Context-aware queries about platform sections ---
+    if (/hypothes[ie]s/i.test(q)) {
       if (totalHypotheses > 0) {
-        parts.push(`You have **${totalHypotheses}** hypotheses in the platform. Here are the most recent:\n`)
-        hypotheses.slice(0, 5).forEach((h: any, i: number) => {
-          parts.push(`${i + 1}. **${h.title}**${h.confidence ? ` — ${Math.round(h.confidence * 100)}% confidence` : ''}`)
-        })
-        if (totalHypotheses > 5) parts.push(`\n...and ${totalHypotheses - 5} more.`)
-        parts.push('\nGo to the Discovery section to view details or generate research papers from these.')
-      } else {
-        parts.push('No hypotheses have been generated yet. Start a discovery run from the Discovery section to generate hypotheses for your disease of interest.')
+        const recent = hypotheses.slice(0, 3).map((h: any, i: number) =>
+          `${i + 1}. **${h.title}**${h.confidence ? ` — ${Math.round(h.confidence * 100)}% confidence` : ''}`
+        ).join('\n')
+        return `You've generated **${totalHypotheses}** hypotheses so far. Here are a few:\n\n${recent}${totalHypotheses > 3 ? `\n\n...and ${totalHypotheses - 3} more.` : ''}\n\nHead to **Discovery** to explore them or generate new ones.`
       }
-      return parts.join('\n')
+      return 'You don\'t have any hypotheses yet. Go to **Discovery** in the sidebar, enter a disease or research area, and click "Start" to begin generating hypotheses!'
     }
 
-    if (q.includes('project')) {
+    if (/\bproject/i.test(q)) {
       if (totalProjects > 0) {
-        parts.push(`You have **${totalProjects}** project(s). Here are the most recent:\n`)
-        projects.slice(0, 5).forEach((p: any, i: number) => {
-          parts.push(`${i + 1}. **${p.name}**${p.disease ? ` — ${p.disease}` : ''}${p.hypotheses ? ` (${p.hypotheses} hypotheses)` : ''}`)
-        })
-        if (totalProjects > 5) parts.push(`\n...and ${totalProjects - 5} more. Visit the Projects page to see all of them.`)
-      } else {
-        parts.push('No projects yet. Create one from the Projects page to organize your research.')
+        const recent = projects.slice(0, 3).map((p: any, i: number) =>
+          `${i + 1}. **${p.name}**${p.disease ? ` — ${p.disease}` : ''}`
+        ).join('\n')
+        return `You have **${totalProjects}** project${totalProjects > 1 ? 's' : ''}:\n\n${recent}${totalProjects > 3 ? `\n\n...and ${totalProjects - 3} more.` : ''}\n\nVisit **Projects** in the sidebar to manage them.`
       }
-      return parts.join('\n')
+      return 'No projects yet! You can create one from the **Projects** page in the sidebar, or projects are automatically created when you run a discovery.'
     }
 
-    if (q.includes('paper') || q.includes('publication')) {
+    if (/paper|publication|manuscript/i.test(q)) {
       if (totalPapers > 0) {
-        parts.push(`You have **${totalPapers}** generated research paper(s):\n`)
-        papers.slice(0, 5).forEach((p: any, i: number) => {
-          parts.push(`${i + 1}. **${p.title}**${p.disease ? ` — ${p.disease}` : ''}`)
-        })
-        parts.push('\nFind them in your Project folder.')
-      } else {
-        parts.push('No research papers generated yet. Generate one by clicking "Generate Research Paper" on any hypothesis in your project.')
+        const recent = papers.slice(0, 3).map((p: any, i: number) =>
+          `${i + 1}. **${p.title}**${p.disease ? ` — ${p.disease}` : ''}`
+        ).join('\n')
+        return `You've generated **${totalPapers}** research paper${totalPapers > 1 ? 's' : ''}:\n\n${recent}\n\nYou can find them inside their respective projects.`
       }
-      return parts.join('\n')
+      return 'No papers generated yet. To create one, open a project, select a hypothesis, and click "Generate Research Paper."'
     }
 
-    if (q.includes('simulation')) {
+    if (/simulat/i.test(q)) {
       if (totalSimulations > 0) {
-        parts.push(`You have **${totalSimulations}** simulation(s). Head to the Simulations page to view results and run new ones.`)
-      } else {
-        parts.push('No simulations yet. Go to the Simulations page to run Monte Carlo simulations on your hypotheses.')
+        return `You have **${totalSimulations}** simulation${totalSimulations > 1 ? 's' : ''}. Head to the **Simulations** page in the sidebar to view results or run new ones.`
       }
-      return parts.join('\n')
+      return 'No simulations yet. Go to **Simulations** in the sidebar to run Monte Carlo simulations on your hypotheses — they help validate robustness and sensitivity.'
     }
 
-    // How many / count questions
-    if (q.includes('how many') || q.includes('count') || q.includes('total') || q.includes('number')) {
-      parts.push('Here\'s your platform overview:\n')
-      parts.push(`- **${totalProjects}** projects`)
-      parts.push(`- **${totalHypotheses}** hypotheses`)
-      parts.push(`- **${totalPapers}** research papers`)
-      parts.push(`- **${totalSimulations}** simulations`)
-      return parts.join('\n')
+    if (/how many|count|total|number|overview|summary|status/i.test(q)) {
+      return `Here's your research at a glance:\n\n- **${totalProjects}** project${totalProjects !== 1 ? 's' : ''}\n- **${totalHypotheses}** hypothes${totalHypotheses !== 1 ? 'es' : 'is'}\n- **${totalPapers}** research paper${totalPapers !== 1 ? 's' : ''}\n- **${totalSimulations}** simulation${totalSimulations !== 1 ? 's' : ''}\n\nAnything specific you'd like to dig into?`
     }
 
-    // Educational / tutoring queries
-    if (q.includes('what is') || q.includes('explain') || q.includes('teach') || q.includes('how does') || q.includes('define') || q.includes('tell me about') || q.includes('what are') || q.includes('why do') || q.includes('how do')) {
-      const topics: Record<string, string> = {
-        'p53': '**TP53 (p53)** is a tumor suppressor protein known as the "guardian of the genome." It activates DNA repair, arrests the cell cycle at G1/S checkpoint, and triggers apoptosis when DNA damage is irreparable. Mutations in TP53 are found in ~50% of all human cancers. Key downstream targets include p21 (cell cycle arrest), BAX (apoptosis), and MDM2 (negative feedback).',
-        'brca': '**BRCA1/BRCA2** are tumor suppressor genes critical for homologous recombination DNA repair. Germline mutations increase risk of breast (60-80%) and ovarian (20-40%) cancers. BRCA-deficient tumors are sensitive to PARP inhibitors (e.g., olaparib) due to synthetic lethality — they cannot repair double-strand breaks via alternative pathways.',
-        'crispr': '**CRISPR-Cas9** is a gene editing tool derived from bacterial immune systems. The guide RNA (gRNA) directs Cas9 nuclease to a specific genomic locus where it creates a double-strand break. The cell repairs this via NHEJ (creating knockouts) or HDR (precise edits with a donor template). Applications include gene therapy, functional genomics screens, and disease modeling.',
-        't-test': '**T-test** compares means between two groups. Use an **independent t-test** for two separate groups and a **paired t-test** for before/after measurements on the same subjects. Assumptions: normal distribution, equal variances (use Welch\'s if unequal). p < 0.05 suggests the means differ significantly. Report effect size (Cohen\'s d) alongside p-value.',
-        'anova': '**ANOVA (Analysis of Variance)** compares means across 3+ groups simultaneously. It tests whether at least one group mean differs from others. One-way ANOVA uses one factor; two-way uses two. If significant (p < 0.05), use post-hoc tests (Tukey, Bonferroni) to identify which groups differ. Assumptions: normality, homogeneity of variance, independence.',
-        'regression': '**Regression analysis** models the relationship between dependent and independent variables. **Linear regression** predicts a continuous outcome (Y = β₀ + β₁X + ε). **Logistic regression** predicts binary outcomes. Key metrics: R² (variance explained), p-values for coefficients, residual analysis for model fit.',
-        'pathway': '**Pathway enrichment analysis** identifies biological pathways overrepresented in your gene list. KEGG and Reactome are common databases. Input a gene list (e.g., differentially expressed genes), and the tool tests if any pathway has more genes than expected by chance (hypergeometric test). Significant pathways suggest biological processes involved in your condition.',
-        'gsea': '**GSEA (Gene Set Enrichment Analysis)** determines whether predefined gene sets show statistically significant, concordant differences between two biological states. Unlike pathway analysis, GSEA uses ALL genes ranked by expression change, not just significant ones. This captures subtle but coordinated changes.',
-        'survival': '**Survival analysis** (Kaplan-Meier) estimates time-to-event probabilities. The curve shows the probability of surviving past each time point. The log-rank test compares survival between groups. Cox proportional hazards regression identifies factors that influence survival. Censored data (subjects lost to follow-up) is handled natively.',
-        'hypothesis': 'A **scientific hypothesis** must be testable, falsifiable, and based on existing evidence. Structure: "If [independent variable] is [changed], then [dependent variable] will [predicted change] because [mechanism]." Start with a broad research question, review literature, identify gaps, then formulate a specific, mechanistic hypothesis.',
-        'biomarker': '**Biomarkers** are measurable indicators of biological processes, pathogenic processes, or treatment responses. Types: diagnostic (detect disease), prognostic (predict outcome), predictive (predict treatment response), pharmacodynamic (measure drug effect). Discovery typically involves comparing molecular profiles between groups and validating in independent cohorts.',
-        'apoptosis': '**Apoptosis** (programmed cell death) occurs via intrinsic (mitochondrial) or extrinsic (death receptor) pathways. Intrinsic: cellular stress → BAX/BAK pore formation → cytochrome c release → caspase-9 → caspase-3. Extrinsic: FAS/TRAIL ligand → death receptor → FADD → caspase-8 → caspase-3. Both converge on executioner caspases that dismantle the cell.',
-        'kinase': '**Kinases** are enzymes that transfer phosphate groups from ATP to target proteins (phosphorylation), regulating their activity. Major families: receptor tyrosine kinases (EGFR, HER2), serine/threonine kinases (RAF, AKT), and MAP kinases (ERK, JNK). Kinase inhibitors (imatinib, erlotinib) are major cancer therapeutics.',
-        'sample size': '**Sample size calculation** determines how many subjects you need. Key inputs: effect size (expected difference), significance level (α, typically 0.05), power (1-β, typically 0.80), and variability (SD). Formula for two-sample t-test: n = 2(Zα/2 + Zβ)²σ²/Δ². Underpowered studies risk missing real effects; overpowered studies waste resources.',
-      }
-
-      for (const [key, explanation] of Object.entries(topics)) {
-        if (q.includes(key)) {
-          return explanation + '\n\nWant me to explain further or connect this to your research?'
-        }
-      }
-
-      return 'Great question! I can teach you about many biomedical and research topics. Try asking about:\n\n- **Biology:** p53, BRCA, CRISPR, apoptosis, kinases, biomarkers\n- **Statistics:** t-tests, ANOVA, regression, survival analysis, sample size\n- **Genomics:** pathway analysis, GSEA, variant annotation\n- **Research methods:** hypothesis design, experimental controls, clinical trials\n\nI\'m currently in offline mode for detailed tutoring. When connected to the backend, I can provide comprehensive explanations on any topic. Try being specific — e.g., "What is p53?" or "Explain ANOVA"'
+    // --- Educational / tutoring queries ---
+    const topics: Record<string, string> = {
+      'p53': '**TP53 (p53)** is often called the "guardian of the genome." When DNA gets damaged, p53 steps in to either pause the cell cycle (via p21) so the cell can repair itself, or trigger apoptosis (via BAX) if the damage is too severe. It\'s mutated in about half of all human cancers, which is why it\'s such a huge research target.\n\nMDM2 keeps p53 in check through a negative feedback loop — it tags p53 for destruction. Many cancer therapies aim to disrupt this MDM2-p53 interaction to reactivate p53.',
+      'brca': '**BRCA1 and BRCA2** are essential for repairing double-strand DNA breaks through homologous recombination. When these genes are mutated (inherited mutations), cells can\'t properly fix their DNA, leading to genomic instability.\n\nThis dramatically increases cancer risk — particularly breast (60-80% lifetime risk) and ovarian (20-40%). The silver lining? BRCA-deficient tumors are vulnerable to **PARP inhibitors** like olaparib, which exploit synthetic lethality — blocking the backup repair pathway too.',
+      'crispr': '**CRISPR-Cas9** is a powerful gene editing tool borrowed from bacterial immune defense. Here\'s how it works:\n\n1. A **guide RNA** is designed to match your target DNA sequence\n2. The **Cas9 protein** follows the guide to the exact spot in the genome\n3. Cas9 cuts both DNA strands at that location\n4. The cell repairs the break — either by **NHEJ** (creating knockouts) or **HDR** (making precise edits with a template)\n\nIt\'s revolutionizing gene therapy, disease modeling, and functional genomics.',
+      'rett': '**Rett Syndrome** is a rare neurodevelopmental disorder caused primarily by mutations in the **MECP2** gene on the X chromosome. It predominantly affects girls (about 1 in 10,000-15,000 female births).\n\nChildren develop normally for 6-18 months, then begin losing motor and communication skills. Key features include repetitive hand movements, breathing irregularities, seizures, and intellectual disability.\n\nMECP2 encodes a protein that regulates gene expression by reading DNA methylation marks — without it, thousands of genes become dysregulated in the brain. Current research focuses on gene replacement therapy (AAV-MECP2), reactivating the silent X chromosome copy, and targeted downstream interventions.',
+      't-test': '**T-tests** are your go-to for comparing means between two groups. There are two main types:\n\n- **Independent t-test** — comparing two separate groups (e.g., treated vs. control)\n- **Paired t-test** — comparing before/after measurements on the same subjects\n\nKey assumptions: data should be roughly normally distributed, and variances should be similar (or use Welch\'s t-test if they\'re not). If p < 0.05, the difference is statistically significant — but always report **effect size** (Cohen\'s d) too, since p-values alone don\'t tell you how *big* the difference is.\n\nYou can run t-tests right here on the platform — go to **Statistics** in the sidebar!',
+      'anova': '**ANOVA** extends the t-test idea to 3+ groups. Instead of asking "are these two groups different?" it asks "is at least one of these groups different from the rest?"\n\n- **One-way ANOVA** — one grouping factor (e.g., 3 drug doses)\n- **Two-way ANOVA** — two factors (e.g., drug dose × gender)\n\nIf the overall ANOVA is significant, you need **post-hoc tests** (Tukey or Bonferroni) to figure out *which* groups differ.\n\nYou can run ANOVA directly in the **Statistics** section!',
+      'regression': '**Regression** models how one variable predicts another:\n\n- **Linear regression**: Y = β₀ + β₁X + error — predicts a continuous outcome\n- **Logistic regression**: predicts binary outcomes (yes/no, disease/healthy)\n- **Multiple regression**: multiple predictors simultaneously\n\nKey metrics to look at: **R²** (how much variance is explained), **p-values** (which predictors are significant), and **residual plots** (checking model assumptions).\n\nThe **Statistics** section has regression tools built in!',
+      'pathway': '**Pathway enrichment analysis** helps you understand the "bigger picture" of your gene list. Rather than looking at individual genes, it identifies which biological pathways have more of your genes than expected by chance.\n\nPopular databases: **KEGG** and **Reactome**. The analysis uses a hypergeometric test to find significantly enriched pathways.\n\nYou can run this directly in the **Genomics** section under Analysis!',
+      'gsea': '**GSEA** (Gene Set Enrichment Analysis) is different from standard pathway analysis because it uses your **entire ranked gene list**, not just the significant ones. This is powerful because it can detect subtle but coordinated changes that individual gene cutoffs might miss.\n\nThe output includes an enrichment score, normalized enrichment score (NES), and leading-edge genes that drive the enrichment signal.\n\nTry it out in the **Genomics** section!',
+      'survival': '**Survival analysis** studies time until an event occurs (death, relapse, response). The **Kaplan-Meier curve** visualizes the probability of "surviving" past each time point.\n\nKey tools:\n- **Log-rank test** — compares survival between groups\n- **Cox regression** — identifies factors that influence survival (hazard ratios)\n- **Censoring** — properly handles patients lost to follow-up\n\nRun survival analysis in the **Statistics** section!',
+      'hypothesis': 'A good scientific hypothesis follows this structure: "If [independent variable] is [changed], then [dependent variable] will [change] because [mechanism]."\n\nKey principles:\n1. It must be **testable** — you can design an experiment to test it\n2. It must be **falsifiable** — there must be possible outcomes that would disprove it\n3. It should be **mechanistic** — explaining *why*, not just *what*\n\nOr let the platform do it for you! Go to **Discovery** and enter a disease — the AI will generate novel, mechanistic hypotheses automatically.',
+      'biomarker': '**Biomarkers** are measurable indicators of biological states. There are several types:\n\n- **Diagnostic** — detect disease presence\n- **Prognostic** — predict disease outcome\n- **Predictive** — predict treatment response\n- **Pharmacodynamic** — measure drug effects\n\nDiscovery typically involves comparing molecular profiles between groups and validating candidates in independent cohorts. You can explore biomarker discovery in the **Genomics** section!',
+      'apoptosis': '**Apoptosis** is programmed cell death — the body\'s clean way of removing damaged or unnecessary cells. Two main pathways:\n\n**Intrinsic (mitochondrial):** Cellular stress → BAX/BAK form pores → cytochrome c released → caspase-9 → caspase-3\n\n**Extrinsic (death receptor):** FAS/TRAIL ligand binds receptor → FADD recruited → caspase-8 → caspase-3\n\nBoth pathways converge on executioner caspases (3, 6, 7) that systematically dismantle the cell. Cancer cells often find ways to evade apoptosis — restoring it is a major therapeutic strategy.',
+      'kinase': '**Kinases** are enzymes that add phosphate groups to proteins, acting as molecular switches. They\'re central to cell signaling:\n\n- **Receptor tyrosine kinases** (EGFR, HER2) — receive signals at the cell surface\n- **Serine/threonine kinases** (RAF, AKT) — relay signals internally\n- **MAP kinases** (ERK, JNK, p38) — control growth, stress response\n\nKinase inhibitors are blockbuster cancer drugs — imatinib (BCR-ABL), erlotinib (EGFR), and many more. You can model these pathways in the **Workbench**!',
+      'sample size': '**Sample size calculation** ensures your study has enough power to detect a real effect. Key inputs:\n\n- **Effect size** — how big a difference you expect\n- **Alpha** (α) — significance threshold, usually 0.05\n- **Power** (1-β) — probability of detecting a real effect, usually 0.80\n- **Variability** — standard deviation of your measurements\n\nUnderpowered studies waste resources and risk missing real effects. The **Statistics** section has a sample size calculator built in!',
     }
 
-    // Default: summarize platform state and offer tutoring
-    const summary: string[] = ['Here\'s your current research overview:']
-    summary.push(`- **${totalProjects}** projects`)
-    summary.push(`- **${totalHypotheses}** hypotheses`)
-    summary.push(`- **${totalPapers}** research papers`)
-    summary.push(`- **${totalSimulations}** simulations`)
+    for (const [key, explanation] of Object.entries(topics)) {
+      if (q.includes(key)) {
+        return explanation + '\n\nWant me to go deeper on any aspect of this, or connect it to something in your research?'
+      }
+    }
+
+    // Check for general educational intent even without matching a specific topic
+    if (/what is|explain|teach|how does|define|tell me about|what are|why do|how do|what('?s| is) the|describe/i.test(q)) {
+      return `That's a great question! I have built-in explanations for many topics — try asking about specific concepts like:\n\n- **Biology:** p53, BRCA, CRISPR, apoptosis, kinases, biomarkers, Rett syndrome\n- **Statistics:** t-tests, ANOVA, regression, survival analysis, sample size\n- **Genomics:** pathway analysis, GSEA, variant annotation\n- **Methods:** hypothesis design, experimental controls\n\nWhen the backend AI is connected, I can explain virtually anything in detail. For now, try one of the topics above!`
+    }
+
+    // --- Default: friendly, conversational response ---
     if (totalProjects === 0 && totalHypotheses === 0) {
-      summary.push('\nYour platform is empty right now. Start by creating a project and running a discovery!')
-    } else {
-      summary.push('\nTry asking about a specific disease, hypothesis, or project name.')
+      return 'Looks like you\'re just getting started — exciting! Here\'s how to begin:\n\n1. **Create a project** in the Projects section to organize your research\n2. **Run a discovery** — enter a disease in Discovery and let the AI generate hypotheses\n3. **Explore your results** — review hypotheses, generate papers, run simulations\n\nOr ask me anything — I\'m here to help you learn and navigate the platform!'
     }
-    summary.push('\nI\'m also your research tutor! Ask me to explain any biology concept, statistical method, or research technique.')
-    return summary.join('\n')
+
+    const responses = [
+      `I'm not sure I caught that, but I'd love to help! You can ask me to explain research concepts, search your data, or navigate the platform. For example, try "Explain CRISPR" or "Show me my projects."`,
+      `Hmm, could you rephrase that? I can help with:\n- Explaining biology, stats, or research methods\n- Finding things in your data (${totalHypotheses} hypotheses, ${totalProjects} projects)\n- Navigating any section of the platform`,
+      `I want to make sure I help you properly — could you be a bit more specific? I'm great at explaining concepts, searching your research data, and pointing you to the right tools on the platform.`,
+    ]
+    return responses[Math.floor(Math.random() * responses.length)]
   }
 
   const sendMessage = async () => {

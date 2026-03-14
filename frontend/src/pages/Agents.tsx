@@ -682,17 +682,15 @@ export default function Agents() {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              {projectId && projectId !== 'discovery' && (
-                <Link
-                  to={`/projects/${projectId}`}
-                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-[var(--color-border)] hover:bg-[var(--glass-bg-hover)] transition-all"
-                  style={{ color: 'var(--color-accent-blue)' }}
-                >
-                  <FiFolder className="w-3.5 h-3.5" />
-                  View in Project
-                  <FiExternalLink className="w-3 h-3" />
-                </Link>
-              )}
+              <Link
+                to="/projects"
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-[var(--color-border)] hover:bg-[var(--glass-bg-hover)] transition-all"
+                style={{ color: 'var(--color-accent-blue)' }}
+              >
+                <FiFolder className="w-3.5 h-3.5" />
+                All Projects
+                <FiExternalLink className="w-3 h-3" />
+              </Link>
               {isRunning && (
                 <span className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg" style={{ color: 'var(--color-success)', background: 'rgba(34, 197, 94, 0.08)' }}>
                   <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-success)] animate-pulse" /> Running
@@ -753,6 +751,19 @@ export default function Agents() {
             </div>
           ) : (
             <div className="space-y-2">
+              {(isRunning || isPaused) && projectId && projectId !== 'discovery' && (
+                <div className="flex items-center justify-center py-2">
+                  <Link
+                    to={`/projects/${projectId}`}
+                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-[var(--color-border)] hover:bg-[var(--glass-bg-hover)] transition-all"
+                    style={{ color: 'var(--color-accent-blue)' }}
+                  >
+                    <FiFolder className="w-3.5 h-3.5" />
+                    View This Project
+                    <FiExternalLink className="w-3 h-3" />
+                  </Link>
+                </div>
+              )}
               {sortedHypotheses.map(h => (
                 <button
                   key={h.id}
