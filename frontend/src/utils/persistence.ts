@@ -80,7 +80,8 @@ export function getActivityLog(): ActivityEntry[] {
 /**
  * Format a date string or Date to MM/DD/YYYY format.
  */
-export function formatDate(date: string | Date): string {
+export function formatDate(date: string | Date | undefined | null): string {
+  if (!date) return ''
   const d = typeof date === 'string' ? new Date(date) : date
   if (isNaN(d.getTime())) return ''
   const month = String(d.getMonth() + 1).padStart(2, '0')
@@ -92,7 +93,8 @@ export function formatDate(date: string | Date): string {
 /**
  * Format a date string or Date to MM/DD/YYYY with time (HH:MM AM/PM).
  */
-export function formatDateTime(date: string | Date): string {
+export function formatDateTime(date: string | Date | undefined | null): string {
+  if (!date) return ''
   const d = typeof date === 'string' ? new Date(date) : date
   if (isNaN(d.getTime())) return ''
   const dateStr = formatDate(d)
