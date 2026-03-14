@@ -275,6 +275,17 @@ export default function Search() {
     localStorage.setItem('humanovo-saved-searches', JSON.stringify(updated))
   }
 
+  const removeRecentSearch = (s: string) => {
+    const updated = recentSearches.filter(x => x !== s)
+    setRecentSearches(updated)
+    localStorage.setItem('humanovo-recent-searches', JSON.stringify(updated))
+  }
+
+  const clearRecentSearches = () => {
+    setRecentSearches([])
+    localStorage.removeItem('humanovo-recent-searches')
+  }
+
   const navigateToResult = (result: SearchResult) => {
     switch (result.type) {
       case 'project': navigate(`/projects/${result.id}`); break
@@ -416,14 +427,24 @@ export default function Search() {
             {/* Recent Searches */}
             {recentSearches.length > 0 && (
               <div>
-                <label className="text-xs text-[var(--color-text-muted)] mb-2 block flex items-center gap-1">
-                  <FiClock className="w-3 h-3" /> Recent
-                </label>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs text-[var(--color-text-muted)] flex items-center gap-1">
+                    <FiClock className="w-3 h-3" /> Recent
+                  </label>
+                  <button onClick={clearRecentSearches} className="text-[10px] text-[var(--color-text-muted)] hover:text-[var(--color-error)] transition-colors">
+                    Clear
+                  </button>
+                </div>
                 <div className="space-y-0.5">
                   {recentSearches.slice(0, 5).map(s => (
-                    <button key={s} onClick={() => { setQuery(s); handleSearch(s) }} className="w-full text-left text-xs px-3 py-1.5 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)] truncate">
-                      {s}
-                    </button>
+                    <div key={s} className="group flex items-center">
+                      <button onClick={() => { setQuery(s); handleSearch(s) }} className="flex-1 text-left text-xs px-3 py-1.5 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)] truncate">
+                        {s}
+                      </button>
+                      <button onClick={() => removeRecentSearch(s)} className="p-1 text-[var(--color-text-muted)] opacity-0 group-hover:opacity-100 hover:text-[var(--color-error)]">
+                        <FiX className="w-3 h-3" />
+                      </button>
+                    </div>
                   ))}
                 </div>
               </div>

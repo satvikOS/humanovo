@@ -45,6 +45,67 @@ function normalCDF(z: number): number {
   const y = 1 - ((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t * Math.exp(-z * z)
   return 0.5 * (1 + sign * y)
 }
+// Regularized lower incomplete gamma function P(a,x) — for chi-square and F-distribution CDF
+function gammainc(a: number, x: number): number {
+  if (x <= 0) return 0
+  if (x > a + 30) return 1 // converged
+  // Series expansion for P(a,x) = gamma(a,x) / Gamma(a)
+  let sum = 1 / a, term = 1 / a
+  for (let n = 1; n < 200; n++) {
+    term *= x / (a + n)
+    sum += term
+    if (Math.abs(term) < 1e-12 * Math.abs(sum)) break
+  }
+  return sum * Math.exp(-x + a * Math.log(x) - lgamma(a))
+}
+function lgamma(x: number): number {
+  // Lanczos approximation for log-gamma
+  const c = [76.18009172947146, -86.50532032941677, 24.01409824083091, -1.231739572450155, 0.001208650973866179, -5.395239384953e-06]
+  let y = x, tmp = x + 5.5
+  tmp -= (x + 0.5) * Math.log(tmp)
+  let ser = 1.000000000190015
+  for (let j = 0; j < 6; j++) ser += c[j] / ++y
+  return -tmp + Math.log(2.5066282746310005 * ser / x)
+}
+// Chi-square CDF: P(X <= x | df)
+function chiSquareCDF(x: number, df: number): number {
+  return gammainc(df / 2, x / 2)
+}
+// F-distribution CDF using regularized incomplete beta function approximation
+function fDistCDF(f: number, d1: number, d2: number): number {
+  if (f <= 0) return 0
+  // Convert F to chi-square approximation (Wilson-Hilferty)
+  const x = d1 * f / (d1 * f + d2)
+  return betainc(d1 / 2, d2 / 2, x)
+}
+function betainc(a: number, b: number, x: number): number {
+  if (x <= 0) return 0
+  if (x >= 1) return 1
+  // Continued fraction for regularized incomplete beta (Lentz method)
+  const lbeta = lgamma(a) + lgamma(b) - lgamma(a + b)
+  const front = Math.exp(Math.log(x) * a + Math.log(1 - x) * b - lbeta) / a
+  // Use continued fraction
+  let f_cf = 1, c = 1, d = 1 - (a + b) * x / (a + 1)
+  if (Math.abs(d) < 1e-30) d = 1e-30
+  d = 1 / d; f_cf = d
+  for (let m = 1; m <= 200; m++) {
+    // Even step
+    let num = m * (b - m) * x / ((a + 2 * m - 1) * (a + 2 * m))
+    d = 1 + num * d; if (Math.abs(d) < 1e-30) d = 1e-30; d = 1 / d
+    c = 1 + num / c; if (Math.abs(c) < 1e-30) c = 1e-30
+    f_cf *= d * c
+    // Odd step
+    num = -(a + m) * (a + b + m) * x / ((a + 2 * m) * (a + 2 * m + 1))
+    d = 1 + num * d; if (Math.abs(d) < 1e-30) d = 1e-30; d = 1 / d
+    c = 1 + num / c; if (Math.abs(c) < 1e-30) c = 1e-30
+    const delta = d * c; f_cf *= delta
+    if (Math.abs(delta - 1) < 1e-10) break
+  }
+  const result = front * f_cf
+  // If x > (a+1)/(a+b+2), use 1-I(b,a,1-x) for numerical stability
+  if (x > (a + 1) / (a + b + 2)) return Math.max(0, Math.min(1, 1 - betainc(b, a, 1 - x)))
+  return Math.max(0, Math.min(1, result))
+}
 
 function computeDescriptive(data: number[], label: string) {
   const sorted = [...data].sort((a, b) => a - b)
@@ -106,8 +167,8 @@ function computeANOVA(groups: number[][], labels: string[]) {
   const fStat = msBetween / msWithin
   return {
     test: 'One-way ANOVA', f_statistic: fStat, df_between: dfBetween, df_within: dfWithin,
-    p_value: fStat > 4 ? 0.01 : fStat > 3 ? 0.05 : 0.1,
-    significant: fStat > 3.84,
+    p_value: Math.max(1e-10, 1 - fDistCDF(fStat, dfBetween, dfWithin)),
+    significant: (1 - fDistCDF(fStat, dfBetween, dfWithin)) < 0.05,
     groups: groups.map((g, i) => ({ label: labels[i] || `Group ${i + 1}`, n: g.length, mean: mean(g), std: std(g) })),
     ss_between: ssBetween, ss_within: ssWithin, ms_between: msBetween, ms_within: msWithin,
   }
@@ -126,8 +187,8 @@ function computeChiSquare(observed: number[][], rowLabels: string[], colLabels: 
   const df = (observed.length - 1) * (observed[0].length - 1)
   return {
     test: 'Chi-square test', chi_square: chiSq, degrees_of_freedom: df,
-    p_value: chiSq > 6.63 ? 0.01 : chiSq > 3.84 ? 0.05 : 0.1,
-    significant: chiSq > 3.84,
+    p_value: Math.max(1e-10, 1 - chiSquareCDF(chiSq, df)),
+    significant: (1 - chiSquareCDF(chiSq, df)) < 0.05,
     observed, expected,
     row_labels: rowLabels, col_labels: colLabels,
     cramers_v: Math.sqrt(chiSq / (total * (Math.min(observed.length, observed[0].length) - 1))),

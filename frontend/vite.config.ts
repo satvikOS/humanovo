@@ -1,9 +1,13 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
+import { constantChatPlugin } from './vite-chat-plugin'
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    constantChatPlugin(),
+  ],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
@@ -12,10 +16,6 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: {
-      '/api': {
-        target: 'http://localhost:8000',
-        changeOrigin: true,
-      },
       '/ws': {
         target: 'ws://localhost:8000',
         ws: true,

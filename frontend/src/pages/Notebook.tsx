@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import {
   FiPlus, FiTrash2, FiSave, FiDownload, FiClock, FiTag,
   FiEdit3, FiEye, FiColumns, FiFileText,
@@ -1789,10 +1790,6 @@ export default function Notebook() {
 
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
-  const deletePage = (id: string) => {
-    setDeleteConfirmId(id)
-  }
-
   const confirmDeletePage = async () => {
     if (!deleteConfirmId) return
     const id = deleteConfirmId
@@ -1995,12 +1992,16 @@ export default function Notebook() {
               <div className="flex items-center justify-between">
                 <div className="w-1.5 h-1.5 rounded-full shrink-0 mr-1.5" style={{ background: TEMPLATE_CATEGORY_COLORS[getPageCategory(page)] || '#94a3b8' }} />
                 <span className="text-xs font-medium truncate flex-1">{page.title}</span>
-                <button
-                  onClick={e => { e.stopPropagation(); deletePage(page.id) }}
-                  className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-white/10 text-red-400"
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={e => { e.preventDefault(); e.stopPropagation(); setDeleteConfirmId(page.id) }}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.stopPropagation(); setDeleteConfirmId(page.id) } }}
+                  className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-500/20 text-red-400 cursor-pointer shrink-0 z-10"
+                  title="Delete page"
                 >
                   <FiTrash2 className="w-3 h-3" />
-                </button>
+                </div>
               </div>
               <div className="flex items-center gap-2 mt-0.5">
                 <span className="text-xxs text-[var(--color-text-muted)]">
@@ -2422,25 +2423,26 @@ export default function Notebook() {
       )}
       </div>
 
-      {/* Delete Confirmation Dialog */}
-      {deleteConfirmId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="glass-card p-6 max-w-sm mx-4 text-center" style={{ background: 'var(--color-surface-solid)' }}>
+      {/* Delete Confirmation Dialog - rendered via portal to avoid stacking context issues */}
+      {deleteConfirmId && createPortal(
+        <div className="fixed inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm" style={{ zIndex: 9999 }} onClick={() => setDeleteConfirmId(null)}>
+          <div className="p-6 max-w-sm mx-4 text-center rounded-xl border border-[var(--color-border)]" style={{ background: 'var(--color-surface-solid)', boxShadow: '0 25px 50px rgba(0,0,0,0.5)' }} onClick={e => e.stopPropagation()}>
             <FiTrash2 className="w-8 h-8 text-red-400 mx-auto mb-3" />
             <h3 className="text-lg font-semibold mb-2">Delete Notebook Page?</h3>
             <p className="text-sm text-[var(--color-text-muted)] mb-4">
               This will permanently delete this page and its content. This action cannot be undone.
             </p>
             <div className="flex gap-3 justify-center">
-              <button onClick={() => setDeleteConfirmId(null)} className="btn px-4 py-2 text-sm text-[var(--color-text-muted)]">
+              <button onClick={() => setDeleteConfirmId(null)} className="px-4 py-2 text-sm rounded-lg text-[var(--color-text-muted)] hover:bg-white/5 transition-colors">
                 Cancel
               </button>
-              <button onClick={confirmDeletePage} className="btn px-4 py-2 text-sm bg-red-500/10 text-red-400 hover:bg-red-500/20">
+              <button onClick={confirmDeletePage} className="px-4 py-2 text-sm rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors font-medium">
                 Delete Permanently
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )

@@ -1,4 +1,4 @@
-import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
+import { Outlet, NavLink, Link, useNavigate, useLocation } from 'react-router-dom'
 import { formatDateTime } from '../utils/persistence'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
@@ -700,15 +700,15 @@ if (path === '/clinical-trials') return 'Clinical Trials'
       {/* Sidebar */}
       <aside className="w-52 flex flex-col glass-sidebar">
         {/* Logo */}
-        <div className="h-12 flex items-center px-4 border-b border-[var(--color-border)]">
-          <div className="flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-lg bg-[var(--color-text)] flex items-center justify-center">
-              <span className="text-[var(--color-bg)] text-xl" style={{ fontFamily: "'Cormorant Garamond', serif", fontStyle: 'italic', fontWeight: 600, lineHeight: 1 }}>h</span>
+        <div className="h-14 flex items-center px-4 border-b border-[var(--color-border)]">
+          <Link to="/dashboard" className="flex items-center gap-2.5 no-underline hover:opacity-80 transition-opacity">
+            <div className="w-8 h-8 rounded-lg bg-[var(--color-text)] flex items-center justify-center">
+              <span className="text-[var(--color-bg)] text-2xl" style={{ fontFamily: "'Cormorant Garamond', serif", fontStyle: 'italic', fontWeight: 600, lineHeight: 1 }}>h</span>
             </div>
             <div className="flex flex-col">
-              <span className="text-lg text-[var(--color-text)] tracking-tight" style={{ fontFamily: "'Cormorant Garamond', serif", fontStyle: 'italic', fontWeight: 700, lineHeight: 1.2 }}>humanovo</span>
+              <span className="text-2xl text-[var(--color-text)] tracking-wide" style={{ fontFamily: "'Cormorant Garamond', serif", fontStyle: 'italic', fontWeight: 700, lineHeight: 1.2, letterSpacing: '0.04em' }}>humanovo</span>
             </div>
-          </div>
+          </Link>
         </div>
 
         {/* Main Navigation */}

@@ -14,7 +14,7 @@ import {
   FiChevronRight,
   FiCpu,
 } from 'react-icons/fi'
-import { AreaChart, Area, ResponsiveContainer } from 'recharts'
+import { AreaChart, Area, ResponsiveContainer, Tooltip } from 'recharts'
 import api from '../services/api'
 import type { Project } from '../services/api'
 import { persistGet, getActivityLog, type ActivityEntry } from '../utils/persistence'
@@ -61,6 +61,21 @@ function StatCard({ stat }: { stat: StatData }) {
                   <stop offset="95%" stopColor={stat.accentColor} stopOpacity={0} />
                 </linearGradient>
               </defs>
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: 'rgba(17, 17, 17, 0.95)',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  borderRadius: '8px',
+                  padding: '6px 10px',
+                  fontSize: '11px',
+                  color: '#fff',
+                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.4)',
+                }}
+                itemStyle={{ color: '#fff', fontSize: '11px' }}
+                labelStyle={{ color: 'rgba(255, 255, 255, 0.6)', fontSize: '10px', marginBottom: '2px' }}
+                cursor={{ stroke: stat.accentColor, strokeWidth: 1, strokeDasharray: '3 3' }}
+                formatter={(value: any) => [value ?? 0, 'Count']}
+              />
               <Area
                 type="monotone"
                 dataKey="value"
@@ -386,7 +401,7 @@ function buildChartData(activities: ActivityEntry[], type: string): Array<{ name
       const t = new Date(a.timestamp).getTime()
       return t >= dayStart.getTime() && t < dayEnd.getTime()
     }).length
-    const dayLabel = dayStart.toLocaleDateString('en-US', { weekday: 'short' })
+    const dayLabel = dayStart.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
     days.push({ name: dayLabel, value: count })
   }
   return days
