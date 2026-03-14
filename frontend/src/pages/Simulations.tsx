@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
-import { formatDateTime } from '../utils/persistence'
+import { formatDateTime, logActivity } from '../utils/persistence'
 import '@tanstack/react-query' // kept to preserve dependency
 import {
   FiActivity, FiPlay, FiPause, FiCheck, FiX, FiPlus,
@@ -415,6 +415,146 @@ function saveSimulations(sims: MCResult[]) {
   try {
     localStorage.setItem(LS_KEY, JSON.stringify(sims))
   } catch { /* quota exceeded - ignore */ }
+}
+
+// ── Unified Simulation History ──────────────────────────────────
+
+const EQ_HISTORY_KEY = 'humanovo-eq-plots'
+const COMP_HISTORY_KEY = 'humanovo-comp-runs'
+
+interface EqHistoryEntry { id: string; expr: string; xMin: number; xMax: number; createdAt: string }
+interface CompHistoryEntry { id: string; env: string; template: string; code: string; output: string; createdAt: string }
+
+function loadEqHistory(): EqHistoryEntry[] {
+  try { return JSON.parse(localStorage.getItem(EQ_HISTORY_KEY) || '[]') } catch { return [] }
+}
+function saveEqHistory(entries: EqHistoryEntry[]) {
+  try { localStorage.setItem(EQ_HISTORY_KEY, JSON.stringify(entries.slice(0, 50))) } catch {}
+}
+function loadCompHistory(): CompHistoryEntry[] {
+  try { return JSON.parse(localStorage.getItem(COMP_HISTORY_KEY) || '[]') } catch { return [] }
+}
+function saveCompHistory(entries: CompHistoryEntry[]) {
+  try { localStorage.setItem(COMP_HISTORY_KEY, JSON.stringify(entries.slice(0, 50))) } catch {}
+}
+
+function SimulationHistory() {
+  const mcSims = useMemo(() => loadSavedSimulations(), [])
+  const eqPlots = useMemo(() => loadEqHistory(), [])
+  const compRuns = useMemo(() => loadCompHistory(), [])
+  const [filter, setFilter] = useState<'all' | 'monte-carlo' | 'equation' | 'computational'>('all')
+
+  type UnifiedEntry = { id: string; type: 'monte-carlo' | 'equation' | 'computational'; title: string; subtitle: string; createdAt: string; stats?: string }
+
+  const allEntries = useMemo<UnifiedEntry[]>(() => {
+    const entries: UnifiedEntry[] = []
+    for (const mc of mcSims) {
+      const typeLabel = SIMULATION_TYPES.find(t => t.id === mc.simulationType)?.label || mc.simulationType
+      entries.push({
+        id: mc.id, type: 'monte-carlo', title: mc.name,
+        subtitle: `${typeLabel} · ${mc.iterations.toLocaleString()} iterations`,
+        createdAt: mc.createdAt,
+        stats: `μ=${mc.stats.mean.toFixed(2)}  σ=${mc.stats.std.toFixed(2)}  95% CI [${mc.stats.ci95Lower.toFixed(2)}, ${mc.stats.ci95Upper.toFixed(2)}]`,
+      })
+    }
+    for (const eq of eqPlots) {
+      entries.push({
+        id: eq.id, type: 'equation', title: `f(x) = ${eq.expr}`,
+        subtitle: `x ∈ [${eq.xMin}, ${eq.xMax}]`,
+        createdAt: eq.createdAt,
+      })
+    }
+    for (const cr of compRuns) {
+      entries.push({
+        id: cr.id, type: 'computational', title: cr.template || cr.env,
+        subtitle: `${cr.env} · ${cr.code.split('\n').length} lines`,
+        createdAt: cr.createdAt,
+      })
+    }
+    entries.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    return entries
+  }, [mcSims, eqPlots, compRuns])
+
+  const filtered = filter === 'all' ? allEntries : allEntries.filter(e => e.type === filter)
+
+  const typeIcon = (type: string) => {
+    if (type === 'monte-carlo') return <FiActivity className="w-3.5 h-3.5" />
+    if (type === 'equation') return <FiTrendingUp className="w-3.5 h-3.5" />
+    return <FiTerminal className="w-3.5 h-3.5" />
+  }
+  const typeColor = (type: string) => {
+    if (type === 'monte-carlo') return 'var(--color-accent-blue)'
+    if (type === 'equation') return 'var(--color-accent-green)'
+    return 'var(--color-accent-purple)'
+  }
+  const typeLabel = (type: string) => {
+    if (type === 'monte-carlo') return 'Monte Carlo'
+    if (type === 'equation') return 'Equation Plot'
+    return 'Computational Lab'
+  }
+
+  const formatTimeAgo = (ts: string) => {
+    const diff = Date.now() - new Date(ts).getTime()
+    const mins = Math.floor(diff / 60000)
+    if (mins < 1) return 'Just now'
+    if (mins < 60) return `${mins}m ago`
+    const hrs = Math.floor(mins / 60)
+    if (hrs < 24) return `${hrs}h ago`
+    const days = Math.floor(hrs / 24)
+    if (days < 30) return `${days}d ago`
+    return new Date(ts).toLocaleDateString()
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Filter bar */}
+      <div className="flex items-center gap-2">
+        {(['all', 'monte-carlo', 'equation', 'computational'] as const).map(f => (
+          <button
+            key={f}
+            onClick={() => setFilter(f)}
+            className={clsx(
+              'px-3 py-1.5 text-xs rounded-lg font-medium transition-all',
+              filter === f
+                ? 'bg-[var(--color-text)] text-[var(--color-bg)]'
+                : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)]'
+            )}
+          >
+            {f === 'all' ? `All (${allEntries.length})` : `${typeLabel(f)} (${allEntries.filter(e => e.type === f).length})`}
+          </button>
+        ))}
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="text-center py-16">
+          <FiDatabase className="w-10 h-10 text-[var(--color-text-muted)] mx-auto mb-3 opacity-30" />
+          <h3 className="text-base font-medium text-[var(--color-text)] mb-1">No history yet</h3>
+          <p className="text-sm text-[var(--color-text-muted)]">Run simulations, plot equations, or execute code to see history here.</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {filtered.map(entry => (
+            <div key={entry.id} className="glass-card p-4 flex items-start gap-3 hover:bg-[var(--glass-bg)] transition-all">
+              <div className="p-2 rounded-lg flex-shrink-0" style={{ background: `color-mix(in srgb, ${typeColor(entry.type)} 12%, transparent)` }}>
+                <span style={{ color: typeColor(entry.type) }}>{typeIcon(entry.type)}</span>
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-0.5">
+                  <span className="text-sm font-medium text-[var(--color-text)] truncate">{entry.title}</span>
+                  <span className="text-xxs px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ color: typeColor(entry.type), background: `color-mix(in srgb, ${typeColor(entry.type)} 12%, transparent)` }}>
+                    {typeLabel(entry.type)}
+                  </span>
+                </div>
+                <p className="text-xs text-[var(--color-text-muted)]">{entry.subtitle}</p>
+                {entry.stats && <p className="text-xxs text-[var(--color-text-muted)] mt-1 font-mono">{entry.stats}</p>}
+              </div>
+              <span className="text-xxs text-[var(--color-text-muted)] flex-shrink-0 whitespace-nowrap">{formatTimeAgo(entry.createdAt)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 // ── MC Simulation Form ──────────────────────────────────────────
@@ -1993,6 +2133,11 @@ function EquationPlotter() {
         const next = [{ expr: equationExpr, data }, ...prev.filter(h => h.expr !== equationExpr)]
         return next.slice(0, 10)
       })
+      // Persist to history
+      const entry: EqHistoryEntry = { id: crypto.randomUUID(), expr: equationExpr, xMin, xMax, createdAt: new Date().toISOString() }
+      const prev = loadEqHistory().filter(e => e.expr !== equationExpr)
+      saveEqHistory([entry, ...prev])
+      logActivity({ type: 'simulation', action: 'created', title: `Equation plot: ${equationExpr}` })
     }
   }, [equationExpr, xMin, xMax])
 
@@ -2401,8 +2546,17 @@ function ComputationalLab() {
       parseOutputForViz(out)
     } finally {
       setIsRunning(false)
+      // Persist to history
+      const entry: CompHistoryEntry = {
+        id: crypto.randomUUID(), env: selectedEnv,
+        template: selectedTemplate?.name || 'Custom', code,
+        output: '', createdAt: new Date().toISOString(),
+      }
+      const prev = loadCompHistory()
+      saveCompHistory([entry, ...prev])
+      logActivity({ type: 'simulation', action: 'created', title: `Comp Lab: ${selectedTemplate?.name || selectedEnv}` })
     }
-  }, [code, selectedEnv, isRunning, parseOutputForViz])
+  }, [code, selectedEnv, selectedTemplate, isRunning, parseOutputForViz])
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -2739,7 +2893,7 @@ function simulateOutput(code: string, env: ComputeEnv): string {
 // ── Main Simulations Page ───────────────────────────────────────
 export default function Simulations() {
   const [showCreate, setShowCreate] = useState(false)
-  const [activeTab, setActiveTab] = useState<'simulations' | 'computational-lab' | 'equation-plotter'>('simulations')
+  const [activeTab, setActiveTab] = useState<'simulations' | 'computational-lab' | 'equation-plotter' | 'history'>('simulations')
   const [mcSimulations, setMcSimulations] = useState<MCResult[]>(() => loadSavedSimulations())
 
   // Persist to localStorage whenever simulations change
@@ -2750,6 +2904,7 @@ export default function Simulations() {
   const handleNewResult = (result: MCResult) => {
     setMcSimulations(prev => [result, ...prev])
     setShowCreate(false)
+    logActivity({ type: 'simulation', action: 'created', title: result.name })
   }
 
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
@@ -2824,6 +2979,18 @@ export default function Simulations() {
           <FiCpu className="w-4 h-4 inline mr-2" />
           Equation Plotter
         </button>
+        <button
+          onClick={() => setActiveTab('history')}
+          className={clsx(
+            'px-4 py-2.5 text-sm font-medium transition-all border-b-2 -mb-px',
+            activeTab === 'history'
+              ? 'border-[var(--color-text)] text-[var(--color-text)]'
+              : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
+          )}
+        >
+          <FiDatabase className="w-4 h-4 inline mr-2" />
+          History
+        </button>
       </div>
 
       {/* Content */}
@@ -2856,6 +3023,8 @@ export default function Simulations() {
         {activeTab === 'computational-lab' && <ComputationalLab />}
 
         {activeTab === 'equation-plotter' && <EquationPlotter />}
+
+        {activeTab === 'history' && <SimulationHistory />}
       </div>
 
       {/* Delete Confirmation Dialog */}

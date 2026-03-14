@@ -108,18 +108,20 @@ interface SimulationSummary {
 
 const SIM_TYPE_LABELS: Record<string, string> = {
   clinical_outcome: 'Clinical',
-  drug_efficacy: 'Drug Efficacy',
-  biomarker: 'Biomarker',
-  pathway: 'Pathway',
-  population: 'Population',
+  epidemiological: 'Epidemiological',
+  dose_response: 'Dose Response',
+  pathway_dynamics: 'Pathway Dynamics',
+  drug_interaction: 'Drug Interaction',
+  survival_analysis: 'Survival Analysis',
 }
 
 const SIM_TYPE_COLORS: Record<string, string> = {
   clinical_outcome: 'var(--color-accent-green)',
-  drug_efficacy: 'var(--color-accent-blue)',
-  biomarker: 'var(--color-accent-purple)',
-  pathway: 'var(--color-accent-orange)',
-  population: 'var(--color-accent-cyan)',
+  epidemiological: 'var(--color-accent-blue)',
+  dose_response: 'var(--color-accent-purple)',
+  pathway_dynamics: 'var(--color-accent-orange)',
+  drug_interaction: 'var(--color-accent-cyan)',
+  survival_analysis: '#ef4444',
 }
 
 function formatTimeAgo(ts: string) {
@@ -497,7 +499,24 @@ export default function Dashboard() {
       label: 'Simulations', value: localSimulations.length,
       change: computeChangePercent(allActivities, 'simulation'),
       icon: FiActivity, accentColor: '#3b82f6', href: '/simulations',
-      chartData: buildChartData(allActivities, 'simulation'),
+      chartData: (() => {
+        // Build chart from actual simulation timestamps in localStorage
+        const now = new Date()
+        const days: Array<{ name: string; value: number }> = []
+        for (let i = 6; i >= 0; i--) {
+          const dayStart = new Date(now)
+          dayStart.setDate(dayStart.getDate() - i)
+          dayStart.setHours(0, 0, 0, 0)
+          const dayEnd = new Date(dayStart)
+          dayEnd.setDate(dayEnd.getDate() + 1)
+          const count = localSimulations.filter((s: any) => {
+            const t = new Date(s.createdAt).getTime()
+            return t >= dayStart.getTime() && t < dayEnd.getTime()
+          }).length
+          days.push({ name: dayStart.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }), value: count })
+        }
+        return days
+      })(),
     },
   ]
 

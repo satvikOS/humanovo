@@ -3076,7 +3076,7 @@ User question: {message}"""
             try:
                 import json as json_mod
                 bedrock_response = bedrock_runtime.invoke_model(
-                    modelId=BEDROCK_MODEL_ID,
+                    modelId=BEDROCK_MODEL_CLAUDE_OPUS,
                     contentType="application/json",
                     accept="application/json",
                     body=json_mod.dumps({

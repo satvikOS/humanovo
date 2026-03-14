@@ -1,4 +1,4 @@
-import { Outlet, NavLink, Link, useNavigate, useLocation } from 'react-router-dom'
+import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { formatDateTime } from '../utils/persistence'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
@@ -234,12 +234,14 @@ function ConstantChat() {
   ])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [streamingText, setStreamingText] = useState('')
+  const [isStreaming, setIsStreaming] = useState(false)
   const chatEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, loading])
+  }, [messages, loading, streamingText])
 
   const getLocalContext = () => {
     try {
@@ -488,7 +490,8 @@ function ConstantChat() {
     setMessages(prev => [...prev, { role: 'user', text: userMsg }])
     setLoading(true)
 
-    // Call the backend AI endpoint (routes to FastAPI → Bedrock Claude)
+    // Call the backend AI endpoint (routes to API Gateway → Lambda → Bedrock Claude)
+    let fullResponse = ''
     try {
       const platformContext = getLocalContext()
       const res = await fetch('/api/v1/orchestrator/chat', {
@@ -498,17 +501,25 @@ function ConstantChat() {
       })
       if (res.ok) {
         const data = await res.json()
-        setMessages(prev => [...prev, { role: 'assistant', text: data.response || 'I\'m not sure about that. Could you rephrase?' }])
+        fullResponse = data.response || 'I\'m not sure about that. Could you rephrase?'
       } else {
-        // API returned error — smart fallback using platform data
-        setMessages(prev => [...prev, { role: 'assistant', text: generateSmartFallbackResponse(userMsg) }])
+        fullResponse = generateSmartFallbackResponse(userMsg)
       }
     } catch {
-      // API unreachable — smart fallback using platform data
-      setMessages(prev => [...prev, { role: 'assistant', text: generateSmartFallbackResponse(userMsg) }])
-    } finally {
-      setLoading(false)
+      fullResponse = generateSmartFallbackResponse(userMsg)
     }
+    // Stream the response character-by-character for a real-time feel
+    setLoading(false)
+    setIsStreaming(true)
+    setStreamingText('')
+    const chunkSize = 3
+    for (let i = 0; i < fullResponse.length; i += chunkSize) {
+      await new Promise(r => setTimeout(r, 12))
+      setStreamingText(fullResponse.slice(0, i + chunkSize))
+    }
+    setStreamingText('')
+    setIsStreaming(false)
+    setMessages(prev => [...prev, { role: 'assistant', text: fullResponse }])
   }
 
   const modal = isOpen ? createPortal(
@@ -558,6 +569,14 @@ function ConstantChat() {
               </div>
             </div>
           )}
+          {isStreaming && streamingText && (
+            <div className="flex justify-start">
+              <div className="max-w-[80%] px-4 py-3 rounded-2xl rounded-tl-md bg-[var(--glass-bg)] text-[var(--color-text-secondary)] text-sm leading-relaxed">
+                <span className="text-[var(--color-accent-purple)] font-medium text-xs block mb-1">Constant</span>
+                {streamingText}<span className="inline-block w-0.5 h-4 bg-[var(--color-accent-purple)] ml-0.5 animate-pulse align-text-bottom" />
+              </div>
+            </div>
+          )}
           <div ref={chatEndRef} />
         </div>
 
@@ -575,7 +594,7 @@ function ConstantChat() {
             />
             <button
               onClick={sendMessage}
-              disabled={!input.trim() || loading}
+              disabled={!input.trim() || loading || isStreaming}
               className="p-2 rounded-lg text-white disabled:opacity-30 transition-all"
               style={{ background: 'var(--color-accent-purple)' }}
             >
@@ -701,14 +720,14 @@ if (path === '/clinical-trials') return 'Clinical Trials'
       <aside className="w-52 flex flex-col glass-sidebar">
         {/* Logo */}
         <div className="h-14 flex items-center px-4 border-b border-[var(--color-border)]">
-          <Link to="/dashboard" className="flex items-center gap-2.5 no-underline hover:opacity-80 transition-opacity">
+          <a href="/dashboard" onClick={(e) => { e.preventDefault(); window.location.href = '/dashboard' }} className="flex items-center gap-2.5 no-underline hover:opacity-80 transition-opacity cursor-pointer">
             <div className="w-8 h-8 rounded-lg bg-[var(--color-text)] flex items-center justify-center">
               <span className="text-[var(--color-bg)] text-2xl" style={{ fontFamily: "'Cormorant Garamond', serif", fontStyle: 'italic', fontWeight: 600, lineHeight: 1 }}>h</span>
             </div>
             <div className="flex flex-col">
               <span className="text-2xl text-[var(--color-text)] tracking-wide" style={{ fontFamily: "'Cormorant Garamond', serif", fontStyle: 'italic', fontWeight: 700, lineHeight: 1.2, letterSpacing: '0.04em' }}>humanovo</span>
             </div>
-          </Link>
+          </a>
         </div>
 
         {/* Main Navigation */}
