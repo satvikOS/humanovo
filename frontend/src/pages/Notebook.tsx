@@ -1639,7 +1639,7 @@ export default function Notebook() {
       const apiIds = new Set(apiItems.map(p => p.id))
       const localOnly = cachedPages.filter(p => !apiIds.has(p.id))
       const merged = [...apiItems, ...localOnly]
-      merged.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+      merged.sort((a, b) => (new Date(b.updated_at || b.created_at || 0).getTime()) - (new Date(a.updated_at || a.created_at || 0).getTime()))
 
       if (merged.length > 0) {
         setPages(merged)
