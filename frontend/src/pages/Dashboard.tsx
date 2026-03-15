@@ -208,30 +208,17 @@ function RecentNotebooksWidget() {
   const [notebooks, setNotebooks] = useState<NotebookSummary[]>([])
 
   useEffect(() => {
-    const fetchNotebooks = async () => {
-      try {
-        // Get locally persisted notebooks
-        const cachedPages = persistGet<any[]>('notebook-pages', [])
-        let apiPages: any[] = []
-        try {
-          const res = await api.getNotebookPages({ page_size: 4 })
-          apiPages = res?.items || []
-        } catch {
-          // API unavailable
-        }
-        // Merge: API pages + local-only pages
-        const apiIds = new Set(apiPages.map((p: any) => p.id))
-        const localOnly = cachedPages.filter((p: any) => !apiIds.has(p.id))
-        const merged = [...apiPages, ...localOnly]
-        merged.sort((a: any, b: any) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
-        setNotebooks(merged.slice(0, 4).map((p: any) => ({ id: p.id, title: p.title, updated_at: p.updated_at, tags: p.tags || [] })))
-      } catch {
-        // Fallback to cached only
-        const cachedPages = persistGet<any[]>('notebook-pages', [])
-        setNotebooks(cachedPages.slice(0, 4).map((p: any) => ({ id: p.id, title: p.title, updated_at: p.updated_at, tags: p.tags || [] })))
-      }
-    }
-    fetchNotebooks()
+    // Read from new per-page notebook index (notebook-index key stores PageMeta[])
+    const pageIndex = persistGet<any[]>('notebook-index', [])
+    const sorted = [...pageIndex].sort((a, b) =>
+      new Date(b.updatedAt || b.updated_at || 0).getTime() - new Date(a.updatedAt || a.updated_at || 0).getTime()
+    )
+    setNotebooks(sorted.slice(0, 4).map((p: any) => ({
+      id: p.id,
+      title: p.title,
+      updated_at: p.updatedAt || p.updated_at || p.createdAt || '',
+      tags: p.tags || [],
+    })))
   }, [])
 
   return (
@@ -329,8 +316,8 @@ function ActivityFeed() {
   }
 
   return (
-    <div className="glass-card p-5">
-      <div className="flex items-center justify-between mb-4">
+    <div className="glass-card p-5 h-full flex flex-col">
+      <div className="flex items-center justify-between mb-4 shrink-0">
         <h3 className="text-sm font-medium">Recent Activity</h3>
         <Link to="/timeline" className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] flex items-center gap-1 transition-colors">
           <FiClock className="w-3 h-3" />
@@ -338,13 +325,13 @@ function ActivityFeed() {
         </Link>
       </div>
       {activities.length === 0 ? (
-        <div className="text-center py-8 text-[var(--color-text-muted)]">
+        <div className="text-center py-8 text-[var(--color-text-muted)] flex-1 flex flex-col items-center justify-center">
           <FiClock className="w-6 h-6 mx-auto mb-2 opacity-40" />
           <p className="text-sm">No recent activity</p>
           <p className="text-xs mt-1">Start a discovery or create a project</p>
         </div>
       ) : (
-        <div className="space-y-0">
+        <div className="space-y-0 flex-1 overflow-y-auto">
           {activities.map((activity) => {
             const Icon = typeIcons[activity.type] || FiActivity
             const color = typeColors[activity.type] || 'var(--color-text-muted)'
@@ -560,9 +547,9 @@ export default function Dashboard() {
 
       {/* Main Content */}
       <div className="grid grid-cols-3 gap-4">
-        {/* Activity Feed - spans 2 cols */}
-        <div className="col-span-2">
-          <ActivityFeed />
+        {/* Activity Feed - spans 2 cols, stretch to match right column */}
+        <div className="col-span-2 flex flex-col">
+          <div className="flex-1"><ActivityFeed /></div>
         </div>
 
         {/* Recent Simulations + Notebooks — fill height equally */}

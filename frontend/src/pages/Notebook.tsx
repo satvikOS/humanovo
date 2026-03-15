@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import {
-  FiPlus, FiTrash2, FiSave, FiDownload, FiSearch,
+  FiPlus, FiTrash2, FiSave, FiSearch,
   FiFileText, FiX, FiGrid, FiList, FiPrinter,
   FiBookOpen, FiCode, FiActivity, FiClipboard,
   FiTarget, FiTag,
@@ -23,16 +23,19 @@ import Typography from '@tiptap/extension-typography'
 import Color from '@tiptap/extension-color'
 import { TextStyle } from '@tiptap/extension-text-style'
 import HorizontalRule from '@tiptap/extension-horizontal-rule'
-import { persistGet, persistSet, persistRemove } from '../utils/persistence'
+import { persistGet, persistSet, persistRemove, logActivity } from '../utils/persistence'
 
 // ═══════════════════════════════════════════════════════════════
 // Types
 // ═══════════════════════════════════════════════════════════════
 
+type ImportanceLevel = 'low' | 'medium' | 'high' | 'critical'
+
 interface PageMeta {
   id: string
   title: string
   category: TemplateCategory
+  importance: ImportanceLevel
   tags: string[]
   createdAt: string
   updatedAt: string
@@ -72,6 +75,20 @@ const CATEGORY_LABELS: Record<TemplateCategory, string> = {
   analysis: 'Analysis',
   collaboration: 'Collaboration',
   publication: 'Publication',
+}
+
+const IMPORTANCE_COLORS: Record<ImportanceLevel, string> = {
+  low: '#94a3b8',
+  medium: '#3b82f6',
+  high: '#f59e0b',
+  critical: '#ef4444',
+}
+
+const IMPORTANCE_LABELS: Record<ImportanceLevel, string> = {
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+  critical: 'Critical',
 }
 
 // Key for the page index (list of PageMeta). Each page's content is stored separately.
@@ -401,6 +418,7 @@ function getGettingStartedPage(): { meta: PageMeta; data: PageData } {
       id: 'getting-started',
       title: 'Getting Started',
       category: 'general',
+      importance: 'medium' as ImportanceLevel,
       tags: ['welcome'],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -537,11 +555,6 @@ function exportPrint(title: string, html: string) {
   win.onload = () => win.print()
 }
 
-function exportPdf(title: string, html: string) {
-  // Use print dialog with "Save as PDF" option
-  exportPrint(title, html)
-}
-
 function exportDocx(title: string, html: string) {
   // Export as Word-compatible HTML (.doc) — opens natively in MS Word / Google Docs / LibreOffice
   const fullHtml = getEditorHtmlDocument(title, html)
@@ -589,6 +602,10 @@ export default function Notebook() {
   const [searchQuery, setSearchQuery] = useState('')
   const [sidebarView, setSidebarView] = useState<'list' | 'grid'>('list')
   const [showTemplates, setShowTemplates] = useState(false)
+  const [pendingTemplate, setPendingTemplate] = useState<PageTemplate | null>(null)
+  const [newPageTitle, setNewPageTitle] = useState('')
+  const [newPageImportance, setNewPageImportance] = useState<'low' | 'medium' | 'high' | 'critical'>('medium')
+  const [newPageTags, setNewPageTags] = useState('')
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
   const [editTitle, setEditTitle] = useState('')
   const [tagInput, setTagInput] = useState('')
@@ -725,37 +742,52 @@ export default function Notebook() {
     setActivePageId(id)
   }, [activePageId, editor])
 
-  // Create page from template
-  const createPage = useCallback((template: PageTemplate, customTitle?: string) => {
+  // Open pre-fillout form after selecting a template
+  const handleTemplateSelect = useCallback((template: PageTemplate) => {
+    setPendingTemplate(template)
+    setNewPageTitle(template.name)
+    setNewPageImportance('medium')
+    setNewPageTags('')
+    setShowTemplates(false)
+  }, [])
+
+  // Create page from template with form data
+  const createPage = useCallback(() => {
+    if (!pendingTemplate) return
     const id = generateId()
-    const title = customTitle || template.name
+    const title = newPageTitle.trim() || pendingTemplate.name
+    const tags = newPageTags.split(',').map(t => t.trim()).filter(Boolean)
     const meta: PageMeta = {
       id,
       title,
-      category: template.category,
-      tags: [],
+      category: pendingTemplate.category,
+      importance: newPageImportance,
+      tags,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }
     // Save content to its own key
-    savePageData(id, { html: template.html })
+    savePageData(id, { html: pendingTemplate.html })
     // Update index
     const newIndex = [meta, ...pageIndex]
     saveIndex(newIndex)
     setPageIndex(newIndex)
-    setShowTemplates(false)
+    setPendingTemplate(null)
+    // Log to activity timeline
+    logActivity({ type: 'notebook', action: 'created', title: `Created notebook: ${title}` })
     // Switch to new page
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null }
     if (activePageId && editor && !editor.isDestroyed) {
       savePageData(activePageId, { html: editor.getHTML() })
     }
     setActivePageId(id)
-  }, [pageIndex, activePageId, editor])
+  }, [pendingTemplate, newPageTitle, newPageImportance, newPageTags, pageIndex, activePageId, editor])
 
   // Delete page
   const confirmDelete = useCallback(() => {
     if (!deleteConfirmId) return
     const pid = deleteConfirmId
+    const deletedMeta = pageIndex.find(p => p.id === pid)
     setDeleteConfirmId(null)
     // Cancel pending auto-save
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null }
@@ -765,6 +797,8 @@ export default function Notebook() {
     const newIndex = pageIndex.filter(p => p.id !== pid)
     saveIndex(newIndex)
     setPageIndex(newIndex)
+    // Log to activity timeline
+    logActivity({ type: 'notebook', action: 'deleted', title: `Deleted notebook: ${deletedMeta?.title || 'Untitled'}` })
     // If deleted page was active, switch
     if (activePageId === pid) {
       setActivePageId(newIndex.length > 0 ? newIndex[0].id : null)
@@ -889,6 +923,12 @@ export default function Notebook() {
                         background: (CATEGORY_COLORS[page.category] || '#94a3b8') + '20',
                         color: CATEGORY_COLORS[page.category] || '#94a3b8',
                       }}>{CATEGORY_LABELS[page.category]}</span>
+                      {page.importance && page.importance !== 'medium' && (
+                        <span className="text-xxs px-1 py-0.5 rounded" style={{
+                          background: (IMPORTANCE_COLORS[page.importance] || '#94a3b8') + '15',
+                          color: IMPORTANCE_COLORS[page.importance] || '#94a3b8',
+                        }}>{IMPORTANCE_LABELS[page.importance]}</span>
+                      )}
                       <span className="text-xxs text-[var(--color-text-muted)]">{formatDate(page.updatedAt)}</span>
                     </div>
                   </div>
@@ -929,9 +969,6 @@ export default function Notebook() {
                   placeholder="Page title..."
                 />
                 <div className="flex items-center gap-1">
-                  <button onClick={() => exportPdf(editTitle, editor?.getHTML() || '')} className="p-1.5 rounded hover:bg-white/5 text-[var(--color-text-muted)] hover:text-white" title="Export PDF">
-                    <FiDownload className="w-3.5 h-3.5" />
-                  </button>
                   <button onClick={() => exportDocx(editTitle, editor?.getHTML() || '')} className="px-2 py-1 rounded hover:bg-white/5 text-[var(--color-text-muted)] hover:text-white text-xxs" title="Export Word">
                     .doc
                   </button>
@@ -1011,7 +1048,7 @@ export default function Notebook() {
       {/* ── Delete Confirmation Dialog (Simulations-style) ── */}
       {deleteConfirmId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="glass-card p-6 max-w-sm mx-4 text-center" style={{ background: 'var(--color-surface-solid)' }}>
+          <div className="glass-card-static p-6 max-w-sm mx-4 text-center" style={{ background: 'var(--glass-bg)', backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)', boxShadow: 'var(--glass-shadow)' }}>
             <FiTrash2 className="w-8 h-8 text-red-400 mx-auto mb-3" />
             <h3 className="text-lg font-semibold mb-2">Delete Page?</h3>
             <p className="text-sm text-[var(--color-text-muted)] mb-4">
@@ -1033,13 +1070,13 @@ export default function Notebook() {
       {showTemplates && (
         <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowTemplates(false)}>
           <div
-            className="max-w-2xl w-full mx-4 max-h-[80vh] flex flex-col rounded-xl border border-white/10"
-            style={{ background: '#1a1a2e', boxShadow: '0 25px 50px rgba(0,0,0,0.5)', color: '#e2e8f0' }}
+            className="glass-card-static max-w-2xl w-full mx-4 max-h-[80vh] flex flex-col"
+            style={{ backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)', boxShadow: 'var(--glass-shadow)' }}
             onClick={e => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between p-4 border-b border-white/10 shrink-0">
+            <div className="flex items-center justify-between p-4 border-b border-[var(--glass-border)] shrink-0">
               <h2 className="text-sm font-semibold">Choose a Template</h2>
-              <button onClick={() => setShowTemplates(false)} className="p-1 rounded hover:bg-white/10" style={{ background: 'transparent', border: 'none', color: '#94a3b8' }}>
+              <button onClick={() => setShowTemplates(false)} className="p-1 rounded hover:bg-[var(--glass-bg-hover)] text-[var(--color-text-muted)]">
                 <FiX className="w-4 h-4" />
               </button>
             </div>
@@ -1059,15 +1096,15 @@ export default function Notebook() {
                       {catTemplates.map(tmpl => (
                         <button
                           key={tmpl.name}
-                          onClick={() => createPage(tmpl)}
-                          className="flex items-start gap-3 p-3 rounded-lg border border-white/5 hover:border-white/20 hover:bg-white/5 text-left transition-colors"
+                          onClick={() => handleTemplateSelect(tmpl)}
+                          className="flex items-start gap-3 p-3 rounded-lg border border-[var(--glass-border)] hover:border-[var(--color-border-strong)] hover:bg-[var(--glass-bg-hover)] text-left transition-colors"
                         >
                           <div className="p-1.5 rounded" style={{ background: CATEGORY_COLORS[cat] + '20', color: CATEGORY_COLORS[cat] }}>
                             {tmpl.icon}
                           </div>
                           <div className="min-w-0">
                             <div className="text-sm font-medium">{tmpl.name}</div>
-                            <div className="text-xxs text-[#94a3b8] mt-0.5">{tmpl.description}</div>
+                            <div className="text-xxs text-[var(--color-text-muted)] mt-0.5">{tmpl.description}</div>
                           </div>
                         </button>
                       ))}
@@ -1075,6 +1112,92 @@ export default function Notebook() {
                   </div>
                 )
               })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Pre-fillout Form Modal ── */}
+      {pendingTemplate && (
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setPendingTemplate(null)}>
+          <div
+            className="glass-card-static max-w-md w-full mx-4 flex flex-col"
+            style={{ backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)', boxShadow: 'var(--glass-shadow)' }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-4 border-b border-[var(--glass-border)]">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 rounded" style={{ background: CATEGORY_COLORS[pendingTemplate.category] + '20', color: CATEGORY_COLORS[pendingTemplate.category] }}>
+                  {pendingTemplate.icon}
+                </div>
+                <div>
+                  <h2 className="text-sm font-semibold">New {pendingTemplate.name}</h2>
+                  <p className="text-xxs text-[var(--color-text-muted)]">{pendingTemplate.description}</p>
+                </div>
+              </div>
+              <button onClick={() => setPendingTemplate(null)} className="p-1 rounded hover:bg-[var(--glass-bg-hover)] text-[var(--color-text-muted)]">
+                <FiX className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-4 space-y-4">
+              <div>
+                <label className="block text-xs font-medium mb-1.5 text-[var(--color-text-secondary)]">Title</label>
+                <input
+                  type="text"
+                  value={newPageTitle}
+                  onChange={e => setNewPageTitle(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && createPage()}
+                  className="input w-full"
+                  placeholder="Enter page title..."
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium mb-1.5 text-[var(--color-text-secondary)]">Importance</label>
+                <div className="flex gap-2">
+                  {(Object.keys(IMPORTANCE_LABELS) as ImportanceLevel[]).map(level => (
+                    <button
+                      key={level}
+                      onClick={() => setNewPageImportance(level)}
+                      className={clsx(
+                        'flex-1 py-1.5 px-2 rounded-lg text-xs font-medium border transition-colors',
+                        newPageImportance === level
+                          ? 'border-current'
+                          : 'border-[var(--glass-border)] hover:border-[var(--color-border-strong)]'
+                      )}
+                      style={{
+                        color: IMPORTANCE_COLORS[level],
+                        background: newPageImportance === level ? IMPORTANCE_COLORS[level] + '15' : 'transparent',
+                      }}
+                    >
+                      {IMPORTANCE_LABELS[level]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium mb-1.5 text-[var(--color-text-secondary)]">Tags <span className="text-[var(--color-text-muted)] font-normal">(comma-separated)</span></label>
+                <input
+                  type="text"
+                  value={newPageTags}
+                  onChange={e => setNewPageTags(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && createPage()}
+                  className="input w-full"
+                  placeholder="e.g. oncology, phase-2, biomarker"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 p-4 border-t border-[var(--glass-border)]">
+              <button onClick={() => setPendingTemplate(null)} className="btn px-4 py-2 text-sm text-[var(--color-text-muted)]">
+                Cancel
+              </button>
+              <button
+                onClick={createPage}
+                className="btn-primary px-4 py-2 text-sm"
+                style={{ background: CATEGORY_COLORS[pendingTemplate.category] + '20', color: CATEGORY_COLORS[pendingTemplate.category] }}
+              >
+                Create Page
+              </button>
             </div>
           </div>
         </div>
