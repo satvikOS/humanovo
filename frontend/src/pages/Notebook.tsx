@@ -1777,43 +1777,40 @@ export default function Notebook() {
     setNewPageTags('')
   }
 
-  const createPage = async () => {
+  const createPage = useCallback(() => {
     const template = pendingTemplate
     const title = newPageTitle.trim() || (template ? template.name : 'Untitled')
     const content = template?.content || ''
     const categoryTag = template?.category ? `category:${template.category}` : 'category:general'
     const extraTags = newPageTags.split(',').map(t => t.trim()).filter(Boolean)
     const tags = [categoryTag, ...extraTags]
-    try {
-      const page = await api.createNotebookPage({
-        title,
-        content,
-        content_type: 'markdown',
-        tags,
-      })
-      const pageWithContent = { ...page, content: page.content || content, tags: page.tags?.length ? page.tags : tags }
-      setPages(prev => [pageWithContent, ...prev])
-      selectPage(pageWithContent)
-    } catch (err) {
-      console.error('Failed to create page via API, creating locally:', err)
-      const localPage: NotebookPage = {
-        id: `local-${Date.now()}`,
-        title,
-        content,
-        content_type: 'markdown',
-        tags,
-        version: 1,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      }
-      setPages(prev => [localPage, ...prev])
-      selectPage(localPage)
-    }
+
+    // Close modal immediately
     setPendingTemplate(null)
     setNewPageTitle('')
     setNewPageTags('')
     setShowTemplates(false)
-  }
+
+    // Create the page (local first, then try API)
+    const localPage: NotebookPage = {
+      id: `local-${Date.now()}`,
+      title,
+      content,
+      content_type: 'markdown',
+      tags,
+      version: 1,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }
+    setPages(prev => [localPage, ...prev])
+    selectPage(localPage)
+
+    // Try API in background — if it succeeds, swap the local page for the API one
+    api.createNotebookPage({ title, content, content_type: 'markdown', tags }).then(apiPage => {
+      const pageWithContent = { ...apiPage, content: apiPage.content || content, tags: apiPage.tags?.length ? apiPage.tags : tags }
+      setPages(prev => prev.map(p => p.id === localPage.id ? pageWithContent : p))
+    }).catch(() => { /* keep local page */ })
+  }, [pendingTemplate, newPageTitle, newPageTags, selectPage, setPages])
 
   // Helper to extract template category from page tags
   const getPageCategory = (page: NotebookPage | null): TemplateCategory => {
@@ -1821,35 +1818,34 @@ export default function Notebook() {
     return (catTag?.replace('category:', '') as TemplateCategory) || 'general'
   }
 
-  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
-
-  const confirmDeletePage = async () => {
-    if (!deleteConfirmId) return
-    const id = deleteConfirmId
-    setDeleteConfirmId(null)
-    try {
-      if (!id.startsWith('local-')) {
-        try { await api.deleteNotebookPage(id) } catch { /* API may be unavailable */ }
-      }
-      persistSet('notebook-onboarded', true)
-      setPagesRaw(prev => {
-        const remaining = prev.filter(p => p.id !== id)
-        persistSet('notebook-pages', remaining)
-        if (activePage?.id === id) {
-          if (remaining.length > 0) {
-            setTimeout(() => selectPage(remaining[0]), 0)
+  const handleDeletePage = useCallback((pageId: string) => {
+    if (!window.confirm('Are you sure you want to delete this page? This cannot be undone.')) return
+    // API delete (fire and forget)
+    if (!pageId.startsWith('local-')) {
+      api.deleteNotebookPage(pageId).catch(() => {})
+    }
+    persistSet('notebook-onboarded', true)
+    setPagesRaw(prev => {
+      const remaining = prev.filter(p => p.id !== pageId)
+      persistSet('notebook-pages', remaining)
+      return remaining
+    })
+    if (activePage?.id === pageId) {
+      // Use setTimeout to avoid state conflicts
+      setTimeout(() => {
+        setPagesRaw(current => {
+          if (current.length > 0) {
+            selectPage(current[0])
           } else {
             setActivePage(null)
             setEditContent('')
             setEditTitle('')
           }
-        }
-        return remaining
-      })
-    } catch (err) {
-      console.error('Failed to delete page:', err)
+          return current
+        })
+      }, 0)
     }
-  }
+  }, [activePage, selectPage])
 
   const loadVersions = async () => {
     if (!activePage) return
@@ -2031,16 +2027,16 @@ export default function Notebook() {
               <div className="flex items-center justify-between">
                 <div className="w-1.5 h-1.5 rounded-full shrink-0 mr-1.5" style={{ background: TEMPLATE_CATEGORY_COLORS[getPageCategory(page)] || '#94a3b8' }} />
                 <span className="text-xs font-medium truncate flex-1">{page.title}</span>
-                <div
-                  role="button"
-                  tabIndex={0}
-                  onClick={e => { e.preventDefault(); e.stopPropagation(); setDeleteConfirmId(page.id) }}
-                  onKeyDown={e => { if (e.key === 'Enter') { e.stopPropagation(); setDeleteConfirmId(page.id) } }}
-                  className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-500/20 text-red-400 cursor-pointer shrink-0 z-10"
+                <button
+                  type="button"
+                  onClick={e => { e.stopPropagation(); handleDeletePage(page.id) }}
+                  onMouseDown={e => e.stopPropagation()}
+                  className="p-1 rounded hover:bg-red-500/20 text-red-400/60 hover:text-red-400 cursor-pointer shrink-0"
                   title="Delete page"
+                  style={{ pointerEvents: 'auto', position: 'relative', zIndex: 20 }}
                 >
                   <FiTrash2 className="w-3 h-3" />
-                </div>
+                </button>
               </div>
               <div className="flex items-center gap-2 mt-0.5">
                 <span className="text-xxs text-[var(--color-text-muted)]">
@@ -2510,26 +2506,6 @@ export default function Notebook() {
         </div>
       )}
 
-      {/* Delete Confirmation Dialog */}
-      {deleteConfirmId && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 99999 }} onClick={() => setDeleteConfirmId(null)}>
-          <div style={{ padding: '1.5rem', maxWidth: '24rem', margin: '0 1rem', textAlign: 'center', borderRadius: '0.75rem', border: '1px solid rgba(255,255,255,0.1)', background: '#1a1a2e', boxShadow: '0 25px 50px rgba(0,0,0,0.5)', color: '#e2e8f0' }} onClick={e => e.stopPropagation()}>
-            <FiTrash2 style={{ width: '2rem', height: '2rem', color: '#f87171', margin: '0 auto 0.75rem' }} />
-            <h3 style={{ fontSize: '1.125rem', fontWeight: 600, marginBottom: '0.5rem' }}>Are you sure?</h3>
-            <p style={{ fontSize: '0.875rem', color: '#94a3b8', marginBottom: '1rem' }}>
-              This will permanently delete this page and its content. This action cannot be undone.
-            </p>
-            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
-              <button onClick={() => setDeleteConfirmId(null)} style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', borderRadius: '0.5rem', background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer' }}>
-                Cancel
-              </button>
-              <button onClick={confirmDeletePage} style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', borderRadius: '0.5rem', background: 'rgba(239,68,68,0.2)', border: 'none', color: '#f87171', cursor: 'pointer', fontWeight: 500 }}>
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
