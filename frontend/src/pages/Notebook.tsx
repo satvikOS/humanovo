@@ -1821,8 +1821,32 @@ export default function Notebook() {
   }
 
   const handleDeletePage = useCallback((pageId: string) => {
-    setDeleteConfirmId(pageId)
-  }, [])
+    if (!window.confirm('Delete this page permanently? This cannot be undone.')) return
+    // Directly delete without modal
+    if (!pageId.startsWith('local-')) {
+      api.deleteNotebookPage(pageId).catch(() => {})
+    }
+    persistSet('notebook-onboarded', true)
+    setPagesRaw(prev => {
+      const remaining = prev.filter(p => p.id !== pageId)
+      persistSet('notebook-pages', remaining)
+      return remaining
+    })
+    if (activePage?.id === pageId) {
+      setTimeout(() => {
+        setPagesRaw(current => {
+          if (current.length > 0) {
+            selectPage(current[0])
+          } else {
+            setActivePage(null)
+            setEditContent('')
+            setEditTitle('')
+          }
+          return current
+        })
+      }, 0)
+    }
+  }, [activePage, selectPage])
 
   const confirmDelete = useCallback(() => {
     const pageId = deleteConfirmId
