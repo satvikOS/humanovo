@@ -3,7 +3,7 @@ import {
   FiPlus, FiTrash2, FiSave, FiSearch,
   FiFileText, FiX, FiGrid, FiList, FiPrinter,
   FiBookOpen, FiCode, FiActivity, FiClipboard,
-  FiTarget, FiTag,
+  FiTarget, FiTag, FiFilter,
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import { useEditor, EditorContent, Editor } from '@tiptap/react'
@@ -600,6 +600,10 @@ export default function Notebook() {
   })
 
   const [searchQuery, setSearchQuery] = useState('')
+  const [filterCategory, setFilterCategory] = useState<TemplateCategory | 'all'>('all')
+  const [filterImportance, setFilterImportance] = useState<ImportanceLevel | 'all'>('all')
+  const [sortBy, setSortBy] = useState<'updated' | 'created' | 'title' | 'importance'>('updated')
+  const [showFilters, setShowFilters] = useState(false)
   const [sidebarView, setSidebarView] = useState<'list' | 'grid'>('list')
   const [showTemplates, setShowTemplates] = useState(false)
   const [pendingTemplate, setPendingTemplate] = useState<PageTemplate | null>(null)
@@ -827,16 +831,41 @@ export default function Notebook() {
     setHasUnsaved(true)
   }
 
-  // Filtered pages
+  // Filtered & sorted pages
   const filteredPages = useMemo(() => {
-    if (!searchQuery) return pageIndex
-    const q = searchQuery.toLowerCase()
-    return pageIndex.filter(p =>
-      p.title.toLowerCase().includes(q) ||
-      p.tags.some(t => t.toLowerCase().includes(q)) ||
-      p.category.toLowerCase().includes(q)
-    )
-  }, [pageIndex, searchQuery])
+    const importanceOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 }
+    let pages = [...pageIndex]
+    // Text search
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase()
+      pages = pages.filter(p =>
+        p.title.toLowerCase().includes(q) ||
+        p.tags.some(t => t.toLowerCase().includes(q)) ||
+        p.category.toLowerCase().includes(q) ||
+        (p.importance && p.importance.toLowerCase().includes(q))
+      )
+    }
+    // Category filter
+    if (filterCategory !== 'all') {
+      pages = pages.filter(p => p.category === filterCategory)
+    }
+    // Importance filter
+    if (filterImportance !== 'all') {
+      pages = pages.filter(p => p.importance === filterImportance)
+    }
+    // Sort
+    pages.sort((a, b) => {
+      switch (sortBy) {
+        case 'title': return a.title.localeCompare(b.title)
+        case 'created': return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        case 'importance': return (importanceOrder[a.importance] ?? 2) - (importanceOrder[b.importance] ?? 2)
+        case 'updated': default: return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+      }
+    })
+    return pages
+  }, [pageIndex, searchQuery, filterCategory, filterImportance, sortBy])
+
+  const activeFilterCount = (filterCategory !== 'all' ? 1 : 0) + (filterImportance !== 'all' ? 1 : 0)
 
   // Cleanup
   useEffect(() => {
@@ -880,9 +909,64 @@ export default function Notebook() {
                   value={searchQuery}
                   onChange={e => setSearchQuery(e.target.value)}
                   placeholder="Search pages..."
-                  className="w-full pl-7 pr-2 py-1.5 text-xs bg-[var(--color-surface)] border border-[var(--color-border)] rounded focus:outline-none focus:border-white/20"
+                  className="w-full pl-7 pr-7 py-1.5 text-xs bg-[var(--color-surface)] border border-[var(--color-border)] rounded focus:outline-none focus:border-white/20"
                 />
+                <button
+                  onClick={() => setShowFilters(v => !v)}
+                  className={clsx('absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded transition-colors', showFilters || activeFilterCount > 0 ? 'text-[var(--color-accent-blue)]' : 'text-[var(--color-text-muted)] hover:text-white')}
+                  title="Filters"
+                >
+                  <FiFilter className="w-3 h-3" />
+                  {activeFilterCount > 0 && (
+                    <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-[var(--color-accent-blue)] text-white text-[8px] flex items-center justify-center font-bold">{activeFilterCount}</span>
+                  )}
+                </button>
               </div>
+              {showFilters && (
+                <div className="mt-2 space-y-2">
+                  {/* Category filter */}
+                  <div>
+                    <label className="text-xxs text-[var(--color-text-muted)] mb-1 block">Category</label>
+                    <div className="flex flex-wrap gap-1">
+                      <button onClick={() => setFilterCategory('all')} className={clsx('text-xxs px-1.5 py-0.5 rounded transition-colors', filterCategory === 'all' ? 'bg-white/10 text-white' : 'text-[var(--color-text-muted)] hover:bg-white/5')}>All</button>
+                      {(Object.keys(CATEGORY_LABELS) as TemplateCategory[]).map(cat => (
+                        <button key={cat} onClick={() => setFilterCategory(cat)} className={clsx('text-xxs px-1.5 py-0.5 rounded transition-colors', filterCategory === cat ? 'text-white' : 'hover:bg-white/5')} style={{ color: filterCategory === cat ? CATEGORY_COLORS[cat] : undefined, background: filterCategory === cat ? CATEGORY_COLORS[cat] + '20' : undefined }}>
+                          {CATEGORY_LABELS[cat]}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {/* Importance filter */}
+                  <div>
+                    <label className="text-xxs text-[var(--color-text-muted)] mb-1 block">Importance</label>
+                    <div className="flex flex-wrap gap-1">
+                      <button onClick={() => setFilterImportance('all')} className={clsx('text-xxs px-1.5 py-0.5 rounded transition-colors', filterImportance === 'all' ? 'bg-white/10 text-white' : 'text-[var(--color-text-muted)] hover:bg-white/5')}>All</button>
+                      {(Object.keys(IMPORTANCE_LABELS) as ImportanceLevel[]).map(level => (
+                        <button key={level} onClick={() => setFilterImportance(level)} className={clsx('text-xxs px-1.5 py-0.5 rounded transition-colors', filterImportance === level ? 'text-white' : 'hover:bg-white/5')} style={{ color: filterImportance === level ? IMPORTANCE_COLORS[level] : undefined, background: filterImportance === level ? IMPORTANCE_COLORS[level] + '20' : undefined }}>
+                          {IMPORTANCE_LABELS[level]}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {/* Sort */}
+                  <div>
+                    <label className="text-xxs text-[var(--color-text-muted)] mb-1 block">Sort by</label>
+                    <div className="flex flex-wrap gap-1">
+                      {([['updated', 'Last Updated'], ['created', 'Created'], ['title', 'Title'], ['importance', 'Importance']] as const).map(([key, label]) => (
+                        <button key={key} onClick={() => setSortBy(key)} className={clsx('text-xxs px-1.5 py-0.5 rounded transition-colors', sortBy === key ? 'bg-white/10 text-white' : 'text-[var(--color-text-muted)] hover:bg-white/5')}>
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {/* Clear filters */}
+                  {activeFilterCount > 0 && (
+                    <button onClick={() => { setFilterCategory('all'); setFilterImportance('all') }} className="text-xxs text-[var(--color-accent-blue)] hover:underline">
+                      Clear filters
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
