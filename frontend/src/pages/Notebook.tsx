@@ -684,7 +684,7 @@ export default function Notebook() {
   // Sync editor content when switching pages
   useEffect(() => {
     if (editor && !editor.isDestroyed) {
-      editor.commands.setContent(activeHtml, false)
+      editor.commands.setContent(activeHtml, { emitUpdate: false })
     }
   }, [activeHtml]) // eslint-disable-line react-hooks/exhaustive-deps
 
