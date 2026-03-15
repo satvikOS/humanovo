@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { createPortal } from 'react-dom'
 import {
   FiPlus, FiTrash2, FiSave, FiDownload, FiClock, FiTag,
   FiEdit3, FiEye, FiColumns, FiFileText,
@@ -1761,11 +1760,30 @@ export default function Notebook() {
     }
   }
 
-  const createPage = async (template?: typeof templates[0]) => {
-    const title = template ? template.name : 'Untitled'
+  // Pre-fillout form state for new page creation
+  const [pendingTemplate, setPendingTemplate] = useState<typeof templates[0] | null>(null)
+  const [newPageTitle, setNewPageTitle] = useState('')
+  const [newPageTags, setNewPageTags] = useState('')
+
+  const selectTemplate = (template: typeof templates[0]) => {
+    setPendingTemplate(template)
+    setNewPageTitle(template.name)
+    setNewPageTags('')
+  }
+
+  const cancelCreate = () => {
+    setPendingTemplate(null)
+    setNewPageTitle('')
+    setNewPageTags('')
+  }
+
+  const createPage = async () => {
+    const template = pendingTemplate
+    const title = newPageTitle.trim() || (template ? template.name : 'Untitled')
     const content = template?.content || ''
     const categoryTag = template?.category ? `category:${template.category}` : 'category:general'
-    const tags = [categoryTag]
+    const extraTags = newPageTags.split(',').map(t => t.trim()).filter(Boolean)
+    const tags = [categoryTag, ...extraTags]
     try {
       const page = await api.createNotebookPage({
         title,
@@ -1791,6 +1809,9 @@ export default function Notebook() {
       setPages(prev => [localPage, ...prev])
       selectPage(localPage)
     }
+    setPendingTemplate(null)
+    setNewPageTitle('')
+    setNewPageTags('')
     setShowTemplates(false)
   }
 
@@ -1800,12 +1821,7 @@ export default function Notebook() {
     return (catTag?.replace('category:', '') as TemplateCategory) || 'general'
   }
 
-  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
-
-  const confirmDeletePage = async () => {
-    if (!deleteConfirmId) return
-    const id = deleteConfirmId
-    setDeleteConfirmId(null)
+  const deletePage = async (id: string) => {
     try {
       try { await api.deleteNotebookPage(id) } catch { /* API may be unavailable */ }
       // Mark as onboarded so Getting Started doesn't reappear
@@ -2009,8 +2025,8 @@ export default function Notebook() {
                 <div
                   role="button"
                   tabIndex={0}
-                  onClick={e => { e.preventDefault(); e.stopPropagation(); setDeleteConfirmId(page.id) }}
-                  onKeyDown={e => { if (e.key === 'Enter') { e.stopPropagation(); setDeleteConfirmId(page.id) } }}
+                  onClick={e => { e.preventDefault(); e.stopPropagation(); deletePage(page.id) }}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.stopPropagation(); deletePage(page.id) } }}
                   className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-500/20 text-red-400 cursor-pointer shrink-0 z-10"
                   title="Delete page"
                 >
@@ -2334,55 +2350,108 @@ export default function Notebook() {
 
       {/* Template picker modal */}
       {showTemplates && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setShowTemplates(false)}>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => { setShowTemplates(false); cancelCreate() }}>
           <div className="glass-card w-full max-w-lg mx-4 p-0 max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between p-4 border-b border-[var(--color-border)] shrink-0">
-              <h2 className="text-sm font-semibold">New Page</h2>
-              <button onClick={() => setShowTemplates(false)} className="p-1 rounded hover:bg-white/5 text-[var(--color-text-muted)]">
+              <h2 className="text-sm font-semibold">
+                {pendingTemplate ? 'Configure New Page' : 'Choose a Template'}
+              </h2>
+              <button onClick={() => { setShowTemplates(false); cancelCreate() }} className="p-1 rounded hover:bg-white/5 text-[var(--color-text-muted)]">
                 <FiX className="w-4 h-4" />
               </button>
             </div>
-            <div className="p-3 overflow-y-auto">
-              {Object.entries(
-                templates.reduce<Record<string, typeof templates>>((acc, t) => {
-                  const cat = t.category || 'general'
-                  if (!acc[cat]) acc[cat] = []
-                  acc[cat].push(t)
-                  return acc
-                }, {})
-              ).map(([cat, tmpls]) => (
-                <div key={cat} className="mb-3">
-                  <div className="flex items-center gap-2 mb-1.5 px-1">
-                    <div className="w-2 h-2 rounded-full" style={{ background: TEMPLATE_CATEGORY_COLORS[cat as TemplateCategory] || '#94a3b8' }} />
-                    <span className="text-xxs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-                      {TEMPLATE_CATEGORY_LABELS[cat as TemplateCategory] || cat}
-                    </span>
+
+            {pendingTemplate ? (
+              /* Step 2: Pre-fillout form */
+              <div className="p-4 space-y-4">
+                <div className="flex items-center gap-3 p-3 rounded-lg bg-white/5 border border-[var(--color-border)]">
+                  <div
+                    className="p-1.5 rounded shrink-0"
+                    style={{ background: (TEMPLATE_CATEGORY_COLORS[pendingTemplate.category] || '#94a3b8') + '20', color: TEMPLATE_CATEGORY_COLORS[pendingTemplate.category] || '#94a3b8' }}
+                  >
+                    {pendingTemplate.icon}
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    {tmpls.map(template => (
-                      <button
-                        key={template.name}
-                        onClick={() => createPage(template)}
-                        className="text-left p-3 rounded-lg border border-[var(--color-border)] hover:border-white/20 hover:bg-white/5 transition-all flex items-start gap-2.5"
-                      >
-                        <div
-                          className="p-1.5 rounded"
-                          style={{ background: (TEMPLATE_CATEGORY_COLORS[template.category] || '#94a3b8') + '20', color: TEMPLATE_CATEGORY_COLORS[template.category] || '#94a3b8' }}
-                        >
-                          {template.icon}
-                        </div>
-                        <div className="min-w-0">
-                          <div className="text-xs font-medium">{template.name}</div>
-                          <div className="text-xxs text-[var(--color-text-muted)] mt-0.5 line-clamp-2">
-                            {template.description}
-                          </div>
-                        </div>
-                      </button>
-                    ))}
+                  <div className="min-w-0">
+                    <div className="text-xs font-medium">{pendingTemplate.name}</div>
+                    <div className="text-xxs text-[var(--color-text-muted)]">{pendingTemplate.description}</div>
                   </div>
                 </div>
-              ))}
-            </div>
+                <div>
+                  <label className="block text-xs font-medium mb-1.5">Page Title</label>
+                  <input
+                    type="text"
+                    value={newPageTitle}
+                    onChange={e => setNewPageTitle(e.target.value)}
+                    placeholder="Enter page title..."
+                    className="input w-full text-sm"
+                    autoFocus
+                    onKeyDown={e => { if (e.key === 'Enter') createPage() }}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium mb-1.5">Tags <span className="text-[var(--color-text-muted)] font-normal">(comma-separated, optional)</span></label>
+                  <input
+                    type="text"
+                    value={newPageTags}
+                    onChange={e => setNewPageTags(e.target.value)}
+                    placeholder="e.g. research, draft, BRCA1"
+                    className="input w-full text-sm"
+                    onKeyDown={e => { if (e.key === 'Enter') createPage() }}
+                  />
+                </div>
+                <div className="flex gap-3 justify-end pt-2">
+                  <button onClick={cancelCreate} className="px-4 py-2 text-sm rounded-lg text-[var(--color-text-muted)] hover:bg-white/5 transition-colors">
+                    Back
+                  </button>
+                  <button onClick={createPage} className="px-4 py-2 text-sm rounded-lg bg-primary-500/20 text-primary-400 hover:bg-primary-500/30 transition-colors font-medium">
+                    Create Page
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* Step 1: Template selection */
+              <div className="p-3 overflow-y-auto">
+                {Object.entries(
+                  templates.reduce<Record<string, typeof templates>>((acc, t) => {
+                    const cat = t.category || 'general'
+                    if (!acc[cat]) acc[cat] = []
+                    acc[cat].push(t)
+                    return acc
+                  }, {})
+                ).map(([cat, tmpls]) => (
+                  <div key={cat} className="mb-3">
+                    <div className="flex items-center gap-2 mb-1.5 px-1">
+                      <div className="w-2 h-2 rounded-full" style={{ background: TEMPLATE_CATEGORY_COLORS[cat as TemplateCategory] || '#94a3b8' }} />
+                      <span className="text-xxs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+                        {TEMPLATE_CATEGORY_LABELS[cat as TemplateCategory] || cat}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {tmpls.map(template => (
+                        <button
+                          key={template.name}
+                          onClick={() => selectTemplate(template)}
+                          className="text-left p-3 rounded-lg border border-[var(--color-border)] hover:border-white/20 hover:bg-white/5 transition-all flex items-start gap-2.5"
+                        >
+                          <div
+                            className="p-1.5 rounded"
+                            style={{ background: (TEMPLATE_CATEGORY_COLORS[template.category] || '#94a3b8') + '20', color: TEMPLATE_CATEGORY_COLORS[template.category] || '#94a3b8' }}
+                          >
+                            {template.icon}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="text-xs font-medium">{template.name}</div>
+                            <div className="text-xxs text-[var(--color-text-muted)] mt-0.5 line-clamp-2">
+                              {template.description}
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -2437,27 +2506,6 @@ export default function Notebook() {
       )}
       </div>
 
-      {/* Delete Confirmation Dialog - rendered via portal to avoid stacking context issues */}
-      {deleteConfirmId && createPortal(
-        <div className="fixed inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm" style={{ zIndex: 9999 }} onClick={() => setDeleteConfirmId(null)}>
-          <div className="p-6 max-w-sm mx-4 text-center rounded-xl border border-[var(--color-border)]" style={{ background: 'var(--color-surface-solid)', boxShadow: '0 25px 50px rgba(0,0,0,0.5)' }} onClick={e => e.stopPropagation()}>
-            <FiTrash2 className="w-8 h-8 text-red-400 mx-auto mb-3" />
-            <h3 className="text-lg font-semibold mb-2">Delete Notebook Page?</h3>
-            <p className="text-sm text-[var(--color-text-muted)] mb-4">
-              This will permanently delete this page and its content. This action cannot be undone.
-            </p>
-            <div className="flex gap-3 justify-center">
-              <button onClick={() => setDeleteConfirmId(null)} className="px-4 py-2 text-sm rounded-lg text-[var(--color-text-muted)] hover:bg-white/5 transition-colors">
-                Cancel
-              </button>
-              <button onClick={confirmDeletePage} className="px-4 py-2 text-sm rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors font-medium">
-                Delete Permanently
-              </button>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
     </div>
   )
 }
