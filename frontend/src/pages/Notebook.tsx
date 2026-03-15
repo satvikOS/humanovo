@@ -1796,9 +1796,9 @@ export default function Notebook() {
     setDeleteConfirmId(null)
     try {
       try { await api.deleteNotebookPage(id) } catch { /* API may be unavailable */ }
-      setPages(prev => prev.filter(p => p.id !== id))
+      const remaining = pages.filter(p => p.id !== id)
+      setPages(remaining)
       if (activePage?.id === id) {
-        const remaining = pages.filter(p => p.id !== id)
         if (remaining.length > 0) {
           selectPage(remaining[0])
         } else {

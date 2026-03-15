@@ -438,37 +438,43 @@ function saveCompHistory(entries: CompHistoryEntry[]) {
   try { localStorage.setItem(COMP_HISTORY_KEY, JSON.stringify(entries.slice(0, 50))) } catch {}
 }
 
-function SimulationHistory() {
+function SavedSimulations() {
   const mcSims = useMemo(() => loadSavedSimulations(), [])
   const eqPlots = useMemo(() => loadEqHistory(), [])
   const compRuns = useMemo(() => loadCompHistory(), [])
   const [filter, setFilter] = useState<'all' | 'monte-carlo' | 'equation' | 'computational'>('all')
+  const [expandedId, setExpandedId] = useState<string | null>(null)
 
-  type UnifiedEntry = { id: string; type: 'monte-carlo' | 'equation' | 'computational'; title: string; subtitle: string; createdAt: string; stats?: string }
+  type UnifiedEntry = {
+    id: string; type: 'monte-carlo' | 'equation' | 'computational'
+    title: string; subtitle: string; createdAt: string; stats?: string
+    mcData?: MCResult; eqData?: EqHistoryEntry; compData?: CompHistoryEntry
+  }
 
   const allEntries = useMemo<UnifiedEntry[]>(() => {
     const entries: UnifiedEntry[] = []
     for (const mc of mcSims) {
-      const typeLabel = SIMULATION_TYPES.find(t => t.id === mc.simulationType)?.label || mc.simulationType
+      const tl = SIMULATION_TYPES.find(t => t.id === mc.simulationType)?.label || mc.simulationType
       entries.push({
         id: mc.id, type: 'monte-carlo', title: mc.name,
-        subtitle: `${typeLabel} · ${mc.iterations.toLocaleString()} iterations`,
+        subtitle: `${tl} · ${mc.iterations.toLocaleString()} iterations`,
         createdAt: mc.createdAt,
         stats: `μ=${mc.stats.mean.toFixed(2)}  σ=${mc.stats.std.toFixed(2)}  95% CI [${mc.stats.ci95Lower.toFixed(2)}, ${mc.stats.ci95Upper.toFixed(2)}]`,
+        mcData: mc,
       })
     }
     for (const eq of eqPlots) {
       entries.push({
         id: eq.id, type: 'equation', title: `f(x) = ${eq.expr}`,
         subtitle: `x ∈ [${eq.xMin}, ${eq.xMax}]`,
-        createdAt: eq.createdAt,
+        createdAt: eq.createdAt, eqData: eq,
       })
     }
     for (const cr of compRuns) {
       entries.push({
         id: cr.id, type: 'computational', title: cr.template || cr.env,
         subtitle: `${cr.env} · ${cr.code.split('\n').length} lines`,
-        createdAt: cr.createdAt,
+        createdAt: cr.createdAt, compData: cr,
       })
     }
     entries.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
@@ -505,6 +511,101 @@ function SimulationHistory() {
     return new Date(ts).toLocaleDateString()
   }
 
+  const renderExpandedContent = (entry: UnifiedEntry) => {
+    if (entry.type === 'monte-carlo' && entry.mcData) {
+      const mc = entry.mcData
+      return (
+        <div className="mt-3 pt-3 border-t border-[var(--color-border)] space-y-3">
+          {/* Stats grid */}
+          <div className="grid grid-cols-5 gap-2">
+            {[
+              { label: 'Mean', value: mc.stats.mean.toFixed(4) },
+              { label: 'Median', value: mc.stats.median.toFixed(4) },
+              { label: 'Std Dev', value: mc.stats.std.toFixed(4) },
+              { label: '95% CI Low', value: mc.stats.ci95Lower.toFixed(4) },
+              { label: '95% CI High', value: mc.stats.ci95Upper.toFixed(4) },
+            ].map(s => (
+              <div key={s.label} className="text-center p-2 rounded-lg bg-[var(--glass-bg)]">
+                <div className="text-xxs text-[var(--color-text-muted)]">{s.label}</div>
+                <div className="text-xs font-mono font-medium text-[var(--color-text)]">{s.value}</div>
+              </div>
+            ))}
+          </div>
+          {/* Distribution histogram */}
+          {mc.histogramData && mc.histogramData.length > 0 && (
+            <div className="h-40">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={mc.histogramData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                  <XAxis dataKey="bin" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} interval="preserveStartEnd" />
+                  <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
+                  <Tooltip contentStyle={{ background: 'var(--color-surface-solid)', border: '1px solid var(--color-border)', borderRadius: 8, fontSize: 11 }} />
+                  <Bar dataKey="count" fill="var(--color-accent-blue)" radius={[2, 2, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+          {/* Convergence chart */}
+          {mc.convergenceData && mc.convergenceData.length > 0 && (
+            <div className="h-32">
+              <div className="text-xxs text-[var(--color-text-muted)] mb-1">Convergence</div>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={mc.convergenceData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                  <XAxis dataKey="iteration" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
+                  <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
+                  <Tooltip contentStyle={{ background: 'var(--color-surface-solid)', border: '1px solid var(--color-border)', borderRadius: 8, fontSize: 11 }} />
+                  <Line type="monotone" dataKey="mean" stroke="var(--color-accent-green)" strokeWidth={1.5} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </div>
+      )
+    }
+
+    if (entry.type === 'equation' && entry.eqData) {
+      const eq = entry.eqData
+      const plotData = evaluateExpression(eq.expr, eq.xMin, eq.xMax)
+      return (
+        <div className="mt-3 pt-3 border-t border-[var(--color-border)]">
+          <div className="h-48">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={plotData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                <XAxis dataKey="x" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} tickFormatter={(v: number) => v.toFixed(1)} />
+                <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
+                <Tooltip contentStyle={{ background: 'var(--color-surface-solid)', border: '1px solid var(--color-border)', borderRadius: 8, fontSize: 11 }} />
+                <defs>
+                  <linearGradient id="savedEqGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="var(--color-accent-green)" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="var(--color-accent-green)" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <Area type="monotone" dataKey="y" stroke="var(--color-accent-green)" strokeWidth={2} fill="url(#savedEqGrad)" dot={false} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )
+    }
+
+    if (entry.type === 'computational' && entry.compData) {
+      const cr = entry.compData
+      return (
+        <div className="mt-3 pt-3 border-t border-[var(--color-border)] space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="text-xxs px-1.5 py-0.5 rounded bg-[var(--glass-bg)] text-[var(--color-text-muted)] font-mono">{cr.env}</span>
+            <span className="text-xxs text-[var(--color-text-muted)]">{cr.template}</span>
+          </div>
+          <pre className="text-xxs font-mono text-[var(--color-text-secondary)] bg-[var(--glass-bg)] rounded-lg p-3 max-h-40 overflow-auto whitespace-pre-wrap">{cr.code.slice(0, 800)}{cr.code.length > 800 ? '\n...' : ''}</pre>
+        </div>
+      )
+    }
+
+    return null
+  }
+
   return (
     <div className="space-y-4">
       {/* Filter bar */}
@@ -528,29 +629,41 @@ function SimulationHistory() {
       {filtered.length === 0 ? (
         <div className="text-center py-16">
           <FiDatabase className="w-10 h-10 text-[var(--color-text-muted)] mx-auto mb-3 opacity-30" />
-          <h3 className="text-base font-medium text-[var(--color-text)] mb-1">No history yet</h3>
-          <p className="text-sm text-[var(--color-text-muted)]">Run simulations, plot equations, or execute code to see history here.</p>
+          <h3 className="text-base font-medium text-[var(--color-text)] mb-1">No saved simulations</h3>
+          <p className="text-sm text-[var(--color-text-muted)]">Run simulations, plot equations, or execute code to see results here.</p>
         </div>
       ) : (
         <div className="space-y-2">
-          {filtered.map(entry => (
-            <div key={entry.id} className="glass-card p-4 flex items-start gap-3 hover:bg-[var(--glass-bg)] transition-all">
-              <div className="p-2 rounded-lg flex-shrink-0" style={{ background: `color-mix(in srgb, ${typeColor(entry.type)} 12%, transparent)` }}>
-                <span style={{ color: typeColor(entry.type) }}>{typeIcon(entry.type)}</span>
+          {filtered.map(entry => {
+            const isExpanded = expandedId === entry.id
+            return (
+              <div key={entry.id} className="glass-card p-4 transition-all">
+                <button
+                  onClick={() => setExpandedId(isExpanded ? null : entry.id)}
+                  className="w-full text-left flex items-start gap-3"
+                >
+                  <div className="p-2 rounded-lg flex-shrink-0" style={{ background: `color-mix(in srgb, ${typeColor(entry.type)} 12%, transparent)` }}>
+                    <span style={{ color: typeColor(entry.type) }}>{typeIcon(entry.type)}</span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <span className="text-sm font-medium text-[var(--color-text)] truncate">{entry.title}</span>
+                      <span className="text-xxs px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ color: typeColor(entry.type), background: `color-mix(in srgb, ${typeColor(entry.type)} 12%, transparent)` }}>
+                        {typeLabel(entry.type)}
+                      </span>
+                    </div>
+                    <p className="text-xs text-[var(--color-text-muted)]">{entry.subtitle}</p>
+                    {!isExpanded && entry.stats && <p className="text-xxs text-[var(--color-text-muted)] mt-1 font-mono">{entry.stats}</p>}
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <span className="text-xxs text-[var(--color-text-muted)] whitespace-nowrap">{formatTimeAgo(entry.createdAt)}</span>
+                    <FiBarChart2 className={clsx('w-3.5 h-3.5 text-[var(--color-text-muted)] transition-transform', isExpanded && 'rotate-180')} />
+                  </div>
+                </button>
+                {isExpanded && renderExpandedContent(entry)}
               </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-0.5">
-                  <span className="text-sm font-medium text-[var(--color-text)] truncate">{entry.title}</span>
-                  <span className="text-xxs px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ color: typeColor(entry.type), background: `color-mix(in srgb, ${typeColor(entry.type)} 12%, transparent)` }}>
-                    {typeLabel(entry.type)}
-                  </span>
-                </div>
-                <p className="text-xs text-[var(--color-text-muted)]">{entry.subtitle}</p>
-                {entry.stats && <p className="text-xxs text-[var(--color-text-muted)] mt-1 font-mono">{entry.stats}</p>}
-              </div>
-              <span className="text-xxs text-[var(--color-text-muted)] flex-shrink-0 whitespace-nowrap">{formatTimeAgo(entry.createdAt)}</span>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>
@@ -639,7 +752,7 @@ function MCSimulationForm({ onResult, onClose }: { onResult: (r: MCResult) => vo
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">Simulation Type</label>
-            <select value={simType} onChange={e => handleTypeChange(e.target.value)} className="w-full px-3 py-2 text-sm bg-[var(--glass-bg)] border border-[var(--color-border)] rounded-lg text-[var(--color-text)] focus:outline-none focus:border-[var(--color-accent-blue)]" disabled={running}>
+            <select value={simType} onChange={e => handleTypeChange(e.target.value)} className="input w-full" disabled={running}>
               {SIMULATION_TYPES.map(t => (<option key={t.id} value={t.id}>{t.label}</option>))}
             </select>
           </div>
@@ -655,11 +768,11 @@ function MCSimulationForm({ onResult, onClose }: { onResult: (r: MCResult) => vo
               <div key={cfg.key}>
                 <label className="block text-xs text-[var(--color-text-muted)] mb-1">{cfg.label}</label>
                 {cfg.type === 'select' ? (
-                  <select value={String(params[cfg.key])} onChange={e => setParams(prev => ({ ...prev, [cfg.key]: e.target.value }))} className="w-full px-2 py-1.5 text-sm bg-[var(--glass-bg)] border border-[var(--color-border)] rounded text-[var(--color-text)] focus:outline-none focus:border-[var(--color-accent-blue)]" disabled={running}>
+                  <select value={String(params[cfg.key])} onChange={e => setParams(prev => ({ ...prev, [cfg.key]: e.target.value }))} className="input w-full text-xs py-1.5" disabled={running}>
                     {cfg.options?.map(o => (<option key={o.value} value={o.value}>{o.label}</option>))}
                   </select>
                 ) : (
-                  <input type="number" value={Number(params[cfg.key])} onChange={e => setParams(prev => ({ ...prev, [cfg.key]: parseFloat(e.target.value) || cfg.default }))} min={cfg.min} max={cfg.max} step={cfg.step} className="w-full px-2 py-1.5 text-sm bg-[var(--glass-bg)] border border-[var(--color-border)] rounded text-[var(--color-text)] focus:outline-none focus:border-[var(--color-accent-blue)]" disabled={running} />
+                  <input type="number" value={Number(params[cfg.key])} onChange={e => setParams(prev => ({ ...prev, [cfg.key]: parseFloat(e.target.value) || cfg.default }))} min={cfg.min} max={cfg.max} step={cfg.step} className="input w-full text-xs py-1.5" disabled={running} />
                 )}
               </div>
             ))}
@@ -2621,7 +2734,7 @@ function ComputationalLab() {
             <select
               value={filterCategory}
               onChange={e => setFilterCategory(e.target.value)}
-              className="w-full px-2 py-1.5 text-xs bg-[var(--glass-bg)] border border-[var(--color-border)] rounded text-[var(--color-text)] focus:outline-none"
+              className="input w-full text-xs py-1.5"
             >
               <option value="all">All Categories</option>
               {categories.map(c => <option key={c} value={c}>{c}</option>)}
@@ -2989,7 +3102,7 @@ export default function Simulations() {
           )}
         >
           <FiDatabase className="w-4 h-4 inline mr-2" />
-          History
+          Saved
         </button>
       </div>
 
@@ -3024,7 +3137,7 @@ export default function Simulations() {
 
         {activeTab === 'equation-plotter' && <EquationPlotter />}
 
-        {activeTab === 'history' && <SimulationHistory />}
+        {activeTab === 'history' && <SavedSimulations />}
       </div>
 
       {/* Delete Confirmation Dialog */}
