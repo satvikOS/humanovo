@@ -60,6 +60,7 @@
     "remark-math": "^6.0.0",
     "three": "^0.182.0",
     "turndown": "^7.2.2",
+    "xlsx": "^0.18.5",
     "zustand": "^4.5.0"
   },
   "devDependencies": {
