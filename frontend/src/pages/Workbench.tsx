@@ -2445,12 +2445,10 @@ function EdgeLabelModal({
 
 export default function Workbench() {
   const [components, setComponents] = useState<BiologicalComponent[]>(biologicalStructures)
-  const [leftPanelTab, setLeftPanelTab] = useState<'structures' | 'library'>('structures')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
 
   // Master Library state
-  const [librarySearchTerm, setLibrarySearchTerm] = useState('')
   const [selectedLibraryId, setSelectedLibraryId] = useState<string | null>(null)
   const [expandedLibraryNodes, setExpandedLibraryNodes] = useState<Set<string>>(new Set(['molecular_level', 'cellular_level']))
 
@@ -2479,7 +2477,7 @@ export default function Workbench() {
 
   const selectedComponent = components.find(c => c.id === selectedId) || null
   const selectedLibraryElement = selectedLibraryId ? findElementById(selectedLibraryId) ?? null : null
-  const librarySearchResults = librarySearchTerm.length > 2 ? searchElements(librarySearchTerm) : []
+  const librarySearchResults = searchTerm.length > 2 ? searchElements(searchTerm) : []
   const selectedGraphNode = nodes.find(n => n.id === selectedNode) || null
   const selectedGraphEntity = selectedGraphNode ? components.find(c => c.id === selectedGraphNode.entityId) || null : null
 
@@ -3211,121 +3209,83 @@ IMPORTANT: If the user asks you to connect nodes, suggest connections, or explai
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <div className="flex flex-1 min-h-0">
-        {/* Left panel - Component Tree / Master Library */}
+        {/* Left panel - Sapien Corridor */}
         <div className="w-72 border-r border-[var(--color-border)] bg-[var(--color-bg-elevated)] flex flex-col">
-          {/* Tab switcher */}
-          <div className="flex border-b border-[var(--color-border)]">
-            <button
-              onClick={() => setLeftPanelTab('structures')}
-              className={clsx(
-                'flex-1 px-3 py-2 text-xs font-medium transition-colors border-b-2',
-                leftPanelTab === 'structures'
-                  ? 'border-primary-500 text-primary-400 bg-primary-500/10'
-                  : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
-              )}
-            >
-              <FiTarget className="w-3.5 h-3.5 inline mr-1.5" />
-              Structures
-            </button>
-            <button
-              onClick={() => setLeftPanelTab('library')}
-              className={clsx(
-                'flex-1 px-3 py-2 text-xs font-medium transition-colors border-b-2',
-                leftPanelTab === 'library'
-                  ? 'border-primary-500 text-primary-400 bg-primary-500/10'
-                  : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
-              )}
-            >
-              <FiDatabase className="w-3.5 h-3.5 inline mr-1.5" />
-              Master Library
-            </button>
+          <div className="px-3 pt-3 pb-2 border-b border-[var(--color-border)]">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-medium">Sapien Corridor</h3>
+              <span className="text-xxs text-green-400">{libraryStats.totalElements + components.length} elements</span>
+            </div>
+            <div className="relative">
+              <FiSearch className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--color-text-muted)]" />
+              <input
+                type="text"
+                placeholder="Search structures & library..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="input w-full text-xs pl-7"
+              />
+            </div>
+            {searchTerm.length > 0 && searchTerm.length < 3 && (
+              <div className="text-xxs text-[var(--color-text-muted)] mt-1">Type 3+ characters to search library</div>
+            )}
           </div>
-
-          {leftPanelTab === 'structures' ? (
-            <>
-              <div className="p-3 border-b border-[var(--color-border)]">
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-sm font-medium">Disease Structures</h3>
-                  <span className="text-xxs text-[var(--color-text-muted)]">{visibleCount} visible</span>
+          <div className="flex-1 overflow-y-auto p-2">
+            {librarySearchResults.length > 0 ? (
+              <div className="space-y-0.5">
+                <div className="text-xxs text-[var(--color-text-muted)] px-2 py-1">
+                  {librarySearchResults.length} results found
                 </div>
-                <div className="relative">
-                  <FiSearch className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--color-text-muted)]" />
-                  <input
-                    type="text"
-                    placeholder="Search structures..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="input w-full text-xs pl-7"
-                  />
-                </div>
-              </div>
-              <div className="flex-1 overflow-y-auto p-2">
-                <ComponentTree
-                  components={components}
-                  selectedId={selectedId}
-                  onSelect={setSelectedId}
-                  onToggleVisibility={toggleVisibility}
-                  searchTerm={searchTerm}
-                  onAddToCanvas={addToCanvas}
-                />
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="p-3 border-b border-[var(--color-border)]">
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-sm font-medium">Master Human Library</h3>
-                  <span className="text-xxs text-green-400">{libraryStats.totalElements} elements</span>
-                </div>
-                <div className="relative">
-                  <FiSearch className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--color-text-muted)]" />
-                  <input
-                    type="text"
-                    placeholder="Search all elements..."
-                    value={librarySearchTerm}
-                    onChange={(e) => setLibrarySearchTerm(e.target.value)}
-                    className="input w-full text-xs pl-7"
-                  />
-                </div>
-                {librarySearchTerm.length > 0 && librarySearchTerm.length < 3 && (
-                  <div className="text-xxs text-[var(--color-text-muted)] mt-1">Type 3+ characters to search</div>
-                )}
-              </div>
-              <div className="flex-1 overflow-y-auto p-2">
-                {librarySearchResults.length > 0 ? (
-                  <div className="space-y-0.5">
-                    <div className="text-xxs text-[var(--color-text-muted)] px-2 py-1">
-                      {librarySearchResults.length} results found
-                    </div>
-                    {librarySearchResults.slice(0, 50).map(elem => (
-                      <div
-                        key={elem.id}
-                        onClick={() => setSelectedLibraryId(elem.id)}
-                        className={clsx(
-                          'flex items-center gap-2 py-1.5 px-2 rounded text-xs cursor-pointer transition-colors',
-                          selectedLibraryId === elem.id
-                            ? 'bg-primary-500/20 text-primary-400'
-                            : 'hover:bg-[var(--color-surface)] text-[var(--color-text-secondary)]'
-                        )}
-                      >
-                        {elem.aiSimulationReady && <FiCpu className="w-3 h-3 text-green-400" />}
-                        <span className="truncate flex-1">{elem.name}</span>
-                        <span className="text-xxs text-[var(--color-text-muted)]">{elem.category.split('_')[0]}</span>
-                      </div>
-                    ))}
+                {librarySearchResults.slice(0, 50).map(elem => (
+                  <div
+                    key={elem.id}
+                    onClick={() => { setSelectedLibraryId(elem.id); setSelectedId(null) }}
+                    className={clsx(
+                      'flex items-center gap-2 py-1.5 px-2 rounded text-xs cursor-pointer transition-colors',
+                      selectedLibraryId === elem.id
+                        ? 'bg-primary-500/20 text-primary-400'
+                        : 'hover:bg-[var(--color-surface)] text-[var(--color-text-secondary)]'
+                    )}
+                  >
+                    {elem.aiSimulationReady && <FiCpu className="w-3 h-3 text-green-400" />}
+                    <span className="truncate flex-1">{elem.name}</span>
+                    <span className="text-xxs text-[var(--color-text-muted)]">{elem.category.split('_')[0]}</span>
                   </div>
-                ) : (
+                ))}
+              </div>
+            ) : (
+              <>
+                {/* Structures section */}
+                <div className="mb-3">
+                  <div className="text-xxs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider px-2 py-1.5">
+                    Disease Structures
+                    <span className="ml-1.5 text-[var(--color-text-muted)] font-normal normal-case">({visibleCount} visible)</span>
+                  </div>
+                  <ComponentTree
+                    components={components}
+                    selectedId={selectedId}
+                    onSelect={(id) => { setSelectedId(id); setSelectedLibraryId(null) }}
+                    onToggleVisibility={toggleVisibility}
+                    searchTerm={searchTerm}
+                    onAddToCanvas={addToCanvas}
+                  />
+                </div>
+                {/* Master Library section */}
+                <div className="border-t border-[var(--color-border)] pt-3">
+                  <div className="text-xxs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider px-2 py-1.5">
+                    Master Human Library
+                  </div>
                   <MasterLibraryTree
                     nodes={masterLibraryTree}
-                    onSelect={setSelectedLibraryId}
+                    onSelect={(id) => { setSelectedLibraryId(id); setSelectedId(null) }}
                     selectedId={selectedLibraryId}
                     expandedNodes={expandedLibraryNodes}
                     onToggleExpand={toggleLibraryNode}
                   />
-                )}
-              </div>
-            </>
-          )}
+                </div>
+              </>
+            )}
+          </div>
         </div>
 
         {/* Main viewport - SVG Node Graph Canvas */}
@@ -3531,10 +3491,10 @@ IMPORTANT: If the user asks you to connect nodes, suggest connections, or explai
             <div className="p-3 border-b border-[var(--color-border)]">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-medium">
-                  {leftPanelTab === 'library' ? 'Element Details' : 'Properties'}
+                  {selectedLibraryId ? 'Element Details' : 'Properties'}
                 </h3>
                 <div className="flex items-center gap-1">
-                  {leftPanelTab === 'library' && selectedLibraryElement && (
+                  {selectedLibraryId && selectedLibraryElement && (
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-400">
                       {selectedLibraryElement.aiSimulationReady ? 'AI Ready' : 'Manual'}
                     </span>
@@ -3546,7 +3506,7 @@ IMPORTANT: If the user asks you to connect nodes, suggest connections, or explai
               </div>
             </div>
             <div className="flex-1 overflow-y-auto">
-              {leftPanelTab === 'library' ? (
+              {selectedLibraryId ? (
                 <MasterLibraryDetails element={selectedLibraryElement} />
               ) : (
                 <div className="p-3">
