@@ -1826,9 +1826,15 @@ export default function Notebook() {
   activePageRef.current = activePage
 
   const handleDeletePage = useCallback((pageId: string) => {
-    // Build modal via DOM — styled to match Simulations delete dialog (2nd image reference)
+    // Remove any existing overlay first
+    document.getElementById('delete-confirm-overlay')?.remove()
+
+    // Store pageId on the overlay element as a data attribute for bulletproof access
+    const idToDelete = String(pageId)
+
     const overlay = document.createElement('div')
     overlay.id = 'delete-confirm-overlay'
+    overlay.dataset.pageId = idToDelete
     Object.assign(overlay.style, {
       position: 'fixed', top: '0', left: '0', right: '0', bottom: '0',
       zIndex: '999999', display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -1844,24 +1850,36 @@ export default function Notebook() {
       boxShadow: '0 25px 60px rgba(0,0,0,0.6)',
     })
 
-    card.innerHTML = `
-      <div style="margin-bottom:12px;">
-        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-      </div>
-      <h3 style="font-size:18px;font-weight:600;margin:0 0 8px 0;">Delete Page?</h3>
-      <p style="font-size:14px;color:var(--color-text-muted, #94a3b8);margin:0 0 20px 0;">
-        This will permanently delete this page and its contents. This action cannot be undone.
-      </p>
-      <div style="display:flex;gap:12px;justify-content:center;">
-        <button id="delete-cancel-btn" style="padding:8px 16px;font-size:14px;border-radius:8px;border:none;background:transparent;color:var(--color-text-muted, #94a3b8);cursor:pointer;font-weight:500;">
-          Cancel
-        </button>
-        <button id="delete-confirm-btn" style="padding:8px 16px;font-size:14px;border-radius:8px;border:none;background:rgba(239,68,68,0.1);color:#f87171;cursor:pointer;font-weight:500;">
-          Delete Permanently
-        </button>
-      </div>
-    `
+    // Create elements directly instead of innerHTML to avoid any scoping issues
+    const iconDiv = document.createElement('div')
+    iconDiv.style.marginBottom = '12px'
+    iconDiv.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>'
 
+    const h3 = document.createElement('h3')
+    Object.assign(h3.style, { fontSize: '18px', fontWeight: '600', margin: '0 0 8px 0' })
+    h3.textContent = 'Delete Page?'
+
+    const p = document.createElement('p')
+    Object.assign(p.style, { fontSize: '14px', color: 'var(--color-text-muted, #94a3b8)', margin: '0 0 20px 0' })
+    p.textContent = 'This will permanently delete this page and its contents. This action cannot be undone.'
+
+    const btnRow = document.createElement('div')
+    Object.assign(btnRow.style, { display: 'flex', gap: '12px', justifyContent: 'center' })
+
+    const cancelBtn = document.createElement('button')
+    Object.assign(cancelBtn.style, { padding: '8px 16px', fontSize: '14px', borderRadius: '8px', border: 'none', background: 'transparent', color: 'var(--color-text-muted, #94a3b8)', cursor: 'pointer', fontWeight: '500' })
+    cancelBtn.textContent = 'Cancel'
+
+    const confirmBtn = document.createElement('button')
+    Object.assign(confirmBtn.style, { padding: '8px 16px', fontSize: '14px', borderRadius: '8px', border: 'none', background: 'rgba(239,68,68,0.1)', color: '#f87171', cursor: 'pointer', fontWeight: '500' })
+    confirmBtn.textContent = 'Delete Permanently'
+
+    btnRow.appendChild(cancelBtn)
+    btnRow.appendChild(confirmBtn)
+    card.appendChild(iconDiv)
+    card.appendChild(h3)
+    card.appendChild(p)
+    card.appendChild(btnRow)
     overlay.appendChild(card)
     document.body.appendChild(overlay)
 
@@ -1871,8 +1889,10 @@ export default function Notebook() {
       if (e.target === overlay) close()
     })
     card.addEventListener('click', (e) => { e.stopPropagation() })
-    card.querySelector('#delete-cancel-btn')!.addEventListener('click', close)
-    card.querySelector('#delete-confirm-btn')!.addEventListener('click', () => {
+    cancelBtn.addEventListener('click', close)
+    confirmBtn.addEventListener('click', () => {
+      // Read pageId from data attribute as failsafe
+      const pid = overlay.dataset.pageId || idToDelete
       close()
 
       try {
@@ -1882,14 +1902,14 @@ export default function Notebook() {
           saveTimerRef.current = null
         }
         // API delete
-        if (!pageId.startsWith('local-')) {
-          api.deleteNotebookPage(pageId).catch(() => {})
+        if (pid && !pid.startsWith('local-')) {
+          api.deleteNotebookPage(pid).catch(() => {})
         }
         persistSet('notebook-onboarded', true)
 
-        // Remove from pages — use flushSync to force synchronous React update
+        // Remove from pages
         const currentPages = pagesRef.current
-        const remaining = currentPages.filter(p => p.id !== pageId)
+        const remaining = currentPages.filter(p => p.id !== pid)
         persistSet('notebook-pages', remaining)
 
         flushSync(() => {
@@ -1898,7 +1918,7 @@ export default function Notebook() {
 
         // Switch active page if we deleted the active one
         const currentActive = activePageRef.current
-        if (currentActive?.id === pageId) {
+        if (currentActive?.id === pid) {
           flushSync(() => {
             if (remaining.length > 0) {
               const next = remaining[0]
@@ -1916,11 +1936,11 @@ export default function Notebook() {
           })
         }
       } catch (err) {
-        console.error('[DELETE] Error during page deletion:', err)
+        console.error('[DELETE] Error:', err)
         alert('Delete failed: ' + (err instanceof Error ? err.message : String(err)))
       }
     })
-  }, []) // No dependencies — uses refs for latest state
+  }, []) // No dependencies — uses refs + data attributes for state
 
   const loadVersions = async () => {
     if (!activePage) return
