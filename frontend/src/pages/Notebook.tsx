@@ -1821,62 +1821,37 @@ export default function Notebook() {
   }
 
   const handleDeletePage = useCallback((pageId: string) => {
-    if (!window.confirm('Delete this page permanently? This cannot be undone.')) return
-    // Directly delete without modal
-    if (!pageId.startsWith('local-')) {
-      api.deleteNotebookPage(pageId).catch(() => {})
-    }
-    persistSet('notebook-onboarded', true)
-    setPagesRaw(prev => {
-      const remaining = prev.filter(p => p.id !== pageId)
-      persistSet('notebook-pages', remaining)
-      return remaining
-    })
-    if (activePage?.id === pageId) {
-      setTimeout(() => {
-        setPagesRaw(current => {
-          if (current.length > 0) {
-            selectPage(current[0])
-          } else {
-            setActivePage(null)
-            setEditContent('')
-            setEditTitle('')
-          }
-          return current
-        })
-      }, 0)
-    }
-  }, [activePage, selectPage])
+    setDeleteConfirmId(pageId)
+  }, [])
 
   const confirmDelete = useCallback(() => {
     const pageId = deleteConfirmId
     if (!pageId) return
     setDeleteConfirmId(null)
+    // Cancel any pending auto-save to prevent race conditions
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = null
+    }
     // API delete (fire and forget)
     if (!pageId.startsWith('local-')) {
       api.deleteNotebookPage(pageId).catch(() => {})
     }
     persistSet('notebook-onboarded', true)
-    setPagesRaw(prev => {
-      const remaining = prev.filter(p => p.id !== pageId)
-      persistSet('notebook-pages', remaining)
-      return remaining
-    })
+    // Use setPages (the persisting wrapper) instead of setPagesRaw
+    const remaining = pages.filter(p => p.id !== pageId)
+    setPages(remaining)
+    // Switch to another page or clear
     if (activePage?.id === pageId) {
-      setTimeout(() => {
-        setPagesRaw(current => {
-          if (current.length > 0) {
-            selectPage(current[0])
-          } else {
-            setActivePage(null)
-            setEditContent('')
-            setEditTitle('')
-          }
-          return current
-        })
-      }, 0)
+      if (remaining.length > 0) {
+        selectPage(remaining[0])
+      } else {
+        setActivePage(null)
+        setEditContent('')
+        setEditTitle('')
+      }
     }
-  }, [deleteConfirmId, activePage, selectPage])
+  }, [deleteConfirmId, activePage, pages, selectPage, setPages])
 
   const loadVersions = async () => {
     if (!activePage) return
