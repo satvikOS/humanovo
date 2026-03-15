@@ -7,7 +7,7 @@ import {
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import api, { Project } from '../services/api'
-import { persistGet, persistSet, logActivity } from '../utils/persistence'
+import { persistGet, persistSet, logActivity, formatDate } from '../utils/persistence'
 import HypothesisDocViewer from '../components/HypothesisDocViewer'
 
 const API_BASE = '/api/v1'
@@ -858,7 +858,7 @@ export default function ProjectDetail() {
                         <div className="min-w-0">
                           <p className="text-white text-sm font-medium truncate">{paper.hypothesis_title}</p>
                           <p className="text-[var(--color-text-muted)] text-xs">
-                            {new Date(paper.generated_at).toLocaleDateString()} &middot; {paper.disease}
+                            {formatDate(paper.generated_at)} &middot; {paper.disease}
                           </p>
                         </div>
                       </div>

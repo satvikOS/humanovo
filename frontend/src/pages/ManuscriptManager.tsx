@@ -3,6 +3,7 @@ import {
   FiFileText, FiPlus, FiTrash2, FiEdit3, FiUsers, FiSend,
   FiDownload, FiSave,
 } from 'react-icons/fi'
+import { formatDate } from '../utils/persistence'
 
 interface Manuscript {
   id: string; title: string; status: string; journal_target: string
@@ -182,7 +183,7 @@ export default function ManuscriptManager() {
                   <h3 className="text-xs font-medium mb-2">Submission History</h3>
                   {selected.submission_history.map((s: any) => (
                     <div key={s.id} className="flex items-center justify-between py-1.5 text-xs border-b border-[var(--color-border)]/30 last:border-0">
-                      <span>{s.journal}</span><span className="text-[var(--color-text-muted)]">{s.status} — {new Date(s.submitted_at).toLocaleDateString()}</span>
+                      <span>{s.journal}</span><span className="text-[var(--color-text-muted)]">{s.status} — {formatDate(s.submitted_at)}</span>
                     </div>
                   ))}
                 </div>

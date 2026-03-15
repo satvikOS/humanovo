@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import {
   FiPlus, FiTrash2, FiSave, FiDownload, FiClock, FiTag,
   FiEdit3, FiEye, FiColumns, FiFileText,
@@ -16,6 +17,7 @@ import 'katex/dist/katex.min.css'
 import { marked } from 'marked'
 import TurndownService from 'turndown'
 import api, { NotebookPage, NotebookVersion } from '../services/api'
+import { persistGet, persistSet, formatDate, formatDateTime } from '../utils/persistence'
 
 // Configure turndown for HTML-to-markdown conversion
 const turndownService = new TurndownService({
@@ -117,7 +119,7 @@ const PAGE_TEMPLATES: { name: string; icon: React.ReactNode; description: string
     content: `# Research Notes — [Project Title]
 
 > **PI:** [Principal Investigator]
-> **Date:** ${new Date().toISOString().split('T')[0]}
+> **Date:** ${formatDate(new Date())}
 > **Notebook ID:** RN-${Date.now().toString(36).toUpperCase()}
 > **Status:** Draft
 
@@ -232,7 +234,7 @@ import scipy.stats as stats
     content: `# Experiment Log — [Experiment Title]
 
 > **Experiment ID:** EXP-${Date.now().toString(36).toUpperCase()}
-> **Date initiated:** ${new Date().toISOString().split('T')[0]}
+> **Date initiated:** ${formatDate(new Date())}
 > **Date completed:** [Pending]
 > **Researcher:** [Name, ORCID]
 > **Supervisor:** [Name]
@@ -376,7 +378,7 @@ $$
     content: `# Systematic Literature Review — [Topic]
 
 > **Review ID:** LR-${Date.now().toString(36).toUpperCase()}
-> **Date initiated:** ${new Date().toISOString().split('T')[0]}
+> **Date initiated:** ${formatDate(new Date())}
 > **Reviewer(s):** [Name 1, Name 2]
 > **PROSPERO registration:** [If applicable]
 
@@ -399,7 +401,7 @@ $$
 
 | Database | Date searched | Results |
 |----------|-------------|---------|
-| PubMed / MEDLINE | ${new Date().toISOString().split('T')[0]} | [n] |
+| PubMed / MEDLINE | ${formatDate(new Date())} | [n] |
 | Embase | | [n] |
 | Cochrane Library | | [n] |
 | Web of Science | | [n] |
@@ -545,7 +547,7 @@ $$
 
 > **Analysis ID:** DA-${Date.now().toString(36).toUpperCase()}
 > **Analyst:** [Name, affiliation]
-> **Date:** ${new Date().toISOString().split('T')[0]}
+> **Date:** ${formatDate(new Date())}
 > **Software:** Python 3.x / R 4.x / [Other]
 > **Repository:** [Link to code repository]
 
@@ -733,7 +735,7 @@ $$
 
 > **Protocol ID:** CP-${Date.now().toString(36).toUpperCase()}
 > **Version:** 1.0
-> **Date:** ${new Date().toISOString().split('T')[0]}
+> **Date:** ${formatDate(new Date())}
 > **Sponsor:** [Organization]
 > **Principal Investigator:** [Name, credentials]
 
@@ -862,7 +864,7 @@ $$
     category: 'collaboration' as TemplateCategory,
     content: `# Meeting Notes — [Meeting Title]
 
-> **Date:** ${new Date().toISOString().split('T')[0]}
+> **Date:** ${formatDate(new Date())}
 > **Time:** [Start time] — [End time]
 > **Location:** [Room / Virtual link]
 > **Facilitator:** [Name]
@@ -1061,7 +1063,7 @@ $$
     content: `# Clinical Case Report — [Brief Title]
 
 > **Report ID:** CR-${Date.now().toString(36).toUpperCase()}
-> **Date:** ${new Date().toISOString().split('T')[0]}
+> **Date:** ${formatDate(new Date())}
 > **Author(s):** [Names, affiliations]
 > **Institution:** [Hospital/clinic name]
 > **IRB/Ethics:** [Approval number or waiver]
@@ -1251,7 +1253,7 @@ The authors declare no conflicts of interest.
 > **Degree:** [PhD / MSc / MD] in [Field]
 > **Institution:** [University Name]
 > **Supervisor:** [Name, Title]
-> **Date:** ${new Date().toISOString().split('T')[0]}
+> **Date:** ${formatDate(new Date())}
 
 ---
 
@@ -1425,7 +1427,7 @@ The authors declare no conflicts of interest.
 
 > **Authors:** [Author 1], [Author 2]
 > **Target journal:** [Journal Name]
-> **Date:** ${new Date().toISOString().split('T')[0]}
+> **Date:** ${formatDate(new Date())}
 
 ---
 
@@ -1504,10 +1506,19 @@ const SNIPPET_INSERT = {
 }
 
 export default function Notebook() {
-  const [pages, setPages] = useState<NotebookPage[]>([])
+  const [pages, setPagesRaw] = useState<NotebookPage[]>(() => persistGet<NotebookPage[]>('notebook-pages', []))
   const [activePage, setActivePage] = useState<NotebookPage | null>(null)
   const [viewMode, setViewMode] = useState<ViewMode>('split')
   const [loading, setLoading] = useState(true)
+
+  // Persist pages to localStorage whenever they change
+  const setPages = useCallback((updater: NotebookPage[] | ((prev: NotebookPage[]) => NotebookPage[])) => {
+    setPagesRaw(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater
+      persistSet('notebook-pages', next)
+      return next
+    })
+  }, [])
   const [saving, setSaving] = useState(false)
   const [editContent, setEditContent] = useState('')
   const [editTitle, setEditTitle] = useState('')
@@ -1517,6 +1528,7 @@ export default function Notebook() {
   // Re-read citation style from localStorage each time the template modal opens
   const templates = useMemo(() => buildTemplates(getCitationStyle()), [showTemplates])
   const [showVersions, setShowVersions] = useState(false)
+  // deleteConfirmId for delete confirmation modal
   const [versions, setVersions] = useState<NotebookVersion[]>([])
   const [tagInput, setTagInput] = useState('')
   const [editTags, setEditTags] = useState<string[]>([])
@@ -1547,11 +1559,16 @@ export default function Notebook() {
     }
   }, [])
 
+  // Track whether the rich editor is being initialized (to prevent input handlers from wiping content)
+  const editorInitializingRef = useRef(false)
+
   // Sync rich editor HTML changes back to markdown (does NOT re-render the editor)
   const handleRichEditorInput = useCallback(() => {
-    if (isUpdatingRef.current) return
+    if (isUpdatingRef.current || editorInitializingRef.current) return
     const el = richEditorRef.current
     if (!el) return
+    // Don't sync if editor is empty and we have content (editor just mounted)
+    if (!el.innerHTML.trim() && editContent.trim()) return
     try {
       isUpdatingRef.current = true
       const html = el.innerHTML
@@ -1562,7 +1579,7 @@ export default function Notebook() {
     } finally {
       isUpdatingRef.current = false
     }
-  }, [scheduleAutoSave])
+  }, [scheduleAutoSave, editContent])
 
   // Handle paste in rich editor: intercept images and render them inline
   const handleRichPaste = useCallback((e: React.ClipboardEvent<HTMLDivElement>) => {
@@ -1587,26 +1604,29 @@ export default function Notebook() {
   }, [handleRichEditorInput])
 
   // Set rich editor content imperatively only when content changes externally
-  // (template selection, version restore, page switch) - never during typing
+  // (template selection, version restore, page switch, view mode switch) - never during typing
   const lastExternalContent = useRef('')
   useEffect(() => {
     if (isUpdatingRef.current) return
     const el = richEditorRef.current
     if (!el) return
-    // Only update when content changed from outside (not from typing)
-    if (lastExternalContent.current !== editContent) {
-      // Check if editor content already matches
+    // Update when content changed from outside OR when editor just remounted (empty innerHTML)
+    const editorIsEmpty = !el.innerHTML.trim()
+    if (lastExternalContent.current !== editContent || editorIsEmpty) {
       try {
-        const currentMd = turndownService.turndown(el.innerHTML)
+        editorInitializingRef.current = true
+        const currentMd = editorIsEmpty ? '' : turndownService.turndown(el.innerHTML)
         if (currentMd !== editContent) {
           el.innerHTML = contentToHtml(editContent)
         }
       } catch {
         el.innerHTML = contentToHtml(editContent)
+      } finally {
+        editorInitializingRef.current = false
       }
       lastExternalContent.current = editContent
     }
-  }, [editContent, contentToHtml])
+  }, [editContent, contentToHtml, viewMode])
 
   // Load pages
   useEffect(() => {
@@ -1616,41 +1636,72 @@ export default function Notebook() {
   const loadPages = async () => {
     try {
       setLoading(true)
-      const res = await api.getNotebookPages({ page_size: 100 }) || {}
-      const items = Array.isArray(res.items) ? res.items : []
-      if (items.length > 0) {
-        setPages(items)
-        if (!activePage) selectPage(items[0])
+      const cachedPages = persistGet<NotebookPage[]>('notebook-pages', [])
+      let apiItems: NotebookPage[] = []
+      try {
+        const res = await api.getNotebookPages({ page_size: 100 }) || {}
+        apiItems = Array.isArray(res.items) ? res.items : []
+      } catch {
+        // API unavailable — use cached pages
+      }
+
+      // Merge API pages with locally-created pages
+      const apiIds = new Set(apiItems.map(p => p.id))
+      const localOnly = cachedPages.filter(p => !apiIds.has(p.id))
+      const merged = [...apiItems, ...localOnly]
+      merged.sort((a, b) => (new Date(b.updated_at || b.created_at || 0).getTime()) - (new Date(a.updated_at || a.created_at || 0).getTime()))
+
+      if (merged.length > 0) {
+        setPages(merged)
+        if (!activePage) selectPage(merged[0])
       } else {
-        // No pages returned — create a default local page
-        const defaultPage: NotebookPage = {
-          id: 'local-default',
-          title: 'Getting Started',
-          content: '# Welcome to HumaNovo Notebook\n\nThis is your research notebook. Use **Markdown** to write notes, embed evidence, and track your research.\n\n## Features\n- Rich Markdown editing with live preview\n- LaTeX math: $E = mc^2$\n- Link evidence and hypotheses\n- Version history\n- Export to PDF/Markdown\n\nStart writing below...',
-          content_type: 'markdown',
-          tags: ['getting-started'],
-          version: 1,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
+        // Only show Getting Started for truly fresh users (never used notebook before)
+        const hasUsedNotebook = persistGet<boolean>('notebook-onboarded', false)
+        if (!hasUsedNotebook) {
+          const defaultPage: NotebookPage = {
+            id: 'local-default',
+            title: 'Getting Started',
+            content: '# Welcome to HumaNovo Notebook\n\nThis is your research notebook. Use **Markdown** to write notes, embed evidence, and track your research.\n\n## Features\n- Rich Markdown editing with live preview\n- LaTeX math: $E = mc^2$\n- Link evidence and hypotheses\n- Version history\n- Export to PDF/Markdown\n\nStart writing below...',
+            content_type: 'markdown',
+            tags: ['getting-started'],
+            version: 1,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          }
+          persistSet('notebook-onboarded', true)
+          setPages([defaultPage])
+          selectPage(defaultPage)
+        } else {
+          // User has used notebook before but deleted all pages — show empty state
+          setPages([])
         }
-        setPages([defaultPage])
-        selectPage(defaultPage)
       }
     } catch (err) {
       console.error('Failed to load notebook pages:', err)
-      // Fallback: create a local-only page so the UI isn't blank
-      const fallbackPage: NotebookPage = {
-        id: 'local-fallback',
-        title: 'Research Notes',
-        content: '# Research Notes\n\nStart writing your research notes here.\n\n> **Note:** The notebook backend is currently unavailable. Your notes will be available once the server is back online.\n',
-        content_type: 'markdown',
-        tags: [],
-        version: 1,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+      // Use cached pages if available, otherwise create fallback
+      const cachedPages = persistGet<NotebookPage[]>('notebook-pages', [])
+      if (cachedPages.length > 0) {
+        setPages(cachedPages)
+        if (!activePage) selectPage(cachedPages[0])
+      } else {
+        const hasUsedNotebook = persistGet<boolean>('notebook-onboarded', false)
+        if (!hasUsedNotebook) {
+          const fallbackPage: NotebookPage = {
+            id: 'local-fallback',
+            title: 'Research Notes',
+            content: '# Research Notes\n\nStart writing your research notes here.\n\n> **Note:** The notebook backend is currently unavailable. Your notes will be available once the server is back online.\n',
+            content_type: 'markdown',
+            tags: [],
+            version: 1,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          }
+          setPages([fallbackPage])
+          selectPage(fallbackPage)
+        } else {
+          setPages([])
+        }
       }
-      setPages([fallbackPage])
-      selectPage(fallbackPage)
     } finally {
       setLoading(false)
     }
@@ -1711,38 +1762,57 @@ export default function Notebook() {
     }
   }
 
-  const createPage = async (template?: typeof templates[0]) => {
-    const title = template ? template.name : 'Untitled'
+  // Pre-fillout form state for new page creation
+  const [pendingTemplate, setPendingTemplate] = useState<typeof templates[0] | null>(null)
+  const [newPageTitle, setNewPageTitle] = useState('')
+  const [newPageTags, setNewPageTags] = useState('')
+
+  const selectTemplate = (template: typeof templates[0]) => {
+    setPendingTemplate(template)
+    setNewPageTitle(template.name)
+    setNewPageTags('')
+  }
+
+  const cancelCreate = () => {
+    setPendingTemplate(null)
+    setNewPageTitle('')
+    setNewPageTags('')
+  }
+
+  const createPage = useCallback(() => {
+    const template = pendingTemplate
+    const title = newPageTitle.trim() || (template ? template.name : 'Untitled')
     const content = template?.content || ''
     const categoryTag = template?.category ? `category:${template.category}` : 'category:general'
-    const tags = [categoryTag]
-    try {
-      const page = await api.createNotebookPage({
-        title,
-        content,
-        content_type: 'markdown',
-        tags,
-      })
-      const pageWithContent = { ...page, content: page.content || content, tags: page.tags?.length ? page.tags : tags }
-      setPages(prev => [pageWithContent, ...prev])
-      selectPage(pageWithContent)
-    } catch (err) {
-      console.error('Failed to create page via API, creating locally:', err)
-      const localPage: NotebookPage = {
-        id: `local-${Date.now()}`,
-        title,
-        content,
-        content_type: 'markdown',
-        tags,
-        version: 1,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      }
-      setPages(prev => [localPage, ...prev])
-      selectPage(localPage)
-    }
+    const extraTags = newPageTags.split(',').map(t => t.trim()).filter(Boolean)
+    const tags = [categoryTag, ...extraTags]
+
+    // Close modal immediately
+    setPendingTemplate(null)
+    setNewPageTitle('')
+    setNewPageTags('')
     setShowTemplates(false)
-  }
+
+    // Create the page (local first, then try API)
+    const localPage: NotebookPage = {
+      id: `local-${Date.now()}`,
+      title,
+      content,
+      content_type: 'markdown',
+      tags,
+      version: 1,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }
+    setPages(prev => [localPage, ...prev])
+    selectPage(localPage)
+
+    // Try API in background — if it succeeds, swap the local page for the API one
+    api.createNotebookPage({ title, content, content_type: 'markdown', tags }).then(apiPage => {
+      const pageWithContent = { ...apiPage, content: apiPage.content || content, tags: apiPage.tags?.length ? apiPage.tags : tags }
+      setPages(prev => prev.map(p => p.id === localPage.id ? pageWithContent : p))
+    }).catch(() => { /* keep local page */ })
+  }, [pendingTemplate, newPageTitle, newPageTags, selectPage, setPages])
 
   // Helper to extract template category from page tags
   const getPageCategory = (page: NotebookPage | null): TemplateCategory => {
@@ -1750,12 +1820,33 @@ export default function Notebook() {
     return (catTag?.replace('category:', '') as TemplateCategory) || 'general'
   }
 
-  const deletePage = async (id: string) => {
-    try {
-      await api.deleteNotebookPage(id)
-      setPages(prev => prev.filter(p => p.id !== id))
-      if (activePage?.id === id) {
-        const remaining = pages.filter(p => p.id !== id)
+  // --- Delete page: pure React state, same pattern as Simulations page ---
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+
+  const handleDeletePage = (id: string) => {
+    setDeleteConfirmId(id)
+  }
+
+  const confirmDelete = () => {
+    if (!deleteConfirmId) return
+    const pid = deleteConfirmId
+    setDeleteConfirmId(null)
+    // Cancel any pending auto-save
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = null
+    }
+    // API delete
+    if (!pid.startsWith('local-')) {
+      api.deleteNotebookPage(pid).catch(() => {})
+    }
+    persistSet('notebook-onboarded', true)
+    // Remove from state + persist
+    setPagesRaw(prev => {
+      const remaining = prev.filter(p => p.id !== pid)
+      persistSet('notebook-pages', remaining)
+      // Switch active page
+      if (activePage?.id === pid) {
         if (remaining.length > 0) {
           selectPage(remaining[0])
         } else {
@@ -1764,9 +1855,8 @@ export default function Notebook() {
           setEditTitle('')
         }
       }
-    } catch (err) {
-      console.error('Failed to delete page:', err)
-    }
+      return remaining
+    })
   }
 
   const loadVersions = async () => {
@@ -1896,6 +1986,7 @@ export default function Notebook() {
   }
 
   return (
+    <>
     <div className="relative w-full" style={{ height: 'calc(100vh - 3rem)' }}>
       <div className="absolute inset-0 flex overflow-hidden">
       {/* Sidebar */}
@@ -1933,11 +2024,14 @@ export default function Notebook() {
 
         <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
           {filteredPages.map(page => (
-            <button
+            <div
               key={page.id}
+              role="button"
+              tabIndex={0}
               onClick={() => selectPage(page)}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') selectPage(page) }}
               className={clsx(
-                'w-full text-left p-2 rounded transition-colors group',
+                'w-full text-left p-2 rounded transition-colors group cursor-pointer',
                 activePage?.id === page.id
                   ? 'bg-white/10 text-white'
                   : 'text-[var(--color-text-secondary)] hover:bg-white/5'
@@ -1947,8 +2041,12 @@ export default function Notebook() {
                 <div className="w-1.5 h-1.5 rounded-full shrink-0 mr-1.5" style={{ background: TEMPLATE_CATEGORY_COLORS[getPageCategory(page)] || '#94a3b8' }} />
                 <span className="text-xs font-medium truncate flex-1">{page.title}</span>
                 <button
-                  onClick={e => { e.stopPropagation(); deletePage(page.id) }}
-                  className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-white/10 text-red-400"
+                  type="button"
+                  onClick={e => { e.stopPropagation(); handleDeletePage(page.id) }}
+                  onMouseDown={e => e.stopPropagation()}
+                  className="p-1 rounded hover:bg-red-500/20 text-red-400/60 hover:text-red-400 cursor-pointer shrink-0"
+                  title="Delete page"
+                  style={{ pointerEvents: 'auto', position: 'relative', zIndex: 20 }}
                 >
                   <FiTrash2 className="w-3 h-3" />
                 </button>
@@ -1958,7 +2056,7 @@ export default function Notebook() {
                   v{page.version}
                 </span>
                 <span className="text-xxs text-[var(--color-text-muted)]">
-                  {new Date(page.updated_at).toLocaleDateString()}
+                  {formatDate(page.updated_at)}
                 </span>
               </div>
               {Array.isArray(page.tags) && page.tags.length > 0 && (
@@ -1970,7 +2068,7 @@ export default function Notebook() {
                   ))}
                 </div>
               )}
-            </button>
+            </div>
           ))}
 
           {filteredPages.length === 0 && (
@@ -2268,16 +2366,92 @@ export default function Notebook() {
         </div>
       )}
 
-      {/* Template picker modal */}
-      {showTemplates && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setShowTemplates(false)}>
-          <div className="glass-card w-full max-w-lg mx-4 p-0 max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-4 border-b border-[var(--color-border)] shrink-0">
-              <h2 className="text-sm font-semibold">New Page</h2>
-              <button onClick={() => setShowTemplates(false)} className="p-1 rounded hover:bg-white/5 text-[var(--color-text-muted)]">
-                <FiX className="w-4 h-4" />
-              </button>
+      </div>
+
+    </div>
+
+    {/* Delete Confirmation Dialog — same pattern as Simulations page */}
+    {deleteConfirmId && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+        <div className="glass-card p-6 max-w-sm mx-4 text-center" style={{ background: 'var(--color-surface-solid)' }}>
+          <FiX className="w-8 h-8 text-red-400 mx-auto mb-3" />
+          <h3 className="text-lg font-semibold mb-2">Delete Page?</h3>
+          <p className="text-sm text-[var(--color-text-muted)] mb-4">
+            This will permanently delete this page and its contents. This action cannot be undone.
+          </p>
+          <div className="flex gap-3 justify-center">
+            <button onClick={() => setDeleteConfirmId(null)} className="btn px-4 py-2 text-sm text-[var(--color-text-muted)]">
+              Cancel
+            </button>
+            <button onClick={confirmDelete} className="btn px-4 py-2 text-sm bg-red-500/10 text-red-400 hover:bg-red-500/20">
+              Delete Permanently
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* Template picker modal — portaled to document.body */}
+    {showTemplates && createPortal(
+      <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/60" onClick={() => { setShowTemplates(false); cancelCreate() }}>
+        <div className="max-w-lg w-full mx-4 max-h-[80vh] flex flex-col rounded-xl border border-white/10" style={{ background: '#1a1a2e', boxShadow: '0 25px 50px rgba(0,0,0,0.5)', color: '#e2e8f0' }} onClick={e => e.stopPropagation()}>
+          <div className="flex items-center justify-between p-4 border-b border-white/10 shrink-0">
+            <h2 className="text-sm font-semibold">
+              {pendingTemplate ? 'Configure New Page' : 'Choose a Template'}
+            </h2>
+            <button onClick={() => { setShowTemplates(false); cancelCreate() }} className="p-1 rounded hover:bg-white/10 cursor-pointer" style={{ background: 'transparent', border: 'none', color: '#94a3b8' }}>
+              <FiX className="w-4 h-4" />
+            </button>
+          </div>
+
+          {pendingTemplate ? (
+            /* Step 2: Pre-fillout form */
+            <div className="p-4 flex flex-col gap-4">
+              <div className="flex items-center gap-3 p-3 rounded-lg bg-white/5 border border-white/10">
+                <div className="p-1.5 rounded shrink-0" style={{ background: (TEMPLATE_CATEGORY_COLORS[pendingTemplate.category] || '#94a3b8') + '33', color: TEMPLATE_CATEGORY_COLORS[pendingTemplate.category] || '#94a3b8' }}>
+                  {pendingTemplate.icon}
+                </div>
+                <div>
+                  <div className="text-xs font-medium">{pendingTemplate.name}</div>
+                  <div className="text-xxs" style={{ color: '#94a3b8' }}>{pendingTemplate.description}</div>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium mb-1.5" style={{ color: '#e2e8f0' }}>Page Title</label>
+                <input
+                  type="text"
+                  value={newPageTitle}
+                  onChange={e => setNewPageTitle(e.target.value)}
+                  placeholder="Enter page title..."
+                  autoFocus
+                  onKeyDown={e => { if (e.key === 'Enter') createPage() }}
+                  className="w-full px-3 py-2 text-sm rounded-md border border-white/20 outline-none"
+                  style={{ background: 'rgba(255,255,255,0.05)', color: '#e2e8f0', boxSizing: 'border-box' }}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium mb-1.5" style={{ color: '#e2e8f0' }}>Tags <span style={{ color: '#94a3b8', fontWeight: 400 }}>(comma-separated, optional)</span></label>
+                <input
+                  type="text"
+                  value={newPageTags}
+                  onChange={e => setNewPageTags(e.target.value)}
+                  placeholder="e.g. research, draft, BRCA1"
+                  onKeyDown={e => { if (e.key === 'Enter') createPage() }}
+                  className="w-full px-3 py-2 text-sm rounded-md border border-white/20 outline-none"
+                  style={{ background: 'rgba(255,255,255,0.05)', color: '#e2e8f0', boxSizing: 'border-box' }}
+                />
+              </div>
+              <div className="flex gap-3 justify-end pt-2">
+                <button onClick={cancelCreate} className="px-4 py-2 text-sm cursor-pointer rounded-lg" style={{ background: 'transparent', border: 'none', color: '#94a3b8' }}>
+                  Back
+                </button>
+                <button onClick={createPage} className="px-4 py-2 text-sm cursor-pointer rounded-lg font-medium" style={{ background: 'rgba(99,102,241,0.2)', border: 'none', color: '#818cf8' }}>
+                  Create Page
+                </button>
+              </div>
             </div>
+          ) : (
+            /* Step 1: Template selection */
             <div className="p-3 overflow-y-auto">
               {Object.entries(
                 templates.reduce<Record<string, typeof templates>>((acc, t) => {
@@ -2290,7 +2464,7 @@ export default function Notebook() {
                 <div key={cat} className="mb-3">
                   <div className="flex items-center gap-2 mb-1.5 px-1">
                     <div className="w-2 h-2 rounded-full" style={{ background: TEMPLATE_CATEGORY_COLORS[cat as TemplateCategory] || '#94a3b8' }} />
-                    <span className="text-xxs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+                    <span className="text-xxs font-medium uppercase tracking-wider" style={{ color: '#94a3b8' }}>
                       {TEMPLATE_CATEGORY_LABELS[cat as TemplateCategory] || cat}
                     </span>
                   </div>
@@ -2298,18 +2472,16 @@ export default function Notebook() {
                     {tmpls.map(template => (
                       <button
                         key={template.name}
-                        onClick={() => createPage(template)}
-                        className="text-left p-3 rounded-lg border border-[var(--color-border)] hover:border-white/20 hover:bg-white/5 transition-all flex items-start gap-2.5"
+                        onClick={() => selectTemplate(template)}
+                        className="text-left p-3 rounded-lg border border-white/10 hover:bg-white/5 flex items-start gap-2.5 transition-colors cursor-pointer"
+                        style={{ background: 'transparent', color: '#e2e8f0' }}
                       >
-                        <div
-                          className="p-1.5 rounded"
-                          style={{ background: (TEMPLATE_CATEGORY_COLORS[template.category] || '#94a3b8') + '20', color: TEMPLATE_CATEGORY_COLORS[template.category] || '#94a3b8' }}
-                        >
+                        <div className="p-1.5 rounded" style={{ background: (TEMPLATE_CATEGORY_COLORS[template.category] || '#94a3b8') + '33', color: TEMPLATE_CATEGORY_COLORS[template.category] || '#94a3b8' }}>
                           {template.icon}
                         </div>
                         <div className="min-w-0">
                           <div className="text-xs font-medium">{template.name}</div>
-                          <div className="text-xxs text-[var(--color-text-muted)] mt-0.5 line-clamp-2">
+                          <div className="text-xxs mt-0.5" style={{ color: '#94a3b8' }}>
                             {template.description}
                           </div>
                         </div>
@@ -2319,59 +2491,62 @@ export default function Notebook() {
                 </div>
               ))}
             </div>
-          </div>
+          )}
         </div>
-      )}
+      </div>,
+      document.body
+    )}
 
-      {/* Version history panel */}
-      {showVersions && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setShowVersions(false)}>
-          <div className="glass-card w-full max-w-lg mx-4 p-0 max-h-[70vh] flex flex-col" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-4 border-b border-[var(--color-border)] shrink-0">
-              <h2 className="text-sm font-semibold">Version History</h2>
-              <button onClick={() => setShowVersions(false)} className="p-1 rounded hover:bg-white/5 text-[var(--color-text-muted)]">
-                <FiX className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-2">
-              {versions.length > 0 ? (
-                versions.map(ver => (
-                  <div
-                    key={ver.version}
-                    className="p-3 rounded hover:bg-white/5 flex items-center justify-between group"
-                  >
-                    <div>
-                      <div className="text-sm font-medium">
-                        v{ver.version} — {ver.title}
-                      </div>
-                      <div className="text-xxs text-[var(--color-text-muted)]">
-                        {new Date(ver.created_at).toLocaleString()}
-                      </div>
-                      <div className="text-xxs text-[var(--color-text-muted)] mt-0.5 line-clamp-1">
-                        {(ver.content || '').slice(0, 100)}...
-                      </div>
+    {/* Version history panel — portaled to document.body */}
+    {showVersions && createPortal(
+      <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/60" onClick={() => setShowVersions(false)}>
+        <div className="max-w-lg w-full mx-4 max-h-[70vh] flex flex-col rounded-xl border border-white/10" style={{ background: '#1a1a2e', boxShadow: '0 25px 50px rgba(0,0,0,0.5)', color: '#e2e8f0' }} onClick={e => e.stopPropagation()}>
+          <div className="flex items-center justify-between p-4 border-b border-white/10 shrink-0">
+            <h2 className="text-sm font-semibold">Version History</h2>
+            <button onClick={() => setShowVersions(false)} className="p-1 rounded hover:bg-white/10 cursor-pointer" style={{ background: 'transparent', border: 'none', color: '#94a3b8' }}>
+              <FiX className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-2">
+            {versions.length > 0 ? (
+              versions.map(ver => (
+                <div
+                  key={ver.version}
+                  className="p-3 rounded hover:bg-white/5 flex items-center justify-between group"
+                >
+                  <div>
+                    <div className="text-sm font-medium">
+                      v{ver.version} — {ver.title}
                     </div>
-                    <button
-                      onClick={() => restoreVersion(ver.version)}
-                      className="opacity-0 group-hover:opacity-100 px-2 py-1 text-xs text-accent-blue hover:bg-accent-blue/10 rounded transition-all"
-                    >
-                      <FiRotateCcw className="w-3 h-3 inline mr-1" />
-                      Restore
-                    </button>
+                    <div className="text-xxs" style={{ color: '#94a3b8' }}>
+                      {formatDateTime(ver.created_at)}
+                    </div>
+                    <div className="text-xxs mt-0.5 line-clamp-1" style={{ color: '#94a3b8' }}>
+                      {(ver.content || '').slice(0, 100)}...
+                    </div>
                   </div>
-                ))
-              ) : (
-                <div className="text-center py-8 text-[var(--color-text-muted)]">
-                  <FiClock className="w-6 h-6 mx-auto mb-2 opacity-50" />
-                  <p className="text-xs">No version history yet</p>
-                  <p className="text-xxs mt-1">Versions are created on each save</p>
+                  <button
+                    onClick={() => restoreVersion(ver.version)}
+                    className="opacity-0 group-hover:opacity-100 px-2 py-1 text-xs text-accent-blue hover:bg-accent-blue/10 rounded transition-all cursor-pointer"
+                    style={{ background: 'transparent', border: 'none' }}
+                  >
+                    <FiRotateCcw className="w-3 h-3 inline mr-1" />
+                    Restore
+                  </button>
                 </div>
-              )}
-            </div>
+              ))
+            ) : (
+              <div className="text-center py-8" style={{ color: '#94a3b8' }}>
+                <FiClock className="w-6 h-6 mx-auto mb-2 opacity-50" />
+                <p className="text-xs">No version history yet</p>
+                <p className="text-xxs mt-1">Versions are created on each save</p>
+              </div>
+            )}
           </div>
         </div>
-      )}
-      </div>
-    </div>
+      </div>,
+      document.body
+    )}
+  </>
   )
 }

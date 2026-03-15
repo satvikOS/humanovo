@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react'
+import { formatDate } from '../utils/persistence'
 import {
   FiBarChart2, FiTrendingUp, FiGrid, FiActivity, FiTarget,
   FiPlay, FiSave, FiCopy, FiChevronDown, FiChevronUp, FiUpload,
@@ -43,6 +44,67 @@ function normalCDF(z: number): number {
   const t = 1 / (1 + p * z)
   const y = 1 - ((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t * Math.exp(-z * z)
   return 0.5 * (1 + sign * y)
+}
+// Regularized lower incomplete gamma function P(a,x) — for chi-square and F-distribution CDF
+function gammainc(a: number, x: number): number {
+  if (x <= 0) return 0
+  if (x > a + 30) return 1 // converged
+  // Series expansion for P(a,x) = gamma(a,x) / Gamma(a)
+  let sum = 1 / a, term = 1 / a
+  for (let n = 1; n < 200; n++) {
+    term *= x / (a + n)
+    sum += term
+    if (Math.abs(term) < 1e-12 * Math.abs(sum)) break
+  }
+  return sum * Math.exp(-x + a * Math.log(x) - lgamma(a))
+}
+function lgamma(x: number): number {
+  // Lanczos approximation for log-gamma
+  const c = [76.18009172947146, -86.50532032941677, 24.01409824083091, -1.231739572450155, 0.001208650973866179, -5.395239384953e-06]
+  let y = x, tmp = x + 5.5
+  tmp -= (x + 0.5) * Math.log(tmp)
+  let ser = 1.000000000190015
+  for (let j = 0; j < 6; j++) ser += c[j] / ++y
+  return -tmp + Math.log(2.5066282746310005 * ser / x)
+}
+// Chi-square CDF: P(X <= x | df)
+function chiSquareCDF(x: number, df: number): number {
+  return gammainc(df / 2, x / 2)
+}
+// F-distribution CDF using regularized incomplete beta function approximation
+function fDistCDF(f: number, d1: number, d2: number): number {
+  if (f <= 0) return 0
+  // Convert F to chi-square approximation (Wilson-Hilferty)
+  const x = d1 * f / (d1 * f + d2)
+  return betainc(d1 / 2, d2 / 2, x)
+}
+function betainc(a: number, b: number, x: number): number {
+  if (x <= 0) return 0
+  if (x >= 1) return 1
+  // Continued fraction for regularized incomplete beta (Lentz method)
+  const lbeta = lgamma(a) + lgamma(b) - lgamma(a + b)
+  const front = Math.exp(Math.log(x) * a + Math.log(1 - x) * b - lbeta) / a
+  // Use continued fraction
+  let f_cf = 1, c = 1, d = 1 - (a + b) * x / (a + 1)
+  if (Math.abs(d) < 1e-30) d = 1e-30
+  d = 1 / d; f_cf = d
+  for (let m = 1; m <= 200; m++) {
+    // Even step
+    let num = m * (b - m) * x / ((a + 2 * m - 1) * (a + 2 * m))
+    d = 1 + num * d; if (Math.abs(d) < 1e-30) d = 1e-30; d = 1 / d
+    c = 1 + num / c; if (Math.abs(c) < 1e-30) c = 1e-30
+    f_cf *= d * c
+    // Odd step
+    num = -(a + m) * (a + b + m) * x / ((a + 2 * m) * (a + 2 * m + 1))
+    d = 1 + num * d; if (Math.abs(d) < 1e-30) d = 1e-30; d = 1 / d
+    c = 1 + num / c; if (Math.abs(c) < 1e-30) c = 1e-30
+    const delta = d * c; f_cf *= delta
+    if (Math.abs(delta - 1) < 1e-10) break
+  }
+  const result = front * f_cf
+  // If x > (a+1)/(a+b+2), use 1-I(b,a,1-x) for numerical stability
+  if (x > (a + 1) / (a + b + 2)) return Math.max(0, Math.min(1, 1 - betainc(b, a, 1 - x)))
+  return Math.max(0, Math.min(1, result))
 }
 
 function computeDescriptive(data: number[], label: string) {
@@ -105,8 +167,8 @@ function computeANOVA(groups: number[][], labels: string[]) {
   const fStat = msBetween / msWithin
   return {
     test: 'One-way ANOVA', f_statistic: fStat, df_between: dfBetween, df_within: dfWithin,
-    p_value: fStat > 4 ? 0.01 : fStat > 3 ? 0.05 : 0.1,
-    significant: fStat > 3.84,
+    p_value: Math.max(1e-10, 1 - fDistCDF(fStat, dfBetween, dfWithin)),
+    significant: (1 - fDistCDF(fStat, dfBetween, dfWithin)) < 0.05,
     groups: groups.map((g, i) => ({ label: labels[i] || `Group ${i + 1}`, n: g.length, mean: mean(g), std: std(g) })),
     ss_between: ssBetween, ss_within: ssWithin, ms_between: msBetween, ms_within: msWithin,
   }
@@ -125,8 +187,8 @@ function computeChiSquare(observed: number[][], rowLabels: string[], colLabels: 
   const df = (observed.length - 1) * (observed[0].length - 1)
   return {
     test: 'Chi-square test', chi_square: chiSq, degrees_of_freedom: df,
-    p_value: chiSq > 6.63 ? 0.01 : chiSq > 3.84 ? 0.05 : 0.1,
-    significant: chiSq > 3.84,
+    p_value: Math.max(1e-10, 1 - chiSquareCDF(chiSq, df)),
+    significant: (1 - chiSquareCDF(chiSq, df)) < 0.05,
     observed, expected,
     row_labels: rowLabels, col_labels: colLabels,
     cramers_v: Math.sqrt(chiSq / (total * (Math.min(observed.length, observed[0].length) - 1))),
@@ -578,7 +640,7 @@ export default function StatisticalAnalysis() {
           ) : saved.map(s => (
             <div key={s.id} className="flex items-center justify-between py-1 text-xs">
               <span>{s.title}</span>
-              <span className="text-[var(--color-text-muted)]">{new Date(s.created_at).toLocaleDateString()}</span>
+              <span className="text-[var(--color-text-muted)]">{formatDate(s.created_at)}</span>
             </div>
           ))}
         </div>
@@ -811,11 +873,11 @@ export default function StatisticalAnalysis() {
                 {/* Significance badges */}
                 {result.p_value !== undefined && (
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-[var(--color-text-muted)]">p = {result.p_value}</span>
-                    <span className={`text-xxs px-2 py-0.5 rounded-full ${result.significant_at_05 ? 'bg-green-500/10 text-green-400' : 'bg-yellow-500/10 text-yellow-400'}`}>
-                      {result.significant_at_05 ? 'p < 0.05' : 'p ≥ 0.05'}
+                    <span className="text-xs text-[var(--color-text-muted)]">p = {typeof result.p_value === 'number' ? result.p_value.toFixed(4) : result.p_value}</span>
+                    <span className={`text-xxs px-2 py-0.5 rounded-full ${(result.significant_at_05 || result.significant || result.p_value < 0.05) ? 'bg-green-500/10 text-green-400' : 'bg-yellow-500/10 text-yellow-400'}`}>
+                      {(result.significant_at_05 || result.significant || result.p_value < 0.05) ? 'p < 0.05' : 'p >= 0.05'}
                     </span>
-                    {result.significant_at_01 && <span className="text-xxs px-2 py-0.5 rounded-full bg-green-500/10 text-green-400">p &lt; 0.01</span>}
+                    {(result.significant_at_01 || result.p_value < 0.01) && <span className="text-xxs px-2 py-0.5 rounded-full bg-green-500/10 text-green-400">p &lt; 0.01</span>}
                   </div>
                 )}
 
@@ -824,27 +886,34 @@ export default function StatisticalAnalysis() {
                   <div className="overflow-x-auto">
                     <table className="w-full text-xs">
                       <tbody>
-                        {['n', 'mean', 'median', 'std', 'min', 'max', 'q1', 'q3', 'iqr', 'skewness', 'kurtosis', 'sem', 'ci_95_lower', 'ci_95_upper'].map(key => (
-                          result[key] !== undefined && (
-                            <tr key={key} className="border-b border-[var(--color-border)]/30">
-                              <td className="py-1.5 text-[var(--color-text-muted)] capitalize">{key.replace(/_/g, ' ')}</td>
-                              <td className="py-1.5 text-right font-mono">{typeof result[key] === 'number' ? result[key].toFixed(4) : result[key]}</td>
-                            </tr>
-                          )
+                        {[
+                          { key: 'n', label: 'n' }, { key: 'mean', label: 'mean' }, { key: 'median', label: 'median' },
+                          { key: 'std', label: 'std' }, { key: 'variance', label: 'variance' },
+                          { key: 'min', label: 'min' }, { key: 'max', label: 'max' },
+                          { key: 'q1', label: 'Q1' }, { key: 'q3', label: 'Q3' }, { key: 'iqr', label: 'IQR' },
+                          { key: 'skewness', label: 'skewness' }, { key: 'kurtosis', label: 'kurtosis' },
+                          { key: 'se', label: 'SE' }, { key: 'sem', label: 'SEM' },
+                          { key: 'ci_lower', label: 'CI 95% Lower' }, { key: 'ci_upper', label: 'CI 95% Upper' },
+                          { key: 'ci_95_lower', label: 'CI 95% Lower' }, { key: 'ci_95_upper', label: 'CI 95% Upper' },
+                        ].filter(({ key }) => result[key] !== undefined).map(({ key, label }) => (
+                          <tr key={key} className="border-b border-[var(--color-border)]/30">
+                            <td className="py-1.5 text-[var(--color-text-muted)]">{label}</td>
+                            <td className="py-1.5 text-right font-mono">{typeof result[key] === 'number' ? result[key].toFixed(4) : result[key]}</td>
+                          </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
                 )}
 
-                {/* Histogram */}
+                {/* Histogram - handle both 'bin' and 'label' keys */}
                 {result.histogram && result.histogram.length > 0 && (
                   <div>
                     <p className="text-xs text-[var(--color-text-muted)] mb-2">Distribution</p>
                     <ResponsiveContainer width="100%" height={180}>
                       <BarChart data={result.histogram}>
                         <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                        <XAxis dataKey="label" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
+                        <XAxis dataKey={result.histogram[0]?.bin !== undefined ? 'bin' : 'label'} tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
                         <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
                         <Tooltip contentStyle={{ background: 'var(--color-surface-solid)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '11px', color: 'var(--color-text)' }} />
                         <Bar dataKey="count" fill="var(--color-accent-blue)" radius={[2, 2, 0, 0]} />
@@ -853,8 +922,8 @@ export default function StatisticalAnalysis() {
                   </div>
                 )}
 
-                {/* Group stats */}
-                {result.group_stats && (
+                {/* Group stats - handle both backend and client formats */}
+                {(result.group_stats || result.group1 || result.groups) && (
                   <div className="overflow-x-auto">
                     <table className="w-full text-xs">
                       <thead>
@@ -866,12 +935,17 @@ export default function StatisticalAnalysis() {
                         </tr>
                       </thead>
                       <tbody>
-                        {(Array.isArray(result.group_stats) ? result.group_stats : [result.group1_stats, result.group2_stats].filter(Boolean)).map((g: any, i: number) => (
+                        {(Array.isArray(result.group_stats)
+                          ? result.group_stats
+                          : result.groups
+                          ? result.groups
+                          : [result.group1, result.group2, result.group1_stats, result.group2_stats].filter(Boolean)
+                        ).map((g: any, i: number) => (
                           <tr key={i} className="border-b border-[var(--color-border)]/30">
-                            <td className="py-1.5">{g.label}</td>
+                            <td className="py-1.5">{g.label || `Group ${i + 1}`}</td>
                             <td className="py-1.5 text-right font-mono">{g.n}</td>
-                            <td className="py-1.5 text-right font-mono">{g.mean}</td>
-                            <td className="py-1.5 text-right font-mono">{g.std}</td>
+                            <td className="py-1.5 text-right font-mono">{typeof g.mean === 'number' ? g.mean.toFixed(4) : g.mean}</td>
+                            <td className="py-1.5 text-right font-mono">{typeof g.std === 'number' ? g.std.toFixed(4) : g.std}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -882,97 +956,135 @@ export default function StatisticalAnalysis() {
                 {/* T-test / ANOVA stats */}
                 {result.t_statistic !== undefined && (
                   <div className="grid grid-cols-2 gap-3 text-xs">
-                    <div className="p-2 rounded bg-[var(--glass-bg)]"><span className="text-[var(--color-text-muted)]">t</span> <span className="font-mono float-right">{result.t_statistic}</span></div>
+                    <div className="p-2 rounded bg-[var(--glass-bg)]"><span className="text-[var(--color-text-muted)]">t</span> <span className="font-mono float-right">{typeof result.t_statistic === 'number' ? result.t_statistic.toFixed(4) : result.t_statistic}</span></div>
                     <div className="p-2 rounded bg-[var(--glass-bg)]"><span className="text-[var(--color-text-muted)]">df</span> <span className="font-mono float-right">{result.degrees_of_freedom}</span></div>
-                    {result.effect_size_cohens_d !== undefined && (
-                      <div className="p-2 rounded bg-[var(--glass-bg)]"><span className="text-[var(--color-text-muted)]">Cohen's d</span> <span className="font-mono float-right">{result.effect_size_cohens_d}</span></div>
+                    {(result.effect_size_cohens_d !== undefined || result.effect_size !== undefined) && (
+                      <div className="p-2 rounded bg-[var(--glass-bg)]"><span className="text-[var(--color-text-muted)]">Cohen's d</span> <span className="font-mono float-right">{typeof (result.effect_size_cohens_d ?? result.effect_size) === 'number' ? (result.effect_size_cohens_d ?? result.effect_size).toFixed(4) : (result.effect_size_cohens_d ?? result.effect_size)}</span></div>
                     )}
                     {result.mean_difference !== undefined && (
-                      <div className="p-2 rounded bg-[var(--glass-bg)]"><span className="text-[var(--color-text-muted)]">Δ mean</span> <span className="font-mono float-right">{result.mean_difference}</span></div>
+                      <div className="p-2 rounded bg-[var(--glass-bg)]"><span className="text-[var(--color-text-muted)]">Mean diff</span> <span className="font-mono float-right">{typeof result.mean_difference === 'number' ? result.mean_difference.toFixed(4) : result.mean_difference}</span></div>
                     )}
                   </div>
                 )}
                 {result.f_statistic !== undefined && (
                   <div className="grid grid-cols-2 gap-3 text-xs">
-                    <div className="p-2 rounded bg-[var(--glass-bg)]"><span className="text-[var(--color-text-muted)]">F</span> <span className="font-mono float-right">{result.f_statistic}</span></div>
+                    <div className="p-2 rounded bg-[var(--glass-bg)]"><span className="text-[var(--color-text-muted)]">F</span> <span className="font-mono float-right">{typeof result.f_statistic === 'number' ? result.f_statistic.toFixed(4) : result.f_statistic}</span></div>
                     <div className="p-2 rounded bg-[var(--glass-bg)]"><span className="text-[var(--color-text-muted)]">df</span> <span className="font-mono float-right">{result.df_between}, {result.df_within}</span></div>
                   </div>
                 )}
-                {result.chi_square_statistic !== undefined && (
+                {(result.chi_square_statistic !== undefined || result.chi_square !== undefined) && (
                   <div className="grid grid-cols-2 gap-3 text-xs">
-                    <div className="p-2 rounded bg-[var(--glass-bg)]"><span className="text-[var(--color-text-muted)]">χ²</span> <span className="font-mono float-right">{result.chi_square_statistic}</span></div>
-                    <div className="p-2 rounded bg-[var(--glass-bg)]"><span className="text-[var(--color-text-muted)]">Cramér's V</span> <span className="font-mono float-right">{result.cramers_v}</span></div>
+                    <div className="p-2 rounded bg-[var(--glass-bg)]"><span className="text-[var(--color-text-muted)]">chi-sq</span> <span className="font-mono float-right">{typeof (result.chi_square_statistic ?? result.chi_square) === 'number' ? (result.chi_square_statistic ?? result.chi_square).toFixed(4) : (result.chi_square_statistic ?? result.chi_square)}</span></div>
+                    {result.cramers_v !== undefined && <div className="p-2 rounded bg-[var(--glass-bg)]"><span className="text-[var(--color-text-muted)]">Cramer's V</span> <span className="font-mono float-right">{typeof result.cramers_v === 'number' ? result.cramers_v.toFixed(4) : result.cramers_v}</span></div>}
                   </div>
                 )}
 
-                {/* Correlation matrix */}
-                {Array.isArray(result.matrix) && (
+                {/* Correlation matrix - handle both 'matrix' and 'correlation_matrix' */}
+                {(Array.isArray(result.matrix) || Array.isArray(result.correlation_matrix)) && (
                   <div className="overflow-x-auto">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr>
-                          <th className="py-1"></th>
-                          {result.labels?.map((l: string) => <th key={l} className="py-1 text-right text-[var(--color-text-muted)]">{l}</th>)}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {result.matrix.map((row: number[], i: number) => (
-                          <tr key={i} className="border-b border-[var(--color-border)]/30">
-                            <td className="py-1 text-[var(--color-text-muted)]">{result.labels?.[i]}</td>
-                            {row.map((val: number, j: number) => (
-                              <td key={j} className="py-1 text-right font-mono" style={{ color: i === j ? 'var(--color-text-muted)' : (Math.abs(val) > 0.7 ? 'var(--color-success)' : 'var(--color-text)') }}>
-                                {val.toFixed(3)}
-                              </td>
+                    {(() => {
+                      const matrix = result.matrix || result.correlation_matrix
+                      const labels = result.labels || []
+                      return (
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr>
+                              <th className="py-1"></th>
+                              {labels.map((l: string) => <th key={l} className="py-1 text-right text-[var(--color-text-muted)]">{l}</th>)}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {matrix.map((row: number[], i: number) => (
+                              <tr key={i} className="border-b border-[var(--color-border)]/30">
+                                <td className="py-1 text-[var(--color-text-muted)]">{labels[i]}</td>
+                                {row.map((val: number, j: number) => (
+                                  <td key={j} className="py-1 text-right font-mono" style={{ color: i === j ? 'var(--color-text-muted)' : (Math.abs(val) > 0.7 ? 'var(--color-success)' : 'var(--color-text)') }}>
+                                    {val.toFixed(3)}
+                                  </td>
+                                ))}
+                              </tr>
                             ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                          </tbody>
+                        </table>
+                      )
+                    })()}
                   </div>
                 )}
 
-                {/* Regression results */}
-                {result.r_squared !== undefined && result.coefficients && Array.isArray(result.coefficients) && result.coefficients[0]?.feature && (
+                {/* Regression results - handle both backend and client formats */}
+                {result.r_squared !== undefined && result.coefficients && (
                   <div className="space-y-3">
                     <div className="grid grid-cols-2 gap-3 text-xs">
-                      <div className="p-2 rounded bg-[var(--glass-bg)]"><span className="text-[var(--color-text-muted)]">R²</span> <span className="font-mono float-right">{result.r_squared}</span></div>
-                      <div className="p-2 rounded bg-[var(--glass-bg)]"><span className="text-[var(--color-text-muted)]">Intercept</span> <span className="font-mono float-right">{result.intercept}</span></div>
+                      <div className="p-2 rounded bg-[var(--glass-bg)]"><span className="text-[var(--color-text-muted)]">R-sq</span> <span className="font-mono float-right">{typeof result.r_squared === 'number' ? result.r_squared.toFixed(4) : result.r_squared}</span></div>
+                      <div className="p-2 rounded bg-[var(--glass-bg)]"><span className="text-[var(--color-text-muted)]">Intercept</span> <span className="font-mono float-right">{typeof result.intercept === 'number' ? result.intercept.toFixed(4) : result.intercept}</span></div>
                     </div>
                     <table className="w-full text-xs">
-                      <thead><tr className="border-b border-[var(--color-border)]"><th className="text-left py-1">Feature</th><th className="text-right py-1">Coefficient</th></tr></thead>
+                      <thead><tr className="border-b border-[var(--color-border)]"><th className="text-left py-1">Feature</th><th className="text-right py-1">Coefficient</th><th className="text-right py-1">p-value</th></tr></thead>
                       <tbody>
-                        {result.coefficients.map((c: any, i: number) => (
-                          <tr key={i} className="border-b border-[var(--color-border)]/30">
-                            <td className="py-1">{c.feature}</td>
-                            <td className="py-1 text-right font-mono">{c.coefficient}</td>
-                          </tr>
-                        ))}
+                        {Array.isArray(result.coefficients) && result.coefficients.map((c: any, i: number) => {
+                          const featureName = typeof c === 'object' ? c.feature : (result.feature_names?.[i] || `x${i + 1}`)
+                          const coefVal = typeof c === 'object' ? c.coefficient : c
+                          const pVal = typeof c === 'object' ? c.p_value : result.p_values?.[i]
+                          return (
+                            <tr key={i} className="border-b border-[var(--color-border)]/30">
+                              <td className="py-1">{featureName}</td>
+                              <td className="py-1 text-right font-mono">{typeof coefVal === 'number' ? coefVal.toFixed(4) : coefVal}</td>
+                              <td className="py-1 text-right font-mono">{pVal !== undefined ? (typeof pVal === 'number' ? pVal.toFixed(4) : pVal) : '-'}</td>
+                            </tr>
+                          )
+                        })}
                       </tbody>
                     </table>
-                  </div>
-                )}
-
-                {/* Survival curve */}
-                {result.overall_curve && (
-                  <div>
-                    <p className="text-xs text-[var(--color-text-muted)] mb-2">Kaplan-Meier Curve</p>
-                    <ResponsiveContainer width="100%" height={200}>
-                      <LineChart data={result.overall_curve}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                        <XAxis dataKey="time" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} label={{ value: 'Time', position: 'insideBottom', offset: -2, fontSize: 10, fill: 'var(--color-text-muted)' }} />
-                        <YAxis domain={[0, 1]} tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} label={{ value: 'Survival', angle: -90, position: 'insideLeft', fontSize: 10, fill: 'var(--color-text-muted)' }} />
-                        <Tooltip contentStyle={{ background: 'var(--color-surface-solid)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '11px', color: 'var(--color-text)' }} />
-                        <Line type="stepAfter" dataKey="survival" stroke="var(--color-accent-blue)" strokeWidth={2} dot={false} />
-                      </LineChart>
-                    </ResponsiveContainer>
-                    {result.median_survival !== null && (
-                      <p className="text-xs text-[var(--color-text-muted)] mt-1">Median survival: {result.median_survival}</p>
+                    {/* Scatter plot for regression */}
+                    {result.predictions && result.residuals && (
+                      <div>
+                        <p className="text-xs text-[var(--color-text-muted)] mb-2">Residuals</p>
+                        <ResponsiveContainer width="100%" height={150}>
+                          <BarChart data={result.residuals.map((r: number, i: number) => ({ index: i + 1, residual: r }))}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                            <XAxis dataKey="index" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
+                            <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
+                            <Tooltip contentStyle={{ background: 'var(--color-surface-solid)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '11px', color: 'var(--color-text)' }} />
+                            <Bar dataKey="residual" fill="var(--color-accent-purple)" radius={[2, 2, 0, 0]} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
                     )}
                   </div>
                 )}
 
-                {/* Sample size results */}
-                {result.total_n !== undefined && Array.isArray(result.recommendations) && (
+                {/* Survival curve - handle both 'overall_curve' and 'curves' */}
+                {(result.overall_curve || result.curves) && (
+                  <div>
+                    <p className="text-xs text-[var(--color-text-muted)] mb-2">Kaplan-Meier Curve</p>
+                    {(() => {
+                      const curveData = result.overall_curve || (result.curves?.[0]?.points) || []
+                      const medianSurv = result.median_survival ?? result.curves?.[0]?.median_survival
+                      return (
+                        <>
+                          <ResponsiveContainer width="100%" height={200}>
+                            <LineChart data={curveData}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                              <XAxis dataKey="time" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} label={{ value: 'Time', position: 'insideBottom', offset: -2, fontSize: 10, fill: 'var(--color-text-muted)' }} />
+                              <YAxis domain={[0, 1]} tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} label={{ value: 'Survival', angle: -90, position: 'insideLeft', fontSize: 10, fill: 'var(--color-text-muted)' }} />
+                              <Tooltip contentStyle={{ background: 'var(--color-surface-solid)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '11px', color: 'var(--color-text)' }} />
+                              <Line type="stepAfter" dataKey="survival" stroke="var(--color-accent-blue)" strokeWidth={2} dot={false} />
+                            </LineChart>
+                          </ResponsiveContainer>
+                          {medianSurv !== null && medianSurv !== undefined && (
+                            <p className="text-xs text-[var(--color-text-muted)] mt-1">Median survival: {medianSurv}</p>
+                          )}
+                          {result.n_total !== undefined && (
+                            <p className="text-xs text-[var(--color-text-muted)]">Total: {result.n_total} subjects, {result.n_events} events</p>
+                          )}
+                        </>
+                      )
+                    })()}
+                  </div>
+                )}
+
+                {/* Sample size results - handle both formats */}
+                {result.total_n !== undefined && (
                   <div className="space-y-3">
                     <div className="grid grid-cols-2 gap-3 text-xs">
                       <div className="p-3 rounded-lg bg-[var(--glass-bg)] border border-[var(--color-border)] text-center">
@@ -980,15 +1092,21 @@ export default function StatisticalAnalysis() {
                         <div className="text-[var(--color-text-muted)] mt-1">Total N Required</div>
                       </div>
                       <div className="p-3 rounded-lg bg-[var(--glass-bg)] border border-[var(--color-border)] text-center">
-                        <div className="text-2xl font-semibold" style={{ color: 'var(--color-accent-purple)' }}>{result.n_per_group}</div>
+                        <div className="text-2xl font-semibold" style={{ color: 'var(--color-accent-purple)' }}>{result.n_per_group || result.required_n || Math.ceil(result.total_n / 2)}</div>
                         <div className="text-[var(--color-text-muted)] mt-1">Per Group</div>
                       </div>
                     </div>
-                    <div className="space-y-1">
-                      {result.recommendations.map((r: string, i: number) => (
-                        <p key={i} className="text-xs text-[var(--color-text-muted)]">• {r}</p>
-                      ))}
-                    </div>
+                    {result.test_type && (
+                      <div className="p-2 rounded bg-[var(--glass-bg)] text-xs">
+                        <span className="text-[var(--color-text-muted)]">Test: </span>{result.test_type.replace(/_/g, ' ')}
+                        <span className="text-[var(--color-text-muted)] ml-3">Effect size: </span>{result.effect_size}
+                        <span className="text-[var(--color-text-muted)] ml-3">Alpha: </span>{result.alpha}
+                        <span className="text-[var(--color-text-muted)] ml-3">Power: </span>{result.power}
+                      </div>
+                    )}
+                    {Array.isArray(result.recommendations) && result.recommendations.map((r: string, i: number) => (
+                      <p key={i} className="text-xs text-[var(--color-text-muted)]">- {r}</p>
+                    ))}
                   </div>
                 )}
               </div>

@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react'
+import { formatDate, formatDateTime } from '../utils/persistence'
 import {
   FiClipboard,
   FiPlus,
@@ -142,7 +143,7 @@ export default function ExperimentTracker() {
                 </div>
                 <div className="flex items-center gap-2 text-xxs text-[var(--color-text-muted)]">
                   <span style={{ color: cfg.color }}>{cfg.label}</span>
-                  <span>{new Date(exp.updatedAt).toLocaleDateString()}</span>
+                  <span>{formatDate(exp.updatedAt)}</span>
                 </div>
               </button>
             )
@@ -166,7 +167,7 @@ export default function ExperimentTracker() {
                   >
                     {Object.entries(STATUS_CONFIG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
                   </select>
-                  <span className="text-xs text-[var(--color-text-muted)]">Updated {new Date(selected.updatedAt).toLocaleString()}</span>
+                  <span className="text-xs text-[var(--color-text-muted)]">Updated {formatDateTime(selected.updatedAt)}</span>
                 </div>
               </div>
               <div className="flex items-center gap-1">

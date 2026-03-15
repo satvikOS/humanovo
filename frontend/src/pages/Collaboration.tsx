@@ -3,6 +3,7 @@ import {
   FiUsers, FiMessageSquare, FiShare2, FiBell, FiShield,
   FiSend, FiCheckCircle,
 } from 'react-icons/fi'
+import { formatDate, formatDateTime } from '../utils/persistence'
 
 type TabId = 'team' | 'comments' | 'shares' | 'notifications' | 'audit'
 
@@ -136,7 +137,7 @@ export default function Collaboration() {
                       {c.user_name.split(' ').map(n => n[0]).join('').slice(0, 2)}
                     </div>
                     <span className="text-xs font-medium">{c.user_name}</span>
-                    <span className="text-xxs text-[var(--color-text-muted)]">{new Date(c.created_at).toLocaleString()}</span>
+                    <span className="text-xxs text-[var(--color-text-muted)]">{formatDateTime(c.created_at)}</span>
                     <span className="text-xxs px-1.5 py-0.5 rounded bg-[var(--glass-bg)]">{c.entity_type}</span>
                   </div>
                   <p className="text-xs leading-relaxed">{c.content}</p>
@@ -158,7 +159,7 @@ export default function Collaboration() {
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="text-xxs px-2 py-0.5 rounded-full bg-[var(--glass-bg)]">{s.permission}</span>
-                    <span className="text-xxs text-[var(--color-text-muted)]">{new Date(s.created_at).toLocaleDateString()}</span>
+                    <span className="text-xxs text-[var(--color-text-muted)]">{formatDate(s.created_at)}</span>
                   </div>
                 </div>
               ))}
@@ -177,7 +178,7 @@ export default function Collaboration() {
                 <div key={n.id} className={`glass-card p-3 ${!n.read ? 'border-l-2 border-l-[var(--color-accent-blue)]' : ''}`}>
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-medium">{n.title}</span>
-                    <span className="text-xxs text-[var(--color-text-muted)]">{new Date(n.created_at).toLocaleString()}</span>
+                    <span className="text-xxs text-[var(--color-text-muted)]">{formatDateTime(n.created_at)}</span>
                   </div>
                   <p className="text-xs text-[var(--color-text-muted)] mt-1">{n.message}</p>
                 </div>
@@ -203,7 +204,7 @@ export default function Collaboration() {
                     <tr><td colSpan={5} className="p-4 text-center text-[var(--color-text-muted)]">No audit entries</td></tr>
                   ) : audit.map(a => (
                     <tr key={a.id} className="border-b border-[var(--color-border)]/30">
-                      <td className="p-3 text-[var(--color-text-muted)]">{new Date(a.timestamp).toLocaleString()}</td>
+                      <td className="p-3 text-[var(--color-text-muted)]">{formatDateTime(a.timestamp)}</td>
                       <td className="p-3">{a.user_name}</td>
                       <td className="p-3"><span className="px-1.5 py-0.5 rounded bg-[var(--glass-bg)]">{a.action}</span></td>
                       <td className="p-3">{a.entity_type}</td>

@@ -27,7 +27,9 @@ import {
   FiLink,
   FiX,
   FiSave,
-  FiImage
+  FiImage,
+  FiClipboard,
+  FiCheck,
 } from 'react-icons/fi'
 import clsx from 'clsx'
 
@@ -2167,6 +2169,59 @@ function MasterLibraryDetails({ element }: { element: MasterLibraryElement | nul
 
 // ==================== CONSTANT AI PANEL ====================
 
+// Simple markdown renderer for workbench chat
+function renderWorkbenchMarkdown(text: string): React.ReactNode {
+  const lines = text.split('\n')
+  const elements: React.ReactNode[] = []
+
+  const processInline = (line: string): React.ReactNode => {
+    const parts: React.ReactNode[] = []
+    const regex = /(\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`)/g
+    let lastIndex = 0
+    let match: RegExpExecArray | null
+    let key = 0
+    while ((match = regex.exec(line)) !== null) {
+      if (match.index > lastIndex) parts.push(line.slice(lastIndex, match.index))
+      if (match[2]) parts.push(<strong key={key++}>{match[2]}</strong>)
+      else if (match[3]) parts.push(<em key={key++}>{match[3]}</em>)
+      else if (match[4]) parts.push(<code key={key++} className="px-1 py-0.5 rounded" style={{ background: 'rgba(6,182,212,0.15)', fontSize: '10px' }}>{match[4]}</code>)
+      lastIndex = regex.lastIndex
+    }
+    if (lastIndex < line.length) parts.push(line.slice(lastIndex))
+    return parts.length === 1 ? parts[0] : <>{parts}</>
+  }
+
+  for (const line of lines) {
+    if (/^[-•]\s/.test(line.trim())) {
+      elements.push(<div key={elements.length} className="flex gap-1 ml-1"><span className="text-cyan-400">-</span><span>{processInline(line.trim().replace(/^[-•]\s/, ''))}</span></div>)
+    } else if (/^\d+\.\s/.test(line.trim())) {
+      const num = line.trim().match(/^(\d+)\.\s/)
+      elements.push(<div key={elements.length} className="flex gap-1 ml-1"><span className="text-cyan-400 font-medium">{num?.[1]}.</span><span>{processInline(line.trim().replace(/^\d+\.\s/, ''))}</span></div>)
+    } else if (line.trim() === '') {
+      elements.push(<div key={elements.length} className="h-1.5" />)
+    } else {
+      elements.push(<div key={elements.length}>{processInline(line)}</div>)
+    }
+  }
+  return <div className="space-y-0.5">{elements}</div>
+}
+
+// Copy button for workbench chat
+function WorkbenchCopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  const handleCopy = () => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }
+  return (
+    <button onClick={handleCopy} className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-[var(--color-surface)] text-[var(--color-text-muted)]" title="Copy">
+      {copied ? <FiCheck className="w-3 h-3 text-green-400" /> : <FiClipboard className="w-3 h-3" />}
+    </button>
+  )
+}
+
 function ConstantPanel({
   messages,
   input,
@@ -2202,9 +2257,9 @@ function ConstantPanel({
         {messages.length === 0 && (
           <div className="text-center py-8 text-[var(--color-text-muted)]">
             <FiMessageSquare className="w-8 h-8 mx-auto mb-2 opacity-20" />
-            <p className="text-xs">Ask Constant about your graph nodes, connections, or biological structures.</p>
+            <p className="text-xs">Ask Constant to build graphs, connect nodes, or explain biology.</p>
             <div className="mt-3 space-y-1">
-              {['Suggest connections between my nodes', 'Explain this pathway', 'What proteins interact here?', 'Analyze my research graph'].map(s => (
+              {['Build a cancer biology graph', 'Connect these nodes', 'Create an immunology graph', 'Analyze my research graph'].map(s => (
                 <button key={s} onClick={() => onInputChange(s)} className="block w-full text-left text-[10px] px-2 py-1.5 rounded hover:bg-[var(--color-surface)] text-[var(--color-text-muted)] transition-colors">
                   {s}
                 </button>
@@ -2216,13 +2271,24 @@ function ConstantPanel({
           <div
             key={i}
             className={clsx(
-              'text-xs leading-relaxed rounded-lg px-3 py-2 max-w-[95%]',
+              'text-xs leading-relaxed rounded-lg px-3 py-2 max-w-[95%] group relative',
               msg.role === 'user'
                 ? 'ml-auto bg-cyan-500/20 text-cyan-100'
                 : 'bg-[var(--color-surface)] text-[var(--color-text-secondary)]'
             )}
           >
-            <p className="whitespace-pre-wrap">{msg.text}</p>
+            {msg.role === 'assistant' && (
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-cyan-400 font-medium text-[10px]">Constant</span>
+                <WorkbenchCopyButton text={msg.text} />
+              </div>
+            )}
+            {msg.role === 'assistant' ? renderWorkbenchMarkdown(msg.text) : <p>{msg.text}</p>}
+            {msg.role === 'user' && (
+              <div className="absolute -left-6 top-1/2 -translate-y-1/2">
+                <WorkbenchCopyButton text={msg.text} />
+              </div>
+            )}
           </div>
         ))}
         {loading && (
@@ -2379,12 +2445,10 @@ function EdgeLabelModal({
 
 export default function Workbench() {
   const [components, setComponents] = useState<BiologicalComponent[]>(biologicalStructures)
-  const [leftPanelTab, setLeftPanelTab] = useState<'structures' | 'library'>('structures')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
 
   // Master Library state
-  const [librarySearchTerm, setLibrarySearchTerm] = useState('')
   const [selectedLibraryId, setSelectedLibraryId] = useState<string | null>(null)
   const [expandedLibraryNodes, setExpandedLibraryNodes] = useState<Set<string>>(new Set(['molecular_level', 'cellular_level']))
 
@@ -2413,7 +2477,7 @@ export default function Workbench() {
 
   const selectedComponent = components.find(c => c.id === selectedId) || null
   const selectedLibraryElement = selectedLibraryId ? findElementById(selectedLibraryId) ?? null : null
-  const librarySearchResults = librarySearchTerm.length > 2 ? searchElements(librarySearchTerm) : []
+  const librarySearchResults = searchTerm.length > 2 ? searchElements(searchTerm) : []
   const selectedGraphNode = nodes.find(n => n.id === selectedNode) || null
   const selectedGraphEntity = selectedGraphNode ? components.find(c => c.id === selectedGraphNode.entityId) || null : null
 
@@ -2554,10 +2618,10 @@ export default function Workbench() {
     if (node) setEditingNode(node)
   }, [nodes])
 
+  const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'node' | 'edge' | 'graph'; id?: string } | null>(null)
+
   const handleEdgeClick = useCallback((edgeId: string) => {
-    if (confirm('Delete this connection?')) {
-      setEdges(prev => prev.filter(e => e.id !== edgeId))
-    }
+    setDeleteConfirm({ type: 'edge', id: edgeId })
   }, [])
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
@@ -2589,10 +2653,444 @@ export default function Workbench() {
   // --- Delete selected node ---
   const deleteSelectedNode = useCallback(() => {
     if (!selectedNode) return
-    setNodes(prev => prev.filter(n => n.id !== selectedNode))
-    setEdges(prev => prev.filter(e => e.sourceId !== selectedNode && e.targetId !== selectedNode))
-    setSelectedNode(null)
+    setDeleteConfirm({ type: 'node', id: selectedNode })
   }, [selectedNode])
+
+  const confirmDeleteAction = useCallback(() => {
+    if (!deleteConfirm) return
+    if (deleteConfirm.type === 'edge' && deleteConfirm.id) {
+      setEdges(prev => prev.filter(e => e.id !== deleteConfirm.id))
+    } else if (deleteConfirm.type === 'node' && deleteConfirm.id) {
+      setNodes(prev => prev.filter(n => n.id !== deleteConfirm.id))
+      setEdges(prev => prev.filter(e => e.sourceId !== deleteConfirm.id && e.targetId !== deleteConfirm.id))
+      setSelectedNode(null)
+    } else if (deleteConfirm.type === 'graph') {
+      setNodes([])
+      setEdges([])
+      setSelectedNode(null)
+    }
+    setDeleteConfirm(null)
+  }, [deleteConfirm])
+
+  // --- Constant AI: intelligent fallback for workbench ---
+  const generateWorkbenchFallback = useCallback((query: string): string => {
+    const q = query.toLowerCase()
+
+    // Known biological relationships database for common biological entities
+    const relationships: Record<string, Record<string, { label: string; explanation: string }>> = {
+      'immune & lymphatic system': {
+        't cell': { label: 'contains', explanation: 'The immune system contains T cells as primary adaptive immune effector cells. T cells mature in the thymus and mediate cellular immunity.' },
+        'b cell': { label: 'contains', explanation: 'B cells are lymphocytes within the immune system that produce antibodies and mediate humoral immunity.' },
+        'macrophage': { label: 'contains', explanation: 'Macrophages are innate immune cells that phagocytose pathogens and present antigens to T cells.' },
+        'nk cell': { label: 'contains', explanation: 'Natural Killer cells provide innate immune surveillance against virally-infected and tumor cells.' },
+      },
+      'tp53': {
+        'bax': { label: 'activates', explanation: 'p53 transcriptionally activates BAX, a pro-apoptotic BCL-2 family member that forms pores in the mitochondrial outer membrane, triggering cytochrome c release and apoptosis.' },
+        'mdm2': { label: 'inhibited by', explanation: 'MDM2 is a negative regulator of p53. It ubiquitinates p53 for proteasomal degradation. In turn, p53 transcriptionally activates MDM2, creating a negative feedback loop.' },
+        'p21': { label: 'activates', explanation: 'p53 directly activates p21 (CDKN1A) transcription. p21 inhibits cyclin-CDK complexes, causing G1/S cell cycle arrest to allow DNA repair.' },
+        'apoptosis': { label: 'induces', explanation: 'p53 induces apoptosis through transcriptional activation of pro-apoptotic genes (BAX, PUMA, NOXA) and direct mitochondrial membrane permeabilization.' },
+      },
+      'brca1': {
+        'dna repair': { label: 'mediates', explanation: 'BRCA1 is essential for homologous recombination (HR) DNA repair. It forms the BRCA1-PALB2-BRCA2-RAD51 complex that repairs double-strand breaks.' },
+        'tp53': { label: 'cooperates with', explanation: 'BRCA1 and p53 cooperate in DNA damage response. BRCA1 facilitates p53 phosphorylation and stabilization after DNA damage.' },
+      },
+      'egfr': {
+        'ras': { label: 'activates', explanation: 'EGFR activation leads to RAS-GTP loading via SOS/GRB2 adaptors, initiating the MAPK signaling cascade (RAS→RAF→MEK→ERK).' },
+        'pi3k': { label: 'activates', explanation: 'EGFR activates PI3K directly or via RAS, leading to AKT phosphorylation and promotion of cell survival and proliferation.' },
+        'kras': { label: 'activates', explanation: 'EGFR signals through KRAS via GRB2-SOS complex, activating the MAPK pathway. KRAS mutations can make this pathway constitutively active independent of EGFR.' },
+      },
+      'pi3k-akt signaling': {
+        'mtor': { label: 'activates', explanation: 'PI3K→AKT signaling activates mTOR (mechanistic target of rapamycin), promoting protein synthesis, cell growth, and proliferation via S6K and 4E-BP1.' },
+        'apoptosis': { label: 'inhibits', explanation: 'PI3K-AKT signaling phosphorylates and inactivates pro-apoptotic proteins (BAD, caspase-9), promoting cell survival.' },
+      },
+    }
+
+    // --- Topic-based graph building suggestions ---
+    // When user asks to "make a graph for X" or "build nodes for X", suggest specific structures
+    const topicSuggestions: Record<string, { nodes: string[]; relationships: string[] }> = {
+      'digestion': {
+        nodes: ['Gastrointestinal Tract (organ system)', 'Stomach (organ)', 'Small Intestine (organ)', 'Pancreas (organ)', 'Liver (organ)', 'Pepsin (biomolecule)', 'Amylase (biomolecule)', 'Bile (biomolecule)', 'Insulin (biomolecule)', 'Enteric Nervous System (pathway)'],
+        relationships: [
+          'Stomach → *secretes* → Pepsin (breaks down proteins via pepsinogen activation at pH 2)',
+          'Pancreas → *secretes* → Amylase (digests starch into maltose in the duodenum)',
+          'Liver → *produces* → Bile (emulsifies fats for lipase digestion)',
+          'Pancreas → *secretes* → Insulin (regulates blood glucose after nutrient absorption)',
+          'Small Intestine → *absorbs* → Nutrients (villi and microvilli increase surface area ~600x)',
+          'Enteric Nervous System → *regulates* → Gastrointestinal Tract (peristalsis, secretion, blood flow)',
+        ],
+      },
+      'cancer': {
+        nodes: ['TP53 (gene)', 'KRAS (gene)', 'EGFR (receptor)', 'PI3K-AKT Signaling (pathway)', 'RAS/MAPK Signaling (pathway)', 'Apoptosis (pathway)', 'Cell Cycle (pathway)', 'Tumor Microenvironment (organ system)'],
+        relationships: [
+          'TP53 → *activates* → Apoptosis (via BAX, PUMA, NOXA)',
+          'KRAS → *activates* → RAS/MAPK Signaling (constitutive when mutated)',
+          'EGFR → *activates* → PI3K-AKT Signaling (cell survival)',
+          'PI3K-AKT Signaling → *inhibits* → Apoptosis (phosphorylates BAD)',
+          'TP53 → *arrests* → Cell Cycle (via p21/CDKN1A)',
+        ],
+      },
+      'immune': {
+        nodes: ['Immune & Lymphatic System (organ system)', 'CD4+ T Cell (cell type)', 'CD8+ T Cell (cell type)', 'B Cell (cell type)', 'Macrophage (cell type)', 'Dendritic Cell (cell type)', 'NK Cell (cell type)', 'MHC-I (biomolecule)', 'MHC-II (biomolecule)', 'Cytokines (biomolecule)'],
+        relationships: [
+          'Dendritic Cell → *presents antigen to* → CD4+ T Cell (via MHC-II)',
+          'CD4+ T Cell → *helps* → B Cell (T-cell dependent antibody production)',
+          'CD8+ T Cell → *kills* → Infected Cells (via perforin/granzyme)',
+          'Macrophage → *phagocytoses* → Pathogens (innate immune defense)',
+          'NK Cell → *kills* → Tumor Cells (missing-self recognition)',
+        ],
+      },
+      'neuroscience': {
+        nodes: ['Neuron (cell type)', 'Synapse (cellular component)', 'Glutamate (biomolecule)', 'GABA (biomolecule)', 'Dopamine (biomolecule)', 'Serotonin (biomolecule)', 'Hippocampus (organ)', 'Prefrontal Cortex (organ)', 'Blood-Brain Barrier (cellular component)'],
+        relationships: [
+          'Neuron → *communicates via* → Synapse (neurotransmitter release)',
+          'Glutamate → *excites* → Neuron (main excitatory neurotransmitter)',
+          'GABA → *inhibits* → Neuron (main inhibitory neurotransmitter)',
+          'Hippocampus → *processes* → Memory (spatial and episodic)',
+          'Blood-Brain Barrier → *protects* → Brain (selective permeability)',
+        ],
+      },
+      'cardiovascular': {
+        nodes: ['Heart (organ)', 'Blood Vessels (organ system)', 'Endothelium (cell type)', 'VEGF (biomolecule)', 'Nitric Oxide (biomolecule)', 'ACE (biomolecule)', 'Angiotensin II (biomolecule)', 'Platelets (cell type)'],
+        relationships: [
+          'Endothelium → *produces* → Nitric Oxide (vasodilation)',
+          'VEGF → *stimulates* → Angiogenesis (new blood vessel formation)',
+          'ACE → *converts* → Angiotensin II (vasoconstriction)',
+          'Platelets → *mediate* → Coagulation (hemostasis)',
+        ],
+      },
+      'respiratory': {
+        nodes: ['Lungs (organ)', 'Alveoli (cellular component)', 'Bronchi (organ)', 'Diaphragm (organ)', 'Surfactant (biomolecule)', 'Hemoglobin (biomolecule)', 'CO2 (biomolecule)', 'O2 (biomolecule)'],
+        relationships: [
+          'Alveoli → *exchanges* → O2/CO2 (across respiratory membrane)',
+          'Surfactant → *reduces* → Surface tension (prevents alveolar collapse)',
+          'Hemoglobin → *binds* → O2 (cooperative binding, sigmoid curve)',
+          'Diaphragm → *drives* → Ventilation (contracts to create negative pressure)',
+        ],
+      },
+    }
+
+    // Helper: auto-create nodes for a topic by matching against the components library
+    const autoCreateTopicGraph = (topic: string, suggestion: { nodes: string[]; relationships: string[] }): string => {
+      const addedNodes: GraphNode[] = []
+      const cols = 3
+      const spacingX = 220
+      const spacingY = 120
+      const startX = 150
+      const startY = 100
+
+      for (let idx = 0; idx < suggestion.nodes.length; idx++) {
+        const nodeDef = suggestion.nodes[idx]
+        // Extract name without category hint: "TP53 (gene)" → "TP53"
+        const nameMatch = nodeDef.match(/^(.+?)\s*\(/)
+        const searchName = nameMatch ? nameMatch[1].trim() : nodeDef.trim()
+        const catHint = nodeDef.match(/\(([^)]+)\)/)
+        const catLabel = catHint ? catHint[1].trim().toLowerCase() : ''
+
+        // Map category labels to BiologicalCategory
+        const catMap: Record<string, BiologicalCategory> = {
+          'gene': 'gene', 'receptor': 'receptor', 'pathway': 'pathway',
+          'biomolecule': 'biomolecule', 'cell type': 'cell_type', 'cellular component': 'cellular_component',
+          'organ': 'organ_system', 'organ system': 'organ_system', 'drug target': 'drug_target',
+        }
+        const category: BiologicalCategory = catMap[catLabel] || 'biomolecule'
+        const color = categoryConfig[category]?.color || '#22c55e'
+
+        // Try to find existing component in the library
+        const comp = components.find(c =>
+          c.name.toLowerCase() === searchName.toLowerCase() ||
+          c.name.toLowerCase().includes(searchName.toLowerCase()) ||
+          searchName.toLowerCase().includes(c.name.toLowerCase())
+        )
+
+        // Skip if already on canvas
+        if (comp && nodes.some(n => n.entityId === comp.id)) continue
+        if (!comp && nodes.some(n => n.name.toLowerCase() === searchName.toLowerCase())) continue
+
+        const col = idx % cols
+        const row = Math.floor(idx / cols)
+
+        const newNode: GraphNode = {
+          id: `node_${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${idx}`,
+          entityId: comp?.id || `auto_${searchName.replace(/\s+/g, '_').toLowerCase()}`,
+          name: comp?.name || searchName,
+          category: comp?.category || category,
+          color: comp?.color || color,
+          x: startX + col * spacingX,
+          y: startY + row * spacingY,
+          width: 180,
+          height: 48,
+          notes: '',
+          expanded: false,
+        }
+        addedNodes.push(newNode)
+      }
+
+      if (addedNodes.length > 0) {
+        setNodes(prev => [...prev, ...addedNodes])
+      }
+
+      // Now parse relationships and auto-connect
+      const allNodes = [...nodes, ...addedNodes]
+      const autoEdges: GraphEdge[] = []
+
+      for (const relStr of suggestion.relationships) {
+        // Parse "Source → *label* → Target (explanation)"
+        const relMatch = relStr.match(/^(.+?)\s*→\s*\*(.+?)\*\s*→\s*(.+?)(?:\s*\(|$)/)
+        if (!relMatch) continue
+        const srcName = relMatch[1].trim()
+        const label = relMatch[2].trim()
+        const tgtName = relMatch[3].trim()
+
+        const srcNode = allNodes.find(n => n.name.toLowerCase().includes(srcName.toLowerCase()) || srcName.toLowerCase().includes(n.name.toLowerCase()))
+        const tgtNode = allNodes.find(n => n.name.toLowerCase().includes(tgtName.toLowerCase()) || tgtName.toLowerCase().includes(n.name.toLowerCase()))
+
+        if (srcNode && tgtNode && srcNode.id !== tgtNode.id) {
+          const exists = edges.some(e =>
+            (e.sourceId === srcNode.id && e.targetId === tgtNode.id) ||
+            (e.sourceId === tgtNode.id && e.targetId === srcNode.id)
+          ) || autoEdges.some(e =>
+            (e.sourceId === srcNode.id && e.targetId === tgtNode.id) ||
+            (e.sourceId === tgtNode.id && e.targetId === srcNode.id)
+          )
+          if (!exists) {
+            autoEdges.push({
+              id: `edge_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+              sourceId: srcNode.id,
+              targetId: tgtNode.id,
+              label,
+              color: srcNode.color || 'rgba(255,255,255,0.3)',
+            })
+          }
+        }
+      }
+
+      if (autoEdges.length > 0) {
+        setEdges(prev => [...prev, ...autoEdges])
+      }
+
+      return `I've built a **${topic}** knowledge graph on your canvas!\n\n**Added ${addedNodes.length} nodes:**\n${addedNodes.map(n => `- ${n.name}`).join('\n')}\n\n**Created ${autoEdges.length} connections:**\n${suggestion.relationships.slice(0, autoEdges.length || suggestion.relationships.length).map(r => `- ${r}`).join('\n')}\n\nYou can drag nodes to rearrange them, click any node for details, or ask me to explain any relationship!`
+    }
+
+    // Check if user is asking to build/create a graph for a topic
+    if (/\b(make|create|build|construct|design|set up|model|map|diagram)\b/i.test(q) && /(graph|node|relationship|network|map|model|diagram|pathway)/i.test(q)) {
+      for (const [topic, suggestion] of Object.entries(topicSuggestions)) {
+        if (q.includes(topic)) {
+          return autoCreateTopicGraph(topic, suggestion)
+        }
+      }
+      // Generic topic request
+      return `I can auto-build graphs for these topics — just ask:\n\n- **"Build a cancer biology graph"**\n- **"Create an immunology graph"**\n- **"Make a neuroscience graph"**\n- **"Build a cardiovascular graph"**\n- **"Create a respiratory graph"**\n- **"Make a digestion graph"**\n\nOr search the **Library** panel on the left and drag structures onto the canvas, then say **"connect these nodes"**!`
+    }
+
+    // Also catch requests like "human digestion" or "tell me about digestion nodes"
+    if (nodes.length === 0 || (/\b(for|about|on)\b/i.test(q) && nodes.length < 2)) {
+      for (const [topic, suggestion] of Object.entries(topicSuggestions)) {
+        if (q.includes(topic)) {
+          return autoCreateTopicGraph(topic, suggestion)
+        }
+      }
+    }
+
+    // Try to auto-connect nodes
+    if (q.includes('connect') || q.includes('relationship') || q.includes('link') || q.includes('relate') || q.includes('between')) {
+      if (nodes.length < 2) {
+        return 'Add at least 2 nodes to the canvas first! Drag structures from the **Library** panel on the left, then I can find biological relationships between them.'
+      }
+
+      const foundConnections: string[] = []
+      const edgesToAdd: { sourceId: string; targetId: string; label: string }[] = []
+
+      for (let i = 0; i < nodes.length; i++) {
+        for (let j = i + 1; j < nodes.length; j++) {
+          const n1 = nodes[i], n2 = nodes[j]
+          const n1Lower = n1.name.toLowerCase()
+          const n2Lower = n2.name.toLowerCase()
+
+          // Check known relationships
+          for (const [entity, rels] of Object.entries(relationships)) {
+            for (const [target, rel] of Object.entries(rels)) {
+              if ((n1Lower.includes(entity) && n2Lower.includes(target)) ||
+                  (n1Lower.includes(target) && n2Lower.includes(entity))) {
+                const isForward = n1Lower.includes(entity)
+                const srcId = isForward ? n1.id : n2.id
+                const tgtId = isForward ? n2.id : n1.id
+                const edgeExists = edges.some(e =>
+                  (e.sourceId === srcId && e.targetId === tgtId) ||
+                  (e.sourceId === tgtId && e.targetId === srcId)
+                )
+                if (!edgeExists) {
+                  edgesToAdd.push({ sourceId: srcId, targetId: tgtId, label: rel.label })
+                  foundConnections.push(`**${isForward ? n1.name : n2.name}** → *${rel.label}* → **${isForward ? n2.name : n1.name}**: ${rel.explanation}`)
+                } else {
+                  foundConnections.push(`**${isForward ? n1.name : n2.name}** → *${rel.label}* → **${isForward ? n2.name : n1.name}** (already connected): ${rel.explanation}`)
+                }
+              }
+            }
+          }
+
+          // Category-based smart relationships
+          if (foundConnections.length === 0) {
+            const catPairs: [string, string, string, string][] = [
+              ['pathway', 'biomolecule', 'involves', 'This pathway likely involves or regulates this biomolecule.'],
+              ['gene', 'pathway', 'participates in', 'This gene product likely participates in this signaling pathway.'],
+              ['drug_target', 'receptor', 'targets', 'This therapeutic agent acts on this receptor.'],
+              ['organ_system', 'cell_type', 'contains', 'This organ system contains these cell types.'],
+              ['cell_type', 'biomolecule', 'produces', 'This cell type produces or secretes this biomolecule.'],
+              ['receptor', 'biomolecule', 'binds', 'This receptor binds this ligand/biomolecule.'],
+              ['gene', 'biomolecule', 'encodes', 'This gene encodes this protein/biomolecule.'],
+              ['pathway', 'cell_type', 'regulates', 'This pathway regulates this cell type behavior.'],
+              ['biomolecule', 'pathway', 'activates', 'This biomolecule activates this signaling pathway.'],
+            ]
+            for (const [cat1, cat2, label, explanation] of catPairs) {
+              if ((n1.category === cat1 && n2.category === cat2) || (n1.category === cat2 && n2.category === cat1)) {
+                const isForward = n1.category === cat1
+                const srcId = isForward ? n1.id : n2.id
+                const tgtId = isForward ? n2.id : n1.id
+                const edgeExists = edges.some(e =>
+                  (e.sourceId === srcId && e.targetId === tgtId) ||
+                  (e.sourceId === tgtId && e.targetId === srcId)
+                )
+                if (!edgeExists) {
+                  edgesToAdd.push({ sourceId: srcId, targetId: tgtId, label })
+                  foundConnections.push(`**${isForward ? n1.name : n2.name}** → *${label}* → **${isForward ? n2.name : n1.name}**: ${explanation}`)
+                }
+                break
+              }
+            }
+          }
+        }
+      }
+
+      // Actually add the edges to the graph
+      if (edgesToAdd.length > 0) {
+        const newEdges = edgesToAdd.map(e => ({
+          id: `edge_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          sourceId: e.sourceId,
+          targetId: e.targetId,
+          label: e.label,
+          color: nodes.find(n => n.id === e.sourceId)?.color || 'rgba(255,255,255,0.3)',
+        }))
+        setEdges(prev => [...prev, ...newEdges])
+      }
+
+      if (foundConnections.length > 0) {
+        const connectMsg = edgesToAdd.length > 0 ? `I've added **${edgesToAdd.length}** connection(s) to your graph:\n\n` : ''
+        return connectMsg + foundConnections.join('\n\n')
+      }
+
+      return `I looked at your ${nodes.length} nodes but couldn't auto-detect relationships between them. You can still connect them manually — **click a node's edge circle**, then **click another node** to draw a connection.\n\nTip: Adding nodes from related categories (e.g., a gene and its pathway) makes it easier for me to find relationships.`
+    }
+
+    // Explain a specific node
+    if (q.includes('explain') || q.includes('what is') || q.includes('tell me about') || q.includes('describe')) {
+      const matchedNode = nodes.find(n => q.includes(n.name.toLowerCase()))
+      if (matchedNode) {
+        const comp = components.find(c => c.id === matchedNode.entityId)
+        if (comp) {
+          const parts = [`**${comp.name}** (${categoryConfig[comp.category]?.label || comp.category})\n`]
+          if (comp.description) parts.push(comp.description)
+          if (comp.diseaseRelevance) parts.push(`\n**Disease relevance:** ${comp.diseaseRelevance}`)
+          if (comp.therapeuticTargets?.length) parts.push(`\n**Therapeutic targets:** ${comp.therapeuticTargets.join(', ')}`)
+          if ((comp as any).clinicalSignificance) parts.push(`\n**Clinical significance:** ${(comp as any).clinicalSignificance}`)
+          if (comp.keyFacts?.length) parts.push(`\n**Key facts:**\n${comp.keyFacts.map(f => `- ${f}`).join('\n')}`)
+          return parts.join('\n')
+        }
+      }
+      return 'I can explain any node on your canvas — just mention it by name! For example: "Explain TP53" or "What is PI3K-AKT signaling?"'
+    }
+
+    // Suggest nodes to add — and actually add them if specific enough
+    if (q.includes('suggest') || q.includes('recommend') || q.includes('what should') || /\badd\b/.test(q)) {
+      // Check if user wants to add specific nodes: "add p53" or "add macrophage"
+      const addMatch = q.match(/\badd\s+(.+?)(?:\s+node|\s+to|\s*$)/i)
+      if (addMatch) {
+        const searchName = addMatch[1].trim()
+        const comp = components.find(c =>
+          c.name.toLowerCase() === searchName.toLowerCase() ||
+          c.name.toLowerCase().includes(searchName.toLowerCase()) ||
+          searchName.toLowerCase().includes(c.name.toLowerCase())
+        )
+        if (comp) {
+          const existing = nodes.find(n => n.entityId === comp.id)
+          if (existing) {
+            return `**${comp.name}** is already on your canvas! Click on it to view details, or ask me to connect it with other nodes.`
+          }
+          const newNode: GraphNode = {
+            id: `node_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            entityId: comp.id,
+            name: comp.name,
+            category: comp.category,
+            color: comp.color,
+            x: 200 + Math.random() * 400,
+            y: 150 + Math.random() * 300,
+            width: 180,
+            height: 48,
+            notes: '',
+            expanded: false,
+          }
+          setNodes(prev => [...prev, newNode])
+          let response = `Done! I've added **${comp.name}** (${categoryConfig[comp.category]?.label || comp.category}) to your canvas.`
+          if (comp.description) response += `\n\n${comp.description.slice(0, 200)}${comp.description.length > 200 ? '...' : ''}`
+          if (nodes.length > 0) response += `\n\nSay **"connect these nodes"** to find biological relationships!`
+          return response
+        }
+      }
+
+      if (nodes.length === 0) {
+        return 'Here are some great starting points — just say **"build a [topic] graph"**:\n\n- **"Build a cancer biology graph"** — TP53, KRAS, EGFR, signaling pathways\n- **"Build an immunology graph"** — T cells, B cells, macrophages, cytokines\n- **"Build a neuroscience graph"** — neurons, neurotransmitters, brain regions\n\nOr say **"add [name]"** to add a specific structure (e.g., "add TP53").'
+      }
+      const categories = new Set(nodes.map(n => n.category))
+      const suggestions: string[] = [`Based on your ${nodes.length} nodes, consider adding:`]
+      if (categories.has('pathway') && !categories.has('drug_target')) suggestions.push('- **Drug targets** — say "add imatinib" or "add erlotinib"')
+      if (categories.has('gene') && !categories.has('pathway')) suggestions.push('- **Signaling pathways** — say "add MAPK signaling" or "add PI3K-AKT signaling"')
+      if (categories.has('receptor') && !categories.has('biomolecule')) suggestions.push('- **Ligands** — say "add EGF" or "add insulin"')
+      if (categories.has('organ_system') && !categories.has('cell_type')) suggestions.push('- **Cell types** — say "add macrophage" or "add T cell"')
+      if (categories.has('cell_type') && !categories.has('biomolecule')) suggestions.push('- **Biomolecules** — say "add dopamine" or "add serotonin"')
+      if (suggestions.length === 1) suggestions.push('- Say **"add [name]"** to add any biological structure!')
+      suggestions.push('\nOr say **"connect these nodes"** to auto-connect what you have.')
+      return suggestions.join('\n')
+    }
+
+    // Analyze the graph
+    if (q.includes('analyze') || q.includes('analysis') || q.includes('summary') || q.includes('overview')) {
+      if (nodes.length === 0) return 'Your canvas is empty! Start by adding structures from the Library panel on the left.'
+      const catCounts = new Map<string, number>()
+      nodes.forEach(n => catCounts.set(n.category, (catCounts.get(n.category) || 0) + 1))
+      const parts = [`**Graph Analysis** — ${nodes.length} nodes, ${edges.length} connections\n`]
+      parts.push('**Node categories:**')
+      catCounts.forEach((count, cat) => parts.push(`- ${categoryConfig[cat as BiologicalCategory]?.label || cat}: ${count}`))
+      if (edges.length > 0) {
+        parts.push('\n**Connections:**')
+        edges.forEach(e => {
+          const src = nodes.find(n => n.id === e.sourceId)
+          const tgt = nodes.find(n => n.id === e.targetId)
+          if (src && tgt) parts.push(`- ${src.name} → *${e.label}* → ${tgt.name}`)
+        })
+      }
+      const isolatedNodes = nodes.filter(n => !edges.some(e => e.sourceId === n.id || e.targetId === n.id))
+      if (isolatedNodes.length > 0) {
+        parts.push(`\n**Unconnected nodes:** ${isolatedNodes.map(n => n.name).join(', ')}`)
+        parts.push('\nSay **"connect these nodes"** and I\'ll try to find relationships!')
+      }
+      return parts.join('\n')
+    }
+
+    // Conversational handling
+    if (/^(hi|hey|hello)[\s!.?]*$/i.test(q)) {
+      return nodes.length > 0
+        ? `Hey! You've got ${nodes.length} node${nodes.length > 1 ? 's' : ''} on the canvas. Want me to connect them, analyze your graph, or suggest what to add next?`
+        : 'Hey! I\'m here to help you build a biological knowledge graph. Search for structures in the **Library** panel on the left and drag them onto the canvas. Then I can help you connect them!'
+    }
+
+    if (/thank|thanks|thx/i.test(q)) return 'Happy to help! Let me know if you need anything else with your graph.'
+
+    // Default helpful response
+    if (nodes.length === 0) {
+      return 'Welcome to the Workbench! Here\'s how to get started:\n\n1. Open the **Library** tab on the left panel\n2. Search for biological structures (genes, pathways, cell types, etc.)\n3. **Drag** them onto the canvas\n4. Ask me to **"connect these nodes"** to find relationships\n\nI know about many biological systems — try asking me to help build a graph for cancer, immunology, digestion, neuroscience, or cardiovascular biology!'
+    }
+
+    return `Your graph has **${nodes.length}** node${nodes.length > 1 ? 's' : ''} and **${edges.length}** connection${edges.length !== 1 ? 's' : ''}. I can:\n\n- **"Connect these nodes"** — find biological relationships\n- **"Explain [node name]"** — get detailed info\n- **"Suggest what to add"** — get recommendations\n- **"Analyze my graph"** — get a summary\n\nOr ask me about a specific topic and I'll suggest nodes to build!`
+  }, [nodes, edges, components])
 
   // --- Constant AI send ---
   const sendConstantMessage = useCallback(async () => {
@@ -2609,7 +3107,9 @@ export default function Workbench() {
       return src && tgt ? `${src.name} --[${e.label}]--> ${tgt.name}` : ''
     }).filter(Boolean).join('; ')
 
-    const contextPrompt = `The user is building a biomedical research graph. Current nodes on canvas: ${nodeNames || 'none'}. Current connections: ${edgeDescs || 'none'}. User question: ${userMsg}`
+    const contextPrompt = `The user is building a biomedical research graph in the Workbench. Current nodes on canvas: ${nodeNames || 'none'}. Current connections: ${edgeDescs || 'none'}. User request: ${userMsg}
+
+IMPORTANT: If the user asks you to connect nodes, suggest connections, or explain relationships, provide specific biological relationship details. If they ask to add/edit/remove nodes, describe what should be done. Always be specific about mechanisms and pathways.`
 
     try {
       const resp = await fetch('/api/v1/orchestrator/chat', {
@@ -2619,16 +3119,22 @@ export default function Workbench() {
       })
       if (resp.ok) {
         const data = await resp.json()
-        setConstantMessages(prev => [...prev, { role: 'assistant', text: data.response || data.message || 'I can help you explore biological relationships. Try adding more nodes and asking about their connections.' }])
+        const responseText = data.response || data.message
+        if (responseText && responseText !== 'I can help you explore biological relationships. Try adding more nodes and asking about their connections.') {
+          setConstantMessages(prev => [...prev, { role: 'assistant', text: responseText }])
+        } else {
+          // Backend returned generic fallback — use smart fallback
+          setConstantMessages(prev => [...prev, { role: 'assistant', text: generateWorkbenchFallback(userMsg) }])
+        }
       } else {
-        setConstantMessages(prev => [...prev, { role: 'assistant', text: 'I can help you explore biological relationships. Try adding more nodes and asking about their connections.' }])
+        setConstantMessages(prev => [...prev, { role: 'assistant', text: generateWorkbenchFallback(userMsg) }])
       }
     } catch {
-      setConstantMessages(prev => [...prev, { role: 'assistant', text: 'I can help you explore biological relationships. Try adding more nodes and asking about their connections.' }])
+      setConstantMessages(prev => [...prev, { role: 'assistant', text: generateWorkbenchFallback(userMsg) }])
     } finally {
       setConstantLoading(false)
     }
-  }, [constantInput, constantLoading, nodes, edges])
+  }, [constantInput, constantLoading, nodes, edges, generateWorkbenchFallback])
 
   // --- Export graph as JSON ---
   const exportGraphJSON = useCallback(() => {
@@ -2697,131 +3203,89 @@ export default function Workbench() {
   // --- Clear graph ---
   const clearGraph = useCallback(() => {
     if (nodes.length === 0 && edges.length === 0) return
-    if (confirm('Clear all nodes and connections from the canvas?')) {
-      setNodes([])
-      setEdges([])
-      setSelectedNode(null)
-    }
+    setDeleteConfirm({ type: 'graph' })
   }, [nodes, edges])
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <div className="flex flex-1 min-h-0">
-        {/* Left panel - Component Tree / Master Library */}
+        {/* Left panel - Sapien Corridor */}
         <div className="w-72 border-r border-[var(--color-border)] bg-[var(--color-bg-elevated)] flex flex-col">
-          {/* Tab switcher */}
-          <div className="flex border-b border-[var(--color-border)]">
-            <button
-              onClick={() => setLeftPanelTab('structures')}
-              className={clsx(
-                'flex-1 px-3 py-2 text-xs font-medium transition-colors border-b-2',
-                leftPanelTab === 'structures'
-                  ? 'border-primary-500 text-primary-400 bg-primary-500/10'
-                  : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
-              )}
-            >
-              <FiTarget className="w-3.5 h-3.5 inline mr-1.5" />
-              Structures
-            </button>
-            <button
-              onClick={() => setLeftPanelTab('library')}
-              className={clsx(
-                'flex-1 px-3 py-2 text-xs font-medium transition-colors border-b-2',
-                leftPanelTab === 'library'
-                  ? 'border-primary-500 text-primary-400 bg-primary-500/10'
-                  : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
-              )}
-            >
-              <FiDatabase className="w-3.5 h-3.5 inline mr-1.5" />
-              Master Library
-            </button>
+          <div className="px-3 pt-3 pb-2 border-b border-[var(--color-border)]">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-medium">Sapien Corridor</h3>
+              <span className="text-xxs text-green-400">{libraryStats.totalElements + components.length} elements</span>
+            </div>
+            <div className="relative">
+              <FiSearch className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--color-text-muted)]" />
+              <input
+                type="text"
+                placeholder="Search structures & library..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="input w-full text-xs pl-7"
+              />
+            </div>
+            {searchTerm.length > 0 && searchTerm.length < 3 && (
+              <div className="text-xxs text-[var(--color-text-muted)] mt-1">Type 3+ characters to search library</div>
+            )}
           </div>
-
-          {leftPanelTab === 'structures' ? (
-            <>
-              <div className="p-3 border-b border-[var(--color-border)]">
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-sm font-medium">Disease Structures</h3>
-                  <span className="text-xxs text-[var(--color-text-muted)]">{visibleCount} visible</span>
+          <div className="flex-1 overflow-y-auto p-2">
+            {librarySearchResults.length > 0 ? (
+              <div className="space-y-0.5">
+                <div className="text-xxs text-[var(--color-text-muted)] px-2 py-1">
+                  {librarySearchResults.length} results found
                 </div>
-                <div className="relative">
-                  <FiSearch className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--color-text-muted)]" />
-                  <input
-                    type="text"
-                    placeholder="Search structures..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="input w-full text-xs pl-7"
-                  />
-                </div>
-              </div>
-              <div className="flex-1 overflow-y-auto p-2">
-                <ComponentTree
-                  components={components}
-                  selectedId={selectedId}
-                  onSelect={setSelectedId}
-                  onToggleVisibility={toggleVisibility}
-                  searchTerm={searchTerm}
-                  onAddToCanvas={addToCanvas}
-                />
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="p-3 border-b border-[var(--color-border)]">
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-sm font-medium">Master Human Library</h3>
-                  <span className="text-xxs text-green-400">{libraryStats.totalElements} elements</span>
-                </div>
-                <div className="relative">
-                  <FiSearch className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--color-text-muted)]" />
-                  <input
-                    type="text"
-                    placeholder="Search all elements..."
-                    value={librarySearchTerm}
-                    onChange={(e) => setLibrarySearchTerm(e.target.value)}
-                    className="input w-full text-xs pl-7"
-                  />
-                </div>
-                {librarySearchTerm.length > 0 && librarySearchTerm.length < 3 && (
-                  <div className="text-xxs text-[var(--color-text-muted)] mt-1">Type 3+ characters to search</div>
-                )}
-              </div>
-              <div className="flex-1 overflow-y-auto p-2">
-                {librarySearchResults.length > 0 ? (
-                  <div className="space-y-0.5">
-                    <div className="text-xxs text-[var(--color-text-muted)] px-2 py-1">
-                      {librarySearchResults.length} results found
-                    </div>
-                    {librarySearchResults.slice(0, 50).map(elem => (
-                      <div
-                        key={elem.id}
-                        onClick={() => setSelectedLibraryId(elem.id)}
-                        className={clsx(
-                          'flex items-center gap-2 py-1.5 px-2 rounded text-xs cursor-pointer transition-colors',
-                          selectedLibraryId === elem.id
-                            ? 'bg-primary-500/20 text-primary-400'
-                            : 'hover:bg-[var(--color-surface)] text-[var(--color-text-secondary)]'
-                        )}
-                      >
-                        {elem.aiSimulationReady && <FiCpu className="w-3 h-3 text-green-400" />}
-                        <span className="truncate flex-1">{elem.name}</span>
-                        <span className="text-xxs text-[var(--color-text-muted)]">{elem.category.split('_')[0]}</span>
-                      </div>
-                    ))}
+                {librarySearchResults.slice(0, 50).map(elem => (
+                  <div
+                    key={elem.id}
+                    onClick={() => { setSelectedLibraryId(elem.id); setSelectedId(null) }}
+                    className={clsx(
+                      'flex items-center gap-2 py-1.5 px-2 rounded text-xs cursor-pointer transition-colors',
+                      selectedLibraryId === elem.id
+                        ? 'bg-primary-500/20 text-primary-400'
+                        : 'hover:bg-[var(--color-surface)] text-[var(--color-text-secondary)]'
+                    )}
+                  >
+                    {elem.aiSimulationReady && <FiCpu className="w-3 h-3 text-green-400" />}
+                    <span className="truncate flex-1">{elem.name}</span>
+                    <span className="text-xxs text-[var(--color-text-muted)]">{elem.category.split('_')[0]}</span>
                   </div>
-                ) : (
+                ))}
+              </div>
+            ) : (
+              <>
+                {/* Structures section */}
+                <div className="mb-3">
+                  <div className="text-xxs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider px-2 py-1.5">
+                    Disease Structures
+                    <span className="ml-1.5 text-[var(--color-text-muted)] font-normal normal-case">({visibleCount} visible)</span>
+                  </div>
+                  <ComponentTree
+                    components={components}
+                    selectedId={selectedId}
+                    onSelect={(id) => { setSelectedId(id); setSelectedLibraryId(null) }}
+                    onToggleVisibility={toggleVisibility}
+                    searchTerm={searchTerm}
+                    onAddToCanvas={addToCanvas}
+                  />
+                </div>
+                {/* Master Library section */}
+                <div className="border-t border-[var(--color-border)] pt-3">
+                  <div className="text-xxs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider px-2 py-1.5">
+                    Master Human Library
+                  </div>
                   <MasterLibraryTree
                     nodes={masterLibraryTree}
-                    onSelect={setSelectedLibraryId}
+                    onSelect={(id) => { setSelectedLibraryId(id); setSelectedId(null) }}
                     selectedId={selectedLibraryId}
                     expandedNodes={expandedLibraryNodes}
                     onToggleExpand={toggleLibraryNode}
                   />
-                )}
-              </div>
-            </>
-          )}
+                </div>
+              </>
+            )}
+          </div>
         </div>
 
         {/* Main viewport - SVG Node Graph Canvas */}
@@ -3027,10 +3491,10 @@ export default function Workbench() {
             <div className="p-3 border-b border-[var(--color-border)]">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-medium">
-                  {leftPanelTab === 'library' ? 'Element Details' : 'Properties'}
+                  {selectedLibraryId ? 'Element Details' : 'Properties'}
                 </h3>
                 <div className="flex items-center gap-1">
-                  {leftPanelTab === 'library' && selectedLibraryElement && (
+                  {selectedLibraryId && selectedLibraryElement && (
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-400">
                       {selectedLibraryElement.aiSimulationReady ? 'AI Ready' : 'Manual'}
                     </span>
@@ -3042,7 +3506,7 @@ export default function Workbench() {
               </div>
             </div>
             <div className="flex-1 overflow-y-auto">
-              {leftPanelTab === 'library' ? (
+              {selectedLibraryId ? (
                 <MasterLibraryDetails element={selectedLibraryElement} />
               ) : (
                 <div className="p-3">
@@ -3067,6 +3531,30 @@ export default function Workbench() {
           onSubmit={handleEdgeLabelSubmit}
           onClose={() => setPendingEdge(null)}
         />
+      )}
+
+      {/* Delete Confirmation Dialog */}
+      {deleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setDeleteConfirm(null)}>
+          <div className="bg-[var(--color-bg-elevated)] border border-[var(--color-border)] rounded-xl p-5 w-80 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <h3 className="text-sm font-semibold mb-2 text-red-400">
+              {deleteConfirm.type === 'graph' ? 'Clear Entire Graph?' : deleteConfirm.type === 'node' ? 'Delete Node?' : 'Delete Connection?'}
+            </h3>
+            <p className="text-xs text-[var(--color-text-muted)] mb-4">
+              {deleteConfirm.type === 'graph'
+                ? 'This will remove all nodes and connections from the canvas. This action cannot be undone.'
+                : deleteConfirm.type === 'node'
+                ? 'This will remove the node and all its connections. This action cannot be undone.'
+                : 'This will remove the connection between these nodes. This action cannot be undone.'}
+            </p>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setDeleteConfirm(null)} className="btn btn-sm btn-secondary">Cancel</button>
+              <button onClick={confirmDeleteAction} className="btn btn-sm text-red-400 bg-red-500/10 hover:bg-red-500/20">
+                <FiTrash2 className="w-3 h-3" /> Delete
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

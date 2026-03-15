@@ -11,7 +11,7 @@ import {
   FiTrash2,
   FiTrendingUp,
 } from 'react-icons/fi'
-import { getActivityLog, persistGet, persistSet, type ActivityEntry } from '../utils/persistence'
+import { getActivityLog, persistGet, persistSet, formatDate, formatDateTime, type ActivityEntry } from '../utils/persistence'
 
 type FilterType = '' | 'project' | 'hypothesis' | 'evidence' | 'simulation' | 'notebook' | 'discovery'
 type TimeRange = 'today' | 'week' | 'month' | 'all'
@@ -54,15 +54,11 @@ function formatRelativeTime(dateStr: string): string {
   const days = Math.floor(hrs / 24)
   if (days === 1) return 'Yesterday'
   if (days < 7) return `${days}d ago`
-  return new Date(dateStr).toLocaleDateString()
+  return formatDate(dateStr)
 }
 
 function formatMilestoneTime(dateStr: string): string {
-  const d = new Date(dateStr)
-  return d.toLocaleString('en-US', {
-    month: 'short', day: 'numeric', year: 'numeric',
-    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true,
-  })
+  return formatDateTime(dateStr)
 }
 
 const MILESTONE_ACTIONS = new Set(['created', 'completed', 'validated', 'started', 'rejected'])
@@ -184,7 +180,7 @@ export default function Timeline() {
                   </div>
                   <div>
                     <div className="text-sm font-medium">
-                      {new Date(dateKey).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+                      {formatDate(dateKey)}
                     </div>
                     <div className="text-xs text-[var(--color-text-muted)]">{dayActivities.length} events</div>
                   </div>

@@ -3053,67 +3053,144 @@ def health_check():
 
 @app.post("/api/v1/orchestrator/chat")
 def constant_chat():
-    """Constant AI chat assistant — uses available pipeline models for research Q&A."""
+    """Constant AI chat assistant — multi-provider fallback: Bedrock → Azure GPT-4o → GPT-4.1 → Grok."""
     try:
         body = app.current_event.json_body
         message = body.get("message", "")
-        context = body.get("context", "general")
+        platform_context = body.get("platform_context", {})
 
         if not message.strip():
             return {"response": "Please ask me a question about your research."}
 
-        # Try to use Claude Opus via Bedrock for chat
-        chat_prompt = f"""You are Constant, an AI research assistant for the HumaNovo biomedical discovery platform.
-You help researchers with questions about hypotheses, experimental design, literature analysis,
-drug discovery, molecular biology, and scientific methodology.
+        # Build context-aware system prompt
+        context_lines = []
+        if platform_context:
+            if platform_context.get("totalProjects"):
+                context_lines.append(f"The user has {platform_context['totalProjects']} projects.")
+            if platform_context.get("totalHypotheses"):
+                context_lines.append(f"They have {platform_context['totalHypotheses']} hypotheses.")
+            if platform_context.get("projects"):
+                names = [p.get("name", "") for p in platform_context["projects"][:5] if p.get("name")]
+                if names:
+                    context_lines.append(f"Projects: {', '.join(names)}.")
+            if platform_context.get("hypotheses"):
+                titles = [h.get("title", "")[:80] for h in platform_context["hypotheses"][:3] if h.get("title")]
+                if titles:
+                    context_lines.append(f"Recent hypotheses: {'; '.join(titles)}.")
 
+        platform_info = "\n".join(context_lines)
+        system_msg = f"""You are Constant, an AI research tutor and assistant built into the HumaNovo biomedical discovery platform.
+You help researchers with hypotheses, experimental design, literature analysis, drug discovery, molecular biology, statistics, genomics, and scientific methodology.
 Be concise, helpful, and scientifically accurate. Reference specific mechanisms, genes, and pathways when relevant.
+When the user asks about their research, use the platform context provided.
 
-User question: {message}"""
+{platform_info}""".strip()
+
+        messages = [
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": message},
+        ]
 
         response_text = None
-        if bedrock_runtime:
+        provider_used = None
+
+        # === Tier 1: AWS Bedrock Claude Opus ===
+        if not response_text and bedrock_runtime:
             try:
                 import json as json_mod
                 bedrock_response = bedrock_runtime.invoke_model(
-                    modelId=BEDROCK_MODEL_ID,
+                    modelId=BEDROCK_MODEL_CLAUDE_OPUS,
                     contentType="application/json",
                     accept="application/json",
                     body=json_mod.dumps({
                         "anthropic_version": "bedrock-2023-05-31",
-                        "max_tokens": 1024,
-                        "messages": [{"role": "user", "content": chat_prompt}],
+                        "max_tokens": 2048,
+                        "system": system_msg,
+                        "messages": [{"role": "user", "content": message}],
                     }),
                 )
                 result = json_mod.loads(bedrock_response["body"].read())
                 if result.get("content"):
                     response_text = result["content"][0].get("text", "")
+                    provider_used = "bedrock-opus"
             except Exception as e:
-                print(f"[CHAT] Bedrock error: {e}")
+                print(f"[CHAT] Bedrock Opus error: {e}")
 
-        if not response_text:
-            # Fallback to Claude Sonnet 4.6 via Bedrock
+        # === Tier 2: AWS Bedrock Claude Sonnet ===
+        if not response_text and bedrock_runtime:
             try:
-                if bedrock_runtime:
-                    import json as json_mod
-                    sonnet_resp = bedrock_runtime.invoke_model(
-                        modelId=BEDROCK_MODEL_CLAUDE_SONNET,
-                        contentType="application/json",
-                        accept="application/json",
-                        body=json_mod.dumps({
-                            "anthropic_version": "bedrock-2023-05-31",
-                            "max_tokens": 1024,
-                            "messages": [{"role": "user", "content": chat_prompt}],
-                        }),
-                    )
-                    sonnet_result = json_mod.loads(sonnet_resp["body"].read())
-                    if sonnet_result.get("content"):
-                        response_text = sonnet_result["content"][0].get("text", "")
+                import json as json_mod
+                sonnet_resp = bedrock_runtime.invoke_model(
+                    modelId=BEDROCK_MODEL_CLAUDE_SONNET,
+                    contentType="application/json",
+                    accept="application/json",
+                    body=json_mod.dumps({
+                        "anthropic_version": "bedrock-2023-05-31",
+                        "max_tokens": 2048,
+                        "system": system_msg,
+                        "messages": [{"role": "user", "content": message}],
+                    }),
+                )
+                sonnet_result = json_mod.loads(sonnet_resp["body"].read())
+                if sonnet_result.get("content"):
+                    response_text = sonnet_result["content"][0].get("text", "")
+                    provider_used = "bedrock-sonnet"
             except Exception as e:
-                print(f"[CHAT] Sonnet fallback error: {e}")
+                print(f"[CHAT] Bedrock Sonnet error: {e}")
 
-        if not response_text:
+        # === Tier 3: Azure GPT-4o ===
+        if not response_text and azure_gpt4o_client:
+            try:
+                resp = azure_gpt4o_client.chat.completions.create(
+                    model="gpt-4o", messages=messages, max_tokens=2048, temperature=0.7,
+                )
+                if resp.choices:
+                    response_text = resp.choices[0].message.content
+                    provider_used = "azure-gpt4o"
+            except Exception as e:
+                print(f"[CHAT] Azure GPT-4o error: {e}")
+
+        # === Tier 4: Azure GPT-4.1 ===
+        if not response_text and azure_gpt41_client:
+            try:
+                resp = azure_gpt41_client.chat.completions.create(
+                    model="gpt-4.1", messages=messages, max_tokens=2048, temperature=0.7,
+                )
+                if resp.choices:
+                    response_text = resp.choices[0].message.content
+                    provider_used = "azure-gpt41"
+            except Exception as e:
+                print(f"[CHAT] Azure GPT-4.1 error: {e}")
+
+        # === Tier 5: Azure Grok ===
+        if not response_text and azure_grok_client:
+            try:
+                resp = azure_grok_client.chat.completions.create(
+                    model="grok-4-1-fast-reasoning", messages=messages, max_tokens=2048, temperature=0.7,
+                )
+                if resp.choices:
+                    response_text = resp.choices[0].message.content
+                    provider_used = "azure-grok"
+            except Exception as e:
+                print(f"[CHAT] Azure Grok error: {e}")
+
+        # === Tier 6: Azure DeepSeek ===
+        if not response_text and azure_deepseek_client:
+            try:
+                resp = azure_deepseek_client.chat.completions.create(
+                    model="DeepSeek-R1", messages=messages, max_tokens=2048, temperature=0.7,
+                )
+                if resp.choices:
+                    response_text = resp.choices[0].message.content
+                    provider_used = "azure-deepseek"
+            except Exception as e:
+                print(f"[CHAT] Azure DeepSeek error: {e}")
+
+        if response_text:
+            print(f"[CHAT] Success via {provider_used}")
+        else:
             response_text = "I'm currently unable to connect to the AI models. Please ensure the discovery pipeline is configured and try again."
+            print("[CHAT] All providers failed — returning fallback")
 
         return {"response": response_text}
     except Exception as e:

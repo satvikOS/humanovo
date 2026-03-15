@@ -24,7 +24,7 @@ import { Link } from 'react-router-dom'
 import { BarChart, Bar, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import api from '../services/api'
 import type { OrchestratorStatus, DiscoveryConfig } from '../services/api'
-import { persistSet, persistGet, logActivity } from '../utils/persistence'
+import { persistSet, persistGet, logActivity, formatDate } from '../utils/persistence'
 
 // Types
 interface TranslationalPhaseDetail {
@@ -220,8 +220,10 @@ export default function Agents() {
         setProjectName(pname)
 
         // Save project to localStorage so ProjectDetail can find it
+        // But never re-create a project the user has explicitly deleted
+        const deletedProjectIds = persistGet<string[]>('deleted-project-ids', [])
         const existingProjects = persistGet<any[]>('projects', [])
-        if (!existingProjects.find((p: any) => p.id === pid)) {
+        if (!existingProjects.find((p: any) => p.id === pid) && !deletedProjectIds.includes(pid)) {
           const projectEntry = {
             id: pid,
             name: pname,
@@ -660,7 +662,7 @@ export default function Agents() {
                       <span className="text-[var(--color-text-muted)]">{run.discoveryType}</span>
                     </div>
                     <div className="flex items-center justify-between text-xxs text-[var(--color-text-muted)] mt-1">
-                      <span>{new Date(run.timestamp).toLocaleDateString()}</span>
+                      <span>{formatDate(run.timestamp)}</span>
                       <span>{run.hypothesesCount} hypotheses</span>
                     </div>
                   </div>
@@ -682,17 +684,15 @@ export default function Agents() {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              {projectId && projectId !== 'discovery' && (
-                <Link
-                  to={`/projects/${projectId}`}
-                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-[var(--color-border)] hover:bg-[var(--glass-bg-hover)] transition-all"
-                  style={{ color: 'var(--color-accent-blue)' }}
-                >
-                  <FiFolder className="w-3.5 h-3.5" />
-                  View in Project
-                  <FiExternalLink className="w-3 h-3" />
-                </Link>
-              )}
+              <Link
+                to="/projects"
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-[var(--color-border)] hover:bg-[var(--glass-bg-hover)] transition-all"
+                style={{ color: 'var(--color-accent-blue)' }}
+              >
+                <FiFolder className="w-3.5 h-3.5" />
+                All Projects
+                <FiExternalLink className="w-3 h-3" />
+              </Link>
               {isRunning && (
                 <span className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg" style={{ color: 'var(--color-success)', background: 'rgba(34, 197, 94, 0.08)' }}>
                   <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-success)] animate-pulse" /> Running
@@ -753,6 +753,19 @@ export default function Agents() {
             </div>
           ) : (
             <div className="space-y-2">
+              {(isRunning || isPaused) && projectId && projectId !== 'discovery' && (
+                <div className="flex items-center justify-center py-2">
+                  <Link
+                    to={`/projects/${projectId}`}
+                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-[var(--color-border)] hover:bg-[var(--glass-bg-hover)] transition-all"
+                    style={{ color: 'var(--color-accent-blue)' }}
+                  >
+                    <FiFolder className="w-3.5 h-3.5" />
+                    View This Project
+                    <FiExternalLink className="w-3 h-3" />
+                  </Link>
+                </div>
+              )}
               {sortedHypotheses.map(h => (
                 <button
                   key={h.id}

@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
+import { formatDateTime, logActivity } from '../utils/persistence'
 import '@tanstack/react-query' // kept to preserve dependency
 import {
   FiActivity, FiPlay, FiPause, FiCheck, FiX, FiPlus,
@@ -416,6 +417,259 @@ function saveSimulations(sims: MCResult[]) {
   } catch { /* quota exceeded - ignore */ }
 }
 
+// ── Unified Simulation History ──────────────────────────────────
+
+const EQ_HISTORY_KEY = 'humanovo-eq-plots'
+const COMP_HISTORY_KEY = 'humanovo-comp-runs'
+
+interface EqHistoryEntry { id: string; expr: string; xMin: number; xMax: number; createdAt: string }
+interface CompHistoryEntry { id: string; env: string; template: string; code: string; output: string; createdAt: string }
+
+function loadEqHistory(): EqHistoryEntry[] {
+  try { return JSON.parse(localStorage.getItem(EQ_HISTORY_KEY) || '[]') } catch { return [] }
+}
+function saveEqHistory(entries: EqHistoryEntry[]) {
+  try { localStorage.setItem(EQ_HISTORY_KEY, JSON.stringify(entries.slice(0, 50))) } catch {}
+}
+function loadCompHistory(): CompHistoryEntry[] {
+  try { return JSON.parse(localStorage.getItem(COMP_HISTORY_KEY) || '[]') } catch { return [] }
+}
+function saveCompHistory(entries: CompHistoryEntry[]) {
+  try { localStorage.setItem(COMP_HISTORY_KEY, JSON.stringify(entries.slice(0, 50))) } catch {}
+}
+
+function SavedSimulations() {
+  const mcSims = useMemo(() => loadSavedSimulations(), [])
+  const eqPlots = useMemo(() => loadEqHistory(), [])
+  const compRuns = useMemo(() => loadCompHistory(), [])
+  const [filter, setFilter] = useState<'all' | 'monte-carlo' | 'equation' | 'computational'>('all')
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+
+  type UnifiedEntry = {
+    id: string; type: 'monte-carlo' | 'equation' | 'computational'
+    title: string; subtitle: string; createdAt: string; stats?: string
+    mcData?: MCResult; eqData?: EqHistoryEntry; compData?: CompHistoryEntry
+  }
+
+  const allEntries = useMemo<UnifiedEntry[]>(() => {
+    const entries: UnifiedEntry[] = []
+    for (const mc of mcSims) {
+      const tl = SIMULATION_TYPES.find(t => t.id === mc.simulationType)?.label || mc.simulationType
+      entries.push({
+        id: mc.id, type: 'monte-carlo', title: mc.name,
+        subtitle: `${tl} · ${mc.iterations.toLocaleString()} iterations`,
+        createdAt: mc.createdAt,
+        stats: `μ=${mc.stats.mean.toFixed(2)}  σ=${mc.stats.std.toFixed(2)}  95% CI [${mc.stats.ci95Lower.toFixed(2)}, ${mc.stats.ci95Upper.toFixed(2)}]`,
+        mcData: mc,
+      })
+    }
+    for (const eq of eqPlots) {
+      entries.push({
+        id: eq.id, type: 'equation', title: `f(x) = ${eq.expr}`,
+        subtitle: `x ∈ [${eq.xMin}, ${eq.xMax}]`,
+        createdAt: eq.createdAt, eqData: eq,
+      })
+    }
+    for (const cr of compRuns) {
+      entries.push({
+        id: cr.id, type: 'computational', title: cr.template || cr.env,
+        subtitle: `${cr.env} · ${cr.code.split('\n').length} lines`,
+        createdAt: cr.createdAt, compData: cr,
+      })
+    }
+    entries.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    return entries
+  }, [mcSims, eqPlots, compRuns])
+
+  const filtered = filter === 'all' ? allEntries : allEntries.filter(e => e.type === filter)
+
+  const typeIcon = (type: string) => {
+    if (type === 'monte-carlo') return <FiActivity className="w-3.5 h-3.5" />
+    if (type === 'equation') return <FiTrendingUp className="w-3.5 h-3.5" />
+    return <FiTerminal className="w-3.5 h-3.5" />
+  }
+  const typeColor = (type: string) => {
+    if (type === 'monte-carlo') return 'var(--color-accent-blue)'
+    if (type === 'equation') return 'var(--color-accent-green)'
+    return 'var(--color-accent-purple)'
+  }
+  const typeLabel = (type: string) => {
+    if (type === 'monte-carlo') return 'Monte Carlo'
+    if (type === 'equation') return 'Equation Plot'
+    return 'Computational Lab'
+  }
+
+  const formatTimeAgo = (ts: string) => {
+    const diff = Date.now() - new Date(ts).getTime()
+    const mins = Math.floor(diff / 60000)
+    if (mins < 1) return 'Just now'
+    if (mins < 60) return `${mins}m ago`
+    const hrs = Math.floor(mins / 60)
+    if (hrs < 24) return `${hrs}h ago`
+    const days = Math.floor(hrs / 24)
+    if (days < 30) return `${days}d ago`
+    return new Date(ts).toLocaleDateString()
+  }
+
+  const renderExpandedContent = (entry: UnifiedEntry) => {
+    if (entry.type === 'monte-carlo' && entry.mcData) {
+      const mc = entry.mcData
+      return (
+        <div className="mt-3 pt-3 border-t border-[var(--color-border)] space-y-3">
+          {/* Stats grid */}
+          <div className="grid grid-cols-5 gap-2">
+            {[
+              { label: 'Mean', value: mc.stats.mean.toFixed(4) },
+              { label: 'Median', value: mc.stats.median.toFixed(4) },
+              { label: 'Std Dev', value: mc.stats.std.toFixed(4) },
+              { label: '95% CI Low', value: mc.stats.ci95Lower.toFixed(4) },
+              { label: '95% CI High', value: mc.stats.ci95Upper.toFixed(4) },
+            ].map(s => (
+              <div key={s.label} className="text-center p-2 rounded-lg bg-[var(--glass-bg)]">
+                <div className="text-xxs text-[var(--color-text-muted)]">{s.label}</div>
+                <div className="text-xs font-mono font-medium text-[var(--color-text)]">{s.value}</div>
+              </div>
+            ))}
+          </div>
+          {/* Distribution histogram */}
+          {mc.histogramData && mc.histogramData.length > 0 && (
+            <div className="h-40">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={mc.histogramData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                  <XAxis dataKey="bin" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} interval="preserveStartEnd" />
+                  <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
+                  <Tooltip contentStyle={{ background: 'var(--color-surface-solid)', border: '1px solid var(--color-border)', borderRadius: 8, fontSize: 11 }} />
+                  <Bar dataKey="count" fill="var(--color-accent-blue)" radius={[2, 2, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+          {/* Convergence chart */}
+          {mc.convergenceData && mc.convergenceData.length > 0 && (
+            <div className="h-32">
+              <div className="text-xxs text-[var(--color-text-muted)] mb-1">Convergence</div>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={mc.convergenceData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                  <XAxis dataKey="iteration" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
+                  <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
+                  <Tooltip contentStyle={{ background: 'var(--color-surface-solid)', border: '1px solid var(--color-border)', borderRadius: 8, fontSize: 11 }} />
+                  <Line type="monotone" dataKey="mean" stroke="var(--color-accent-green)" strokeWidth={1.5} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </div>
+      )
+    }
+
+    if (entry.type === 'equation' && entry.eqData) {
+      const eq = entry.eqData
+      const plotData = evaluateExpression(eq.expr, eq.xMin, eq.xMax)
+      return (
+        <div className="mt-3 pt-3 border-t border-[var(--color-border)]">
+          <div className="h-48">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={plotData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                <XAxis dataKey="x" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} tickFormatter={(v: number) => v.toFixed(1)} />
+                <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
+                <Tooltip contentStyle={{ background: 'var(--color-surface-solid)', border: '1px solid var(--color-border)', borderRadius: 8, fontSize: 11 }} />
+                <defs>
+                  <linearGradient id="savedEqGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="var(--color-accent-green)" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="var(--color-accent-green)" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <Area type="monotone" dataKey="y" stroke="var(--color-accent-green)" strokeWidth={2} fill="url(#savedEqGrad)" dot={false} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )
+    }
+
+    if (entry.type === 'computational' && entry.compData) {
+      const cr = entry.compData
+      return (
+        <div className="mt-3 pt-3 border-t border-[var(--color-border)] space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="text-xxs px-1.5 py-0.5 rounded bg-[var(--glass-bg)] text-[var(--color-text-muted)] font-mono">{cr.env}</span>
+            <span className="text-xxs text-[var(--color-text-muted)]">{cr.template}</span>
+          </div>
+          <pre className="text-xxs font-mono text-[var(--color-text-secondary)] bg-[var(--glass-bg)] rounded-lg p-3 max-h-40 overflow-auto whitespace-pre-wrap">{cr.code.slice(0, 800)}{cr.code.length > 800 ? '\n...' : ''}</pre>
+        </div>
+      )
+    }
+
+    return null
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Filter bar */}
+      <div className="flex items-center gap-2">
+        {(['all', 'monte-carlo', 'equation', 'computational'] as const).map(f => (
+          <button
+            key={f}
+            onClick={() => setFilter(f)}
+            className={clsx(
+              'px-3 py-1.5 text-xs rounded-lg font-medium transition-all',
+              filter === f
+                ? 'bg-[var(--color-text)] text-[var(--color-bg)]'
+                : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)]'
+            )}
+          >
+            {f === 'all' ? `All (${allEntries.length})` : `${typeLabel(f)} (${allEntries.filter(e => e.type === f).length})`}
+          </button>
+        ))}
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="text-center py-16">
+          <FiDatabase className="w-10 h-10 text-[var(--color-text-muted)] mx-auto mb-3 opacity-30" />
+          <h3 className="text-base font-medium text-[var(--color-text)] mb-1">No saved simulations</h3>
+          <p className="text-sm text-[var(--color-text-muted)]">Run simulations, plot equations, or execute code to see results here.</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {filtered.map(entry => {
+            const isExpanded = expandedId === entry.id
+            return (
+              <div key={entry.id} className="glass-card p-4 transition-all">
+                <button
+                  onClick={() => setExpandedId(isExpanded ? null : entry.id)}
+                  className="w-full text-left flex items-start gap-3"
+                >
+                  <div className="p-2 rounded-lg flex-shrink-0" style={{ background: `color-mix(in srgb, ${typeColor(entry.type)} 12%, transparent)` }}>
+                    <span style={{ color: typeColor(entry.type) }}>{typeIcon(entry.type)}</span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <span className="text-sm font-medium text-[var(--color-text)] truncate">{entry.title}</span>
+                      <span className="text-xxs px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ color: typeColor(entry.type), background: `color-mix(in srgb, ${typeColor(entry.type)} 12%, transparent)` }}>
+                        {typeLabel(entry.type)}
+                      </span>
+                    </div>
+                    <p className="text-xs text-[var(--color-text-muted)]">{entry.subtitle}</p>
+                    {!isExpanded && entry.stats && <p className="text-xxs text-[var(--color-text-muted)] mt-1 font-mono">{entry.stats}</p>}
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <span className="text-xxs text-[var(--color-text-muted)] whitespace-nowrap">{formatTimeAgo(entry.createdAt)}</span>
+                    <FiBarChart2 className={clsx('w-3.5 h-3.5 text-[var(--color-text-muted)] transition-transform', isExpanded && 'rotate-180')} />
+                  </div>
+                </button>
+                {isExpanded && renderExpandedContent(entry)}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── MC Simulation Form ──────────────────────────────────────────
 function MCSimulationForm({ onResult, onClose }: { onResult: (r: MCResult) => void; onClose: () => void }) {
   const [name, setName] = useState('')
@@ -498,7 +752,7 @@ function MCSimulationForm({ onResult, onClose }: { onResult: (r: MCResult) => vo
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">Simulation Type</label>
-            <select value={simType} onChange={e => handleTypeChange(e.target.value)} className="w-full px-3 py-2 text-sm bg-[var(--glass-bg)] border border-[var(--color-border)] rounded-lg text-[var(--color-text)] focus:outline-none focus:border-[var(--color-accent-blue)]" disabled={running}>
+            <select value={simType} onChange={e => handleTypeChange(e.target.value)} className="input w-full" disabled={running}>
               {SIMULATION_TYPES.map(t => (<option key={t.id} value={t.id}>{t.label}</option>))}
             </select>
           </div>
@@ -514,11 +768,11 @@ function MCSimulationForm({ onResult, onClose }: { onResult: (r: MCResult) => vo
               <div key={cfg.key}>
                 <label className="block text-xs text-[var(--color-text-muted)] mb-1">{cfg.label}</label>
                 {cfg.type === 'select' ? (
-                  <select value={String(params[cfg.key])} onChange={e => setParams(prev => ({ ...prev, [cfg.key]: e.target.value }))} className="w-full px-2 py-1.5 text-sm bg-[var(--glass-bg)] border border-[var(--color-border)] rounded text-[var(--color-text)] focus:outline-none focus:border-[var(--color-accent-blue)]" disabled={running}>
+                  <select value={String(params[cfg.key])} onChange={e => setParams(prev => ({ ...prev, [cfg.key]: e.target.value }))} className="input w-full text-xs py-1.5" disabled={running}>
                     {cfg.options?.map(o => (<option key={o.value} value={o.value}>{o.label}</option>))}
                   </select>
                 ) : (
-                  <input type="number" value={Number(params[cfg.key])} onChange={e => setParams(prev => ({ ...prev, [cfg.key]: parseFloat(e.target.value) || cfg.default }))} min={cfg.min} max={cfg.max} step={cfg.step} className="w-full px-2 py-1.5 text-sm bg-[var(--glass-bg)] border border-[var(--color-border)] rounded text-[var(--color-text)] focus:outline-none focus:border-[var(--color-accent-blue)]" disabled={running} />
+                  <input type="number" value={Number(params[cfg.key])} onChange={e => setParams(prev => ({ ...prev, [cfg.key]: parseFloat(e.target.value) || cfg.default }))} min={cfg.min} max={cfg.max} step={cfg.step} className="input w-full text-xs py-1.5" disabled={running} />
                 )}
               </div>
             ))}
@@ -662,7 +916,7 @@ function MCSimulationCard({ result, onDelete }: { result: MCResult; onDelete: (i
           </div>
 
           <div className="flex items-center justify-between">
-            <p className="text-[10px] text-[var(--color-text-muted)]">Created: {new Date(result.createdAt).toLocaleString()}</p>
+            <p className="text-[10px] text-[var(--color-text-muted)]">Created: {formatDateTime(result.createdAt)}</p>
             <button
               onClick={copyChartsToClipboard}
               className="flex items-center gap-1 px-2 py-1 text-xs rounded hover:bg-white/5 text-[var(--color-text-muted)] hover:text-white transition-all"
@@ -1992,6 +2246,11 @@ function EquationPlotter() {
         const next = [{ expr: equationExpr, data }, ...prev.filter(h => h.expr !== equationExpr)]
         return next.slice(0, 10)
       })
+      // Persist to history
+      const entry: EqHistoryEntry = { id: crypto.randomUUID(), expr: equationExpr, xMin, xMax, createdAt: new Date().toISOString() }
+      const prev = loadEqHistory().filter(e => e.expr !== equationExpr)
+      saveEqHistory([entry, ...prev])
+      logActivity({ type: 'simulation', action: 'created', title: `Equation plot: ${equationExpr}` })
     }
   }, [equationExpr, xMin, xMax])
 
@@ -2400,8 +2659,17 @@ function ComputationalLab() {
       parseOutputForViz(out)
     } finally {
       setIsRunning(false)
+      // Persist to history
+      const entry: CompHistoryEntry = {
+        id: crypto.randomUUID(), env: selectedEnv,
+        template: selectedTemplate?.name || 'Custom', code,
+        output: '', createdAt: new Date().toISOString(),
+      }
+      const prev = loadCompHistory()
+      saveCompHistory([entry, ...prev])
+      logActivity({ type: 'simulation', action: 'created', title: `Comp Lab: ${selectedTemplate?.name || selectedEnv}` })
     }
-  }, [code, selectedEnv, isRunning, parseOutputForViz])
+  }, [code, selectedEnv, selectedTemplate, isRunning, parseOutputForViz])
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -2466,7 +2734,7 @@ function ComputationalLab() {
             <select
               value={filterCategory}
               onChange={e => setFilterCategory(e.target.value)}
-              className="w-full px-2 py-1.5 text-xs bg-[var(--glass-bg)] border border-[var(--color-border)] rounded text-[var(--color-text)] focus:outline-none"
+              className="input w-full text-xs py-1.5"
             >
               <option value="all">All Categories</option>
               {categories.map(c => <option key={c} value={c}>{c}</option>)}
@@ -2738,7 +3006,7 @@ function simulateOutput(code: string, env: ComputeEnv): string {
 // ── Main Simulations Page ───────────────────────────────────────
 export default function Simulations() {
   const [showCreate, setShowCreate] = useState(false)
-  const [activeTab, setActiveTab] = useState<'simulations' | 'computational-lab' | 'equation-plotter'>('simulations')
+  const [activeTab, setActiveTab] = useState<'simulations' | 'computational-lab' | 'equation-plotter' | 'history'>('simulations')
   const [mcSimulations, setMcSimulations] = useState<MCResult[]>(() => loadSavedSimulations())
 
   // Persist to localStorage whenever simulations change
@@ -2749,10 +3017,19 @@ export default function Simulations() {
   const handleNewResult = (result: MCResult) => {
     setMcSimulations(prev => [result, ...prev])
     setShowCreate(false)
+    logActivity({ type: 'simulation', action: 'created', title: result.name })
   }
 
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+
   const handleDelete = (id: string) => {
-    setMcSimulations(prev => prev.filter(s => s.id !== id))
+    setDeleteConfirmId(id)
+  }
+
+  const confirmDelete = () => {
+    if (!deleteConfirmId) return
+    setMcSimulations(prev => prev.filter(s => s.id !== deleteConfirmId))
+    setDeleteConfirmId(null)
   }
 
   return (
@@ -2815,6 +3092,18 @@ export default function Simulations() {
           <FiCpu className="w-4 h-4 inline mr-2" />
           Equation Plotter
         </button>
+        <button
+          onClick={() => setActiveTab('history')}
+          className={clsx(
+            'px-4 py-2.5 text-sm font-medium transition-all border-b-2 -mb-px',
+            activeTab === 'history'
+              ? 'border-[var(--color-text)] text-[var(--color-text)]'
+              : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
+          )}
+        >
+          <FiDatabase className="w-4 h-4 inline mr-2" />
+          Saved
+        </button>
       </div>
 
       {/* Content */}
@@ -2847,7 +3136,30 @@ export default function Simulations() {
         {activeTab === 'computational-lab' && <ComputationalLab />}
 
         {activeTab === 'equation-plotter' && <EquationPlotter />}
+
+        {activeTab === 'history' && <SavedSimulations />}
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      {deleteConfirmId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="glass-card p-6 max-w-sm mx-4 text-center" style={{ background: 'var(--color-surface-solid)' }}>
+            <FiX className="w-8 h-8 text-red-400 mx-auto mb-3" />
+            <h3 className="text-lg font-semibold mb-2">Delete Simulation?</h3>
+            <p className="text-sm text-[var(--color-text-muted)] mb-4">
+              This will permanently delete this simulation and its results. This action cannot be undone.
+            </p>
+            <div className="flex gap-3 justify-center">
+              <button onClick={() => setDeleteConfirmId(null)} className="btn px-4 py-2 text-sm text-[var(--color-text-muted)]">
+                Cancel
+              </button>
+              <button onClick={confirmDelete} className="btn px-4 py-2 text-sm bg-red-500/10 text-red-400 hover:bg-red-500/20">
+                Delete Permanently
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
