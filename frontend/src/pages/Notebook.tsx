@@ -15,7 +15,7 @@ import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import Superscript from '@tiptap/extension-superscript'
 import Subscript from '@tiptap/extension-subscript'
-import { Table, TableRow, TableCell, TableHeader } from '@tiptap/extension-table'
+import { TableKit } from '@tiptap/extension-table'
 import ImageExt from '@tiptap/extension-image'
 import LinkExt from '@tiptap/extension-link'
 import Placeholder from '@tiptap/extension-placeholder'
@@ -559,18 +559,26 @@ function exportDocx(title: string, html: string) {
 // ═══════════════════════════════════════════════════════════════
 
 export default function Notebook() {
+  const [initError, setInitError] = useState<string | null>(null)
+
   // Page index (metadata only — content stored separately per page)
   const [pageIndex, setPageIndex] = useState<PageMeta[]>(() => {
-    const existing = loadIndex()
-    if (existing.length > 0) return existing
-    // First time: show Getting Started page (only if never onboarded)
-    const onboarded = persistGet<boolean>(ONBOARDED_KEY, false)
-    if (onboarded) return []
-    const gs = getGettingStartedPage()
-    saveIndex([gs.meta])
-    savePageData(gs.meta.id, gs.data)
-    persistSet(ONBOARDED_KEY, true)
-    return [gs.meta]
+    try {
+      const existing = loadIndex()
+      if (existing.length > 0) return existing
+      // First time: show Getting Started page (only if never onboarded)
+      const onboarded = persistGet<boolean>(ONBOARDED_KEY, false)
+      if (onboarded) return []
+      const gs = getGettingStartedPage()
+      saveIndex([gs.meta])
+      savePageData(gs.meta.id, gs.data)
+      persistSet(ONBOARDED_KEY, true)
+      return [gs.meta]
+    } catch (e) {
+      console.error('Notebook init error:', e)
+      setInitError(String(e))
+      return []
+    }
   })
 
   const [activePageId, setActivePageId] = useState<string | null>(() => {
@@ -614,7 +622,12 @@ export default function Notebook() {
   // TipTap editor
   const editor = useEditor({
     extensions: [
-      StarterKit.configure({ heading: { levels: [1, 2, 3, 4] } }),
+      StarterKit.configure({
+        heading: { levels: [1, 2, 3, 4] },
+        horizontalRule: false,
+        link: false,
+        underline: false,
+      }),
       Underline,
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
       Highlight.configure({ multicolor: false }),
@@ -622,10 +635,7 @@ export default function Notebook() {
       TaskItem.configure({ nested: true }),
       Superscript,
       Subscript,
-      Table.configure({ resizable: true }),
-      TableRow,
-      TableCell,
-      TableHeader,
+      TableKit.configure({ table: { resizable: true } }),
       ImageExt.configure({ inline: true, allowBase64: true }),
       LinkExt.configure({ openOnClick: false }),
       Placeholder.configure({ placeholder: 'Start writing...' }),
@@ -635,9 +645,9 @@ export default function Notebook() {
       HorizontalRule,
     ],
     content: activeHtml,
+    immediatelyRender: false,
     onUpdate: ({ editor: ed }) => {
       setHasUnsaved(true)
-      // Debounced auto-save
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
       saveTimerRef.current = window.setTimeout(() => {
         doSave(ed.getHTML())
@@ -648,7 +658,6 @@ export default function Notebook() {
         class: 'prose prose-invert prose-sm max-w-none focus:outline-none min-h-[400px] p-4',
       },
       handlePaste: (view, event) => {
-        // Handle image paste
         const items = event.clipboardData?.items
         if (!items) return false
         for (let i = 0; i < items.length; i++) {
@@ -801,10 +810,13 @@ export default function Notebook() {
   }, [])
 
   // ─── Render ──────────────────────────────────────────────
+  if (initError) {
+    return <div className="p-8 text-red-400"><h2 className="text-lg font-bold mb-2">Notebook Error</h2><pre className="text-sm">{initError}</pre></div>
+  }
+
   return (
     <>
-      <div className="relative w-full" style={{ height: 'calc(100vh - 3rem)' }}>
-        <div className="absolute inset-0 flex overflow-hidden">
+      <div className="flex w-full" style={{ height: 'calc(100vh - 3.5rem)' }}>
 
           {/* ── Sidebar ── */}
           <div className="w-64 border-r border-[var(--color-border)] bg-[var(--color-bg-elevated)] flex flex-col shrink-0">
@@ -994,7 +1006,6 @@ export default function Notebook() {
               </div>
             </div>
           )}
-        </div>
       </div>
 
       {/* ── Delete Confirmation Dialog (Simulations-style) ── */}
