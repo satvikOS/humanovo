@@ -1528,7 +1528,7 @@ export default function Notebook() {
   // Re-read citation style from localStorage each time the template modal opens
   const templates = useMemo(() => buildTemplates(getCitationStyle()), [showTemplates])
   const [showVersions, setShowVersions] = useState(false)
-  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+  // deleteConfirmId state removed — delete modal is now built via direct DOM manipulation
   const [versions, setVersions] = useState<NotebookVersion[]>([])
   const [tagInput, setTagInput] = useState('')
   const [editTags, setEditTags] = useState<string[]>([])
@@ -1820,38 +1820,81 @@ export default function Notebook() {
     return (catTag?.replace('category:', '') as TemplateCategory) || 'general'
   }
 
-  const handleDeletePage = useCallback((pageId: string) => {
-    setDeleteConfirmId(pageId)
-  }, [])
-
-  const confirmDelete = useCallback(() => {
-    const pageId = deleteConfirmId
-    if (!pageId) return
-    setDeleteConfirmId(null)
-    // Cancel any pending auto-save to prevent race conditions
+  const doDeletePage = useCallback((pageId: string) => {
+    // Cancel any pending auto-save
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current)
       saveTimerRef.current = null
     }
-    // API delete (fire and forget)
+    // API delete
     if (!pageId.startsWith('local-')) {
       api.deleteNotebookPage(pageId).catch(() => {})
     }
     persistSet('notebook-onboarded', true)
-    // Use setPages (the persisting wrapper) instead of setPagesRaw
-    const remaining = pages.filter(p => p.id !== pageId)
-    setPages(remaining)
-    // Switch to another page or clear
-    if (activePage?.id === pageId) {
-      if (remaining.length > 0) {
-        selectPage(remaining[0])
-      } else {
-        setActivePage(null)
-        setEditContent('')
-        setEditTitle('')
+    setPagesRaw(prev => {
+      const remaining = prev.filter(p => p.id !== pageId)
+      persistSet('notebook-pages', remaining)
+      if (activePage?.id === pageId) {
+        if (remaining.length > 0) {
+          selectPage(remaining[0])
+        } else {
+          setActivePage(null)
+          setEditContent('')
+          setEditTitle('')
+        }
       }
-    }
-  }, [deleteConfirmId, activePage, pages, selectPage, setPages])
+      return remaining
+    })
+  }, [activePage, selectPage])
+
+  const handleDeletePage = useCallback((pageId: string) => {
+    // Build modal via DOM to guarantee visibility regardless of React/CSS context
+    const overlay = document.createElement('div')
+    overlay.id = 'delete-confirm-overlay'
+    Object.assign(overlay.style, {
+      position: 'fixed', top: '0', left: '0', right: '0', bottom: '0',
+      zIndex: '999999', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'rgba(0,0,0,0.7)', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    })
+
+    const card = document.createElement('div')
+    Object.assign(card.style, {
+      background: '#1e1e2e', padding: '24px', borderRadius: '12px',
+      maxWidth: '400px', width: '90%', textAlign: 'center', color: '#e2e8f0',
+      border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 25px 50px rgba(0,0,0,0.5)',
+    })
+
+    card.innerHTML = `
+      <div style="color:#f87171;margin-bottom:12px;font-size:28px;">&#9888;</div>
+      <h3 style="font-size:18px;font-weight:600;margin:0 0 8px 0;">Delete Page?</h3>
+      <p style="font-size:14px;color:#94a3b8;margin:0 0 20px 0;">
+        This will permanently delete this page and its contents. This action cannot be undone.
+      </p>
+      <div style="display:flex;gap:12px;justify-content:center;">
+        <button id="delete-cancel-btn" style="padding:8px 16px;font-size:14px;border-radius:8px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.05);color:#94a3b8;cursor:pointer;">
+          Cancel
+        </button>
+        <button id="delete-confirm-btn" style="padding:8px 16px;font-size:14px;border-radius:8px;border:1px solid rgba(239,68,68,0.3);background:rgba(239,68,68,0.15);color:#f87171;cursor:pointer;font-weight:500;">
+          Delete Permanently
+        </button>
+      </div>
+    `
+
+    overlay.appendChild(card)
+    document.body.appendChild(overlay)
+
+    const close = () => { overlay.remove() }
+
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) close()
+    })
+    card.addEventListener('click', (e) => { e.stopPropagation() })
+    card.querySelector('#delete-cancel-btn')!.addEventListener('click', close)
+    card.querySelector('#delete-confirm-btn')!.addEventListener('click', () => {
+      close()
+      doDeletePage(pageId)
+    })
+  }, [doDeletePage])
 
   const loadVersions = async () => {
     if (!activePage) return
@@ -2363,28 +2406,6 @@ export default function Notebook() {
       </div>
 
     </div>
-
-    {/* Delete Confirmation Dialog — portaled to document.body */}
-    {deleteConfirmId && createPortal(
-      <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/60" onClick={() => setDeleteConfirmId(null)}>
-        <div className="p-6 max-w-sm mx-4 text-center rounded-xl border border-white/10" style={{ background: '#1a1a2e', boxShadow: '0 25px 50px rgba(0,0,0,0.5)', color: '#e2e8f0' }} onClick={e => e.stopPropagation()}>
-          <FiTrash2 className="w-8 h-8 text-red-400 mx-auto mb-3" />
-          <h3 className="text-lg font-semibold mb-2">Delete Page?</h3>
-          <p className="text-sm mb-4" style={{ color: '#94a3b8' }}>
-            This will permanently delete this page and its contents. This action cannot be undone.
-          </p>
-          <div className="flex gap-3 justify-center">
-            <button onClick={() => setDeleteConfirmId(null)} className="px-4 py-2 text-sm rounded-lg border border-white/10 cursor-pointer" style={{ background: 'rgba(255,255,255,0.05)', color: '#94a3b8' }}>
-              Cancel
-            </button>
-            <button onClick={confirmDelete} className="px-4 py-2 text-sm rounded-lg cursor-pointer font-medium" style={{ background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)' }}>
-              Delete Permanently
-            </button>
-          </div>
-        </div>
-      </div>,
-      document.body
-    )}
 
     {/* Template picker modal — portaled to document.body */}
     {showTemplates && createPortal(
