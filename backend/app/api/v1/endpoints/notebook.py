@@ -18,11 +18,12 @@ router = APIRouter()
 # ── In-memory storage (with DB fallback) ─────────────────────────
 
 _notebook_pages: dict[str, dict] = {}
+_defaults_dismissed: bool = False  # Track if user has dismissed defaults
 
 
 def _ensure_defaults():
-    """Create a default page if none exist."""
-    if not _notebook_pages:
+    """Create a default page if none exist and user hasn't dismissed them."""
+    if not _notebook_pages and not _defaults_dismissed:
         page_id = str(uuid4())
         _notebook_pages[page_id] = {
             "id": page_id,
@@ -145,9 +146,12 @@ async def update_page(page_id: str, data: NotebookPageUpdate):
 @router.delete("/pages/{page_id}")
 async def delete_page(page_id: str):
     """Delete a notebook page."""
+    global _defaults_dismissed
     if page_id not in _notebook_pages:
         raise HTTPException(status_code=404, detail="Page not found")
     del _notebook_pages[page_id]
+    # Mark defaults as dismissed so they don't reappear
+    _defaults_dismissed = True
     return {"status": "deleted"}
 
 

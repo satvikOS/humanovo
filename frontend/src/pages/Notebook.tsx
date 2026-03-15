@@ -1654,19 +1654,26 @@ export default function Notebook() {
         setPages(merged)
         if (!activePage) selectPage(merged[0])
       } else {
-        // No pages at all — create a default local page
-        const defaultPage: NotebookPage = {
-          id: 'local-default',
-          title: 'Getting Started',
-          content: '# Welcome to HumaNovo Notebook\n\nThis is your research notebook. Use **Markdown** to write notes, embed evidence, and track your research.\n\n## Features\n- Rich Markdown editing with live preview\n- LaTeX math: $E = mc^2$\n- Link evidence and hypotheses\n- Version history\n- Export to PDF/Markdown\n\nStart writing below...',
-          content_type: 'markdown',
-          tags: ['getting-started'],
-          version: 1,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
+        // Only show Getting Started for truly fresh users (never used notebook before)
+        const hasUsedNotebook = persistGet<boolean>('notebook-onboarded', false)
+        if (!hasUsedNotebook) {
+          const defaultPage: NotebookPage = {
+            id: 'local-default',
+            title: 'Getting Started',
+            content: '# Welcome to HumaNovo Notebook\n\nThis is your research notebook. Use **Markdown** to write notes, embed evidence, and track your research.\n\n## Features\n- Rich Markdown editing with live preview\n- LaTeX math: $E = mc^2$\n- Link evidence and hypotheses\n- Version history\n- Export to PDF/Markdown\n\nStart writing below...',
+            content_type: 'markdown',
+            tags: ['getting-started'],
+            version: 1,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          }
+          persistSet('notebook-onboarded', true)
+          setPages([defaultPage])
+          selectPage(defaultPage)
+        } else {
+          // User has used notebook before but deleted all pages — show empty state
+          setPages([])
         }
-        setPages([defaultPage])
-        selectPage(defaultPage)
       }
     } catch (err) {
       console.error('Failed to load notebook pages:', err)
@@ -1676,18 +1683,23 @@ export default function Notebook() {
         setPages(cachedPages)
         if (!activePage) selectPage(cachedPages[0])
       } else {
-        const fallbackPage: NotebookPage = {
-          id: 'local-fallback',
-          title: 'Research Notes',
-          content: '# Research Notes\n\nStart writing your research notes here.\n\n> **Note:** The notebook backend is currently unavailable. Your notes will be available once the server is back online.\n',
-          content_type: 'markdown',
-          tags: [],
-          version: 1,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
+        const hasUsedNotebook = persistGet<boolean>('notebook-onboarded', false)
+        if (!hasUsedNotebook) {
+          const fallbackPage: NotebookPage = {
+            id: 'local-fallback',
+            title: 'Research Notes',
+            content: '# Research Notes\n\nStart writing your research notes here.\n\n> **Note:** The notebook backend is currently unavailable. Your notes will be available once the server is back online.\n',
+            content_type: 'markdown',
+            tags: [],
+            version: 1,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          }
+          setPages([fallbackPage])
+          selectPage(fallbackPage)
+        } else {
+          setPages([])
         }
-        setPages([fallbackPage])
-        selectPage(fallbackPage)
       }
     } finally {
       setLoading(false)
@@ -1796,6 +1808,8 @@ export default function Notebook() {
     setDeleteConfirmId(null)
     try {
       try { await api.deleteNotebookPage(id) } catch { /* API may be unavailable */ }
+      // Mark as onboarded so Getting Started doesn't reappear
+      persistSet('notebook-onboarded', true)
       const remaining = pages.filter(p => p.id !== id)
       setPages(remaining)
       if (activePage?.id === id) {
