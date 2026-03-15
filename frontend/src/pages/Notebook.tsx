@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import {
   FiPlus, FiTrash2, FiSave, FiDownload, FiClock, FiTag,
   FiEdit3, FiEye, FiColumns, FiFileText,
@@ -2364,36 +2365,37 @@ export default function Notebook() {
 
     </div>
 
-    {/* Delete Confirmation Dialog — same pattern as Simulations page */}
-    {deleteConfirmId && (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-        <div className="glass-card p-6 max-w-sm mx-4 text-center" style={{ background: 'var(--color-surface-solid)' }}>
+    {/* Delete Confirmation Dialog — portaled to document.body */}
+    {deleteConfirmId && createPortal(
+      <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/60" onClick={() => setDeleteConfirmId(null)}>
+        <div className="p-6 max-w-sm mx-4 text-center rounded-xl border border-white/10" style={{ background: '#1a1a2e', boxShadow: '0 25px 50px rgba(0,0,0,0.5)', color: '#e2e8f0' }} onClick={e => e.stopPropagation()}>
           <FiTrash2 className="w-8 h-8 text-red-400 mx-auto mb-3" />
           <h3 className="text-lg font-semibold mb-2">Delete Page?</h3>
-          <p className="text-sm text-[var(--color-text-muted)] mb-4">
+          <p className="text-sm mb-4" style={{ color: '#94a3b8' }}>
             This will permanently delete this page and its contents. This action cannot be undone.
           </p>
           <div className="flex gap-3 justify-center">
-            <button onClick={() => setDeleteConfirmId(null)} className="btn px-4 py-2 text-sm text-[var(--color-text-muted)]">
+            <button onClick={() => setDeleteConfirmId(null)} className="px-4 py-2 text-sm rounded-lg border border-white/10 cursor-pointer" style={{ background: 'rgba(255,255,255,0.05)', color: '#94a3b8' }}>
               Cancel
             </button>
-            <button onClick={confirmDelete} className="btn px-4 py-2 text-sm bg-red-500/10 text-red-400 hover:bg-red-500/20">
+            <button onClick={confirmDelete} className="px-4 py-2 text-sm rounded-lg cursor-pointer font-medium" style={{ background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)' }}>
               Delete Permanently
             </button>
           </div>
         </div>
-      </div>
+      </div>,
+      document.body
     )}
 
-    {/* Template picker modal */}
-    {showTemplates && (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => { setShowTemplates(false); cancelCreate() }}>
-        <div className="glass-card max-w-lg w-full mx-4 max-h-[80vh] flex flex-col" style={{ background: 'var(--color-surface-solid)' }} onClick={e => e.stopPropagation()}>
-          <div className="flex items-center justify-between p-4 border-b border-[var(--color-border)] shrink-0">
+    {/* Template picker modal — portaled to document.body */}
+    {showTemplates && createPortal(
+      <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/60" onClick={() => { setShowTemplates(false); cancelCreate() }}>
+        <div className="max-w-lg w-full mx-4 max-h-[80vh] flex flex-col rounded-xl border border-white/10" style={{ background: '#1a1a2e', boxShadow: '0 25px 50px rgba(0,0,0,0.5)', color: '#e2e8f0' }} onClick={e => e.stopPropagation()}>
+          <div className="flex items-center justify-between p-4 border-b border-white/10 shrink-0">
             <h2 className="text-sm font-semibold">
               {pendingTemplate ? 'Configure New Page' : 'Choose a Template'}
             </h2>
-            <button onClick={() => { setShowTemplates(false); cancelCreate() }} className="p-1 rounded hover:bg-white/10 text-[var(--color-text-muted)]">
+            <button onClick={() => { setShowTemplates(false); cancelCreate() }} className="p-1 rounded hover:bg-white/10 cursor-pointer" style={{ background: 'transparent', border: 'none', color: '#94a3b8' }}>
               <FiX className="w-4 h-4" />
             </button>
           </div>
@@ -2401,17 +2403,17 @@ export default function Notebook() {
           {pendingTemplate ? (
             /* Step 2: Pre-fillout form */
             <div className="p-4 flex flex-col gap-4">
-              <div className="flex items-center gap-3 p-3 rounded-lg bg-white/5 border border-[var(--color-border)]">
-                <div className="p-1.5 rounded" style={{ background: (TEMPLATE_CATEGORY_COLORS[pendingTemplate.category] || '#94a3b8') + '33', color: TEMPLATE_CATEGORY_COLORS[pendingTemplate.category] || '#94a3b8', flexShrink: 0 }}>
+              <div className="flex items-center gap-3 p-3 rounded-lg bg-white/5 border border-white/10">
+                <div className="p-1.5 rounded shrink-0" style={{ background: (TEMPLATE_CATEGORY_COLORS[pendingTemplate.category] || '#94a3b8') + '33', color: TEMPLATE_CATEGORY_COLORS[pendingTemplate.category] || '#94a3b8' }}>
                   {pendingTemplate.icon}
                 </div>
                 <div>
                   <div className="text-xs font-medium">{pendingTemplate.name}</div>
-                  <div className="text-xxs text-[var(--color-text-muted)]">{pendingTemplate.description}</div>
+                  <div className="text-xxs" style={{ color: '#94a3b8' }}>{pendingTemplate.description}</div>
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-medium mb-1.5">Page Title</label>
+                <label className="block text-xs font-medium mb-1.5" style={{ color: '#e2e8f0' }}>Page Title</label>
                 <input
                   type="text"
                   value={newPageTitle}
@@ -2419,25 +2421,27 @@ export default function Notebook() {
                   placeholder="Enter page title..."
                   autoFocus
                   onKeyDown={e => { if (e.key === 'Enter') createPage() }}
-                  className="w-full px-3 py-2 text-sm rounded-md border border-[var(--color-border)] bg-white/5 text-[var(--color-text)] outline-none"
+                  className="w-full px-3 py-2 text-sm rounded-md border border-white/20 outline-none"
+                  style={{ background: 'rgba(255,255,255,0.05)', color: '#e2e8f0', boxSizing: 'border-box' }}
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium mb-1.5">Tags <span className="text-[var(--color-text-muted)] font-normal">(comma-separated, optional)</span></label>
+                <label className="block text-xs font-medium mb-1.5" style={{ color: '#e2e8f0' }}>Tags <span style={{ color: '#94a3b8', fontWeight: 400 }}>(comma-separated, optional)</span></label>
                 <input
                   type="text"
                   value={newPageTags}
                   onChange={e => setNewPageTags(e.target.value)}
                   placeholder="e.g. research, draft, BRCA1"
                   onKeyDown={e => { if (e.key === 'Enter') createPage() }}
-                  className="w-full px-3 py-2 text-sm rounded-md border border-[var(--color-border)] bg-white/5 text-[var(--color-text)] outline-none"
+                  className="w-full px-3 py-2 text-sm rounded-md border border-white/20 outline-none"
+                  style={{ background: 'rgba(255,255,255,0.05)', color: '#e2e8f0', boxSizing: 'border-box' }}
                 />
               </div>
               <div className="flex gap-3 justify-end pt-2">
-                <button onClick={cancelCreate} className="btn px-4 py-2 text-sm text-[var(--color-text-muted)]">
+                <button onClick={cancelCreate} className="px-4 py-2 text-sm cursor-pointer rounded-lg" style={{ background: 'transparent', border: 'none', color: '#94a3b8' }}>
                   Back
                 </button>
-                <button onClick={createPage} className="btn px-4 py-2 text-sm bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 font-medium">
+                <button onClick={createPage} className="px-4 py-2 text-sm cursor-pointer rounded-lg font-medium" style={{ background: 'rgba(99,102,241,0.2)', border: 'none', color: '#818cf8' }}>
                   Create Page
                 </button>
               </div>
@@ -2456,7 +2460,7 @@ export default function Notebook() {
                 <div key={cat} className="mb-3">
                   <div className="flex items-center gap-2 mb-1.5 px-1">
                     <div className="w-2 h-2 rounded-full" style={{ background: TEMPLATE_CATEGORY_COLORS[cat as TemplateCategory] || '#94a3b8' }} />
-                    <span className="text-xxs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+                    <span className="text-xxs font-medium uppercase tracking-wider" style={{ color: '#94a3b8' }}>
                       {TEMPLATE_CATEGORY_LABELS[cat as TemplateCategory] || cat}
                     </span>
                   </div>
@@ -2465,14 +2469,15 @@ export default function Notebook() {
                       <button
                         key={template.name}
                         onClick={() => selectTemplate(template)}
-                        className="text-left p-3 rounded-lg border border-[var(--color-border)] hover:bg-white/5 flex items-start gap-2.5 transition-colors"
+                        className="text-left p-3 rounded-lg border border-white/10 hover:bg-white/5 flex items-start gap-2.5 transition-colors cursor-pointer"
+                        style={{ background: 'transparent', color: '#e2e8f0' }}
                       >
                         <div className="p-1.5 rounded" style={{ background: (TEMPLATE_CATEGORY_COLORS[template.category] || '#94a3b8') + '33', color: TEMPLATE_CATEGORY_COLORS[template.category] || '#94a3b8' }}>
                           {template.icon}
                         </div>
                         <div className="min-w-0">
                           <div className="text-xs font-medium">{template.name}</div>
-                          <div className="text-xxs text-[var(--color-text-muted)] mt-0.5">
+                          <div className="text-xxs mt-0.5" style={{ color: '#94a3b8' }}>
                             {template.description}
                           </div>
                         </div>
@@ -2484,16 +2489,17 @@ export default function Notebook() {
             </div>
           )}
         </div>
-      </div>
+      </div>,
+      document.body
     )}
 
-    {/* Version history panel */}
-    {showVersions && (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowVersions(false)}>
-        <div className="glass-card max-w-lg w-full mx-4 max-h-[70vh] flex flex-col" style={{ background: 'var(--color-surface-solid)' }} onClick={e => e.stopPropagation()}>
-          <div className="flex items-center justify-between p-4 border-b border-[var(--color-border)] shrink-0">
+    {/* Version history panel — portaled to document.body */}
+    {showVersions && createPortal(
+      <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/60" onClick={() => setShowVersions(false)}>
+        <div className="max-w-lg w-full mx-4 max-h-[70vh] flex flex-col rounded-xl border border-white/10" style={{ background: '#1a1a2e', boxShadow: '0 25px 50px rgba(0,0,0,0.5)', color: '#e2e8f0' }} onClick={e => e.stopPropagation()}>
+          <div className="flex items-center justify-between p-4 border-b border-white/10 shrink-0">
             <h2 className="text-sm font-semibold">Version History</h2>
-            <button onClick={() => setShowVersions(false)} className="p-1 rounded hover:bg-white/10 text-[var(--color-text-muted)]">
+            <button onClick={() => setShowVersions(false)} className="p-1 rounded hover:bg-white/10 cursor-pointer" style={{ background: 'transparent', border: 'none', color: '#94a3b8' }}>
               <FiX className="w-4 h-4" />
             </button>
           </div>
@@ -2508,16 +2514,17 @@ export default function Notebook() {
                     <div className="text-sm font-medium">
                       v{ver.version} — {ver.title}
                     </div>
-                    <div className="text-xxs text-[var(--color-text-muted)]">
+                    <div className="text-xxs" style={{ color: '#94a3b8' }}>
                       {formatDateTime(ver.created_at)}
                     </div>
-                    <div className="text-xxs text-[var(--color-text-muted)] mt-0.5 line-clamp-1">
+                    <div className="text-xxs mt-0.5 line-clamp-1" style={{ color: '#94a3b8' }}>
                       {(ver.content || '').slice(0, 100)}...
                     </div>
                   </div>
                   <button
                     onClick={() => restoreVersion(ver.version)}
-                    className="opacity-0 group-hover:opacity-100 px-2 py-1 text-xs text-accent-blue hover:bg-accent-blue/10 rounded transition-all"
+                    className="opacity-0 group-hover:opacity-100 px-2 py-1 text-xs text-accent-blue hover:bg-accent-blue/10 rounded transition-all cursor-pointer"
+                    style={{ background: 'transparent', border: 'none' }}
                   >
                     <FiRotateCcw className="w-3 h-3 inline mr-1" />
                     Restore
@@ -2525,7 +2532,7 @@ export default function Notebook() {
                 </div>
               ))
             ) : (
-              <div className="text-center py-8 text-[var(--color-text-muted)]">
+              <div className="text-center py-8" style={{ color: '#94a3b8' }}>
                 <FiClock className="w-6 h-6 mx-auto mb-2 opacity-50" />
                 <p className="text-xs">No version history yet</p>
                 <p className="text-xxs mt-1">Versions are created on each save</p>
@@ -2533,7 +2540,8 @@ export default function Notebook() {
             )}
           </div>
         </div>
-      </div>
+      </div>,
+      document.body
     )}
   </>
   )
