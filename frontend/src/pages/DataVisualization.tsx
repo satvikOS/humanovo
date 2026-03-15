@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useMemo } from 'react'
 import {
   FiBarChart2, FiPlus, FiTrash2,
-  FiDownload, FiUpload, FiSettings, FiSave, FiX,
+  FiDownload, FiUpload, FiSettings, FiX,
   FiMaximize2, FiMinimize2, FiEdit3, FiCopy, FiDroplet,
   FiClipboard, FiCheck,
 } from 'react-icons/fi'
@@ -15,6 +15,7 @@ import {
   RadialBarChart, RadialBar,
 } from 'recharts'
 import html2canvas from 'html2canvas'
+import * as XLSX from 'xlsx'
 import { persistGet, persistSet, formatDate } from '../utils/persistence'
 
 // ─── Types ──────────────────────────────────────────────────────
@@ -132,11 +133,6 @@ function suggestChartType(data: DataPoint[]): ChartType {
   // Default: bar
   return 'bar'
 }
-
-const CHART_COLORS = [
-  'var(--color-accent-blue)', 'var(--color-accent-purple)', 'var(--color-accent-green)',
-  'var(--color-accent-orange)', 'var(--color-accent-cyan)', 'var(--color-error)',
-]
 
 const defaultOptions: ChartOptions = {
   color: 'var(--color-accent-blue)',
@@ -310,26 +306,53 @@ export default function DataVisualization() {
     saveCharts(charts.map(c => c.id === id ? { ...c, options: { ...c.options, ...opts } } : c))
   }
 
-  // ─── File upload ────────────────────────────────────────────
+  // ─── File upload (CSV/TSV/XLSX) ────────────────────────────
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-    const reader = new FileReader()
-    reader.onload = (ev) => {
-      const text = ev.target?.result as string
-      if (!text) return
-      const lines = text.split('\n').filter(l => l.trim())
-      if (!lines.length) return
-      const sep = text.includes('\t') ? /\t/ : /,/
-      const first = lines[0].split(sep).map(p => p.trim().replace(/^["']|["']$/g, ''))
-      const hasHeader = first.length >= 2 && isNaN(parseFloat(first[1]))
-      const dataLines = hasHeader ? lines.slice(1) : lines
-      const dataText = dataLines.map(l => l.split(sep).map(p => p.trim().replace(/^["']|["']$/g, '')).join(', ')).join('\n')
-      const title = file.name.replace(/\.(csv|tsv|xlsx?|txt)$/i, '').replace(/[-_]/g, ' ')
-      setForm(f => ({ ...f, title: title || f.title, dataText }))
-      setShowAdd(true)
+    const title = file.name.replace(/\.(csv|tsv|xlsx?|txt)$/i, '').replace(/[-_]/g, ' ')
+    const isExcel = /\.xlsx?$/i.test(file.name)
+
+    if (isExcel) {
+      const reader = new FileReader()
+      reader.onload = (ev) => {
+        try {
+          const wb = XLSX.read(ev.target?.result, { type: 'array' })
+          const ws = wb.Sheets[wb.SheetNames[0]]
+          const rows: string[][] = XLSX.utils.sheet_to_json(ws, { header: 1 }) as string[][]
+          if (!rows.length) return
+          const first = rows[0]
+          const hasHeader = first.length >= 2 && isNaN(parseFloat(String(first[1])))
+          const dataRows = hasHeader ? rows.slice(1) : rows
+          const dataText = dataRows.map(r => r.map(c => String(c ?? '').trim()).join(', ')).join('\n')
+          setForm(f => ({ ...f, title: title || f.title, dataText }))
+          // Auto-suggest chart type
+          const parsed = parseCSV(dataText)
+          if (parsed.length > 0) setForm(f => ({ ...f, type: suggestChartType(parsed) }))
+          setShowAdd(true)
+        } catch (err) { console.error('XLSX parse error:', err) }
+      }
+      reader.readAsArrayBuffer(file)
+    } else {
+      const reader = new FileReader()
+      reader.onload = (ev) => {
+        const text = ev.target?.result as string
+        if (!text) return
+        const lines = text.split('\n').filter(l => l.trim())
+        if (!lines.length) return
+        const sep = text.includes('\t') ? /\t/ : /,/
+        const first = lines[0].split(sep).map(p => p.trim().replace(/^["']|["']$/g, ''))
+        const hasHeader = first.length >= 2 && isNaN(parseFloat(first[1]))
+        const dataLines = hasHeader ? lines.slice(1) : lines
+        const dataText = dataLines.map(l => l.split(sep).map(p => p.trim().replace(/^["']|["']$/g, '')).join(', ')).join('\n')
+        setForm(f => ({ ...f, title: title || f.title, dataText }))
+        // Auto-suggest chart type
+        const parsed = parseCSV(dataText)
+        if (parsed.length > 0) setForm(f => ({ ...f, type: suggestChartType(parsed) }))
+        setShowAdd(true)
+      }
+      reader.readAsText(file)
     }
-    reader.readAsText(file)
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
@@ -1019,80 +1042,142 @@ export default function DataVisualization() {
       <div className="p-6 border-b border-[var(--color-border)]">
         <div className="flex items-center justify-between mb-2">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Data Visualization Engine</h1>
+            <h1 className="text-2xl font-semibold tracking-tight">Data Visualization</h1>
             <p className="text-sm text-[var(--color-text-muted)] mt-1">
-              {charts.length} chart{charts.length !== 1 ? 's' : ''} — 29 chart types, CSV/TSV upload, full customization, PNG/SVG/CSV export
+              {charts.length} chart{charts.length !== 1 ? 's' : ''} — 29 chart types, CSV/XLSX import, full customization, PNG/SVG/CSV export
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <input ref={fileInputRef} type="file" accept=".csv,.tsv,.txt" onChange={handleFileUpload} className="hidden" />
-            <button onClick={() => fileInputRef.current?.click()} className="btn text-sm border border-[var(--color-border)]" style={{ color: 'var(--color-accent-green)' }}>
-              <FiUpload className="w-4 h-4" /> Upload CSV
-            </button>
-            <button onClick={() => setShowAdd(!showAdd)} className="btn text-sm" style={{ color: 'var(--color-accent-blue)' }}>
-              <FiPlus className="w-4 h-4" /> New Chart
-            </button>
-          </div>
+          <input ref={fileInputRef} type="file" accept=".csv,.tsv,.txt,.xlsx,.xls" onChange={handleFileUpload} className="hidden" />
+          <button onClick={() => { setForm({ title: '', type: 'bar', dataText: '', options: { ...defaultOptions } }); setShowAdd(true) }} className="btn text-sm" style={{ color: 'var(--color-accent-blue)' }}>
+            <FiPlus className="w-4 h-4" /> Create Visualization
+          </button>
         </div>
       </div>
 
-      {/* New Chart Form */}
+      {/* ── Create Visualization Overlay ── */}
       {showAdd && (
-        <div className="p-4 border-b border-[var(--color-border)] bg-[var(--glass-bg)] animate-slide-down">
-          <div className="max-w-4xl mx-auto space-y-3">
-            <div className="flex gap-3">
-              <input type="text" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
-                placeholder="Chart title *" className="input flex-1 text-sm" />
-              <select value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value as ChartType }))} className="input text-xs w-48">
-                {Object.entries(chartTypeGroups).map(([group, types]) => (
-                  <optgroup key={group} label={group}>
-                    {types.map(ct => <option key={ct.value} value={ct.value}>{ct.label}</option>)}
-                  </optgroup>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={() => {
-                  const data = parseCSV(form.dataText)
-                  if (data.length > 0) setForm(f => ({ ...f, type: suggestChartType(data) }))
-                }}
-                disabled={!form.dataText.trim()}
-                className="btn text-xs border border-[var(--color-border)] disabled:opacity-30 whitespace-nowrap"
-                style={{ color: 'var(--color-accent-purple)' }}
-                title="Analyze data and suggest the best chart type"
-              >
-                Suggest
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowAdd(false)}>
+          <div
+            className="glass-card-static max-w-2xl w-full mx-4 max-h-[85vh] flex flex-col"
+            style={{ backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)', boxShadow: 'var(--glass-shadow)' }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-4 border-b border-[var(--glass-border)] shrink-0">
+              <div>
+                <h2 className="text-sm font-semibold">Create Visualization</h2>
+                <p className="text-xxs text-[var(--color-text-muted)] mt-0.5">Configure your chart and import data</p>
+              </div>
+              <button onClick={() => setShowAdd(false)} className="p-1 rounded hover:bg-[var(--glass-bg-hover)] text-[var(--color-text-muted)]">
+                <FiX className="w-4 h-4" />
               </button>
-              <select value={form.options.color} onChange={e => setForm(f => ({ ...f, options: { ...f.options, color: e.target.value } }))} className="input text-xs w-32">
-                {CHART_COLORS.map(c => <option key={c} value={c}>{c.replace('var(--color-', '').replace(')', '')}</option>)}
-              </select>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <select value={form.options.colorPalette} onChange={e => setForm(f => ({ ...f, options: { ...f.options, colorPalette: e.target.value } }))} className="input text-xs">
-                {Object.keys(PALETTES).map(p => <option key={p} value={p}>{p} palette</option>)}
-              </select>
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {/* Title */}
+              <div>
+                <label className="block text-xs font-medium mb-1.5 text-[var(--color-text-secondary)]">Chart Title</label>
+                <input type="text" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+                  placeholder="e.g. Tumor Growth Curve, Patient Demographics..." className="input w-full text-sm" autoFocus />
+              </div>
+
+              {/* Chart type + auto-suggest */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium mb-1.5 text-[var(--color-text-secondary)]">Chart Type</label>
+                  <select value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value as ChartType }))} className="input w-full text-xs">
+                    {Object.entries(chartTypeGroups).map(([group, types]) => (
+                      <optgroup key={group} label={group}>
+                        {types.map(ct => <option key={ct.value} value={ct.value}>{ct.label}</option>)}
+                      </optgroup>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium mb-1.5 text-[var(--color-text-secondary)]">Color Palette</label>
+                  <select value={form.options.colorPalette} onChange={e => setForm(f => ({ ...f, options: { ...f.options, colorPalette: e.target.value } }))} className="input w-full text-xs">
+                    {Object.keys(PALETTES).map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              {/* Palette preview */}
               <div className="flex items-center gap-1">
                 {getPalette(form.options.colorPalette).slice(0, 10).map((c, i) => (
-                  <div key={i} className="w-5 h-5 rounded-sm" style={{ background: c }} />
+                  <div key={i} className="w-5 h-5 rounded-sm border border-white/5" style={{ background: c }} />
                 ))}
               </div>
+
+              {/* Data input */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-medium text-[var(--color-text-secondary)]">Data Input</label>
+                  <div className="flex items-center gap-2">
+                    {form.dataText.trim() && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const data = parseCSV(form.dataText)
+                          if (data.length > 0) setForm(f => ({ ...f, type: suggestChartType(data) }))
+                        }}
+                        className="text-xxs px-2 py-0.5 rounded border border-[var(--glass-border)] hover:border-[var(--color-border-strong)] transition-colors"
+                        style={{ color: 'var(--color-accent-purple)' }}
+                        title="Analyze your data and auto-select the best chart type"
+                      >
+                        Auto-suggest type
+                      </button>
+                    )}
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      className="text-xxs px-2 py-0.5 rounded border border-[var(--glass-border)] hover:border-[var(--color-border-strong)] transition-colors flex items-center gap-1"
+                      style={{ color: 'var(--color-accent-green)' }}
+                    >
+                      <FiUpload className="w-3 h-3" /> Import CSV/XLSX
+                    </button>
+                  </div>
+                </div>
+                <textarea value={form.dataText} onChange={e => setForm(f => ({ ...f, dataText: e.target.value }))}
+                  placeholder={"Paste data or import a file. One entry per line:\n\nSample A, 45\nSample B, 72\nSample C, 38\n\nMulti-series: label, val1, val2, val3\nCategorized: label, value, categoryName"}
+                  rows={8} className="input w-full text-xs font-mono resize-none" />
+                <p className="text-xxs text-[var(--color-text-muted)] mt-1">
+                  Format: <span className="font-mono">label, value[, value2, value3, errorPlus, errorMinus, size]</span>
+                </p>
+              </div>
+
+              {/* Advanced options */}
+              <details className="group">
+                <summary className="text-xs font-medium text-[var(--color-text-secondary)] cursor-pointer select-none flex items-center gap-1">
+                  <FiSettings className="w-3 h-3" /> Advanced Options
+                </summary>
+                <div className="mt-3 grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xxs text-[var(--color-text-muted)] mb-1 block">X Axis Label</label>
+                    <input type="text" value={form.options.xLabel} onChange={e => setForm(f => ({ ...f, options: { ...f.options, xLabel: e.target.value } }))} className="input w-full text-xs" placeholder="X axis" />
+                  </div>
+                  <div>
+                    <label className="text-xxs text-[var(--color-text-muted)] mb-1 block">Y Axis Label</label>
+                    <input type="text" value={form.options.yLabel} onChange={e => setForm(f => ({ ...f, options: { ...f.options, yLabel: e.target.value } }))} className="input w-full text-xs" placeholder="Y axis" />
+                  </div>
+                  <label className="flex items-center gap-2 text-xs text-[var(--color-text-secondary)] cursor-pointer">
+                    <input type="checkbox" checked={form.options.showGrid} onChange={e => setForm(f => ({ ...f, options: { ...f.options, showGrid: e.target.checked } }))} className="rounded" /> Show Grid
+                  </label>
+                  <label className="flex items-center gap-2 text-xs text-[var(--color-text-secondary)] cursor-pointer">
+                    <input type="checkbox" checked={form.options.showLegend} onChange={e => setForm(f => ({ ...f, options: { ...f.options, showLegend: e.target.checked } }))} className="rounded" /> Show Legend
+                  </label>
+                  <label className="flex items-center gap-2 text-xs text-[var(--color-text-secondary)] cursor-pointer">
+                    <input type="checkbox" checked={form.options.showValues} onChange={e => setForm(f => ({ ...f, options: { ...f.options, showValues: e.target.checked } }))} className="rounded" /> Show Values
+                  </label>
+                  <label className="flex items-center gap-2 text-xs text-[var(--color-text-secondary)] cursor-pointer">
+                    <input type="checkbox" checked={form.options.animate} onChange={e => setForm(f => ({ ...f, options: { ...f.options, animate: e.target.checked } }))} className="rounded" /> Animate
+                  </label>
+                </div>
+              </details>
             </div>
-            <div>
-              <label className="text-xs text-[var(--color-text-muted)] mb-1 block">
-                Data — one entry per line: <span className="font-mono">label, value[, value2, value3, errorPlus, errorMinus, size]</span>
-                <br />For categories: <span className="font-mono">label, value, categoryName</span>
-              </label>
-              <textarea value={form.dataText} onChange={e => setForm(f => ({ ...f, dataText: e.target.value }))}
-                placeholder={"e.g.:\nSample A, 45\nSample B, 72\nSample C, 38\nSample D, 91\n\nOr multi-series:\nJan, 10, 15, 8\nFeb, 20, 25, 12\nMar, 15, 30, 20\n\nOr categorized:\nQ1, 100, Sales\nQ1, 80, Marketing\nQ2, 120, Sales\nQ2, 95, Marketing"}
-                rows={6} className="input w-full text-xs font-mono resize-none" />
-            </div>
-            <div className="flex gap-2">
-              <button onClick={addChart} disabled={!form.title.trim() || !form.dataText.trim()}
-                className="btn text-xs disabled:opacity-30" style={{ color: 'var(--color-success)' }}>
-                <FiSave className="w-3.5 h-3.5" /> Create Chart
+            <div className="flex justify-end gap-2 p-4 border-t border-[var(--glass-border)] shrink-0">
+              <button onClick={() => setShowAdd(false)} className="btn px-4 py-2 text-sm text-[var(--color-text-muted)]">
+                Cancel
               </button>
-              <button onClick={() => setShowAdd(false)} className="btn text-xs text-[var(--color-text-muted)]">
-                <FiX className="w-3.5 h-3.5" /> Cancel
+              <button onClick={addChart} disabled={!form.title.trim() || !form.dataText.trim()}
+                className="btn-primary px-4 py-2 text-sm disabled:opacity-30 flex items-center gap-1.5" style={{ color: !form.title.trim() || !form.dataText.trim() ? undefined : 'var(--color-accent-blue)' }}>
+                <FiBarChart2 className="w-3.5 h-3.5" /> Create Visualization
               </button>
             </div>
           </div>
