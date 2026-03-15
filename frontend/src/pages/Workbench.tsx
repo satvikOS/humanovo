@@ -27,7 +27,9 @@ import {
   FiLink,
   FiX,
   FiSave,
-  FiImage
+  FiImage,
+  FiClipboard,
+  FiCheck,
 } from 'react-icons/fi'
 import clsx from 'clsx'
 
@@ -2167,6 +2169,59 @@ function MasterLibraryDetails({ element }: { element: MasterLibraryElement | nul
 
 // ==================== CONSTANT AI PANEL ====================
 
+// Simple markdown renderer for workbench chat
+function renderWorkbenchMarkdown(text: string): React.ReactNode {
+  const lines = text.split('\n')
+  const elements: React.ReactNode[] = []
+
+  const processInline = (line: string): React.ReactNode => {
+    const parts: React.ReactNode[] = []
+    const regex = /(\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`)/g
+    let lastIndex = 0
+    let match: RegExpExecArray | null
+    let key = 0
+    while ((match = regex.exec(line)) !== null) {
+      if (match.index > lastIndex) parts.push(line.slice(lastIndex, match.index))
+      if (match[2]) parts.push(<strong key={key++}>{match[2]}</strong>)
+      else if (match[3]) parts.push(<em key={key++}>{match[3]}</em>)
+      else if (match[4]) parts.push(<code key={key++} className="px-1 py-0.5 rounded" style={{ background: 'rgba(6,182,212,0.15)', fontSize: '10px' }}>{match[4]}</code>)
+      lastIndex = regex.lastIndex
+    }
+    if (lastIndex < line.length) parts.push(line.slice(lastIndex))
+    return parts.length === 1 ? parts[0] : <>{parts}</>
+  }
+
+  for (const line of lines) {
+    if (/^[-•]\s/.test(line.trim())) {
+      elements.push(<div key={elements.length} className="flex gap-1 ml-1"><span className="text-cyan-400">-</span><span>{processInline(line.trim().replace(/^[-•]\s/, ''))}</span></div>)
+    } else if (/^\d+\.\s/.test(line.trim())) {
+      const num = line.trim().match(/^(\d+)\.\s/)
+      elements.push(<div key={elements.length} className="flex gap-1 ml-1"><span className="text-cyan-400 font-medium">{num?.[1]}.</span><span>{processInline(line.trim().replace(/^\d+\.\s/, ''))}</span></div>)
+    } else if (line.trim() === '') {
+      elements.push(<div key={elements.length} className="h-1.5" />)
+    } else {
+      elements.push(<div key={elements.length}>{processInline(line)}</div>)
+    }
+  }
+  return <div className="space-y-0.5">{elements}</div>
+}
+
+// Copy button for workbench chat
+function WorkbenchCopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  const handleCopy = () => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }
+  return (
+    <button onClick={handleCopy} className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-[var(--color-surface)] text-[var(--color-text-muted)]" title="Copy">
+      {copied ? <FiCheck className="w-3 h-3 text-green-400" /> : <FiClipboard className="w-3 h-3" />}
+    </button>
+  )
+}
+
 function ConstantPanel({
   messages,
   input,
@@ -2202,9 +2257,9 @@ function ConstantPanel({
         {messages.length === 0 && (
           <div className="text-center py-8 text-[var(--color-text-muted)]">
             <FiMessageSquare className="w-8 h-8 mx-auto mb-2 opacity-20" />
-            <p className="text-xs">Ask Constant about your graph nodes, connections, or biological structures.</p>
+            <p className="text-xs">Ask Constant to build graphs, connect nodes, or explain biology.</p>
             <div className="mt-3 space-y-1">
-              {['Suggest connections between my nodes', 'Explain this pathway', 'What proteins interact here?', 'Analyze my research graph'].map(s => (
+              {['Build a cancer biology graph', 'Connect these nodes', 'Create an immunology graph', 'Analyze my research graph'].map(s => (
                 <button key={s} onClick={() => onInputChange(s)} className="block w-full text-left text-[10px] px-2 py-1.5 rounded hover:bg-[var(--color-surface)] text-[var(--color-text-muted)] transition-colors">
                   {s}
                 </button>
@@ -2216,13 +2271,24 @@ function ConstantPanel({
           <div
             key={i}
             className={clsx(
-              'text-xs leading-relaxed rounded-lg px-3 py-2 max-w-[95%]',
+              'text-xs leading-relaxed rounded-lg px-3 py-2 max-w-[95%] group relative',
               msg.role === 'user'
                 ? 'ml-auto bg-cyan-500/20 text-cyan-100'
                 : 'bg-[var(--color-surface)] text-[var(--color-text-secondary)]'
             )}
           >
-            <p className="whitespace-pre-wrap">{msg.text}</p>
+            {msg.role === 'assistant' && (
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-cyan-400 font-medium text-[10px]">Constant</span>
+                <WorkbenchCopyButton text={msg.text} />
+              </div>
+            )}
+            {msg.role === 'assistant' ? renderWorkbenchMarkdown(msg.text) : <p>{msg.text}</p>}
+            {msg.role === 'user' && (
+              <div className="absolute -left-6 top-1/2 -translate-y-1/2">
+                <WorkbenchCopyButton text={msg.text} />
+              </div>
+            )}
           </div>
         ))}
         {loading && (
@@ -2705,22 +2771,124 @@ export default function Workbench() {
       },
     }
 
+    // Helper: auto-create nodes for a topic by matching against the components library
+    const autoCreateTopicGraph = (topic: string, suggestion: { nodes: string[]; relationships: string[] }): string => {
+      const addedNodes: GraphNode[] = []
+      const cols = 3
+      const spacingX = 220
+      const spacingY = 120
+      const startX = 150
+      const startY = 100
+
+      for (let idx = 0; idx < suggestion.nodes.length; idx++) {
+        const nodeDef = suggestion.nodes[idx]
+        // Extract name without category hint: "TP53 (gene)" → "TP53"
+        const nameMatch = nodeDef.match(/^(.+?)\s*\(/)
+        const searchName = nameMatch ? nameMatch[1].trim() : nodeDef.trim()
+        const catHint = nodeDef.match(/\(([^)]+)\)/)
+        const catLabel = catHint ? catHint[1].trim().toLowerCase() : ''
+
+        // Map category labels to BiologicalCategory
+        const catMap: Record<string, BiologicalCategory> = {
+          'gene': 'gene', 'receptor': 'receptor', 'pathway': 'pathway',
+          'biomolecule': 'biomolecule', 'cell type': 'cell_type', 'cellular component': 'cellular_component',
+          'organ': 'organ_system', 'organ system': 'organ_system', 'drug target': 'drug_target',
+        }
+        const category: BiologicalCategory = catMap[catLabel] || 'biomolecule'
+        const color = categoryConfig[category]?.color || '#22c55e'
+
+        // Try to find existing component in the library
+        const comp = components.find(c =>
+          c.name.toLowerCase() === searchName.toLowerCase() ||
+          c.name.toLowerCase().includes(searchName.toLowerCase()) ||
+          searchName.toLowerCase().includes(c.name.toLowerCase())
+        )
+
+        // Skip if already on canvas
+        if (comp && nodes.some(n => n.entityId === comp.id)) continue
+        if (!comp && nodes.some(n => n.name.toLowerCase() === searchName.toLowerCase())) continue
+
+        const col = idx % cols
+        const row = Math.floor(idx / cols)
+
+        const newNode: GraphNode = {
+          id: `node_${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${idx}`,
+          entityId: comp?.id || `auto_${searchName.replace(/\s+/g, '_').toLowerCase()}`,
+          name: comp?.name || searchName,
+          category: comp?.category || category,
+          color: comp?.color || color,
+          x: startX + col * spacingX,
+          y: startY + row * spacingY,
+          width: 180,
+          height: 48,
+          notes: '',
+          expanded: false,
+        }
+        addedNodes.push(newNode)
+      }
+
+      if (addedNodes.length > 0) {
+        setNodes(prev => [...prev, ...addedNodes])
+      }
+
+      // Now parse relationships and auto-connect
+      const allNodes = [...nodes, ...addedNodes]
+      const autoEdges: GraphEdge[] = []
+
+      for (const relStr of suggestion.relationships) {
+        // Parse "Source → *label* → Target (explanation)"
+        const relMatch = relStr.match(/^(.+?)\s*→\s*\*(.+?)\*\s*→\s*(.+?)(?:\s*\(|$)/)
+        if (!relMatch) continue
+        const srcName = relMatch[1].trim()
+        const label = relMatch[2].trim()
+        const tgtName = relMatch[3].trim()
+
+        const srcNode = allNodes.find(n => n.name.toLowerCase().includes(srcName.toLowerCase()) || srcName.toLowerCase().includes(n.name.toLowerCase()))
+        const tgtNode = allNodes.find(n => n.name.toLowerCase().includes(tgtName.toLowerCase()) || tgtName.toLowerCase().includes(n.name.toLowerCase()))
+
+        if (srcNode && tgtNode && srcNode.id !== tgtNode.id) {
+          const exists = edges.some(e =>
+            (e.sourceId === srcNode.id && e.targetId === tgtNode.id) ||
+            (e.sourceId === tgtNode.id && e.targetId === srcNode.id)
+          ) || autoEdges.some(e =>
+            (e.sourceId === srcNode.id && e.targetId === tgtNode.id) ||
+            (e.sourceId === tgtNode.id && e.targetId === srcNode.id)
+          )
+          if (!exists) {
+            autoEdges.push({
+              id: `edge_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+              sourceId: srcNode.id,
+              targetId: tgtNode.id,
+              label,
+              color: srcNode.color || 'rgba(255,255,255,0.3)',
+            })
+          }
+        }
+      }
+
+      if (autoEdges.length > 0) {
+        setEdges(prev => [...prev, ...autoEdges])
+      }
+
+      return `I've built a **${topic}** knowledge graph on your canvas!\n\n**Added ${addedNodes.length} nodes:**\n${addedNodes.map(n => `- ${n.name}`).join('\n')}\n\n**Created ${autoEdges.length} connections:**\n${suggestion.relationships.slice(0, autoEdges.length || suggestion.relationships.length).map(r => `- ${r}`).join('\n')}\n\nYou can drag nodes to rearrange them, click any node for details, or ask me to explain any relationship!`
+    }
+
     // Check if user is asking to build/create a graph for a topic
     if (/\b(make|create|build|construct|design|set up|model|map|diagram)\b/i.test(q) && /(graph|node|relationship|network|map|model|diagram|pathway)/i.test(q)) {
       for (const [topic, suggestion] of Object.entries(topicSuggestions)) {
         if (q.includes(topic)) {
-          return `Great idea! Here's how to build a **${topic}** knowledge graph:\n\n**Suggested nodes** (search for these in the Library panel on the left):\n${suggestion.nodes.map(n => `- ${n}`).join('\n')}\n\n**Key relationships to create:**\n${suggestion.relationships.map(r => `- ${r}`).join('\n')}\n\nDrag the structures from the Library onto the canvas, then ask me to "connect these nodes" and I'll create the relationships for you!`
+          return autoCreateTopicGraph(topic, suggestion)
         }
       }
       // Generic topic request
-      return `I'd be happy to help you build a knowledge graph! While I can't auto-create nodes yet, here's how to get started:\n\n1. **Open the Library** tab in the left panel\n2. **Search** for biological structures related to your topic\n3. **Drag** them onto the canvas\n4. Once you have nodes, ask me to **"connect these nodes"** and I'll find biological relationships\n\nI have built-in knowledge for topics like cancer biology, immunology, neuroscience, cardiovascular, respiratory, and digestion. Try asking about one of these!`
+      return `I can auto-build graphs for these topics — just ask:\n\n- **"Build a cancer biology graph"**\n- **"Create an immunology graph"**\n- **"Make a neuroscience graph"**\n- **"Build a cardiovascular graph"**\n- **"Create a respiratory graph"**\n- **"Make a digestion graph"**\n\nOr search the **Library** panel on the left and drag structures onto the canvas, then say **"connect these nodes"**!`
     }
 
     // Also catch requests like "human digestion" or "tell me about digestion nodes"
     if (nodes.length === 0 || (/\b(for|about|on)\b/i.test(q) && nodes.length < 2)) {
       for (const [topic, suggestion] of Object.entries(topicSuggestions)) {
         if (q.includes(topic)) {
-          return `To build a **${topic}** graph, search for these structures in the **Library** panel on the left:\n\n${suggestion.nodes.map(n => `- ${n}`).join('\n')}\n\nDrag them onto the canvas, and then I can help connect them with these biological relationships:\n${suggestion.relationships.slice(0, 3).map(r => `- ${r}`).join('\n')}\n${suggestion.relationships.length > 3 ? `- ...and ${suggestion.relationships.length - 3} more connections\n` : ''}\nOnce the nodes are on the canvas, just say **"connect these nodes"**!`
+          return autoCreateTopicGraph(topic, suggestion)
         }
       }
     }
@@ -2833,20 +3001,55 @@ export default function Workbench() {
       return 'I can explain any node on your canvas — just mention it by name! For example: "Explain TP53" or "What is PI3K-AKT signaling?"'
     }
 
-    // Suggest nodes to add
+    // Suggest nodes to add — and actually add them if specific enough
     if (q.includes('suggest') || q.includes('recommend') || q.includes('what should') || /\badd\b/.test(q)) {
+      // Check if user wants to add specific nodes: "add p53" or "add macrophage"
+      const addMatch = q.match(/\badd\s+(.+?)(?:\s+node|\s+to|\s*$)/i)
+      if (addMatch) {
+        const searchName = addMatch[1].trim()
+        const comp = components.find(c =>
+          c.name.toLowerCase() === searchName.toLowerCase() ||
+          c.name.toLowerCase().includes(searchName.toLowerCase()) ||
+          searchName.toLowerCase().includes(c.name.toLowerCase())
+        )
+        if (comp) {
+          const existing = nodes.find(n => n.entityId === comp.id)
+          if (existing) {
+            return `**${comp.name}** is already on your canvas! Click on it to view details, or ask me to connect it with other nodes.`
+          }
+          const newNode: GraphNode = {
+            id: `node_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            entityId: comp.id,
+            name: comp.name,
+            category: comp.category,
+            color: comp.color,
+            x: 200 + Math.random() * 400,
+            y: 150 + Math.random() * 300,
+            width: 180,
+            height: 48,
+            notes: '',
+            expanded: false,
+          }
+          setNodes(prev => [...prev, newNode])
+          let response = `Done! I've added **${comp.name}** (${categoryConfig[comp.category]?.label || comp.category}) to your canvas.`
+          if (comp.description) response += `\n\n${comp.description.slice(0, 200)}${comp.description.length > 200 ? '...' : ''}`
+          if (nodes.length > 0) response += `\n\nSay **"connect these nodes"** to find biological relationships!`
+          return response
+        }
+      }
+
       if (nodes.length === 0) {
-        return 'Here are some great starting points for your knowledge graph:\n\n- **Immune System** — for immunology research\n- **TP53** — for cancer biology\n- **PI3K-AKT Signaling** — for cell survival pathways\n- **EGFR** — for targeted therapy research\n\nSearch in the **Library** tab on the left and drag structures onto the canvas!'
+        return 'Here are some great starting points — just say **"build a [topic] graph"**:\n\n- **"Build a cancer biology graph"** — TP53, KRAS, EGFR, signaling pathways\n- **"Build an immunology graph"** — T cells, B cells, macrophages, cytokines\n- **"Build a neuroscience graph"** — neurons, neurotransmitters, brain regions\n\nOr say **"add [name]"** to add a specific structure (e.g., "add TP53").'
       }
       const categories = new Set(nodes.map(n => n.category))
       const suggestions: string[] = [`Based on your ${nodes.length} nodes, consider adding:`]
-      if (categories.has('pathway') && !categories.has('drug_target')) suggestions.push('- **Drug targets** — explore druggable nodes in your pathways')
-      if (categories.has('gene') && !categories.has('pathway')) suggestions.push('- **Signaling pathways** — see how your genes participate in larger networks')
-      if (categories.has('receptor') && !categories.has('biomolecule')) suggestions.push('- **Ligands/biomolecules** — see what activates your receptors')
-      if (categories.has('organ_system') && !categories.has('cell_type')) suggestions.push('- **Cell types** — see which cells make up your organ systems')
-      if (categories.has('cell_type') && !categories.has('biomolecule')) suggestions.push('- **Biomolecules** — add the proteins and signaling molecules these cells use')
-      if (suggestions.length === 1) suggestions.push('- Try adding nodes from different categories to create more interesting connections!')
-      suggestions.push('\nSearch the **Library** tab on the left to find more components.')
+      if (categories.has('pathway') && !categories.has('drug_target')) suggestions.push('- **Drug targets** — say "add imatinib" or "add erlotinib"')
+      if (categories.has('gene') && !categories.has('pathway')) suggestions.push('- **Signaling pathways** — say "add MAPK signaling" or "add PI3K-AKT signaling"')
+      if (categories.has('receptor') && !categories.has('biomolecule')) suggestions.push('- **Ligands** — say "add EGF" or "add insulin"')
+      if (categories.has('organ_system') && !categories.has('cell_type')) suggestions.push('- **Cell types** — say "add macrophage" or "add T cell"')
+      if (categories.has('cell_type') && !categories.has('biomolecule')) suggestions.push('- **Biomolecules** — say "add dopamine" or "add serotonin"')
+      if (suggestions.length === 1) suggestions.push('- Say **"add [name]"** to add any biological structure!')
+      suggestions.push('\nOr say **"connect these nodes"** to auto-connect what you have.')
       return suggestions.join('\n')
     }
 

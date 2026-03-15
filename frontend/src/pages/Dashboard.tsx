@@ -432,6 +432,10 @@ export default function Dashboard() {
           apiProjects = res?.items || []
         } catch (err) { console.warn('Dashboard: projects API unavailable', err) }
 
+        // Filter out projects the user has explicitly deleted locally
+        const deletedIds = new Set(persistGet<string[]>('deleted-project-ids', []))
+        apiProjects = apiProjects.filter(p => !deletedIds.has(p.id))
+
         const apiIds = new Set(apiProjects.map(p => p.id))
         const localOnly = localProjects
           .filter((p: any) => p.id && !apiIds.has(p.id))

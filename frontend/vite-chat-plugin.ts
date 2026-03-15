@@ -538,8 +538,28 @@ const NAV_MAP: [RegExp, string][] = [
 ]
 
 // ── Response generator ─────────────────────────────────────────────────
+function isOutOfScopePlugin(query: string): boolean {
+  const q = query.toLowerCase().trim()
+  if (/^(hi|hey|hello|howdy|yo|sup|what'?s up|good (morning|afternoon|evening))[\s!.?]*$/i.test(q)) return false
+  if (/^(i am|i'm|my name is|this is|call me)\s/i.test(q)) return false
+  if (/^(thanks?|thank you|thx|ty|cheers|appreciate)[\s!.]*$/i.test(q)) return false
+  if (/how are you/i.test(q)) return false
+  if (/what (can|do) you do|help me|tour|guide/i.test(q)) return false
+  if (/where|how (do i|to|can i)|take me to|go to|open|navigate|show me|dashboard|project|notebook|workbench|setting|search|discover/i.test(q)) return false
+  if (/hypothes|paper|simulat|how many|count|total|overview|summary|status/i.test(q)) return false
+  if (/medic|health|bio|pharma|genom|gene|protein|cell|organ|disease|drug|clinic|pathol|immun|neuro|cardio|oncol|cancer|tumor|anat|physiol|molecule|dna|rna|enzyme|receptor|antibod|vaccine|therap|diagnos|symptom|treat|patient|epidem|virus|bacter|infect|metabol|kinase|pathway|apoptosis|crispr|pcr|t-test|anova|regression|survival|sample size|statistic|research|experiment|lab|science|human|body|tissue|blood|brain|heart|lung|liver|kidney|p53|tp53|brca|egfr|rett/i.test(q)) return false
+  if (q.split(/\s+/).length <= 4) return false
+  if (/\b(cook|recipe|football|soccer|basketball|movie|film|music|song|celebrity|fashion|politics|election|stock market|crypto|bitcoin|gaming|video game|programming|javascript|python|react|html|css|database|sql|astrology|horoscope|dating|relationship|astronomy|planet|galaxy|weather|forecast|travel|hotel|restaurant|food|cuisine)\b/i.test(q)) return true
+  return false
+}
+
 function generateResponse(message: string, platformContext: any): string {
   const q = message.toLowerCase().trim()
+
+  // ── Scope guard ──
+  if (isOutOfScopePlugin(q)) {
+    return `I appreciate the question, but I'm specifically designed to assist with **medicine, healthcare, biotechnology, and human sciences** topics.\n\nHere's what I can help with:\n\n| Category | Examples |\n|----------|----------|\n| **Biology** | Genes, proteins, pathways, cell biology, anatomy |\n| **Medicine** | Diseases, diagnostics, treatments, clinical trials |\n| **Statistics** | t-tests, ANOVA, regression, survival analysis |\n| **Genomics** | GSEA, pathway enrichment, variant annotation |\n| **Platform** | Navigation, your projects, hypotheses, papers |\n\nTry asking something in these areas!`
+  }
 
   // ── Greetings ──
   if (/^(hi|hey|hello|howdy|yo|sup|what'?s up|good\s*(morning|afternoon|evening))[\s!.?]*$/i.test(q)) {

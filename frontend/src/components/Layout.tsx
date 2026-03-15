@@ -227,6 +227,135 @@ function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
 
 // ── Constant AI Chat ─────────────────────────────────────────────
 
+// Simple markdown renderer for Constant chat responses
+function renderMarkdown(text: string): React.ReactNode {
+  // Split into lines and process
+  const lines = text.split('\n')
+  const elements: React.ReactNode[] = []
+  let inTable = false
+  let tableRows: string[][] = []
+  let tableHeaders: string[] = []
+
+  const processInline = (line: string): React.ReactNode => {
+    // Process bold, italic, and code inline
+    const parts: React.ReactNode[] = []
+    const regex = /(\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`)/g
+    let lastIndex = 0
+    let match: RegExpExecArray | null
+    let key = 0
+    while ((match = regex.exec(line)) !== null) {
+      if (match.index > lastIndex) parts.push(line.slice(lastIndex, match.index))
+      if (match[2]) parts.push(<strong key={key++}>{match[2]}</strong>)
+      else if (match[3]) parts.push(<em key={key++}>{match[3]}</em>)
+      else if (match[4]) parts.push(<code key={key++} className="px-1 py-0.5 rounded text-xs" style={{ background: 'rgba(168,85,247,0.15)' }}>{match[4]}</code>)
+      lastIndex = regex.lastIndex
+    }
+    if (lastIndex < line.length) parts.push(line.slice(lastIndex))
+    return parts.length === 1 ? parts[0] : <>{parts}</>
+  }
+
+  const flushTable = () => {
+    if (tableHeaders.length > 0) {
+      elements.push(
+        <div key={elements.length} className="overflow-x-auto my-2">
+          <table className="w-full text-xs border-collapse">
+            <thead>
+              <tr>
+                {tableHeaders.map((h, i) => (
+                  <th key={i} className="text-left px-2 py-1.5 border-b border-[var(--color-border)] font-semibold text-[var(--color-text)]">{processInline(h.trim())}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {tableRows.map((row, ri) => (
+                <tr key={ri}>
+                  {row.map((cell, ci) => (
+                    <td key={ci} className="px-2 py-1.5 border-b border-[var(--color-border)] text-[var(--color-text-secondary)]">{processInline(cell.trim())}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )
+    }
+    tableHeaders = []
+    tableRows = []
+    inTable = false
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+
+    // Table detection
+    if (line.trim().startsWith('|') && line.trim().endsWith('|')) {
+      const cells = line.trim().slice(1, -1).split('|')
+      // Check if next line is separator (|---|---|)
+      if (!inTable && i + 1 < lines.length && /^\|[\s\-:|]+\|$/.test(lines[i + 1].trim())) {
+        inTable = true
+        tableHeaders = cells
+        i++ // skip separator line
+        continue
+      } else if (inTable) {
+        tableRows.push(cells)
+        continue
+      }
+    } else if (inTable) {
+      flushTable()
+    }
+
+    // Bullet points
+    if (/^[-•]\s/.test(line.trim())) {
+      elements.push(<div key={elements.length} className="flex gap-1.5 ml-1"><span className="text-[var(--color-accent-purple)] mt-0.5">-</span><span>{processInline(line.trim().replace(/^[-•]\s/, ''))}</span></div>)
+      continue
+    }
+
+    // Numbered lists
+    if (/^\d+\.\s/.test(line.trim())) {
+      const num = line.trim().match(/^(\d+)\.\s/)
+      elements.push(<div key={elements.length} className="flex gap-1.5 ml-1"><span className="text-[var(--color-accent-purple)] font-medium mt-0.5">{num?.[1]}.</span><span>{processInline(line.trim().replace(/^\d+\.\s/, ''))}</span></div>)
+      continue
+    }
+
+    // Empty lines
+    if (line.trim() === '') {
+      elements.push(<div key={elements.length} className="h-2" />)
+      continue
+    }
+
+    // Regular text with inline formatting
+    elements.push(<div key={elements.length}>{processInline(line)}</div>)
+  }
+
+  if (inTable) flushTable()
+
+  return <div className="space-y-0.5">{elements}</div>
+}
+
+// Copy button for chat messages
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  const handleCopy = () => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }
+  return (
+    <button
+      onClick={handleCopy}
+      className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+      title="Copy message"
+    >
+      {copied ? (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+      ) : (
+        <FiClipboard className="w-3.5 h-3.5" />
+      )}
+    </button>
+  )
+}
+
 function ConstantChat() {
   const [isOpen, setIsOpen] = useState(false)
   const [messages, setMessages] = useState<{ role: 'user' | 'assistant'; text: string }[]>([
@@ -290,9 +419,34 @@ function ConstantChat() {
     return () => window.removeEventListener('keydown', handler)
   }, [isOpen])
 
+  // --- Scope guard: only allow medical/healthcare/biotech/human sciences topics ---
+  const isOutOfScope = (query: string): boolean => {
+    const q = query.toLowerCase().trim()
+    // Allow conversational, navigation, platform, and data queries
+    if (/^(hi|hey|hello|howdy|yo|sup|what'?s up|good (morning|afternoon|evening))[\s!.?]*$/i.test(q)) return false
+    if (/^(i am|i'm|my name is|this is|call me)\s/i.test(q)) return false
+    if (/^(thanks?|thank you|thx|ty|cheers|appreciate)[\s!.]*$/i.test(q)) return false
+    if (/how are you|how('?re| are) (you|u) doing/i.test(q)) return false
+    if (/what (can|do) you do|help me|tour|guide/i.test(q)) return false
+    if (/where|how (do i|to|can i)|take me to|go to|open|navigate|show me|dashboard|project|notebook|workbench|setting|search|discover/i.test(q)) return false
+    if (/hypothes|paper|simulat|how many|count|total|overview|summary|status/i.test(q)) return false
+    // Allow medical/bio/health keywords
+    if (/medic|health|bio|pharma|genom|gene|protein|cell|organ|disease|drug|clinic|pathol|immun|neuro|cardio|oncol|cancer|tumor|surg|anat|physiol|molecule|dna|rna|enzyme|receptor|antibod|vaccine|therap|diagnos|symptom|treat|patient|hospital|epidem|virus|bacter|infect|metabol|endocrin|hematol|pulmon|gastro|dermat|ophthal|orthoped|pediatr|geriatr|psych|nutrit|toxicol|radiol|anesthes|pathogen|prognos|biomarker|assay|pcr|crispr|apoptosis|kinase|signaling|pathway|t-test|anova|regression|survival|sample size|p-value|statistic|research|experiment|hypothes|lab|science|human|body|tissue|blood|brain|heart|lung|liver|kidney|muscle|bone|nerve|skin|stem cell|chromosome|mutation|variant|allele|phenotype|genotype|epigenet|transcript|translat|ribosom|mitochond|endoplasm|golgi|cytoplasm|nucleus|membrane|synapse|neurotransmit|dopamin|serotonin|glutamat|gaba|insulin|cortisol|estrogen|testosterone|thyroid|pituitar|adrenal|pancrea|spleen|lymph|marrow|platelet|hemoglobin|cholesterol|lipid|amino acid|peptide|carbohydrate|glucose|glycol|oxidat|reduct|ATP|mitosis|meiosis|fertil|embryo|fetus|pregnan|natal|obstet|gynecol|urol|nephrol|hepat|respiratory|ventilat|alveol|bronch|trachea|diaphragm|rett|brca|egfr|p53|tp53|mdm2|bax|vegf|mtor|pi3k|akt|ras|mapk|kras/i.test(q)) return false
+    // Allow if query is short or generic enough to not be clearly off-topic
+    if (q.split(/\s+/).length <= 4) return false
+    // Check for clearly off-topic subjects
+    if (/\b(cook|recipe|football|soccer|basketball|baseball|cricket|tennis|movie|film|actor|actress|music|song|lyric|celebrity|fashion|style|outfit|makeup|politics|election|vote|president|prime minister|parliament|congress|stock market|crypto|bitcoin|ethereum|nft|forex|trading|invest|real estate|mortgage|car|automobile|truck|motorcycle|airplane|flight|travel|hotel|resort|vacation|tourism|restaurant|food|cuisine|baking|weather|forecast|temperature|rain|snow|hurricane|earthquake|volcano|gaming|video game|playstation|xbox|nintendo|twitch|streamer|tiktok|instagram|snapchat|youtube|influencer|dating|relationship|wedding|divorce|astrology|horoscope|zodiac|religion|prayer|church|mosque|temple|bible|quran|homework|math|algebra|calculus|geometry|trigonometry|physics(?! ther)|chemistry(?! ther)|engineering(?! bio)|programming|javascript|python|react|angular|vue|java|c\+\+|rust|golang|html|css|database|sql|mongodb|docker|kubernetes|aws|cloud|machine learning(?! (drug|bio|medical|health|genom))|artificial intelligence(?! (drug|bio|medical|health))|robot|autonomous|self-driving|spacex|nasa|astronomy|planet|galaxy|star(?!t)|universe|cosmos|philosophy(?! of (medicine|science|bio))|literature|novel|poem|poetry|shakespeare|history(?! of (medicine|bio|health|science))|geography|economy|inflation|recession|gdp|unemployment|tax|insurance(?! health)|legal|lawyer|court|judge|jury|law(?! of thermodynamics)|crime|police|military|army|navy|war(?!farin)|weapon|gun|ammunition|explosive|hack|exploit|malware|virus(?!es| biology| infect))\b/i.test(q)) return true
+    return false
+  }
+
   const generateSmartFallbackResponse = (query: string): string => {
     const q = query.toLowerCase().trim()
     const ctx = getLocalContext() as any
+
+    // Scope check: reject out-of-scope topics
+    if (isOutOfScope(q)) {
+      return `I appreciate the question, but I'm specifically designed to assist with **medicine, healthcare, biotechnology, and human sciences** topics.\n\nHere's what I can help with:\n\n| Category | Examples |\n|----------|----------|\n| **Biology** | Genes, proteins, pathways, cell biology, anatomy |\n| **Medicine** | Diseases, diagnostics, treatments, clinical trials |\n| **Statistics** | t-tests, ANOVA, regression, survival analysis |\n| **Genomics** | GSEA, pathway enrichment, variant annotation |\n| **Platform** | Navigation, your projects, hypotheses, papers |\n\nTry asking something in these areas!`
+    }
 
     const totalProjects = ctx.totalProjects || 0
     const totalHypotheses = ctx.totalHypotheses || 0
@@ -490,23 +644,28 @@ function ConstantChat() {
     setMessages(prev => [...prev, { role: 'user', text: userMsg }])
     setLoading(true)
 
-    // Call the backend AI endpoint (routes to API Gateway → Lambda → Bedrock Claude)
+    // Scope guard: check before hitting backend
     let fullResponse = ''
-    try {
-      const platformContext = getLocalContext()
-      const res = await fetch('/api/v1/orchestrator/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userMsg, context: 'general', platform_context: platformContext }),
-      })
-      if (res.ok) {
-        const data = await res.json()
-        fullResponse = data.response || 'I\'m not sure about that. Could you rephrase?'
-      } else {
+    if (isOutOfScope(userMsg.toLowerCase().trim())) {
+      fullResponse = generateSmartFallbackResponse(userMsg)
+    } else {
+      // Call the backend AI endpoint (routes to API Gateway → Lambda → Bedrock Claude)
+      try {
+        const platformContext = getLocalContext()
+        const res = await fetch('/api/v1/orchestrator/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: userMsg, context: 'general', platform_context: platformContext }),
+        })
+        if (res.ok) {
+          const data = await res.json()
+          fullResponse = data.response || 'I\'m not sure about that. Could you rephrase?'
+        } else {
+          fullResponse = generateSmartFallbackResponse(userMsg)
+        }
+      } catch {
         fullResponse = generateSmartFallbackResponse(userMsg)
       }
-    } catch {
-      fullResponse = generateSmartFallbackResponse(userMsg)
     }
     // Stream the response character-by-character for a real-time feel
     setLoading(false)
@@ -545,9 +704,9 @@ function ConstantChat() {
         {/* Messages */}
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
           {messages.map((msg, i) => (
-            <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+            <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} group`}>
               <div
-                className={`max-w-[80%] px-4 py-3 rounded-2xl text-sm leading-relaxed ${
+                className={`max-w-[80%] px-4 py-3 rounded-2xl text-sm leading-relaxed relative ${
                   msg.role === 'assistant'
                     ? 'bg-[var(--glass-bg)] text-[var(--color-text-secondary)] rounded-tl-md'
                     : 'rounded-tr-md text-[var(--color-text)]'
@@ -555,9 +714,17 @@ function ConstantChat() {
                 style={msg.role === 'user' ? { background: 'rgba(168, 85, 247, 0.1)' } : {}}
               >
                 {msg.role === 'assistant' && (
-                  <span className="text-[var(--color-accent-purple)] font-medium text-xs block mb-1">Constant</span>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[var(--color-accent-purple)] font-medium text-xs">Constant</span>
+                    <CopyButton text={msg.text} />
+                  </div>
                 )}
-                {msg.text}
+                {msg.role === 'assistant' ? renderMarkdown(msg.text) : msg.text}
+                {msg.role === 'user' && (
+                  <div className="absolute -left-8 top-1/2 -translate-y-1/2">
+                    <CopyButton text={msg.text} />
+                  </div>
+                )}
               </div>
             </div>
           ))}
@@ -573,7 +740,7 @@ function ConstantChat() {
             <div className="flex justify-start">
               <div className="max-w-[80%] px-4 py-3 rounded-2xl rounded-tl-md bg-[var(--glass-bg)] text-[var(--color-text-secondary)] text-sm leading-relaxed">
                 <span className="text-[var(--color-accent-purple)] font-medium text-xs block mb-1">Constant</span>
-                {streamingText}<span className="inline-block w-0.5 h-4 bg-[var(--color-accent-purple)] ml-0.5 animate-pulse align-text-bottom" />
+                {renderMarkdown(streamingText)}<span className="inline-block w-0.5 h-4 bg-[var(--color-accent-purple)] ml-0.5 animate-pulse align-text-bottom" />
               </div>
             </div>
           )}
@@ -980,8 +1147,10 @@ if (path === '/clinical-trials') return 'Clinical Trials'
                     <button
                       onClick={() => {
                         setIsUserMenuOpen(false)
-                        localStorage.clear()
-                        window.location.href = '/dashboard'
+                        // Sign out only clears session state, NOT user research data.
+                        // There is no auth system yet, so this just resets UI state and navigates home.
+                        sessionStorage.clear()
+                        navigate('/dashboard')
                       }}
                       className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-[var(--color-error)] hover:bg-[var(--glass-bg)] transition-all"
                     >

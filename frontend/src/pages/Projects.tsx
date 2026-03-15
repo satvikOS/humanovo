@@ -242,6 +242,10 @@ export default function Projects() {
         // API may be unavailable
       }
 
+      // Filter out projects the user has explicitly deleted locally
+      const deletedIds = new Set(persistGet<string[]>('deleted-project-ids', []))
+      apiProjects = apiProjects.filter(p => !deletedIds.has(p.id))
+
       // Merge localStorage projects (created by discovery) that aren't in API
       const localProjects = persistGet<any[]>('projects', [])
       const apiIds = new Set(apiProjects.map(p => p.id))
@@ -307,6 +311,9 @@ export default function Projects() {
       // Also remove from localStorage
       const localProjects = persistGet<any[]>('projects', [])
       persistSet('projects', localProjects.filter((p: any) => p.id !== id))
+      // Track deleted IDs so API projects don't reappear on reload
+      const deletedIds = persistGet<string[]>('deleted-project-ids', [])
+      if (!deletedIds.includes(id)) persistSet('deleted-project-ids', [...deletedIds, id])
       // Remove associated research papers
       const papers = persistGet<any[]>('research-papers', [])
       persistSet('research-papers', papers.filter((p: any) => p.project_id !== id))
