@@ -12,6 +12,16 @@ import { ectodermalCells, mesodermalCells, endodermalCells, extendedCellOntology
 import { completeSkeleton, neurocranium, viscerocranium, auditoryOssicles, vertebralColumn, thoracicCage, pectoralGirdle, upperLimb, pelvicGirdle, lowerLimb } from './MasterHumanLibrary8'
 import { completeMuscularSystem, headNeckMuscles, thoraxAbdomenMuscles, upperLimbMuscles, lowerLimbMuscles } from './MasterHumanLibrary9'
 import { cranialNerves, spinalPlexuses, epithelialTissues, connectiveTissues, muscleTissues, nervousTissues, allNervousSystemDetails, allHistologicalTissues, allLibrary10Elements } from './MasterHumanLibrary10'
+// Libraries 11-19: Extended workbench data from xlsx imports
+import { geneAtlas } from './MasterHumanLibrary11'
+import { proteomeMolecularMachines } from './MasterHumanLibrary12'
+import { extendedCellTypesAnatomy } from './MasterHumanLibrary13'
+import { metabolomeBiochemistry } from './MasterHumanLibrary14'
+import { comprehensiveAnatomy } from './MasterHumanLibrary15'
+import { genomicsGenes, ncRNAEpigenetics } from './MasterHumanLibrary16'
+import { clinicalDiseases, therapeuticDrugs } from './MasterHumanLibrary17'
+import { signalingPathwaysExtended, pathogensInfectious, clinicalBiomarkers } from './MasterHumanLibrary18'
+import { humanBiologyTaxonomy } from './MasterHumanLibrary19'
 
 // ==================== TREE STRUCTURE FOR NAVIGATION ====================
 export interface LibraryTreeNode {
@@ -48,7 +58,29 @@ export const allBiologicalElements: BiologicalElement[] = [
   // Library 9 - Myological System (muscles)
   ...completeMuscularSystem,
   // Library 10 - Nervous System Details & Histological Tissues
-  ...allLibrary10Elements
+  ...allLibrary10Elements,
+  // Library 11 - Human Gene Atlas (WB1)
+  ...geneAtlas,
+  // Library 12 - Proteome & Molecular Machines (WB2)
+  ...proteomeMolecularMachines,
+  // Library 13 - Extended Cell Types & Anatomy (WB3)
+  ...extendedCellTypesAnatomy,
+  // Library 14 - Metabolome & Biochemistry (WB4)
+  ...metabolomeBiochemistry,
+  // Library 15 - Comprehensive Anatomy (File1)
+  ...comprehensiveAnatomy,
+  // Library 16 - Genomics, ncRNA & Epigenetics (File2 + File6)
+  ...genomicsGenes,
+  ...ncRNAEpigenetics,
+  // Library 17 - Diseases & Therapeutics (File3 + File4)
+  ...clinicalDiseases,
+  ...therapeuticDrugs,
+  // Library 18 - Pathways, Pathogens & Biomarkers (File5 + File7 + File8)
+  ...signalingPathwaysExtended,
+  ...pathogensInfectious,
+  ...clinicalBiomarkers,
+  // Library 19 - Complete Human Biology Taxonomy
+  ...humanBiologyTaxonomy
 ]
 
 // Library statistics
@@ -92,6 +124,28 @@ export const libraryStats = {
   connectiveTissues: connectiveTissues.length,
   muscleTissues: muscleTissues.length,
   nervousTissues: nervousTissues.length,
+  // Library 11 - Gene Atlas (WB1)
+  geneAtlas: geneAtlas.length,
+  // Library 12 - Proteome (WB2)
+  proteomeMolecularMachines: proteomeMolecularMachines.length,
+  // Library 13 - Extended Cell Types (WB3)
+  extendedCellTypesAnatomy: extendedCellTypesAnatomy.length,
+  // Library 14 - Metabolome (WB4)
+  metabolomeBiochemistry: metabolomeBiochemistry.length,
+  // Library 15 - Comprehensive Anatomy (File1)
+  comprehensiveAnatomy: comprehensiveAnatomy.length,
+  // Library 16 - Genomics & ncRNA (File2 + File6)
+  genomicsGenes: genomicsGenes.length,
+  ncRNAEpigenetics: ncRNAEpigenetics.length,
+  // Library 17 - Diseases & Drugs (File3 + File4)
+  clinicalDiseases: clinicalDiseases.length,
+  therapeuticDrugs: therapeuticDrugs.length,
+  // Library 18 - Pathways, Pathogens & Biomarkers (File5 + File7 + File8)
+  signalingPathwaysExtended: signalingPathwaysExtended.length,
+  pathogensInfectious: pathogensInfectious.length,
+  clinicalBiomarkers: clinicalBiomarkers.length,
+  // Library 19 - Taxonomy
+  humanBiologyTaxonomy: humanBiologyTaxonomy.length,
   // AI Simulation Ready
   aiSimulationReady: allBiologicalElements.filter(e => e.aiSimulationReady).length
 }
@@ -511,6 +565,100 @@ export const masterLibraryTree: LibraryTreeNode[] = [
         ]
       }
     ]
+  },
+  {
+    id: 'gene_atlas',
+    name: '🧬 Human Gene Atlas',
+    type: 'category',
+    description: 'Chromosome-by-chromosome gene catalog with disease associations',
+    color: '#7C3AED',
+    children: Array.from({ length: 22 }, (_, i) => ({
+      id: `chr${i + 1}_genes`,
+      name: `Chromosome ${i + 1}`,
+      type: 'subcategory' as const,
+      children: geneAtlas.filter(e => e.subcategory === `Chr${i + 1} Genes`).map(e => ({ id: e.id, name: e.name, type: 'element' as const }))
+    })).concat([
+      { id: 'chrx_genes', name: 'Chromosome X', type: 'subcategory' as const, children: geneAtlas.filter(e => e.subcategory === 'ChrX Genes').map(e => ({ id: e.id, name: e.name, type: 'element' as const })) },
+      { id: 'chry_genes', name: 'Chromosome Y', type: 'subcategory' as const, children: geneAtlas.filter(e => e.subcategory === 'ChrY Genes').map(e => ({ id: e.id, name: e.name, type: 'element' as const })) }
+    ])
+  },
+  {
+    id: 'proteome_machines',
+    name: '🔧 Proteome & Molecular Machines',
+    type: 'category',
+    description: 'Kinases, phosphatases, proteases, ion channels, transporters, and structural proteins',
+    color: '#059669',
+    children: [
+      { id: 'wb2_kinases', name: 'Kinases', type: 'subcategory', children: proteomeMolecularMachines.filter(e => e.subcategory === 'Kinases').map(e => ({ id: e.id, name: e.name, type: 'element' as const })) },
+      { id: 'wb2_phosphatases', name: 'Phosphatases', type: 'subcategory', children: proteomeMolecularMachines.filter(e => e.subcategory === 'Phosphatases').map(e => ({ id: e.id, name: e.name, type: 'element' as const })) },
+      { id: 'wb2_proteases', name: 'Proteases', type: 'subcategory', children: proteomeMolecularMachines.filter(e => e.subcategory === 'Proteases').map(e => ({ id: e.id, name: e.name, type: 'element' as const })) },
+      { id: 'wb2_ion_channels', name: 'Ion Channels', type: 'subcategory', children: proteomeMolecularMachines.filter(e => e.subcategory === 'Ion Channels').map(e => ({ id: e.id, name: e.name, type: 'element' as const })) },
+      { id: 'wb2_transporters', name: 'Transporters', type: 'subcategory', children: proteomeMolecularMachines.filter(e => e.subcategory === 'Transporters').map(e => ({ id: e.id, name: e.name, type: 'element' as const })) },
+      { id: 'wb2_structural', name: 'Structural & ECM', type: 'subcategory', children: proteomeMolecularMachines.filter(e => e.subcategory === 'Structural & ECM').map(e => ({ id: e.id, name: e.name, type: 'element' as const })) }
+    ]
+  },
+  {
+    id: 'extended_cell_anatomy',
+    name: '🦠 Extended Cell Types & Anatomy',
+    type: 'category',
+    description: 'Immune, epithelial, neural, muscle, and connective cell types',
+    color: '#D97706',
+    children: [
+      { id: 'wb3_immune', name: 'Immune Cells', type: 'subcategory', children: extendedCellTypesAnatomy.filter(e => e.subcategory === 'Immune Cells').map(e => ({ id: e.id, name: e.name, type: 'element' as const })) },
+      { id: 'wb3_epithelial', name: 'Epithelial Cells', type: 'subcategory', children: extendedCellTypesAnatomy.filter(e => e.subcategory === 'Epithelial Cells').map(e => ({ id: e.id, name: e.name, type: 'element' as const })) },
+      { id: 'wb3_neural_muscle', name: 'Neural & Muscle Cells', type: 'subcategory', children: extendedCellTypesAnatomy.filter(e => e.subcategory === 'Neural & Muscle Cells').map(e => ({ id: e.id, name: e.name, type: 'element' as const })) },
+      { id: 'wb3_connective', name: 'Connective & Stromal', type: 'subcategory', children: extendedCellTypesAnatomy.filter(e => e.subcategory === 'Connective & Stromal').map(e => ({ id: e.id, name: e.name, type: 'element' as const })) }
+    ]
+  },
+  {
+    id: 'metabolome_biochem',
+    name: '⚗️ Metabolome & Biochemistry',
+    type: 'category',
+    description: 'Hormones, metabolites, cofactors, and neurotransmitters',
+    color: '#0891B2',
+    children: [
+      { id: 'wb4_hormones', name: 'Hormones & Signaling', type: 'subcategory', children: metabolomeBiochemistry.filter(e => e.subcategory === 'Hormones & Signaling').map(e => ({ id: e.id, name: e.name, type: 'element' as const })) },
+      { id: 'wb4_metabolites', name: 'Metabolites & Cofactors', type: 'subcategory', children: metabolomeBiochemistry.filter(e => e.subcategory === 'Metabolites & Cofactors').map(e => ({ id: e.id, name: e.name, type: 'element' as const })) },
+      { id: 'wb4_neurotransmitters', name: 'Neurotransmitters', type: 'subcategory', children: metabolomeBiochemistry.filter(e => e.subcategory === 'Neurotransmitters').map(e => ({ id: e.id, name: e.name, type: 'element' as const })) }
+    ]
+  },
+  {
+    id: 'clinical_reference',
+    name: '🏥 Clinical Reference',
+    type: 'category',
+    description: 'Diseases, drugs, pathogens, and biomarkers',
+    color: '#DC2626',
+    children: [
+      { id: 'diseases_clinical', name: 'Diseases & Clinical', type: 'subcategory', elementCount: clinicalDiseases.length, children: clinicalDiseases.map(e => ({ id: e.id, name: e.name, type: 'element' as const })) },
+      { id: 'drugs_therapeutics', name: 'Drugs & Therapeutics', type: 'subcategory', elementCount: therapeuticDrugs.length, children: therapeuticDrugs.map(e => ({ id: e.id, name: e.name, type: 'element' as const })) },
+      { id: 'pathogens_infectious', name: 'Pathogens & Infectious Agents', type: 'subcategory', elementCount: pathogensInfectious.length, children: pathogensInfectious.map(e => ({ id: e.id, name: e.name, type: 'element' as const })) },
+      { id: 'biomarkers_diagnostics', name: 'Biomarkers & Diagnostics', type: 'subcategory', elementCount: clinicalBiomarkers.length, children: clinicalBiomarkers.map(e => ({ id: e.id, name: e.name, type: 'element' as const })) }
+    ]
+  },
+  {
+    id: 'extended_pathways',
+    name: '🔄 Extended Signaling & Pathways',
+    type: 'category',
+    description: 'Extended signaling pathways, metabolic networks, and immune cascades',
+    color: '#4F46E5',
+    children: [
+      { id: 'ext_signaling', name: 'Signaling Pathways', type: 'subcategory', children: signalingPathwaysExtended.filter(e => e.subcategory === 'Signaling Pathways').map(e => ({ id: e.id, name: e.name, type: 'element' as const })) },
+      { id: 'ext_metabolic', name: 'Metabolic Detail', type: 'subcategory', children: signalingPathwaysExtended.filter(e => e.subcategory === 'Metabolic Detail').map(e => ({ id: e.id, name: e.name, type: 'element' as const })) },
+      { id: 'ext_immune', name: 'Immune Networks', type: 'subcategory', children: signalingPathwaysExtended.filter(e => e.subcategory === 'Immune Networks').map(e => ({ id: e.id, name: e.name, type: 'element' as const })) }
+    ]
+  },
+  {
+    id: 'ncrna_epigenetics',
+    name: '🧬 ncRNA & Epigenetics',
+    type: 'category',
+    description: 'Non-coding RNAs, epigenetic marks, and chromatin regulation',
+    color: '#9333EA',
+    children: [
+      { id: 'mirnas', name: 'miRNAs', type: 'subcategory', children: ncRNAEpigenetics.filter(e => e.subcategory === 'miRNAs').map(e => ({ id: e.id, name: e.name, type: 'element' as const })) },
+      { id: 'lncrnas', name: 'lncRNAs', type: 'subcategory', children: ncRNAEpigenetics.filter(e => e.subcategory === 'lncRNAs').map(e => ({ id: e.id, name: e.name, type: 'element' as const })) },
+      { id: 'other_ncrnas', name: 'Other ncRNAs', type: 'subcategory', children: ncRNAEpigenetics.filter(e => e.subcategory === 'Other ncRNAs').map(e => ({ id: e.id, name: e.name, type: 'element' as const })) },
+      { id: 'epigenetics_chromatin', name: 'Epigenetics & Chromatin', type: 'subcategory', children: ncRNAEpigenetics.filter(e => e.subcategory === 'Epigenetics & Chromatin').map(e => ({ id: e.id, name: e.name, type: 'element' as const })) }
+    ]
   }
 ]
 
@@ -621,5 +769,19 @@ export {
   nervousTissues,
   allNervousSystemDetails,
   allHistologicalTissues,
-  allLibrary10Elements
+  allLibrary10Elements,
+  // Library 11-19 - Extended Workbench Data
+  geneAtlas,
+  proteomeMolecularMachines,
+  extendedCellTypesAnatomy,
+  metabolomeBiochemistry,
+  comprehensiveAnatomy,
+  genomicsGenes,
+  ncRNAEpigenetics,
+  clinicalDiseases,
+  therapeuticDrugs,
+  signalingPathwaysExtended,
+  pathogensInfectious,
+  clinicalBiomarkers,
+  humanBiologyTaxonomy
 }
