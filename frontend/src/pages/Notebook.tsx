@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { createPortal, flushSync } from 'react-dom'
+import { createPortal } from 'react-dom'
 import {
   FiPlus, FiTrash2, FiSave, FiDownload, FiClock, FiTag,
   FiEdit3, FiEye, FiColumns, FiFileText,
@@ -1820,21 +1820,69 @@ export default function Notebook() {
     return (catTag?.replace('category:', '') as TemplateCategory) || 'general'
   }
 
-  const pagesRef = useRef(pages)
-  pagesRef.current = pages
-  const activePageRef = useRef(activePage)
-  activePageRef.current = activePage
+  // --- Delete page: use a pending-delete-id ref + custom event to bridge DOM modal → React state ---
+  const pendingDeleteId = useRef<string | null>(null)
+
+  // Listen for the custom "confirm-delete-page" event dispatched by the DOM modal
+  useEffect(() => {
+    const handler = () => {
+      const pid = pendingDeleteId.current
+      if (!pid) return
+      pendingDeleteId.current = null
+
+      // Cancel any pending auto-save
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current)
+        saveTimerRef.current = null
+      }
+      // API delete
+      if (!pid.startsWith('local-')) {
+        api.deleteNotebookPage(pid).catch(() => {})
+      }
+      persistSet('notebook-onboarded', true)
+
+      // Remove from state — exact same pattern as Simulations page
+      setPagesRaw(prev => {
+        const remaining = prev.filter(p => p.id !== pid)
+        persistSet('notebook-pages', remaining)
+        return remaining
+      })
+
+      // Switch active page if we deleted the active one
+      if (activePage?.id === pid) {
+        // Use setTimeout to let the setPagesRaw settle first
+        setTimeout(() => {
+          setPagesRaw(current => {
+            if (current.length > 0) {
+              setActivePage(current[0])
+              setEditContent(current[0].content || '')
+              setEditTitle(current[0].title || '')
+              setEditTags(Array.isArray(current[0].tags) ? current[0].tags : [])
+              setHasUnsavedChanges(false)
+            } else {
+              setActivePage(null)
+              setEditContent('')
+              setEditTitle('')
+              setEditTags([])
+            }
+            return current
+          })
+        }, 0)
+      }
+    }
+    window.addEventListener('confirm-delete-page', handler)
+    return () => window.removeEventListener('confirm-delete-page', handler)
+  }, [activePage])
 
   const handleDeletePage = useCallback((pageId: string) => {
-    // Remove any existing overlay first
+    // Remove any existing overlay
     document.getElementById('delete-confirm-overlay')?.remove()
 
-    // Store pageId on the overlay element as a data attribute for bulletproof access
-    const idToDelete = String(pageId)
+    // Store the page ID in a ref so the event handler can read it
+    pendingDeleteId.current = pageId
 
     const overlay = document.createElement('div')
     overlay.id = 'delete-confirm-overlay'
-    overlay.dataset.pageId = idToDelete
     Object.assign(overlay.style, {
       position: 'fixed', top: '0', left: '0', right: '0', bottom: '0',
       zIndex: '999999', display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -1850,7 +1898,6 @@ export default function Notebook() {
       boxShadow: '0 25px 60px rgba(0,0,0,0.6)',
     })
 
-    // Create elements directly instead of innerHTML to avoid any scoping issues
     const iconDiv = document.createElement('div')
     iconDiv.style.marginBottom = '12px'
     iconDiv.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>'
@@ -1885,62 +1932,15 @@ export default function Notebook() {
 
     const close = () => { if (overlay.parentNode) overlay.remove() }
 
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) close()
-    })
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close() })
     card.addEventListener('click', (e) => { e.stopPropagation() })
-    cancelBtn.addEventListener('click', close)
+    cancelBtn.addEventListener('click', () => { pendingDeleteId.current = null; close() })
     confirmBtn.addEventListener('click', () => {
-      // Read pageId from data attribute as failsafe
-      const pid = overlay.dataset.pageId || idToDelete
       close()
-
-      try {
-        // Cancel any pending auto-save
-        if (saveTimerRef.current) {
-          clearTimeout(saveTimerRef.current)
-          saveTimerRef.current = null
-        }
-        // API delete
-        if (pid && !pid.startsWith('local-')) {
-          api.deleteNotebookPage(pid).catch(() => {})
-        }
-        persistSet('notebook-onboarded', true)
-
-        // Remove from pages
-        const currentPages = pagesRef.current
-        const remaining = currentPages.filter(p => p.id !== pid)
-        persistSet('notebook-pages', remaining)
-
-        flushSync(() => {
-          setPagesRaw(remaining)
-        })
-
-        // Switch active page if we deleted the active one
-        const currentActive = activePageRef.current
-        if (currentActive?.id === pid) {
-          flushSync(() => {
-            if (remaining.length > 0) {
-              const next = remaining[0]
-              setActivePage(next)
-              setEditContent(next.content || '')
-              setEditTitle(next.title || '')
-              setEditTags(Array.isArray(next.tags) ? next.tags : [])
-              setHasUnsavedChanges(false)
-            } else {
-              setActivePage(null)
-              setEditContent('')
-              setEditTitle('')
-              setEditTags([])
-            }
-          })
-        }
-      } catch (err) {
-        console.error('[DELETE] Error:', err)
-        alert('Delete failed: ' + (err instanceof Error ? err.message : String(err)))
-      }
+      // Dispatch custom event — handled by the React useEffect above
+      window.dispatchEvent(new Event('confirm-delete-page'))
     })
-  }, []) // No dependencies — uses refs + data attributes for state
+  }, [])
 
   const loadVersions = async () => {
     if (!activePage) return
@@ -2125,8 +2125,13 @@ export default function Notebook() {
                 <span className="text-xs font-medium truncate flex-1">{page.title}</span>
                 <button
                   type="button"
-                  onClick={e => { e.stopPropagation(); handleDeletePage(page.id) }}
-                  onMouseDown={e => e.stopPropagation()}
+                  onClick={e => {
+                    e.stopPropagation()
+                    e.preventDefault()
+                    const pid = page.id
+                    handleDeletePage(pid)
+                  }}
+                  onMouseDown={e => { e.stopPropagation(); e.preventDefault() }}
                   className="p-1 rounded hover:bg-red-500/20 text-red-400/60 hover:text-red-400 cursor-pointer shrink-0"
                   title="Delete page"
                   style={{ pointerEvents: 'auto', position: 'relative', zIndex: 20 }}
