@@ -1,9 +1,9 @@
-import { useState, useCallback, useRef, useMemo } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import {
   FiBarChart2, FiPlus, FiTrash2,
   FiDownload, FiUpload, FiSettings, FiX,
   FiMaximize2, FiMinimize2, FiEdit3, FiCopy, FiDroplet,
-  FiClipboard, FiCheck,
+  FiClipboard, FiCheck, FiChevronDown,
 } from 'react-icons/fi'
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
@@ -255,6 +255,78 @@ function computeHistogram(values: number[], bins = 15): { label: string; count: 
   return buckets.map(b => ({ label: b.label, count: b.count }))
 }
 
+// ─── Glassmorphic Select ────────────────────────────────────────
+interface GlassSelectOption { value: string; label: string; group?: string; preview?: React.ReactNode }
+
+function GlassSelect({ value, options, onChange, placeholder }: {
+  value: string
+  options: GlassSelectOption[]
+  onChange: (val: string) => void
+  placeholder?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  const selected = options.find(o => o.value === value)
+  const groups = options.reduce<Record<string, GlassSelectOption[]>>((acc, o) => {
+    const g = o.group || ''
+    if (!acc[g]) acc[g] = []
+    acc[g].push(o)
+    return acc
+  }, {})
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        className="input w-full text-xs text-left flex items-center justify-between gap-2"
+      >
+        <span className="truncate">{selected?.label || placeholder || 'Select...'}</span>
+        <FiChevronDown className={`w-3 h-3 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div
+          className="absolute z-[99999] left-0 right-0 mt-1 max-h-64 overflow-y-auto rounded-xl border border-[var(--glass-border)]"
+          style={{ background: 'var(--color-surface-solid)', backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)', boxShadow: 'var(--glass-shadow)' }}
+        >
+          {Object.entries(groups).map(([group, items]) => (
+            <div key={group}>
+              {group && (
+                <div className="px-3 py-1.5 text-xxs font-semibold uppercase tracking-wider text-[var(--color-text-muted)] border-b border-[var(--glass-border)]">
+                  {group}
+                </div>
+              )}
+              {items.map(opt => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => { onChange(opt.value); setOpen(false) }}
+                  className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 transition-colors ${
+                    opt.value === value
+                      ? 'bg-[var(--color-accent-blue)]/10 text-[var(--color-accent-blue)]'
+                      : 'text-[var(--color-text-secondary)] hover:bg-[var(--glass-bg-hover)] hover:text-[var(--color-text)]'
+                  }`}
+                >
+                  {opt.preview}
+                  <span className="truncate">{opt.label}</span>
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Component ──────────────────────────────────────────────────
 export default function DataVisualization() {
   const [charts, setCharts] = useState<ChartConfig[]>(() => {
@@ -422,13 +494,6 @@ export default function DataVisualization() {
       setCopiedChart(id)
       setTimeout(() => setCopiedChart(null), 2000)
     }
-  }, [])
-
-  // ─── Grouped chart types for dropdown ───────────────────────
-  const chartTypeGroups = useMemo(() => {
-    const groups: Record<string, typeof CHART_TYPES> = {}
-    CHART_TYPES.forEach(ct => { if (!groups[ct.group]) groups[ct.group] = []; groups[ct.group].push(ct) })
-    return groups
   }, [])
 
   // ─── Render any chart ───────────────────────────────────────
@@ -961,16 +1026,34 @@ export default function DataVisualization() {
       <div className="grid grid-cols-3 gap-3">
         <div>
           <label className="text-xxs text-[var(--color-text-muted)] block mb-0.5">Color Palette</label>
-          <select className="input text-xs w-full" value={chart.options.colorPalette} onChange={e => updateChartOptions(chart.id, { colorPalette: e.target.value })}>
-            {Object.keys(PALETTES).map(p => <option key={p} value={p}>{p}</option>)}
-          </select>
+          <GlassSelect
+            value={chart.options.colorPalette}
+            onChange={val => updateChartOptions(chart.id, { colorPalette: val })}
+            options={Object.keys(PALETTES).map(p => ({
+              value: p,
+              label: p.charAt(0).toUpperCase() + p.slice(1),
+              preview: (
+                <span className="flex gap-0.5 shrink-0">
+                  {PALETTES[p].slice(0, 5).map((c: string, i: number) => (
+                    <span key={i} className="w-3 h-3 rounded-sm" style={{ background: c }} />
+                  ))}
+                </span>
+              ),
+            }))}
+          />
         </div>
         <div>
           <label className="text-xxs text-[var(--color-text-muted)] block mb-0.5">Legend Position</label>
-          <select className="input text-xs w-full" value={chart.options.legendPosition} onChange={e => updateChartOptions(chart.id, { legendPosition: e.target.value as any })}>
-            <option value="top">Top</option><option value="bottom">Bottom</option>
-            <option value="left">Left</option><option value="right">Right</option>
-          </select>
+          <GlassSelect
+            value={chart.options.legendPosition}
+            onChange={val => updateChartOptions(chart.id, { legendPosition: val as any })}
+            options={[
+              { value: 'top', label: 'Top' },
+              { value: 'bottom', label: 'Bottom' },
+              { value: 'left', label: 'Left' },
+              { value: 'right', label: 'Right' },
+            ]}
+          />
         </div>
         <div>
           <label className="text-xxs text-[var(--color-text-muted)] block mb-0.5">Line Width</label>
@@ -1079,31 +1162,34 @@ export default function DataVisualization() {
                   placeholder="e.g. Tumor Growth Curve, Patient Demographics..." className="input w-full text-sm" autoFocus />
               </div>
 
-              {/* Chart type + auto-suggest */}
+              {/* Chart type + palette */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium mb-1.5 text-[var(--color-text-secondary)]">Chart Type</label>
-                  <select value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value as ChartType }))} className="input w-full text-xs">
-                    {Object.entries(chartTypeGroups).map(([group, types]) => (
-                      <optgroup key={group} label={group}>
-                        {types.map(ct => <option key={ct.value} value={ct.value}>{ct.label}</option>)}
-                      </optgroup>
-                    ))}
-                  </select>
+                  <GlassSelect
+                    value={form.type}
+                    onChange={val => setForm(f => ({ ...f, type: val as ChartType }))}
+                    options={CHART_TYPES.map(ct => ({ value: ct.value, label: ct.label, group: ct.group }))}
+                  />
                 </div>
                 <div>
                   <label className="block text-xs font-medium mb-1.5 text-[var(--color-text-secondary)]">Color Palette</label>
-                  <select value={form.options.colorPalette} onChange={e => setForm(f => ({ ...f, options: { ...f.options, colorPalette: e.target.value } }))} className="input w-full text-xs">
-                    {Object.keys(PALETTES).map(p => <option key={p} value={p}>{p}</option>)}
-                  </select>
+                  <GlassSelect
+                    value={form.options.colorPalette}
+                    onChange={val => setForm(f => ({ ...f, options: { ...f.options, colorPalette: val } }))}
+                    options={Object.keys(PALETTES).map(p => ({
+                      value: p,
+                      label: p.charAt(0).toUpperCase() + p.slice(1),
+                      preview: (
+                        <span className="flex gap-0.5 shrink-0">
+                          {PALETTES[p].slice(0, 5).map((c, i) => (
+                            <span key={i} className="w-3 h-3 rounded-sm" style={{ background: c }} />
+                          ))}
+                        </span>
+                      ),
+                    }))}
+                  />
                 </div>
-              </div>
-
-              {/* Palette preview */}
-              <div className="flex items-center gap-1">
-                {getPalette(form.options.colorPalette).slice(0, 10).map((c, i) => (
-                  <div key={i} className="w-5 h-5 rounded-sm border border-white/5" style={{ background: c }} />
-                ))}
               </div>
 
               {/* Data input */}
