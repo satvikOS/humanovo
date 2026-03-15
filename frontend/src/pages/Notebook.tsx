@@ -1820,35 +1820,13 @@ export default function Notebook() {
     return (catTag?.replace('category:', '') as TemplateCategory) || 'general'
   }
 
-  const doDeletePage = useCallback((pageId: string) => {
-    // Cancel any pending auto-save
-    if (saveTimerRef.current) {
-      clearTimeout(saveTimerRef.current)
-      saveTimerRef.current = null
-    }
-    // API delete
-    if (!pageId.startsWith('local-')) {
-      api.deleteNotebookPage(pageId).catch(() => {})
-    }
-    persistSet('notebook-onboarded', true)
-    setPagesRaw(prev => {
-      const remaining = prev.filter(p => p.id !== pageId)
-      persistSet('notebook-pages', remaining)
-      if (activePage?.id === pageId) {
-        if (remaining.length > 0) {
-          selectPage(remaining[0])
-        } else {
-          setActivePage(null)
-          setEditContent('')
-          setEditTitle('')
-        }
-      }
-      return remaining
-    })
-  }, [activePage, selectPage])
+  const pagesRef = useRef(pages)
+  pagesRef.current = pages
+  const activePageRef = useRef(activePage)
+  activePageRef.current = activePage
 
   const handleDeletePage = useCallback((pageId: string) => {
-    // Build modal via DOM to guarantee visibility regardless of React/CSS context
+    // Build modal via DOM to guarantee visibility
     const overlay = document.createElement('div')
     overlay.id = 'delete-confirm-overlay'
     Object.assign(overlay.style, {
@@ -1865,7 +1843,9 @@ export default function Notebook() {
     })
 
     card.innerHTML = `
-      <div style="color:#f87171;margin-bottom:12px;font-size:28px;">&#9888;</div>
+      <div style="margin-bottom:12px;">
+        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+      </div>
       <h3 style="font-size:18px;font-weight:600;margin:0 0 8px 0;">Delete Page?</h3>
       <p style="font-size:14px;color:#94a3b8;margin:0 0 20px 0;">
         This will permanently delete this page and its contents. This action cannot be undone.
@@ -1892,9 +1872,44 @@ export default function Notebook() {
     card.querySelector('#delete-cancel-btn')!.addEventListener('click', close)
     card.querySelector('#delete-confirm-btn')!.addEventListener('click', () => {
       close()
-      doDeletePage(pageId)
+
+      // ---- Perform the actual delete using refs for latest state ----
+      // Cancel any pending auto-save
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current)
+        saveTimerRef.current = null
+      }
+      // API delete
+      if (!pageId.startsWith('local-')) {
+        api.deleteNotebookPage(pageId).catch(() => {})
+      }
+      persistSet('notebook-onboarded', true)
+
+      // Remove from pages
+      const currentPages = pagesRef.current
+      const remaining = currentPages.filter(p => p.id !== pageId)
+      persistSet('notebook-pages', remaining)
+      setPagesRaw(remaining)
+
+      // Switch active page if we deleted the active one
+      const currentActive = activePageRef.current
+      if (currentActive?.id === pageId) {
+        if (remaining.length > 0) {
+          const next = remaining[0]
+          setActivePage(next)
+          setEditContent(next.content || '')
+          setEditTitle(next.title || '')
+          setEditTags(Array.isArray(next.tags) ? next.tags : [])
+          setHasUnsavedChanges(false)
+        } else {
+          setActivePage(null)
+          setEditContent('')
+          setEditTitle('')
+          setEditTags([])
+        }
+      }
     })
-  }, [doDeletePage])
+  }, []) // No dependencies — uses refs for latest state
 
   const loadVersions = async () => {
     if (!activePage) return
