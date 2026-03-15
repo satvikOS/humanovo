@@ -1528,7 +1528,7 @@ export default function Notebook() {
   // Re-read citation style from localStorage each time the template modal opens
   const templates = useMemo(() => buildTemplates(getCitationStyle()), [showTemplates])
   const [showVersions, setShowVersions] = useState(false)
-  // deleteConfirmId state removed — delete modal is now built via direct DOM manipulation
+  // deleteConfirmId for delete confirmation modal
   const [versions, setVersions] = useState<NotebookVersion[]>([])
   const [tagInput, setTagInput] = useState('')
   const [editTags, setEditTags] = useState<string[]>([])
@@ -1820,127 +1820,44 @@ export default function Notebook() {
     return (catTag?.replace('category:', '') as TemplateCategory) || 'general'
   }
 
-  // --- Delete page: use a pending-delete-id ref + custom event to bridge DOM modal → React state ---
-  const pendingDeleteId = useRef<string | null>(null)
+  // --- Delete page: pure React state, same pattern as Simulations page ---
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
-  // Listen for the custom "confirm-delete-page" event dispatched by the DOM modal
-  useEffect(() => {
-    const handler = () => {
-      const pid = pendingDeleteId.current
-      if (!pid) return
-      pendingDeleteId.current = null
+  const handleDeletePage = (id: string) => {
+    setDeleteConfirmId(id)
+  }
 
-      // Cancel any pending auto-save
-      if (saveTimerRef.current) {
-        clearTimeout(saveTimerRef.current)
-        saveTimerRef.current = null
-      }
-      // API delete
-      if (!pid.startsWith('local-')) {
-        api.deleteNotebookPage(pid).catch(() => {})
-      }
-      persistSet('notebook-onboarded', true)
-
-      // Remove from state — exact same pattern as Simulations page
-      setPagesRaw(prev => {
-        const remaining = prev.filter(p => p.id !== pid)
-        persistSet('notebook-pages', remaining)
-        return remaining
-      })
-
-      // Switch active page if we deleted the active one
-      if (activePage?.id === pid) {
-        // Use setTimeout to let the setPagesRaw settle first
-        setTimeout(() => {
-          setPagesRaw(current => {
-            if (current.length > 0) {
-              setActivePage(current[0])
-              setEditContent(current[0].content || '')
-              setEditTitle(current[0].title || '')
-              setEditTags(Array.isArray(current[0].tags) ? current[0].tags : [])
-              setHasUnsavedChanges(false)
-            } else {
-              setActivePage(null)
-              setEditContent('')
-              setEditTitle('')
-              setEditTags([])
-            }
-            return current
-          })
-        }, 0)
-      }
+  const confirmDelete = () => {
+    if (!deleteConfirmId) return
+    const pid = deleteConfirmId
+    setDeleteConfirmId(null)
+    // Cancel any pending auto-save
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = null
     }
-    window.addEventListener('confirm-delete-page', handler)
-    return () => window.removeEventListener('confirm-delete-page', handler)
-  }, [activePage])
-
-  const handleDeletePage = useCallback((pageId: string) => {
-    // Remove any existing overlay
-    document.getElementById('delete-confirm-overlay')?.remove()
-
-    // Store the page ID in a ref so the event handler can read it
-    pendingDeleteId.current = pageId
-
-    const overlay = document.createElement('div')
-    overlay.id = 'delete-confirm-overlay'
-    Object.assign(overlay.style, {
-      position: 'fixed', top: '0', left: '0', right: '0', bottom: '0',
-      zIndex: '999999', display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)',
-      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    // API delete
+    if (!pid.startsWith('local-')) {
+      api.deleteNotebookPage(pid).catch(() => {})
+    }
+    persistSet('notebook-onboarded', true)
+    // Remove from state + persist
+    setPagesRaw(prev => {
+      const remaining = prev.filter(p => p.id !== pid)
+      persistSet('notebook-pages', remaining)
+      // Switch active page
+      if (activePage?.id === pid) {
+        if (remaining.length > 0) {
+          selectPage(remaining[0])
+        } else {
+          setActivePage(null)
+          setEditContent('')
+          setEditTitle('')
+        }
+      }
+      return remaining
     })
-
-    const card = document.createElement('div')
-    Object.assign(card.style, {
-      background: 'var(--color-surface-solid, #1a1a2e)', padding: '24px', borderRadius: '16px',
-      maxWidth: '400px', width: '90%', textAlign: 'center', color: 'var(--color-text, #e2e8f0)',
-      border: '1px solid var(--color-border, rgba(255,255,255,0.1))',
-      boxShadow: '0 25px 60px rgba(0,0,0,0.6)',
-    })
-
-    const iconDiv = document.createElement('div')
-    iconDiv.style.marginBottom = '12px'
-    iconDiv.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>'
-
-    const h3 = document.createElement('h3')
-    Object.assign(h3.style, { fontSize: '18px', fontWeight: '600', margin: '0 0 8px 0' })
-    h3.textContent = 'Delete Page?'
-
-    const p = document.createElement('p')
-    Object.assign(p.style, { fontSize: '14px', color: 'var(--color-text-muted, #94a3b8)', margin: '0 0 20px 0' })
-    p.textContent = 'This will permanently delete this page and its contents. This action cannot be undone.'
-
-    const btnRow = document.createElement('div')
-    Object.assign(btnRow.style, { display: 'flex', gap: '12px', justifyContent: 'center' })
-
-    const cancelBtn = document.createElement('button')
-    Object.assign(cancelBtn.style, { padding: '8px 16px', fontSize: '14px', borderRadius: '8px', border: 'none', background: 'transparent', color: 'var(--color-text-muted, #94a3b8)', cursor: 'pointer', fontWeight: '500' })
-    cancelBtn.textContent = 'Cancel'
-
-    const confirmBtn = document.createElement('button')
-    Object.assign(confirmBtn.style, { padding: '8px 16px', fontSize: '14px', borderRadius: '8px', border: 'none', background: 'rgba(239,68,68,0.1)', color: '#f87171', cursor: 'pointer', fontWeight: '500' })
-    confirmBtn.textContent = 'Delete Permanently'
-
-    btnRow.appendChild(cancelBtn)
-    btnRow.appendChild(confirmBtn)
-    card.appendChild(iconDiv)
-    card.appendChild(h3)
-    card.appendChild(p)
-    card.appendChild(btnRow)
-    overlay.appendChild(card)
-    document.body.appendChild(overlay)
-
-    const close = () => { if (overlay.parentNode) overlay.remove() }
-
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) close() })
-    card.addEventListener('click', (e) => { e.stopPropagation() })
-    cancelBtn.addEventListener('click', () => { pendingDeleteId.current = null; close() })
-    confirmBtn.addEventListener('click', () => {
-      close()
-      // Dispatch custom event — handled by the React useEffect above
-      window.dispatchEvent(new Event('confirm-delete-page'))
-    })
-  }, [])
+  }
 
   const loadVersions = async () => {
     if (!activePage) return
@@ -2071,7 +1988,7 @@ export default function Notebook() {
   return (
     <>
     <div className="relative w-full" style={{ height: 'calc(100vh - 3rem)' }}>
-      <div className="absolute inset-0 flex" style={{ overflow: 'clip' }}>
+      <div className="absolute inset-0 flex overflow-hidden">
       {/* Sidebar */}
       <div className="w-64 border-r border-[var(--color-border)] bg-[var(--color-bg-elevated)] flex flex-col shrink-0">
         <div className="p-3 border-b border-[var(--color-border)]">
@@ -2125,13 +2042,8 @@ export default function Notebook() {
                 <span className="text-xs font-medium truncate flex-1">{page.title}</span>
                 <button
                   type="button"
-                  onClick={e => {
-                    e.stopPropagation()
-                    e.preventDefault()
-                    const pid = page.id
-                    handleDeletePage(pid)
-                  }}
-                  onMouseDown={e => { e.stopPropagation(); e.preventDefault() }}
+                  onClick={e => { e.stopPropagation(); handleDeletePage(page.id) }}
+                  onMouseDown={e => e.stopPropagation()}
                   className="p-1 rounded hover:bg-red-500/20 text-red-400/60 hover:text-red-400 cursor-pointer shrink-0"
                   title="Delete page"
                   style={{ pointerEvents: 'auto', position: 'relative', zIndex: 20 }}
@@ -2457,6 +2369,27 @@ export default function Notebook() {
       </div>
 
     </div>
+
+    {/* Delete Confirmation Dialog — same pattern as Simulations page */}
+    {deleteConfirmId && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+        <div className="glass-card p-6 max-w-sm mx-4 text-center" style={{ background: 'var(--color-surface-solid)' }}>
+          <FiX className="w-8 h-8 text-red-400 mx-auto mb-3" />
+          <h3 className="text-lg font-semibold mb-2">Delete Page?</h3>
+          <p className="text-sm text-[var(--color-text-muted)] mb-4">
+            This will permanently delete this page and its contents. This action cannot be undone.
+          </p>
+          <div className="flex gap-3 justify-center">
+            <button onClick={() => setDeleteConfirmId(null)} className="btn px-4 py-2 text-sm text-[var(--color-text-muted)]">
+              Cancel
+            </button>
+            <button onClick={confirmDelete} className="btn px-4 py-2 text-sm bg-red-500/10 text-red-400 hover:bg-red-500/20">
+              Delete Permanently
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
 
     {/* Template picker modal — portaled to document.body */}
     {showTemplates && createPortal(
