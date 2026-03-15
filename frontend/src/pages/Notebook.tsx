@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { createPortal } from 'react-dom'
+import { createPortal, flushSync } from 'react-dom'
 import {
   FiPlus, FiTrash2, FiSave, FiDownload, FiClock, FiTag,
   FiEdit3, FiEye, FiColumns, FiFileText,
@@ -1826,35 +1826,37 @@ export default function Notebook() {
   activePageRef.current = activePage
 
   const handleDeletePage = useCallback((pageId: string) => {
-    // Build modal via DOM to guarantee visibility
+    // Build modal via DOM — styled to match Simulations delete dialog (2nd image reference)
     const overlay = document.createElement('div')
     overlay.id = 'delete-confirm-overlay'
     Object.assign(overlay.style, {
       position: 'fixed', top: '0', left: '0', right: '0', bottom: '0',
       zIndex: '999999', display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: 'rgba(0,0,0,0.7)', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+      background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
     })
 
     const card = document.createElement('div')
     Object.assign(card.style, {
-      background: '#1e1e2e', padding: '24px', borderRadius: '12px',
-      maxWidth: '400px', width: '90%', textAlign: 'center', color: '#e2e8f0',
-      border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 25px 50px rgba(0,0,0,0.5)',
+      background: 'var(--color-surface-solid, #1a1a2e)', padding: '24px', borderRadius: '16px',
+      maxWidth: '400px', width: '90%', textAlign: 'center', color: 'var(--color-text, #e2e8f0)',
+      border: '1px solid var(--color-border, rgba(255,255,255,0.1))',
+      boxShadow: '0 25px 60px rgba(0,0,0,0.6)',
     })
 
     card.innerHTML = `
       <div style="margin-bottom:12px;">
-        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </div>
       <h3 style="font-size:18px;font-weight:600;margin:0 0 8px 0;">Delete Page?</h3>
-      <p style="font-size:14px;color:#94a3b8;margin:0 0 20px 0;">
+      <p style="font-size:14px;color:var(--color-text-muted, #94a3b8);margin:0 0 20px 0;">
         This will permanently delete this page and its contents. This action cannot be undone.
       </p>
       <div style="display:flex;gap:12px;justify-content:center;">
-        <button id="delete-cancel-btn" style="padding:8px 16px;font-size:14px;border-radius:8px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.05);color:#94a3b8;cursor:pointer;">
+        <button id="delete-cancel-btn" style="padding:8px 16px;font-size:14px;border-radius:8px;border:none;background:transparent;color:var(--color-text-muted, #94a3b8);cursor:pointer;font-weight:500;">
           Cancel
         </button>
-        <button id="delete-confirm-btn" style="padding:8px 16px;font-size:14px;border-radius:8px;border:1px solid rgba(239,68,68,0.3);background:rgba(239,68,68,0.15);color:#f87171;cursor:pointer;font-weight:500;">
+        <button id="delete-confirm-btn" style="padding:8px 16px;font-size:14px;border-radius:8px;border:none;background:rgba(239,68,68,0.1);color:#f87171;cursor:pointer;font-weight:500;">
           Delete Permanently
         </button>
       </div>
@@ -1863,7 +1865,7 @@ export default function Notebook() {
     overlay.appendChild(card)
     document.body.appendChild(overlay)
 
-    const close = () => { overlay.remove() }
+    const close = () => { if (overlay.parentNode) overlay.remove() }
 
     overlay.addEventListener('click', (e) => {
       if (e.target === overlay) close()
@@ -1873,40 +1875,49 @@ export default function Notebook() {
     card.querySelector('#delete-confirm-btn')!.addEventListener('click', () => {
       close()
 
-      // ---- Perform the actual delete using refs for latest state ----
-      // Cancel any pending auto-save
-      if (saveTimerRef.current) {
-        clearTimeout(saveTimerRef.current)
-        saveTimerRef.current = null
-      }
-      // API delete
-      if (!pageId.startsWith('local-')) {
-        api.deleteNotebookPage(pageId).catch(() => {})
-      }
-      persistSet('notebook-onboarded', true)
-
-      // Remove from pages
-      const currentPages = pagesRef.current
-      const remaining = currentPages.filter(p => p.id !== pageId)
-      persistSet('notebook-pages', remaining)
-      setPagesRaw(remaining)
-
-      // Switch active page if we deleted the active one
-      const currentActive = activePageRef.current
-      if (currentActive?.id === pageId) {
-        if (remaining.length > 0) {
-          const next = remaining[0]
-          setActivePage(next)
-          setEditContent(next.content || '')
-          setEditTitle(next.title || '')
-          setEditTags(Array.isArray(next.tags) ? next.tags : [])
-          setHasUnsavedChanges(false)
-        } else {
-          setActivePage(null)
-          setEditContent('')
-          setEditTitle('')
-          setEditTags([])
+      try {
+        // Cancel any pending auto-save
+        if (saveTimerRef.current) {
+          clearTimeout(saveTimerRef.current)
+          saveTimerRef.current = null
         }
+        // API delete
+        if (!pageId.startsWith('local-')) {
+          api.deleteNotebookPage(pageId).catch(() => {})
+        }
+        persistSet('notebook-onboarded', true)
+
+        // Remove from pages — use flushSync to force synchronous React update
+        const currentPages = pagesRef.current
+        const remaining = currentPages.filter(p => p.id !== pageId)
+        persistSet('notebook-pages', remaining)
+
+        flushSync(() => {
+          setPagesRaw(remaining)
+        })
+
+        // Switch active page if we deleted the active one
+        const currentActive = activePageRef.current
+        if (currentActive?.id === pageId) {
+          flushSync(() => {
+            if (remaining.length > 0) {
+              const next = remaining[0]
+              setActivePage(next)
+              setEditContent(next.content || '')
+              setEditTitle(next.title || '')
+              setEditTags(Array.isArray(next.tags) ? next.tags : [])
+              setHasUnsavedChanges(false)
+            } else {
+              setActivePage(null)
+              setEditContent('')
+              setEditTitle('')
+              setEditTags([])
+            }
+          })
+        }
+      } catch (err) {
+        console.error('[DELETE] Error during page deletion:', err)
+        alert('Delete failed: ' + (err instanceof Error ? err.message : String(err)))
       }
     })
   }, []) // No dependencies — uses refs for latest state
