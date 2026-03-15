@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import {
   FiPlus, FiTrash2, FiSave, FiDownload, FiClock, FiTag,
   FiEdit3, FiEye, FiColumns, FiFileText,
@@ -1527,6 +1528,7 @@ export default function Notebook() {
   // Re-read citation style from localStorage each time the template modal opens
   const templates = useMemo(() => buildTemplates(getCitationStyle()), [showTemplates])
   const [showVersions, setShowVersions] = useState(false)
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
   const [versions, setVersions] = useState<NotebookVersion[]>([])
   const [tagInput, setTagInput] = useState('')
   const [editTags, setEditTags] = useState<string[]>([])
@@ -1819,7 +1821,13 @@ export default function Notebook() {
   }
 
   const handleDeletePage = useCallback((pageId: string) => {
-    if (!window.confirm('Are you sure you want to delete this page? This cannot be undone.')) return
+    setDeleteConfirmId(pageId)
+  }, [])
+
+  const confirmDelete = useCallback(() => {
+    const pageId = deleteConfirmId
+    if (!pageId) return
+    setDeleteConfirmId(null)
     // API delete (fire and forget)
     if (!pageId.startsWith('local-')) {
       api.deleteNotebookPage(pageId).catch(() => {})
@@ -1831,7 +1839,6 @@ export default function Notebook() {
       return remaining
     })
     if (activePage?.id === pageId) {
-      // Use setTimeout to avoid state conflicts
       setTimeout(() => {
         setPagesRaw(current => {
           if (current.length > 0) {
@@ -1845,7 +1852,7 @@ export default function Notebook() {
         })
       }, 0)
     }
-  }, [activePage, selectPage])
+  }, [deleteConfirmId, activePage, selectPage])
 
   const loadVersions = async () => {
     if (!activePage) return
@@ -2355,8 +2362,34 @@ export default function Notebook() {
 
       </div>
 
-      {/* Template picker modal */}
-      {showTemplates && (
+      {/* Delete confirmation modal — portaled to #modal-root to escape CSS stacking contexts */}
+      {deleteConfirmId && createPortal(
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 99999 }} onClick={() => setDeleteConfirmId(null)}>
+          <div style={{ width: '100%', maxWidth: '24rem', margin: '0 1rem', padding: '1.5rem', borderRadius: '0.75rem', border: '1px solid rgba(255,255,255,0.1)', background: '#1a1a2e', boxShadow: '0 25px 50px rgba(0,0,0,0.5)', color: '#e2e8f0' }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
+              <div style={{ padding: '0.5rem', borderRadius: '0.5rem', background: 'rgba(239,68,68,0.15)' }}>
+                <FiTrash2 style={{ width: '1.25rem', height: '1.25rem', color: '#f87171' }} />
+              </div>
+              <h2 style={{ fontSize: '1rem', fontWeight: 600 }}>Delete Page</h2>
+            </div>
+            <p style={{ fontSize: '0.875rem', color: '#94a3b8', marginBottom: '1.5rem', lineHeight: 1.5 }}>
+              Are you sure you want to delete this page? This action cannot be undone.
+            </p>
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+              <button onClick={() => setDeleteConfirmId(null)} style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', borderRadius: '0.5rem', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#94a3b8', cursor: 'pointer' }}>
+                Cancel
+              </button>
+              <button onClick={confirmDelete} style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', borderRadius: '0.5rem', background: 'rgba(239,68,68,0.2)', border: '1px solid rgba(239,68,68,0.3)', color: '#f87171', cursor: 'pointer', fontWeight: 500 }}>
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.getElementById('modal-root')!
+      )}
+
+      {/* Template picker modal — portaled to #modal-root */}
+      {showTemplates && createPortal(
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 99999 }} onClick={() => { setShowTemplates(false); cancelCreate() }}>
           <div style={{ width: '100%', maxWidth: '32rem', margin: '0 1rem', padding: 0, maxHeight: '80vh', display: 'flex', flexDirection: 'column', borderRadius: '0.75rem', border: '1px solid rgba(255,255,255,0.1)', background: '#1a1a2e', boxShadow: '0 25px 50px rgba(0,0,0,0.5)', color: '#e2e8f0' }} onClick={e => e.stopPropagation()}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '1rem', borderBottom: '1px solid rgba(255,255,255,0.1)', flexShrink: 0 }}>
@@ -2454,11 +2487,12 @@ export default function Notebook() {
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.getElementById('modal-root')!
       )}
 
-      {/* Version history panel */}
-      {showVersions && (
+      {/* Version history panel — portaled to #modal-root */}
+      {showVersions && createPortal(
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 99999 }} onClick={() => setShowVersions(false)}>
           <div style={{ width: '100%', maxWidth: '32rem', margin: '0 1rem', padding: 0, maxHeight: '70vh', display: 'flex', flexDirection: 'column', borderRadius: '0.75rem', border: '1px solid rgba(255,255,255,0.1)', background: '#1a1a2e', boxShadow: '0 25px 50px rgba(0,0,0,0.5)', color: '#e2e8f0' }} onClick={e => e.stopPropagation()}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '1rem', borderBottom: '1px solid rgba(255,255,255,0.1)', flexShrink: 0 }}>
@@ -2503,7 +2537,8 @@ export default function Notebook() {
               )}
             </div>
           </div>
-        </div>
+        </div>,
+        document.getElementById('modal-root')!
       )}
 
     </div>
