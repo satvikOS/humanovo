@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import {
   FiPlus, FiTrash2, FiSave, FiDownload, FiClock, FiTag,
   FiEdit3, FiEye, FiColumns, FiFileText,
@@ -2357,10 +2358,14 @@ export default function Notebook() {
         </div>
       )}
 
+      </div>
+
+      {/* All modals portaled to document.body to escape overflow-hidden parent */}
+
       {/* Template picker modal */}
-      {showTemplates && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => { setShowTemplates(false); cancelCreate() }}>
-          <div className="glass-card w-full max-w-lg mx-4 p-0 max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+      {showTemplates && createPortal(
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center" style={{ zIndex: 10000 }} onClick={() => { setShowTemplates(false); cancelCreate() }}>
+          <div className="w-full max-w-lg mx-4 p-0 max-h-[80vh] flex flex-col rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-elevated)]" style={{ boxShadow: '0 25px 50px rgba(0,0,0,0.5)' }} onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between p-4 border-b border-[var(--color-border)] shrink-0">
               <h2 className="text-sm font-semibold">
                 {pendingTemplate ? 'Configure New Page' : 'Choose a Template'}
@@ -2462,13 +2467,14 @@ export default function Notebook() {
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Version history panel */}
-      {showVersions && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setShowVersions(false)}>
-          <div className="glass-card w-full max-w-lg mx-4 p-0 max-h-[70vh] flex flex-col" onClick={e => e.stopPropagation()}>
+      {showVersions && createPortal(
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center" style={{ zIndex: 10000 }} onClick={() => setShowVersions(false)}>
+          <div className="w-full max-w-lg mx-4 p-0 max-h-[70vh] flex flex-col rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-elevated)]" style={{ boxShadow: '0 25px 50px rgba(0,0,0,0.5)' }} onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between p-4 border-b border-[var(--color-border)] shrink-0">
               <h2 className="text-sm font-semibold">Version History</h2>
               <button onClick={() => setShowVersions(false)} className="p-1 rounded hover:bg-white/5 text-[var(--color-text-muted)]">
@@ -2511,13 +2517,13 @@ export default function Notebook() {
               )}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
-      </div>
 
       {/* Delete Confirmation Dialog */}
-      {deleteConfirmId && (
-        <div className="fixed inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm z-[9999]" onClick={() => setDeleteConfirmId(null)}>
+      {deleteConfirmId && createPortal(
+        <div className="fixed inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm" style={{ zIndex: 10001 }} onClick={() => setDeleteConfirmId(null)}>
           <div className="p-6 max-w-sm mx-4 text-center rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-elevated)]" style={{ boxShadow: '0 25px 50px rgba(0,0,0,0.5)' }} onClick={e => e.stopPropagation()}>
             <FiTrash2 className="w-8 h-8 text-red-400 mx-auto mb-3" />
             <h3 className="text-lg font-semibold mb-2">Are you sure?</h3>
@@ -2533,7 +2539,8 @@ export default function Notebook() {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )
