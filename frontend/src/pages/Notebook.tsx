@@ -1821,22 +1821,31 @@ export default function Notebook() {
     return (catTag?.replace('category:', '') as TemplateCategory) || 'general'
   }
 
-  const deletePage = async (id: string) => {
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+
+  const confirmDeletePage = async () => {
+    if (!deleteConfirmId) return
+    const id = deleteConfirmId
+    setDeleteConfirmId(null)
     try {
-      try { await api.deleteNotebookPage(id) } catch { /* API may be unavailable */ }
-      // Mark as onboarded so Getting Started doesn't reappear
-      persistSet('notebook-onboarded', true)
-      const remaining = pages.filter(p => p.id !== id)
-      setPages(remaining)
-      if (activePage?.id === id) {
-        if (remaining.length > 0) {
-          selectPage(remaining[0])
-        } else {
-          setActivePage(null)
-          setEditContent('')
-          setEditTitle('')
-        }
+      if (!id.startsWith('local-')) {
+        try { await api.deleteNotebookPage(id) } catch { /* API may be unavailable */ }
       }
+      persistSet('notebook-onboarded', true)
+      setPagesRaw(prev => {
+        const remaining = prev.filter(p => p.id !== id)
+        persistSet('notebook-pages', remaining)
+        if (activePage?.id === id) {
+          if (remaining.length > 0) {
+            setTimeout(() => selectPage(remaining[0]), 0)
+          } else {
+            setActivePage(null)
+            setEditContent('')
+            setEditTitle('')
+          }
+        }
+        return remaining
+      })
     } catch (err) {
       console.error('Failed to delete page:', err)
     }
@@ -2025,8 +2034,8 @@ export default function Notebook() {
                 <div
                   role="button"
                   tabIndex={0}
-                  onClick={e => { e.preventDefault(); e.stopPropagation(); deletePage(page.id) }}
-                  onKeyDown={e => { if (e.key === 'Enter') { e.stopPropagation(); deletePage(page.id) } }}
+                  onClick={e => { e.preventDefault(); e.stopPropagation(); setDeleteConfirmId(page.id) }}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.stopPropagation(); setDeleteConfirmId(page.id) } }}
                   className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-500/20 text-red-400 cursor-pointer shrink-0 z-10"
                   title="Delete page"
                 >
@@ -2506,6 +2515,26 @@ export default function Notebook() {
       )}
       </div>
 
+      {/* Delete Confirmation Dialog */}
+      {deleteConfirmId && (
+        <div className="fixed inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm z-[9999]" onClick={() => setDeleteConfirmId(null)}>
+          <div className="p-6 max-w-sm mx-4 text-center rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-elevated)]" style={{ boxShadow: '0 25px 50px rgba(0,0,0,0.5)' }} onClick={e => e.stopPropagation()}>
+            <FiTrash2 className="w-8 h-8 text-red-400 mx-auto mb-3" />
+            <h3 className="text-lg font-semibold mb-2">Are you sure?</h3>
+            <p className="text-sm text-[var(--color-text-muted)] mb-4">
+              This will permanently delete this page and its content. This action cannot be undone.
+            </p>
+            <div className="flex gap-3 justify-center">
+              <button onClick={() => setDeleteConfirmId(null)} className="px-4 py-2 text-sm rounded-lg text-[var(--color-text-muted)] hover:bg-white/5 transition-colors">
+                Cancel
+              </button>
+              <button onClick={confirmDeletePage} className="px-4 py-2 text-sm rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors font-medium">
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
