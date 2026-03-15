@@ -15,7 +15,7 @@ interface SavedResearchPaper {
   filename: string
 }
 
-function CreateProjectModal({ onClose, onCreate }: { onClose: () => void; onCreate: (project: ProjectCreate) => void }) {
+function CreateProjectModal({ onClose, onCreate }: { onClose: () => void; onCreate: (project: ProjectCreate) => Promise<boolean> }) {
   const [formData, setFormData] = useState({
     name: '',
     description: '',
@@ -24,17 +24,31 @@ function CreateProjectModal({ onClose, onCreate }: { onClose: () => void; onCrea
     tags: [] as string[],
   })
   const [tagInput, setTagInput] = useState('')
+  const [creating, setCreating] = useState(false)
+  const [error, setError] = useState('')
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    onCreate({
-      name: formData.name,
-      description: formData.description || undefined,
-      disease_focus: formData.disease_focus || undefined,
-      research_question: formData.research_question || undefined,
-      tags: formData.tags,
-    })
-    onClose()
+    setError('')
+    setCreating(true)
+    try {
+      const success = await onCreate({
+        name: formData.name,
+        description: formData.description || undefined,
+        disease_focus: formData.disease_focus || undefined,
+        research_question: formData.research_question || undefined,
+        tags: formData.tags,
+      })
+      if (success) {
+        onClose()
+      } else {
+        setError('Failed to create project. Please check that the backend server is running.')
+      }
+    } catch {
+      setError('Failed to create project. Please check that the backend server is running.')
+    } finally {
+      setCreating(false)
+    }
   }
 
   const addTag = () => {
@@ -141,12 +155,18 @@ function CreateProjectModal({ onClose, onCreate }: { onClose: () => void; onCrea
             )}
           </div>
 
+          {error && (
+            <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-red-400">
+              {error}
+            </div>
+          )}
+
           <div className="flex justify-end space-x-3 pt-4">
-            <button type="button" onClick={onClose} className="btn text-[var(--color-text-secondary)] hover:text-white">
+            <button type="button" onClick={onClose} className="btn text-[var(--color-text-secondary)] hover:text-white" disabled={creating}>
               Cancel
             </button>
-            <button type="submit" className="btn text-accent-blue hover:bg-accent-blue/10">
-              Create Project
+            <button type="submit" className="btn text-accent-blue hover:bg-accent-blue/10" disabled={creating}>
+              {creating ? 'Creating...' : 'Create Project'}
             </button>
           </div>
         </form>
@@ -287,12 +307,17 @@ export default function Projects() {
     }
   }
 
-  const handleCreate = async (data: ProjectCreate) => {
+  const handleCreate = async (data: ProjectCreate): Promise<boolean> => {
     try {
       const project = await api.createProject(data)
       setProjects(prev => [project, ...prev])
+      // Also save to localStorage so it survives reloads
+      const localProjects = persistGet<any[]>('projects', [])
+      persistSet('projects', [project, ...localProjects])
+      return true
     } catch (err) {
       console.error('Failed to create project:', err)
+      return false
     }
   }
 

@@ -1540,14 +1540,26 @@ export default function Notebook() {
   const richEditorRef = useRef<HTMLDivElement>(null)
   const isUpdatingRef = useRef(false)
 
-  // Auto-save with debounce
+  // Refs to track current editing state for auto-save (prevents stale closure bugs)
+  const activePageRef = useRef<NotebookPage | null>(null)
+  const editContentRef = useRef('')
+  const editTitleRef = useRef('')
+  const editTagsRef = useRef<string[]>([])
+
+  // Keep refs in sync with state
+  useEffect(() => { activePageRef.current = activePage }, [activePage])
+  useEffect(() => { editContentRef.current = editContent }, [editContent])
+  useEffect(() => { editTitleRef.current = editTitle }, [editTitle])
+  useEffect(() => { editTagsRef.current = editTags }, [editTags])
+
+  // Auto-save with debounce — reads from refs to avoid stale closures
   const scheduleAutoSave = useCallback(() => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     setHasUnsavedChanges(true)
     saveTimerRef.current = window.setTimeout(() => {
-      savePage()
+      savePageFromRefs()
     }, 2000)
-  }, [activePage?.id])
+  }, [])
 
   // Convert markdown to HTML for rendering
   const contentToHtml = useCallback((md: string): string => {
@@ -1708,6 +1720,27 @@ export default function Notebook() {
   }
 
   const selectPage = useCallback((page: NotebookPage) => {
+    // Cancel any pending auto-save for the previous page
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = null
+    }
+    // Flush unsaved changes to the previous page before switching
+    const prevPage = activePageRef.current
+    if (prevPage && prevPage.id !== page.id) {
+      const prevTitle = editTitleRef.current
+      const prevContent = editContentRef.current
+      const prevTags = [...editTagsRef.current]
+      // Only save if something actually changed
+      if (prevTitle !== prevPage.title || prevContent !== (prevPage.content || '') || JSON.stringify(prevTags) !== JSON.stringify(prevPage.tags || [])) {
+        const updated = { ...prevPage, title: prevTitle, content: prevContent, tags: prevTags, updated_at: new Date().toISOString() }
+        setPages(prev => prev.map(p => p.id === updated.id ? updated : p))
+        // Fire-and-forget API save for previous page
+        if (!prevPage.id.startsWith('local-')) {
+          api.updateNotebookPage(prevPage.id, { title: prevTitle, content: prevContent, tags: prevTags }).catch(() => {})
+        }
+      }
+    }
     setActivePage(page)
     const content = page.content || ''
     setEditContent(content)
@@ -1717,7 +1750,7 @@ export default function Notebook() {
     setShowVersions(false)
     // Force editor content refresh on page switch
     lastExternalContent.current = ''
-  }, [])
+  }, [setPages])
 
   useEffect(() => {
     return () => {
@@ -1730,11 +1763,42 @@ export default function Notebook() {
     scheduleAutoSave()
   }
 
+  // Save using refs (for auto-save timer — avoids stale closures)
+  const savePageFromRefs = useCallback(async () => {
+    const page = activePageRef.current
+    if (!page) return
+    const title = editTitleRef.current
+    const content = editContentRef.current
+    const tags = [...editTagsRef.current]
+    try {
+      setSaving(true)
+      if (page.id.startsWith('local-')) {
+        const updated = { ...page, title, content, tags, updated_at: new Date().toISOString() }
+        setActivePage(prev => prev?.id === page.id ? updated : prev)
+        setPages(prev => prev.map(p => p.id === updated.id ? updated : p))
+        setHasUnsavedChanges(false)
+        return
+      }
+      const updated = await api.updateNotebookPage(page.id, { title, content, tags })
+      setActivePage(prev => prev?.id === updated.id ? updated : prev)
+      setPages(prev => prev.map(p => p.id === updated.id ? updated : p))
+      setHasUnsavedChanges(false)
+    } catch (err) {
+      console.error('Failed to save page:', err)
+      const updated = { ...page, title, content, tags, updated_at: new Date().toISOString() }
+      setActivePage(prev => prev?.id === page.id ? updated : prev)
+      setPages(prev => prev.map(p => p.id === updated.id ? updated : p))
+      setHasUnsavedChanges(false)
+    } finally {
+      setSaving(false)
+    }
+  }, [setPages])
+
+  // Save using current state (for explicit save button)
   const savePage = async () => {
     if (!activePage) return
     try {
       setSaving(true)
-      // For local/fallback pages, save in-memory only
       if (activePage.id.startsWith('local-')) {
         const updated = { ...activePage, title: editTitle, content: editContent, tags: editTags, updated_at: new Date().toISOString() }
         setActivePage(updated)
@@ -1752,7 +1816,6 @@ export default function Notebook() {
       setHasUnsavedChanges(false)
     } catch (err) {
       console.error('Failed to save page:', err)
-      // Save locally on failure
       const updated = { ...activePage, title: editTitle, content: editContent, tags: editTags, updated_at: new Date().toISOString() }
       setActivePage(updated)
       setPages(prev => prev.map(p => p.id === updated.id ? updated : p))
@@ -1827,7 +1890,7 @@ export default function Notebook() {
     setDeleteConfirmId(id)
   }
 
-  const confirmDelete = () => {
+  const confirmDelete = useCallback(() => {
     if (!deleteConfirmId) return
     const pid = deleteConfirmId
     setDeleteConfirmId(null)
@@ -1845,19 +1908,30 @@ export default function Notebook() {
     setPagesRaw(prev => {
       const remaining = prev.filter(p => p.id !== pid)
       persistSet('notebook-pages', remaining)
-      // Switch active page
-      if (activePage?.id === pid) {
-        if (remaining.length > 0) {
-          selectPage(remaining[0])
-        } else {
-          setActivePage(null)
-          setEditContent('')
-          setEditTitle('')
-        }
-      }
       return remaining
     })
-  }
+    // Switch active page if the deleted page was active — use ref for fresh value
+    if (activePageRef.current?.id === pid) {
+      // Read updated pages from localStorage since setPagesRaw is async
+      const remaining = (persistGet<NotebookPage[]>('notebook-pages', []))
+      if (remaining.length > 0) {
+        // Directly set state instead of calling selectPage to avoid stale ref issues
+        const nextPage = remaining[0]
+        setActivePage(nextPage)
+        setEditContent(nextPage.content || '')
+        setEditTitle(nextPage.title || '')
+        setEditTags(Array.isArray(nextPage.tags) ? nextPage.tags : [])
+        setHasUnsavedChanges(false)
+        lastExternalContent.current = ''
+      } else {
+        setActivePage(null)
+        setEditContent('')
+        setEditTitle('')
+        setEditTags([])
+        setHasUnsavedChanges(false)
+      }
+    }
+  }, [deleteConfirmId])
 
   const loadVersions = async () => {
     if (!activePage) return
