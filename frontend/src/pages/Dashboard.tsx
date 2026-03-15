@@ -417,7 +417,8 @@ export default function Dashboard() {
 
   // Get real counts from localStorage (all use 'humanovo-' prefix via persistGet)
   const allActivities = useMemo(() => getActivityLog(), [])
-  const localProjects = useMemo(() => persistGet<any[]>('projects', []), [])
+  const deletedProjectIds = useMemo(() => new Set(persistGet<string[]>('deleted-project-ids', [])), [])
+  const localProjects = useMemo(() => persistGet<any[]>('projects', []).filter((p: any) => p.id && !deletedProjectIds.has(p.id)), [deletedProjectIds])
   const localSimulations = useMemo(() => {
     try { return JSON.parse(localStorage.getItem('humanovo-mc-simulations') || '[]') } catch { return [] }
   }, [])
@@ -429,16 +430,12 @@ export default function Dashboard() {
         let apiProjects: Project[] = []
         try {
           const res = await api.getProjects({ page_size: 50 })
-          apiProjects = res?.items || []
+          apiProjects = (res?.items || []).filter(p => !deletedProjectIds.has(p.id))
         } catch (err) { console.warn('Dashboard: projects API unavailable', err) }
-
-        // Filter out projects the user has explicitly deleted locally
-        const deletedIds = new Set(persistGet<string[]>('deleted-project-ids', []))
-        apiProjects = apiProjects.filter(p => !deletedIds.has(p.id))
 
         const apiIds = new Set(apiProjects.map(p => p.id))
         const localOnly = localProjects
-          .filter((p: any) => p.id && !apiIds.has(p.id))
+          .filter((p: any) => !apiIds.has(p.id))
           .map((p: any) => ({
             id: p.id,
             name: p.name || 'Untitled Project',
@@ -461,10 +458,10 @@ export default function Dashboard() {
       }
     }
     fetchData()
-  }, [localProjects])
+  }, [localProjects, deletedProjectIds])
 
   // Derive counts from actual project data for accuracy
-  const totalProjects = Math.max(projects.length, localProjects.length)
+  const totalProjects = projects.length
   // Count hypotheses from projects' own hypothesis arrays/counts
   const totalHypotheses = useMemo(() => {
     return projects.reduce((sum, p) => {

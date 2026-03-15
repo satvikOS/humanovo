@@ -220,8 +220,10 @@ export default function Agents() {
         setProjectName(pname)
 
         // Save project to localStorage so ProjectDetail can find it
+        // But never re-create a project the user has explicitly deleted
+        const deletedProjectIds = persistGet<string[]>('deleted-project-ids', [])
         const existingProjects = persistGet<any[]>('projects', [])
-        if (!existingProjects.find((p: any) => p.id === pid)) {
+        if (!existingProjects.find((p: any) => p.id === pid) && !deletedProjectIds.includes(pid)) {
           const projectEntry = {
             id: pid,
             name: pname,

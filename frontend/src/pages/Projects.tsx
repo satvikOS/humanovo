@@ -234,23 +234,24 @@ export default function Projects() {
   const loadProjects = async () => {
     try {
       setLoading(true)
+
+      // Get list of IDs the user has explicitly deleted
+      const deletedIds = new Set(persistGet<string[]>('deleted-project-ids', []))
+
       let apiProjects: Project[] = []
       try {
         const res = await api.getProjects({ page_size: 50, search: searchQuery || undefined })
-        apiProjects = res.items || []
+        apiProjects = (res.items || []).filter(p => !deletedIds.has(p.id))
       } catch {
         // API may be unavailable
       }
 
-      // Filter out projects the user has explicitly deleted locally
-      const deletedIds = new Set(persistGet<string[]>('deleted-project-ids', []))
-      apiProjects = apiProjects.filter(p => !deletedIds.has(p.id))
-
       // Merge localStorage projects (created by discovery) that aren't in API
-      const localProjects = persistGet<any[]>('projects', [])
+      // Also filter out deleted projects from localStorage
+      const localProjects = persistGet<any[]>('projects', []).filter((p: any) => p.id && !deletedIds.has(p.id))
       const apiIds = new Set(apiProjects.map(p => p.id))
       const localOnly = localProjects
-        .filter((p: any) => p.id && !apiIds.has(p.id))
+        .filter((p: any) => !apiIds.has(p.id))
         .map((p: any) => ({
           id: p.id,
           name: p.name || 'Untitled Project',
