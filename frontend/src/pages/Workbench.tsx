@@ -3,8 +3,6 @@ import {
   FiBox,
   FiZoomIn,
   FiZoomOut,
-  FiEye,
-  FiEyeOff,
   FiDownload,
   FiUpload,
   FiSettings,
@@ -39,6 +37,7 @@ import {
   libraryStats,
   searchElements,
   findElementById,
+  allBiologicalElements,
   LibraryTreeNode,
   BiologicalElement as MasterLibraryElement
 } from '../data/MasterHumanLibraryIndex'
@@ -87,6 +86,70 @@ const categoryConfig: Record<BiologicalCategory, { label: string; color: string;
   gene: { label: 'Genes & Regulation', color: '#ec4899', icon: 'FiBookOpen' },
   drug_target: { label: 'Therapeutic Targets', color: '#10b981', icon: 'FiTarget' },
   vaccine_target: { label: 'Vaccine Targets', color: '#14b8a6', icon: 'FiShield' },
+}
+
+// ==================== LIBRARY-TO-COMPONENT CONVERSION ====================
+
+const libraryCategoryMap: Record<string, BiologicalCategory> = {
+  genetic_material: 'gene',
+  rna_expression: 'gene',
+  proteins_enzymes: 'biomolecule',
+  organic_molecules: 'biomolecule',
+  inorganic_components: 'cellular_component',
+  organelles: 'cellular_component',
+  cell_types: 'cell_type',
+  tissues: 'organ_system',
+  organs: 'organ_system',
+  organ_systems: 'organ_system',
+  biochemical_pathways: 'pathway',
+  signaling_pathways: 'pathway',
+  // Extended library categories
+  bones: 'organ_system',
+  muscles: 'organ_system',
+  nerves: 'organ_system',
+  histological_tissues: 'organ_system',
+  diseases: 'drug_target',
+  drugs: 'drug_target',
+  pathogens: 'antigen',
+  biomarkers: 'biomolecule',
+  receptors: 'receptor',
+  vaccine_targets: 'vaccine_target',
+}
+
+function convertLibraryElement(elem: MasterLibraryElement): BiologicalComponent {
+  const category = libraryCategoryMap[elem.category] || 'biomolecule'
+  const config = categoryConfig[category]
+  return {
+    id: elem.id,
+    name: elem.name,
+    category,
+    subcategory: elem.subcategory,
+    visible: true,
+    color: config.color,
+    tags: [...elem.functions.slice(0, 3), ...elem.diseaseLinks.slice(0, 2)],
+    description: elem.description,
+    diseaseRelevance: elem.diseaseLinks.join('; ') || undefined,
+    therapeuticTargets: elem.drugTargets.length > 0 ? elem.drugTargets : undefined,
+    relatedComponents: elem.interactions.length > 0 ? elem.interactions.slice(0, 5) : undefined,
+    keyFacts: elem.functions.length > 0 ? elem.functions : undefined,
+    drugTargets: elem.drugTargets.length > 0 ? elem.drugTargets : undefined,
+  }
+}
+
+// Pre-convert all library elements to workbench components (lazy, computed once)
+let _allLibraryComponents: BiologicalComponent[] | null = null
+function getAllLibraryComponents(): BiologicalComponent[] {
+  if (!_allLibraryComponents) {
+    const seen = new Set<string>()
+    _allLibraryComponents = []
+    for (const elem of allBiologicalElements) {
+      if (!seen.has(elem.id)) {
+        seen.add(elem.id)
+        _allLibraryComponents.push(convertLibraryElement(elem))
+      }
+    }
+  }
+  return _allLibraryComponents
 }
 
 // ==================== COMPREHENSIVE BIOLOGICAL STRUCTURES DATABASE ====================
@@ -1614,113 +1677,6 @@ function NodeGraphCanvas({
   )
 }
 
-// ==================== SIDEBAR COMPONENT TREE ====================
-
-function ComponentTree({ components, selectedId, onSelect, onToggleVisibility, searchTerm, onAddToCanvas }: {
-  components: BiologicalComponent[]
-  selectedId: string | null
-  onSelect: (id: string) => void
-  onToggleVisibility: (id: string) => void
-  searchTerm: string
-  onAddToCanvas?: (comp: BiologicalComponent) => void
-}) {
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({
-    organ_system: true,
-    cell_type: true,
-    cellular_component: false,
-    biomolecule: true,
-    pathway: true,
-    receptor: true,
-    antigen: false,
-    gene: true,
-    drug_target: false,
-    vaccine_target: false,
-  })
-
-  const filteredComponents = components.filter(comp =>
-    comp.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    comp.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase())) ||
-    comp.description.toLowerCase().includes(searchTerm.toLowerCase())
-  )
-
-  const groupedComponents = filteredComponents.reduce((acc, comp) => {
-    if (!acc[comp.category]) acc[comp.category] = []
-    acc[comp.category].push(comp)
-    return acc
-  }, {} as Record<string, BiologicalComponent[]>)
-
-  return (
-    <div className="space-y-1">
-      {Object.entries(categoryConfig).map(([category, config]) => {
-        const comps = groupedComponents[category] || []
-        if (comps.length === 0 && searchTerm) return null
-
-        return (
-          <div key={category}>
-            <button
-              onClick={() => setExpanded(e => ({ ...e, [category]: !e[category] }))}
-              className="flex items-center gap-1.5 w-full px-2 py-1 text-xs hover:bg-[var(--color-border)] rounded transition-colors"
-            >
-              {expanded[category] ? <FiChevronDown className="w-3 h-3" /> : <FiChevronRight className="w-3 h-3" />}
-              <span
-                className="w-2 h-2 rounded-full"
-                style={{ backgroundColor: config.color }}
-              />
-              <span className="flex-1 text-left truncate">{config.label}</span>
-              <span className="text-[var(--color-text-muted)]">{comps.length}</span>
-            </button>
-            {expanded[category] && comps.length > 0 && (
-              <div className="ml-4 space-y-0.5">
-                {comps.map(comp => (
-                  <div
-                    key={comp.id}
-                    onClick={() => onSelect(comp.id)}
-                    className={clsx(
-                      'group flex items-center gap-1.5 px-2 py-1 text-xs rounded cursor-pointer transition-colors',
-                      selectedId === comp.id
-                        ? 'bg-primary-500/20 text-primary-400'
-                        : 'hover:bg-[var(--color-border)] text-[var(--color-text-secondary)]'
-                    )}
-                  >
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        onToggleVisibility(comp.id)
-                      }}
-                      className="p-0.5 hover:bg-[var(--color-surface)] rounded"
-                    >
-                      {comp.visible ? (
-                        <FiEye className="w-3 h-3" />
-                      ) : (
-                        <FiEyeOff className="w-3 h-3 text-[var(--color-text-muted)]" />
-                      )}
-                    </button>
-                    <span className={clsx('truncate flex-1', !comp.visible && 'text-[var(--color-text-muted)]')}>
-                      {comp.name}
-                    </span>
-                    {onAddToCanvas && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); onAddToCanvas(comp) }}
-                        className="p-0.5 hover:bg-primary-500/20 rounded text-primary-400 opacity-0 group-hover:opacity-100 transition-opacity"
-                        title="Add to Canvas"
-                      >
-                        <FiPlus className="w-3 h-3" />
-                      </button>
-                    )}
-                    {comp.therapeuticTargets && comp.therapeuticTargets.length > 0 && (
-                      <FiTarget className="w-3 h-3 text-[var(--color-text-muted)]" title="Has therapeutic targets" />
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
 function PropertiesPanel({ component }: { component: BiologicalComponent | null }) {
   const [activeTab, setActiveTab] = useState<'overview' | 'clinical' | 'targets'>('overview')
 
@@ -1895,6 +1851,7 @@ function MasterLibraryTree({
   selectedId,
   expandedNodes,
   onToggleExpand,
+  onAddToCanvas,
   depth = 0
 }: {
   nodes: LibraryTreeNode[]
@@ -1902,6 +1859,7 @@ function MasterLibraryTree({
   selectedId: string | null
   expandedNodes: Set<string>
   onToggleExpand: (id: string) => void
+  onAddToCanvas?: (id: string) => void
   depth?: number
 }) {
   return (
@@ -1923,7 +1881,7 @@ function MasterLibraryTree({
               }}
               style={{ paddingLeft: `${depth * 12 + 4}px` }}
               className={clsx(
-                'flex items-center gap-1.5 py-1 px-2 rounded text-xs cursor-pointer transition-colors',
+                'group flex items-center gap-1.5 py-1 px-2 rounded text-xs cursor-pointer transition-colors',
                 isSelected
                   ? 'bg-primary-500/20 text-primary-400'
                   : 'hover:bg-[var(--color-surface)] text-[var(--color-text-secondary)]',
@@ -1948,6 +1906,15 @@ function MasterLibraryTree({
                 />
               )}
               <span className="truncate flex-1">{node.name}</span>
+              {node.type === 'element' && onAddToCanvas && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onAddToCanvas(node.id) }}
+                  className="p-0.5 hover:bg-primary-500/20 rounded text-primary-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                  title="Add to Canvas"
+                >
+                  <FiPlus className="w-3 h-3" />
+                </button>
+              )}
               {node.elementCount !== undefined && (
                 <span className="text-xxs text-[var(--color-text-muted)]">
                   {node.elementCount}
@@ -1961,6 +1928,7 @@ function MasterLibraryTree({
                 selectedId={selectedId}
                 expandedNodes={expandedNodes}
                 onToggleExpand={onToggleExpand}
+                onAddToCanvas={onAddToCanvas}
                 depth={depth + 1}
               />
             )}
@@ -1971,7 +1939,7 @@ function MasterLibraryTree({
   )
 }
 
-function MasterLibraryDetails({ element }: { element: MasterLibraryElement | null }) {
+function MasterLibraryDetails({ element, onAddToCanvas }: { element: MasterLibraryElement | null; onAddToCanvas?: (id: string) => void }) {
   const [activeTab, setActiveTab] = useState<'info' | 'simulation' | 'interactions'>('info')
 
   if (!element) {
@@ -2002,7 +1970,17 @@ function MasterLibraryDetails({ element }: { element: MasterLibraryElement | nul
           {element.aiSimulationReady && (
             <FiCpu className="w-3.5 h-3.5 text-green-400" title="AI Simulation Ready" />
           )}
-          <span className="text-sm font-medium">{element.name}</span>
+          <span className="text-sm font-medium flex-1">{element.name}</span>
+          {onAddToCanvas && (
+            <button
+              onClick={() => onAddToCanvas(element.id)}
+              className="flex items-center gap-1 px-2 py-1 text-xxs rounded bg-primary-500/20 text-primary-400 hover:bg-primary-500/30 transition-colors"
+              title="Add to Canvas"
+            >
+              <FiPlus className="w-3 h-3" />
+              <span>Add to Canvas</span>
+            </button>
+          )}
         </div>
         <div className="flex items-center gap-2 text-xxs text-[var(--color-text-muted)]">
           <span className="badge badge-primary">{element.category.replace(/_/g, ' ')}</span>
@@ -2444,13 +2422,19 @@ function EdgeLabelModal({
 // ==================== MAIN WORKBENCH COMPONENT ====================
 
 export default function Workbench() {
-  const [components, setComponents] = useState<BiologicalComponent[]>(biologicalStructures)
+  // Merge hardcoded structures with all library elements (deduplicated by ID)
+  const [components] = useState<BiologicalComponent[]>(() => {
+    const libraryComponents = getAllLibraryComponents()
+    const hardcodedIds = new Set(biologicalStructures.map(s => s.id))
+    const uniqueLibrary = libraryComponents.filter(c => !hardcodedIds.has(c.id))
+    return [...biologicalStructures, ...uniqueLibrary]
+  })
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
 
   // Master Library state
   const [selectedLibraryId, setSelectedLibraryId] = useState<string | null>(null)
-  const [expandedLibraryNodes, setExpandedLibraryNodes] = useState<Set<string>>(new Set(['molecular_level', 'cellular_level']))
+  const [expandedLibraryNodes, setExpandedLibraryNodes] = useState<Set<string>>(new Set())
 
   // --- Node Graph State ---
   const initialGraph = useMemo(() => loadGraphState(), [])
@@ -2496,12 +2480,6 @@ export default function Workbench() {
     })
   }, [])
 
-  const toggleVisibility = useCallback((id: string) => {
-    setComponents(prev => prev.map(c => c.id === id ? { ...c, visible: !c.visible } : c))
-  }, [])
-
-  const visibleCount = components.filter(c => c.visible).length
-
   // --- Add node to canvas ---
   const addToCanvas = useCallback((comp: BiologicalComponent) => {
     const existing = nodes.find(n => n.entityId === comp.id)
@@ -2525,6 +2503,14 @@ export default function Workbench() {
     setNodes(prev => [...prev, newNode])
     setSelectedNode(newNode.id)
   }, [nodes, canvasOffset, zoom])
+
+  // Add a library element to the canvas by its ID
+  const addLibraryElementToCanvas = useCallback((elementId: string) => {
+    const comp = components.find(c => c.id === elementId)
+    if (comp) {
+      addToCanvas(comp)
+    }
+  }, [components, addToCanvas])
 
   // --- Node interaction handlers ---
   const handleNodeMouseDown = useCallback((e: React.MouseEvent, nodeId: string) => {
@@ -3214,7 +3200,7 @@ IMPORTANT: If the user asks you to connect nodes, suggest connections, or explai
           <div className="px-3 pt-3 pb-2 border-b border-[var(--color-border)]">
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-sm font-medium">Sapien Corridor</h3>
-              <span className="text-xxs text-green-400">{libraryStats.totalElements + components.length} elements</span>
+              <span className="text-xxs text-green-400">{components.length} entities</span>
             </div>
             <div className="relative">
               <FiSearch className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--color-text-muted)]" />
@@ -3239,9 +3225,9 @@ IMPORTANT: If the user asks you to connect nodes, suggest connections, or explai
                 {librarySearchResults.slice(0, 50).map(elem => (
                   <div
                     key={elem.id}
-                    onClick={() => { setSelectedLibraryId(elem.id); setSelectedId(null) }}
+                    onClick={() => { setSelectedLibraryId(elem.id); setSelectedId(elem.id) }}
                     className={clsx(
-                      'flex items-center gap-2 py-1.5 px-2 rounded text-xs cursor-pointer transition-colors',
+                      'group flex items-center gap-2 py-1.5 px-2 rounded text-xs cursor-pointer transition-colors',
                       selectedLibraryId === elem.id
                         ? 'bg-primary-500/20 text-primary-400'
                         : 'hover:bg-[var(--color-surface)] text-[var(--color-text-secondary)]'
@@ -3250,40 +3236,25 @@ IMPORTANT: If the user asks you to connect nodes, suggest connections, or explai
                     {elem.aiSimulationReady && <FiCpu className="w-3 h-3 text-green-400" />}
                     <span className="truncate flex-1">{elem.name}</span>
                     <span className="text-xxs text-[var(--color-text-muted)]">{elem.category.split('_')[0]}</span>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); addLibraryElementToCanvas(elem.id) }}
+                      className="p-0.5 hover:bg-primary-500/20 rounded text-primary-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                      title="Add to Canvas"
+                    >
+                      <FiPlus className="w-3 h-3" />
+                    </button>
                   </div>
                 ))}
               </div>
             ) : (
-              <>
-                {/* Structures section */}
-                <div className="mb-3">
-                  <div className="text-xxs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider px-2 py-1.5">
-                    Disease Structures
-                    <span className="ml-1.5 text-[var(--color-text-muted)] font-normal normal-case">({visibleCount} visible)</span>
-                  </div>
-                  <ComponentTree
-                    components={components}
-                    selectedId={selectedId}
-                    onSelect={(id) => { setSelectedId(id); setSelectedLibraryId(null) }}
-                    onToggleVisibility={toggleVisibility}
-                    searchTerm={searchTerm}
-                    onAddToCanvas={addToCanvas}
-                  />
-                </div>
-                {/* Master Library section */}
-                <div className="border-t border-[var(--color-border)] pt-3">
-                  <div className="text-xxs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider px-2 py-1.5">
-                    Master Human Library
-                  </div>
-                  <MasterLibraryTree
-                    nodes={masterLibraryTree}
-                    onSelect={(id) => { setSelectedLibraryId(id); setSelectedId(null) }}
-                    selectedId={selectedLibraryId}
-                    expandedNodes={expandedLibraryNodes}
-                    onToggleExpand={toggleLibraryNode}
-                  />
-                </div>
-              </>
+              <MasterLibraryTree
+                nodes={masterLibraryTree}
+                onSelect={(id) => { setSelectedLibraryId(id); setSelectedId(id) }}
+                selectedId={selectedLibraryId}
+                expandedNodes={expandedLibraryNodes}
+                onToggleExpand={toggleLibraryNode}
+                onAddToCanvas={addLibraryElementToCanvas}
+              />
             )}
           </div>
         </div>
@@ -3507,7 +3478,7 @@ IMPORTANT: If the user asks you to connect nodes, suggest connections, or explai
             </div>
             <div className="flex-1 overflow-y-auto">
               {selectedLibraryId ? (
-                <MasterLibraryDetails element={selectedLibraryElement} />
+                <MasterLibraryDetails element={selectedLibraryElement} onAddToCanvas={addLibraryElementToCanvas} />
               ) : (
                 <div className="p-3">
                   <PropertiesPanel component={selectedComponent} />
