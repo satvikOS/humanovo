@@ -1719,38 +1719,52 @@ export default function Notebook() {
     }
   }
 
+  // Flush current edits into the pages array (but NOT to other pages)
+  const flushCurrentPage = useCallback(() => {
+    const curPage = activePageRef.current
+    if (!curPage) return
+    const curId = curPage.id
+    const title = editTitleRef.current
+    const content = editContentRef.current
+    const tags = [...editTagsRef.current]
+    // Only flush if something changed
+    if (title !== curPage.title || content !== (curPage.content || '') || JSON.stringify(tags) !== JSON.stringify(curPage.tags || [])) {
+      const updated = { ...curPage, title, content, tags, updated_at: new Date().toISOString() }
+      // Update ONLY the matching page by ID — never touch other pages
+      setPagesRaw(prev => {
+        const next = prev.map(p => p.id === curId ? updated : p)
+        persistSet('notebook-pages', next)
+        return next
+      })
+      // Fire-and-forget API save
+      if (!curId.startsWith('local-')) {
+        api.updateNotebookPage(curId, { title, content, tags }).catch(() => {})
+      }
+    }
+  }, [])
+
   const selectPage = useCallback((page: NotebookPage) => {
-    // Cancel any pending auto-save for the previous page
+    // Cancel any pending auto-save
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current)
       saveTimerRef.current = null
     }
-    // Flush unsaved changes to the previous page before switching
-    const prevPage = activePageRef.current
-    if (prevPage && prevPage.id !== page.id) {
-      const prevTitle = editTitleRef.current
-      const prevContent = editContentRef.current
-      const prevTags = [...editTagsRef.current]
-      // Only save if something actually changed
-      if (prevTitle !== prevPage.title || prevContent !== (prevPage.content || '') || JSON.stringify(prevTags) !== JSON.stringify(prevPage.tags || [])) {
-        const updated = { ...prevPage, title: prevTitle, content: prevContent, tags: prevTags, updated_at: new Date().toISOString() }
-        setPages(prev => prev.map(p => p.id === updated.id ? updated : p))
-        // Fire-and-forget API save for previous page
-        if (!prevPage.id.startsWith('local-')) {
-          api.updateNotebookPage(prevPage.id, { title: prevTitle, content: prevContent, tags: prevTags }).catch(() => {})
-        }
-      }
+    // Flush edits for the page we're LEAVING (only if switching to a different page)
+    if (activePageRef.current && activePageRef.current.id !== page.id) {
+      flushCurrentPage()
     }
-    setActivePage(page)
-    const content = page.content || ''
-    setEditContent(content)
-    setEditTitle(page.title || '')
-    setEditTags(Array.isArray(page.tags) ? page.tags : [])
+    // Read the FRESH version of the target page from the pages array
+    // (it may have been updated since the stale `page` object was captured)
+    const freshPage = persistGet<NotebookPage[]>('notebook-pages', []).find(p => p.id === page.id) || page
+    setActivePage(freshPage)
+    setEditContent(freshPage.content || '')
+    setEditTitle(freshPage.title || '')
+    setEditTags(Array.isArray(freshPage.tags) ? [...freshPage.tags] : [])
     setHasUnsavedChanges(false)
     setShowVersions(false)
     // Force editor content refresh on page switch
     lastExternalContent.current = ''
-  }, [setPages])
+  }, [flushCurrentPage])
 
   useEffect(() => {
     return () => {
@@ -1764,61 +1778,83 @@ export default function Notebook() {
   }
 
   // Save using refs (for auto-save timer — avoids stale closures)
+  // CRITICAL: Only updates the specific page matching activePageRef.current.id
   const savePageFromRefs = useCallback(async () => {
     const page = activePageRef.current
     if (!page) return
+    const pageId = page.id  // Capture the ID to save
     const title = editTitleRef.current
     const content = editContentRef.current
     const tags = [...editTagsRef.current]
     try {
       setSaving(true)
-      if (page.id.startsWith('local-')) {
-        const updated = { ...page, title, content, tags, updated_at: new Date().toISOString() }
-        setActivePage(prev => prev?.id === page.id ? updated : prev)
-        setPages(prev => prev.map(p => p.id === updated.id ? updated : p))
+      if (pageId.startsWith('local-')) {
+        // Update only this specific page in the array
+        setPagesRaw(prev => {
+          const next = prev.map(p => p.id === pageId ? { ...p, title, content, tags, updated_at: new Date().toISOString() } : p)
+          persistSet('notebook-pages', next)
+          return next
+        })
+        setActivePage(prev => prev?.id === pageId ? { ...prev, title, content, tags, updated_at: new Date().toISOString() } : prev)
         setHasUnsavedChanges(false)
         return
       }
-      const updated = await api.updateNotebookPage(page.id, { title, content, tags })
-      setActivePage(prev => prev?.id === updated.id ? updated : prev)
-      setPages(prev => prev.map(p => p.id === updated.id ? updated : p))
+      const updated = await api.updateNotebookPage(pageId, { title, content, tags })
+      // Only apply if we're still on the same page
+      setPagesRaw(prev => {
+        const next = prev.map(p => p.id === pageId ? { ...p, ...updated } : p)
+        persistSet('notebook-pages', next)
+        return next
+      })
+      setActivePage(prev => prev?.id === pageId ? { ...prev, ...updated } : prev)
       setHasUnsavedChanges(false)
     } catch (err) {
       console.error('Failed to save page:', err)
-      const updated = { ...page, title, content, tags, updated_at: new Date().toISOString() }
-      setActivePage(prev => prev?.id === page.id ? updated : prev)
-      setPages(prev => prev.map(p => p.id === updated.id ? updated : p))
+      setPagesRaw(prev => {
+        const next = prev.map(p => p.id === pageId ? { ...p, title, content, tags, updated_at: new Date().toISOString() } : p)
+        persistSet('notebook-pages', next)
+        return next
+      })
+      setActivePage(prev => prev?.id === pageId ? { ...prev, title, content, tags, updated_at: new Date().toISOString() } : prev)
       setHasUnsavedChanges(false)
     } finally {
       setSaving(false)
     }
-  }, [setPages])
+  }, [])
 
   // Save using current state (for explicit save button)
+  // CRITICAL: Only updates the specific page matching activePage.id
   const savePage = async () => {
     if (!activePage) return
+    const pageId = activePage.id  // Capture ID to save
     try {
       setSaving(true)
-      if (activePage.id.startsWith('local-')) {
-        const updated = { ...activePage, title: editTitle, content: editContent, tags: editTags, updated_at: new Date().toISOString() }
-        setActivePage(updated)
-        setPages(prev => prev.map(p => p.id === updated.id ? updated : p))
+      if (pageId.startsWith('local-')) {
+        setPagesRaw(prev => {
+          const next = prev.map(p => p.id === pageId ? { ...p, title: editTitle, content: editContent, tags: editTags, updated_at: new Date().toISOString() } : p)
+          persistSet('notebook-pages', next)
+          return next
+        })
+        setActivePage(prev => prev?.id === pageId ? { ...prev, title: editTitle, content: editContent, tags: editTags, updated_at: new Date().toISOString() } : prev)
         setHasUnsavedChanges(false)
         return
       }
-      const updated = await api.updateNotebookPage(activePage.id, {
-        title: editTitle,
-        content: editContent,
-        tags: editTags,
+      const updated = await api.updateNotebookPage(pageId, { title: editTitle, content: editContent, tags: editTags })
+      setPagesRaw(prev => {
+        const next = prev.map(p => p.id === pageId ? { ...p, ...updated } : p)
+        persistSet('notebook-pages', next)
+        return next
       })
-      setActivePage(updated)
-      setPages(prev => prev.map(p => p.id === updated.id ? updated : p))
+      setActivePage(prev => prev?.id === pageId ? { ...prev, ...updated } : prev)
       setHasUnsavedChanges(false)
     } catch (err) {
       console.error('Failed to save page:', err)
-      const updated = { ...activePage, title: editTitle, content: editContent, tags: editTags, updated_at: new Date().toISOString() }
-      setActivePage(updated)
-      setPages(prev => prev.map(p => p.id === updated.id ? updated : p))
+      setPagesRaw(prev => {
+        const next = prev.map(p => p.id === pageId ? { ...p, title: editTitle, content: editContent, tags: editTags, updated_at: new Date().toISOString() } : p)
+        persistSet('notebook-pages', next)
+        return next
+      })
+      setActivePage(prev => prev?.id === pageId ? { ...prev, title: editTitle, content: editContent, tags: editTags, updated_at: new Date().toISOString() } : prev)
       setHasUnsavedChanges(false)
     } finally {
       setSaving(false)
@@ -1883,52 +1919,58 @@ export default function Notebook() {
     return (catTag?.replace('category:', '') as TemplateCategory) || 'general'
   }
 
-  // --- Delete page: pure React state, same pattern as Simulations page ---
+  // --- Delete page ---
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
-  const handleDeletePage = (id: string) => {
+  // Use a ref-backed handler to guarantee the delete dialog opens
+  const requestDeleteRef = useRef<(id: string) => void>(() => {})
+  requestDeleteRef.current = (id: string) => {
     setDeleteConfirmId(id)
   }
 
   const confirmDelete = useCallback(() => {
-    if (!deleteConfirmId) return
     const pid = deleteConfirmId
+    if (!pid) return
     setDeleteConfirmId(null)
     // Cancel any pending auto-save
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current)
       saveTimerRef.current = null
     }
-    // API delete
+    // API delete (fire and forget)
     if (!pid.startsWith('local-')) {
       api.deleteNotebookPage(pid).catch(() => {})
     }
     persistSet('notebook-onboarded', true)
-    // Remove from state + persist
-    setPagesRaw(prev => {
-      const remaining = prev.filter(p => p.id !== pid)
-      persistSet('notebook-pages', remaining)
-      return remaining
-    })
-    // Switch active page if the deleted page was active — use ref for fresh value
+    // Remove from pages array
+    const currentPages = persistGet<NotebookPage[]>('notebook-pages', [])
+    const remaining = currentPages.filter(p => p.id !== pid)
+    persistSet('notebook-pages', remaining)
+    setPagesRaw(remaining)
+    // Switch active page if deleted page was active
     if (activePageRef.current?.id === pid) {
-      // Read updated pages from localStorage since setPagesRaw is async
-      const remaining = (persistGet<NotebookPage[]>('notebook-pages', []))
       if (remaining.length > 0) {
-        // Directly set state instead of calling selectPage to avoid stale ref issues
         const nextPage = remaining[0]
         setActivePage(nextPage)
         setEditContent(nextPage.content || '')
         setEditTitle(nextPage.title || '')
-        setEditTags(Array.isArray(nextPage.tags) ? nextPage.tags : [])
+        setEditTags(Array.isArray(nextPage.tags) ? [...nextPage.tags] : [])
         setHasUnsavedChanges(false)
         lastExternalContent.current = ''
+        activePageRef.current = nextPage
+        editContentRef.current = nextPage.content || ''
+        editTitleRef.current = nextPage.title || ''
+        editTagsRef.current = Array.isArray(nextPage.tags) ? [...nextPage.tags] : []
       } else {
         setActivePage(null)
         setEditContent('')
         setEditTitle('')
         setEditTags([])
         setHasUnsavedChanges(false)
+        activePageRef.current = null
+        editContentRef.current = ''
+        editTitleRef.current = ''
+        editTagsRef.current = []
       }
     }
   }, [deleteConfirmId])
@@ -2100,48 +2142,58 @@ export default function Notebook() {
           {filteredPages.map(page => (
             <div
               key={page.id}
-              role="button"
-              tabIndex={0}
-              onClick={() => selectPage(page)}
-              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') selectPage(page) }}
               className={clsx(
-                'w-full text-left p-2 rounded transition-colors group cursor-pointer',
+                'w-full text-left p-2 rounded transition-colors group',
                 activePage?.id === page.id
                   ? 'bg-white/10 text-white'
                   : 'text-[var(--color-text-secondary)] hover:bg-white/5'
               )}
             >
+              {/* Row 1: category dot + title + delete button */}
               <div className="flex items-center justify-between">
-                <div className="w-1.5 h-1.5 rounded-full shrink-0 mr-1.5" style={{ background: TEMPLATE_CATEGORY_COLORS[getPageCategory(page)] || '#94a3b8' }} />
-                <span className="text-xs font-medium truncate flex-1">{page.title}</span>
+                {/* Clickable area for page selection (does NOT wrap delete button) */}
+                <div
+                  className="flex items-center flex-1 min-w-0 cursor-pointer"
+                  onClick={() => selectPage(page)}
+                >
+                  <div className="w-1.5 h-1.5 rounded-full shrink-0 mr-1.5" style={{ background: TEMPLATE_CATEGORY_COLORS[getPageCategory(page)] || '#94a3b8' }} />
+                  <span className="text-xs font-medium truncate flex-1">{page.title}</span>
+                </div>
+                {/* Delete button — completely separate from selection area */}
                 <button
                   type="button"
-                  onClick={e => { e.stopPropagation(); handleDeletePage(page.id) }}
-                  onMouseDown={e => e.stopPropagation()}
-                  className="p-1 rounded hover:bg-red-500/20 text-red-400/60 hover:text-red-400 cursor-pointer shrink-0"
+                  className="p-1 ml-1 rounded hover:bg-red-500/20 text-red-400/60 hover:text-red-400 cursor-pointer shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
                   title="Delete page"
-                  style={{ pointerEvents: 'auto', position: 'relative', zIndex: 20 }}
+                  onPointerDown={(e) => {
+                    // Use onPointerDown to guarantee event fires before any parent handlers
+                    e.preventDefault()
+                    e.stopPropagation()
+                    requestDeleteRef.current(page.id)
+                  }}
                 >
-                  <FiTrash2 className="w-3 h-3" />
+                  <FiTrash2 className="w-3 h-3 pointer-events-none" />
                 </button>
               </div>
-              <div className="flex items-center gap-2 mt-0.5">
-                <span className="text-xxs text-[var(--color-text-muted)]">
-                  v{page.version}
-                </span>
-                <span className="text-xxs text-[var(--color-text-muted)]">
-                  {formatDate(page.updated_at)}
-                </span>
-              </div>
-              {Array.isArray(page.tags) && page.tags.length > 0 && (
-                <div className="flex gap-1 mt-1 flex-wrap">
-                  {(page.tags ?? []).slice(0, 3).map(tag => (
-                    <span key={tag} className="text-xxs px-1 py-0.5 rounded bg-white/5 text-[var(--color-text-muted)]">
-                      {tag}
-                    </span>
-                  ))}
+              {/* Row 2: metadata (also clickable for selection) */}
+              <div className="cursor-pointer" onClick={() => selectPage(page)}>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <span className="text-xxs text-[var(--color-text-muted)]">
+                    v{page.version}
+                  </span>
+                  <span className="text-xxs text-[var(--color-text-muted)]">
+                    {formatDate(page.updated_at)}
+                  </span>
                 </div>
-              )}
+                {Array.isArray(page.tags) && page.tags.length > 0 && (
+                  <div className="flex gap-1 mt-1 flex-wrap">
+                    {(page.tags ?? []).slice(0, 3).map(tag => (
+                      <span key={tag} className="text-xxs px-1 py-0.5 rounded bg-white/5 text-[var(--color-text-muted)]">
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           ))}
 

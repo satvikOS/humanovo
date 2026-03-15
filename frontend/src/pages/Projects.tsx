@@ -308,17 +308,36 @@ export default function Projects() {
   }
 
   const handleCreate = async (data: ProjectCreate): Promise<boolean> => {
+    // Try API first
     try {
       const project = await api.createProject(data)
       setProjects(prev => [project, ...prev])
-      // Also save to localStorage so it survives reloads
+      // Also persist to localStorage
       const localProjects = persistGet<any[]>('projects', [])
       persistSet('projects', [project, ...localProjects])
       return true
-    } catch (err) {
-      console.error('Failed to create project:', err)
-      return false
+    } catch {
+      // API unavailable — create locally
+      console.warn('Backend unavailable, creating project locally')
     }
+    // localStorage fallback: create a local project object
+    const localProject: Project = {
+      id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name: data.name,
+      description: data.description,
+      disease_focus: data.disease_focus,
+      research_question: data.research_question,
+      tags: data.tags || [],
+      status: 'active',
+      hypothesis_count: 0,
+      evidence_count: 0,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }
+    setProjects(prev => [localProject, ...prev])
+    const localProjects = persistGet<any[]>('projects', [])
+    persistSet('projects', [localProject, ...localProjects])
+    return true
   }
 
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
