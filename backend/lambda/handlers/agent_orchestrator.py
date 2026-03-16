@@ -1250,6 +1250,18 @@ def call_azure_ai(model_name: str, prompt: str, system_prompt: str,
                 raise RateLimitError(
                     f"Azure AI rate limit (429) exhausted after {max_retries} retries for {model_name}"
                 )
+            elif e.code in (424, 502, 503) and attempt < max_retries:
+                # Service unavailable / dependency failed — retry with backoff
+                wait = min(5 * (2 ** attempt), 30)  # 5s, 10s, 20s, 30s
+                logger.warning(f"Azure AI HTTP {e.code} for {model_name}, retry {attempt+1}/{max_retries} in {wait}s")
+                try:
+                    _cancellable_sleep(wait)
+                except CancelledError:
+                    raise CancelledError(f"Cancelled during {e.code} backoff for {model_name}")
+            elif e.code in (424, 502, 503):
+                # Exhausted retries for service unavailable — raise for fallback handling
+                logger.error(f"Azure AI HTTP {e.code} exhausted {max_retries} retries for {model_name}: {error_body[:200]}")
+                raise RuntimeError(f"Model {model_name} HTTP {e.code}: {error_body[:200]}")
             elif e.code == 400 and ("content_filter" in error_body or "ResponsibleAIPolicyViolation" in error_body):
                 # Content filter triggered — retry with reformulated prompt
                 logger.warning(f"Azure content filter triggered for {model_name}, retrying with reformulated prompt")
@@ -1644,7 +1656,7 @@ STAGE_FALLBACKS = {
     "innovator": ["explorer"],          # Cohere → Claude Opus
     "critic": ["explorer"],             # Mistral → Claude Opus
     "strategist": ["explorer"],          # Claude Sonnet → Claude Opus
-    "quant": ["critic", "explorer"],    # Grok → Mistral → Claude Opus
+    "quant": ["validator", "critic", "explorer"],    # Grok → o3-mini → Mistral → Claude Opus
     "validator": ["analyst"],           # o3-mini → Claude Sonnet
     "architect": ["explorer"],           # Claude Sonnet → Claude Opus
     "analyst": ["explorer"],            # Claude Sonnet → Claude Opus
@@ -1820,33 +1832,75 @@ def search_uniprot(query: str, max_results: int = 3) -> list[dict]:
     return results
 
 
-def search_reactome(query: str, max_results: int = 3) -> list[dict]:
-    """Search Reactome for biological pathways."""
+def search_kegg(query: str, max_results: int = 3) -> list[dict]:
+    """Search KEGG for biological pathways (fallback when Reactome is unavailable)."""
     results = []
     try:
-        url = f"https://reactome.org/ContentService/search/query?query={urllib.parse.quote(query)}&types=Pathway&cluster=true"
-        text = _fetch_url(url)
+        url = f"https://rest.kegg.jp/find/pathway/{urllib.parse.quote(query)}"
+        text = _fetch_url(url, timeout=10)
         if not text:
+            print(f"[RAG] KEGG FAIL: no response for '{query[:50]}'")
             return results
-        data = json.loads(text)
-        entries = data.get("results", [])
-        count = 0
-        for group in entries:
-            for entry in group.get("entries", []):
-                if count >= max_results:
-                    break
-                st_id = entry.get("stId", "")
-                name = entry.get("name", "")
-                species = entry.get("species", [""])[0] if entry.get("species") else ""
+        lines = text.strip().split("\n")
+        for line in lines[:max_results]:
+            parts = line.split("\t")
+            if len(parts) >= 2:
+                pathway_id = parts[0].replace("map:", "").strip()
+                name = parts[1].strip()
                 results.append({
-                    "id": st_id,
+                    "id": pathway_id,
                     "name": name,
-                    "species": species,
-                    "citation": f"Reactome {st_id}: {name}",
+                    "species": "Homo sapiens",
+                    "citation": f"KEGG {pathway_id}: {name}",
                 })
-                count += 1
+        print(f"[RAG] KEGG OK: {len(results)} pathways for '{query[:50]}'")
     except Exception as e:
-        logger.warning(f"Reactome search failed for '{query[:50]}': {e}")
+        print(f"[RAG] KEGG FAIL: '{query[:50]}' — {e}")
+        logger.warning(f"KEGG search failed for '{query[:50]}': {e}")
+    return results
+
+
+def search_reactome(query: str, max_results: int = 3) -> list[dict]:
+    """Search Reactome for biological pathways. Retries up to 2x, then falls back to KEGG."""
+    results = []
+    max_retries = 2
+    for attempt in range(max_retries + 1):
+        try:
+            url = f"https://reactome.org/ContentService/search/query?query={urllib.parse.quote(query)}&types=Pathway&cluster=true"
+            text = _fetch_url(url, timeout=10)
+            if not text:
+                if attempt < max_retries:
+                    time.sleep(1 * (attempt + 1))  # 1s, 2s backoff
+                    continue
+                # All retries exhausted — fall back to KEGG
+                print(f"[RAG] Reactome FAIL after {max_retries + 1} attempts — falling back to KEGG")
+                return search_kegg(query, max_results)
+            data = json.loads(text)
+            entries = data.get("results", [])
+            count = 0
+            for group in entries:
+                for entry in group.get("entries", []):
+                    if count >= max_results:
+                        break
+                    st_id = entry.get("stId", "")
+                    name = entry.get("name", "")
+                    species = entry.get("species", [""])[0] if entry.get("species") else ""
+                    results.append({
+                        "id": st_id,
+                        "name": name,
+                        "species": species,
+                        "citation": f"Reactome {st_id}: {name}",
+                    })
+                    count += 1
+            print(f"[RAG] Reactome OK: {len(results)} pathways for '{query[:50]}'")
+            return results
+        except Exception as e:
+            if attempt < max_retries:
+                time.sleep(1 * (attempt + 1))
+                continue
+            logger.warning(f"Reactome search failed for '{query[:50]}': {e}")
+            print(f"[RAG] Reactome FAIL after {max_retries + 1} attempts — falling back to KEGG: {e}")
+            return search_kegg(query, max_results)
     return results
 
 
@@ -1883,22 +1937,33 @@ def ground_hypothesis_with_databases(disease: str, hypothesis_title: str, mechan
     if not pubmed_results:
         pubmed_results = search_pubmed(disease, max_results=3)
     grounding["pubmed"] = pubmed_results
+    print(f"[RAG] PubMed {'OK' if pubmed_results else 'FAIL'}: {len(pubmed_results)} results for '{query_base[:50]}'")
 
     # ClinicalTrials.gov
     ct_results = search_clinical_trials(disease, max_results=3)
     grounding["clinical_trials"] = ct_results
+    print(f"[RAG] ClinicalTrials.gov {'OK' if ct_results else 'FAIL'}: {len(ct_results)} results for '{disease[:50]}'")
 
     # FDA
     fda_results = search_fda(disease, max_results=2)
     grounding["fda"] = fda_results
+    print(f"[RAG] FDA {'OK' if fda_results else 'FAIL'}: {len(fda_results)} results for '{disease[:50]}'")
 
     # UniProt — search for key proteins mentioned
     uniprot_results = search_uniprot(mechanism_short, max_results=2)
     grounding["uniprot"] = uniprot_results
+    print(f"[RAG] UniProt {'OK' if uniprot_results else 'FAIL'}: {len(uniprot_results)} results for '{mechanism_short[:50]}'")
 
-    # Reactome — search for pathways
+    # Reactome — search for pathways (with KEGG fallback)
     reactome_results = search_reactome(mechanism_short, max_results=2)
     grounding["reactome"] = reactome_results
+    # Note: Reactome/KEGG logging is handled inside search_reactome()
+
+    # Log RAG summary
+    total_citations = sum(len(v) for k, v in grounding.items() if k != "summary")
+    sources_ok = sum(1 for k, v in grounding.items() if k != "summary" and v)
+    sources_total = sum(1 for k in grounding if k != "summary")
+    print(f"[RAG] Grounding summary: {sources_ok}/{sources_total} sources returned data, {total_citations} total citations")
 
     # Build summary citations
     for src, items in grounding.items():
@@ -2371,7 +2436,38 @@ Validation: {_safe_join('; ', result.get('validation_steps', []), 3)}"""
                     cancelled = True
                     break
                 except Exception as e:
-                    print(f"[WORKER]   {stage_name} -> ERROR: {e}, skipping stage")
+                    print(f"[WORKER]   {stage_name} -> ERROR with {role}: {e}")
+                    # Runtime fallback: try alternative models from STAGE_FALLBACKS
+                    original_role = stage_info.get("fallback_from", role)
+                    fallback_roles = STAGE_FALLBACKS.get(original_role, [])
+                    # Skip roles already tried (including the current one)
+                    tried = {role}
+                    fallback_success = False
+                    for fb_role in fallback_roles:
+                        if fb_role in tried:
+                            continue
+                        tried.add(fb_role)
+                        print(f"[WORKER]   {stage_name} -> runtime fallback: trying {fb_role}...")
+                        try:
+                            fb_result = run_single_agent(fb_role, stage_prompt, system_prompt)
+                            if fb_result:
+                                hypothesis_data = fb_result
+                                accumulated_context = f"""Title: {fb_result['title']}
+Description: {fb_result['description'][:800]}
+Mechanism: {fb_result['mechanism'][:500]}
+Confidence: {fb_result['confidence']:.0%}
+Evidence: {_safe_join('; ', fb_result.get('evidence_summary', []), 5)}
+Risks: {_safe_join('; ', fb_result.get('risks', []), 3)}
+Validation: {_safe_join('; ', fb_result.get('validation_steps', []), 3)}"""
+                                print(f"[WORKER]   {stage_name} -> fallback {fb_role} OK: {fb_result['title'][:70]} conf={fb_result['confidence']:.2f}")
+                                fallback_success = True
+                                break
+                        except (RateLimitError, CancelledError):
+                            raise
+                        except Exception as fb_err:
+                            print(f"[WORKER]   {stage_name} -> fallback {fb_role} also failed: {fb_err}")
+                    if not fallback_success:
+                        print(f"[WORKER]   {stage_name} -> all fallbacks exhausted, skipping stage")
 
                 stages_completed += 1
 
@@ -2424,27 +2520,64 @@ Validation: {_safe_join('; ', result.get('validation_steps', []), 3)}"""
                         resume_round = round_num + 1
                         resume_hyp_idx = 0
                     try:
-                        lambda_client.invoke(
-                            FunctionName=FUNCTION_NAME,
-                            InvocationType="Event",
-                            Payload=json.dumps({
+                        continuation_payload = json.dumps({
+                            "source": "self-invoke",
+                            "action": "run_discovery",
+                            "config": config,
+                            "continuation": {
+                                "start_round": resume_round,
+                                "start_hyp_idx": resume_hyp_idx,
+                                "existing_hypotheses": hypotheses,
+                                "stages_completed": stages_completed,
+                                "total_start_time_offset": elapsed_now + time_offset,
+                                "project_id": project_id,
+                                "project_name": project_name,
+                            },
+                        }, cls=DecimalEncoder)
+                        payload_size = len(continuation_payload.encode("utf-8"))
+                        print(f"[WORKER] Continuation payload size: {payload_size:,} bytes")
+                        # Lambda async invoke limit is 256KB — if exceeded, trim hypotheses
+                        if payload_size > 250_000:
+                            # Keep only top hypotheses by confidence to reduce payload
+                            trimmed = sorted(hypotheses, key=lambda x: x["confidence"], reverse=True)[:TARGET_TOTAL_HYPOTHESES]
+                            # Strip verbose fields to reduce size
+                            for h in trimmed:
+                                h.pop("evidence_summary", None)
+                                h.pop("validation_steps", None)
+                            continuation_payload = json.dumps({
                                 "source": "self-invoke",
                                 "action": "run_discovery",
                                 "config": config,
                                 "continuation": {
                                     "start_round": resume_round,
                                     "start_hyp_idx": resume_hyp_idx,
-                                    "existing_hypotheses": hypotheses,
+                                    "existing_hypotheses": trimmed,
                                     "stages_completed": stages_completed,
                                     "total_start_time_offset": elapsed_now + time_offset,
                                     "project_id": project_id,
                                     "project_name": project_name,
                                 },
-                            }, cls=DecimalEncoder),
+                            }, cls=DecimalEncoder)
+                            print(f"[WORKER] Trimmed continuation payload: {len(continuation_payload.encode('utf-8')):,} bytes")
+                        lambda_client.invoke(
+                            FunctionName=FUNCTION_NAME,
+                            InvocationType="Event",
+                            Payload=continuation_payload,
                         )
                         print(f"[WORKER] Continuation invoked at round {resume_round + 1}, hyp_idx {resume_hyp_idx}")
                     except Exception as cont_err:
-                        print(f"[WORKER] Continuation FAILED: {cont_err}")
+                        print(f"[WORKER] Continuation self-invoke FAILED: {cont_err}")
+                        # Critical: if continuation fails, don't leave state as "running" forever
+                        # Mark as completed with whatever we have so frontend isn't stuck
+                        try:
+                            update_discovery_state({
+                                "status": "completed",
+                                "hypotheses": sorted_h[:TARGET_TOTAL_HYPOTHESES],
+                                "stats": _build_stats(hypotheses, stages_completed, elapsed_now + time_offset, round_num, NUM_ROUNDS),
+                            })
+                            print(f"[WORKER] Marked as completed due to continuation failure ({len(hypotheses)} hypotheses saved)")
+                        except Exception:
+                            pass
                     return
 
             if cancelled:
@@ -3478,13 +3611,32 @@ def _update_paper_phase(table, phase_name: str, phase_num: int, total_phases: in
         pass  # Non-critical
 
 
+# Paper section fallback models: if primary fails, try these in order
+PAPER_SECTION_FALLBACKS = {
+    "grok": [
+        {"model_id": AZURE_AI_O3MINI_MODEL, "provider": "azure_ai", "name": "o3-mini"},
+        {"model_id": AZURE_AI_GPT41_MODEL, "provider": "azure_ai", "name": "gpt-4.1"},
+    ],
+    "mistral": [
+        {"model_id": AZURE_AI_GPT41_MODEL, "provider": "azure_ai", "name": "gpt-4.1"},
+    ],
+    "cohere": [
+        {"model_id": AZURE_AI_GPT4O_MODEL, "provider": "azure_ai", "name": "gpt-4o"},
+    ],
+}
+
+
 def _call_model_for_section(section_key: str, section_cfg: dict, prompt: str) -> tuple[str, str, str | None]:
-    """Call a specific model for a paper section. Returns (section_key, result_text, error)."""
+    """Call a specific model for a paper section. Returns (section_key, result_text, error).
+
+    On failure, tries fallback models from PAPER_SECTION_FALLBACKS.
+    """
     model_id = section_cfg["model_id"]()
     client = section_cfg["client"]()
     provider = section_cfg["provider"]
     heading = section_cfg["heading"]
     system = section_cfg["system"]
+    model_key = section_cfg.get("model", "")
 
     try:
         if client is not None and provider == "azure_ai":
@@ -3496,9 +3648,25 @@ def _call_model_for_section(section_key: str, section_cfg: dict, prompt: str) ->
             print(f"[PAPER] Section '{heading}' (bedrock): {len(result)} chars")
             return (section_key, result, None)
         else:
-            return (section_key, "", f"Client not available for {model_id}")
+            raise RuntimeError(f"Client not available for {model_id}")
     except Exception as e:
-        print(f"[PAPER] Section '{heading}' FAILED: {e}")
+        print(f"[PAPER] Section '{heading}' FAILED with {model_id}: {e}")
+        # Try fallback models
+        fallbacks = PAPER_SECTION_FALLBACKS.get(model_key, [])
+        for fb in fallbacks:
+            fb_model = fb["model_id"]
+            fb_name = fb["name"]
+            print(f"[PAPER] Section '{heading}' — trying fallback: {fb_name}")
+            try:
+                if fb["provider"] == "azure_ai":
+                    result = call_azure_ai(fb_model, prompt, system, max_tokens=8_000, temperature=0.3)
+                else:
+                    result = call_bedrock(fb_model, prompt, system, max_tokens=8_000, temperature=0.3)
+                print(f"[PAPER] Section '{heading}' fallback {fb_name} OK: {len(result)} chars")
+                return (section_key, result, None)
+            except Exception as fb_err:
+                print(f"[PAPER] Section '{heading}' fallback {fb_name} FAILED: {fb_err}")
+        print(f"[PAPER] Section '{heading}' — all models failed")
         return (section_key, "", str(e))
 
 
