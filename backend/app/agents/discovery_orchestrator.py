@@ -7,16 +7,16 @@ moves to the next hypothesis. Between EVERY stage, a dual-model embedding
 grounding system ensures zero hallucinations.
 
 10-Stage Pipeline (one model per stage):
-  Stage 1  — SEED       (Claude Opus, Bedrock)         : Generate initial hypothesis seed
-  Stage 2  — EXPAND     (DeepSeek-R1-0528, Azure AI)   : Deep causal chain reasoning
-  Stage 3  — EVIDENCE   (Cohere Command A, Azure OpenAI): Literature evidence review (+ ALL APIs)
-  Stage 4  — COUNTER    (Mistral-Large-3, Azure AI)     : Counter-argument generation
-  Stage 5  — MECHANISM  (o3-mini, Azure OpenAI)         : Mechanistic deep dive
-  Stage 6  — VALIDATE   (Kimi-K2-Thinking, Azure OpenAI): Cross-validation
-  Stage 7  — GROUND     (GPT-4.1, Azure OpenAI)         : Scientific grounding (+ ALL APIs)
-  Stage 8  — SCORE      (GPT-4o, Azure OpenAI)          : Multi-dimensional confidence scoring
-  Stage 9  — REFINE     (Grok-4-1-fast, Azure AI)       : Rapid refinement
-  Stage 10 — FINALIZE   (Claude Opus, Bedrock)          : Final synthesis
+  Stage 1  — SEED       (Claude Opus, Bedrock)          : Generate initial hypothesis seed
+  Stage 2  — EXPAND     (o3-mini, Azure OpenAI)          : Deep causal chain reasoning
+  Stage 3  — EVIDENCE   (Cohere Command A, Azure OpenAI) : Literature evidence review (+ ALL APIs)
+  Stage 4  — COUNTER    (Mistral-Large-3, Azure AI)      : Counter-argument generation
+  Stage 5  — MECHANISM  (GPT-4.1, Azure OpenAI)          : Mechanistic deep dive
+  Stage 6  — VALIDATE   (GPT-4o, Azure OpenAI)           : Cross-validation
+  Stage 7  — GROUND     (Grok-4-1-fast, Azure AI)        : Scientific grounding (+ ALL APIs)
+  Stage 8  — SCORE      (GPT-4.1, Azure OpenAI)          : Multi-dimensional confidence scoring
+  Stage 9  — REFINE     (GPT-4o, Azure OpenAI)           : Fast refinement
+  Stage 10 — FINALIZE   (Claude Opus, Bedrock)           : Final synthesis
 
 Dual-Model Embedding Grounding (between EVERY stage):
   Two embedding models run in parallel on every stage output:
@@ -27,10 +27,11 @@ Dual-Model Embedding Grounding (between EVERY stage):
   A) RAG Retrieval: Embed output → retrieve matching evidence → inject into next stage
   B) Semantic Gating: Compare each claim against evidence pool → flag ungrounded claims
 
-Scientific Data Sources (15+ APIs queried in parallel):
+Scientific Data Sources (60+ APIs queried in parallel):
   Core: PubMed, ClinicalTrials.gov, openFDA, UniProt, Reactome, KEGG, Ensembl, HMDB
   Extended: Elsevier/Scopus, Springer Nature, ChEBI, HCA, Cell Ontology, FMA,
-            NCBI Gene, ClinVar, KEGG Disease/Drug/Compound
+            NCBI Gene, ClinVar, Semantic Scholar, OpenAlex, ChEMBL, DrugBank,
+            DisGeNET, STRING, PDB, AlphaFold, WikiPathways, and 40+ more
 
 Discovery Rounds (4 rounds, 3 hypotheses per round = 12 total):
   Round 1-2: Independent exploration — new hypotheses from different pathways
@@ -38,8 +39,12 @@ Discovery Rounds (4 rounds, 3 hypotheses per round = 12 total):
 
 Provider routing:
   - Claude Opus 4.6 → AWS Bedrock
-  - DeepSeek-R1-0528, Mistral-Large-3, Grok → Azure AI Foundry
-  - GPT-4o, Cohere, Kimi-K2, o3-mini, GPT-4.1 → Azure OpenAI
+  - Mistral-Large-3, Grok → Azure AI Foundry
+  - GPT-4o, Cohere, o3-mini, GPT-4.1 → Azure OpenAI
+
+Embeddings stored in pgvector (PostgreSQL native vector search):
+  - Biomedical embeddings (1024d) via Bedrock Cohere Embed v3
+  - General embeddings (3072d) via Azure text-embedding-3-large
 """
 
 import asyncio
@@ -134,22 +139,21 @@ class AgentRole(str, Enum):
 
 class ModelType(str, Enum):
     """LLM model types available for parallel discovery."""
-    # Primary models — mixed provider routing (6-model pipeline)
+    # Primary models — mixed provider routing (8-model pipeline)
     CLAUDE_OPUS = "claude_opus"                    # Explorer + Synthesizer via Bedrock (200K context)
-    DEEPSEEK_R1_0528 = "deepseek_r1_0528"          # Reasoner via Azure AI (64K output)
     MISTRAL_LARGE_3 = "mistral_large_3"            # Critic via Azure AI (32K output)
     GPT_4O_AZURE = "gpt_4o_azure"                  # Editorial synthesis via Azure OpenAI (131K→16K, GA)
     COHERE_COMMAND_A = "cohere_command_a"           # RAG literature review via Azure AI (256K context, GA)
-    KIMI_K2_THINKING = "kimi_k2_thinking"          # QA validation via Azure AI (20K TPM, Stable)
     O3_MINI = "o3_mini"                            # Reasoning via Azure OpenAI (2.5M TPM / 250 RPM, GA)
     GPT_41 = "gpt_41"                              # General purpose via Azure OpenAI (50K TPM / 50 RPM, GA)
-    GROK_FAST = "grok_fast"                            # Fast Refiner via Azure AI (Grok-4-1-fast-reasoning)
-    # Bedrock-only fallback
-    DEEPSEEK_R1 = "deepseek_r1"
+    GROK_FAST = "grok_fast"                        # Fast Refiner via Azure AI (Grok-4-1-fast-reasoning)
     # Azure OpenAI models — legacy
     O3_DEEP_RESEARCH = "o3_deep_research"
     O1 = "o1"
-    # Legacy (kept for stored data compatibility)
+    # Legacy (kept for stored data compatibility — not used in active pipeline)
+    DEEPSEEK_R1_0528 = "deepseek_r1_0528"
+    DEEPSEEK_R1 = "deepseek_r1"
+    KIMI_K2_THINKING = "kimi_k2_thinking"
     GROK_4 = "grok_4"
     CLAUDE_OPUS_AZURE_AI = "claude_opus_azure_ai"
     LLAMA_MAVERICK = "llama_maverick"
@@ -600,25 +604,26 @@ INSTRUCTIONS:
 
 class MultiModelLLM:
     """
-    Three-model hybrid pipeline — mixed Bedrock + Azure AI providers.
+    Multi-model hybrid pipeline — mixed Bedrock + Azure AI providers.
 
     Bedrock (Claude Opus 4.6):
     - Claude Opus 4.6  (us.anthropic.claude-opus-4-6-v1:0) — Explorer + Synthesizer, 200K context
 
-    Azure AI (DeepSeek + Mistral):
-    - DeepSeek-R1-0528 — Reasoner: state-of-the-art reasoning chains (Chat completion)
+    Azure AI (Mistral + Grok):
     - Mistral-Large-3  — Critic: strong analytical capabilities (Chat completion)
+    - Grok-4-1-fast    — Fast reasoning and refinement
 
-    Azure OpenAI (legacy):
-    - o3-deep-research — 100K out, deep research exploration
-    - o1               — 100K out, multi-step mathematical reasoning
+    Azure OpenAI (GPT-4o, GPT-4.1, o3-mini, Cohere):
+    - GPT-4o           — Editorial synthesis and validation
+    - GPT-4.1          — Mechanistic reasoning and scoring
+    - o3-mini          — Deep causal chain reasoning
+    - Cohere Command A — RAG literature review
 
-    Parallel MCP distributes large contexts across all 3 models.
+    Parallel MCP distributes large contexts across models.
     """
 
     BEDROCK_MODELS = {
         ModelType.CLAUDE_OPUS: settings.BEDROCK_MODEL_CLAUDE_OPUS,
-        ModelType.DEEPSEEK_R1: settings.BEDROCK_MODEL_DEEPSEEK,
     }
 
     AZURE_OPENAI_MODELS = {
@@ -628,18 +633,15 @@ class MultiModelLLM:
 
     # Azure AI — model-specific endpoints (direct, no Foundry routing layer)
     AZURE_AI_MODELS = {
-        ModelType.DEEPSEEK_R1_0528:    settings.AZURE_DEEPSEEK_MODEL,
         ModelType.MISTRAL_LARGE_3:     settings.AZURE_MISTRAL_MODEL,
     }
 
     def __init__(self, token_pool: TokenPool):
         self._bedrock_client = None
         self._azure_client = None        # Legacy Azure OpenAI
-        self._azure_deepseek_client = None   # DeepSeek model-specific endpoint
         self._azure_mistral_client = None    # Mistral model-specific endpoint
         self._azure_gpt4o_client = None      # GPT-4o (Azure OpenAI deployment)
         self._azure_cohere_client = None     # Cohere Command A (Azure OpenAI deployment)
-        self._azure_kimi_client = None       # Kimi-K2-Thinking (Azure AI deployment)
         self._azure_o3mini_client = None     # o3-mini (Azure OpenAI deployment)
         self._azure_gpt41_client = None      # GPT-4.1 (Azure OpenAI deployment)
         self._azure_grok_client = None       # Grok-4-1-fast-reasoning (Azure AI Foundry)
@@ -654,20 +656,6 @@ class MultiModelLLM:
 
         # Initialize Azure AI model-specific clients (direct endpoints, no Foundry layer)
         azure_models_ready = 0
-
-        if settings.azure_deepseek_key_value and settings.AZURE_DEEPSEEK_ENDPOINT:
-            try:
-                from openai import AsyncOpenAI
-                self._azure_deepseek_client = AsyncOpenAI(
-                    base_url=settings.AZURE_DEEPSEEK_ENDPOINT.rstrip('/'),
-                    api_key=settings.azure_deepseek_key_value,
-                )
-                azure_models_ready += 1
-                logger.info(f"Azure DeepSeek client initialized → {settings.AZURE_DEEPSEEK_ENDPOINT}")
-            except Exception as e:
-                logger.error(f"Azure DeepSeek client init FAILED: {e}")
-        else:
-            logger.warning("AZURE_DEEPSEEK_ENDPOINT or AZURE_DEEPSEEK_KEY not set")
 
         if settings.azure_mistral_key_value and settings.AZURE_MISTRAL_ENDPOINT:
             try:
@@ -714,22 +702,6 @@ class MultiModelLLM:
                 logger.error(f"Azure Cohere client init FAILED: {e}")
         else:
             logger.warning("AZURE_COHERE_ENDPOINT or AZURE_COHERE_KEY not set")
-
-        # Kimi-K2-Thinking via Azure OpenAI (deployment-based — uses AsyncAzureOpenAI)
-        if settings.azure_kimi_key_value and settings.AZURE_KIMI_ENDPOINT:
-            try:
-                from openai import AsyncAzureOpenAI
-                self._azure_kimi_client = AsyncAzureOpenAI(
-                    api_key=settings.azure_kimi_key_value,
-                    azure_endpoint=settings.AZURE_KIMI_ENDPOINT,
-                    api_version=settings.AZURE_KIMI_API_VERSION,
-                )
-                azure_models_ready += 1
-                logger.info(f"Azure Kimi-K2-Thinking client initialized → {settings.AZURE_KIMI_ENDPOINT}")
-            except Exception as e:
-                logger.error(f"Azure Kimi-K2 client init FAILED: {e}")
-        else:
-            logger.warning("AZURE_KIMI_ENDPOINT or AZURE_KIMI_KEY not set")
 
         # o3-mini via Azure OpenAI (deployment-based — uses AsyncAzureOpenAI)
         if settings.azure_o3mini_key_value and settings.AZURE_O3MINI_ENDPOINT:
@@ -820,8 +792,7 @@ class MultiModelLLM:
 
         self._initialized = True
         available = []
-        if self._azure_deepseek_client:
-            available.append(f"deepseek_r1_0528 ({settings.AZURE_DEEPSEEK_MODEL}) [azure-model-specific]")
+        # DeepSeek and Kimi removed from active pipeline
         if self._azure_mistral_client:
             available.append(f"mistral_large_3 ({settings.AZURE_MISTRAL_MODEL}) [azure-model-specific]")
         if self._azure_grok_client:
@@ -830,8 +801,6 @@ class MultiModelLLM:
             available.append(f"gpt_4o_azure ({settings.AZURE_GPT4O_DEPLOYMENT}) [azure-openai-dedicated]")
         if self._azure_cohere_client:
             available.append(f"cohere_command_a ({settings.AZURE_COHERE_DEPLOYMENT}) [azure-openai]")
-        if self._azure_kimi_client:
-            available.append(f"kimi_k2_thinking ({settings.AZURE_KIMI_DEPLOYMENT}) [azure-openai]")
         if self._azure_o3mini_client:
             available.append(f"o3_mini ({settings.AZURE_O3MINI_DEPLOYMENT}) [azure-openai]")
         if self._azure_gpt41_client:
@@ -846,8 +815,6 @@ class MultiModelLLM:
 
     def _is_azure_ai_model(self, model_type: ModelType) -> bool:
         """Check if a model type routes through an Azure AI model-specific endpoint."""
-        if model_type == ModelType.DEEPSEEK_R1_0528:
-            return self._azure_deepseek_client is not None
         if model_type == ModelType.MISTRAL_LARGE_3:
             return self._azure_mistral_client is not None
         if model_type == ModelType.GROK_FAST:
@@ -860,8 +827,6 @@ class MultiModelLLM:
             return self._azure_gpt4o_client is not None
         if model_type == ModelType.COHERE_COMMAND_A:
             return self._azure_cohere_client is not None
-        if model_type == ModelType.KIMI_K2_THINKING:
-            return self._azure_kimi_client is not None
         if model_type == ModelType.O3_MINI:
             return self._azure_o3mini_client is not None
         if model_type == ModelType.GPT_41:
@@ -1088,10 +1053,7 @@ class MultiModelLLM:
         """Invoke a model via its Azure AI model-specific endpoint.
         Returns (text, usage_dict) with actual token counts from API response.
         """
-        if model_type == ModelType.DEEPSEEK_R1_0528:
-            client = self._azure_deepseek_client
-            model_name = settings.AZURE_DEEPSEEK_MODEL
-        elif model_type == ModelType.MISTRAL_LARGE_3:
+        if model_type == ModelType.MISTRAL_LARGE_3:
             client = self._azure_mistral_client
             model_name = settings.AZURE_MISTRAL_MODEL
         elif model_type == ModelType.GROK_FAST:
@@ -1149,7 +1111,6 @@ class MultiModelLLM:
         _deployment_clients = {
             ModelType.GPT_4O_AZURE: (self._azure_gpt4o_client, settings.AZURE_GPT4O_DEPLOYMENT),
             ModelType.COHERE_COMMAND_A: (self._azure_cohere_client, settings.AZURE_COHERE_DEPLOYMENT),
-            ModelType.KIMI_K2_THINKING: (self._azure_kimi_client, settings.AZURE_KIMI_DEPLOYMENT),
             ModelType.O3_MINI: (self._azure_o3mini_client, settings.AZURE_O3MINI_DEPLOYMENT),
             ModelType.GPT_41: (self._azure_gpt41_client, settings.AZURE_GPT41_DEPLOYMENT),
         }
@@ -1335,13 +1296,7 @@ class MultiModelLLM:
                 max_tokens=32_768, temperature=0.3,
             )
 
-        # DeepSeek-R1-0528 + Mistral-Large-3 via Azure AI
-        if self._azure_deepseek_client:
-            tasks["deepseek_r1_0528"] = self.generate(
-                ModelType.DEEPSEEK_R1_0528, full_prompt,
-                get_agent_prompt("reasoner", include_master=True),
-                max_tokens=65_536, temperature=0.2,
-            )
+        # Mistral-Large-3 via Azure AI
         if self._azure_mistral_client:
             tasks["mistral_large_3"] = self.generate(
                 ModelType.MISTRAL_LARGE_3, full_prompt,
@@ -1363,14 +1318,6 @@ class MultiModelLLM:
                 ModelType.COHERE_COMMAND_A, full_prompt,
                 get_agent_prompt("explorer", include_master=True),
                 max_tokens=4_096, temperature=0.2,
-            )
-
-        # Kimi-K2-Thinking via Azure AI (Validation QA)
-        if self._azure_kimi_client:
-            tasks["kimi_k2_thinking"] = self.generate(
-                ModelType.KIMI_K2_THINKING, full_prompt,
-                get_agent_prompt("validator", include_master=True),
-                max_tokens=4_096, temperature=0.15,
             )
 
         # o3-mini via Azure OpenAI (Secondary Reasoning — 2.5M TPM, 100K output)
@@ -1426,7 +1373,7 @@ class MultiModelLLM:
         """
         Parallel MCP reasoning: shard context across models, process, then synthesize.
         Used when total context exceeds per-model token limits.
-        Claude Opus (Bedrock) + DeepSeek/Mistral (Azure AI).
+        Claude Opus (Bedrock) + Mistral/Grok (Azure AI) + GPT-4o/GPT-4.1/o3-mini (Azure OpenAI).
         """
         full_prompt = f"{context}\n\n{prompt}"
 
@@ -1447,13 +1394,8 @@ class MultiModelLLM:
                 max_tokens=32_768, temperature=0.3,
             )
 
-        # DeepSeek + Mistral via Azure AI
+        # Mistral via Azure AI
         if self._azure_ai_available:
-            all_tasks["deepseek_r1_0528"] = self._generate_azure_ai(
-                ModelType.DEEPSEEK_R1_0528, full_prompt,
-                get_agent_prompt("reasoner", include_master=True),
-                max_tokens=65_536, temperature=0.2,
-            )
             all_tasks["mistral_large_3"] = self._generate_azure_ai(
                 ModelType.MISTRAL_LARGE_3, full_prompt,
                 get_agent_prompt("critic", include_master=True),
@@ -1627,14 +1569,10 @@ class SequentialHypothesisPipeline:
         """Check if a model client is initialized."""
         if model_type == ModelType.CLAUDE_OPUS:
             return self._llm._bedrock_client is not None
-        if model_type == ModelType.DEEPSEEK_R1_0528:
-            return self._llm._azure_deepseek_client is not None
         if model_type == ModelType.MISTRAL_LARGE_3:
             return self._llm._azure_mistral_client is not None
         if model_type == ModelType.COHERE_COMMAND_A:
             return self._llm._azure_cohere_client is not None
-        if model_type == ModelType.KIMI_K2_THINKING:
-            return self._llm._azure_kimi_client is not None
         if model_type == ModelType.O3_MINI:
             return self._llm._azure_o3mini_client is not None
         if model_type == ModelType.GPT_41:
@@ -2484,9 +2422,9 @@ class DiscoveryOrchestrator(LoggerMixin):
     """
     Main orchestrator for parallel discovery agents.
 
-    Manages 100-10,000 agents across 3 models with mixed providers:
-    Claude Opus 4.6 (Bedrock, explorer+synthesizer), DeepSeek-R1-0528 (Azure AI, reasoner),
-    Mistral-Large-3 (Azure AI, critic).
+    Manages 100-10,000 agents across 8 models with mixed providers:
+    Claude Opus 4.6 (Bedrock, explorer+synthesizer), Mistral-Large-3 (Azure AI, critic),
+    Grok-4-1-fast (Azure AI, refiner), GPT-4o, GPT-4.1, o3-mini, Cohere Command A (Azure OpenAI).
     """
 
     def __init__(
@@ -2521,7 +2459,7 @@ class DiscoveryOrchestrator(LoggerMixin):
         self._rag_service = None
 
     async def initialize(self) -> None:
-        self.logger.info("Initializing discovery orchestrator (Claude Opus via Bedrock + DeepSeek-R1-0528 + Mistral-Large-3 via Azure AI)")
+        self.logger.info("Initializing discovery orchestrator (Claude Opus via Bedrock + Mistral/Grok via Azure AI + GPT-4o/GPT-4.1/o3-mini via Azure OpenAI)")
         await self.llm.initialize()
 
         try:
@@ -2574,7 +2512,7 @@ class DiscoveryOrchestrator(LoggerMixin):
             self.logger.warning("Orchestrator already running")
             return
 
-        self.logger.info(f"Starting discovery for {disease} with {self.max_agents} agents (Claude Opus via Bedrock, DeepSeek-R1-0528 + Mistral-Large-3 via Azure AI)")
+        self.logger.info(f"Starting discovery for {disease} with {self.max_agents} agents (Claude Opus via Bedrock, Mistral-Large-3 + Grok via Azure AI, GPT-4o/GPT-4.1/o3-mini via Azure OpenAI)")
         self.state = OrchestratorState.RUNNING
         self._start_time = time.time()
         self._stop_requested = False
@@ -2739,21 +2677,17 @@ class DiscoveryOrchestrator(LoggerMixin):
 
         # 8-model distribution across mixed providers:
         # Bedrock: Claude Opus 4.6
-        # Azure AI: DeepSeek-R1-0528, Mistral-Large-3, Cohere Command A, Kimi-K2-Thinking
-        # Azure OpenAI: GPT-4o, o3-mini, GPT-4.1
+        # Azure AI: Mistral-Large-3, Grok-4-1-fast
+        # Azure OpenAI: GPT-4o, Cohere Command A, o3-mini, GPT-4.1
         models = []
         if self.llm._bedrock_client:
             models.append(ModelType.CLAUDE_OPUS)
-        if self.llm._azure_deepseek_client:
-            models.append(ModelType.DEEPSEEK_R1_0528)
         if self.llm._azure_mistral_client:
             models.append(ModelType.MISTRAL_LARGE_3)
         if self.llm._azure_gpt4o_client:
             models.append(ModelType.GPT_4O_AZURE)
         if self.llm._azure_cohere_client:
             models.append(ModelType.COHERE_COMMAND_A)
-        if self.llm._azure_kimi_client:
-            models.append(ModelType.KIMI_K2_THINKING)
         if self.llm._azure_o3mini_client:
             models.append(ModelType.O3_MINI)
         if self.llm._azure_gpt41_client:
@@ -2763,9 +2697,7 @@ class DiscoveryOrchestrator(LoggerMixin):
 
         # Fallback to Bedrock-only if no Azure models available
         if not models and self.llm._bedrock_client:
-            models = [ModelType.CLAUDE_OPUS, ModelType.DEEPSEEK_R1]
-        elif len(models) == 1 and models[0] == ModelType.CLAUDE_OPUS and self.llm._bedrock_client:
-            models.append(ModelType.DEEPSEEK_R1)
+            models = [ModelType.CLAUDE_OPUS]
 
         # Roles distributed within each model's agent pool
         role_distribution = [

@@ -1,9 +1,9 @@
 version: '3.8'
 
 services:
-  # PostgreSQL Database
+  # PostgreSQL Database (with pgvector extension for native vector search)
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     container_name: genup-postgres
     environment:
       POSTGRES_USER: genup
@@ -76,8 +76,6 @@ services:
       - AZURE_GPT4O_KEY=${AZURE_GPT4O_KEY}
       - AZURE_GPT41_ENDPOINT=${AZURE_GPT41_ENDPOINT}
       - AZURE_GPT41_KEY=${AZURE_GPT41_KEY}
-      - AZURE_DEEPSEEK_ENDPOINT=${AZURE_DEEPSEEK_ENDPOINT}
-      - AZURE_DEEPSEEK_KEY=${AZURE_DEEPSEEK_KEY}
       - AZURE_MISTRAL_ENDPOINT=${AZURE_MISTRAL_ENDPOINT}
       - AZURE_MISTRAL_KEY=${AZURE_MISTRAL_KEY}
       - AZURE_EMBEDDING_ENDPOINT=${AZURE_EMBEDDING_ENDPOINT}

@@ -16,9 +16,8 @@ psycopg2-binary==2.9.9
 neo4j==5.17.0
 py2neo==2021.2.4
 
-# Vector Database
-chromadb==0.4.22
-faiss-cpu==1.7.4
+# Vector Database (pgvector — PostgreSQL native)
+pgvector==0.3.6
 
 # AI/ML
 langchain==0.1.20
@@ -58,6 +57,9 @@ lxml==5.1.0
 
 # PDF Generation
 reportlab==4.1.0
+
+# DOCX Generation
+python-docx==1.1.0
 
 # Utilities
 pydantic==2.6.1

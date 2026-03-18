@@ -47,11 +47,16 @@ class Settings(BaseSettings):
     NEO4J_USER: str = "neo4j"
     NEO4J_PASSWORD: SecretStr = SecretStr("neo4jpassword")
 
-    # Vector Store (ChromaDB)
-    CHROMA_HOST: str = "localhost"
-    CHROMA_PORT: int = 8000
-    CHROMA_PERSIST_DIRECTORY: str = "./data/chroma"
-    VECTOR_EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
+    # Vector Store (pgvector — PostgreSQL native)
+    PGVECTOR_EMBEDDING_DIM_BIOMEDICAL: int = 1024   # Bedrock Cohere Embed v3
+    PGVECTOR_EMBEDDING_DIM_GENERAL: int = 3072      # Azure text-embedding-3-large
+    PGVECTOR_SEARCH_WEIGHT_BIOMEDICAL: float = 0.6  # Weight for biomedical embedding in hybrid search
+    PGVECTOR_SEARCH_WEIGHT_GENERAL: float = 0.4     # Weight for general embedding in hybrid search
+    PGVECTOR_DEFAULT_SEARCH_LIMIT: int = 20
+    PGVECTOR_INDEX_TYPE: str = "ivfflat"             # ivfflat or hnsw
+    PGVECTOR_INDEX_LISTS: int = 100                  # Number of lists for IVFFlat index
+    PGVECTOR_HNSW_M: int = 16                        # HNSW M parameter
+    PGVECTOR_HNSW_EF_CONSTRUCTION: int = 64          # HNSW ef_construction
 
     # Azure OpenAI — legacy config (kept for backward compatibility)
     AZURE_OPENAI_API_KEY: SecretStr | None = None
@@ -63,11 +68,7 @@ class Settings(BaseSettings):
 
     # Azure AI — model-specific endpoints (direct, no Foundry routing layer)
     # Each model deployed separately with its own endpoint URL + API key
-    AZURE_DEEPSEEK_ENDPOINT: str = ""   # Full base_url from Azure (e.g. https://humanovo-openai.services.ai.azure.com/openai/v1/)
-    AZURE_DEEPSEEK_KEY: SecretStr | None = None
-    AZURE_DEEPSEEK_MODEL: str = "DeepSeek-R1-0528"
-
-    AZURE_MISTRAL_ENDPOINT: str = ""    # Full base_url from Azure (can be same as DeepSeek if shared endpoint)
+    AZURE_MISTRAL_ENDPOINT: str = ""    # Full base_url from Azure
     AZURE_MISTRAL_KEY: SecretStr | None = None
     AZURE_MISTRAL_MODEL: str = "Mistral-Large-3"
 
@@ -82,12 +83,6 @@ class Settings(BaseSettings):
     AZURE_COHERE_KEY: SecretStr | None = None
     AZURE_COHERE_DEPLOYMENT: str = "cohere-command-a"
     AZURE_COHERE_API_VERSION: str = "2024-05-01-preview"
-
-    # Azure AI Foundry — Kimi-K2-Thinking (same resource, deployment-based routing)
-    AZURE_KIMI_ENDPOINT: str = ""      # Azure AI resource URL (e.g. https://humanovo-openai.cognitiveservices.azure.com)
-    AZURE_KIMI_KEY: SecretStr | None = None
-    AZURE_KIMI_DEPLOYMENT: str = "Kimi-K2-Thinking"
-    AZURE_KIMI_API_VERSION: str = "2024-05-01-preview"
 
     # Azure OpenAI — o3-mini (2.5M TPM / 250 RPM, reasoning model)
     AZURE_O3MINI_ENDPOINT: str = ""    # Azure OpenAI resource URL (e.g. https://humanovo-openai.cognitiveservices.azure.com)
@@ -112,7 +107,6 @@ class Settings(BaseSettings):
     AWS_REGION: str = "us-east-1"
 
     # Bedrock Model IDs — Claude Opus 4.6 serves as Explorer + Synthesizer
-    BEDROCK_MODEL_DEEPSEEK: str = "us.deepseek.r1-v1:0"
     BEDROCK_MODEL_CLAUDE_OPUS: str = "us.anthropic.claude-opus-4-6-v1:0"
     BEDROCK_MODEL_CLAUDE_SONNET: str = "us.anthropic.claude-sonnet-4-20250514-v1:0"
 
@@ -164,7 +158,7 @@ class Settings(BaseSettings):
 
     # Azure OpenAI Embedding — dedicated endpoint on cognitiveservices resource
     # Deployment: text-embedding-3-large (150K TPM, 900 RPM)
-    # Resource: humanovo-openai.cognitiveservices.azure.com (shared with Cohere, Kimi, etc.)
+    # Resource: humanovo-openai.cognitiveservices.azure.com
     AZURE_EMBEDDING_ENDPOINT: str = ""  # e.g. https://humanovo-openai.cognitiveservices.azure.com
     AZURE_EMBEDDING_KEY: SecretStr | None = None
     AZURE_EMBEDDING_API_VERSION: str = "2023-05-15"
@@ -224,11 +218,6 @@ class Settings(BaseSettings):
         return self.AWS_SECRET_ACCESS_KEY.get_secret_value() if self.AWS_SECRET_ACCESS_KEY else None
 
     @property
-    def azure_deepseek_key_value(self) -> str | None:
-        """Azure DeepSeek model-specific API key."""
-        return self.AZURE_DEEPSEEK_KEY.get_secret_value() if self.AZURE_DEEPSEEK_KEY else None
-
-    @property
     def azure_mistral_key_value(self) -> str | None:
         """Azure Mistral model-specific API key."""
         return self.AZURE_MISTRAL_KEY.get_secret_value() if self.AZURE_MISTRAL_KEY else None
@@ -242,11 +231,6 @@ class Settings(BaseSettings):
     def azure_cohere_key_value(self) -> str | None:
         """Azure Cohere Command A API key."""
         return self.AZURE_COHERE_KEY.get_secret_value() if self.AZURE_COHERE_KEY else None
-
-    @property
-    def azure_kimi_key_value(self) -> str | None:
-        """Azure Kimi-K2-Thinking API key."""
-        return self.AZURE_KIMI_KEY.get_secret_value() if self.AZURE_KIMI_KEY else None
 
     @property
     def azure_o3mini_key_value(self) -> str | None:

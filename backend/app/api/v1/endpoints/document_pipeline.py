@@ -665,3 +665,134 @@ def _extract_external_factors(hypotheses: list[dict[str, Any]]) -> list[dict[str
                 seen.add(f)
                 factors.append({"name": f, "category": "unknown"})
     return factors
+
+
+# ============================================================================
+# Document Export Endpoints (PDF + DOCX via DocumentExportService)
+# ============================================================================
+
+
+class ExportDocumentRequest(BaseModel):
+    """Request body for document export."""
+    document_type: str = Field(
+        default="research_paper",
+        description="Document type: research_paper, hypothesis_report, discovery_summary, evidence_compilation, translational_roadmap",
+    )
+    format: str = Field(
+        default="pdf",
+        description="Output format: pdf or docx",
+    )
+    title: str = Field(default="", description="Custom document title")
+    hypotheses: list[dict[str, Any]] = Field(default_factory=list, description="Hypotheses data")
+    evidence: list[dict[str, Any]] = Field(default_factory=list, description="Evidence data")
+    disease: str = Field(default="Unknown", description="Disease focus")
+    discovery_type: str = Field(default="treatment", description="Discovery type")
+
+
+@router.post("/export")
+async def export_document(request: ExportDocumentRequest):
+    """
+    Export a document in PDF or DOCX format.
+
+    Supports multiple document types:
+    - research_paper: Full scientific paper
+    - hypothesis_report: Single hypothesis deep-dive
+    - discovery_summary: Overview of all hypotheses
+    - evidence_compilation: Evidence from all sources
+    - translational_roadmap: T0-T5 bench-to-bedside plan
+    """
+    from app.services.document_export_service import DocumentExportService
+
+    service = DocumentExportService()
+    fmt = request.format.lower()
+
+    if fmt not in ("pdf", "docx"):
+        raise HTTPException(status_code=400, detail=f"Unsupported format: {fmt}. Use 'pdf' or 'docx'.")
+
+    try:
+        if request.document_type == "research_paper":
+            doc_bytes = await service.generate_research_paper(
+                project_id="export",
+                hypotheses=request.hypotheses,
+                evidence=request.evidence,
+                format=fmt,
+            )
+        elif request.document_type == "hypothesis_report":
+            if not request.hypotheses:
+                raise HTTPException(status_code=400, detail="At least one hypothesis required for hypothesis report")
+            doc_bytes = await service.generate_hypothesis_report(
+                hypothesis=request.hypotheses[0],
+                evidence=request.evidence,
+                format=fmt,
+            )
+        elif request.document_type == "discovery_summary":
+            doc_bytes = await service.generate_discovery_summary(
+                discovery_run={
+                    "disease": request.disease,
+                    "discovery_type": request.discovery_type,
+                    "hypotheses": request.hypotheses,
+                },
+                format=fmt,
+            )
+        elif request.document_type == "evidence_compilation":
+            doc_bytes = await service.generate_evidence_compilation(
+                evidence=request.evidence,
+                format=fmt,
+            )
+        elif request.document_type == "translational_roadmap":
+            if not request.hypotheses:
+                raise HTTPException(status_code=400, detail="At least one hypothesis required for translational roadmap")
+            doc_bytes = await service.generate_translational_roadmap(
+                hypothesis=request.hypotheses[0],
+                format=fmt,
+            )
+        else:
+            raise HTTPException(status_code=400, detail=f"Unknown document type: {request.document_type}")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Document export failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Document export failed: {str(e)}")
+
+    media_type = "application/pdf" if fmt == "pdf" else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    ext = fmt
+    filename = f"humanovo_{request.document_type}_{request.disease.replace(' ', '_')}.{ext}"
+
+    return Response(
+        content=doc_bytes,
+        media_type=media_type,
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@router.post("/project/{project_id}/docx")
+async def generate_project_docx(project_id: UUID):
+    """Generate a research paper DOCX from all hypotheses in a project."""
+    project_data = await _get_project_data(project_id)
+    hypotheses = project_data.get("hypotheses", [])
+    if not hypotheses:
+        raise HTTPException(status_code=400, detail="Project has no hypotheses.")
+
+    from app.services.document_export_service import DocumentExportService
+    service = DocumentExportService()
+
+    try:
+        doc_bytes = await service.generate_research_paper(
+            project_id=str(project_id),
+            hypotheses=hypotheses,
+            evidence=[],
+            format="docx",
+        )
+    except Exception as e:
+        logger.error(f"DOCX generation failed for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"DOCX generation failed: {e}")
+
+    disease = project_data.get("disease_focus", "research")
+    filename = f"humanovo_{disease.replace(' ', '_')}_paper.docx"
+
+    return Response(
+        content=doc_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
