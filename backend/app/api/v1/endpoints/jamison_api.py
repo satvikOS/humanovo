@@ -866,7 +866,7 @@ async def pgvector_maintenance_status() -> dict:
 
 
 # ===================================================================
-# Billing — wired to cost_tracking_service
+# Billing — wired to cost_tracking_service and DB models
 # ===================================================================
 
 
@@ -874,21 +874,9 @@ async def pgvector_maintenance_status() -> dict:
 async def billing_summary(
     project_id: str | None = Query(None),
 ) -> dict:
-    try:
-        from app.services.cost_tracking_service import get_cost_tracker
-        tracker = get_cost_tracker()
-        return await tracker.get_summary(project_id=project_id)
-    except Exception as e:
-        logger.warning(f"Billing summary failed: {e}")
-        return {
-            "total_cost_cents": 0,
-            "budget_remaining_cents": None,
-            "projected_end_of_month_cents": 0,
-            "total_requests": 0,
-            "by_model": {},
-            "by_project": [],
-            "generated_at": datetime.utcnow().isoformat(),
-        }
+    from app.services.cost_tracking_service import get_cost_tracker
+    tracker = get_cost_tracker()
+    return await tracker.get_summary(project_id=project_id)
 
 
 @router.get("/billing/daily")
@@ -898,17 +886,14 @@ async def billing_daily(
     project_id: str | None = Query(None),
     group_by: str = Query("provider"),
 ) -> list:
-    try:
-        from app.services.cost_tracking_service import get_cost_tracker
-        tracker = get_cost_tracker()
-        return await tracker.get_daily_breakdown(
-            start_date=start_date,
-            end_date=end_date,
-            project_id=project_id,
-            group_by=group_by,
-        )
-    except Exception:
-        return []
+    from app.services.cost_tracking_service import get_cost_tracker
+    tracker = get_cost_tracker()
+    return await tracker.get_daily_breakdown(
+        start_date=start_date,
+        end_date=end_date,
+        project_id=project_id,
+        group_by=group_by,
+    )
 
 
 @router.get("/billing/breakdown")
@@ -916,28 +901,23 @@ async def billing_breakdown(
     period: str = Query("30d"),
     group_by: str = Query("model"),
 ) -> dict:
-    try:
-        from app.services.cost_tracking_service import get_cost_tracker
-        tracker = get_cost_tracker()
-        return await tracker.get_model_breakdown(period=period)
-    except Exception:
-        return {"period": period, "group_by": group_by, "items": []}
+    from app.services.cost_tracking_service import get_cost_tracker
+    tracker = get_cost_tracker()
+    return await tracker.get_model_breakdown(period=period)
 
 
 @router.get("/billing/projects")
 async def billing_projects(
     period: str = Query("30d"),
 ) -> list:
-    try:
-        from app.services.cost_tracking_service import get_cost_tracker
-        tracker = get_cost_tracker()
-        return await tracker.get_project_costs(period=period)
-    except Exception:
-        return []
+    from app.services.cost_tracking_service import get_cost_tracker
+    tracker = get_cost_tracker()
+    return await tracker.get_project_costs(period=period)
 
 
 @router.get("/billing/usage")
 async def billing_usage(
+    db: AsyncSession = Depends(get_db),
     project_id: str | None = Query(None),
     model: str | None = Query(None),
     provider: str | None = Query(None),
@@ -946,71 +926,179 @@ async def billing_usage(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
 ) -> dict:
+    from app.models.learning_memory import APICostRecord
+
+    query = select(APICostRecord)
+    if model:
+        query = query.where(APICostRecord.model_name == model)
+    if provider:
+        query = query.where(APICostRecord.provider == provider)
+    if start_date:
+        query = query.where(APICostRecord.created_at >= datetime.fromisoformat(start_date))
+    if end_date:
+        query = query.where(APICostRecord.created_at <= datetime.fromisoformat(end_date))
+
+    # Count total
+    from sqlalchemy import func
+    count_query = select(func.count()).select_from(query.subquery())
+    total_result = await db.execute(count_query)
+    total = total_result.scalar() or 0
+
+    # Paginate
+    query = query.order_by(APICostRecord.created_at.desc())
+    query = query.offset((page - 1) * page_size).limit(page_size)
+    result = await db.execute(query)
+    records = result.scalars().all()
+
     return {
-        "items": [],
-        "total": 0,
+        "items": [r.to_dict() for r in records],
+        "total": total,
         "page": page,
         "page_size": page_size,
     }
 
 
 @router.post("/billing/usage/export")
-async def billing_usage_export() -> JSONResponse:
-    return JSONResponse(
-        content={"message": "Export not yet implemented"},
-        status_code=501,
+async def billing_usage_export(
+    db: AsyncSession = Depends(get_db),
+    model: str | None = Query(None),
+    provider: str | None = Query(None),
+    start_date: str | None = Query(None),
+    end_date: str | None = Query(None),
+) -> StreamingResponse:
+    from app.models.learning_memory import APICostRecord
+
+    query = select(APICostRecord)
+    if model:
+        query = query.where(APICostRecord.model_name == model)
+    if provider:
+        query = query.where(APICostRecord.provider == provider)
+    if start_date:
+        query = query.where(APICostRecord.created_at >= datetime.fromisoformat(start_date))
+    if end_date:
+        query = query.where(APICostRecord.created_at <= datetime.fromisoformat(end_date))
+    query = query.order_by(APICostRecord.created_at.desc())
+
+    result = await db.execute(query)
+    records = result.scalars().all()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "id", "created_at", "provider", "model_name", "api_type",
+        "input_tokens", "output_tokens", "total_tokens",
+        "input_cost_usd", "output_cost_usd", "total_cost_usd",
+        "latency_ms", "stage_name",
+    ])
+    for r in records:
+        writer.writerow([
+            str(r.id), r.created_at.isoformat() if r.created_at else "",
+            r.provider, r.model_name, r.api_type,
+            r.input_tokens, r.output_tokens, r.total_tokens,
+            r.input_cost_usd, r.output_cost_usd, r.total_cost_usd,
+            r.latency_ms, r.stage_name or "",
+        ])
+
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=billing_usage_export.csv"},
     )
 
 
 @router.get("/billing/budgets")
-async def list_budgets() -> list:
-    return []
+async def list_budgets(db: AsyncSession = Depends(get_db)) -> list:
+    from app.models.platform_entities import BillingBudget
+    result = await db.execute(
+        select(BillingBudget).order_by(BillingBudget.created_at.desc())
+    )
+    budgets = result.scalars().all()
+    return [b.to_dict() for b in budgets]
 
 
 @router.post("/billing/budgets", status_code=201)
-async def create_budget(body: BudgetCreate) -> dict:
-    return {
-        "id": str(uuid4()),
-        "scope": body.scope,
-        "project_id": body.project_id,
-        "monthly_budget_cents": body.monthly_budget_cents,
-        "alert_threshold_pct": body.alert_threshold_pct,
-        "hard_limit": body.hard_limit,
-        "current_month_spend_cents": 0,
-        "created_at": datetime.utcnow().isoformat(),
-    }
+async def create_budget(body: BudgetCreate, db: AsyncSession = Depends(get_db)) -> dict:
+    from app.models.platform_entities import BillingBudget
+    budget = BillingBudget(
+        scope=body.scope,
+        project_id=body.project_id,
+        monthly_budget_cents=body.monthly_budget_cents,
+        alert_threshold_pct=body.alert_threshold_pct,
+        hard_limit=body.hard_limit,
+        current_month_spend_cents=0,
+    )
+    db.add(budget)
+    await db.flush()
+    await db.refresh(budget)
+    return budget.to_dict()
 
 
 @router.put("/billing/budgets/{budget_id}")
-async def update_budget(budget_id: str, body: BudgetCreate) -> dict:
-    return {
-        "id": budget_id,
-        "scope": body.scope,
-        "project_id": body.project_id,
-        "monthly_budget_cents": body.monthly_budget_cents,
-        "alert_threshold_pct": body.alert_threshold_pct,
-        "hard_limit": body.hard_limit,
-        "updated_at": datetime.utcnow().isoformat(),
-    }
+async def update_budget(
+    budget_id: str, body: BudgetCreate, db: AsyncSession = Depends(get_db)
+) -> dict:
+    from app.models.platform_entities import BillingBudget
+    result = await db.execute(
+        select(BillingBudget).where(BillingBudget.id == budget_id)
+    )
+    budget = result.scalar_one_or_none()
+    if not budget:
+        raise HTTPException(status_code=404, detail=f"Budget {budget_id} not found")
+    budget.scope = body.scope
+    budget.project_id = body.project_id
+    budget.monthly_budget_cents = body.monthly_budget_cents
+    budget.alert_threshold_pct = body.alert_threshold_pct
+    budget.hard_limit = body.hard_limit
+    await db.flush()
+    await db.refresh(budget)
+    return budget.to_dict()
 
 
 @router.delete("/billing/budgets/{budget_id}")
-async def delete_budget(budget_id: str) -> dict:
+async def delete_budget(budget_id: str, db: AsyncSession = Depends(get_db)) -> dict:
+    from app.models.platform_entities import BillingBudget
+    result = await db.execute(
+        select(BillingBudget).where(BillingBudget.id == budget_id)
+    )
+    budget = result.scalar_one_or_none()
+    if not budget:
+        raise HTTPException(status_code=404, detail=f"Budget {budget_id} not found")
+    await db.delete(budget)
     return {"id": budget_id, "deleted": True}
 
 
 @router.get("/billing/notifications")
 async def list_billing_notifications(
+    db: AsyncSession = Depends(get_db),
     unread_only: bool = Query(False),
     limit: int = Query(50, ge=1, le=200),
 ) -> dict:
-    return {"items": [], "total": 0}
+    from app.models.platform_entities import BillingNotification
+    query = select(BillingNotification).order_by(BillingNotification.created_at.desc())
+    if unread_only:
+        query = query.where(BillingNotification.read == False)
+    query = query.limit(limit)
+    result = await db.execute(query)
+    notifications = result.scalars().all()
+    return {
+        "items": [n.to_dict() for n in notifications],
+        "total": len(notifications),
+    }
 
 
 @router.post("/billing/notifications/{notification_id}/read")
-async def mark_notification_read(notification_id: str) -> dict:
-    return {
-        "id": notification_id,
-        "read": True,
-        "read_at": datetime.utcnow().isoformat(),
-    }
+async def mark_notification_read(
+    notification_id: str, db: AsyncSession = Depends(get_db)
+) -> dict:
+    from app.models.platform_entities import BillingNotification
+    result = await db.execute(
+        select(BillingNotification).where(BillingNotification.id == notification_id)
+    )
+    notification = result.scalar_one_or_none()
+    if not notification:
+        raise HTTPException(status_code=404, detail=f"Notification {notification_id} not found")
+    notification.read = True
+    await db.flush()
+    await db.refresh(notification)
+    return notification.to_dict()
