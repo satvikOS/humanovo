@@ -39,6 +39,7 @@ from app.api.v1.endpoints import (
     simulation,
     statistics,
     websocket,
+    ws_streaming,
 )
 
 router = APIRouter()
@@ -100,3 +101,6 @@ router.include_router(config_endpoints.router)
 
 # Project Jamison — unified discovery, synthesis, imaging, billing, pgvector endpoints
 router.include_router(jamison_api.router)
+
+# WebSocket streaming for discovery/synthesis runs (Jamison v2)
+router.include_router(ws_streaming.router)

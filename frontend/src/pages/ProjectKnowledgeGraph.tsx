@@ -105,57 +105,7 @@ function defaultExternalLinks(type: string, label: string): { label: string; url
   }
 }
 
-// ---------------------------------------------------------------------------
-// Mock data
-// ---------------------------------------------------------------------------
-
-const MOCK_DATA: GraphPayload = {
-  nodes: [
-    { id: 'g1', label: 'BRCA1', type: 'gene', properties: { chromosome: '17q21.31', function: 'DNA repair' } },
-    { id: 'g2', label: 'TP53', type: 'gene', properties: { chromosome: '17p13.1', function: 'Tumor suppression' } },
-    { id: 'g3', label: 'EGFR', type: 'gene', properties: { chromosome: '7p11.2', function: 'Cell signaling' } },
-    { id: 'g4', label: 'HER2', type: 'gene', properties: { chromosome: '17q12', function: 'Growth factor receptor' } },
-    { id: 'g5', label: 'KRAS', type: 'gene', properties: { chromosome: '12p12.1', function: 'GTPase signaling' } },
-    { id: 'p1', label: 'p53', type: 'protein', properties: { mass: '43.7 kDa', structure: 'Tetramer' } },
-    { id: 'p2', label: 'EGFR protein', type: 'protein', properties: { mass: '134 kDa', structure: 'Monomer/Dimer' } },
-    { id: 'p3', label: 'PD-L1', type: 'protein', properties: { mass: '33.3 kDa', structure: 'Transmembrane' } },
-    { id: 'p4', label: 'VEGF', type: 'protein', properties: { mass: '45 kDa', structure: 'Homodimer' } },
-    { id: 'd1', label: 'Pembrolizumab', type: 'drug', properties: { class: 'Anti-PD-1', phase: 'Approved' } },
-    { id: 'd2', label: 'Trastuzumab', type: 'drug', properties: { class: 'Anti-HER2', phase: 'Approved' } },
-    { id: 'd3', label: 'Osimertinib', type: 'drug', properties: { class: 'EGFR TKI', phase: 'Approved' } },
-    { id: 'd4', label: 'Bevacizumab', type: 'drug', properties: { class: 'Anti-VEGF', phase: 'Approved' } },
-    { id: 'dis1', label: 'Breast Cancer', type: 'disease', properties: { icd10: 'C50', prevalence: 'Common' } },
-    { id: 'dis2', label: 'NSCLC', type: 'disease', properties: { icd10: 'C34', prevalence: 'Common' } },
-    { id: 'dis3', label: 'Colorectal Cancer', type: 'disease', properties: { icd10: 'C18', prevalence: 'Common' } },
-    { id: 'pw1', label: 'PI3K/AKT/mTOR', type: 'pathway', properties: { category: 'Signaling', organisms: 'Homo sapiens' } },
-    { id: 'pw2', label: 'RAS-MAPK', type: 'pathway', properties: { category: 'Signaling', organisms: 'Homo sapiens' } },
-    { id: 'pw3', label: 'DNA Damage Response', type: 'pathway', properties: { category: 'Repair', organisms: 'Homo sapiens' } },
-  ],
-  edges: [
-    { id: 'e1', source: 'g1', target: 'dis1', relation: 'causes', confidence: 0.94 },
-    { id: 'e2', source: 'g2', target: 'p1', relation: 'encodes', confidence: 0.99 },
-    { id: 'e3', source: 'g3', target: 'p2', relation: 'encodes', confidence: 0.98 },
-    { id: 'e4', source: 'g4', target: 'dis1', relation: 'associates', confidence: 0.91 },
-    { id: 'e5', source: 'g5', target: 'dis3', relation: 'causes', confidence: 0.88 },
-    { id: 'e6', source: 'd1', target: 'p3', relation: 'targets', confidence: 0.97 },
-    { id: 'e7', source: 'd2', target: 'g4', relation: 'targets', confidence: 0.96 },
-    { id: 'e8', source: 'd3', target: 'p2', relation: 'inhibits', confidence: 0.95 },
-    { id: 'e9', source: 'd4', target: 'p4', relation: 'inhibits', confidence: 0.93 },
-    { id: 'e10', source: 'd1', target: 'dis2', relation: 'treats', confidence: 0.92 },
-    { id: 'e11', source: 'd2', target: 'dis1', relation: 'treats', confidence: 0.94 },
-    { id: 'e12', source: 'd3', target: 'dis2', relation: 'treats', confidence: 0.91 },
-    { id: 'e13', source: 'd4', target: 'dis3', relation: 'treats', confidence: 0.87 },
-    { id: 'e14', source: 'g3', target: 'pw1', relation: 'activates', confidence: 0.89 },
-    { id: 'e15', source: 'g5', target: 'pw2', relation: 'activates', confidence: 0.93 },
-    { id: 'e16', source: 'g1', target: 'pw3', relation: 'participates', confidence: 0.96 },
-    { id: 'e17', source: 'g2', target: 'pw3', relation: 'participates', confidence: 0.95 },
-    { id: 'e18', source: 'pw1', target: 'dis1', relation: 'modulates', confidence: 0.82 },
-    { id: 'e19', source: 'pw2', target: 'dis2', relation: 'modulates', confidence: 0.80 },
-    { id: 'e20', source: 'p3', target: 'dis2', relation: 'associates', confidence: 0.86 },
-    { id: 'e21', source: 'p4', target: 'dis3', relation: 'activates', confidence: 0.84 },
-    { id: 'e22', source: 'g2', target: 'dis2', relation: 'associates', confidence: 0.85 },
-  ],
-}
+// No mock data — all graph data comes from the API
 
 // ---------------------------------------------------------------------------
 // Component
@@ -195,7 +145,8 @@ export default function ProjectKnowledgeGraph() {
         const payload: GraphPayload = await res.json()
         if (!cancelled) setGraphData(payload)
       } catch {
-        if (!cancelled) setGraphData(MOCK_DATA)
+        // API unavailable — show empty graph
+        if (!cancelled) setGraphData({ nodes: [], edges: [] })
       } finally {
         if (!cancelled) setLoading(false)
       }

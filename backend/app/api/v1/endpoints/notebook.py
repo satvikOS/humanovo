@@ -2,43 +2,24 @@
 Notebook API Endpoints
 
 CRUD operations for researcher notebook pages with versioning.
+All data persisted to PostgreSQL via NotebookPage model.
 """
 
 import logging
 from datetime import datetime
 from typing import Optional
-from uuid import uuid4
+from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.database import get_db
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-# ── In-memory storage (with DB fallback) ─────────────────────────
-
-_notebook_pages: dict[str, dict] = {}
-_defaults_dismissed: bool = False  # Track if user has dismissed defaults
-
-
-def _ensure_defaults():
-    """Create a default page if none exist and user hasn't dismissed them."""
-    if not _notebook_pages and not _defaults_dismissed:
-        page_id = str(uuid4())
-        _notebook_pages[page_id] = {
-            "id": page_id,
-            "title": "Getting Started",
-            "content": "# Welcome to HumaNovo Notebook\n\nThis is your research notebook. Use **Markdown** to write notes, embed evidence, and track your research.\n\n## Features\n- Rich Markdown editing with live preview\n- LaTeX math: $E = mc^2$\n- Link evidence and hypotheses\n- Version history\n- Export to PDF/Markdown\n\nStart writing below...",
-            "content_type": "markdown",
-            "tags": ["getting-started"],
-            "version": 1,
-            "versions": [],
-            "created_at": datetime.utcnow().isoformat(),
-            "updated_at": datetime.utcnow().isoformat(),
-        }
-
-
-_ensure_defaults()
 
 
 # ── Schemas ──────────────────────────────────────────────────────
@@ -57,20 +38,30 @@ class NotebookPageUpdate(BaseModel):
     tags: Optional[list[str]] = None
 
 
+def _get_model():
+    from app.models.notebook import NotebookPage
+    return NotebookPage
+
+
 # ── Endpoints ────────────────────────────────────────────────────
 
 @router.get("/pages")
 async def list_pages(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
 ):
     """List all notebook pages."""
-    pages = sorted(_notebook_pages.values(), key=lambda p: p["updated_at"], reverse=True)
-    total = len(pages)
+    NotebookPage = _get_model()
+    result = await db.execute(
+        select(NotebookPage).order_by(NotebookPage.updated_at.desc())
+    )
+    all_pages = result.scalars().all()
+    total = len(all_pages)
     start = (page - 1) * page_size
-    items = pages[start:start + page_size]
+    items = all_pages[start:start + page_size]
     return {
-        "items": items,
+        "items": [p.to_dict() for p in items],
         "total": total,
         "page": page,
         "page_size": page_size,
@@ -78,103 +69,121 @@ async def list_pages(
 
 
 @router.get("/pages/{page_id}")
-async def get_page(page_id: str):
+async def get_page(page_id: str, db: AsyncSession = Depends(get_db)):
     """Get a single notebook page."""
-    if page_id not in _notebook_pages:
+    NotebookPage = _get_model()
+    try:
+        uid = UUID(page_id)
+    except ValueError:
         raise HTTPException(status_code=404, detail="Page not found")
-    return _notebook_pages[page_id]
+    page = await db.get(NotebookPage, uid)
+    if not page:
+        raise HTTPException(status_code=404, detail="Page not found")
+    return page.to_dict()
 
 
 @router.post("/pages")
-async def create_page(data: NotebookPageCreate):
+async def create_page(data: NotebookPageCreate, db: AsyncSession = Depends(get_db)):
     """Create a new notebook page."""
-    page_id = str(uuid4())
-    now = datetime.utcnow().isoformat()
-    page = {
-        "id": page_id,
-        "title": data.title,
-        "content": data.content,
-        "content_type": data.content_type,
-        "tags": data.tags,
-        "version": 1,
-        "versions": [],
-        "created_at": now,
-        "updated_at": now,
-    }
-    _notebook_pages[page_id] = page
-    return page
+    NotebookPage = _get_model()
+    page = NotebookPage(
+        title=data.title,
+        content=data.content,
+        content_type=data.content_type,
+        tags=data.tags,
+        version=1,
+        versions=[],
+    )
+    db.add(page)
+    await db.flush()
+    return page.to_dict()
 
 
 @router.patch("/pages/{page_id}")
-async def update_page(page_id: str, data: NotebookPageUpdate):
+async def update_page(page_id: str, data: NotebookPageUpdate, db: AsyncSession = Depends(get_db)):
     """Update a notebook page. Saves current version to history."""
-    if page_id not in _notebook_pages:
+    NotebookPage = _get_model()
+    try:
+        uid = UUID(page_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Page not found")
+    page = await db.get(NotebookPage, uid)
+    if not page:
         raise HTTPException(status_code=404, detail="Page not found")
 
-    page = _notebook_pages[page_id]
-
-    # Save current version to history before updating
-    if data.content is not None and data.content != page.get("content"):
-        version_entry = {
-            "version": page["version"],
-            "content": page["content"],
-            "title": page["title"],
-            "created_at": page["updated_at"],
-        }
-        if "versions" not in page:
-            page["versions"] = []
-        page["versions"].append(version_entry)
-        # Keep last 50 versions
-        if len(page["versions"]) > 50:
-            page["versions"] = page["versions"][-50:]
-        page["version"] = page["version"] + 1
+    # Save current version to history before updating content
+    if data.content is not None and data.content != page.content:
+        versions = list(page.versions or [])
+        versions.append({
+            "version": page.version,
+            "content": page.content,
+            "title": page.title,
+            "created_at": page.updated_at.isoformat() if page.updated_at else datetime.utcnow().isoformat(),
+        })
+        if len(versions) > 50:
+            versions = versions[-50:]
+        page.versions = versions
+        page.version = (page.version or 1) + 1
 
     if data.title is not None:
-        page["title"] = data.title
+        page.title = data.title
     if data.content is not None:
-        page["content"] = data.content
+        page.content = data.content
     if data.content_type is not None:
-        page["content_type"] = data.content_type
+        page.content_type = data.content_type
     if data.tags is not None:
-        page["tags"] = data.tags
+        page.tags = data.tags
 
-    page["updated_at"] = datetime.utcnow().isoformat()
-    _notebook_pages[page_id] = page
-    return page
+    await db.flush()
+    return page.to_dict()
 
 
 @router.delete("/pages/{page_id}")
-async def delete_page(page_id: str):
+async def delete_page(page_id: str, db: AsyncSession = Depends(get_db)):
     """Delete a notebook page."""
-    global _defaults_dismissed
-    if page_id not in _notebook_pages:
+    NotebookPage = _get_model()
+    try:
+        uid = UUID(page_id)
+    except ValueError:
         raise HTTPException(status_code=404, detail="Page not found")
-    del _notebook_pages[page_id]
-    # Mark defaults as dismissed so they don't reappear
-    _defaults_dismissed = True
+    page = await db.get(NotebookPage, uid)
+    if not page:
+        raise HTTPException(status_code=404, detail="Page not found")
+    await db.delete(page)
+    await db.flush()
     return {"status": "deleted"}
 
 
 @router.get("/pages/{page_id}/versions")
-async def get_versions(page_id: str):
+async def get_versions(page_id: str, db: AsyncSession = Depends(get_db)):
     """Get version history for a page."""
-    if page_id not in _notebook_pages:
+    NotebookPage = _get_model()
+    try:
+        uid = UUID(page_id)
+    except ValueError:
         raise HTTPException(status_code=404, detail="Page not found")
-    page = _notebook_pages[page_id]
-    return page.get("versions", [])
+    page = await db.get(NotebookPage, uid)
+    if not page:
+        raise HTTPException(status_code=404, detail="Page not found")
+    return page.versions or []
 
 
 @router.post("/pages/{page_id}/versions/{version}/restore")
-async def restore_version(page_id: str, version: int):
+async def restore_version(page_id: str, version: int, db: AsyncSession = Depends(get_db)):
     """Restore a previous version."""
-    if page_id not in _notebook_pages:
+    NotebookPage = _get_model()
+    try:
+        uid = UUID(page_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Page not found")
+    page = await db.get(NotebookPage, uid)
+    if not page:
         raise HTTPException(status_code=404, detail="Page not found")
 
-    page = _notebook_pages[page_id]
-    versions = page.get("versions", [])
+    versions = list(page.versions or [])
     target = None
     for v in versions:
-        if v["version"] == version:
+        if v.get("version") == version:
             target = v
             break
 
@@ -182,46 +191,47 @@ async def restore_version(page_id: str, version: int):
         raise HTTPException(status_code=404, detail="Version not found")
 
     # Save current as new version entry
-    version_entry = {
-        "version": page["version"],
-        "content": page["content"],
-        "title": page["title"],
-        "created_at": page["updated_at"],
-    }
-    page["versions"].append(version_entry)
-    page["version"] = page["version"] + 1
-    page["content"] = target["content"]
-    page["title"] = target["title"]
-    page["updated_at"] = datetime.utcnow().isoformat()
+    versions.append({
+        "version": page.version,
+        "content": page.content,
+        "title": page.title,
+        "created_at": page.updated_at.isoformat() if page.updated_at else datetime.utcnow().isoformat(),
+    })
+    page.versions = versions
+    page.version = (page.version or 1) + 1
+    page.content = target["content"]
+    page.title = target["title"]
 
-    _notebook_pages[page_id] = page
-    return page
+    await db.flush()
+    return page.to_dict()
 
 
 @router.get("/pages/{page_id}/export")
-async def export_page(page_id: str, format: str = Query("markdown")):
+async def export_page(page_id: str, format: str = Query("markdown"), db: AsyncSession = Depends(get_db)):
     """Export a page. Returns content in requested format."""
-    if page_id not in _notebook_pages:
+    NotebookPage = _get_model()
+    try:
+        uid = UUID(page_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Page not found")
+    page = await db.get(NotebookPage, uid)
+    if not page:
         raise HTTPException(status_code=404, detail="Page not found")
 
-    page = _notebook_pages[page_id]
-    content = page["content"]
+    content = page.content or ""
 
     if format == "markdown":
-        from fastapi.responses import Response
         return Response(
             content=content,
             media_type="text/markdown",
-            headers={"Content-Disposition": f"attachment; filename={page['title']}.md"},
+            headers={"Content-Disposition": f"attachment; filename={page.title}.md"},
         )
     elif format == "html":
-        # Basic markdown to HTML
-        html_content = f"<html><head><title>{page['title']}</title></head><body><pre>{content}</pre></body></html>"
-        from fastapi.responses import Response
+        html_content = f"<html><head><title>{page.title}</title></head><body><pre>{content}</pre></body></html>"
         return Response(
             content=html_content,
             media_type="text/html",
-            headers={"Content-Disposition": f"attachment; filename={page['title']}.html"},
+            headers={"Content-Disposition": f"attachment; filename={page.title}.html"},
         )
 
     return {"content": content, "format": format}

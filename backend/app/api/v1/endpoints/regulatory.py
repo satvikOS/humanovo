@@ -9,90 +9,24 @@ from datetime import datetime
 from typing import Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.database import get_db
+from app.models.platform_entities import (
+    ComplianceChecklist,
+    ConsentForm,
+    DataUseAgreement,
+    IRBSubmission,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-_irb_submissions: dict[str, dict] = {}
-_agreements: dict[str, dict] = {}
-_consent_forms: dict[str, dict] = {}
-_checklists: dict[str, dict] = {}
 
-
-def _seed():
-    if _irb_submissions:
-        return
-
-    iid = str(uuid4())
-    _irb_submissions[iid] = {
-        "id": iid, "protocol_title": "Phase II Trial of Novel EGFR Inhibitor",
-        "irb_number": "IRB-2024-0451", "status": "approved",
-        "submission_date": "2024-03-15", "approval_date": "2024-05-01",
-        "expiration_date": "2025-05-01", "pi": "Dr. Sarah Chen",
-        "risk_level": "greater_than_minimal",
-        "review_type": "full_board",
-        "history": [
-            {"date": "2024-03-15", "action": "Submitted", "notes": "Initial submission"},
-            {"date": "2024-04-10", "action": "Revisions Requested", "notes": "Clarify consent process"},
-            {"date": "2024-04-20", "action": "Revisions Submitted", "notes": "Updated consent form"},
-            {"date": "2024-05-01", "action": "Approved", "notes": "Full board approval granted"},
-        ],
-        "created_at": datetime.utcnow().isoformat(),
-    }
-
-    aid = str(uuid4())
-    _agreements[aid] = {
-        "id": aid, "title": "Data Use Agreement - City Hospital",
-        "agreement_type": "DUA", "status": "active",
-        "party": "City Medical Center", "start_date": "2024-06-01",
-        "end_date": "2026-06-01", "data_types": ["demographics", "genomics", "imaging"],
-        "restrictions": ["No re-identification", "Destroy after study completion"],
-        "created_at": datetime.utcnow().isoformat(),
-    }
-
-    cid = str(uuid4())
-    _consent_forms[cid] = {
-        "id": cid, "title": "Informed Consent - EGFR Trial",
-        "version": "2.1", "status": "active",
-        "language": "English", "irb_approved": True,
-        "versions": [
-            {"version": "1.0", "date": "2024-03-01", "changes": "Initial version"},
-            {"version": "2.0", "date": "2024-04-15", "changes": "Updated risk section per IRB feedback"},
-            {"version": "2.1", "date": "2024-04-25", "changes": "Minor language clarifications"},
-        ],
-        "created_at": datetime.utcnow().isoformat(),
-    }
-
-    for framework, items in [
-        ("HIPAA", [
-            ("Privacy Rule compliance", True), ("Security Rule compliance", True),
-            ("Breach notification plan", True), ("Business associate agreements", True),
-            ("Minimum necessary standard", False), ("Patient access rights", True),
-        ]),
-        ("GCP", [
-            ("Investigator qualifications", True), ("Protocol compliance", True),
-            ("Informed consent process", True), ("IRB/IEC approval", True),
-            ("Adverse event reporting", True), ("Source data verification", False),
-        ]),
-        ("GDPR", [
-            ("Lawful basis for processing", True), ("Data protection impact assessment", False),
-            ("Data subject rights", True), ("Data processing records", True),
-            ("Cross-border transfer safeguards", False),
-        ]),
-    ]:
-        clid = str(uuid4())
-        _checklists[clid] = {
-            "id": clid, "framework": framework,
-            "items": [{"name": name, "completed": completed, "notes": ""} for name, completed in items],
-            "completion_pct": round(sum(1 for _, c in items if c) / len(items) * 100),
-            "last_reviewed": datetime.utcnow().isoformat(),
-            "created_at": datetime.utcnow().isoformat(),
-        }
-
-
-_seed()
+# ── Schemas ─────────────────────────────────────────────────────
 
 
 class IRBCreate(BaseModel):
@@ -121,116 +55,163 @@ class ChecklistUpdate(BaseModel):
     items: list[dict]
 
 
-# ── IRB ──────────────────────────────────────────────────────────
+# ── IRB ─────────────────────────────────────────────────────────
+
 
 @router.get("/irb-submissions")
-async def list_irb():
-    items = sorted(_irb_submissions.values(), key=lambda i: i["created_at"], reverse=True)
-    return {"items": items, "total": len(items)}
+async def list_irb(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(IRBSubmission).order_by(IRBSubmission.created_at.desc())
+    )
+    items = result.scalars().all()
+    return {"items": [i.to_dict() for i in items], "total": len(items)}
 
 
 @router.post("/irb-submissions")
-async def create_irb(data: IRBCreate):
-    iid = str(uuid4())
-    submission = {
-        "id": iid, "protocol_title": data.protocol_title,
-        "irb_number": f"IRB-{datetime.utcnow().year}-{str(uuid4())[:4]}",
-        "status": "pending", "submission_date": datetime.utcnow().strftime("%Y-%m-%d"),
-        "approval_date": None, "expiration_date": None,
-        "pi": data.pi, "risk_level": data.risk_level,
-        "review_type": data.review_type,
-        "history": [{"date": datetime.utcnow().strftime("%Y-%m-%d"), "action": "Submitted", "notes": "Initial submission"}],
-        "created_at": datetime.utcnow().isoformat(),
-    }
-    _irb_submissions[iid] = submission
-    return submission
+async def create_irb(data: IRBCreate, db: AsyncSession = Depends(get_db)):
+    now = datetime.utcnow()
+    submission = IRBSubmission(
+        protocol_title=data.protocol_title,
+        irb_number=f"IRB-{now.year}-{str(uuid4())[:4]}",
+        status="pending",
+        submission_date=now.strftime("%Y-%m-%d"),
+        approval_date=None,
+        expiration_date=None,
+        pi=data.pi,
+        risk_level=data.risk_level,
+        review_type=data.review_type,
+        history=[
+            {
+                "date": now.strftime("%Y-%m-%d"),
+                "action": "Submitted",
+                "notes": "Initial submission",
+            }
+        ],
+    )
+    db.add(submission)
+    await db.flush()
+    return submission.to_dict()
 
 
 @router.get("/irb-submissions/{irb_id}")
-async def get_irb(irb_id: str):
-    if irb_id not in _irb_submissions:
+async def get_irb(irb_id: str, db: AsyncSession = Depends(get_db)):
+    submission = await db.get(IRBSubmission, irb_id)
+    if not submission:
         raise HTTPException(status_code=404, detail="IRB submission not found")
-    return _irb_submissions[irb_id]
+    return submission.to_dict()
 
 
 @router.delete("/irb-submissions/{irb_id}")
-async def delete_irb(irb_id: str):
-    if irb_id not in _irb_submissions:
+async def delete_irb(irb_id: str, db: AsyncSession = Depends(get_db)):
+    submission = await db.get(IRBSubmission, irb_id)
+    if not submission:
         raise HTTPException(status_code=404, detail="IRB submission not found")
-    del _irb_submissions[irb_id]
+    await db.delete(submission)
+    await db.flush()
     return {"status": "deleted"}
 
 
-# ── Agreements ───────────────────────────────────────────────────
+# ── Agreements ──────────────────────────────────────────────────
+
 
 @router.get("/agreements")
-async def list_agreements():
-    return {"items": list(_agreements.values()), "total": len(_agreements)}
+async def list_agreements(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(DataUseAgreement))
+    items = result.scalars().all()
+    return {"items": [a.to_dict() for a in items], "total": len(items)}
 
 
 @router.post("/agreements")
-async def create_agreement(data: AgreementCreate):
-    aid = str(uuid4())
-    agreement = {
-        "id": aid, "title": data.title, "agreement_type": data.agreement_type,
-        "status": "draft", "party": data.party, "data_types": data.data_types,
-        "start_date": data.start_date, "end_date": data.end_date,
-        "restrictions": [], "created_at": datetime.utcnow().isoformat(),
-    }
-    _agreements[aid] = agreement
-    return agreement
+async def create_agreement(data: AgreementCreate, db: AsyncSession = Depends(get_db)):
+    agreement = DataUseAgreement(
+        title=data.title,
+        agreement_type=data.agreement_type,
+        status="draft",
+        party=data.party,
+        data_types=data.data_types,
+        start_date=data.start_date,
+        end_date=data.end_date,
+        restrictions=[],
+    )
+    db.add(agreement)
+    await db.flush()
+    return agreement.to_dict()
 
 
 @router.delete("/agreements/{agreement_id}")
-async def delete_agreement(agreement_id: str):
-    if agreement_id not in _agreements:
+async def delete_agreement(agreement_id: str, db: AsyncSession = Depends(get_db)):
+    agreement = await db.get(DataUseAgreement, agreement_id)
+    if not agreement:
         raise HTTPException(status_code=404, detail="Agreement not found")
-    del _agreements[agreement_id]
+    await db.delete(agreement)
+    await db.flush()
     return {"status": "deleted"}
 
 
-# ── Consent Forms ────────────────────────────────────────────────
+# ── Consent Forms ───────────────────────────────────────────────
+
 
 @router.get("/consent-forms")
-async def list_consent_forms():
-    return {"items": list(_consent_forms.values()), "total": len(_consent_forms)}
+async def list_consent_forms(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(ConsentForm))
+    items = result.scalars().all()
+    return {"items": [f.to_dict() for f in items], "total": len(items)}
 
 
 @router.post("/consent-forms")
-async def create_consent_form(data: ConsentFormCreate):
-    cid = str(uuid4())
-    form = {
-        "id": cid, "title": data.title, "version": data.version,
-        "status": "draft", "language": data.language, "irb_approved": False,
-        "versions": [{"version": data.version, "date": datetime.utcnow().strftime("%Y-%m-%d"), "changes": "Initial version"}],
-        "created_at": datetime.utcnow().isoformat(),
-    }
-    _consent_forms[cid] = form
-    return form
+async def create_consent_form(data: ConsentFormCreate, db: AsyncSession = Depends(get_db)):
+    now = datetime.utcnow()
+    form = ConsentForm(
+        title=data.title,
+        version=data.version,
+        status="draft",
+        language=data.language,
+        irb_approved=False,
+        versions=[
+            {
+                "version": data.version,
+                "date": now.strftime("%Y-%m-%d"),
+                "changes": "Initial version",
+            }
+        ],
+    )
+    db.add(form)
+    await db.flush()
+    return form.to_dict()
 
 
 @router.delete("/consent-forms/{form_id}")
-async def delete_consent_form(form_id: str):
-    if form_id not in _consent_forms:
+async def delete_consent_form(form_id: str, db: AsyncSession = Depends(get_db)):
+    form = await db.get(ConsentForm, form_id)
+    if not form:
         raise HTTPException(status_code=404, detail="Consent form not found")
-    del _consent_forms[form_id]
+    await db.delete(form)
+    await db.flush()
     return {"status": "deleted"}
 
 
-# ── Checklists ───────────────────────────────────────────────────
+# ── Checklists ──────────────────────────────────────────────────
+
 
 @router.get("/checklists")
-async def list_checklists():
-    return {"items": list(_checklists.values()), "total": len(_checklists)}
+async def list_checklists(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(ComplianceChecklist))
+    items = result.scalars().all()
+    return {"items": [c.to_dict() for c in items], "total": len(items)}
 
 
 @router.patch("/checklists/{checklist_id}")
-async def update_checklist(checklist_id: str, data: ChecklistUpdate):
-    if checklist_id not in _checklists:
+async def update_checklist(
+    checklist_id: str,
+    data: ChecklistUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    checklist = await db.get(ComplianceChecklist, checklist_id)
+    if not checklist:
         raise HTTPException(status_code=404, detail="Checklist not found")
-    cl = _checklists[checklist_id]
-    cl["items"] = data.items
+    checklist.items = data.items
     completed = sum(1 for i in data.items if i.get("completed"))
-    cl["completion_pct"] = round(completed / len(data.items) * 100) if data.items else 0
-    cl["last_reviewed"] = datetime.utcnow().isoformat()
-    return cl
+    checklist.completion_pct = round(completed / len(data.items) * 100) if data.items else 0
+    checklist.last_reviewed = datetime.utcnow().isoformat()
+    await db.flush()
+    return checklist.to_dict()

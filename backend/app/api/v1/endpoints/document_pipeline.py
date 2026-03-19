@@ -431,83 +431,64 @@ async def download_generated_document():
 
 async def _get_project_data(project_id: UUID) -> dict[str, Any]:
     """
-    Retrieve project data including hypotheses from DB or in-memory store.
+    Retrieve project data including hypotheses from the database.
     """
-    # Try in-memory store first (from orchestrator save-to-project)
-    from app.api.v1.endpoints.projects import _memory_projects, _check_db_available
+    try:
+        from app.core.database import get_db
+        from app.models.project import Project
+        from app.models.hypothesis import Hypothesis
+        from sqlalchemy import select
 
-    project_id_str = str(project_id)
-    if project_id_str in _memory_projects:
-        return _memory_projects[project_id_str]
+        async for db in get_db():
+            result = await db.execute(
+                select(Project).where(Project.id == project_id)
+            )
+            project = result.scalar_one_or_none()
+            if not project:
+                raise HTTPException(status_code=404, detail="Project not found")
 
-    # Try database
-    db_ok = await _check_db_available()
-    if db_ok:
-        try:
-            from app.core.database import get_db
-            from app.models.project import Project
-            from app.models.hypothesis import Hypothesis
-            from sqlalchemy import select
+            # Fetch hypotheses for this project
+            hyp_result = await db.execute(
+                select(Hypothesis).where(Hypothesis.project_id == project_id)
+            )
+            db_hypotheses = hyp_result.scalars().all()
 
-            async for db in get_db():
-                result = await db.execute(
-                    select(Project).where(Project.id == project_id)
-                )
-                project = result.scalar_one_or_none()
-                if not project:
-                    raise HTTPException(status_code=404, detail="Project not found")
-
-                # Fetch hypotheses for this project
-                hyp_result = await db.execute(
-                    select(Hypothesis).where(Hypothesis.project_id == project_id)
-                )
-                db_hypotheses = hyp_result.scalars().all()
-
-                hypotheses = []
-                for h in db_hypotheses:
-                    hyp_dict = {
-                        "id": str(h.id),
-                        "title": h.statement,
-                        "description": h.rationale or "",
-                        "mechanism": h.mechanism or "",
-                        "confidence": h.confidence_score or 0.0,
-                        "model_used": (h.generation_context or {}).get("model_used", "unknown"),
-                        "validated": h.status.value == "validated" if hasattr(h.status, 'value') else False,
-                        "external_factors": (h.generation_context or {}).get("external_factors", []),
-                    }
-                    hypotheses.append(hyp_dict)
-
-                return {
-                    "id": str(project.id),
-                    "name": project.name,
-                    "description": project.description,
-                    "disease_focus": project.disease_focus,
-                    "research_question": project.research_question,
-                    "tags": project.tags or [],
-                    "hypotheses": hypotheses,
-                    "hypothesis_count": len(hypotheses),
+            hypotheses = []
+            for h in db_hypotheses:
+                hyp_dict = {
+                    "id": str(h.id),
+                    "title": h.statement,
+                    "description": h.rationale or "",
+                    "mechanism": h.mechanism or "",
+                    "confidence": h.confidence_score or 0.0,
+                    "model_used": (h.generation_context or {}).get("model_used", "unknown"),
+                    "validated": h.status.value == "validated" if hasattr(h.status, 'value') else False,
+                    "external_factors": (h.generation_context or {}).get("external_factors", []),
                 }
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.warning(f"DB project retrieval failed: {e}")
+                hypotheses.append(hyp_dict)
+
+            return {
+                "id": str(project.id),
+                "name": project.name,
+                "description": project.description,
+                "disease_focus": project.disease_focus,
+                "research_question": project.research_question,
+                "tags": project.tags or [],
+                "hypotheses": hypotheses,
+                "hypothesis_count": len(hypotheses),
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"DB project retrieval failed: {e}")
 
     raise HTTPException(status_code=404, detail="Project not found")
 
 
 async def _get_hypothesis_data(hypothesis_id: UUID) -> dict[str, Any]:
     """Retrieve a single hypothesis from DB or orchestrator."""
-    from app.api.v1.endpoints.projects import _memory_projects, _check_db_available
 
-    # Check in-memory projects for this hypothesis
-    for project in _memory_projects.values():
-        for h in project.get("hypotheses", []):
-            if str(h.get("id", "")) == str(hypothesis_id):
-                # Enrich with project context
-                h["disease"] = project.get("disease_focus", "Unknown")
-                return h
-
-    # Check active orchestrator
+    # Check active orchestrator first (for in-progress discovery runs)
     try:
         from app.api.v1.endpoints.orchestrator import _current_orchestrator
         if _current_orchestrator:
@@ -538,52 +519,50 @@ async def _get_hypothesis_data(hypothesis_id: UUID) -> dict[str, Any]:
         logger.debug("Orchestrator hypothesis lookup failed", error=str(e))
 
     # Try database
-    db_ok = await _check_db_available()
-    if db_ok:
-        try:
-            from app.core.database import get_db
-            from app.models.hypothesis import Hypothesis
-            from app.models.project import Project
-            from sqlalchemy import select
+    try:
+        from app.core.database import get_db
+        from app.models.hypothesis import Hypothesis
+        from app.models.project import Project
+        from sqlalchemy import select
 
-            async for db in get_db():
-                result = await db.execute(
-                    select(Hypothesis).where(Hypothesis.id == hypothesis_id)
+        async for db in get_db():
+            result = await db.execute(
+                select(Hypothesis).where(Hypothesis.id == hypothesis_id)
+            )
+            h = result.scalar_one_or_none()
+            if not h:
+                raise HTTPException(status_code=404, detail="Hypothesis not found")
+
+            # Get project for disease context
+            disease = "Unknown"
+            if h.project_id:
+                proj_result = await db.execute(
+                    select(Project).where(Project.id == h.project_id)
                 )
-                h = result.scalar_one_or_none()
-                if not h:
-                    raise HTTPException(status_code=404, detail="Hypothesis not found")
+                project = proj_result.scalar_one_or_none()
+                if project:
+                    disease = project.disease_focus or "Unknown"
 
-                # Get project for disease context
-                disease = "Unknown"
-                if h.project_id:
-                    proj_result = await db.execute(
-                        select(Project).where(Project.id == h.project_id)
-                    )
-                    project = proj_result.scalar_one_or_none()
-                    if project:
-                        disease = project.disease_focus or "Unknown"
-
-                return {
-                    "id": str(h.id),
-                    "title": h.statement,
-                    "description": h.rationale or "",
-                    "mechanism": h.mechanism or "",
-                    "confidence": h.confidence_score or 0.0,
-                    "model_used": (h.generation_context or {}).get("model_used", "unknown"),
-                    "validated": h.status.value == "validated" if hasattr(h.status, 'value') else False,
-                    "external_factors": (h.generation_context or {}).get("external_factors", []),
-                    "disease": disease,
-                    "disease_focus": disease,
-                    "evidence_summary": [],
-                    "risks": [],
-                    "validation_steps": [],
-                    "translational_roadmap": getattr(h, "translational_roadmap", None) or {},
-                }
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.warning(f"DB hypothesis retrieval failed: {e}")
+            return {
+                "id": str(h.id),
+                "title": h.statement,
+                "description": h.rationale or "",
+                "mechanism": h.mechanism or "",
+                "confidence": h.confidence_score or 0.0,
+                "model_used": (h.generation_context or {}).get("model_used", "unknown"),
+                "validated": h.status.value == "validated" if hasattr(h.status, 'value') else False,
+                "external_factors": (h.generation_context or {}).get("external_factors", []),
+                "disease": disease,
+                "disease_focus": disease,
+                "evidence_summary": [],
+                "risks": [],
+                "validation_steps": [],
+                "translational_roadmap": getattr(h, "translational_roadmap", None) or {},
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"DB hypothesis retrieval failed: {e}")
 
     raise HTTPException(status_code=404, detail="Hypothesis not found")
 
