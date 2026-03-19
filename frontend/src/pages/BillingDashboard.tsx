@@ -71,70 +71,6 @@ interface BudgetConfig {
   scope: 'global' | 'project'
 }
 
-// ── Mock data generators ─────────────────────────────────────
-
-function mockSummary(): BillingSummary {
-  return {
-    current_month_spend_cents: 55290,
-    budget_cents: 80000,
-    projected_spend_cents: 87300,
-    total_requests: 4827,
-  }
-}
-
-function mockDailySpend(): DailySpend[] {
-  const data: DailySpend[] = []
-  const now = new Date()
-  for (let i = 29; i >= 0; i--) {
-    const d = new Date(now)
-    d.setDate(d.getDate() - i)
-    data.push({
-      date: d.toISOString().slice(0, 10),
-      cost_cents: Math.floor(Math.random() * 3500 + 800),
-    })
-  }
-  return data
-}
-
-function mockModelBreakdown(): ModelBreakdown[] {
-  return [
-    { name: 'Claude Opus', cost_cents: 19850 },
-    { name: 'GPT-4o', cost_cents: 14230 },
-    { name: 'Claude Sonnet', cost_cents: 8720 },
-    { name: 'Gemini 1.5 Pro', cost_cents: 6340 },
-    { name: 'Command-R+', cost_cents: 4260 },
-    { name: 'GPT-4o-mini', cost_cents: 1890 },
-  ]
-}
-
-function mockStageBreakdown(): StageBreakdown[] {
-  return [
-    { name: 'Discovery', cost_cents: 28540 },
-    { name: 'Synthesis', cost_cents: 14720 },
-    { name: 'Evidence Grounding', cost_cents: 6890 },
-    { name: 'Literature Review', cost_cents: 5140 },
-  ]
-}
-
-function mockProjectCosts(): ProjectCost[] {
-  return [
-    { project_name: "Alzheimer's TREM2", total_cost_cents: 14280, runs: 20, last_activity: new Date(Date.now() - 2 * 3600000).toISOString() },
-    { project_name: 'GLP-1 Neuroplasticity', total_cost_cents: 18760, runs: 26, last_activity: new Date(Date.now() - 5 * 3600000).toISOString() },
-    { project_name: 'BRCA2 Resistance', total_cost_cents: 9840, runs: 14, last_activity: new Date(Date.now() - 24 * 3600000).toISOString() },
-    { project_name: 'CAR-T Optimization', total_cost_cents: 6720, runs: 11, last_activity: new Date(Date.now() - 48 * 3600000).toISOString() },
-    { project_name: 'CRISPR Off-Target', total_cost_cents: 5430, runs: 9, last_activity: new Date(Date.now() - 72 * 3600000).toISOString() },
-    { project_name: 'mRNA Delivery Vectors', total_cost_cents: 3260, runs: 6, last_activity: new Date(Date.now() - 120 * 3600000).toISOString() },
-  ]
-}
-
-function mockBudgets(): BudgetConfig[] {
-  return [
-    { id: 'b1', name: 'Global Budget', monthly_budget_cents: 80000, spent_cents: 55290, alert_threshold_pct: 80, hard_limit: false, scope: 'global' },
-    { id: 'b2', name: "Alzheimer's TREM2", monthly_budget_cents: 20000, spent_cents: 14280, alert_threshold_pct: 75, hard_limit: true, scope: 'project' },
-    { id: 'b3', name: 'BRCA2 Resistance', monthly_budget_cents: 15000, spent_cents: 9840, alert_threshold_pct: 80, hard_limit: false, scope: 'project' },
-  ]
-}
-
 // ── Helpers ──────────────────────────────────────────────────
 
 function formatUSD(cents: number) {
@@ -283,39 +219,39 @@ export default function BillingDashboard() {
       setSummary(
         summaryRes.status === 'fulfilled' && summaryRes.value
           ? summaryRes.value
-          : mockSummary()
+          : null
       )
 
       const dailyVal = dailyRes.status === 'fulfilled' && dailyRes.value
         ? (Array.isArray(dailyRes.value) ? dailyRes.value : dailyRes.value.items || [])
         : []
-      setDaily(dailyVal.length > 0 ? dailyVal : mockDailySpend())
+      setDaily(dailyVal)
 
       if (breakdownRes.status === 'fulfilled' && breakdownRes.value) {
         const bd = breakdownRes.value
-        setModelBreakdown(Array.isArray(bd.by_model) ? bd.by_model : mockModelBreakdown())
-        setStageBreakdown(Array.isArray(bd.by_stage) ? bd.by_stage : mockStageBreakdown())
+        setModelBreakdown(Array.isArray(bd.by_model) ? bd.by_model : [])
+        setStageBreakdown(Array.isArray(bd.by_stage) ? bd.by_stage : [])
       } else {
-        setModelBreakdown(mockModelBreakdown())
-        setStageBreakdown(mockStageBreakdown())
+        setModelBreakdown([])
+        setStageBreakdown([])
       }
 
       const pVal = projectsRes.status === 'fulfilled' && projectsRes.value
         ? (Array.isArray(projectsRes.value) ? projectsRes.value : projectsRes.value.items || [])
         : []
-      setProjectCosts(pVal.length > 0 ? pVal : mockProjectCosts())
+      setProjectCosts(pVal)
 
       const bVal = budgetsRes.status === 'fulfilled' && budgetsRes.value
         ? (Array.isArray(budgetsRes.value) ? budgetsRes.value : budgetsRes.value.items || [])
         : []
-      setBudgets(bVal.length > 0 ? bVal : mockBudgets())
+      setBudgets(bVal)
     } catch {
-      setSummary(mockSummary())
-      setDaily(mockDailySpend())
-      setModelBreakdown(mockModelBreakdown())
-      setStageBreakdown(mockStageBreakdown())
-      setProjectCosts(mockProjectCosts())
-      setBudgets(mockBudgets())
+      setSummary(null)
+      setDaily([])
+      setModelBreakdown([])
+      setStageBreakdown([])
+      setProjectCosts([])
+      setBudgets([])
     } finally {
       setLoading(false)
     }
