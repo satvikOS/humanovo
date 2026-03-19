@@ -1197,6 +1197,103 @@ Each phase MUST include: title, objectives (list), key_activities (list), milest
 IMPORTANT: Fill in ALL arrays with specific, detailed items relevant to the disease and hypothesis. Do NOT leave any arrays empty — each phase must have at least 3 objectives, 3 key_activities, 2 milestones, 2 risks, and 2 success_criteria."""
 
 
+STAGE_5_REVISE_PROMPT = """## STAGE 5: HYPOTHESIS REVISION (Reviser)
+
+You are the REVISER — Stage 5 of 12. You receive the hypothesis after counter-argument generation (Stage 4) and must systematically address every criticism.
+
+### YOUR TASK
+For each counter-argument from Stage 4:
+1. Assess its validity (valid, partially valid, invalid)
+2. If valid: MODIFY the hypothesis to address it. Explain what changed and why.
+3. If partially valid: ACKNOWLEDGE the limitation and add a qualifier or condition.
+4. If invalid: REFUTE with specific evidence (cite PMIDs).
+
+### REQUIREMENTS
+1. You MUST respond to EVERY counter-argument — do not skip any
+2. Track pre-revision vs post-revision confidence
+3. The revised hypothesis must be stronger than the original
+4. Maintain intellectual honesty — do not dismiss valid criticisms
+
+### OUTPUT FORMAT (strict JSON)
+```json
+{
+    "title": "Revised hypothesis title",
+    "description": "Updated description incorporating revisions",
+    "mechanism": "Updated mechanism after addressing criticisms",
+    "revision_responses": [
+        {
+            "counter_argument": "The original criticism",
+            "validity": "valid|partially_valid|invalid",
+            "response": "How it was addressed",
+            "hypothesis_change": "What was modified in the hypothesis"
+        }
+    ],
+    "pre_revision_confidence": 0.0-1.0,
+    "post_revision_confidence": 0.0-1.0,
+    "confidence": 0.0-1.0,
+    "remaining_limitations": ["Limitation 1", "Limitation 2"],
+    "strengthened_aspects": ["What became stronger"]
+}
+```"""
+
+STAGE_11_TRANSLATE_PROMPT = """## STAGE 11: TRANSLATIONAL ROADMAP (Translator)
+
+You are the TRANSLATOR — Stage 11 of 12. You create a comprehensive bench-to-bedside translational roadmap for the refined, scored hypothesis.
+
+### YOUR TASK
+Create a detailed T0-T5 translational roadmap covering the entire journey from basic research to global health impact.
+
+### TRANSLATIONAL PHASES (T0-T5)
+Each phase MUST include: title, objectives (list), key_activities (list), milestones (list), timeline, estimated_cost, risks (list), success_criteria (list), go_no_go_criteria (list).
+
+- T0_BASIC_RESEARCH: Target validation, in vitro studies, mechanism elucidation
+- T1_TRANSLATION_TO_HUMANS: Preclinical development, IND-enabling, toxicology, formulation
+- T2_TRANSLATION_TO_PATIENTS: Clinical trials (Phase I/II/III), patient stratification, endpoints
+- T3_TRANSLATION_TO_PRACTICE: Guidelines, clinical decision support, health system integration
+- T4_TRANSLATION_TO_COMMUNITY: Population health, equity, access programs, real-world evidence
+- T5_GLOBAL_IMPACT: International regulatory, LMIC adaptation, global health policy
+
+### REQUIREMENTS
+1. Every phase must have at least 3 objectives, 3 activities, 2 milestones, 2 risks
+2. Timelines must be realistic and specific
+3. Costs must be evidence-based estimates
+4. Go/no-go criteria must be measurable
+
+### OUTPUT FORMAT (strict JSON)
+```json
+{
+    "title": "Hypothesis title (from previous stages)",
+    "confidence": 0.0-1.0,
+    "translational_roadmap": {
+        "overall_timeline": "Estimated total timeline",
+        "overall_budget": "Estimated total budget range",
+        "current_phase": "T0_BASIC_RESEARCH",
+        "phases": {
+            "T0_BASIC_RESEARCH": {
+                "title": "Basic Research & Target Validation",
+                "description": "Detailed paragraph...",
+                "objectives": ["Obj1", "Obj2", "Obj3"],
+                "key_activities": ["Act1", "Act2", "Act3"],
+                "milestones": ["Mile1", "Mile2"],
+                "timeline": "12-24 months",
+                "estimated_cost": "$2-5M",
+                "risks": ["Risk1", "Risk2"],
+                "success_criteria": ["Crit1", "Crit2"],
+                "go_no_go_criteria": ["Go/NoGo1", "Go/NoGo2"],
+                "key_experiments": ["Exp1", "Exp2"],
+                "required_resources": ["Res1", "Res2"]
+            }
+        }
+    },
+    "required_methods": ["Method1", "Method2"],
+    "feasibility_score": 0.0-1.0,
+    "impact_score": 0.0-1.0
+}
+```
+
+IMPORTANT: Fill in ALL phases (T0-T5) with specific, detailed, disease-relevant content. Do NOT leave arrays empty."""
+
+
 # Combined prompts dictionary
 AGENT_PROMPTS = {
     "master": MASTER_DISCOVERY_PROMPT,
@@ -1209,25 +1306,48 @@ AGENT_PROMPTS = {
     "deep_analyst": DEEP_ANALYST_PROMPT,
 }
 
-# 10-stage pipeline prompts mapped by stage number
+# 12-stage pipeline prompts mapped by stage number
 STAGE_PROMPTS = {
     1: STAGE_1_SEED_PROMPT,
     2: STAGE_2_EXPAND_PROMPT,
     3: STAGE_3_EVIDENCE_PROMPT,
     4: STAGE_4_COUNTER_PROMPT,
-    5: STAGE_5_MECHANISM_PROMPT,
-    6: STAGE_6_VALIDATE_PROMPT,
-    7: STAGE_7_GROUND_PROMPT,
-    8: STAGE_8_SCORE_PROMPT,
-    9: STAGE_9_REFINE_PROMPT,
-    10: STAGE_10_FINALIZE_PROMPT,
+    5: STAGE_5_REVISE_PROMPT,
+    6: STAGE_5_MECHANISM_PROMPT,       # Was stage 5, now stage 6
+    7: STAGE_6_VALIDATE_PROMPT,        # Was stage 6, now stage 7
+    8: STAGE_7_GROUND_PROMPT,          # Was stage 7, now stage 8
+    9: STAGE_8_SCORE_PROMPT,           # Was stage 8, now stage 9
+    10: STAGE_9_REFINE_PROMPT,         # Was stage 9, now stage 10
+    11: STAGE_11_TRANSLATE_PROMPT,
+    12: STAGE_10_FINALIZE_PROMPT,      # Was stage 10, now stage 12
 }
 
 
+# Load constitutional constraints to prepend to ALL pipeline stage prompts
+_CONSTITUTIONAL_CONSTRAINTS = None
+
+def _load_constitutional_constraints() -> str:
+    """Load constitutional constraints from config file."""
+    global _CONSTITUTIONAL_CONSTRAINTS
+    if _CONSTITUTIONAL_CONSTRAINTS is None:
+        import os
+        constraints_path = os.path.join(
+            os.path.dirname(__file__), "../../config/constitutional_constraints.txt"
+        )
+        try:
+            with open(constraints_path) as f:
+                _CONSTITUTIONAL_CONSTRAINTS = f.read().strip()
+        except FileNotFoundError:
+            _CONSTITUTIONAL_CONSTRAINTS = ""
+    return _CONSTITUTIONAL_CONSTRAINTS
+
+
 def get_stage_prompt(stage: int) -> str:
-    """Get the prompt for a specific pipeline stage (1-10), with master prompt included."""
+    """Get the prompt for a specific pipeline stage (1-12), with master prompt and constitutional constraints."""
     stage_prompt = STAGE_PROMPTS.get(stage, "")
-    return f"{MASTER_DISCOVERY_PROMPT}\n\n---\n\n{stage_prompt}"
+    constraints = _load_constitutional_constraints()
+    constraints_block = f"\n\n## {constraints}\n" if constraints else ""
+    return f"{MASTER_DISCOVERY_PROMPT}{constraints_block}\n\n---\n\n{stage_prompt}"
 
 
 def get_agent_prompt(role: str, include_master: bool = True) -> str:

@@ -1,177 +1,127 @@
 """
-Cost Tracking Service — Accurate Per-API-Call Cost Tracking
+Cost Tracking Service per Project Jamison v2 Spec Section 21.
 
-Tracks every single LLM and biomedical API call with actual token counts
-from provider responses (not estimates). Calculates costs using provider pricing
-at the time of the call.
-
-Provides:
-- Per-call cost recording with actual tokens from API responses
-- Per-stage, per-model, per-run cost breakdowns
-- Time-series cost data for visualization
-- Provider-specific pricing management
-- Full audit trail matching provider usage dashboards
+Wraps all LLM/embedding/API calls with cost recording to usage_events table.
+Provides summary queries for billing dashboard.
 """
 
-import asyncio
-from collections import defaultdict
-from dataclasses import dataclass
-from datetime import datetime, timedelta
-from typing import Any, Optional
-from uuid import uuid4
+import json
+import os
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta
+from decimal import Decimal
+from typing import Any, Literal, Optional
 
-from sqlalchemy import and_, desc, func, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
 
 from app.core.database import async_session_factory
 from app.core.logging import get_logger
-from app.models.learning_memory import (
-    APICostRecord,
-    CostCategory,
-    DiscoveryRun,
-    ModelPricing,
-)
 
 logger = get_logger(__name__)
 
 
-# ============== Provider Pricing (as of API call time) ==============
+# ═══════════════════════════════════════════════════════════════════════
+# Pricing loader — reads config/model_pricing.json once, caches in memory
+# ═══════════════════════════════════════════════════════════════════════
 
-# These are the actual prices from each provider's pricing page.
-# Updated pricing is stored in the model_pricing table for audit trail.
-# All prices are per million tokens.
-
-CURRENT_PRICING = {
-    # AWS Bedrock — Claude Opus 4.6
-    ("aws_bedrock", "us.anthropic.claude-opus-4-6-v1:0"): {
-        "input": 15.00,
-        "output": 75.00,
-        "cached_input": 1.50,
-    },
-    # Azure AI — Mistral-Large-3
-    ("azure_ai", "Mistral-Large-3"): {
-        "input": 2.00,
-        "output": 6.00,
-        "cached_input": 0.20,
-    },
-    # Azure OpenAI — GPT-4o
-    ("azure_openai", "gpt-4o"): {
-        "input": 2.50,
-        "output": 10.00,
-        "cached_input": 1.25,
-    },
-    # Azure OpenAI — Cohere Command A
-    ("azure_openai", "cohere-command-a"): {
-        "input": 2.50,
-        "output": 10.00,
-        "cached_input": 0.0,
-    },
-    # Azure OpenAI — o3-mini
-    ("azure_openai", "o3-mini"): {
-        "input": 1.10,
-        "output": 4.40,
-        "cached_input": 0.55,
-    },
-    # Azure OpenAI — GPT-4.1
-    ("azure_openai", "gpt-4.1"): {
-        "input": 2.00,
-        "output": 8.00,
-        "cached_input": 0.50,
-    },
-    # Azure AI — Grok-4-1-fast-reasoning
-    ("azure_ai", "grok-4-1-fast-reasoning"): {
-        "input": 3.00,
-        "output": 12.00,
-        "cached_input": 0.0,
-    },
-    # Azure OpenAI — Embeddings
-    ("azure_openai", "text-embedding-3-large"): {
-        "input": 0.13,
-        "output": 0.0,
-        "cached_input": 0.0,
-    },
-    ("azure_openai", "text-embedding-3-small"): {
-        "input": 0.02,
-        "output": 0.0,
-        "cached_input": 0.0,
-    },
-    # AWS Bedrock — Cohere Embed v3
-    ("aws_bedrock", "cohere.embed-english-v3"): {
-        "input": 0.10,
-        "output": 0.0,
-        "cached_input": 0.0,
-    },
-}
-
-# Biomedical API costs (per request — most are free but some have usage tiers)
-BIOMEDICAL_API_PRICING = {
-    "pubmed": 0.0,
-    "clinical_trials": 0.0,
-    "openfda": 0.0,
-    "uniprot": 0.0,
-    "reactome": 0.0,
-    "kegg": 0.0,
-    "ensembl": 0.0,
-    "hmdb": 0.0,
-    "chebi": 0.0,
-    "ncbi_gene": 0.0,
-    "clinvar": 0.0,
-    "cell_ontology": 0.0,
-    "fma": 0.0,
-    "hca": 0.0,
-    "elsevier_scopus": 0.0,  # Institutional license
-    "springer_nature": 0.0,
-}
+_pricing: Optional[dict] = None
 
 
-def calculate_cost(
-    provider: str,
+def _load_pricing() -> dict:
+    global _pricing
+    if _pricing is None:
+        path = os.path.join(
+            os.path.dirname(__file__), "../../config/model_pricing.json"
+        )
+        try:
+            with open(path) as f:
+                _pricing = json.load(f)
+        except Exception as e:
+            logger.warning(f"Could not load model pricing from {path}: {e}")
+            _pricing = {}
+    return _pricing
+
+
+def compute_cost_cents(
     model_name: str,
     input_tokens: int,
     output_tokens: int,
     cached_tokens: int = 0,
-) -> tuple[float, float, float]:
-    """Calculate cost from actual token counts using current pricing.
+) -> Decimal:
+    """Compute cost in fractional cents using model_pricing.json.
 
-    Returns: (input_cost, output_cost, total_cost) in USD.
+    The pricing file stores costs per 1 million tokens in cents.
+    Cached tokens are subtracted from input_tokens for billing
+    (most providers charge nothing or a reduced rate for cached tokens;
+    our pricing file does not carry a separate cached rate, so we treat
+    cached tokens as free).
     """
-    key = (provider, model_name)
-    pricing = CURRENT_PRICING.get(key)
-
-    if not pricing:
-        # Try partial match
-        for (p, m), pr in CURRENT_PRICING.items():
-            if p == provider and model_name.lower() in m.lower():
-                pricing = pr
+    pricing = _load_pricing()
+    entry = pricing.get(model_name)
+    if not entry:
+        # Try case-insensitive partial match
+        for key, val in pricing.items():
+            if key.lower() in model_name.lower() or model_name.lower() in key.lower():
+                entry = val
                 break
+    if not entry:
+        logger.warning(
+            "No pricing entry for model %s — recording 0 cost", model_name
+        )
+        return Decimal("0")
 
-    if not pricing:
-        logger.warning(f"No pricing found for {provider}/{model_name}, recording $0")
-        return 0.0, 0.0, 0.0
+    input_rate = Decimal(str(entry.get("input_cost_per_1m_tokens_cents", 0)))
+    output_rate = Decimal(str(entry.get("output_cost_per_1m_tokens_cents", 0)))
 
-    # Cached tokens are charged at cached rate, rest at full rate
-    non_cached_input = max(0, input_tokens - cached_tokens)
-    input_cost = (non_cached_input * pricing["input"] / 1_000_000) + \
-                 (cached_tokens * pricing.get("cached_input", 0) / 1_000_000)
-    output_cost = output_tokens * pricing["output"] / 1_000_000
-    total_cost = input_cost + output_cost
-
-    return input_cost, output_cost, total_cost
+    billable_input = max(0, input_tokens - cached_tokens)
+    input_cost = Decimal(billable_input) * input_rate / Decimal("1000000")
+    output_cost = Decimal(output_tokens) * output_rate / Decimal("1000000")
+    return (input_cost + output_cost).quantize(Decimal("0.0001"))
 
 
-class CostTrackingService:
-    """Tracks every API call with actual token counts and costs.
+# ═══════════════════════════════════════════════════════════════════════
+# Data classes
+# ═══════════════════════════════════════════════════════════════════════
 
-    Records are stored in PostgreSQL and queryable for:
-    - Real-time cost dashboards
-    - Per-run cost breakdowns
-    - Model cost comparisons
-    - Time-series cost analysis
-    - Provider usage verification
-    """
+
+@dataclass
+class BudgetStatus:
+    status: Literal["ok", "warning", "blocked"]
+    current_spend_cents: int = 0
+    budget_cents: int = 0
+    remaining_cents: int = 0
+    threshold_pct: int = 80
+    hard_limit: bool = False
+    message: str = ""
+
+
+@dataclass
+class UsageSummary:
+    total_cost_cents: float = 0.0
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    total_cached_tokens: int = 0
+    total_requests: int = 0
+    total_errors: int = 0
+    period_start: Optional[str] = None
+    period_end: Optional[str] = None
+    by_provider: list[dict[str, Any]] = field(default_factory=list)
+    by_model: list[dict[str, Any]] = field(default_factory=list)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# CostTracker
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class CostTracker:
+    """Records every external API call to usage_events and provides
+    aggregation queries for the billing dashboard."""
 
     def __init__(self, session_factory=None):
         self._session_factory = session_factory or async_session_factory
+
+    # ── Recording methods ──────────────────────────────────────────────
 
     async def record_llm_call(
         self,
@@ -180,559 +130,636 @@ class CostTrackingService:
         input_tokens: int,
         output_tokens: int,
         cached_tokens: int = 0,
-        latency_ms: int = 0,
-        discovery_run_id: str = None,
-        stage_execution_id: str = None,
-        stage_number: int = None,
-        stage_name: str = None,
-        hypothesis_id: str = None,
-        round_number: int = None,
-        request_id: str = None,
-        response_status: int = 200,
+        latency_ms: Optional[int] = None,
+        project_id: Optional[str] = None,
+        discovery_run_id: Optional[str] = None,
+        synthesis_run_id: Optional[str] = None,
+        stage_execution_id: Optional[str] = None,
+        stage_number: Optional[int] = None,
+        stage_name: Optional[str] = None,
+        hypothesis_id: Optional[str] = None,
+        round_number: Optional[int] = None,
         is_retry: bool = False,
-        retry_of: str = None,
-        endpoint: str = None,
+        error_message: Optional[str] = None,
     ) -> str:
-        """Record a single LLM API call with actual token counts from the response.
-
-        This is called AFTER the API response is received, using the actual
-        usage data from the response (not estimates).
-        """
-        input_cost, output_cost, total_cost = calculate_cost(
-            provider, model_name, input_tokens, output_tokens, cached_tokens
-        )
-
-        pricing = CURRENT_PRICING.get((provider, model_name), {})
+        """Insert a single LLM call into usage_events with computed cost."""
+        cost = compute_cost_cents(model_name, input_tokens, output_tokens, cached_tokens)
 
         async with self._session_factory() as session:
             async with session.begin():
-                record = APICostRecord(
-                    discovery_run_id=discovery_run_id,
-                    stage_execution_id=stage_execution_id,
-                    provider=provider,
-                    model_name=model_name,
-                    endpoint=endpoint,
-                    api_type="llm",
-                    category=CostCategory.LLM_INPUT if input_tokens > output_tokens else CostCategory.LLM_OUTPUT,
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                    total_tokens=input_tokens + output_tokens,
-                    cached_tokens=cached_tokens,
-                    input_cost_usd=input_cost,
-                    output_cost_usd=output_cost,
-                    total_cost_usd=total_cost,
-                    input_price_per_million=pricing.get("input"),
-                    output_price_per_million=pricing.get("output"),
-                    request_id=request_id,
-                    response_status=response_status,
-                    latency_ms=latency_ms,
-                    is_retry=is_retry,
-                    retry_of=retry_of,
-                    stage_number=stage_number,
-                    stage_name=stage_name,
-                    hypothesis_id=hypothesis_id,
-                    round_number=round_number,
-                    called_at=datetime.utcnow(),
+                result = await session.execute(
+                    text("""
+                        INSERT INTO usage_events (
+                            project_id, discovery_run_id, synthesis_run_id,
+                            stage_execution_id, provider, model_name,
+                            input_tokens, output_tokens, cached_tokens,
+                            cost_cents, latency_ms,
+                            stage_number, stage_name,
+                            hypothesis_id, round_number,
+                            is_retry, is_embedding, is_search,
+                            error_message
+                        ) VALUES (
+                            :project_id, :discovery_run_id, :synthesis_run_id,
+                            :stage_execution_id, :provider, :model_name,
+                            :input_tokens, :output_tokens, :cached_tokens,
+                            :cost_cents, :latency_ms,
+                            :stage_number, :stage_name,
+                            :hypothesis_id, :round_number,
+                            :is_retry, FALSE, FALSE,
+                            :error_message
+                        )
+                        RETURNING id
+                    """),
+                    {
+                        "project_id": project_id,
+                        "discovery_run_id": discovery_run_id,
+                        "synthesis_run_id": synthesis_run_id,
+                        "stage_execution_id": stage_execution_id,
+                        "provider": provider,
+                        "model_name": model_name,
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
+                        "cached_tokens": cached_tokens,
+                        "cost_cents": cost,
+                        "latency_ms": latency_ms,
+                        "stage_number": stage_number,
+                        "stage_name": stage_name,
+                        "hypothesis_id": hypothesis_id,
+                        "round_number": round_number,
+                        "is_retry": is_retry,
+                        "error_message": error_message,
+                    },
                 )
-                session.add(record)
-                await session.flush()
-                return str(record.id)
+                row = result.fetchone()
+
+                # Update budget spend if project-scoped
+                if project_id and cost > 0:
+                    await self._increment_budget_spend(session, project_id, int(cost))
+
+                return str(row[0])
 
     async def record_embedding_call(
         self,
         provider: str,
         model_name: str,
-        total_tokens: int,
-        latency_ms: int = 0,
-        discovery_run_id: str = None,
-        stage_number: int = None,
-        hypothesis_id: str = None,
+        token_count: int,
+        latency_ms: Optional[int] = None,
+        project_id: Optional[str] = None,
+        discovery_run_id: Optional[str] = None,
+        stage_number: Optional[int] = None,
+        stage_name: Optional[str] = None,
+        hypothesis_id: Optional[str] = None,
+        error_message: Optional[str] = None,
     ) -> str:
-        """Record an embedding API call."""
-        pricing = CURRENT_PRICING.get((provider, model_name), {})
-        cost = total_tokens * pricing.get("input", 0) / 1_000_000
+        """Record an embedding API call (input_tokens = token_count, output = 0)."""
+        cost = compute_cost_cents(model_name, token_count, 0)
 
         async with self._session_factory() as session:
             async with session.begin():
-                record = APICostRecord(
-                    discovery_run_id=discovery_run_id,
-                    provider=provider,
-                    model_name=model_name,
-                    api_type="embedding",
-                    category=CostCategory.EMBEDDING,
-                    input_tokens=total_tokens,
-                    output_tokens=0,
-                    total_tokens=total_tokens,
-                    cached_tokens=0,
-                    input_cost_usd=cost,
-                    output_cost_usd=0.0,
-                    total_cost_usd=cost,
-                    input_price_per_million=pricing.get("input"),
-                    latency_ms=latency_ms,
-                    stage_number=stage_number,
-                    hypothesis_id=hypothesis_id,
-                    called_at=datetime.utcnow(),
+                result = await session.execute(
+                    text("""
+                        INSERT INTO usage_events (
+                            project_id, discovery_run_id,
+                            provider, model_name,
+                            input_tokens, output_tokens, cached_tokens,
+                            cost_cents, latency_ms,
+                            stage_number, stage_name,
+                            hypothesis_id,
+                            is_retry, is_embedding, is_search,
+                            error_message
+                        ) VALUES (
+                            :project_id, :discovery_run_id,
+                            :provider, :model_name,
+                            :token_count, 0, 0,
+                            :cost_cents, :latency_ms,
+                            :stage_number, :stage_name,
+                            :hypothesis_id,
+                            FALSE, TRUE, FALSE,
+                            :error_message
+                        )
+                        RETURNING id
+                    """),
+                    {
+                        "project_id": project_id,
+                        "discovery_run_id": discovery_run_id,
+                        "provider": provider,
+                        "model_name": model_name,
+                        "token_count": token_count,
+                        "cost_cents": cost,
+                        "latency_ms": latency_ms,
+                        "stage_number": stage_number,
+                        "stage_name": stage_name,
+                        "hypothesis_id": hypothesis_id,
+                        "error_message": error_message,
+                    },
                 )
-                session.add(record)
-                await session.flush()
-                return str(record.id)
+                row = result.fetchone()
 
-    async def record_biomedical_api_call(
+                if project_id and cost > 0:
+                    await self._increment_budget_spend(session, project_id, int(cost))
+
+                return str(row[0])
+
+    async def record_search_call(
         self,
-        api_name: str,
-        latency_ms: int = 0,
-        discovery_run_id: str = None,
-        stage_number: int = None,
-        hypothesis_id: str = None,
-        endpoint: str = None,
-        response_status: int = 200,
+        provider: str,
+        source_name: str,
+        latency_ms: Optional[int] = None,
+        project_id: Optional[str] = None,
+        discovery_run_id: Optional[str] = None,
+        stage_number: Optional[int] = None,
+        stage_name: Optional[str] = None,
+        hypothesis_id: Optional[str] = None,
+        error_message: Optional[str] = None,
     ) -> str:
-        """Record a biomedical API call (PubMed, ClinicalTrials, etc.)."""
-        cost = BIOMEDICAL_API_PRICING.get(api_name, 0.0)
+        """Record a data source / search API call (e.g. PubMed, ClinicalTrials).
+
+        Most biomedical APIs are free, so cost_cents = 0 unless pricing
+        is configured in model_pricing.json.
+        """
+        cost = compute_cost_cents(source_name, 0, 0)
 
         async with self._session_factory() as session:
             async with session.begin():
-                record = APICostRecord(
-                    discovery_run_id=discovery_run_id,
-                    provider=api_name,
-                    model_name=api_name,
-                    endpoint=endpoint,
-                    api_type="biomedical",
-                    category=CostCategory.BIOMEDICAL_API,
-                    input_tokens=0,
-                    output_tokens=0,
-                    total_tokens=0,
-                    cached_tokens=0,
-                    input_cost_usd=0.0,
-                    output_cost_usd=0.0,
-                    total_cost_usd=cost,
-                    per_request_price=cost,
-                    response_status=response_status,
-                    latency_ms=latency_ms,
-                    stage_number=stage_number,
-                    hypothesis_id=hypothesis_id,
-                    called_at=datetime.utcnow(),
-                )
-                session.add(record)
-                await session.flush()
-                return str(record.id)
-
-    # ============== Query Methods for Visualization ==============
-
-    async def get_run_cost_breakdown(self, run_id: str) -> dict[str, Any]:
-        """Get complete cost breakdown for a discovery run."""
-        async with self._session_factory() as session:
-            # Total by provider
-            by_provider = await session.execute(
-                select(
-                    APICostRecord.provider,
-                    func.sum(APICostRecord.total_cost_usd).label("cost"),
-                    func.sum(APICostRecord.input_tokens).label("input_tokens"),
-                    func.sum(APICostRecord.output_tokens).label("output_tokens"),
-                    func.count(APICostRecord.id).label("calls"),
-                    func.avg(APICostRecord.latency_ms).label("avg_latency"),
-                )
-                .where(APICostRecord.discovery_run_id == run_id)
-                .group_by(APICostRecord.provider)
-            )
-
-            # Total by model
-            by_model = await session.execute(
-                select(
-                    APICostRecord.model_name,
-                    APICostRecord.provider,
-                    func.sum(APICostRecord.total_cost_usd).label("cost"),
-                    func.sum(APICostRecord.input_tokens).label("input_tokens"),
-                    func.sum(APICostRecord.output_tokens).label("output_tokens"),
-                    func.count(APICostRecord.id).label("calls"),
-                )
-                .where(APICostRecord.discovery_run_id == run_id)
-                .group_by(APICostRecord.model_name, APICostRecord.provider)
-            )
-
-            # Total by stage
-            by_stage = await session.execute(
-                select(
-                    APICostRecord.stage_number,
-                    APICostRecord.stage_name,
-                    func.sum(APICostRecord.total_cost_usd).label("cost"),
-                    func.sum(APICostRecord.input_tokens).label("input_tokens"),
-                    func.sum(APICostRecord.output_tokens).label("output_tokens"),
-                    func.count(APICostRecord.id).label("calls"),
-                )
-                .where(
-                    and_(
-                        APICostRecord.discovery_run_id == run_id,
-                        APICostRecord.stage_number.isnot(None),
-                    )
-                )
-                .group_by(APICostRecord.stage_number, APICostRecord.stage_name)
-                .order_by(APICostRecord.stage_number)
-            )
-
-            # Total by category
-            by_category = await session.execute(
-                select(
-                    APICostRecord.category,
-                    func.sum(APICostRecord.total_cost_usd).label("cost"),
-                    func.count(APICostRecord.id).label("calls"),
-                )
-                .where(APICostRecord.discovery_run_id == run_id)
-                .group_by(APICostRecord.category)
-            )
-
-            # Total by round
-            by_round = await session.execute(
-                select(
-                    APICostRecord.round_number,
-                    func.sum(APICostRecord.total_cost_usd).label("cost"),
-                    func.count(APICostRecord.id).label("calls"),
-                )
-                .where(
-                    and_(
-                        APICostRecord.discovery_run_id == run_id,
-                        APICostRecord.round_number.isnot(None),
-                    )
-                )
-                .group_by(APICostRecord.round_number)
-                .order_by(APICostRecord.round_number)
-            )
-
-            # Grand total
-            total = await session.execute(
-                select(
-                    func.sum(APICostRecord.total_cost_usd).label("total_cost"),
-                    func.sum(APICostRecord.input_tokens).label("total_input"),
-                    func.sum(APICostRecord.output_tokens).label("total_output"),
-                    func.sum(APICostRecord.total_tokens).label("total_tokens"),
-                    func.count(APICostRecord.id).label("total_calls"),
-                    func.sum(APICostRecord.latency_ms).label("total_latency"),
-                )
-                .where(APICostRecord.discovery_run_id == run_id)
-            )
-            total_row = total.one()
-
-            return {
-                "run_id": run_id,
-                "total": {
-                    "cost_usd": float(total_row.total_cost or 0),
-                    "input_tokens": int(total_row.total_input or 0),
-                    "output_tokens": int(total_row.total_output or 0),
-                    "total_tokens": int(total_row.total_tokens or 0),
-                    "total_calls": int(total_row.total_calls or 0),
-                    "total_latency_ms": int(total_row.total_latency or 0),
-                },
-                "by_provider": [
+                result = await session.execute(
+                    text("""
+                        INSERT INTO usage_events (
+                            project_id, discovery_run_id,
+                            provider, model_name,
+                            input_tokens, output_tokens, cached_tokens,
+                            cost_cents, latency_ms,
+                            stage_number, stage_name,
+                            hypothesis_id,
+                            is_retry, is_embedding, is_search,
+                            error_message
+                        ) VALUES (
+                            :project_id, :discovery_run_id,
+                            :provider, :source_name,
+                            0, 0, 0,
+                            :cost_cents, :latency_ms,
+                            :stage_number, :stage_name,
+                            :hypothesis_id,
+                            FALSE, FALSE, TRUE,
+                            :error_message
+                        )
+                        RETURNING id
+                    """),
                     {
-                        "provider": row.provider,
-                        "cost_usd": float(row.cost or 0),
-                        "input_tokens": int(row.input_tokens or 0),
-                        "output_tokens": int(row.output_tokens or 0),
-                        "calls": int(row.calls or 0),
-                        "avg_latency_ms": float(row.avg_latency or 0),
-                    }
-                    for row in by_provider
-                ],
-                "by_model": [
-                    {
-                        "model_name": row.model_name,
-                        "provider": row.provider,
-                        "cost_usd": float(row.cost or 0),
-                        "input_tokens": int(row.input_tokens or 0),
-                        "output_tokens": int(row.output_tokens or 0),
-                        "calls": int(row.calls or 0),
-                    }
-                    for row in by_model
-                ],
-                "by_stage": [
-                    {
-                        "stage_number": row.stage_number,
-                        "stage_name": row.stage_name,
-                        "cost_usd": float(row.cost or 0),
-                        "input_tokens": int(row.input_tokens or 0),
-                        "output_tokens": int(row.output_tokens or 0),
-                        "calls": int(row.calls or 0),
-                    }
-                    for row in by_stage
-                ],
-                "by_category": [
-                    {
-                        "category": row.category.value if hasattr(row.category, 'value') else str(row.category),
-                        "cost_usd": float(row.cost or 0),
-                        "calls": int(row.calls or 0),
-                    }
-                    for row in by_category
-                ],
-                "by_round": [
-                    {
-                        "round_number": row.round_number,
-                        "cost_usd": float(row.cost or 0),
-                        "calls": int(row.calls or 0),
-                    }
-                    for row in by_round
-                ],
-            }
+                        "project_id": project_id,
+                        "discovery_run_id": discovery_run_id,
+                        "provider": provider,
+                        "source_name": source_name,
+                        "cost_cents": cost,
+                        "latency_ms": latency_ms,
+                        "stage_number": stage_number,
+                        "stage_name": stage_name,
+                        "hypothesis_id": hypothesis_id,
+                        "error_message": error_message,
+                    },
+                )
+                row = result.fetchone()
+                return str(row[0])
 
-    async def get_cost_time_series(
+    # ── Query / summary methods ────────────────────────────────────────
+
+    async def get_summary(
         self,
-        days: int = 30,
-        granularity: str = "day",
+        project_id: Optional[str] = None,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+    ) -> UsageSummary:
+        """Monthly (or custom range) usage summary with provider/model breakdowns."""
+        if start_date is None:
+            start_date = date.today().replace(day=1)
+        if end_date is None:
+            end_date = date.today()
+
+        where_clauses = ["created_at >= :start_date", "created_at < :end_date + INTERVAL '1 day'"]
+        params: dict[str, Any] = {
+            "start_date": start_date,
+            "end_date": end_date,
+        }
+        if project_id is not None:
+            where_clauses.append("project_id = :project_id")
+            params["project_id"] = project_id
+
+        where_sql = " AND ".join(where_clauses)
+
+        async with self._session_factory() as session:
+            # Grand totals
+            totals = await session.execute(
+                text(f"""
+                    SELECT
+                        COALESCE(SUM(cost_cents), 0)        AS total_cost_cents,
+                        COALESCE(SUM(input_tokens), 0)      AS total_input_tokens,
+                        COALESCE(SUM(output_tokens), 0)     AS total_output_tokens,
+                        COALESCE(SUM(cached_tokens), 0)     AS total_cached_tokens,
+                        COUNT(*)                             AS total_requests,
+                        COUNT(*) FILTER (WHERE error_message IS NOT NULL) AS total_errors
+                    FROM usage_events
+                    WHERE {where_sql}
+                """),
+                params,
+            )
+            t = totals.mappings().fetchone()
+
+            # By provider
+            prov_rows = await session.execute(
+                text(f"""
+                    SELECT
+                        provider,
+                        COALESCE(SUM(cost_cents), 0) AS cost_cents,
+                        COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                        COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                        COUNT(*) AS requests
+                    FROM usage_events
+                    WHERE {where_sql}
+                    GROUP BY provider
+                    ORDER BY cost_cents DESC
+                """),
+                params,
+            )
+
+            # By model
+            model_rows = await session.execute(
+                text(f"""
+                    SELECT
+                        provider,
+                        model_name,
+                        COALESCE(SUM(cost_cents), 0) AS cost_cents,
+                        COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                        COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                        COUNT(*) AS requests
+                    FROM usage_events
+                    WHERE {where_sql}
+                    GROUP BY provider, model_name
+                    ORDER BY cost_cents DESC
+                """),
+                params,
+            )
+
+            return UsageSummary(
+                total_cost_cents=float(t["total_cost_cents"]),
+                total_input_tokens=int(t["total_input_tokens"]),
+                total_output_tokens=int(t["total_output_tokens"]),
+                total_cached_tokens=int(t["total_cached_tokens"]),
+                total_requests=int(t["total_requests"]),
+                total_errors=int(t["total_errors"]),
+                period_start=start_date.isoformat(),
+                period_end=end_date.isoformat(),
+                by_provider=[
+                    {
+                        "provider": r["provider"],
+                        "cost_cents": float(r["cost_cents"]),
+                        "input_tokens": int(r["input_tokens"]),
+                        "output_tokens": int(r["output_tokens"]),
+                        "requests": int(r["requests"]),
+                    }
+                    for r in prov_rows.mappings()
+                ],
+                by_model=[
+                    {
+                        "provider": r["provider"],
+                        "model_name": r["model_name"],
+                        "cost_cents": float(r["cost_cents"]),
+                        "input_tokens": int(r["input_tokens"]),
+                        "output_tokens": int(r["output_tokens"]),
+                        "requests": int(r["requests"]),
+                    }
+                    for r in model_rows.mappings()
+                ],
+            )
+
+    async def get_daily_breakdown(
+        self,
+        start_date: date,
+        end_date: date,
+        project_id: Optional[str] = None,
+        group_by: str = "provider",
     ) -> list[dict[str, Any]]:
-        """Get cost time series for visualization (line/area charts)."""
-        since = datetime.utcnow() - timedelta(days=days)
+        """Daily cost breakdown grouped by provider or model."""
+        where_clauses = [
+            "created_at >= :start_date",
+            "created_at < :end_date + INTERVAL '1 day'",
+        ]
+        params: dict[str, Any] = {
+            "start_date": start_date,
+            "end_date": end_date,
+        }
+        if project_id is not None:
+            where_clauses.append("project_id = :project_id")
+            params["project_id"] = project_id
 
-        if granularity == "hour":
-            trunc_fn = func.date_trunc("hour", APICostRecord.called_at)
-        elif granularity == "day":
-            trunc_fn = func.date_trunc("day", APICostRecord.called_at)
+        where_sql = " AND ".join(where_clauses)
+
+        if group_by == "model":
+            group_col = "model_name"
         else:
-            trunc_fn = func.date_trunc("week", APICostRecord.called_at)
+            group_col = "provider"
 
         async with self._session_factory() as session:
-            result = await session.execute(
-                select(
-                    trunc_fn.label("period"),
-                    func.sum(APICostRecord.total_cost_usd).label("cost"),
-                    func.sum(APICostRecord.input_tokens).label("input_tokens"),
-                    func.sum(APICostRecord.output_tokens).label("output_tokens"),
-                    func.count(APICostRecord.id).label("calls"),
-                )
-                .where(APICostRecord.called_at >= since)
-                .group_by("period")
-                .order_by("period")
+            rows = await session.execute(
+                text(f"""
+                    SELECT
+                        DATE(created_at) AS day,
+                        {group_col},
+                        COALESCE(SUM(cost_cents), 0)    AS cost_cents,
+                        COALESCE(SUM(input_tokens), 0)  AS input_tokens,
+                        COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                        COUNT(*)                         AS requests,
+                        ROUND(AVG(latency_ms)::numeric, 2) AS avg_latency_ms
+                    FROM usage_events
+                    WHERE {where_sql}
+                    GROUP BY day, {group_col}
+                    ORDER BY day, cost_cents DESC
+                """),
+                params,
             )
 
             return [
                 {
-                    "period": row.period.isoformat() if row.period else None,
-                    "cost_usd": float(row.cost or 0),
-                    "input_tokens": int(row.input_tokens or 0),
-                    "output_tokens": int(row.output_tokens or 0),
-                    "calls": int(row.calls or 0),
+                    "day": r["day"].isoformat() if r["day"] else None,
+                    group_by: r[group_col],
+                    "cost_cents": float(r["cost_cents"]),
+                    "input_tokens": int(r["input_tokens"]),
+                    "output_tokens": int(r["output_tokens"]),
+                    "requests": int(r["requests"]),
+                    "avg_latency_ms": float(r["avg_latency_ms"])
+                    if r["avg_latency_ms"] is not None
+                    else None,
                 }
-                for row in result
+                for r in rows.mappings()
             ]
 
-    async def get_model_cost_comparison(self) -> list[dict[str, Any]]:
-        """Get cost comparison across all models (for bar/radar charts)."""
-        async with self._session_factory() as session:
-            result = await session.execute(
-                select(
-                    APICostRecord.provider,
-                    APICostRecord.model_name,
-                    func.sum(APICostRecord.total_cost_usd).label("total_cost"),
-                    func.sum(APICostRecord.input_tokens).label("total_input"),
-                    func.sum(APICostRecord.output_tokens).label("total_output"),
-                    func.count(APICostRecord.id).label("total_calls"),
-                    func.avg(APICostRecord.latency_ms).label("avg_latency"),
-                    func.avg(APICostRecord.total_cost_usd).label("avg_cost_per_call"),
-                )
-                .where(APICostRecord.api_type == "llm")
-                .group_by(APICostRecord.provider, APICostRecord.model_name)
-                .order_by(desc("total_cost"))
-            )
-
-            return [
-                {
-                    "provider": row.provider,
-                    "model_name": row.model_name,
-                    "total_cost_usd": float(row.total_cost or 0),
-                    "total_input_tokens": int(row.total_input or 0),
-                    "total_output_tokens": int(row.total_output or 0),
-                    "total_calls": int(row.total_calls or 0),
-                    "avg_latency_ms": float(row.avg_latency or 0),
-                    "avg_cost_per_call": float(row.avg_cost_per_call or 0),
-                }
-                for row in result
-            ]
-
-    async def get_cumulative_cost(self) -> dict[str, Any]:
-        """Get cumulative cost across all time."""
-        async with self._session_factory() as session:
-            result = await session.execute(
-                select(
-                    func.sum(APICostRecord.total_cost_usd).label("total_cost"),
-                    func.sum(APICostRecord.input_tokens).label("total_input"),
-                    func.sum(APICostRecord.output_tokens).label("total_output"),
-                    func.sum(APICostRecord.total_tokens).label("total_tokens"),
-                    func.count(APICostRecord.id).label("total_calls"),
-                    func.count(func.distinct(APICostRecord.discovery_run_id)).label("total_runs"),
-                )
-            )
-            row = result.one()
-
-            # Last 24h
-            since_24h = datetime.utcnow() - timedelta(hours=24)
-            last_24h = await session.execute(
-                select(
-                    func.sum(APICostRecord.total_cost_usd).label("cost"),
-                    func.count(APICostRecord.id).label("calls"),
-                )
-                .where(APICostRecord.called_at >= since_24h)
-            )
-            h24 = last_24h.one()
-
-            # Last 7d
-            since_7d = datetime.utcnow() - timedelta(days=7)
-            last_7d = await session.execute(
-                select(
-                    func.sum(APICostRecord.total_cost_usd).label("cost"),
-                    func.count(APICostRecord.id).label("calls"),
-                )
-                .where(APICostRecord.called_at >= since_7d)
-            )
-            d7 = last_7d.one()
-
-            # Last 30d
-            since_30d = datetime.utcnow() - timedelta(days=30)
-            last_30d = await session.execute(
-                select(
-                    func.sum(APICostRecord.total_cost_usd).label("cost"),
-                    func.count(APICostRecord.id).label("calls"),
-                )
-                .where(APICostRecord.called_at >= since_30d)
-            )
-            d30 = last_30d.one()
-
-            return {
-                "all_time": {
-                    "cost_usd": float(row.total_cost or 0),
-                    "input_tokens": int(row.total_input or 0),
-                    "output_tokens": int(row.total_output or 0),
-                    "total_tokens": int(row.total_tokens or 0),
-                    "total_calls": int(row.total_calls or 0),
-                    "total_runs": int(row.total_runs or 0),
-                },
-                "last_24h": {
-                    "cost_usd": float(h24.cost or 0),
-                    "calls": int(h24.calls or 0),
-                },
-                "last_7d": {
-                    "cost_usd": float(d7.cost or 0),
-                    "calls": int(d7.calls or 0),
-                },
-                "last_30d": {
-                    "cost_usd": float(d30.cost or 0),
-                    "calls": int(d30.calls or 0),
-                },
-            }
-
-    async def get_stage_cost_heatmap(self) -> list[dict[str, Any]]:
-        """Get cost heatmap data: stage x model matrix (for heatmap visualization)."""
-        async with self._session_factory() as session:
-            result = await session.execute(
-                select(
-                    APICostRecord.stage_number,
-                    APICostRecord.stage_name,
-                    APICostRecord.model_name,
-                    func.sum(APICostRecord.total_cost_usd).label("cost"),
-                    func.avg(APICostRecord.total_cost_usd).label("avg_cost"),
-                    func.count(APICostRecord.id).label("calls"),
-                    func.avg(APICostRecord.latency_ms).label("avg_latency"),
-                )
-                .where(
-                    and_(
-                        APICostRecord.stage_number.isnot(None),
-                        APICostRecord.api_type == "llm",
-                    )
-                )
-                .group_by(
-                    APICostRecord.stage_number,
-                    APICostRecord.stage_name,
-                    APICostRecord.model_name,
-                )
-                .order_by(APICostRecord.stage_number)
-            )
-
-            return [
-                {
-                    "stage_number": row.stage_number,
-                    "stage_name": row.stage_name,
-                    "model_name": row.model_name,
-                    "total_cost_usd": float(row.cost or 0),
-                    "avg_cost_usd": float(row.avg_cost or 0),
-                    "calls": int(row.calls or 0),
-                    "avg_latency_ms": float(row.avg_latency or 0),
-                }
-                for row in result
-            ]
-
-    async def get_recent_calls(
-        self, limit: int = 50, run_id: str = None
+    async def get_model_breakdown(
+        self,
+        period: str = "30d",
+        project_id: Optional[str] = None,
     ) -> list[dict[str, Any]]:
-        """Get recent API calls for real-time monitoring."""
-        async with self._session_factory() as session:
-            query = select(APICostRecord).order_by(desc(APICostRecord.called_at)).limit(limit)
-            if run_id:
-                query = query.where(APICostRecord.discovery_run_id == run_id)
+        """Cost breakdown by model over a time period (e.g. '7d', '30d', '90d')."""
+        days = int(period.rstrip("d")) if period.endswith("d") else 30
+        since = date.today() - timedelta(days=days)
 
-            result = await session.execute(query)
-            records = result.scalars().all()
+        where_clauses = ["created_at >= :since"]
+        params: dict[str, Any] = {"since": since}
+        if project_id is not None:
+            where_clauses.append("project_id = :project_id")
+            params["project_id"] = project_id
+
+        where_sql = " AND ".join(where_clauses)
+
+        async with self._session_factory() as session:
+            rows = await session.execute(
+                text(f"""
+                    SELECT
+                        provider,
+                        model_name,
+                        COALESCE(SUM(cost_cents), 0)    AS cost_cents,
+                        COALESCE(SUM(input_tokens), 0)  AS input_tokens,
+                        COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                        COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
+                        COUNT(*)                         AS requests,
+                        COUNT(*) FILTER (WHERE error_message IS NOT NULL) AS errors,
+                        ROUND(AVG(latency_ms)::numeric, 2) AS avg_latency_ms
+                    FROM usage_events
+                    WHERE {where_sql}
+                    GROUP BY provider, model_name
+                    ORDER BY cost_cents DESC
+                """),
+                params,
+            )
 
             return [
                 {
-                    "id": str(r.id),
-                    "provider": r.provider,
-                    "model_name": r.model_name,
-                    "api_type": r.api_type,
-                    "category": r.category.value if hasattr(r.category, 'value') else str(r.category),
-                    "input_tokens": r.input_tokens,
-                    "output_tokens": r.output_tokens,
-                    "total_tokens": r.total_tokens,
-                    "total_cost_usd": r.total_cost_usd,
-                    "latency_ms": r.latency_ms,
-                    "stage_number": r.stage_number,
-                    "stage_name": r.stage_name,
-                    "hypothesis_id": r.hypothesis_id,
-                    "round_number": r.round_number,
-                    "called_at": r.called_at.isoformat() if r.called_at else None,
-                    "is_retry": r.is_retry,
+                    "provider": r["provider"],
+                    "model_name": r["model_name"],
+                    "cost_cents": float(r["cost_cents"]),
+                    "input_tokens": int(r["input_tokens"]),
+                    "output_tokens": int(r["output_tokens"]),
+                    "cached_tokens": int(r["cached_tokens"]),
+                    "requests": int(r["requests"]),
+                    "errors": int(r["errors"]),
+                    "avg_latency_ms": float(r["avg_latency_ms"])
+                    if r["avg_latency_ms"] is not None
+                    else None,
                 }
-                for r in records
+                for r in rows.mappings()
             ]
 
-    # ============== Pricing Management ==============
+    async def get_project_costs(
+        self,
+        period: str = "30d",
+    ) -> list[dict[str, Any]]:
+        """Per-project cost totals over a time period."""
+        days = int(period.rstrip("d")) if period.endswith("d") else 30
+        since = date.today() - timedelta(days=days)
 
-    async def sync_pricing_to_db(self) -> int:
-        """Sync current in-memory pricing to database for audit trail."""
-        count = 0
+        async with self._session_factory() as session:
+            rows = await session.execute(
+                text("""
+                    SELECT
+                        ue.project_id,
+                        p.name AS project_name,
+                        COALESCE(SUM(ue.cost_cents), 0)    AS cost_cents,
+                        COALESCE(SUM(ue.input_tokens), 0)  AS input_tokens,
+                        COALESCE(SUM(ue.output_tokens), 0) AS output_tokens,
+                        COUNT(*)                             AS requests,
+                        COUNT(*) FILTER (WHERE ue.error_message IS NOT NULL) AS errors,
+                        COUNT(DISTINCT ue.discovery_run_id)
+                            FILTER (WHERE ue.discovery_run_id IS NOT NULL) AS discovery_runs,
+                        COUNT(DISTINCT ue.synthesis_run_id)
+                            FILTER (WHERE ue.synthesis_run_id IS NOT NULL) AS synthesis_runs
+                    FROM usage_events ue
+                    LEFT JOIN projects p ON p.id = ue.project_id
+                    WHERE ue.created_at >= :since
+                      AND ue.project_id IS NOT NULL
+                    GROUP BY ue.project_id, p.name
+                    ORDER BY cost_cents DESC
+                """),
+                {"since": since},
+            )
+
+            return [
+                {
+                    "project_id": str(r["project_id"]),
+                    "project_name": r["project_name"],
+                    "cost_cents": float(r["cost_cents"]),
+                    "input_tokens": int(r["input_tokens"]),
+                    "output_tokens": int(r["output_tokens"]),
+                    "requests": int(r["requests"]),
+                    "errors": int(r["errors"]),
+                    "discovery_runs": int(r["discovery_runs"]),
+                    "synthesis_runs": int(r["synthesis_runs"]),
+                }
+                for r in rows.mappings()
+            ]
+
+    async def check_budget(
+        self,
+        project_id: Optional[str] = None,
+    ) -> BudgetStatus:
+        """Check whether the project (or global) budget allows further spending."""
+        async with self._session_factory() as session:
+            # Try project-level budget first, fall back to global
+            if project_id is not None:
+                row = await session.execute(
+                    text("""
+                        SELECT id, scope, monthly_budget_cents,
+                               alert_threshold_pct, hard_limit,
+                               current_month_spend_cents
+                        FROM budget_configs
+                        WHERE scope = 'project' AND project_id = :project_id
+                        LIMIT 1
+                    """),
+                    {"project_id": project_id},
+                )
+                budget = row.mappings().fetchone()
+                if budget is not None:
+                    return self._evaluate_budget(budget)
+
+            # Global budget
+            row = await session.execute(
+                text("""
+                    SELECT id, scope, monthly_budget_cents,
+                           alert_threshold_pct, hard_limit,
+                           current_month_spend_cents
+                    FROM budget_configs
+                    WHERE scope = 'global'
+                    LIMIT 1
+                """),
+            )
+            budget = row.mappings().fetchone()
+            if budget is not None:
+                return self._evaluate_budget(budget)
+
+            return BudgetStatus(
+                status="ok",
+                message="No budget configured",
+            )
+
+    async def aggregate_daily(self) -> int:
+        """Aggregate usage_events into usage_daily_summary.
+
+        Designed to be called by a daily cron job. Uses an UPSERT so it
+        is safe to re-run for the same day.
+
+        Returns the number of summary rows upserted.
+        """
         async with self._session_factory() as session:
             async with session.begin():
-                for (provider, model), prices in CURRENT_PRICING.items():
-                    existing = await session.execute(
-                        select(ModelPricing)
-                        .where(
-                            and_(
-                                ModelPricing.provider == provider,
-                                ModelPricing.model_name == model,
-                                ModelPricing.is_current == True,
-                            )
+                result = await session.execute(
+                    text("""
+                        INSERT INTO usage_daily_summary (
+                            date, project_id, provider, model_name,
+                            total_input_tokens, total_output_tokens,
+                            total_cached_tokens, total_cost_cents,
+                            total_requests, total_errors, avg_latency_ms
                         )
-                        .limit(1)
-                    )
-                    if not existing.scalar_one_or_none():
-                        pricing = ModelPricing(
-                            provider=provider,
-                            model_name=model,
-                            input_price_per_million=prices["input"],
-                            output_price_per_million=prices["output"],
-                            cached_input_price_per_million=prices.get("cached_input", 0),
-                            is_current=True,
-                            pricing_source="hardcoded_defaults",
-                        )
-                        session.add(pricing)
-                        count += 1
-        return count
+                        SELECT
+                            DATE(created_at)          AS day,
+                            project_id,
+                            provider,
+                            model_name,
+                            SUM(input_tokens),
+                            SUM(output_tokens),
+                            SUM(cached_tokens),
+                            SUM(cost_cents),
+                            COUNT(*),
+                            COUNT(*) FILTER (WHERE error_message IS NOT NULL),
+                            ROUND(AVG(latency_ms)::numeric, 2)
+                        FROM usage_events
+                        WHERE DATE(created_at) = CURRENT_DATE - INTERVAL '1 day'
+                        GROUP BY day, project_id, provider, model_name
+                        ON CONFLICT (date, project_id, provider, model_name)
+                        DO UPDATE SET
+                            total_input_tokens  = EXCLUDED.total_input_tokens,
+                            total_output_tokens = EXCLUDED.total_output_tokens,
+                            total_cached_tokens = EXCLUDED.total_cached_tokens,
+                            total_cost_cents    = EXCLUDED.total_cost_cents,
+                            total_requests      = EXCLUDED.total_requests,
+                            total_errors        = EXCLUDED.total_errors,
+                            avg_latency_ms      = EXCLUDED.avg_latency_ms
+                    """)
+                )
+                return result.rowcount
+
+    # ── Internal helpers ───────────────────────────────────────────────
+
+    @staticmethod
+    def _evaluate_budget(budget) -> BudgetStatus:
+        """Evaluate a budget_configs row and return a BudgetStatus."""
+        current = int(budget["current_month_spend_cents"])
+        limit = int(budget["monthly_budget_cents"])
+        threshold = int(budget["alert_threshold_pct"])
+        hard = bool(budget["hard_limit"])
+        remaining = max(0, limit - current)
+
+        if hard and current >= limit:
+            return BudgetStatus(
+                status="blocked",
+                current_spend_cents=current,
+                budget_cents=limit,
+                remaining_cents=0,
+                threshold_pct=threshold,
+                hard_limit=hard,
+                message=(
+                    f"Hard budget limit reached: "
+                    f"${current / 100:.2f} / ${limit / 100:.2f}"
+                ),
+            )
+
+        if limit > 0 and current >= (limit * threshold / 100):
+            return BudgetStatus(
+                status="warning",
+                current_spend_cents=current,
+                budget_cents=limit,
+                remaining_cents=remaining,
+                threshold_pct=threshold,
+                hard_limit=hard,
+                message=(
+                    f"Budget warning ({threshold}% threshold): "
+                    f"${current / 100:.2f} / ${limit / 100:.2f}"
+                ),
+            )
+
+        return BudgetStatus(
+            status="ok",
+            current_spend_cents=current,
+            budget_cents=limit,
+            remaining_cents=remaining,
+            threshold_pct=threshold,
+            hard_limit=hard,
+        )
+
+    @staticmethod
+    async def _increment_budget_spend(
+        session, project_id: str, cost_cents: int
+    ) -> None:
+        """Atomically increment current_month_spend_cents on matching budgets."""
+        try:
+            await session.execute(
+                text("""
+                    UPDATE budget_configs
+                    SET current_month_spend_cents = current_month_spend_cents + :cost,
+                        updated_at = NOW()
+                    WHERE (scope = 'project' AND project_id = :project_id)
+                       OR scope = 'global'
+                """),
+                {"cost": cost_cents, "project_id": project_id},
+            )
+        except Exception as e:
+            logger.warning("Budget spend increment failed: %s", e)
 
 
-# ============== Singleton ==============
+# ═══════════════════════════════════════════════════════════════════════
+# Module-level singleton
+# ═══════════════════════════════════════════════════════════════════════
 
-_cost_tracker: Optional[CostTrackingService] = None
+_cost_tracker: Optional[CostTracker] = None
 
 
-def get_cost_tracker() -> CostTrackingService:
-    """Get the singleton cost tracking service."""
+def get_cost_tracker() -> CostTracker:
     global _cost_tracker
     if _cost_tracker is None:
-        _cost_tracker = CostTrackingService()
+        _cost_tracker = CostTracker()
     return _cost_tracker

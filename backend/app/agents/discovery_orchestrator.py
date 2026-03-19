@@ -139,14 +139,16 @@ class AgentRole(str, Enum):
 
 class ModelType(str, Enum):
     """LLM model types available for parallel discovery."""
-    # Primary models — mixed provider routing (8-model pipeline)
+    # Primary models — mixed provider routing (9-model pipeline)
     CLAUDE_OPUS = "claude_opus"                    # Explorer + Synthesizer via Bedrock (200K context)
+    CLAUDE_SONNET = "claude_sonnet"                # EXPAND/VALIDATE/TRANSLATE/FINALIZE via Bedrock (200K context)
     MISTRAL_LARGE_3 = "mistral_large_3"            # Critic via Azure AI (32K output)
     GPT_4O_AZURE = "gpt_4o_azure"                  # Editorial synthesis via Azure OpenAI (131K→16K, GA)
     COHERE_COMMAND_A = "cohere_command_a"           # RAG literature review via Azure AI (256K context, GA)
     O3_MINI = "o3_mini"                            # Reasoning via Azure OpenAI (2.5M TPM / 250 RPM, GA)
     GPT_41 = "gpt_41"                              # General purpose via Azure OpenAI (50K TPM / 50 RPM, GA)
     GROK_FAST = "grok_fast"                        # Fast Refiner via Azure AI (Grok-4-1-fast-reasoning)
+    CLAUDE_SONNET = "claude_sonnet"                # Fast formatting via Bedrock (200K context)
     # Azure OpenAI models — legacy
     O3_DEEP_RESEARCH = "o3_deep_research"
     O1 = "o1"
@@ -203,6 +205,14 @@ class DiscoveryHypothesis:
     round_number: int = 0
     stages_completed: int = 0
     translational_roadmap: dict[str, Any] = field(default_factory=dict)
+    # Jamison v2 additions
+    feasibility_score: float = 0.0
+    impact_score: float = 0.0
+    required_methods: list[str] = field(default_factory=list)
+    counter_arguments: list[dict[str, Any]] = field(default_factory=list)
+    revisions: list[dict[str, Any]] = field(default_factory=list)
+    pipeline_trace: dict[str, Any] = field(default_factory=dict)
+    visualization_data: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -620,6 +630,7 @@ class MultiModelLLM:
 
     BEDROCK_MODELS = {
         ModelType.CLAUDE_OPUS: settings.BEDROCK_MODEL_CLAUDE_OPUS,
+        ModelType.CLAUDE_SONNET: settings.BEDROCK_MODEL_CLAUDE_SONNET,
     }
 
     AZURE_OPENAI_MODELS = {
@@ -1450,7 +1461,7 @@ class PipelineStageResult:
 
 @dataclass
 class HypothesisPipelineResult:
-    """Complete result from the 10-stage pipeline for one hypothesis."""
+    """Complete result from the 12-stage pipeline for one hypothesis."""
     hypothesis_id: str
     round_number: int
     hypothesis_index: int  # 1-3 within the round
@@ -1463,37 +1474,41 @@ class HypothesisPipelineResult:
 
 class SequentialHypothesisPipeline:
     """
-    10-Stage Sequential Hypothesis Pipeline.
+    12-Stage Sequential Hypothesis Pipeline (Project Jamison v2).
 
-    All 10 models work on ONE hypothesis at a time, passing results
-    from stage to stage. Only after all 10 stages complete does the
+    All models work on ONE hypothesis at a time, passing results
+    from stage to stage. Only after all 12 stages complete does the
     pipeline move to the next hypothesis.
 
     Stage → Model Assignment:
-      1. Seed       → Claude Opus (Bedrock)            — Explorer
-      2. Expand     → o3-mini (Azure OpenAI)           — Deep Reasoner
-      3. Evidence   → Cohere Command A (Azure OpenAI)  — Literature RAG
-      4. Counter    → Mistral-Large-3 (Azure AI)       — Critic
-      5. Mechanism  → GPT-4.1 (Azure OpenAI)           — Mechanistic Reasoner
-      6. Validate   → GPT-4o (Azure OpenAI)            — QA Validator
-      7. Ground     → Grok-4-1-fast (Azure AI)         — Scientific Grounder
-      8. Score      → GPT-4.1 (Azure OpenAI)           — Confidence Scorer
-      9. Refine     → GPT-4o (Azure OpenAI)            — Fast Refiner
-      10. Finalize  → Claude Opus (Bedrock)            — Final Synthesizer
+      1.  Seed       → Claude Opus (Bedrock)            — Explorer
+      2.  Expand     → Claude Sonnet (Bedrock)          — Deep expansion
+      3.  Evidence   → Cohere Command A (Azure OpenAI)  — Literature RAG
+      4.  Counter    → Mistral-Large-3 (Azure AI)       — Critic
+      5.  Revise     → o3-mini (Azure OpenAI)           — Address counter-arguments
+      6.  Mechanism  → GPT-4.1 (Azure OpenAI)           — Mechanistic deep dive
+      7.  Validate   → Claude Sonnet (Bedrock)          — Cross-validation
+      8.  Ground     → Grok-4-1-fast (Azure AI)         — Scientific grounding
+      9.  Score      → GPT-4.1 (Azure OpenAI)           — Confidence scoring
+      10. Refine     → GPT-4o (Azure OpenAI)            — Fast refinement
+      11. Translate  → Claude Sonnet (Bedrock)          — Translational roadmap
+      12. Finalize   → Claude Sonnet (Bedrock)          — Final synthesis
     """
 
     # Stage definitions: (stage_number, name, model_type, max_tokens, temperature)
     STAGES = [
         (1,  "seed",      ModelType.CLAUDE_OPUS,       32_768, 0.4),
-        (2,  "expand",    ModelType.O3_MINI,           65_536, 0.2),
+        (2,  "expand",    ModelType.CLAUDE_SONNET,     32_768, 0.3),
         (3,  "evidence",  ModelType.COHERE_COMMAND_A,    4_096, 0.2),
         (4,  "counter",   ModelType.MISTRAL_LARGE_3,   32_768, 0.3),
-        (5,  "mechanism", ModelType.GPT_41,           100_000, 0.0),
-        (6,  "validate",  ModelType.GPT_4O_AZURE,       4_096, 0.15),
-        (7,  "ground",    ModelType.GROK_FAST,         32_768, 0.25),
-        (8,  "score",     ModelType.GPT_41,            16_384, 0.25),
-        (9,  "refine",    ModelType.GPT_4O_AZURE,      16_384, 0.3),
-        (10, "finalize",  ModelType.CLAUDE_OPUS,       32_768, 0.3),
+        (5,  "revise",    ModelType.O3_MINI,           65_536, 0.2),
+        (6,  "mechanism", ModelType.GPT_41,           100_000, 0.0),
+        (7,  "validate",  ModelType.CLAUDE_SONNET,      4_096, 0.15),
+        (8,  "ground",    ModelType.GROK_FAST,         32_768, 0.25),
+        (9,  "score",     ModelType.GPT_41,            16_384, 0.25),
+        (10, "refine",    ModelType.GPT_4O_AZURE,      16_384, 0.3),
+        (11, "translate", ModelType.CLAUDE_SONNET,     32_768, 0.3),
+        (12, "finalize",  ModelType.CLAUDE_SONNET,     32_768, 0.3),
     ]
 
     def __init__(self, llm: MultiModelLLM, discovery_run_id: str = None):
@@ -1534,11 +1549,12 @@ class SequentialHypothesisPipeline:
         available = []
         fallback_map = {
             # If a model is unavailable, fall back to another
+            ModelType.CLAUDE_SONNET: ModelType.CLAUDE_OPUS,
             ModelType.O3_MINI: ModelType.CLAUDE_OPUS,
             ModelType.COHERE_COMMAND_A: ModelType.CLAUDE_OPUS,
             ModelType.MISTRAL_LARGE_3: ModelType.CLAUDE_OPUS,
             ModelType.GPT_41: ModelType.CLAUDE_OPUS,
-            ModelType.GPT_4O_AZURE: ModelType.CLAUDE_OPUS,
+            ModelType.GPT_4O_AZURE: ModelType.CLAUDE_SONNET,
             ModelType.GROK_FAST: ModelType.MISTRAL_LARGE_3,
         }
 
@@ -1563,6 +1579,8 @@ class SequentialHypothesisPipeline:
     def _is_model_available(self, model_type: ModelType) -> bool:
         """Check if a model client is initialized."""
         if model_type == ModelType.CLAUDE_OPUS:
+            return self._llm._bedrock_client is not None
+        if model_type == ModelType.CLAUDE_SONNET:
             return self._llm._bedrock_client is not None
         if model_type == ModelType.MISTRAL_LARGE_3:
             return self._llm._azure_mistral_client is not None
@@ -1589,9 +1607,10 @@ class SequentialHypothesisPipeline:
         previous_hypotheses: list[dict[str, Any]] = None,
         refine_hypothesis: dict[str, Any] = None,
         on_stage_complete: Optional[Callable] = None,
+        lab_profile: Optional[dict[str, Any]] = None,
     ) -> HypothesisPipelineResult:
         """
-        Run the full 10-stage pipeline for a single hypothesis.
+        Run the full 12-stage pipeline for a single hypothesis.
 
         Args:
             disease: Target disease
@@ -1603,6 +1622,7 @@ class SequentialHypothesisPipeline:
             previous_hypotheses: Hypotheses from previous rounds (for context in rounds 3-4)
             refine_hypothesis: Specific hypothesis to refine (for rounds 3-4)
             on_stage_complete: Callback after each stage completes
+            lab_profile: Lab capability profile (equipment, modalities, techniques, excluded_methods)
         """
         from app.agents.prompts import get_stage_prompt
 
@@ -1642,7 +1662,7 @@ Your goal is to STRENGTHEN this hypothesis — address its weaknesses, find stro
 """
 
         stages = self._get_available_stages()
-        logger.info(f"Starting 10-stage pipeline for hypothesis R{round_number}H{hypothesis_index} ({len(stages)} stages available)")
+        logger.info(f"Starting 12-stage pipeline for hypothesis R{round_number}H{hypothesis_index} ({len(stages)} stages available)")
 
         # Initialize dual-embedding grounding engine
         embedding_grounder = await self._get_embedding_grounder()
@@ -1672,6 +1692,7 @@ Your goal is to STRENGTHEN this hypothesis — address its weaknesses, find stro
                     accumulated_context=accumulated_context,
                     round_number=round_number,
                     hypothesis_index=hypothesis_index,
+                    lab_profile=lab_profile,
                 )
 
                 # === FULL DATABASE SWEEP BEFORE EVERY STAGE ===
@@ -1883,18 +1904,40 @@ Your goal is to STRENGTHEN this hypothesis — address its weaknesses, find stro
         accumulated_context: dict[str, Any],
         round_number: int,
         hypothesis_index: int,
+        lab_profile: Optional[dict[str, Any]] = None,
     ) -> str:
         """Build the user prompt for a specific pipeline stage."""
+        # Build lab capability context if provided
+        lab_context = ""
+        if lab_profile:
+            lab_parts = []
+            if lab_profile.get("equipment"):
+                lab_parts.append(f"Available Equipment: {', '.join(lab_profile['equipment'][:20])}")
+            if lab_profile.get("modalities"):
+                lab_parts.append(f"Available Modalities: {', '.join(lab_profile['modalities'][:10])}")
+            if lab_profile.get("techniques"):
+                lab_parts.append(f"Available Techniques: {', '.join(lab_profile['techniques'][:20])}")
+            if lab_profile.get("excluded_methods"):
+                lab_parts.append(f"EXCLUDED Methods (NOT available): {', '.join(lab_profile['excluded_methods'][:10])}")
+            if lab_profile.get("filter_mode"):
+                lab_parts.append(f"Filter Mode: {lab_profile['filter_mode']}")
+            if lab_parts:
+                lab_context = "\n\n## LAB CAPABILITY PROFILE\n" + "\n".join(lab_parts)
+
         base = f"""Disease: {disease}
 Discovery Type: {discovery_type}
 Round: {round_number}/4 | Hypothesis: {hypothesis_index}/3
 {ext_factors_text}
 {prev_context}
 {refine_context}
+{lab_context}
 """
 
         if stage_num == 1:
-            # Seed stage gets pathway context
+            # Seed stage gets pathway context + lab capability filter
+            lab_instruction = ""
+            if lab_profile:
+                lab_instruction = "\nIMPORTANT: Prioritize hypotheses that can be tested with the available lab equipment and techniques listed above. Avoid proposing experiments requiring excluded methods."
             return f"""{base}
 
 ## PATHWAY DATA
@@ -1902,7 +1945,7 @@ Round: {round_number}/4 | Hypothesis: {hypothesis_index}/3
 
 Generate a novel, specific, testable hypothesis for {discovery_type} of {disease}.
 Focus on mechanisms that are scientifically grounded and experimentally verifiable.
-You MUST cite only real biological pathways, genes, and proteins."""
+You MUST cite only real biological pathways, genes, and proteins.{lab_instruction}"""
 
         # All subsequent stages get accumulated context from previous stages
         context_summary = self._summarize_accumulated(accumulated_context)
@@ -1938,47 +1981,74 @@ Generate the strongest possible counter-arguments against this hypothesis. Be ru
 ## HYPOTHESIS AFTER CRITICISM (from Stages 1-4)
 {context_summary}
 
-Perform a deep mechanistic analysis. Validate every molecular interaction in the proposed mechanism."""
+Address every counter-argument from Stage 4. Revise the hypothesis to strengthen weak points.
+For each counter-argument: either refute it with evidence, acknowledge it as a limitation, or modify the hypothesis to avoid it.
+Output the revised hypothesis with explicit responses to each counter-argument."""
 
         if stage_num == 6:
             return f"""{base}
 
-## HYPOTHESIS WITH MECHANISM VALIDATED (from Stages 1-5)
+## REVISED HYPOTHESIS (from Stages 1-5)
 {context_summary}
 
-Cross-validate this hypothesis against multiple independent knowledge sources."""
+Perform a deep mechanistic analysis. Validate every molecular interaction in the proposed mechanism."""
 
         if stage_num == 7:
             return f"""{base}
 
-## HYPOTHESIS CROSS-VALIDATED (from Stages 1-6)
+## HYPOTHESIS WITH MECHANISM VALIDATED (from Stages 1-6)
 {context_summary}
 
-Ground every claim to real, verifiable scientific sources. You will receive PubMed, ClinicalTrials.gov, and FDA data below."""
+Cross-validate this hypothesis against multiple independent knowledge sources."""
 
         if stage_num == 8:
             return f"""{base}
 
-## HYPOTHESIS GROUNDED (from Stages 1-7)
+## HYPOTHESIS CROSS-VALIDATED (from Stages 1-7)
 {context_summary}
 
-Score this hypothesis across 7 dimensions: biological plausibility, evidence strength, novelty, feasibility, safety, clinical relevance, reproducibility."""
+Ground every claim to real, verifiable scientific sources. You will receive PubMed, ClinicalTrials.gov, and FDA data below."""
 
         if stage_num == 9:
             return f"""{base}
 
-## HYPOTHESIS SCORED (from Stages 1-8)
+## HYPOTHESIS GROUNDED (from Stages 1-8)
 {context_summary}
 
-Rapidly refine this hypothesis. Fix logical inconsistencies, address major counter-arguments, tighten the language."""
+Score this hypothesis across 7 dimensions: biological plausibility, evidence strength, novelty, feasibility, safety, clinical relevance, reproducibility."""
 
         if stage_num == 10:
             return f"""{base}
 
-## COMPLETE PIPELINE DATA (from all 9 previous stages)
+## HYPOTHESIS SCORED (from Stages 1-9)
 {context_summary}
 
-Produce the FINAL, COMPLETE hypothesis. Integrate ALL findings from stages 1-9 into one coherent, publication-ready result."""
+Rapidly refine this hypothesis. Fix logical inconsistencies, address major counter-arguments, tighten the language."""
+
+        if stage_num == 11:
+            return f"""{base}
+
+## REFINED HYPOTHESIS (from Stages 1-10)
+{context_summary}
+
+Create a translational roadmap for this hypothesis:
+- T0 (Basic Research): Required in-vitro and computational studies
+- T1 (Translation to Humans): Preclinical models and safety studies
+- T2 (Translation to Patients): Clinical trial design (Phase I/II/III)
+- T3 (Translation to Practice): Guidelines, protocols, implementation
+- T4 (Translation to Community): Public health impact, accessibility
+- T5 (Global Impact): Global scale-up, equity considerations
+
+For each phase, specify: key experiments, estimated timeline, required resources, go/no-go criteria, and risk factors."""
+
+        if stage_num == 12:
+            return f"""{base}
+
+## COMPLETE PIPELINE DATA (from all 11 previous stages)
+{context_summary}
+
+Produce the FINAL, COMPLETE hypothesis. Integrate ALL findings from stages 1-11 into one coherent, publication-ready result.
+Include the translational roadmap from Stage 11."""
 
         return f"{base}\n{context_summary}"
 
@@ -2039,9 +2109,9 @@ Produce the FINAL, COMPLETE hypothesis. Integrate ALL findings from stages 1-9 i
             parts.append(f"**Post-Refinement Confidence:** {ctx['confidence_after_refinement']}")
 
         # Include raw stage outputs for later stages
-        for i in range(1, 11):
+        for i in range(1, 13):
             raw = ctx.get(f"stage_{i}_raw")
-            if raw and i <= 5:  # Include raw outputs from first 5 stages
+            if raw and i <= 6:  # Include raw outputs from first 6 stages
                 parts.append(f"\n--- Stage {i} Raw Output (truncated) ---\n{raw[:500]}")
 
         return "\n".join(parts) if parts else "No accumulated context yet."
@@ -2186,7 +2256,7 @@ Produce the FINAL, COMPLETE hypothesis. Integrate ALL findings from stages 1-9 i
         # Compute average grounding ratio across all stages
         grounding_ratios = [
             accumulated_context.get(f"stage_{i}_grounding_ratio", 0.0)
-            for i in range(1, 11)
+            for i in range(1, 13)
             if f"stage_{i}_grounding_ratio" in accumulated_context
         ]
         avg_grounding_ratio = sum(grounding_ratios) / len(grounding_ratios) if grounding_ratios else 0.0
@@ -2212,6 +2282,28 @@ Produce the FINAL, COMPLETE hypothesis. Integrate ALL findings from stages 1-9 i
             if phases:
                 translational_roadmap = {"phases": phases}
 
+        # Build pipeline trace from stage results
+        pipeline_trace = {}
+        for sr in stage_results:
+            pipeline_trace[f"stage_{sr.stage}_{sr.stage_name}"] = {
+                "model": sr.model_used,
+                "duration_seconds": sr.duration_seconds,
+                "success": sr.success,
+                "error": sr.error if sr.error else None,
+                "grounding_ratio": accumulated_context.get(f"stage_{sr.stage}_grounding_ratio"),
+            }
+
+        # Extract revision data from Stage 5
+        revisions = []
+        revision_responses = accumulated_context.get("revision_responses", [])
+        if isinstance(revision_responses, list):
+            revisions = revision_responses
+
+        # Extract counter arguments from Stage 4
+        counter_args = accumulated_context.get("counter_arguments", [])
+        if isinstance(counter_args, list):
+            counter_args = counter_args[:10]
+
         return DiscoveryHypothesis(
             id=hypothesis_id,
             disease=disease,
@@ -2222,7 +2314,7 @@ Produce the FINAL, COMPLETE hypothesis. Integrate ALL findings from stages 1-9 i
             confidence=max(0.0, min(1.0, confidence)),
             supporting_paths=[],
             contributing_agents=models_used,
-            model_used="10-stage-pipeline-grounded",
+            model_used="12-stage-pipeline-grounded",
             external_factors=ext_factors,
             evidence_summary=evidence_summary,
             risks=risks,
@@ -2236,6 +2328,12 @@ Produce the FINAL, COMPLETE hypothesis. Integrate ALL findings from stages 1-9 i
             round_number=round_number,
             stages_completed=sum(1 for sr in stage_results if sr.success),
             translational_roadmap=translational_roadmap,
+            feasibility_score=float(accumulated_context.get("feasibility_score", 0.0)),
+            impact_score=float(accumulated_context.get("impact_score", 0.0)),
+            required_methods=accumulated_context.get("required_methods", []),
+            counter_arguments=counter_args,
+            revisions=revisions,
+            pipeline_trace=pipeline_trace,
         )
 
 
@@ -2559,9 +2657,9 @@ class DiscoveryOrchestrator(LoggerMixin):
                         best_confidence=self._best_confidence,
                         avg_confidence=sum(h.confidence for h in self._hypotheses) / max(len(self._hypotheses), 1),
                         total_duration=time.time() - self._start_time if self._start_time else 0,
-                        stages_total=sum(1 for _ in self._hypotheses) * 10,
+                        stages_total=sum(1 for _ in self._hypotheses) * 12,
                         stages_succeeded=sum(h.stages_completed for h in self._hypotheses),
-                        stages_failed=sum(10 - h.stages_completed for h in self._hypotheses),
+                        stages_failed=sum(12 - h.stages_completed for h in self._hypotheses),
                     )
                 except Exception as e:
                     self.logger.warning(f"Failed to complete discovery run record: {e}")
@@ -2744,13 +2842,13 @@ class DiscoveryOrchestrator(LoggerMixin):
         self, disease: str, graph_data: dict[str, Any], discovery_type: str,
     ) -> None:
         """
-        4-Round Discovery with 10-Stage Sequential Hypothesis Pipeline.
+        4-Round Discovery with 12-Stage Sequential Hypothesis Pipeline.
 
         Round 1-2: Independent exploration — 3 new hypotheses per round from different pathways
         Round 3-4: Hybrid refinement — refine the top 3 hypotheses from earlier rounds
 
-        Each hypothesis goes through the full 10-stage pipeline sequentially:
-        all 10 models work on ONE hypothesis before moving to the next.
+        Each hypothesis goes through the full 12-stage pipeline sequentially:
+        all models work on ONE hypothesis before moving to the next.
         """
         entities = graph_data.get("entities", [])
         if not entities:
