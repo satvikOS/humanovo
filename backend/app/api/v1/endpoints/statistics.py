@@ -9,16 +9,17 @@ import logging
 import math
 from datetime import datetime
 from typing import Optional
-from uuid import uuid4
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.database import get_db
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-# ── In-memory storage for saved analyses ─────────────────────────
-_saved_analyses: dict[str, dict] = {}
 
 
 # ── Request / Response Schemas ───────────────────────────────────
@@ -730,41 +731,63 @@ async def sample_size_calculator(request: SampleSizeRequest):
 
 # ── Saved Analyses CRUD ─────────────────────────────────────────
 
+
+def _get_saved_model():
+    from app.models.platform_entities import SavedAnalysis
+    return SavedAnalysis
+
+
 @router.get("/saved")
-async def list_saved_analyses():
+async def list_saved_analyses(db: AsyncSession = Depends(get_db)):
     """List all saved analyses."""
-    items = sorted(_saved_analyses.values(), key=lambda x: x["created_at"], reverse=True)
-    return {"items": items, "total": len(items)}
+    SavedAnalysis = _get_saved_model()
+    result = await db.execute(
+        select(SavedAnalysis).order_by(SavedAnalysis.created_at.desc())
+    )
+    items = result.scalars().all()
+    return {"items": [a.to_dict() for a in items], "total": len(items)}
 
 
 @router.post("/saved")
-async def save_analysis(request: SaveAnalysisRequest):
+async def save_analysis(request: SaveAnalysisRequest, db: AsyncSession = Depends(get_db)):
     """Save an analysis result."""
-    analysis_id = str(uuid4())
-    entry = {
-        "id": analysis_id,
-        "title": request.title,
-        "analysis_type": request.analysis_type,
-        "input_data": request.input_data,
-        "results": request.results,
-        "created_at": datetime.utcnow().isoformat(),
-    }
-    _saved_analyses[analysis_id] = entry
-    return entry
+    SavedAnalysis = _get_saved_model()
+    analysis = SavedAnalysis(
+        title=request.title,
+        analysis_type=request.analysis_type,
+        input_data=request.input_data,
+        results=request.results,
+    )
+    db.add(analysis)
+    await db.flush()
+    return analysis.to_dict()
 
 
 @router.get("/saved/{analysis_id}")
-async def get_saved_analysis(analysis_id: str):
+async def get_saved_analysis(analysis_id: str, db: AsyncSession = Depends(get_db)):
     """Get a saved analysis."""
-    if analysis_id not in _saved_analyses:
+    SavedAnalysis = _get_saved_model()
+    try:
+        uid = UUID(analysis_id)
+    except ValueError:
         raise HTTPException(status_code=404, detail="Analysis not found")
-    return _saved_analyses[analysis_id]
+    analysis = await db.get(SavedAnalysis, uid)
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+    return analysis.to_dict()
 
 
 @router.delete("/saved/{analysis_id}")
-async def delete_saved_analysis(analysis_id: str):
+async def delete_saved_analysis(analysis_id: str, db: AsyncSession = Depends(get_db)):
     """Delete a saved analysis."""
-    if analysis_id not in _saved_analyses:
+    SavedAnalysis = _get_saved_model()
+    try:
+        uid = UUID(analysis_id)
+    except ValueError:
         raise HTTPException(status_code=404, detail="Analysis not found")
-    del _saved_analyses[analysis_id]
+    analysis = await db.get(SavedAnalysis, uid)
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+    await db.delete(analysis)
+    await db.flush()
     return {"status": "deleted"}

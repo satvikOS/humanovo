@@ -362,6 +362,20 @@ def upgrade() -> None:
     )
 
     # -----------------------------------------------------------------------
+    # Saved Analyses
+    # -----------------------------------------------------------------------
+    op.create_table(
+        "saved_analyses",
+        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("title", sa.String(500), nullable=False),
+        sa.Column("analysis_type", sa.String(100), nullable=False),
+        sa.Column("input_data", postgresql.JSONB(), server_default="{}", nullable=False),
+        sa.Column("results", postgresql.JSONB(), server_default="{}", nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+    )
+
+    # -----------------------------------------------------------------------
     # Useful indexes
     # -----------------------------------------------------------------------
     op.create_index("ix_clinical_trials_status", "clinical_trials", ["status"])
@@ -388,6 +402,7 @@ def downgrade() -> None:
     op.drop_index("ix_clinical_trials_status", table_name="clinical_trials")
 
     # Drop tables in reverse dependency order
+    op.drop_table("saved_analyses")
     op.drop_table("billing_notifications")
     op.drop_table("billing_budgets")
     op.drop_table("audit_log_entries")

@@ -263,8 +263,8 @@ export default function BillingDashboard() {
 
   // ── Derived ────────────────────────────────────────────────
   const spendCents = summary?.current_month_spend_cents ?? 0
-  const budgetCents = summary?.budget_cents ?? 80000
-  const budgetPct = Math.min((spendCents / budgetCents) * 100, 100)
+  const budgetCents = summary?.budget_cents ?? 0
+  const budgetPct = budgetCents > 0 ? Math.min((spendCents / budgetCents) * 100, 100) : 0
   const budgetRemaining = Math.max(0, budgetCents - spendCents)
   const projectedCents = summary?.projected_spend_cents ?? 0
 

@@ -392,3 +392,18 @@ class BillingNotification(BaseModel):
         nullable=True,
         index=True,
     )
+
+
+# ---------------------------------------------------------------------------
+# Saved Statistical Analyses
+# ---------------------------------------------------------------------------
+
+class SavedAnalysis(BaseModel):
+    """A saved statistical analysis result."""
+
+    __tablename__ = "saved_analyses"
+
+    title = Column(String(500), nullable=False)
+    analysis_type = Column(String(100), nullable=False)
+    input_data = Column(JSONB, default=dict, nullable=False)
+    results = Column(JSONB, default=dict, nullable=False)

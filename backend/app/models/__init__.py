@@ -44,6 +44,7 @@ from app.models.platform_entities import (
     Manuscript,
     ProjectShare,
     ResearchDataset,
+    SavedAnalysis,
     StorageLocation,
     TrialDocument,
     TrialSubject,
@@ -103,4 +104,5 @@ __all__ = [
     "AuditLogEntry",
     "BillingBudget",
     "BillingNotification",
+    "SavedAnalysis",
 ]
