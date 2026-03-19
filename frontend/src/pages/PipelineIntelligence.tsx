@@ -99,68 +99,6 @@ const TAB_ICONS: Record<Tab, typeof FiDollarSign> = {
   'Optimizations': FiZap,
 }
 
-// ── Mock data generators ─────────────────────────────────────
-
-function mockBillingSummary(): BillingSummary {
-  return {
-    current_month_spend_cents: 55290,
-    budget_cents: 80000,
-    projected_spend_cents: 87300,
-    total_requests: 4827,
-  }
-}
-
-function mockDailySpend(): DailySpend[] {
-  const data: DailySpend[] = []
-  const now = new Date()
-  for (let i = 29; i >= 0; i--) {
-    const d = new Date(now)
-    d.setDate(d.getDate() - i)
-    data.push({
-      date: d.toISOString().slice(0, 10),
-      cost_cents: Math.floor(Math.random() * 3500 + 800),
-    })
-  }
-  return data
-}
-
-function mockModelBreakdown(): ModelBreakdown[] {
-  return [
-    { model: 'claude-opus-4-20250514', cost_cents: 19850, requests: 342 },
-    { model: 'gpt-4o', cost_cents: 14230, requests: 587 },
-    { model: 'claude-sonnet-4-20250514', cost_cents: 8720, requests: 1204 },
-    { model: 'gemini-1.5-pro', cost_cents: 6340, requests: 891 },
-    { model: 'command-r-plus', cost_cents: 4260, requests: 1203 },
-    { model: 'gpt-4o-mini', cost_cents: 1890, requests: 600 },
-  ]
-}
-
-function mockModelPerformance(): ModelPerformanceRow[] {
-  return [
-    { model: 'claude-opus-4-20250514', avg_latency_ms: 8420, success_rate: 0.967, total_tokens: 2840000, cost_cents: 19850, total_calls: 342 },
-    { model: 'gpt-4o', avg_latency_ms: 4210, success_rate: 0.982, total_tokens: 1920000, cost_cents: 14230, total_calls: 587 },
-    { model: 'claude-sonnet-4-20250514', avg_latency_ms: 2830, success_rate: 0.991, total_tokens: 3150000, cost_cents: 8720, total_calls: 1204 },
-    { model: 'gemini-1.5-pro', avg_latency_ms: 3560, success_rate: 0.954, total_tokens: 2100000, cost_cents: 6340, total_calls: 891 },
-    { model: 'command-r-plus', avg_latency_ms: 2140, success_rate: 0.978, total_tokens: 1680000, cost_cents: 4260, total_calls: 1203 },
-    { model: 'gpt-4o-mini', avg_latency_ms: 1230, success_rate: 0.994, total_tokens: 890000, cost_cents: 1890, total_calls: 600 },
-  ]
-}
-
-function mockBenchmarks(): BenchmarkData {
-  return {
-    avg_hypotheses_per_run: 4.7,
-    avg_confidence: 0.72,
-    avg_duration_seconds: 47.3,
-    stage_metrics: [
-      { stage: 'hypothesis-generation', avg_duration_seconds: 12.4, failure_rate: 0.02 },
-      { stage: 'evidence-grounding', avg_duration_seconds: 18.7, failure_rate: 0.05 },
-      { stage: 'synthesis', avg_duration_seconds: 8.2, failure_rate: 0.01 },
-      { stage: 'literature-review', avg_duration_seconds: 6.1, failure_rate: 0.03 },
-      { stage: 'ranking', avg_duration_seconds: 1.9, failure_rate: 0.01 },
-    ],
-  }
-}
-
 function generateOptimizations(
   models: ModelPerformanceRow[],
   benchmarks: BenchmarkData | null,
