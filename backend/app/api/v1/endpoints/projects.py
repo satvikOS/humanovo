@@ -424,3 +424,95 @@ async def get_project_stats(project_id: UUID) -> dict:
         "created_at": p["created_at"].isoformat(),
         "updated_at": p["updated_at"].isoformat(),
     }
+
+
+# ── Lab Profile & Discovery Config (Project Jamison v2) ──────────────
+
+
+class LabProfile(BaseModel):
+    """Lab capability profile for feasibility filtering."""
+    equipment: list[str] = Field(default_factory=list, description="Lab equipment list")
+    modalities: list[str] = Field(default_factory=list, description="Available research modalities (from methods taxonomy)")
+    techniques: list[str] = Field(default_factory=list, description="Research techniques")
+    excluded_methods: list[str] = Field(default_factory=list, description="Methods the lab cannot perform")
+    filter_mode: str = Field(default="permissive", description="'strict' (exclude low-feasibility) or 'permissive' (flag but keep)")
+
+
+class DiscoveryConfig(BaseModel):
+    """Project-level discovery pipeline configuration."""
+    default_discovery_type: str = Field(default="treatment_discovery", description="Default discovery type")
+    default_num_rounds: int = Field(default=3, ge=1, le=4, description="Default number of rounds")
+    default_output_format: str = Field(default="narrative", description="Default output format")
+    default_verbosity: str = Field(default="standard", description="Default verbosity level")
+    default_citation_style: str = Field(default="numbered", description="Default citation style")
+    external_factors: list[str] = Field(default_factory=list, description="Default external factors")
+
+
+@router.patch("/{project_id}/lab-profile")
+async def update_lab_profile(project_id: UUID, profile: LabProfile):
+    """Update the lab capability profile for a project. Used for feasibility filtering in the discovery pipeline."""
+    Project, ProjectStatus = _get_project_model()
+    if await _check_db_available() and Project:
+        async for db in get_db():
+            from sqlalchemy import update
+            result = await db.execute(
+                update(Project)
+                .where(Project.id == project_id)
+                .values(lab_profile=profile.model_dump())
+                .returning(Project.id)
+            )
+            updated = result.scalar_one_or_none()
+            if not updated:
+                raise HTTPException(status_code=404, detail="Project not found")
+            await db.commit()
+            return {"status": "ok", "lab_profile": profile.model_dump()}
+
+    pid = str(project_id)
+    if pid not in _memory_projects:
+        raise HTTPException(status_code=404, detail="Project not found")
+    _memory_projects[pid]["lab_profile"] = profile.model_dump()
+    return {"status": "ok", "lab_profile": profile.model_dump()}
+
+
+@router.get("/{project_id}/lab-profile")
+async def get_lab_profile(project_id: UUID):
+    """Get the lab capability profile for a project."""
+    Project, ProjectStatus = _get_project_model()
+    if await _check_db_available() and Project:
+        async for db in get_db():
+            result = await db.execute(select(Project).where(Project.id == project_id))
+            project = result.scalar_one_or_none()
+            if not project:
+                raise HTTPException(status_code=404, detail="Project not found")
+            return {"lab_profile": getattr(project, "lab_profile", None) or {}}
+
+    pid = str(project_id)
+    if pid not in _memory_projects:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return {"lab_profile": _memory_projects[pid].get("lab_profile", {})}
+
+
+@router.patch("/{project_id}/discovery-config")
+async def update_discovery_config(project_id: UUID, config: DiscoveryConfig):
+    """Update the default discovery configuration for a project."""
+    Project, ProjectStatus = _get_project_model()
+    if await _check_db_available() and Project:
+        async for db in get_db():
+            from sqlalchemy import update
+            result = await db.execute(
+                update(Project)
+                .where(Project.id == project_id)
+                .values(discovery_config=config.model_dump())
+                .returning(Project.id)
+            )
+            updated = result.scalar_one_or_none()
+            if not updated:
+                raise HTTPException(status_code=404, detail="Project not found")
+            await db.commit()
+            return {"status": "ok", "discovery_config": config.model_dump()}
+
+    pid = str(project_id)
+    if pid not in _memory_projects:
+        raise HTTPException(status_code=404, detail="Project not found")
+    _memory_projects[pid]["discovery_config"] = config.model_dump()
+    return {"status": "ok", "discovery_config": config.model_dump()}

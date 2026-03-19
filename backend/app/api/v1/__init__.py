@@ -13,6 +13,8 @@ from app.api.v1.endpoints import (
     biobank,
     clinical_trials,
     collaboration,
+    config_endpoints,
+    data_sources,
     datasets,
     discovery,
     document_pipeline,
@@ -88,3 +90,9 @@ router.include_router(biobank.router, prefix="/biobank", tags=["biobank"])
 
 # Pipeline Intelligence (Learning Memory, Cost Tracking, Benchmarks, Optimization)
 router.include_router(pipeline_intelligence.router)
+
+# Data Sources (60+ biomedical APIs)
+router.include_router(data_sources.router)
+
+# Configuration (methods taxonomy, model pricing, constitutional constraints)
+router.include_router(config_endpoints.router)

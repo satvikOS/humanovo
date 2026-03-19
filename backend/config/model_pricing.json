@@ -1,0 +1,47 @@
+{
+  "claude-opus-4-6": {
+    "provider": "anthropic_bedrock",
+    "input_cost_per_1m_tokens_cents": 1500,
+    "output_cost_per_1m_tokens_cents": 7500
+  },
+  "claude-sonnet-4-6": {
+    "provider": "anthropic_bedrock",
+    "input_cost_per_1m_tokens_cents": 300,
+    "output_cost_per_1m_tokens_cents": 1500
+  },
+  "gpt-4.1": {
+    "provider": "azure_openai",
+    "input_cost_per_1m_tokens_cents": 200,
+    "output_cost_per_1m_tokens_cents": 800
+  },
+  "o3-mini": {
+    "provider": "azure_openai",
+    "input_cost_per_1m_tokens_cents": 110,
+    "output_cost_per_1m_tokens_cents": 440
+  },
+  "cohere-command-a": {
+    "provider": "cohere",
+    "input_cost_per_1m_tokens_cents": 250,
+    "output_cost_per_1m_tokens_cents": 1000
+  },
+  "cohere-embed-v3": {
+    "provider": "cohere",
+    "input_cost_per_1m_tokens_cents": 10,
+    "output_cost_per_1m_tokens_cents": 0
+  },
+  "text-embedding-3-large": {
+    "provider": "openai",
+    "input_cost_per_1m_tokens_cents": 13,
+    "output_cost_per_1m_tokens_cents": 0
+  },
+  "grok-4-1-fast": {
+    "provider": "azure_ai_foundry",
+    "input_cost_per_1m_tokens_cents": 300,
+    "output_cost_per_1m_tokens_cents": 1000
+  },
+  "mistral-large-3": {
+    "provider": "azure_ai",
+    "input_cost_per_1m_tokens_cents": 200,
+    "output_cost_per_1m_tokens_cents": 600
+  }
+}

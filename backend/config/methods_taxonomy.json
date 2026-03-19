@@ -1,0 +1,44 @@
+{
+  "categories": [
+    {
+      "name": "Neuroimaging",
+      "methods": ["MRI", "fMRI", "DTI", "EEG", "MEG", "PET", "SPECT", "fNIRS", "CT", "TMS", "tDCS"]
+    },
+    {
+      "name": "Molecular Biology",
+      "methods": ["PCR", "qPCR", "RT-PCR", "Western Blot", "ELISA", "RNA-seq", "ChIP-seq", "CRISPR", "CRISPR-Cas9", "Northern Blot", "Southern Blot", "In Situ Hybridization", "Cloning"]
+    },
+    {
+      "name": "Cell Biology",
+      "methods": ["Flow Cytometry", "FACS", "Confocal Microscopy", "Fluorescence Microscopy", "Electron Microscopy", "Cell Culture", "Immunohistochemistry", "Immunofluorescence", "Live Cell Imaging", "Patch Clamp"]
+    },
+    {
+      "name": "Animal Models",
+      "methods": ["Mouse Models", "Rat Models", "Zebrafish", "Drosophila", "C. elegans", "Non-Human Primates", "Transgenic Models", "Knockout Models"]
+    },
+    {
+      "name": "Clinical Research",
+      "methods": ["Randomized Controlled Trial", "Observational Study", "Case-Control Study", "Cohort Study", "Cross-Sectional Study", "Meta-Analysis", "Systematic Review", "Clinical Trial Phase I", "Clinical Trial Phase II", "Clinical Trial Phase III", "Patient Survey", "Chart Review"]
+    },
+    {
+      "name": "Computational",
+      "methods": ["Bioinformatics", "Machine Learning", "Deep Learning", "Molecular Dynamics", "Network Analysis", "GWAS", "PRS", "Single-Cell Analysis", "Spatial Transcriptomics", "Structural Modeling", "Docking Simulation"]
+    },
+    {
+      "name": "Omics",
+      "methods": ["Proteomics", "Metabolomics", "Genomics", "Transcriptomics", "Lipidomics", "Epigenomics", "Metagenomics", "Phosphoproteomics", "Glycomics"]
+    },
+    {
+      "name": "Biochemistry & Structural",
+      "methods": ["Mass Spectrometry", "LC-MS", "GC-MS", "X-ray Crystallography", "NMR Spectroscopy", "Cryo-EM", "SAXS", "Surface Plasmon Resonance", "Isothermal Titration Calorimetry", "Circular Dichroism"]
+    },
+    {
+      "name": "Electrophysiology",
+      "methods": ["Patch Clamp", "Extracellular Recording", "Multi-Electrode Array", "ERP", "EMG", "ECoG", "Local Field Potential"]
+    },
+    {
+      "name": "Pharmacology",
+      "methods": ["Dose-Response Assay", "IC50 Determination", "Pharmacokinetics", "Pharmacodynamics", "Drug Screening", "ADMET Profiling", "Toxicity Testing"]
+    }
+  ]
+}
