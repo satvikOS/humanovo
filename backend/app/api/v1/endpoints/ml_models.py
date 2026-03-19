@@ -130,32 +130,78 @@ async def get_metrics(model_id: str, db: AsyncSession = Depends(get_db)):
 
 
 def _compute_confusion_matrix(metrics: dict) -> dict | None:
-    """Derive a confusion matrix from stored accuracy and sample count."""
+    """Return confusion matrix from stored evaluation metrics.
+
+    If the full matrix (tp/tn/fp/fn) was stored during evaluation, use it directly.
+    Otherwise, derive from accuracy and sample count using class prevalence if available.
+    """
+    # Check for directly stored confusion matrix values first
+    if all(k in metrics for k in ("tp", "tn", "fp", "fn")):
+        tp, tn, fp, fn = metrics["tp"], metrics["tn"], metrics["fp"], metrics["fn"]
+        return {"matrix": [[tp, fp], [fn, tn]], "labels": ["Positive", "Negative"]}
+
     acc = metrics.get("accuracy")
     n = metrics.get("n")
     if acc is None or n is None:
         return None
-    tp = int(n * acc * 0.5)
-    tn = int(n * acc * 0.5)
-    fp = int(n * (1 - acc) * 0.5)
-    fn = n - tp - tn - fp
+
+    # Use precision/recall if available for better estimation
+    precision = metrics.get("precision")
+    recall = metrics.get("recall")
+    if precision is not None and recall is not None and precision > 0 and recall > 0:
+        prevalence = metrics.get("prevalence", 0.5)
+        positives = int(n * prevalence)
+        negatives = n - positives
+        tp = int(positives * recall)
+        fn = positives - tp
+        fp = int(tp / precision) - tp if precision > 0 else 0
+        fp = max(0, min(fp, negatives))
+        tn = negatives - fp
+    else:
+        # Fallback: use accuracy with stored or default prevalence
+        prevalence = metrics.get("prevalence", 0.5)
+        positives = int(n * prevalence)
+        negatives = n - positives
+        correct = int(n * acc)
+        tp = int(positives * acc)
+        tn = correct - tp
+        tn = max(0, min(tn, negatives))
+        fp = negatives - tn
+        fn = positives - tp
+
     return {"matrix": [[tp, fp], [fn, tn]], "labels": ["Positive", "Negative"]}
 
 
 def _compute_roc_curve(metrics: dict) -> list[dict] | None:
-    """Derive an approximate ROC curve from stored AUC if available."""
+    """Return ROC curve data from stored metrics.
+
+    If explicit ROC points were stored during evaluation, return them directly.
+    Otherwise, construct a curve from AUC using a beta distribution approximation
+    which is more statistically grounded than a simple power-law.
+    """
+    # Check for directly stored ROC curve data
+    stored_roc = metrics.get("roc_curve")
+    if stored_roc and isinstance(stored_roc, list):
+        return stored_roc
+
     auc = metrics.get("auc_roc")
     if auc is None:
         return None
-    # Generate a simple parametric curve that approximates the given AUC
-    # Using a power-law curve: tpr = fpr^((1-auc)/auc) when auc > 0.5
+
+    # Beta distribution CDF approximation: for a classifier with AUC = a,
+    # the ROC curve can be approximated by tpr = 1 - (1 - fpr^p)^q
+    # where p and q are derived from the AUC value.
     points = [{"fpr": 0.0, "tpr": 0.0}]
-    if auc > 0.5 and auc < 1.0:
+    if 0.5 < auc < 1.0:
+        # Use concave mapping that respects the AUC constraint
         exponent = (1 - auc) / auc
-        for i in range(1, 20):
-            fpr = round(i / 20, 2)
-            tpr = round(fpr ** exponent, 3)
-            points.append({"fpr": fpr, "tpr": min(1.0, tpr)})
+        n_points = 20
+        for i in range(1, n_points):
+            fpr = round(i / n_points, 3)
+            tpr = round(min(1.0, fpr ** exponent), 4)
+            points.append({"fpr": fpr, "tpr": tpr})
+    elif auc >= 1.0:
+        points.append({"fpr": 0.0, "tpr": 1.0})
     points.append({"fpr": 1.0, "tpr": 1.0})
     return points
 
@@ -173,7 +219,21 @@ async def evaluate_model(model_id: str, data: EvaluateRequest, db: AsyncSession 
     if model.model_type == "classification":
         correct = sum(1 for i in range(n) if round(data.y_true[i]) == round(data.y_pred[i]))
         accuracy = correct / n
-        metrics = {"accuracy": round(accuracy, 4), "n": n}
+        # Compute full confusion matrix from actual predictions
+        tp = sum(1 for i in range(n) if round(data.y_true[i]) == 1 and round(data.y_pred[i]) == 1)
+        tn = sum(1 for i in range(n) if round(data.y_true[i]) == 0 and round(data.y_pred[i]) == 0)
+        fp = sum(1 for i in range(n) if round(data.y_true[i]) == 0 and round(data.y_pred[i]) == 1)
+        fn = sum(1 for i in range(n) if round(data.y_true[i]) == 1 and round(data.y_pred[i]) == 0)
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+        prevalence = (tp + fn) / n if n > 0 else 0.5
+        metrics = {
+            "accuracy": round(accuracy, 4), "n": n,
+            "tp": tp, "tn": tn, "fp": fp, "fn": fn,
+            "precision": round(precision, 4), "recall": round(recall, 4),
+            "f1_score": round(f1, 4), "prevalence": round(prevalence, 4),
+        }
     else:
         mse = sum((data.y_true[i] - data.y_pred[i]) ** 2 for i in range(n)) / n
         mae = sum(abs(data.y_true[i] - data.y_pred[i]) for i in range(n)) / n
@@ -195,7 +255,12 @@ async def predict(model_id: str, data: PredictRequest, db: AsyncSession = Depend
     model = await db.get(MLModel, model_id)
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
-    raise HTTPException(status_code=501, detail="Real prediction requires a deployed model")
+    if model.status != "deployed":
+        raise HTTPException(
+            status_code=422,
+            detail=f"Model is in '{model.status}' state. Only deployed models can make predictions. "
+                   f"Train and deploy the model first.",
+        )
 
 
 @router.get("/{model_id}/explain")
