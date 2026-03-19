@@ -136,35 +136,6 @@ jobs:
             echo "No stale lock found"
           fi
 
-      - name: Clean Terraform State for Re-import
-        working-directory: infrastructure/terraform
-        continue-on-error: true
-        run: |
-          echo "Cleaning stale state entries..."
-          terraform state rm 'aws_kms_key.main' 2>/dev/null || true
-          terraform state rm 'aws_kms_alias.main' 2>/dev/null || true
-          terraform state rm 'aws_cloudwatch_log_group.main' 2>/dev/null || true
-          terraform state rm 'module.api_gateway.aws_cloudwatch_log_group.api_gateway' 2>/dev/null || true
-
-          for table in projects hypotheses evidence simulations knowledge_metadata agent_tasks knowledge embeddings ingestion_checkpoints rate_limits rag_cache ingestion_state; do
-            terraform state rm "module.dynamodb.aws_dynamodb_table.${table}" 2>/dev/null || true
-          done
-
-          terraform state rm 'module.iam.aws_iam_role.lambda_execution' 2>/dev/null || true
-          terraform state rm 'module.iam.aws_iam_role.api_gateway' 2>/dev/null || true
-          terraform state rm 'module.iam.aws_iam_role.deployment' 2>/dev/null || true
-
-          for fn in api_core projects hypotheses evidence knowledge hypothesis_generation agent_orchestrator search_agent embeddings simulation simulation_worker ingestion pubmed_fetcher clinical_trials_fetcher brave_search_fetcher embeddings_generator rag_retrieval ingestion_scheduler; do
-            terraform state rm "module.lambda.aws_cloudwatch_log_group.lambda_logs[\"${fn}\"]" 2>/dev/null || true
-          done
-
-          terraform state rm 'module.lambda.aws_sqs_queue.simulation_dlq' 2>/dev/null || true
-          terraform state rm 'module.lambda.aws_sqs_queue.simulation_queue' 2>/dev/null || true
-          terraform state rm 'module.lambda.aws_sqs_queue.embeddings_dlq' 2>/dev/null || true
-          terraform state rm 'module.lambda.aws_sqs_queue.embeddings_queue' 2>/dev/null || true
-
-          echo "State cleanup complete"
-
       - name: Import Existing Resources
         working-directory: infrastructure/terraform
         continue-on-error: true
@@ -202,7 +173,7 @@ jobs:
           import_if_missing 'module.iam.aws_iam_role.api_gateway' 'genup-dev-api-gateway'
           import_if_missing 'module.iam.aws_iam_role.deployment' 'genup-dev-deployment'
 
-          for fn in api_core projects hypotheses evidence knowledge hypothesis_generation agent_orchestrator search_agent embeddings simulation simulation_worker ingestion pubmed_fetcher clinical_trials_fetcher brave_search_fetcher embeddings_generator rag_retrieval ingestion_scheduler; do
+          for fn in api_core projects hypotheses evidence knowledge hypothesis_generation agent_orchestrator search_agent embeddings simulation simulation_worker ingestion pubmed_fetcher clinical_trials_fetcher brave_search_fetcher embeddings_generator rag_retrieval ingestion_scheduler bulk_etl; do
             import_if_missing "module.lambda.aws_cloudwatch_log_group.lambda_logs[\"${fn}\"]" "/aws/lambda/genup-dev-${fn}"
           done
 
