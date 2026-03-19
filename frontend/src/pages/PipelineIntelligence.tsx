@@ -55,11 +55,6 @@ interface ModelBreakdown {
   requests: number
 }
 
-interface StageBreakdown {
-  stage: string
-  cost_cents: number
-}
-
 interface ModelPerformanceRow {
   model: string
   avg_latency_ms: number
@@ -250,7 +245,7 @@ function CostsTab({
                 />
                 <Tooltip
                   contentStyle={CHART_TOOLTIP_STYLE}
-                  formatter={(value: number) => [`$${value.toFixed(2)}`, 'Daily Spend']}
+                  formatter={(value) => [`$${Number(value).toFixed(2)}`, 'Daily Spend']}
                   labelStyle={{ color: 'rgba(255,255,255,0.6)', fontSize: '11px' }}
                 />
                 <Bar dataKey="cost" fill="#6366f1" radius={[4, 4, 0, 0]} />
@@ -290,7 +285,7 @@ function CostsTab({
                   </Pie>
                   <Tooltip
                     contentStyle={CHART_TOOLTIP_STYLE}
-                    formatter={(value: number) => [`$${value.toFixed(2)}`, 'Cost']}
+                    formatter={(value) => [`$${Number(value).toFixed(2)}`, 'Cost']}
                   />
                   <Legend
                     wrapperStyle={{ fontSize: '11px' }}
@@ -332,7 +327,7 @@ function CostsTab({
                   />
                   <Tooltip
                     contentStyle={CHART_TOOLTIP_STYLE}
-                    formatter={(value: number) => [`$${value.toFixed(2)}`, 'Daily Cost']}
+                    formatter={(value) => [`$${Number(value).toFixed(2)}`, 'Daily Cost']}
                     labelStyle={{ color: 'rgba(255,255,255,0.6)', fontSize: '11px' }}
                   />
                   <Line
@@ -488,11 +483,11 @@ function BenchmarksTab({ data }: { data: BenchmarkData | null }) {
               />
               <Tooltip
                 contentStyle={CHART_TOOLTIP_STYLE}
-                formatter={(value: number) => [`${value.toFixed(1)}s`, 'Avg Duration']}
+                formatter={(value) => [`${Number(value).toFixed(1)}s`, 'Avg Duration']}
                 labelStyle={{ color: 'rgba(255,255,255,0.6)', fontSize: '11px' }}
               />
               <Bar dataKey="duration" radius={[0, 4, 4, 0]}>
-                {stageBarData.map((entry, idx) => (
+                {stageBarData.map((_entry, idx) => (
                   <Cell
                     key={idx}
                     fill={STAGE_COLORS[data.stage_metrics[idx]?.stage] || CHART_COLORS[idx % CHART_COLORS.length]}

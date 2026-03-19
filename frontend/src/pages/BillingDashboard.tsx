@@ -264,7 +264,6 @@ export default function BillingDashboard() {
   // ── Derived ────────────────────────────────────────────────
   const spendCents = summary?.current_month_spend_cents ?? 0
   const budgetCents = summary?.budget_cents ?? 0
-  const budgetPct = budgetCents > 0 ? Math.min((spendCents / budgetCents) * 100, 100) : 0
   const budgetRemaining = Math.max(0, budgetCents - spendCents)
   const projectedCents = summary?.projected_spend_cents ?? 0
 
@@ -430,7 +429,7 @@ export default function BillingDashboard() {
                 />
                 <Tooltip
                   contentStyle={CHART_TOOLTIP_STYLE}
-                  formatter={(value: number) => [`$${value.toFixed(2)}`, 'Daily Spend']}
+                  formatter={(value) => [`$${Number(value).toFixed(2)}`, 'Daily Spend']}
                   labelStyle={{ color: 'rgba(255,255,255,0.6)', fontSize: '11px' }}
                 />
                 <Area
@@ -477,7 +476,7 @@ export default function BillingDashboard() {
                   </Pie>
                   <Tooltip
                     contentStyle={CHART_TOOLTIP_STYLE}
-                    formatter={(value: number) => [`$${value.toFixed(2)}`, 'Cost']}
+                    formatter={(value) => [`$${Number(value).toFixed(2)}`, 'Cost']}
                   />
                   <Legend
                     wrapperStyle={{ fontSize: '11px' }}
@@ -518,7 +517,7 @@ export default function BillingDashboard() {
                   />
                   <Tooltip
                     contentStyle={CHART_TOOLTIP_STYLE}
-                    formatter={(value: number) => [`$${value.toFixed(2)}`, 'Cost']}
+                    formatter={(value) => [`$${Number(value).toFixed(2)}`, 'Cost']}
                     labelStyle={{ color: 'rgba(255,255,255,0.6)', fontSize: '11px' }}
                   />
                   <Bar dataKey="cost" radius={[4, 4, 0, 0]}>
