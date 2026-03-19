@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { Component, type ReactNode } from 'react'
 import Layout from './components/Layout'
@@ -26,8 +27,16 @@ import GenomicsAnalysis from './pages/GenomicsAnalysis'
 import ManuscriptManager from './pages/ManuscriptManager'
 import RegulatoryCompliance from './pages/RegulatoryCompliance'
 import ResearchImaging from './pages/ResearchImaging'
-// ML Models removed
 import BiobankManager from './pages/BiobankManager'
+
+// Project Jamison — new pages (lazy-loaded for code splitting)
+const ProjectWorkspace = lazy(() => import('./pages/ProjectWorkspace'))
+const DiscoveryRunner = lazy(() => import('./pages/DiscoveryRunner'))
+const HypothesisReview = lazy(() => import('./pages/HypothesisReview'))
+const ProjectKnowledgeGraph = lazy(() => import('./pages/ProjectKnowledgeGraph'))
+const PipelineIntelligence = lazy(() => import('./pages/PipelineIntelligence'))
+const PgvectorManager = lazy(() => import('./pages/PgvectorManager'))
+const BillingDashboard = lazy(() => import('./pages/BillingDashboard'))
 
 // Error boundary to prevent blank pages on runtime errors
 class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; error: string }> {
@@ -71,6 +80,20 @@ function PageWrapper({ children }: { children: ReactNode }) {
   return <ErrorBoundary>{children}</ErrorBoundary>
 }
 
+function LazyPageWrapper({ children }: { children: ReactNode }) {
+  return (
+    <ErrorBoundary>
+      <Suspense fallback={
+        <div className="flex items-center justify-center h-full p-8">
+          <div className="animate-pulse text-sm" style={{ color: 'var(--color-text-muted)' }}>Loading...</div>
+        </div>
+      }>
+        {children}
+      </Suspense>
+    </ErrorBoundary>
+  )
+}
+
 function App() {
   return (
     <Routes>
@@ -79,6 +102,11 @@ function App() {
         <Route path="dashboard" element={<PageWrapper><Dashboard /></PageWrapper>} />
         <Route path="projects" element={<PageWrapper><Projects /></PageWrapper>} />
         <Route path="projects/:projectId" element={<PageWrapper><ProjectDetail /></PageWrapper>} />
+        {/* Project Jamison — integrated project workspace routes */}
+        <Route path="projects/:projectId/workspace" element={<LazyPageWrapper><ProjectWorkspace /></LazyPageWrapper>} />
+        <Route path="projects/:projectId/discover" element={<LazyPageWrapper><DiscoveryRunner /></LazyPageWrapper>} />
+        <Route path="projects/:projectId/hypotheses/:hypothesisId" element={<LazyPageWrapper><HypothesisReview /></LazyPageWrapper>} />
+        <Route path="projects/:projectId/graph" element={<LazyPageWrapper><ProjectKnowledgeGraph /></LazyPageWrapper>} />
         <Route path="evidence" element={<PageWrapper><Evidence /></PageWrapper>} />
         <Route path="simulations" element={<PageWrapper><Simulations /></PageWrapper>} />
         <Route path="workbench" element={<PageWrapper><Workbench /></PageWrapper>} />
@@ -100,8 +128,12 @@ function App() {
         <Route path="manuscripts" element={<PageWrapper><ManuscriptManager /></PageWrapper>} />
         <Route path="regulatory" element={<PageWrapper><RegulatoryCompliance /></PageWrapper>} />
         <Route path="imaging" element={<PageWrapper><ResearchImaging /></PageWrapper>} />
-        {/* ML Models removed */}
         <Route path="biobank" element={<PageWrapper><BiobankManager /></PageWrapper>} />
+        {/* Project Jamison — platform-level pages */}
+        <Route path="intelligence" element={<LazyPageWrapper><PipelineIntelligence /></LazyPageWrapper>} />
+        <Route path="dev/pgvector" element={<LazyPageWrapper><PgvectorManager /></LazyPageWrapper>} />
+        {/* Billing/usage is within settings tree */}
+        <Route path="settings/billing" element={<LazyPageWrapper><BillingDashboard /></LazyPageWrapper>} />
       </Route>
     </Routes>
   )

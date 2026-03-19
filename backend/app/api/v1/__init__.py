@@ -24,6 +24,7 @@ from app.api.v1.endpoints import (
     imaging,
     ingestion,
     ingestion_ws,
+    jamison_api,
     knowledge,
     knowledge_graph,
     manuscripts,
@@ -96,3 +97,6 @@ router.include_router(data_sources.router)
 
 # Configuration (methods taxonomy, model pricing, constitutional constraints)
 router.include_router(config_endpoints.router)
+
+# Project Jamison — unified discovery, synthesis, imaging, billing, pgvector endpoints
+router.include_router(jamison_api.router)

@@ -2,9 +2,9 @@ import { useState, useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import {
   FiPlus, FiFolder, FiX, FiTrash2, FiSearch, FiRefreshCw,
-  FiGrid, FiList, FiFilter, FiChevronDown, FiActivity,
-  FiTarget, FiFileText, FiClock, FiTrendingUp, FiZap,
-  FiBookOpen, FiDatabase, FiLayers,
+  FiGrid, FiList, FiFilter, FiChevronDown,
+  FiTarget, FiFileText, FiClock, FiZap,
+  FiDatabase,
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import api, { Project, ProjectCreate } from '../services/api'

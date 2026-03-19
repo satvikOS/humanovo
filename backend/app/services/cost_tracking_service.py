@@ -48,12 +48,6 @@ CURRENT_PRICING = {
         "output": 75.00,
         "cached_input": 1.50,
     },
-    # Azure AI — DeepSeek-R1-0528
-    ("azure_ai", "DeepSeek-R1-0528"): {
-        "input": 3.50,  # Azure AI Foundry pricing
-        "output": 14.00,
-        "cached_input": 0.35,
-    },
     # Azure AI — Mistral-Large-3
     ("azure_ai", "Mistral-Large-3"): {
         "input": 2.00,
@@ -70,12 +64,6 @@ CURRENT_PRICING = {
     ("azure_openai", "cohere-command-a"): {
         "input": 2.50,
         "output": 10.00,
-        "cached_input": 0.0,
-    },
-    # Azure OpenAI — Kimi-K2-Thinking
-    ("azure_openai", "Kimi-K2-Thinking"): {
-        "input": 0.60,
-        "output": 2.40,
         "cached_input": 0.0,
     },
     # Azure OpenAI — o3-mini

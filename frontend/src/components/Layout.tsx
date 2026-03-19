@@ -66,6 +66,7 @@ const researchNavItems = [
 const analysisNavItems = [
   { to: '/statistical-analysis', icon: FiTarget, label: 'Statistics' },
   { to: '/genomics', icon: FiHeart, label: 'Genomics' },
+  { to: '/intelligence', icon: FiTrendingUp, label: 'Pipeline Intel' },
 ]
 
 const managementNavItems = [

@@ -4,7 +4,6 @@ Agent Orchestrator Lambda Handler - Multi-model AI discovery system.
 Handles the /orchestrator/* endpoints for the discovery page.
 Uses mixed providers:
   - Claude Opus 4.6 via AWS Bedrock (Explorer + Synthesizer)
-  - DeepSeek-R1 via Azure AI Foundry (Reasoner)
   - Mistral-Large-3 via Azure AI Foundry (Critic)
 Model identities are never exposed to the frontend (unbiasing).
 """
@@ -255,11 +254,9 @@ class AzureOpenAIClient:
         self.chat = _AzureOpenAIChat(endpoint, api_key, deployment, api_version)
 
 
-azure_deepseek_client = None
 azure_mistral_client = None
 azure_gpt4o_client = None
 azure_cohere_client = None
-azure_kimi_client = None
 azure_o3mini_client = None
 azure_gpt41_client = None
 azure_phi4_client = None
@@ -271,16 +268,12 @@ AZURE_AI_ENDPOINT = os.environ.get("AZURE_AI_ENDPOINT", "")
 AZURE_AI_KEY = os.environ.get("AZURE_AI_KEY", "")
 
 # Per-model overrides (fall back to shared endpoint)
-AZURE_DEEPSEEK_ENDPOINT = os.environ.get("AZURE_DEEPSEEK_ENDPOINT", "") or AZURE_AI_ENDPOINT
-AZURE_DEEPSEEK_KEY = os.environ.get("AZURE_DEEPSEEK_KEY", "") or AZURE_AI_KEY
 AZURE_MISTRAL_ENDPOINT = os.environ.get("AZURE_MISTRAL_ENDPOINT", "") or AZURE_AI_ENDPOINT
 AZURE_MISTRAL_KEY = os.environ.get("AZURE_MISTRAL_KEY", "") or AZURE_AI_KEY
 AZURE_GPT4O_ENDPOINT = os.environ.get("AZURE_GPT4O_ENDPOINT", "") or AZURE_AI_ENDPOINT
 AZURE_GPT4O_KEY = os.environ.get("AZURE_GPT4O_KEY", "") or AZURE_AI_KEY
 AZURE_COHERE_ENDPOINT = os.environ.get("AZURE_COHERE_ENDPOINT", "") or AZURE_AI_ENDPOINT
 AZURE_COHERE_KEY = os.environ.get("AZURE_COHERE_KEY", "") or AZURE_AI_KEY
-AZURE_KIMI_ENDPOINT = os.environ.get("AZURE_KIMI_ENDPOINT", "") or AZURE_AI_ENDPOINT
-AZURE_KIMI_KEY = os.environ.get("AZURE_KIMI_KEY", "") or AZURE_AI_KEY
 AZURE_O3MINI_ENDPOINT = os.environ.get("AZURE_O3MINI_ENDPOINT", "") or AZURE_AI_ENDPOINT
 AZURE_O3MINI_KEY = os.environ.get("AZURE_O3MINI_KEY", "") or AZURE_AI_KEY
 AZURE_GPT41_ENDPOINT = os.environ.get("AZURE_GPT41_ENDPOINT", "") or AZURE_AI_ENDPOINT
@@ -398,10 +391,8 @@ def _init_azure_openai_client(name, endpoint, key, deployment, api_version="2024
     return None
 
 # Azure AI model-specific endpoints — auto-detects services.ai.azure.com vs cognitiveservices.azure.com
-azure_deepseek_client = _init_azure_client("DeepSeek", AZURE_DEEPSEEK_ENDPOINT, AZURE_DEEPSEEK_KEY, model_name="DeepSeek-R1")
 azure_mistral_client = _init_azure_client("Mistral", AZURE_MISTRAL_ENDPOINT, AZURE_MISTRAL_KEY, model_name="Mistral-Large-3")
 azure_cohere_client = _init_azure_client("Cohere", AZURE_COHERE_ENDPOINT, AZURE_COHERE_KEY, model_name="Cohere-command-a")
-azure_kimi_client = _init_azure_client("Kimi-K2", AZURE_KIMI_ENDPOINT, AZURE_KIMI_KEY, model_name="Kimi-K2-Thinking")
 azure_phi4_client = _init_azure_client("Phi4", AZURE_PHI4_ENDPOINT, AZURE_PHI4_KEY, model_name="Phi-4-reasoning")
 azure_grok_client = _init_azure_client("Grok", AZURE_GROK_ENDPOINT, AZURE_GROK_KEY, model_name="grok-4-1-fast-reasoning")
 # Azure OpenAI deployment-based endpoints (GPT-4o, o3-mini, GPT-4.1 — via cognitiveservices.azure.com)
@@ -412,13 +403,11 @@ azure_gpt53_client = _init_azure_openai_client("GPT-5.3", AZURE_GPT53_ENDPOINT, 
 
 # Map model name patterns to their clients for routing
 AZURE_MODEL_CLIENTS = {
-    "deepseek": ("azure_deepseek", lambda: azure_deepseek_client),
     "mistral": ("azure_mistral", lambda: azure_mistral_client),
     "gpt-4o": ("azure_gpt4o", lambda: azure_gpt4o_client),
     "gpt4o": ("azure_gpt4o", lambda: azure_gpt4o_client),
     "cohere": ("azure_cohere", lambda: azure_cohere_client),
     "command": ("azure_cohere", lambda: azure_cohere_client),
-    "kimi": ("azure_kimi", lambda: azure_kimi_client),
     "o3-mini": ("azure_o3mini", lambda: azure_o3mini_client),
     "o3mini": ("azure_o3mini", lambda: azure_o3mini_client),
     "gpt-4.1": ("azure_gpt41", lambda: azure_gpt41_client),
@@ -453,11 +442,10 @@ BEDROCK_MODEL_CLAUDE_OPUS = os.environ.get("BEDROCK_MODEL_ID", "us.anthropic.cla
 BEDROCK_MODEL_CLAUDE_SONNET = os.environ.get("BEDROCK_SONNET_ID", "us.anthropic.claude-sonnet-4-20250514-v1:0")
 BEDROCK_MODEL_CLAUDE_OPUS_45 = os.environ.get("BEDROCK_OPUS_45_ID", "us.anthropic.claude-opus-4-5-20251101-v1:0")
 BEDROCK_MODEL_NOVA_PREMIER = os.environ.get("BEDROCK_NOVA_PREMIER_ID", "us.amazon.nova-premier-v1:0")
-AZURE_AI_REASONER_MODEL = os.environ.get("AZURE_AI_REASONER_MODEL", "DeepSeek-R1")
+AZURE_AI_REASONER_MODEL = os.environ.get("AZURE_AI_REASONER_MODEL", "grok-4-1-fast-reasoning")
 AZURE_AI_CRITIC_MODEL = os.environ.get("AZURE_AI_CRITIC_MODEL", "Mistral-Large-3")
 AZURE_AI_GPT4O_MODEL = os.environ.get("AZURE_AI_GPT4O_MODEL", "gpt-4o")
 AZURE_AI_COHERE_MODEL = os.environ.get("AZURE_AI_COHERE_MODEL", "Cohere-command-a")
-AZURE_AI_KIMI_MODEL = os.environ.get("AZURE_AI_KIMI_MODEL", "Kimi-K2-Thinking")
 AZURE_AI_O3MINI_MODEL = os.environ.get("AZURE_AI_O3MINI_MODEL", "o3-mini")
 AZURE_AI_GPT41_MODEL = os.environ.get("AZURE_AI_GPT41_MODEL", "gpt-4.1")
 AZURE_AI_PHI4_MODEL = os.environ.get("AZURE_AI_PHI4_MODEL", "Phi-4-reasoning")
@@ -925,7 +913,7 @@ def update_discovery_state(updates: dict):
 def _get_provider(model_id: str) -> str:
     """Extract provider from model ID, handling cross-region inference profile prefixes.
 
-    e.g. 'us.meta.llama4-...' -> 'meta', 'moonshotai.kimi-k2.5' -> 'moonshotai'
+    e.g. 'us.meta.llama4-...' -> 'meta', 'openai.gpt-4o' -> 'openai'
     """
     parts = model_id.split(".")
     # Cross-region prefix: us, eu, ap — skip it
@@ -969,7 +957,7 @@ def _build_invoke_body(model_id: str, prompt: str, system_prompt: str,
             },
         }
     else:
-        # OpenAI-compatible chat format (deepseek, moonshotai, openai)
+        # OpenAI-compatible chat format (openai, etc.)
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
@@ -1005,7 +993,7 @@ def _parse_invoke_response(model_id: str, response_body: dict) -> str:
                 elif isinstance(content, str):
                     return content
 
-    # OpenAI-compatible choices format (deepseek, openai, moonshotai)
+    # OpenAI-compatible choices format (openai, etc.)
     if "choices" in response_body:
         choices = response_body["choices"]
         if choices and isinstance(choices, list):
@@ -3164,10 +3152,8 @@ def health_check():
     debug = {
         "azure_ai_endpoint_set": bool(os.environ.get("AZURE_AI_ENDPOINT", "")),
         "azure_ai_key_set": bool(os.environ.get("AZURE_AI_KEY", "")),
-        "azure_deepseek_client_init": azure_deepseek_client is not None,
         "azure_mistral_client_init": azure_mistral_client is not None,
         "azure_cohere_client_init": azure_cohere_client is not None,
-        "azure_kimi_client_init": azure_kimi_client is not None,
         "azure_phi4_client_init": azure_phi4_client is not None,
         "azure_grok_client_init": azure_grok_client is not None,
         "azure_gpt4o_client_init": azure_gpt4o_client is not None,
@@ -3306,18 +3292,6 @@ When the user asks about their research, use the platform context provided.
                     provider_used = "azure-grok"
             except Exception as e:
                 print(f"[CHAT] Azure Grok error: {e}")
-
-        # === Tier 6: Azure DeepSeek ===
-        if not response_text and azure_deepseek_client:
-            try:
-                resp = azure_deepseek_client.chat.completions.create(
-                    model="DeepSeek-R1", messages=messages, max_tokens=2048, temperature=0.7,
-                )
-                if resp.choices:
-                    response_text = resp.choices[0].message.content
-                    provider_used = "azure-deepseek"
-            except Exception as e:
-                print(f"[CHAT] Azure DeepSeek error: {e}")
 
         if response_text:
             print(f"[CHAT] Success via {provider_used}")

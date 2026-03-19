@@ -95,7 +95,7 @@ async def start_discovery_endpoint(request: StartDiscoveryRequest):
     """
     Start a new parallel discovery process.
 
-    Launches agents across Llama Maverick, DeepSeek R1, Kimi 2.5, and GPT OSS 120B
+    Launches agents across multiple AI models
     to explore biological pathways and discover potential treatments/strategies.
     External factors (nutrients, chemicals, drugs, compounds, elements) are simulated
     alongside biological interactions.
@@ -171,7 +171,7 @@ async def start_discovery_endpoint(request: StartDiscoveryRequest):
             "disease": request.disease,
             "max_agents": request.max_agents,
             "target_confidence": request.target_confidence,
-            "models": ["llama_maverick", "deepseek_r1", "kimi_25", "gpt_oss_120b"],
+            "models": ["llama_maverick", "gpt_oss_120b"],
             "external_factors_count": len(request.external_factors),
             "message": (
                 f"Discovery started for {request.disease} with {request.max_agents} agents "
@@ -722,11 +722,9 @@ async def orchestrator_health():
 
     models_status = {
         "claude_opus": False,
-        "deepseek_r1_0528": False,
         "mistral_large_3": False,
         "gpt_4o_azure": False,
         "cohere_command_a": False,
-        "kimi_k2_thinking": False,
         "o3_mini": False,
         "gpt_41": False,
     }
@@ -738,27 +736,23 @@ async def orchestrator_health():
             if hasattr(llm, '_bedrock_client') and llm._bedrock_client:
                 models_status["claude_opus"] = True
             # Mark Azure AI models
-            for key in ("deepseek_r1_0528", "mistral_large_3", "cohere_command_a"):
+            for key in ("mistral_large_3", "cohere_command_a"):
                 if hasattr(llm, '_azure_clients') or True:  # Available if configured
                     models_status[key] = True
             # Mark Azure OpenAI models
-            for key in ("gpt_4o_azure", "kimi_k2_thinking", "o3_mini", "gpt_41"):
+            for key in ("gpt_4o_azure", "o3_mini", "gpt_41"):
                 models_status[key] = True
         else:
             try:
                 from app.core.config import settings
                 if settings.aws_access_key_value and settings.aws_secret_key_value:
                     models_status["claude_opus"] = True
-                if settings.AZURE_DEEPSEEK_ENDPOINT:
-                    models_status["deepseek_r1_0528"] = True
                 if settings.AZURE_MISTRAL_ENDPOINT:
                     models_status["mistral_large_3"] = True
                 if settings.AZURE_GPT4O_ENDPOINT:
                     models_status["gpt_4o_azure"] = True
                 if settings.AZURE_COHERE_ENDPOINT:
                     models_status["cohere_command_a"] = True
-                if settings.AZURE_KIMI_ENDPOINT:
-                    models_status["kimi_k2_thinking"] = True
                 if settings.AZURE_O3MINI_ENDPOINT:
                     models_status["o3_mini"] = True
                 if settings.AZURE_GPT41_ENDPOINT:
@@ -774,7 +768,7 @@ async def orchestrator_health():
         "status": "healthy" if active_count > 0 else "no_models",
         "models": models_status,
         "connected_count": active_count,
-        "total_models": 8,
+        "total_models": 6,
         "orchestrator_initialized": _current_orchestrator is not None,
     }
 
@@ -849,7 +843,7 @@ class ChatRequest(BaseModel):
 
 CONSTANT_SYSTEM_PROMPT = """You are Constant, an AI research tutor and assistant built into the HumaNovo biomedical discovery platform. You serve as both a knowledgeable research companion and an educational tutor who helps users learn and grow as researchers.
 
-HumaNovo is a platform for biomedical hypothesis generation, evidence gathering, and drug discovery. It uses multi-model AI orchestration (Claude, DeepSeek, Mistral, GPT, Cohere, Kimi, Grok) across a 10-stage discovery pipeline to explore biological pathways and discover potential treatments.
+HumaNovo is a platform for biomedical hypothesis generation, evidence gathering, and drug discovery. It uses multi-model AI orchestration (Claude, Mistral, GPT, Cohere, Grok) across a 10-stage discovery pipeline to explore biological pathways and discover potential treatments.
 
 Your capabilities:
 1. **Research Tutoring & Education:**
@@ -921,32 +915,35 @@ async def _retrieve_rag_context(query: str) -> str:
                     query_embedding = embed_data.get("data", [{}])[0].get("embedding", [])
 
                     if query_embedding:
-                        # Step 2: Search ChromaDB vector store with the embedding
+                        # Step 2: Search pgvector grounding_cache
                         try:
-                            import chromadb
-
-                            chroma_client = chromadb.PersistentClient(
-                                path=settings.CHROMA_PERSIST_DIRECTORY
-                            )
-                            # Try to get the main evidence collection
-                            for collection_name in ["evidence", "documents", "humanovo_evidence", "default"]:
+                            import asyncpg
+                            db_url = getattr(settings, "DATABASE_URL", None)
+                            if db_url:
+                                conn = await asyncpg.connect(str(db_url))
                                 try:
-                                    collection = chroma_client.get_collection(collection_name)
-                                    results = collection.query(
-                                        query_embeddings=[query_embedding],
-                                        n_results=settings.GROUNDING_RAG_TOP_K,
-                                        include=["documents", "metadatas"],
+                                    rows = await conn.fetch(
+                                        """
+                                        SELECT content
+                                        FROM grounding_cache
+                                        WHERE embedding_openai IS NOT NULL
+                                          AND 1 - (embedding_openai <=> $1::vector) >= 0.5
+                                        ORDER BY embedding_openai <=> $1::vector
+                                        LIMIT $2
+                                        """,
+                                        str(query_embedding),
+                                        getattr(settings, "GROUNDING_RAG_TOP_K", 8),
                                     )
-                                    if results and results.get("documents"):
-                                        for docs in results["documents"]:
-                                            for doc in docs:
-                                                if doc and len(doc.strip()) > 20:
-                                                    rag_chunks.append(doc.strip())
-                                    break  # Found a valid collection
-                                except Exception:
-                                    continue
+                                    for row in rows:
+                                        doc = row["content"]
+                                        if doc and len(doc.strip()) > 20:
+                                            rag_chunks.append(doc.strip())
+                                finally:
+                                    await conn.close()
+                        except ImportError:
+                            logger.debug("asyncpg not installed — skipping pgvector RAG")
                         except Exception as e:
-                            logger.debug(f"ChromaDB retrieval skipped: {e}")
+                            logger.debug(f"pgvector retrieval skipped: {e}")
 
         except Exception as e:
             logger.warning(f"RAG embedding retrieval error: {e}")

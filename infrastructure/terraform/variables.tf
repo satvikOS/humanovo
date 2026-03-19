@@ -123,7 +123,7 @@ variable "bedrock_embedding_model_id" {
 # ==================== Azure AI — Shared Endpoint ====================
 
 variable "azure_ai_endpoint" {
-  description = "Azure AI shared endpoint (both DeepSeek + Mistral at same resource)"
+  description = "Azure AI shared endpoint (Mistral at same resource)"
   type        = string
   default     = ""
 }
@@ -136,19 +136,6 @@ variable "azure_ai_key" {
 }
 
 # ==================== Azure AI — Per-Model Overrides ====================
-
-variable "azure_deepseek_endpoint" {
-  description = "Azure AI DeepSeek-R1-0528 model-specific endpoint"
-  type        = string
-  default     = ""
-}
-
-variable "azure_deepseek_key" {
-  description = "Azure AI DeepSeek-R1-0528 API key"
-  type        = string
-  default     = ""
-  sensitive   = true
-}
 
 variable "azure_mistral_endpoint" {
   description = "Azure AI Mistral-Large-3 model-specific endpoint"
@@ -186,19 +173,6 @@ variable "azure_cohere_endpoint" {
 
 variable "azure_cohere_key" {
   description = "Azure AI Cohere Command A API key"
-  type        = string
-  default     = ""
-  sensitive   = true
-}
-
-variable "azure_kimi_endpoint" {
-  description = "Azure AI Kimi K2 Thinking endpoint"
-  type        = string
-  default     = ""
-}
-
-variable "azure_kimi_key" {
-  description = "Azure AI Kimi K2 Thinking API key"
   type        = string
   default     = ""
   sensitive   = true
