@@ -118,47 +118,10 @@ async def get_available_sources():
         orchestrator = DataSourceOrchestrator()
         return {"sources": orchestrator.get_available_sources()}
     except ImportError:
-        # Return hardcoded list if service not yet available
-        return {
-            "sources": [
-                {"name": "PubMed", "category": "literature", "status": "available"},
-                {"name": "Semantic Scholar", "category": "literature", "status": "available"},
-                {"name": "OpenAlex", "category": "literature", "status": "available"},
-                {"name": "Europe PMC", "category": "literature", "status": "available"},
-                {"name": "Elsevier/Scopus", "category": "literature", "status": "requires_key"},
-                {"name": "Springer Nature", "category": "literature", "status": "available"},
-                {"name": "Crossref", "category": "literature", "status": "available"},
-                {"name": "NCBI Gene", "category": "genomics", "status": "available"},
-                {"name": "Ensembl", "category": "genomics", "status": "available"},
-                {"name": "ClinVar", "category": "genomics", "status": "available"},
-                {"name": "DisGeNET", "category": "genomics", "status": "available"},
-                {"name": "UniProt", "category": "proteins", "status": "available"},
-                {"name": "PDB", "category": "proteins", "status": "available"},
-                {"name": "AlphaFold", "category": "proteins", "status": "available"},
-                {"name": "STRING", "category": "proteins", "status": "available"},
-                {"name": "Reactome", "category": "pathways", "status": "available"},
-                {"name": "KEGG", "category": "pathways", "status": "available"},
-                {"name": "WikiPathways", "category": "pathways", "status": "available"},
-                {"name": "ChEMBL", "category": "drugs", "status": "available"},
-                {"name": "openFDA", "category": "drugs", "status": "available"},
-                {"name": "PubChem", "category": "drugs", "status": "available"},
-                {"name": "DGIdb", "category": "drugs", "status": "available"},
-                {"name": "ClinicalTrials.gov", "category": "clinical", "status": "available"},
-                {"name": "HPO", "category": "clinical", "status": "available"},
-                {"name": "HMDB", "category": "metabolomics", "status": "available"},
-                {"name": "ChEBI", "category": "metabolomics", "status": "available"},
-                {"name": "Human Cell Atlas", "category": "cell_tissue", "status": "available"},
-                {"name": "Human Protein Atlas", "category": "cell_tissue", "status": "available"},
-                {"name": "Gene Ontology", "category": "ontologies", "status": "available"},
-                {"name": "MeSH", "category": "ontologies", "status": "available"},
-                {"name": "bioRxiv", "category": "preprints", "status": "available"},
-            ],
-            "total_count": 65,
-            "categories": [
-                "literature", "genomics", "proteins", "pathways", "drugs",
-                "clinical", "metabolomics", "cell_tissue", "ontologies", "preprints",
-            ],
-        }
+        raise HTTPException(status_code=503, detail="Data sources service not yet initialized")
+    except Exception as e:
+        logger.error(f"Failed to list available sources: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/stats")
@@ -169,4 +132,7 @@ async def get_source_stats():
         orchestrator = DataSourceOrchestrator()
         return orchestrator.get_source_stats()
     except ImportError:
-        return {"message": "Data sources service not yet initialized", "total_sources": 65}
+        raise HTTPException(status_code=503, detail="Data sources service not yet initialized")
+    except Exception as e:
+        logger.error(f"Failed to get source stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

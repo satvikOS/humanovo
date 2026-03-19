@@ -224,84 +224,16 @@ function CostsTab({
         <StatCard label="Total Requests" value={(summary?.total_requests ?? 0).toLocaleString()} icon={FiActivity} color="#8b5cf6" />
       </div>
 
-      {/* Monthly spend bar chart */}
+      {/* Daily spend bar chart */}
       <div className="glass-card p-6">
         <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
           <FiBarChart2 className="w-5 h-5 text-[var(--color-accent-blue)]" />
-          Monthly Spend
+          Daily Spend
         </h3>
-        <div className="h-[280px]">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={monthlyData} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-              <XAxis
-                dataKey="month"
-                tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 11 }}
-                tickLine={false}
-                axisLine={false}
-              />
-              <YAxis
-                tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 11 }}
-                tickLine={false}
-                axisLine={false}
-                tickFormatter={v => `$${(v / 100).toFixed(0)}`}
-              />
-              <Tooltip
-                contentStyle={CHART_TOOLTIP_STYLE}
-                formatter={(value: number) => [formatUSD(value), 'Spend']}
-                labelStyle={{ color: 'rgba(255,255,255,0.6)', fontSize: '11px' }}
-              />
-              <Bar dataKey="spend" fill="#6366f1" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Cost by model pie chart */}
-        <div className="glass-card p-6">
-          <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-            <FiLayers className="w-5 h-5 text-[var(--color-accent-purple)]" />
-            Cost by Model
-          </h3>
+        {dailyChart.length > 0 ? (
           <div className="h-[280px]">
             <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={pieData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={95}
-                  paddingAngle={2}
-                  dataKey="value"
-                >
-                  {pieData.map((_, idx) => (
-                    <Cell key={idx} fill={CHART_COLORS[idx % CHART_COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  contentStyle={CHART_TOOLTIP_STYLE}
-                  formatter={(value: number) => [`$${value.toFixed(2)}`, 'Cost']}
-                />
-                <Legend
-                  wrapperStyle={{ fontSize: '11px' }}
-                  formatter={(value) => <span style={{ color: 'rgba(255,255,255,0.7)' }}>{value}</span>}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        {/* Daily trend line chart */}
-        <div className="glass-card p-6">
-          <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-            <FiTrendingUp className="w-5 h-5 text-[var(--color-accent-green)]" />
-            Daily Trend
-          </h3>
-          <div className="h-[280px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={dailyChart} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+              <BarChart data={dailyChart} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
                 <XAxis
                   dataKey="date"
@@ -318,20 +250,107 @@ function CostsTab({
                 />
                 <Tooltip
                   contentStyle={CHART_TOOLTIP_STYLE}
-                  formatter={(value: number) => [`$${value.toFixed(2)}`, 'Daily Cost']}
+                  formatter={(value: number) => [`$${value.toFixed(2)}`, 'Daily Spend']}
                   labelStyle={{ color: 'rgba(255,255,255,0.6)', fontSize: '11px' }}
                 />
-                <Line
-                  type="monotone"
-                  dataKey="cost"
-                  stroke="#10b981"
-                  strokeWidth={2}
-                  dot={false}
-                  activeDot={{ r: 4, fill: '#10b981' }}
-                />
-              </LineChart>
+                <Bar dataKey="cost" fill="#6366f1" radius={[4, 4, 0, 0]} />
+              </BarChart>
             </ResponsiveContainer>
           </div>
+        ) : (
+          <div className="flex items-center justify-center py-16 text-sm text-[var(--color-text-muted)]">
+            No daily spend data yet
+          </div>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Cost by model pie chart */}
+        <div className="glass-card p-6">
+          <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+            <FiLayers className="w-5 h-5 text-[var(--color-accent-purple)]" />
+            Cost by Model
+          </h3>
+          {pieData.length > 0 ? (
+            <div className="h-[280px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={pieData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={95}
+                    paddingAngle={2}
+                    dataKey="value"
+                  >
+                    {pieData.map((_, idx) => (
+                      <Cell key={idx} fill={CHART_COLORS[idx % CHART_COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={CHART_TOOLTIP_STYLE}
+                    formatter={(value: number) => [`$${value.toFixed(2)}`, 'Cost']}
+                  />
+                  <Legend
+                    wrapperStyle={{ fontSize: '11px' }}
+                    formatter={(value) => <span style={{ color: 'rgba(255,255,255,0.7)' }}>{value}</span>}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <div className="flex items-center justify-center py-16 text-sm text-[var(--color-text-muted)]">
+              No model cost data yet
+            </div>
+          )}
+        </div>
+
+        {/* Daily trend line chart */}
+        <div className="glass-card p-6">
+          <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+            <FiTrendingUp className="w-5 h-5 text-[var(--color-accent-green)]" />
+            Daily Trend
+          </h3>
+          {dailyChart.length > 0 ? (
+            <div className="h-[280px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={dailyChart} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                  <XAxis
+                    dataKey="date"
+                    tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 11 }}
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={v => v.slice(5)}
+                  />
+                  <YAxis
+                    tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 11 }}
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={v => `$${v}`}
+                  />
+                  <Tooltip
+                    contentStyle={CHART_TOOLTIP_STYLE}
+                    formatter={(value: number) => [`$${value.toFixed(2)}`, 'Daily Cost']}
+                    labelStyle={{ color: 'rgba(255,255,255,0.6)', fontSize: '11px' }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="cost"
+                    stroke="#10b981"
+                    strokeWidth={2}
+                    dot={false}
+                    activeDot={{ r: 4, fill: '#10b981' }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <div className="flex items-center justify-center py-16 text-sm text-[var(--color-text-muted)]">
+              No daily trend data yet
+            </div>
+          )}
         </div>
       </div>
     </div>
