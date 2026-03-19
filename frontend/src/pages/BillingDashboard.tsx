@@ -404,44 +404,50 @@ export default function BillingDashboard() {
           <FiTrendingUp className="w-5 h-5 text-[var(--color-accent-blue)]" />
           Daily Spend &mdash; Last 30 Days
         </h2>
-        <div className="h-[320px]">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={dailyChart} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-              <defs>
-                <linearGradient id="dailyGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-              <XAxis
-                dataKey="date"
-                tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 11 }}
-                tickLine={false}
-                axisLine={false}
-                tickFormatter={v => v.slice(5)}
-              />
-              <YAxis
-                tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 11 }}
-                tickLine={false}
-                axisLine={false}
-                tickFormatter={v => `$${v}`}
-              />
-              <Tooltip
-                contentStyle={CHART_TOOLTIP_STYLE}
-                formatter={(value: number) => [`$${value.toFixed(2)}`, 'Daily Spend']}
-                labelStyle={{ color: 'rgba(255,255,255,0.6)', fontSize: '11px' }}
-              />
-              <Area
-                type="monotone"
-                dataKey="cost"
-                stroke="#6366f1"
-                fill="url(#dailyGrad)"
-                strokeWidth={2}
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
+        {dailyChart.length > 0 ? (
+          <div className="h-[320px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={dailyChart} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+                <defs>
+                  <linearGradient id="dailyGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                <XAxis
+                  dataKey="date"
+                  tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 11 }}
+                  tickLine={false}
+                  axisLine={false}
+                  tickFormatter={v => v.slice(5)}
+                />
+                <YAxis
+                  tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 11 }}
+                  tickLine={false}
+                  axisLine={false}
+                  tickFormatter={v => `$${v}`}
+                />
+                <Tooltip
+                  contentStyle={CHART_TOOLTIP_STYLE}
+                  formatter={(value: number) => [`$${value.toFixed(2)}`, 'Daily Spend']}
+                  labelStyle={{ color: 'rgba(255,255,255,0.6)', fontSize: '11px' }}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="cost"
+                  stroke="#6366f1"
+                  fill="url(#dailyGrad)"
+                  strokeWidth={2}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        ) : (
+          <div className="flex items-center justify-center py-16 text-sm text-[var(--color-text-muted)]">
+            No daily spend data yet
+          </div>
+        )}
       </div>
 
       {/* ── Section 3: Cost Breakdown ────────────────────── */}
@@ -452,33 +458,39 @@ export default function BillingDashboard() {
             <FiPieChart className="w-5 h-5 text-[var(--color-accent-purple)]" />
             Cost by Model
           </h2>
-          <div className="h-[280px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={modelPieData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={95}
-                  paddingAngle={2}
-                  dataKey="value"
-                >
-                  {modelPieData.map((_, idx) => (
-                    <Cell key={idx} fill={MODEL_COLORS[idx % MODEL_COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  contentStyle={CHART_TOOLTIP_STYLE}
-                  formatter={(value: number) => [`$${value.toFixed(2)}`, 'Cost']}
-                />
-                <Legend
-                  wrapperStyle={{ fontSize: '11px' }}
-                  formatter={(value) => <span style={{ color: 'rgba(255,255,255,0.7)' }}>{value}</span>}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
+          {modelPieData.length > 0 ? (
+            <div className="h-[280px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={modelPieData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={95}
+                    paddingAngle={2}
+                    dataKey="value"
+                  >
+                    {modelPieData.map((_, idx) => (
+                      <Cell key={idx} fill={MODEL_COLORS[idx % MODEL_COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={CHART_TOOLTIP_STYLE}
+                    formatter={(value: number) => [`$${value.toFixed(2)}`, 'Cost']}
+                  />
+                  <Legend
+                    wrapperStyle={{ fontSize: '11px' }}
+                    formatter={(value) => <span style={{ color: 'rgba(255,255,255,0.7)' }}>{value}</span>}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <div className="flex items-center justify-center py-16 text-sm text-[var(--color-text-muted)]">
+              No model cost data yet
+            </div>
+          )}
         </div>
 
         {/* By Pipeline Stage - Bar */}
@@ -487,35 +499,41 @@ export default function BillingDashboard() {
             <FiGrid className="w-5 h-5 text-[var(--color-accent-cyan)]" />
             Cost by Pipeline Stage
           </h2>
-          <div className="h-[280px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={stageBarData} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-                <XAxis
-                  dataKey="name"
-                  tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 11 }}
-                  tickLine={false}
-                  axisLine={false}
-                />
-                <YAxis
-                  tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 11 }}
-                  tickLine={false}
-                  axisLine={false}
-                  tickFormatter={v => `$${v}`}
-                />
-                <Tooltip
-                  contentStyle={CHART_TOOLTIP_STYLE}
-                  formatter={(value: number) => [`$${value.toFixed(2)}`, 'Cost']}
-                  labelStyle={{ color: 'rgba(255,255,255,0.6)', fontSize: '11px' }}
-                />
-                <Bar dataKey="cost" radius={[4, 4, 0, 0]}>
-                  {stageBarData.map((_, idx) => (
-                    <Cell key={idx} fill={STAGE_COLORS[idx % STAGE_COLORS.length]} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+          {stageBarData.length > 0 ? (
+            <div className="h-[280px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={stageBarData} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                  <XAxis
+                    dataKey="name"
+                    tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 11 }}
+                    tickLine={false}
+                    axisLine={false}
+                  />
+                  <YAxis
+                    tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 11 }}
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={v => `$${v}`}
+                  />
+                  <Tooltip
+                    contentStyle={CHART_TOOLTIP_STYLE}
+                    formatter={(value: number) => [`$${value.toFixed(2)}`, 'Cost']}
+                    labelStyle={{ color: 'rgba(255,255,255,0.6)', fontSize: '11px' }}
+                  />
+                  <Bar dataKey="cost" radius={[4, 4, 0, 0]}>
+                    {stageBarData.map((_, idx) => (
+                      <Cell key={idx} fill={STAGE_COLORS[idx % STAGE_COLORS.length]} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <div className="flex items-center justify-center py-16 text-sm text-[var(--color-text-muted)]">
+              No stage cost data yet
+            </div>
+          )}
         </div>
       </div>
 

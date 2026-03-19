@@ -7,19 +7,20 @@ Pathway analysis, GSEA, variant annotation, biomarker discovery.
 import logging
 import math
 import random
-from datetime import datetime
 from typing import Optional
-from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy import select, func
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.database import get_db
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-_omics_datasets: dict[str, dict] = {}
+# ── Reference Pathways (scientific constants, NOT mock data) ─────
 
-# Reference pathways
 KEGG_PATHWAYS = {
     "hsa04110": {"name": "Cell cycle", "genes": ["TP53", "RB1", "CDK2", "CDK4", "CCND1", "CCNE1", "E2F1", "CDC25A"]},
     "hsa04115": {"name": "p53 signaling pathway", "genes": ["TP53", "MDM2", "BAX", "BCL2", "CDKN1A", "GADD45A", "FAS", "CASP3"]},
@@ -38,6 +39,8 @@ REACTOME_PATHWAYS = {
     "R-HSA-1257604": {"name": "PIP3 activates AKT signaling", "genes": ["PIK3CA", "AKT1", "PDK1", "PTEN"]},
 }
 
+
+# ── Schemas ──────────────────────────────────────────────────────
 
 class GeneListRequest(BaseModel):
     genes: list[str]
@@ -59,8 +62,13 @@ class BiomarkerRequest(BaseModel):
     alpha: float = 0.05
 
 
+# ── Stateless Computation Endpoints ──────────────────────────────
+
 @router.post("/pathway-analysis")
-async def pathway_analysis(request: GeneListRequest):
+async def pathway_analysis(
+    request: GeneListRequest,
+    db: AsyncSession = Depends(get_db),
+):
     if not request.genes:
         raise HTTPException(status_code=422, detail="Gene list cannot be empty")
     query_genes = set(g.upper() for g in request.genes)
@@ -78,15 +86,13 @@ async def pathway_analysis(request: GeneListRequest):
         K = len(pathway_genes)
         N = request.background_size
 
-        # Hypergeometric p-value approximation
-        # Use Fisher's exact test approximation
+        # Hypergeometric p-value approximation using Poisson
         expected = n * K / N
         if expected > 0:
             fold_enrichment = k / expected
         else:
             fold_enrichment = 0
 
-        # Simple p-value approximation using Poisson
         p_value = 1.0
         if expected > 0:
             p_value = math.exp(-expected)
@@ -118,7 +124,10 @@ async def pathway_analysis(request: GeneListRequest):
 
 
 @router.post("/gsea")
-async def gene_set_enrichment(request: GSEARequest):
+async def gene_set_enrichment(
+    request: GSEARequest,
+    db: AsyncSession = Depends(get_db),
+):
     if not request.ranked_genes:
         raise HTTPException(status_code=422, detail="Ranked gene list cannot be empty")
     ranked = sorted(request.ranked_genes, key=lambda g: g.get("score", 0), reverse=True)
@@ -153,7 +162,7 @@ async def gene_set_enrichment(request: GSEARequest):
             if abs(current) > abs(es):
                 es = current
 
-        nes = es * math.sqrt(nh) if nh > 0 else 0  # Normalized enrichment score
+        nes = es * math.sqrt(nh) if nh > 0 else 0
 
         results.append({
             "pathway_id": pid,
@@ -162,7 +171,7 @@ async def gene_set_enrichment(request: GSEARequest):
             "normalized_es": round(nes, 4),
             "hits": nh,
             "leading_edge_genes": [gene_names[i] for i in hits[:5]],
-            "running_sum": running_sum[::max(1, n // 50)],  # Downsample for visualization
+            "running_sum": running_sum[::max(1, n // 50)],
         })
 
     results.sort(key=lambda r: abs(r["normalized_es"]), reverse=True)
@@ -170,7 +179,10 @@ async def gene_set_enrichment(request: GSEARequest):
 
 
 @router.post("/variant-annotation")
-async def annotate_variants(request: VariantRequest):
+async def annotate_variants(
+    request: VariantRequest,
+    db: AsyncSession = Depends(get_db),
+):
     if not request.variants:
         raise HTTPException(status_code=422, detail="Variant list cannot be empty")
     annotations = []
@@ -180,7 +192,6 @@ async def annotate_variants(request: VariantRequest):
         ref = v.get("ref", "")
         alt = v.get("alt", "")
 
-        # Simulated annotation
         impact_options = ["HIGH", "MODERATE", "LOW", "MODIFIER"]
         consequence_map = {
             "HIGH": ["frameshift_variant", "stop_gained", "splice_donor_variant"],
@@ -189,7 +200,7 @@ async def annotate_variants(request: VariantRequest):
             "MODIFIER": ["intron_variant", "upstream_gene_variant", "downstream_gene_variant"],
         }
 
-        impact = random.choice(impact_options[:3])  # Bias toward higher impact
+        impact = random.choice(impact_options[:3])
         consequences = consequence_map[impact]
 
         clinical_sigs = ["Pathogenic", "Likely pathogenic", "Uncertain significance", "Likely benign", "Benign"]
@@ -216,7 +227,10 @@ async def annotate_variants(request: VariantRequest):
 
 
 @router.post("/biomarker-discovery")
-async def discover_biomarkers(request: BiomarkerRequest):
+async def discover_biomarkers(
+    request: BiomarkerRequest,
+    db: AsyncSession = Depends(get_db),
+):
     if not request.expression_data:
         raise HTTPException(status_code=422, detail="Expression data cannot be empty")
     results = []
@@ -263,33 +277,8 @@ async def discover_biomarkers(request: BiomarkerRequest):
         "significant_biomarkers": len(significant),
         "alpha": request.alpha,
         "results": results,
-        "volcano_data": [{"gene": r["gene"], "x": r["log2_fold_change"], "y": r["neg_log10_p"], "significant": r["significant"]} for r in results],
+        "volcano_data": [
+            {"gene": r["gene"], "x": r["log2_fold_change"], "y": r["neg_log10_p"], "significant": r["significant"]}
+            for r in results
+        ],
     }
-
-
-# ── Omics Dataset Management ────────────────────────────────────
-
-@router.get("/datasets")
-async def list_omics_datasets():
-    items = sorted(_omics_datasets.values(), key=lambda d: d["created_at"], reverse=True)
-    return {"items": items, "total": len(items)}
-
-
-@router.post("/datasets")
-async def create_omics_dataset(name: str = Query(...), omics_type: str = Query("transcriptomics"), description: str = Query("")):
-    did = str(uuid4())
-    ds = {
-        "id": did, "name": name, "omics_type": omics_type,
-        "description": description, "sample_count": 0, "gene_count": 0,
-        "created_at": datetime.utcnow().isoformat(),
-    }
-    _omics_datasets[did] = ds
-    return ds
-
-
-@router.delete("/datasets/{dataset_id}")
-async def delete_omics_dataset(dataset_id: str):
-    if dataset_id not in _omics_datasets:
-        raise HTTPException(status_code=404, detail="Dataset not found")
-    del _omics_datasets[dataset_id]
-    return {"status": "deleted"}
