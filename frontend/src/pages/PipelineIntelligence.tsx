@@ -211,15 +211,6 @@ function CostsTab({
   daily: DailySpend[]
   breakdown: ModelBreakdown[]
 }) {
-  const monthlyData = [
-    { month: 'Oct', spend: 42300 },
-    { month: 'Nov', spend: 51200 },
-    { month: 'Dec', spend: 38700 },
-    { month: 'Jan', spend: 61400 },
-    { month: 'Feb', spend: 48900 },
-    { month: 'Mar', spend: summary?.current_month_spend_cents ?? 55290 },
-  ]
-
   const pieData = breakdown.map(b => ({ name: b.model.split('-').slice(0, 2).join('-'), value: b.cost_cents / 100 }))
   const dailyChart = daily.map(d => ({ date: d.date, cost: d.cost_cents / 100 }))
 
@@ -613,31 +604,25 @@ export default function PipelineIntelligence() {
         fetch('/api/v1/pipeline-intelligence/benchmarks').then(r => r.ok ? r.json() : null),
       ])
 
-      const s = summaryRes.status === 'fulfilled' && summaryRes.value ? summaryRes.value : mockBillingSummary()
-      const d = dailyRes.status === 'fulfilled' && dailyRes.value ? (Array.isArray(dailyRes.value) ? dailyRes.value : dailyRes.value.items || []) : mockDailySpend()
-      const b = breakdownRes.status === 'fulfilled' && breakdownRes.value ? (Array.isArray(breakdownRes.value) ? breakdownRes.value : breakdownRes.value.by_model || []) : mockModelBreakdown()
-      const m = modelsRes.status === 'fulfilled' && modelsRes.value ? (Array.isArray(modelsRes.value) ? modelsRes.value : modelsRes.value.items || []) : mockModelPerformance()
-      const bench = benchRes.status === 'fulfilled' && benchRes.value ? benchRes.value : mockBenchmarks()
+      const s = summaryRes.status === 'fulfilled' && summaryRes.value ? summaryRes.value : null
+      const d = dailyRes.status === 'fulfilled' && dailyRes.value ? (Array.isArray(dailyRes.value) ? dailyRes.value : dailyRes.value.items || []) : []
+      const b = breakdownRes.status === 'fulfilled' && breakdownRes.value ? (Array.isArray(breakdownRes.value) ? breakdownRes.value : breakdownRes.value.by_model || []) : []
+      const m = modelsRes.status === 'fulfilled' && modelsRes.value ? (Array.isArray(modelsRes.value) ? modelsRes.value : modelsRes.value.items || []) : []
+      const bench = benchRes.status === 'fulfilled' && benchRes.value ? benchRes.value : null
 
       setSummary(s)
-      setDaily(d.length > 0 ? d : mockDailySpend())
-      setBreakdown(b.length > 0 ? b : mockModelBreakdown())
-      setModels(m.length > 0 ? m : mockModelPerformance())
-      setBenchmarkData(bench)
-      setOptimizations(generateOptimizations(
-        m.length > 0 ? m : mockModelPerformance(),
-        bench,
-      ))
-    } catch {
-      // Fallback to mock data
-      setSummary(mockBillingSummary())
-      setDaily(mockDailySpend())
-      setBreakdown(mockModelBreakdown())
-      const m = mockModelPerformance()
+      setDaily(d)
+      setBreakdown(b)
       setModels(m)
-      const bench = mockBenchmarks()
       setBenchmarkData(bench)
       setOptimizations(generateOptimizations(m, bench))
+    } catch {
+      setSummary(null)
+      setDaily([])
+      setBreakdown([])
+      setModels([])
+      setBenchmarkData(null)
+      setOptimizations([])
     } finally {
       setLoading(false)
     }
