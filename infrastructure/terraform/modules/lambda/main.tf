@@ -74,7 +74,7 @@ variable "bedrock_embedding_model_id" {
   type = string
 }
 
-# Shared Azure AI endpoint (both DeepSeek + Mistral at same resource)
+# Shared Azure AI endpoint (Mistral at same resource)
 variable "azure_ai_endpoint" {
   type    = string
   default = ""
@@ -87,17 +87,6 @@ variable "azure_ai_key" {
 }
 
 # Per-model overrides (optional — fall back to shared endpoint)
-variable "azure_deepseek_endpoint" {
-  type    = string
-  default = ""
-}
-
-variable "azure_deepseek_key" {
-  type      = string
-  default   = ""
-  sensitive = true
-}
-
 variable "azure_mistral_endpoint" {
   type    = string
   default = ""
@@ -126,17 +115,6 @@ variable "azure_cohere_endpoint" {
 }
 
 variable "azure_cohere_key" {
-  type      = string
-  default   = ""
-  sensitive = true
-}
-
-variable "azure_kimi_endpoint" {
-  type    = string
-  default = ""
-}
-
-variable "azure_kimi_key" {
   type      = string
   default   = ""
   sensitive = true
@@ -228,16 +206,12 @@ locals {
     BEDROCK_EMBEDDING_MODEL_ID = var.bedrock_embedding_model_id
     AZURE_AI_ENDPOINT          = var.azure_ai_endpoint
     AZURE_AI_KEY               = var.azure_ai_key
-    AZURE_DEEPSEEK_ENDPOINT    = var.azure_deepseek_endpoint
-    AZURE_DEEPSEEK_KEY         = var.azure_deepseek_key
     AZURE_MISTRAL_ENDPOINT     = var.azure_mistral_endpoint
     AZURE_MISTRAL_KEY          = var.azure_mistral_key
     AZURE_GPT4O_ENDPOINT       = var.azure_gpt4o_endpoint
     AZURE_GPT4O_KEY            = var.azure_gpt4o_key
     AZURE_COHERE_ENDPOINT      = var.azure_cohere_endpoint
     AZURE_COHERE_KEY           = var.azure_cohere_key
-    AZURE_KIMI_ENDPOINT        = var.azure_kimi_endpoint
-    AZURE_KIMI_KEY             = var.azure_kimi_key
     AZURE_O3MINI_ENDPOINT      = var.azure_o3mini_endpoint
     AZURE_O3MINI_KEY           = var.azure_o3mini_key
     AZURE_GPT41_ENDPOINT       = var.azure_gpt41_endpoint

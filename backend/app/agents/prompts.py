@@ -279,7 +279,7 @@ Your analysis is part of a larger scientific research pipeline. Be thorough, be 
 #
 # Model-to-Role Assignments (mixed providers):
 #   EXPLORER    → Claude Opus 4.6     (Bedrock, 200K context, broad deep reasoning)
-#   REASONER    → DeepSeek-R1-0528    (Azure AI, state-of-the-art reasoning chains)
+#   REASONER    → Claude Opus 4.6      (Bedrock, state-of-the-art reasoning chains)
 #   VALIDATOR   → rotates across models
 #   SYNTHESIZER → Claude Opus 4.6     (Bedrock, 200K context, best synthesis)
 #   CRITIC      → Mistral-Large-3     (Azure AI, strong analytical capabilities)
@@ -345,7 +345,7 @@ For every pathway you analyze, systematically check interactions with:
 Think like a postdoc at 2am who just found something strange in the data. Follow that thread."""
 
 
-REASONER_PROMPT = """You are a REASONER agent running on DeepSeek-R1-0528 via Azure AI Foundry.
+REASONER_PROMPT = """You are a REASONER agent running on Claude Opus 4.6 via AWS Bedrock.
 Your unique strength is DEEP, RIGOROUS logical analysis with formal causal reasoning.
 
 ## YOUR MISSION
@@ -743,7 +743,7 @@ SPECIFIC INSTRUCTIONS:
 Think like a Chief Medical Officer designing the development program for a promising asset."""
 
 # Azure o1: Deep multi-step reasoning, statistical & mathematical analysis
-DEEP_ANALYST_PROMPT = """You are a DEEP ANALYST agent running on DeepSeek-R1-0528 via Azure AI Foundry.
+DEEP_ANALYST_PROMPT = """You are a DEEP ANALYST agent running on GPT-4.1 via Azure OpenAI.
 Your unique strength is RIGOROUS MULTI-STEP REASONING — solving problems that require extended chains of logical deduction.
 
 MISSION: Perform deep mathematical, statistical, and systems-level analysis that requires careful step-by-step reasoning.

@@ -270,16 +270,12 @@ module "lambda" {
   bedrock_embedding_model_id = var.bedrock_embedding_model_id
   azure_ai_endpoint       = var.azure_ai_endpoint
   azure_ai_key            = var.azure_ai_key
-  azure_deepseek_endpoint = var.azure_deepseek_endpoint
-  azure_deepseek_key      = var.azure_deepseek_key
   azure_mistral_endpoint  = var.azure_mistral_endpoint
   azure_mistral_key       = var.azure_mistral_key
   azure_gpt4o_endpoint    = var.azure_gpt4o_endpoint
   azure_gpt4o_key         = var.azure_gpt4o_key
   azure_cohere_endpoint   = var.azure_cohere_endpoint
   azure_cohere_key        = var.azure_cohere_key
-  azure_kimi_endpoint     = var.azure_kimi_endpoint
-  azure_kimi_key          = var.azure_kimi_key
   azure_o3mini_endpoint   = var.azure_o3mini_endpoint
   azure_o3mini_key        = var.azure_o3mini_key
   azure_gpt41_endpoint    = var.azure_gpt41_endpoint

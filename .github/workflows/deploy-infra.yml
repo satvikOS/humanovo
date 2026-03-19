@@ -20,16 +20,12 @@ env:
   ENVIRONMENT: dev
   TF_VAR_azure_ai_endpoint: ${{ secrets.AZURE_AI_ENDPOINT }}
   TF_VAR_azure_ai_key: ${{ secrets.AZURE_AI_KEY }}
-  TF_VAR_azure_deepseek_endpoint: ${{ secrets.AZURE_DEEPSEEK_ENDPOINT }}
-  TF_VAR_azure_deepseek_key: ${{ secrets.AZURE_DEEPSEEK_KEY }}
   TF_VAR_azure_mistral_endpoint: ${{ secrets.AZURE_MISTRAL_ENDPOINT }}
   TF_VAR_azure_mistral_key: ${{ secrets.AZURE_MISTRAL_KEY }}
   TF_VAR_azure_gpt4o_endpoint: ${{ secrets.AZURE_GPT4O_ENDPOINT }}
   TF_VAR_azure_gpt4o_key: ${{ secrets.AZURE_GPT4O_KEY }}
   TF_VAR_azure_cohere_endpoint: ${{ secrets.AZURE_COHERE_ENDPOINT }}
   TF_VAR_azure_cohere_key: ${{ secrets.AZURE_COHERE_KEY }}
-  TF_VAR_azure_kimi_endpoint: ${{ secrets.AZURE_KIMI_ENDPOINT }}
-  TF_VAR_azure_kimi_key: ${{ secrets.AZURE_KIMI_KEY }}
   TF_VAR_azure_o3mini_endpoint: ${{ secrets.AZURE_O3MINI_ENDPOINT }}
   TF_VAR_azure_o3mini_key: ${{ secrets.AZURE_O3MINI_KEY }}
   TF_VAR_azure_gpt41_endpoint: ${{ secrets.AZURE_GPT41_ENDPOINT }}
@@ -344,16 +340,12 @@ jobs:
         env:
           AZURE_AI_ENDPOINT: ${{ secrets.AZURE_AI_ENDPOINT }}
           AZURE_AI_KEY: ${{ secrets.AZURE_AI_KEY }}
-          AZURE_DEEPSEEK_ENDPOINT: ${{ secrets.AZURE_DEEPSEEK_ENDPOINT }}
-          AZURE_DEEPSEEK_KEY: ${{ secrets.AZURE_DEEPSEEK_KEY }}
           AZURE_MISTRAL_ENDPOINT: ${{ secrets.AZURE_MISTRAL_ENDPOINT }}
           AZURE_MISTRAL_KEY: ${{ secrets.AZURE_MISTRAL_KEY }}
           AZURE_GPT4O_ENDPOINT: ${{ secrets.AZURE_GPT4O_ENDPOINT }}
           AZURE_GPT4O_KEY: ${{ secrets.AZURE_GPT4O_KEY }}
           AZURE_COHERE_ENDPOINT: ${{ secrets.AZURE_COHERE_ENDPOINT }}
           AZURE_COHERE_KEY: ${{ secrets.AZURE_COHERE_KEY }}
-          AZURE_KIMI_ENDPOINT: ${{ secrets.AZURE_KIMI_ENDPOINT }}
-          AZURE_KIMI_KEY: ${{ secrets.AZURE_KIMI_KEY }}
           AZURE_O3MINI_ENDPOINT: ${{ secrets.AZURE_O3MINI_ENDPOINT }}
           AZURE_O3MINI_KEY: ${{ secrets.AZURE_O3MINI_KEY }}
           AZURE_GPT41_ENDPOINT: ${{ secrets.AZURE_GPT41_ENDPOINT }}
@@ -380,16 +372,12 @@ jobs:
           env = json.load(sys.stdin)
           env['AZURE_AI_ENDPOINT'] = os.environ.get('AZURE_AI_ENDPOINT', '')
           env['AZURE_AI_KEY'] = os.environ.get('AZURE_AI_KEY', '')
-          env['AZURE_DEEPSEEK_ENDPOINT'] = os.environ.get('AZURE_DEEPSEEK_ENDPOINT', '')
-          env['AZURE_DEEPSEEK_KEY'] = os.environ.get('AZURE_DEEPSEEK_KEY', '')
           env['AZURE_MISTRAL_ENDPOINT'] = os.environ.get('AZURE_MISTRAL_ENDPOINT', '')
           env['AZURE_MISTRAL_KEY'] = os.environ.get('AZURE_MISTRAL_KEY', '')
           env['AZURE_GPT4O_ENDPOINT'] = os.environ.get('AZURE_GPT4O_ENDPOINT', '')
           env['AZURE_GPT4O_KEY'] = os.environ.get('AZURE_GPT4O_KEY', '')
           env['AZURE_COHERE_ENDPOINT'] = os.environ.get('AZURE_COHERE_ENDPOINT', '')
           env['AZURE_COHERE_KEY'] = os.environ.get('AZURE_COHERE_KEY', '')
-          env['AZURE_KIMI_ENDPOINT'] = os.environ.get('AZURE_KIMI_ENDPOINT', '')
-          env['AZURE_KIMI_KEY'] = os.environ.get('AZURE_KIMI_KEY', '')
           env['AZURE_O3MINI_ENDPOINT'] = os.environ.get('AZURE_O3MINI_ENDPOINT', '')
           env['AZURE_O3MINI_KEY'] = os.environ.get('AZURE_O3MINI_KEY', '')
           env['AZURE_GPT41_ENDPOINT'] = os.environ.get('AZURE_GPT41_ENDPOINT', '')

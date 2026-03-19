@@ -5,7 +5,7 @@ Advanced LLM-powered service for discovering disease cures and prevention strate
 by connecting billions of data points across the knowledge graph.
 
 Supports three LLM providers:
-- Azure AI Foundry (DeepSeek-R1-0528, Mistral-Large-3) — reasoner + critic
+- Azure AI Foundry (Mistral-Large-3) — critic
 - AWS Bedrock (Claude Opus 4.6) — explorer + synthesizer
 - Azure OpenAI (legacy)
 """
@@ -297,10 +297,8 @@ def _parse_bedrock_invoke_response(model_id: str, response_body: dict) -> str:
 class BedrockLLMClient(BaseLLMClient):
     """AWS Bedrock LLM client using Converse API with InvokeModel fallback.
 
-    Supports all 4 Humanovo discovery models via Bedrock:
+    Supports Humanovo discovery models via Bedrock:
     - meta.llama4-maverick-17b-instruct-v1:0  (Explorer)
-    - deepseek.r1-v1:0                         (Reasoner)
-    - moonshotai.kimi-k2.5                      (Synthesizer)
     - openai.gpt-oss-safeguard-120b             (Critic)
     """
 
@@ -375,13 +373,13 @@ class BedrockLLMClient(BaseLLMClient):
 class BedrockMultiModelClient(BaseLLMClient):
     """Multi-model Bedrock client for parallel discovery.
 
-    Uses Claude Opus (explorer+synthesizer) and DeepSeek R1 (reasoner)
+    Uses Claude Opus (explorer+synthesizer+reasoner)
     via the Converse API, then synthesizes outputs.
     """
 
     MODEL_ROLES = {
         "explorer": settings.BEDROCK_MODEL_CLAUDE_OPUS,
-        "reasoner": settings.BEDROCK_MODEL_DEEPSEEK,
+        "reasoner": settings.BEDROCK_MODEL_CLAUDE_OPUS,
         "synthesizer": settings.BEDROCK_MODEL_CLAUDE_OPUS,
     }
 
@@ -548,30 +546,29 @@ class AzureOpenAILLMClient(BaseLLMClient):
 
 
 class AzureAILLMClient(BaseLLMClient):
-    """Azure AI client — model-specific endpoints for DeepSeek + Mistral.
+    """Azure AI client — model-specific endpoints for Mistral.
 
     Each model has its own endpoint URL + API key (direct, no Foundry layer).
-    Defaults to DeepSeek-R1-0528 for single-model calls.
+    Defaults to Mistral-Large-3 for single-model calls.
     """
 
     def __init__(self):
-        self._deepseek_client = None
         self._mistral_client = None
 
-    async def _get_deepseek_client(self):
-        if self._deepseek_client is None:
-            endpoint = settings.AZURE_DEEPSEEK_ENDPOINT
-            key = settings.azure_deepseek_key_value
+    async def _get_mistral_client(self):
+        if self._mistral_client is None:
+            endpoint = settings.AZURE_MISTRAL_ENDPOINT
+            key = settings.azure_mistral_key_value
             if not endpoint or not key:
                 raise RuntimeError(
-                    "Azure DeepSeek not configured. Set AZURE_DEEPSEEK_ENDPOINT and AZURE_DEEPSEEK_KEY."
+                    "Azure Mistral not configured. Set AZURE_MISTRAL_ENDPOINT and AZURE_MISTRAL_KEY."
                 )
             from openai import AsyncOpenAI
-            self._deepseek_client = AsyncOpenAI(
+            self._mistral_client = AsyncOpenAI(
                 base_url=endpoint.rstrip('/'),
                 api_key=key,
             )
-        return self._deepseek_client
+        return self._mistral_client
 
     async def generate(
         self,
@@ -580,14 +577,14 @@ class AzureAILLMClient(BaseLLMClient):
         max_tokens: int = 4000,
         temperature: float = 0.3,
     ) -> str:
-        client = await self._get_deepseek_client()
+        client = await self._get_mistral_client()
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
 
         response = await client.chat.completions.create(
-            model=settings.AZURE_DEEPSEEK_MODEL,
+            model=settings.AZURE_MISTRAL_MODEL,
             messages=messages,
             max_tokens=max_tokens,
             temperature=temperature,
@@ -596,11 +593,7 @@ class AzureAILLMClient(BaseLLMClient):
 
     @property
     def model_name(self) -> str:
-        models = ", ".join([
-            settings.AZURE_DEEPSEEK_MODEL,
-            settings.AZURE_MISTRAL_MODEL,
-        ])
-        return f"azure-model-specific/[{models}]"
+        return f"azure-model-specific/[{settings.AZURE_MISTRAL_MODEL}]"
 
 
 def get_llm_client(provider: LLMProvider = None) -> BaseLLMClient:

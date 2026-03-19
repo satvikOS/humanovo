@@ -215,7 +215,7 @@ async def list_providers():
             {
                 "id": "azure_ai",
                 "name": "Azure AI Foundry",
-                "description": "DeepSeek-R1-0528 (reasoner) + Mistral-Large-3 (critic)",
+                "description": "Mistral-Large-3 (critic)",
                 "default": True,
             },
             {
@@ -281,9 +281,6 @@ async def discovery_health():
         if settings.aws_access_key_value and settings.aws_secret_key_value:
             models_active.append(f"{settings.BEDROCK_MODEL_CLAUDE_OPUS} (explorer+synthesizer)")
             providers.append("bedrock")
-        if settings.azure_deepseek_key_value and settings.AZURE_DEEPSEEK_ENDPOINT:
-            models_active.append(f"{settings.AZURE_DEEPSEEK_MODEL} (reasoner)")
-            providers.append("azure-deepseek")
         if settings.azure_mistral_key_value and settings.AZURE_MISTRAL_ENDPOINT:
             models_active.append(f"{settings.AZURE_MISTRAL_MODEL} (critic)")
             providers.append("azure-mistral")

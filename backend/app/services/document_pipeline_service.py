@@ -997,11 +997,11 @@ class DocumentPipelineService:
         model_rows = []
         for model_name, display in [
             ("claude_opus", "Claude Opus 4.6"),
-            ("deepseek_r1_0528", "DeepSeek-R1-0528"),
+
             ("mistral_large_3", "Mistral-Large-3"),
             ("gpt_4o_azure", "GPT-4o"),
             ("cohere_command_a", "Cohere Command A"),
-            ("kimi_k2_thinking", "Kimi-K2-Thinking"),
+
             ("o3_mini", "o3-mini"),
             ("gpt_41", "GPT-4.1"),
         ]:

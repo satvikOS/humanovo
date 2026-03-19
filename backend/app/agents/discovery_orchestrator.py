@@ -151,13 +151,9 @@ class ModelType(str, Enum):
     O3_DEEP_RESEARCH = "o3_deep_research"
     O1 = "o1"
     # Legacy (kept for stored data compatibility — not used in active pipeline)
-    DEEPSEEK_R1_0528 = "deepseek_r1_0528"
-    DEEPSEEK_R1 = "deepseek_r1"
-    KIMI_K2_THINKING = "kimi_k2_thinking"
     GROK_4 = "grok_4"
     CLAUDE_OPUS_AZURE_AI = "claude_opus_azure_ai"
     LLAMA_MAVERICK = "llama_maverick"
-    KIMI_25 = "kimi_25"
     GPT_OSS_120B = "gpt_oss_120b"
     GPT_4O = "gpt_4o"
     HYBRID = "hybrid"
@@ -792,7 +788,6 @@ class MultiModelLLM:
 
         self._initialized = True
         available = []
-        # DeepSeek and Kimi removed from active pipeline
         if self._azure_mistral_client:
             available.append(f"mistral_large_3 ({settings.AZURE_MISTRAL_MODEL}) [azure-model-specific]")
         if self._azure_grok_client:

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import {
   FiSettings,
   FiUser,
@@ -54,6 +54,7 @@ const settingsSections = [
   { id: 'privacy', label: 'Privacy & Security', icon: FiShield },
   { id: 'data', label: 'Data & Storage', icon: FiDatabase },
   { id: 'integrations', label: 'Integrations', icon: FiGlobe },
+  { id: 'billing', label: 'Usage & Billing', icon: FiDatabase, link: '/settings/billing' },
 ]
 
 function Toggle({ enabled, onChange }: { enabled: boolean; onChange: (v: boolean) => void }) {
@@ -358,7 +359,10 @@ export default function Settings() {
           {settingsSections.map(section => (
             <button
               key={section.id}
-              onClick={() => setActiveSection(section.id)}
+              onClick={() => {
+                if ((section as any).link) { window.location.href = (section as any).link; return }
+                setActiveSection(section.id)
+              }}
               className={clsx(
                 'flex items-center gap-2 w-full px-3 py-2 rounded text-xs transition-colors',
                 activeSection === section.id
