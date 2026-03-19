@@ -149,7 +149,7 @@ async def retrieve_rag_context(query: str) -> str:
     key = os.environ.get("AZURE_EMBEDDING_KEY", "")
     deployment = os.environ.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT_LARGE", "text-embedding-3-large")
     api_version = os.environ.get("AZURE_EMBEDDING_API_VERSION", "2023-05-15")
-    chroma_dir = os.environ.get("CHROMA_PERSIST_DIRECTORY", "./data/chroma")
+    db_url = os.environ.get("DATABASE_URL", "")
 
     if not endpoint or not key:
         return ""
@@ -171,27 +171,31 @@ async def retrieve_rag_context(query: str) -> str:
             if not query_embedding:
                 return ""
 
-            # Search ChromaDB vector store
-            try:
-                import chromadb
-                chroma_client = chromadb.PersistentClient(path=chroma_dir)
-                for coll_name in ["evidence", "documents", "humanovo_evidence", "default"]:
+            # Search pgvector grounding_cache for nearest neighbors
+            if db_url:
+                try:
+                    import asyncpg
+                    conn = await asyncpg.connect(db_url)
                     try:
-                        collection = chroma_client.get_collection(coll_name)
-                        results = collection.query(
-                            query_embeddings=[query_embedding],
-                            n_results=8,
-                            include=["documents", "metadatas"],
+                        rows = await conn.fetch(
+                            """
+                            SELECT content, 1 - (embedding_openai <=> $1::vector) AS similarity
+                            FROM grounding_cache
+                            WHERE embedding_openai IS NOT NULL
+                            ORDER BY embedding_openai <=> $1::vector
+                            LIMIT 8
+                            """,
+                            str(query_embedding),
                         )
-                        docs = results.get("documents", [[]])[0]
+                        docs = [row["content"] for row in rows if row["similarity"] >= 0.5]
                         if docs:
                             return "\n\n".join(docs[:8])
-                    except Exception:
-                        continue
-            except ImportError:
-                logger.info("chromadb not installed — skipping vector store RAG")
-            except Exception as e:
-                logger.debug(f"ChromaDB error: {e}")
+                    finally:
+                        await conn.close()
+                except ImportError:
+                    logger.info("asyncpg not installed — skipping pgvector RAG")
+                except Exception as e:
+                    logger.debug(f"pgvector RAG error: {e}")
 
     except ImportError:
         logger.info("httpx not installed — skipping Azure embedding RAG")

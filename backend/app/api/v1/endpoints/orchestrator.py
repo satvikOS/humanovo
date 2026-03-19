@@ -915,32 +915,35 @@ async def _retrieve_rag_context(query: str) -> str:
                     query_embedding = embed_data.get("data", [{}])[0].get("embedding", [])
 
                     if query_embedding:
-                        # Step 2: Search ChromaDB vector store with the embedding
+                        # Step 2: Search pgvector grounding_cache
                         try:
-                            import chromadb
-
-                            chroma_client = chromadb.PersistentClient(
-                                path=settings.CHROMA_PERSIST_DIRECTORY
-                            )
-                            # Try to get the main evidence collection
-                            for collection_name in ["evidence", "documents", "humanovo_evidence", "default"]:
+                            import asyncpg
+                            db_url = getattr(settings, "DATABASE_URL", None)
+                            if db_url:
+                                conn = await asyncpg.connect(str(db_url))
                                 try:
-                                    collection = chroma_client.get_collection(collection_name)
-                                    results = collection.query(
-                                        query_embeddings=[query_embedding],
-                                        n_results=settings.GROUNDING_RAG_TOP_K,
-                                        include=["documents", "metadatas"],
+                                    rows = await conn.fetch(
+                                        """
+                                        SELECT content
+                                        FROM grounding_cache
+                                        WHERE embedding_openai IS NOT NULL
+                                          AND 1 - (embedding_openai <=> $1::vector) >= 0.5
+                                        ORDER BY embedding_openai <=> $1::vector
+                                        LIMIT $2
+                                        """,
+                                        str(query_embedding),
+                                        getattr(settings, "GROUNDING_RAG_TOP_K", 8),
                                     )
-                                    if results and results.get("documents"):
-                                        for docs in results["documents"]:
-                                            for doc in docs:
-                                                if doc and len(doc.strip()) > 20:
-                                                    rag_chunks.append(doc.strip())
-                                    break  # Found a valid collection
-                                except Exception:
-                                    continue
+                                    for row in rows:
+                                        doc = row["content"]
+                                        if doc and len(doc.strip()) > 20:
+                                            rag_chunks.append(doc.strip())
+                                finally:
+                                    await conn.close()
+                        except ImportError:
+                            logger.debug("asyncpg not installed — skipping pgvector RAG")
                         except Exception as e:
-                            logger.debug(f"ChromaDB retrieval skipped: {e}")
+                            logger.debug(f"pgvector retrieval skipped: {e}")
 
         except Exception as e:
             logger.warning(f"RAG embedding retrieval error: {e}")

@@ -516,3 +516,24 @@ async def update_discovery_config(project_id: UUID, config: DiscoveryConfig):
         raise HTTPException(status_code=404, detail="Project not found")
     _memory_projects[pid]["discovery_config"] = config.model_dump()
     return {"status": "ok", "discovery_config": config.model_dump()}
+
+
+@router.get("/{project_id}/discovery-config")
+async def get_discovery_config(project_id: UUID):
+    """Get the discovery configuration for a project."""
+    Project, ProjectStatus = _get_project_model()
+    if await _check_db_available() and Project:
+        async for db in get_db():
+            from sqlalchemy import select
+            result = await db.execute(
+                select(Project.discovery_config).where(Project.id == project_id)
+            )
+            row = result.scalar_one_or_none()
+            if row is None:
+                raise HTTPException(status_code=404, detail="Project not found")
+            return {"discovery_config": row or {}}
+
+    pid = str(project_id)
+    if pid not in _memory_projects:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return {"discovery_config": _memory_projects[pid].get("discovery_config", {})}
