@@ -10,16 +10,21 @@ data_sources.py, and pipeline_intelligence.py are NOT duplicated here.
 """
 
 import asyncio
+import csv
+import io
 import json
 import os
 from datetime import datetime
 from typing import Literal
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.database import get_db
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
