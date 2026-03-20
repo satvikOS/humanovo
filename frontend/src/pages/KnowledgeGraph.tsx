@@ -120,7 +120,7 @@ export default function KnowledgeGraph() {
     nodes: [],
     edges: [],
   })
-  const [graphLoading, setGraphLoading] = useState(true)
+  const [, setGraphLoading] = useState(true)
 
   // Fetch graph data from API on mount
   useEffect(() => {
