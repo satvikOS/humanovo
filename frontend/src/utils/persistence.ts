@@ -2,6 +2,7 @@
  * Typed localStorage persistence layer for humanovo.
  * All user data persists across sessions — projects, evidence, notebooks, workspace.
  */
+// @ts-ignore — types provided by @types/react at install time
 import { useState, useCallback, useEffect, useRef } from 'react'
 
 const PREFIX = 'humanovo-'

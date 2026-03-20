@@ -107,7 +107,7 @@ function betainc(a: number, b: number, x: number): number {
   return Math.max(0, Math.min(1, result))
 }
 
-function computeDescriptive(data: number[], label: string) {
+export function _computeDescriptive(data: number[], label: string) {
   const sorted = [...data].sort((a, b) => a - b)
   const m = mean(data), s = std(data), se = s / Math.sqrt(data.length)
   const ci95 = 1.96 * se
@@ -131,7 +131,7 @@ function buildHistogram(data: number[]): { bin: string; count: number }[] {
   return counts.map((c, i) => ({ bin: (min + i * width).toFixed(1), count: c }))
 }
 
-function computeTTest(g1: number[], g2: number[], paired: boolean, l1: string, l2: string) {
+export function _computeTTest(g1: number[], g2: number[], paired: boolean, l1: string, l2: string) {
   const m1 = mean(g1), m2 = mean(g2), s1 = std(g1), s2 = std(g2)
   const n1 = g1.length, n2 = g2.length
   let tStat: number, df: number
@@ -156,7 +156,7 @@ function computeTTest(g1: number[], g2: number[], paired: boolean, l1: string, l
   }
 }
 
-function computeANOVA(groups: number[][], labels: string[]) {
+export function _computeANOVA(groups: number[][], labels: string[]) {
   const allData = groups.flat()
   const grandMean = mean(allData)
   const k = groups.length, N = allData.length
@@ -174,7 +174,7 @@ function computeANOVA(groups: number[][], labels: string[]) {
   }
 }
 
-function computeChiSquare(observed: number[][], rowLabels: string[], colLabels: string[]) {
+export function _computeChiSquare(observed: number[][], rowLabels: string[], colLabels: string[]) {
   const rowTotals = observed.map(r => r.reduce((a, b) => a + b, 0))
   const colTotals = observed[0].map((_, j) => observed.reduce((s, r) => s + r[j], 0))
   const total = rowTotals.reduce((a, b) => a + b, 0)
@@ -195,7 +195,7 @@ function computeChiSquare(observed: number[][], rowLabels: string[], colLabels: 
   }
 }
 
-function computeCorrelation(variables: number[][], labels: string[], method: string) {
+export function _computeCorrelation(variables: number[][], labels: string[], method: string) {
   const n = variables.length
   const matrix: number[][] = Array.from({ length: n }, () => new Array(n).fill(0))
   for (let i = 0; i < n; i++) {
@@ -213,7 +213,7 @@ function computeCorrelation(variables: number[][], labels: string[], method: str
   return { method, labels, correlation_matrix: matrix, n_observations: variables[0]?.length || 0 }
 }
 
-function computeRegression(x: number[][], y: number[], featureNames: string[]) {
+export function _computeRegression(x: number[][], y: number[], featureNames: string[]) {
   // Simple linear regression using first feature
   const xVals = x.map(r => r[0] || 0)
   const mx = mean(xVals), my = mean(y)
@@ -236,7 +236,7 @@ function computeRegression(x: number[][], y: number[], featureNames: string[]) {
   }
 }
 
-function computeSurvival(times: number[], events: number[], groups: number[] | null, groupLabels: string[]) {
+export function _computeSurvival(times: number[], events: number[], groups: number[] | null, groupLabels: string[]) {
   const data = times.map((t, i) => ({ time: t, event: events[i], group: groups?.[i] ?? 0 })).sort((a, b) => a.time - b.time)
   const uniqueGroups = [...new Set(data.map(d => d.group))].sort()
   const curves = uniqueGroups.map(g => {
@@ -255,7 +255,7 @@ function computeSurvival(times: number[], events: number[], groups: number[] | n
   return { curves, n_total: data.length, n_events: data.filter(d => d.event === 1).length }
 }
 
-function computeSampleSize(effectSize: number, alpha: number, power: number, testType: string) {
+export function _computeSampleSize(effectSize: number, alpha: number, power: number, testType: string) {
   const zAlpha = 1.96, zBeta = 0.842
   let n: number
   if (testType === 'two_sample_t') {
@@ -379,55 +379,20 @@ export default function StatisticalAnalysis() {
           break
       }
 
-      // Try backend API first, fall back to client-side computation
-      let backendOk = false
-      try {
-        const res = await fetch(`${API}${endpoint}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        })
-        const contentType = res.headers.get('content-type') || ''
-        if (contentType.includes('application/json') && res.ok) {
-          setResult(await res.json())
-          backendOk = true
-        }
-      } catch { /* backend unavailable, use client-side */ }
-
-      if (!backendOk) {
-        // Client-side fallback computation
-        let localResult: any = null
-        switch (tab) {
-          case 'descriptive':
-            localResult = computeDescriptive(body.data, body.label)
-            break
-          case 'hypothesis': {
-            const testType = document.querySelector<HTMLSelectElement>('#hyp-test')?.value || 'ttest'
-            if (testType === 'ttest') localResult = computeTTest(body.group1, body.group2, body.paired, body.label1, body.label2)
-            else if (testType === 'anova') localResult = computeANOVA(body.groups, body.labels)
-            else localResult = computeChiSquare(body.observed, body.row_labels, body.col_labels)
-            break
-          }
-          case 'regression': {
-            const corrOrReg = document.querySelector<HTMLSelectElement>('#reg-type')?.value || 'regression'
-            if (corrOrReg === 'correlation') localResult = computeCorrelation(body.variables, body.labels, body.method)
-            else localResult = computeRegression(body.x, body.y, body.feature_names)
-            break
-          }
-          case 'survival':
-            localResult = computeSurvival(body.times, body.events, body.groups, body.group_labels || [])
-            break
-          case 'sample_size':
-            localResult = computeSampleSize(body.effect_size, body.alpha, body.power, body.test_type)
-            break
-        }
-        if (localResult) {
-          localResult._computed = 'client'
-          setResult(localResult)
-        } else {
-          throw new Error('Unable to compute analysis')
-        }
+      // Call backend API for all statistical computations
+      const res = await fetch(`${API}${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) {
+        throw new Error(`Backend returned ${res.status}: ${await res.text()}`)
       }
+      const contentType = res.headers.get('content-type') || ''
+      if (!contentType.includes('application/json')) {
+        throw new Error('Backend returned non-JSON response')
+      }
+      setResult(await res.json())
     } catch (e: any) {
       setError(e.message || 'Analysis failed')
     } finally {

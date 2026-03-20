@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
@@ -6,7 +6,6 @@ import {
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import { api } from '../services/api'
-import { persistGet } from '../utils/persistence'
 import HypothesisDocViewer from '../components/HypothesisDocViewer'
 
 const API_BASE = '/api/v1'
@@ -357,13 +356,6 @@ interface TranslationalRoadmapLocal {
   commercialization_potential?: string;
 }
 
-interface LocalHypothesis {
-  id: string; title: string; description: string; mechanism: string;
-  confidence: number; tags: string[]; disease?: string;
-  discovery_type?: string; model_used?: string; created_at?: string;
-  translational_roadmap?: TranslationalRoadmapLocal;
-}
-
 export default function HypothesisDetail() {
   const { hypothesisId } = useParams<{ hypothesisId: string }>()
   const navigate = useNavigate()
@@ -382,31 +374,8 @@ export default function HypothesisDetail() {
     retry: 1,
   })
 
-  // Fallback: load from localStorage when API is down
-  const localHypothesis = useMemo(() => {
-    if (apiHypothesis) return null
-    const saved = persistGet<LocalHypothesis[]>('hypotheses', [])
-    return saved.find(h => h.id === hypothesisId) || null
-  }, [apiHypothesis, hypothesisId])
-
-  // Merged hypothesis data (API or local)
-  const hypothesis = apiHypothesis || (localHypothesis ? {
-    id: localHypothesis.id,
-    project_id: '',
-    statement: localHypothesis.title,
-    mechanism: localHypothesis.mechanism,
-    rationale: localHypothesis.description,
-    status: 'active' as const,
-    confidence_score: localHypothesis.confidence,
-    novelty_score: 0,
-    evidence_refs: [],
-    contradiction_count: 0,
-    supporting_count: 0,
-    tags: localHypothesis.tags || [],
-    version: 1,
-    created_at: localHypothesis.created_at || '',
-    updated_at: '',
-  } : null)
+  // Use only API data
+  const hypothesis = apiHypothesis || null
 
   useEffect(() => {
     return () => { if (progressTimerRef.current) clearInterval(progressTimerRef.current) }
@@ -444,7 +413,7 @@ export default function HypothesisDetail() {
     setPaperHtml(null)
     startPhaseAnimation()
 
-    const roadmapData = (hypothesis as any).translational_roadmap || localHypothesis?.translational_roadmap
+    const roadmapData = (hypothesis as any).translational_roadmap || undefined
 
     // Helper: generate client-side HTML paper — runs through full pipeline animation
     const generateClientSide = () => {
@@ -455,7 +424,7 @@ export default function HypothesisDetail() {
           description: hypothesis.rationale || hypothesis.mechanism || '',
           mechanism: hypothesis.mechanism || '',
           confidence: hypothesis.confidence_score || 0,
-          disease: localHypothesis?.disease || 'Unknown',
+          disease: 'Unknown',
           tags: hypothesis.tags || [],
           translational_roadmap: roadmapData,
         })
@@ -475,7 +444,7 @@ export default function HypothesisDetail() {
           description: hypothesis.rationale || hypothesis.mechanism || '',
           mechanism: hypothesis.mechanism || '',
           confidence: hypothesis.confidence_score || 0,
-          disease: localHypothesis?.disease || 'Unknown',
+          disease: 'Unknown',
           discovery_type: 'treatment',
           model_used: 'unknown',
           tags: hypothesis.tags || [],
@@ -499,7 +468,7 @@ export default function HypothesisDetail() {
       // Backend unreachable — fall back to client-side
       generateClientSide()
     }
-  }, [hypothesisId, hypothesis, localHypothesis, startPhaseAnimation, stopPhaseAnimation])
+  }, [hypothesisId, hypothesis, startPhaseAnimation, stopPhaseAnimation])
 
   const downloadPaper = useCallback(async () => {
     if (!hypothesis) return
@@ -512,7 +481,7 @@ export default function HypothesisDetail() {
           description: hypothesis.rationale || hypothesis.mechanism || '',
           mechanism: hypothesis.mechanism || '',
           confidence: hypothesis.confidence_score || 0,
-          disease: localHypothesis?.disease || 'Unknown',
+          disease: 'Unknown',
           tags: hypothesis.tags || [],
         }),
       })
@@ -532,9 +501,9 @@ export default function HypothesisDetail() {
     } catch (e) {
       console.error('PDF export failed:', e)
     }
-  }, [hypothesisId, hypothesis, localHypothesis])
+  }, [hypothesisId, hypothesis])
 
-  if (isLoading && !localHypothesis) {
+  if (isLoading) {
     return (
       <div className="p-8">
         <div className="animate-pulse space-y-4">
@@ -636,7 +605,7 @@ export default function HypothesisDetail() {
   }
 
   // ---- Default: Document viewer ----
-  const roadmapData = (hypothesis as any).translational_roadmap || localHypothesis?.translational_roadmap
+  const roadmapData = (hypothesis as any).translational_roadmap || undefined
   return (
     <HypothesisDocViewer
       hypothesis={{
@@ -646,7 +615,7 @@ export default function HypothesisDetail() {
         mechanism: hypothesis.mechanism || '',
         confidence: hypothesis.confidence_score || 0,
         tags: hypothesis.tags || [],
-        disease: localHypothesis?.disease,
+        disease: undefined,
         created_at: hypothesis.created_at,
         translational_roadmap: roadmapData,
       }}

@@ -136,11 +136,25 @@ function formatTimeAgo(ts: string) {
 
 function RecentSimulationsWidget() {
   const navigate = useNavigate()
-  const simulations = useMemo(() => {
-    try {
-      const stored = JSON.parse(localStorage.getItem('humanovo-mc-simulations') || '[]') as SimulationSummary[]
-      return stored.slice(0, 3)
-    } catch { return [] }
+  const [simulations, setSimulations] = useState<SimulationSummary[]>([])
+
+  useEffect(() => {
+    const fetchSimulations = async () => {
+      try {
+        const res = await api.getSimulations({ page_size: 3 })
+        const items = (res?.items || []).map((s: any) => ({
+          id: s.id,
+          name: s.name || 'Untitled Simulation',
+          simulationType: s.simulation_type || s.simulationType || 'unknown',
+          stats: s.results?.stats || s.stats || { mean: 0, median: 0, std: 0, ci95Lower: 0, ci95Upper: 0 },
+          createdAt: s.created_at || s.createdAt || new Date().toISOString(),
+        }))
+        setSimulations(items)
+      } catch (err) {
+        console.warn('Dashboard: simulations API unavailable', err)
+      }
+    }
+    fetchSimulations()
   }, [])
 
   return (
@@ -271,7 +285,7 @@ function RecentNotebooksWidget() {
   )
 }
 
-// ── Activity Feed (from localStorage) ──────────────────────────
+// ── Activity Feed ──────────────────────────────────────────────
 
 function ActivityFeed() {
   const activities = useMemo(() => getActivityLog().slice(0, 10), [])
@@ -402,50 +416,37 @@ export default function Dashboard() {
   const navigate = useNavigate()
   const [projects, setProjects] = useState<Project[]>([])
 
-  // Get real counts from localStorage (all use 'humanovo-' prefix via persistGet)
+  // Get real counts from activity log
   const allActivities = useMemo(() => getActivityLog(), [])
-  const deletedProjectIds = useMemo(() => new Set(persistGet<string[]>('deleted-project-ids', [])), [])
-  const localProjects = useMemo(() => persistGet<any[]>('projects', []).filter((p: any) => p.id && !deletedProjectIds.has(p.id)), [deletedProjectIds])
-  const localSimulations = useMemo(() => {
-    try { return JSON.parse(localStorage.getItem('humanovo-mc-simulations') || '[]') } catch { return [] }
-  }, [])
+  const [simulationCount, setSimulationCount] = useState(0)
 
-  // Fetch API projects, merge with localStorage
+  // Fetch API projects (no localStorage fallback)
   useEffect(() => {
     const fetchData = async () => {
       try {
-        let apiProjects: Project[] = []
-        try {
-          const res = await api.getProjects({ page_size: 50 })
-          apiProjects = (res?.items || []).filter(p => !deletedProjectIds.has(p.id))
-        } catch (err) { console.warn('Dashboard: projects API unavailable', err) }
-
-        const apiIds = new Set(apiProjects.map(p => p.id))
-        const localOnly = localProjects
-          .filter((p: any) => !apiIds.has(p.id))
-          .map((p: any) => ({
-            id: p.id,
-            name: p.name || 'Untitled Project',
-            description: p.description,
-            disease_focus: p.disease_focus,
-            research_question: p.research_question,
-            tags: p.tags || [],
-            status: p.status || 'active',
-            hypothesis_count: p.hypothesis_count || 0,
-            evidence_count: p.evidence_count || 0,
-            created_at: p.created_at || new Date().toISOString(),
-            updated_at: p.updated_at || new Date().toISOString(),
-          } as Project))
-
-        const all = [...apiProjects, ...localOnly]
-        all.sort((a, b) => new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime())
-        setProjects(all)
-      } catch (e) {
-        console.error('Dashboard fetch error:', e)
+        const res = await api.getProjects({ page_size: 50 })
+        const apiProjects = res?.items || []
+        apiProjects.sort((a, b) => new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime())
+        setProjects(apiProjects)
+      } catch (err) {
+        console.warn('Dashboard: projects API unavailable', err)
       }
     }
     fetchData()
-  }, [localProjects, deletedProjectIds])
+  }, [])
+
+  // Fetch simulation count from API
+  useEffect(() => {
+    const fetchSimCount = async () => {
+      try {
+        const res = await api.getSimulations({ page_size: 1 })
+        setSimulationCount(res?.total || 0)
+      } catch (err) {
+        console.warn('Dashboard: simulations count API unavailable', err)
+      }
+    }
+    fetchSimCount()
+  }, [])
 
   // Derive counts from actual project data for accuracy
   const totalProjects = projects.length
@@ -456,12 +457,9 @@ export default function Dashboard() {
       return sum + (p.hypothesis_count || 0)
     }, 0)
   }, [projects])
-  // Count research papers from localStorage but only those belonging to current projects
+  // Count research papers from project evidence counts
   const totalPapers = useMemo(() => {
-    const allPapers = persistGet<any[]>('research-papers', [])
-    const projectIds = new Set(projects.map(p => p.id))
-    // Only count papers that belong to an existing project
-    return allPapers.filter(p => p.project_id && projectIds.has(p.project_id)).length
+    return projects.reduce((sum, p) => sum + (p.evidence_count || 0), 0)
   }, [projects])
 
   const stats: StatData[] = [
@@ -484,27 +482,10 @@ export default function Dashboard() {
       chartData: buildChartData(allActivities, 'evidence'),
     },
     {
-      label: 'Simulations', value: localSimulations.length,
+      label: 'Simulations', value: simulationCount,
       change: computeChangePercent(allActivities, 'simulation'),
       icon: FiActivity, accentColor: '#3b82f6', href: '/simulations',
-      chartData: (() => {
-        // Build chart from actual simulation timestamps in localStorage
-        const now = new Date()
-        const days: Array<{ name: string; value: number }> = []
-        for (let i = 6; i >= 0; i--) {
-          const dayStart = new Date(now)
-          dayStart.setDate(dayStart.getDate() - i)
-          dayStart.setHours(0, 0, 0, 0)
-          const dayEnd = new Date(dayStart)
-          dayEnd.setDate(dayEnd.getDate() + 1)
-          const count = localSimulations.filter((s: any) => {
-            const t = new Date(s.createdAt).getTime()
-            return t >= dayStart.getTime() && t < dayEnd.getTime()
-          }).length
-          days.push({ name: dayStart.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }), value: count })
-        }
-        return days
-      })(),
+      chartData: buildChartData(allActivities, 'simulation'),
     },
   ]
 

@@ -46,7 +46,7 @@ _vector_store: Optional["VectorStore"] = None
 # Embedding dimension constants
 # ---------------------------------------------------------------------------
 BIOMEDICAL_DIM = 1024   # Bedrock Cohere Embed v3
-GENERAL_DIM = 3072      # Azure text-embedding-3-large
+GENERAL_DIM = 1536      # Azure text-embedding-3-large (spec: 1536d, matches grounding_cache)
 
 # ---------------------------------------------------------------------------
 # SQLAlchemy ORM model
@@ -126,7 +126,7 @@ class VectorStore(LoggerMixin):
 
     Stores dual embeddings per document:
       - embedding_biomedical  (1024-d, Bedrock Cohere Embed v3)
-      - embedding_general     (3072-d, Azure text-embedding-3-large)
+      - embedding_general     (1536-d, Azure text-embedding-3-large)
 
     Supports hybrid search that combines cosine similarity scores from both
     embedding spaces with configurable weights.
@@ -183,7 +183,7 @@ class VectorStore(LoggerMixin):
             metadata: Optional metadata dictionary.
             doc_id: Optional document ID (UUID string); generated if omitted.
             embedding_biomedical: 1024-d Cohere biomedical embedding.
-            embedding_general: 3072-d Azure general embedding.
+            embedding_general: 1536-d Azure general embedding.
             source_type: Category of the source document.
             source_id: External reference identifier.
 
@@ -304,7 +304,7 @@ class VectorStore(LoggerMixin):
             filters: Optional dict of metadata / source_type / source_id filters.
             min_score: Minimum combined similarity score.
             embedding_biomedical: Pre-computed 1024-d query embedding.
-            embedding_general: Pre-computed 3072-d query embedding.
+            embedding_general: Pre-computed 1536-d query embedding.
             biomedical_weight: Weight for the biomedical similarity [0-1].
             general_weight: Weight for the general similarity [0-1].
 
@@ -391,7 +391,7 @@ class VectorStore(LoggerMixin):
         filters: dict[str, Any] | None = None,
         min_score: float = 0.0,
     ) -> list[SearchResult]:
-        """Search using only the general (Azure 3072-d) embedding."""
+        """Search using only the general (Azure 1536-d) embedding."""
         return await self._single_model_search(
             column=VectorEmbedding.embedding_general,
             embedding=embedding,

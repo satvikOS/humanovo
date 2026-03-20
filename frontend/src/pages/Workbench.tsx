@@ -1333,20 +1333,13 @@ interface GraphState {
   edges: GraphEdge[]
 }
 
-const STORAGE_KEY = 'humanovo-workbench-graph'
-
+// Graph state is ephemeral (kept in component state only, no localStorage)
 function loadGraphState(): GraphState {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw) return JSON.parse(raw)
-  } catch { /* ignore */ }
   return { nodes: [], edges: [] }
 }
 
-function saveGraphState(state: GraphState) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
-  } catch { /* ignore */ }
+function saveGraphState(_state: GraphState) {
+  // No-op: graph state is ephemeral per session
 }
 
 // ==================== NODE SHAPE HELPER ====================
@@ -2457,6 +2450,17 @@ export default function Workbench() {
   const [constantInput, setConstantInput] = useState('')
   const [constantLoading, setConstantLoading] = useState(false)
 
+  // Discovery panel state
+  const [showDiscovery, setShowDiscovery] = useState(false)
+  const [discoveryDisease, setDiscoveryDisease] = useState('')
+  const [discoveryType, setDiscoveryType] = useState<string>('treatment_discovery')
+  const [discoveryOutputFormat, setDiscoveryOutputFormat] = useState<string>('narrative')
+  const [discoveryVerbosity, setDiscoveryVerbosity] = useState<string>('standard')
+  const [discoveryNumRounds, setDiscoveryNumRounds] = useState(3)
+  const [discoveryLoading, setDiscoveryLoading] = useState(false)
+  const [discoveryRunId, setDiscoveryRunId] = useState<string | null>(null)
+  const [discoveryError, setDiscoveryError] = useState<string | null>(null)
+
   const svgRef = useRef<SVGSVGElement>(null)
 
   const selectedComponent = components.find(c => c.id === selectedId) || null
@@ -3186,6 +3190,62 @@ IMPORTANT: If the user asks you to connect nodes, suggest connections, or explai
     setZoom(1)
   }, [])
 
+  // --- Launch discovery from canvas context ---
+  const API = '/api'
+
+  const launchDiscovery = useCallback(async () => {
+    if (discoveryLoading) return
+    // Derive disease/topic from text input or canvas nodes
+    const disease = discoveryDisease.trim()
+      || nodes.map(n => n.name).slice(0, 5).join(', ')
+    if (!disease) {
+      setDiscoveryError('Enter a disease or add nodes to the canvas first.')
+      return
+    }
+    setDiscoveryLoading(true)
+    setDiscoveryError(null)
+    setDiscoveryRunId(null)
+
+    // Build external factors from canvas node names/categories
+    const externalFactors = nodes.length > 0
+      ? nodes.map(n => `${n.name} (${categoryConfig[n.category]?.label || n.category})`).slice(0, 10)
+      : null
+
+    const body = {
+      disease,
+      discovery_type: discoveryType,
+      external_factors: externalFactors,
+      num_rounds: discoveryNumRounds,
+      hypotheses_per_round: 3,
+      output_format: discoveryOutputFormat,
+      verbosity: discoveryVerbosity,
+    }
+
+    try {
+      // Use project ID from URL or default
+      const projectId = new URLSearchParams(window.location.search).get('project') || 'default'
+      const res = await fetch(`${API}/v1/projects/${projectId}/discover`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) {
+        const errText = await res.text()
+        throw new Error(`Discovery failed (${res.status}): ${errText}`)
+      }
+      const data = await res.json()
+      setDiscoveryRunId(data.run_id)
+      // Open DiscoveryRunner in new tab with the run_id
+      const wsUrl = data.websocket_url || `/ws/discovery/${data.run_id}`
+      const runnerUrl = `/projects/${projectId}/discover?run_id=${data.run_id}&ws=${encodeURIComponent(wsUrl)}`
+      window.open(runnerUrl, '_blank')
+    } catch (e: any) {
+      setDiscoveryError(e.message || 'Discovery launch failed')
+    } finally {
+      setDiscoveryLoading(false)
+    }
+  }, [discoveryDisease, discoveryType, discoveryOutputFormat, discoveryVerbosity, discoveryNumRounds, discoveryLoading, nodes])
+
   // --- Clear graph ---
   const clearGraph = useCallback(() => {
     if (nodes.length === 0 && edges.length === 0) return
@@ -3317,7 +3377,15 @@ IMPORTANT: If the user asks you to connect nodes, suggest connections, or explai
               </button>
               <div className="w-px h-5 bg-[var(--color-border)] mx-1" />
               <button
-                onClick={() => setShowConstant(s => !s)}
+                onClick={() => { setShowDiscovery(s => !s); if (!showDiscovery) setShowConstant(false) }}
+                className={clsx('btn btn-sm', showDiscovery ? 'btn-primary' : 'btn-secondary')}
+                title="Launch Discovery Pipeline"
+              >
+                <FiActivity className="w-3 h-3" />
+                Discover
+              </button>
+              <button
+                onClick={() => { setShowConstant(s => !s); if (!showConstant) setShowDiscovery(false) }}
                 className={clsx('btn btn-sm', showConstant ? 'btn-primary' : 'btn-secondary')}
                 title="Toggle Constant AI"
               >
@@ -3447,8 +3515,132 @@ IMPORTANT: If the user asks you to connect nodes, suggest connections, or explai
           </div>
         </div>
 
-        {/* Right panel - Constant AI or Properties */}
-        {showConstant ? (
+        {/* Right panel - Discovery, Constant AI, or Properties */}
+        {showDiscovery ? (
+          <div className="w-80 border-l border-[var(--color-border)] bg-[var(--color-bg-elevated)] flex flex-col">
+            <div className="p-3 border-b border-[var(--color-border)]">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-medium flex items-center gap-1.5">
+                  <FiActivity className="w-3.5 h-3.5 text-primary-400" />
+                  Discovery Pipeline
+                </h3>
+                <button onClick={() => setShowDiscovery(false)} className="p-1 hover:bg-[var(--color-surface)] rounded transition-colors">
+                  <FiX className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto p-3 space-y-3">
+              <div>
+                <label className="text-xxs text-[var(--color-text-muted)] uppercase tracking-wider mb-1 block">Disease / Topic</label>
+                <input
+                  type="text"
+                  value={discoveryDisease}
+                  onChange={(e) => setDiscoveryDisease(e.target.value)}
+                  placeholder={nodes.length > 0 ? nodes.map(n => n.name).slice(0, 3).join(', ') : 'e.g., Rett syndrome + EEG biomarkers'}
+                  className="input w-full text-xs"
+                />
+                {nodes.length > 0 && !discoveryDisease && (
+                  <div className="text-xxs text-[var(--color-text-muted)] mt-0.5">
+                    Will use canvas nodes: {nodes.map(n => n.name).slice(0, 3).join(', ')}{nodes.length > 3 ? '...' : ''}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="text-xxs text-[var(--color-text-muted)] uppercase tracking-wider mb-1 block">Discovery Mode</label>
+                <select
+                  value={discoveryType}
+                  onChange={(e) => setDiscoveryType(e.target.value)}
+                  className="input w-full text-xs"
+                >
+                  <option value="treatment_discovery">Treatment Discovery</option>
+                  <option value="prevention_strategies">Prevention Strategies</option>
+                  <option value="biomarker_identification">Biomarker Identification</option>
+                  <option value="drug_repurposing">Drug Repurposing</option>
+                  <option value="combination_therapy">Combination Therapy</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xxs text-[var(--color-text-muted)] uppercase tracking-wider mb-1 block">Output Format</label>
+                <select
+                  value={discoveryOutputFormat}
+                  onChange={(e) => setDiscoveryOutputFormat(e.target.value)}
+                  className="input w-full text-xs"
+                >
+                  <option value="narrative">Narrative</option>
+                  <option value="structured_table">Structured Table</option>
+                  <option value="knowledge_gap_map">Knowledge Gap Map</option>
+                  <option value="grant_sections">Grant Sections</option>
+                  <option value="comprehensive">Comprehensive</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xxs text-[var(--color-text-muted)] uppercase tracking-wider mb-1 block">Verbosity</label>
+                <select
+                  value={discoveryVerbosity}
+                  onChange={(e) => setDiscoveryVerbosity(e.target.value)}
+                  className="input w-full text-xs"
+                >
+                  <option value="brief">Brief (~300 words)</option>
+                  <option value="standard">Standard (~1000 words)</option>
+                  <option value="comprehensive">Comprehensive (~3000 words)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xxs text-[var(--color-text-muted)] uppercase tracking-wider mb-1 block">Rounds: {discoveryNumRounds}</label>
+                <input
+                  type="range"
+                  min={1}
+                  max={4}
+                  value={discoveryNumRounds}
+                  onChange={(e) => setDiscoveryNumRounds(parseInt(e.target.value))}
+                  className="w-full"
+                />
+                <div className="flex justify-between text-xxs text-[var(--color-text-muted)]">
+                  <span>1</span><span>4</span>
+                </div>
+              </div>
+
+              {discoveryError && (
+                <div className="text-xs text-red-400 bg-red-500/10 rounded p-2 border border-red-500/20">
+                  {discoveryError}
+                </div>
+              )}
+
+              {discoveryRunId && (
+                <div className="text-xs text-green-400 bg-green-500/10 rounded p-2 border border-green-500/20">
+                  Discovery launched! Run ID: {discoveryRunId.slice(0, 8)}...
+                </div>
+              )}
+
+              <button
+                onClick={launchDiscovery}
+                disabled={discoveryLoading}
+                className="btn btn-primary w-full text-xs flex items-center justify-center gap-1.5"
+              >
+                {discoveryLoading ? (
+                  <>
+                    <FiActivity className="w-3 h-3 animate-spin" />
+                    Launching...
+                  </>
+                ) : (
+                  <>
+                    <FiPlay className="w-3 h-3" />
+                    Launch Discovery
+                  </>
+                )}
+              </button>
+
+              <div className="text-xxs text-[var(--color-text-muted)] space-y-1 border-t border-[var(--color-border)] pt-2">
+                <p>Runs the 12-stage discovery pipeline with real-time WebSocket progress. Results open in the Discovery Runner.</p>
+                <p>Canvas nodes are passed as external context factors to guide hypothesis generation.</p>
+              </div>
+            </div>
+          </div>
+        ) : showConstant ? (
           <ConstantPanel
             messages={constantMessages}
             input={constantInput}

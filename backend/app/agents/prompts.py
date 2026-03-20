@@ -1346,7 +1346,7 @@ def get_stage_prompt(stage: int) -> str:
     """Get the prompt for a specific pipeline stage (1-12), with master prompt and constitutional constraints."""
     stage_prompt = STAGE_PROMPTS.get(stage, "")
     constraints = _load_constitutional_constraints()
-    constraints_block = f"\n\n## {constraints}\n" if constraints else ""
+    constraints_block = f"\n\n## CONSTITUTIONAL CONSTRAINTS (IMMUTABLE)\n{constraints}\n" if constraints else ""
     return f"{MASTER_DISCOVERY_PROMPT}{constraints_block}\n\n---\n\n{stage_prompt}"
 
 

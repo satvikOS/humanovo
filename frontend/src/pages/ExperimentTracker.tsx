@@ -39,9 +39,7 @@ const STATUS_CONFIG = {
 }
 
 export default function ExperimentTracker() {
-  const [experiments, setExperiments] = useState<Experiment[]>(() => {
-    try { return JSON.parse(localStorage.getItem('humanovo-experiments') || '[]') } catch { return [] }
-  })
+  const [experiments, setExperiments] = useState<Experiment[]>([])
   const [selected, setSelected] = useState<Experiment | null>(null)
   const [showAdd, setShowAdd] = useState(false)
   const [filterStatus, setFilterStatus] = useState('')
@@ -50,7 +48,6 @@ export default function ExperimentTracker() {
 
   const save = useCallback((updated: Experiment[]) => {
     setExperiments(updated)
-    localStorage.setItem('humanovo-experiments', JSON.stringify(updated))
   }, [])
 
   const [form, setForm] = useState({ title: '', hypothesis: '', tags: '' })

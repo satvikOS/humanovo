@@ -3,7 +3,7 @@ Embedding Grounding Module — Dual-Model Semantic Grounding for the 10-Stage Pi
 
 Architecture:
   Two Azure OpenAI embedding models run in parallel on every pipeline stage output:
-  1. Azure text-embedding-3-large (3072d) — highest MTEB score, primary grounding model
+  1. Azure text-embedding-3-large (1536d) — highest MTEB score, primary grounding model
   2. Azure text-embedding-3-small (1536d) — fast complementary model, broad coverage
 
 Two grounding mechanisms operate between each pipeline stage:
@@ -74,7 +74,7 @@ class DualEmbeddingGrounder:
     on every pipeline stage output to provide maximum grounding coverage.
 
     The two models complement each other:
-    - text-embedding-3-large (3072d): Highest MTEB score, best semantic precision,
+    - text-embedding-3-large (1536d): Highest MTEB score, best semantic precision,
       captures fine-grained biomedical relationships and cross-domain connections
     - text-embedding-3-small (1536d): Fast, lightweight, broad semantic coverage,
       provides complementary signal at lower latency and cost
@@ -102,12 +102,12 @@ class DualEmbeddingGrounder:
             AzureOpenAIEmbedder,
         )
 
-        # Primary: Azure text-embedding-3-large (3072d, highest MTEB score)
+        # Primary: Azure text-embedding-3-large (1536d, highest MTEB score)
         try:
             primary_config = EmbeddingConfig.for_model(EmbeddingModel.AZURE_EMBEDDING_LARGE)
             self._primary_embedder = AzureOpenAIEmbedder(primary_config)
             await self._primary_embedder.initialize()
-            logger.info("Grounding primary embedder initialized: Azure text-embedding-3-large (3072d)")
+            logger.info("Grounding primary embedder initialized: Azure text-embedding-3-large (1536d)")
         except Exception as e:
             logger.warning(f"Primary embedder (Azure large) failed to init: {e}")
             # Fallback to local BGE-large
