@@ -985,7 +985,7 @@ export const api = {
       }),
 
       // Search hypotheses
-      apiClient.get('/hypotheses', { params: { page_size: 10 } }).then(r => {
+      apiClient.get('/hypotheses', { params: { page_size: 10 } }).then((r: any) => {
         const items = (r.data.items || []).filter((item: any) =>
           item.statement?.toLowerCase().includes(query.toLowerCase()) ||
           item.mechanism?.toLowerCase().includes(query.toLowerCase())
@@ -1007,7 +1007,7 @@ export const api = {
       }),
 
       // Search RAG
-      apiClient.post('/rag/query', { query, top_k: params?.limit || 10 }).then(r => {
+      apiClient.post('/rag/query', { query, top_k: params?.limit || 10 }).then((r: any) => {
         (r.data.results || []).forEach((item: any) => {
           // Avoid duplicates from evidence search
           if (!results.find(r => r.id === item.id)) {

@@ -393,7 +393,6 @@ export default function StatisticalAnalysis() {
         throw new Error('Backend returned non-JSON response')
       }
       setResult(await res.json())
-      }
     } catch (e: any) {
       setError(e.message || 'Analysis failed')
     } finally {
