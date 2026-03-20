@@ -379,54 +379,20 @@ export default function StatisticalAnalysis() {
           break
       }
 
-      // Try backend API first, fall back to client-side computation
-      let backendOk = false
-      try {
-        const res = await fetch(`${API}${endpoint}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        })
-        const contentType = res.headers.get('content-type') || ''
-        if (contentType.includes('application/json') && res.ok) {
-          setResult(await res.json())
-          backendOk = true
-        }
-      } catch { /* backend unavailable, use client-side */ }
-
-      if (!backendOk) {
-        // Client-side fallback computation
-        let localResult: any = null
-        switch (tab) {
-          case 'descriptive':
-            localResult = computeDescriptive(body.data, body.label)
-            break
-          case 'hypothesis': {
-            const testType = document.querySelector<HTMLSelectElement>('#hyp-test')?.value || 'ttest'
-            if (testType === 'ttest') localResult = computeTTest(body.group1, body.group2, body.paired, body.label1, body.label2)
-            else if (testType === 'anova') localResult = computeANOVA(body.groups, body.labels)
-            else localResult = computeChiSquare(body.observed, body.row_labels, body.col_labels)
-            break
-          }
-          case 'regression': {
-            const corrOrReg = document.querySelector<HTMLSelectElement>('#reg-type')?.value || 'regression'
-            if (corrOrReg === 'correlation') localResult = computeCorrelation(body.variables, body.labels, body.method)
-            else localResult = computeRegression(body.x, body.y, body.feature_names)
-            break
-          }
-          case 'survival':
-            localResult = computeSurvival(body.times, body.events, body.groups, body.group_labels || [])
-            break
-          case 'sample_size':
-            localResult = computeSampleSize(body.effect_size, body.alpha, body.power, body.test_type)
-            break
-        }
-        if (localResult) {
-          localResult._computed = 'client'
-          setResult(localResult)
-        } else {
-          throw new Error('Unable to compute analysis')
-        }
+      // Call backend API for all statistical computations
+      const res = await fetch(`${API}${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) {
+        throw new Error(`Backend returned ${res.status}: ${await res.text()}`)
+      }
+      const contentType = res.headers.get('content-type') || ''
+      if (!contentType.includes('application/json')) {
+        throw new Error('Backend returned non-JSON response')
+      }
+      setResult(await res.json())
       }
     } catch (e: any) {
       setError(e.message || 'Analysis failed')

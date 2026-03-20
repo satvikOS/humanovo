@@ -1333,20 +1333,13 @@ interface GraphState {
   edges: GraphEdge[]
 }
 
-const STORAGE_KEY = 'humanovo-workbench-graph'
-
+// Graph state is ephemeral (kept in component state only, no localStorage)
 function loadGraphState(): GraphState {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw) return JSON.parse(raw)
-  } catch { /* ignore */ }
   return { nodes: [], edges: [] }
 }
 
-function saveGraphState(state: GraphState) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
-  } catch { /* ignore */ }
+function saveGraphState(_state: GraphState) {
+  // No-op: graph state is ephemeral per session
 }
 
 // ==================== NODE SHAPE HELPER ====================

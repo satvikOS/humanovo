@@ -1,22 +1,25 @@
 """
-Discovery Orchestrator — 10-Stage Sequential Hypothesis Pipeline with Dual-Embedding Grounding
+Discovery Orchestrator — 12-Stage Sequential Hypothesis Pipeline with Dual-Embedding Grounding
 
-Architecture: 10 models work sequentially on ONE hypothesis at a time.
-Each hypothesis passes through 10 specialized stages before the pipeline
+Architecture: 12 models work sequentially on ONE hypothesis at a time.
+Each hypothesis passes through 12 specialized stages before the pipeline
 moves to the next hypothesis. Between EVERY stage, a dual-model embedding
-grounding system ensures zero hallucinations.
+grounding system ensures zero hallucinations. Constitutional constraints
+are prepended to ALL stage prompts.
 
-10-Stage Pipeline (one model per stage):
-  Stage 1  — SEED       (Claude Opus, Bedrock)          : Generate initial hypothesis seed
-  Stage 2  — EXPAND     (o3-mini, Azure OpenAI)          : Deep causal chain reasoning
+12-Stage Pipeline (per Project Jamison v2 Spec Section 6.1):
+  Stage 1  — SEED       (Claude Opus 4.6, Bedrock)       : Generate initial hypothesis seed
+  Stage 2  — EXPAND     (Claude Sonnet 4.6, Bedrock)     : Broaden hypotheses
   Stage 3  — EVIDENCE   (Cohere Command A, Azure OpenAI) : Literature evidence review (+ ALL APIs)
   Stage 4  — COUNTER    (Mistral-Large-3, Azure AI)      : Counter-argument generation
-  Stage 5  — MECHANISM  (GPT-4.1, Azure OpenAI)          : Mechanistic deep dive
-  Stage 6  — VALIDATE   (GPT-4o, Azure OpenAI)           : Cross-validation
-  Stage 7  — GROUND     (Grok-4-1-fast, Azure AI)        : Scientific grounding (+ ALL APIs)
-  Stage 8  — SCORE      (GPT-4.1, Azure OpenAI)          : Multi-dimensional confidence scoring
-  Stage 9  — REFINE     (GPT-4o, Azure OpenAI)           : Fast refinement
-  Stage 10 — FINALIZE   (Claude Opus, Bedrock)           : Final synthesis
+  Stage 5  — REVISE     (o3-mini, Azure OpenAI)           : Revise based on counter-arguments
+  Stage 6  — MECHANISM  (GPT-4.1, Azure OpenAI)          : Mechanistic deep dive
+  Stage 7  — VALIDATE   (Claude Sonnet 4.6, Bedrock)     : Cross-validation
+  Stage 8  — GROUND     (Grok-4-1-fast, Azure AI)        : 3-layer scientific grounding (+ ALL APIs)
+  Stage 9  — SCORE      (GPT-4.1, Azure OpenAI)          : Multi-dimensional confidence scoring
+  Stage 10 — REFINE     (GPT-4o, Azure OpenAI)           : Fast refinement
+  Stage 11 — TRANSLATE  (Claude Sonnet 4.6, Bedrock)     : Translational roadmap T0-T5
+  Stage 12 — FINALIZE   (Claude Sonnet 4.6, Bedrock)     : Final synthesis + visualization data
 
 Dual-Model Embedding Grounding (between EVERY stage):
   Two embedding models run in parallel on every stage output:
@@ -2010,12 +2013,15 @@ Cross-validate this hypothesis against multiple independent knowledge sources.""
 Ground every claim to real, verifiable scientific sources. You will receive PubMed, ClinicalTrials.gov, and FDA data below."""
 
         if stage_num == 9:
+            feasibility_instruction = ""
+            if lab_profile:
+                feasibility_instruction = "\nFEASIBILITY SCORING: When scoring feasibility, evaluate whether this hypothesis can be tested with the lab equipment, modalities, and techniques listed in the Lab Capability Profile above. Penalize hypotheses requiring excluded methods. Output a feasibility_score (0-1) and impact_score (0-1) alongside the confidence_score."
             return f"""{base}
 
 ## HYPOTHESIS GROUNDED (from Stages 1-8)
 {context_summary}
 
-Score this hypothesis across 7 dimensions: biological plausibility, evidence strength, novelty, feasibility, safety, clinical relevance, reproducibility."""
+Score this hypothesis across 7 dimensions: biological plausibility, evidence strength, novelty, feasibility, safety, clinical relevance, reproducibility.{feasibility_instruction}"""
 
         if stage_num == 10:
             return f"""{base}

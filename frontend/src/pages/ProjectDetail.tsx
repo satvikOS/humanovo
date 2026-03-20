@@ -7,7 +7,7 @@ import {
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import api, { Project } from '../services/api'
-import { persistGet, persistSet, logActivity, formatDate } from '../utils/persistence'
+import { logActivity, formatDate } from '../utils/persistence'
 import HypothesisDocViewer from '../components/HypothesisDocViewer'
 
 const API_BASE = '/api/v1'
@@ -56,8 +56,6 @@ export default function ProjectDetail() {
   const { projectId } = useParams<{ projectId: string }>()
   const [generatingPaper, setGeneratingPaper] = useState(false)
   const generatingPaperRef = useRef(false)
-  const [, setRefresh] = useState(0)
-
   // Project from API
   const [project, setProject] = useState<Project | null>(null)
   const [loadingProject, setLoadingProject] = useState(true)
@@ -78,7 +76,7 @@ export default function ProjectDetail() {
   // Hypothesis chooser modal state
   const [showChooser, setShowChooser] = useState(false)
 
-  // Load project from API, fall back to localStorage
+  // Load project from API
   useEffect(() => {
     if (!projectId) return
     loadProject()
@@ -90,47 +88,30 @@ export default function ProjectDetail() {
     try {
       const proj = await api.getProject(projectId)
       setProject(proj)
-    } catch {
-      // Fall back to localStorage
-      const localProjects = persistGet<any[]>('projects', [])
-      const local = localProjects.find((p: any) => p.id === projectId)
-      if (local) {
-        setProject(local as Project)
-      }
+    } catch (err) {
+      console.warn('ProjectDetail: failed to load project from API', err)
     } finally {
       setLoadingProject(false)
     }
   }
 
-  // Get hypotheses from project or localStorage
-  const allHypotheses = persistGet<SavedHypothesis[]>('hypotheses', [])
-  const projectHypotheses = [
-    // From API project
-    ...(project?.hypotheses || []).map(h => ({
-      id: h.id,
-      title: h.title,
-      description: h.description,
-      mechanism: h.mechanism,
-      confidence: h.confidence,
-      tags: [] as string[],
-      disease: project?.disease_focus || '',
-      discovery_type: 'treatment',
-      project_id: projectId || '',
-      created_at: h.created_at,
-      model_used: h.model_used,
-    })),
-    // From localStorage
-    ...allHypotheses.filter(h => h.project_id === projectId),
-  ]
+  // Get hypotheses from API project data only
+  const uniqueHypotheses = (project?.hypotheses || []).map(h => ({
+    id: h.id,
+    title: h.title,
+    description: h.description,
+    mechanism: h.mechanism,
+    confidence: h.confidence,
+    tags: [] as string[],
+    disease: project?.disease_focus || '',
+    discovery_type: 'treatment',
+    project_id: projectId || '',
+    created_at: h.created_at,
+    model_used: h.model_used,
+  }))
 
-  // Deduplicate by id
-  const uniqueHypotheses = projectHypotheses.filter((h, i, arr) =>
-    arr.findIndex(x => x.id === h.id) === i
-  )
-
-  // Research papers state
-  const allPapers = persistGet<SavedResearchPaper[]>('research-papers', [])
-  const projectPapers = allPapers.filter(p => p.project_id === projectId)
+  // Research papers state (ephemeral, tracked in component state)
+  const [projectPapers, setProjectPapers] = useState<SavedResearchPaper[]>([])
 
   // Cleanup timers on unmount
   useEffect(() => {
@@ -377,31 +358,30 @@ export default function ProjectDetail() {
   }, [project, startPhaseAnimation, stopPhaseAnimation])
 
   const _saveResearchPaper = useCallback((hypothesis: SavedHypothesis, html?: string) => {
-    const papers = persistGet<SavedResearchPaper[]>('research-papers', [])
-    // If paper already exists, update its HTML if we have new HTML
-    const existingIdx = papers.findIndex(p => p.hypothesis_id === hypothesis.id)
-    if (existingIdx >= 0) {
-      if (html) {
-        papers[existingIdx].paper_html = html
-        persistSet('research-papers', papers)
-        setRefresh(n => n + 1)
+    setProjectPapers(prev => {
+      // If paper already exists, update its HTML if we have new HTML
+      const existingIdx = prev.findIndex(p => p.hypothesis_id === hypothesis.id)
+      if (existingIdx >= 0) {
+        if (html) {
+          const updated = [...prev]
+          updated[existingIdx] = { ...updated[existingIdx], paper_html: html }
+          return updated
+        }
+        return prev
       }
-      return
-    }
-    const paper: SavedResearchPaper = {
-      id: `rp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      hypothesis_id: hypothesis.id,
-      hypothesis_title: hypothesis.title,
-      project_id: hypothesis.project_id,
-      disease: hypothesis.disease || project?.disease_focus || 'Unknown',
-      generated_at: new Date().toISOString(),
-      filename: `humanovo-${hypothesis.title.replace(/\s+/g, '-').toLowerCase().slice(0, 50)}.pdf`,
-      paper_html: html,
-    }
-    papers.unshift(paper)
-    persistSet('research-papers', papers.slice(0, 200))
+      const paper: SavedResearchPaper = {
+        id: `rp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        hypothesis_id: hypothesis.id,
+        hypothesis_title: hypothesis.title,
+        project_id: hypothesis.project_id,
+        disease: hypothesis.disease || project?.disease_focus || 'Unknown',
+        generated_at: new Date().toISOString(),
+        filename: `humanovo-${hypothesis.title.replace(/\s+/g, '-').toLowerCase().slice(0, 50)}.pdf`,
+        paper_html: html,
+      }
+      return [paper, ...prev].slice(0, 200)
+    })
     logActivity({ type: 'evidence', action: 'created', title: `Research paper: ${hypothesis.title}`, project: project?.name })
-    setRefresh(n => n + 1)
   }, [project])
 
   const printPaper = useCallback(() => {
@@ -820,10 +800,8 @@ export default function ProjectDetail() {
                         setGeneratingPaper(false)
                         setPdfBlobUrl(null)
 
-                        // Re-read from localStorage to get latest paper_html
-                        const freshPapers = persistGet<SavedResearchPaper[]>('research-papers', [])
-                        const freshPaper = freshPapers.find(p => p.hypothesis_id === paper.hypothesis_id)
-                        const storedHtml = freshPaper?.paper_html || paper.paper_html
+                        // Use the paper's stored HTML
+                        const storedHtml = paper.paper_html
 
                         if (storedHtml && storedHtml.length > 100) {
                           setPaperHtml(storedHtml)
@@ -877,9 +855,7 @@ export default function ProjectDetail() {
                         <button
                           onClick={(e) => {
                             e.stopPropagation()
-                            const updated = persistGet<SavedResearchPaper[]>('research-papers', []).filter(p => p.id !== paper.id)
-                            persistSet('research-papers', updated)
-                            setRefresh(n => n + 1)
+                            setProjectPapers(prev => prev.filter(p => p.id !== paper.id))
                           }}
                           className="p-1.5 rounded hover:bg-white/5 text-[var(--color-text-muted)] hover:text-red-400 transition-colors"
                           title="Remove"

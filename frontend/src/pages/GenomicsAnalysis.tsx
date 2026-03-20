@@ -308,31 +308,16 @@ export default function GenomicsAnalysis() {
         endpoint = '/biomarker-discovery'
         body = { expression_data: biomarkerData.split('\n').filter(l => l.trim()).map(l => { const [gene, rest] = l.split(',', 2).map(s => s.trim()); const groups = (rest || '').split(';'); return { gene, group1_values: groups[0]?.split(',').map(Number) || [], group2_values: groups[1]?.split(',').map(Number) || [] } }) }
       }
-      // Try backend API first, fall back to client-side computation
-      let backendOk = false
-      try {
-        const res = await fetch(`${API}${endpoint}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-        const contentType = res.headers.get('content-type') || ''
-        if (contentType.includes('application/json') && res.ok) {
-          setResult(await res.json())
-          backendOk = true
-        }
-      } catch { /* backend unavailable */ }
-
-      if (!backendOk) {
-        // Client-side fallback computation
-        let localResult: any = null
-        if (tab === 'pathway') localResult = computePathwayAnalysis(body.genes, body.database)
-        else if (tab === 'gsea') localResult = computeGSEA(body.ranked_genes, body.gene_set)
-        else if (tab === 'variants') localResult = computeVariantAnnotation(body.variants)
-        else localResult = computeBiomarkerDiscovery(body.expression_data)
-        if (localResult) {
-          localResult._computed = 'client'
-          setResult(localResult)
-        } else {
-          throw new Error('Unable to compute analysis')
-        }
+      // Call backend API for all genomics computations
+      const res = await fetch(`${API}${endpoint}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      if (!res.ok) {
+        throw new Error(`Backend returned ${res.status}: ${await res.text()}`)
       }
+      const contentType = res.headers.get('content-type') || ''
+      if (!contentType.includes('application/json')) {
+        throw new Error('Backend returned non-JSON response')
+      }
+      setResult(await res.json())
     } catch (e: any) { setError(e.message) } finally { setLoading(false) }
   }
 

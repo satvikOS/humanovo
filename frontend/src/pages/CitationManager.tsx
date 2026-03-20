@@ -49,14 +49,10 @@ function formatCitation(c: Citation, style: CitationStyle): string {
 const CITATION_TYPES: Citation['type'][] = ['journal', 'book', 'conference', 'preprint', 'website', 'thesis']
 
 export default function CitationManager() {
-  const [citations, setCitations] = useState<Citation[]>(() => {
-    try { return JSON.parse(localStorage.getItem('humanovo-citations') || '[]') } catch { return [] }
-  })
+  const [citations, setCitations] = useState<Citation[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [showAddForm, setShowAddForm] = useState(false)
-  const [citationStyle, setCitationStyle] = useState<CitationStyle>(() => {
-    try { const s = localStorage.getItem('humanovo-citation-style'); if (s && ['apa','mla','chicago','vancouver','harvard'].includes(s)) return s as CitationStyle } catch {} return 'apa'
-  })
+  const [citationStyle, setCitationStyle] = useState<CitationStyle>('apa')
   const [copied, setCopied] = useState<string | null>(null)
   const [filterType, setFilterType] = useState<string>('')
 
@@ -67,7 +63,6 @@ export default function CitationManager() {
 
   const saveCitations = useCallback((updated: Citation[]) => {
     setCitations(updated)
-    localStorage.setItem('humanovo-citations', JSON.stringify(updated))
   }, [])
 
   const addCitation = () => {
@@ -126,7 +121,7 @@ export default function CitationManager() {
             <p className="text-sm text-[var(--color-text-muted)] mt-1">Manage references and generate bibliographies</p>
           </div>
           <div className="flex items-center gap-2">
-            <select value={citationStyle} onChange={e => { const s = e.target.value as CitationStyle; setCitationStyle(s); localStorage.setItem('humanovo-citation-style', s) }} className="input text-xs py-1.5">
+            <select value={citationStyle} onChange={e => setCitationStyle(e.target.value as CitationStyle)} className="input text-xs py-1.5">
               <option value="apa">APA 7th</option>
               <option value="mla">MLA 9th</option>
               <option value="chicago">Chicago</option>

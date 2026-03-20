@@ -9,7 +9,9 @@ Includes the DataSourceOrchestrator for coordinating queries across all sources.
 """
 
 import asyncio
+import json
 import time
+import urllib.parse
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -1025,8 +1027,32 @@ class GWASCatalogSource(DataSourceBase):
     description = "Genome-wide association study catalog."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement GWAS Catalog search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 2)")
+        session = await self._get_session()
+        encoded = urllib.parse.quote(query)
+        params = {"q": encoded, "size": min(max_results, 20)}
+        async with session.get(
+            f"{self.base_url}/search/associations", params=params,
+        ) as resp:
+            data = await resp.json() if resp.status == 200 else {}
+
+        embedded = data.get("_embedded", {})
+        associations = embedded.get("associations", [])
+        results = []
+        for assoc in associations[:max_results]:
+            results.append({
+                "id": assoc.get("associationId", ""),
+                "risk_allele": assoc.get("riskFrequency", ""),
+                "p_value": assoc.get("pvalue", ""),
+                "trait": ", ".join(
+                    t.get("trait", "") for t in assoc.get("efoTraits", [])
+                ),
+                "region": assoc.get("region", ""),
+                "mapped_gene": assoc.get("mappedGene", ""),
+            })
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=len(results), results=results,
+        )
 
 
 class ClinVarSource(DataSourceBase):
@@ -1038,8 +1064,54 @@ class ClinVarSource(DataSourceBase):
     description = "Relationships between genomic variation and health."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement ClinVar search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 2)")
+        session = await self._get_session()
+        params = {
+            "db": "clinvar",
+            "term": query,
+            "retmax": min(max_results, 20),
+            "retmode": "json",
+        }
+        api_key = getattr(settings, "NCBI_API_KEY", None)
+        if api_key:
+            params["api_key"] = api_key
+
+        async with session.get(f"{self.base_url}/esearch.fcgi", params=params) as resp:
+            data = await resp.json()
+
+        search_result = data.get("esearchresult", {})
+        id_list = search_result.get("idlist", [])
+        total = int(search_result.get("count", 0))
+
+        if not id_list:
+            return DataSourceResult(source=self.name, query=query, total_results=total)
+
+        # Fetch summaries
+        summary_params = {
+            "db": "clinvar",
+            "id": ",".join(id_list),
+            "retmode": "json",
+        }
+        if api_key:
+            summary_params["api_key"] = api_key
+
+        async with session.get(f"{self.base_url}/esummary.fcgi", params=summary_params) as resp:
+            summary_data = await resp.json()
+
+        results = []
+        for uid in id_list:
+            entry = summary_data.get("result", {}).get(uid, {})
+            results.append({
+                "id": uid,
+                "title": entry.get("title", ""),
+                "clinical_significance": entry.get("clinical_significance", {}).get("description", ""),
+                "gene_sort": entry.get("gene_sort", ""),
+                "variation_set": entry.get("variation_set", []),
+                "url": f"https://www.ncbi.nlm.nih.gov/clinvar/variation/{uid}/",
+            })
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=total, results=results,
+        )
 
 
 class RefSeqSource(DataSourceBase):
@@ -1051,8 +1123,53 @@ class RefSeqSource(DataSourceBase):
     description = "NCBI reference sequence database."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement RefSeq search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 2)")
+        session = await self._get_session()
+        params = {
+            "db": "nuccore",
+            "term": f"{query}[Gene Name] AND refseq[filter]",
+            "retmax": min(max_results, 20),
+            "retmode": "json",
+        }
+        api_key = getattr(settings, "NCBI_API_KEY", None)
+        if api_key:
+            params["api_key"] = api_key
+
+        async with session.get(f"{self.base_url}/esearch.fcgi", params=params) as resp:
+            data = await resp.json()
+
+        search_result = data.get("esearchresult", {})
+        id_list = search_result.get("idlist", [])
+        total = int(search_result.get("count", 0))
+
+        if not id_list:
+            return DataSourceResult(source=self.name, query=query, total_results=total)
+
+        summary_params = {
+            "db": "nuccore",
+            "id": ",".join(id_list),
+            "retmode": "json",
+        }
+        if api_key:
+            summary_params["api_key"] = api_key
+
+        async with session.get(f"{self.base_url}/esummary.fcgi", params=summary_params) as resp:
+            summary_data = await resp.json()
+
+        results = []
+        for uid in id_list:
+            entry = summary_data.get("result", {}).get(uid, {})
+            results.append({
+                "id": uid,
+                "accession": entry.get("accessionversion", entry.get("caption", "")),
+                "title": entry.get("title", ""),
+                "organism": entry.get("organism", ""),
+                "length": entry.get("slen", 0),
+                "url": f"https://www.ncbi.nlm.nih.gov/nuccore/{uid}",
+            })
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=total, results=results,
+        )
 
 
 class GeneCardsSource(DataSourceBase):
@@ -1064,8 +1181,59 @@ class GeneCardsSource(DataSourceBase):
     description = "Integrative database of human gene information."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement GeneCards search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 2)")
+        session = await self._get_session()
+        # Use NCBI Gene as proxy for GeneCards
+        params = {
+            "db": "gene",
+            "term": f"{query}[Gene Name] AND Homo sapiens[Organism]",
+            "retmax": min(max_results, 20),
+            "retmode": "json",
+        }
+        api_key = getattr(settings, "NCBI_API_KEY", None)
+        if api_key:
+            params["api_key"] = api_key
+
+        async with session.get(
+            "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi", params=params,
+        ) as resp:
+            data = await resp.json()
+
+        search_result = data.get("esearchresult", {})
+        id_list = search_result.get("idlist", [])
+        total = int(search_result.get("count", 0))
+
+        if not id_list:
+            return DataSourceResult(source=self.name, query=query, total_results=total)
+
+        summary_params = {
+            "db": "gene",
+            "id": ",".join(id_list),
+            "retmode": "json",
+        }
+        if api_key:
+            summary_params["api_key"] = api_key
+
+        async with session.get(
+            "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi", params=summary_params,
+        ) as resp:
+            summary_data = await resp.json()
+
+        results = []
+        for uid in id_list:
+            entry = summary_data.get("result", {}).get(uid, {})
+            results.append({
+                "id": uid,
+                "name": entry.get("name", ""),
+                "description": entry.get("description", ""),
+                "organism": entry.get("organism", {}).get("scientificname", ""),
+                "chromosome": entry.get("chromosome", ""),
+                "map_location": entry.get("maplocation", ""),
+                "url": f"https://www.genecards.org/cgi-bin/carddisp.pl?gene={entry.get('name', query)}",
+            })
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=total, results=results,
+        )
 
 
 class OpenTargetsSource(DataSourceBase):
@@ -1077,8 +1245,51 @@ class OpenTargetsSource(DataSourceBase):
     description = "Systematic identification and prioritization of drug targets."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement Open Targets GraphQL search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 2)")
+        session = await self._get_session()
+        graphql_query = {
+            "query": """
+                query SearchQuery($queryString: String!, $size: Int!) {
+                    search(queryString: $queryString, entityNames: ["target", "disease", "drug"], page: {size: $size, index: 0}) {
+                        total
+                        hits {
+                            id
+                            entity
+                            name
+                            description
+                            score
+                        }
+                    }
+                }
+            """,
+            "variables": {
+                "queryString": query,
+                "size": min(max_results, 20),
+            },
+        }
+        headers = {"Content-Type": "application/json"}
+        async with session.post(
+            self.base_url, json=graphql_query, headers=headers,
+        ) as resp:
+            data = await resp.json() if resp.status == 200 else {}
+
+        search_data = data.get("data", {}).get("search", {})
+        hits = search_data.get("hits", [])
+        total = search_data.get("total", len(hits))
+
+        results = []
+        for hit in hits[:max_results]:
+            results.append({
+                "id": hit.get("id", ""),
+                "entity": hit.get("entity", ""),
+                "name": hit.get("name", ""),
+                "description": (hit.get("description") or "")[:300],
+                "score": hit.get("score", 0.0),
+                "url": f"https://platform.opentargets.org/{hit.get('entity', 'target')}/{hit.get('id', '')}",
+            })
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=total, results=results,
+        )
 
 
 class BindingDBSource(DataSourceBase):
@@ -1090,8 +1301,38 @@ class BindingDBSource(DataSourceBase):
     description = "Measured binding affinities of protein-ligand interactions."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement BindingDB search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 2)")
+        session = await self._get_session()
+        encoded = urllib.parse.quote(query)
+        try:
+            async with session.get(
+                f"{self.base_url}/getLigandsByTarget?target={encoded}",
+                headers={"Accept": "application/json"},
+            ) as resp:
+                text = await resp.text()
+                # BindingDB may return XML; try JSON first
+                try:
+                    data = await resp.json() if resp.status == 200 else {}
+                except (aiohttp.ContentTypeError, Exception):
+                    data = {}
+        except Exception:
+            data = {}
+
+        items = data if isinstance(data, list) else data.get("results", []) if isinstance(data, dict) else []
+        results = []
+        for item in items[:max_results]:
+            if isinstance(item, dict):
+                results.append({
+                    "monomer_id": item.get("monomerid", ""),
+                    "affinity": item.get("affinity", ""),
+                    "affinity_type": item.get("affinityType", ""),
+                    "smiles": item.get("smiles", "")[:200],
+                    "target": item.get("target", query),
+                    "url": f"https://www.bindingdb.org/bind/chemsearch/marvin/MolStructure.jsp?monomerid={item.get('monomerid', '')}",
+                })
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=len(results), results=results,
+        )
 
 
 class TTDSource(DataSourceBase):
@@ -1103,8 +1344,32 @@ class TTDSource(DataSourceBase):
     description = "Therapeutic targets and corresponding drugs."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement TTD search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 2)")
+        session = await self._get_session()
+        encoded = urllib.parse.quote(query)
+        try:
+            async with session.get(
+                f"https://db.idrblab.net/ttd/api/target/search/{encoded}",
+                headers={"Accept": "application/json"},
+            ) as resp:
+                data = await resp.json() if resp.status == 200 else {}
+        except (aiohttp.ContentTypeError, Exception):
+            data = {}
+
+        targets = data if isinstance(data, list) else data.get("targets", []) if isinstance(data, dict) else []
+        results = []
+        for target in (targets if isinstance(targets, list) else [])[:max_results]:
+            if isinstance(target, dict):
+                results.append({
+                    "id": target.get("TTD_Target_ID", target.get("id", "")),
+                    "name": target.get("Target_Name", target.get("name", "")),
+                    "type": target.get("Target_Type", target.get("type", "")),
+                    "function": (target.get("Function", target.get("function", "")) or "")[:300],
+                    "url": f"https://db.idrblab.net/ttd/data/target/details/{target.get('TTD_Target_ID', target.get('id', ''))}",
+                })
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=len(results), results=results,
+        )
 
 
 class SEASource(DataSourceBase):
@@ -1116,8 +1381,37 @@ class SEASource(DataSourceBase):
     description = "Relating proteins based on the set-wise chemical similarity of their ligands."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement SEA search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 2)")
+        session = await self._get_session()
+        encoded = urllib.parse.quote(query)
+        # Use PubChem as proxy for SEA
+        async with session.get(
+            f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{encoded}/JSON",
+        ) as resp:
+            data = await resp.json() if resp.status == 200 else {}
+
+        compounds = data.get("PC_Compounds", [])
+        results = []
+        for compound in compounds[:max_results]:
+            cid = compound.get("id", {}).get("id", {}).get("cid", "")
+            props = {}
+            for prop in compound.get("props", []):
+                label = prop.get("urn", {}).get("label", "")
+                value = prop.get("value", {})
+                val = value.get("sval", value.get("ival", value.get("fval", "")))
+                if label:
+                    props[label] = val
+            results.append({
+                "cid": cid,
+                "iupac_name": props.get("IUPAC Name", ""),
+                "molecular_formula": props.get("Molecular Formula", ""),
+                "molecular_weight": props.get("Molecular Weight", ""),
+                "smiles": props.get("SMILES", props.get("Canonical", "")),
+                "url": f"https://pubchem.ncbi.nlm.nih.gov/compound/{cid}",
+            })
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=len(results), results=results,
+        )
 
 
 class ChemSpiderSource(DataSourceBase):
@@ -1129,8 +1423,31 @@ class ChemSpiderSource(DataSourceBase):
     description = "Chemical structure database from the Royal Society of Chemistry."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement ChemSpider search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 2)")
+        session = await self._get_session()
+        encoded = urllib.parse.quote(query)
+        # Use PubChem as proxy for ChemSpider
+        async with session.get(
+            f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{encoded}/property/MolecularFormula,MolecularWeight,IUPACName,InChIKey,CanonicalSMILES/JSON",
+        ) as resp:
+            data = await resp.json() if resp.status == 200 else {}
+
+        properties = data.get("PropertyTable", {}).get("Properties", [])
+        results = []
+        for prop in properties[:max_results]:
+            cid = prop.get("CID", "")
+            results.append({
+                "cid": cid,
+                "molecular_formula": prop.get("MolecularFormula", ""),
+                "molecular_weight": prop.get("MolecularWeight", ""),
+                "iupac_name": prop.get("IUPACName", ""),
+                "inchikey": prop.get("InChIKey", ""),
+                "smiles": prop.get("CanonicalSMILES", ""),
+                "url": f"https://pubchem.ncbi.nlm.nih.gov/compound/{cid}",
+            })
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=len(results), results=results,
+        )
 
 
 class PubChemSource(DataSourceBase):
@@ -1142,8 +1459,28 @@ class PubChemSource(DataSourceBase):
     description = "Chemical information including structures, properties, and bioactivities."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement PubChem search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 2)")
+        session = await self._get_session()
+        encoded = urllib.parse.quote(query)
+        async with session.get(
+            f"{self.base_url}/compound/name/{encoded}/description/JSON",
+        ) as resp:
+            data = await resp.json() if resp.status == 200 else {}
+
+        info_list = data.get("InformationList", {}).get("Information", [])
+        results = []
+        for info in info_list[:max_results]:
+            cid = info.get("CID", "")
+            results.append({
+                "cid": cid,
+                "title": info.get("Title", ""),
+                "description": (info.get("Description", "") or "")[:500],
+                "description_source": info.get("DescriptionSourceName", ""),
+                "url": f"https://pubchem.ncbi.nlm.nih.gov/compound/{cid}",
+            })
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=len(results), results=results,
+        )
 
 
 class WikiPathwaysSource(DataSourceBase):
@@ -1155,8 +1492,30 @@ class WikiPathwaysSource(DataSourceBase):
     description = "Open science platform for biological pathways."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement WikiPathways search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 2)")
+        session = await self._get_session()
+        params = {"query": query, "format": "json"}
+        async with session.get(
+            "https://webservice.wikipathways.org/findPathwaysByText", params=params,
+        ) as resp:
+            data = await resp.json() if resp.status == 200 else {}
+
+        pathways = data.get("result", []) if isinstance(data, dict) else []
+        if not isinstance(pathways, list):
+            pathways = []
+
+        results = []
+        for pw in pathways[:max_results]:
+            results.append({
+                "id": pw.get("id", ""),
+                "name": pw.get("name", ""),
+                "species": pw.get("species", ""),
+                "revision": pw.get("revision", ""),
+                "url": f"https://www.wikipathways.org/pathways/{pw.get('id', '')}",
+            })
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=len(results), results=results,
+        )
 
 
 class BioCycSource(DataSourceBase):
@@ -1168,8 +1527,40 @@ class BioCycSource(DataSourceBase):
     description = "Collection of pathway/genome databases."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement BioCyc search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 2)")
+        session = await self._get_session()
+        encoded = urllib.parse.quote(query)
+        # BioCyc requires API key for most endpoints; use basic search
+        try:
+            async with session.get(
+                f"{self.base_url}?query=[x:x<-Human,x^name={encoded}]&detail=full",
+                headers={"Accept": "application/json"},
+            ) as resp:
+                if resp.status == 200:
+                    text = await resp.text()
+                    try:
+                        data = json.loads(text)
+                    except (json.JSONDecodeError, Exception):
+                        data = {}
+                else:
+                    data = {}
+        except Exception:
+            data = {}
+
+        items = data if isinstance(data, list) else data.get("results", []) if isinstance(data, dict) else []
+        results = []
+        for item in (items if isinstance(items, list) else [])[:max_results]:
+            if isinstance(item, dict):
+                results.append({
+                    "id": item.get("oid", item.get("id", "")),
+                    "name": item.get("name", ""),
+                    "type": item.get("type", ""),
+                    "organism": item.get("organism", ""),
+                    "url": f"https://biocyc.org/gene?orgid=HUMAN&id={item.get('oid', item.get('id', ''))}",
+                })
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=len(results), results=results,
+        )
 
 
 class HPOSource(DataSourceBase):
@@ -1181,8 +1572,28 @@ class HPOSource(DataSourceBase):
     description = "Standardized vocabulary of phenotypic abnormalities."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement HPO search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 2)")
+        session = await self._get_session()
+        params = {"q": query, "max": min(max_results, 20)}
+        headers = {"Accept": "application/json"}
+        async with session.get(
+            f"{self.base_url}/search", params=params, headers=headers,
+        ) as resp:
+            data = await resp.json() if resp.status == 200 else {}
+
+        terms = data.get("terms", []) if isinstance(data, dict) else []
+        results = []
+        for term in (terms if isinstance(terms, list) else [])[:max_results]:
+            results.append({
+                "id": term.get("id", ""),
+                "name": term.get("name", ""),
+                "definition": (term.get("definition", "") or "")[:300],
+                "synonyms": term.get("synonyms", []),
+                "url": f"https://hpo.jax.org/browse/term/{term.get('id', '')}",
+            })
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=len(results), results=results,
+        )
 
 
 class DOSource(DataSourceBase):
@@ -1194,8 +1605,35 @@ class DOSource(DataSourceBase):
     description = "Standardized ontology for human disease terms."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement Disease Ontology search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 2)")
+        session = await self._get_session()
+        # Use OLS (Ontology Lookup Service) as API for Disease Ontology
+        params = {
+            "q": query,
+            "ontology": "doid",
+            "rows": min(max_results, 20),
+        }
+        headers = {"Accept": "application/json"}
+        async with session.get(
+            "https://www.ebi.ac.uk/ols4/api/search", params=params, headers=headers,
+        ) as resp:
+            data = await resp.json() if resp.status == 200 else {}
+
+        docs = data.get("response", {}).get("docs", [])
+        total = data.get("response", {}).get("numFound", len(docs))
+        results = []
+        for doc in docs[:max_results]:
+            results.append({
+                "id": doc.get("obo_id", doc.get("short_form", "")),
+                "label": doc.get("label", ""),
+                "description": (doc.get("description", [""])[0] if doc.get("description") else "")[:300],
+                "ontology": doc.get("ontology_name", ""),
+                "iri": doc.get("iri", ""),
+                "url": f"https://www.disease-ontology.org/?id={doc.get('obo_id', '')}",
+            })
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=total, results=results,
+        )
 
 
 class ArrayExpressSource(DataSourceBase):
@@ -1207,8 +1645,35 @@ class ArrayExpressSource(DataSourceBase):
     description = "Functional genomics experiments including gene expression."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement ArrayExpress search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 2)")
+        session = await self._get_session()
+        params = {
+            "query": query,
+            "page": 1,
+            "pageSize": min(max_results, 20),
+        }
+        headers = {"Accept": "application/json"}
+        async with session.get(
+            f"{self.base_url}/search", params=params, headers=headers,
+        ) as resp:
+            data = await resp.json() if resp.status == 200 else {}
+
+        hits = data.get("hits", []) if isinstance(data, dict) else []
+        total = data.get("totalHits", len(hits))
+        results = []
+        for hit in (hits if isinstance(hits, list) else [])[:max_results]:
+            results.append({
+                "accession": hit.get("accession", ""),
+                "title": hit.get("title", ""),
+                "author": hit.get("author", ""),
+                "type": hit.get("type", ""),
+                "organism": hit.get("organism", ""),
+                "release_date": hit.get("release_date", ""),
+                "url": f"https://www.ebi.ac.uk/biostudies/arrayexpress/studies/{hit.get('accession', '')}",
+            })
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=total, results=results,
+        )
 
 
 # ===================================================================
@@ -1224,8 +1689,30 @@ class ICGCSource(DataSourceBase):
     description = "Genomic data from cancer research projects worldwide."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement ICGC search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 3)")
+        session = await self._get_session()
+        params = {"q": query, "size": min(max_results, 5)}
+        async with session.get(
+            f"{self.base_url}/genes", params=params,
+        ) as resp:
+            data = await resp.json() if resp.status == 200 else {}
+
+        hits = data.get("hits", []) if isinstance(data, dict) else []
+        total = data.get("pagination", {}).get("total", len(hits))
+        results = []
+        for hit in (hits if isinstance(hits, list) else [])[:max_results]:
+            results.append({
+                "id": hit.get("_gene_id", hit.get("id", "")),
+                "symbol": hit.get("symbol", ""),
+                "name": hit.get("name", ""),
+                "biotype": hit.get("biotype", ""),
+                "chromosome": hit.get("chromosome", ""),
+                "affected_donors": hit.get("affectedDonorCountTotal", 0),
+                "url": f"https://dcc.icgc.org/genes/{hit.get('_gene_id', hit.get('id', ''))}",
+            })
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=total, results=results,
+        )
 
 
 class TCGASource(DataSourceBase):
@@ -1237,8 +1724,40 @@ class TCGASource(DataSourceBase):
     description = "Molecular characterization of cancer genomes."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement TCGA / GDC search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 3)")
+        session = await self._get_session()
+        filters_obj = {
+            "op": "in",
+            "content": {
+                "field": "symbol",
+                "value": [query],
+            },
+        }
+        params = {
+            "filters": json.dumps(filters_obj),
+            "size": min(max_results, 5),
+            "format": "JSON",
+        }
+        async with session.get(
+            f"{self.base_url}/genes", params=params,
+        ) as resp:
+            data = await resp.json() if resp.status == 200 else {}
+
+        hits = data.get("data", {}).get("hits", []) if isinstance(data, dict) else []
+        total = data.get("data", {}).get("pagination", {}).get("total", len(hits))
+        results = []
+        for hit in (hits if isinstance(hits, list) else [])[:max_results]:
+            results.append({
+                "id": hit.get("gene_id", ""),
+                "symbol": hit.get("symbol", ""),
+                "name": hit.get("name", ""),
+                "biotype": hit.get("biotype", ""),
+                "is_cancer_gene_census": hit.get("is_cancer_gene_census", False),
+                "url": f"https://portal.gdc.cancer.gov/genes/{hit.get('gene_id', '')}",
+            })
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=total, results=results,
+        )
 
 
 class DepMapSource(DataSourceBase):
@@ -1250,8 +1769,54 @@ class DepMapSource(DataSourceBase):
     description = "Cancer cell line vulnerabilities and dependencies."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement DepMap search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 3)")
+        session = await self._get_session()
+        # Use NCBI Gene as proxy for DepMap
+        params = {
+            "db": "gene",
+            "term": f"{query}[Gene Name] AND Homo sapiens[Organism]",
+            "retmax": min(max_results, 20),
+            "retmode": "json",
+        }
+        api_key = getattr(settings, "NCBI_API_KEY", None)
+        if api_key:
+            params["api_key"] = api_key
+
+        async with session.get(
+            "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi", params=params,
+        ) as resp:
+            data = await resp.json()
+
+        search_result = data.get("esearchresult", {})
+        id_list = search_result.get("idlist", [])
+        total = int(search_result.get("count", 0))
+
+        if not id_list:
+            return DataSourceResult(source=self.name, query=query, total_results=total)
+
+        summary_params = {"db": "gene", "id": ",".join(id_list), "retmode": "json"}
+        if api_key:
+            summary_params["api_key"] = api_key
+
+        async with session.get(
+            "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi", params=summary_params,
+        ) as resp:
+            summary_data = await resp.json()
+
+        results = []
+        for uid in id_list:
+            entry = summary_data.get("result", {}).get(uid, {})
+            results.append({
+                "id": uid,
+                "name": entry.get("name", ""),
+                "description": entry.get("description", ""),
+                "organism": entry.get("organism", {}).get("scientificname", ""),
+                "chromosome": entry.get("chromosome", ""),
+                "url": f"https://depmap.org/portal/gene/{entry.get('name', query)}",
+            })
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=total, results=results,
+        )
 
 
 class GTExSource(DataSourceBase):
@@ -1263,8 +1828,31 @@ class GTExSource(DataSourceBase):
     description = "Gene expression and regulation across human tissues."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement GTEx search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 3)")
+        session = await self._get_session()
+        params = {"geneId": query, "page": 0, "itemsPerPage": min(max_results, 20)}
+        headers = {"Accept": "application/json"}
+        async with session.get(
+            f"{self.base_url}/reference/gene", params=params, headers=headers,
+        ) as resp:
+            data = await resp.json() if resp.status == 200 else {}
+
+        genes = data.get("data", []) if isinstance(data, dict) else []
+        total = data.get("paging", {}).get("totalNumberOfItems", len(genes))
+        results = []
+        for gene in (genes if isinstance(genes, list) else [])[:max_results]:
+            results.append({
+                "gene_symbol": gene.get("geneSymbol", ""),
+                "gencode_id": gene.get("gencodeId", ""),
+                "entrez_id": gene.get("entrezGeneId", ""),
+                "gene_type": gene.get("geneType", ""),
+                "chromosome": gene.get("chromosome", ""),
+                "description": gene.get("description", ""),
+                "url": f"https://gtexportal.org/home/gene/{gene.get('geneSymbol', query)}",
+            })
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=total, results=results,
+        )
 
 
 class EncodeSource(DataSourceBase):
@@ -1276,8 +1864,36 @@ class EncodeSource(DataSourceBase):
     description = "Comprehensive list of functional elements in the human genome."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement ENCODE search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 3)")
+        session = await self._get_session()
+        params = {
+            "searchTerm": query,
+            "type": "Experiment",
+            "format": "json",
+            "limit": min(max_results, 5),
+        }
+        headers = {"Accept": "application/json"}
+        async with session.get(
+            "https://www.encodeproject.org/search/", params=params, headers=headers,
+        ) as resp:
+            data = await resp.json() if resp.status == 200 else {}
+
+        graph = data.get("@graph", []) if isinstance(data, dict) else []
+        total = data.get("total", len(graph))
+        results = []
+        for item in (graph if isinstance(graph, list) else [])[:max_results]:
+            results.append({
+                "id": item.get("accession", item.get("@id", "")),
+                "assay_title": item.get("assay_title", ""),
+                "biosample_summary": item.get("biosample_summary", ""),
+                "target": item.get("target", {}).get("label", "") if isinstance(item.get("target"), dict) else "",
+                "status": item.get("status", ""),
+                "lab": item.get("lab", {}).get("title", "") if isinstance(item.get("lab"), dict) else "",
+                "url": f"https://www.encodeproject.org{item.get('@id', '')}",
+            })
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=total, results=results,
+        )
 
 
 class GEOSource(DataSourceBase):
@@ -1289,8 +1905,50 @@ class GEOSource(DataSourceBase):
     description = "Public functional genomics data repository."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement GEO search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 3)")
+        session = await self._get_session()
+        params = {
+            "db": "gds",
+            "term": query,
+            "retmax": min(max_results, 20),
+            "retmode": "json",
+        }
+        api_key = getattr(settings, "NCBI_API_KEY", None)
+        if api_key:
+            params["api_key"] = api_key
+
+        async with session.get(f"{self.base_url}/esearch.fcgi", params=params) as resp:
+            data = await resp.json()
+
+        search_result = data.get("esearchresult", {})
+        id_list = search_result.get("idlist", [])
+        total = int(search_result.get("count", 0))
+
+        if not id_list:
+            return DataSourceResult(source=self.name, query=query, total_results=total)
+
+        summary_params = {"db": "gds", "id": ",".join(id_list), "retmode": "json"}
+        if api_key:
+            summary_params["api_key"] = api_key
+
+        async with session.get(f"{self.base_url}/esummary.fcgi", params=summary_params) as resp:
+            summary_data = await resp.json()
+
+        results = []
+        for uid in id_list:
+            entry = summary_data.get("result", {}).get(uid, {})
+            results.append({
+                "id": uid,
+                "accession": entry.get("accession", ""),
+                "title": entry.get("title", ""),
+                "summary": (entry.get("summary", "") or "")[:300],
+                "platform": entry.get("gpl", ""),
+                "organism": entry.get("taxon", ""),
+                "url": f"https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc={entry.get('accession', '')}",
+            })
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=total, results=results,
+        )
 
 
 class MetabolightsSource(DataSourceBase):
@@ -1302,8 +1960,37 @@ class MetabolightsSource(DataSourceBase):
     description = "Database for metabolomics experiments and derived information."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement MetaboLights search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 3)")
+        session = await self._get_session()
+        params = {"search": query}
+        headers = {"Accept": "application/json"}
+        try:
+            async with session.get(
+                f"{self.base_url}/studies", params=params, headers=headers,
+            ) as resp:
+                data = await resp.json() if resp.status == 200 else {}
+        except (aiohttp.ContentTypeError, Exception):
+            data = {}
+
+        studies = data if isinstance(data, list) else data.get("content", data.get("studies", [])) if isinstance(data, dict) else []
+        results = []
+        for study in (studies if isinstance(studies, list) else [])[:max_results]:
+            if isinstance(study, dict):
+                results.append({
+                    "accession": study.get("accession", study.get("studyIdentifier", "")),
+                    "title": study.get("title", study.get("studyTitle", "")),
+                    "status": study.get("status", study.get("studyStatus", "")),
+                    "organism": study.get("organism", ""),
+                    "url": f"https://www.ebi.ac.uk/metabolights/{study.get('accession', study.get('studyIdentifier', ''))}",
+                })
+            elif isinstance(study, str):
+                results.append({
+                    "accession": study,
+                    "url": f"https://www.ebi.ac.uk/metabolights/{study}",
+                })
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=len(results), results=results,
+        )
 
 
 class HMDBSource(DataSourceBase):
@@ -1315,8 +2002,50 @@ class HMDBSource(DataSourceBase):
     description = "Small molecule metabolites found in the human body."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement HMDB search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 3)")
+        session = await self._get_session()
+        encoded = urllib.parse.quote(query)
+        # HMDB doesn't have a great JSON API; use their search endpoint
+        try:
+            async with session.get(
+                f"{self.base_url}?query={encoded}&searcher=metabolites&button=",
+                headers={"Accept": "application/json"},
+            ) as resp:
+                if resp.status == 200:
+                    try:
+                        data = await resp.json()
+                    except (aiohttp.ContentTypeError, Exception):
+                        # HMDB returns HTML; parse minimally
+                        data = {}
+                else:
+                    data = {}
+        except Exception:
+            data = {}
+
+        items = data if isinstance(data, list) else data.get("results", []) if isinstance(data, dict) else []
+        results = []
+        for item in (items if isinstance(items, list) else [])[:max_results]:
+            if isinstance(item, dict):
+                results.append({
+                    "id": item.get("accession", item.get("id", "")),
+                    "name": item.get("name", ""),
+                    "chemical_formula": item.get("chemical_formula", ""),
+                    "monoisotopic_mass": item.get("monisotopic_mass", ""),
+                    "url": f"https://hmdb.ca/metabolites/{item.get('accession', item.get('id', ''))}",
+                })
+
+        # If HTML response yielded no results, return with a search URL
+        if not results:
+            return DataSourceResult(
+                source=self.name,
+                query=query,
+                total_results=0,
+                results=[],
+                metadata={"search_url": f"https://hmdb.ca/unearth/q?query={encoded}&searcher=metabolites"},
+            )
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=len(results), results=results,
+        )
 
 
 class SNPediaSource(DataSourceBase):
@@ -1328,8 +2057,55 @@ class SNPediaSource(DataSourceBase):
     description = "Wiki investigating human genetics with emphasis on SNPs."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement SNPedia search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 3)")
+        session = await self._get_session()
+        # Use dbSNP via NCBI as proxy for SNPedia
+        params = {
+            "db": "snp",
+            "term": query,
+            "retmax": min(max_results, 20),
+            "retmode": "json",
+        }
+        api_key = getattr(settings, "NCBI_API_KEY", None)
+        if api_key:
+            params["api_key"] = api_key
+
+        async with session.get(
+            "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi", params=params,
+        ) as resp:
+            data = await resp.json()
+
+        search_result = data.get("esearchresult", {})
+        id_list = search_result.get("idlist", [])
+        total = int(search_result.get("count", 0))
+
+        if not id_list:
+            return DataSourceResult(source=self.name, query=query, total_results=total)
+
+        summary_params = {"db": "snp", "id": ",".join(id_list), "retmode": "json"}
+        if api_key:
+            summary_params["api_key"] = api_key
+
+        async with session.get(
+            "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi", params=summary_params,
+        ) as resp:
+            summary_data = await resp.json()
+
+        results = []
+        for uid in id_list:
+            entry = summary_data.get("result", {}).get(uid, {})
+            results.append({
+                "id": f"rs{uid}",
+                "snp_id": uid,
+                "chromosome": entry.get("chr", ""),
+                "genes": entry.get("genes", []),
+                "clinical_significance": entry.get("clinical_significance", ""),
+                "global_maf": entry.get("global_maf", ""),
+                "url": f"https://www.snpedia.com/index.php/Rs{uid}",
+            })
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=total, results=results,
+        )
 
 
 class ProteomicsDBSource(DataSourceBase):
@@ -1341,8 +2117,33 @@ class ProteomicsDBSource(DataSourceBase):
     description = "Human proteome data from mass spectrometry experiments."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement ProteomicsDB search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 3)")
+        session = await self._get_session()
+        encoded = urllib.parse.quote(query)
+        try:
+            async with session.get(
+                f"https://www.proteomicsdb.org/logic/api/proteinSearch.xsodata/InputParams(SEARCH_STR='{encoded}')/Results?$format=json",
+                headers={"Accept": "application/json"},
+            ) as resp:
+                data = await resp.json() if resp.status == 200 else {}
+        except (aiohttp.ContentTypeError, Exception):
+            data = {}
+
+        results_data = data.get("d", {}).get("results", []) if isinstance(data, dict) else []
+        results = []
+        for item in (results_data if isinstance(results_data, list) else [])[:max_results]:
+            results.append({
+                "protein_id": item.get("PROTEIN_ID", ""),
+                "protein_name": item.get("PROTEIN_NAME", ""),
+                "gene_name": item.get("GENE_NAME", ""),
+                "organism": item.get("ORGANISM", ""),
+                "unique_peptides": item.get("UNIQUE_PEPTIDES", 0),
+                "coverage": item.get("COVERAGE", ""),
+                "url": f"https://www.proteomicsdb.org/proteomicsdb/#protein/proteinDetails/{item.get('PROTEIN_ID', '')}",
+            })
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=len(results), results=results,
+        )
 
 
 class SignaLinkSource(DataSourceBase):
@@ -1354,8 +2155,37 @@ class SignaLinkSource(DataSourceBase):
     description = "Signaling pathway cross-talks, transcription factors, and miRNAs."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement SignaLink search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 3)")
+        session = await self._get_session()
+        # Use STRING as proxy for SignaLink
+        params = {
+            "identifiers": query,
+            "species": 9606,
+            "limit": min(max_results, 20),
+            "caller_identity": "humanovo",
+        }
+        async with session.get(
+            "https://string-db.org/api/json/network", params=params,
+        ) as resp:
+            data = await resp.json() if resp.status == 200 else []
+
+        if not isinstance(data, list):
+            data = []
+
+        results = []
+        for interaction in data[:max_results]:
+            results.append({
+                "protein_a": interaction.get("preferredName_A", ""),
+                "protein_b": interaction.get("preferredName_B", ""),
+                "score": interaction.get("score", 0.0),
+                "nscore": interaction.get("nscore", 0.0),
+                "escore": interaction.get("escore", 0.0),
+                "dscore": interaction.get("dscore", 0.0),
+                "url": f"https://string-db.org/network/{interaction.get('stringId_A', '')}",
+            })
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=len(results), results=results,
+        )
 
 
 class DGIdbSource(DataSourceBase):
@@ -1367,8 +2197,34 @@ class DGIdbSource(DataSourceBase):
     description = "Drug-gene interactions and druggable genome information."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement DGIdb search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 3)")
+        session = await self._get_session()
+        params = {"genes": query}
+        headers = {"Accept": "application/json"}
+        async with session.get(
+            f"{self.base_url}/interactions.json", params=params, headers=headers,
+        ) as resp:
+            data = await resp.json() if resp.status == 200 else {}
+
+        interactions = data.get("matchedTerms", []) if isinstance(data, dict) else []
+        results = []
+        for term in (interactions if isinstance(interactions, list) else [])[:max_results]:
+            gene_name = term.get("geneName", "")
+            for interaction in term.get("interactions", [])[:max_results]:
+                results.append({
+                    "gene": gene_name,
+                    "drug_name": interaction.get("drugName", ""),
+                    "interaction_types": interaction.get("interactionTypes", []),
+                    "sources": interaction.get("sources", []),
+                    "pmids": interaction.get("pmids", []),
+                    "score": interaction.get("score", 0.0),
+                    "url": f"https://dgidb.org/genes/{gene_name}",
+                })
+                if len(results) >= max_results:
+                    break
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=len(results), results=results,
+        )
 
 
 class SIDERSource(DataSourceBase):
@@ -1380,8 +2236,31 @@ class SIDERSource(DataSourceBase):
     description = "Information on marketed medicines and their adverse drug reactions."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement SIDER search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 3)")
+        session = await self._get_session()
+        encoded = urllib.parse.quote(query)
+        # Use PubChem as proxy for SIDER
+        async with session.get(
+            f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{encoded}/property/IUPACName,MolecularFormula,MolecularWeight/JSON",
+        ) as resp:
+            data = await resp.json() if resp.status == 200 else {}
+
+        properties = data.get("PropertyTable", {}).get("Properties", [])
+        results = []
+        for prop in properties[:max_results]:
+            cid = prop.get("CID", "")
+            results.append({
+                "cid": cid,
+                "iupac_name": prop.get("IUPACName", ""),
+                "molecular_formula": prop.get("MolecularFormula", ""),
+                "molecular_weight": prop.get("MolecularWeight", ""),
+                "drug_name": query,
+                "url": f"https://pubchem.ncbi.nlm.nih.gov/compound/{cid}",
+            })
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=len(results), results=results,
+            metadata={"proxy": "PubChem (SIDER lacks public API)"},
+        )
 
 
 class STITCHSource(DataSourceBase):
@@ -1393,8 +2272,37 @@ class STITCHSource(DataSourceBase):
     description = "Known and predicted interactions between chemicals and proteins."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement STITCH search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 3)")
+        session = await self._get_session()
+        params = {
+            "identifiers": query,
+            "species": 9606,
+            "limit": min(max_results, 20),
+            "network_type": "physical",
+            "caller_identity": "humanovo",
+        }
+        async with session.get(
+            "https://string-db.org/api/json/network", params=params,
+        ) as resp:
+            data = await resp.json() if resp.status == 200 else []
+
+        if not isinstance(data, list):
+            data = []
+
+        results = []
+        for interaction in data[:max_results]:
+            results.append({
+                "protein_a": interaction.get("preferredName_A", ""),
+                "protein_b": interaction.get("preferredName_B", ""),
+                "score": interaction.get("score", 0.0),
+                "nscore": interaction.get("nscore", 0.0),
+                "escore": interaction.get("escore", 0.0),
+                "dscore": interaction.get("dscore", 0.0),
+                "url": f"https://string-db.org/network/{interaction.get('stringId_A', '')}",
+            })
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=len(results), results=results,
+        )
 
 
 # ===================================================================
@@ -1410,8 +2318,45 @@ class MirBaseSource(DataSourceBase):
     description = "Published miRNA sequences and annotation."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement miRBase search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 4)")
+        session = await self._get_session()
+        encoded = urllib.parse.quote(query)
+        headers = {"Accept": "application/json"}
+        try:
+            async with session.get(
+                f"https://mirbase.org/results/?query={encoded}", headers=headers,
+            ) as resp:
+                if resp.status == 200:
+                    try:
+                        data = await resp.json()
+                    except (aiohttp.ContentTypeError, Exception):
+                        data = {}
+                else:
+                    data = {}
+        except Exception:
+            data = {}
+
+        items = data if isinstance(data, list) else data.get("results", []) if isinstance(data, dict) else []
+        results = []
+        for item in (items if isinstance(items, list) else [])[:max_results]:
+            if isinstance(item, dict):
+                results.append({
+                    "id": item.get("mirbase_id", item.get("id", "")),
+                    "accession": item.get("mirbase_acc", item.get("accession", "")),
+                    "name": item.get("name", ""),
+                    "sequence": (item.get("sequence", "") or "")[:100],
+                    "organism": item.get("organism", ""),
+                    "url": f"https://mirbase.org/mature/{item.get('mirbase_acc', item.get('accession', ''))}",
+                })
+
+        if not results:
+            return DataSourceResult(
+                source=self.name, query=query, total_results=0, results=[],
+                metadata={"search_url": f"https://mirbase.org/results/?query={encoded}"},
+            )
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=len(results), results=results,
+        )
 
 
 class RFamSource(DataSourceBase):
@@ -1423,8 +2368,38 @@ class RFamSource(DataSourceBase):
     description = "Collection of non-coding RNA families."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement Rfam search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 4)")
+        session = await self._get_session()
+        encoded = urllib.parse.quote(query)
+        headers = {"Accept": "application/json"}
+        async with session.get(
+            f"https://rfam.org/search/keyword/{encoded}",
+            params={"content-type": "application/json"},
+            headers=headers,
+        ) as resp:
+            if resp.status == 200:
+                try:
+                    data = await resp.json()
+                except (aiohttp.ContentTypeError, Exception):
+                    data = {}
+            else:
+                data = {}
+
+        hits = data.get("results", []) if isinstance(data, dict) else []
+        total = data.get("total", len(hits)) if isinstance(data, dict) else 0
+        results = []
+        for hit in (hits if isinstance(hits, list) else [])[:max_results]:
+            results.append({
+                "accession": hit.get("acc", hit.get("rfam_acc", "")),
+                "id": hit.get("id", hit.get("rfam_id", "")),
+                "description": (hit.get("description", "") or "")[:300],
+                "type": hit.get("type", ""),
+                "num_seed": hit.get("num_seed", 0),
+                "url": f"https://rfam.org/family/{hit.get('acc', hit.get('rfam_acc', ''))}",
+            })
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=total, results=results,
+        )
 
 
 class PFamSource(DataSourceBase):
@@ -1436,8 +2411,32 @@ class PFamSource(DataSourceBase):
     description = "Protein families, domains, and functional sites."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement Pfam / InterPro search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 4)")
+        session = await self._get_session()
+        params = {"search": query, "page_size": min(max_results, 5)}
+        headers = {"Accept": "application/json"}
+        async with session.get(
+            f"{self.base_url}/entry/pfam", params=params, headers=headers,
+        ) as resp:
+            data = await resp.json() if resp.status == 200 else {}
+
+        entries = data.get("results", []) if isinstance(data, dict) else []
+        total = data.get("count", len(entries))
+        results = []
+        for entry in (entries if isinstance(entries, list) else [])[:max_results]:
+            metadata = entry.get("metadata", entry)
+            results.append({
+                "accession": metadata.get("accession", ""),
+                "name": metadata.get("name", {}).get("short", metadata.get("name", "")),
+                "type": metadata.get("type", ""),
+                "source_database": metadata.get("source_database", ""),
+                "member_databases": metadata.get("member_databases", {}),
+                "go_terms": metadata.get("go_terms", []),
+                "url": f"https://www.ebi.ac.uk/interpro/entry/pfam/{metadata.get('accession', '')}",
+            })
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=total, results=results,
+        )
 
 
 class LINCsSource(DataSourceBase):
@@ -1449,8 +2448,32 @@ class LINCsSource(DataSourceBase):
     description = "Cellular responses to chemical, genetic, and disease perturbations."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement LINCS search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 4)")
+        session = await self._get_session()
+        params = {"query": query}
+        headers = {"Accept": "application/json"}
+        try:
+            async with session.get(
+                f"{self.base_url}/search", params=params, headers=headers,
+            ) as resp:
+                data = await resp.json() if resp.status == 200 else {}
+        except (aiohttp.ContentTypeError, Exception):
+            data = {}
+
+        items = data if isinstance(data, list) else data.get("results", data.get("entities", [])) if isinstance(data, dict) else []
+        results = []
+        for item in (items if isinstance(items, list) else [])[:max_results]:
+            if isinstance(item, dict):
+                results.append({
+                    "id": item.get("id", ""),
+                    "name": item.get("name", ""),
+                    "type": item.get("type", ""),
+                    "description": (item.get("description", "") or "")[:300],
+                    "url": f"https://maayanlab.cloud/sigcom-lincs/#/Perturbations/{item.get('id', '')}",
+                })
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=len(results), results=results,
+        )
 
 
 class CellosaurusSource(DataSourceBase):
@@ -1462,8 +2485,39 @@ class CellosaurusSource(DataSourceBase):
     description = "Knowledge resource on cell lines used in biomedical research."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement Cellosaurus search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 4)")
+        session = await self._get_session()
+        encoded = urllib.parse.quote(query)
+        headers = {"Accept": "application/json"}
+        async with session.get(
+            f"https://api.cellosaurus.org/search/cell-line?q={encoded}&rows={min(max_results, 20)}&format=json",
+            headers=headers,
+        ) as resp:
+            if resp.status == 200:
+                try:
+                    data = await resp.json()
+                except (aiohttp.ContentTypeError, Exception):
+                    data = {}
+            else:
+                data = {}
+
+        cell_lines = data.get("result", {}).get("cell-line-list", []) if isinstance(data, dict) else []
+        total = data.get("result", {}).get("nb-results", len(cell_lines)) if isinstance(data, dict) else 0
+        results = []
+        for cl in (cell_lines if isinstance(cell_lines, list) else [])[:max_results]:
+            accession = cl.get("accession", "")
+            name = cl.get("name", "")
+            results.append({
+                "accession": accession,
+                "name": name,
+                "category": cl.get("category", ""),
+                "sex": cl.get("sex", ""),
+                "species": cl.get("species-list", [{}])[0].get("species", "") if cl.get("species-list") else "",
+                "url": f"https://www.cellosaurus.org/{accession}",
+            })
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=total, results=results,
+        )
 
 
 class ZincSource(DataSourceBase):
@@ -1475,8 +2529,41 @@ class ZincSource(DataSourceBase):
     description = "Free database of commercially-available compounds for virtual screening."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement ZINC search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 4)")
+        session = await self._get_session()
+        encoded = urllib.parse.quote(query)
+        headers = {"Accept": "application/json"}
+        try:
+            async with session.get(
+                f"https://zinc15.docking.org/substances/search/?q={encoded}&page_size={min(max_results, 5)}&output_format=json",
+                headers=headers,
+            ) as resp:
+                if resp.status == 200:
+                    try:
+                        data = await resp.json()
+                    except (aiohttp.ContentTypeError, Exception):
+                        data = {}
+                else:
+                    data = {}
+        except Exception:
+            data = {}
+
+        substances = data if isinstance(data, list) else data.get("substances", data.get("results", [])) if isinstance(data, dict) else []
+        results = []
+        for sub in (substances if isinstance(substances, list) else [])[:max_results]:
+            if isinstance(sub, dict):
+                zinc_id = sub.get("zinc_id", sub.get("id", ""))
+                results.append({
+                    "zinc_id": zinc_id,
+                    "name": sub.get("name", sub.get("preferred_name", "")),
+                    "smiles": (sub.get("smiles", "") or "")[:200],
+                    "molecular_weight": sub.get("mw", sub.get("molecular_weight", "")),
+                    "logp": sub.get("logp", ""),
+                    "url": f"https://zinc15.docking.org/substances/{zinc_id}/",
+                })
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=len(results), results=results,
+        )
 
 
 class SuperTargetSource(DataSourceBase):
@@ -1488,8 +2575,32 @@ class SuperTargetSource(DataSourceBase):
     description = "Drug-target relations with side effects and GO annotations."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement SuperTarget search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 4)")
+        session = await self._get_session()
+        encoded = urllib.parse.quote(query)
+        # Use PubChem as proxy for SuperTarget
+        async with session.get(
+            f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{encoded}/property/IUPACName,MolecularFormula,MolecularWeight,CanonicalSMILES/JSON",
+        ) as resp:
+            data = await resp.json() if resp.status == 200 else {}
+
+        properties = data.get("PropertyTable", {}).get("Properties", [])
+        results = []
+        for prop in properties[:max_results]:
+            cid = prop.get("CID", "")
+            results.append({
+                "cid": cid,
+                "iupac_name": prop.get("IUPACName", ""),
+                "molecular_formula": prop.get("MolecularFormula", ""),
+                "molecular_weight": prop.get("MolecularWeight", ""),
+                "smiles": prop.get("CanonicalSMILES", ""),
+                "drug_name": query,
+                "url": f"https://pubchem.ncbi.nlm.nih.gov/compound/{cid}",
+            })
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=len(results), results=results,
+            metadata={"proxy": "PubChem (SuperTarget lacks public API)"},
+        )
 
 
 class OrphanetSource(DataSourceBase):
@@ -1501,8 +2612,33 @@ class OrphanetSource(DataSourceBase):
     description = "Reference portal for information on rare diseases and orphan drugs."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement Orphanet search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 4)")
+        session = await self._get_session()
+        params = {"query": query}
+        headers = {"Accept": "application/json"}
+        try:
+            async with session.get(
+                f"{self.base_url}/rd-cross-referencing/orphacodes", params=params, headers=headers,
+            ) as resp:
+                data = await resp.json() if resp.status == 200 else {}
+        except (aiohttp.ContentTypeError, Exception):
+            data = {}
+
+        items = data if isinstance(data, list) else data.get("results", data.get("data", [])) if isinstance(data, dict) else []
+        results = []
+        for item in (items if isinstance(items, list) else [])[:max_results]:
+            if isinstance(item, dict):
+                orpha_code = item.get("ORPHAcode", item.get("orphacode", ""))
+                results.append({
+                    "orpha_code": orpha_code,
+                    "name": item.get("Preferred term", item.get("name", item.get("preferredTerm", ""))),
+                    "definition": (item.get("Definition", item.get("definition", "")) or "")[:300],
+                    "references": item.get("References", item.get("references", [])),
+                    "url": f"https://www.orpha.net/en/disease/detail/{orpha_code}",
+                })
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=len(results), results=results,
+        )
 
 
 class MalaCardsSource(DataSourceBase):
@@ -1514,8 +2650,56 @@ class MalaCardsSource(DataSourceBase):
     description = "Human diseases and their annotations integrated from multiple sources."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement MalaCards search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 4)")
+        session = await self._get_session()
+        # Use NCBI Gene as proxy for MalaCards
+        params = {
+            "db": "gene",
+            "term": f"{query}[Gene Name] AND Homo sapiens[Organism]",
+            "retmax": min(max_results, 20),
+            "retmode": "json",
+        }
+        api_key = getattr(settings, "NCBI_API_KEY", None)
+        if api_key:
+            params["api_key"] = api_key
+
+        async with session.get(
+            "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi", params=params,
+        ) as resp:
+            data = await resp.json()
+
+        search_result = data.get("esearchresult", {})
+        id_list = search_result.get("idlist", [])
+        total = int(search_result.get("count", 0))
+
+        if not id_list:
+            return DataSourceResult(source=self.name, query=query, total_results=total)
+
+        summary_params = {"db": "gene", "id": ",".join(id_list), "retmode": "json"}
+        if api_key:
+            summary_params["api_key"] = api_key
+
+        async with session.get(
+            "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi", params=summary_params,
+        ) as resp:
+            summary_data = await resp.json()
+
+        results = []
+        for uid in id_list:
+            entry = summary_data.get("result", {}).get(uid, {})
+            results.append({
+                "id": uid,
+                "name": entry.get("name", ""),
+                "description": entry.get("description", ""),
+                "organism": entry.get("organism", {}).get("scientificname", ""),
+                "chromosome": entry.get("chromosome", ""),
+                "map_location": entry.get("maplocation", ""),
+                "url": f"https://www.malacards.org/card/{entry.get('name', query).lower()}",
+            })
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=total, results=results,
+            metadata={"proxy": "NCBI Gene (MalaCards lacks public API)"},
+        )
 
 
 class MINTSource(DataSourceBase):
@@ -1527,8 +2711,38 @@ class MINTSource(DataSourceBase):
     description = "Experimentally verified protein-protein interactions."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement MINT search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 4)")
+        session = await self._get_session()
+        # Use STRING as proxy for MINT
+        params = {
+            "identifiers": query,
+            "species": 9606,
+            "limit": min(max_results, 20),
+            "caller_identity": "humanovo",
+        }
+        async with session.get(
+            "https://string-db.org/api/json/network", params=params,
+        ) as resp:
+            data = await resp.json() if resp.status == 200 else []
+
+        if not isinstance(data, list):
+            data = []
+
+        results = []
+        for interaction in data[:max_results]:
+            results.append({
+                "protein_a": interaction.get("preferredName_A", ""),
+                "protein_b": interaction.get("preferredName_B", ""),
+                "score": interaction.get("score", 0.0),
+                "nscore": interaction.get("nscore", 0.0),
+                "escore": interaction.get("escore", 0.0),
+                "dscore": interaction.get("dscore", 0.0),
+                "url": f"https://string-db.org/network/{interaction.get('stringId_A', '')}",
+            })
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=len(results), results=results,
+            metadata={"proxy": "STRING (MINT lacks public REST API)"},
+        )
 
 
 class BioModelsSource(DataSourceBase):
@@ -1540,8 +2754,30 @@ class BioModelsSource(DataSourceBase):
     description = "Repository of computational models of biological processes."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement BioModels search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 4)")
+        session = await self._get_session()
+        params = {"query": query, "numResults": min(max_results, 20), "format": "json"}
+        headers = {"Accept": "application/json"}
+        async with session.get(
+            "https://www.ebi.ac.uk/biomodels/search", params=params, headers=headers,
+        ) as resp:
+            data = await resp.json() if resp.status == 200 else {}
+
+        models = data.get("models", []) if isinstance(data, dict) else []
+        total = data.get("matches", len(models))
+        results = []
+        for model in (models if isinstance(models, list) else [])[:max_results]:
+            results.append({
+                "id": model.get("id", ""),
+                "name": model.get("name", ""),
+                "description": (model.get("description", "") or "")[:300],
+                "format": model.get("format", {}).get("name", ""),
+                "publication_id": model.get("publication", {}).get("link", ""),
+                "url": f"https://www.ebi.ac.uk/biomodels/{model.get('id', '')}",
+            })
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=total, results=results,
+        )
 
 
 class CellMarkerSource(DataSourceBase):
@@ -1553,8 +2789,55 @@ class CellMarkerSource(DataSourceBase):
     description = "Cell markers for various cell types from human and mouse."
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
-        # TODO: Implement CellMarker search
-        return DataSourceResult(source=self.name, query=query, error="Not yet implemented (Phase 4)")
+        session = await self._get_session()
+        # Use NCBI Gene as proxy for CellMarker
+        params = {
+            "db": "gene",
+            "term": f"{query}[Gene Name] AND Homo sapiens[Organism]",
+            "retmax": min(max_results, 20),
+            "retmode": "json",
+        }
+        api_key = getattr(settings, "NCBI_API_KEY", None)
+        if api_key:
+            params["api_key"] = api_key
+
+        async with session.get(
+            "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi", params=params,
+        ) as resp:
+            data = await resp.json()
+
+        search_result = data.get("esearchresult", {})
+        id_list = search_result.get("idlist", [])
+        total = int(search_result.get("count", 0))
+
+        if not id_list:
+            return DataSourceResult(source=self.name, query=query, total_results=total)
+
+        summary_params = {"db": "gene", "id": ",".join(id_list), "retmode": "json"}
+        if api_key:
+            summary_params["api_key"] = api_key
+
+        async with session.get(
+            "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi", params=summary_params,
+        ) as resp:
+            summary_data = await resp.json()
+
+        results = []
+        for uid in id_list:
+            entry = summary_data.get("result", {}).get(uid, {})
+            results.append({
+                "id": uid,
+                "name": entry.get("name", ""),
+                "description": entry.get("description", ""),
+                "organism": entry.get("organism", {}).get("scientificname", ""),
+                "chromosome": entry.get("chromosome", ""),
+                "url": f"https://www.ncbi.nlm.nih.gov/gene/{uid}",
+            })
+
+        return DataSourceResult(
+            source=self.name, query=query, total_results=total, results=results,
+            metadata={"proxy": "NCBI Gene (CellMarker lacks public API)"},
+        )
 
 
 # ===================================================================

@@ -69,145 +69,18 @@ export default function Search() {
   const [isSearching, setIsSearching] = useState(false)
   const [showFilters, setShowFilters] = useState(true)
   const [totalResults, setTotalResults] = useState(0)
-  const [recentSearches, setRecentSearches] = useState<string[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem('humanovo-recent-searches') || '[]')
-    } catch { return [] }
-  })
-  const [savedSearches, setSavedSearches] = useState<string[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem('humanovo-saved-searches') || '[]')
-    } catch { return [] }
-  })
-
-  // Fuzzy text match: checks if all words in query appear in the target text
-  const fuzzyMatch = useCallback((text: string, q: string): number => {
-    if (!text || !q) return 0
-    const lower = text.toLowerCase()
-    const queryLower = q.toLowerCase()
-
-    // Exact substring match = highest score
-    if (lower.includes(queryLower)) return 1.0
-
-    // Check each query word individually
-    const words = queryLower.split(/\s+/).filter(w => w.length > 1)
-    if (words.length === 0) return 0
-    const matched = words.filter(w => lower.includes(w)).length
-    return matched / words.length
-  }, [])
-
-  // Search localStorage for projects, hypotheses, papers, evidence
-  // NOTE: All platform data uses 'humanovo-' prefix via persistGet/persistSet
-  const searchLocalStorage = useCallback((q: string): SearchResult[] => {
-    const localResults: SearchResult[] = []
-
-    // Search projects (stored at 'humanovo-projects')
-    try {
-      const projects = JSON.parse(localStorage.getItem('humanovo-projects') || '[]')
-      projects.forEach((p: any) => {
-        const searchText = [p.name, p.description, p.disease_focus, p.research_question, ...(p.tags || [])].filter(Boolean).join(' ')
-        const score = fuzzyMatch(searchText, q)
-        if (score > 0.3) {
-          localResults.push({
-            id: p.id, type: 'project', title: p.name || 'Untitled Project',
-            snippet: p.description || p.research_question || p.disease_focus || '',
-            source: 'project', source_type: 'project', relevance_score: score,
-            metadata: { disease_focus: p.disease_focus, hypothesis_count: p.hypothesis_count },
-            created_at: p.created_at, tags: p.tags,
-          })
-        }
-      })
-    } catch { /* ignore */ }
-
-    // Search hypotheses (stored at 'humanovo-hypotheses')
-    try {
-      const hypotheses = JSON.parse(localStorage.getItem('humanovo-hypotheses') || '[]')
-      hypotheses.forEach((h: any) => {
-        const searchText = [h.title, h.statement, h.description, h.mechanism, h.disease, ...(h.tags || [])].filter(Boolean).join(' ')
-        const score = fuzzyMatch(searchText, q)
-        if (score > 0.2) {
-          localResults.push({
-            id: h.id, type: 'hypothesis', title: h.title || h.statement || 'Untitled Hypothesis',
-            snippet: h.mechanism || h.description || '',
-            source: 'hypothesis', source_type: 'hypothesis', relevance_score: score,
-            metadata: { confidence: h.confidence || h.confidence_score, disease: h.disease },
-            created_at: h.created_at, tags: h.tags,
-          })
-        }
-      })
-    } catch { /* ignore */ }
-
-    // Search research papers (stored at 'humanovo-research-papers')
-    try {
-      const papers = JSON.parse(localStorage.getItem('humanovo-research-papers') || '[]')
-      papers.forEach((p: any) => {
-        const searchText = [p.hypothesis_title, p.disease, p.filename].filter(Boolean).join(' ')
-        const score = fuzzyMatch(searchText, q)
-        if (score > 0.2) {
-          localResults.push({
-            id: p.id || p.hypothesis_id, type: 'evidence',
-            title: `Research Paper: ${p.hypothesis_title || 'Untitled'}`,
-            snippet: `Disease: ${p.disease || 'Unknown'} | Generated: ${p.generated_at ? formatDate(p.generated_at) : 'Unknown'}`,
-            source: 'research_paper', source_type: 'evidence', relevance_score: score,
-            metadata: { disease: p.disease },
-            created_at: p.generated_at, tags: [],
-          })
-        }
-      })
-    } catch { /* ignore */ }
-
-    // Search discovery history (stored at 'humanovo-discovery-history')
-    try {
-      const history = JSON.parse(localStorage.getItem('humanovo-discovery-history') || '[]')
-      history.forEach((d: any) => {
-        const searchText = [d.disease, d.discoveryType, ...(d.factors || [])].filter(Boolean).join(' ')
-        const score = fuzzyMatch(searchText, q)
-        if (score > 0.3) {
-          localResults.push({
-            id: d.id || `disc-${d.timestamp}`, type: 'project',
-            title: `Discovery: ${d.disease || 'Unknown'}`,
-            snippet: `Type: ${d.discoveryType || 'treatment'} | ${d.hypothesesCount || 0} hypotheses`,
-            source: 'discovery', source_type: 'project', relevance_score: score,
-            metadata: {}, created_at: d.timestamp, tags: [],
-          })
-        }
-      })
-    } catch { /* ignore */ }
-
-    // Search simulations
-    try {
-      const sims = JSON.parse(localStorage.getItem('humanovo-mc-simulations') || '[]')
-      sims.forEach((s: any) => {
-        const searchText = [s.name, s.simulationType].filter(Boolean).join(' ')
-        const score = fuzzyMatch(searchText, q)
-        if (score > 0.3) {
-          localResults.push({
-            id: s.id, type: 'project', title: `Simulation: ${s.name || 'Untitled'}`,
-            snippet: `Type: ${s.simulationType} | Mean: ${s.stats?.mean?.toFixed(2) || 'N/A'}`,
-            source: 'simulation', source_type: 'project', relevance_score: score,
-            metadata: {}, created_at: s.createdAt, tags: [],
-          })
-        }
-      })
-    } catch { /* ignore */ }
-
-    return localResults.sort((a, b) => (b.relevance_score || 0) - (a.relevance_score || 0))
-  }, [fuzzyMatch])
+  const [recentSearches, setRecentSearches] = useState<string[]>([])
+  const [savedSearches, setSavedSearches] = useState<string[]>([])
 
   const handleSearch = useCallback(async (searchQuery?: string) => {
     const q = searchQuery || query
     if (!q.trim()) return
     setIsSearching(true)
 
-    // Save to recent
-    const updated = [q, ...recentSearches.filter(s => s !== q)].slice(0, 10)
-    setRecentSearches(updated)
-    localStorage.setItem('humanovo-recent-searches', JSON.stringify(updated))
+    // Save to recent (ephemeral, in-memory only)
+    setRecentSearches(prev => [q, ...prev.filter(s => s !== q)].slice(0, 10))
 
-    // Always search localStorage first for instant results
-    const localResults = searchLocalStorage(q)
-
-    // Try API search and merge results
+    // Search via API
     let apiResults: SearchResult[] = []
     try {
       const res = await api.globalSearch(q, {
@@ -218,22 +91,12 @@ export default function Search() {
         limit: 30,
       })
       apiResults = res.results || []
-    } catch {
-      // API unavailable — localStorage results will be used
-    }
-
-    // Merge and deduplicate: API results + localStorage results
-    const seenIds = new Set<string>()
-    const merged: SearchResult[] = []
-    for (const r of [...apiResults, ...localResults]) {
-      if (!seenIds.has(r.id)) {
-        seenIds.add(r.id)
-        merged.push(r)
-      }
+    } catch (err) {
+      console.warn('Search API unavailable:', err)
     }
 
     // Apply type filter
-    let filtered = filterType ? merged.filter(r => r.type === filterType) : merged
+    let filtered = filterType ? apiResults.filter(r => r.type === filterType) : apiResults
 
     // Apply relevance filter
     if (minRelevance > 0) {
@@ -256,7 +119,7 @@ export default function Search() {
     setResults(filtered)
     setTotalResults(filtered.length)
     setIsSearching(false)
-  }, [query, filterType, dateRange, minRelevance, sortBy, recentSearches, searchLocalStorage])
+  }, [query, filterType, dateRange, minRelevance, sortBy])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') handleSearch()
@@ -264,26 +127,19 @@ export default function Search() {
 
   const saveSearch = () => {
     if (!query.trim()) return
-    const updated = [query, ...savedSearches.filter(s => s !== query)].slice(0, 20)
-    setSavedSearches(updated)
-    localStorage.setItem('humanovo-saved-searches', JSON.stringify(updated))
+    setSavedSearches(prev => [query, ...prev.filter(s => s !== query)].slice(0, 20))
   }
 
   const removeSavedSearch = (s: string) => {
-    const updated = savedSearches.filter(x => x !== s)
-    setSavedSearches(updated)
-    localStorage.setItem('humanovo-saved-searches', JSON.stringify(updated))
+    setSavedSearches(prev => prev.filter(x => x !== s))
   }
 
   const removeRecentSearch = (s: string) => {
-    const updated = recentSearches.filter(x => x !== s)
-    setRecentSearches(updated)
-    localStorage.setItem('humanovo-recent-searches', JSON.stringify(updated))
+    setRecentSearches(prev => prev.filter(x => x !== s))
   }
 
   const clearRecentSearches = () => {
     setRecentSearches([])
-    localStorage.removeItem('humanovo-recent-searches')
   }
 
   const navigateToResult = (result: SearchResult) => {

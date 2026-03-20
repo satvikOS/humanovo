@@ -24,7 +24,7 @@ import { Link } from 'react-router-dom'
 import { BarChart, Bar, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import api from '../services/api'
 import type { OrchestratorStatus, DiscoveryConfig } from '../services/api'
-import { persistSet, persistGet, logActivity, formatDate } from '../utils/persistence'
+import { logActivity, formatDate } from '../utils/persistence'
 
 // Types
 interface TranslationalPhaseDetail {
@@ -173,10 +173,8 @@ export default function Agents() {
   const [factorCategory, setFactorCategory] = useState<ExternalFactor['category']>('nutrient')
   const [factorInteraction, setFactorInteraction] = useState('')
 
-  // History
-  const [discoveryHistory, setDiscoveryHistory] = useState<DiscoveryRun[]>(() => {
-    try { return JSON.parse(localStorage.getItem('humanovo-discovery-history') || '[]') } catch { return [] }
-  })
+  // History (ephemeral — loaded from API when projectId is available)
+  const [discoveryHistory, setDiscoveryHistory] = useState<DiscoveryRun[]>([])
 
   // Project tracking (auto-created by backend)
   const [projectId, setProjectId] = useState<string>('')
@@ -212,51 +210,12 @@ export default function Agents() {
         setConfig(prev => ({ ...prev, disease: (res as any).disease, discovery_type: (res as any).discovery_type || prev.discovery_type }))
       }
 
-      // Track auto-created project and sync to localStorage for ProjectDetail
+      // Track auto-created project (backend handles persistence)
       if ((res as any).project_id && (res as any).project_id !== 'discovery') {
         const pid = (res as any).project_id
         const pname = (res as any).project_name || ''
         setProjectId(pid)
         setProjectName(pname)
-
-        // Save project to localStorage so ProjectDetail can find it
-        // But never re-create a project the user has explicitly deleted
-        const deletedProjectIds = persistGet<string[]>('deleted-project-ids', [])
-        const existingProjects = persistGet<any[]>('projects', [])
-        if (!existingProjects.find((p: any) => p.id === pid) && !deletedProjectIds.includes(pid)) {
-          const projectEntry = {
-            id: pid,
-            name: pname,
-            description: `Auto-generated discovery project for ${(res as any).disease || config.disease}`,
-            disease_focus: (res as any).disease || config.disease,
-            research_question: `${config.discovery_type?.replace('_', ' ')} discovery for ${(res as any).disease || config.disease}`,
-            tags: ['discovery', 'auto-generated'],
-            status: state === 'completed' ? 'completed' : 'active',
-            hypothesis_count: (res as any).top_hypotheses?.length || 0,
-            evidence_count: 0,
-            simulation_count: 0,
-            hypotheses: [],
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          }
-          persistSet('projects', [...existingProjects, projectEntry])
-          logActivity({
-            type: 'project', action: 'created',
-            title: `Project auto-created: ${pname}`,
-            project: pname,
-          })
-        } else {
-          // Update hypothesis count and status
-          const updated = existingProjects.map((p: any) =>
-            p.id === pid ? {
-              ...p,
-              hypothesis_count: (res as any).top_hypotheses?.length || p.hypothesis_count,
-              status: state === 'completed' ? 'completed' : p.status,
-              updated_at: new Date().toISOString(),
-            } : p
-          )
-          persistSet('projects', updated)
-        }
       }
 
       // Merge hypotheses only during active discovery, not from stale completed state
@@ -268,27 +227,14 @@ export default function Agents() {
           if (!incoming.length) return prev
           const merged = [...incoming, ...prev].sort((a: Hypothesis, b: Hypothesis) => b.confidence - a.confidence).slice(0, 100)
 
-          // Save hypotheses to localStorage with project_id for ProjectDetail
-          if (pid && pid !== 'discovery') {
-            const savedHypotheses = persistGet<any[]>('hypotheses', [])
-            const existingIds = new Set(savedHypotheses.map((h: any) => h.id))
-            const newEntries = merged.filter(h => !existingIds.has(h.id)).map(h => ({
-              ...h,
-              project_id: pid,
-              disease: (res as any).disease || config.disease,
-              discovery_type: config.discovery_type || 'treatment',
-            }))
-            if (newEntries.length > 0) {
-              persistSet('hypotheses', [...savedHypotheses, ...newEntries])
-              for (const h of newEntries) {
-                logActivity({
-                  type: 'hypothesis', action: 'created',
-                  title: `Hypothesis discovered: ${h.title?.slice(0, 80) || 'Untitled'}`,
-                  project: (res as any).project_name || config.disease,
-                  metadata: { confidence: h.confidence },
-                })
-              }
-            }
+          // Log activity for new hypotheses (backend persists the actual data)
+          for (const h of incoming) {
+            logActivity({
+              type: 'hypothesis', action: 'created',
+              title: `Hypothesis discovered: ${h.title?.slice(0, 80) || 'Untitled'}`,
+              project: (res as any).project_name || config.disease,
+              metadata: { confidence: h.confidence },
+            })
           }
 
           return merged
@@ -332,7 +278,7 @@ export default function Agents() {
         metadata: { disease: config.disease, discovery_type: config.discovery_type },
       })
 
-      // Save to history
+      // Save to history (ephemeral in-memory only)
       const run: DiscoveryRun = {
         id: `run-${Date.now()}`,
         disease: config.disease,
@@ -341,9 +287,7 @@ export default function Agents() {
         timestamp: new Date().toISOString(),
         status: 'running',
       }
-      const updated = [run, ...discoveryHistory].slice(0, 50)
-      setDiscoveryHistory(updated)
-      localStorage.setItem('humanovo-discovery-history', JSON.stringify(updated))
+      setDiscoveryHistory(prev => [run, ...prev].slice(0, 50))
     } catch (err) {
       console.error('Failed to start discovery:', err)
     }

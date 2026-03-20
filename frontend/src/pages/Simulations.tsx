@@ -402,44 +402,23 @@ const MC_RUNNERS: Record<string, (p: MCParams) => number> = {
   drug_interaction: mcDrugInteraction,
 }
 
-const LS_KEY = 'humanovo-mc-simulations'
-
-function loadSavedSimulations(): MCResult[] {
-  try {
-    const raw = localStorage.getItem(LS_KEY)
-    return raw ? JSON.parse(raw) : []
-  } catch { return [] }
-}
-
-function saveSimulations(sims: MCResult[]) {
-  try {
-    localStorage.setItem(LS_KEY, JSON.stringify(sims))
-  } catch { /* quota exceeded - ignore */ }
-}
-
-// ── Unified Simulation History ──────────────────────────────────
-
-const EQ_HISTORY_KEY = 'humanovo-eq-plots'
-const COMP_HISTORY_KEY = 'humanovo-comp-runs'
+// Ephemeral storage for simulation history (no localStorage)
+// MC simulations, equation plots, and computational runs are kept in component state only
 
 interface EqHistoryEntry { id: string; expr: string; xMin: number; xMax: number; createdAt: string }
 interface CompHistoryEntry { id: string; env: string; template: string; code: string; output: string; createdAt: string }
 
-function loadEqHistory(): EqHistoryEntry[] {
-  try { return JSON.parse(localStorage.getItem(EQ_HISTORY_KEY) || '[]') } catch { return [] }
-}
-function saveEqHistory(entries: EqHistoryEntry[]) {
-  try { localStorage.setItem(EQ_HISTORY_KEY, JSON.stringify(entries.slice(0, 50))) } catch {}
-}
-function loadCompHistory(): CompHistoryEntry[] {
-  try { return JSON.parse(localStorage.getItem(COMP_HISTORY_KEY) || '[]') } catch { return [] }
-}
-function saveCompHistory(entries: CompHistoryEntry[]) {
-  try { localStorage.setItem(COMP_HISTORY_KEY, JSON.stringify(entries.slice(0, 50))) } catch {}
-}
+// Module-level ephemeral stores (persist across component remounts within same session)
+let _eqHistory: EqHistoryEntry[] = []
+let _compHistory: CompHistoryEntry[] = []
+
+function loadEqHistory(): EqHistoryEntry[] { return _eqHistory }
+function saveEqHistory(entries: EqHistoryEntry[]) { _eqHistory = entries.slice(0, 50) }
+function loadCompHistory(): CompHistoryEntry[] { return _compHistory }
+function saveCompHistory(entries: CompHistoryEntry[]) { _compHistory = entries.slice(0, 50) }
 
 function SavedSimulations() {
-  const mcSims = useMemo(() => loadSavedSimulations(), [])
+  const mcSims: MCResult[] = []  // No localStorage — MC sims are ephemeral per session
   const eqPlots = useMemo(() => loadEqHistory(), [])
   const compRuns = useMemo(() => loadCompHistory(), [])
   const [filter, setFilter] = useState<'all' | 'monte-carlo' | 'equation' | 'computational'>('all')
@@ -3007,12 +2986,7 @@ function simulateOutput(code: string, env: ComputeEnv): string {
 export default function Simulations() {
   const [showCreate, setShowCreate] = useState(false)
   const [activeTab, setActiveTab] = useState<'simulations' | 'computational-lab' | 'equation-plotter' | 'history'>('simulations')
-  const [mcSimulations, setMcSimulations] = useState<MCResult[]>(() => loadSavedSimulations())
-
-  // Persist to localStorage whenever simulations change
-  useEffect(() => {
-    saveSimulations(mcSimulations)
-  }, [mcSimulations])
+  const [mcSimulations, setMcSimulations] = useState<MCResult[]>([])
 
   const handleNewResult = (result: MCResult) => {
     setMcSimulations(prev => [result, ...prev])

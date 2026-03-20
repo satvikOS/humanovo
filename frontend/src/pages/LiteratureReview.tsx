@@ -34,9 +34,7 @@ const RELEVANCE_COLORS = {
 }
 
 export default function LiteratureReview() {
-  const [papers, setPapers] = useState<Paper[]>(() => {
-    try { return JSON.parse(localStorage.getItem('humanovo-lit-review') || '[]') } catch { return [] }
-  })
+  const [papers, setPapers] = useState<Paper[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [showAddForm, setShowAddForm] = useState(false)
   const [selectedPaper, setSelectedPaper] = useState<Paper | null>(null)
@@ -53,7 +51,6 @@ export default function LiteratureReview() {
 
   const savePapers = useCallback((updated: Paper[]) => {
     setPapers(updated)
-    localStorage.setItem('humanovo-lit-review', JSON.stringify(updated))
   }, [])
 
   const addPaper = () => {

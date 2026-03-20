@@ -1040,6 +1040,200 @@ export const api = {
 
     return { results: filtered, total: filtered.length, query }
   },
+
+  // ── Jamison Discovery Pipeline ──────────────────────────────
+
+  async startProjectDiscovery(projectId: string, config: {
+    disease: string
+    discovery_type: string
+    external_factors?: string[]
+    num_rounds?: number
+    hypotheses_per_round?: number
+    output_format?: string
+    verbosity?: string
+    grant_type?: string
+    citation_style?: string
+  }): Promise<{ run_id: string; websocket_url: string; status: string }> {
+    const { data } = await apiClient.post(`/projects/${projectId}/discover`, config)
+    return data
+  },
+
+  async listDiscoveryRuns(projectId: string, params?: { status?: string; limit?: number; offset?: number }): Promise<{ items: any[]; total: number }> {
+    const { data } = await apiClient.get(`/projects/${projectId}/discovery-runs`, { params })
+    return data
+  },
+
+  async getDiscoveryRun(runId: string): Promise<any> {
+    const { data } = await apiClient.get(`/discovery-runs/${runId}`)
+    return data
+  },
+
+  async cancelDiscoveryRun(runId: string): Promise<any> {
+    const { data } = await apiClient.delete(`/discovery-runs/${runId}`)
+    return data
+  },
+
+  async listProjectHypotheses(projectId: string, params?: { limit?: number; offset?: number }): Promise<{ items: any[]; total: number }> {
+    const { data } = await apiClient.get(`/projects/${projectId}/hypotheses`, { params })
+    return data
+  },
+
+  async getProjectHypothesis(projectId: string, hypothesisId: string): Promise<any> {
+    const { data } = await apiClient.get(`/projects/${projectId}/hypotheses/${hypothesisId}`)
+    return data
+  },
+
+  async submitHypothesisFeedback(hypothesisId: string, feedback: {
+    overall_quality: number
+    dimension_scores: Record<string, number>
+    boolean_flags?: Record<string, boolean>
+    tags?: string[]
+    free_text?: string
+  }): Promise<any> {
+    const { data } = await apiClient.post(`/hypotheses/${hypothesisId}/feedback`, feedback)
+    return data
+  },
+
+  // ── Jamison Synthesis Pipeline ──────────────────────────────
+
+  async startSynthesis(projectId: string, config: {
+    hypothesis: string
+    field_scope?: string
+    output_format?: string
+    grant_type?: string
+    citation_style?: string
+    verbosity?: string
+  }): Promise<{ run_id: string; websocket_url: string; status: string }> {
+    const { data } = await apiClient.post(`/projects/${projectId}/synthesize`, config)
+    return data
+  },
+
+  async listSynthesisRuns(projectId: string, params?: { limit?: number; offset?: number }): Promise<{ items: any[]; total: number }> {
+    const { data } = await apiClient.get(`/projects/${projectId}/synthesis-runs`, { params })
+    return data
+  },
+
+  async getSynthesisRun(projectId: string, runId: string): Promise<any> {
+    const { data } = await apiClient.get(`/projects/${projectId}/synthesis-runs/${runId}`)
+    return data
+  },
+
+  // ── Imaging ──────────────────────────────────────────────────
+
+  async uploadImaging(projectId: string, file: File): Promise<any> {
+    const formData = new FormData()
+    formData.append('file', file)
+    const { data } = await apiClient.post(`/projects/${projectId}/imaging/upload`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    return data
+  },
+
+  async listImagingRecords(projectId: string): Promise<{ items: any[]; total: number }> {
+    const { data } = await apiClient.get(`/projects/${projectId}/imaging`)
+    return data
+  },
+
+  async linkImagingToHypothesis(projectId: string, recordId: string, hypothesisId: string): Promise<any> {
+    const { data } = await apiClient.post(`/projects/${projectId}/imaging/${recordId}/link-hypothesis`, { hypothesis_id: hypothesisId })
+    return data
+  },
+
+  // ── Billing ──────────────────────────────────────────────────
+
+  async getBillingSummary(projectId?: string): Promise<any> {
+    const { data } = await apiClient.get('/billing/summary', { params: projectId ? { project_id: projectId } : undefined })
+    return data
+  },
+
+  async getBillingDaily(params?: { start_date?: string; end_date?: string; project_id?: string; group_by?: string }): Promise<any[]> {
+    const { data } = await apiClient.get('/billing/daily', { params })
+    return data
+  },
+
+  async getBillingBreakdown(params?: { period?: string; group_by?: string }): Promise<any> {
+    const { data } = await apiClient.get('/billing/breakdown', { params })
+    return data
+  },
+
+  async getBillingProjects(period?: string): Promise<any[]> {
+    const { data } = await apiClient.get('/billing/projects', { params: period ? { period } : undefined })
+    return data
+  },
+
+  async listBudgets(): Promise<any[]> {
+    const { data } = await apiClient.get('/billing/budgets')
+    return data
+  },
+
+  async createBudget(budget: { scope: string; project_id?: string; monthly_budget_cents: number; alert_threshold_pct?: number; hard_limit?: boolean }): Promise<any> {
+    const { data } = await apiClient.post('/billing/budgets', budget)
+    return data
+  },
+
+  async updateBudget(budgetId: string, budget: any): Promise<any> {
+    const { data } = await apiClient.put(`/billing/budgets/${budgetId}`, budget)
+    return data
+  },
+
+  async deleteBudget(budgetId: string): Promise<any> {
+    const { data } = await apiClient.delete(`/billing/budgets/${budgetId}`)
+    return data
+  },
+
+  // ── pgvector Management ──────────────────────────────────────
+
+  async getPgvectorStats(): Promise<any> {
+    const { data } = await apiClient.get('/dev/pgvector/stats')
+    return data
+  },
+
+  async pgvectorSearch(query: string, params?: { source?: string; threshold?: number; limit?: number }): Promise<any[]> {
+    const { data } = await apiClient.post('/dev/pgvector/search', { query, ...params })
+    return data
+  },
+
+  async pgvectorSimilarityTest(query: string): Promise<any> {
+    const { data } = await apiClient.post('/dev/pgvector/similarity-test', { query })
+    return data
+  },
+
+  async pgvectorTtlCleanup(): Promise<any> {
+    const { data } = await apiClient.post('/dev/pgvector/maintenance/ttl-cleanup')
+    return data
+  },
+
+  async pgvectorReindex(): Promise<any> {
+    const { data } = await apiClient.post('/dev/pgvector/maintenance/reindex')
+    return data
+  },
+
+  async pgvectorVacuum(): Promise<any> {
+    const { data } = await apiClient.post('/dev/pgvector/maintenance/vacuum')
+    return data
+  },
+
+  async pgvectorMaintenanceStatus(): Promise<any> {
+    const { data } = await apiClient.get('/dev/pgvector/maintenance/status')
+    return data
+  },
+
+  // ── Config ──────────────────────────────────────────────────
+
+  async getMethodsTaxonomy(): Promise<any> {
+    const { data } = await apiClient.get('/config/methods-taxonomy')
+    return data
+  },
+
+  async getModelPricing(): Promise<any> {
+    const { data } = await apiClient.get('/config/model-pricing')
+    return data
+  },
+
+  async getConstitutionalConstraints(): Promise<string> {
+    const { data } = await apiClient.get('/config/constitutional-constraints')
+    return data
+  },
 }
 
 export default api

@@ -230,6 +230,27 @@ class SynthesisPipeline:
     def __init__(self, llm):
         """Initialize with a MultiModelLLM instance."""
         self._llm = llm
+        self._constitutional_constraints = self._load_constraints()
+
+    @staticmethod
+    def _load_constraints() -> str:
+        """Load constitutional constraints for all pipeline prompts."""
+        import os
+        path = os.path.join(os.path.dirname(__file__), "../config/constitutional_constraints.txt")
+        try:
+            # Try relative to services directory
+            if not os.path.exists(path):
+                path = os.path.join(os.path.dirname(__file__), "../../config/constitutional_constraints.txt")
+            with open(path) as f:
+                return f.read().strip()
+        except FileNotFoundError:
+            return ""
+
+    def _prepend_constraints(self, system_prompt: str) -> str:
+        """Prepend constitutional constraints to a system prompt."""
+        if self._constitutional_constraints:
+            return f"{self._constitutional_constraints}\n\n---\n\n{system_prompt}"
+        return system_prompt
 
     async def run(
         self,
@@ -259,7 +280,7 @@ class SynthesisPipeline:
         decompose_response = await self._llm.generate(
             ModelType.CLAUDE_OPUS,
             decompose_prompt,
-            system_prompt="You are a biomedical research decomposition specialist. Return valid JSON only.",
+            system_prompt=self._prepend_constraints("You are a biomedical research decomposition specialist. Return valid JSON only."),
             max_tokens=4096,
             temperature=0.2,
         )
@@ -268,9 +289,12 @@ class SynthesisPipeline:
         if on_stage_complete:
             await on_stage_complete(1, "DECOMPOSE", "claude_opus", claims_data)
 
-        # Stage 2: RETRIEVE — search PubMed for each claim
+        # Stage 2: RETRIEVE — search PubMed + pgvector RAG for each claim
         logger.info(f"Synthesis {run_id}: Stage 2/5 RETRIEVE ({len(claims)} claims)")
         findings = await self._retrieve_evidence(claims)
+        # Augment with pgvector RAG grounding
+        rag_findings = await self._retrieve_from_vector_store(claims)
+        findings.extend(rag_findings)
         claims_evidence = self._format_claims_evidence(claims, findings)
         if on_stage_complete:
             await on_stage_complete(2, "RETRIEVE", "cohere_command_a", {"findings_count": len(findings)})
@@ -290,7 +314,7 @@ class SynthesisPipeline:
         synthesize_response = await self._llm.generate(
             ModelType.CLAUDE_OPUS,
             synthesize_prompt,
-            system_prompt="You are a scientific evidence synthesizer. Return valid JSON only.",
+            system_prompt=self._prepend_constraints("You are a scientific evidence synthesizer. Return valid JSON only."),
             max_tokens=8192,
             temperature=0.3,
         )
@@ -308,7 +332,7 @@ class SynthesisPipeline:
         gap_response = await self._llm.generate(
             ModelType.GPT_41,
             gap_prompt,
-            system_prompt="You are a knowledge gap analyst. Return valid JSON only.",
+            system_prompt=self._prepend_constraints("You are a knowledge gap analyst. Return valid JSON only."),
             max_tokens=4096,
             temperature=0.2,
         )
@@ -341,7 +365,7 @@ class SynthesisPipeline:
         format_response = await self._llm.generate(
             ModelType.CLAUDE_SONNET,
             format_prompt,
-            system_prompt="You are a scientific document formatter. Return valid JSON only.",
+            system_prompt=self._prepend_constraints("You are a scientific document formatter. Return valid JSON only."),
             max_tokens=8192,
             temperature=0.3,
         )
@@ -453,6 +477,38 @@ class SynthesisPipeline:
                         "confidence": 0.0,
                     })
 
+        return findings
+
+    async def _retrieve_from_vector_store(self, claims: list[dict]) -> list[dict]:
+        """Retrieve grounding evidence from pgvector RAG store."""
+        findings = []
+        try:
+            from app.knowledge.vector_store import get_vector_store
+            store = get_vector_store()
+            for claim_info in claims[:20]:
+                claim_text = claim_info.get("claim", "")
+                try:
+                    results = await store.search(claim_text, limit=3)
+                    for r in results:
+                        content = r.content if hasattr(r, "content") else str(r)
+                        metadata = r.metadata_ if hasattr(r, "metadata_") else {}
+                        if isinstance(metadata, dict):
+                            source_id = metadata.get("pmid") or metadata.get("source_id", "")
+                        else:
+                            source_id = ""
+                        similarity = r.similarity if hasattr(r, "similarity") else 0.0
+                        if similarity >= 0.7:
+                            findings.append({
+                                "claim": claim_text,
+                                "pmid": source_id if source_id else None,
+                                "title": content[:200] if content else "RAG result",
+                                "confidence": round(similarity, 3),
+                                "source": "pgvector_rag",
+                            })
+                except Exception as e:
+                    logger.debug(f"pgvector search failed for claim: {e}")
+        except Exception as e:
+            logger.warning(f"Vector store unavailable for RAG grounding: {e}")
         return findings
 
     def _format_claims_evidence(self, claims: list[dict], findings: list[dict]) -> str:

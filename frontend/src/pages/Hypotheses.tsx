@@ -1,9 +1,8 @@
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { FiZap, FiCheck, FiAlertTriangle, FiClock, FiDownload, FiRefreshCw } from 'react-icons/fi'
 import { api, Hypothesis } from '../services/api'
-import { persistGet } from '../utils/persistence'
 import clsx from 'clsx'
 
 const API_BASE = '/api/v1'
@@ -42,19 +41,6 @@ async function downloadHypothesisPdf(hypothesisId: string, hypothesisData: {
     a.click()
     URL.revokeObjectURL(url)
   }
-}
-
-interface LocalHypothesis {
-  id: string
-  title: string
-  description: string
-  mechanism: string
-  confidence: number
-  tags: string[]
-  disease?: string
-  discovery_type?: string
-  project_id?: string
-  created_at: string
 }
 
 function HypothesisCard({ hypothesis }: { hypothesis: Hypothesis }) {
@@ -154,90 +140,6 @@ function HypothesisCard({ hypothesis }: { hypothesis: Hypothesis }) {
   )
 }
 
-// Card for locally-saved hypotheses (from discovery, stored in localStorage)
-function LocalHypothesisCard({ hypothesis }: { hypothesis: LocalHypothesis }) {
-  const [exporting, setExporting] = useState(false)
-
-  const handleExportPdf = useCallback(async (e: React.MouseEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setExporting(true)
-    try {
-      await downloadHypothesisPdf(hypothesis.id, {
-        title: hypothesis.title,
-        description: hypothesis.description,
-        mechanism: hypothesis.mechanism,
-        confidence: hypothesis.confidence,
-        disease: hypothesis.disease,
-        tags: hypothesis.tags,
-      })
-    } finally {
-      setTimeout(() => setExporting(false), 1000)
-    }
-  }, [hypothesis])
-
-  return (
-    <div className="card hover:border-primary-600/50 transition-colors">
-      <div className="flex items-start space-x-4">
-        <div className="p-2 rounded-lg bg-yellow-600/20">
-          <FiZap className="w-5 h-5 text-yellow-400" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-white font-medium line-clamp-2">{hypothesis.title}</p>
-          {hypothesis.mechanism && (
-            <p className="text-secondary-400 text-sm mt-1 line-clamp-1">
-              {hypothesis.mechanism}
-            </p>
-          )}
-          {hypothesis.description && !hypothesis.mechanism && (
-            <p className="text-secondary-400 text-sm mt-1 line-clamp-2">
-              {hypothesis.description}
-            </p>
-          )}
-        </div>
-      </div>
-
-      <div className="mt-4 flex items-center justify-between">
-        <div className="flex items-center space-x-4">
-          <span className={clsx(
-            'px-2 py-0.5 rounded text-xs font-medium',
-            hypothesis.confidence >= 0.7 ? 'bg-green-500/20 text-green-400' :
-            hypothesis.confidence >= 0.5 ? 'bg-yellow-500/20 text-yellow-400' : 'bg-orange-500/20 text-orange-400'
-          )}>
-            {Math.round(hypothesis.confidence * 100)}% confidence
-          </span>
-          {hypothesis.disease && (
-            <span className="text-secondary-500 text-xs">{hypothesis.disease}</span>
-          )}
-        </div>
-        <div className="flex items-center space-x-2">
-          <button
-            onClick={handleExportPdf}
-            disabled={exporting}
-            className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-purple-500/20 text-purple-400 hover:bg-purple-500/30 disabled:opacity-50 transition-colors"
-            title="Export as PDF"
-          >
-            {exporting ? (
-              <FiRefreshCw className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <FiDownload className="w-3.5 h-3.5" />
-            )}
-            {exporting ? 'Exporting...' : 'Export PDF'}
-          </button>
-        </div>
-      </div>
-
-      {hypothesis.tags && hypothesis.tags.length > 0 && (
-        <div className="mt-3 flex flex-wrap gap-1">
-          {hypothesis.tags.slice(0, 5).map(tag => (
-            <span key={tag} className="text-xxs px-1.5 py-0.5 rounded bg-secondary-700 text-secondary-400">{tag}</span>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
 export default function Hypotheses() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ['hypotheses'],
@@ -245,13 +147,7 @@ export default function Hypotheses() {
     retry: 1,
   })
 
-  // Load hypotheses from localStorage as fallback when API is down
-  const localHypotheses = useMemo(() => {
-    return persistGet<LocalHypothesis[]>('hypotheses', [])
-  }, [])
-
   const apiHypotheses = data?.items || []
-  const showLocal = (isError || (!isLoading && apiHypotheses.length === 0)) && localHypotheses.length > 0
 
   return (
     <div className="p-8">
@@ -266,15 +162,9 @@ export default function Hypotheses() {
         </Link>
       </div>
 
-      {isError && localHypotheses.length === 0 && (
+      {isError && (
         <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-400">
-          Backend is offline. No locally-saved hypotheses found. Run a discovery from the Agents page first.
-        </div>
-      )}
-
-      {showLocal && (
-        <div className="mb-4 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-sm text-yellow-400">
-          Showing {localHypotheses.length} locally-saved hypotheses (backend is offline).
+          Backend is offline. Run a discovery from the Agents page first.
         </div>
       )}
 
@@ -288,12 +178,6 @@ export default function Hypotheses() {
         <div className="space-y-4">
           {apiHypotheses.map((hypothesis) => (
             <HypothesisCard key={hypothesis.id} hypothesis={hypothesis} />
-          ))}
-        </div>
-      ) : showLocal ? (
-        <div className="space-y-4">
-          {localHypotheses.map((hypothesis) => (
-            <LocalHypothesisCard key={hypothesis.id} hypothesis={hypothesis} />
           ))}
         </div>
       ) : (
