@@ -719,8 +719,14 @@ async def upload_document(
     allowed_types = {
         "application/pdf",
         "text/plain",
+        "text/csv",
+        "text/tab-separated-values",
+        "text/markdown",
+        "application/json",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/msword",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-excel",
     }
 
     if file.content_type not in allowed_types:

@@ -310,12 +310,15 @@ export default function GenomicsAnalysis() {
       }
       // Call backend API for all genomics computations
       const res = await fetch(`${API}${endpoint}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-      if (!res.ok) {
-        throw new Error(`Backend returned ${res.status}: ${await res.text()}`)
-      }
       const contentType = res.headers.get('content-type') || ''
+      if (!res.ok) {
+        const errBody = contentType.includes('application/json')
+          ? JSON.stringify(await res.json())
+          : await res.text()
+        throw new Error(`Backend error ${res.status}: ${errBody.slice(0, 200)}`)
+      }
       if (!contentType.includes('application/json')) {
-        throw new Error('Backend returned non-JSON response')
+        throw new Error(`Expected JSON but received ${contentType}. Ensure the backend server is running at ${location.origin}.`)
       }
       setResult(await res.json())
     } catch (e: any) { setError(e.message) } finally { setLoading(false) }

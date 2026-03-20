@@ -30,12 +30,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     await init_db()
 
-    # Initialize knowledge stores
-    from app.knowledge.graph_store import init_graph_store
-    from app.knowledge.vector_store import init_vector_store
+    # Initialize knowledge stores (non-fatal — app starts without them)
+    try:
+        from app.knowledge.vector_store import init_vector_store
 
-    await init_vector_store()
-    await init_graph_store()
+        await init_vector_store()
+    except Exception as e:
+        logger.warning("Vector store initialization failed — continuing without it", error=str(e))
+
+    try:
+        from app.knowledge.graph_store import init_graph_store
+
+        await init_graph_store()
+    except Exception as e:
+        logger.warning("Graph store initialization failed — continuing without it", error=str(e))
 
     logger.info("Humanovo Backend started successfully")
 
@@ -78,15 +86,52 @@ def create_app() -> FastAPI:
     # Include API routers
     app.include_router(api_router, prefix="/api")
 
-    # Health check endpoint
+    # Health check endpoint with service-level diagnostics
     @app.get("/health")
     async def health_check():
-        """Health check endpoint for container orchestration."""
+        """Health check endpoint with connectivity diagnostics for AWS monitoring."""
+        from sqlalchemy import text
+
+        from app.core.database import engine
+
+        checks: dict[str, str] = {}
+
+        # Check PostgreSQL / RDS connectivity
+        try:
+            async with engine.connect() as conn:
+                await conn.execute(text("SELECT 1"))
+            checks["database"] = "connected"
+        except Exception as e:
+            checks["database"] = f"error: {str(e)[:120]}"
+
+        # Check pgvector extension
+        try:
+            async with engine.connect() as conn:
+                await conn.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'vector'"))
+            checks["pgvector"] = "available"
+        except Exception as e:
+            checks["pgvector"] = f"error: {str(e)[:120]}"
+
+        # Check Neo4j / graph store
+        try:
+            from app.knowledge.graph_store import graph_store
+
+            if graph_store and hasattr(graph_store, "_driver") and graph_store._driver:
+                checks["neo4j"] = "connected"
+            else:
+                checks["neo4j"] = "not_configured"
+        except Exception as e:
+            checks["neo4j"] = f"error: {str(e)[:120]}"
+
+        overall = "healthy" if checks.get("database") == "connected" else "degraded"
+
         return JSONResponse(
             content={
-                "status": "healthy",
+                "status": overall,
                 "version": settings.VERSION,
                 "service": "humanovo-backend",
+                "environment": settings.ENVIRONMENT,
+                "checks": checks,
             }
         )
 

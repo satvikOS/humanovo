@@ -51,10 +51,10 @@ const statusConfig: Record<string, { icon: typeof FiCheckCircle; color: string; 
 // Knowledge Base status panel — shows dataset counts from the graph
 function KnowledgeBaseStatus({ stats }: { stats: { total_entities: number; total_relations: number; entity_counts: Record<string, number>; relation_counts: Record<string, number> } | null }) {
   const [expanded, setExpanded] = useState(false)
-  if (!stats) return null
+  if (!stats || typeof stats.total_entities !== 'number' || typeof stats.total_relations !== 'number') return null
 
-  const entityTypes = Object.entries(stats.entity_counts || {}).sort((a, b) => b[1] - a[1])
-  const relationTypes = Object.entries(stats.relation_counts || {}).sort((a, b) => b[1] - a[1])
+  const entityTypes = Object.entries(stats.entity_counts || {}).sort((a, b) => (b[1] || 0) - (a[1] || 0))
+  const relationTypes = Object.entries(stats.relation_counts || {}).sort((a, b) => (b[1] || 0) - (a[1] || 0))
 
   const entityColors: Record<string, string> = {
     gene: '#3B82F6', protein: '#8B5CF6', disease: '#EF4444', drug: '#10B981',
@@ -68,7 +68,7 @@ function KnowledgeBaseStatus({ stats }: { stats: { total_entities: number; total
           <FiGlobe className="w-4 h-4 text-[var(--color-accent-blue)]" />
           <span className="text-sm font-medium">Knowledge Base</span>
           <span className="text-xs text-[var(--color-text-muted)]">
-            {stats.total_entities.toLocaleString()} entities &middot; {stats.total_relations.toLocaleString()} relations
+            {(stats.total_entities ?? 0).toLocaleString()} entities &middot; {(stats.total_relations ?? 0).toLocaleString()} relations
           </span>
         </div>
         <FiChevronRight className={`w-3.5 h-3.5 text-[var(--color-text-muted)] transition-transform ${expanded ? 'rotate-90' : ''}`} />
@@ -86,7 +86,7 @@ function KnowledgeBaseStatus({ stats }: { stats: { total_entities: number; total
                       <span className="w-2 h-2 rounded-full" style={{ background: entityColors[type] || 'var(--color-text-muted)' }} />
                       <span className="text-[var(--color-text-secondary)] capitalize">{type.replace(/_/g, ' ')}</span>
                     </div>
-                    <span className="text-[var(--color-text-muted)] font-mono">{count.toLocaleString()}</span>
+                    <span className="text-[var(--color-text-muted)] font-mono">{(count ?? 0).toLocaleString()}</span>
                   </div>
                 ))}
               </div>
@@ -97,7 +97,7 @@ function KnowledgeBaseStatus({ stats }: { stats: { total_entities: number; total
                 {relationTypes.map(([type, count]) => (
                   <div key={type} className="flex items-center justify-between text-xs">
                     <span className="text-[var(--color-text-secondary)] capitalize">{type.replace(/_/g, ' ')}</span>
-                    <span className="text-[var(--color-text-muted)] font-mono">{count.toLocaleString()}</span>
+                    <span className="text-[var(--color-text-muted)] font-mono">{(count ?? 0).toLocaleString()}</span>
                   </div>
                 ))}
               </div>

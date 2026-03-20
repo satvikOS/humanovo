@@ -36,6 +36,7 @@ import {
   FiTarget,
   FiHeart,
   FiGrid,
+  FiUpload,
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import { useTheme } from '../contexts/ThemeContext'
@@ -368,10 +369,29 @@ function ConstantChat() {
   const [isStreaming, setIsStreaming] = useState(false)
   const chatEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [uploading, setUploading] = useState(false)
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, loading, streamingText])
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files || files.length === 0) return
+    setUploading(true)
+    for (const file of Array.from(files)) {
+      try {
+        const { api } = await import('../services/api')
+        await api.uploadDocument(file)
+        setMessages(prev => [...prev, { role: 'assistant', text: `Document **${file.name}** uploaded successfully and will be processed for the knowledge base.` }])
+      } catch {
+        setMessages(prev => [...prev, { role: 'assistant', text: `Failed to upload **${file.name}**. Please check that the backend is running and try again.` }])
+      }
+    }
+    setUploading(false)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
 
   const getLocalContext = () => {
     try {
@@ -750,7 +770,23 @@ function ConstantChat() {
 
         {/* Input */}
         <div className="px-5 py-4 border-t border-[var(--color-border)]">
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept=".pdf,.txt,.csv,.json,.docx,.xlsx,.md,.tsv"
+            onChange={handleFileUpload}
+            className="hidden"
+          />
           <div className="flex items-center gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--glass-bg)] px-4 py-3">
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              className="p-1.5 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)] transition-all disabled:opacity-30"
+              title="Upload document"
+            >
+              <FiUpload className="w-4 h-4" />
+            </button>
             <input
               ref={inputRef}
               type="text"
