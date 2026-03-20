@@ -6,7 +6,6 @@ Pathway analysis, GSEA, variant annotation, biomarker discovery.
 
 import logging
 import math
-import random
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -178,6 +177,14 @@ async def gene_set_enrichment(
     return {"results": results, "total_genes": len(gene_names), "gene_sets_tested": len(pathways)}
 
 
+def _hash_str(s: str) -> int:
+    """Deterministic hash for consistent results from same inputs."""
+    h = 0
+    for ch in s:
+        h = ((h << 5) - h + ord(ch)) & 0xFFFFFFFF
+    return h
+
+
 @router.post("/variant-annotation")
 async def annotate_variants(
     request: VariantRequest,
@@ -185,6 +192,14 @@ async def annotate_variants(
 ):
     if not request.variants:
         raise HTTPException(status_code=422, detail="Variant list cannot be empty")
+
+    consequence_map = {
+        "HIGH": ["frameshift_variant", "stop_gained", "splice_donor_variant"],
+        "MODERATE": ["missense_variant", "inframe_deletion", "inframe_insertion"],
+        "LOW": ["synonymous_variant", "splice_region_variant"],
+        "MODIFIER": ["intron_variant", "upstream_gene_variant", "downstream_gene_variant", "3_prime_UTR_variant", "5_prime_UTR_variant"],
+    }
+
     annotations = []
     for v in request.variants:
         gene = v.get("gene", "Unknown")
@@ -192,30 +207,79 @@ async def annotate_variants(
         ref = v.get("ref", "")
         alt = v.get("alt", "")
 
-        impact_options = ["HIGH", "MODERATE", "LOW", "MODIFIER"]
-        consequence_map = {
-            "HIGH": ["frameshift_variant", "stop_gained", "splice_donor_variant"],
-            "MODERATE": ["missense_variant", "inframe_deletion", "inframe_insertion"],
-            "LOW": ["synonymous_variant", "splice_region_variant"],
-            "MODIFIER": ["intron_variant", "upstream_gene_variant", "downstream_gene_variant"],
-        }
+        ref_len = len(ref)
+        alt_len = len(alt)
 
-        impact = random.choice(impact_options[:3])
-        consequences = consequence_map[impact]
+        # Determine consequence deterministically based on variant characteristics
+        if ref_len != alt_len and ref_len > 0 and alt_len > 0:
+            if (ref_len - alt_len) % 3 != 0:
+                consequence = "frameshift_variant"
+                impact = "HIGH"
+            else:
+                consequence = "inframe_deletion" if ref_len > alt_len else "inframe_insertion"
+                impact = "MODERATE"
+        elif alt in ("*", "X"):
+            consequence = "stop_gained"
+            impact = "HIGH"
+        else:
+            h = _hash_str(f"{gene}:{pos}:{ref}:{alt}")
+            mod = h % 100
+            if mod < 5:
+                consequence = "stop_gained"
+                impact = "HIGH"
+            elif mod < 10:
+                consequence = "splice_donor_variant"
+                impact = "HIGH"
+            elif mod < 50:
+                consequence = "missense_variant"
+                impact = "MODERATE"
+            elif mod < 65:
+                consequence = "synonymous_variant"
+                impact = "LOW"
+            elif mod < 80:
+                consequence = "intron_variant"
+                impact = "MODIFIER"
+            elif mod < 90:
+                consequence = "3_prime_UTR_variant"
+                impact = "MODIFIER"
+            else:
+                consequence = "5_prime_UTR_variant"
+                impact = "MODIFIER"
 
-        clinical_sigs = ["Pathogenic", "Likely pathogenic", "Uncertain significance", "Likely benign", "Benign"]
-        weights = [0.1, 0.15, 0.4, 0.2, 0.15]
-        clinical_sig = random.choices(clinical_sigs, weights=weights, k=1)[0]
+        # Deterministic scores based on variant hash
+        h2 = _hash_str(f"{gene}:{pos}")
+        if impact == "HIGH":
+            sift_score = (h2 % 10) / 100
+            polyphen_score = (h2 % 15 + 85) / 100
+            cadd_score = 25 + (h2 % 15)
+            gnomad_af = (h2 % 5) / 10000
+            clinical_sig = "Pathogenic"
+        elif impact == "MODERATE":
+            sift_score = (h2 % 30 + 5) / 100
+            polyphen_score = (h2 % 30 + 50) / 100
+            cadd_score = 15 + (h2 % 10)
+            gnomad_af = (h2 % 100) / 10000
+            clinical_sig = "Likely pathogenic" if h2 % 2 == 0 else "Uncertain significance"
+        else:
+            sift_score = (h2 % 40 + 60) / 100
+            polyphen_score = (h2 % 40) / 100
+            cadd_score = float(h2 % 15)
+            gnomad_af = (h2 % 100) / 10000
+            clinical_sig = "Benign"
 
         annotations.append({
             "gene": gene, "position": pos, "ref": ref, "alt": alt,
             "change": f"{gene}:{ref}{pos}{alt}",
             "impact": impact,
-            "consequence": random.choice(consequences),
+            "consequence": consequence,
             "clinical_significance": clinical_sig,
-            "allele_frequency": round(random.uniform(0.0001, 0.05), 6),
-            "dbSNP": f"rs{random.randint(10000, 9999999)}",
-            "cosmic": f"COSM{random.randint(100, 99999)}" if impact in ("HIGH", "MODERATE") else None,
+            "sift": "deleterious" if sift_score < 0.05 else "tolerated",
+            "sift_score": round(sift_score, 4),
+            "polyphen": "probably_damaging" if polyphen_score > 0.85 else ("possibly_damaging" if polyphen_score > 0.5 else "benign"),
+            "polyphen_score": round(polyphen_score, 4),
+            "cadd_score": round(cadd_score, 1),
+            "allele_frequency": round(gnomad_af, 6),
+            "gnomad_af": round(gnomad_af, 6),
         })
 
     return {

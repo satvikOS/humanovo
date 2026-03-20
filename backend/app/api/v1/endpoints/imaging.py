@@ -26,6 +26,8 @@ class StudyCreate(BaseModel):
     modality: str = "CT"
     body_part: str = ""
     findings: str = ""
+    width: int = 0
+    height: int = 0
 
 
 class AnnotationCreate(BaseModel):
@@ -60,8 +62,8 @@ async def create_study(data: StudyCreate, db: AsyncSession = Depends(get_db)):
         patient_id="",
         annotations=[],
         ai_analysis=None,
-        width=512,
-        height=512,
+        width=data.width,
+        height=data.height,
     )
     db.add(study)
     await db.flush()
