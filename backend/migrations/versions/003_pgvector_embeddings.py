@@ -1,7 +1,7 @@
 """Add pgvector extension and vector_embeddings table
 
 Replaces ChromaDB with PostgreSQL-native vector search via pgvector.
-Stores dual embeddings: biomedical (1024d Cohere) + general (3072d Azure).
+Stores dual embeddings: biomedical (1024d Cohere) + general (1536d Azure).
 
 Revision ID: 003_pgvector
 Revises: 002_pipeline_intelligence
@@ -31,7 +31,7 @@ def upgrade() -> None:
             content TEXT NOT NULL,
             content_hash VARCHAR(64),
             embedding_biomedical vector(1024),
-            embedding_general vector(3072),
+            embedding_general vector(1536),
             metadata JSONB DEFAULT '{}'::jsonb,
             source_type VARCHAR(100),
             source_id VARCHAR(255),

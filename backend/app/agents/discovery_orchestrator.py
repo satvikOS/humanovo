@@ -24,7 +24,7 @@ are prepended to ALL stage prompts.
 Dual-Model Embedding Grounding (between EVERY stage):
   Two embedding models run in parallel on every stage output:
   1. Bedrock Cohere Embed English v3 (1024d) — biomedical-optimized
-  2. Azure text-embedding-3-large (3072d)    — most powerful general embedding
+  2. Azure text-embedding-3-large (1536d)    — most powerful general embedding
 
   Two grounding mechanisms:
   A) RAG Retrieval: Embed output → retrieve matching evidence → inject into next stage
@@ -47,7 +47,7 @@ Provider routing:
 
 Embeddings stored in pgvector (PostgreSQL native vector search):
   - Biomedical embeddings (1024d) via Bedrock Cohere Embed v3
-  - General embeddings (3072d) via Azure text-embedding-3-large
+  - General embeddings (1536d) via Azure text-embedding-3-large
 """
 
 import asyncio
@@ -2168,6 +2168,174 @@ Include the translational roadmap from Stage 11."""
                 return match.group(1).strip()
         return default
 
+    def _build_visualization_data(
+        self,
+        accumulated_context: dict[str, Any],
+        stage_results: list['PipelineStageResult'],
+        title: str,
+        confidence: float,
+        feasibility_score: float,
+        evidence_summary: list[str],
+        citations: list[dict[str, Any]],
+        counter_args: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Build visualization_data per Jamison v2 spec Section 5.
+
+        Computes five chart datasets programmatically from pipeline outputs:
+        1. evidence_landscape — scatter of evidence papers
+        2. method_frequency — methods used across evidence
+        3. confidence_meters — hypothesis confidence breakdown
+        4. cost_breakdown — per-stage model costs
+        (gap_heatmap is synthesis-pipeline only)
+        """
+        viz: dict[str, Any] = {}
+
+        # --- Chart 1: Evidence Landscape ---
+        evidence_points = []
+        for cite in citations[:50]:
+            if isinstance(cite, dict):
+                point: dict[str, Any] = {
+                    "title": cite.get("title", "Unknown"),
+                    "year": cite.get("year", 2024),
+                    "relevance_score": float(cite.get("relevance_score", cite.get("relevance", 0.5))),
+                    "citation_count": int(cite.get("citation_count", cite.get("cited_by", 0))),
+                    "stance": cite.get("stance", "supporting"),
+                    "doi": cite.get("doi", ""),
+                    "method": cite.get("method", cite.get("method_used", "")),
+                }
+                evidence_points.append(point)
+
+        # Also extract from supporting_evidence in accumulated context
+        for ev in accumulated_context.get("supporting_evidence", [])[:20]:
+            if isinstance(ev, dict) and not any(p.get("doi") == ev.get("doi") for p in evidence_points if ev.get("doi")):
+                evidence_points.append({
+                    "title": ev.get("finding", ev.get("title", ""))[:200],
+                    "year": int(ev.get("year", 2024)),
+                    "relevance_score": float(ev.get("relevance_score", 0.7)),
+                    "citation_count": int(ev.get("citation_count", 0)),
+                    "stance": "supporting",
+                    "doi": ev.get("doi", ""),
+                    "method": ev.get("method", ""),
+                })
+
+        for ev in accumulated_context.get("contradicting_evidence", [])[:10]:
+            if isinstance(ev, dict):
+                evidence_points.append({
+                    "title": ev.get("finding", ev.get("title", ""))[:200],
+                    "year": int(ev.get("year", 2024)),
+                    "relevance_score": float(ev.get("relevance_score", 0.5)),
+                    "citation_count": int(ev.get("citation_count", 0)),
+                    "stance": "contradicting",
+                    "doi": ev.get("doi", ""),
+                    "method": ev.get("method", ""),
+                })
+
+        viz["evidence_landscape"] = {"points": evidence_points}
+
+        # --- Chart 2: Method Frequency ---
+        method_counts: dict[str, dict[str, Any]] = {}
+        # Gather methods from evidence and citations
+        all_evidence = (
+            accumulated_context.get("supporting_evidence", [])
+            + accumulated_context.get("contradicting_evidence", [])
+            + citations
+        )
+        for item in all_evidence:
+            if isinstance(item, dict):
+                method = item.get("method", item.get("method_used", ""))
+                if method and isinstance(method, str) and method.strip():
+                    method = method.strip()
+                    if method not in method_counts:
+                        method_counts[method] = {"count": 0, "most_recent_year": 0}
+                    method_counts[method]["count"] += 1
+                    yr = int(item.get("year", 0))
+                    if yr > method_counts[method]["most_recent_year"]:
+                        method_counts[method]["most_recent_year"] = yr
+
+        # Also check required_methods
+        for m in accumulated_context.get("required_methods", []):
+            if isinstance(m, str) and m.strip() and m not in method_counts:
+                method_counts[m] = {"count": 0, "most_recent_year": 0}
+
+        method_rows = []
+        lab_profile = accumulated_context.get("lab_profile", {})
+        lab_modalities = set()
+        if isinstance(lab_profile, dict):
+            for k in ("modalities", "techniques", "equipment"):
+                for v in lab_profile.get(k, []):
+                    if isinstance(v, str):
+                        lab_modalities.add(v.lower())
+
+        for method, data in sorted(method_counts.items(), key=lambda x: -x[1]["count"]):
+            method_rows.append({
+                "method": method,
+                "count": data["count"],
+                "most_recent_year": data["most_recent_year"] or None,
+                "in_lab_profile": method.lower() in lab_modalities,
+            })
+
+        viz["method_frequency"] = {"rows": method_rows[:30]}
+
+        # --- Chart 4: Confidence Meters (discovery pipeline only) ---
+        supporting_count = len(accumulated_context.get("supporting_evidence", []))
+        contradicting_count = len(counter_args) + len(accumulated_context.get("contradicting_evidence", []))
+
+        viz["confidence_meters"] = [{
+            "hypothesis_index": 0,
+            "title": title,
+            "confidence_score": confidence,
+            "supporting_count": supporting_count,
+            "contradicting_count": contradicting_count,
+            "feasibility_score": feasibility_score,
+        }]
+
+        # --- Chart 5: Cost Breakdown ---
+        cost_stages = []
+        total_cost_cents = 0
+        total_duration = 0.0
+
+        # Model cost estimates (cents per 1K tokens) — from config/model_pricing.json
+        model_costs = {
+            "claude_opus": {"input": 1.5, "output": 7.5},
+            "claude_sonnet": {"input": 0.3, "output": 1.5},
+            "gpt_41": {"input": 0.2, "output": 0.8},
+            "gpt_4o_azure": {"input": 0.25, "output": 1.0},
+            "o3_mini": {"input": 0.11, "output": 0.44},
+            "cohere_command_a": {"input": 0.25, "output": 1.0},
+            "mistral_large_3": {"input": 0.2, "output": 0.6},
+            "grok_fast": {"input": 0.5, "output": 1.5},
+        }
+
+        for sr in stage_results:
+            tokens_in = sr.output.get("tokens_in", sr.output.get("prompt_tokens", 0)) if isinstance(sr.output, dict) else 0
+            tokens_out = sr.output.get("tokens_out", sr.output.get("completion_tokens", 0)) if isinstance(sr.output, dict) else 0
+            # Estimate tokens from duration if not available
+            if not tokens_in and sr.duration_seconds > 0:
+                tokens_in = int(sr.duration_seconds * 200)  # rough estimate
+                tokens_out = int(sr.duration_seconds * 100)
+
+            pricing = model_costs.get(sr.model_used, {"input": 0.3, "output": 1.0})
+            cost_cents = (tokens_in / 1000 * pricing["input"]) + (tokens_out / 1000 * pricing["output"])
+            total_cost_cents += cost_cents
+            total_duration += sr.duration_seconds
+
+            cost_stages.append({
+                "stage": sr.stage_name.upper(),
+                "model": sr.model_used,
+                "cost_cents": round(cost_cents, 2),
+                "tokens_in": tokens_in,
+                "tokens_out": tokens_out,
+                "duration_seconds": round(sr.duration_seconds, 2),
+            })
+
+        viz["cost_breakdown"] = {
+            "stages": cost_stages,
+            "total_cost_cents": round(total_cost_cents, 2),
+            "total_duration_seconds": round(total_duration, 2),
+        }
+
+        return viz
+
     def _build_final_hypothesis(
         self,
         hypothesis_id: str,
@@ -2310,6 +2478,18 @@ Include the translational roadmap from Stage 11."""
         if isinstance(counter_args, list):
             counter_args = counter_args[:10]
 
+        # Build visualization_data programmatically from pipeline outputs (Section 5)
+        visualization_data = self._build_visualization_data(
+            accumulated_context=accumulated_context,
+            stage_results=stage_results,
+            title=str(title)[:500],
+            confidence=max(0.0, min(1.0, confidence)),
+            feasibility_score=float(accumulated_context.get("feasibility_score", 0.0)),
+            evidence_summary=evidence_summary,
+            citations=citations if isinstance(citations, list) else [],
+            counter_args=counter_args,
+        )
+
         return DiscoveryHypothesis(
             id=hypothesis_id,
             disease=disease,
@@ -2340,6 +2520,7 @@ Include the translational roadmap from Stage 11."""
             counter_arguments=counter_args,
             revisions=revisions,
             pipeline_trace=pipeline_trace,
+            visualization_data=visualization_data,
         )
 
 

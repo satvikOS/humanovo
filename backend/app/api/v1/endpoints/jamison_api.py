@@ -923,7 +923,7 @@ async def pgvector_similarity_test(body: PgvectorSimilarityTestRequest) -> dict:
         )
         # Search with general (OpenAI/Azure) embeddings only
         openai_results = await store.search_general(
-            embedding=[0.0] * 3072,  # placeholder — real call needs actual embedding
+            embedding=[0.0] * 1536,  # placeholder — real call needs actual embedding
             limit=10,
             min_score=0.0,
         )

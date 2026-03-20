@@ -49,7 +49,7 @@ class Settings(BaseSettings):
 
     # Vector Store (pgvector — PostgreSQL native)
     PGVECTOR_EMBEDDING_DIM_BIOMEDICAL: int = 1024   # Bedrock Cohere Embed v3
-    PGVECTOR_EMBEDDING_DIM_GENERAL: int = 3072      # Azure text-embedding-3-large
+    PGVECTOR_EMBEDDING_DIM_GENERAL: int = 1536      # Azure text-embedding-3-large (spec: 1536d)
     PGVECTOR_SEARCH_WEIGHT_BIOMEDICAL: float = 0.6  # Weight for biomedical embedding in hybrid search
     PGVECTOR_SEARCH_WEIGHT_GENERAL: float = 0.4     # Weight for general embedding in hybrid search
     PGVECTOR_DEFAULT_SEARCH_LIMIT: int = 20
@@ -151,7 +151,7 @@ class Settings(BaseSettings):
     # Embedding Grounding Configuration
     # Dual-model: Bedrock Cohere (biomedical) + Azure text-embedding-3-large (general)
     GROUNDING_EMBEDDING_PRIMARY: str = "cohere.embed-english-v3"  # Bedrock Cohere Embed v3 (1024d)
-    GROUNDING_EMBEDDING_SECONDARY: str = "azure-text-embedding-3-large"  # Azure OpenAI (3072d)
+    GROUNDING_EMBEDDING_SECONDARY: str = "azure-text-embedding-3-large"  # Azure OpenAI (1536d)
     GROUNDING_SIMILARITY_THRESHOLD: float = 0.4  # Min cosine similarity for claim grounding
     GROUNDING_RAG_TOP_K: int = 8  # Top-K chunks retrieved per stage
     GROUNDING_GATE_ENABLED: bool = True  # Enable semantic similarity gating between stages
