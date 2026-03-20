@@ -229,44 +229,21 @@ export default function Evidence() {
           source_types: filterType !== 'all' ? [filterType] : undefined,
           limit: pageSize,
         })
-        const items = res.items || []
-        if (items.length > 0) {
-          setEvidence(items)
-          setTotalItems(res.total || 0)
-        } else {
-          // Filter local data by search query
-          const q = searchQuery.toLowerCase()
-          const filtered = LOCAL_EVIDENCE.filter(e =>
-            e.title.toLowerCase().includes(q) ||
-            e.abstract?.toLowerCase().includes(q) ||
-            e.tags?.some(t => t.toLowerCase().includes(q))
-          )
-          setEvidence(filtered)
-          setTotalItems(filtered.length)
-        }
+        setEvidence(res.items || [])
+        setTotalItems(res.total || 0)
       } else {
         const res = await api.getEvidenceList({
           page,
           page_size: pageSize,
           source_type: filterType !== 'all' ? filterType : undefined,
         })
-        const items = res.items || []
-        if (items.length > 0) {
-          setEvidence(items)
-          setTotalItems(res.total || 0)
-        } else {
-          // Use local data when API returns empty
-          const filtered = filterType !== 'all' ? LOCAL_EVIDENCE.filter(e => e.source_type === filterType) : LOCAL_EVIDENCE
-          setEvidence(filtered)
-          setTotalItems(filtered.length)
-        }
+        setEvidence(res.items || [])
+        setTotalItems(res.total || 0)
       }
     } catch (err) {
       console.error('Failed to fetch evidence:', err)
-      // Fallback to local data on API error
-      const filtered = filterType !== 'all' ? LOCAL_EVIDENCE.filter(e => e.source_type === filterType) : LOCAL_EVIDENCE
-      setEvidence(filtered)
-      setTotalItems(filtered.length)
+      setEvidence([])
+      setTotalItems(0)
     }
     setLoading(false)
   }, [searchQuery, filterType, page])
@@ -276,13 +253,9 @@ export default function Evidence() {
   // Fetch knowledge base stats on mount
   useEffect(() => {
     api.getGraphStats().then(stats => {
-      if (stats && stats.total_entities > 0) {
-        setGraphStats(stats)
-      } else {
-        setGraphStats(LOCAL_GRAPH_STATS)
-      }
+      setGraphStats(stats || null)
     }).catch(() => {
-      setGraphStats(LOCAL_GRAPH_STATS)
+      setGraphStats(null)
     })
   }, [])
 

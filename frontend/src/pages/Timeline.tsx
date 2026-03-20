@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import {
   FiFolder,
   FiZap,
@@ -11,7 +11,8 @@ import {
   FiTrash2,
   FiTrendingUp,
 } from 'react-icons/fi'
-import { getActivityLog, persistGet, persistSet, formatDate, formatDateTime, type ActivityEntry } from '../utils/persistence'
+import api from '../services/api'
+import { formatDate, formatDateTime, type ActivityEntry } from '../utils/persistence'
 
 type FilterType = '' | 'project' | 'hypothesis' | 'evidence' | 'simulation' | 'notebook' | 'discovery'
 type TimeRange = 'today' | 'week' | 'month' | 'all'
@@ -68,37 +69,46 @@ export default function Timeline() {
   const [timeRange, setTimeRange] = useState<TimeRange>('all')
   const [refreshKey, setRefreshKey] = useState(0)
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
+  const [allActivities, setAllActivities] = useState<ActivityEntry[]>([])
 
-  const activities = useMemo(() => {
-    const all = getActivityLog()
-    let filtered = all
-
-    if (filterType) {
-      filtered = filtered.filter(a => a.type === filterType)
-    }
-
-    if (timeRange !== 'all') {
-      const now = Date.now()
-      let cutoff = 0
-      if (timeRange === 'today') {
-        const today = new Date()
-        today.setHours(0, 0, 0, 0)
-        cutoff = today.getTime()
-      } else if (timeRange === 'week') {
-        cutoff = now - 7 * 86400000
-      } else if (timeRange === 'month') {
-        cutoff = now - 30 * 86400000
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const dateFrom = timeRange === 'today'
+          ? new Date(new Date().setHours(0, 0, 0, 0)).toISOString()
+          : timeRange === 'week'
+            ? new Date(Date.now() - 7 * 86400000).toISOString()
+            : timeRange === 'month'
+              ? new Date(Date.now() - 30 * 86400000).toISOString()
+              : undefined
+        const res = await api.getActivities({
+          page_size: 200,
+          type: filterType || undefined,
+          date_from: dateFrom,
+        })
+        const mapped: ActivityEntry[] = (res.items || []).map((a: any) => ({
+          id: a.id,
+          type: a.type || 'project',
+          action: a.action || 'created',
+          title: a.title || '',
+          project: a.project_name || '',
+          timestamp: a.created_at || new Date().toISOString(),
+          metadata: a.metadata,
+        }))
+        setAllActivities(mapped)
+      } catch {
+        setAllActivities([])
       }
-      filtered = filtered.filter(a => new Date(a.timestamp).getTime() >= cutoff)
     }
-
-    return filtered
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    load()
   }, [filterType, timeRange, refreshKey])
 
-  const handleDelete = (id: string) => {
-    const all = persistGet<ActivityEntry[]>('activity-log', [])
-    persistSet('activity-log', all.filter(a => a.id !== id))
+  const activities = useMemo(() => allActivities, [allActivities])
+
+  const handleDelete = async (id: string) => {
+    try {
+      await api.deleteActivity(id)
+    } catch { /* ignore */ }
     setDeleteConfirm(null)
     setRefreshKey(n => n + 1)
   }

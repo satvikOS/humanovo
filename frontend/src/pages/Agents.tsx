@@ -19,6 +19,10 @@ import {
   FiColumns,
   FiExternalLink,
   FiFolder,
+  FiUpload,
+  FiFile,
+  FiThumbsUp,
+  FiMessageSquare,
 } from 'react-icons/fi'
 import { Link } from 'react-router-dom'
 import { BarChart, Bar, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
@@ -180,6 +184,11 @@ export default function Agents() {
   const [projectId, setProjectId] = useState<string>('')
   const [, setProjectName] = useState<string>('')
 
+  // Document upload
+  const [uploadedDocs, setUploadedDocs] = useState<Array<{ name: string; id: string; status: string }>>([])
+  const [uploading, setUploading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
   const pollRef = useRef<number | null>(null)
   const failRef = useRef(0)
   const prevStateRef = useRef<string>('idle')
@@ -263,11 +272,69 @@ export default function Agents() {
     return () => { if (pollRef.current) clearInterval(pollRef.current) }
   }, [fetchStatus])
 
+  // Load saved hypotheses from project when available and discovery is not running
+  useEffect(() => {
+    if (!projectId || projectId === 'discovery' || state === 'running') return
+    if (hypotheses.length > 0) return // already have hypotheses from polling
+    const loadProjectHypotheses = async () => {
+      try {
+        const res = await api.listProjectHypotheses(projectId, { limit: 100 })
+        if (res.items?.length > 0) {
+          const mapped: Hypothesis[] = res.items.map((h: any) => ({
+            id: h.id,
+            title: h.title || h.statement || '',
+            description: h.description || h.mechanism || '',
+            mechanism: h.mechanism || '',
+            confidence: h.confidence ?? h.confidence_score ?? 0.5,
+            validated: h.validated || h.status === 'validated',
+            novelty_score: h.novelty_score,
+            evidence_summary: h.evidence_summary || [],
+            risks: h.risks || [],
+            validation_steps: h.validation_steps || [],
+            translational_roadmap: h.translational_roadmap,
+            created_at: h.created_at,
+          }))
+          setHypotheses(mapped.filter(isValidHypothesis))
+        }
+      } catch {
+        // Project hypotheses endpoint may not be available
+      }
+    }
+    loadProjectHypotheses()
+  }, [projectId, state])
+
+  // Load discovery history from API when projectId is available
+  useEffect(() => {
+    if (!projectId || projectId === 'discovery') return
+    const loadHistory = async () => {
+      try {
+        const res = await api.listDiscoveryRuns(projectId, { limit: 50 })
+        if (res.items?.length > 0) {
+          setDiscoveryHistory(res.items.map((r: any) => ({
+            id: r.id || r.run_id,
+            disease: r.disease || r.config?.disease || '',
+            discoveryType: r.discovery_type || r.config?.discovery_type || 'treatment',
+            hypothesesCount: r.hypotheses_count || 0,
+            timestamp: r.created_at || r.started_at || '',
+            status: r.status || 'completed',
+          })))
+        }
+      } catch {
+        // History endpoint may not exist yet - keep ephemeral history
+      }
+    }
+    loadHistory()
+  }, [projectId])
+
   // Actions
   const startDiscovery = async () => {
     if (!config.disease.trim()) return
     try {
-      await api.startDiscovery(config)
+      const discoveryConfig = {
+        ...config,
+        external_factors: factors.length > 0 ? factors.map(f => `${f.name} (${f.category}): ${f.interaction}`) : undefined,
+      }
+      await api.startDiscovery(discoveryConfig as any)
       setState('running')
       setShowConfig(false)
       setHypotheses([])
@@ -298,7 +365,7 @@ export default function Agents() {
 
   const resumeDiscovery = async () => {
     try {
-      await fetch('/api/v1/orchestrator/resume', { method: 'POST' })
+      await api.resumeDiscovery()
       setState('running')
     } catch (e) { console.error(e) }
   }
@@ -354,6 +421,24 @@ export default function Agents() {
     if (!factorName.trim()) return
     setFactors(prev => [...prev, { name: factorName, category: factorCategory, interaction: factorInteraction }])
     setFactorName(''); setFactorInteraction('')
+  }
+
+  const handleDocUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files || files.length === 0) return
+    setUploading(true)
+    for (const file of Array.from(files)) {
+      try {
+        const result = await api.uploadDocument(file, projectId ? { project_id: projectId } : undefined)
+        setUploadedDocs(prev => [...prev, { name: file.name, id: result.id || result.document_id || '', status: 'uploaded' }])
+        logActivity({ type: 'evidence', action: 'imported', title: `Document uploaded: ${file.name}`, project: config.disease || 'Discovery' })
+      } catch (err) {
+        console.error('Upload failed:', err)
+        setUploadedDocs(prev => [...prev, { name: file.name, id: '', status: 'failed' }])
+      }
+    }
+    setUploading(false)
+    if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
   // Sort & filter hypotheses
@@ -524,6 +609,42 @@ export default function Agents() {
                         <div key={i} className="flex items-center justify-between text-xs p-2 rounded-lg bg-[var(--glass-bg)]">
                           <span><span className="font-medium">{f.name}</span> <span className="text-[var(--color-text-muted)]">({f.category})</span></span>
                           {isIdle && <button onClick={() => setFactors(prev => prev.filter((_, j) => j !== i))} className="text-[var(--color-text-muted)] hover:text-[var(--color-error)]"><FiX className="w-3 h-3" /></button>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Document Upload */}
+                <div>
+                  <label className="text-xs text-[var(--color-text-muted)] mb-1.5 block font-medium">Supporting Documents</label>
+                  <p className="text-xxs text-[var(--color-text-muted)] mb-2">Upload research papers, datasets, or notes to guide discovery</p>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    accept=".pdf,.txt,.csv,.json,.docx,.xlsx,.md"
+                    onChange={handleDocUpload}
+                    className="hidden"
+                  />
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading}
+                    className="w-full flex items-center justify-center gap-2 p-3 rounded-lg border-2 border-dashed border-[var(--color-border)] hover:border-[var(--color-border-strong)] hover:bg-[var(--glass-bg)] transition-all text-xs disabled:opacity-50"
+                  >
+                    <FiUpload className="w-4 h-4 text-[var(--color-text-muted)]" />
+                    <span className="text-[var(--color-text-muted)]">{uploading ? 'Uploading...' : 'Click to upload documents'}</span>
+                  </button>
+                  {uploadedDocs.length > 0 && (
+                    <div className="mt-2 space-y-1">
+                      {uploadedDocs.map((doc, i) => (
+                        <div key={i} className="flex items-center gap-2 text-xs p-2 rounded-lg bg-[var(--glass-bg)]">
+                          <FiFile className="w-3 h-3 flex-shrink-0" style={{ color: doc.status === 'uploaded' ? 'var(--color-success)' : 'var(--color-error)' }} />
+                          <span className="flex-1 truncate">{doc.name}</span>
+                          <span className="text-xxs text-[var(--color-text-muted)]">{doc.status}</span>
+                          <button onClick={() => setUploadedDocs(prev => prev.filter((_, j) => j !== i))} className="text-[var(--color-text-muted)] hover:text-[var(--color-error)]">
+                            <FiX className="w-3 h-3" />
+                          </button>
                         </div>
                       ))}
                     </div>
@@ -776,6 +897,29 @@ export default function Agents() {
 
 function HypothesisDetail({ hypothesis: h, onClose, onExport }: { hypothesis: Hypothesis; onClose: () => void; onExport: () => void }) {
   const [expandedPhase, setExpandedPhase] = useState<string | null>(null)
+  const [feedbackOpen, setFeedbackOpen] = useState(false)
+  const [feedbackScore, setFeedbackScore] = useState(3)
+  const [feedbackText, setFeedbackText] = useState('')
+  const [feedbackSent, setFeedbackSent] = useState(false)
+
+  const submitFeedback = async () => {
+    try {
+      await api.submitHypothesisFeedback(h.id, {
+        overall_quality: feedbackScore,
+        dimension_scores: {
+          novelty: feedbackScore,
+          feasibility: feedbackScore,
+          clinical_relevance: feedbackScore,
+        },
+        free_text: feedbackText || undefined,
+      })
+      setFeedbackSent(true)
+      setFeedbackOpen(false)
+    } catch (err) {
+      console.error('Failed to submit feedback:', err)
+    }
+  }
+
   const roadmap = h.translational_roadmap
   const currentPhaseIdx = roadmap ? ['T0','T1','T2','T3','T4','T5'].indexOf(roadmap.current_phase) : 0
 
@@ -999,6 +1143,59 @@ function HypothesisDetail({ hypothesis: h, onClose, onExport }: { hypothesis: Hy
             </div>
           </div>
         )}
+
+        {/* Feedback Section */}
+        <div className="border-t border-[var(--color-border)] pt-4">
+          {feedbackSent ? (
+            <div className="flex items-center gap-2 text-xs text-[var(--color-success)] p-3 rounded-lg bg-[rgba(34,197,94,0.08)]">
+              <FiCheck className="w-4 h-4" /> Feedback submitted
+            </div>
+          ) : feedbackOpen ? (
+            <div className="space-y-3">
+              <h4 className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider font-medium">Rate this Hypothesis</h4>
+              <div>
+                <label className="text-xxs text-[var(--color-text-muted)] mb-1 block">Quality (1-5)</label>
+                <div className="flex gap-1">
+                  {[1, 2, 3, 4, 5].map(n => (
+                    <button
+                      key={n}
+                      onClick={() => setFeedbackScore(n)}
+                      className="w-8 h-8 rounded-lg text-xs font-medium transition-all"
+                      style={{
+                        background: n <= feedbackScore ? 'var(--color-accent-blue)' : 'var(--glass-bg)',
+                        color: n <= feedbackScore ? '#fff' : 'var(--color-text-muted)',
+                      }}
+                    >
+                      {n}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <textarea
+                value={feedbackText}
+                onChange={e => setFeedbackText(e.target.value)}
+                placeholder="Optional feedback notes..."
+                rows={2}
+                className="input w-full text-xs resize-none"
+              />
+              <div className="flex gap-2">
+                <button onClick={submitFeedback} className="btn text-xs flex-1" style={{ color: 'var(--color-success)' }}>
+                  <FiThumbsUp className="w-3 h-3" /> Submit
+                </button>
+                <button onClick={() => setFeedbackOpen(false)} className="btn text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={() => setFeedbackOpen(true)}
+              className="flex items-center gap-2 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+            >
+              <FiMessageSquare className="w-3.5 h-3.5" /> Rate this hypothesis
+            </button>
+          )}
+        </div>
       </div>
     </div>
   )

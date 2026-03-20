@@ -222,17 +222,33 @@ function RecentNotebooksWidget() {
   const [notebooks, setNotebooks] = useState<NotebookSummary[]>([])
 
   useEffect(() => {
-    // Read from new per-page notebook index (notebook-index key stores PageMeta[])
-    const pageIndex = persistGet<any[]>('notebook-index', [])
-    const sorted = [...pageIndex].sort((a, b) =>
-      new Date(b.updatedAt || b.updated_at || 0).getTime() - new Date(a.updatedAt || a.updated_at || 0).getTime()
-    )
-    setNotebooks(sorted.slice(0, 4).map((p: any) => ({
-      id: p.id,
-      title: p.title,
-      updated_at: p.updatedAt || p.updated_at || p.createdAt || '',
-      tags: p.tags || [],
-    })))
+    const fetchNotebooks = async () => {
+      try {
+        const res = await api.getNotebookPages({ page_size: 4 })
+        const items = (res?.items || []).map((p: any) => ({
+          id: p.id,
+          title: p.title || 'Untitled',
+          updated_at: p.updated_at || p.created_at || '',
+          tags: p.tags || [],
+        }))
+        if (items.length > 0) {
+          setNotebooks(items)
+          return
+        }
+      } catch { /* API unavailable, fall back to local */ }
+      // Fallback to localStorage notebook index
+      const pageIndex = persistGet<any[]>('notebook-index', [])
+      const sorted = [...pageIndex].sort((a, b) =>
+        new Date(b.updatedAt || b.updated_at || 0).getTime() - new Date(a.updatedAt || a.updated_at || 0).getTime()
+      )
+      setNotebooks(sorted.slice(0, 4).map((p: any) => ({
+        id: p.id,
+        title: p.title,
+        updated_at: p.updatedAt || p.updated_at || p.createdAt || '',
+        tags: p.tags || [],
+      })))
+    }
+    fetchNotebooks()
   }, [])
 
   return (
@@ -288,7 +304,29 @@ function RecentNotebooksWidget() {
 // ── Activity Feed ──────────────────────────────────────────────
 
 function ActivityFeed() {
-  const activities = useMemo(() => getActivityLog().slice(0, 10), [])
+  const [activities, setActivities] = useState<ActivityEntry[]>([])
+
+  useEffect(() => {
+    const fetchActivities = async () => {
+      try {
+        const res = await api.getActivities({ page_size: 10 })
+        const items = (res?.items || []).map((a: any) => ({
+          id: a.id,
+          type: a.type || 'project',
+          action: a.action || 'created',
+          title: a.title || a.description || 'Activity',
+          project: a.project_name,
+          timestamp: a.created_at || new Date().toISOString(),
+        }))
+        if (items.length > 0) {
+          setActivities(items)
+          return
+        }
+      } catch { /* API unavailable, fall back to local */ }
+      setActivities(getActivityLog().slice(0, 10))
+    }
+    fetchActivities()
+  }, [])
 
   const typeIcons: Record<string, typeof FiZap> = {
     hypothesis: FiZap,
@@ -416,9 +454,31 @@ export default function Dashboard() {
   const navigate = useNavigate()
   const [projects, setProjects] = useState<Project[]>([])
 
-  // Get real counts from activity log
-  const allActivities = useMemo(() => getActivityLog(), [])
+  const [allActivities, setAllActivities] = useState<ActivityEntry[]>([])
   const [simulationCount, setSimulationCount] = useState(0)
+
+  // Fetch activities from API for trend data
+  useEffect(() => {
+    const fetchActivities = async () => {
+      try {
+        const res = await api.getActivities({ page_size: 100 })
+        const items = (res?.items || []).map((a: any) => ({
+          id: a.id,
+          type: a.type || 'project',
+          action: a.action || 'created',
+          title: a.title || '',
+          project: a.project_name,
+          timestamp: a.created_at || new Date().toISOString(),
+        }))
+        if (items.length > 0) {
+          setAllActivities(items)
+          return
+        }
+      } catch { /* fall back to local */ }
+      setAllActivities(getActivityLog())
+    }
+    fetchActivities()
+  }, [])
 
   // Fetch API projects (no localStorage fallback)
   useEffect(() => {

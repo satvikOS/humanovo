@@ -115,117 +115,45 @@ export default function KnowledgeGraph() {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
-  // Graph data - populated with local biomedical knowledge graph data
+  // Graph data - fetched from backend knowledge graph API
   const [graphData, setGraphData] = useState<{ nodes: GraphNode[], edges: GraphEdge[] }>({
-    nodes: [
-      // Diseases
-      { id: 'n1', label: 'Breast Cancer', type: 'disease', confidence: 0.95, sources: 1203 },
-      { id: 'n2', label: 'NSCLC', type: 'disease', confidence: 0.93, sources: 891 },
-      { id: 'n3', label: 'Melanoma', type: 'disease', confidence: 0.91, sources: 678 },
-      { id: 'n4', label: 'Alzheimer', type: 'disease', confidence: 0.88, sources: 567 },
-      { id: 'n5', label: 'Diabetes T2', type: 'disease', confidence: 0.90, sources: 891 },
-      { id: 'n6', label: 'DLBCL', type: 'disease', confidence: 0.87, sources: 234 },
-      { id: 'n7', label: 'Myeloma', type: 'disease', confidence: 0.89, sources: 178 },
-      { id: 'n8', label: 'PDAC', type: 'disease', confidence: 0.86, sources: 267 },
-      { id: 'n9', label: 'Sickle Cell', type: 'disease', confidence: 0.94, sources: 342 },
-      { id: 'n10', label: 'Long COVID', type: 'disease', confidence: 0.82, sources: 234 },
-      // Genes
-      { id: 'n11', label: 'HER2', type: 'gene', confidence: 0.97, sources: 1500 },
-      { id: 'n12', label: 'BRCA1', type: 'gene', confidence: 0.96, sources: 1200 },
-      { id: 'n13', label: 'EGFR', type: 'gene', confidence: 0.95, sources: 1100 },
-      { id: 'n14', label: 'KRAS', type: 'gene', confidence: 0.94, sources: 980 },
-      { id: 'n15', label: 'TP53', type: 'gene', confidence: 0.98, sources: 2100 },
-      { id: 'n16', label: 'APOE4', type: 'gene', confidence: 0.91, sources: 567 },
-      { id: 'n17', label: 'PCSK9', type: 'gene', confidence: 0.93, sources: 445 },
-      { id: 'n18', label: 'HBB', type: 'gene', confidence: 0.92, sources: 342 },
-      { id: 'n19', label: 'BRAF', type: 'gene', confidence: 0.95, sources: 890 },
-      { id: 'n20', label: 'PD-L1', type: 'gene', confidence: 0.94, sources: 1300 },
-      // Drugs
-      { id: 'n21', label: 'Pembrolizumab', type: 'drug', confidence: 0.96, sources: 1800 },
-      { id: 'n22', label: 'T-DXd', type: 'drug', confidence: 0.93, sources: 1203 },
-      { id: 'n23', label: 'Semaglutide', type: 'drug', confidence: 0.95, sources: 891 },
-      { id: 'n24', label: 'Nivolumab', type: 'drug', confidence: 0.94, sources: 1500 },
-      { id: 'n25', label: 'Glofitamab', type: 'drug', confidence: 0.89, sources: 234 },
-      { id: 'n26', label: 'Rituximab', type: 'drug', confidence: 0.92, sources: 900 },
-      { id: 'n27', label: 'Osimertinib', type: 'drug', confidence: 0.93, sources: 780 },
-      // Proteins
-      { id: 'n28', label: 'PD-1', type: 'protein', confidence: 0.97, sources: 1900 },
-      { id: 'n29', label: 'TREM2', type: 'protein', confidence: 0.88, sources: 456 },
-      { id: 'n30', label: 'GLP-1R', type: 'protein', confidence: 0.91, sources: 678 },
-      { id: 'n31', label: 'CD20', type: 'protein', confidence: 0.93, sources: 800 },
-      { id: 'n32', label: 'GPRC5D', type: 'protein', confidence: 0.85, sources: 178 },
-      { id: 'n33', label: 'VEGF', type: 'protein', confidence: 0.94, sources: 1100 },
-      // Pathways
-      { id: 'n34', label: 'PI3K/mTOR', type: 'pathway', confidence: 0.93, sources: 1400 },
-      { id: 'n35', label: 'RAS-MAPK', type: 'pathway', confidence: 0.95, sources: 1600 },
-      { id: 'n36', label: 'Wnt/β-cat', type: 'pathway', confidence: 0.90, sources: 900 },
-      { id: 'n37', label: 'JAK-STAT', type: 'pathway', confidence: 0.91, sources: 780 },
-      // Biomarkers
-      { id: 'n38', label: 'ctDNA', type: 'biomarker', confidence: 0.89, sources: 678 },
-      { id: 'n39', label: 'AFP', type: 'biomarker', confidence: 0.87, sources: 445 },
-      { id: 'n40', label: 'CA-125', type: 'biomarker', confidence: 0.86, sources: 560 },
-      // Cell types
-      { id: 'n41', label: 'CD8+ T cell', type: 'cell_type', confidence: 0.95, sources: 1200 },
-      { id: 'n42', label: 'CAR-T', type: 'cell_type', confidence: 0.92, sources: 890 },
-      { id: 'n43', label: 'Microglia', type: 'cell_type', confidence: 0.88, sources: 456 },
-      { id: 'n44', label: 'NK Cell', type: 'cell_type', confidence: 0.90, sources: 670 },
-      // Mutations
-      { id: 'n45', label: 'BRAF V600E', type: 'mutation', confidence: 0.96, sources: 1100 },
-      { id: 'n46', label: 'EGFR T790M', type: 'mutation', confidence: 0.94, sources: 780 },
-      { id: 'n47', label: 'KRAS G12C', type: 'mutation', confidence: 0.93, sources: 650 },
-    ],
-    edges: [
-      // Drug-Disease (treats)
-      { id: 'e1', source: 'n21', target: 'n3', relation: 'treats', confidence: 0.94, evidenceCount: 189 },
-      { id: 'e2', source: 'n22', target: 'n1', relation: 'treats', confidence: 0.93, evidenceCount: 1203 },
-      { id: 'e3', source: 'n23', target: 'n5', relation: 'treats', confidence: 0.95, evidenceCount: 891 },
-      { id: 'e4', source: 'n24', target: 'n2', relation: 'treats', confidence: 0.93, evidenceCount: 678 },
-      { id: 'e5', source: 'n25', target: 'n6', relation: 'treats', confidence: 0.89, evidenceCount: 234 },
-      { id: 'e6', source: 'n26', target: 'n6', relation: 'treats', confidence: 0.92, evidenceCount: 900 },
-      { id: 'e7', source: 'n27', target: 'n2', relation: 'treats', confidence: 0.93, evidenceCount: 780 },
-      { id: 'e35', source: 'n21', target: 'n2', relation: 'treats', confidence: 0.92, evidenceCount: 1500 },
-      // Drug-Protein (targets)
-      { id: 'e8', source: 'n21', target: 'n28', relation: 'targets', confidence: 0.98, evidenceCount: 1900 },
-      { id: 'e9', source: 'n22', target: 'n11', relation: 'targets', confidence: 0.97, evidenceCount: 1500 },
-      { id: 'e10', source: 'n23', target: 'n30', relation: 'targets', confidence: 0.96, evidenceCount: 678 },
-      { id: 'e11', source: 'n24', target: 'n28', relation: 'targets', confidence: 0.97, evidenceCount: 1500 },
-      { id: 'e12', source: 'n25', target: 'n31', relation: 'targets', confidence: 0.94, evidenceCount: 800 },
-      { id: 'e13', source: 'n26', target: 'n31', relation: 'targets', confidence: 0.96, evidenceCount: 800 },
-      { id: 'e14', source: 'n27', target: 'n13', relation: 'targets', confidence: 0.95, evidenceCount: 780 },
-      // Gene-Disease (causes/associates)
-      { id: 'e15', source: 'n12', target: 'n1', relation: 'causes', confidence: 0.92, evidenceCount: 1200 },
-      { id: 'e16', source: 'n13', target: 'n2', relation: 'causes', confidence: 0.91, evidenceCount: 1100 },
-      { id: 'e17', source: 'n14', target: 'n8', relation: 'causes', confidence: 0.89, evidenceCount: 980 },
-      { id: 'e18', source: 'n15', target: 'n1', relation: 'associates', confidence: 0.95, evidenceCount: 2100 },
-      { id: 'e19', source: 'n16', target: 'n4', relation: 'causes', confidence: 0.88, evidenceCount: 567 },
-      { id: 'e20', source: 'n17', target: 'n5', relation: 'associates', confidence: 0.85, evidenceCount: 445 },
-      { id: 'e21', source: 'n18', target: 'n9', relation: 'causes', confidence: 0.96, evidenceCount: 342 },
-      { id: 'e22', source: 'n19', target: 'n3', relation: 'causes', confidence: 0.93, evidenceCount: 890 },
-      { id: 'e36', source: 'n14', target: 'n2', relation: 'causes', confidence: 0.88, evidenceCount: 650 },
-      // Mutation-Gene (associates)
-      { id: 'e23', source: 'n45', target: 'n19', relation: 'associates', confidence: 0.98, evidenceCount: 1100 },
-      { id: 'e24', source: 'n46', target: 'n13', relation: 'resistance', confidence: 0.95, evidenceCount: 780 },
-      { id: 'e25', source: 'n47', target: 'n14', relation: 'associates', confidence: 0.96, evidenceCount: 650 },
-      // Protein-Gene (expresses)
-      { id: 'e26', source: 'n20', target: 'n28', relation: 'expresses', confidence: 0.97, evidenceCount: 1300 },
-      { id: 'e27', source: 'n29', target: 'n43', relation: 'expresses', confidence: 0.86, evidenceCount: 456 },
-      // Pathway-Disease (modulates)
-      { id: 'e28', source: 'n34', target: 'n1', relation: 'modulates', confidence: 0.89, evidenceCount: 900 },
-      { id: 'e29', source: 'n35', target: 'n2', relation: 'modulates', confidence: 0.91, evidenceCount: 1100 },
-      { id: 'e30', source: 'n35', target: 'n3', relation: 'modulates', confidence: 0.88, evidenceCount: 780 },
-      // Cell type - Disease
-      { id: 'e31', source: 'n41', target: 'n3', relation: 'inhibits', confidence: 0.87, evidenceCount: 670 },
-      { id: 'e32', source: 'n42', target: 'n7', relation: 'treats', confidence: 0.90, evidenceCount: 178 },
-      { id: 'e33', source: 'n43', target: 'n4', relation: 'associates', confidence: 0.84, evidenceCount: 456 },
-      // Biomarker
-      { id: 'e34', source: 'n38', target: 'n2', relation: 'biomarker_of', confidence: 0.88, evidenceCount: 678 },
-      { id: 'e37', source: 'n39', target: 'n8', relation: 'biomarker_of', confidence: 0.83, evidenceCount: 445 },
-      { id: 'e38', source: 'n33', target: 'n1', relation: 'activates', confidence: 0.86, evidenceCount: 800 },
-      // Drug interactions
-      { id: 'e39', source: 'n27', target: 'n46', relation: 'inhibits', confidence: 0.92, evidenceCount: 780 },
-      { id: 'e40', source: 'n42', target: 'n32', relation: 'targets', confidence: 0.88, evidenceCount: 178 },
-    ],
+    nodes: [],
+    edges: [],
   })
+  const [graphLoading, setGraphLoading] = useState(true)
+
+  // Fetch graph data from API on mount
+  useEffect(() => {
+    const fetchGraph = async () => {
+      setGraphLoading(true)
+      try {
+        const res = await fetch('/api/v1/knowledge-graph/full')
+        if (res.ok) {
+          const data = await res.json()
+          const nodes: GraphNode[] = (data.nodes || []).map((n: any) => ({
+            id: n.id,
+            label: n.name || n.label || n.id,
+            type: n.entity_type || n.type || 'gene',
+            confidence: n.confidence || 0.5,
+            sources: n.source_count || 0,
+          }))
+          const edges: GraphEdge[] = (data.edges || data.relations || []).map((e: any) => ({
+            id: e.id,
+            source: e.source_id || e.source,
+            target: e.target_id || e.target,
+            relation: e.relation_type || e.relation || 'associates',
+            confidence: e.confidence || 0.5,
+            evidenceCount: e.evidence_count || 0,
+          }))
+          setGraphData({ nodes, edges })
+        }
+      } catch (err) {
+        console.warn('Failed to fetch knowledge graph data:', err)
+      }
+      setGraphLoading(false)
+    }
+    fetchGraph()
+  }, [])
 
   const { data: searchResults } = useQuery({
     queryKey: ['entities', 'search', searchQuery],

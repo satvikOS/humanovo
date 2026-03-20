@@ -12,7 +12,7 @@ const TYPE_COLORS: Record<string, string> = {
   disease: '#ef4444', drug: '#f97316',
 }
 
-const API = '/api/knowledge-graph'
+const API = '/api/v1/knowledge-graph'
 
 export default function KnowledgeGraphViewer() {
   const [nodes, setNodes] = useState<GNode[]>([])

@@ -13,7 +13,7 @@ interface Dataset {
 interface Column { name: string; type: string; description: string; nullable: boolean }
 interface Profile { name: string; count: number; non_null: number; null_count: number; completeness: number; unique: number; min?: number; max?: number; mean?: number; value_counts?: Record<string, number> }
 
-const API = '/api/datasets'
+const API = '/api/v1/datasets'
 
 export default function DataManager() {
   const [datasets, setDatasets] = useState<Dataset[]>([])

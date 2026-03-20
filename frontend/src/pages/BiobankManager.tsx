@@ -9,7 +9,7 @@ interface Sample {
 }
 interface Inventory { total_samples: number; by_type: Record<string, number>; by_status: Record<string, number>; by_project: Record<string, number>; alerts: any[]; storage_utilization: any[] }
 
-const API = '/api/biobank'
+const API = '/api/v1/biobank'
 const PIE_COLORS = ['#3b82f6', '#8b5cf6', '#22c55e', '#f97316', '#06b6d4', '#ef4444']
 const STATUS_COLORS: Record<string, string> = { available: 'text-green-400 bg-green-500/10', checked_out: 'text-yellow-400 bg-yellow-500/10', depleted: 'text-red-400 bg-red-500/10', reserved: 'text-blue-400 bg-blue-500/10' }
 

@@ -8,7 +8,7 @@ import {
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import api, { Project, ProjectCreate } from '../services/api'
-import { persistGet, persistSet, formatDateTime } from '../utils/persistence'
+import { persistGet, formatDateTime } from '../utils/persistence'
 
 interface SavedResearchPaper {
   id: string
@@ -421,44 +421,10 @@ export default function Projects() {
   const loadProjects = async () => {
     try {
       setLoading(true)
-      const deletedIds = new Set(persistGet<string[]>('deleted-project-ids', []))
-
-      let apiProjects: Project[] = []
-      try {
-        const res = await api.getProjects({ page_size: 50, search: searchQuery || undefined })
-        apiProjects = (res.items || []).filter(p => !deletedIds.has(p.id))
-      } catch { /* API unavailable */ }
-
-      const localProjects = persistGet<any[]>('projects', []).filter((p: any) => p.id && !deletedIds.has(p.id))
-      const apiIds = new Set(apiProjects.map(p => p.id))
-      const localOnly = localProjects
-        .filter((p: any) => !apiIds.has(p.id))
-        .map((p: any) => ({
-          id: p.id,
-          name: p.name || 'Untitled Project',
-          description: p.description,
-          disease_focus: p.disease_focus,
-          research_question: p.research_question,
-          tags: p.tags || [],
-          status: p.status || 'active',
-          hypothesis_count: p.hypothesis_count || 0,
-          evidence_count: p.evidence_count || 0,
-          hypotheses: p.hypotheses,
-          created_at: p.created_at || new Date().toISOString(),
-          updated_at: p.updated_at || new Date().toISOString(),
-        } as Project))
-
-      const filteredLocal = searchQuery
-        ? localOnly.filter(p =>
-            p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            (p.description || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-            (p.disease_focus || '').toLowerCase().includes(searchQuery.toLowerCase())
-          )
-        : localOnly
-
-      const all = [...apiProjects, ...filteredLocal]
-      all.sort((a, b) => new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime())
-      setProjects(all)
+      const res = await api.getProjects({ page_size: 50, search: searchQuery || undefined })
+      const apiProjects = res.items || []
+      apiProjects.sort((a, b) => new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime())
+      setProjects(apiProjects)
     } catch (err) {
       console.error('Failed to load projects:', err)
     } finally {
@@ -470,28 +436,11 @@ export default function Projects() {
     try {
       const project = await api.createProject(data)
       setProjects(prev => [project, ...prev])
-      const localProjects = persistGet<any[]>('projects', [])
-      persistSet('projects', [project, ...localProjects])
       return true
-    } catch { /* API unavailable */ }
-
-    const localProject: Project = {
-      id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      name: data.name,
-      description: data.description,
-      disease_focus: data.disease_focus,
-      research_question: data.research_question,
-      tags: data.tags || [],
-      status: 'active',
-      hypothesis_count: 0,
-      evidence_count: 0,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+    } catch (err) {
+      console.error('Failed to create project:', err)
+      return false
     }
-    setProjects(prev => [localProject, ...prev])
-    const localProjects = persistGet<any[]>('projects', [])
-    persistSet('projects', [localProject, ...localProjects])
-    return true
   }
 
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
@@ -503,16 +452,8 @@ export default function Projects() {
     const id = deleteConfirmId
     setDeleteConfirmId(null)
     try {
-      try { await api.deleteProject(id) } catch { /* API unavailable */ }
+      await api.deleteProject(id)
       setProjects(prev => prev.filter(p => p.id !== id))
-      const localProjects = persistGet<any[]>('projects', [])
-      persistSet('projects', localProjects.filter((p: any) => p.id !== id))
-      const deletedIds = persistGet<string[]>('deleted-project-ids', [])
-      if (!deletedIds.includes(id)) persistSet('deleted-project-ids', [...deletedIds, id])
-      const papers = persistGet<any[]>('research-papers', [])
-      persistSet('research-papers', papers.filter((p: any) => p.project_id !== id))
-      const hypotheses = persistGet<any[]>('hypotheses', [])
-      persistSet('hypotheses', hypotheses.filter((h: any) => h.project_id !== id))
     } catch (err) {
       console.error('Failed to delete project:', err)
     }

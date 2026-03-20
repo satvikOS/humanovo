@@ -771,6 +771,11 @@ export const api = {
     return data
   },
 
+  async resumeDiscovery(): Promise<any> {
+    const { data } = await apiClient.post('/orchestrator/resume')
+    return data
+  },
+
   async stopDiscovery(): Promise<any> {
     const { data } = await apiClient.post('/orchestrator/stop')
     return data
