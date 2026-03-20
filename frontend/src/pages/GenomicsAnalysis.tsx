@@ -41,7 +41,7 @@ const PATHWAY_GENES: Record<string, Record<string, string[]>> = {
   },
 }
 
-function computePathwayAnalysis(genes: string[], database: string) {
+export function _computePathwayAnalysis(genes: string[], database: string) {
   const db = PATHWAY_GENES[database] || PATHWAY_GENES.kegg
   const upperGenes = genes.map(g => g.toUpperCase().trim())
 
@@ -71,7 +71,7 @@ function computePathwayAnalysis(genes: string[], database: string) {
   return { database, input_genes: genes.length, pathways: results }
 }
 
-function computeGSEA(rankedGenes: { gene: string; score: number }[], geneSet: string) {
+export function _computeGSEA(rankedGenes: { gene: string; score: number }[], geneSet: string) {
   const sorted = [...rankedGenes].sort((a, b) => b.score - a.score)
   const n = sorted.length
   if (n === 0) return { gene_set: geneSet, enrichment_score: 0, normalized_es: 0, p_value: 1, fdr: 1, n_genes: 0, leading_edge_size: 0, leading_edge_genes: [], enrichment_plot: [] }
@@ -118,7 +118,7 @@ function computeGSEA(rankedGenes: { gene: string; score: number }[], geneSet: st
   }
 }
 
-function computeVariantAnnotation(variants: { gene: string; position: number; ref: string; alt: string }[]) {
+export function _computeVariantAnnotation(variants: { gene: string; position: number; ref: string; alt: string }[]) {
   // Deterministic variant annotation based on mutation characteristics
   function annotateVariant(v: { gene: string; position: number; ref: string; alt: string }) {
     const refLen = v.ref.length
@@ -179,7 +179,7 @@ function computeVariantAnnotation(variants: { gene: string; position: number; re
   }
 }
 
-function computeBiomarkerDiscovery(data: { gene: string; group1_values: number[]; group2_values: number[] }[]) {
+export function _computeBiomarkerDiscovery(data: { gene: string; group1_values: number[]; group2_values: number[] }[]) {
   const mean = (arr: number[]) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0
   const std = (arr: number[]) => { const m = mean(arr); const n = arr.length; return n > 1 ? Math.sqrt(arr.reduce((s, v) => s + (v - m) ** 2, 0) / (n - 1)) : 0 }
   // Approximate t-distribution CDF using normal approximation

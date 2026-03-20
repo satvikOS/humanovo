@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
+import { useState, useRef, useCallback, useMemo } from 'react'
 import { formatDateTime, logActivity } from '../utils/persistence'
 import '@tanstack/react-query' // kept to preserve dependency
 import {

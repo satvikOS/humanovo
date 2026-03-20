@@ -220,7 +220,6 @@ export default function Agents() {
 
       // Merge hypotheses only during active discovery, not from stale completed state
       if ((res as any).top_hypotheses?.length > 0 && (newState === 'running' || newState === 'stopping')) {
-        const pid = (res as any).project_id || ''
         setHypotheses(prev => {
           const ids = new Set(prev.map(h => h.id))
           const incoming = (res as any).top_hypotheses.filter((h: Hypothesis) => !ids.has(h.id)).filter(isValidHypothesis)
