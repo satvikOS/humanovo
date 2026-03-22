@@ -8,7 +8,7 @@ import {
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import api, { Project, ProjectCreate } from '../services/api'
-import { persistGet, formatDateTime } from '../utils/persistence'
+import { persistGet, formatDateTime, logActivity } from '../utils/persistence'
 
 interface SavedResearchPaper {
   id: string
@@ -450,6 +450,7 @@ export default function Projects() {
     try {
       const project = await api.createProject(data)
       setProjects(prev => [project, ...prev])
+      logActivity({ type: 'project', action: 'created', title: `Created project: ${project.name || data.name}`, project: project.name || data.name })
       return true
     } catch (err: any) {
       // Extract the real error for debugging
@@ -472,8 +473,10 @@ export default function Projects() {
     const id = deleteConfirmId
     setDeleteConfirmId(null)
     try {
+      const deletedProject = projects.find(p => p.id === id)
       await api.deleteProject(id)
       setProjects(prev => prev.filter(p => p.id !== id))
+      logActivity({ type: 'project', action: 'deleted', title: `Deleted project: ${deletedProject?.name || 'Unknown'}`, project: deletedProject?.name })
     } catch (err) {
       console.error('Failed to delete project:', err)
     }

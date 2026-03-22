@@ -114,6 +114,7 @@ except Exception as _e:
 PROJECTS_TABLE = os.environ.get("PROJECTS_TABLE", "genup-dev-projects")
 HYPOTHESES_TABLE = os.environ.get("HYPOTHESES_TABLE", "genup-dev-hypotheses")
 EVIDENCE_TABLE = os.environ.get("EVIDENCE_TABLE", "genup-dev-evidence")
+SIMULATIONS_TABLE = os.environ.get("SIMULATIONS_TABLE", "genup-dev-simulations")
 print(f"[PROJECTS] Tables: projects={PROJECTS_TABLE} hypotheses={HYPOTHESES_TABLE}")
 
 
@@ -184,8 +185,32 @@ def list_projects():
         end = start + page_size
         page_items = all_items[start:end] if start < total else []
 
+        # Enrich projects with live hypothesis counts
+        enriched_items = []
+        hyp_table = dynamodb.Table(HYPOTHESES_TABLE)
+        for p in page_items:
+            project = serialize_item(_ensure_project_fields(p))
+            try:
+                try:
+                    hyp_resp = hyp_table.query(
+                        IndexName="project_id-created_at-index",
+                        KeyConditionExpression="project_id = :pid",
+                        ExpressionAttributeValues={":pid": project["id"]},
+                        Select="COUNT",
+                    )
+                except Exception:
+                    hyp_resp = hyp_table.scan(
+                        FilterExpression="project_id = :pid",
+                        ExpressionAttributeValues={":pid": project["id"]},
+                        Select="COUNT",
+                    )
+                project["hypothesis_count"] = hyp_resp.get("Count", 0)
+            except Exception:
+                pass
+            enriched_items.append(project)
+
         return {
-            "items": [serialize_item(_ensure_project_fields(p)) for p in page_items],
+            "items": enriched_items,
             "total": total,
             "page": page,
             "page_size": page_size,
@@ -347,7 +372,7 @@ def list_project_hypotheses(project_id: str):
 
 @app.get("/api/v1/projects/<project_id>/stats")
 def get_project_stats(project_id: str):
-    """Get statistics for a project."""
+    """Get statistics for a project with live counts from related tables."""
     try:
         table = dynamodb.Table(PROJECTS_TABLE)
         response = table.get_item(Key={"id": project_id})
@@ -361,11 +386,62 @@ def get_project_stats(project_id: str):
             )
 
         item = serialize_item(_ensure_project_fields(item))
+
+        # Live count hypotheses from the hypotheses table
+        hypothesis_count = 0
+        try:
+            hyp_table = dynamodb.Table(HYPOTHESES_TABLE)
+            try:
+                hyp_resp = hyp_table.query(
+                    IndexName="project_id-created_at-index",
+                    KeyConditionExpression="project_id = :pid",
+                    ExpressionAttributeValues={":pid": project_id},
+                    Select="COUNT",
+                )
+            except Exception:
+                hyp_resp = hyp_table.scan(
+                    FilterExpression="project_id = :pid",
+                    ExpressionAttributeValues={":pid": project_id},
+                    Select="COUNT",
+                )
+            hypothesis_count = hyp_resp.get("Count", 0)
+        except Exception as e:
+            print(f"[STATS] Hypothesis count failed: {e}")
+            hypothesis_count = item.get("hypothesis_count", 0)
+
+        # Live count evidence
+        evidence_count = 0
+        try:
+            ev_table = dynamodb.Table(EVIDENCE_TABLE)
+            ev_resp = ev_table.scan(
+                FilterExpression="project_id = :pid",
+                ExpressionAttributeValues={":pid": project_id},
+                Select="COUNT",
+            )
+            evidence_count = ev_resp.get("Count", 0)
+        except Exception as e:
+            print(f"[STATS] Evidence count failed: {e}")
+            evidence_count = item.get("evidence_count", 0)
+
+        # Live count simulations
+        simulation_count = 0
+        try:
+            sim_table = dynamodb.Table(SIMULATIONS_TABLE)
+            sim_resp = sim_table.scan(
+                FilterExpression="project_id = :pid",
+                ExpressionAttributeValues={":pid": project_id},
+                Select="COUNT",
+            )
+            simulation_count = sim_resp.get("Count", 0)
+        except Exception as e:
+            print(f"[STATS] Simulation count failed: {e}")
+            simulation_count = item.get("simulation_count", 0)
+
         return {
             "project_id": item["id"],
-            "hypothesis_count": item.get("hypothesis_count", 0),
-            "evidence_count": item.get("evidence_count", 0),
-            "simulation_count": item.get("simulation_count", 0),
+            "hypothesis_count": hypothesis_count,
+            "evidence_count": evidence_count,
+            "simulation_count": simulation_count,
             "status": item.get("status", "active"),
             "created_at": item.get("created_at", ""),
             "updated_at": item.get("updated_at", ""),
@@ -376,6 +452,74 @@ def get_project_stats(project_id: str):
             content_type="application/json",
             body=json.dumps({"detail": f"Failed to get stats: {str(e)}"}),
         )
+
+
+@app.get("/api/v1/projects/<project_id>/discovery-runs")
+def list_discovery_runs(project_id: str):
+    """List discovery runs for a project from the hypotheses table (discovery metadata)."""
+    try:
+        params = app.current_event.query_string_parameters or {}
+        limit = int(params.get("limit", "50"))
+
+        # Query hypotheses for this project to build discovery run summaries
+        hyp_table = dynamodb.Table(HYPOTHESES_TABLE)
+        try:
+            hyp_resp = hyp_table.query(
+                IndexName="project_id-created_at-index",
+                KeyConditionExpression="project_id = :pid",
+                ExpressionAttributeValues={":pid": project_id},
+                ScanIndexForward=False,
+            )
+        except Exception:
+            hyp_resp = hyp_table.scan(
+                FilterExpression="project_id = :pid",
+                ExpressionAttributeValues={":pid": project_id},
+            )
+
+        hypotheses = hyp_resp.get("Items", [])
+
+        # Group hypotheses by run_id if available, otherwise return empty
+        runs_map = {}
+        for h in hypotheses:
+            h = serialize_item(h)
+            run_id = h.get("run_id") or h.get("discovery_run_id")
+            if not run_id:
+                continue
+            if run_id not in runs_map:
+                runs_map[run_id] = {
+                    "id": run_id,
+                    "status": "completed",
+                    "disease": h.get("disease", ""),
+                    "discovery_type": h.get("discovery_type", "treatment"),
+                    "num_rounds": 1,
+                    "best_hypothesis_id": None,
+                    "total_cost_cents": 0,
+                    "total_duration_seconds": None,
+                    "created_at": h.get("created_at", ""),
+                    "hypothesis_count": 0,
+                }
+            run = runs_map[run_id]
+            run["hypothesis_count"] += 1
+            conf = float(h.get("confidence_score", 0))
+            if run["best_hypothesis_id"] is None or conf > float(runs_map[run_id].get("_best_conf", 0)):
+                run["best_hypothesis_id"] = h.get("id")
+                run["_best_conf"] = conf
+
+        # Clean up internal fields and apply limit
+        runs = list(runs_map.values())[:limit]
+        for r in runs:
+            r.pop("_best_conf", None)
+
+        return {"items": runs, "total": len(runs)}
+    except Exception as e:
+        print(f"[DISCOVERY_RUNS] ERROR: {e}\n{traceback.format_exc()}")
+        return {"items": [], "total": 0}
+
+
+@app.get("/api/v1/projects/<project_id>/synthesis-runs")
+def list_synthesis_runs(project_id: str):
+    """List synthesis runs for a project (stub - returns empty for now)."""
+    return {"items": [], "total": 0}
 
 
 @app.patch("/api/v1/projects/<project_id>")

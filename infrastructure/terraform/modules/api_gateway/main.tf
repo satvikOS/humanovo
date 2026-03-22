@@ -176,6 +176,22 @@ resource "aws_apigatewayv2_route" "projects_stats" {
   authorizer_id      = var.enable_jwt_auth ? aws_apigatewayv2_authorizer.jwt[0].id : null
 }
 
+resource "aws_apigatewayv2_route" "projects_discovery_runs" {
+  api_id             = aws_apigatewayv2_api.main.id
+  route_key          = "GET /api/v1/projects/{projectId}/discovery-runs"
+  target             = "integrations/${aws_apigatewayv2_integration.lambda["projects"].id}"
+  authorization_type = var.enable_jwt_auth ? "JWT" : "NONE"
+  authorizer_id      = var.enable_jwt_auth ? aws_apigatewayv2_authorizer.jwt[0].id : null
+}
+
+resource "aws_apigatewayv2_route" "projects_synthesis_runs" {
+  api_id             = aws_apigatewayv2_api.main.id
+  route_key          = "GET /api/v1/projects/{projectId}/synthesis-runs"
+  target             = "integrations/${aws_apigatewayv2_integration.lambda["projects"].id}"
+  authorization_type = var.enable_jwt_auth ? "JWT" : "NONE"
+  authorizer_id      = var.enable_jwt_auth ? aws_apigatewayv2_authorizer.jwt[0].id : null
+}
+
 # Hypotheses Routes
 resource "aws_apigatewayv2_route" "hypotheses_list" {
   api_id             = aws_apigatewayv2_api.main.id

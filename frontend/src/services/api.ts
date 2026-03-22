@@ -932,9 +932,31 @@ export const api = {
 
   async getActivities(params?: PaginationParams & { type?: string; action?: string; date_from?: string; date_to?: string }): Promise<PaginatedResponse<Activity>> {
     // Activities are stored locally — no backend endpoint exists
-    const all = JSON.parse(localStorage.getItem('humanovo-activity-log') || '[]') as Activity[]
+    const raw = JSON.parse(localStorage.getItem('humanovo-activity-log') || '[]') as any[]
+    // Normalize: ensure created_at is set (legacy items may only have timestamp)
+    let all: Activity[] = raw.map(a => ({
+      ...a,
+      created_at: a.created_at || a.timestamp || new Date().toISOString(),
+    }))
+
+    // Apply filters
+    if (params?.type) {
+      all = all.filter(a => a.type === params.type)
+    }
+    if (params?.action) {
+      all = all.filter(a => a.action === params.action)
+    }
+    if (params?.date_from) {
+      const from = new Date(params.date_from).getTime()
+      all = all.filter(a => new Date(a.created_at).getTime() >= from)
+    }
+    if (params?.date_to) {
+      const to = new Date(params.date_to).getTime()
+      all = all.filter(a => new Date(a.created_at).getTime() <= to)
+    }
+
     const page = params?.page || 1
-    const pageSize = params?.page_size || 20
+    const pageSize = params?.page_size || 200
     const start = (page - 1) * pageSize
     return { items: all.slice(start, start + pageSize), total: all.length, page, page_size: pageSize }
   },

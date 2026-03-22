@@ -221,6 +221,7 @@ module "iam" {
     module.dynamodb.agent_tasks_table_arn,
     module.dynamodb.knowledge_table_arn,
     module.dynamodb.knowledge_metadata_table_arn,
+    module.dynamodb.notebook_table_arn,
   ]
 }
 
