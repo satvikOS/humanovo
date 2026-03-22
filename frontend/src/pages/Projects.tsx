@@ -66,7 +66,7 @@ function StatsBar({ projects }: { projects: Project[] }) {
 
 /* ─── Create Modal ──────────────────────────────────────────────────── */
 
-function CreateProjectModal({ onClose, onCreate }: { onClose: () => void; onCreate: (project: ProjectCreate) => Promise<boolean> }) {
+function CreateProjectModal({ onClose, onCreate }: { onClose: () => void; onCreate: (project: ProjectCreate) => Promise<string | true> }) {
   const [formData, setFormData] = useState({
     name: '',
     description: '',
@@ -83,17 +83,17 @@ function CreateProjectModal({ onClose, onCreate }: { onClose: () => void; onCrea
     setError('')
     setCreating(true)
     try {
-      const success = await onCreate({
+      const result = await onCreate({
         name: formData.name,
         description: formData.description || undefined,
         disease_focus: formData.disease_focus || undefined,
         research_question: formData.research_question || undefined,
         tags: formData.tags,
       })
-      if (success) onClose()
-      else setError('Failed to create project. Please check that the backend server is running.')
-    } catch {
-      setError('Failed to create project. Please check that the backend server is running.')
+      if (result === true) onClose()
+      else setError(typeof result === 'string' ? result : 'Failed to create project. Open browser console (F12) for details.')
+    } catch (e: any) {
+      setError(e?.message || 'Failed to create project. Open browser console (F12) for details.')
     } finally {
       setCreating(false)
     }
@@ -418,6 +418,9 @@ export default function Projects() {
     localStorage.setItem('humanovo-projects-view', viewMode)
   }, [viewMode])
 
+  const [apiStatus, setApiStatus] = useState<'checking' | 'connected' | 'error'>('checking')
+  const [apiError, setApiError] = useState<string>('')
+
   const loadProjects = async () => {
     try {
       setLoading(true)
@@ -425,21 +428,38 @@ export default function Projects() {
       const apiProjects = res.items || []
       apiProjects.sort((a, b) => new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime())
       setProjects(apiProjects)
-    } catch (err) {
+      setApiStatus('connected')
+    } catch (err: any) {
       console.error('Failed to load projects:', err)
+      setApiStatus('error')
+      const status = err?.response?.status
+      const ct = err?.response?.headers?.['content-type'] || ''
+      if (ct.includes('text/html')) {
+        setApiError('API Gateway not connected — CloudFront returning HTML instead of JSON. Run deploy-infra workflow.')
+      } else if (status) {
+        setApiError(`API returned ${status}: ${err?.response?.data?.detail || err?.message}`)
+      } else {
+        setApiError(`Cannot reach API: ${err?.message}`)
+      }
     } finally {
       setLoading(false)
     }
   }
 
-  const handleCreate = async (data: ProjectCreate): Promise<boolean> => {
+  const handleCreate = async (data: ProjectCreate): Promise<string | true> => {
     try {
       const project = await api.createProject(data)
       setProjects(prev => [project, ...prev])
       return true
-    } catch (err) {
-      console.error('Failed to create project:', err)
-      return false
+    } catch (err: any) {
+      // Extract the real error for debugging
+      const status = err?.response?.status
+      const detail = err?.response?.data?.detail || err?.response?.data?.message || err?.message || String(err)
+      const msg = status
+        ? `API error ${status}: ${detail}`
+        : `Network error: ${detail}`
+      console.error('Failed to create project:', msg, err)
+      return msg
     }
   }
 
@@ -520,6 +540,13 @@ export default function Projects() {
           <span>New Project</span>
         </button>
       </div>
+
+      {/* API Status Banner */}
+      {apiStatus === 'error' && (
+        <div className="mb-4 p-3 rounded-lg border text-sm" style={{ background: 'rgba(239,68,68,0.1)', borderColor: 'rgba(239,68,68,0.3)', color: '#fca5a5' }}>
+          <strong>API Error:</strong> {apiError}
+        </div>
+      )}
 
       {/* Stats */}
       {!loading && projects.length > 0 && <StatsBar projects={projects} />}

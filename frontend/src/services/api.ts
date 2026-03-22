@@ -12,6 +12,30 @@ const apiClient: AxiosInstance = axios.create({
   },
 })
 
+// Response interceptor: detect non-JSON responses (e.g. CloudFront returning HTML)
+apiClient.interceptors.response.use(
+  (response) => {
+    const ct = response.headers['content-type'] || ''
+    if (ct.includes('text/html') && typeof response.data === 'string' && response.data.includes('<!doctype')) {
+      console.error('[API] Received HTML instead of JSON — API Gateway may not be connected. URL:', response.config?.url)
+      return Promise.reject(new Error(
+        `API returned HTML instead of JSON for ${response.config?.url}. ` +
+        'This usually means CloudFront is not routing /api/* to API Gateway. ' +
+        'Check your infrastructure deployment.'
+      ))
+    }
+    return response
+  },
+  (error) => {
+    if (error.response) {
+      console.error(`[API] ${error.response.status} ${error.config?.method?.toUpperCase()} ${error.config?.url}:`, error.response.data)
+    } else if (error.request) {
+      console.error('[API] No response received:', error.config?.url, error.message)
+    }
+    return Promise.reject(error)
+  }
+)
+
 // ─── Projects ──────────────────────────────────────────────────────
 
 export interface Project {
@@ -442,6 +466,12 @@ export interface SearchResult {
 // ═══════════════════════════════════════════════════════════════════
 
 export const api = {
+  // ── Health Check ──────────────────────────────────────────────
+  async checkHealth(): Promise<{ status: string; environment: string }> {
+    const { data } = await apiClient.get('/health')
+    return data
+  },
+
   // ── Projects ──────────────────────────────────────────────────
 
   async getProjects(params?: PaginationParams & { search?: string; status?: string }): Promise<PaginatedResponse<Project>> {
