@@ -265,6 +265,14 @@ resource "aws_apigatewayv2_route" "knowledge_paths" {
   authorizer_id      = var.enable_jwt_auth ? aws_apigatewayv2_authorizer.jwt[0].id : null
 }
 
+resource "aws_apigatewayv2_route" "knowledge_stats" {
+  api_id             = aws_apigatewayv2_api.main.id
+  route_key          = "GET /api/v1/knowledge/stats"
+  target             = "integrations/${aws_apigatewayv2_integration.lambda["knowledge"].id}"
+  authorization_type = var.enable_jwt_auth ? "JWT" : "NONE"
+  authorizer_id      = var.enable_jwt_auth ? aws_apigatewayv2_authorizer.jwt[0].id : null
+}
+
 # Simulation Routes
 resource "aws_apigatewayv2_route" "simulations_list" {
   api_id             = aws_apigatewayv2_api.main.id

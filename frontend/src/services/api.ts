@@ -618,8 +618,12 @@ export const api = {
   },
 
   async getGraphStats(): Promise<{ total_entities: number; total_relations: number; entity_counts: Record<string, number>; relation_counts: Record<string, number>; last_updated: string }> {
-    const { data } = await apiClient.get('/knowledge/stats')
-    return data
+    try {
+      const { data } = await apiClient.get('/knowledge/stats')
+      return data
+    } catch {
+      return { total_entities: 0, total_relations: 0, entity_counts: {}, relation_counts: {}, last_updated: '' }
+    }
   },
 
   async getEntityTypes(): Promise<string[]> {
@@ -719,12 +723,12 @@ export const api = {
   // ── Simulations ───────────────────────────────────────────────
 
   async getSimulations(params?: PaginationParams & { project_id?: string; hypothesis_id?: string; status?: string }): Promise<PaginatedResponse<Simulation>> {
-    const { data } = await apiClient.get('/simulation', { params })
+    const { data } = await apiClient.get('/simulations', { params })
     return data
   },
 
   async getSimulation(id: string): Promise<Simulation> {
-    const { data } = await apiClient.get(`/simulation/${id}`)
+    const { data } = await apiClient.get(`/simulations/${id}`)
     return data
   },
 
@@ -738,22 +742,22 @@ export const api = {
     iterations?: number
     seed?: number
   }): Promise<{ id: string; status: string; message: string }> {
-    const { data } = await apiClient.post('/simulation', simulation)
+    const { data } = await apiClient.post('/simulations', simulation)
     return data
   },
 
   async runSimulation(id: string): Promise<any> {
-    const { data } = await apiClient.post(`/simulation/${id}/run`)
+    const { data } = await apiClient.post(`/simulations/${id}/run`)
     return data
   },
 
   async getSimulationResults(id: string): Promise<any> {
-    const { data } = await apiClient.get(`/simulation/${id}/results`)
+    const { data } = await apiClient.get(`/simulations/${id}/results`)
     return data
   },
 
   async cancelSimulation(id: string): Promise<Simulation> {
-    const { data } = await apiClient.post(`/simulation/${id}/cancel`)
+    const { data } = await apiClient.post(`/simulations/${id}/cancel`)
     return data
   },
 
@@ -927,22 +931,33 @@ export const api = {
   // ── Activity / Timeline ───────────────────────────────────────
 
   async getActivities(params?: PaginationParams & { type?: string; action?: string; date_from?: string; date_to?: string }): Promise<PaginatedResponse<Activity>> {
-    const { data } = await apiClient.get('/activities', { params })
-    return data
+    // Activities are stored locally — no backend endpoint exists
+    const all = JSON.parse(localStorage.getItem('humanovo-activity-log') || '[]') as Activity[]
+    const page = params?.page || 1
+    const pageSize = params?.page_size || 20
+    const start = (page - 1) * pageSize
+    return { items: all.slice(start, start + pageSize), total: all.length, page, page_size: pageSize }
   },
 
   async getActivity(id: string): Promise<Activity> {
-    const { data } = await apiClient.get(`/activities/${id}`)
-    return data
+    const all = JSON.parse(localStorage.getItem('humanovo-activity-log') || '[]') as Activity[]
+    const found = all.find((a: any) => a.id === id)
+    if (!found) throw new Error('Activity not found')
+    return found
   },
 
   async updateActivity(id: string, update: { annotation?: string; description?: string }): Promise<Activity> {
-    const { data } = await apiClient.patch(`/activities/${id}`, update)
-    return data
+    const all = JSON.parse(localStorage.getItem('humanovo-activity-log') || '[]') as Activity[]
+    const idx = all.findIndex((a: any) => a.id === id)
+    if (idx === -1) throw new Error('Activity not found')
+    Object.assign(all[idx], update)
+    localStorage.setItem('humanovo-activity-log', JSON.stringify(all))
+    return all[idx]
   },
 
   async deleteActivity(id: string): Promise<void> {
-    await apiClient.delete(`/activities/${id}`)
+    const all = JSON.parse(localStorage.getItem('humanovo-activity-log') || '[]') as Activity[]
+    localStorage.setItem('humanovo-activity-log', JSON.stringify(all.filter((a: any) => a.id !== id)))
   },
 
   // ── Monitoring ────────────────────────────────────────────────
