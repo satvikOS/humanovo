@@ -11,12 +11,11 @@ from typing import Any
 from uuid import uuid4
 
 import boto3
-from aws_lambda_powertools import Logger, Metrics, Tracer
+from aws_lambda_powertools import Logger, Metrics
 from aws_lambda_powertools.event_handler import APIGatewayHttpResolver
 from aws_lambda_powertools.utilities.typing import LambdaContext
 
 logger = Logger()
-tracer = Tracer()
 metrics = Metrics()
 
 app = APIGatewayHttpResolver()
@@ -31,7 +30,6 @@ HYPOTHESES_TABLE = os.environ.get("HYPOTHESES_TABLE", "genup-dev-hypotheses")
 EVIDENCE_TABLE = os.environ.get("EVIDENCE_TABLE", "genup-dev-evidence")
 
 
-@tracer.capture_method
 def invoke_bedrock(prompt: str, max_tokens: int = 2000) -> str:
     """Invoke AWS Bedrock with Claude model."""
     body = {
@@ -66,7 +64,6 @@ Format each hypothesis with:
     return response_body["content"][0]["text"]
 
 
-@tracer.capture_method
 def retrieve_evidence(query: str, project_id: str = None, limit: int = 10) -> list[dict]:
     """Retrieve relevant evidence from DynamoDB."""
     table = dynamodb.Table(EVIDENCE_TABLE)
@@ -96,7 +93,6 @@ def retrieve_evidence(query: str, project_id: str = None, limit: int = 10) -> li
     return [item for _, item in scored_items[:limit]]
 
 
-@tracer.capture_method
 def parse_hypotheses(response_text: str) -> list[dict]:
     """Parse LLM response into structured hypotheses."""
     hypotheses = []
@@ -130,7 +126,6 @@ def parse_hypotheses(response_text: str) -> list[dict]:
     return hypotheses
 
 
-@tracer.capture_method
 def save_hypothesis(hypothesis: dict, project_id: str, evidence_ids: list[str]) -> dict:
     """Save hypothesis to DynamoDB."""
     table = dynamodb.Table(HYPOTHESES_TABLE)
@@ -157,7 +152,6 @@ def save_hypothesis(hypothesis: dict, project_id: str, evidence_ids: list[str]) 
 
 
 @app.post("/api/v1/hypotheses/generate")
-@tracer.capture_method
 def generate_hypotheses():
     """Generate hypotheses based on a research query."""
     body = app.current_event.json_body or {}
@@ -221,7 +215,6 @@ Each hypothesis should propose a specific mechanism and cite the relevant eviden
 
 
 @logger.inject_lambda_context
-@tracer.capture_lambda_handler
 @metrics.log_metrics(capture_cold_start_metric=True)
 def handler(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
     """Lambda handler entry point."""

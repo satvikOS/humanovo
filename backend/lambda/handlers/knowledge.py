@@ -7,19 +7,17 @@ import os
 from typing import Any
 
 import boto3
-from aws_lambda_powertools import Logger, Metrics, Tracer
+from aws_lambda_powertools import Logger, Metrics
 from aws_lambda_powertools.event_handler import APIGatewayHttpResolver
 from aws_lambda_powertools.utilities.typing import LambdaContext
 
 logger = Logger()
-tracer = Tracer()
 metrics = Metrics()
 
 app = APIGatewayHttpResolver()
 
 
 @app.get("/api/v1/knowledge/entities")
-@tracer.capture_method
 def search_entities():
     """Search entities in the knowledge graph."""
     params = app.current_event.query_string_parameters or {}
@@ -27,7 +25,6 @@ def search_entities():
 
 
 @app.get("/api/v1/knowledge/entities/<entity_id>")
-@tracer.capture_method
 def get_entity(entity_id: str):
     """Get entity details."""
     return {
@@ -43,7 +40,6 @@ def get_entity(entity_id: str):
 
 
 @app.get("/api/v1/knowledge/entities/<entity_id>/neighborhood")
-@tracer.capture_method
 def get_neighborhood(entity_id: str):
     """Get entity neighborhood."""
     return {
@@ -55,14 +51,12 @@ def get_neighborhood(entity_id: str):
 
 
 @app.get("/api/v1/knowledge/paths")
-@tracer.capture_method
 def find_paths():
     """Find paths between entities."""
     return []
 
 
 @app.get("/api/v1/knowledge/stats")
-@tracer.capture_method
 def get_stats():
     """Get knowledge graph statistics."""
     return {
@@ -75,7 +69,6 @@ def get_stats():
 
 
 @logger.inject_lambda_context
-@tracer.capture_lambda_handler
 @metrics.log_metrics(capture_cold_start_metric=True)
 def handler(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
     """Lambda handler entry point."""

@@ -13,12 +13,11 @@ from decimal import Decimal
 from typing import Any
 
 import boto3
-from aws_lambda_powertools import Logger, Metrics, Tracer
+from aws_lambda_powertools import Logger, Metrics
 from aws_lambda_powertools.event_handler import APIGatewayHttpResolver
 from aws_lambda_powertools.utilities.typing import LambdaContext
 
 logger = Logger()
-tracer = Tracer()
 metrics = Metrics()
 
 app = APIGatewayHttpResolver()
@@ -94,7 +93,6 @@ def compute_cache_key(query: str, filters: dict, k: int) -> str:
     return f"rag:{hashlib.md5(key_data.encode()).hexdigest()}"
 
 
-@tracer.capture_method
 def get_cached_results(cache_key: str) -> list[dict] | None:
     """Get cached results from Redis or DynamoDB."""
     # Try Redis first
@@ -126,7 +124,6 @@ def get_cached_results(cache_key: str) -> list[dict] | None:
     return None
 
 
-@tracer.capture_method
 def set_cached_results(cache_key: str, results: list[dict]) -> None:
     """Cache results in Redis and DynamoDB."""
     # Limit cached results
@@ -160,7 +157,6 @@ def set_cached_results(cache_key: str, results: list[dict]) -> None:
         logger.warning("DynamoDB cache write failed", error=str(e))
 
 
-@tracer.capture_method
 def generate_query_embedding(query: str) -> list[float]:
     """Generate embedding for query."""
     try:
@@ -182,7 +178,6 @@ def generate_query_embedding(query: str) -> list[float]:
         return []
 
 
-@tracer.capture_method
 def vector_search_opensearch(
     embedding: list[float],
     k: int = 10,
@@ -251,7 +246,6 @@ def vector_search_opensearch(
         return []
 
 
-@tracer.capture_method
 def keyword_search_dynamodb(
     query: str,
     k: int = 10,
@@ -302,7 +296,6 @@ def keyword_search_dynamodb(
         return []
 
 
-@tracer.capture_method
 def hybrid_search(
     query: str,
     k: int = 10,
@@ -350,7 +343,6 @@ def hybrid_search(
     return sorted_results[:k]
 
 
-@tracer.capture_method
 def format_for_rag(results: list[dict], max_tokens: int = 4000) -> str:
     """Format results for RAG context."""
     context_parts = []
@@ -387,7 +379,6 @@ Title: {title}
 
 
 @app.post("/api/v1/rag/retrieve")
-@tracer.capture_method
 def retrieve():
     """Retrieve relevant context for RAG."""
     body = app.current_event.json_body or {}
@@ -434,7 +425,6 @@ def retrieve():
 
 
 @app.post("/api/v1/rag/ask")
-@tracer.capture_method
 def ask():
     """Answer a question using RAG."""
     body = app.current_event.json_body or {}
@@ -500,7 +490,6 @@ Provide a comprehensive, evidence-based answer with citations:"""
 
 
 @app.post("/api/v1/rag/invalidate-cache")
-@tracer.capture_method
 def invalidate_cache():
     """Invalidate cached results for a query."""
     body = app.current_event.json_body or {}
@@ -535,7 +524,6 @@ def invalidate_cache():
 
 
 @logger.inject_lambda_context
-@tracer.capture_lambda_handler
 @metrics.log_metrics(capture_cold_start_metric=True)
 def handler(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
     """Lambda handler entry point."""

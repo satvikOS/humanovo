@@ -11,11 +11,10 @@ from datetime import datetime, timedelta
 from typing import Any
 
 import boto3
-from aws_lambda_powertools import Logger, Metrics, Tracer
+from aws_lambda_powertools import Logger, Metrics
 from aws_lambda_powertools.utilities.typing import LambdaContext
 
 logger = Logger()
-tracer = Tracer()
 metrics = Metrics()
 
 # AWS Clients
@@ -92,7 +91,6 @@ INGESTION_SCHEDULE = {
 }
 
 
-@tracer.capture_method
 def get_ingestion_state(source: str) -> dict:
     """Get current ingestion state for a source."""
     table = dynamodb.Table(INGESTION_STATE_TABLE)
@@ -104,7 +102,6 @@ def get_ingestion_state(source: str) -> dict:
         return {}
 
 
-@tracer.capture_method
 def update_ingestion_state(
     source: str,
     status: str,
@@ -125,7 +122,6 @@ def update_ingestion_state(
     )
 
 
-@tracer.capture_method
 def should_run_source(source: str, config: dict) -> bool:
     """Determine if source should run based on state and config."""
     if not config.get("enabled", True):
@@ -152,7 +148,6 @@ def should_run_source(source: str, config: dict) -> bool:
     return datetime.utcnow() > cooldown_end
 
 
-@tracer.capture_method
 def invoke_fetcher(
     arn: str,
     payload: dict,
@@ -183,7 +178,6 @@ def invoke_fetcher(
         return {"success": False, "error": str(e)}
 
 
-@tracer.capture_method
 def run_pubmed_ingestion() -> dict:
     """Run PubMed ingestion."""
     config = INGESTION_SCHEDULE["pubmed"]
@@ -215,7 +209,6 @@ def run_pubmed_ingestion() -> dict:
     return result
 
 
-@tracer.capture_method
 def run_clinical_trials_ingestion() -> dict:
     """Run ClinicalTrials.gov ingestion."""
     config = INGESTION_SCHEDULE["clinical_trials"]
@@ -245,7 +238,6 @@ def run_clinical_trials_ingestion() -> dict:
     return result
 
 
-@tracer.capture_method
 def run_brave_search_ingestion() -> dict:
     """Run Brave Search ingestion (rate-limited)."""
     config = INGESTION_SCHEDULE["brave_search"]
@@ -277,7 +269,6 @@ def run_brave_search_ingestion() -> dict:
     return result
 
 
-@tracer.capture_method
 def send_notification(subject: str, message: str) -> None:
     """Send notification about ingestion results."""
     if not NOTIFICATION_TOPIC_ARN:
@@ -294,7 +285,6 @@ def send_notification(subject: str, message: str) -> None:
 
 
 @logger.inject_lambda_context
-@tracer.capture_lambda_handler
 @metrics.log_metrics(capture_cold_start_metric=True)
 def handler(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
     """
@@ -386,7 +376,6 @@ Errors:
 
 # Manual trigger handler
 @logger.inject_lambda_context
-@tracer.capture_lambda_handler
 @metrics.log_metrics(capture_cold_start_metric=True)
 def handler_manual(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
     """

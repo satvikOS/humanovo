@@ -10,12 +10,11 @@ from typing import Any
 from uuid import uuid4
 
 import boto3
-from aws_lambda_powertools import Logger, Metrics, Tracer
+from aws_lambda_powertools import Logger, Metrics
 from aws_lambda_powertools.event_handler import APIGatewayHttpResolver
 from aws_lambda_powertools.utilities.typing import LambdaContext
 
 logger = Logger()
-tracer = Tracer()
 metrics = Metrics()
 
 app = APIGatewayHttpResolver()
@@ -36,7 +35,6 @@ def serialize_item(item: dict) -> dict:
 
 
 @app.get("/api/v1/simulations")
-@tracer.capture_method
 def list_simulations():
     """List simulations."""
     table = dynamodb.Table(SIMULATIONS_TABLE)
@@ -60,7 +58,6 @@ def list_simulations():
 
 
 @app.post("/api/v1/simulations")
-@tracer.capture_method
 def create_simulation():
     """Create a new simulation."""
     body = app.current_event.json_body or {}
@@ -90,7 +87,6 @@ def create_simulation():
 
 
 @app.get("/api/v1/simulations/<simulation_id>")
-@tracer.capture_method
 def get_simulation(simulation_id: str):
     """Get a simulation."""
     table = dynamodb.Table(SIMULATIONS_TABLE)
@@ -104,7 +100,6 @@ def get_simulation(simulation_id: str):
 
 
 @app.post("/api/v1/simulations/<simulation_id>/cancel")
-@tracer.capture_method
 def cancel_simulation(simulation_id: str):
     """Cancel a simulation."""
     table = dynamodb.Table(SIMULATIONS_TABLE)
@@ -118,7 +113,6 @@ def cancel_simulation(simulation_id: str):
 
 
 @logger.inject_lambda_context
-@tracer.capture_lambda_handler
 @metrics.log_metrics(capture_cold_start_metric=True)
 def handler(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
     """Lambda handler entry point."""
