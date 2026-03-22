@@ -545,6 +545,48 @@ resource "aws_dynamodb_table" "ingestion_state" {
   }
 }
 
+# ==================== Notebook Table ====================
+
+resource "aws_dynamodb_table" "notebook" {
+  name         = "${var.name_prefix}-notebook"
+  billing_mode = var.billing_mode
+  hash_key     = "id"
+
+  attribute {
+    name = "id"
+    type = "S"
+  }
+
+  attribute {
+    name = "user_id"
+    type = "S"
+  }
+
+  attribute {
+    name = "updated_at"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name            = "user_id-updated_at-index"
+    hash_key        = "user_id"
+    range_key       = "updated_at"
+    projection_type = "ALL"
+  }
+
+  server_side_encryption {
+    enabled = true
+  }
+
+  point_in_time_recovery {
+    enabled = var.environment == "prod"
+  }
+
+  tags = {
+    Name = "${var.name_prefix}-notebook"
+  }
+}
+
 # ==================== Outputs ====================
 
 output "projects_table_name" {
@@ -641,4 +683,12 @@ output "ingestion_state_table_name" {
 
 output "ingestion_state_table_arn" {
   value = aws_dynamodb_table.ingestion_state.arn
+}
+
+output "notebook_table_name" {
+  value = aws_dynamodb_table.notebook.name
+}
+
+output "notebook_table_arn" {
+  value = aws_dynamodb_table.notebook.arn
 }

@@ -65,13 +65,20 @@ except ImportError as _import_err:
             return decorator
         def resolve(self, event, context):
             method = event.get("requestContext", {}).get("http", {}).get("method", "GET")
-            path = event.get("rawPath", "")
+            path = event.get("rawPath", "/").split("?")[0]
+            # strip stage prefix (e.g. /dev)
+            parts = path.split("/")
+            if len(parts) > 1 and parts[1] not in ("api",):
+                path = "/" + "/".join(parts[2:])
+            self.current_event = type("Event", (), {
+                "json_body": json.loads(event.get("body", "{}") or "{}"),
+                "query_string_parameters": event.get("queryStringParameters") or {},
+            })()
             for route_method, pattern_re, param_names, handler_fn in self._routes:
                 if route_method != method:
                     continue
                 m = pattern_re.match(path)
                 if m:
-                    self.current_event = type("Event", (), {"json_body": json.loads(event.get("body", "{}") or "{}")})()
                     kwargs = {name: m.group(i + 1) for i, name in enumerate(param_names)}
                     result = handler_fn(**kwargs)
                     if isinstance(result, dict):

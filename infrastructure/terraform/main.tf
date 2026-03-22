@@ -260,6 +260,7 @@ module "lambda" {
   evidence_table_name    = module.dynamodb.evidence_table_name
   simulations_table_name = module.dynamodb.simulations_table_name
   agent_tasks_table_name = module.dynamodb.agent_tasks_table_name
+  notebook_table_name    = module.dynamodb.notebook_table_name
 
   # S3 buckets
   data_bucket_name      = module.s3.data_bucket_name
