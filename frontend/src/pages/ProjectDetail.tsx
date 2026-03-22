@@ -10,7 +10,8 @@ import api, { Project } from '../services/api'
 import { logActivity, formatDate } from '../utils/persistence'
 import HypothesisDocViewer from '../components/HypothesisDocViewer'
 
-const API_BASE = '/api/v1'
+const _BACKEND = import.meta.env.VITE_API_BASE_URL || ''
+const API_BASE = `${_BACKEND}/api/v1`
 
 interface SavedResearchPaper {
   id: string
@@ -94,7 +95,9 @@ export default function ProjectDetail() {
     } catch (err: any) {
       console.warn('ProjectDetail: failed to load project from API', err)
       const status = err?.response?.status
-      if (status === 404) {
+      const errData = err?.response?.data
+      // Lambda returns 400 with error:"not_found" (not 404, to avoid CloudFront HTML intercept)
+      if (status === 404 || (status === 400 && errData?.error === 'not_found')) {
         setLoadError('This project does not exist in the database.')
       } else if (status === 422) {
         setLoadError('Invalid project ID format.')

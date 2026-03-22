@@ -334,10 +334,15 @@ export default function Agents() {
         ...config,
         external_factors: factors.length > 0 ? factors.map(f => `${f.name} (${f.category}): ${f.interaction}`) : undefined,
       }
-      await api.startDiscovery(discoveryConfig as any)
+      const startRes = await api.startDiscovery(discoveryConfig as any)
       setState('running')
       setShowConfig(false)
       setHypotheses([])
+      // Capture auto-created project from start response
+      if (startRes?.project_id && startRes.project_id !== 'discovery') {
+        setProjectId(startRes.project_id)
+        setProjectName(startRes.project_name || '')
+      }
       logActivity({
         type: 'discovery', action: 'started',
         title: `Discovery started: ${config.disease} (${config.discovery_type || 'treatment'})`,

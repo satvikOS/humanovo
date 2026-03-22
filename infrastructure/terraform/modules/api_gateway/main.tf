@@ -157,6 +157,22 @@ resource "aws_apigatewayv2_route" "projects_delete" {
   authorizer_id      = var.enable_jwt_auth ? aws_apigatewayv2_authorizer.jwt[0].id : null
 }
 
+resource "aws_apigatewayv2_route" "projects_hypotheses" {
+  api_id             = aws_apigatewayv2_api.main.id
+  route_key          = "GET /api/v1/projects/{projectId}/hypotheses"
+  target             = "integrations/${aws_apigatewayv2_integration.lambda["projects"].id}"
+  authorization_type = var.enable_jwt_auth ? "JWT" : "NONE"
+  authorizer_id      = var.enable_jwt_auth ? aws_apigatewayv2_authorizer.jwt[0].id : null
+}
+
+resource "aws_apigatewayv2_route" "projects_stats" {
+  api_id             = aws_apigatewayv2_api.main.id
+  route_key          = "GET /api/v1/projects/{projectId}/stats"
+  target             = "integrations/${aws_apigatewayv2_integration.lambda["projects"].id}"
+  authorization_type = var.enable_jwt_auth ? "JWT" : "NONE"
+  authorizer_id      = var.enable_jwt_auth ? aws_apigatewayv2_authorizer.jwt[0].id : null
+}
+
 # Hypotheses Routes
 resource "aws_apigatewayv2_route" "hypotheses_list" {
   api_id             = aws_apigatewayv2_api.main.id
