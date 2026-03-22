@@ -673,7 +673,8 @@ function ConstantChat() {
       // Call the backend AI endpoint (routes to API Gateway → Lambda → Bedrock Claude)
       try {
         const platformContext = getLocalContext()
-        const res = await fetch('/api/v1/orchestrator/chat', {
+        const _apiBase = import.meta.env.VITE_API_BASE_URL || ''
+        const res = await fetch(`${_apiBase}/api/v1/orchestrator/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ message: userMsg, context: 'general', platform_context: platformContext }),

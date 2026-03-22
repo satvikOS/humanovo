@@ -6,8 +6,11 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
 import api from '../services/api'
 
-const API = '/api'
-const WS_BASE = (window.location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + window.location.host
+const _BACKEND = import.meta.env.VITE_API_BASE_URL || ''
+const API = `${_BACKEND}/api`
+const WS_BASE = _BACKEND
+  ? _BACKEND.replace(/^http/, 'ws')
+  : (window.location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + window.location.host
 
 const STAGES = ['SEED', 'EXPAND', 'EVIDENCE', 'COUNTER', 'REVISE', 'MECHANISM', 'VALIDATE', 'GROUND', 'SCORE', 'REFINE', 'TRANSLATE', 'FINALIZE']
 

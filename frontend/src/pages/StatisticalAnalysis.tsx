@@ -18,7 +18,8 @@ interface SavedAnalysis {
   created_at: string
 }
 
-const API = '/api/v1/statistics'
+const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
+const API = `${API_BASE}/api/v1/statistics`
 
 // ── Client-side statistical computations (fallback when backend unavailable) ──
 function mean(arr: number[]): number { return arr.reduce((a, b) => a + b, 0) / arr.length }

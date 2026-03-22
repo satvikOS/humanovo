@@ -8,7 +8,8 @@ import {
 } from 'recharts'
 
 type TabId = 'pathway' | 'gsea' | 'variants' | 'biomarkers'
-const API = '/api/v1/genomics'
+const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
+const API = `${API_BASE}/api/v1/genomics`
 
 // ── Deterministic hash for consistent results from same inputs ──
 function hashStr(s: string): number {

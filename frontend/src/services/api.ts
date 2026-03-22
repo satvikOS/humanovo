@@ -1,7 +1,12 @@
 import axios, { AxiosInstance } from 'axios'
 
+// In production (CloudFront), set VITE_API_BASE_URL to the backend URL
+// (e.g. https://api.humanovo.com or API Gateway URL).
+// In development, Vite proxy handles /api → localhost:8000.
+const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
+
 const apiClient: AxiosInstance = axios.create({
-  baseURL: '/api/v1',
+  baseURL: `${API_BASE}/api/v1`,
   headers: {
     'Content-Type': 'application/json',
   },
