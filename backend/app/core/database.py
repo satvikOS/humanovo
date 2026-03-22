@@ -54,6 +54,10 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 async def init_db() -> None:
     """Initialize database tables."""
+    # Import all models so their Base.metadata knows about every table
+    from app.models.base import Base as ModelsBase
+    import app.models  # noqa: F401
+
     # Mask password in URL for safe logging
     db_url = settings.DATABASE_URL
     masked_url = db_url
@@ -67,9 +71,9 @@ async def init_db() -> None:
     try:
         # Test connection
         async with engine.begin() as conn:
-            # Create all tables
-            await conn.run_sync(Base.metadata.create_all)
-        logger.info("Database initialized successfully", database=masked_url)
+            # Create all tables (use the models' Base, not database.py's Base)
+            await conn.run_sync(ModelsBase.metadata.create_all)
+        logger.info("Database initialized successfully", database=masked_url, tables=len(ModelsBase.metadata.tables))
     except Exception as e:
         logger.error(
             "Failed to initialize database",

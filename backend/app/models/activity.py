@@ -34,5 +34,5 @@ class Activity(BaseModel):
     entity_id = Column(String(100), nullable=True)
     entity_type = Column(String(50), nullable=True)
     project_name = Column(String(200), nullable=True)
-    metadata = Column(JSONB, nullable=True, default={})
+    extra_metadata = Column("metadata", JSONB, nullable=True, default={})
     annotation = Column(Text, nullable=True)

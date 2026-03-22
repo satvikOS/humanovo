@@ -213,8 +213,8 @@ class StageExecution(BaseModel):
     prompt_length_chars = Column(Integer, default=0, nullable=False)
     output_length_chars = Column(Integer, default=0, nullable=False)
 
-    # Metadata
-    metadata = Column(JSONB, default=dict, nullable=False)
+    # Metadata (attribute renamed to avoid clash with SQLAlchemy reserved name)
+    extra_metadata = Column("metadata", JSONB, default=dict, nullable=False)
 
     # Relationships
     discovery_run = relationship("DiscoveryRun", back_populates="stage_executions")

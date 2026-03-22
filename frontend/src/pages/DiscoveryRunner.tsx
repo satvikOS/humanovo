@@ -4,6 +4,7 @@
  */
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
+import api from '../services/api'
 
 const API = '/api'
 const WS_BASE = (window.location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + window.location.host
@@ -58,6 +59,25 @@ export default function DiscoveryRunner() {
 
   const wsRef = useRef<WebSocket | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [uploading, setUploading] = useState(false)
+  const [uploadedDocs, setUploadedDocs] = useState<{ name: string; status: 'uploaded' | 'failed' }[]>([])
+
+  const handleDocUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files || files.length === 0) return
+    setUploading(true)
+    for (const file of Array.from(files)) {
+      try {
+        await api.uploadDocument(file, projectId ? { project_id: projectId } : undefined)
+        setUploadedDocs(prev => [...prev, { name: file.name, status: 'uploaded' }])
+      } catch {
+        setUploadedDocs(prev => [...prev, { name: file.name, status: 'failed' }])
+      }
+    }
+    setUploading(false)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
 
   const addLog = useCallback((event: string, detail: string) => {
     setLogs(prev => [...prev, { time: new Date().toISOString().slice(11, 19), event, detail }])
@@ -258,6 +278,35 @@ export default function DiscoveryRunner() {
               <option value="apa">APA</option>
               <option value="vancouver">Vancouver</option>
             </select>
+          </Field>
+
+          <Field label="Supporting Documents">
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept=".pdf,.txt,.csv,.json,.docx,.xlsx,.md,.tsv"
+              onChange={handleDocUpload}
+              className="hidden"
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              className="w-full flex items-center justify-center gap-2 px-3 py-3 rounded-lg text-sm"
+              style={{ border: '2px dashed var(--color-border)', color: 'var(--color-text-muted)', opacity: uploading ? 0.5 : 1 }}>
+              {uploading ? 'Uploading...' : 'Click to upload research documents'}
+            </button>
+            {uploadedDocs.length > 0 && (
+              <div className="mt-2 space-y-1">
+                {uploadedDocs.map((doc, i) => (
+                  <div key={i} className="flex items-center gap-2 text-xs px-2 py-1 rounded" style={{ background: 'var(--color-bg-secondary)' }}>
+                    <span style={{ color: doc.status === 'uploaded' ? 'var(--color-accent-green)' : '#ef4444' }}>●</span>
+                    <span className="flex-1 truncate" style={{ color: 'var(--color-text)' }}>{doc.name}</span>
+                    <span style={{ color: 'var(--color-text-muted)' }}>{doc.status}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </Field>
 
           <button onClick={startDiscovery} disabled={!disease.trim()}

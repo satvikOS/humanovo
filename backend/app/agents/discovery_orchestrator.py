@@ -151,7 +151,6 @@ class ModelType(str, Enum):
     O3_MINI = "o3_mini"                            # Reasoning via Azure OpenAI (2.5M TPM / 250 RPM, GA)
     GPT_41 = "gpt_41"                              # General purpose via Azure OpenAI (50K TPM / 50 RPM, GA)
     GROK_FAST = "grok_fast"                        # Fast Refiner via Azure AI (Grok-4-1-fast-reasoning)
-    CLAUDE_SONNET = "claude_sonnet"                # Fast formatting via Bedrock (200K context)
     # Azure OpenAI models — legacy
     O3_DEEP_RESEARCH = "o3_deep_research"
     O1 = "o1"
