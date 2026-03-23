@@ -140,6 +140,31 @@ def _ensure_project_fields(item: dict) -> dict:
     return item
 
 
+def _normalize_hypothesis(h: dict) -> dict:
+    """Map DynamoDB hypothesis fields to frontend-expected fields."""
+    return {
+        "id": h.get("id", ""),
+        "title": h.get("title") or h.get("statement", ""),
+        "description": h.get("description") or h.get("rationale", ""),
+        "mechanism": h.get("mechanism", ""),
+        "confidence_score": h.get("confidence_score", h.get("confidence", 0.5)),
+        "novelty_score": h.get("novelty_score", 0.5),
+        "feasibility_score": h.get("feasibility_score", 0.5),
+        "impact_score": h.get("impact_score", 0.5),
+        "round_number": h.get("round_number", h.get("version", 1)),
+        "discovery_type": h.get("discovery_type", ""),
+        "status": h.get("status", "generated"),
+        "evidence_summary": h.get("evidence_summary", []),
+        "risks": h.get("risks", []),
+        "validation_steps": h.get("validation_steps", []),
+        "key_citations": h.get("key_citations", []),
+        "tags": h.get("tags", []),
+        "project_id": h.get("project_id", ""),
+        "created_at": h.get("created_at", ""),
+        "updated_at": h.get("updated_at", ""),
+    }
+
+
 @app.get("/api/v1/projects")
 def list_projects():
     """List all projects with pagination."""
@@ -327,20 +352,7 @@ def get_project(project_id: str):
                 )
             db_hypotheses = hyp_response.get("Items", [])
             if db_hypotheses:
-                hypotheses_list = []
-                for h in db_hypotheses:
-                    h_serialized = serialize_item(h)
-                    hypotheses_list.append({
-                        "id": h_serialized.get("id", ""),
-                        "title": h_serialized.get("statement", ""),
-                        "description": h_serialized.get("rationale", ""),
-                        "mechanism": h_serialized.get("mechanism", ""),
-                        "confidence": h_serialized.get("confidence_score", 0.5),
-                        "model_used": "AI Pipeline",
-                        "validated": h_serialized.get("status") == "validated",
-                        "external_factors": [],
-                        "created_at": h_serialized.get("created_at", ""),
-                    })
+                hypotheses_list = [_normalize_hypothesis(serialize_item(h)) for h in db_hypotheses]
                 project["hypotheses"] = hypotheses_list
                 project["hypothesis_count"] = len(hypotheses_list)
         except Exception as e:
@@ -382,7 +394,7 @@ def list_project_hypotheses(project_id: str):
         page_items = items[offset:offset + limit]
 
         return {
-            "items": [serialize_item(h) for h in page_items],
+            "items": [_normalize_hypothesis(serialize_item(h)) for h in page_items],
             "total": total,
         }
     except Exception as e:
