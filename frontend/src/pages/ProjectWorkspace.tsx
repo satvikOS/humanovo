@@ -4,8 +4,20 @@
  */
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
+import { persistGet } from '../utils/persistence'
 
 const API = '/api'
+
+interface SavedResearchPaper {
+  id: string
+  hypothesis_id: string
+  hypothesis_title: string
+  project_id: string
+  disease: string
+  generated_at: string
+  filename: string
+  paper_html?: string
+}
 
 interface Project {
   id: string
@@ -79,6 +91,7 @@ export default function ProjectWorkspace() {
   const [hypotheses, setHypotheses] = useState<Hypothesis[]>([])
   const [synthRuns, setSynthRuns] = useState<SynthesisRun[]>([])
   const [taxonomy, setTaxonomy] = useState<MethodCategory[]>([])
+  const [papers, setPapers] = useState<SavedResearchPaper[]>([])
   const [loading, setLoading] = useState(true)
 
   // Lab profile editor state
@@ -111,6 +124,9 @@ export default function ProjectWorkspace() {
         setLabExcluded(proj.lab_profile.excluded_methods || [])
         setLabFilterMode(proj.lab_profile.filter_mode || 'permissive')
       }
+      // Load research papers from localStorage
+      const allPapers = persistGet<SavedResearchPaper[]>('research-papers', [])
+      setPapers(allPapers.filter(p => p.project_id === projectId))
       setLoading(false)
     })
   }, [projectId])
@@ -244,28 +260,62 @@ export default function ProjectWorkspace() {
       )}
 
       {tab === 'Evidence' && (
-        <div className="space-y-4">
-          <h3 className="font-medium" style={{ color: 'var(--color-text)' }}>Synthesis Runs</h3>
-          <div className="rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
-            <table className="w-full text-sm">
-              <thead>
-                <tr style={{ background: 'var(--color-bg-secondary)' }}>
-                  <Th>Hypothesis</Th><Th>Status</Th><Th>Format</Th><Th>Verbosity</Th><Th>Date</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {synthRuns.map(s => (
-                  <tr key={s.id} style={{ borderTop: '1px solid var(--color-border)' }}>
-                    <Td>{s.hypothesis.slice(0, 80)}{s.hypothesis.length > 80 ? '...' : ''}</Td>
-                    <Td><StatusBadge status={s.status} /></Td>
-                    <Td>{s.output_format}</Td>
-                    <Td>{s.verbosity}</Td>
-                    <Td>{new Date(s.created_at).toLocaleDateString()}</Td>
-                  </tr>
+        <div className="space-y-6">
+          {/* Research Papers */}
+          {papers.length > 0 && (
+            <div>
+              <h3 className="font-medium mb-2" style={{ color: 'var(--color-text)' }}>Research Papers</h3>
+              <div className="space-y-2">
+                {papers.map(p => (
+                  <div key={p.id} className="rounded-lg p-3 flex items-center justify-between"
+                    style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+                    <div>
+                      <div className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>{p.hypothesis_title || p.filename}</div>
+                      <div className="text-xs mt-0.5" style={{ color: 'var(--color-text-muted)' }}>
+                        {p.disease} &middot; Generated {new Date(p.generated_at).toLocaleDateString()}
+                      </div>
+                    </div>
+                    {p.paper_html && (
+                      <button
+                        onClick={() => {
+                          const win = window.open('', '_blank')
+                          if (win) { win.document.write(p.paper_html!); win.document.close() }
+                        }}
+                        className="px-3 py-1 text-xs rounded"
+                        style={{ background: 'var(--color-accent-blue)', color: '#fff' }}>
+                        View
+                      </button>
+                    )}
+                  </div>
                 ))}
-              </tbody>
-            </table>
-            {synthRuns.length === 0 && <p className="p-4 text-sm text-center" style={{ color: 'var(--color-text-muted)' }}>No synthesis runs yet</p>}
+              </div>
+            </div>
+          )}
+
+          {/* Synthesis Runs */}
+          <div>
+            <h3 className="font-medium mb-2" style={{ color: 'var(--color-text)' }}>Synthesis Runs</h3>
+            <div className="rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr style={{ background: 'var(--color-bg-secondary)' }}>
+                    <Th>Hypothesis</Th><Th>Status</Th><Th>Format</Th><Th>Verbosity</Th><Th>Date</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {synthRuns.map(s => (
+                    <tr key={s.id} style={{ borderTop: '1px solid var(--color-border)' }}>
+                      <Td>{s.hypothesis.slice(0, 80)}{s.hypothesis.length > 80 ? '...' : ''}</Td>
+                      <Td><StatusBadge status={s.status} /></Td>
+                      <Td>{s.output_format}</Td>
+                      <Td>{s.verbosity}</Td>
+                      <Td>{new Date(s.created_at).toLocaleDateString()}</Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {synthRuns.length === 0 && papers.length === 0 && <p className="p-4 text-sm text-center" style={{ color: 'var(--color-text-muted)' }}>No evidence or papers yet</p>}
+            </div>
           </div>
         </div>
       )}

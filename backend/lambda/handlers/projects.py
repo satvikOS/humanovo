@@ -185,26 +185,50 @@ def list_projects():
         end = start + page_size
         page_items = all_items[start:end] if start < total else []
 
-        # Enrich projects with live hypothesis counts
+        # Enrich projects with live counts from related tables
         enriched_items = []
         hyp_table = dynamodb.Table(HYPOTHESES_TABLE)
+        ev_table = dynamodb.Table(EVIDENCE_TABLE)
+        sim_table = dynamodb.Table(SIMULATIONS_TABLE)
         for p in page_items:
             project = serialize_item(_ensure_project_fields(p))
+            pid = project["id"]
+            # Live hypothesis count
             try:
                 try:
                     hyp_resp = hyp_table.query(
                         IndexName="project_id-created_at-index",
                         KeyConditionExpression="project_id = :pid",
-                        ExpressionAttributeValues={":pid": project["id"]},
+                        ExpressionAttributeValues={":pid": pid},
                         Select="COUNT",
                     )
                 except Exception:
                     hyp_resp = hyp_table.scan(
                         FilterExpression="project_id = :pid",
-                        ExpressionAttributeValues={":pid": project["id"]},
+                        ExpressionAttributeValues={":pid": pid},
                         Select="COUNT",
                     )
                 project["hypothesis_count"] = hyp_resp.get("Count", 0)
+            except Exception:
+                pass
+            # Live evidence count
+            try:
+                ev_resp = ev_table.scan(
+                    FilterExpression="project_id = :pid",
+                    ExpressionAttributeValues={":pid": pid},
+                    Select="COUNT",
+                )
+                project["evidence_count"] = ev_resp.get("Count", 0)
+            except Exception:
+                pass
+            # Live simulation count
+            try:
+                sim_resp = sim_table.scan(
+                    FilterExpression="project_id = :pid",
+                    ExpressionAttributeValues={":pid": pid},
+                    Select="COUNT",
+                )
+                project["simulation_count"] = sim_resp.get("Count", 0)
             except Exception:
                 pass
             enriched_items.append(project)
