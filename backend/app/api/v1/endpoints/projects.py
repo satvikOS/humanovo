@@ -248,6 +248,48 @@ async def delete_project(project_id: UUID, db: AsyncSession = Depends(get_db)) -
     await db.flush()
 
 
+@router.get("/{project_id}/hypotheses")
+async def list_project_hypotheses(
+    project_id: UUID,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """List hypotheses for a specific project."""
+    from app.models.hypothesis import Hypothesis
+    result = await db.execute(
+        select(Hypothesis)
+        .where(Hypothesis.project_id == project_id)
+        .order_by(Hypothesis.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    hyps = result.scalars().all()
+    count_result = await db.execute(
+        select(func.count()).select_from(
+            select(Hypothesis.id).where(Hypothesis.project_id == project_id).subquery()
+        )
+    )
+    total = count_result.scalar() or 0
+    items = []
+    for h in hyps:
+        items.append({
+            "id": str(h.id),
+            "project_id": str(h.project_id),
+            "statement": h.statement,
+            "title": h.statement,
+            "mechanism": h.mechanism or "",
+            "rationale": h.rationale or "",
+            "description": h.rationale or "",
+            "status": h.status.value if hasattr(h.status, "value") else str(h.status),
+            "confidence_score": h.confidence_score or 0.5,
+            "confidence": h.confidence_score or 0.5,
+            "created_at": h.created_at.isoformat() if h.created_at else None,
+            "updated_at": h.updated_at.isoformat() if h.updated_at else None,
+        })
+    return {"items": items, "total": total}
+
+
 @router.get("/{project_id}/stats")
 async def get_project_stats(project_id: UUID, db: AsyncSession = Depends(get_db)) -> dict:
     """Get statistics for a project."""

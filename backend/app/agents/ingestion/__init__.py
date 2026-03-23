@@ -6,8 +6,6 @@ Includes scheduling, state management, and checkpointing capabilities.
 """
 
 from app.agents.ingestion.base import (
-    ExtractedEntity,
-    ExtractedRelation,
     IngestionAgent,
     IngestionConfig,
     IngestionMetrics,
@@ -16,6 +14,7 @@ from app.agents.ingestion.base import (
     IngestionStatus,
     SourceType,
 )
+from app.ingestion.extractors import ExtractedEntity, ExtractedRelation
 from app.agents.ingestion.clinical_trials_agent import ClinicalTrialsIngestionAgent
 from app.agents.ingestion.custom_document_agent import CustomDocumentIngestionAgent
 from app.agents.ingestion.orchestrator import IngestionOrchestrator

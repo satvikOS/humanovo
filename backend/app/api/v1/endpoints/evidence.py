@@ -309,13 +309,22 @@ async def get_evidence(
     return evidence_to_response(evidence)
 
 
+class EvidenceUpdate(BaseModel):
+    """Schema for updating evidence."""
+
+    title: str | None = None
+    abstract: str | None = None
+    tags: list[str] | None = None
+    entities: list[str] | None = None
+    status: str | None = None
+    source_url: str | None = None
+    user_notes: str | None = None
+
+
 @router.patch("/{evidence_id}", response_model=EvidenceResponse)
 async def update_evidence(
     evidence_id: UUID,
-    title: str | None = None,
-    abstract: str | None = None,
-    tags: list[str] | None = None,
-    entities: list[str] | None = None,
+    update: EvidenceUpdate,
     db: AsyncSession = Depends(get_db),
 ) -> EvidenceResponse:
     """Update an evidence item."""
@@ -326,15 +335,13 @@ async def update_evidence(
     if not evidence:
         raise HTTPException(status_code=404, detail="Evidence not found")
 
-    if title is not None:
-        evidence.title = title
-    if abstract is not None:
-        evidence.abstract = abstract
-        evidence.snippet = abstract[:300] if abstract else None
-    if tags is not None:
-        evidence.tags = tags
-    if entities is not None:
-        evidence.entities = entities
+    update_data = update.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        if field == "abstract" and value is not None:
+            evidence.abstract = value
+            evidence.snippet = value[:300] if value else None
+        elif hasattr(evidence, field):
+            setattr(evidence, field, value)
 
     await db.commit()
     await db.refresh(evidence)

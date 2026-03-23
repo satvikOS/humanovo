@@ -16,11 +16,10 @@ from typing import Any
 from uuid import uuid4
 
 import boto3
-from aws_lambda_powertools import Logger, Metrics, Tracer
+from aws_lambda_powertools import Logger, Metrics
 from aws_lambda_powertools.utilities.typing import LambdaContext
 
 logger = Logger()
-tracer = Tracer()
 metrics = Metrics()
 
 # AWS Clients
@@ -67,7 +66,6 @@ def get_brave_api_key() -> str:
         return os.environ.get("BRAVE_API_KEY", "")
 
 
-@tracer.capture_method
 def check_rate_limit() -> tuple[bool, dict]:
     """
     Check if we can make a request based on rate limits.
@@ -136,7 +134,6 @@ def check_rate_limit() -> tuple[bool, dict]:
         return False, {"blocked_reason": "check_failed", "error": str(e)}
 
 
-@tracer.capture_method
 def record_request() -> None:
     """Record a successful request for rate limiting."""
     table = dynamodb.Table(RATE_LIMIT_TABLE)
@@ -178,7 +175,6 @@ def record_request() -> None:
         logger.error("Failed to record request", error=str(e))
 
 
-@tracer.capture_method
 def brave_search(query: str, count: int = 10) -> list[dict]:
     """
     Search using Brave API.
@@ -276,7 +272,6 @@ def compute_content_hash(content: str, title: str) -> str:
     return hashlib.md5(normalized.encode()).hexdigest()
 
 
-@tracer.capture_method
 def check_duplicate(content_hash: str) -> bool:
     """Check if content already exists."""
     table = dynamodb.Table(KNOWLEDGE_TABLE)
@@ -293,7 +288,6 @@ def check_duplicate(content_hash: str) -> bool:
         return False
 
 
-@tracer.capture_method
 def extract_entities_bedrock(title: str, content: str) -> dict:
     """Extract entities using Bedrock."""
     if not content:
@@ -339,7 +333,6 @@ Return ONLY valid JSON like:
     return {}
 
 
-@tracer.capture_method
 def save_to_knowledge_base(result: dict, entities: dict) -> str:
     """Save result to knowledge base."""
     table = dynamodb.Table(KNOWLEDGE_TABLE)
@@ -391,7 +384,6 @@ def save_to_knowledge_base(result: dict, entities: dict) -> str:
     return record_id
 
 
-@tracer.capture_method
 def store_raw_data(results: list[dict], query: str) -> None:
     """Store raw data to S3."""
     timestamp = datetime.utcnow().strftime("%Y/%m/%d/%H%M%S")
@@ -414,7 +406,6 @@ def store_raw_data(results: list[dict], query: str) -> None:
 
 
 @logger.inject_lambda_context
-@tracer.capture_lambda_handler
 @metrics.log_metrics(capture_cold_start_metric=True)
 def handler(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
     """

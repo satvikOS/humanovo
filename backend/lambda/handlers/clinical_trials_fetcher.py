@@ -13,11 +13,10 @@ from typing import Any
 from uuid import uuid4
 
 import boto3
-from aws_lambda_powertools import Logger, Metrics, Tracer
+from aws_lambda_powertools import Logger, Metrics
 from aws_lambda_powertools.utilities.typing import LambdaContext
 
 logger = Logger()
-tracer = Tracer()
 metrics = Metrics()
 
 # AWS Clients
@@ -67,14 +66,12 @@ PHASE_MAP = {
 }
 
 
-@tracer.capture_method
 def compute_content_hash(content: str, title: str) -> str:
     """Compute hash for deduplication."""
     normalized = f"{title.lower().strip()}|{content.lower().strip()}"
     return hashlib.md5(normalized.encode()).hexdigest()
 
 
-@tracer.capture_method
 def check_duplicate(content_hash: str) -> dict | None:
     """Check if content already exists in knowledge base."""
     table = dynamodb.Table(KNOWLEDGE_TABLE)
@@ -93,7 +90,6 @@ def check_duplicate(content_hash: str) -> dict | None:
         return None
 
 
-@tracer.capture_method
 def get_checkpoint(condition: str) -> dict:
     """Get last ingestion checkpoint for a condition."""
     table = dynamodb.Table(CHECKPOINT_TABLE)
@@ -110,7 +106,6 @@ def get_checkpoint(condition: str) -> dict:
         return {}
 
 
-@tracer.capture_method
 def save_checkpoint(condition: str, last_date: str, last_count: int) -> None:
     """Save ingestion checkpoint."""
     table = dynamodb.Table(CHECKPOINT_TABLE)
@@ -127,7 +122,6 @@ def save_checkpoint(condition: str, last_date: str, last_count: int) -> None:
     )
 
 
-@tracer.capture_method
 def fetch_clinical_trials(
     condition: str,
     last_update_after: str | None = None,
@@ -259,7 +253,6 @@ def parse_clinical_trial(study: dict) -> dict:
     }
 
 
-@tracer.capture_method
 def extract_entities_bedrock(title: str, summary: str, interventions: list[dict]) -> dict:
     """Extract biomedical entities using Bedrock Claude."""
     intervention_text = ", ".join([i.get("name", "") for i in interventions])
@@ -306,7 +299,6 @@ Return ONLY valid JSON like:
     return {"genes": [], "proteins": [], "drugs": [], "diseases": [], "biomarkers": []}
 
 
-@tracer.capture_method
 def save_to_knowledge_base(trial: dict, entities: dict) -> str:
     """Save clinical trial to knowledge base."""
     table = dynamodb.Table(KNOWLEDGE_TABLE)
@@ -391,7 +383,6 @@ def save_to_knowledge_base(trial: dict, entities: dict) -> str:
     return record_id
 
 
-@tracer.capture_method
 def store_raw_data(trials: list[dict], condition: str) -> str:
     """Store raw fetched data to S3 for auditing."""
     timestamp = datetime.utcnow().strftime("%Y/%m/%d/%H%M%S")
@@ -416,7 +407,6 @@ def store_raw_data(trials: list[dict], condition: str) -> str:
 
 
 @logger.inject_lambda_context
-@tracer.capture_lambda_handler
 @metrics.log_metrics(capture_cold_start_metric=True)
 def handler(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
     """

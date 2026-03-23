@@ -23,7 +23,8 @@ import Typography from '@tiptap/extension-typography'
 import Color from '@tiptap/extension-color'
 import { TextStyle } from '@tiptap/extension-text-style'
 import HorizontalRule from '@tiptap/extension-horizontal-rule'
-import { persistGet, persistSet, persistRemove, logActivity } from '../utils/persistence'
+import { logActivity } from '../utils/persistence'
+import api from '../services/api'
 
 // ═══════════════════════════════════════════════════════════════
 // Types
@@ -41,9 +42,7 @@ interface PageMeta {
   updatedAt: string
 }
 
-interface PageData {
-  html: string
-}
+// Page content is stored as HTML string in the API's `content` field
 
 type TemplateCategory = 'general' | 'research' | 'clinical' | 'analysis' | 'collaboration' | 'publication'
 
@@ -91,42 +90,9 @@ const IMPORTANCE_LABELS: Record<ImportanceLevel, string> = {
   critical: 'Critical',
 }
 
-// Key for the page index (list of PageMeta). Each page's content is stored separately.
-const INDEX_KEY = 'notebook-index'
-const PAGE_KEY = (id: string) => `notebook-page-${id}`
-const ONBOARDED_KEY = 'notebook-onboarded'
-
-function generateId(): string {
-  return `nb-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-}
-
 function formatDate(iso: string): string {
   try { return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) }
   catch { return iso }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// Storage helpers — per-page isolation
-// ═══════════════════════════════════════════════════════════════
-
-function loadIndex(): PageMeta[] {
-  return persistGet<PageMeta[]>(INDEX_KEY, [])
-}
-
-function saveIndex(index: PageMeta[]) {
-  persistSet(INDEX_KEY, index)
-}
-
-function loadPageData(id: string): PageData {
-  return persistGet<PageData>(PAGE_KEY(id), { html: '' })
-}
-
-function savePageData(id: string, data: PageData) {
-  persistSet(PAGE_KEY(id), data)
-}
-
-function removePageData(id: string) {
-  persistRemove(PAGE_KEY(id))
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -409,43 +375,7 @@ const TEMPLATES: PageTemplate[] = [
 ]
 
 // ═══════════════════════════════════════════════════════════════
-// Getting Started page
-// ═══════════════════════════════════════════════════════════════
-
-function getGettingStartedPage(): { meta: PageMeta; data: PageData } {
-  return {
-    meta: {
-      id: 'getting-started',
-      title: 'Getting Started',
-      category: 'general',
-      importance: 'medium' as ImportanceLevel,
-      tags: ['welcome'],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    },
-    data: {
-      html: `<h1>Welcome to HumaNovo Notebook</h1>
-<p>Your research notebook for structured scientific documentation.</p>
-<hr>
-<h2>Features</h2>
-<ul>
-<li><strong>Rich text editing</strong> &mdash; full WYSIWYG with formatting toolbar</li>
-<li><strong>Tables</strong> &mdash; create and edit data tables inline</li>
-<li><strong>Images</strong> &mdash; paste or insert images directly</li>
-<li><strong>Task lists</strong> &mdash; track experiment steps with checkboxes</li>
-<li><strong>Templates</strong> &mdash; industry-standard formats for research, clinical, and publication workflows</li>
-<li><strong>Export</strong> &mdash; save as PDF, Word (.docx), or print directly</li>
-</ul>
-<h2>Getting Started</h2>
-<ol>
-<li>Click the <strong>+</strong> button in the sidebar to create a new page</li>
-<li>Choose a template that fits your workflow</li>
-<li>Start writing &mdash; your work is saved automatically</li>
-</ol>
-<p><em>You can delete this page once you&rsquo;re ready.</em></p>`,
-    },
-  }
-}
+// Getting Started page template (used as default content for empty notebooks)
 
 // ═══════════════════════════════════════════════════════════════
 // TipTap Toolbar
@@ -574,30 +504,41 @@ function exportDocx(title: string, html: string) {
 export default function Notebook() {
   const [initError, setInitError] = useState<string | null>(null)
 
-  // Page index (metadata only — content stored separately per page)
-  const [pageIndex, setPageIndex] = useState<PageMeta[]>(() => {
-    try {
-      const existing = loadIndex()
-      if (existing.length > 0) return existing
-      // First time: show Getting Started page (only if never onboarded)
-      const onboarded = persistGet<boolean>(ONBOARDED_KEY, false)
-      if (onboarded) return []
-      const gs = getGettingStartedPage()
-      saveIndex([gs.meta])
-      savePageData(gs.meta.id, gs.data)
-      persistSet(ONBOARDED_KEY, true)
-      return [gs.meta]
-    } catch (e) {
-      console.error('Notebook init error:', e)
-      setInitError(String(e))
-      return []
-    }
-  })
+  // Page index (metadata only — content loaded on demand from API)
+  const [pageIndex, setPageIndex] = useState<PageMeta[]>([])
+  const [activePageId, setActivePageId] = useState<string | null>(null)
+  // Cache of page content loaded from API
+  const pageContentCache = useRef<Record<string, string>>({})
 
-  const [activePageId, setActivePageId] = useState<string | null>(() => {
-    const idx = loadIndex()
-    return idx.length > 0 ? idx[0].id : null
-  })
+  // Load pages from API on mount
+  useEffect(() => {
+    const loadPages = async () => {
+      try {
+        const res = await api.getNotebookPages({ page_size: 200 })
+        const pages: PageMeta[] = (res.items || []).map((p: any) => ({
+          id: p.id,
+          title: p.title || 'Untitled',
+          category: (p.tags?.find((t: string) => ['research', 'clinical', 'analysis', 'collaboration', 'publication'].includes(t)) || 'general') as TemplateCategory,
+          importance: (p.tags?.find((t: string) => ['low', 'medium', 'high', 'critical'].includes(t)) || 'medium') as ImportanceLevel,
+          tags: (p.tags || []).filter((t: string) => !['research', 'clinical', 'analysis', 'collaboration', 'publication', 'low', 'medium', 'high', 'critical'].includes(t)),
+          createdAt: p.created_at,
+          updatedAt: p.updated_at,
+        }))
+        if (pages.length > 0) {
+          setPageIndex(pages)
+          setActivePageId(pages[0].id)
+          // Pre-cache content of first page
+          if (res.items[0]?.content) {
+            pageContentCache.current[pages[0].id] = res.items[0].content
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load notebook pages:', err)
+        setInitError('Failed to load notebook pages from server')
+      }
+    }
+    loadPages()
+  }, [])
 
   const [searchQuery, setSearchQuery] = useState('')
   const [filterCategory, setFilterCategory] = useState<TemplateCategory | 'all'>('all')
@@ -625,8 +566,18 @@ export default function Notebook() {
 
   useEffect(() => {
     if (activePageId) {
-      const data = loadPageData(activePageId)
-      setActiveHtml(data.html)
+      // Load content from cache or API
+      const cached = pageContentCache.current[activePageId]
+      if (cached !== undefined) {
+        setActiveHtml(cached)
+      } else {
+        // Fetch from API
+        api.getNotebookPage(activePageId).then(page => {
+          const html = page.content || ''
+          pageContentCache.current[activePageId] = html
+          setActiveHtml(html)
+        }).catch(() => setActiveHtml(''))
+      }
       const meta = pageIndex.find(p => p.id === activePageId)
       if (meta) {
         setEditTitle(meta.title)
@@ -709,25 +660,35 @@ export default function Notebook() {
     }
   }, [activeHtml]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Save function — writes to per-page storage only
-  const doSave = useCallback((html?: string) => {
+  // Save function — writes to API
+  const doSave = useCallback(async (html?: string) => {
     if (!activePageId) return
     const finalHtml = html ?? editor?.getHTML() ?? ''
     setSaving(true)
-    // Save content
-    savePageData(activePageId, { html: finalHtml })
-    // Update meta
-    setPageIndex(prev => {
-      const next = prev.map(p => p.id === activePageId
-        ? { ...p, title: editTitle, tags: editTags, updatedAt: new Date().toISOString() }
-        : p
-      )
-      saveIndex(next)
-      return next
-    })
+    // Update cache
+    pageContentCache.current[activePageId] = finalHtml
+    // Update meta locally
+    const meta = pageIndex.find(p => p.id === activePageId)
+    const allTags = [...editTags]
+    if (meta?.category && meta.category !== 'general') allTags.push(meta.category)
+    if (meta?.importance && meta.importance !== 'medium') allTags.push(meta.importance)
+    setPageIndex(prev => prev.map(p => p.id === activePageId
+      ? { ...p, title: editTitle, tags: editTags, updatedAt: new Date().toISOString() }
+      : p
+    ))
+    // Persist to API
+    try {
+      await api.updateNotebookPage(activePageId, {
+        title: editTitle,
+        content: finalHtml,
+        tags: allTags,
+      })
+    } catch (err) {
+      console.error('Failed to save notebook page:', err)
+    }
     setHasUnsaved(false)
     setSaving(false)
-  }, [activePageId, editTitle, editTags, editor])
+  }, [activePageId, editTitle, editTags, editor, pageIndex])
 
   // Explicit save
   const handleSave = () => {
@@ -741,7 +702,9 @@ export default function Notebook() {
     // Flush current page before switching
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null }
     if (activePageId && editor && !editor.isDestroyed) {
-      savePageData(activePageId, { html: editor.getHTML() })
+      pageContentCache.current[activePageId] = editor.getHTML()
+      // Fire-and-forget save to API
+      api.updateNotebookPage(activePageId, { content: editor.getHTML() }).catch(() => {})
     }
     setActivePageId(id)
   }, [activePageId, editor])
@@ -756,54 +719,69 @@ export default function Notebook() {
   }, [])
 
   // Create page from template with form data
-  const createPage = useCallback(() => {
+  const createPage = useCallback(async () => {
     if (!pendingTemplate) return
-    const id = generateId()
     const title = newPageTitle.trim() || pendingTemplate.name
     const tags = newPageTags.split(',').map(t => t.trim()).filter(Boolean)
-    const meta: PageMeta = {
-      id,
-      title,
-      category: pendingTemplate.category,
-      importance: newPageImportance,
-      tags,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+    // Add category and importance as tags for API storage
+    const allTags = [...tags]
+    if (pendingTemplate.category !== 'general') allTags.push(pendingTemplate.category)
+    if (newPageImportance !== 'medium') allTags.push(newPageImportance)
+
+    try {
+      // Create via API
+      const created = await api.createNotebookPage({
+        title,
+        content: pendingTemplate.html,
+        content_type: 'rich_text',
+        tags: allTags,
+      })
+      const meta: PageMeta = {
+        id: created.id,
+        title,
+        category: pendingTemplate.category,
+        importance: newPageImportance,
+        tags,
+        createdAt: created.created_at,
+        updatedAt: created.updated_at,
+      }
+      // Cache content
+      pageContentCache.current[created.id] = pendingTemplate.html
+      setPageIndex(prev => [meta, ...prev])
+      setPendingTemplate(null)
+      logActivity({ type: 'notebook', action: 'created', title: `Created notebook: ${title}` })
+      // Flush current page before switching
+      if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null }
+      if (activePageId && editor && !editor.isDestroyed) {
+        pageContentCache.current[activePageId] = editor.getHTML()
+        api.updateNotebookPage(activePageId, { content: editor.getHTML() }).catch(() => {})
+      }
+      setActivePageId(created.id)
+    } catch (err) {
+      console.error('Failed to create notebook page:', err)
     }
-    // Save content to its own key
-    savePageData(id, { html: pendingTemplate.html })
-    // Update index
-    const newIndex = [meta, ...pageIndex]
-    saveIndex(newIndex)
-    setPageIndex(newIndex)
-    setPendingTemplate(null)
-    // Log to activity timeline
-    logActivity({ type: 'notebook', action: 'created', title: `Created notebook: ${title}` })
-    // Switch to new page
-    if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null }
-    if (activePageId && editor && !editor.isDestroyed) {
-      savePageData(activePageId, { html: editor.getHTML() })
-    }
-    setActivePageId(id)
   }, [pendingTemplate, newPageTitle, newPageImportance, newPageTags, pageIndex, activePageId, editor])
 
   // Delete page
-  const confirmDelete = useCallback(() => {
+  const confirmDelete = useCallback(async () => {
     if (!deleteConfirmId) return
     const pid = deleteConfirmId
     const deletedMeta = pageIndex.find(p => p.id === pid)
     setDeleteConfirmId(null)
     // Cancel pending auto-save
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null }
-    // Remove page data
-    removePageData(pid)
+    // Remove from API
+    try {
+      await api.deleteNotebookPage(pid)
+    } catch (err) {
+      console.error('Failed to delete notebook page:', err)
+    }
+    // Remove from cache
+    delete pageContentCache.current[pid]
     // Remove from index
     const newIndex = pageIndex.filter(p => p.id !== pid)
-    saveIndex(newIndex)
     setPageIndex(newIndex)
-    // Log to activity timeline
     logActivity({ type: 'notebook', action: 'deleted', title: `Deleted notebook: ${deletedMeta?.title || 'Untitled'}` })
-    // If deleted page was active, switch
     if (activePageId === pid) {
       setActivePageId(newIndex.length > 0 ? newIndex[0].id : null)
     }

@@ -52,7 +52,7 @@ class ProvenanceRecordModel(Base):
     quality_level = Column(String(20), default="medium", nullable=False)
     version = Column(Float, default=1, nullable=False)
     current_hash = Column(String(64), nullable=True)
-    metadata = Column(JSONB, default=dict, nullable=False)
+    extra_metadata = Column("metadata", JSONB, default=dict, nullable=False)
 
     # Relationships
     events = relationship(
@@ -78,7 +78,7 @@ class ProvenanceRecordModel(Base):
             quality_level=DataQualityLevel(self.quality_level),
             version=int(self.version),
             current_hash=self.current_hash,
-            metadata=dict(self.metadata or {}),
+            metadata=dict(self.extra_metadata or {}),
         )
 
     @classmethod
@@ -95,7 +95,7 @@ class ProvenanceRecordModel(Base):
             quality_level=record.quality_level.value,
             version=record.version,
             current_hash=record.current_hash,
-            metadata=record.metadata,
+            extra_metadata=record.metadata,
         )
 
 
@@ -118,7 +118,7 @@ class ProvenanceEventModel(Base):
     operation = Column(String(100), default="", nullable=False)
     input_records = Column(ARRAY(String), default=list, nullable=False)
     output_records = Column(ARRAY(String), default=list, nullable=False)
-    metadata = Column(JSONB, default=dict, nullable=False)
+    extra_metadata = Column("metadata", JSONB, default=dict, nullable=False)
     data_hash = Column(String(64), nullable=True)
     quality_level = Column(String(20), default="medium", nullable=False)
     confidence = Column(Float, default=1.0, nullable=False)
@@ -143,7 +143,7 @@ class ProvenanceEventModel(Base):
             operation=self.operation,
             input_records=list(self.input_records or []),
             output_records=list(self.output_records or []),
-            metadata=dict(self.metadata or {}),
+            metadata=dict(self.extra_metadata or {}),
             data_hash=self.data_hash,
             quality_level=DataQualityLevel(self.quality_level),
             confidence=self.confidence,
@@ -162,7 +162,7 @@ class ProvenanceEventModel(Base):
             operation=event.operation,
             input_records=list(event.input_records),
             output_records=list(event.output_records),
-            metadata=event.metadata,
+            extra_metadata=event.metadata,
             data_hash=event.data_hash,
             quality_level=event.quality_level.value,
             confidence=event.confidence,
@@ -208,7 +208,7 @@ class PostgresProvenanceStorage(ProvenanceStorage):
                     existing.quality_level = record.quality_level.value
                     existing.version = record.version
                     existing.current_hash = record.current_hash
-                    existing.metadata = record.metadata
+                    existing.extra_metadata = record.metadata
                 else:
                     # Create new record
                     model = ProvenanceRecordModel.from_domain(record)

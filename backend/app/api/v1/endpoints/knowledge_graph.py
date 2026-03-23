@@ -222,6 +222,25 @@ async def get_subgraph(
     }
 
 
+# ── Full Graph ──────────────────────────────────────────────────
+
+@router.get("/full")
+async def get_full_graph(db: AsyncSession = Depends(get_db)):
+    """Return all nodes and edges for the interactive graph visualization."""
+    node_result = await db.execute(select(KnowledgeGraphNode))
+    nodes = node_result.scalars().all()
+
+    edge_result = await db.execute(select(KnowledgeGraphEdge))
+    edges = edge_result.scalars().all()
+
+    return {
+        "nodes": [n.to_dict() for n in nodes],
+        "edges": [e.to_dict() for e in edges],
+        "total_nodes": len(nodes),
+        "total_edges": len(edges),
+    }
+
+
 # ── Stats ────────────────────────────────────────────────────────
 
 @router.get("/stats")

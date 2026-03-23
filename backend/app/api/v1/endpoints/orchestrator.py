@@ -86,8 +86,16 @@ class DiscoveryStatusResponse(BaseModel):
     """Response with discovery status."""
     state: str
     disease: Optional[str] = None
+    discovery_type: Optional[str] = None
+    project_id: Optional[str] = None
+    project_name: Optional[str] = None
     stats: Optional[DiscoveryOrchestratorStats] = None
     top_hypotheses: list[dict] = []
+
+
+# Track auto-created project per discovery run
+_auto_project_id: Optional[str] = None
+_auto_project_name: Optional[str] = None
 
 
 @router.post("/start")
@@ -110,6 +118,37 @@ async def start_discovery_endpoint(request: StartDiscoveryRequest):
         )
 
     try:
+        global _auto_project_id, _auto_project_name
+
+        # Auto-create a project in the database for this discovery run
+        try:
+            from app.core.database import async_session_factory
+            from app.models.project import Project, ProjectStatus
+
+            discovery_type = request.discovery_type or "treatment"
+            project_name = f"{request.disease} - {discovery_type.replace('_', ' ').title()} Discovery"
+
+            async with async_session_factory() as db:
+                db_project = Project(
+                    name=project_name,
+                    description=f"Auto-generated discovery project for {request.disease}",
+                    disease_focus=request.disease,
+                    research_question=f"What are the most promising {discovery_type} strategies for {request.disease}?",
+                    tags=[request.disease.lower(), discovery_type, "ai-discovery"],
+                    status=ProjectStatus.ACTIVE,
+                    hypothesis_count=0,
+                )
+                db.add(db_project)
+                await db.commit()
+                await db.refresh(db_project)
+                _auto_project_id = str(db_project.id)
+                _auto_project_name = project_name
+                logger.info("Auto-created project for discovery", project_id=_auto_project_id, name=project_name)
+        except Exception as e:
+            logger.warning("Failed to auto-create project — hypotheses will be in-memory only", error=str(e))
+            _auto_project_id = None
+            _auto_project_name = None
+
         # Create new orchestrator
         _current_orchestrator = DiscoveryOrchestrator(
             max_agents=request.max_agents,
@@ -117,8 +156,52 @@ async def start_discovery_endpoint(request: StartDiscoveryRequest):
         )
         await _current_orchestrator.initialize()
 
-        # Set up callbacks for WebSocket updates
+        # Set up callbacks for WebSocket updates + auto-save each hypothesis
         async def on_hypothesis(hypothesis):
+            # Auto-save hypothesis to database
+            if _auto_project_id:
+                try:
+                    from app.core.database import async_session_factory
+                    from app.models.hypothesis import Hypothesis as HypModel, HypothesisStatus as HypStatus
+                    from uuid import UUID as _UUID
+
+                    async with async_session_factory() as db:
+                        db_hyp = HypModel(
+                            project_id=_UUID(_auto_project_id),
+                            statement=hypothesis.title,
+                            mechanism=hypothesis.mechanism,
+                            rationale=hypothesis.description,
+                            status=HypStatus.ACTIVE,
+                            confidence_score=hypothesis.confidence,
+                            novelty_score=getattr(hypothesis, "novelty_score", 0.0),
+                            generated_by="ai",
+                            generation_context={
+                                "model_used": hypothesis.model_used,
+                                "disease": getattr(hypothesis, "disease", ""),
+                                "external_factors": hypothesis.external_factors,
+                                "contributing_agents": getattr(hypothesis, "contributing_agents", []),
+                            },
+                            tags=[getattr(hypothesis, "disease", "").lower(), hypothesis.model_used],
+                            translational_roadmap=getattr(hypothesis, "translational_roadmap", None),
+                        )
+                        db.add(db_hyp)
+                        # Update project hypothesis count
+                        from app.models.project import Project
+                        from sqlalchemy import select as sa_select, func as sa_func
+                        count_result = await db.execute(
+                            sa_select(sa_func.count()).select_from(HypModel).where(
+                                HypModel.project_id == _UUID(_auto_project_id)
+                            )
+                        )
+                        new_count = (count_result.scalar() or 0) + 1
+                        project = await db.get(Project, _UUID(_auto_project_id))
+                        if project:
+                            project.hypothesis_count = new_count
+                        await db.commit()
+                        logger.info("Auto-saved hypothesis to project", project_id=_auto_project_id)
+                except Exception as e:
+                    logger.warning("Failed to auto-save hypothesis", error=str(e))
+
             await manager.broadcast({
                 "type": "hypothesis",
                 "data": {
@@ -173,6 +256,8 @@ async def start_discovery_endpoint(request: StartDiscoveryRequest):
             "target_confidence": request.target_confidence,
             "models": ["llama_maverick", "gpt_oss_120b"],
             "external_factors_count": len(request.external_factors),
+            "project_id": _auto_project_id,
+            "project_name": _auto_project_name,
             "message": (
                 f"Discovery started for {request.disease} with {request.max_agents} agents "
                 f"across 4 models, {len(request.external_factors)} external factors"
@@ -268,6 +353,9 @@ async def get_discovery_status():
         return DiscoveryStatusResponse(
             state=_current_orchestrator.state.value,
             disease=_current_orchestrator._disease,
+            discovery_type=getattr(_current_orchestrator, "_discovery_type", None),
+            project_id=_auto_project_id,
+            project_name=_auto_project_name,
             stats=stats,
             top_hypotheses=[
                 {

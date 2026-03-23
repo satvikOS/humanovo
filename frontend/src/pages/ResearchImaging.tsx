@@ -4,7 +4,7 @@ import { FiImage, FiPlus, FiTrash2, FiZoomIn, FiZoomOut, FiCpu, FiSquare, FiCirc
 interface Study { id: string; title: string; modality: string; body_part: string; findings: string; status: string; annotations: Annotation[]; ai_analysis: any; width: number; height: number }
 interface Annotation { id: string; type: string; x: number; y: number; width: number; height: number; label: string; color: string; notes: string }
 
-const API = '/api/imaging'
+const API = '/api/v1/imaging'
 
 export default function ResearchImaging() {
   const [studies, setStudies] = useState<Study[]>([])

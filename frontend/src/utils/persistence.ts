@@ -65,12 +65,14 @@ export interface ActivityEntry {
 const MAX_ACTIVITY = 500
 
 export function logActivity(entry: Omit<ActivityEntry, 'id' | 'timestamp'>): void {
+  const now = new Date().toISOString()
   const activities = persistGet<ActivityEntry[]>('activity-log', [])
   activities.unshift({
     ...entry,
     id: `act-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    timestamp: new Date().toISOString(),
-  })
+    timestamp: now,
+    created_at: now,
+  } as ActivityEntry & { created_at: string })
   persistSet('activity-log', activities.slice(0, MAX_ACTIVITY))
 }
 

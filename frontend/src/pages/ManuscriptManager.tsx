@@ -12,7 +12,7 @@ interface Manuscript {
 }
 interface Author { id: string; name: string; affiliation: string; email: string; role: string; order: number }
 
-const API = '/api/manuscripts'
+const API = '/api/v1/manuscripts'
 const STATUS_COLORS: Record<string, string> = { draft: 'var(--color-text-muted)', review: 'var(--color-accent-blue)', submitted: 'var(--color-accent-purple)', accepted: 'var(--color-success)', published: 'var(--color-accent-green)', rejected: 'var(--color-error)' }
 const SECTIONS = ['abstract', 'introduction', 'methods', 'results', 'discussion', 'references']
 

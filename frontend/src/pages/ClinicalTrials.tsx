@@ -14,7 +14,7 @@ interface Subject { id: string; subject_number: string; display_name: string; ag
 interface Document { id: string; document_type: string; name: string; status: string; version: string; uploaded_by: string }
 
 type ViewTab = 'overview' | 'subjects' | 'visits' | 'documents' | 'budget'
-const API = '/api/clinical-trials'
+const API = '/api/v1/clinical-trials'
 const STATUS_COLORS: Record<string, string> = { planning: 'var(--color-text-muted)', recruiting: 'var(--color-accent-blue)', active: 'var(--color-success)', completed: 'var(--color-accent-purple)', suspended: 'var(--color-error)' }
 
 export default function ClinicalTrials() {

@@ -10,7 +10,8 @@ import api, { Project } from '../services/api'
 import { logActivity, formatDate } from '../utils/persistence'
 import HypothesisDocViewer from '../components/HypothesisDocViewer'
 
-const API_BASE = '/api/v1'
+const _BACKEND = import.meta.env.VITE_API_BASE_URL || ''
+const API_BASE = `${_BACKEND}/api/v1`
 
 interface SavedResearchPaper {
   id: string
@@ -82,14 +83,27 @@ export default function ProjectDetail() {
     loadProject()
   }, [projectId])
 
+  const [loadError, setLoadError] = useState<string | null>(null)
+
   const loadProject = async () => {
     if (!projectId) return
     setLoadingProject(true)
+    setLoadError(null)
     try {
       const proj = await api.getProject(projectId)
       setProject(proj)
-    } catch (err) {
+    } catch (err: any) {
       console.warn('ProjectDetail: failed to load project from API', err)
+      const status = err?.response?.status
+      const errData = err?.response?.data
+      // Lambda returns 400 with error:"not_found" (not 404, to avoid CloudFront HTML intercept)
+      if (status === 404 || (status === 400 && errData?.error === 'not_found')) {
+        setLoadError('This project does not exist in the database.')
+      } else if (status === 422) {
+        setLoadError('Invalid project ID format.')
+      } else {
+        setLoadError(err?.message || 'Failed to load project. The backend may be unavailable.')
+      }
     } finally {
       setLoadingProject(false)
     }
@@ -432,9 +446,15 @@ export default function ProjectDetail() {
           <FiTarget className="w-12 h-12 text-[var(--color-text-muted)] mx-auto mb-4 opacity-30" />
           <h2 className="text-xl font-semibold text-white mb-2">Project Not Found</h2>
           <p className="text-[var(--color-text-muted)] max-w-md mx-auto">
-            This project may not have been saved properly. Try running a new discovery
-            and saving results to a project from the Agents page.
+            {loadError || 'This project could not be loaded. It may have been deleted or the backend may be unavailable.'}
           </p>
+          <button
+            onClick={loadProject}
+            className="mt-4 btn text-accent-blue hover:bg-accent-blue/10"
+          >
+            <FiRefreshCw className="w-4 h-4 mr-1" />
+            Retry
+          </button>
         </div>
       </div>
     )

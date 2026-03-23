@@ -13,7 +13,7 @@ interface Share { id: string; entity_type: string; entity_name: string; shared_w
 interface Notification { id: string; title: string; message: string; notification_type: string; read: boolean; created_at: string }
 interface AuditEntry { id: string; action: string; entity_type: string; user_name: string; details: string; timestamp: string }
 
-const API = '/api/collaboration'
+const API = '/api/v1/collaboration'
 
 export default function Collaboration() {
   const [tab, setTab] = useState<TabId>('team')

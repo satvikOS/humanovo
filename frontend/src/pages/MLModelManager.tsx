@@ -9,7 +9,7 @@ interface MLModel {
   created_at: string; updated_at: string
 }
 
-const API = '/api/ml-models'
+const API = '/api/v1/ml-models'
 const STATUS_COLORS: Record<string, string> = { draft: 'var(--color-text-muted)', training: 'var(--color-accent-blue)', validated: 'var(--color-accent-purple)', deployed: 'var(--color-success)', retired: 'var(--color-error)' }
 
 export default function MLModelManager() {

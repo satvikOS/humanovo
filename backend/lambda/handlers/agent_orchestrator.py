@@ -65,13 +65,20 @@ except ImportError as _import_err:
             return decorator
         def resolve(self, event, context):
             method = event.get("requestContext", {}).get("http", {}).get("method", "GET")
-            path = event.get("rawPath", "")
+            path = event.get("rawPath", "/").split("?")[0]
+            # strip stage prefix (e.g. /dev)
+            parts = path.split("/")
+            if len(parts) > 1 and parts[1] not in ("api",):
+                path = "/" + "/".join(parts[2:])
+            self.current_event = type("Event", (), {
+                "json_body": json.loads(event.get("body", "{}") or "{}"),
+                "query_string_parameters": event.get("queryStringParameters") or {},
+            })()
             for route_method, pattern_re, param_names, handler_fn in self._routes:
                 if route_method != method:
                     continue
                 m = pattern_re.match(path)
                 if m:
-                    self.current_event = type("Event", (), {"json_body": json.loads(event.get("body", "{}") or "{}")})()
                     kwargs = {name: m.group(i + 1) for i, name in enumerate(param_names)}
                     result = handler_fn(**kwargs)
                     if isinstance(result, dict):
@@ -2074,9 +2081,17 @@ def run_discovery_worker(config: dict, continuation: dict | None = None):
     hypotheses = list(prior_hypotheses)
     stages_completed = prior_stages
 
-    # Auto-create project at discovery start (or reuse from continuation)
+    # Reuse project created by start_discovery (stored in DynamoDB state),
+    # or from continuation payload, or create a new one as fallback
     project_id = continuation.get("project_id", "") if continuation else ""
     project_name = continuation.get("project_name", "") if continuation else ""
+    if not project_id:
+        # Check DynamoDB state — start_discovery may have already created the project
+        _state = get_discovery_state()
+        if _state and _state.get("project_id") and _state["project_id"] != "discovery":
+            project_id = _state["project_id"]
+            project_name = _state.get("project_name", "")
+            print(f"[WORKER] Reusing project from state: {project_id} name={project_name}")
     if not project_id:
         project_id = str(uuid4())
         now_ts = datetime.utcnow()
@@ -2978,15 +2993,43 @@ def start_discovery():
         # Create initial state in DynamoDB
         table = get_task_table()
         now = datetime.utcnow().isoformat()
+        discovery_type = body.get("discovery_type", "cure")
         config = {
             "disease": disease,
-            "discovery_type": body.get("discovery_type", "cure"),
+            "discovery_type": discovery_type,
             "focus_entities": body.get("focus_entities", []),
             "max_agents": body.get("max_agents", 1000),
             "target_confidence": Decimal(str(body.get("target_confidence", 0.95))),
             "external_factors": body.get("external_factors", []),
             "research_guidance": body.get("research_guidance", ""),
         }
+
+        # Auto-create project at discovery start so frontend has project_id immediately
+        project_id = str(uuid4())
+        now_ts = datetime.utcnow()
+        project_name = f"{disease} — {discovery_type.replace('_', ' ').title()} Discovery — {now_ts.strftime('%b %d %Y %H:%M')}"
+        try:
+            proj_table = dynamodb.Table(PROJECTS_TABLE)
+            proj_table.put_item(Item={
+                "id": project_id,
+                "name": project_name,
+                "description": f"AI discovery pipeline for {disease} ({discovery_type}). Hypotheses auto-generated via 10-stage sequential pipeline.",
+                "disease_focus": disease,
+                "research_question": f"{discovery_type.replace('_', ' ').capitalize()} discovery for {disease}",
+                "tags": [disease, discovery_type, "ai-generated"],
+                "status": "active",
+                "hypothesis_count": 0,
+                "evidence_count": 0,
+                "simulation_count": 0,
+                "user_id": "default",
+                "created_at": now,
+                "updated_at": now,
+            })
+            print(f"[START] Auto-created project: id={project_id} name={project_name}")
+        except Exception as proj_err:
+            logger.error(f"Failed to auto-create project at start: {proj_err}")
+            project_id = "discovery"
+            project_name = ""
 
         print(f"[START] Writing DynamoDB initial state...")
         table.put_item(Item={
@@ -3013,7 +3056,8 @@ def start_discovery():
             },
             "created_at": now,
             "updated_at": now,
-            "project_id": "discovery",
+            "project_id": project_id,
+            "project_name": project_name,
         })
 
         # Invoke self asynchronously to do the AI work
@@ -3040,8 +3084,15 @@ def start_discovery():
                 logger.error(f"Synchronous fallback also failed: {e2}")
                 update_discovery_state({"status": "idle"})
 
-        print(f"[START] Returning started response")
-        return {"status": "started", "disease": disease, "agents": len(PIPELINE_STAGES), "total_rounds": NUM_ROUNDS}
+        print(f"[START] Returning started response with project_id={project_id}")
+        return {
+            "status": "started",
+            "disease": disease,
+            "agents": len(PIPELINE_STAGES),
+            "total_rounds": NUM_ROUNDS,
+            "project_id": project_id,
+            "project_name": project_name,
+        }
     except Exception as e:
         logger.error(f"Start discovery failed: {e}")
         return Response(

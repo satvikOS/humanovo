@@ -52,7 +52,10 @@ locals {
     "agent_orchestrator",
     "search_agent",
     "embeddings",
-    "simulation"
+    "simulation",
+    "notebook",
+    "statistics",
+    "genomics"
   ])
 }
 
@@ -157,6 +160,38 @@ resource "aws_apigatewayv2_route" "projects_delete" {
   authorizer_id      = var.enable_jwt_auth ? aws_apigatewayv2_authorizer.jwt[0].id : null
 }
 
+resource "aws_apigatewayv2_route" "projects_hypotheses" {
+  api_id             = aws_apigatewayv2_api.main.id
+  route_key          = "GET /api/v1/projects/{projectId}/hypotheses"
+  target             = "integrations/${aws_apigatewayv2_integration.lambda["projects"].id}"
+  authorization_type = var.enable_jwt_auth ? "JWT" : "NONE"
+  authorizer_id      = var.enable_jwt_auth ? aws_apigatewayv2_authorizer.jwt[0].id : null
+}
+
+resource "aws_apigatewayv2_route" "projects_stats" {
+  api_id             = aws_apigatewayv2_api.main.id
+  route_key          = "GET /api/v1/projects/{projectId}/stats"
+  target             = "integrations/${aws_apigatewayv2_integration.lambda["projects"].id}"
+  authorization_type = var.enable_jwt_auth ? "JWT" : "NONE"
+  authorizer_id      = var.enable_jwt_auth ? aws_apigatewayv2_authorizer.jwt[0].id : null
+}
+
+resource "aws_apigatewayv2_route" "projects_discovery_runs" {
+  api_id             = aws_apigatewayv2_api.main.id
+  route_key          = "GET /api/v1/projects/{projectId}/discovery-runs"
+  target             = "integrations/${aws_apigatewayv2_integration.lambda["projects"].id}"
+  authorization_type = var.enable_jwt_auth ? "JWT" : "NONE"
+  authorizer_id      = var.enable_jwt_auth ? aws_apigatewayv2_authorizer.jwt[0].id : null
+}
+
+resource "aws_apigatewayv2_route" "projects_synthesis_runs" {
+  api_id             = aws_apigatewayv2_api.main.id
+  route_key          = "GET /api/v1/projects/{projectId}/synthesis-runs"
+  target             = "integrations/${aws_apigatewayv2_integration.lambda["projects"].id}"
+  authorization_type = var.enable_jwt_auth ? "JWT" : "NONE"
+  authorizer_id      = var.enable_jwt_auth ? aws_apigatewayv2_authorizer.jwt[0].id : null
+}
+
 # Hypotheses Routes
 resource "aws_apigatewayv2_route" "hypotheses_list" {
   api_id             = aws_apigatewayv2_api.main.id
@@ -244,6 +279,14 @@ resource "aws_apigatewayv2_route" "knowledge_neighborhood" {
 resource "aws_apigatewayv2_route" "knowledge_paths" {
   api_id             = aws_apigatewayv2_api.main.id
   route_key          = "GET /api/v1/knowledge/paths"
+  target             = "integrations/${aws_apigatewayv2_integration.lambda["knowledge"].id}"
+  authorization_type = var.enable_jwt_auth ? "JWT" : "NONE"
+  authorizer_id      = var.enable_jwt_auth ? aws_apigatewayv2_authorizer.jwt[0].id : null
+}
+
+resource "aws_apigatewayv2_route" "knowledge_stats" {
+  api_id             = aws_apigatewayv2_api.main.id
+  route_key          = "GET /api/v1/knowledge/stats"
   target             = "integrations/${aws_apigatewayv2_integration.lambda["knowledge"].id}"
   authorization_type = var.enable_jwt_auth ? "JWT" : "NONE"
   authorizer_id      = var.enable_jwt_auth ? aws_apigatewayv2_authorizer.jwt[0].id : null
@@ -406,6 +449,123 @@ resource "aws_apigatewayv2_route" "embeddings_create" {
   target             = "integrations/${aws_apigatewayv2_integration.lambda["embeddings"].id}"
   authorization_type = var.enable_jwt_auth ? "JWT" : "NONE"
   authorizer_id      = var.enable_jwt_auth ? aws_apigatewayv2_authorizer.jwt[0].id : null
+}
+
+# Notebook Routes
+resource "aws_apigatewayv2_route" "notebook_pages_list" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "GET /api/v1/notebook/pages"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda["notebook"].id}"
+}
+
+resource "aws_apigatewayv2_route" "notebook_pages_create" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /api/v1/notebook/pages"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda["notebook"].id}"
+}
+
+resource "aws_apigatewayv2_route" "notebook_pages_get" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "GET /api/v1/notebook/pages/{pageId}"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda["notebook"].id}"
+}
+
+resource "aws_apigatewayv2_route" "notebook_pages_update" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "PATCH /api/v1/notebook/pages/{pageId}"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda["notebook"].id}"
+}
+
+resource "aws_apigatewayv2_route" "notebook_pages_delete" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "DELETE /api/v1/notebook/pages/{pageId}"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda["notebook"].id}"
+}
+
+resource "aws_apigatewayv2_route" "notebook_pages_versions" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "GET /api/v1/notebook/pages/{pageId}/versions"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda["notebook"].id}"
+}
+
+resource "aws_apigatewayv2_route" "notebook_pages_export" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "GET /api/v1/notebook/pages/{pageId}/export"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda["notebook"].id}"
+}
+
+# Statistics Routes
+resource "aws_apigatewayv2_route" "statistics_descriptive" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /api/v1/statistics/descriptive"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda["statistics"].id}"
+}
+
+resource "aws_apigatewayv2_route" "statistics_ttest" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /api/v1/statistics/ttest"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda["statistics"].id}"
+}
+
+resource "aws_apigatewayv2_route" "statistics_anova" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /api/v1/statistics/anova"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda["statistics"].id}"
+}
+
+resource "aws_apigatewayv2_route" "statistics_chi_square" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /api/v1/statistics/chi-square"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda["statistics"].id}"
+}
+
+resource "aws_apigatewayv2_route" "statistics_correlation" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /api/v1/statistics/correlation"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda["statistics"].id}"
+}
+
+resource "aws_apigatewayv2_route" "statistics_regression" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /api/v1/statistics/regression"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda["statistics"].id}"
+}
+
+resource "aws_apigatewayv2_route" "statistics_survival" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /api/v1/statistics/survival"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda["statistics"].id}"
+}
+
+resource "aws_apigatewayv2_route" "statistics_sample_size" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /api/v1/statistics/sample-size"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda["statistics"].id}"
+}
+
+# Genomics Routes
+resource "aws_apigatewayv2_route" "genomics_pathway" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /api/v1/genomics/pathway-analysis"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda["genomics"].id}"
+}
+
+resource "aws_apigatewayv2_route" "genomics_gsea" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /api/v1/genomics/gsea"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda["genomics"].id}"
+}
+
+resource "aws_apigatewayv2_route" "genomics_variants" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /api/v1/genomics/variant-annotation"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda["genomics"].id}"
+}
+
+resource "aws_apigatewayv2_route" "genomics_biomarkers" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /api/v1/genomics/biomarker-discovery"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda["genomics"].id}"
 }
 
 # ==================== Stage ====================

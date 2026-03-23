@@ -53,6 +53,11 @@ variable "simulations_table_name" {
   type = string
 }
 
+variable "notebook_table_name" {
+  type    = string
+  default = ""
+}
+
 variable "data_bucket_name" {
   type = string
 }
@@ -195,6 +200,7 @@ locals {
     HYPOTHESES_TABLE           = var.hypotheses_table_name
     EVIDENCE_TABLE             = var.evidence_table_name
     SIMULATIONS_TABLE          = var.simulations_table_name
+    NOTEBOOK_TABLE             = var.notebook_table_name
     AGENT_TASKS_TABLE          = var.agent_tasks_table_name != "" ? var.agent_tasks_table_name : "${var.name_prefix}-agent-tasks"
     # Unified bucket with prefix-based organization
     GENUP_BUCKET               = var.data_bucket_name
@@ -299,6 +305,28 @@ locals {
       handler     = "handlers.simulation.handler"
       memory      = 3008
       timeout     = 300
+    }
+
+    # Notebook, Statistics, Genomics
+    notebook = {
+      description = "Notebook pages CRUD operations"
+      handler     = "handlers.notebook.handler"
+      memory      = 512
+      timeout     = 15
+    }
+
+    statistics = {
+      description = "Statistical analysis computations"
+      handler     = "handlers.statistics.handler"
+      memory      = 512
+      timeout     = 30
+    }
+
+    genomics = {
+      description = "Genomics and pathway analysis"
+      handler     = "handlers.genomics.handler"
+      memory      = 512
+      timeout     = 30
     }
 
     simulation_worker = {

@@ -54,15 +54,33 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 async def init_db() -> None:
     """Initialize database tables."""
-    logger.info("Initializing database connection")
+    # Import all models so their Base.metadata knows about every table
+    from app.models.base import Base as ModelsBase
+    import app.models  # noqa: F401
+
+    # Mask password in URL for safe logging
+    db_url = settings.DATABASE_URL
+    masked_url = db_url
+    if "@" in db_url:
+        pre_at = db_url.split("@")[0]
+        post_at = db_url.split("@", 1)[1]
+        if ":" in pre_at:
+            scheme_user = pre_at.rsplit(":", 1)[0]
+            masked_url = f"{scheme_user}:****@{post_at}"
+    logger.info("Initializing database connection", database=masked_url)
     try:
         # Test connection
         async with engine.begin() as conn:
-            # Create all tables
-            await conn.run_sync(Base.metadata.create_all)
-        logger.info("Database initialized successfully")
+            # Create all tables (use the models' Base, not database.py's Base)
+            await conn.run_sync(ModelsBase.metadata.create_all)
+        logger.info("Database initialized successfully", database=masked_url, tables=len(ModelsBase.metadata.tables))
     except Exception as e:
-        logger.error("Failed to initialize database", error=str(e))
+        logger.error(
+            "Failed to initialize database",
+            error=str(e),
+            database=masked_url,
+            hint="Set DATABASE_URL env var to point to your PostgreSQL/RDS instance",
+        )
         # Don't raise - allow app to start without DB for development
         logger.warning("Application starting without database connection")
 

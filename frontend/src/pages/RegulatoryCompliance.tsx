@@ -8,7 +8,7 @@ interface Agreement { id: string; title: string; agreement_type: string; status:
 interface ConsentForm { id: string; title: string; version: string; status: string; language: string; irb_approved: boolean; versions: any[] }
 interface Checklist { id: string; framework: string; items: { name: string; completed: boolean; notes: string }[]; completion_pct: number; last_reviewed: string }
 
-const API = '/api/regulatory'
+const API = '/api/v1/regulatory'
 
 export default function RegulatoryCompliance() {
   const [tab, setTab] = useState<TabId>('irb')

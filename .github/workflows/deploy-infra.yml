@@ -248,6 +248,9 @@ jobs:
             ["rag_retrieval"]="rag_retrieval.py"
             ["ingestion_scheduler"]="ingestion_scheduler.py"
             ["bulk_etl"]="bulk_etl.py"
+            ["notebook"]="notebook.py"
+            ["statistics"]="statistics.py"
+            ["genomics"]="genomics.py"
           )
 
           # Functions that need placeholder (no handler file yet)

@@ -12,13 +12,12 @@ from decimal import Decimal
 from typing import Any
 
 import boto3
-from aws_lambda_powertools import Logger, Metrics, Tracer
+from aws_lambda_powertools import Logger, Metrics
 from aws_lambda_powertools.utilities.batch import BatchProcessor, EventType
 from aws_lambda_powertools.utilities.batch.types import PartialItemFailureResponse
 from aws_lambda_powertools.utilities.typing import LambdaContext
 
 logger = Logger()
-tracer = Tracer()
 metrics = Metrics()
 
 # AWS Clients
@@ -67,7 +66,6 @@ def get_opensearch_client():
     return opensearch
 
 
-@tracer.capture_method
 def generate_embedding(text: str) -> list[float]:
     """Generate embedding using Bedrock Titan Embeddings."""
     # Truncate to model's max input
@@ -92,7 +90,6 @@ def generate_embedding(text: str) -> list[float]:
         raise
 
 
-@tracer.capture_method
 def save_embedding_dynamodb(record_id: str, embedding: list[float], source: str) -> None:
     """Save embedding to DynamoDB."""
     table = dynamodb.Table(EMBEDDINGS_TABLE)
@@ -111,7 +108,6 @@ def save_embedding_dynamodb(record_id: str, embedding: list[float], source: str)
     )
 
 
-@tracer.capture_method
 def save_embedding_opensearch(
     record_id: str,
     embedding: list[float],
@@ -145,7 +141,6 @@ def save_embedding_opensearch(
         raise
 
 
-@tracer.capture_method
 def update_knowledge_record(record_id: str, status: str = "completed") -> None:
     """Update knowledge record with embedding status."""
     table = dynamodb.Table(KNOWLEDGE_TABLE)
@@ -160,7 +155,6 @@ def update_knowledge_record(record_id: str, status: str = "completed") -> None:
     )
 
 
-@tracer.capture_method
 def get_knowledge_record(record_id: str) -> dict | None:
     """Get knowledge record for metadata."""
     table = dynamodb.Table(KNOWLEDGE_TABLE)
@@ -227,7 +221,6 @@ def record_handler(record: dict) -> None:
 
 
 @logger.inject_lambda_context
-@tracer.capture_lambda_handler
 @metrics.log_metrics(capture_cold_start_metric=True)
 def handler(event: dict[str, Any], context: LambdaContext) -> PartialItemFailureResponse:
     """
@@ -241,7 +234,6 @@ def handler(event: dict[str, Any], context: LambdaContext) -> PartialItemFailure
 
 # Direct invocation handler for single records
 @logger.inject_lambda_context
-@tracer.capture_lambda_handler
 @metrics.log_metrics(capture_cold_start_metric=True)
 def handler_direct(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
     """
@@ -302,7 +294,6 @@ def handler_direct(event: dict[str, Any], context: LambdaContext) -> dict[str, A
 
 # Batch re-embedding handler
 @logger.inject_lambda_context
-@tracer.capture_lambda_handler
 @metrics.log_metrics(capture_cold_start_metric=True)
 def handler_batch(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
     """
