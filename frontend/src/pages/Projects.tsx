@@ -24,12 +24,6 @@ type ViewMode = 'grid' | 'list'
 type SortOption = 'recent' | 'name' | 'hypotheses' | 'status'
 type StatusFilter = 'all' | 'active' | 'paused' | 'completed' | 'archived'
 
-const STATUS_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
-  active: { bg: 'bg-emerald-500/10', text: 'text-emerald-400', dot: 'bg-emerald-400' },
-  paused: { bg: 'bg-amber-500/10', text: 'text-amber-400', dot: 'bg-amber-400' },
-  completed: { bg: 'bg-blue-500/10', text: 'text-blue-400', dot: 'bg-blue-400' },
-  archived: { bg: 'bg-zinc-500/10', text: 'text-zinc-400', dot: 'bg-zinc-500' },
-}
 
 /* ─── Stats Bar ─────────────────────────────────────────────────────── */
 
@@ -239,10 +233,6 @@ function CreateProjectModal({ onClose, onCreate }: { onClose: () => void; onCrea
 function ProjectCardGrid({ project, onDelete }: { project: Project; onDelete: (id: string) => void }) {
   const allPapers = persistGet<SavedResearchPaper[]>('research-papers', [])
   const paperCount = allPapers.filter(p => p.project_id === project.id).length
-  const status = project.status || 'active'
-  const statusColors = STATUS_COLORS[status] || STATUS_COLORS.active
-  const totalItems = (project.hypothesis_count || 0) + (project.evidence_count || 0) + paperCount
-  const progressWidth = Math.min(100, totalItems * 5)
 
   return (
     <div className="glass-card hover:border-white/10 transition-all duration-200 group relative overflow-hidden">
@@ -326,9 +316,6 @@ function ProjectCardGrid({ project, onDelete }: { project: Project; onDelete: (i
 function ProjectCardList({ project, onDelete }: { project: Project; onDelete: (id: string) => void }) {
   const allPapers = persistGet<SavedResearchPaper[]>('research-papers', [])
   const paperCount = allPapers.filter(p => p.project_id === project.id).length
-  const status = project.status || 'active'
-  const statusColors = STATUS_COLORS[status] || STATUS_COLORS.active
-
   return (
     <div className="glass-card hover:border-white/10 transition-all group">
       <Link to={`/projects/${project.id}`} className="flex items-center gap-4 p-4">

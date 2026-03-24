@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect, lazy, Suspense } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import {
   FiBarChart2, FiPlus, FiTrash2,
   FiDownload, FiUpload, FiSettings, FiX,

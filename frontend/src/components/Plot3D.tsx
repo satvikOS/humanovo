@@ -1,10 +1,10 @@
 /**
  * Plot3D — Interactive 3D scatter plot and surface visualization
  * Uses React Three Fiber for GPU-accelerated rendering
+ * NOTE: Does NOT import @react-three/drei to avoid three.js LinearEncoding compat issue
  */
-import { useRef, useState, useMemo } from 'react'
-import { Canvas, useFrame } from '@react-three/fiber'
-import { OrbitControls, Text, Html, Grid } from '@react-three/drei'
+import { useRef, useState, useMemo, useEffect } from 'react'
+import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 
 interface DataPoint3D {
@@ -44,7 +44,7 @@ function viridisColor(t: number): string {
 }
 
 function normalizeData(data: DataPoint3D[]) {
-  if (data.length === 0) return { normalized: [], scale: { x: 1, y: 1, z: 1 }, offset: { x: 0, y: 0, z: 0 } }
+  if (data.length === 0) return { normalized: [] as Array<DataPoint3D & { nx: number; ny: number; nz: number }> }
   const xs = data.map(d => d.x)
   const ys = data.map(d => d.y)
   const zs = data.map(d => d.z)
@@ -55,23 +55,71 @@ function normalizeData(data: DataPoint3D[]) {
   }
   const xr = range(xs), yr = range(ys), zr = range(zs)
   const maxSpan = Math.max(xr.span, yr.span, zr.span)
-  const scale = 4 // total axis size
+  const scale = 4
   const normalized = data.map(d => ({
     ...d,
     nx: ((d.x - xr.min) / maxSpan - 0.5) * scale,
     ny: ((d.y - yr.min) / maxSpan - 0.5) * scale,
     nz: ((d.z - zr.min) / maxSpan - 0.5) * scale,
   }))
-  return { normalized, scale: { x: xr.span, y: yr.span, z: zr.span }, offset: { x: xr.min, y: yr.min, z: zr.min }, ranges: { xr, yr, zr } }
+  return { normalized }
 }
 
-function PointCloud({ data, pointSize, colorScheme, onPointClick }: {
+// Simple orbit controls without drei
+function SimpleOrbitControls() {
+  const { camera, gl } = useThree()
+  const isDragging = useRef(false)
+  const prevMouse = useRef({ x: 0, y: 0 })
+  const spherical = useRef({ theta: Math.PI / 4, phi: Math.PI / 4, radius: 8 })
+
+  useEffect(() => {
+    const el = gl.domElement
+    const onDown = (e: PointerEvent) => { isDragging.current = true; prevMouse.current = { x: e.clientX, y: e.clientY } }
+    const onUp = () => { isDragging.current = false }
+    const onMove = (e: PointerEvent) => {
+      if (!isDragging.current) return
+      const dx = e.clientX - prevMouse.current.x
+      const dy = e.clientY - prevMouse.current.y
+      spherical.current.theta -= dx * 0.005
+      spherical.current.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.current.phi - dy * 0.005))
+      prevMouse.current = { x: e.clientX, y: e.clientY }
+    }
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      spherical.current.radius = Math.max(3, Math.min(20, spherical.current.radius + e.deltaY * 0.01))
+    }
+    el.addEventListener('pointerdown', onDown)
+    el.addEventListener('pointerup', onUp)
+    el.addEventListener('pointerleave', onUp)
+    el.addEventListener('pointermove', onMove)
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => {
+      el.removeEventListener('pointerdown', onDown)
+      el.removeEventListener('pointerup', onUp)
+      el.removeEventListener('pointerleave', onUp)
+      el.removeEventListener('pointermove', onMove)
+      el.removeEventListener('wheel', onWheel)
+    }
+  }, [gl])
+
+  useFrame(() => {
+    const { theta, phi, radius } = spherical.current
+    camera.position.set(
+      radius * Math.sin(phi) * Math.cos(theta),
+      radius * Math.cos(phi),
+      radius * Math.sin(phi) * Math.sin(theta),
+    )
+    camera.lookAt(0, 0, 0)
+  })
+
+  return null
+}
+
+function PointCloud({ data, pointSize, colorScheme }: {
   data: DataPoint3D[]
   pointSize: number
   colorScheme: string
-  onPointClick?: (point: DataPoint3D, index: number) => void
 }) {
-  const [hovered, setHovered] = useState<number | null>(null)
   const { normalized } = useMemo(() => normalizeData(data), [data])
   const categories = useMemo(() => [...new Set(data.map(d => d.category || 'default'))], [data])
 
@@ -80,92 +128,64 @@ function PointCloud({ data, pointSize, colorScheme, onPointClick }: {
     if (colorScheme === 'categorical' && point.category) {
       return CATEGORY_COLORS[categories.indexOf(point.category) % CATEGORY_COLORS.length]
     }
-    if (colorScheme === 'viridis' || colorScheme === 'plasma') {
-      const t = data.length > 1 ? idx / (data.length - 1) : 0.5
-      return viridisColor(t)
-    }
-    return '#8b5cf6'
+    const t = data.length > 1 ? idx / (data.length - 1) : 0.5
+    return viridisColor(t)
   }
 
+  // Use instanced mesh for performance
+  const meshRef = useRef<THREE.InstancedMesh>(null)
+  const colorArray = useMemo(() => {
+    const arr = new Float32Array(data.length * 3)
+    data.forEach((point, i) => {
+      const c = new THREE.Color(getColor(point, i))
+      arr[i * 3] = c.r
+      arr[i * 3 + 1] = c.g
+      arr[i * 3 + 2] = c.b
+    })
+    return arr
+  }, [data, colorScheme]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!meshRef.current) return
+    const dummy = new THREE.Object3D()
+    normalized.forEach((d, i) => {
+      const s = (data[i].size || pointSize) * 0.03
+      dummy.position.set(d.nx, d.ny, d.nz)
+      dummy.scale.set(s, s, s)
+      dummy.updateMatrix()
+      meshRef.current!.setMatrixAt(i, dummy.matrix)
+      meshRef.current!.setColorAt(i, new THREE.Color().setRGB(colorArray[i * 3], colorArray[i * 3 + 1], colorArray[i * 3 + 2]))
+    })
+    meshRef.current.instanceMatrix.needsUpdate = true
+    if (meshRef.current.instanceColor) meshRef.current.instanceColor.needsUpdate = true
+  }, [normalized, data, pointSize, colorArray])
+
   return (
-    <group>
-      {normalized.map((d, i) => {
-        const color = getColor(data[i], i)
-        const size = (data[i].size || pointSize) * (hovered === i ? 1.5 : 1)
-        return (
-          <group key={i}>
-            <mesh
-              position={[d.nx, d.ny, d.nz]}
-              onPointerOver={() => setHovered(i)}
-              onPointerOut={() => setHovered(null)}
-              onClick={() => onPointClick?.(data[i], i)}
-            >
-              <sphereGeometry args={[size * 0.03, 16, 16]} />
-              <meshStandardMaterial color={color} emissive={color} emissiveIntensity={hovered === i ? 0.5 : 0.1} />
-            </mesh>
-            {hovered === i && (
-              <Html position={[d.nx, d.ny + 0.3, d.nz]} center>
-                <div style={{
-                  background: 'rgba(0,0,0,0.85)',
-                  color: '#fff',
-                  padding: '6px 10px',
-                  borderRadius: '6px',
-                  fontSize: '11px',
-                  whiteSpace: 'nowrap',
-                  pointerEvents: 'none',
-                  border: `1px solid ${color}40`,
-                }}>
-                  {data[i].label && <div style={{ fontWeight: 600 }}>{data[i].label}</div>}
-                  <div>x: {data[i].x.toFixed(2)} | y: {data[i].y.toFixed(2)} | z: {data[i].z.toFixed(2)}</div>
-                  {data[i].category && <div style={{ color: color }}>{data[i].category}</div>}
-                </div>
-              </Html>
-            )}
-          </group>
-        )
-      })}
-    </group>
+    <instancedMesh ref={meshRef} args={[undefined, undefined, data.length]}>
+      <sphereGeometry args={[1, 12, 12]} />
+      <meshStandardMaterial />
+    </instancedMesh>
   )
 }
 
-function Axes({ xLabel, yLabel, zLabel }: { xLabel: string; yLabel: string; zLabel: string }) {
+function AxisLine({ from, to, color }: { from: [number, number, number]; to: [number, number, number]; color: string }) {
+  const geometry = useMemo(() => {
+    const g = new THREE.BufferGeometry()
+    g.setAttribute('position', new THREE.Float32BufferAttribute([...from, ...to], 3))
+    return g
+  }, [from, to])
+  const material = useMemo(() => new THREE.LineBasicMaterial({ color, opacity: 0.6, transparent: true }), [color])
+  const line = useMemo(() => new THREE.Line(geometry, material), [geometry, material])
+  return <primitive object={line} />
+}
+
+function Axes() {
   return (
     <group>
-      {/* X axis */}
-      <line>
-        <bufferGeometry>
-          <bufferAttribute
-            attach="attributes-position"
-            args={[new Float32Array([-2.5, -2.5, -2.5, 2.5, -2.5, -2.5]), 3]}
-          />
-        </bufferGeometry>
-        <lineBasicMaterial color="#ef4444" opacity={0.6} transparent />
-      </line>
-      <Text position={[2.8, -2.5, -2.5]} fontSize={0.15} color="#ef4444" anchorX="left">{xLabel}</Text>
-
-      {/* Y axis */}
-      <line>
-        <bufferGeometry>
-          <bufferAttribute
-            attach="attributes-position"
-            args={[new Float32Array([-2.5, -2.5, -2.5, -2.5, 2.5, -2.5]), 3]}
-          />
-        </bufferGeometry>
-        <lineBasicMaterial color="#22c55e" opacity={0.6} transparent />
-      </line>
-      <Text position={[-2.5, 2.8, -2.5]} fontSize={0.15} color="#22c55e" anchorX="center">{yLabel}</Text>
-
-      {/* Z axis */}
-      <line>
-        <bufferGeometry>
-          <bufferAttribute
-            attach="attributes-position"
-            args={[new Float32Array([-2.5, -2.5, -2.5, -2.5, -2.5, 2.5]), 3]}
-          />
-        </bufferGeometry>
-        <lineBasicMaterial color="#3b82f6" opacity={0.6} transparent />
-      </line>
-      <Text position={[-2.5, -2.5, 2.8]} fontSize={0.15} color="#3b82f6" anchorX="center">{zLabel}</Text>
+      <AxisLine from={[-2.5, -2.5, -2.5]} to={[2.5, -2.5, -2.5]} color="#ef4444" />
+      <AxisLine from={[-2.5, -2.5, -2.5]} to={[-2.5, 2.5, -2.5]} color="#22c55e" />
+      <AxisLine from={[-2.5, -2.5, -2.5]} to={[-2.5, -2.5, 2.5]} color="#3b82f6" />
+      <gridHelper args={[5, 10, '#ffffff15', '#ffffff08']} position={[0, -2.5, 0]} />
     </group>
   )
 }
@@ -183,15 +203,13 @@ function RotatingGroup({ children, autoRotate }: { children: React.ReactNode; au
 export default function Plot3D({
   data,
   title,
-  xLabel = 'X',
-  yLabel = 'Y',
-  zLabel = 'Z',
+  xLabel: _xLabel = 'X',
+  yLabel: _yLabel = 'Y',
+  zLabel: _zLabel = 'Z',
   pointSize = 3,
   colorScheme = 'viridis',
-  showGrid = true,
   showAxes = true,
   height = 400,
-  onPointClick,
 }: Plot3DProps) {
   const [autoRotate, setAutoRotate] = useState(false)
 
@@ -230,26 +248,11 @@ export default function Plot3D({
         <pointLight position={[-5, -5, -5]} intensity={0.3} />
 
         <RotatingGroup autoRotate={autoRotate}>
-          <PointCloud data={data} pointSize={pointSize} colorScheme={colorScheme} onPointClick={onPointClick} />
-          {showAxes && <Axes xLabel={xLabel} yLabel={yLabel} zLabel={zLabel} />}
-          {showGrid && (
-            <Grid
-              args={[10, 10]}
-              position={[0, -2.5, 0]}
-              cellColor="#ffffff08"
-              sectionColor="#ffffff15"
-              fadeDistance={20}
-              infiniteGrid
-            />
-          )}
+          <PointCloud data={data} pointSize={pointSize} colorScheme={colorScheme} />
+          {showAxes && <Axes />}
         </RotatingGroup>
 
-        <OrbitControls
-          enableDamping
-          dampingFactor={0.08}
-          minDistance={3}
-          maxDistance={20}
-        />
+        <SimpleOrbitControls />
       </Canvas>
       <div style={{ position: 'absolute', bottom: 8, left: 12, fontSize: '10px', color: 'var(--color-text-muted)' }}>
         {data.length} points | Drag to rotate, scroll to zoom

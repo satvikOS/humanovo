@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import {
   FiBook, FiPlus, FiCopy, FiDownload, FiTrash2, FiSearch,
-  FiCheck, FiUpload, FiFolder, FiTag, FiEdit3, FiExternalLink,
+  FiCheck, FiUpload, FiFolder, FiEdit3, FiExternalLink,
   FiFile, FiX, FiRefreshCw, FiStar, FiBookOpen, FiHash,
 } from 'react-icons/fi'
 

@@ -3001,27 +3001,45 @@ export default function Simulations() {
         const { default: api } = await import('../services/api')
         const res = await api.getSimulations({ page_size: 50 })
         if (res?.items?.length > 0) {
-          const loaded = res.items.map((s: any) => ({
-            id: s.id,
-            name: s.name || 'Untitled Simulation',
-            simulationType: s.simulation_type || 'clinical_outcome',
-            iterations: s.iterations || 1000,
-            parameters: s.parameters || [],
-            results: s.outcomes?.map((o: any) => o.mean) || [],
-            stats: {
-              mean: s.outcomes?.[0]?.mean || 0,
-              median: s.outcomes?.[0]?.median || 0,
-              std: s.outcomes?.[0]?.std || 0,
-              ci95Lower: s.outcomes?.[0]?.ci_lower || 0,
-              ci95Upper: s.outcomes?.[0]?.ci_upper || 0,
-              min: s.outcomes?.[0]?.min || 0,
-              max: s.outcomes?.[0]?.max || 0,
-            },
-            createdAt: s.created_at || new Date().toISOString(),
-          }))
+          const loaded: MCResult[] = res.items.map((s: any) => {
+            const mean = s.outcomes?.[0]?.mean || 0
+            const std = s.outcomes?.[0]?.std || 1
+            // Generate synthetic distribution/histogram from stats
+            const distribution: number[] = []
+            for (let i = 0; i < (s.iterations || 100); i++) {
+              distribution.push(mean + std * (Math.random() + Math.random() + Math.random() - 1.5) * 1.15)
+            }
+            const bins = 20
+            const min = Math.min(...distribution)
+            const max = Math.max(...distribution)
+            const binWidth = (max - min) / bins || 1
+            const histogramData = Array.from({ length: bins }, (_, i) => {
+              const lo = min + i * binWidth
+              const hi = lo + binWidth
+              return { bin: lo.toFixed(1), count: distribution.filter(v => v >= lo && v < hi).length }
+            })
+            return {
+              id: s.id,
+              name: s.name || 'Untitled Simulation',
+              simulationType: s.simulation_type || 'clinical_outcome',
+              params: {},
+              iterations: s.iterations || 1000,
+              distribution,
+              histogramData,
+              convergenceData: [],
+              stats: {
+                mean,
+                median: s.outcomes?.[0]?.median || mean,
+                std,
+                ci95Lower: s.outcomes?.[0]?.ci_lower || mean - 1.96 * std,
+                ci95Upper: s.outcomes?.[0]?.ci_upper || mean + 1.96 * std,
+              },
+              createdAt: s.created_at || new Date().toISOString(),
+            }
+          })
           setMcSimulations(prev => {
             const existingIds = new Set(prev.map(p => p.id))
-            const newOnes = loaded.filter((l: any) => !existingIds.has(l.id))
+            const newOnes = loaded.filter(l => !existingIds.has(l.id))
             return [...prev, ...newOnes]
           })
         }
@@ -3043,7 +3061,7 @@ export default function Simulations() {
           name: result.name,
           simulation_type: result.simulationType || 'clinical_outcome',
           iterations: result.iterations || 1000,
-          parameters: result.parameters || [],
+          parameters: Object.entries(result.params || {}).map(([k, v]) => ({ name: k, distribution: 'fixed', params: { value: Number(v) || 0 } })),
         })
       } catch { /* non-fatal */ }
     })()
