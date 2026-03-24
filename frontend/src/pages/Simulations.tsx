@@ -409,17 +409,14 @@ const MC_RUNNERS: Record<string, (p: MCParams) => number> = {
 interface EqHistoryEntry { id: string; expr: string; xMin: number; xMax: number; createdAt: string }
 interface CompHistoryEntry { id: string; env: string; template: string; code: string; output: string; createdAt: string }
 
-// Module-level ephemeral stores (persist across component remounts within same session)
-let _eqHistory: EqHistoryEntry[] = []
-let _compHistory: CompHistoryEntry[] = []
-
-function loadEqHistory(): EqHistoryEntry[] { return _eqHistory }
-function saveEqHistory(entries: EqHistoryEntry[]) { _eqHistory = entries.slice(0, 50) }
-function loadCompHistory(): CompHistoryEntry[] { return _compHistory }
-function saveCompHistory(entries: CompHistoryEntry[]) { _compHistory = entries.slice(0, 50) }
+// Persistent stores for simulation history
+function loadEqHistory(): EqHistoryEntry[] { return persistGet<EqHistoryEntry[]>('eq-history', []) }
+function saveEqHistory(entries: EqHistoryEntry[]) { persistSet('eq-history', entries.slice(0, 50)) }
+function loadCompHistory(): CompHistoryEntry[] { return persistGet<CompHistoryEntry[]>('comp-history', []) }
+function saveCompHistory(entries: CompHistoryEntry[]) { persistSet('comp-history', entries.slice(0, 50)) }
 
 function SavedSimulations() {
-  const mcSims: MCResult[] = []  // No localStorage — MC sims are ephemeral per session
+  const mcSims: MCResult[] = persistGet<MCResult[]>('mc-simulations', [])
   const eqPlots = useMemo(() => loadEqHistory(), [])
   const compRuns = useMemo(() => loadCompHistory(), [])
   const [filter, setFilter] = useState<'all' | 'monte-carlo' | 'equation' | 'computational'>('all')
