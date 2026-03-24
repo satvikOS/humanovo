@@ -197,7 +197,7 @@ export default function DiscoveryRunner() {
     }
   }, [])
 
-  const costDollars = (cents: number) => `$${(cents / 100).toFixed(2)}`
+  const costDollars = (cents: unknown) => { const n = typeof cents === 'number' && Number.isFinite(cents) ? cents : 0; return `$${(n / 100).toFixed(2)}` }
 
   if (phase === 'config') {
     return (
@@ -357,7 +357,7 @@ export default function DiscoveryRunner() {
                 <div className="absolute top-full mt-1 left-0 right-0 text-center opacity-0 group-hover:opacity-100 transition-opacity z-10">
                   <div className="inline-block px-2 py-1 rounded text-xs" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text-muted)' }}>
                     {s.model}{s.duration_seconds ? ` (${s.duration_seconds.toFixed(1)}s)` : ''}
-                    {s.grounding_ratio != null ? ` GR:${(s.grounding_ratio * 100).toFixed(0)}%` : ''}
+                    {s.grounding_ratio != null && Number.isFinite(s.grounding_ratio) ? ` GR:${(s.grounding_ratio * 100).toFixed(0)}%` : ''}
                   </div>
                 </div>
               )}
@@ -379,7 +379,7 @@ export default function DiscoveryRunner() {
                   R{h.round}
                 </span>
                 <span className="flex-1 truncate" style={{ color: 'var(--color-text)' }}>{h.title}</span>
-                {h.confidence_score != null && (
+                {h.confidence_score != null && Number.isFinite(h.confidence_score) && (
                   <span className="text-xs font-mono" style={{ color: h.confidence_score >= 0.7 ? '#22c55e' : '#eab308' }}>
                     {(h.confidence_score * 100).toFixed(0)}%
                   </span>

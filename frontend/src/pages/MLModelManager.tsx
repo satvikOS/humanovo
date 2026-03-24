@@ -91,7 +91,7 @@ export default function MLModelManager() {
               <div className="flex items-center gap-2 mt-1">
                 <span className="text-xxs px-1.5 py-0.5 rounded-full" style={{ color: STATUS_COLORS[m.status], background: 'var(--glass-bg)' }}>{m.status}</span>
                 <span className="text-xxs text-[var(--color-text-muted)]">{m.model_type}</span>
-                {m.metrics.accuracy && <span className="text-xxs text-[var(--color-text-muted)]">Acc: {(m.metrics.accuracy * 100).toFixed(1)}%</span>}
+                {m.metrics.accuracy != null && Number.isFinite(m.metrics.accuracy) && <span className="text-xxs text-[var(--color-text-muted)]">Acc: {(m.metrics.accuracy * 100).toFixed(1)}%</span>}
               </div>
             </div>
           ))}
@@ -110,7 +110,7 @@ export default function MLModelManager() {
                 <div className="grid grid-cols-5 gap-2">
                   {Object.entries(selected.metrics).filter(([, v]) => v !== null).map(([key, val]) => (
                     <div key={key} className="glass-card p-3 text-center">
-                      <div className="text-lg font-semibold" style={{ color: 'var(--color-accent-blue)' }}>{typeof val === 'number' ? (val < 1 ? (val * 100).toFixed(1) + '%' : val.toFixed(4)) : val}</div>
+                      <div className="text-lg font-semibold" style={{ color: 'var(--color-accent-blue)' }}>{typeof val === 'number' && Number.isFinite(val) ? (val < 1 ? (val * 100).toFixed(1) + '%' : val.toFixed(4)) : (val ?? '--')}</div>
                       <div className="text-xxs text-[var(--color-text-muted)] capitalize">{key.replace(/_/g, ' ')}</div>
                     </div>
                   ))}
@@ -179,7 +179,7 @@ export default function MLModelManager() {
                       {prediction.class_label || prediction.prediction}
                       {prediction.probability !== undefined && <span className="text-xs text-[var(--color-text-muted)] ml-2">(p={prediction.probability})</span>}
                     </div>
-                    {prediction.confidence !== undefined && <div className="text-xxs text-[var(--color-text-muted)]">Confidence: {(prediction.confidence * 100).toFixed(1)}%</div>}
+                    {prediction.confidence != null && Number.isFinite(prediction.confidence) && <div className="text-xxs text-[var(--color-text-muted)]">Confidence: {(prediction.confidence * 100).toFixed(1)}%</div>}
                   </div>
                 )}
               </div>

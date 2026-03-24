@@ -139,6 +139,18 @@ function RecentSimulationsWidget() {
   const [simulations, setSimulations] = useState<SimulationSummary[]>([])
 
   useEffect(() => {
+    // Load from localStorage first for instant display
+    const cached = persistGet<SimulationSummary[]>('mc-simulations', [])
+    if (cached.length > 0) {
+      setSimulations(cached.slice(0, 3).map((s: any) => ({
+        id: s.id,
+        name: s.name || 'Untitled Simulation',
+        simulationType: s.simulationType || s.simulation_type || 'unknown',
+        stats: s.stats || { mean: 0, median: 0, std: 0, ci95Lower: 0, ci95Upper: 0 },
+        createdAt: s.createdAt || s.created_at || new Date().toISOString(),
+      })))
+    }
+    // Also try API
     const fetchSimulations = async () => {
       try {
         const res = await api.getSimulations({ page_size: 3 })
@@ -149,9 +161,9 @@ function RecentSimulationsWidget() {
           stats: s.results?.stats || s.stats || { mean: 0, median: 0, std: 0, ci95Lower: 0, ci95Upper: 0 },
           createdAt: s.created_at || s.createdAt || new Date().toISOString(),
         }))
-        setSimulations(items)
-      } catch (err) {
-        console.warn('Dashboard: simulations API unavailable', err)
+        if (items.length > 0) setSimulations(items)
+      } catch {
+        // API unavailable — localStorage data is already displayed
       }
     }
     fetchSimulations()
@@ -499,14 +511,18 @@ export default function Dashboard() {
     fetchData()
   }, [])
 
-  // Fetch simulation count from API
+  // Fetch simulation count from localStorage + API
   useEffect(() => {
+    // Instant count from localStorage
+    const cached = persistGet<unknown[]>('mc-simulations', [])
+    if (cached.length > 0) setSimulationCount(cached.length)
     const fetchSimCount = async () => {
       try {
         const res = await api.getSimulations({ page_size: 1 })
-        setSimulationCount(res?.total || 0)
-      } catch (err) {
-        console.warn('Dashboard: simulations count API unavailable', err)
+        const apiCount = res?.total || 0
+        if (apiCount > 0) setSimulationCount(apiCount)
+      } catch {
+        // API unavailable — localStorage count already set
       }
     }
     fetchSimCount()

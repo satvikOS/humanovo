@@ -81,6 +81,32 @@ export function getActivityLog(): ActivityEntry[] {
 }
 
 /**
+ * Sanitize a numeric value — returns `fallback` if the value is NaN, null, undefined, or not a finite number.
+ */
+export function safeNum(val: unknown, fallback = 0): number {
+  if (val == null) return fallback
+  const n = typeof val === 'number' ? val : Number(val)
+  return Number.isFinite(n) ? n : fallback
+}
+
+/**
+ * Format a percentage value safely — returns formatted string like "73%" or fallback string.
+ */
+export function safePct(val: unknown, decimals = 0, fallback = '--'): string {
+  const n = safeNum(val, NaN)
+  if (!Number.isFinite(n)) return fallback
+  return `${(n * 100).toFixed(decimals)}%`
+}
+
+/**
+ * Format a dollar amount from cents safely.
+ */
+export function safeDollars(cents: unknown): string {
+  const n = safeNum(cents, 0)
+  return `$${(n / 100).toFixed(2)}`
+}
+
+/**
  * Format a date string or Date to MM/DD/YYYY format.
  */
 export function formatDate(date: string | Date | undefined | null): string {
