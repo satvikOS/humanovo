@@ -1,4 +1,5 @@
-import { useState, useRef, useCallback, useMemo } from 'react'
+import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { formatDateTime, logActivity } from '../utils/persistence'
 import '@tanstack/react-query' // kept to preserve dependency
 import {
@@ -2615,7 +2616,8 @@ function ComputationalLab() {
     setOutput('Executing...\n')
 
     try {
-      const res = await fetch('/api/v1/compute/execute', {
+      const apiBase = import.meta.env.VITE_API_BASE_URL || ''
+      const res = await fetch(`${apiBase}/api/v1/compute/execute`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code, environment: selectedEnv }),
@@ -2623,7 +2625,9 @@ function ComputationalLab() {
       if (res.ok) {
         const data = await res.json()
         const out = data.output || data.stdout || 'Execution completed.'
-        setOutput(out)
+        const err = data.stderr || ''
+        const fullOutput = err ? `${out}\n\n--- stderr ---\n${err}` : out
+        setOutput(data.timed_out ? `[TIMEOUT] Execution exceeded time limit.\n${err}` : fullOutput)
         parseOutputForViz(out)
       } else {
         // Simulate output for demo when backend isn't available
@@ -2984,14 +2988,65 @@ function simulateOutput(code: string, env: ComputeEnv): string {
 
 // ── Main Simulations Page ───────────────────────────────────────
 export default function Simulations() {
+  const [searchParams] = useSearchParams()
+  const initialTab = searchParams.get('tab') === 'history' ? 'history' : 'simulations'
   const [showCreate, setShowCreate] = useState(false)
-  const [activeTab, setActiveTab] = useState<'simulations' | 'computational-lab' | 'equation-plotter' | 'history'>('simulations')
+  const [activeTab, setActiveTab] = useState<'simulations' | 'computational-lab' | 'equation-plotter' | 'history'>(initialTab)
   const [mcSimulations, setMcSimulations] = useState<MCResult[]>([])
+
+  // Load simulations from backend API on mount
+  useEffect(() => {
+    const loadSaved = async () => {
+      try {
+        const { default: api } = await import('../services/api')
+        const res = await api.getSimulations({ page_size: 50 })
+        if (res?.items?.length > 0) {
+          const loaded = res.items.map((s: any) => ({
+            id: s.id,
+            name: s.name || 'Untitled Simulation',
+            simulationType: s.simulation_type || 'clinical_outcome',
+            iterations: s.iterations || 1000,
+            parameters: s.parameters || [],
+            results: s.outcomes?.map((o: any) => o.mean) || [],
+            stats: {
+              mean: s.outcomes?.[0]?.mean || 0,
+              median: s.outcomes?.[0]?.median || 0,
+              std: s.outcomes?.[0]?.std || 0,
+              ci95Lower: s.outcomes?.[0]?.ci_lower || 0,
+              ci95Upper: s.outcomes?.[0]?.ci_upper || 0,
+              min: s.outcomes?.[0]?.min || 0,
+              max: s.outcomes?.[0]?.max || 0,
+            },
+            createdAt: s.created_at || new Date().toISOString(),
+          }))
+          setMcSimulations(prev => {
+            const existingIds = new Set(prev.map(p => p.id))
+            const newOnes = loaded.filter((l: any) => !existingIds.has(l.id))
+            return [...prev, ...newOnes]
+          })
+        }
+      } catch { /* API may not be available */ }
+    }
+    loadSaved()
+  }, [])
 
   const handleNewResult = (result: MCResult) => {
     setMcSimulations(prev => [result, ...prev])
     setShowCreate(false)
     logActivity({ type: 'simulation', action: 'created', title: result.name })
+    // Persist to backend API
+    ;(async () => {
+      try {
+        const { default: api } = await import('../services/api')
+        await api.createSimulation({
+          project_id: 'default',
+          name: result.name,
+          simulation_type: result.simulationType || 'clinical_outcome',
+          iterations: result.iterations || 1000,
+          parameters: result.parameters || [],
+        })
+      } catch { /* non-fatal */ }
+    })()
   }
 
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)

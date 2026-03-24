@@ -105,7 +105,9 @@ function HypothesisCard({ hypothesis }: { hypothesis: Hypothesis }) {
             {hypothesis.status}
           </span>
           <span className="text-secondary-400 text-sm">
-            {Math.round(hypothesis.confidence_score * 100)}% confidence
+            {hypothesis.confidence_score != null && !isNaN(hypothesis.confidence_score)
+              ? `${Math.round(hypothesis.confidence_score * 100)}% confidence`
+              : '-- confidence'}
           </span>
         </div>
         <div className="flex items-center space-x-2">

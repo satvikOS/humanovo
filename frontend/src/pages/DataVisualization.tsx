@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef, useEffect, lazy, Suspense } from 'react'
 import {
   FiBarChart2, FiPlus, FiTrash2,
   FiDownload, FiUpload, FiSettings, FiX,
@@ -17,6 +17,7 @@ import {
 import html2canvas from 'html2canvas'
 import * as XLSX from 'xlsx'
 import { persistGet, persistSet, formatDate } from '../utils/persistence'
+import Plot3D from '../components/Plot3D'
 
 // ─── Types ──────────────────────────────────────────────────────
 interface DataPoint {
@@ -42,6 +43,7 @@ type ChartType =
   | 'waterfall' | 'error_bar' | 'candlestick'
   | 'heatmap' | 'stem' | 'band'
   | 'polar_area'
+  | 'scatter_3d'
 
 interface ChartConfig {
   id: string
@@ -57,6 +59,7 @@ interface ChartOptions {
   colorPalette: string
   xLabel: string
   yLabel: string
+  zLabel?: string
   showGrid: boolean
   showLegend: boolean
   legendPosition: 'top' | 'bottom' | 'left' | 'right'
@@ -185,6 +188,7 @@ const CHART_TYPES: { value: ChartType; label: string; group: string }[] = [
   // Scatter
   { value: 'scatter', label: 'Scatter', group: 'Scatter / Bubble' },
   { value: 'bubble', label: 'Bubble', group: 'Scatter / Bubble' },
+  { value: 'scatter_3d' as ChartType, label: '3D Scatter', group: 'Scatter / Bubble' },
   // Statistical
   { value: 'histogram', label: 'Histogram', group: 'Statistical' },
   { value: 'box_plot', label: 'Box Plot', group: 'Statistical' },
@@ -834,6 +838,29 @@ export default function DataVisualization() {
             </ScatterChart>
           </ResponsiveContainer>
         )
+
+      case 'scatter_3d': {
+        const points3d = data.map(d => ({
+          x: d.value,
+          y: d.value2 ?? d.value * 0.8,
+          z: d.value3 ?? d.value * 0.5,
+          label: d.label,
+          category: d.category,
+          size: d.size,
+        }))
+        return (
+          <Plot3D
+            data={points3d}
+            title=""
+            xLabel={o.xLabel || 'X'}
+            yLabel={o.yLabel || 'Y'}
+            zLabel={o.zLabel || 'Z'}
+            height={height}
+            colorScheme={data.some(d => d.category) ? 'categorical' : 'viridis'}
+            pointSize={o.markerSize || 3}
+          />
+        )
+      }
 
       // ── STATISTICAL ─────────────────────────────────────────
       case 'histogram': {

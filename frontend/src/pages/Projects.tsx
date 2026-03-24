@@ -246,17 +246,6 @@ function ProjectCardGrid({ project, onDelete }: { project: Project; onDelete: (i
 
   return (
     <div className="glass-card hover:border-white/10 transition-all duration-200 group relative overflow-hidden">
-      {/* Progress bar at top */}
-      <div className="h-0.5 bg-white/5">
-        <div
-          className="h-full transition-all duration-500"
-          style={{
-            width: `${progressWidth}%`,
-            background: `linear-gradient(90deg, var(--color-accent-blue), var(--color-accent-purple))`,
-          }}
-        />
-      </div>
-
       <Link to={`/projects/${project.id}`} className="block p-5">
         <div className="flex items-start justify-between mb-3">
           <div className="flex items-center gap-3 min-w-0">
@@ -272,10 +261,6 @@ function ProjectCardGrid({ project, onDelete }: { project: Project; onDelete: (i
               )}
             </div>
           </div>
-          <span className={clsx('flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs flex-shrink-0', statusColors.bg, statusColors.text)}>
-            <span className={clsx('w-1.5 h-1.5 rounded-full', statusColors.dot)} />
-            {status}
-          </span>
         </div>
 
         {project.description && (
@@ -303,13 +288,13 @@ function ProjectCardGrid({ project, onDelete }: { project: Project; onDelete: (i
         {/* Tags */}
         {project.tags && project.tags.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mb-3">
-            {project.tags.slice(0, 4).map(tag => (
+            {project.tags.filter(t => !['AI generated', 'ai-generated', '12-stage-pipeline', '10-stage-pipeline', 'well-grounded', 'partially-grounded', 'needs-grounding'].includes(t)).slice(0, 5).map(tag => (
               <span key={tag} className="text-[11px] px-2 py-0.5 rounded-full bg-white/5 text-[var(--color-text-muted)]">
                 {tag}
               </span>
             ))}
-            {project.tags.length > 4 && (
-              <span className="text-[var(--color-text-muted)] text-xs self-center">+{project.tags.length - 4}</span>
+            {project.tags.filter(t => !['AI generated', 'ai-generated', '12-stage-pipeline', '10-stage-pipeline', 'well-grounded', 'partially-grounded', 'needs-grounding'].includes(t)).length > 5 && (
+              <span className="text-[var(--color-text-muted)] text-xs self-center">+{project.tags.filter(t => !['AI generated', 'ai-generated', '12-stage-pipeline', '10-stage-pipeline', 'well-grounded', 'partially-grounded', 'needs-grounding'].includes(t)).length - 5}</span>
             )}
           </div>
         )}
@@ -356,10 +341,6 @@ function ProjectCardList({ project, onDelete }: { project: Project; onDelete: (i
             <h3 className="font-semibold text-white group-hover:text-[var(--color-accent-blue)] transition-colors truncate">
               {project.name}
             </h3>
-            <span className={clsx('flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs flex-shrink-0', statusColors.bg, statusColors.text)}>
-              <span className={clsx('w-1.5 h-1.5 rounded-full', statusColors.dot)} />
-              {status}
-            </span>
           </div>
           {project.disease_focus && (
             <p className="text-[var(--color-text-muted)] text-sm truncate">{project.disease_focus}</p>

@@ -173,10 +173,10 @@ async def _run_discovery_pipeline(
                 "title": h.title,
                 "description": h.description[:2000],
                 "mechanism": h.mechanism[:1000],
-                "confidence_score": h.confidence,
-                "novelty_score": h.novelty_score,
-                "feasibility_score": h.feasibility_score,
-                "impact_score": h.impact_score,
+                "confidence_score": h.confidence if h.confidence == h.confidence else 0.5,
+                "novelty_score": h.novelty_score if h.novelty_score == h.novelty_score else 0.0,
+                "feasibility_score": h.feasibility_score if getattr(h, 'feasibility_score', 0) == getattr(h, 'feasibility_score', 0) else 0.0,
+                "impact_score": h.impact_score if getattr(h, 'impact_score', 0) == getattr(h, 'impact_score', 0) else 0.0,
                 "required_methods": h.required_methods,
                 "key_citations": h.key_citations[:10],
                 "fda_references": h.fda_references[:5],
@@ -203,7 +203,7 @@ async def _run_discovery_pipeline(
                     "hypothesis_index": len(hypotheses) - 1,
                     "round": h.round_number,
                     "title": h.title[:200],
-                    "confidence_score": h.confidence,
+                    "confidence_score": h.confidence if h.confidence == h.confidence else 0.5,
                     "timestamp": datetime.utcnow().isoformat(),
                 })
             except Exception:

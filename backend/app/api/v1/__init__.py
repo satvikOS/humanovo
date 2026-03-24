@@ -13,6 +13,7 @@ from app.api.v1.endpoints import (
     biobank,
     clinical_trials,
     collaboration,
+    compute,
     config_endpoints,
     data_sources,
     datasets,
@@ -104,3 +105,6 @@ router.include_router(jamison_api.router)
 
 # WebSocket streaming for discovery/synthesis runs (Jamison v2)
 router.include_router(ws_streaming.router)
+
+# Computational Lab (Python/R/Julia code execution)
+router.include_router(compute.router)
