@@ -4,7 +4,7 @@
  */
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { persistGet } from '../utils/persistence'
+import { persistGet, safeNum, safePct, safeDollars } from '../utils/persistence'
 
 const API = '/api'
 
@@ -158,7 +158,7 @@ export default function ProjectWorkspace() {
     return <div className="p-8 animate-pulse" style={{ color: 'var(--color-text-muted)' }}>Loading workspace...</div>
   }
 
-  const costDollars = (cents: number) => `$${(cents / 100).toFixed(2)}`
+  const costDollars = (cents: unknown) => safeDollars(cents)
 
   return (
     <div className="p-6 space-y-6">
@@ -193,7 +193,7 @@ export default function ProjectWorkspace() {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <StatCard label="Discovery Runs" value={String(project?.total_discovery_runs || runs.length)} />
           <StatCard label="Hypotheses" value={String(hypotheses.length)} />
-          <StatCard label="Best Confidence" value={project?.best_confidence_score ? `${(project.best_confidence_score * 100).toFixed(0)}%` : 'N/A'} />
+          <StatCard label="Best Confidence" value={safePct(project?.best_confidence_score, 0, 'N/A')} />
           <StatCard label="Total Cost" value={costDollars(project?.total_api_cost_cents || 0)} />
           <div className="col-span-full rounded-lg p-4" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
             <h3 className="font-medium mb-2" style={{ color: 'var(--color-text)' }}>Recent Activity</h3>
@@ -324,7 +324,7 @@ export default function ProjectWorkspace() {
         <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <StatCard label="Total Spend" value={costDollars(project?.total_api_cost_cents || 0)} />
-            <StatCard label="Avg Cost/Run" value={runs.length ? costDollars(Math.round((project?.total_api_cost_cents || 0) / runs.length)) : '$0.00'} />
+            <StatCard label="Avg Cost/Run" value={runs.length ? costDollars(Math.round(safeNum(project?.total_api_cost_cents) / runs.length)) : '$0.00'} />
             <StatCard label="Runs" value={String(runs.length + synthRuns.length)} />
           </div>
           <div className="rounded-lg p-4" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>

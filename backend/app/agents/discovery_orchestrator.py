@@ -2167,6 +2167,66 @@ Include the translational roadmap from Stage 11."""
                 return match.group(1).strip()
         return default
 
+    @staticmethod
+    def _extract_keywords(title: str, description: str, mechanism: str, disease: str, max_keywords: int = 10) -> list[str]:
+        """Extract scientific keywords from hypothesis text using frequency analysis."""
+        import re
+        # Common English stopwords + generic scientific filler
+        stopwords = {
+            'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with',
+            'by', 'from', 'as', 'is', 'was', 'are', 'were', 'been', 'be', 'have', 'has', 'had',
+            'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'can',
+            'this', 'that', 'these', 'those', 'it', 'its', 'which', 'who', 'whom', 'what',
+            'when', 'where', 'how', 'why', 'not', 'no', 'nor', 'if', 'then', 'than', 'so',
+            'such', 'both', 'each', 'other', 'some', 'any', 'all', 'most', 'more', 'less',
+            'also', 'just', 'about', 'into', 'through', 'during', 'before', 'after', 'above',
+            'below', 'between', 'up', 'down', 'out', 'off', 'over', 'under', 'further',
+            'very', 'only', 'own', 'same', 'here', 'there', 'once', 'our', 'their', 'your',
+            'however', 'thus', 'therefore', 'although', 'while', 'since', 'because', 'given',
+            'based', 'using', 'used', 'including', 'resulting', 'leading', 'well', 'known',
+            'may', 'suggest', 'suggests', 'suggest', 'show', 'shows', 'shown', 'found',
+            'indicate', 'indicates', 'demonstrated', 'reported', 'observed', 'associated',
+            'potential', 'novel', 'new', 'recent', 'studies', 'study', 'research', 'data',
+            'results', 'analysis', 'approach', 'method', 'role', 'effect', 'effects',
+        }
+        text = f"{title} {description} {mechanism} {disease}".lower()
+        # Extract multi-word scientific terms (2-3 word phrases)
+        bigrams: dict[str, int] = {}
+        words = re.findall(r'[a-z][a-z\-]{2,}', text)
+        for i in range(len(words) - 1):
+            if words[i] not in stopwords and words[i+1] not in stopwords:
+                phrase = f"{words[i]} {words[i+1]}"
+                bigrams[phrase] = bigrams.get(phrase, 0) + 1
+        # Count individual meaningful words
+        word_freq: dict[str, int] = {}
+        for w in words:
+            if w not in stopwords and len(w) >= 3:
+                word_freq[w] = word_freq.get(w, 0) + 1
+        # Merge: prefer bigrams, then fill with unigrams
+        candidates: list[tuple[str, int]] = []
+        for phrase, count in bigrams.items():
+            if count >= 2:
+                candidates.append((phrase, count * 3))  # boost multi-word terms
+        for word, count in word_freq.items():
+            # Skip if word is already part of a selected bigram
+            if not any(word in c[0] for c in candidates):
+                candidates.append((word, count))
+        # Sort by frequency, take top N
+        candidates.sort(key=lambda x: -x[1])
+        keywords = []
+        seen = set()
+        for term, _ in candidates:
+            if term not in seen and len(keywords) < max_keywords:
+                keywords.append(term)
+                seen.add(term)
+        # Always include the disease as first keyword if not already present
+        disease_lower = disease.lower().strip()
+        if disease_lower and disease_lower not in seen:
+            keywords.insert(0, disease_lower)
+            if len(keywords) > max_keywords:
+                keywords = keywords[:max_keywords]
+        return keywords
+
     def _build_visualization_data(
         self,
         accumulated_context: dict[str, Any],
@@ -2374,7 +2434,11 @@ Include the translational roadmap from Stage 11."""
             val = accumulated_context.get(key)
             if val is not None:
                 try:
-                    confidence = float(val)
+                    parsed = float(val)
+                    # Guard against NaN/Inf from LLM outputs
+                    import math
+                    if not math.isnan(parsed) and not math.isinf(parsed):
+                        confidence = parsed
                 except (ValueError, TypeError):
                     pass
 
@@ -2434,14 +2498,14 @@ Include the translational roadmap from Stage 11."""
         ]
         avg_grounding_ratio = sum(grounding_ratios) / len(grounding_ratios) if grounding_ratios else 0.0
 
-        # Add grounding tag
-        tags = accumulated_context.get("tags", [])
-        if avg_grounding_ratio > 0.7:
-            tags.append("well-grounded")
-        elif avg_grounding_ratio > 0.4:
-            tags.append("partially-grounded")
-        else:
-            tags.append("needs-grounding")
+        # Extract 10 scientific keywords from the hypothesis content
+        tags = self._extract_keywords(
+            title=str(accumulated_context.get("refined_title") or accumulated_context.get("title") or ""),
+            description=str(accumulated_context.get("description") or ""),
+            mechanism=str(accumulated_context.get("refined_mechanism") or accumulated_context.get("mechanism") or ""),
+            disease=disease,
+            max_keywords=10,
+        )
 
         # Extract translational roadmap from accumulated context
         translational_roadmap = accumulated_context.get("translational_roadmap", {})

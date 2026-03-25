@@ -67,7 +67,6 @@ const researchNavItems = [
 const analysisNavItems = [
   { to: '/statistical-analysis', icon: FiTarget, label: 'Statistics' },
   { to: '/genomics', icon: FiHeart, label: 'Genomics' },
-  { to: '/intelligence', icon: FiTrendingUp, label: 'Pipeline Intel' },
 ]
 
 const managementNavItems = [
@@ -848,8 +847,8 @@ export default function Layout() {
           const lastRead = localStorage.getItem('humanovo-notifs-read') || '0'
           setNotifications(result.items.map((a: any) => ({
             id: a.id,
-            title: (a.activity_type || 'activity').replace(/_/g, ' '),
-            description: a.description || '',
+            title: a.title || `${(a.type || 'activity').replace(/_/g, ' ')} ${(a.action || '').replace(/_/g, ' ')}`,
+            description: a.description || a.project_name || '',
             time: a.created_at ? formatDateTime(a.created_at) : '',
           })))
           const newestTime = result.items[0]?.created_at || ''

@@ -455,12 +455,12 @@ export default function Evidence() {
                             <status.icon className="w-3 h-3" style={{ color: status.color }} />
                             <span className="text-xs" style={{ color: status.color }}>{status.label}</span>
                           </div>
-                          {item.relevance_score !== undefined && (
+                          {item.relevance_score != null && Number.isFinite(Number(item.relevance_score)) && (
                             <div className="flex items-center gap-1">
                               <div className="h-1 w-12 rounded-full overflow-hidden bg-[var(--color-border)]">
-                                <div className="h-full rounded-full" style={{ width: `${item.relevance_score * 100}%`, background: color }} />
+                                <div className="h-full rounded-full" style={{ width: `${Math.min(100, Math.max(0, Number(item.relevance_score) * 100))}%`, background: color }} />
                               </div>
-                              <span className="text-xxs text-[var(--color-text-muted)]">{Math.round(item.relevance_score * 100)}%</span>
+                              <span className="text-xxs text-[var(--color-text-muted)]">{Math.round(Number(item.relevance_score) * 100)}%</span>
                             </div>
                           )}
                         </div>

@@ -132,8 +132,8 @@ function generateOptimizations(
         type: 'recommendation',
         severity: 'info',
         title: 'Consider increasing grounding threshold for better accuracy',
-        description: `Average confidence score is ${(benchmarks.avg_confidence * 100).toFixed(0)}%. Increasing the evidence grounding threshold may improve hypothesis quality at the cost of longer run times.`,
-        metric: `${(benchmarks.avg_confidence * 100).toFixed(0)}% avg confidence`,
+        description: `Average confidence score is ${(Number.isFinite(benchmarks.avg_confidence) ? benchmarks.avg_confidence * 100 : 0).toFixed(0)}%. Increasing the evidence grounding threshold may improve hypothesis quality at the cost of longer run times.`,
+        metric: `${(Number.isFinite(benchmarks.avg_confidence) ? benchmarks.avg_confidence * 100 : 0).toFixed(0)}% avg confidence`,
       })
     }
 

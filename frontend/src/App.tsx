@@ -34,7 +34,8 @@ const ProjectWorkspace = lazy(() => import('./pages/ProjectWorkspace'))
 const DiscoveryRunner = lazy(() => import('./pages/DiscoveryRunner'))
 const HypothesisReview = lazy(() => import('./pages/HypothesisReview'))
 const ProjectKnowledgeGraph = lazy(() => import('./pages/ProjectKnowledgeGraph'))
-const PipelineIntelligence = lazy(() => import('./pages/PipelineIntelligence'))
+// Pipeline Intelligence removed per user request
+// const PipelineIntelligence = lazy(() => import('./pages/PipelineIntelligence'))
 const PgvectorManager = lazy(() => import('./pages/PgvectorManager'))
 const BillingDashboard = lazy(() => import('./pages/BillingDashboard'))
 
@@ -130,7 +131,7 @@ function App() {
         <Route path="imaging" element={<PageWrapper><ResearchImaging /></PageWrapper>} />
         <Route path="biobank" element={<PageWrapper><BiobankManager /></PageWrapper>} />
         {/* Project Jamison — platform-level pages */}
-        <Route path="intelligence" element={<LazyPageWrapper><PipelineIntelligence /></LazyPageWrapper>} />
+        {/* Pipeline Intelligence removed */}
         <Route path="dev/pgvector" element={<LazyPageWrapper><PgvectorManager /></LazyPageWrapper>} />
         {/* Billing/usage is within settings tree */}
         <Route path="settings/billing" element={<LazyPageWrapper><BillingDashboard /></LazyPageWrapper>} />

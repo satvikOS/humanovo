@@ -157,11 +157,11 @@ export default function ResearchImaging() {
                   {analysis && (
                     <div className="glass-card p-3">
                       <h4 className="text-xs font-medium mb-2">AI Analysis</h4>
-                      <p className="text-xxs text-[var(--color-text-muted)] mb-2">Model: {analysis.model} | Confidence: {(analysis.confidence * 100).toFixed(0)}%</p>
+                      <p className="text-xxs text-[var(--color-text-muted)] mb-2">Model: {analysis.model} | Confidence: {Number.isFinite(analysis.confidence) ? (analysis.confidence * 100).toFixed(0) : '--'}%</p>
                       {analysis.findings?.map((f: any, i: number) => (
                         <div key={i} className={`p-2 rounded mb-1 text-xxs ${f.severity === 'high' ? 'bg-red-500/10 border border-red-500/20' : f.severity === 'moderate' ? 'bg-yellow-500/10 border border-yellow-500/20' : 'bg-[var(--glass-bg)]'}`}>
                           <div className="font-medium">{f.region}: {f.finding}</div>
-                          <div className="text-[var(--color-text-muted)]">Confidence: {(f.confidence * 100).toFixed(0)}% | Severity: {f.severity}</div>
+                          <div className="text-[var(--color-text-muted)]">Confidence: {Number.isFinite(f.confidence) ? (f.confidence * 100).toFixed(0) : '--'}% | Severity: {f.severity}</div>
                         </div>
                       ))}
                     </div>

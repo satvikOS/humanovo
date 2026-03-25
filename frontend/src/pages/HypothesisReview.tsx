@@ -39,6 +39,43 @@ interface Citation {
   verified: boolean
 }
 
+/** Parse a raw citation (string or partial object) into a structured Citation */
+function parseCitation(raw: unknown, idx: number): Citation {
+  if (typeof raw === 'string') {
+    // Parse formats like "Sica et al., Clin Pharmacokinet 2005" or "Author, Journal (2020)"
+    const yearMatch = (raw as string).match(/\b(19|20)\d{2}\b/)
+    const year = yearMatch ? parseInt(yearMatch[0]) : 0
+    // Try to split on common delimiters
+    const parts = (raw as string).split(/[,;]\s*/)
+    const authors = parts.length > 0 ? [parts[0].trim()] : ['Unknown']
+    const journal = parts.length > 1 ? parts.slice(1).join(', ').replace(/\s*\(?\d{4}\)?\s*\.?$/, '').trim() : ''
+    return {
+      index: idx + 1,
+      title: raw as string,
+      authors,
+      journal,
+      year,
+      doi: null,
+      pmid: null,
+      verified: false,
+    }
+  }
+  if (typeof raw === 'object' && raw !== null) {
+    const obj = raw as Record<string, unknown>
+    return {
+      index: (obj.index as number) ?? idx + 1,
+      title: (obj.title as string) || (obj.finding as string) || String(obj),
+      authors: Array.isArray(obj.authors) ? obj.authors as string[] : typeof obj.authors === 'string' ? [obj.authors] : ['Unknown'],
+      journal: (obj.journal as string) || (obj.source as string) || '',
+      year: (obj.year as number) || 0,
+      doi: (obj.doi as string) || null,
+      pmid: (obj.pmid as string) || null,
+      verified: (obj.verified as boolean) || false,
+    }
+  }
+  return { index: idx + 1, title: String(raw), authors: ['Unknown'], journal: '', year: 0, doi: null, pmid: null, verified: false }
+}
+
 interface StageTrace {
   model: string
   duration_seconds: number
@@ -198,22 +235,25 @@ export default function HypothesisReview() {
       <Section title="Evidence">
         {hyp.key_citations?.length > 0 ? (
           <div className="space-y-2">
-            {hyp.key_citations.map((c, i) => (
-              <div key={i} className="text-sm p-2 rounded" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
-                <div className="flex items-start gap-2">
-                  <span className="text-xs font-mono shrink-0 px-1.5 py-0.5 rounded" style={{ background: 'var(--color-accent-blue)', color: '#fff' }}>[{c.index}]</span>
-                  <div>
-                    <p className="font-medium" style={{ color: 'var(--color-text)' }}>{c.title}</p>
-                    <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-muted)' }}>
-                      {c.authors?.slice(0, 3).join(', ')}{c.authors?.length > 3 ? ' et al.' : ''} &middot; {c.journal} ({c.year})
-                      {c.verified && <span className="ml-1 text-green-500">verified</span>}
-                    </p>
-                    {c.pmid && <a href={`https://pubmed.ncbi.nlm.nih.gov/${c.pmid}`} target="_blank" rel="noreferrer" className="text-xs" style={{ color: 'var(--color-accent-blue)' }}>PubMed</a>}
-                    {c.doi && <a href={`https://doi.org/${c.doi}`} target="_blank" rel="noreferrer" className="text-xs ml-2" style={{ color: 'var(--color-accent-blue)' }}>DOI</a>}
+            {hyp.key_citations.map((raw, i) => {
+              const c = parseCitation(raw, i)
+              return (
+                <div key={i} className="text-sm p-2 rounded" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
+                  <div className="flex items-start gap-2">
+                    <span className="text-xs font-mono shrink-0 px-1.5 py-0.5 rounded" style={{ background: 'var(--color-accent-blue)', color: '#fff' }}>[{c.index}]</span>
+                    <div>
+                      <p className="font-medium" style={{ color: 'var(--color-text)' }}>{c.title}</p>
+                      <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-muted)' }}>
+                        {c.authors?.slice(0, 3).join(', ')}{c.authors?.length > 3 ? ' et al.' : ''}{c.journal ? ` \u00B7 ${c.journal}` : ''}{c.year ? ` (${c.year})` : ''}
+                        {c.verified && <span className="ml-1 text-green-500">verified</span>}
+                      </p>
+                      {c.pmid && <a href={`https://pubmed.ncbi.nlm.nih.gov/${c.pmid}`} target="_blank" rel="noreferrer" className="text-xs" style={{ color: 'var(--color-accent-blue)' }}>PubMed</a>}
+                      {c.doi && <a href={`https://doi.org/${c.doi}`} target="_blank" rel="noreferrer" className="text-xs ml-2" style={{ color: 'var(--color-accent-blue)' }}>DOI</a>}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         ) : (
           <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>No citations available</p>

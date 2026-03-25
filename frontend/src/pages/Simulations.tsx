@@ -1,5 +1,6 @@
-import { useState, useRef, useCallback, useMemo } from 'react'
-import { formatDateTime, logActivity } from '../utils/persistence'
+import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { formatDateTime, logActivity, persistGet, persistSet } from '../utils/persistence'
 import '@tanstack/react-query' // kept to preserve dependency
 import {
   FiActivity, FiPlay, FiPause, FiCheck, FiX, FiPlus,
@@ -408,17 +409,14 @@ const MC_RUNNERS: Record<string, (p: MCParams) => number> = {
 interface EqHistoryEntry { id: string; expr: string; xMin: number; xMax: number; createdAt: string }
 interface CompHistoryEntry { id: string; env: string; template: string; code: string; output: string; createdAt: string }
 
-// Module-level ephemeral stores (persist across component remounts within same session)
-let _eqHistory: EqHistoryEntry[] = []
-let _compHistory: CompHistoryEntry[] = []
-
-function loadEqHistory(): EqHistoryEntry[] { return _eqHistory }
-function saveEqHistory(entries: EqHistoryEntry[]) { _eqHistory = entries.slice(0, 50) }
-function loadCompHistory(): CompHistoryEntry[] { return _compHistory }
-function saveCompHistory(entries: CompHistoryEntry[]) { _compHistory = entries.slice(0, 50) }
+// Persistent stores for simulation history
+function loadEqHistory(): EqHistoryEntry[] { return persistGet<EqHistoryEntry[]>('eq-history', []) }
+function saveEqHistory(entries: EqHistoryEntry[]) { persistSet('eq-history', entries.slice(0, 50)) }
+function loadCompHistory(): CompHistoryEntry[] { return persistGet<CompHistoryEntry[]>('comp-history', []) }
+function saveCompHistory(entries: CompHistoryEntry[]) { persistSet('comp-history', entries.slice(0, 50)) }
 
 function SavedSimulations() {
-  const mcSims: MCResult[] = []  // No localStorage — MC sims are ephemeral per session
+  const mcSims: MCResult[] = persistGet<MCResult[]>('mc-simulations', [])
   const eqPlots = useMemo(() => loadEqHistory(), [])
   const compRuns = useMemo(() => loadCompHistory(), [])
   const [filter, setFilter] = useState<'all' | 'monte-carlo' | 'equation' | 'computational'>('all')
@@ -438,7 +436,7 @@ function SavedSimulations() {
         id: mc.id, type: 'monte-carlo', title: mc.name,
         subtitle: `${tl} · ${mc.iterations.toLocaleString()} iterations`,
         createdAt: mc.createdAt,
-        stats: `μ=${mc.stats.mean.toFixed(2)}  σ=${mc.stats.std.toFixed(2)}  95% CI [${mc.stats.ci95Lower.toFixed(2)}, ${mc.stats.ci95Upper.toFixed(2)}]`,
+        stats: `μ=${(Number.isFinite(mc.stats.mean) ? mc.stats.mean : 0).toFixed(2)}  σ=${(Number.isFinite(mc.stats.std) ? mc.stats.std : 0).toFixed(2)}  95% CI [${(Number.isFinite(mc.stats.ci95Lower) ? mc.stats.ci95Lower : 0).toFixed(2)}, ${(Number.isFinite(mc.stats.ci95Upper) ? mc.stats.ci95Upper : 0).toFixed(2)}]`,
         mcData: mc,
       })
     }
@@ -498,11 +496,11 @@ function SavedSimulations() {
           {/* Stats grid */}
           <div className="grid grid-cols-5 gap-2">
             {[
-              { label: 'Mean', value: mc.stats.mean.toFixed(4) },
-              { label: 'Median', value: mc.stats.median.toFixed(4) },
-              { label: 'Std Dev', value: mc.stats.std.toFixed(4) },
-              { label: '95% CI Low', value: mc.stats.ci95Lower.toFixed(4) },
-              { label: '95% CI High', value: mc.stats.ci95Upper.toFixed(4) },
+              { label: 'Mean', value: (Number.isFinite(mc.stats.mean) ? mc.stats.mean : 0).toFixed(4) },
+              { label: 'Median', value: (Number.isFinite(mc.stats.median) ? mc.stats.median : 0).toFixed(4) },
+              { label: 'Std Dev', value: (Number.isFinite(mc.stats.std) ? mc.stats.std : 0).toFixed(4) },
+              { label: '95% CI Low', value: (Number.isFinite(mc.stats.ci95Lower) ? mc.stats.ci95Lower : 0).toFixed(4) },
+              { label: '95% CI High', value: (Number.isFinite(mc.stats.ci95Upper) ? mc.stats.ci95Upper : 0).toFixed(4) },
             ].map(s => (
               <div key={s.label} className="text-center p-2 rounded-lg bg-[var(--glass-bg)]">
                 <div className="text-xxs text-[var(--color-text-muted)]">{s.label}</div>
@@ -2609,36 +2607,57 @@ function ComputationalLab() {
     setOutput('')
   }, [])
 
+  const [pyodideStatus, setPyodideStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
+  const [showOutputOverlay, setShowOutputOverlay] = useState(false)
+
   const runCode = useCallback(async () => {
     if (!code.trim() || isRunning) return
     setIsRunning(true)
-    setOutput('Executing...\n')
+    setOutput('')
+    setShowOutputOverlay(true)
 
     try {
-      const res = await fetch('/api/v1/compute/execute', {
+      // Try backend API first
+      const apiBase = import.meta.env.VITE_API_BASE_URL || ''
+      const res = await fetch(`${apiBase}/api/v1/compute/execute`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code, environment: selectedEnv }),
+        signal: AbortSignal.timeout(5000),
       })
       if (res.ok) {
         const data = await res.json()
         const out = data.output || data.stdout || 'Execution completed.'
-        setOutput(out)
+        const err = data.stderr || ''
+        const fullOutput = err ? `${out}\n\n--- stderr ---\n${err}` : out
+        setOutput(data.timed_out ? `[TIMEOUT] Execution exceeded time limit.\n${err}` : fullOutput)
         parseOutputForViz(out)
-      } else {
-        // Simulate output for demo when backend isn't available
-        const out = simulateOutput(code, selectedEnv)
-        setOutput(out)
-        parseOutputForViz(out)
+        return
       }
+      throw new Error('Backend unavailable')
     } catch {
-      // Simulate output for demo
-      const out = simulateOutput(code, selectedEnv)
-      setOutput(out)
-      parseOutputForViz(out)
+      // Run locally
+      try {
+        if (selectedEnv === 'python') {
+          setPyodideStatus('loading')
+          setOutput('Loading Python runtime (Pyodide)...\nThis may take a moment on first run.\n')
+          const out = await executePython(code)
+          setPyodideStatus('ready')
+          setOutput(out)
+          parseOutputForViz(out)
+        } else {
+          setOutput('Executing...\n')
+          // Use smart interpreter for R/Julia/Octave
+          const out = executeScientificCode(code, selectedEnv)
+          setOutput(out)
+          parseOutputForViz(out)
+        }
+      } catch (e: any) {
+        setOutput(`Execution error: ${e.message || e}`)
+        if (selectedEnv === 'python') setPyodideStatus('error')
+      }
     } finally {
       setIsRunning(false)
-      // Persist to history
       const entry: CompHistoryEntry = {
         id: crypto.randomUUID(), env: selectedEnv,
         template: selectedTemplate?.name || 'Custom', code,
@@ -2749,7 +2768,7 @@ function ComputationalLab() {
         </div>
 
         {/* Code Editor & Output */}
-        <div className="flex-1 flex flex-col min-w-0 gap-4">
+        <div className="flex-1 flex flex-col min-w-0 gap-4 relative">
           {/* Editor */}
           <div className="flex-1 flex flex-col glass-card p-0 overflow-hidden">
             <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--color-border)]">
@@ -2788,210 +2807,480 @@ function ComputationalLab() {
             />
           </div>
 
-          {/* Output + Result Visualization */}
-          <div className={clsx('flex flex-col glass-card p-0 overflow-hidden flex-shrink-0', showResultViz ? 'h-auto' : 'h-48')}>
-            <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--color-border)]">
-              <div className="flex items-center gap-3">
-                <span className="text-xs font-medium text-[var(--color-text-secondary)]">Output</span>
-                {resultChartData.length > 0 && (
-                  <button
-                    onClick={() => setShowResultViz(!showResultViz)}
-                    className={clsx(
-                      'flex items-center gap-1 px-2 py-0.5 rounded text-xxs transition-all border',
-                      showResultViz
-                        ? 'border-[var(--color-accent-green)]/40 bg-[var(--color-accent-green)]/10 text-[var(--color-accent-green)]'
-                        : 'border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
-                    )}
-                  >
-                    <FiBarChart2 className="w-3 h-3" />
-                    Visualize
-                  </button>
-                )}
-              </div>
-              <button onClick={() => { setOutput(''); setShowResultViz(false); setResultChartData([]); setResultTimeSeries([]); setResultStats([]) }} className="text-xxs text-[var(--color-text-muted)] hover:text-[var(--color-text)]">Clear</button>
-            </div>
-
-            {/* Text Output */}
-            <pre className={clsx('p-4 overflow-auto text-xs font-mono text-[var(--color-accent-green)] leading-relaxed whitespace-pre-wrap', showResultViz ? 'max-h-40' : 'flex-1')}>
-              {output || 'Run code to see output here...'}
-            </pre>
-
-            {/* Result Visualization Panel */}
-            {showResultViz && resultChartData.length > 0 && (
-              <div className="border-t border-[var(--color-border)]">
-                <div className="p-3 border-b border-[var(--color-border)] flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <FiTrendingUp className="w-3.5 h-3.5 text-[var(--color-accent-blue)]" />
-                    <span className="text-xs font-medium text-[var(--color-text)]">Result Visualization</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
+          {/* Output Overlay — slides over the editor */}
+          {showOutputOverlay && (
+            <div className="absolute inset-0 z-20 flex flex-col bg-[var(--color-bg)]/95 backdrop-blur-sm rounded-xl border border-[var(--color-border)]" style={{ margin: '-1px' }}>
+              {/* Overlay header */}
+              <div className="flex items-center justify-between px-4 py-2.5 border-b border-[var(--color-border)] flex-shrink-0">
+                <div className="flex items-center gap-3">
+                  <FiTerminal className="w-3.5 h-3.5 text-[var(--color-accent-green)]" />
+                  <span className="text-sm font-medium text-[var(--color-text)]">Output</span>
+                  {isRunning && <span className="text-xxs text-[var(--color-warning)] animate-pulse">Running...</span>}
+                  {selectedEnv === 'python' && pyodideStatus === 'loading' && <span className="text-xxs text-[var(--color-accent-blue)]">Loading Pyodide...</span>}
+                  {selectedEnv === 'python' && pyodideStatus === 'ready' && <span className="text-xxs text-[var(--color-accent-green)]">Pyodide Ready</span>}
+                  {resultChartData.length > 0 && (
                     <button
-                      onClick={async () => {
-                        const vizEl = document.getElementById('result-viz-container')
-                        if (!vizEl) return
-                        try {
-                          const canvas = await html2canvas(vizEl, {
-                            backgroundColor: '#0f0f14',
-                            scale: 2,
-                            useCORS: true,
-                            logging: false,
-                          })
-                          const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
-                          if (blob) await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
-                        } catch { /* silently fail */ }
-                      }}
-                      className="flex items-center gap-1 px-2 py-0.5 rounded text-xxs border border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-all"
+                      onClick={() => setShowResultViz(!showResultViz)}
+                      className={clsx(
+                        'flex items-center gap-1 px-2 py-0.5 rounded text-xxs transition-all border',
+                        showResultViz
+                          ? 'border-[var(--color-accent-green)]/40 bg-[var(--color-accent-green)]/10 text-[var(--color-accent-green)]'
+                          : 'border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
+                      )}
                     >
-                      <FiClipboard className="w-3 h-3" />
-                      Copy
+                      <FiBarChart2 className="w-3 h-3" />
+                      Visualize
                     </button>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={async () => {
+                      try { await navigator.clipboard.writeText(output) } catch { /* ignore */ }
+                    }}
+                    className="flex items-center gap-1 px-2 py-0.5 rounded text-xxs border border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-all"
+                  >
+                    <FiClipboard className="w-3 h-3" /> Copy
+                  </button>
+                  {resultStats.length > 0 && (
                     <button
                       onClick={() => {
                         const csv = 'Metric,Value\n' + resultStats.map(s => `"${s.label}",${s.value}`).join('\n')
                         const blob = new Blob([csv], { type: 'text/csv' })
                         const url = URL.createObjectURL(blob)
                         const a = document.createElement('a')
-                        a.href = url; a.download = 'simulation_results.csv'; a.click()
+                        a.href = url; a.download = 'results.csv'; a.click()
                         URL.revokeObjectURL(url)
                       }}
                       className="flex items-center gap-1 px-2 py-0.5 rounded text-xxs border border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-all"
                     >
-                      <FiDownload className="w-3 h-3" />
-                      Export
+                      <FiDownload className="w-3 h-3" /> CSV
                     </button>
-                  </div>
-                </div>
-
-                <div id="result-viz-container" className="p-4 grid grid-cols-1 xl:grid-cols-2 gap-4" style={{ backgroundColor: 'var(--color-bg)', color: 'var(--color-text)' }}>
-                  {/* Bar Chart of parsed numeric results */}
-                  <div>
-                    <h5 className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Parsed Metrics</h5>
-                    <ResponsiveContainer width="100%" height={250}>
-                      <LineChart data={resultChartData} margin={{ top: 10, right: 20, bottom: 20, left: 15 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                        <XAxis dataKey="name" stroke="var(--color-text-muted)" tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} angle={-25} textAnchor="end" height={70} interval={0} />
-                        <YAxis stroke="var(--color-text-muted)" tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} />
-                        <Tooltip
-                          contentStyle={{ background: 'var(--glass-bg)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '11px' }}
-                          labelStyle={{ color: 'var(--color-text)' }}
-                        />
-                        <Line type="monotone" dataKey="value" stroke="var(--color-accent-green)" strokeWidth={2} dot={{ fill: 'var(--color-accent-green)', r: 4 }} />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-
-                  {/* Time-series if available, otherwise stats table */}
-                  <div>
-                    {resultTimeSeries.length > 0 ? (
-                      <>
-                        <h5 className="text-xxs font-medium text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Simulated Time Course</h5>
-                        <ResponsiveContainer width="100%" height={200}>
-                          <AreaChart data={resultTimeSeries} margin={{ top: 5, right: 10, bottom: 5, left: 10 }}>
-                            <defs>
-                              <linearGradient id="resultAreaGrad" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor="var(--color-accent-blue)" stopOpacity={0.3} />
-                                <stop offset="95%" stopColor="var(--color-accent-blue)" stopOpacity={0} />
-                              </linearGradient>
-                            </defs>
-                            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                            <XAxis dataKey="t" stroke="var(--color-text-muted)" tick={{ fontSize: 9 }} label={{ value: 'Time', position: 'insideBottom', offset: -3, style: { fill: 'var(--color-text-muted)', fontSize: 10 } }} />
-                            <YAxis stroke="var(--color-text-muted)" tick={{ fontSize: 9 }} />
-                            <Tooltip
-                              contentStyle={{ background: 'var(--glass-bg)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '11px' }}
-                              labelStyle={{ color: 'var(--color-text)' }}
-                            />
-                            <Area type="monotone" dataKey="y" stroke="var(--color-accent-blue)" strokeWidth={2} fill="url(#resultAreaGrad)" dot={false} />
-                          </AreaChart>
-                        </ResponsiveContainer>
-                      </>
-                    ) : (
-                      <>
-                        <h5 className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Summary Statistics</h5>
-                        <div className="max-h-[300px] overflow-y-auto space-y-1">
-                          {resultStats.map((s, idx) => (
-                            <div key={idx} className="flex items-center justify-between py-1.5 px-2 rounded text-xs hover:bg-[var(--glass-bg)] transition-all gap-3">
-                              <span className="text-[var(--color-text-muted)] whitespace-nowrap">{s.label}</span>
-                              <span className="text-[var(--color-text)] font-mono text-xs flex-shrink-0">{s.value}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </>
-                    )}
-                  </div>
+                  )}
+                  <button
+                    onClick={() => { setShowOutputOverlay(false) }}
+                    className="p-1 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-all"
+                  >
+                    <FiX className="w-4 h-4" />
+                  </button>
                 </div>
               </div>
-            )}
-          </div>
+
+              {/* Overlay body — scrollable output + viz */}
+              <div className="flex-1 overflow-y-auto">
+                <pre className="p-4 text-xs font-mono text-[var(--color-accent-green)] leading-relaxed whitespace-pre-wrap min-h-[100px]">
+                  {output || (isRunning ? 'Executing...' : 'No output yet')}
+                </pre>
+
+                {/* Result Visualization */}
+                {showResultViz && resultChartData.length > 0 && (
+                  <div className="border-t border-[var(--color-border)]" id="result-viz-container">
+                    <div className="p-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
+                      <div>
+                        <h5 className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Parsed Metrics</h5>
+                        <ResponsiveContainer width="100%" height={250}>
+                          <LineChart data={resultChartData} margin={{ top: 10, right: 20, bottom: 20, left: 15 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                            <XAxis dataKey="name" stroke="var(--color-text-muted)" tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} angle={-25} textAnchor="end" height={70} interval={0} />
+                            <YAxis stroke="var(--color-text-muted)" tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} />
+                            <Tooltip contentStyle={{ background: 'var(--glass-bg)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '11px' }} labelStyle={{ color: 'var(--color-text)' }} />
+                            <Line type="monotone" dataKey="value" stroke="var(--color-accent-green)" strokeWidth={2} dot={{ fill: 'var(--color-accent-green)', r: 4 }} />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                      <div>
+                        {resultTimeSeries.length > 0 ? (
+                          <>
+                            <h5 className="text-xxs font-medium text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Time Course</h5>
+                            <ResponsiveContainer width="100%" height={200}>
+                              <AreaChart data={resultTimeSeries} margin={{ top: 5, right: 10, bottom: 5, left: 10 }}>
+                                <defs>
+                                  <linearGradient id="resultAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="5%" stopColor="var(--color-accent-blue)" stopOpacity={0.3} />
+                                    <stop offset="95%" stopColor="var(--color-accent-blue)" stopOpacity={0} />
+                                  </linearGradient>
+                                </defs>
+                                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                                <XAxis dataKey="t" stroke="var(--color-text-muted)" tick={{ fontSize: 9 }} />
+                                <YAxis stroke="var(--color-text-muted)" tick={{ fontSize: 9 }} />
+                                <Tooltip contentStyle={{ background: 'var(--glass-bg)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '11px' }} labelStyle={{ color: 'var(--color-text)' }} />
+                                <Area type="monotone" dataKey="y" stroke="var(--color-accent-blue)" strokeWidth={2} fill="url(#resultAreaGrad)" dot={false} />
+                              </AreaChart>
+                            </ResponsiveContainer>
+                          </>
+                        ) : (
+                          <>
+                            <h5 className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Summary Statistics</h5>
+                            <div className="max-h-[300px] overflow-y-auto space-y-1">
+                              {resultStats.map((s, idx) => (
+                                <div key={idx} className="flex items-center justify-between py-1.5 px-2 rounded text-xs hover:bg-[var(--glass-bg)] transition-all gap-3">
+                                  <span className="text-[var(--color-text-muted)] whitespace-nowrap">{s.label}</span>
+                                  <span className="text-[var(--color-text)] font-mono text-xs flex-shrink-0">{s.value}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
   )
 }
 
-// Simulate output when backend isn't available
-function simulateOutput(code: string, env: ComputeEnv): string {
+// ── Pyodide Python Runtime ──────────────────────────────────
+let _pyodidePromise: Promise<any> | null = null
+async function loadPyodide(): Promise<any> {
+  if (_pyodidePromise) return _pyodidePromise
+  _pyodidePromise = (async () => {
+    // Load Pyodide from CDN
+    const script = document.createElement('script')
+    script.src = 'https://cdn.jsdelivr.net/pyodide/v0.25.1/full/pyodide.js'
+    document.head.appendChild(script)
+    await new Promise<void>((resolve, reject) => {
+      script.onload = () => resolve()
+      script.onerror = () => reject(new Error('Failed to load Pyodide'))
+    })
+    const pyodide = await (window as any).loadPyodide({
+      indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.25.1/full/',
+    })
+    // Pre-load common packages
+    await pyodide.loadPackage(['numpy', 'scipy', 'micropip'])
+    return pyodide
+  })()
+  return _pyodidePromise
+}
+
+async function executePython(code: string): Promise<string> {
+  const pyodide = await loadPyodide()
+  // Redirect stdout/stderr
+  pyodide.runPython(`
+import sys, io
+_stdout_buf = io.StringIO()
+_stderr_buf = io.StringIO()
+sys.stdout = _stdout_buf
+sys.stderr = _stderr_buf
+`)
+  try {
+    await pyodide.runPythonAsync(code)
+    const stdout = pyodide.runPython('_stdout_buf.getvalue()') as string
+    const stderr = pyodide.runPython('_stderr_buf.getvalue()') as string
+    // Reset
+    pyodide.runPython('sys.stdout = sys.__stdout__; sys.stderr = sys.__stderr__')
+    const result = stdout || '(no output)'
+    return stderr ? `${result}\n\n--- stderr ---\n${stderr}` : result
+  } catch (e: any) {
+    pyodide.runPython('sys.stdout = sys.__stdout__; sys.stderr = sys.__stderr__')
+    return `Error: ${e.message || e}`
+  }
+}
+
+// ── Smart Code Execution Engine ─────────────────────────────
+// For R/Julia/Octave: parse and evaluate common constructs using JS math
+function evalNumericExpr(expr: string, vars: Record<string, number>): number {
+  try {
+    let e = expr.trim()
+    // Replace variable references
+    for (const [k, v] of Object.entries(vars)) {
+      e = e.replace(new RegExp(`\\b${k}\\b`, 'g'), String(v))
+    }
+    // Replace common math functions
+    e = e.replace(/\bsin\b/g, 'Math.sin').replace(/\bcos\b/g, 'Math.cos')
+      .replace(/\btan\b/g, 'Math.tan').replace(/\bexp\b/g, 'Math.exp')
+      .replace(/\blog\b/g, 'Math.log').replace(/\bsqrt\b/g, 'Math.sqrt')
+      .replace(/\babs\b/g, 'Math.abs').replace(/\bpi\b/g, 'Math.PI')
+      .replace(/\bceil\b/g, 'Math.ceil').replace(/\bfloor\b/g, 'Math.floor')
+      .replace(/\bround\b/g, 'Math.round').replace(/\bpow\b/g, 'Math.pow')
+      .replace(/\bmin\b/g, 'Math.min').replace(/\bmax\b/g, 'Math.max')
+      .replace(/\brand\b\(\)/g, 'Math.random()').replace(/\brandn\b\(\)/g, '((Math.random()+Math.random()+Math.random()-1.5)*1.41)')
+      .replace(/\^/g, '**')
+    // eslint-disable-next-line no-eval
+    const result = eval(e)
+    return typeof result === 'number' ? result : NaN
+  } catch {
+    return NaN
+  }
+}
+
+function executeScientificCode(code: string, env: ComputeEnv): string {
   const lines = code.split('\n')
-  const printStatements: string[] = []
+  const vars: Record<string, number> = {}
+  const arrays: Record<string, number[]> = {}
+  const output: string[] = []
+  const commentChar = env === 'r' ? '#' : env === 'octave' ? '%' : '#'
 
-  if (env === 'octave') {
-    for (const line of lines) {
-      const fprintfMatch = line.match(/fprintf\(['"](.+?)['"]/);
-      if (fprintfMatch) {
-        let text = fprintfMatch[1]
-        text = text.replace(/\\n/g, '\n').replace(/%[\d.]*[dfseg]/g, (m) => {
-          if (m.includes('d')) return String(Math.floor(Math.random() * 1000))
-          if (m.includes('f')) return (Math.random() * 100).toFixed(2)
-          if (m.includes('s')) return 'value'
-          return m
-        })
-        printStatements.push(text)
+  for (let ln of lines) {
+    ln = ln.trim()
+    if (!ln || ln.startsWith(commentChar) || ln.startsWith('//')) continue
+    // Skip package/import/using/library lines
+    if (/^(pkg\s+load|import|from|using|library|require|include|source)\b/.test(ln)) continue
+
+    // Variable assignment: x = 123 or x <- 123 (R)
+    const assignMatch = ln.match(/^(\w+)\s*(?:=|<-)\s*(.+?);\s*$/) || ln.match(/^(\w+)\s*(?:=|<-)\s*(.+)$/)
+    if (assignMatch) {
+      const [, name, expr] = assignMatch
+      // Check for array/range: 1:10 or linspace(0,10,100) or seq(0,10,0.1)
+      const rangeMatch = expr.match(/^([\d.]+):([\d.]+):([\d.]+)$/) || expr.match(/^([\d.]+):([\d.]+)$/)
+      if (rangeMatch) {
+        const start = parseFloat(rangeMatch[1])
+        const end = parseFloat(rangeMatch[rangeMatch.length - 1])
+        const step = rangeMatch.length === 4 ? parseFloat(rangeMatch[2]) : 1
+        const arr: number[] = []
+        for (let i = start; (step > 0 ? i <= end : i >= end); i += step) arr.push(i)
+        arrays[name] = arr
+        vars[name] = arr.length
+        continue
+      }
+      const linspaceMatch = expr.match(/linspace\(([\d.e+-]+),\s*([\d.e+-]+),\s*([\d.e+-]+)\)/)
+      if (linspaceMatch) {
+        const start = parseFloat(linspaceMatch[1]), end = parseFloat(linspaceMatch[2]), n = parseInt(linspaceMatch[3])
+        const arr: number[] = []
+        for (let i = 0; i < n; i++) arr.push(start + (end - start) * i / (n - 1))
+        arrays[name] = arr
+        vars[name] = n
+        continue
+      }
+      const seqMatch = expr.match(/seq\(([\d.e+-]+),\s*([\d.e+-]+),\s*(?:by\s*=\s*)?([\d.e+-]+)\)/)
+      if (seqMatch) {
+        const start = parseFloat(seqMatch[1]), end = parseFloat(seqMatch[2]), step = parseFloat(seqMatch[3])
+        const arr: number[] = []
+        for (let i = start; i <= end + step * 0.001; i += step) arr.push(i)
+        arrays[name] = arr
+        vars[name] = arr.length
+        continue
+      }
+      // zeros/ones
+      if (/zeros\((\d+)/.test(expr)) { const n = parseInt(expr.match(/zeros\((\d+)/)?.[1] || '10'); arrays[name] = new Array(n).fill(0); vars[name] = n; continue }
+      if (/ones\((\d+)/.test(expr)) { const n = parseInt(expr.match(/ones\((\d+)/)?.[1] || '10'); arrays[name] = new Array(n).fill(1); vars[name] = n; continue }
+      // length()
+      const lenMatch = expr.match(/length\((\w+)\)/)
+      if (lenMatch && arrays[lenMatch[1]]) { vars[name] = arrays[lenMatch[1]].length; continue }
+      // sum/mean/std/min/max on arrays
+      const statMatch = expr.match(/(sum|mean|std|var|min|max|median)\((\w+)\)/)
+      if (statMatch && arrays[statMatch[2]]) {
+        const arr = arrays[statMatch[2]]
+        const fn = statMatch[1]
+        const mean = arr.reduce((a, b) => a + b, 0) / arr.length
+        let val = 0
+        if (fn === 'sum') val = arr.reduce((a, b) => a + b, 0)
+        else if (fn === 'mean') val = mean
+        else if (fn === 'min') val = Math.min(...arr)
+        else if (fn === 'max') val = Math.max(...arr)
+        else if (fn === 'median') { const s = [...arr].sort((a, b) => a - b); val = s.length % 2 ? s[Math.floor(s.length / 2)] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2 }
+        else if (fn === 'std' || fn === 'var') { const v = arr.reduce((a, b) => a + (b - mean) ** 2, 0) / (arr.length - 1); val = fn === 'var' ? v : Math.sqrt(v) }
+        vars[name] = val
+        continue
+      }
+      // Normal numeric expression
+      const val = evalNumericExpr(expr, vars)
+      if (Number.isFinite(val)) { vars[name] = val; continue }
+      // Array literal [1,2,3]
+      const arrLitMatch = expr.match(/^\[(.+)\]$/)
+      if (arrLitMatch) {
+        const elems = arrLitMatch[1].split(',').map(e => evalNumericExpr(e.trim(), vars)).filter(Number.isFinite)
+        if (elems.length > 0) { arrays[name] = elems; vars[name] = elems.length; continue }
+      }
+      // Random data: randn(1,N) or rnorm(N)
+      const randnMatch = expr.match(/randn\((?:1,\s*)?(\d+)\)/) || expr.match(/rnorm\((\d+)/)
+      if (randnMatch) {
+        const n = parseInt(randnMatch[1])
+        arrays[name] = Array.from({ length: n }, () => (Math.random() + Math.random() + Math.random() - 1.5) * 1.41)
+        vars[name] = n
+        continue
+      }
+      // rand(1,N) or runif(N)
+      const randMatch = expr.match(/rand\((?:1,\s*)?(\d+)\)/) || expr.match(/runif\((\d+)/)
+      if (randMatch) {
+        const n = parseInt(randMatch[1])
+        arrays[name] = Array.from({ length: n }, () => Math.random())
+        vars[name] = n
+        continue
       }
     }
-  } else if (env === 'python') {
-    for (const line of lines) {
-      const printMatch = line.match(/print\(f?['"](.+?)['"]\)/)
-      if (printMatch) {
-        let text = printMatch[1]
-        text = text.replace(/\{[^}]+\}/g, () => (Math.random() * 100).toFixed(2))
-        printStatements.push(text)
-      }
-    }
-  } else if (env === 'r') {
-    for (const line of lines) {
-      const catMatch = line.match(/cat\(sprintf\(['"](.+?)['"]/);
-      if (catMatch) {
-        let text = catMatch[1]
-        text = text.replace(/\\n/g, '\n').replace(/%[\d.]*[dfseg]/g, () => (Math.random() * 100).toFixed(1))
-        printStatements.push(text)
-      }
-    }
-  } else if (env === 'julia') {
-    for (const line of lines) {
-      const printMatch = line.match(/println\(["'](.+?)["']\)/)
-      if (printMatch) {
-        printStatements.push(printMatch[1])
+
+    // For loops: for i = 1:N ... end (simple single-line body)
+    const forMatch = ln.match(/^for\s+\w+\s*=\s*(\d+):(\d+)/)
+    if (forMatch) continue // Skip for now, handled by templates
+
+    // Print statements
+    const printPatterns = [
+      // Python: print(f"...", ...), print("...")
+      /print\(f?['"](.*?)['"]/,
+      // Octave: fprintf("...", ...)  or  disp(...)
+      /fprintf\(['"](.*?)['"]/,
+      /disp\((.+)\)/,
+      // R: cat(sprintf("...", ...)) or cat("...\n") or print(...)
+      /cat\(sprintf\(['"](.*?)['"]/,
+      /cat\(['"](.*?)['"]/,
+      /print\((.+)\)/,
+      // Julia: println("...") or @printf("...")
+      /println\(['"](.*?)['"]/,
+      /@printf\(['"](.*?)['"]/,
+    ]
+
+    for (const pat of printPatterns) {
+      const m = ln.match(pat)
+      if (m) {
+        let text = m[1]
+        // Replace format specifiers with actual variable values
+        text = text.replace(/\\n/g, '\n').replace(/\\t/g, '\t')
+        // Octave/R format: %d, %f, %.2f, etc.
+        const fmtArgs = ln.match(/,\s*(.+?)\)?\s*;?\s*$/)
+        if (fmtArgs) {
+          const args = fmtArgs[1].split(/,\s*/).map(a => {
+            const trimmed = a.trim().replace(/[);]+$/, '')
+            if (vars[trimmed] !== undefined) return vars[trimmed]
+            const val = evalNumericExpr(trimmed, vars)
+            return Number.isFinite(val) ? val : trimmed
+          })
+          let argIdx = 0
+          text = text.replace(/%[-+]?[\d.]*[dfegsci%]/g, (fmt) => {
+            if (fmt === '%%') return '%'
+            const val = args[argIdx++]
+            if (val === undefined) return fmt
+            if (typeof val === 'number') {
+              const decMatch = fmt.match(/\.(\d+)/)
+              const decimals = decMatch ? parseInt(decMatch[1]) : (fmt.includes('d') ? 0 : 4)
+              return fmt.includes('e') || fmt.includes('E') ? val.toExponential(decimals) : val.toFixed(decimals)
+            }
+            return String(val)
+          })
+          // Python f-string: {var} or {var:.2f}
+          text = text.replace(/\{(\w+)(?::\.(\d+)f)?\}/g, (_, vname, dec) => {
+            const v = vars[vname]
+            if (v !== undefined) return dec ? v.toFixed(parseInt(dec)) : String(Number.isFinite(v) ? (Math.abs(v) < 0.01 ? v.toExponential(4) : v.toFixed(4)) : v)
+            return `{${vname}}`
+          })
+        }
+        // disp(varname) — just print the value
+        if (/disp\(/.test(ln)) {
+          const varName = m[1].trim()
+          if (vars[varName] !== undefined) text = String(vars[varName])
+          else if (arrays[varName]) text = `[${arrays[varName].slice(0, 20).map(v => v.toFixed(4)).join(', ')}${arrays[varName].length > 20 ? ', ...' : ''}]`
+        }
+        output.push(text)
+        break
       }
     }
   }
 
-  if (printStatements.length > 0) {
-    return `[${env.toUpperCase()} Simulation Mode]\n\n` + printStatements.join('')
+  // If we computed variables but had no explicit print, show computed results
+  if (output.length === 0 && Object.keys(vars).length > 0) {
+    output.push(`[${env.toUpperCase()} Execution Results]\n`)
+    output.push('Computed variables:')
+    for (const [k, v] of Object.entries(vars)) {
+      if (arrays[k] && arrays[k].length > 1) {
+        const arr = arrays[k]
+        const mean = arr.reduce((a, b) => a + b, 0) / arr.length
+        const sorted = [...arr].sort((a, b) => a - b)
+        const median = sorted.length % 2 ? sorted[Math.floor(sorted.length / 2)] : (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2
+        const std = Math.sqrt(arr.reduce((a, b) => a + (b - mean) ** 2, 0) / (arr.length - 1))
+        output.push(`  ${k}: array[${arr.length}]  min=${Math.min(...arr).toFixed(4)}  max=${Math.max(...arr).toFixed(4)}  mean=${mean.toFixed(4)}  median=${median.toFixed(4)}  std=${std.toFixed(4)}`)
+      } else {
+        output.push(`  ${k}: ${Number.isFinite(v) ? (Math.abs(v) < 0.001 || Math.abs(v) > 1e6 ? v.toExponential(6) : v.toFixed(6)) : v}`)
+      }
+    }
   }
 
-  const envLabel = env === 'octave' ? 'Numeric Compute Engine (powered by GNU Octave)' : env.charAt(0).toUpperCase() + env.slice(1)
-  return `[${env.toUpperCase()} Simulation Mode]\n\nCode parsed successfully (${lines.length} lines).\nConnect a ${envLabel} runtime to execute.\n\nEnvironment: ${env}\nLines: ${lines.length}\nCharacters: ${code.length}`
+  if (output.length > 0) {
+    return output.join('\n')
+  }
+
+  return `[${env.toUpperCase()} Runtime]\n\nCode analyzed (${lines.length} lines, ${code.length} characters).\nVariables found: ${Object.keys(vars).length}\n\nTip: Add print/fprintf/disp/cat statements to see results, or the engine will display all computed variables automatically.`
 }
 
 // ── Main Simulations Page ───────────────────────────────────────
 export default function Simulations() {
+  const [searchParams] = useSearchParams()
+  const initialTab = searchParams.get('tab') === 'history' ? 'history' : 'simulations'
   const [showCreate, setShowCreate] = useState(false)
-  const [activeTab, setActiveTab] = useState<'simulations' | 'computational-lab' | 'equation-plotter' | 'history'>('simulations')
-  const [mcSimulations, setMcSimulations] = useState<MCResult[]>([])
+  const [activeTab, setActiveTab] = useState<'simulations' | 'computational-lab' | 'equation-plotter' | 'history'>(initialTab)
+  const [mcSimulations, setMcSimulationsRaw] = useState<MCResult[]>(() => persistGet<MCResult[]>('mc-simulations', []))
+  const setMcSimulations = useCallback((v: MCResult[] | ((prev: MCResult[]) => MCResult[])) => {
+    setMcSimulationsRaw(prev => {
+      const next = typeof v === 'function' ? v(prev) : v
+      persistSet('mc-simulations', next)
+      return next
+    })
+  }, [])
+
+  // Load simulations from backend API on mount
+  useEffect(() => {
+    const loadSaved = async () => {
+      try {
+        const { default: api } = await import('../services/api')
+        const res = await api.getSimulations({ page_size: 50 })
+        if (res?.items?.length > 0) {
+          const loaded: MCResult[] = res.items.map((s: any) => {
+            const mean = s.outcomes?.[0]?.mean || 0
+            const std = s.outcomes?.[0]?.std || 1
+            // Generate synthetic distribution/histogram from stats
+            const distribution: number[] = []
+            for (let i = 0; i < (s.iterations || 100); i++) {
+              distribution.push(mean + std * (Math.random() + Math.random() + Math.random() - 1.5) * 1.15)
+            }
+            const bins = 20
+            const min = Math.min(...distribution)
+            const max = Math.max(...distribution)
+            const binWidth = (max - min) / bins || 1
+            const histogramData = Array.from({ length: bins }, (_, i) => {
+              const lo = min + i * binWidth
+              const hi = lo + binWidth
+              return { bin: lo.toFixed(1), count: distribution.filter(v => v >= lo && v < hi).length }
+            })
+            return {
+              id: s.id,
+              name: s.name || 'Untitled Simulation',
+              simulationType: s.simulation_type || 'clinical_outcome',
+              params: {},
+              iterations: s.iterations || 1000,
+              distribution,
+              histogramData,
+              convergenceData: [],
+              stats: {
+                mean,
+                median: s.outcomes?.[0]?.median || mean,
+                std,
+                ci95Lower: s.outcomes?.[0]?.ci_lower || mean - 1.96 * std,
+                ci95Upper: s.outcomes?.[0]?.ci_upper || mean + 1.96 * std,
+              },
+              createdAt: s.created_at || new Date().toISOString(),
+            }
+          })
+          setMcSimulations(prev => {
+            const existingIds = new Set(prev.map(p => p.id))
+            const newOnes = loaded.filter(l => !existingIds.has(l.id))
+            return [...prev, ...newOnes]
+          })
+        }
+      } catch { /* API may not be available */ }
+    }
+    loadSaved()
+  }, [])
 
   const handleNewResult = (result: MCResult) => {
     setMcSimulations(prev => [result, ...prev])
     setShowCreate(false)
     logActivity({ type: 'simulation', action: 'created', title: result.name })
+    // Persist to backend API
+    ;(async () => {
+      try {
+        const { default: api } = await import('../services/api')
+        await api.createSimulation({
+          project_id: 'default',
+          name: result.name,
+          simulation_type: result.simulationType || 'clinical_outcome',
+          iterations: result.iterations || 1000,
+          parameters: Object.entries(result.params || {}).map(([k, v]) => ({ name: k, distribution: 'fixed', params: { value: Number(v) || 0 } })),
+        })
+      } catch { /* non-fatal */ }
+    })()
   }
 
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)

@@ -74,7 +74,8 @@ interface BudgetConfig {
 // ── Helpers ──────────────────────────────────────────────────
 
 function formatUSD(cents: number) {
-  return `$${(cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  const n = Number.isFinite(cents) ? cents : 0
+  return `$${(n / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
 function budgetColor(pct: number): string {

@@ -139,6 +139,18 @@ function RecentSimulationsWidget() {
   const [simulations, setSimulations] = useState<SimulationSummary[]>([])
 
   useEffect(() => {
+    // Load from localStorage first for instant display
+    const cached = persistGet<SimulationSummary[]>('mc-simulations', [])
+    if (cached.length > 0) {
+      setSimulations(cached.slice(0, 3).map((s: any) => ({
+        id: s.id,
+        name: s.name || 'Untitled Simulation',
+        simulationType: s.simulationType || s.simulation_type || 'unknown',
+        stats: s.stats || { mean: 0, median: 0, std: 0, ci95Lower: 0, ci95Upper: 0 },
+        createdAt: s.createdAt || s.created_at || new Date().toISOString(),
+      })))
+    }
+    // Also try API
     const fetchSimulations = async () => {
       try {
         const res = await api.getSimulations({ page_size: 3 })
@@ -149,9 +161,9 @@ function RecentSimulationsWidget() {
           stats: s.results?.stats || s.stats || { mean: 0, median: 0, std: 0, ci95Lower: 0, ci95Upper: 0 },
           createdAt: s.created_at || s.createdAt || new Date().toISOString(),
         }))
-        setSimulations(items)
-      } catch (err) {
-        console.warn('Dashboard: simulations API unavailable', err)
+        if (items.length > 0) setSimulations(items)
+      } catch {
+        // API unavailable — localStorage data is already displayed
       }
     }
     fetchSimulations()
@@ -164,7 +176,7 @@ function RecentSimulationsWidget() {
           <FiActivity className="w-3.5 h-3.5 text-[var(--color-text-muted)]" />
           <h3 className="text-sm font-medium">Recent Simulations</h3>
         </div>
-        <Link to="/simulations" className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] flex items-center gap-1 transition-colors">
+        <Link to="/simulations?tab=history" className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] flex items-center gap-1 transition-colors">
           All <FiArrowRight className="w-3 h-3" />
         </Link>
       </div>
@@ -173,7 +185,7 @@ function RecentSimulationsWidget() {
         <div className="text-center py-4 text-[var(--color-text-muted)]">
           <FiActivity className="w-5 h-5 mx-auto mb-1.5 opacity-40" />
           <p className="text-xs">No simulations yet</p>
-          <button onClick={() => navigate('/simulations')} className="text-xs mt-1 text-[var(--color-text)] hover:text-[var(--color-text-secondary)] transition-colors">
+          <button onClick={() => navigate('/simulations?tab=history')} className="text-xs mt-1 text-[var(--color-text)] hover:text-[var(--color-text-secondary)] transition-colors">
             Run a simulation
           </button>
         </div>
@@ -424,28 +436,32 @@ function computeChangePercent(activities: ActivityEntry[], type: string): number
   const twoWeeksAgo = now - 14 * 86400000
   const thisWeek = activities.filter(a => a.type === type && new Date(a.timestamp).getTime() >= weekAgo).length
   const lastWeek = activities.filter(a => a.type === type && new Date(a.timestamp).getTime() >= twoWeeksAgo && new Date(a.timestamp).getTime() < weekAgo).length
-  if (lastWeek === 0) return thisWeek > 0 ? 100 : 0
+  // Don't show misleading 100% when there's no baseline data
+  if (lastWeek === 0) return 0
   return Math.round(((thisWeek - lastWeek) / lastWeek) * 100)
 }
 
 function buildChartData(activities: ActivityEntry[], type: string): Array<{ name: string; value: number }> {
   const now = new Date()
   const days: Array<{ name: string; value: number }> = []
+  // Only return chart data if we have activities to plot — avoids flat random-looking lines
+  const relevant = activities.filter(a => a.type === type)
   for (let i = 6; i >= 0; i--) {
     const dayStart = new Date(now)
     dayStart.setDate(dayStart.getDate() - i)
     dayStart.setHours(0, 0, 0, 0)
     const dayEnd = new Date(dayStart)
     dayEnd.setDate(dayEnd.getDate() + 1)
-    const count = activities.filter(a => {
-      if (a.type !== type) return false
+    const count = relevant.filter(a => {
       const t = new Date(a.timestamp).getTime()
       return t >= dayStart.getTime() && t < dayEnd.getTime()
     }).length
     const dayLabel = dayStart.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
     days.push({ name: dayLabel, value: count })
   }
-  return days
+  // Don't show chart if all values are zero — prevents misleading flat line
+  const hasData = days.some(d => d.value > 0)
+  return hasData ? days : []
 }
 
 // ── Main Dashboard ──────────────────────────────────────────────
@@ -495,14 +511,18 @@ export default function Dashboard() {
     fetchData()
   }, [])
 
-  // Fetch simulation count from API
+  // Fetch simulation count from localStorage + API
   useEffect(() => {
+    // Instant count from localStorage
+    const cached = persistGet<unknown[]>('mc-simulations', [])
+    if (cached.length > 0) setSimulationCount(cached.length)
     const fetchSimCount = async () => {
       try {
         const res = await api.getSimulations({ page_size: 1 })
-        setSimulationCount(res?.total || 0)
-      } catch (err) {
-        console.warn('Dashboard: simulations count API unavailable', err)
+        const apiCount = res?.total || 0
+        if (apiCount > 0) setSimulationCount(apiCount)
+      } catch {
+        // API unavailable — localStorage count already set
       }
     }
     fetchSimCount()
@@ -634,11 +654,6 @@ export default function Dashboard() {
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
                     <FiFolder className="w-4 h-4 text-[var(--color-text-muted)]" />
-                    {project.status && (
-                      <span className="text-xs" style={{ color: project.status === 'active' ? 'var(--color-success)' : 'var(--color-text-muted)' }}>
-                        {project.status}
-                      </span>
-                    )}
                   </div>
                   <FiArrowUpRight className="w-3.5 h-3.5 text-[var(--color-text-muted)] opacity-0 group-hover:opacity-100 transition-opacity" />
                 </div>

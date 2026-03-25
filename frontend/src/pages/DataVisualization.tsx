@@ -17,6 +17,7 @@ import {
 import html2canvas from 'html2canvas'
 import * as XLSX from 'xlsx'
 import { persistGet, persistSet, formatDate } from '../utils/persistence'
+import Plot3D, { type Chart3DType } from '../components/Plot3D'
 
 // ─── Types ──────────────────────────────────────────────────────
 interface DataPoint {
@@ -42,6 +43,10 @@ type ChartType =
   | 'waterfall' | 'error_bar' | 'candlestick'
   | 'heatmap' | 'stem' | 'band'
   | 'polar_area'
+  | 'scatter_3d' | 'bubble_3d' | 'line_3d' | 'bar_3d'
+  | 'surface_3d' | 'wireframe_3d' | 'contour_3d' | 'trisurf_3d'
+  | 'quiver_3d' | 'isosurface_3d' | 'voxel_3d' | 'streamline_3d'
+  | 'slice_3d' | 'stem_3d' | 'waterfall_3d' | 'ribbon_3d' | 'pie_3d'
 
 interface ChartConfig {
   id: string
@@ -57,6 +62,7 @@ interface ChartOptions {
   colorPalette: string
   xLabel: string
   yLabel: string
+  zLabel?: string
   showGrid: boolean
   showLegend: boolean
   legendPosition: 'top' | 'bottom' | 'left' | 'right'
@@ -185,6 +191,23 @@ const CHART_TYPES: { value: ChartType; label: string; group: string }[] = [
   // Scatter
   { value: 'scatter', label: 'Scatter', group: 'Scatter / Bubble' },
   { value: 'bubble', label: 'Bubble', group: 'Scatter / Bubble' },
+  { value: 'scatter_3d' as ChartType, label: '3D Scatter', group: '3D Charts' },
+  { value: 'bubble_3d' as ChartType, label: '3D Bubble', group: '3D Charts' },
+  { value: 'line_3d' as ChartType, label: '3D Line', group: '3D Charts' },
+  { value: 'bar_3d' as ChartType, label: '3D Bar', group: '3D Charts' },
+  { value: 'surface_3d' as ChartType, label: '3D Surface', group: '3D Charts' },
+  { value: 'wireframe_3d' as ChartType, label: '3D Wireframe', group: '3D Charts' },
+  { value: 'contour_3d' as ChartType, label: '3D Contour', group: '3D Charts' },
+  { value: 'trisurf_3d' as ChartType, label: '3D Tri-Surface', group: '3D Charts' },
+  { value: 'quiver_3d' as ChartType, label: '3D Quiver (Vectors)', group: '3D Charts' },
+  { value: 'isosurface_3d' as ChartType, label: '3D Isosurface', group: '3D Charts' },
+  { value: 'voxel_3d' as ChartType, label: '3D Voxel', group: '3D Charts' },
+  { value: 'streamline_3d' as ChartType, label: '3D Streamline', group: '3D Charts' },
+  { value: 'slice_3d' as ChartType, label: '3D Slice', group: '3D Charts' },
+  { value: 'stem_3d' as ChartType, label: '3D Stem', group: '3D Charts' },
+  { value: 'waterfall_3d' as ChartType, label: '3D Waterfall', group: '3D Charts' },
+  { value: 'ribbon_3d' as ChartType, label: '3D Ribbon', group: '3D Charts' },
+  { value: 'pie_3d' as ChartType, label: '3D Pie', group: '3D Charts' },
   // Statistical
   { value: 'histogram', label: 'Histogram', group: 'Statistical' },
   { value: 'box_plot', label: 'Box Plot', group: 'Statistical' },
@@ -834,6 +857,37 @@ export default function DataVisualization() {
             </ScatterChart>
           </ResponsiveContainer>
         )
+
+      case 'scatter_3d': case 'bubble_3d': case 'line_3d': case 'bar_3d':
+      case 'surface_3d': case 'wireframe_3d': case 'contour_3d': case 'trisurf_3d':
+      case 'quiver_3d': case 'isosurface_3d': case 'voxel_3d': case 'streamline_3d':
+      case 'slice_3d': case 'stem_3d': case 'waterfall_3d': case 'ribbon_3d':
+      case 'pie_3d': {
+        const points3d = data.map(d => ({
+          x: d.value,
+          y: d.value2 ?? d.value * 0.8,
+          z: d.value3 ?? d.value * 0.5,
+          label: d.label,
+          category: d.category,
+          size: d.size,
+        }))
+        return (
+          <Plot3D
+            data={points3d}
+            chartType={type as Chart3DType}
+            title=""
+            xLabel={o.xLabel || 'X'}
+            yLabel={o.yLabel || 'Y'}
+            zLabel={o.zLabel || 'Z'}
+            height={height}
+            colorScheme={data.some(d => d.category) ? 'categorical' : 'viridis'}
+            pointSize={o.markerSize || 3}
+            surfaceFunction={type.includes('surface') || type === 'wireframe_3d' || type === 'contour_3d'
+              ? (x: number, y: number) => Math.sin(x * 2) * Math.cos(y * 2) * 1.5
+              : undefined}
+          />
+        )
+      }
 
       // ── STATISTICAL ─────────────────────────────────────────
       case 'histogram': {
