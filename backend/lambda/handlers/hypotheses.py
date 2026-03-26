@@ -7,6 +7,7 @@ print("[HYPOTHESES] Module loading...")
 
 import json
 import logging
+import math
 import os
 import traceback
 from datetime import datetime
@@ -109,7 +110,11 @@ HYPOTHESES_TABLE = os.environ.get("HYPOTHESES_TABLE", "genup-dev-hypotheses")
 class DecimalEncoder(json.JSONEncoder):
     def default(self, o):
         if isinstance(o, Decimal):
-            return float(o) if o % 1 else int(o)
+            f = float(o)
+            # Guard against NaN/Infinity from corrupted data
+            if not math.isfinite(f):
+                return 0.0
+            return f if o % 1 else int(o)
         return super().default(o)
 
 
@@ -220,9 +225,13 @@ def update_hypothesis(hypothesis_id: str):
 
     for field in ["confidence_score", "novelty_score"]:
         if field in body:
+            val = body[field]
+            # Guard against NaN/Infinity values
+            if val is None or (isinstance(val, float) and not math.isfinite(val)):
+                val = 0.0
             update_parts.append(f"#{field} = :{field}")
             expr_names[f"#{field}"] = field
-            expr_values[f":{field}"] = Decimal(str(body[field]))
+            expr_values[f":{field}"] = Decimal(str(val))
 
     response = table.update_item(
         Key={"id": hypothesis_id},

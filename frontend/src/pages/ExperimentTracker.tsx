@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react'
-import { formatDate, formatDateTime } from '../utils/persistence'
+import { formatDate, formatDateTime, usePersistentState, logActivity } from '../utils/persistence'
 import {
   FiClipboard,
   FiPlus,
@@ -39,7 +39,7 @@ const STATUS_CONFIG = {
 }
 
 export default function ExperimentTracker() {
-  const [experiments, setExperiments] = useState<Experiment[]>([])
+  const [experiments, setExperiments] = usePersistentState<Experiment[]>('experiments', [])
   const [selected, setSelected] = useState<Experiment | null>(null)
   const [showAdd, setShowAdd] = useState(false)
   const [filterStatus, setFilterStatus] = useState('')
@@ -48,14 +48,15 @@ export default function ExperimentTracker() {
 
   const save = useCallback((updated: Experiment[]) => {
     setExperiments(updated)
-  }, [])
+  }, [setExperiments])
 
   const [form, setForm] = useState({ title: '', hypothesis: '', tags: '' })
 
   const addExperiment = () => {
     if (!form.title.trim()) return
+    const now = new Date().toISOString()
     const exp: Experiment = {
-      id: `exp-${Date.now()}`,
+      id: `exp-${crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`}`,
       title: form.title,
       hypothesis: form.hypothesis,
       status: 'planned',
@@ -65,10 +66,11 @@ export default function ExperimentTracker() {
       results: '',
       conclusion: '',
       tags: form.tags.split(',').map(t => t.trim()).filter(Boolean),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      createdAt: now,
+      updatedAt: now,
     }
     save([exp, ...experiments])
+    logActivity({ type: 'project', action: 'created', title: exp.title })
     setForm({ title: '', hypothesis: '', tags: '' })
     setShowAdd(false)
     setSelected(exp)

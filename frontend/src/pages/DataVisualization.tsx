@@ -17,7 +17,7 @@ import {
 import html2canvas from 'html2canvas'
 import * as XLSX from 'xlsx'
 import { persistGet, persistSet, formatDate } from '../utils/persistence'
-import Plot3D, { type Chart3DType } from '../components/Plot3D'
+import PlotlyPlot3D, { type Chart3DType } from '../components/PlotlyPlot3D'
 
 // ─── Types ──────────────────────────────────────────────────────
 interface DataPoint {
@@ -872,7 +872,7 @@ export default function DataVisualization() {
           size: d.size,
         }))
         return (
-          <Plot3D
+          <PlotlyPlot3D
             data={points3d}
             chartType={type as Chart3DType}
             title=""
@@ -1181,7 +1181,7 @@ export default function DataVisualization() {
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Data Visualization</h1>
             <p className="text-sm text-[var(--color-text-muted)] mt-1">
-              {charts.length} chart{charts.length !== 1 ? 's' : ''} — 29 chart types, CSV/XLSX import, full customization, PNG/SVG/CSV export
+              {charts.length} chart{charts.length !== 1 ? 's' : ''} — {CHART_TYPES.length} chart types (2D + 3D), CSV/XLSX import, full customization, PNG/SVG/CSV export
             </p>
           </div>
           <input ref={fileInputRef} type="file" accept=".csv,.tsv,.txt,.xlsx,.xls" onChange={handleFileUpload} className="hidden" />

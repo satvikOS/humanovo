@@ -289,7 +289,7 @@ export default function Agents() {
             title: h.title || h.statement || '',
             description: h.description || h.mechanism || '',
             mechanism: h.mechanism || '',
-            confidence: h.confidence ?? h.confidence_score ?? 0.5,
+            confidence: Number.isFinite(h.confidence) ? h.confidence : Number.isFinite(h.confidence_score) ? h.confidence_score : 0.5,
             validated: h.validated || h.status === 'validated',
             novelty_score: h.novelty_score,
             evidence_summary: h.evidence_summary || [],

@@ -14,7 +14,7 @@ import {
   FiChevronRight,
   FiCpu,
 } from 'react-icons/fi'
-import { AreaChart, Area, ResponsiveContainer, Tooltip } from 'recharts'
+// recharts not used in dashboard
 import api from '../services/api'
 import type { Project } from '../services/api'
 import { persistGet, getActivityLog, type ActivityEntry } from '../utils/persistence'
@@ -28,7 +28,6 @@ interface StatData {
   icon: typeof FiFolder
   accentColor: string
   href: string
-  chartData?: Array<{ name: string; value: number }>
 }
 
 function StatCard({ stat }: { stat: StatData }) {
@@ -38,9 +37,7 @@ function StatCard({ stat }: { stat: StatData }) {
       className="glass-card p-5 text-left transition-all duration-300 hover:bg-[var(--glass-bg-hover)] group block"
     >
       <div className="flex items-start justify-between mb-3">
-        <div className={`p-2 rounded-lg`} style={{ background: `${stat.accentColor}12` }}>
-          <stat.icon className="w-4 h-4" style={{ color: stat.accentColor }} />
-        </div>
+        <stat.icon className="w-5 h-5" style={{ color: stat.accentColor }} />
         {stat.change !== undefined && stat.change !== 0 && (
           <span className="flex items-center gap-0.5 text-xs" style={{ color: stat.change > 0 ? 'var(--color-success)' : 'var(--color-error)' }}>
             {stat.change > 0 ? <FiArrowUpRight className="w-3 h-3" /> : <FiArrowDownRight className="w-3 h-3" />}
@@ -50,44 +47,6 @@ function StatCard({ stat }: { stat: StatData }) {
       </div>
       <div className="text-3xl font-semibold tracking-tight mb-1">{stat.value}</div>
       <div className="text-sm text-[var(--color-text-muted)]">{stat.label}</div>
-
-      {stat.chartData && stat.chartData.length > 0 && (
-        <div className="mt-3 h-0 group-hover:h-16 overflow-visible transition-all duration-300 ease-in-out opacity-0 group-hover:opacity-100">
-          <ResponsiveContainer width="100%" height={64}>
-            <AreaChart data={stat.chartData} margin={{ top: 2, right: 4, bottom: 8, left: 4 }}>
-              <defs>
-                <linearGradient id={`grad-${stat.label}`} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor={stat.accentColor} stopOpacity={0.2} />
-                  <stop offset="95%" stopColor={stat.accentColor} stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: 'rgba(17, 17, 17, 0.95)',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
-                  borderRadius: '8px',
-                  padding: '6px 10px',
-                  fontSize: '11px',
-                  color: '#fff',
-                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.4)',
-                }}
-                itemStyle={{ color: '#fff', fontSize: '11px' }}
-                labelStyle={{ color: 'rgba(255, 255, 255, 0.6)', fontSize: '10px', marginBottom: '2px' }}
-                cursor={{ stroke: stat.accentColor, strokeWidth: 1, strokeDasharray: '3 3' }}
-                formatter={(value: any) => [value ?? 0, 'Count']}
-              />
-              <Area
-                type="monotone"
-                dataKey="value"
-                stroke={stat.accentColor}
-                fill={`url(#grad-${stat.label})`}
-                strokeWidth={1.5}
-                isAnimationActive={false}
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-      )}
 
       <div className="flex items-center gap-1 mt-2 text-xs text-[var(--color-text-muted)] opacity-0 group-hover:opacity-100 transition-opacity">
         View details <FiChevronRight className="w-3 h-3" />
@@ -199,9 +158,7 @@ function RecentSimulationsWidget() {
                 onClick={() => navigate('/simulations')}
                 className="w-full text-left flex items-center gap-2.5 py-2.5 border-b border-[var(--color-border)] last:border-0 hover:bg-[var(--glass-bg)] rounded-lg px-2 transition-all"
               >
-                <div className="p-1 rounded-md flex-shrink-0" style={{ background: `${color}12` }}>
-                  <FiActivity className="w-3 h-3" style={{ color }} />
-                </div>
+                <FiActivity className="w-3.5 h-3.5 flex-shrink-0" style={{ color }} />
                 <div className="flex-1 min-w-0">
                   <div className="text-xs font-medium truncate">{sim.name}</div>
                   <div className="flex items-center gap-1.5 mt-0.5">
@@ -401,9 +358,7 @@ function ActivityFeed() {
             const color = typeColors[activity.type] || 'var(--color-text-muted)'
             return (
               <div key={activity.id} className="flex items-start gap-3 py-3 border-b border-[var(--color-border)] last:border-0 group">
-                <div className="p-1.5 rounded-lg flex-shrink-0" style={{ background: `${color}12` }}>
-                  <Icon className="w-3.5 h-3.5" style={{ color }} />
-                </div>
+                <Icon className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" style={{ color }} />
                 <div className="flex-1 min-w-0">
                   <div className="text-sm truncate">{activity.title}</div>
                   <div className="flex items-center gap-2 mt-0.5">
@@ -441,28 +396,6 @@ function computeChangePercent(activities: ActivityEntry[], type: string): number
   return Math.round(((thisWeek - lastWeek) / lastWeek) * 100)
 }
 
-function buildChartData(activities: ActivityEntry[], type: string): Array<{ name: string; value: number }> {
-  const now = new Date()
-  const days: Array<{ name: string; value: number }> = []
-  // Only return chart data if we have activities to plot — avoids flat random-looking lines
-  const relevant = activities.filter(a => a.type === type)
-  for (let i = 6; i >= 0; i--) {
-    const dayStart = new Date(now)
-    dayStart.setDate(dayStart.getDate() - i)
-    dayStart.setHours(0, 0, 0, 0)
-    const dayEnd = new Date(dayStart)
-    dayEnd.setDate(dayEnd.getDate() + 1)
-    const count = relevant.filter(a => {
-      const t = new Date(a.timestamp).getTime()
-      return t >= dayStart.getTime() && t < dayEnd.getTime()
-    }).length
-    const dayLabel = dayStart.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
-    days.push({ name: dayLabel, value: count })
-  }
-  // Don't show chart if all values are zero — prevents misleading flat line
-  const hasData = days.some(d => d.value > 0)
-  return hasData ? days : []
-}
 
 // ── Main Dashboard ──────────────────────────────────────────────
 
@@ -547,25 +480,21 @@ export default function Dashboard() {
       label: 'Active Projects', value: totalProjects,
       change: computeChangePercent(allActivities, 'project'),
       icon: FiFolder, accentColor: '#a1a1a1', href: '/projects',
-      chartData: buildChartData(allActivities, 'project'),
     },
     {
       label: 'Hypotheses', value: totalHypotheses,
       change: computeChangePercent(allActivities, 'hypothesis'),
       icon: FiZap, accentColor: '#a855f7', href: '/agents',
-      chartData: buildChartData(allActivities, 'hypothesis'),
     },
     {
       label: 'Research Papers', value: totalPapers,
       change: computeChangePercent(allActivities, 'evidence'),
       icon: FiFileText, accentColor: '#22c55e', href: '/projects',
-      chartData: buildChartData(allActivities, 'evidence'),
     },
     {
       label: 'Simulations', value: simulationCount,
       change: computeChangePercent(allActivities, 'simulation'),
       icon: FiActivity, accentColor: '#3b82f6', href: '/simulations',
-      chartData: buildChartData(allActivities, 'simulation'),
     },
   ]
 

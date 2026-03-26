@@ -1,6 +1,6 @@
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
-import { formatDateTime } from '../utils/persistence'
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { formatDateTime, persistGet, getActivityLog } from '../utils/persistence'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import {
   FiHome,
@@ -167,15 +167,107 @@ function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
     { label: 'Open Settings', icon: FiSettings, category: 'Actions', action: () => { navigate('/settings'); onClose() } },
   ]
 
+  // Build data search results from local storage when user types a query
+  const dataResults = useMemo<CommandAction[]>(() => {
+    if (!query || query.length < 2) return []
+    const lq = query.toLowerCase()
+    const results: CommandAction[] = []
+
+    // Search activity log
+    const activities = getActivityLog()
+    const seen = new Set<string>()
+    for (const a of activities) {
+      if (seen.has(a.title)) continue
+      if (a.title?.toLowerCase().includes(lq) || a.project?.toLowerCase().includes(lq)) {
+        seen.add(a.title)
+        const typeIcon = a.type === 'hypothesis' ? FiZap : a.type === 'simulation' ? FiTrendingUp : a.type === 'evidence' ? FiDatabase : a.type === 'notebook' ? FiBook : FiFolder
+        results.push({
+          label: a.title,
+          icon: typeIcon,
+          description: `${a.type} · ${a.action}${a.project ? ` · ${a.project}` : ''}`,
+          category: 'Results',
+          action: () => {
+            if (a.type === 'project') navigate(`/projects`)
+            else if (a.type === 'hypothesis') navigate(`/agents`)
+            else if (a.type === 'notebook') navigate(`/notebook`)
+            else if (a.type === 'simulation') navigate(`/simulations`)
+            else navigate(`/search?q=${encodeURIComponent(a.title)}`)
+            onClose()
+          },
+        })
+      }
+      if (results.length >= 5) break
+    }
+
+    // Search MC simulations
+    const mcSims = persistGet<any[]>('mc-simulations', [])
+    for (const s of mcSims) {
+      if (results.length >= 8) break
+      if (s.name?.toLowerCase().includes(lq) || s.simulationType?.toLowerCase().includes(lq)) {
+        results.push({
+          label: s.name || 'Untitled Simulation',
+          icon: FiTrendingUp,
+          description: `Monte Carlo · ${s.simulationType}`,
+          category: 'Results',
+          action: () => { navigate('/simulations?tab=history'); onClose() },
+        })
+      }
+    }
+
+    // Search notebook pages
+    const notebooks = persistGet<any[]>('notebook-index', [])
+    for (const n of notebooks) {
+      if (results.length >= 10) break
+      if (n.title?.toLowerCase().includes(lq) || n.tags?.some((t: string) => t.toLowerCase().includes(lq))) {
+        results.push({
+          label: n.title || 'Untitled Page',
+          icon: FiBook,
+          description: `Notebook · ${n.tags?.join(', ') || ''}`,
+          category: 'Results',
+          action: () => { navigate(`/notebook?page=${n.id}`); onClose() },
+        })
+      }
+    }
+
+    // Search experiments
+    const experiments = persistGet<any[]>('experiments', [])
+    for (const e of experiments) {
+      if (results.length >= 12) break
+      if (e.title?.toLowerCase().includes(lq) || e.hypothesis?.toLowerCase().includes(lq)) {
+        results.push({
+          label: e.title,
+          icon: FiClipboard,
+          description: `Experiment · ${e.status}`,
+          category: 'Results',
+          action: () => { navigate('/experiments'); onClose() },
+        })
+      }
+    }
+
+    return results
+  }, [query, navigate, onClose])
+
   const filtered = query
     ? actions.filter(a => a.label.toLowerCase().includes(query.toLowerCase()) || a.description?.toLowerCase().includes(query.toLowerCase()))
     : actions
 
-  const categories = [...new Set(filtered.map(a => a.category))]
+  // Combine navigation + data results
+  const allItems = [...filtered, ...dataResults]
+  const categories = [...new Set(allItems.map(a => a.category))]
+
+  // If query is long enough and no data results, offer to do a full search
+  const showFullSearchOption = query.length >= 2
 
   useEffect(() => {
     if (isOpen) setQuery('')
   }, [isOpen])
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && query.trim().length >= 2) {
+      navigate(`/search?q=${encodeURIComponent(query.trim())}`)
+      onClose()
+    }
+  }
 
   if (!isOpen) return null
 
@@ -189,6 +281,7 @@ function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
             type="text"
             value={query}
             onChange={e => setQuery(e.target.value)}
+            onKeyDown={handleKeyDown}
             placeholder="Type a command or search..."
             className="flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--color-text-muted)]"
             autoFocus
@@ -196,12 +289,25 @@ function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
           <kbd className="px-1.5 py-0.5 text-xxs text-[var(--color-text-muted)] bg-[var(--glass-bg)] rounded border border-[var(--color-border)]">ESC</kbd>
         </div>
         <div className="max-h-[320px] overflow-y-auto p-2">
+          {showFullSearchOption && (
+            <button
+              onClick={() => { navigate(`/search?q=${encodeURIComponent(query.trim())}`); onClose() }}
+              className="flex items-center gap-3 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--glass-bg-hover)] transition-all group mb-1"
+            >
+              <FiSearch className="w-4 h-4 text-[var(--color-accent-purple)] group-hover:text-[var(--color-text)]" />
+              <div className="flex-1 text-left">
+                <span className="text-[var(--color-text-secondary)] group-hover:text-[var(--color-text)]">Search for "{query}"</span>
+                <span className="block text-xs text-[var(--color-text-muted)]">Full search across all platform data</span>
+              </div>
+              <span className="text-xxs text-[var(--color-text-muted)]">Enter</span>
+            </button>
+          )}
           {categories.map(cat => (
             <div key={cat}>
               <div className="text-xxs text-[var(--color-text-muted)] px-2 py-1.5 uppercase tracking-wider font-medium">{cat}</div>
-              {filtered.filter(a => a.category === cat).map(item => (
+              {allItems.filter(a => a.category === cat).map((item, idx) => (
                 <button
-                  key={item.label}
+                  key={`${item.label}-${idx}`}
                   onClick={item.action}
                   className="flex items-center gap-3 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--glass-bg-hover)] transition-all group"
                 >
@@ -217,7 +323,7 @@ function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
               ))}
             </div>
           ))}
-          {filtered.length === 0 && (
+          {allItems.length === 0 && !showFullSearchOption && (
             <div className="text-center py-8 text-sm text-[var(--color-text-muted)]">No results found</div>
           )}
         </div>

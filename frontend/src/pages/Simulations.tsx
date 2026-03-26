@@ -403,8 +403,8 @@ const MC_RUNNERS: Record<string, (p: MCParams) => number> = {
   drug_interaction: mcDrugInteraction,
 }
 
-// Ephemeral storage for simulation history (no localStorage)
-// MC simulations, equation plots, and computational runs are kept in component state only
+// Persistent storage for simulation history (localStorage)
+// MC simulations, equation plots, and computational runs persist across sessions
 
 interface EqHistoryEntry { id: string; expr: string; xMin: number; xMax: number; createdAt: string }
 interface CompHistoryEntry { id: string; env: string; template: string; code: string; output: string; createdAt: string }

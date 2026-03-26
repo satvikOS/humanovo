@@ -376,12 +376,13 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 function ScorePill({ label, score }: { label: string; score: number | null }) {
-  const color = score == null ? '#6b7280' : score >= 0.8 ? '#22c55e' : score >= 0.5 ? '#eab308' : '#ef4444'
+  const valid = score != null && Number.isFinite(score)
+  const color = !valid ? '#6b7280' : score >= 0.8 ? '#22c55e' : score >= 0.5 ? '#eab308' : '#ef4444'
   return (
     <div className="flex items-center gap-1.5 text-xs">
       <span style={{ color: 'var(--color-text-muted)' }}>{label}</span>
       <span className="font-mono font-medium px-1.5 py-0.5 rounded" style={{ background: `${color}20`, color }}>
-        {score != null ? `${(score * 100).toFixed(0)}%` : 'N/A'}
+        {valid ? `${(score * 100).toFixed(0)}%` : 'N/A'}
       </span>
     </div>
   )
