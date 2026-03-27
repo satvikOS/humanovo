@@ -94,7 +94,7 @@ export default function PlotlyPlot3D({
     const uniqueCats = [...new Set(categories.filter(Boolean))]
     const hasCats = uniqueCats.length > 1
 
-    const buildTraces = (): Plotly.Data[] => {
+    const buildTraces = (): any[] => {
       switch (chartType) {
         case 'scatter_3d': {
           if (hasCats) {
@@ -144,7 +144,7 @@ export default function PlotlyPlot3D({
 
         case 'bar_3d': {
           // Plotly doesn't have native 3D bars — simulate with mesh3d or use scatter3d with wide markers
-          const traces: Plotly.Data[] = []
+          const traces: any[] = []
           for (let i = 0; i < data.length; i++) {
             const d = data[i]
             traces.push({
@@ -237,7 +237,7 @@ export default function PlotlyPlot3D({
         }
 
         case 'stem_3d': {
-          const traces: Plotly.Data[] = []
+          const traces: any[] = []
           // Stems (vertical lines from z=0)
           for (const d of data.slice(0, 100)) {
             traces.push({
@@ -285,7 +285,7 @@ export default function PlotlyPlot3D({
     }
 
     const is2D = chartType === 'pie_3d'
-    const baseLayout: Partial<Plotly.Layout> = {
+    const baseLayout: Record<string, any> = {
       title: title ? { text: title, font: { color: '#e5e5e5', size: 14 } } : undefined,
       paper_bgcolor: 'rgba(0,0,0,0)',
       plot_bgcolor: 'rgba(0,0,0,0)',
