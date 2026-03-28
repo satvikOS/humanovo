@@ -399,14 +399,19 @@ export default function Dashboard() {
 
   // Fetch simulation count from localStorage + API
   useEffect(() => {
-    // Instant count from localStorage
-    const cached = persistGet<unknown[]>('mc-simulations', [])
-    if (cached.length > 0) setSimulationCount(cached.length)
+    // Count from localStorage — MC sims + equation plots + computational runs
+    const mcSims = persistGet<unknown[]>('mc-simulations', [])
+    const eqHistory = persistGet<unknown[]>('eq-history', [])
+    const compHistory = persistGet<unknown[]>('comp-history', [])
+    const localCount = mcSims.length + eqHistory.length + compHistory.length
+    setSimulationCount(localCount)
+
     const fetchSimCount = async () => {
       try {
         const res = await api.getSimulations({ page_size: 1 })
         const apiCount = res?.total || 0
-        if (apiCount > 0) setSimulationCount(apiCount)
+        // Use whichever is higher — API may have extra, or local may have unsynced
+        if (apiCount > localCount) setSimulationCount(apiCount)
       } catch {
         // API unavailable — localStorage count already set
       }
@@ -432,7 +437,7 @@ export default function Dashboard() {
     { label: 'Active Projects', value: totalProjects, icon: FiFolder, accentColor: '#a1a1a1', href: '/projects' },
     { label: 'Hypotheses', value: totalHypotheses, icon: FiZap, accentColor: '#a855f7', href: '/agents' },
     { label: 'Research Papers', value: totalPapers, icon: FiFileText, accentColor: '#22c55e', href: '/projects' },
-    { label: 'Simulations', value: simulationCount, icon: FiActivity, accentColor: '#3b82f6', href: '/simulations' },
+    { label: 'Simulations', value: simulationCount, icon: FiActivity, accentColor: '#3b82f6', href: '/simulations?tab=history' },
   ]
 
   const quickActions = [
