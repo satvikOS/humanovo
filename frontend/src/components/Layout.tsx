@@ -272,23 +272,23 @@ function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[20vh] animate-fade-in">
+    <div className="fixed inset-0 z-50 flex items-center justify-center animate-fade-in">
       <div className="absolute inset-0 modal-overlay" onClick={onClose} />
-      <div className="relative w-full max-w-xl glass-card-static overflow-hidden animate-scale-in" style={{ background: 'var(--color-surface-solid)', boxShadow: 'var(--glass-shadow)' }}>
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-[var(--color-border)]">
-          <FiSearch className="w-4 h-4 text-[var(--color-text-muted)]" />
+      <div className="relative w-full max-w-2xl mx-4 glass-card-static overflow-hidden animate-scale-in" style={{ background: 'var(--color-surface-solid)', boxShadow: 'var(--glass-shadow)' }}>
+        <div className="flex items-center gap-3 px-5 py-4 border-b border-[var(--color-border)]">
+          <FiSearch className="w-5 h-5 text-[var(--color-text-muted)]" />
           <input
             type="text"
             value={query}
             onChange={e => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Type a command or search..."
-            className="flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--color-text-muted)]"
+            className="flex-1 bg-transparent text-base outline-none placeholder:text-[var(--color-text-muted)]"
             autoFocus
           />
           <kbd className="px-1.5 py-0.5 text-xxs text-[var(--color-text-muted)] bg-[var(--glass-bg)] rounded border border-[var(--color-border)]">ESC</kbd>
         </div>
-        <div className="max-h-[320px] overflow-y-auto p-2">
+        <div className="max-h-[60vh] overflow-y-auto p-3">
           {showFullSearchOption && (
             <button
               onClick={() => { navigate(`/search?q=${encodeURIComponent(query.trim())}`); onClose() }}

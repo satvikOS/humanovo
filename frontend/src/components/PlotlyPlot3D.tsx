@@ -290,7 +290,7 @@ export default function PlotlyPlot3D({
       paper_bgcolor: 'rgba(0,0,0,0)',
       plot_bgcolor: 'rgba(0,0,0,0)',
       font: { color: '#a1a1aa', size: 11 },
-      margin: { l: 40, r: 20, t: title ? 40 : 20, b: 40 },
+      margin: { l: 20, r: 10, t: title ? 35 : 10, b: 20 },
       height,
       showlegend: hasCats || chartType === 'pie_3d',
       legend: { font: { color: '#a1a1aa' }, bgcolor: 'rgba(0,0,0,0)' },
@@ -310,24 +310,50 @@ export default function PlotlyPlot3D({
 
   return (
     <div style={{ width: '100%', height }}>
-      <Plot
-        data={traces}
-        layout={layout as any}
-        config={{
-          responsive: true,
-          displayModeBar: true,
-          modeBarButtonsToAdd: ['toImage'],
-          toImageButtonOptions: {
-            format: 'svg',
-            filename: title || '3d-visualization',
-            width: 1200,
-            height: 800,
-          },
-          displaylogo: false,
-        }}
-        style={{ width: '100%', height: '100%' }}
-        useResizeHandler
-      />
+      {/* Hide modebar when printing or copy-pasting into documents */}
+      <style>{`
+        @media print {
+          .plotly-plot3d-wrapper .modebar-container { display: none !important; }
+        }
+        .plotly-plot3d-wrapper .modebar-container {
+          background: transparent !important;
+        }
+        .plotly-plot3d-wrapper .modebar-btn {
+          font-size: 14px !important;
+        }
+        .plotly-plot3d-wrapper .modebar-group {
+          padding: 0 2px !important;
+        }
+      `}</style>
+      <div className="plotly-plot3d-wrapper" style={{ width: '100%', height: '100%' }}>
+        <Plot
+          data={traces}
+          layout={layout as any}
+          config={{
+            responsive: true,
+            displayModeBar: 'hover',
+            modeBarButtonsToRemove: [
+              'resetCameraLastSave3d',
+              'hoverClosest3d',
+              'tableRotation',
+              'orbitRotation',
+              'pan3d',
+              'sendDataToCloud',
+              'toggleSpikelines',
+              'resetViewMapbox',
+            ],
+            toImageButtonOptions: {
+              format: 'svg',
+              filename: title || '3d-visualization',
+              width: 1200,
+              height: 800,
+            },
+            displaylogo: false,
+          }}
+          style={{ width: '100%', height: '100%' }}
+          useResizeHandler
+        />
+      </div>
     </div>
   )
 }

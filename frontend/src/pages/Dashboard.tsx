@@ -7,8 +7,6 @@ import {
   FiFileText,
   FiClock,
   FiArrowRight,
-  FiArrowUpRight,
-  FiArrowDownRight,
   FiSearch,
   FiBook,
   FiChevronRight,
@@ -24,7 +22,6 @@ import { persistGet, getActivityLog, type ActivityEntry } from '../utils/persist
 interface StatData {
   label: string
   value: number
-  change?: number
   icon: typeof FiFolder
   accentColor: string
   href: string
@@ -36,14 +33,8 @@ function StatCard({ stat }: { stat: StatData }) {
       to={stat.href}
       className="glass-card p-5 text-left transition-all duration-300 hover:bg-[var(--glass-bg-hover)] group block"
     >
-      <div className="flex items-start justify-between mb-3">
+      <div className="mb-3">
         <stat.icon className="w-5 h-5" style={{ color: stat.accentColor }} />
-        {stat.change !== undefined && stat.change !== 0 && (
-          <span className="flex items-center gap-0.5 text-xs" style={{ color: stat.change > 0 ? 'var(--color-success)' : 'var(--color-error)' }}>
-            {stat.change > 0 ? <FiArrowUpRight className="w-3 h-3" /> : <FiArrowDownRight className="w-3 h-3" />}
-            {Math.abs(stat.change)}%
-          </span>
-        )}
       </div>
       <div className="text-3xl font-semibold tracking-tight mb-1">{stat.value}</div>
       <div className="text-sm text-[var(--color-text-muted)]">{stat.label}</div>
@@ -383,20 +374,6 @@ function ActivityFeed() {
   )
 }
 
-// ── Helpers for real stats ──────────────────────────────────────
-
-function computeChangePercent(activities: ActivityEntry[], type: string): number {
-  const now = Date.now()
-  const weekAgo = now - 7 * 86400000
-  const twoWeeksAgo = now - 14 * 86400000
-  const thisWeek = activities.filter(a => a.type === type && new Date(a.timestamp).getTime() >= weekAgo).length
-  const lastWeek = activities.filter(a => a.type === type && new Date(a.timestamp).getTime() >= twoWeeksAgo && new Date(a.timestamp).getTime() < weekAgo).length
-  // Don't show misleading 100% when there's no baseline data
-  if (lastWeek === 0) return 0
-  return Math.round(((thisWeek - lastWeek) / lastWeek) * 100)
-}
-
-
 // ── Main Dashboard ──────────────────────────────────────────────
 
 export default function Dashboard() {
@@ -476,26 +453,10 @@ export default function Dashboard() {
   }, [projects])
 
   const stats: StatData[] = [
-    {
-      label: 'Active Projects', value: totalProjects,
-      change: computeChangePercent(allActivities, 'project'),
-      icon: FiFolder, accentColor: '#a1a1a1', href: '/projects',
-    },
-    {
-      label: 'Hypotheses', value: totalHypotheses,
-      change: computeChangePercent(allActivities, 'hypothesis'),
-      icon: FiZap, accentColor: '#a855f7', href: '/agents',
-    },
-    {
-      label: 'Research Papers', value: totalPapers,
-      change: computeChangePercent(allActivities, 'evidence'),
-      icon: FiFileText, accentColor: '#22c55e', href: '/projects',
-    },
-    {
-      label: 'Simulations', value: simulationCount,
-      change: computeChangePercent(allActivities, 'simulation'),
-      icon: FiActivity, accentColor: '#3b82f6', href: '/simulations',
-    },
+    { label: 'Active Projects', value: totalProjects, icon: FiFolder, accentColor: '#a1a1a1', href: '/projects' },
+    { label: 'Hypotheses', value: totalHypotheses, icon: FiZap, accentColor: '#a855f7', href: '/agents' },
+    { label: 'Research Papers', value: totalPapers, icon: FiFileText, accentColor: '#22c55e', href: '/projects' },
+    { label: 'Simulations', value: simulationCount, icon: FiActivity, accentColor: '#3b82f6', href: '/simulations' },
   ]
 
   const quickActions = [

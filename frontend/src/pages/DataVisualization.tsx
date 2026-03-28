@@ -219,6 +219,89 @@ const CHART_TYPES: { value: ChartType; label: string; group: string }[] = [
   { value: 'treemap', label: 'Treemap', group: 'Other' },
 ]
 
+// ── Sample Data Templates per Chart Type ──────────────────────────
+// Each chart type has a pre-built sample dataset so users can see it immediately
+const SAMPLE_DATA: Record<string, { data: string; title: string; columns: string }> = {
+  bar: { title: 'Drug Response Rates', columns: 'label, value', data: 'Aspirin, 78\nIbuprofen, 65\nAcetaminophen, 72\nNaproxen, 58\nDiclofenac, 63' },
+  horizontal_bar: { title: 'Gene Expression Levels', columns: 'label, value', data: 'BRCA1, 4.2\nTP53, 3.8\nEGFR, 5.1\nMYC, 2.9\nPIK3CA, 3.5\nKRAS, 4.7' },
+  grouped_bar: { title: 'Treatment vs Control', columns: 'label, treatment, control', data: 'Week 1, 45, 42\nWeek 2, 52, 44\nWeek 3, 61, 43\nWeek 4, 68, 45' },
+  stacked_bar: { title: 'Cell Type Distribution', columns: 'label, value, category', data: 'Sample A, 40, T-cells\nSample A, 30, B-cells\nSample A, 30, NK-cells\nSample B, 35, T-cells\nSample B, 45, B-cells\nSample B, 20, NK-cells' },
+  stacked_bar_100: { title: 'Mutation Frequency', columns: 'label, value, category', data: 'Lung, 45, Missense\nLung, 30, Nonsense\nLung, 25, Silent\nBreast, 55, Missense\nBreast, 20, Nonsense\nBreast, 25, Silent' },
+  waterfall: { title: 'Tumor Size Change', columns: 'label, value', data: 'Baseline, 100\nWeek 4, -15\nWeek 8, -22\nWeek 12, -8\nWeek 16, 5\nWeek 20, -18\nFinal, -58' },
+  line: { title: 'Patient Vital Signs', columns: 'label, value', data: 'Day 1, 98.6\nDay 2, 99.1\nDay 3, 100.2\nDay 4, 101.5\nDay 5, 100.8\nDay 6, 99.4\nDay 7, 98.9' },
+  multi_line: { title: 'Drug Concentration', columns: 'label, plasma, tissue', data: '0h, 0, 0\n1h, 85, 20\n2h, 72, 55\n4h, 48, 68\n8h, 22, 45\n12h, 10, 28\n24h, 3, 12' },
+  step: { title: 'Dose Escalation', columns: 'label, value', data: 'Phase 1, 10\nPhase 2, 25\nPhase 3, 50\nPhase 4, 100\nPhase 5, 200' },
+  spline: { title: 'Pharmacokinetic Curve', columns: 'label, value', data: '0, 0\n0.5, 42\n1, 85\n2, 72\n4, 48\n6, 30\n8, 18\n12, 8\n24, 2' },
+  stem: { title: 'Peak Metabolite Levels', columns: 'label, value', data: 'Met-A, 3.2\nMet-B, 7.8\nMet-C, 1.5\nMet-D, 5.4\nMet-E, 9.1\nMet-F, 2.8' },
+  area: { title: 'Viral Load Over Time', columns: 'label, value', data: 'Day 0, 1000000\nDay 3, 850000\nDay 7, 500000\nDay 14, 120000\nDay 21, 15000\nDay 28, 2000\nDay 35, 200' },
+  stacked_area: { title: 'Immune Cell Populations', columns: 'label, cd4, cd8, nk', data: 'Baseline, 800, 400, 200\nWeek 1, 750, 450, 250\nWeek 2, 700, 550, 300\nWeek 4, 650, 700, 350\nWeek 8, 600, 850, 400' },
+  stream: { title: 'Cytokine Dynamics', columns: 'label, il6, tnf, ifn', data: '0h, 10, 5, 2\n6h, 45, 38, 15\n12h, 82, 65, 55\n24h, 55, 40, 72\n48h, 25, 18, 45\n72h, 12, 8, 20' },
+  band: { title: 'Confidence Intervals', columns: 'label, value, upper, lower', data: 'Week 1, 50, 55, 45\nWeek 2, 55, 62, 48\nWeek 3, 62, 70, 54\nWeek 4, 58, 68, 48\nWeek 5, 65, 75, 55' },
+  pie: { title: 'Trial Enrollment by Site', columns: 'label, value', data: 'New York, 35\nLondon, 28\nTokyo, 22\nSydney, 15' },
+  donut: { title: 'Adverse Events by Grade', columns: 'label, value', data: 'Grade 1, 45\nGrade 2, 30\nGrade 3, 15\nGrade 4, 8\nGrade 5, 2' },
+  radial_bar: { title: 'Endpoint Achievement', columns: 'label, value', data: 'Primary, 85\nSecondary, 72\nExploratory, 58\nSafety, 95' },
+  polar_area: { title: 'Biomarker Levels', columns: 'label, value', data: 'CRP, 75\nESR, 60\nIL-6, 85\nTNF-a, 45\nIFN-g, 70\nIL-10, 55' },
+  radar: { title: 'Drug Profile Comparison', columns: 'label, value', data: 'Efficacy, 85\nSafety, 72\nTolerability, 68\nBioavailability, 90\nHalf-life, 55\nSelectivity, 78' },
+  scatter: { title: 'IC50 vs Selectivity', columns: 'label, value, value2', data: 'Compound A, 2.5, 85\nCompound B, 5.1, 62\nCompound C, 0.8, 95\nCompound D, 12.3, 45\nCompound E, 3.2, 78\nCompound F, 7.8, 55' },
+  bubble: { title: 'Clinical Trial Landscape', columns: 'label, value, value2, size', data: 'Phase I, 25, 80, 15\nPhase II, 50, 65, 30\nPhase III, 75, 45, 50\nPhase IV, 90, 30, 20' },
+  histogram: { title: 'Patient Age Distribution', columns: 'label, value', data: '18, 5\n22, 12\n28, 18\n32, 25\n38, 30\n42, 28\n48, 22\n52, 18\n58, 15\n62, 10\n68, 8\n72, 5' },
+  box_plot: { title: 'Biomarker Variability', columns: 'label, value, category', data: 'CRP, 2.1, Control\nCRP, 3.5, Control\nCRP, 1.8, Control\nCRP, 5.2, Treatment\nCRP, 4.8, Treatment\nCRP, 6.1, Treatment' },
+  error_bar: { title: 'Treatment Response', columns: 'label, value, errorPlus, errorMinus', data: 'Placebo, 20, 5, 5\nLow Dose, 35, 8, 6\nMed Dose, 55, 10, 8\nHigh Dose, 72, 12, 7' },
+  candlestick: { title: 'Blood Glucose', columns: 'label, open, high, low, close', data: 'Mon, 95, 140, 80, 110\nTue, 110, 135, 90, 105\nWed, 105, 150, 85, 120\nThu, 120, 160, 95, 100\nFri, 100, 130, 75, 115' },
+  heatmap: { title: 'Gene Co-expression', columns: 'label, value, category', data: 'TP53-BRCA1, 0.85, High\nTP53-EGFR, 0.42, Med\nBRCA1-EGFR, 0.68, Med\nTP53-MYC, 0.91, High\nBRCA1-MYC, 0.35, Low' },
+  funnel: { title: 'Patient Screening Funnel', columns: 'label, value', data: 'Screened, 1000\nEligible, 450\nConsented, 320\nRandomized, 280\nCompleted, 220' },
+  treemap: { title: 'Disease Taxonomy', columns: 'label, value', data: 'Oncology, 45\nCardiology, 30\nNeurology, 25\nImmunology, 20\nEndocrinology, 15\nHematology, 12' },
+  scatter_3d: { title: '3D Protein Structure', columns: 'label, x, y, z', data: 'Residue 1, 2.5, 3.1, 1.8\nResidue 2, 4.2, 1.5, 3.2\nResidue 3, 1.8, 4.5, 2.1\nResidue 4, 3.5, 2.8, 4.5\nResidue 5, 5.1, 3.9, 1.2' },
+  bubble_3d: { title: '3D Drug Space', columns: 'label, x, y, z, size', data: 'Drug A, 2.5, 3.1, 1.8, 10\nDrug B, 4.2, 1.5, 3.2, 25\nDrug C, 1.8, 4.5, 2.1, 15\nDrug D, 3.5, 2.8, 4.5, 30' },
+  line_3d: { title: '3D Trajectory', columns: 'label, x, y, z', data: 'T0, 0, 0, 0\nT1, 1, 2, 1\nT2, 2, 3, 3\nT3, 3, 2, 5\nT4, 4, 4, 4\nT5, 5, 3, 6' },
+  bar_3d: { title: '3D Expression Levels', columns: 'label, x, y, z', data: 'Gene A, 1, 1, 8\nGene B, 2, 1, 5\nGene C, 3, 1, 12\nGene D, 1, 2, 6\nGene E, 2, 2, 9' },
+  surface_3d: { title: '3D Dose-Response Surface', columns: 'label, x, y, z', data: 'P1, -2, -2, 0.5\nP2, 0, -2, 1.2\nP3, 2, -2, 0.8\nP4, -2, 0, 1.5\nP5, 0, 0, 3.0\nP6, 2, 0, 1.8\nP7, -2, 2, 0.6\nP8, 0, 2, 1.4\nP9, 2, 2, 0.9' },
+  wireframe_3d: { title: '3D Wireframe Model', columns: 'label, x, y, z', data: 'P1, -2, -2, 0.5\nP2, 0, -2, 1.2\nP3, 2, -2, 0.8\nP4, -2, 0, 1.5\nP5, 0, 0, 3.0\nP6, 2, 0, 1.8' },
+  contour_3d: { title: '3D Contour Map', columns: 'label, x, y, z', data: 'P1, -2, -2, 0.5\nP2, 0, -2, 1.2\nP3, 2, -2, 0.8\nP4, -2, 0, 1.5\nP5, 0, 0, 3.0\nP6, 2, 0, 1.8' },
+  pie_3d: { title: '3D Enrollment Distribution', columns: 'label, x, y, z', data: 'Site A, 1, 1, 35\nSite B, 2, 2, 28\nSite C, 3, 3, 22\nSite D, 4, 4, 15' },
+}
+
+// Excel column mapping: describes expected columns per chart type
+const COLUMN_MAPS: Record<string, { required: string[]; optional: string[]; description: string }> = {
+  bar: { required: ['Label', 'Value'], optional: [], description: 'One value per category' },
+  horizontal_bar: { required: ['Label', 'Value'], optional: [], description: 'One value per category' },
+  grouped_bar: { required: ['Label', 'Value 1', 'Value 2'], optional: ['Value 3'], description: 'Multiple series per category' },
+  stacked_bar: { required: ['Label', 'Value', 'Category'], optional: [], description: 'Values grouped by category' },
+  stacked_bar_100: { required: ['Label', 'Value', 'Category'], optional: [], description: 'Percentages by category' },
+  waterfall: { required: ['Label', 'Value'], optional: [], description: 'Sequential changes (positive/negative)' },
+  line: { required: ['Label/X', 'Value/Y'], optional: [], description: 'Sequential data points' },
+  multi_line: { required: ['Label', 'Series 1', 'Series 2'], optional: ['Series 3'], description: 'Multiple series over same x-axis' },
+  step: { required: ['Label', 'Value'], optional: [], description: 'Discrete steps' },
+  spline: { required: ['Label', 'Value'], optional: [], description: 'Smooth curve through points' },
+  stem: { required: ['Label', 'Value'], optional: [], description: 'Discrete values with stems' },
+  area: { required: ['Label', 'Value'], optional: [], description: 'Filled area under curve' },
+  stacked_area: { required: ['Label', 'Series 1', 'Series 2'], optional: ['Series 3'], description: 'Stacked filled areas' },
+  stream: { required: ['Label', 'Series 1', 'Series 2'], optional: ['Series 3'], description: 'Flowing stacked data' },
+  band: { required: ['Label', 'Value', 'Upper', 'Lower'], optional: [], description: 'Value with confidence band' },
+  pie: { required: ['Label', 'Value'], optional: [], description: 'Parts of a whole' },
+  donut: { required: ['Label', 'Value'], optional: [], description: 'Parts of a whole (ring)' },
+  radial_bar: { required: ['Label', 'Value'], optional: [], description: 'Circular progress bars' },
+  polar_area: { required: ['Label', 'Value'], optional: [], description: 'Circular segments by area' },
+  radar: { required: ['Label', 'Value'], optional: [], description: 'Multi-axis comparison' },
+  scatter: { required: ['Label', 'X', 'Y'], optional: [], description: 'X-Y point distribution' },
+  bubble: { required: ['Label', 'X', 'Y', 'Size'], optional: [], description: 'Scatter with size dimension' },
+  histogram: { required: ['Label/Bin', 'Count'], optional: [], description: 'Frequency distribution' },
+  box_plot: { required: ['Label', 'Value', 'Category'], optional: [], description: 'Distribution by group' },
+  error_bar: { required: ['Label', 'Value', 'Error+', 'Error-'], optional: [], description: 'Values with error margins' },
+  candlestick: { required: ['Label', 'Open', 'High', 'Low', 'Close'], optional: [], description: 'OHLC data' },
+  heatmap: { required: ['Label', 'Value', 'Category'], optional: [], description: 'Matrix intensity values' },
+  funnel: { required: ['Label', 'Value'], optional: [], description: 'Sequential reduction (descending)' },
+  treemap: { required: ['Label', 'Value'], optional: [], description: 'Hierarchical proportions' },
+  scatter_3d: { required: ['Label', 'X', 'Y', 'Z'], optional: ['Category'], description: '3D point cloud' },
+  bubble_3d: { required: ['Label', 'X', 'Y', 'Z', 'Size'], optional: [], description: '3D scatter with size' },
+  line_3d: { required: ['Label', 'X', 'Y', 'Z'], optional: [], description: '3D line trajectory' },
+  bar_3d: { required: ['Label', 'X', 'Y', 'Z'], optional: [], description: '3D bar columns' },
+  surface_3d: { required: ['Label', 'X', 'Y', 'Z'], optional: [], description: '3D surface from grid points' },
+  wireframe_3d: { required: ['Label', 'X', 'Y', 'Z'], optional: [], description: '3D wireframe mesh' },
+  contour_3d: { required: ['Label', 'X', 'Y', 'Z'], optional: [], description: '3D contour projection' },
+  pie_3d: { required: ['Label', 'X', 'Y', 'Z'], optional: [], description: '3D pie chart' },
+}
+
 const TOOLTIP_STYLE = {
   background: 'var(--color-surface-solid)',
   border: '1px solid var(--color-border)',
@@ -1246,6 +1329,41 @@ export default function DataVisualization() {
                 </div>
               </div>
 
+              {/* Column mapping info for selected chart type */}
+              {COLUMN_MAPS[form.type] && (
+                <div className="rounded-lg border border-[var(--glass-border)] p-3 bg-[var(--glass-bg)]">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xxs font-medium text-[var(--color-text-secondary)]">
+                        Expected columns for {CHART_TYPES.find(c => c.value === form.type)?.label || form.type}
+                      </p>
+                      <p className="text-xxs text-[var(--color-text-muted)] mt-0.5">{COLUMN_MAPS[form.type].description}</p>
+                    </div>
+                    {SAMPLE_DATA[form.type] && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const sample = SAMPLE_DATA[form.type]
+                          setForm(f => ({ ...f, title: f.title || sample.title, dataText: sample.data }))
+                        }}
+                        className="text-xxs px-2.5 py-1 rounded border border-[var(--glass-border)] hover:border-[var(--color-border-strong)] transition-colors flex items-center gap-1 shrink-0"
+                        style={{ color: 'var(--color-accent-cyan)' }}
+                      >
+                        <FiClipboard className="w-3 h-3" /> Load Sample
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {COLUMN_MAPS[form.type].required.map(col => (
+                      <span key={col} className="text-xxs px-1.5 py-0.5 rounded bg-[var(--glass-bg-hover)] text-[var(--color-text)]">{col}</span>
+                    ))}
+                    {COLUMN_MAPS[form.type].optional.map(col => (
+                      <span key={col} className="text-xxs px-1.5 py-0.5 rounded bg-[var(--glass-bg-hover)] text-[var(--color-text-muted)] italic">{col} (opt)</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Data input */}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
@@ -1275,10 +1393,12 @@ export default function DataVisualization() {
                   </div>
                 </div>
                 <textarea value={form.dataText} onChange={e => setForm(f => ({ ...f, dataText: e.target.value }))}
-                  placeholder={"Paste data or import a file. One entry per line:\n\nSample A, 45\nSample B, 72\nSample C, 38\n\nMulti-series: label, val1, val2, val3\nCategorized: label, value, categoryName"}
+                  placeholder={SAMPLE_DATA[form.type]
+                    ? `Paste data or import a file. Columns: ${COLUMN_MAPS[form.type]?.required.join(', ') || 'label, value'}\n\nExample:\n${SAMPLE_DATA[form.type].data.split('\n').slice(0, 3).join('\n')}`
+                    : "Paste data or import a file. One entry per line:\n\nSample A, 45\nSample B, 72"}
                   rows={8} className="input w-full text-xs font-mono resize-none" />
                 <p className="text-xxs text-[var(--color-text-muted)] mt-1">
-                  Format: <span className="font-mono">label, value[, value2, value3, errorPlus, errorMinus, size]</span>
+                  Format: <span className="font-mono">{COLUMN_MAPS[form.type]?.required.join(', ').toLowerCase() || 'label, value[, value2, value3, errorPlus, errorMinus, size]'}</span>
                 </p>
               </div>
 
