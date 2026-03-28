@@ -380,31 +380,7 @@ export default function Dashboard() {
   const navigate = useNavigate()
   const [projects, setProjects] = useState<Project[]>([])
 
-  const [allActivities, setAllActivities] = useState<ActivityEntry[]>([])
   const [simulationCount, setSimulationCount] = useState(0)
-
-  // Fetch activities from API for trend data
-  useEffect(() => {
-    const fetchActivities = async () => {
-      try {
-        const res = await api.getActivities({ page_size: 100 })
-        const items = (res?.items || []).map((a: any) => ({
-          id: a.id,
-          type: a.type || 'project',
-          action: a.action || 'created',
-          title: a.title || '',
-          project: a.project_name,
-          timestamp: a.created_at || new Date().toISOString(),
-        }))
-        if (items.length > 0) {
-          setAllActivities(items)
-          return
-        }
-      } catch { /* fall back to local */ }
-      setAllActivities(getActivityLog())
-    }
-    fetchActivities()
-  }, [])
 
   // Fetch API projects (no localStorage fallback)
   useEffect(() => {
@@ -545,7 +521,7 @@ export default function Dashboard() {
                   <div className="flex items-center gap-2">
                     <FiFolder className="w-4 h-4 text-[var(--color-text-muted)]" />
                   </div>
-                  <FiArrowUpRight className="w-3.5 h-3.5 text-[var(--color-text-muted)] opacity-0 group-hover:opacity-100 transition-opacity" />
+                  <FiChevronRight className="w-3.5 h-3.5 text-[var(--color-text-muted)] opacity-0 group-hover:opacity-100 transition-opacity" />
                 </div>
                 <div className="text-sm font-medium mb-1 truncate">{project.name}</div>
                 {project.disease_focus && (
