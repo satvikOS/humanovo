@@ -110,6 +110,9 @@ VALID_KEYS = {
     "notebook-index",
     "workspace-tabs",
     "workspace-active-tab",
+    "charts",
+    "research-papers",
+    "tab-counter",
 }
 
 

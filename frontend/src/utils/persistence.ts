@@ -1,7 +1,7 @@
 /**
  * Typed localStorage persistence layer for humanovo.
  * All user data persists across sessions — projects, evidence, notebooks, workspace.
- * Syncs to backend API for cross-device consistency.
+ * Syncs to backend API for cross-device consistency with ID-based array merging.
  */
 // @ts-ignore — types provided by @types/react at install time
 import { useState, useCallback, useEffect, useRef } from 'react'
@@ -21,11 +21,71 @@ const SYNCED_KEYS = new Set([
   'notebook-index',
   'workspace-tabs',
   'workspace-active-tab',
+  'charts',
+  'research-papers',
+  'tab-counter',
 ])
+
+// Keys whose values are arrays of objects with an `id` field — these get merged
+// instead of last-write-wins so data from multiple devices is combined.
+const ARRAY_MERGE_KEYS = new Set([
+  'experiments',
+  'mc-simulations',
+  'eq-history',
+  'comp-history',
+  'activity-log',
+  'notebook-index',
+  'workspace-tabs',
+  'charts',
+  'research-papers',
+])
+
+// Max items per key (to prevent unbounded growth after merging)
+const MAX_ITEMS: Record<string, number> = {
+  'activity-log': 500,
+  'eq-history': 50,
+  'comp-history': 50,
+}
 
 // Debounce timers for backend sync
 const _syncTimers: Record<string, ReturnType<typeof setTimeout>> = {}
 const _syncInFlight: Set<string> = new Set()
+
+/**
+ * Merge two arrays by `id` field. Items from `incoming` that don't exist in
+ * `existing` are added. Items that exist in both keep the newer version
+ * (by `updatedAt`, `updated_at`, `createdAt`, or `timestamp` field).
+ * Returns the merged array sorted newest-first.
+ */
+function mergeArraysById(existing: any[], incoming: any[]): any[] {
+  const map = new Map<string, any>()
+
+  const getTime = (item: any): number => {
+    const ts = item.updatedAt || item.updated_at || item.createdAt || item.timestamp || item.created_at || ''
+    return ts ? new Date(ts).getTime() : 0
+  }
+
+  // Add existing items
+  for (const item of existing) {
+    if (item && item.id) {
+      map.set(item.id, item)
+    }
+  }
+
+  // Merge incoming — keep newer version if same id exists
+  for (const item of incoming) {
+    if (!item || !item.id) continue
+    const prev = map.get(item.id)
+    if (!prev || getTime(item) >= getTime(prev)) {
+      map.set(item.id, item)
+    }
+  }
+
+  // Sort newest first
+  const merged = Array.from(map.values())
+  merged.sort((a, b) => getTime(b) - getTime(a))
+  return merged
+}
 
 /**
  * Push a key's value to the backend API (fire-and-forget, debounced).
@@ -68,8 +128,40 @@ async function syncFromBackend<T>(key: string): Promise<T | null> {
 }
 
 /**
+ * Sync a single key from backend, merging arrays by ID.
+ * Returns true if local data was updated.
+ */
+async function syncKeyFromBackend(key: string): Promise<boolean> {
+  const remoteValue = await syncFromBackend(key)
+  if (remoteValue === null) return false
+
+  const localRaw = localStorage.getItem(PREFIX + key)
+  let localValue: any = null
+  try { localValue = localRaw ? JSON.parse(localRaw) : null } catch { /* */ }
+
+  let merged: any
+  if (ARRAY_MERGE_KEYS.has(key) && Array.isArray(remoteValue)) {
+    const localArr = Array.isArray(localValue) ? localValue : []
+    merged = mergeArraysById(localArr, remoteValue)
+    const max = MAX_ITEMS[key]
+    if (max && merged.length > max) merged = merged.slice(0, max)
+  } else {
+    // Scalar/object: remote wins
+    merged = remoteValue
+  }
+
+  const mergedRaw = JSON.stringify(merged)
+  if (mergedRaw !== localRaw) {
+    localStorage.setItem(PREFIX + key, mergedRaw)
+    localStorage.setItem(PREFIX + key + '-sync-ts', new Date().toISOString())
+    return true
+  }
+  return false
+}
+
+/**
  * Initial sync: pull all synced keys from backend on app startup.
- * Merges with localStorage (backend wins for newer data).
+ * Uses ID-based merging for arrays so no data is lost.
  */
 let _initialSyncDone = false
 const _initialSyncPromise: Promise<void> = (async () => {
@@ -80,18 +172,20 @@ const _initialSyncPromise: Promise<void> = (async () => {
     const data = await res.json()
     const remoteKeys = (data.items || []) as Array<{ key: string; updated_at: string }>
 
-    for (const { key, updated_at } of remoteKeys) {
+    for (const { key } of remoteKeys) {
       if (!SYNCED_KEYS.has(key)) continue
-      const localRaw = localStorage.getItem(PREFIX + key)
-      const localTimestamp = localStorage.getItem(PREFIX + key + '-sync-ts')
+      await syncKeyFromBackend(key)
+    }
 
-      // If backend is newer or local doesn't exist, pull from backend
-      if (!localRaw || !localTimestamp || new Date(updated_at) > new Date(localTimestamp)) {
-        const remoteValue = await syncFromBackend(key)
-        if (remoteValue !== null) {
-          localStorage.setItem(PREFIX + key, JSON.stringify(remoteValue))
-          localStorage.setItem(PREFIX + key + '-sync-ts', updated_at)
-        }
+    // After pulling remote data, push any local-only keys that don't exist on backend
+    const remoteKeySet = new Set(remoteKeys.map((r: any) => r.key))
+    for (const key of SYNCED_KEYS) {
+      if (remoteKeySet.has(key)) continue
+      const localRaw = localStorage.getItem(PREFIX + key)
+      if (localRaw) {
+        try {
+          syncToBackend(key, JSON.parse(localRaw))
+        } catch { /* */ }
       }
     }
   } catch {
@@ -100,6 +194,49 @@ const _initialSyncPromise: Promise<void> = (async () => {
     _initialSyncDone = true
   }
 })()
+
+// ── Periodic background sync ──────────────────────────────────────
+// Every 30s, pull changes from backend so data from other devices appears
+// without requiring a page reload.
+
+const _syncListeners = new Set<(key: string) => void>()
+
+let _periodicSyncInterval: ReturnType<typeof setInterval> | null = null
+
+function startPeriodicSync() {
+  if (_periodicSyncInterval) return
+  _periodicSyncInterval = setInterval(async () => {
+    if (!_initialSyncDone) return
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/user-state`)
+      if (!res.ok) return
+      const data = await res.json()
+      const remoteKeys = (data.items || []) as Array<{ key: string; updated_at: string }>
+
+      for (const { key, updated_at } of remoteKeys) {
+        if (!SYNCED_KEYS.has(key)) continue
+        const localTs = localStorage.getItem(PREFIX + key + '-sync-ts')
+        // Only sync if remote is newer than our last sync
+        if (localTs && new Date(updated_at) <= new Date(localTs)) continue
+
+        const changed = await syncKeyFromBackend(key)
+        if (changed) {
+          // Notify any mounted usePersistentState hooks to re-read
+          for (const listener of _syncListeners) {
+            listener(key)
+          }
+        }
+      }
+    } catch {
+      // Backend unavailable — skip this cycle
+    }
+  }, 30_000)
+}
+
+// Start periodic sync once initial sync completes
+_initialSyncPromise.then(() => startPeriodicSync())
+
+// ── Public API ────────────────────────────────────────────────────
 
 export function persistGet<T>(key: string, fallback: T): T {
   try {
@@ -134,35 +271,53 @@ export function persistRemove(key: string): void {
 /**
  * React hook: useState backed by localStorage + backend sync.
  * On mount reads from localStorage; on every setState writes back and syncs.
+ * Automatically re-reads when periodic sync detects changes from other devices.
  */
 export function usePersistentState<T>(key: string, initialValue: T): [T, (value: T | ((prev: T) => T)) => void] {
   const [state, setStateRaw] = useState<T>(() => persistGet(key, initialValue))
   const keyRef = useRef(key)
   keyRef.current = key
-  const mountedRef = useRef(false)
+  const initialValueRef = useRef(initialValue)
+  const skipNextPersist = useRef(false)
 
-  // On mount, try to pull from backend if newer
+  // On mount, wait for initial sync then re-read merged data
   useEffect(() => {
     let cancelled = false
     if (SYNCED_KEYS.has(key)) {
       _initialSyncPromise.then(() => {
         if (cancelled) return
-        // Re-read from localStorage after sync completes
         const synced = persistGet(key, initialValue)
         const currentRaw = JSON.stringify(state)
         const syncedRaw = JSON.stringify(synced)
         if (currentRaw !== syncedRaw) {
+          skipNextPersist.current = true
           setStateRaw(synced)
         }
-        mountedRef.current = true
       })
-    } else {
-      mountedRef.current = true
     }
     return () => { cancelled = true }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Listen for periodic sync updates from other devices
   useEffect(() => {
+    if (!SYNCED_KEYS.has(key)) return
+
+    const listener = (changedKey: string) => {
+      if (changedKey !== keyRef.current) return
+      const updated = persistGet(keyRef.current, initialValueRef.current)
+      skipNextPersist.current = true
+      setStateRaw(updated)
+    }
+    _syncListeners.add(listener)
+    return () => { _syncListeners.delete(listener) }
+  }, [key])
+
+  // Persist to localStorage + backend on state change
+  useEffect(() => {
+    if (skipNextPersist.current) {
+      skipNextPersist.current = false
+      return
+    }
     persistSet(keyRef.current, state)
   }, [state])
 
@@ -173,9 +328,8 @@ export function usePersistentState<T>(key: string, initialValue: T): [T, (value:
   return [state, setState]
 }
 
-/**
- * Activity logger — records user actions for Timeline page.
- */
+// ── Activity Logger ───────────────────────────────────────────────
+
 export interface ActivityEntry {
   id: string
   type: 'project' | 'hypothesis' | 'evidence' | 'simulation' | 'notebook' | 'discovery'
@@ -204,35 +358,25 @@ export function getActivityLog(): ActivityEntry[] {
   return persistGet<ActivityEntry[]>('activity-log', [])
 }
 
-/**
- * Sanitize a numeric value — returns `fallback` if the value is NaN, null, undefined, or not a finite number.
- */
+// ── Numeric / formatting utilities ────────────────────────────────
+
 export function safeNum(val: unknown, fallback = 0): number {
   if (val == null) return fallback
   const n = typeof val === 'number' ? val : Number(val)
   return Number.isFinite(n) ? n : fallback
 }
 
-/**
- * Format a percentage value safely — returns formatted string like "73%" or fallback string.
- */
 export function safePct(val: unknown, decimals = 0, fallback = '--'): string {
   const n = safeNum(val, NaN)
   if (!Number.isFinite(n)) return fallback
   return `${(n * 100).toFixed(decimals)}%`
 }
 
-/**
- * Format a dollar amount from cents safely.
- */
 export function safeDollars(cents: unknown): string {
   const n = safeNum(cents, 0)
   return `$${(n / 100).toFixed(2)}`
 }
 
-/**
- * Format a date string or Date to MM/DD/YYYY format.
- */
 export function formatDate(date: string | Date | undefined | null): string {
   if (!date) return ''
   const d = typeof date === 'string' ? new Date(date) : date
@@ -243,9 +387,6 @@ export function formatDate(date: string | Date | undefined | null): string {
   return `${month}/${day}/${year}`
 }
 
-/**
- * Format a date string or Date to MM/DD/YYYY with time (HH:MM AM/PM).
- */
 export function formatDateTime(date: string | Date | undefined | null): string {
   if (!date) return ''
   const d = typeof date === 'string' ? new Date(date) : date

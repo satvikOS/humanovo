@@ -7,7 +7,7 @@ import {
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import api, { Project } from '../services/api'
-import { logActivity, formatDate } from '../utils/persistence'
+import { logActivity, formatDate, usePersistentState } from '../utils/persistence'
 import HypothesisDocViewer from '../components/HypothesisDocViewer'
 
 const _BACKEND = import.meta.env.VITE_API_BASE_URL || ''
@@ -124,8 +124,17 @@ export default function ProjectDetail() {
     model_used: h.model_used,
   }))
 
-  // Research papers state (ephemeral, tracked in component state)
-  const [projectPapers, setProjectPapers] = useState<SavedResearchPaper[]>([])
+  // Research papers state — persisted + synced across devices
+  const [allPapers, setAllPapers] = usePersistentState<SavedResearchPaper[]>('research-papers', [])
+  const projectPapers = allPapers.filter(p => p.project_id === projectId)
+  const setProjectPapers = useCallback((updater: SavedResearchPaper[] | ((prev: SavedResearchPaper[]) => SavedResearchPaper[])) => {
+    setAllPapers(prev => {
+      const otherPapers = prev.filter(p => p.project_id !== projectId)
+      const currentProjectPapers = prev.filter(p => p.project_id === projectId)
+      const next = typeof updater === 'function' ? updater(currentProjectPapers) : updater
+      return [...next, ...otherPapers]
+    })
+  }, [projectId, setAllPapers])
 
   // Cleanup timers on unmount
   useEffect(() => {
