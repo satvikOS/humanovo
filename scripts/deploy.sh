@@ -166,6 +166,7 @@ deploy_lambdas() {
         "ingestion"
         "pubmed_fetcher"
         "clinical_trials_fetcher"
+        "user_state"
     )
 
     for handler in "${lambda_handlers[@]}"; do
