@@ -55,7 +55,8 @@ locals {
     "simulation",
     "notebook",
     "statistics",
-    "genomics"
+    "genomics",
+    "user_state"
   ])
 }
 
@@ -566,6 +567,31 @@ resource "aws_apigatewayv2_route" "genomics_biomarkers" {
   api_id    = aws_apigatewayv2_api.main.id
   route_key = "POST /api/v1/genomics/biomarker-discovery"
   target    = "integrations/${aws_apigatewayv2_integration.lambda["genomics"].id}"
+}
+
+# User State Routes (cross-device localStorage sync)
+resource "aws_apigatewayv2_route" "user_state_list" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "GET /api/v1/user-state"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda["user_state"].id}"
+}
+
+resource "aws_apigatewayv2_route" "user_state_get" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "GET /api/v1/user-state/{key}"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda["user_state"].id}"
+}
+
+resource "aws_apigatewayv2_route" "user_state_put" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "PUT /api/v1/user-state/{key}"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda["user_state"].id}"
+}
+
+resource "aws_apigatewayv2_route" "user_state_delete" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "DELETE /api/v1/user-state/{key}"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda["user_state"].id}"
 }
 
 # ==================== Stage ====================

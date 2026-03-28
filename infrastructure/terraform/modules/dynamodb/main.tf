@@ -587,6 +587,27 @@ resource "aws_dynamodb_table" "notebook" {
   }
 }
 
+# ==================== User State Table (cross-device localStorage sync) ====================
+
+resource "aws_dynamodb_table" "user_state" {
+  name         = "${var.name_prefix}-user-state"
+  billing_mode = var.billing_mode
+  hash_key     = "key"
+
+  attribute {
+    name = "key"
+    type = "S"
+  }
+
+  server_side_encryption {
+    enabled = true
+  }
+
+  tags = {
+    Name = "${var.name_prefix}-user-state"
+  }
+}
+
 # ==================== Outputs ====================
 
 output "projects_table_name" {
@@ -691,4 +712,12 @@ output "notebook_table_name" {
 
 output "notebook_table_arn" {
   value = aws_dynamodb_table.notebook.arn
+}
+
+output "user_state_table_name" {
+  value = aws_dynamodb_table.user_state.name
+}
+
+output "user_state_table_arn" {
+  value = aws_dynamodb_table.user_state.arn
 }

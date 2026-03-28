@@ -98,7 +98,7 @@ except ImportError as _import_err:
 app = APIGatewayHttpResolver()
 
 dynamodb = boto3.resource("dynamodb")
-USER_STATE_TABLE = os.environ.get("USER_STATE_TABLE", "humanovo-user-state")
+USER_STATE_TABLE = os.environ.get("USER_STATE_TABLE", "genup-dev-user-state")
 
 # Valid state keys that can be synced
 VALID_KEYS = {
