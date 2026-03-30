@@ -9,6 +9,7 @@ import clsx from 'clsx'
 import api, { Project } from '../services/api'
 import { logActivity, formatDate, usePersistentState } from '../utils/persistence'
 import HypothesisDocViewer from '../components/HypothesisDocViewer'
+import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 
 const _BACKEND = import.meta.env.VITE_API_BASE_URL || ''
 const API_BASE = `${_BACKEND}/api/v1`
@@ -67,6 +68,7 @@ export default function ProjectDetail() {
   const [paperHtml, setPaperHtml] = useState<string | null>(null)
   const [paperError, setPaperError] = useState<string | null>(null)
   const [activeHypothesis, setActiveHypothesis] = useState<SavedHypothesis | null>(null)
+  const [deletePaperId, setDeletePaperId] = useState<string | null>(null)
 
   // Loading phase animation
   const [currentPhase, setCurrentPhase] = useState(0)
@@ -379,6 +381,8 @@ export default function ProjectDetail() {
       setGeneratingPaper(false)
     }
   }, [project, startPhaseAnimation, stopPhaseAnimation])
+
+  const confirmDeletePaper = () => { if (deletePaperId) { setProjectPapers(prev => prev.filter(p => p.id !== deletePaperId)); setDeletePaperId(null) } }
 
   const _saveResearchPaper = useCallback((hypothesis: SavedHypothesis, html?: string) => {
     setProjectPapers(prev => {
@@ -884,7 +888,7 @@ export default function ProjectDetail() {
                         <button
                           onClick={(e) => {
                             e.stopPropagation()
-                            setProjectPapers(prev => prev.filter(p => p.id !== paper.id))
+                            setDeletePaperId(paper.id)
                           }}
                           className="p-1.5 rounded hover:bg-white/5 text-[var(--color-text-muted)] hover:text-red-400 transition-colors"
                           title="Remove"
@@ -964,6 +968,14 @@ export default function ProjectDetail() {
           )}
         </div>
       </div>
+      {deletePaperId && (
+        <ConfirmDeleteDialog
+          title="Delete Research Paper?"
+          message="This will permanently delete this generated research paper. This action cannot be undone."
+          onConfirm={confirmDeletePaper}
+          onCancel={() => setDeletePaperId(null)}
+        />
+      )}
     </div>
   )
 }

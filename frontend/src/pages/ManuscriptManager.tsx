@@ -4,6 +4,7 @@ import {
   FiDownload, FiSave,
 } from 'react-icons/fi'
 import { formatDate } from '../utils/persistence'
+import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 
 interface Manuscript {
   id: string; title: string; status: string; journal_target: string
@@ -26,6 +27,7 @@ export default function ManuscriptManager() {
   const [newJournal, setNewJournal] = useState('')
   const [showAuthorAdd, setShowAuthorAdd] = useState(false)
   const [newAuthor, setNewAuthor] = useState({ name: '', affiliation: '', email: '', role: 'Co-Author' })
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
   const load = async () => { try { const r = await fetch(API); if (r.ok) setManuscripts((await r.json()).items || []) } catch {} }
   useEffect(() => { load() }, [])
@@ -41,9 +43,15 @@ export default function ManuscriptManager() {
     if (r.ok) { load(); setShowAdd(false); setNewTitle(''); setNewJournal('') }
   }
 
-  const deleteMs = async (id: string) => {
-    await fetch(`${API}/${id}`, { method: 'DELETE' })
-    if (selected?.id === id) setSelected(null); load()
+  const deleteMs = (id: string) => {
+    setDeleteConfirmId(id)
+  }
+
+  const confirmDelete = async () => {
+    if (!deleteConfirmId) return
+    await fetch(`${API}/${deleteConfirmId}`, { method: 'DELETE' })
+    if (selected?.id === deleteConfirmId) setSelected(null); load()
+    setDeleteConfirmId(null)
   }
 
   const saveSection = async () => {
@@ -192,6 +200,13 @@ export default function ManuscriptManager() {
           )}
         </div>
       </div>
+      <ConfirmDeleteDialog
+        open={deleteConfirmId !== null}
+        entityName="Manuscript"
+        message="This will permanently delete this manuscript. This action cannot be undone."
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteConfirmId(null)}
+      />
     </div>
   )
 }

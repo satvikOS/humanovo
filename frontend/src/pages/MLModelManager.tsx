@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { FiCpu, FiPlus, FiTrash2, FiPlay } from 'react-icons/fi'
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 
 interface MLModel {
   id: string; name: string; model_type: string; status: string; description: string; version: string
@@ -20,6 +21,7 @@ export default function MLModelManager() {
   const [form, setForm] = useState({ name: '', model_type: 'classification', description: '', framework: 'scikit-learn' })
   const [predInput, setPredInput] = useState('')
   const [prediction, setPrediction] = useState<any>(null)
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
   const load = async () => { try { const r = await fetch(API); if (r.ok) setModels((await r.json()).items || []) } catch {} }
   useEffect(() => { load() }, [])
@@ -36,9 +38,15 @@ export default function MLModelManager() {
     if (r.ok) { load(); setShowAdd(false); setForm({ name: '', model_type: 'classification', description: '', framework: 'scikit-learn' }) }
   }
 
-  const deleteModel = async (id: string) => {
-    await fetch(`${API}/${id}`, { method: 'DELETE' })
-    if (selected?.id === id) { setSelected(null); setMetrics(null) }; load()
+  const deleteModel = (id: string) => {
+    setDeleteConfirmId(id)
+  }
+
+  const confirmDelete = async () => {
+    if (!deleteConfirmId) return
+    await fetch(`${API}/${deleteConfirmId}`, { method: 'DELETE' })
+    if (selected?.id === deleteConfirmId) { setSelected(null); setMetrics(null) }; load()
+    setDeleteConfirmId(null)
   }
 
   const predict = async () => {
@@ -197,6 +205,13 @@ export default function MLModelManager() {
           )}
         </div>
       </div>
+      <ConfirmDeleteDialog
+        open={deleteConfirmId !== null}
+        entityName="ML Model"
+        message="This will permanently delete this ML model. This action cannot be undone."
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteConfirmId(null)}
+      />
     </div>
   )
 }

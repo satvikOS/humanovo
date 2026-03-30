@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { FiImage, FiPlus, FiTrash2, FiZoomIn, FiZoomOut, FiCpu, FiSquare, FiCircle, FiType } from 'react-icons/fi'
+import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 
 interface Study { id: string; title: string; modality: string; body_part: string; findings: string; status: string; annotations: Annotation[]; ai_analysis: any; width: number; height: number }
 interface Annotation { id: string; type: string; x: number; y: number; width: number; height: number; label: string; color: string; notes: string }
@@ -16,6 +17,7 @@ export default function ResearchImaging() {
   const [annotLabel, setAnnotLabel] = useState('')
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [zoom, setZoom] = useState(1)
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
   const load = async () => { try { const r = await fetch(`${API}/studies`); if (r.ok) setStudies((await r.json()).items || []) } catch {} }
   useEffect(() => { load() }, [])
@@ -28,9 +30,15 @@ export default function ResearchImaging() {
     if (r.ok) { load(); setShowAdd(false); setForm({ title: '', modality: 'CT', body_part: '', findings: '' }) }
   }
 
-  const deleteStudy = async (id: string) => {
-    await fetch(`${API}/studies/${id}`, { method: 'DELETE' })
-    if (selected?.id === id) setSelected(null); load()
+  const deleteStudy = (id: string) => {
+    setDeleteConfirmId(id)
+  }
+
+  const confirmDelete = async () => {
+    if (!deleteConfirmId) return
+    await fetch(`${API}/studies/${deleteConfirmId}`, { method: 'DELETE' })
+    if (selected?.id === deleteConfirmId) setSelected(null); load()
+    setDeleteConfirmId(null)
   }
 
   const runAnalysis = async () => {
@@ -184,6 +192,13 @@ export default function ResearchImaging() {
           )}
         </div>
       </div>
+      <ConfirmDeleteDialog
+        open={deleteConfirmId !== null}
+        entityName="Research Study"
+        message="This will permanently delete this imaging study. This action cannot be undone."
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteConfirmId(null)}
+      />
     </div>
   )
 }

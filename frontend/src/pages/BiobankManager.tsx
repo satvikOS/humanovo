@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { FiSearch, FiPlus, FiTrash2, FiAlertTriangle, FiLogOut, FiLogIn } from 'react-icons/fi'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
+import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 
 interface Sample {
   id: string; barcode: string; sample_type: string; status: string; project: string
@@ -23,6 +24,7 @@ export default function BiobankManager() {
   const [statusFilter, setStatusFilter] = useState('')
   const [showAdd, setShowAdd] = useState(false)
   const [form, setForm] = useState({ barcode: '', sample_type: 'tissue', tissue_type: '', project: '', patient_id: '', quantity: '' })
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
   const load = async () => {
     try { const r = await fetch(`${API}/samples`); if (r.ok) setSamples((await r.json()).items || []) } catch {}
@@ -35,9 +37,15 @@ export default function BiobankManager() {
     if (r.ok) { load(); setShowAdd(false); setForm({ barcode: '', sample_type: 'tissue', tissue_type: '', project: '', patient_id: '', quantity: '' }) }
   }
 
-  const deleteSample = async (id: string) => {
-    await fetch(`${API}/samples/${id}`, { method: 'DELETE' })
-    if (selected?.id === id) setSelected(null); load()
+  const deleteSample = (id: string) => {
+    setDeleteConfirmId(id)
+  }
+
+  const confirmDelete = async () => {
+    if (!deleteConfirmId) return
+    await fetch(`${API}/samples/${deleteConfirmId}`, { method: 'DELETE' })
+    if (selected?.id === deleteConfirmId) setSelected(null); load()
+    setDeleteConfirmId(null)
   }
 
   const checkout = async (id: string) => {
@@ -220,6 +228,13 @@ export default function BiobankManager() {
           </div>
         )}
       </div>
+      <ConfirmDeleteDialog
+        open={deleteConfirmId !== null}
+        entityName="Biobank Sample"
+        message="This will permanently delete this biobank sample record. This action cannot be undone."
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteConfirmId(null)}
+      />
     </div>
   )
 }

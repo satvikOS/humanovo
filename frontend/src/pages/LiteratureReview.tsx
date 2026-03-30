@@ -11,6 +11,7 @@ import {
   FiCalendar,
   FiFileText,
 } from 'react-icons/fi'
+import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 
 interface Paper {
   id: string
@@ -42,6 +43,7 @@ export default function LiteratureReview() {
   const [filterTag, setFilterTag] = useState('')
   const [editingNotes, setEditingNotes] = useState(false)
   const [notesText, setNotesText] = useState('')
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
   // New paper form
   const [newPaper, setNewPaper] = useState({
@@ -79,8 +81,14 @@ export default function LiteratureReview() {
   }
 
   const deletePaper = (id: string) => {
-    savePapers(papers.filter(p => p.id !== id))
-    if (selectedPaper?.id === id) setSelectedPaper(null)
+    setDeleteConfirmId(id)
+  }
+
+  const confirmDelete = () => {
+    if (!deleteConfirmId) return
+    savePapers(papers.filter(p => p.id !== deleteConfirmId))
+    if (selectedPaper?.id === deleteConfirmId) setSelectedPaper(null)
+    setDeleteConfirmId(null)
   }
 
   const saveNotes = () => {
@@ -303,6 +311,14 @@ export default function LiteratureReview() {
           </div>
         </div>
       )}
+
+      <ConfirmDeleteDialog
+        open={deleteConfirmId !== null}
+        entityName="Paper"
+        message="This will permanently remove this paper from your review. This action cannot be undone."
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteConfirmId(null)}
+      />
     </div>
   )
 }

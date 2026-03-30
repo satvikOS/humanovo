@@ -3,6 +3,7 @@ import {
   FiSearch, FiPlus, FiTrash2, FiZoomIn, FiZoomOut, FiMaximize2,
   FiLink,
 } from 'react-icons/fi'
+import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 
 interface GNode { id: string; name: string; type: string; description: string; created_at: string }
 interface GEdge { id: string; source: string; target: string; source_name: string; target_name: string; relationship: string; strength: number; evidence: string }
@@ -140,9 +141,16 @@ export default function KnowledgeGraphViewer() {
     if (res.ok) { setNewNode({ name: '', type: 'gene', description: '' }); setShowAdd(false); load() }
   }
 
-  const deleteNode = async (id: string) => {
-    await fetch(`${API}/nodes/${id}`, { method: 'DELETE' })
-    if (selected?.id === id) setSelected(null); load()
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+
+  const deleteNode = (id: string) => { setDeleteConfirmId(id) }
+
+  const confirmDeleteNode = async () => {
+    if (!deleteConfirmId) return
+    await fetch(`${API}/nodes/${deleteConfirmId}`, { method: 'DELETE' })
+    if (selected?.id === deleteConfirmId) setSelected(null)
+    setDeleteConfirmId(null)
+    load()
   }
 
   const searchNodes = async () => {
@@ -236,6 +244,15 @@ export default function KnowledgeGraphViewer() {
           </div>
         )}
       </div>
+
+      {deleteConfirmId && (
+        <ConfirmDeleteDialog
+          title="Delete Graph Node?"
+          message="This will permanently delete this node and all its connections. This action cannot be undone."
+          onConfirm={confirmDeleteNode}
+          onCancel={() => setDeleteConfirmId(null)}
+        />
+      )}
     </div>
   )
 }

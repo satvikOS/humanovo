@@ -4,6 +4,7 @@ import {
   FiPlus, FiEye, FiBarChart2, FiBook,
 } from 'react-icons/fi'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 
 interface Dataset {
   id: string; name: string; description: string; format: string
@@ -25,6 +26,7 @@ export default function DataManager() {
   const [newDesc, setNewDesc] = useState('')
   const [search, setSearch] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
   const load = async () => {
     try {
@@ -41,10 +43,16 @@ export default function DataManager() {
     if (res.ok) { const ds = await res.json(); setDatasets(prev => [ds, ...prev]); setNewName(''); setNewDesc(''); setShowAdd(false) }
   }
 
-  const deleteDataset = async (id: string) => {
-    await fetch(`${API}/${id}`, { method: 'DELETE' })
-    setDatasets(prev => prev.filter(d => d.id !== id))
-    if (selected?.id === id) { setSelected(null); setView('list') }
+  const deleteDataset = (id: string) => {
+    setDeleteConfirmId(id)
+  }
+
+  const confirmDelete = async () => {
+    if (!deleteConfirmId) return
+    await fetch(`${API}/${deleteConfirmId}`, { method: 'DELETE' })
+    setDatasets(prev => prev.filter(d => d.id !== deleteConfirmId))
+    if (selected?.id === deleteConfirmId) { setSelected(null); setView('list') }
+    setDeleteConfirmId(null)
   }
 
   const uploadFile = async (dsId: string, file: File) => {
@@ -265,6 +273,13 @@ export default function DataManager() {
           )}
         </div>
       </div>
+      <ConfirmDeleteDialog
+        open={deleteConfirmId !== null}
+        entityName="Dataset"
+        message="This will permanently delete this dataset. This action cannot be undone."
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteConfirmId(null)}
+      />
     </div>
   )
 }

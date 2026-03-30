@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react'
+import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 import { formatDate, formatDateTime, usePersistentState, logActivity } from '../utils/persistence'
 import {
   FiClipboard,
@@ -45,6 +46,7 @@ export default function ExperimentTracker() {
   const [filterStatus, setFilterStatus] = useState('')
   const [editing, setEditing] = useState(false)
   const [editData, setEditData] = useState<Partial<Experiment>>({})
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
   const save = useCallback((updated: Experiment[]) => {
     setExperiments(updated)
@@ -83,8 +85,15 @@ export default function ExperimentTracker() {
   }
 
   const deleteExperiment = (id: string) => {
-    save(experiments.filter(e => e.id !== id))
-    if (selected?.id === id) setSelected(null)
+    setDeleteConfirmId(id)
+  }
+
+  const confirmDelete = () => {
+    if (deleteConfirmId) {
+      save(experiments.filter(e => e.id !== deleteConfirmId))
+      if (selected?.id === deleteConfirmId) setSelected(null)
+      setDeleteConfirmId(null)
+    }
   }
 
   const filtered = experiments.filter(e => !filterStatus || e.status === filterStatus)
@@ -256,6 +265,14 @@ export default function ExperimentTracker() {
             <p className="text-xs mt-1">or create a new one to start tracking</p>
           </div>
         </div>
+      )}
+      {deleteConfirmId && (
+        <ConfirmDeleteDialog
+          title="Delete Experiment?"
+          message="This will permanently delete this experiment and all its data. This action cannot be undone."
+          onConfirm={confirmDelete}
+          onCancel={() => setDeleteConfirmId(null)}
+        />
       )}
     </div>
   )

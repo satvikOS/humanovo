@@ -4,6 +4,7 @@ import {
   FiPlus, FiTrash2,
 } from 'react-icons/fi'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 
 interface Trial {
   id: string; protocol_number: string; title: string; phase: string; status: string
@@ -25,6 +26,7 @@ export default function ClinicalTrials() {
   const [viewTab, setViewTab] = useState<ViewTab>('overview')
   const [showAdd, setShowAdd] = useState(false)
   const [form, setForm] = useState({ protocol_number: '', title: '', phase: 'Phase I', pi: '', target_enrollment: 0 })
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
   const load = async () => { try { const r = await fetch(API); if (r.ok) setTrials((await r.json()).items || []) } catch {} }
   useEffect(() => { load() }, [])
@@ -42,10 +44,16 @@ export default function ClinicalTrials() {
     if (r.ok) { load(); setShowAdd(false); setForm({ protocol_number: '', title: '', phase: 'Phase I', pi: '', target_enrollment: 0 }) }
   }
 
-  const deleteTrial = async (id: string) => {
-    await fetch(`${API}/${id}`, { method: 'DELETE' })
-    if (selected?.id === id) setSelected(null)
+  const deleteTrial = (id: string) => {
+    setDeleteConfirmId(id)
+  }
+
+  const confirmDelete = async () => {
+    if (!deleteConfirmId) return
+    await fetch(`${API}/${deleteConfirmId}`, { method: 'DELETE' })
+    if (selected?.id === deleteConfirmId) setSelected(null)
     load()
+    setDeleteConfirmId(null)
   }
 
   const enrollPct = selected ? Math.round((selected.current_enrollment / Math.max(selected.target_enrollment, 1)) * 100) : 0
@@ -201,6 +209,13 @@ export default function ClinicalTrials() {
           )}
         </div>
       </div>
+      <ConfirmDeleteDialog
+        open={deleteConfirmId !== null}
+        entityName="Clinical Trial"
+        message="This will permanently delete this clinical trial record. This action cannot be undone."
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteConfirmId(null)}
+      />
     </div>
   )
 }

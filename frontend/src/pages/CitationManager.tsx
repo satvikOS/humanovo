@@ -5,6 +5,7 @@ import {
   FiFile, FiX, FiRefreshCw, FiStar, FiBookOpen, FiHash,
 } from 'react-icons/fi'
 import { usePersistentState } from '../utils/persistence'
+import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 
 interface Citation {
   id: string
@@ -187,6 +188,7 @@ export default function CitationManager() {
   const [importId, setImportId] = useState('')
   const [importing, setImporting] = useState(false)
   const [activeTab, setActiveTab] = useState<'all' | 'starred' | 'collections'>('all')
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const [form, setForm] = useState({
@@ -347,7 +349,14 @@ export default function CitationManager() {
   }
 
   const deleteCitation = (id: string) => {
-    saveCitation(citations.filter(c => c.id !== id))
+    setDeleteConfirmId(id)
+  }
+
+  const confirmDelete = () => {
+    if (deleteConfirmId) {
+      saveCitation(citations.filter(c => c.id !== deleteConfirmId))
+      setDeleteConfirmId(null)
+    }
   }
 
   const toggleStar = (id: string) => {
@@ -648,6 +657,14 @@ export default function CitationManager() {
           </div>
         )}
       </div>
+      {deleteConfirmId && (
+        <ConfirmDeleteDialog
+          title="Delete Citation?"
+          message="This will permanently remove this citation from your library. This action cannot be undone."
+          onConfirm={confirmDelete}
+          onCancel={() => setDeleteConfirmId(null)}
+        />
+      )}
     </div>
   )
 }

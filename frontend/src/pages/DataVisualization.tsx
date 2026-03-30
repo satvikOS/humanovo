@@ -18,6 +18,7 @@ import html2canvas from 'html2canvas'
 import * as XLSX from 'xlsx'
 import { persistGet, persistSet, formatDate } from '../utils/persistence'
 import PlotlyPlot3D, { type Chart3DType } from '../components/PlotlyPlot3D'
+import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 
 // ─── Types ──────────────────────────────────────────────────────
 interface DataPoint {
@@ -475,7 +476,8 @@ export default function DataVisualization() {
     setShowAdd(false)
   }
 
-  const deleteChart = (id: string) => saveCharts(charts.filter(c => c.id !== id))
+  const deleteChart = (id: string) => setDeleteConfirmId(id)
+  const confirmDeleteChart = () => { if (deleteConfirmId) { saveCharts(charts.filter(c => c.id !== deleteConfirmId)); setDeleteConfirmId(null) } }
   const duplicateChart = (c: ChartConfig) => {
     const dup = { ...c, id: `chart-${Date.now()}`, title: c.title + ' (copy)', createdAt: new Date().toISOString() }
     saveCharts([dup, ...charts])
@@ -579,6 +581,7 @@ export default function DataVisualization() {
 
   // ─── Copy chart to clipboard as image ──────────────────────
   const [copiedChart, setCopiedChart] = useState<string | null>(null)
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
   const copyChartToClipboard = useCallback(async (id: string) => {
     const el = chartRefs.current[id]
@@ -1527,6 +1530,14 @@ export default function DataVisualization() {
           </div>
         )}
       </div>
+      {deleteConfirmId && (
+        <ConfirmDeleteDialog
+          title="Delete Chart?"
+          message="This will permanently delete this visualization. This action cannot be undone."
+          onConfirm={confirmDeleteChart}
+          onCancel={() => setDeleteConfirmId(null)}
+        />
+      )}
     </div>
   )
 }
