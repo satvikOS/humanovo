@@ -332,6 +332,56 @@ export function usePersistentState<T>(key: string, initialValue: T): [T, (value:
   return [state, setState]
 }
 
+// ── IndexedDB for large blobs (documents, PDFs) ──────────────────
+
+const IDB_NAME = 'humanovo-blobs'
+const IDB_STORE = 'files'
+const IDB_VERSION = 1
+
+function openBlobDB(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NAME, IDB_VERSION)
+    req.onupgradeneeded = () => {
+      const db = req.result
+      if (!db.objectStoreNames.contains(IDB_STORE)) {
+        db.createObjectStore(IDB_STORE)
+      }
+    }
+    req.onsuccess = () => resolve(req.result)
+    req.onerror = () => reject(req.error)
+  })
+}
+
+export async function blobPut(key: string, data: string): Promise<void> {
+  const db = await openBlobDB()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite')
+    tx.objectStore(IDB_STORE).put(data, key)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+  })
+}
+
+export async function blobGet(key: string): Promise<string | null> {
+  const db = await openBlobDB()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readonly')
+    const req = tx.objectStore(IDB_STORE).get(key)
+    req.onsuccess = () => resolve(req.result ?? null)
+    req.onerror = () => reject(req.error)
+  })
+}
+
+export async function blobDelete(key: string): Promise<void> {
+  const db = await openBlobDB()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite')
+    tx.objectStore(IDB_STORE).delete(key)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+  })
+}
+
 // ── Activity Logger ───────────────────────────────────────────────
 
 export interface ActivityEntry {

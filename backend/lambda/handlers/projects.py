@@ -148,6 +148,7 @@ def _normalize_hypothesis(h: dict) -> dict:
         "description": h.get("description") or h.get("rationale", ""),
         "mechanism": h.get("mechanism", ""),
         "confidence_score": h.get("confidence_score", h.get("confidence", 0.5)),
+        "confidence": h.get("confidence_score", h.get("confidence", 0.5)),
         "novelty_score": h.get("novelty_score", 0.5),
         "feasibility_score": h.get("feasibility_score", 0.5),
         "impact_score": h.get("impact_score", 0.5),

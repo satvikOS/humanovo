@@ -484,15 +484,17 @@ export default function Dashboard() {
       return sum + (p.hypothesis_count || 0)
     }, 0)
   }, [projects])
-  // Count research papers from project evidence counts
+  // Count evidence: API evidence + project documents from localStorage
   const totalPapers = useMemo(() => {
-    return projects.reduce((sum, p) => sum + (p.evidence_count || 0), 0)
+    const apiEvidence = projects.reduce((sum, p) => sum + (p.evidence_count || 0), 0)
+    const docs = persistGet<Array<{ id: string }>>('project-documents', [])
+    return apiEvidence + docs.length
   }, [projects])
 
   const stats: StatData[] = [
     { label: 'Active Projects', value: totalProjects, icon: FiFolder, accentColor: '#a1a1a1', href: '/projects' },
     { label: 'Hypotheses', value: totalHypotheses, icon: FiZap, accentColor: '#a855f7', href: '/agents' },
-    { label: 'Research Papers', value: totalPapers, icon: FiFileText, accentColor: '#22c55e', href: '/projects' },
+    { label: 'Evidence', value: totalPapers, icon: FiFileText, accentColor: '#22c55e', href: '/evidence' },
     { label: 'Simulations', value: simulationCount, icon: FiActivity, accentColor: '#3b82f6', href: '/simulations?tab=history' },
   ]
 

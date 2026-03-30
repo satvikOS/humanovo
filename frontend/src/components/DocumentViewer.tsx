@@ -104,7 +104,7 @@ export default function DocumentViewer({
           <FiFileText className="w-4 h-4 text-primary-400 shrink-0" />
           <span className="text-sm font-medium text-white truncate">{title}</span>
           {isGenerating && (
-            <span className="flex items-center gap-1 text-xs text-yellow-400 shrink-0">
+            <span className="flex items-center gap-1 text-xs text-[var(--color-text-secondary)] shrink-0">
               <FiRefreshCw className="w-3 h-3 animate-spin" />
               {progressMessage || 'Generating...'}
             </span>
@@ -116,7 +116,7 @@ export default function DocumentViewer({
             <button
               onClick={onGenerateResearchPaper}
               disabled={isGenerating}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-purple-500/20 text-purple-400 hover:bg-purple-500/30 disabled:opacity-50 text-xs font-medium transition-colors"
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-white/10 text-[var(--color-text-secondary)] hover:bg-white/15 disabled:opacity-50 text-xs font-medium transition-colors"
               title="Generate Research Paper"
             >
               {isGenerating ? (
@@ -183,7 +183,7 @@ export default function DocumentViewer({
               <FiFileText className="w-12 h-12 text-secondary-600 mb-4" />
               <p className="text-white mb-2">PDF Preview Not Available</p>
               <p className="text-secondary-400 text-sm mb-4">Your browser doesn't support inline PDF viewing.</p>
-              <button onClick={handleDownload} className="btn bg-primary-500 text-white hover:bg-primary-600">
+              <button onClick={handleDownload} className="btn bg-white/10 text-white hover:bg-white/15">
                 <FiDownload className="w-4 h-4" /> Download PDF
               </button>
             </div>
@@ -203,7 +203,7 @@ export default function DocumentViewer({
             {onGenerateResearchPaper && (
               <button
                 onClick={onGenerateResearchPaper}
-                className="btn bg-purple-500 text-white hover:bg-purple-600 text-sm"
+                className="btn bg-white/10 text-white hover:bg-white/15 text-sm"
               >
                 <FiRefreshCw className="w-4 h-4" /> Try Again
               </button>
@@ -216,7 +216,7 @@ export default function DocumentViewer({
             {onGenerateResearchPaper && (
               <button
                 onClick={onGenerateResearchPaper}
-                className="mt-3 btn bg-purple-500 text-white hover:bg-purple-600 text-sm"
+                className="mt-3 btn bg-white/10 text-white hover:bg-white/15 text-sm"
               >
                 <FiFileText className="w-4 h-4" /> Generate Research Paper
               </button>
@@ -292,8 +292,8 @@ export function HypothesisViewer({
               <div className="flex items-center gap-2 flex-wrap">
                 <span className={clsx(
                   'text-sm font-bold',
-                  hypothesis.confidence >= 0.7 ? 'text-green-400' :
-                  hypothesis.confidence >= 0.5 ? 'text-yellow-400' : 'text-orange-400'
+                  hypothesis.confidence >= 0.7 ? 'text-[var(--color-text-secondary)]' :
+                  hypothesis.confidence >= 0.5 ? 'text-[var(--color-text-secondary)]' : 'text-[var(--color-text-muted)]'
                 )}>
                   {(hypothesis.confidence * 100).toFixed(1)}% confidence
                 </span>
@@ -341,7 +341,7 @@ export function HypothesisViewer({
 
             {/* Status indicator */}
             {isGenerating && (
-              <div className="flex items-center gap-2 text-yellow-400 text-sm">
+              <div className="flex items-center gap-2 text-[var(--color-text-secondary)] text-sm">
                 <FiRefreshCw className="w-4 h-4 animate-spin" />
                 Generating research paper...
               </div>

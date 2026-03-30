@@ -8,7 +8,7 @@ import {
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import api, { Project } from '../services/api'
-import { logActivity, formatDate, usePersistentState } from '../utils/persistence'
+import { logActivity, formatDate, usePersistentState, blobPut, blobGet, blobDelete } from '../utils/persistence'
 import HypothesisDocViewer from '../components/HypothesisDocViewer'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 
@@ -53,13 +53,107 @@ interface ProjectDocument {
   filename: string
   file_size: number
   mime_type: string
-  data_base64: string
   uploaded_at: string
+  // data_base64 is stored in IndexedDB, NOT in this object (to avoid localStorage size limits)
 }
 
 const DOC_TYPES = ['Protocol', 'Report', 'Dataset', 'Consent Form', 'IRB Approval', 'Lab Notes', 'Manuscript', 'Supplementary', 'Other'] as const
 
 type ViewMode = 'list' | 'hypothesis_viewer' | 'hypothesis_paper' | 'document_viewer'
+
+/** Standalone doc viewer that loads blob content from IndexedDB asynchronously */
+function DocumentViewer({ doc, onClose }: { doc: ProjectDocument; onClose: () => void }) {
+  const [dataUrl, setDataUrl] = useState<string | null>(null)
+  const [textContent, setTextContent] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  const isImage = doc.mime_type.startsWith('image/')
+  const isPdf = doc.mime_type === 'application/pdf'
+  const isText = doc.mime_type.startsWith('text/') || doc.mime_type.includes('json') || doc.mime_type.includes('xml')
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      setLoading(true)
+      const base64 = await blobGet(doc.id)
+      if (cancelled) return
+      if (base64) {
+        setDataUrl(`data:${doc.mime_type};base64,${base64}`)
+        if (isText) {
+          try { setTextContent(atob(base64)) } catch { setTextContent(null) }
+        }
+      }
+      setLoading(false)
+    })()
+    return () => { cancelled = true }
+  }, [doc.id])
+
+  return (
+    <div className="h-full flex flex-col">
+      <div className="px-6 py-3 border-b border-[var(--color-border)] flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-2">
+          <button onClick={onClose} className="text-[var(--color-text-secondary)] hover:text-[var(--color-text)] text-sm flex items-center gap-1">
+            <FiArrowLeft className="w-3.5 h-3.5" />Back
+          </button>
+          <span className="text-[var(--color-text-muted)]">/</span>
+          <span className="text-[var(--color-text)] text-sm font-medium truncate max-w-md">{doc.title}</span>
+        </div>
+        <div className="flex items-center gap-3 text-xs text-[var(--color-text-muted)]">
+          <span>{doc.doc_type}</span>
+          {doc.authors && <span>{doc.authors}</span>}
+          <span>{formatDate(doc.date)}</span>
+          <button onClick={onClose} className="p-1.5 rounded hover:bg-white/5 text-[var(--color-text-muted)]">
+            <FiX className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+      <div className="flex-1 min-h-0 relative">
+        {loading && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="w-6 h-6 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+          </div>
+        )}
+        {!loading && !dataUrl && (
+          <div className="flex flex-col items-center justify-center h-full gap-4">
+            <FiFile className="w-16 h-16 text-[var(--color-text-muted)] opacity-30" />
+            <p className="text-[var(--color-text-muted)]">File content not available on this device</p>
+            <p className="text-xs text-[var(--color-text-muted)]">Upload the document again to view it here</p>
+          </div>
+        )}
+        {!loading && dataUrl && isPdf && (
+          <object data={dataUrl} type="application/pdf" className="w-full h-full">
+            <div className="flex flex-col items-center justify-center h-full">
+              <p className="text-[var(--color-text-muted)] mb-4">Unable to display PDF inline.</p>
+              <a href={dataUrl} download={doc.filename} className="text-sm text-[var(--color-text-secondary)] hover:underline">Download</a>
+            </div>
+          </object>
+        )}
+        {!loading && dataUrl && isImage && (
+          <div className="flex items-center justify-center h-full p-8">
+            <img src={dataUrl} alt={doc.title} className="max-w-full max-h-full object-contain rounded" />
+          </div>
+        )}
+        {!loading && dataUrl && isText && textContent && (
+          <div className="p-8 overflow-auto h-full">
+            <pre className="text-sm text-[var(--color-text-secondary)] whitespace-pre-wrap font-mono">{textContent}</pre>
+          </div>
+        )}
+        {!loading && dataUrl && !isPdf && !isImage && !isText && (
+          <div className="flex flex-col items-center justify-center h-full gap-4">
+            <FiFile className="w-16 h-16 text-[var(--color-text-muted)] opacity-30" />
+            <p className="text-[var(--color-text-muted)]">Preview not available for this file type</p>
+            <a href={dataUrl} download={doc.filename} className="text-sm text-[var(--color-text-secondary)] hover:underline">Download {doc.filename}</a>
+          </div>
+        )}
+      </div>
+      {doc.description && (
+        <div className="px-6 py-3 border-t border-[var(--color-border)] text-xs text-[var(--color-text-muted)]">
+          {doc.description}
+        </div>
+      )}
+    </div>
+  )
+}
 
 const PAPER_PHASES = [
   { label: 'Initializing research pipeline...', duration: 2000 },
@@ -154,7 +248,7 @@ export default function ProjectDetail() {
     title: h.title,
     description: h.description,
     mechanism: h.mechanism,
-    confidence: h.confidence,
+    confidence: (h as any).confidence ?? (h as any).confidence_score ?? 0,
     tags: [] as string[],
     disease: project?.disease_focus || '',
     discovery_type: 'treatment',
@@ -451,10 +545,14 @@ export default function ProjectDetail() {
   const handleDocUpload = useCallback(async () => {
     if (!docFile || !docForm.title.trim() || !projectId) return
     const reader = new FileReader()
-    reader.onload = () => {
+    reader.onload = async () => {
       const base64 = (reader.result as string).split(',')[1] || ''
+      const docId = `doc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      // Store the file blob in IndexedDB (no size limits)
+      await blobPut(docId, base64)
+      // Store metadata in localStorage (small, syncs across devices)
       const doc: ProjectDocument = {
-        id: `doc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        id: docId,
         project_id: projectId,
         title: docForm.title.trim(),
         doc_type: docForm.doc_type,
@@ -465,7 +563,6 @@ export default function ProjectDetail() {
         filename: docFile.name,
         file_size: docFile.size,
         mime_type: docFile.type,
-        data_base64: base64,
         uploaded_at: new Date().toISOString(),
       }
       setProjectDocs(prev => [doc, ...prev])
@@ -477,9 +574,10 @@ export default function ProjectDetail() {
     reader.readAsDataURL(docFile)
   }, [docFile, docForm, projectId, project, setProjectDocs])
 
-  const confirmDeleteDoc = () => {
+  const confirmDeleteDoc = async () => {
     if (!deleteDocId) return
     const doc = projectDocs.find(d => d.id === deleteDocId)
+    await blobDelete(deleteDocId).catch(() => {})
     setProjectDocs(prev => prev.filter(d => d.id !== deleteDocId))
     logActivity({ type: 'evidence', action: 'deleted', title: `Deleted document: ${doc?.title || deleteDocId}`, project: project?.name })
     setDeleteDocId(null)
@@ -736,66 +834,9 @@ export default function ProjectDetail() {
     )
   }
 
-  // Document viewer
+  // Document viewer — loads blob from IndexedDB
   if (viewMode === 'document_viewer' && viewingDoc) {
-    const isImage = viewingDoc.mime_type.startsWith('image/')
-    const isPdf = viewingDoc.mime_type === 'application/pdf'
-    const isText = viewingDoc.mime_type.startsWith('text/') || viewingDoc.mime_type.includes('json') || viewingDoc.mime_type.includes('xml')
-    const dataUrl = `data:${viewingDoc.mime_type};base64,${viewingDoc.data_base64}`
-
-    return (
-      <div className="h-full flex flex-col">
-        <div className="px-6 py-3 border-b border-[var(--color-border)] flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-2">
-            <button onClick={() => { setViewingDoc(null); setViewMode('list') }} className="text-[var(--color-text-secondary)] hover:text-[var(--color-text)] text-sm flex items-center gap-1">
-              <FiArrowLeft className="w-3.5 h-3.5" />Back
-            </button>
-            <span className="text-[var(--color-text-muted)]">/</span>
-            <span className="text-[var(--color-text)] text-sm font-medium truncate max-w-md">{viewingDoc.title}</span>
-          </div>
-          <div className="flex items-center gap-3 text-xs text-[var(--color-text-muted)]">
-            <span>{viewingDoc.doc_type}</span>
-            {viewingDoc.authors && <span>{viewingDoc.authors}</span>}
-            <span>{formatDate(viewingDoc.date)}</span>
-            <button onClick={() => { setViewingDoc(null); setViewMode('list') }} className="p-1.5 rounded hover:bg-white/5 text-[var(--color-text-muted)]">
-              <FiX className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-        <div className="flex-1 min-h-0 relative">
-          {isPdf && (
-            <object data={dataUrl} type="application/pdf" className="w-full h-full">
-              <div className="flex flex-col items-center justify-center h-full">
-                <p className="text-[var(--color-text-muted)] mb-4">Unable to display PDF inline.</p>
-                <a href={dataUrl} download={viewingDoc.filename} className="text-sm text-[var(--color-text-secondary)] hover:underline">Download</a>
-              </div>
-            </object>
-          )}
-          {isImage && (
-            <div className="flex items-center justify-center h-full p-8">
-              <img src={dataUrl} alt={viewingDoc.title} className="max-w-full max-h-full object-contain rounded" />
-            </div>
-          )}
-          {isText && (
-            <div className="p-8 overflow-auto h-full">
-              <pre className="text-sm text-[var(--color-text-secondary)] whitespace-pre-wrap font-mono">{atob(viewingDoc.data_base64)}</pre>
-            </div>
-          )}
-          {!isPdf && !isImage && !isText && (
-            <div className="flex flex-col items-center justify-center h-full gap-4">
-              <FiFile className="w-16 h-16 text-[var(--color-text-muted)] opacity-30" />
-              <p className="text-[var(--color-text-muted)]">Preview not available for this file type</p>
-              <a href={dataUrl} download={viewingDoc.filename} className="text-sm text-[var(--color-text-secondary)] hover:underline">Download {viewingDoc.filename}</a>
-            </div>
-          )}
-        </div>
-        {viewingDoc.description && (
-          <div className="px-6 py-3 border-t border-[var(--color-border)] text-xs text-[var(--color-text-muted)]">
-            {viewingDoc.description}
-          </div>
-        )}
-      </div>
-    )
+    return <DocumentViewer doc={viewingDoc} onClose={() => { setViewingDoc(null); setViewMode('list') }} />
   }
 
   // Default list view
