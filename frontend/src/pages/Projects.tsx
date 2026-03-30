@@ -29,7 +29,8 @@ type StatusFilter = 'all' | 'active' | 'paused' | 'completed' | 'archived'
 
 function StatsBar({ projects }: { projects: Project[] }) {
   const totalHypotheses = projects.reduce((sum, p) => sum + (p.hypothesis_count || 0), 0)
-  const totalEvidence = projects.reduce((sum, p) => sum + (p.evidence_count || 0), 0)
+  const allDocs = persistGet<{ id: string; project_id: string }[]>('project-documents', [])
+  const totalEvidence = projects.reduce((sum, p) => sum + (p.evidence_count || 0), 0) + allDocs.length
   const activeCount = projects.filter(p => (p.status || 'active') === 'active').length
   const allPapers = persistGet<SavedResearchPaper[]>('research-papers', [])
 
@@ -233,6 +234,8 @@ function CreateProjectModal({ onClose, onCreate }: { onClose: () => void; onCrea
 function ProjectCardGrid({ project, onDelete }: { project: Project; onDelete: (id: string) => void }) {
   const allPapers = persistGet<SavedResearchPaper[]>('research-papers', [])
   const paperCount = allPapers.filter(p => p.project_id === project.id).length
+  const allDocs = persistGet<{ id: string; project_id: string }[]>('project-documents', [])
+  const docCount = allDocs.filter(d => d.project_id === project.id).length
 
   return (
     <div className="glass-card hover:border-white/10 transition-all duration-200 group relative overflow-hidden">
@@ -266,7 +269,7 @@ function ProjectCardGrid({ project, onDelete }: { project: Project; onDelete: (i
             <div className="text-[10px] text-[var(--color-text-muted)] uppercase tracking-wider">Hypotheses</div>
           </div>
           <div className="text-center p-2 rounded-lg bg-white/[0.02]">
-            <div className="text-sm font-bold text-white">{project.evidence_count || 0}</div>
+            <div className="text-sm font-bold text-white">{(project.evidence_count || 0) + docCount}</div>
             <div className="text-[10px] text-[var(--color-text-muted)] uppercase tracking-wider">Evidence</div>
           </div>
           <div className="text-center p-2 rounded-lg bg-white/[0.02]">
@@ -316,6 +319,8 @@ function ProjectCardGrid({ project, onDelete }: { project: Project; onDelete: (i
 function ProjectCardList({ project, onDelete }: { project: Project; onDelete: (id: string) => void }) {
   const allPapers = persistGet<SavedResearchPaper[]>('research-papers', [])
   const paperCount = allPapers.filter(p => p.project_id === project.id).length
+  const allDocs = persistGet<{ id: string; project_id: string }[]>('project-documents', [])
+  const docCount = allDocs.filter(d => d.project_id === project.id).length
   return (
     <div className="glass-card hover:border-white/10 transition-all group">
       <Link to={`/projects/${project.id}`} className="flex items-center gap-4 p-4">
@@ -340,7 +345,7 @@ function ProjectCardList({ project, onDelete }: { project: Project; onDelete: (i
             <div className="text-[10px] text-[var(--color-text-muted)]">Hyp.</div>
           </div>
           <div className="text-center w-16">
-            <div className="font-bold text-white">{project.evidence_count || 0}</div>
+            <div className="font-bold text-white">{(project.evidence_count || 0) + docCount}</div>
             <div className="text-[10px] text-[var(--color-text-muted)]">Evidence</div>
           </div>
           <div className="text-center w-16">

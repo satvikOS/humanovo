@@ -37,6 +37,7 @@ import {
   FiHeart,
   FiGrid,
   FiUpload,
+  FiPaperclip,
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import { useTheme } from '../contexts/ThemeContext'
@@ -473,29 +474,37 @@ function ConstantChat() {
   const [streamingText, setStreamingText] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
   const chatEndRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const [uploading, setUploading] = useState(false)
+  const [attachedFiles, setAttachedFiles] = useState<File[]>([])
+  const MAX_FILE_SIZE = 20 * 1024 * 1024 // 20MB
+  const MAX_FILES = 2
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, loading, streamingText])
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
     if (!files || files.length === 0) return
-    setUploading(true)
+    const newFiles: File[] = []
     for (const file of Array.from(files)) {
-      try {
-        const { api } = await import('../services/api')
-        await api.uploadDocument(file)
-        setMessages(prev => [...prev, { role: 'assistant', text: `Document **${file.name}** uploaded successfully and will be processed for the knowledge base.` }])
-      } catch {
-        setMessages(prev => [...prev, { role: 'assistant', text: `Failed to upload **${file.name}**. Please check that the backend is running and try again.` }])
+      if (file.size > MAX_FILE_SIZE) {
+        setMessages(prev => [...prev, { role: 'assistant', text: `**${file.name}** exceeds the 20 MB size limit. Please use a smaller file.` }])
+        continue
       }
+      if (attachedFiles.length + newFiles.length >= MAX_FILES) {
+        setMessages(prev => [...prev, { role: 'assistant', text: `Maximum ${MAX_FILES} documents per message. Remove an attachment first.` }])
+        break
+      }
+      newFiles.push(file)
     }
-    setUploading(false)
+    if (newFiles.length > 0) setAttachedFiles(prev => [...prev, ...newFiles].slice(0, MAX_FILES))
     if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  const removeAttachment = (index: number) => {
+    setAttachedFiles(prev => prev.filter((_, i) => i !== index))
   }
 
   const getLocalContext = () => {
@@ -545,6 +554,9 @@ function ConstantChat() {
   useEffect(() => {
     if (isOpen) {
       setTimeout(() => inputRef.current?.focus(), 100)
+    } else {
+      // Clear attachments when chat closes
+      setAttachedFiles([])
     }
   }, [isOpen])
 
@@ -775,15 +787,36 @@ function ConstantChat() {
   }
 
   const sendMessage = async () => {
-    if (!input.trim() || loading) return
+    if ((!input.trim() && attachedFiles.length === 0) || loading) return
     const userMsg = input.trim()
+    const filesToSend = [...attachedFiles]
     setInput('')
-    setMessages(prev => [...prev, { role: 'user', text: userMsg }])
+    setAttachedFiles([])
+    // Reset textarea height
+    if (inputRef.current) inputRef.current.style.height = 'auto'
+
+    const displayText = filesToSend.length > 0
+      ? `${userMsg}${userMsg ? '\n' : ''}${filesToSend.map(f => `📎 ${f.name}`).join('\n')}`
+      : userMsg
+    setMessages(prev => [...prev, { role: 'user', text: displayText }])
     setLoading(true)
+
+    // Upload attached files first (if any)
+    for (const file of filesToSend) {
+      try {
+        const { api } = await import('../services/api')
+        await api.uploadDocument(file)
+      } catch {
+        // Silently continue — file upload to backend is best-effort
+      }
+    }
 
     // Scope guard: check before hitting backend
     let fullResponse = ''
-    if (isOutOfScope(userMsg.toLowerCase().trim())) {
+    const hasOnlyFiles = !userMsg && filesToSend.length > 0
+    if (hasOnlyFiles) {
+      fullResponse = `Got it! I've received ${filesToSend.length === 1 ? `**${filesToSend[0].name}**` : `${filesToSend.length} documents`}. They'll be processed for the knowledge base. What would you like to do with ${filesToSend.length === 1 ? 'it' : 'them'}?`
+    } else if (isOutOfScope(userMsg.toLowerCase().trim())) {
       fullResponse = generateSmartFallbackResponse(userMsg)
     } else {
       // Call the backend AI endpoint (routes to API Gateway → Lambda → Bedrock Claude)
@@ -793,7 +826,13 @@ function ConstantChat() {
         const res = await fetch(`${_apiBase}/api/v1/orchestrator/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: userMsg, context: 'general', platform_context: platformContext, knowledge_base: { include_documents: true, retrieval_mode: 'hybrid' } }),
+          body: JSON.stringify({
+            message: userMsg,
+            context: 'general',
+            platform_context: platformContext,
+            knowledge_base: { include_documents: true, retrieval_mode: 'hybrid' },
+            attached_files: filesToSend.map(f => ({ name: f.name, size: f.size, type: f.type })),
+          }),
         })
         if (res.ok) {
           const data = await res.json()
@@ -886,43 +925,69 @@ function ConstantChat() {
         </div>
 
         {/* Input */}
-        <div className="px-5 py-4 border-t border-[var(--color-border)]">
+        <div className="px-5 py-3 border-t border-[var(--color-border)]">
           <input
             ref={fileInputRef}
             type="file"
             multiple
             accept=".pdf,.txt,.csv,.json,.docx,.xlsx,.md,.tsv"
-            onChange={handleFileUpload}
+            onChange={handleFileSelect}
             className="hidden"
           />
-          <div className="flex items-center gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--glass-bg)] px-4 py-3">
+          {/* Attachment chips */}
+          {attachedFiles.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-2">
+              {attachedFiles.map((f, i) => (
+                <div key={i} className="flex items-center gap-1.5 bg-white/5 border border-[var(--color-border)] rounded-lg px-2.5 py-1 text-xs text-[var(--color-text-secondary)]">
+                  <FiPaperclip className="w-3 h-3 shrink-0" />
+                  <span className="truncate max-w-[140px]">{f.name}</span>
+                  <span className="text-[var(--color-text-muted)]">({(f.size / 1024 / 1024).toFixed(1)}MB)</span>
+                  <button onClick={() => removeAttachment(i)} className="p-0.5 rounded hover:bg-white/10 text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
+                    <FiX className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex items-end gap-2">
             <button
               onClick={() => fileInputRef.current?.click()}
-              disabled={uploading}
-              className="p-1.5 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)] transition-all disabled:opacity-30"
-              title="Upload document"
+              disabled={attachedFiles.length >= MAX_FILES}
+              className="p-2 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-white/5 transition-all disabled:opacity-30 shrink-0 mb-0.5"
+              title={attachedFiles.length >= MAX_FILES ? `Max ${MAX_FILES} files` : 'Attach document'}
             >
               <FiUpload className="w-4 h-4" />
             </button>
-            <input
+            <textarea
               ref={inputRef}
-              type="text"
               value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && sendMessage()}
+              onChange={e => {
+                setInput(e.target.value)
+                // Auto-resize
+                e.target.style.height = 'auto'
+                e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px'
+              }}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  sendMessage()
+                }
+              }}
               placeholder="Ask Constant anything — research, biology, stats..."
-              className="flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--color-text-muted)]"
+              rows={1}
+              className="flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--color-text-muted)] resize-none leading-relaxed py-2"
+              style={{ maxHeight: '120px' }}
             />
             <button
               onClick={sendMessage}
-              disabled={!input.trim() || loading || isStreaming}
-              className="p-2 rounded-lg text-white disabled:opacity-30 transition-all"
+              disabled={(!input.trim() && attachedFiles.length === 0) || loading || isStreaming}
+              className="p-2 rounded-lg text-white disabled:opacity-30 transition-all shrink-0 mb-0.5"
               style={{ background: 'var(--color-accent-purple)' }}
             >
               <FiSend className="w-4 h-4" />
             </button>
           </div>
-          <p className="text-xxs text-[var(--color-text-muted)] mt-2 text-center">Press Enter to send, Escape to close</p>
+          <p className="text-xxs text-[var(--color-text-muted)] mt-1.5 text-center">Enter to send · Shift+Enter for new line · Escape to close</p>
         </div>
       </div>
     </div>,

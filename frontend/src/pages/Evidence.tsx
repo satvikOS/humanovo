@@ -24,6 +24,8 @@ import {
   FiTag,
   FiGlobe,
   FiShare2,
+  FiDownload,
+  FiPrinter,
 } from 'react-icons/fi'
 import api from '../services/api'
 import type { Evidence as EvidenceType, Hypothesis, Entity } from '../services/api'
@@ -809,28 +811,54 @@ export default function Evidence() {
       {/* Document Viewer Overlay */}
       {viewingDocOverlay && (
         <>
-          <div className="fixed inset-0 bg-black/50 z-40" onClick={closeDocViewer} />
-          <div className="fixed inset-8 z-50 flex flex-col rounded-2xl border border-[var(--color-border)] overflow-hidden" style={{ background: 'var(--color-surface-solid)' }}>
-            <div className="px-6 py-3 border-b border-[var(--color-border)] flex items-center justify-between shrink-0">
-              <div>
-                <h3 className="text-sm font-medium text-white">{viewingDocOverlay.title}</h3>
-                <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{viewingDocOverlay.doc_type} {viewingDocOverlay.authors && `· ${viewingDocOverlay.authors}`} {viewingDocOverlay.date && `· ${viewingDocOverlay.date}`}</p>
+          <div className="fixed inset-0 bg-black/60 z-40 backdrop-blur-sm" onClick={closeDocViewer} />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-8">
+            <div className="w-full max-w-4xl h-[80vh] flex flex-col rounded-2xl border border-[var(--color-border)] overflow-hidden" style={{ background: 'var(--color-surface-solid)' }}>
+              <div className="px-5 py-3 border-b border-[var(--color-border)] flex items-center justify-between shrink-0">
+                <div className="min-w-0 flex-1 mr-3">
+                  <h3 className="text-sm font-medium text-white truncate">{viewingDocOverlay.title}</h3>
+                  <p className="text-xs text-[var(--color-text-muted)] mt-0.5 truncate">{viewingDocOverlay.doc_type} {viewingDocOverlay.authors && `· ${viewingDocOverlay.authors}`} {viewingDocOverlay.date && `· ${viewingDocOverlay.date}`}</p>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {viewingDocBlobUrl && (
+                    <>
+                      <button
+                        onClick={() => {
+                          const w = window.open('')
+                          if (w) { w.document.write(`<iframe src="${viewingDocBlobUrl}" style="width:100%;height:100%;border:none"></iframe>`); w.document.title = viewingDocOverlay.title; w.print() }
+                        }}
+                        className="p-1.5 rounded-lg hover:bg-white/5 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                        title="Print"
+                      >
+                        <FiPrinter className="w-4 h-4" />
+                      </button>
+                      <a
+                        href={viewingDocBlobUrl}
+                        download={viewingDocOverlay.filename || viewingDocOverlay.title}
+                        className="p-1.5 rounded-lg hover:bg-white/5 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                        title="Download"
+                      >
+                        <FiDownload className="w-4 h-4" />
+                      </a>
+                    </>
+                  )}
+                  <button onClick={closeDocViewer} className="p-1.5 rounded-lg hover:bg-white/5 text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
+                    <FiX className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
-              <button onClick={closeDocViewer} className="p-1.5 rounded hover:bg-white/5 text-[var(--color-text-muted)]">
-                <FiX className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="flex-1 min-h-0 relative">
-              {viewingDocLoading && <div className="absolute inset-0 flex items-center justify-center"><div className="w-6 h-6 border-2 border-white/20 border-t-white rounded-full animate-spin" /></div>}
-              {!viewingDocLoading && viewingDocBlobUrl && viewingDocOverlay.mime_type === 'application/pdf' && (
-                <iframe src={viewingDocBlobUrl} className="w-full h-full border-0" title={viewingDocOverlay.title} />
-              )}
-              {!viewingDocLoading && viewingDocBlobUrl && viewingDocOverlay.mime_type.startsWith('image/') && (
-                <div className="flex items-center justify-center h-full p-8"><img src={viewingDocBlobUrl} alt={viewingDocOverlay.title} className="max-w-full max-h-full object-contain rounded" /></div>
-              )}
-              {!viewingDocLoading && !viewingDocBlobUrl && (
-                <div className="flex flex-col items-center justify-center h-full"><p className="text-[var(--color-text-muted)]">File content not available</p></div>
-              )}
+              <div className="flex-1 min-h-0 relative">
+                {viewingDocLoading && <div className="absolute inset-0 flex items-center justify-center"><div className="w-6 h-6 border-2 border-white/20 border-t-white rounded-full animate-spin" /></div>}
+                {!viewingDocLoading && viewingDocBlobUrl && viewingDocOverlay.mime_type === 'application/pdf' && (
+                  <iframe src={viewingDocBlobUrl} className="w-full h-full border-0" title={viewingDocOverlay.title} />
+                )}
+                {!viewingDocLoading && viewingDocBlobUrl && viewingDocOverlay.mime_type.startsWith('image/') && (
+                  <div className="flex items-center justify-center h-full p-8"><img src={viewingDocBlobUrl} alt={viewingDocOverlay.title} className="max-w-full max-h-full object-contain rounded" /></div>
+                )}
+                {!viewingDocLoading && !viewingDocBlobUrl && (
+                  <div className="flex flex-col items-center justify-center h-full"><p className="text-[var(--color-text-muted)]">File content not available</p></div>
+                )}
+              </div>
             </div>
           </div>
         </>
