@@ -7,6 +7,8 @@ import {
   ResponsiveContainer, Cell,
 } from 'recharts'
 
+import { logActivity } from '../utils/persistence'
+
 type TabId = 'pathway' | 'gsea' | 'variants' | 'biomarkers'
 const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
 const API = `${API_BASE}/api/v1/genomics`
@@ -322,6 +324,7 @@ export default function GenomicsAnalysis() {
         throw new Error(`Expected JSON but received ${contentType}. Ensure the backend server is running at ${location.origin}.`)
       }
       setResult(await res.json())
+      logActivity({ type: 'discovery', action: 'started', title: `Ran genomics analysis: ${tab}` })
     } catch (e: any) { setError(e.message) } finally { setLoading(false) }
   }
 

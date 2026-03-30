@@ -12,6 +12,7 @@ import {
   FiFileText,
 } from 'react-icons/fi'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
+import { logActivity } from '../utils/persistence'
 
 interface Paper {
   id: string
@@ -72,6 +73,7 @@ export default function LiteratureReview() {
       starred: false,
     }
     savePapers([paper, ...papers])
+    logActivity({ type: 'notebook', action: 'created', title: `Added paper: ${paper.title}` })
     setNewPaper({ title: '', authors: '', journal: '', year: new Date().getFullYear(), doi: '', abstract: '', tags: '', relevance: 'medium' })
     setShowAddForm(false)
   }
@@ -86,7 +88,9 @@ export default function LiteratureReview() {
 
   const confirmDelete = () => {
     if (!deleteConfirmId) return
+    const deletedPaper = papers.find(p => p.id === deleteConfirmId)
     savePapers(papers.filter(p => p.id !== deleteConfirmId))
+    logActivity({ type: 'notebook', action: 'deleted', title: `Deleted paper: ${deletedPaper?.title || deleteConfirmId}` })
     if (selectedPaper?.id === deleteConfirmId) setSelectedPaper(null)
     setDeleteConfirmId(null)
   }

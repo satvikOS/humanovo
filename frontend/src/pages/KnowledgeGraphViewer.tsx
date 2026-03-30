@@ -4,6 +4,7 @@ import {
   FiLink,
 } from 'react-icons/fi'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
+import { logActivity } from '../utils/persistence'
 
 interface GNode { id: string; name: string; type: string; description: string; created_at: string }
 interface GEdge { id: string; source: string; target: string; source_name: string; target_name: string; relationship: string; strength: number; evidence: string }
@@ -138,7 +139,7 @@ export default function KnowledgeGraphViewer() {
   const addNode = async () => {
     if (!newNode.name.trim()) return
     const res = await fetch(`${API}/nodes`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newNode) })
-    if (res.ok) { setNewNode({ name: '', type: 'gene', description: '' }); setShowAdd(false); load() }
+    if (res.ok) { logActivity({ type: 'discovery', action: 'created', title: `Added node: ${newNode.name} (${newNode.type})` }); setNewNode({ name: '', type: 'gene', description: '' }); setShowAdd(false); load() }
   }
 
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
@@ -147,8 +148,10 @@ export default function KnowledgeGraphViewer() {
 
   const confirmDeleteNode = async () => {
     if (!deleteConfirmId) return
+    const deletedNode = nodes.find(n => n.id === deleteConfirmId)
     await fetch(`${API}/nodes/${deleteConfirmId}`, { method: 'DELETE' })
     if (selected?.id === deleteConfirmId) setSelected(null)
+    logActivity({ type: 'discovery', action: 'deleted', title: `Deleted node: ${deletedNode?.name || deleteConfirmId}` })
     setDeleteConfirmId(null)
     load()
   }

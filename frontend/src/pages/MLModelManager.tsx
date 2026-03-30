@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { FiCpu, FiPlus, FiTrash2, FiPlay } from 'react-icons/fi'
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
+import { logActivity } from '../utils/persistence'
 
 interface MLModel {
   id: string; name: string; model_type: string; status: string; description: string; version: string
@@ -35,7 +36,7 @@ export default function MLModelManager() {
   const createModel = async () => {
     if (!form.name.trim()) return
     const r = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) })
-    if (r.ok) { load(); setShowAdd(false); setForm({ name: '', model_type: 'classification', description: '', framework: 'scikit-learn' }) }
+    if (r.ok) { load(); setShowAdd(false); logActivity({ type: 'discovery', action: 'created', title: `Created ML model: ${form.name}` }); setForm({ name: '', model_type: 'classification', description: '', framework: 'scikit-learn' }) }
   }
 
   const deleteModel = (id: string) => {
@@ -44,9 +45,11 @@ export default function MLModelManager() {
 
   const confirmDelete = async () => {
     if (!deleteConfirmId) return
+    const deletedModel = models.find(m => m.id === deleteConfirmId)
     await fetch(`${API}/${deleteConfirmId}`, { method: 'DELETE' })
     if (selected?.id === deleteConfirmId) { setSelected(null); setMetrics(null) }; load()
     setDeleteConfirmId(null)
+    logActivity({ type: 'discovery', action: 'deleted', title: `Deleted ML model: ${deletedModel?.name || deleteConfirmId}` })
   }
 
   const predict = async () => {

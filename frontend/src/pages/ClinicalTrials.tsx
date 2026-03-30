@@ -5,6 +5,7 @@ import {
 } from 'react-icons/fi'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
+import { logActivity } from '../utils/persistence'
 
 interface Trial {
   id: string; protocol_number: string; title: string; phase: string; status: string
@@ -41,7 +42,7 @@ export default function ClinicalTrials() {
   const createTrial = async () => {
     if (!form.title.trim()) return
     const r = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) })
-    if (r.ok) { load(); setShowAdd(false); setForm({ protocol_number: '', title: '', phase: 'Phase I', pi: '', target_enrollment: 0 }) }
+    if (r.ok) { load(); setShowAdd(false); logActivity({ type: 'discovery', action: 'created', title: `Created trial: ${form.title}` }); setForm({ protocol_number: '', title: '', phase: 'Phase I', pi: '', target_enrollment: 0 }) }
   }
 
   const deleteTrial = (id: string) => {
@@ -50,10 +51,12 @@ export default function ClinicalTrials() {
 
   const confirmDelete = async () => {
     if (!deleteConfirmId) return
+    const deletedTrial = trials.find(t => t.id === deleteConfirmId)
     await fetch(`${API}/${deleteConfirmId}`, { method: 'DELETE' })
     if (selected?.id === deleteConfirmId) setSelected(null)
     load()
     setDeleteConfirmId(null)
+    logActivity({ type: 'discovery', action: 'deleted', title: `Deleted trial: ${deletedTrial?.title || deleteConfirmId}` })
   }
 
   const enrollPct = selected ? Math.round((selected.current_enrollment / Math.max(selected.target_enrollment, 1)) * 100) : 0

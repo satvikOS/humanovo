@@ -4,7 +4,7 @@ import {
   FiCheck, FiUpload, FiFolder, FiEdit3, FiExternalLink,
   FiFile, FiX, FiRefreshCw, FiStar, FiBookOpen, FiHash,
 } from 'react-icons/fi'
-import { usePersistentState } from '../utils/persistence'
+import { usePersistentState, logActivity } from '../utils/persistence'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 
 interface Citation {
@@ -258,6 +258,7 @@ export default function CitationManager() {
     saveCitation([citation, ...citations])
     setForm({ type: 'journal', title: '', authors: '', journal: '', volume: '', issue: '', pages: '', year: new Date().getFullYear(), doi: '', pmid: '', url: '', publisher: '', tags: '', collection: '', abstract: '' })
     setShowAddForm(false)
+    logActivity({ type: 'notebook', action: 'created', title: `Added citation: ${citation.title}` })
 
     // Persist to backend
     ;(async () => {
@@ -315,6 +316,7 @@ export default function CitationManager() {
         saveCitation([citation, ...citations])
         setImportId('')
         setShowImport(false)
+        logActivity({ type: 'notebook', action: 'imported', title: `Imported citation: ${citation.title}` })
       }
     } catch { /* import failed */ }
     setImporting(false)
@@ -336,6 +338,7 @@ export default function CitationManager() {
       createdAt: new Date().toISOString(),
     }
     saveCitation([citation, ...citations])
+    logActivity({ type: 'notebook', action: 'imported', title: `Uploaded PDF citation: ${name}` })
 
     // Upload to backend
     try {
@@ -354,8 +357,10 @@ export default function CitationManager() {
 
   const confirmDelete = () => {
     if (deleteConfirmId) {
+      const deletedCitation = citations.find(c => c.id === deleteConfirmId)
       saveCitation(citations.filter(c => c.id !== deleteConfirmId))
       setDeleteConfirmId(null)
+      logActivity({ type: 'notebook', action: 'deleted', title: `Deleted citation: ${deletedCitation?.title || deleteConfirmId}` })
     }
   }
 

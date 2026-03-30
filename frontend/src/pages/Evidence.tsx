@@ -26,6 +26,7 @@ import {
 } from 'react-icons/fi'
 import api from '../services/api'
 import type { Evidence as EvidenceType, Hypothesis, Entity } from '../services/api'
+import { logActivity } from '../utils/persistence'
 
 const sourceTypeColors: Record<string, string> = {
   pubmed: 'var(--color-accent-blue)',
@@ -262,6 +263,7 @@ export default function Evidence() {
       const updated = await api.updateEvidence(selectedId, { [field]: value })
       setEvidence(prev => prev.map(e => e.id === selectedId ? { ...e, ...updated } : e))
       setEditField(null)
+      logActivity({ type: 'evidence', action: 'updated', title: `Updated evidence field ${field}: ${selectedItem?.title || selectedId}` })
     } catch (err) {
       console.error('Failed to update:', err)
     }
@@ -274,6 +276,7 @@ export default function Evidence() {
     try {
       const updated = await api.updateEvidence(selectedId, { status: newStatus })
       setEvidence(prev => prev.map(e => e.id === selectedId ? { ...e, ...updated } : e))
+      logActivity({ type: 'evidence', action: 'updated', title: `Updated evidence status to ${newStatus}: ${selectedItem?.title || selectedId}` })
     } catch (err) {
       console.error('Failed to update status:', err)
     }
@@ -314,9 +317,11 @@ export default function Evidence() {
     const id = deleteConfirmId
     setDeleteConfirmId(null)
     try {
+      const deletedItem = evidence.find(e => e.id === id)
       await api.deleteEvidence(id)
       setEvidence(prev => prev.filter(e => e.id !== id))
       if (selectedId === id) setSelectedId(null)
+      logActivity({ type: 'evidence', action: 'deleted', title: `Deleted evidence: ${deletedItem?.title || id}` })
     } catch (err) {
       console.error('Failed to delete evidence:', err)
     }
@@ -359,6 +364,7 @@ export default function Evidence() {
       })
       setEvidence(prev => [created, ...prev])
       setShowAddModal(false)
+      logActivity({ type: 'evidence', action: 'created', title: `Added evidence: ${form.title}` })
     } catch (err) {
       console.error('Failed to create evidence:', err)
     }

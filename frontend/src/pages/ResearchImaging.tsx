@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { FiImage, FiPlus, FiTrash2, FiZoomIn, FiZoomOut, FiCpu, FiSquare, FiCircle, FiType } from 'react-icons/fi'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
+import { logActivity } from '../utils/persistence'
 
 interface Study { id: string; title: string; modality: string; body_part: string; findings: string; status: string; annotations: Annotation[]; ai_analysis: any; width: number; height: number }
 interface Annotation { id: string; type: string; x: number; y: number; width: number; height: number; label: string; color: string; notes: string }
@@ -27,7 +28,7 @@ export default function ResearchImaging() {
   const createStudy = async () => {
     if (!form.title.trim()) return
     const r = await fetch(`${API}/studies`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) })
-    if (r.ok) { load(); setShowAdd(false); setForm({ title: '', modality: 'CT', body_part: '', findings: '' }) }
+    if (r.ok) { load(); setShowAdd(false); logActivity({ type: 'discovery', action: 'created', title: `Created imaging study: ${form.title}` }); setForm({ title: '', modality: 'CT', body_part: '', findings: '' }) }
   }
 
   const deleteStudy = (id: string) => {
@@ -36,15 +37,17 @@ export default function ResearchImaging() {
 
   const confirmDelete = async () => {
     if (!deleteConfirmId) return
+    const deletedStudy = studies.find(s => s.id === deleteConfirmId)
     await fetch(`${API}/studies/${deleteConfirmId}`, { method: 'DELETE' })
     if (selected?.id === deleteConfirmId) setSelected(null); load()
     setDeleteConfirmId(null)
+    logActivity({ type: 'discovery', action: 'deleted', title: `Deleted imaging study: ${deletedStudy?.title || deleteConfirmId}` })
   }
 
   const runAnalysis = async () => {
     if (!selected) return
     const r = await fetch(`${API}/studies/${selected.id}/analysis`)
-    if (r.ok) setAnalysis(await r.json())
+    if (r.ok) { setAnalysis(await r.json()); logActivity({ type: 'discovery', action: 'started', title: `Ran AI analysis on: ${selected.title}` }) }
   }
 
   const addAnnotation = async (e: React.MouseEvent) => {

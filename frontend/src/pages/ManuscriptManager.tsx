@@ -3,7 +3,7 @@ import {
   FiFileText, FiPlus, FiTrash2, FiEdit3, FiUsers, FiSend,
   FiDownload, FiSave,
 } from 'react-icons/fi'
-import { formatDate } from '../utils/persistence'
+import { formatDate, logActivity } from '../utils/persistence'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 
 interface Manuscript {
@@ -40,7 +40,7 @@ export default function ManuscriptManager() {
   const createMs = async () => {
     if (!newTitle.trim()) return
     const r = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: newTitle, journal_target: newJournal }) })
-    if (r.ok) { load(); setShowAdd(false); setNewTitle(''); setNewJournal('') }
+    if (r.ok) { load(); setShowAdd(false); logActivity({ type: 'notebook', action: 'created', title: `Created manuscript: ${newTitle}` }); setNewTitle(''); setNewJournal('') }
   }
 
   const deleteMs = (id: string) => {
@@ -49,28 +49,32 @@ export default function ManuscriptManager() {
 
   const confirmDelete = async () => {
     if (!deleteConfirmId) return
+    const deletedMs = manuscripts.find(m => m.id === deleteConfirmId)
     await fetch(`${API}/${deleteConfirmId}`, { method: 'DELETE' })
     if (selected?.id === deleteConfirmId) setSelected(null); load()
     setDeleteConfirmId(null)
+    logActivity({ type: 'notebook', action: 'deleted', title: `Deleted manuscript: ${deletedMs?.title || deleteConfirmId}` })
   }
 
   const saveSection = async () => {
     if (!selected || !editSection) return
     const sections = { ...selected.sections, [editSection]: editText }
     const r = await fetch(`${API}/${selected.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sections }) })
-    if (r.ok) { const ms = await r.json(); setSelected(ms); setEditSection(null) }
+    if (r.ok) { const ms = await r.json(); setSelected(ms); setEditSection(null); logActivity({ type: 'notebook', action: 'updated', title: `Updated section ${editSection}: ${selected.title}` }) }
   }
 
   const addAuthor = async () => {
     if (!selected || !newAuthor.name.trim()) return
     const r = await fetch(`${API}/${selected.id}/authors`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newAuthor) })
-    if (r.ok) { selectMs(selected.id); setShowAuthorAdd(false); setNewAuthor({ name: '', affiliation: '', email: '', role: 'Co-Author' }) }
+    if (r.ok) { selectMs(selected.id); setShowAuthorAdd(false); setNewAuthor({ name: '', affiliation: '', email: '', role: 'Co-Author' }); logActivity({ type: 'notebook', action: 'updated', title: `Added author ${newAuthor.name} to: ${selected.title}` }) }
   }
 
   const removeAuthor = async (authorId: string) => {
     if (!selected) return
+    const removedAuthor = selected.authors.find(a => a.id === authorId)
     await fetch(`${API}/${selected.id}/authors/${authorId}`, { method: 'DELETE' })
     selectMs(selected.id)
+    logActivity({ type: 'notebook', action: 'updated', title: `Removed author ${removedAuthor?.name || authorId} from: ${selected.title}` })
   }
 
   const exportMs = async () => {
@@ -82,7 +86,7 @@ export default function ManuscriptManager() {
   const submitMs = async () => {
     if (!selected || !selected.journal_target) return
     const r = await fetch(`${API}/${selected.id}/submit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ journal: selected.journal_target }) })
-    if (r.ok) selectMs(selected.id)
+    if (r.ok) { selectMs(selected.id); logActivity({ type: 'notebook', action: 'updated', title: `Submitted manuscript: ${selected.title}` }) }
   }
 
   return (

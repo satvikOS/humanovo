@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { FiSearch, FiPlus, FiTrash2, FiAlertTriangle, FiLogOut, FiLogIn } from 'react-icons/fi'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
+import { logActivity } from '../utils/persistence'
 
 interface Sample {
   id: string; barcode: string; sample_type: string; status: string; project: string
@@ -34,7 +35,7 @@ export default function BiobankManager() {
 
   const createSample = async () => {
     const r = await fetch(`${API}/samples`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) })
-    if (r.ok) { load(); setShowAdd(false); setForm({ barcode: '', sample_type: 'tissue', tissue_type: '', project: '', patient_id: '', quantity: '' }) }
+    if (r.ok) { load(); setShowAdd(false); logActivity({ type: 'discovery', action: 'created', title: `Added biobank sample: ${form.barcode || form.sample_type}` }); setForm({ barcode: '', sample_type: 'tissue', tissue_type: '', project: '', patient_id: '', quantity: '' }) }
   }
 
   const deleteSample = (id: string) => {
@@ -43,19 +44,21 @@ export default function BiobankManager() {
 
   const confirmDelete = async () => {
     if (!deleteConfirmId) return
+    const deletedSample = samples.find(s => s.id === deleteConfirmId)
     await fetch(`${API}/samples/${deleteConfirmId}`, { method: 'DELETE' })
     if (selected?.id === deleteConfirmId) setSelected(null); load()
     setDeleteConfirmId(null)
+    logActivity({ type: 'discovery', action: 'deleted', title: `Deleted biobank sample: ${deletedSample?.barcode || deleteConfirmId}` })
   }
 
   const checkout = async (id: string) => {
     const r = await fetch(`${API}/samples/${id}/checkout`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ researcher: 'Current Researcher', purpose: 'Analysis' }) })
-    if (r.ok) { const s = await r.json(); setSelected(s); load() }
+    if (r.ok) { const s = await r.json(); setSelected(s); load(); logActivity({ type: 'discovery', action: 'updated', title: `Checked out sample: ${s.barcode || id}` }) }
   }
 
   const checkin = async (id: string) => {
     const r = await fetch(`${API}/samples/${id}/checkin?condition=good`, { method: 'POST' })
-    if (r.ok) { const s = await r.json(); setSelected(s); load() }
+    if (r.ok) { const s = await r.json(); setSelected(s); load(); logActivity({ type: 'discovery', action: 'updated', title: `Returned sample: ${s.barcode || id}` }) }
   }
 
   const filtered = samples.filter(s => {

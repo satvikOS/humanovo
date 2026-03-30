@@ -5,6 +5,7 @@ import {
 } from 'react-icons/fi'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
+import { logActivity } from '../utils/persistence'
 
 interface Dataset {
   id: string; name: string; description: string; format: string
@@ -40,7 +41,7 @@ export default function DataManager() {
   const createDataset = async () => {
     if (!newName.trim()) return
     const res = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: newName, description: newDesc }) })
-    if (res.ok) { const ds = await res.json(); setDatasets(prev => [ds, ...prev]); setNewName(''); setNewDesc(''); setShowAdd(false) }
+    if (res.ok) { const ds = await res.json(); setDatasets(prev => [ds, ...prev]); setNewName(''); setNewDesc(''); setShowAdd(false); logActivity({ type: 'discovery', action: 'created', title: `Created dataset: ${newName}` }) }
   }
 
   const deleteDataset = (id: string) => {
@@ -49,16 +50,18 @@ export default function DataManager() {
 
   const confirmDelete = async () => {
     if (!deleteConfirmId) return
+    const deletedDs = datasets.find(d => d.id === deleteConfirmId)
     await fetch(`${API}/${deleteConfirmId}`, { method: 'DELETE' })
     setDatasets(prev => prev.filter(d => d.id !== deleteConfirmId))
     if (selected?.id === deleteConfirmId) { setSelected(null); setView('list') }
     setDeleteConfirmId(null)
+    logActivity({ type: 'discovery', action: 'deleted', title: `Deleted dataset: ${deletedDs?.name || deleteConfirmId}` })
   }
 
   const uploadFile = async (dsId: string, file: File) => {
     const form = new FormData(); form.append('file', file)
     const res = await fetch(`${API}/${dsId}/upload`, { method: 'POST', body: form })
-    if (res.ok) { load(); selectDs(dsId) }
+    if (res.ok) { load(); selectDs(dsId); logActivity({ type: 'discovery', action: 'imported', title: `Uploaded file to dataset: ${file.name}` }) }
   }
 
   const selectDs = async (id: string) => {

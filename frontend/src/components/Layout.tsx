@@ -938,37 +938,37 @@ export default function Layout() {
   const [isCommandOpen, setIsCommandOpen] = useState(false)
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false)
-  const [notifications, setNotifications] = useState<Array<{ id: string; title: string; description: string; time: string }>>([])
+  const [notifications, setNotifications] = useState<Array<{ id: string; title: string; description: string; time: string; timestamp: string }>>([])
   const [hasUnread, setHasUnread] = useState(false)
   const location = useLocation()
   const navigate = useNavigate()
 
-  // Fetch recent activities as notifications
+  // Load notifications from localStorage activity log
   useEffect(() => {
-    const fetchNotifications = async () => {
+    const loadNotifications = () => {
       try {
-        const { api } = await import('../services/api')
-        const result = await api.getActivities({ page: 1, page_size: 5 })
-        if (result?.items && result.items.length > 0) {
-          const lastRead = localStorage.getItem('humanovo-notifs-read') || '0'
-          setNotifications(result.items.map((a: any) => ({
-            id: a.id,
-            title: a.title || `${(a.type || 'activity').replace(/_/g, ' ')} ${(a.action || '').replace(/_/g, ' ')}`,
-            description: a.description || a.project_name || '',
-            time: a.created_at ? formatDateTime(a.created_at) : '',
-          })))
-          const newestTime = result.items[0]?.created_at || ''
-          setHasUnread(newestTime > lastRead)
-        }
+        const activities = getActivityLog()
+        const lastRead = localStorage.getItem('humanovo-notifs-read') || '0'
+        const recent = activities.slice(0, 20)
+        setNotifications(recent.map((a: any) => ({
+          id: a.id,
+          title: a.title || `${(a.type || 'activity').replace(/_/g, ' ')} ${(a.action || '').replace(/_/g, ' ')}`,
+          description: a.project || '',
+          time: formatDateTime(a.timestamp),
+          timestamp: a.timestamp || '',
+        })))
+        const newestTime = recent[0]?.timestamp || ''
+        setHasUnread(newestTime > lastRead)
       } catch {
-        // Activities endpoint may not be available yet
+        // Activity log may not be available
       }
     }
-    fetchNotifications()
+    loadNotifications()
   }, [location.pathname])
 
   const markAllRead = () => {
     setHasUnread(false)
+    setNotifications([])
     localStorage.setItem('humanovo-notifs-read', new Date().toISOString())
   }
 
@@ -1227,10 +1227,19 @@ if (path === '/clinical-trials') return 'Clinical Trials'
                     {notifications.length > 0 ? (
                       <div className="max-h-64 overflow-y-auto">
                         {notifications.map(n => (
-                          <div key={n.id} className="px-3 py-2 hover:bg-[var(--glass-bg)] transition-all">
-                            <div className="text-xs font-medium text-[var(--color-text-secondary)] capitalize">{n.title}</div>
-                            <div className="text-xxs text-[var(--color-text-muted)] mt-0.5 truncate">{n.description}</div>
-                            <div className="text-xxs text-[var(--color-text-muted)] mt-0.5">{n.time}</div>
+                          <div key={n.id} className="px-3 py-2 hover:bg-[var(--glass-bg)] transition-all flex gap-2">
+                            <div className="flex-shrink-0 mt-1.5">
+                              {n.timestamp > (localStorage.getItem('humanovo-notifs-read') || '0') ? (
+                                <span className="block w-2 h-2 rounded-full bg-[var(--color-accent-blue)]" />
+                              ) : (
+                                <span className="block w-2 h-2" />
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-xs font-medium text-[var(--color-text-secondary)] capitalize">{n.title}</div>
+                              <div className="text-xxs text-[var(--color-text-muted)] mt-0.5 truncate">{n.description}</div>
+                              <div className="text-xxs text-[var(--color-text-muted)] mt-0.5">{n.time}</div>
+                            </div>
                           </div>
                         ))}
                       </div>

@@ -16,7 +16,7 @@ import {
 } from 'recharts'
 import html2canvas from 'html2canvas'
 import * as XLSX from 'xlsx'
-import { persistGet, persistSet, formatDate } from '../utils/persistence'
+import { persistGet, persistSet, formatDate, logActivity } from '../utils/persistence'
 import PlotlyPlot3D, { type Chart3DType } from '../components/PlotlyPlot3D'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 
@@ -472,12 +472,13 @@ export default function DataVisualization() {
       createdAt: new Date().toISOString(),
     }
     saveCharts([chart, ...charts])
+    logActivity({ type: 'discovery', action: 'created', title: `Created chart: ${chart.title} (${chart.type})` })
     setForm({ title: '', type: 'bar', dataText: '', options: { ...defaultOptions } })
     setShowAdd(false)
   }
 
   const deleteChart = (id: string) => setDeleteConfirmId(id)
-  const confirmDeleteChart = () => { if (deleteConfirmId) { saveCharts(charts.filter(c => c.id !== deleteConfirmId)); setDeleteConfirmId(null) } }
+  const confirmDeleteChart = () => { if (deleteConfirmId) { const deletedChart = charts.find(c => c.id === deleteConfirmId); saveCharts(charts.filter(c => c.id !== deleteConfirmId)); logActivity({ type: 'discovery', action: 'deleted', title: `Deleted chart: ${deletedChart?.title || deleteConfirmId}` }); setDeleteConfirmId(null) } }
   const duplicateChart = (c: ChartConfig) => {
     const dup = { ...c, id: `chart-${Date.now()}`, title: c.title + ' (copy)', createdAt: new Date().toISOString() }
     saveCharts([dup, ...charts])

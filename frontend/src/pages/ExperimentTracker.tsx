@@ -79,9 +79,11 @@ export default function ExperimentTracker() {
   }
 
   const updateExperiment = (id: string, updates: Partial<Experiment>) => {
+    const exp = experiments.find(e => e.id === id)
     const updated = experiments.map(e => e.id === id ? { ...e, ...updates, updatedAt: new Date().toISOString() } : e)
     save(updated)
     if (selected?.id === id) setSelected({ ...selected, ...updates, updatedAt: new Date().toISOString() })
+    logActivity({ type: 'evidence', action: 'updated', title: `Updated experiment: ${exp?.title || id}` })
   }
 
   const deleteExperiment = (id: string) => {
@@ -90,7 +92,9 @@ export default function ExperimentTracker() {
 
   const confirmDelete = () => {
     if (deleteConfirmId) {
+      const deletedExp = experiments.find(e => e.id === deleteConfirmId)
       save(experiments.filter(e => e.id !== deleteConfirmId))
+      logActivity({ type: 'project', action: 'deleted', title: `Deleted experiment: ${deletedExp?.title || deleteConfirmId}` })
       if (selected?.id === deleteConfirmId) setSelected(null)
       setDeleteConfirmId(null)
     }
