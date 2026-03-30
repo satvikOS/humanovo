@@ -11,6 +11,8 @@ import {
   FiBook,
   FiChevronRight,
   FiCpu,
+  FiTrendingUp,
+  FiCode,
 } from 'react-icons/fi'
 // recharts not used in dashboard
 import api from '../services/api'
@@ -52,7 +54,8 @@ interface SimulationSummary {
   id: string
   name: string
   simulationType: string
-  stats: { mean: number; median: number; std: number; ci95Lower: number; ci95Upper: number }
+  kind: 'monte-carlo' | 'equation' | 'computational'
+  stats?: { mean: number; median: number; std: number; ci95Lower: number; ci95Upper: number }
   createdAt: string
 }
 
@@ -63,6 +66,8 @@ const SIM_TYPE_LABELS: Record<string, string> = {
   pathway_dynamics: 'Pathway Dynamics',
   drug_interaction: 'Drug Interaction',
   survival_analysis: 'Survival Analysis',
+  equation: 'Equation Plot',
+  computational: 'Computational Lab',
 }
 
 const SIM_TYPE_COLORS: Record<string, string> = {
@@ -72,6 +77,14 @@ const SIM_TYPE_COLORS: Record<string, string> = {
   pathway_dynamics: 'var(--color-accent-orange)',
   drug_interaction: 'var(--color-accent-cyan)',
   survival_analysis: '#ef4444',
+  equation: 'var(--color-accent-green)',
+  computational: 'var(--color-accent-purple)',
+}
+
+const SIM_KIND_ICONS: Record<string, typeof FiActivity> = {
+  'monte-carlo': FiActivity,
+  equation: FiTrendingUp,
+  computational: FiCode,
 }
 
 function formatTimeAgo(ts: string) {
@@ -89,18 +102,51 @@ function RecentSimulationsWidget() {
   const [simulations, setSimulations] = useState<SimulationSummary[]>([])
 
   useEffect(() => {
-    // Load from localStorage first for instant display
-    const cached = persistGet<SimulationSummary[]>('mc-simulations', [])
-    if (cached.length > 0) {
-      setSimulations(cached.slice(0, 3).map((s: any) => ({
+    // Gather all simulation types from localStorage
+    const allSims: SimulationSummary[] = []
+
+    // MC simulations
+    const mcSims = persistGet<any[]>('mc-simulations', [])
+    for (const s of mcSims) {
+      allSims.push({
         id: s.id,
         name: s.name || 'Untitled Simulation',
         simulationType: s.simulationType || s.simulation_type || 'unknown',
-        stats: s.stats || { mean: 0, median: 0, std: 0, ci95Lower: 0, ci95Upper: 0 },
+        kind: 'monte-carlo',
+        stats: s.stats,
         createdAt: s.createdAt || s.created_at || new Date().toISOString(),
-      })))
+      })
     }
-    // Also try API
+
+    // Equation plots
+    const eqHistory = persistGet<any[]>('eq-history', [])
+    for (const eq of eqHistory) {
+      allSims.push({
+        id: eq.id,
+        name: `f(x) = ${eq.expr}`,
+        simulationType: 'equation',
+        kind: 'equation',
+        createdAt: eq.createdAt || new Date().toISOString(),
+      })
+    }
+
+    // Computational lab runs
+    const compHistory = persistGet<any[]>('comp-history', [])
+    for (const cr of compHistory) {
+      allSims.push({
+        id: cr.id,
+        name: cr.template || cr.env || 'Code Run',
+        simulationType: 'computational',
+        kind: 'computational',
+        createdAt: cr.createdAt || new Date().toISOString(),
+      })
+    }
+
+    // Sort by date, take top 4
+    allSims.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    if (allSims.length > 0) setSimulations(allSims.slice(0, 4))
+
+    // Also try API for MC simulations
     const fetchSimulations = async () => {
       try {
         const res = await api.getSimulations({ page_size: 3 })
@@ -108,10 +154,19 @@ function RecentSimulationsWidget() {
           id: s.id,
           name: s.name || 'Untitled Simulation',
           simulationType: s.simulation_type || s.simulationType || 'unknown',
-          stats: s.results?.stats || s.stats || { mean: 0, median: 0, std: 0, ci95Lower: 0, ci95Upper: 0 },
+          kind: 'monte-carlo' as const,
+          stats: s.results?.stats || s.stats,
           createdAt: s.created_at || s.createdAt || new Date().toISOString(),
         }))
-        if (items.length > 0) setSimulations(items)
+        if (items.length > 0) {
+          // Merge API items with local (dedup by id)
+          setSimulations(prev => {
+            const ids = new Set(items.map((i: any) => i.id))
+            const merged = [...items, ...prev.filter(p => !ids.has(p.id))]
+            merged.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+            return merged.slice(0, 4)
+          })
+        }
       } catch {
         // API unavailable — localStorage data is already displayed
       }
@@ -135,7 +190,7 @@ function RecentSimulationsWidget() {
         <div className="text-center py-4 text-[var(--color-text-muted)]">
           <FiActivity className="w-5 h-5 mx-auto mb-1.5 opacity-40" />
           <p className="text-xs">No simulations yet</p>
-          <button onClick={() => navigate('/simulations?tab=history')} className="text-xs mt-1 text-[var(--color-text)] hover:text-[var(--color-text-secondary)] transition-colors">
+          <button onClick={() => navigate('/simulations')} className="text-xs mt-1 text-[var(--color-text)] hover:text-[var(--color-text-secondary)] transition-colors">
             Run a simulation
           </button>
         </div>
@@ -143,13 +198,14 @@ function RecentSimulationsWidget() {
         <div className="space-y-0">
           {simulations.map(sim => {
             const color = SIM_TYPE_COLORS[sim.simulationType] || 'var(--color-text-muted)'
+            const IconComp = SIM_KIND_ICONS[sim.kind] || FiActivity
             return (
               <button
                 key={sim.id}
-                onClick={() => navigate('/simulations')}
+                onClick={() => navigate('/simulations?tab=history')}
                 className="w-full text-left flex items-center gap-2.5 py-2.5 border-b border-[var(--color-border)] last:border-0 hover:bg-[var(--glass-bg)] rounded-lg px-2 transition-all"
               >
-                <FiActivity className="w-3.5 h-3.5 flex-shrink-0" style={{ color }} />
+                <IconComp className="w-3.5 h-3.5 flex-shrink-0" style={{ color }} />
                 <div className="flex-1 min-w-0">
                   <div className="text-xs font-medium truncate">{sim.name}</div>
                   <div className="flex items-center gap-1.5 mt-0.5">

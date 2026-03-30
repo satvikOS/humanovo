@@ -4,6 +4,7 @@ import {
   FiCheck, FiUpload, FiFolder, FiEdit3, FiExternalLink,
   FiFile, FiX, FiRefreshCw, FiStar, FiBookOpen, FiHash,
 } from 'react-icons/fi'
+import { usePersistentState } from '../utils/persistence'
 
 interface Citation {
   id: string
@@ -28,23 +29,96 @@ interface Citation {
   createdAt: string
 }
 
-type CitationStyle = 'apa' | 'mla' | 'chicago' | 'vancouver' | 'harvard'
+type CitationStyle = 'apa' | 'mla' | 'chicago' | 'vancouver'
+
+/**
+ * Format author names for different citation styles.
+ */
+function formatAuthorsAPA(authors: string[]): string {
+  if (authors.length === 0) return 'Unknown'
+  if (authors.length === 1) return authors[0]
+  if (authors.length === 2) return `${authors[0]} & ${authors[1]}`
+  if (authors.length <= 20) return `${authors.slice(0, -1).join(', ')}, & ${authors[authors.length - 1]}`
+  return `${authors.slice(0, 19).join(', ')}, ... ${authors[authors.length - 1]}`
+}
+
+function formatAuthorsMLA(authors: string[]): string {
+  if (authors.length === 0) return 'Unknown'
+  if (authors.length === 1) return authors[0]
+  if (authors.length === 2) return `${authors[0]}, and ${authors[1]}`
+  return `${authors[0]}, et al.`
+}
+
+function formatAuthorsVancouver(authors: string[]): string {
+  if (authors.length === 0) return 'Unknown'
+  if (authors.length <= 6) return authors.join(', ')
+  return `${authors.slice(0, 6).join(', ')}, et al.`
+}
 
 function formatCitation(c: Citation, style: CitationStyle): string {
-  const authorStr = c.authors.length > 0 ? c.authors.join(', ') : 'Unknown'
   switch (style) {
-    case 'apa':
-      return `${authorStr} (${c.year}). ${c.title}. ${c.journal ? `*${c.journal}*` : ''}${c.volume ? `, ${c.volume}` : ''}${c.issue ? `(${c.issue})` : ''}${c.pages ? `, ${c.pages}` : ''}.${c.doi ? ` https://doi.org/${c.doi}` : ''}`
-    case 'mla':
-      return `${authorStr}. "${c.title}." ${c.journal || ''} ${c.volume || ''}.${c.issue || ''} (${c.year}): ${c.pages || 'n.p.'}.`
-    case 'chicago':
-      return `${authorStr}. "${c.title}." ${c.journal || ''} ${c.volume || ''}, no. ${c.issue || '-'} (${c.year}): ${c.pages || ''}.`
-    case 'vancouver':
-      return `${authorStr}. ${c.title}. ${c.journal || ''}. ${c.year};${c.volume || ''}(${c.issue || ''}):${c.pages || ''}.`
-    case 'harvard':
-      return `${authorStr} (${c.year}) '${c.title}', ${c.journal || ''}${c.volume ? `, vol. ${c.volume}` : ''}${c.issue ? `, no. ${c.issue}` : ''}${c.pages ? `, pp. ${c.pages}` : ''}.`
+    case 'apa': {
+      const authors = formatAuthorsAPA(c.authors)
+      let ref = `${authors} (${c.year}). ${c.title}.`
+      if (c.journal) {
+        ref += ` ${c.journal}`
+        if (c.volume) {
+          ref += `, ${c.volume}`
+          if (c.issue) ref += `(${c.issue})`
+        }
+        if (c.pages) ref += `, ${c.pages}`
+        ref += '.'
+      }
+      if (c.doi) ref += ` https://doi.org/${c.doi}`
+      return ref
+    }
+    case 'mla': {
+      const authors = formatAuthorsMLA(c.authors)
+      let ref = `${authors}. "${c.title}."`
+      if (c.journal) {
+        ref += ` ${c.journal}`
+        if (c.volume) {
+          ref += `, vol. ${c.volume}`
+          if (c.issue) ref += `, no. ${c.issue}`
+        }
+        ref += `, ${c.year}`
+        if (c.pages) ref += `, pp. ${c.pages}`
+        ref += '.'
+      }
+      if (c.doi) ref += ` https://doi.org/${c.doi}`
+      return ref
+    }
+    case 'chicago': {
+      const authors = c.authors.length > 0 ? c.authors.join(', ') : 'Unknown'
+      let ref = `${authors}. "${c.title}."`
+      if (c.journal) {
+        ref += ` ${c.journal}`
+        if (c.volume) ref += ` ${c.volume}`
+        if (c.issue) ref += `, no. ${c.issue}`
+        ref += ` (${c.year})`
+        if (c.pages) ref += `: ${c.pages}`
+        ref += '.'
+      }
+      if (c.doi) ref += ` https://doi.org/${c.doi}`
+      return ref
+    }
+    case 'vancouver': {
+      const authors = formatAuthorsVancouver(c.authors)
+      let ref = `${authors}. ${c.title}.`
+      if (c.journal) {
+        ref += ` ${c.journal}. ${c.year}`
+        if (c.volume) {
+          ref += `;${c.volume}`
+          if (c.issue) ref += `(${c.issue})`
+        }
+        if (c.pages) ref += `:${c.pages}`
+        ref += '.'
+      }
+      if (c.doi) ref += ` doi:${c.doi}`
+      return ref
+    }
     default:
-      return `${authorStr} (${c.year}). ${c.title}.`
+      return `${c.authors.length > 0 ? c.authors.join(', ') : 'Unknown'} (${c.year}). ${c.title}.`
   }
 }
 
@@ -101,7 +175,7 @@ async function fetchFromPMID(pmid: string): Promise<Partial<Citation> | null> {
 }
 
 export default function CitationManager() {
-  const [citations, setCitations] = useState<Citation[]>([])
+  const [citations, setCitations] = usePersistentState<Citation[]>('citations', [])
   const [searchQuery, setSearchQuery] = useState('')
   const [showAddForm, setShowAddForm] = useState(false)
   const [showImport, setShowImport] = useState(false)
@@ -320,9 +394,8 @@ export default function CitationManager() {
             <select value={citationStyle} onChange={e => setCitationStyle(e.target.value as CitationStyle)} className="input text-xs py-1.5">
               <option value="apa">APA 7th</option>
               <option value="mla">MLA 9th</option>
-              <option value="chicago">Chicago</option>
+              <option value="chicago">Chicago 17th</option>
               <option value="vancouver">Vancouver</option>
-              <option value="harvard">Harvard</option>
             </select>
             <button onClick={exportBibliography} disabled={filtered.length === 0} className="btn text-sm disabled:opacity-30" style={{ color: 'var(--color-accent-blue)' }}>
               <FiDownload className="w-4 h-4" /> Export

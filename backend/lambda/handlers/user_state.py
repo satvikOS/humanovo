@@ -113,6 +113,7 @@ VALID_KEYS = {
     "charts",
     "research-papers",
     "tab-counter",
+    "citations",
 }
 
 

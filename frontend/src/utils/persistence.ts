@@ -24,6 +24,7 @@ const SYNCED_KEYS = new Set([
   'charts',
   'research-papers',
   'tab-counter',
+  'citations',
 ])
 
 // Keys whose values are arrays of objects with an `id` field — these get merged
@@ -38,6 +39,7 @@ const ARRAY_MERGE_KEYS = new Set([
   'workspace-tabs',
   'charts',
   'research-papers',
+  'citations',
 ])
 
 // Max items per key (to prevent unbounded growth after merging)
