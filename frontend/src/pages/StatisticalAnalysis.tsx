@@ -799,7 +799,7 @@ export default function StatisticalAnalysis() {
             )}
 
             <div className="flex gap-2 pt-2">
-              <button onClick={runAnalysis} disabled={loading} className="btn text-xs flex items-center gap-1.5" style={{ color: 'var(--color-accent-blue)' }}>
+              <button onClick={runAnalysis} disabled={loading} className="btn text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text-secondary)' }}>
                 <FiPlay className="w-3.5 h-3.5" /> {loading ? 'Running...' : 'Run Analysis'}
               </button>
               <input ref={fileInputRef} type="file" accept=".csv,.tsv,.txt" onChange={handleCSVUpload} className="hidden" />
@@ -843,10 +843,10 @@ export default function StatisticalAnalysis() {
                 {result.p_value !== undefined && (
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-[var(--color-text-muted)]">p = {typeof result.p_value === 'number' ? result.p_value.toFixed(4) : result.p_value}</span>
-                    <span className={`text-xxs px-2 py-0.5 rounded-full ${(result.significant_at_05 || result.significant || result.p_value < 0.05) ? 'bg-green-500/10 text-green-400' : 'bg-yellow-500/10 text-yellow-400'}`}>
+                    <span className={`text-xxs px-2 py-0.5 rounded-full ${(result.significant_at_05 || result.significant || result.p_value < 0.05) ? 'bg-[var(--glass-bg)] text-[var(--color-text-secondary)]' : 'bg-[var(--glass-bg)] text-[var(--color-text-muted)]'}`}>
                       {(result.significant_at_05 || result.significant || result.p_value < 0.05) ? 'p < 0.05' : 'p >= 0.05'}
                     </span>
-                    {(result.significant_at_01 || result.p_value < 0.01) && <span className="text-xxs px-2 py-0.5 rounded-full bg-green-500/10 text-green-400">p &lt; 0.01</span>}
+                    {(result.significant_at_01 || result.p_value < 0.01) && <span className="text-xxs px-2 py-0.5 rounded-full bg-[var(--glass-bg)] text-[var(--color-text-secondary)]">p &lt; 0.01</span>}
                   </div>
                 )}
 
@@ -1057,11 +1057,11 @@ export default function StatisticalAnalysis() {
                   <div className="space-y-3">
                     <div className="grid grid-cols-2 gap-3 text-xs">
                       <div className="p-3 rounded-lg bg-[var(--glass-bg)] border border-[var(--color-border)] text-center">
-                        <div className="text-2xl font-semibold" style={{ color: 'var(--color-accent-blue)' }}>{result.total_n}</div>
+                        <div className="text-2xl font-semibold" style={{ color: 'var(--color-text-secondary)' }}>{result.total_n}</div>
                         <div className="text-[var(--color-text-muted)] mt-1">Total N Required</div>
                       </div>
                       <div className="p-3 rounded-lg bg-[var(--glass-bg)] border border-[var(--color-border)] text-center">
-                        <div className="text-2xl font-semibold" style={{ color: 'var(--color-accent-purple)' }}>{result.n_per_group || result.required_n || Math.ceil(result.total_n / 2)}</div>
+                        <div className="text-2xl font-semibold" style={{ color: 'var(--color-text-secondary)' }}>{result.n_per_group || result.required_n || Math.ceil(result.total_n / 2)}</div>
                         <div className="text-[var(--color-text-muted)] mt-1">Per Group</div>
                       </div>
                     </div>

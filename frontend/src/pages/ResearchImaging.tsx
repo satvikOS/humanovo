@@ -96,7 +96,7 @@ export default function ResearchImaging() {
       <div className="p-6 border-b border-[var(--color-border)]">
         <div className="flex items-center justify-between mb-2">
           <div><h1 className="text-2xl font-semibold tracking-tight">Research Imaging</h1><p className="text-sm text-[var(--color-text-muted)] mt-1">Image viewer, annotations, and AI-assisted analysis</p></div>
-          <button onClick={() => setShowAdd(!showAdd)} className="btn text-sm" style={{ color: 'var(--color-accent-blue)' }}><FiPlus className="w-4 h-4" /> New Study</button>
+          <button onClick={() => setShowAdd(!showAdd)} className="btn text-sm" style={{ color: 'var(--color-text-secondary)' }}><FiPlus className="w-4 h-4" /> New Study</button>
         </div>
       </div>
 
@@ -138,7 +138,7 @@ export default function ResearchImaging() {
                 <div className="flex gap-1">
                   <button onClick={() => setZoom(z => Math.min(3, z + 0.2))} className="btn text-xs"><FiZoomIn className="w-3.5 h-3.5" /></button>
                   <button onClick={() => setZoom(z => Math.max(0.5, z - 0.2))} className="btn text-xs"><FiZoomOut className="w-3.5 h-3.5" /></button>
-                  <button onClick={runAnalysis} className="btn text-xs" style={{ color: 'var(--color-accent-blue)' }}><FiCpu className="w-3.5 h-3.5" /> AI Analysis</button>
+                  <button onClick={runAnalysis} className="btn text-xs" style={{ color: 'var(--color-text-secondary)' }}><FiCpu className="w-3.5 h-3.5" /> AI Analysis</button>
                 </div>
               </div>
 

@@ -33,7 +33,7 @@ interface Experiment {
 
 const STATUS_CONFIG = {
   planned: { label: 'Planned', color: 'var(--color-text-muted)', icon: FiClock },
-  in_progress: { label: 'In Progress', color: 'var(--color-accent-blue)', icon: FiPlay },
+  in_progress: { label: 'In Progress', color: 'var(--color-text-secondary)', icon: FiPlay },
   completed: { label: 'Completed', color: 'var(--color-success)', icon: FiCheck },
   failed: { label: 'Failed', color: 'var(--color-error)', icon: FiAlertTriangle },
   paused: { label: 'Paused', color: 'var(--color-warning)', icon: FiPause },
@@ -112,7 +112,7 @@ export default function ExperimentTracker() {
               <FiClipboard className="w-4 h-4 text-[var(--color-text-muted)]" />
               <h2 className="text-sm font-medium">Experiment Tracker</h2>
             </div>
-            <button onClick={() => setShowAdd(!showAdd)} className="btn btn-sm text-xs" style={{ color: 'var(--color-accent-blue)' }}>
+            <button onClick={() => setShowAdd(!showAdd)} className="btn btn-sm text-xs" style={{ color: 'var(--color-text-secondary)' }}>
               <FiPlus className="w-3.5 h-3.5" />
             </button>
           </div>
@@ -183,7 +183,7 @@ export default function ExperimentTracker() {
                 </div>
               </div>
               <div className="flex items-center gap-1">
-                <button onClick={() => { setEditing(!editing); setEditData(selected) }} className="btn btn-sm text-xs" style={{ color: 'var(--color-accent-blue)' }}>
+                <button onClick={() => { setEditing(!editing); setEditData(selected) }} className="btn btn-sm text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                   <FiEdit3 className="w-3.5 h-3.5" /> {editing ? 'Cancel' : 'Edit'}
                 </button>
                 <button onClick={() => deleteExperiment(selected.id)} className="btn btn-sm text-xs" style={{ color: 'var(--color-error)' }}>

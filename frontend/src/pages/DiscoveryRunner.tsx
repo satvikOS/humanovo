@@ -334,7 +334,7 @@ export default function DiscoveryRunner() {
           <span className="font-mono" style={{ color: 'var(--color-text-muted)' }}>
             {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}
           </span>
-          <span className="font-mono font-medium" style={{ color: 'var(--color-accent-blue)' }}>{costDollars(totalCost)}</span>
+          <span className="font-mono font-medium" style={{ color: 'var(--color-text-secondary)' }}>{costDollars(totalCost)}</span>
           {phase === 'running' && (
             <button onClick={cancelRun} className="px-3 py-1 rounded text-xs font-medium"
               style={{ background: '#ef444420', color: '#ef4444' }}>Cancel</button>

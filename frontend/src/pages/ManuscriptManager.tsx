@@ -94,7 +94,7 @@ export default function ManuscriptManager() {
       <div className="p-6 border-b border-[var(--color-border)]">
         <div className="flex items-center justify-between mb-2">
           <div><h1 className="text-2xl font-semibold tracking-tight">Manuscript Manager</h1><p className="text-sm text-[var(--color-text-muted)] mt-1">Draft, format, and track manuscript submissions</p></div>
-          <button onClick={() => setShowAdd(!showAdd)} className="btn text-sm" style={{ color: 'var(--color-accent-blue)' }}><FiPlus className="w-4 h-4" /> New Manuscript</button>
+          <button onClick={() => setShowAdd(!showAdd)} className="btn text-sm" style={{ color: 'var(--color-text-secondary)' }}><FiPlus className="w-4 h-4" /> New Manuscript</button>
         </div>
       </div>
 
@@ -136,7 +136,7 @@ export default function ManuscriptManager() {
                 <div className="flex gap-1">
                   <button onClick={exportMs} className="btn text-xs text-[var(--color-text-muted)]"><FiDownload className="w-3.5 h-3.5" /> Export</button>
                   {selected.status === 'draft' && selected.journal_target && (
-                    <button onClick={submitMs} className="btn text-xs" style={{ color: 'var(--color-accent-blue)' }}><FiSend className="w-3.5 h-3.5" /> Submit</button>
+                    <button onClick={submitMs} className="btn text-xs" style={{ color: 'var(--color-text-secondary)' }}><FiSend className="w-3.5 h-3.5" /> Submit</button>
                   )}
                 </div>
               </div>

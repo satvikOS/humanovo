@@ -41,7 +41,7 @@ export default function RegulatoryCompliance() {
     { id: 'checklists' as TabId, label: 'Compliance', icon: <FiCheckSquare className="w-3.5 h-3.5" /> },
   ]
 
-  const statusColor = (s: string) => s === 'approved' || s === 'active' ? 'text-green-400 bg-green-500/10' : s === 'pending' || s === 'draft' ? 'text-yellow-400 bg-yellow-500/10' : 'text-[var(--color-text-muted)] bg-[var(--glass-bg)]'
+  const statusColor = (s: string) => s === 'approved' || s === 'active' ? 'text-[var(--color-text-secondary)] bg-[var(--glass-bg)]' : s === 'pending' || s === 'draft' ? 'text-[var(--color-text-muted)] bg-[var(--glass-bg)]' : 'text-[var(--color-text-muted)] bg-[var(--glass-bg)]'
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -121,7 +121,7 @@ export default function RegulatoryCompliance() {
                   <div className="flex items-center justify-between">
                     <div><div className="text-sm font-medium">{c.title}</div><div className="text-xxs text-[var(--color-text-muted)]">v{c.version} | {c.language}</div></div>
                     <div className="flex items-center gap-2">
-                      {c.irb_approved && <span className="text-xxs px-2 py-0.5 rounded-full bg-green-500/10 text-green-400">IRB Approved</span>}
+                      {c.irb_approved && <span className="text-xxs px-2 py-0.5 rounded-full bg-[var(--glass-bg)] text-[var(--color-text-secondary)]">IRB Approved</span>}
                       <span className={`text-xxs px-2 py-0.5 rounded-full ${statusColor(c.status)}`}>{c.status}</span>
                     </div>
                   </div>

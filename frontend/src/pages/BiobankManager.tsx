@@ -13,7 +13,7 @@ interface Inventory { total_samples: number; by_type: Record<string, number>; by
 
 const API = '/api/v1/biobank'
 const PIE_COLORS = ['#3b82f6', '#8b5cf6', '#22c55e', '#f97316', '#06b6d4', '#ef4444']
-const STATUS_COLORS: Record<string, string> = { available: 'text-green-400 bg-green-500/10', checked_out: 'text-yellow-400 bg-yellow-500/10', depleted: 'text-red-400 bg-red-500/10', reserved: 'text-blue-400 bg-blue-500/10' }
+const STATUS_COLORS: Record<string, string> = { available: 'text-[var(--color-text-secondary)] bg-[var(--glass-bg)]', checked_out: 'text-[var(--color-text-muted)] bg-[var(--glass-bg)]', depleted: 'text-[var(--color-text-muted)] bg-[var(--glass-bg)]', reserved: 'text-[var(--color-text-secondary)] bg-[var(--glass-bg)]' }
 
 export default function BiobankManager() {
   const [samples, setSamples] = useState<Sample[]>([])
@@ -77,7 +77,7 @@ export default function BiobankManager() {
           <div><h1 className="text-2xl font-semibold tracking-tight">Biobank Manager</h1><p className="text-sm text-[var(--color-text-muted)] mt-1">Sample registry, storage, and chain of custody</p></div>
           <div className="flex gap-2">
             <button onClick={() => setView(view === 'list' ? 'inventory' : 'list')} className="btn text-xs text-[var(--color-text-muted)]">{view === 'list' ? 'Inventory' : 'Sample List'}</button>
-            <button onClick={() => setShowAdd(!showAdd)} className="btn text-sm" style={{ color: 'var(--color-accent-blue)' }}><FiPlus className="w-4 h-4" /> New Sample</button>
+            <button onClick={() => setShowAdd(!showAdd)} className="btn text-sm" style={{ color: 'var(--color-text-secondary)' }}><FiPlus className="w-4 h-4" /> New Sample</button>
           </div>
         </div>
       </div>
@@ -109,15 +109,15 @@ export default function BiobankManager() {
             {/* Alerts */}
             {inventory.alerts.map((a, i) => (
               <div key={i} className={`glass-card p-3 flex items-center gap-2 ${a.severity === 'warning' ? 'border-l-2 border-l-yellow-400' : ''}`}>
-                <FiAlertTriangle className="w-4 h-4 text-yellow-400" /><span className="text-xs">{a.message}</span>
+                <FiAlertTriangle className="w-4 h-4 text-[var(--color-text-muted)]" /><span className="text-xs">{a.message}</span>
               </div>
             ))}
 
             <div className="grid grid-cols-4 gap-3">
               <div className="glass-card p-4 text-center"><div className="text-2xl font-semibold">{inventory.total_samples}</div><div className="text-xs text-[var(--color-text-muted)]">Total Samples</div></div>
-              <div className="glass-card p-4 text-center"><div className="text-2xl font-semibold text-green-400">{inventory.by_status.available || 0}</div><div className="text-xs text-[var(--color-text-muted)]">Available</div></div>
-              <div className="glass-card p-4 text-center"><div className="text-2xl font-semibold text-yellow-400">{inventory.by_status.checked_out || 0}</div><div className="text-xs text-[var(--color-text-muted)]">Checked Out</div></div>
-              <div className="glass-card p-4 text-center"><div className="text-2xl font-semibold text-red-400">{inventory.by_status.depleted || 0}</div><div className="text-xs text-[var(--color-text-muted)]">Depleted</div></div>
+              <div className="glass-card p-4 text-center"><div className="text-2xl font-semibold text-white">{inventory.by_status.available || 0}</div><div className="text-xs text-[var(--color-text-muted)]">Available</div></div>
+              <div className="glass-card p-4 text-center"><div className="text-2xl font-semibold text-white">{inventory.by_status.checked_out || 0}</div><div className="text-xs text-[var(--color-text-muted)]">Checked Out</div></div>
+              <div className="glass-card p-4 text-center"><div className="text-2xl font-semibold text-white">{inventory.by_status.depleted || 0}</div><div className="text-xs text-[var(--color-text-muted)]">Depleted</div></div>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -207,7 +207,7 @@ export default function BiobankManager() {
                     </div>
                     <div className="flex gap-2 mt-3">
                       {selected.status === 'available' && (
-                        <button onClick={() => checkout(selected.id)} className="btn text-xxs" style={{ color: 'var(--color-accent-blue)' }}><FiLogOut className="w-3 h-3" /> Checkout</button>
+                        <button onClick={() => checkout(selected.id)} className="btn text-xxs" style={{ color: 'var(--color-text-secondary)' }}><FiLogOut className="w-3 h-3" /> Checkout</button>
                       )}
                       {selected.status === 'checked_out' && (
                         <button onClick={() => checkin(selected.id)} className="btn text-xxs" style={{ color: 'var(--color-success)' }}><FiLogIn className="w-3 h-3" /> Return</button>

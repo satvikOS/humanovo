@@ -530,7 +530,7 @@ export default function Evidence() {
                 <a href={selectedItem.source_url || getEvidenceSearchUrl(selectedItem)} target="_blank" rel="noopener noreferrer" className="btn btn-sm border border-[var(--color-border)]">
                   <FiExternalLink className="w-3 h-3" /> {selectedItem.source_url ? 'Source' : 'Search'}
                 </a>
-                <button onClick={openLinkDialog} className="btn btn-sm" style={{ color: 'var(--color-accent-purple)' }}>
+                <button onClick={openLinkDialog} className="btn btn-sm" style={{ color: 'var(--color-text-secondary)' }}>
                   <FiLink className="w-3 h-3" /> Link to Hypothesis
                 </button>
                 <button onClick={() => handleDelete(selectedItem.id)} className="btn btn-sm ml-auto" style={{ color: 'var(--color-error)' }}>
@@ -702,7 +702,7 @@ export default function Evidence() {
               <button onClick={() => setDeleteConfirmId(null)} className="btn px-4 py-2 text-sm text-[var(--color-text-muted)]">
                 Cancel
               </button>
-              <button onClick={confirmDelete} className="btn px-4 py-2 text-sm bg-red-500/10 text-red-400 hover:bg-red-500/20">
+              <button onClick={confirmDelete} className="btn px-4 py-2 text-sm bg-red-500/10 text-[var(--color-text-muted)] hover:text-red-400 hover:bg-red-500/20">
                 Delete Permanently
               </button>
             </div>

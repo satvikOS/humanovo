@@ -411,14 +411,14 @@ export default function CitationManager() {
               <option value="chicago">Chicago 17th</option>
               <option value="vancouver">Vancouver</option>
             </select>
-            <button onClick={exportBibliography} disabled={filtered.length === 0} className="btn text-sm disabled:opacity-30" style={{ color: 'var(--color-accent-blue)' }}>
+            <button onClick={exportBibliography} disabled={filtered.length === 0} className="btn text-sm disabled:opacity-30" style={{ color: 'var(--color-text-secondary)' }}>
               <FiDownload className="w-4 h-4" /> Export
             </button>
             <input ref={fileInputRef} type="file" accept=".pdf" onChange={handlePdfUpload} className="hidden" />
-            <button onClick={() => fileInputRef.current?.click()} className="btn text-sm" style={{ color: 'var(--color-accent-orange)' }}>
+            <button onClick={() => fileInputRef.current?.click()} className="btn text-sm" style={{ color: 'var(--color-text-secondary)' }}>
               <FiUpload className="w-4 h-4" /> Upload PDF
             </button>
-            <button onClick={() => { setShowImport(!showImport); setShowAddForm(false) }} className="btn text-sm" style={{ color: 'var(--color-accent-purple)' }}>
+            <button onClick={() => { setShowImport(!showImport); setShowAddForm(false) }} className="btn text-sm" style={{ color: 'var(--color-text-secondary)' }}>
               <FiHash className="w-4 h-4" /> Import DOI/PMID
             </button>
             <button onClick={() => { setShowAddForm(!showAddForm); setShowImport(false) }} className="btn text-sm" style={{ color: 'var(--color-success)' }}>
@@ -470,7 +470,7 @@ export default function CitationManager() {
                 placeholder="e.g., 10.1038/nature12373 or 25123456"
                 className="input flex-1 text-sm"
               />
-              <button onClick={importFromId} disabled={importing || !importId.trim()} className="btn text-xs disabled:opacity-30" style={{ color: 'var(--color-accent-purple)' }}>
+              <button onClick={importFromId} disabled={importing || !importId.trim()} className="btn text-xs disabled:opacity-30" style={{ color: 'var(--color-text-secondary)' }}>
                 {importing ? <FiRefreshCw className="w-3.5 h-3.5 animate-spin" /> : <FiDownload className="w-3.5 h-3.5" />}
                 {importing ? 'Fetching...' : 'Import'}
               </button>
@@ -559,7 +559,7 @@ export default function CitationManager() {
                     </div>
                     <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
                       <button onClick={(e) => { e.stopPropagation(); toggleStar(citation.id) }} className="p-1.5 rounded hover:bg-[var(--glass-bg)]" title="Star">
-                        <FiStar className={`w-3.5 h-3.5 ${citation.starred ? 'text-yellow-400 fill-yellow-400' : 'text-[var(--color-text-muted)]'}`} />
+                        <FiStar className={`w-3.5 h-3.5 ${citation.starred ? 'text-[var(--color-text-secondary)] fill-[var(--color-text-secondary)]' : 'text-[var(--color-text-muted)]'}`} />
                       </button>
                       <button onClick={(e) => { e.stopPropagation(); copyFormatted(citation) }} className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)]" title="Copy formatted">
                         {copied === citation.id ? <FiCheck className="w-3.5 h-3.5" style={{ color: 'var(--color-success)' }} /> : <FiCopy className="w-3.5 h-3.5" />}

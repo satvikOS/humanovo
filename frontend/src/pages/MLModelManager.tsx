@@ -65,7 +65,7 @@ export default function MLModelManager() {
       <div className="p-6 border-b border-[var(--color-border)]">
         <div className="flex items-center justify-between mb-2">
           <div><h1 className="text-2xl font-semibold tracking-tight">ML Model Manager</h1><p className="text-sm text-[var(--color-text-muted)] mt-1">Model registry, evaluation, and prediction</p></div>
-          <button onClick={() => setShowAdd(!showAdd)} className="btn text-sm" style={{ color: 'var(--color-accent-blue)' }}><FiPlus className="w-4 h-4" /> New Model</button>
+          <button onClick={() => setShowAdd(!showAdd)} className="btn text-sm" style={{ color: 'var(--color-text-secondary)' }}><FiPlus className="w-4 h-4" /> New Model</button>
         </div>
       </div>
 
@@ -121,7 +121,7 @@ export default function MLModelManager() {
                 <div className="grid grid-cols-5 gap-2">
                   {Object.entries(selected.metrics).filter(([, v]) => v !== null).map(([key, val]) => (
                     <div key={key} className="glass-card p-3 text-center">
-                      <div className="text-lg font-semibold" style={{ color: 'var(--color-accent-blue)' }}>{typeof val === 'number' && Number.isFinite(val) ? (val < 1 ? (val * 100).toFixed(1) + '%' : val.toFixed(4)) : (val ?? '--')}</div>
+                      <div className="text-lg font-semibold" style={{ color: 'var(--color-text-secondary)' }}>{typeof val === 'number' && Number.isFinite(val) ? (val < 1 ? (val * 100).toFixed(1) + '%' : val.toFixed(4)) : (val ?? '--')}</div>
                       <div className="text-xxs text-[var(--color-text-muted)] capitalize">{key.replace(/_/g, ' ')}</div>
                     </div>
                   ))}
@@ -182,11 +182,11 @@ export default function MLModelManager() {
                 <h3 className="text-xs font-medium mb-2">Predict</h3>
                 <div className="flex gap-2">
                   <input value={predInput} onChange={e => setPredInput(e.target.value)} placeholder="key1:val1, key2:val2" className="input flex-1 text-xs font-mono" />
-                  <button onClick={predict} className="btn text-xs" style={{ color: 'var(--color-accent-blue)' }}><FiPlay className="w-3.5 h-3.5" /> Predict</button>
+                  <button onClick={predict} className="btn text-xs" style={{ color: 'var(--color-text-secondary)' }}><FiPlay className="w-3.5 h-3.5" /> Predict</button>
                 </div>
                 {prediction && (
                   <div className="mt-3 p-3 rounded-lg bg-[var(--glass-bg)]">
-                    <div className="text-sm font-semibold" style={{ color: 'var(--color-accent-blue)' }}>
+                    <div className="text-sm font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
                       {prediction.class_label || prediction.prediction}
                       {prediction.probability !== undefined && <span className="text-xs text-[var(--color-text-muted)] ml-2">(p={prediction.probability})</span>}
                     </div>

@@ -175,7 +175,7 @@ export default function KnowledgeGraphViewer() {
               {stats && <span className="ml-2">({stats.total_nodes} nodes, {stats.total_edges} edges)</span>}
             </p>
           </div>
-          <button onClick={() => setShowAdd(!showAdd)} className="btn text-sm" style={{ color: 'var(--color-accent-blue)' }}><FiPlus className="w-4 h-4" /> Add Node</button>
+          <button onClick={() => setShowAdd(!showAdd)} className="btn text-sm" style={{ color: 'var(--color-text-secondary)' }}><FiPlus className="w-4 h-4" /> Add Node</button>
         </div>
         <div className="flex gap-2 mt-3">
           <div className="relative flex-1 max-w-xs">

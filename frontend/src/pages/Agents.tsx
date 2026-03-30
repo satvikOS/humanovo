@@ -677,7 +677,7 @@ export default function Agents() {
                   { label: 'Agents', value: stats.total_agents, color: 'var(--color-text)' },
                   { label: 'Active', value: stats.active_agents, color: 'var(--color-success)' },
                   { label: 'Paths', value: stats.paths_explored, color: 'var(--color-text)' },
-                  { label: 'Found', value: stats.hypotheses_found, color: 'var(--color-accent-purple)' },
+                  { label: 'Found', value: stats.hypotheses_found, color: 'var(--color-text-secondary)' },
                 ].map(s => (
                   <div key={s.label} className="p-2.5 rounded-lg bg-[var(--glass-bg)]">
                     <div className="text-xxs text-[var(--color-text-muted)]">{s.label}</div>
@@ -765,7 +765,7 @@ export default function Agents() {
               <Link
                 to="/projects"
                 className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-[var(--color-border)] hover:bg-[var(--glass-bg-hover)] transition-all"
-                style={{ color: 'var(--color-accent-blue)' }}
+                style={{ color: 'var(--color-text-secondary)' }}
               >
                 <FiFolder className="w-3.5 h-3.5" />
                 All Projects
@@ -822,7 +822,7 @@ export default function Agents() {
               <Link
                 to={`/projects/${projectId}`}
                 className="flex items-center gap-2 text-sm px-4 py-2 rounded-lg border border-[var(--color-border)] hover:bg-[var(--glass-bg-hover)] transition-all"
-                style={{ color: 'var(--color-accent-blue)' }}
+                style={{ color: 'var(--color-text-secondary)' }}
               >
                 <FiFolder className="w-4 h-4" />
                 View in Project
@@ -836,7 +836,7 @@ export default function Agents() {
                   <Link
                     to={`/projects/${projectId}`}
                     className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-[var(--color-border)] hover:bg-[var(--glass-bg-hover)] transition-all"
-                    style={{ color: 'var(--color-accent-blue)' }}
+                    style={{ color: 'var(--color-text-secondary)' }}
                   >
                     <FiFolder className="w-3.5 h-3.5" />
                     View This Project
@@ -1110,7 +1110,7 @@ function HypothesisDetail({ hypothesis: h, onClose, onExport }: { hypothesis: Hy
             <div className="space-y-1.5">
               {h.evidence_summary.map((ev, i) => (
                 <div key={i} className="text-xs text-[var(--color-text-secondary)] p-2.5 rounded-lg bg-[var(--glass-bg)] border border-[var(--color-border)] flex items-start gap-2">
-                  <FiCheck className="w-3 h-3 flex-shrink-0 mt-0.5" style={{ color: 'var(--color-accent-blue)' }} />
+                  <FiCheck className="w-3 h-3 flex-shrink-0 mt-0.5" style={{ color: 'var(--color-text-secondary)' }} />
                   <span>{ev}</span>
                 </div>
               ))}
@@ -1122,10 +1122,10 @@ function HypothesisDetail({ hypothesis: h, onClose, onExport }: { hypothesis: Hy
           <div>
             <h4 className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-2 font-medium">Grounding Sources</h4>
             <div className="flex flex-wrap gap-1.5">
-              {h.grounding_sources.pubmed_count ? <span className="text-xxs px-2 py-1 rounded-md" style={{ color: 'var(--color-accent-green)', background: 'rgba(34,197,94,0.08)' }}>PubMed: {h.grounding_sources.pubmed_count}</span> : null}
-              {h.grounding_sources.clinical_trials_count ? <span className="text-xxs px-2 py-1 rounded-md" style={{ color: 'var(--color-accent-cyan)', background: 'rgba(6,182,212,0.08)' }}>ClinicalTrials: {h.grounding_sources.clinical_trials_count}</span> : null}
-              {h.grounding_sources.fda_count ? <span className="text-xxs px-2 py-1 rounded-md" style={{ color: 'var(--color-accent-orange)', background: 'rgba(249,115,22,0.08)' }}>FDA: {h.grounding_sources.fda_count}</span> : null}
-              {h.grounding_sources.uniprot_count ? <span className="text-xxs px-2 py-1 rounded-md" style={{ color: 'var(--color-accent-purple)', background: 'rgba(168,85,247,0.08)' }}>UniProt: {h.grounding_sources.uniprot_count}</span> : null}
+              {h.grounding_sources.pubmed_count ? <span className="text-xxs px-2 py-1 rounded-md" style={{ color: 'var(--color-text-secondary)', background: 'var(--glass-bg)' }}>PubMed: {h.grounding_sources.pubmed_count}</span> : null}
+              {h.grounding_sources.clinical_trials_count ? <span className="text-xxs px-2 py-1 rounded-md" style={{ color: 'var(--color-text-secondary)', background: 'var(--glass-bg)' }}>ClinicalTrials: {h.grounding_sources.clinical_trials_count}</span> : null}
+              {h.grounding_sources.fda_count ? <span className="text-xxs px-2 py-1 rounded-md" style={{ color: 'var(--color-text-secondary)', background: 'var(--glass-bg)' }}>FDA: {h.grounding_sources.fda_count}</span> : null}
+              {h.grounding_sources.uniprot_count ? <span className="text-xxs px-2 py-1 rounded-md" style={{ color: 'var(--color-text-secondary)', background: 'var(--glass-bg)' }}>UniProt: {h.grounding_sources.uniprot_count}</span> : null}
             </div>
           </div>
         )}

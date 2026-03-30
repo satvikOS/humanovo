@@ -302,13 +302,13 @@ function DataSettings() {
         <h3 className="text-base font-medium mb-4">Data Management</h3>
         <div className="glass-card">
           <SettingRow title="Export All Data" description="Download all your projects, hypotheses, and evidence">
-            <button className="btn text-accent-blue hover:bg-accent-blue/10 text-xs">Export</button>
+            <button className="btn text-[var(--color-text-secondary)] hover:bg-white/5 text-xs">Export</button>
           </SettingRow>
           <SettingRow title="Clear Cache" description="Remove cached data to free up space">
             <button className="btn text-[var(--color-text-secondary)] hover:bg-white/5 text-xs">Clear</button>
           </SettingRow>
           <SettingRow title="Delete All Data" description="Permanently delete all your data. This cannot be undone.">
-            <button className="btn text-red-400 hover:bg-red-400/10 text-xs">Delete</button>
+            <button className="btn text-[var(--color-text-muted)] hover:text-red-400 hover:bg-red-400/10 text-xs">Delete</button>
           </SettingRow>
         </div>
       </div>

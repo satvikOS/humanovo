@@ -173,9 +173,9 @@ function formatUSD(cents: number) {
 
 function severityStyles(severity: string) {
   switch (severity) {
-    case 'critical': return { bg: 'bg-red-500/10', border: 'border-red-500/20', icon: 'text-red-400', dot: 'bg-red-400' }
-    case 'warning': return { bg: 'bg-amber-500/10', border: 'border-amber-500/20', icon: 'text-amber-400', dot: 'bg-amber-400' }
-    default: return { bg: 'bg-blue-500/10', border: 'border-blue-500/20', icon: 'text-blue-400', dot: 'bg-blue-400' }
+    case 'critical': return { bg: 'bg-red-500/10', border: 'border-red-500/20', icon: 'text-[var(--color-text-muted)]', dot: 'bg-[var(--color-text-muted)]' }
+    case 'warning': return { bg: 'bg-amber-500/10', border: 'border-amber-500/20', icon: 'text-[var(--color-text-muted)]', dot: 'bg-[var(--color-text-muted)]' }
+    default: return { bg: 'bg-blue-500/10', border: 'border-blue-500/20', icon: 'text-[var(--color-text-secondary)]', dot: 'bg-[var(--color-text-secondary)]' }
   }
 }
 
@@ -381,8 +381,8 @@ function ModelPerformanceTab({ models }: { models: ModelPerformanceRow[] }) {
           </thead>
           <tbody>
             {models.map((m, i) => {
-              const successColor = m.success_rate >= 0.98 ? 'text-emerald-400' : m.success_rate >= 0.95 ? 'text-amber-400' : 'text-red-400'
-              const latencyColor = m.avg_latency_ms <= 3000 ? 'text-emerald-400' : m.avg_latency_ms <= 6000 ? 'text-amber-400' : 'text-red-400'
+              const successColor = 'text-[var(--color-text-secondary)]'
+              const latencyColor = 'text-[var(--color-text-secondary)]'
               return (
                 <tr key={m.model} className={clsx('border-b border-white/5 hover:bg-white/5 transition-colors', i % 2 === 0 && 'bg-white/[0.02]')}>
                   <td className="py-3 px-4">

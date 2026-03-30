@@ -142,7 +142,7 @@ function suggestChartType(data: DataPoint[]): ChartType {
 }
 
 const defaultOptions: ChartOptions = {
-  color: 'var(--color-accent-blue)',
+  color: 'var(--color-text-secondary)',
   colorPalette: 'default',
   xLabel: '', yLabel: '',
   showGrid: true, showLegend: true, legendPosition: 'bottom',
@@ -1272,7 +1272,7 @@ export default function DataVisualization() {
             </p>
           </div>
           <input ref={fileInputRef} type="file" accept=".csv,.tsv,.txt,.xlsx,.xls" onChange={handleFileUpload} className="hidden" />
-          <button onClick={() => { setForm({ title: '', type: 'bar', dataText: '', options: { ...defaultOptions } }); setShowAdd(true) }} className="btn text-sm" style={{ color: 'var(--color-accent-blue)' }}>
+          <button onClick={() => { setForm({ title: '', type: 'bar', dataText: '', options: { ...defaultOptions } }); setShowAdd(true) }} className="btn text-sm" style={{ color: 'var(--color-text-secondary)' }}>
             <FiPlus className="w-4 h-4" /> Create Visualization
           </button>
         </div>
@@ -1351,7 +1351,7 @@ export default function DataVisualization() {
                           setForm(f => ({ ...f, title: f.title || sample.title, dataText: sample.data }))
                         }}
                         className="text-xxs px-2.5 py-1 rounded border border-[var(--glass-border)] hover:border-[var(--color-border-strong)] transition-colors flex items-center gap-1 shrink-0"
-                        style={{ color: 'var(--color-accent-cyan)' }}
+                        style={{ color: 'var(--color-text-secondary)' }}
                       >
                         <FiClipboard className="w-3 h-3" /> Load Sample
                       </button>
@@ -1381,7 +1381,7 @@ export default function DataVisualization() {
                           if (data.length > 0) setForm(f => ({ ...f, type: suggestChartType(data) }))
                         }}
                         className="text-xxs px-2 py-0.5 rounded border border-[var(--glass-border)] hover:border-[var(--color-border-strong)] transition-colors"
-                        style={{ color: 'var(--color-accent-purple)' }}
+                        style={{ color: 'var(--color-text-secondary)' }}
                         title="Analyze your data and auto-select the best chart type"
                       >
                         Auto-suggest type
@@ -1390,7 +1390,7 @@ export default function DataVisualization() {
                     <button
                       onClick={() => fileInputRef.current?.click()}
                       className="text-xxs px-2 py-0.5 rounded border border-[var(--glass-border)] hover:border-[var(--color-border-strong)] transition-colors flex items-center gap-1"
-                      style={{ color: 'var(--color-accent-green)' }}
+                      style={{ color: 'var(--color-text-secondary)' }}
                     >
                       <FiUpload className="w-3 h-3" /> Import CSV/XLSX
                     </button>

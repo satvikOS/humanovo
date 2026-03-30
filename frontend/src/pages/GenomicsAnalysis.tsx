@@ -380,7 +380,7 @@ export default function GenomicsAnalysis() {
                 <textarea value={biomarkerData} onChange={e => setBiomarkerData(e.target.value)} rows={6} placeholder={"e.g.,\nTP53,2.1,3.5,1.8;5.6,7.2,6.1\nBRCA1,1.5,2.0;1.7,2.1"} className="input w-full text-xs font-mono resize-none" /></div>
             )}
             <div className="flex gap-2">
-              <button onClick={run} disabled={loading} className="btn text-xs flex items-center gap-1.5" style={{ color: 'var(--color-accent-blue)' }}><FiPlay className="w-3.5 h-3.5" /> {loading ? 'Running...' : 'Run Analysis'}</button>
+              <button onClick={run} disabled={loading} className="btn text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text-secondary)' }}><FiPlay className="w-3.5 h-3.5" /> {loading ? 'Running...' : 'Run Analysis'}</button>
               <input ref={fileInputRef} type="file" accept=".csv,.tsv,.txt" onChange={handleCSVUpload} className="hidden" />
               <button onClick={() => fileInputRef.current?.click()} className="btn text-xs flex items-center gap-1.5 text-[var(--color-text-muted)]"><FiUpload className="w-3.5 h-3.5" /> Upload CSV</button>
             </div>
@@ -475,7 +475,7 @@ export default function GenomicsAnalysis() {
                         <div key={i} className={`p-3 rounded-lg ${a.impact === 'HIGH' ? 'bg-red-500/5 border border-red-500/20' : a.impact === 'MODERATE' ? 'bg-yellow-500/5 border border-yellow-500/20' : 'bg-[var(--glass-bg)]'}`}>
                           <div className="flex items-center justify-between">
                             <span className="text-xs font-medium font-mono">{a.change || `${a.gene}:${a.position} ${a.ref}>${a.alt}`}</span>
-                            <span className={`text-xxs px-1.5 py-0.5 rounded ${a.impact === 'HIGH' ? 'bg-red-500/10 text-red-400' : a.impact === 'MODERATE' ? 'bg-yellow-500/10 text-yellow-400' : 'bg-[var(--glass-bg)]'}`}>{a.impact}</span>
+                            <span className={`text-xxs px-1.5 py-0.5 rounded ${a.impact === 'HIGH' ? 'bg-[var(--glass-bg)] text-[var(--color-text-muted)]' : a.impact === 'MODERATE' ? 'bg-[var(--glass-bg)] text-[var(--color-text-muted)]' : 'bg-[var(--glass-bg)]'}`}>{a.impact}</span>
                           </div>
                           <div className="text-xxs text-[var(--color-text-muted)] mt-1">{a.consequence} | {a.clinical_significance} | SIFT: {a.sift || '-'} | PolyPhen: {a.polyphen || '-'}</div>
                           {a.cadd_score !== undefined && <div className="text-xxs text-[var(--color-text-muted)]">CADD: {a.cadd_score?.toFixed(1)} | gnomAD AF: {a.gnomad_af?.toFixed(4) || a.allele_frequency || '-'}</div>}
@@ -523,19 +523,19 @@ export default function GenomicsAnalysis() {
                         <div className="space-y-2">
                           {(result.top_upregulated || []).map((r: any) => (
                             <div key={r.gene} className="p-3 rounded-lg bg-red-500/5 border border-red-500/20">
-                              <div className="flex items-center justify-between"><span className="text-xs font-medium">{r.gene}</span><span className="text-xxs px-1.5 py-0.5 rounded bg-red-500/10 text-red-400">up</span></div>
+                              <div className="flex items-center justify-between"><span className="text-xs font-medium">{r.gene}</span><span className="text-xxs px-1.5 py-0.5 rounded bg-[var(--glass-bg)] text-[var(--color-text-secondary)]">up</span></div>
                               <div className="text-xxs text-[var(--color-text-muted)]">log2FC: {r.log2_fold_change?.toFixed(3)} | p: {r.p_value?.toFixed(4)}</div>
                             </div>
                           ))}
                           {(result.top_downregulated || []).map((r: any) => (
                             <div key={r.gene} className="p-3 rounded-lg bg-blue-500/5 border border-blue-500/20">
-                              <div className="flex items-center justify-between"><span className="text-xs font-medium">{r.gene}</span><span className="text-xxs px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400">down</span></div>
+                              <div className="flex items-center justify-between"><span className="text-xs font-medium">{r.gene}</span><span className="text-xxs px-1.5 py-0.5 rounded bg-[var(--glass-bg)] text-[var(--color-text-secondary)]">down</span></div>
                               <div className="text-xxs text-[var(--color-text-muted)]">log2FC: {r.log2_fold_change?.toFixed(3)} | p: {r.p_value?.toFixed(4)}</div>
                             </div>
                           ))}
                           {(result.results?.filter((r: any) => r.significant) || []).map((r: any) => (
                             <div key={r.gene} className="p-3 rounded-lg bg-green-500/5 border border-green-500/20">
-                              <div className="flex items-center justify-between"><span className="text-xs font-medium">{r.gene}</span><span className={`text-xxs px-1.5 py-0.5 rounded ${r.direction === 'up' ? 'bg-red-500/10 text-red-400' : 'bg-blue-500/10 text-blue-400'}`}>{r.direction === 'up' ? 'up' : 'down'}</span></div>
+                              <div className="flex items-center justify-between"><span className="text-xs font-medium">{r.gene}</span><span className={`text-xxs px-1.5 py-0.5 rounded ${r.direction === 'up' ? 'bg-[var(--glass-bg)] text-[var(--color-text-secondary)]' : 'bg-[var(--glass-bg)] text-[var(--color-text-secondary)]'}`}>{r.direction === 'up' ? 'up' : 'down'}</span></div>
                               <div className="text-xxs text-[var(--color-text-muted)]">log2FC: {r.log2_fold_change} | p: {r.p_value}</div>
                             </div>
                           ))}

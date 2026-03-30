@@ -245,10 +245,10 @@ export default function HypothesisReview() {
                       <p className="font-medium" style={{ color: 'var(--color-text)' }}>{c.title}</p>
                       <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-muted)' }}>
                         {c.authors?.slice(0, 3).join(', ')}{c.authors?.length > 3 ? ' et al.' : ''}{c.journal ? ` \u00B7 ${c.journal}` : ''}{c.year ? ` (${c.year})` : ''}
-                        {c.verified && <span className="ml-1 text-green-500">verified</span>}
+                        {c.verified && <span className="ml-1 text-[var(--color-text-secondary)]">verified</span>}
                       </p>
-                      {c.pmid && <a href={`https://pubmed.ncbi.nlm.nih.gov/${c.pmid}`} target="_blank" rel="noreferrer" className="text-xs" style={{ color: 'var(--color-accent-blue)' }}>PubMed</a>}
-                      {c.doi && <a href={`https://doi.org/${c.doi}`} target="_blank" rel="noreferrer" className="text-xs ml-2" style={{ color: 'var(--color-accent-blue)' }}>DOI</a>}
+                      {c.pmid && <a href={`https://pubmed.ncbi.nlm.nih.gov/${c.pmid}`} target="_blank" rel="noreferrer" className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>PubMed</a>}
+                      {c.doi && <a href={`https://doi.org/${c.doi}`} target="_blank" rel="noreferrer" className="text-xs ml-2" style={{ color: 'var(--color-text-secondary)' }}>DOI</a>}
                     </div>
                   </div>
                 </div>
@@ -269,7 +269,7 @@ export default function HypothesisReview() {
               return (
                 <div key={stage} className="min-w-[160px] flex-1 rounded-lg p-3"
                   style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
-                  <div className="text-xs font-mono font-bold mb-1" style={{ color: 'var(--color-accent-blue)' }}>{stage}</div>
+                  <div className="text-xs font-mono font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>{stage}</div>
                   {data ? (
                     <>
                       <p className="text-xs" style={{ color: 'var(--color-text)' }}>{data.description}</p>

@@ -114,6 +114,7 @@ VALID_KEYS = {
     "research-papers",
     "tab-counter",
     "citations",
+    "project-documents",
 }
 
 

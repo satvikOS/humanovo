@@ -123,7 +123,7 @@ export default function LiteratureReview() {
               <FiBookOpen className="w-4 h-4 text-[var(--color-text-muted)]" />
               <h2 className="text-sm font-medium">Literature Review</h2>
             </div>
-            <button onClick={() => setShowAddForm(!showAddForm)} className="btn btn-sm text-xs" style={{ color: 'var(--color-accent-blue)' }}>
+            <button onClick={() => setShowAddForm(!showAddForm)} className="btn btn-sm text-xs" style={{ color: 'var(--color-text-secondary)' }}>
               <FiPlus className="w-3.5 h-3.5" /> Add Paper
             </button>
           </div>
@@ -250,7 +250,7 @@ export default function LiteratureReview() {
               </div>
               <div className="flex items-center gap-1">
                 {selectedPaper.doi && (
-                  <a href={`https://doi.org/${selectedPaper.doi}`} target="_blank" rel="noopener noreferrer" className="btn btn-sm text-xs" style={{ color: 'var(--color-accent-blue)' }}>
+                  <a href={`https://doi.org/${selectedPaper.doi}`} target="_blank" rel="noopener noreferrer" className="btn btn-sm text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                     <FiExternalLink className="w-3.5 h-3.5" /> DOI
                   </a>
                 )}

@@ -852,7 +852,7 @@ export default function Notebook() {
 
   // ─── Render ──────────────────────────────────────────────
   if (initError) {
-    return <div className="p-8 text-red-400"><h2 className="text-lg font-bold mb-2">Notebook Error</h2><pre className="text-sm">{initError}</pre></div>
+    return <div className="p-8 text-[var(--color-text-muted)]"><h2 className="text-lg font-bold mb-2">Notebook Error</h2><pre className="text-sm">{initError}</pre></div>
   }
 
   return (
@@ -968,7 +968,7 @@ export default function Notebook() {
                     </div>
                     <button
                       type="button"
-                      className="p-1 ml-1 rounded hover:bg-red-500/20 text-red-400/60 hover:text-red-400 cursor-pointer shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                      className="p-1 ml-1 rounded hover:bg-red-500/20 text-[var(--color-text-muted)] hover:text-red-400 cursor-pointer shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
                       title="Delete page"
                       onPointerDown={(e) => {
                         e.preventDefault()
@@ -1002,7 +1002,7 @@ export default function Notebook() {
                   <FiFileText className="w-6 h-6 mx-auto mb-2 opacity-50" />
                   <p className="text-xs">{searchQuery ? 'No pages found' : 'No pages yet'}</p>
                   {!searchQuery && (
-                    <button onClick={() => setShowTemplates(true)} className="text-xs text-accent-blue hover:underline mt-1">
+                    <button onClick={() => setShowTemplates(true)} className="text-xs text-[var(--color-text-secondary)] hover:underline mt-1">
                       Create one
                     </button>
                   )}
@@ -1044,7 +1044,7 @@ export default function Notebook() {
                     className={clsx(
                       'px-2.5 py-1 rounded text-xs flex items-center gap-1 transition-colors',
                       hasUnsaved
-                        ? 'bg-accent-blue/20 text-accent-blue hover:bg-accent-blue/30'
+                        ? 'bg-white/10 text-[var(--color-text-secondary)] hover:bg-white/15'
                         : 'text-[var(--color-text-muted)] hover:bg-white/5'
                     )}
                   >
@@ -1061,7 +1061,7 @@ export default function Notebook() {
                   {editTags.map(tag => (
                     <span key={tag} className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xxs bg-white/5 rounded text-[var(--color-text-secondary)]">
                       {tag}
-                      <button onClick={() => removeTag(tag)} className="hover:text-red-400"><FiX className="w-2.5 h-2.5" /></button>
+                      <button onClick={() => removeTag(tag)} className="hover:text-[var(--color-text-muted)]"><FiX className="w-2.5 h-2.5" /></button>
                     </span>
                   ))}
                   <input
@@ -1099,7 +1099,7 @@ export default function Notebook() {
                 <FiFileText className="w-12 h-12 text-[var(--color-text-muted)] mx-auto mb-4 opacity-30" />
                 <h3 className="text-lg font-medium mb-2">No page selected</h3>
                 <p className="text-sm text-[var(--color-text-muted)] mb-4">Select a page or create a new one</p>
-                <button onClick={() => setShowTemplates(true)} className="btn text-accent-blue hover:bg-accent-blue/10">
+                <button onClick={() => setShowTemplates(true)} className="btn text-[var(--color-text-secondary)] hover:bg-white/5">
                   <FiPlus className="w-4 h-4 mr-1" /> New Page
                 </button>
               </div>
@@ -1111,7 +1111,7 @@ export default function Notebook() {
       {deleteConfirmId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
           <div className="glass-card-static p-6 max-w-sm mx-4 text-center" style={{ background: 'var(--glass-bg)', backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)', boxShadow: 'var(--glass-shadow)' }}>
-            <FiTrash2 className="w-8 h-8 text-red-400 mx-auto mb-3" />
+            <FiTrash2 className="w-8 h-8 text-[var(--color-text-muted)] mx-auto mb-3" />
             <h3 className="text-lg font-semibold mb-2">Delete Page?</h3>
             <p className="text-sm text-[var(--color-text-muted)] mb-4">
               This will permanently delete this page and its contents. This action cannot be undone.
@@ -1120,7 +1120,7 @@ export default function Notebook() {
               <button onClick={() => setDeleteConfirmId(null)} className="btn px-4 py-2 text-sm text-[var(--color-text-muted)]">
                 Cancel
               </button>
-              <button onClick={confirmDelete} className="btn px-4 py-2 text-sm bg-red-500/10 text-red-400 hover:bg-red-500/20">
+              <button onClick={confirmDelete} className="btn px-4 py-2 text-sm bg-red-500/10 text-[var(--color-text-muted)] hover:text-red-400 hover:bg-red-500/20">
                 Delete Permanently
               </button>
             </div>

@@ -2449,7 +2449,7 @@ function EquationPlotter() {
                   onClick={copyEqChartToClipboard}
                   className="px-2 py-1 rounded text-xxs border border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-all"
                 >
-                  {eqCopied ? <FiCheck className="w-3 h-3 inline mr-1 text-green-400" /> : <FiClipboard className="w-3 h-3 inline mr-1" />}
+                  {eqCopied ? <FiCheck className="w-3 h-3 inline mr-1 text-[var(--color-text-secondary)]" /> : <FiClipboard className="w-3 h-3 inline mr-1" />}
                   {eqCopied ? 'Copied' : 'Copy'}
                 </button>
                 <button
@@ -3454,7 +3454,7 @@ export default function Simulations() {
       {deleteConfirmId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
           <div className="glass-card p-6 max-w-sm mx-4 text-center" style={{ background: 'var(--color-surface-solid)' }}>
-            <FiX className="w-8 h-8 text-red-400 mx-auto mb-3" />
+            <FiX className="w-8 h-8 text-[var(--color-text-muted)] mx-auto mb-3" />
             <h3 className="text-lg font-semibold mb-2">Delete Simulation?</h3>
             <p className="text-sm text-[var(--color-text-muted)] mb-4">
               This will permanently delete this simulation and its results. This action cannot be undone.
@@ -3463,7 +3463,7 @@ export default function Simulations() {
               <button onClick={() => setDeleteConfirmId(null)} className="btn px-4 py-2 text-sm text-[var(--color-text-muted)]">
                 Cancel
               </button>
-              <button onClick={confirmDelete} className="btn px-4 py-2 text-sm bg-red-500/10 text-red-400 hover:bg-red-500/20">
+              <button onClick={confirmDelete} className="btn px-4 py-2 text-sm bg-red-500/10 text-[var(--color-text-muted)] hover:text-red-400 hover:bg-red-500/20">
                 Delete Permanently
               </button>
             </div>

@@ -296,7 +296,7 @@ function RecentNotebooksWidget() {
               className="w-full text-left flex items-center gap-2.5 py-2.5 border-b border-[var(--color-border)] last:border-0 hover:bg-[var(--glass-bg)] rounded-lg px-2 transition-all"
             >
               <div className="p-1 rounded-md flex-shrink-0" style={{ background: 'rgba(249, 115, 22, 0.08)' }}>
-                <FiBook className="w-3 h-3" style={{ color: 'var(--color-accent-orange)' }} />
+                <FiBook className="w-3 h-3" style={{ color: 'var(--color-text-secondary)' }} />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="text-xs font-medium truncate">{nb.title}</div>
@@ -498,9 +498,9 @@ export default function Dashboard() {
 
   const quickActions = [
     { label: 'New Project', icon: FiFolder, action: () => navigate('/projects?new=1'), color: 'var(--color-text)' },
-    { label: 'Start Discovery', icon: FiZap, action: () => navigate('/agents?start=1'), color: 'var(--color-accent-purple)' },
-    { label: 'Search', icon: FiSearch, action: () => navigate('/search'), color: 'var(--color-accent-blue)' },
-    { label: 'Notebook', icon: FiBook, action: () => navigate('/notebook'), color: 'var(--color-accent-orange)' },
+    { label: 'Start Discovery', icon: FiZap, action: () => navigate('/agents?start=1'), color: 'var(--color-text-secondary)' },
+    { label: 'Search', icon: FiSearch, action: () => navigate('/search'), color: 'var(--color-text-secondary)' },
+    { label: 'Notebook', icon: FiBook, action: () => navigate('/notebook'), color: 'var(--color-text-secondary)' },
   ]
 
   return (

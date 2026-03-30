@@ -93,7 +93,7 @@ export default function DataManager() {
             <h1 className="text-2xl font-semibold tracking-tight">Research Data Manager</h1>
             <p className="text-sm text-[var(--color-text-muted)] mt-1">Import, explore, and manage research datasets</p>
           </div>
-          <button onClick={() => setShowAdd(!showAdd)} className="btn text-sm" style={{ color: 'var(--color-accent-blue)' }}>
+          <button onClick={() => setShowAdd(!showAdd)} className="btn text-sm" style={{ color: 'var(--color-text-secondary)' }}>
             <FiPlus className="w-4 h-4" /> New Dataset
           </button>
         </div>
@@ -232,7 +232,7 @@ export default function DataManager() {
                     <div key={c.name} className="glass-card p-3">
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-xs font-medium">{c.name}</span>
-                        <span className={`text-xxs px-2 py-0.5 rounded-full ${c.completeness === 1 ? 'bg-green-500/10 text-green-400' : 'bg-yellow-500/10 text-yellow-400'}`}>
+                        <span className={`text-xxs px-2 py-0.5 rounded-full ${c.completeness === 1 ? 'bg-[var(--glass-bg)] text-[var(--color-text-secondary)]' : 'bg-[var(--glass-bg)] text-[var(--color-text-muted)]'}`}>
                           {(c.completeness * 100).toFixed(0)}% complete
                         </span>
                       </div>

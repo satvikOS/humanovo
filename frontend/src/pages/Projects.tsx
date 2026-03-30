@@ -34,11 +34,11 @@ function StatsBar({ projects }: { projects: Project[] }) {
   const allPapers = persistGet<SavedResearchPaper[]>('research-papers', [])
 
   const stats = [
-    { label: 'Total Projects', value: projects.length, icon: FiFolder, color: 'var(--color-accent-blue)' },
-    { label: 'Active', value: activeCount, icon: FiZap, color: 'var(--color-accent-green)' },
-    { label: 'Hypotheses', value: totalHypotheses, icon: FiTarget, color: 'var(--color-accent-purple)' },
-    { label: 'Evidence Items', value: totalEvidence, icon: FiDatabase, color: 'var(--color-accent-cyan)' },
-    { label: 'Research Papers', value: allPapers.length, icon: FiFileText, color: 'var(--color-accent-orange)' },
+    { label: 'Total Projects', value: projects.length, icon: FiFolder, color: 'var(--color-text-secondary)' },
+    { label: 'Active', value: activeCount, icon: FiZap, color: 'var(--color-text-secondary)' },
+    { label: 'Hypotheses', value: totalHypotheses, icon: FiTarget, color: 'var(--color-text-secondary)' },
+    { label: 'Evidence Items', value: totalEvidence, icon: FiDatabase, color: 'var(--color-text-secondary)' },
+    { label: 'Research Papers', value: allPapers.length, icon: FiFileText, color: 'var(--color-text-secondary)' },
   ]
 
   return (
@@ -204,7 +204,7 @@ function CreateProjectModal({ onClose, onCreate }: { onClose: () => void; onCrea
           </div>
 
           {error && (
-            <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-red-400">
+            <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-[var(--color-text-muted)]">
               {error}
             </div>
           )}
@@ -681,7 +681,7 @@ export default function Projects() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setDeleteConfirmId(null)}>
           <div className="glass-card p-6 max-w-sm mx-4 text-center" onClick={e => e.stopPropagation()}>
             <div className="inline-flex p-3 rounded-xl bg-red-500/10 mb-4">
-              <FiTrash2 className="w-6 h-6 text-red-400" />
+              <FiTrash2 className="w-6 h-6 text-[var(--color-text-muted)]" />
             </div>
             <h3 className="text-lg font-semibold mb-2">Delete Project?</h3>
             <p className="text-sm text-[var(--color-text-muted)] mb-6 leading-relaxed">
@@ -691,7 +691,7 @@ export default function Projects() {
               <button onClick={() => setDeleteConfirmId(null)} className="btn px-4 py-2 text-sm text-[var(--color-text-muted)]">
                 Cancel
               </button>
-              <button onClick={handleDeleteConfirm} className="btn px-4 py-2 text-sm bg-red-500/10 text-red-400 hover:bg-red-500/20 font-medium">
+              <button onClick={handleDeleteConfirm} className="btn px-4 py-2 text-sm bg-red-500/10 text-[var(--color-text-muted)] hover:text-red-400 hover:bg-red-500/20 font-medium">
                 Delete Permanently
               </button>
             </div>
