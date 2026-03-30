@@ -54,6 +54,7 @@ interface ProjectDocument {
   file_size: number
   mime_type: string
   uploaded_at: string
+  knowledge_base: 'private' | 'common'
   // data_base64 is stored in IndexedDB, NOT in this object (to avoid localStorage size limits)
 }
 
@@ -63,9 +64,10 @@ type ViewMode = 'list' | 'hypothesis_viewer' | 'hypothesis_paper' | 'document_vi
 
 /** Standalone doc viewer that loads blob content from IndexedDB asynchronously */
 function DocumentViewer({ doc, onClose }: { doc: ProjectDocument; onClose: () => void }) {
-  const [dataUrl, setDataUrl] = useState<string | null>(null)
+  const [blobUrl, setBlobUrl] = useState<string | null>(null)
   const [textContent, setTextContent] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   const isImage = doc.mime_type.startsWith('image/')
   const isPdf = doc.mime_type === 'application/pdf'
@@ -73,19 +75,37 @@ function DocumentViewer({ doc, onClose }: { doc: ProjectDocument; onClose: () =>
 
   useEffect(() => {
     let cancelled = false
+    let objectUrl: string | null = null
     ;(async () => {
       setLoading(true)
-      const base64 = await blobGet(doc.id)
-      if (cancelled) return
-      if (base64) {
-        setDataUrl(`data:${doc.mime_type};base64,${base64}`)
-        if (isText) {
-          try { setTextContent(atob(base64)) } catch { setTextContent(null) }
+      setError(null)
+      try {
+        const base64 = await blobGet(doc.id)
+        if (cancelled) return
+        if (!base64) {
+          setError('File content not found. It may need to be re-uploaded on this device.')
+          setLoading(false)
+          return
         }
+        // Convert base64 to Blob → ObjectURL (handles large files properly)
+        const binary = atob(base64)
+        const bytes = new Uint8Array(binary.length)
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+        const blob = new Blob([bytes], { type: doc.mime_type })
+        objectUrl = URL.createObjectURL(blob)
+        setBlobUrl(objectUrl)
+        if (isText) {
+          try { setTextContent(new TextDecoder().decode(bytes)) } catch { setTextContent(null) }
+        }
+      } catch (e) {
+        if (!cancelled) setError(`Failed to load document: ${e instanceof Error ? e.message : String(e)}`)
       }
-      setLoading(false)
+      if (!cancelled) setLoading(false)
     })()
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
   }, [doc.id])
 
   return (
@@ -102,6 +122,11 @@ function DocumentViewer({ doc, onClose }: { doc: ProjectDocument; onClose: () =>
           <span>{doc.doc_type}</span>
           {doc.authors && <span>{doc.authors}</span>}
           <span>{formatDate(doc.date)}</span>
+          {blobUrl && (
+            <a href={blobUrl} download={doc.filename} className="p-1.5 rounded hover:bg-white/5 text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="Download">
+              <FiFile className="w-3.5 h-3.5" />
+            </a>
+          )}
           <button onClick={onClose} className="p-1.5 rounded hover:bg-white/5 text-[var(--color-text-muted)]">
             <FiX className="w-4 h-4" />
           </button>
@@ -113,36 +138,30 @@ function DocumentViewer({ doc, onClose }: { doc: ProjectDocument; onClose: () =>
             <div className="w-6 h-6 border-2 border-white/20 border-t-white rounded-full animate-spin" />
           </div>
         )}
-        {!loading && !dataUrl && (
+        {!loading && error && (
           <div className="flex flex-col items-center justify-center h-full gap-4">
             <FiFile className="w-16 h-16 text-[var(--color-text-muted)] opacity-30" />
-            <p className="text-[var(--color-text-muted)]">File content not available on this device</p>
-            <p className="text-xs text-[var(--color-text-muted)]">Upload the document again to view it here</p>
+            <p className="text-[var(--color-text-muted)] text-sm">{error}</p>
           </div>
         )}
-        {!loading && dataUrl && isPdf && (
-          <object data={dataUrl} type="application/pdf" className="w-full h-full">
-            <div className="flex flex-col items-center justify-center h-full">
-              <p className="text-[var(--color-text-muted)] mb-4">Unable to display PDF inline.</p>
-              <a href={dataUrl} download={doc.filename} className="text-sm text-[var(--color-text-secondary)] hover:underline">Download</a>
-            </div>
-          </object>
+        {!loading && blobUrl && isPdf && (
+          <iframe src={blobUrl} className="w-full h-full border-0" title={doc.title} />
         )}
-        {!loading && dataUrl && isImage && (
+        {!loading && blobUrl && isImage && (
           <div className="flex items-center justify-center h-full p-8">
-            <img src={dataUrl} alt={doc.title} className="max-w-full max-h-full object-contain rounded" />
+            <img src={blobUrl} alt={doc.title} className="max-w-full max-h-full object-contain rounded" />
           </div>
         )}
-        {!loading && dataUrl && isText && textContent && (
+        {!loading && blobUrl && isText && textContent && (
           <div className="p-8 overflow-auto h-full">
             <pre className="text-sm text-[var(--color-text-secondary)] whitespace-pre-wrap font-mono">{textContent}</pre>
           </div>
         )}
-        {!loading && dataUrl && !isPdf && !isImage && !isText && (
+        {!loading && blobUrl && !isPdf && !isImage && !isText && (
           <div className="flex flex-col items-center justify-center h-full gap-4">
             <FiFile className="w-16 h-16 text-[var(--color-text-muted)] opacity-30" />
             <p className="text-[var(--color-text-muted)]">Preview not available for this file type</p>
-            <a href={dataUrl} download={doc.filename} className="text-sm text-[var(--color-text-secondary)] hover:underline">Download {doc.filename}</a>
+            <a href={blobUrl} download={doc.filename} className="text-sm text-[var(--color-text-secondary)] hover:underline">Download {doc.filename}</a>
           </div>
         )}
       </div>
@@ -195,7 +214,7 @@ export default function ProjectDetail() {
     })
   }, [projectId, setAllDocs])
   const [showDocUpload, setShowDocUpload] = useState(false)
-  const [docForm, setDocForm] = useState({ title: '', doc_type: 'Protocol' as string, authors: '', date: '', description: '', tags: '' })
+  const [docForm, setDocForm] = useState({ title: '', doc_type: 'Protocol' as string, authors: '', date: '', description: '', tags: '', knowledge_base: 'private' as 'private' | 'common' })
   const [docFile, setDocFile] = useState<File | null>(null)
   const [deleteDocId, setDeleteDocId] = useState<string | null>(null)
   const [viewingDoc, setViewingDoc] = useState<ProjectDocument | null>(null)
@@ -564,11 +583,17 @@ export default function ProjectDetail() {
         file_size: docFile.size,
         mime_type: docFile.type,
         uploaded_at: new Date().toISOString(),
+        knowledge_base: docForm.knowledge_base,
       }
       setProjectDocs(prev => [doc, ...prev])
-      logActivity({ type: 'evidence', action: 'imported', title: `Uploaded document: ${docForm.title}`, project: project?.name })
+      // Also upload to backend ingestion for AI knowledge base
+      try {
+        const { default: apiService } = await import('../services/api')
+        await apiService.uploadDocument(docFile, { project_id: projectId })
+      } catch { /* Backend may be unavailable — local storage still works */ }
+      logActivity({ type: 'evidence', action: 'imported', title: `Uploaded document: ${docForm.title} (${docForm.knowledge_base} KB)`, project: project?.name })
       setShowDocUpload(false)
-      setDocForm({ title: '', doc_type: 'Protocol', authors: '', date: '', description: '', tags: '' })
+      setDocForm({ title: '', doc_type: 'Protocol', authors: '', date: '', description: '', tags: '', knowledge_base: 'private' })
       setDocFile(null)
     }
     reader.readAsDataURL(docFile)
@@ -1157,6 +1182,10 @@ export default function ProjectDetail() {
                 <dd className="text-white font-medium">{projectDocs.length}</dd>
               </div>
               <div className="flex justify-between">
+                <dt className="text-[var(--color-text-muted)] text-sm">Evidence</dt>
+                <dd className="text-white font-medium">{(project.evidence_count || 0) + projectDocs.length}</dd>
+              </div>
+              <div className="flex justify-between">
                 <dt className="text-[var(--color-text-muted)] text-sm">Status</dt>
                 <dd className="text-white font-medium capitalize">{project.status || 'active'}</dd>
               </div>
@@ -1315,6 +1344,29 @@ export default function ProjectDetail() {
                     className="w-full px-3 py-2 text-sm rounded-lg bg-white/5 border border-[var(--color-border)] text-white placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-border-strong)]"
                     placeholder="Comma-separated tags"
                   />
+                </div>
+
+                {/* Knowledge Base */}
+                <div>
+                  <label className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-2 block">Knowledge Base</label>
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setDocForm(prev => ({ ...prev, knowledge_base: 'private' }))}
+                      className={`flex-1 p-3 rounded-lg border text-left transition-colors ${docForm.knowledge_base === 'private' ? 'border-[var(--color-border-strong)] bg-white/5' : 'border-[var(--color-border)] hover:border-[var(--color-border-strong)]'}`}
+                    >
+                      <div className="text-sm text-white font-medium">Private</div>
+                      <div className="text-xs text-[var(--color-text-muted)] mt-0.5">Only you and your AI can access this document</div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDocForm(prev => ({ ...prev, knowledge_base: 'common' }))}
+                      className={`flex-1 p-3 rounded-lg border text-left transition-colors ${docForm.knowledge_base === 'common' ? 'border-[var(--color-border-strong)] bg-white/5' : 'border-[var(--color-border)] hover:border-[var(--color-border-strong)]'}`}
+                    >
+                      <div className="text-sm text-white font-medium">Common</div>
+                      <div className="text-xs text-[var(--color-text-muted)] mt-0.5">Shared with all users. May earn royalties if used in others' discoveries</div>
+                    </button>
+                  </div>
                 </div>
               </div>
 

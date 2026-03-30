@@ -323,6 +323,8 @@ export interface DiscoveryConfig {
   max_rounds?: number
   models?: string[]
   research_guidance?: string
+  knowledge_base_ids?: string[]
+  document_context?: boolean
 }
 
 // ─── RAG ───────────────────────────────────────────────────────────

@@ -505,11 +505,13 @@ function ConstantChat() {
       const hypotheses = JSON.parse(localStorage.getItem('humanovo-hypotheses') || '[]')
       const papers = JSON.parse(localStorage.getItem('humanovo-research-papers') || '[]')
       const simulations = JSON.parse(localStorage.getItem('humanovo-mc-simulations') || '[]')
+      const docs = JSON.parse(localStorage.getItem('humanovo-project-documents') || '[]')
       return {
         totalProjects: projects.length,
         totalHypotheses: hypotheses.length,
         totalPapers: papers.length,
         totalSimulations: simulations.length,
+        totalDocuments: docs.length,
         projects: projects.map((p: any) => ({
           name: p.name || p.title,
           disease: p.disease_focus || p.disease,
@@ -527,6 +529,15 @@ function ConstantChat() {
           title: p.hypothesis_title,
           disease: p.disease,
         })).filter((p: any) => p.title),
+        documents: docs.map((d: any) => ({
+          title: d.title,
+          doc_type: d.doc_type,
+          authors: d.authors,
+          description: d.description,
+          tags: d.tags,
+          knowledge_base: d.knowledge_base || 'private',
+          project_id: d.project_id,
+        })).filter((d: any) => d.title),
       }
     } catch { return {} }
   }
@@ -782,7 +793,7 @@ function ConstantChat() {
         const res = await fetch(`${_apiBase}/api/v1/orchestrator/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: userMsg, context: 'general', platform_context: platformContext }),
+          body: JSON.stringify({ message: userMsg, context: 'general', platform_context: platformContext, knowledge_base: { include_documents: true, retrieval_mode: 'hybrid' } }),
         })
         if (res.ok) {
           const data = await res.json()

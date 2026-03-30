@@ -88,6 +88,9 @@ export default function DiscoveryRunner() {
 
   const startDiscovery = async () => {
     if (!projectId || !disease.trim()) return
+    // Include uploaded documents for AI context
+    const allDocs = JSON.parse(localStorage.getItem('humanovo-project-documents') || '[]')
+    const projectDocIds = allDocs.filter((d: any) => d.project_id === projectId).map((d: any) => d.id)
     const body = {
       disease,
       discovery_type: discoveryType,
@@ -98,6 +101,8 @@ export default function DiscoveryRunner() {
       verbosity,
       grant_type: outputFormat === 'grant_sections' ? grantType || null : null,
       citation_style: citationStyle,
+      knowledge_base_ids: projectDocIds.length > 0 ? projectDocIds : undefined,
+      document_context: projectDocIds.length > 0 ? true : undefined,
     }
 
     try {

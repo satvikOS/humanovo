@@ -334,9 +334,14 @@ export default function Agents() {
   const startDiscovery = async () => {
     if (!config.disease.trim()) return
     try {
+      // Include uploaded documents for AI context
+      const allDocs = JSON.parse(localStorage.getItem('humanovo-project-documents') || '[]')
+      const docIds = allDocs.map((d: any) => d.id)
       const discoveryConfig = {
         ...config,
         external_factors: factors.length > 0 ? factors.map(f => `${f.name} (${f.category}): ${f.interaction}`) : undefined,
+        knowledge_base_ids: docIds.length > 0 ? docIds : undefined,
+        document_context: docIds.length > 0 ? true : undefined,
       }
       const startRes = await api.startDiscovery(discoveryConfig as any)
       setState('running')
