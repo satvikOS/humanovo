@@ -850,7 +850,7 @@ export default function Evidence() {
               <div className="flex-1 min-h-0 relative">
                 {viewingDocLoading && <div className="absolute inset-0 flex items-center justify-center"><div className="w-6 h-6 border-2 border-white/20 border-t-white rounded-full animate-spin" /></div>}
                 {!viewingDocLoading && viewingDocBlobUrl && viewingDocOverlay.mime_type === 'application/pdf' && (
-                  <iframe src={viewingDocBlobUrl} className="w-full h-full border-0" title={viewingDocOverlay.title} />
+                  <iframe src={`${viewingDocBlobUrl}#toolbar=0&navpanes=0`} className="w-full h-full border-0" title={viewingDocOverlay.title} />
                 )}
                 {!viewingDocLoading && viewingDocBlobUrl && viewingDocOverlay.mime_type.startsWith('image/') && (
                   <div className="flex items-center justify-center h-full p-8"><img src={viewingDocBlobUrl} alt={viewingDocOverlay.title} className="max-w-full max-h-full object-contain rounded" /></div>

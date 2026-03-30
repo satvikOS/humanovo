@@ -145,7 +145,7 @@ function DocumentViewer({ doc, onClose }: { doc: ProjectDocument; onClose: () =>
           </div>
         )}
         {!loading && blobUrl && isPdf && (
-          <iframe src={blobUrl} className="w-full h-full border-0" title={doc.title} />
+          <iframe src={`${blobUrl}#toolbar=0&navpanes=0`} className="w-full h-full border-0" title={doc.title} />
         )}
         {!loading && blobUrl && isImage && (
           <div className="flex items-center justify-center h-full p-8">

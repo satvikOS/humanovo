@@ -163,17 +163,37 @@ async def gene_set_enrichment(
 
         nes = es * math.sqrt(nh) if nh > 0 else 0
 
+        # Approximate p-value from NES magnitude
+        abs_nes = abs(nes)
+        if abs_nes > 3.0:
+            p_val = 0.001
+        elif abs_nes > 2.0:
+            p_val = 0.01
+        elif abs_nes > 1.5:
+            p_val = 0.05
+        elif abs_nes > 1.0:
+            p_val = 0.1
+        else:
+            p_val = min(1.0, 0.5 + (1 - abs_nes) * 0.5)
+
         results.append({
             "pathway_id": pid,
             "pathway_name": pdata["name"],
             "enrichment_score": round(es, 4),
             "normalized_es": round(nes, 4),
+            "p_value": round(p_val, 4),
             "hits": nh,
             "leading_edge_genes": [gene_names[i] for i in hits[:5]],
+            "leading_edge_size": min(nh, 5),
             "running_sum": running_sum[::max(1, n // 50)],
         })
 
     results.sort(key=lambda r: abs(r["normalized_es"]), reverse=True)
+    # Benjamini-Hochberg FDR correction
+    n_tests = max(len(results), 1)
+    for i, r in enumerate(sorted(results, key=lambda x: x["p_value"])):
+        rank = i + 1
+        r["fdr"] = round(min(1.0, r["p_value"] * n_tests / rank), 4)
     return {"results": results, "total_genes": len(gene_names), "gene_sets_tested": len(pathways)}
 
 
@@ -308,25 +328,42 @@ async def discover_biomarkers(
 
         mean1 = sum(g1) / len(g1)
         mean2 = sum(g2) / len(g2)
-        log2fc = math.log2(max(mean2, 0.001) / max(mean1, 0.001))
+        # log2FC: group2 vs group1 (positive = upregulated in group2)
+        if mean1 > 0 and mean2 > 0:
+            log2fc = math.log2(mean2 / mean1)
+        elif mean2 - mean1 != 0:
+            log2fc = 2.0 if mean2 > mean1 else -2.0
+        else:
+            log2fc = 0.0
 
-        # Simple t-test
+        # Welch's t-test (group2 - group1 to match fold change direction)
         var1 = sum((x - mean1) ** 2 for x in g1) / (len(g1) - 1) if len(g1) > 1 else 0
         var2 = sum((x - mean2) ** 2 for x in g2) / (len(g2) - 1) if len(g2) > 1 else 0
-        se = math.sqrt(var1 / len(g1) + var2 / len(g2)) if (var1 / len(g1) + var2 / len(g2)) > 0 else 1e-10
-        t_stat = (mean1 - mean2) / se
+        se_sq = var1 / len(g1) + var2 / len(g2)
+        se = math.sqrt(se_sq) if se_sq > 0 else 1e-10
+        t_stat = (mean2 - mean1) / se  # direction matches log2FC
 
-        # Approximate p-value
-        df = len(g1) + len(g2) - 2
+        # Welch-Satterthwaite degrees of freedom
+        if se_sq > 0:
+            num = se_sq ** 2
+            den = (var1 / len(g1)) ** 2 / max(len(g1) - 1, 1) + (var2 / len(g2)) ** 2 / max(len(g2) - 1, 1)
+            df = num / den if den > 0 else len(g1) + len(g2) - 2
+        else:
+            df = len(g1) + len(g2) - 2
+
+        # Approximate p-value using normal approximation for t
         z = abs(t_stat) / math.sqrt(1 + t_stat * t_stat / max(df, 1))
         p_value = 2 * 0.5 * math.erfc(z / math.sqrt(2)) if z > 0 else 1.0
-        neg_log_p = -math.log10(max(p_value, 1e-300))
+        p_value = max(min(p_value, 1.0), 1e-300)
+        neg_log_p = -math.log10(p_value)
 
         results.append({
             "gene": gene,
             "mean_group1": round(mean1, 4),
             "mean_group2": round(mean2, 4),
             "log2_fold_change": round(log2fc, 4),
+            "t_statistic": round(t_stat, 4),
+            "df": round(df, 1),
             "p_value": round(p_value, 8),
             "neg_log10_p": round(neg_log_p, 4),
             "significant": p_value < request.alpha and abs(log2fc) > 1,
@@ -335,12 +372,18 @@ async def discover_biomarkers(
 
     results.sort(key=lambda r: r["p_value"])
     significant = [r for r in results if r["significant"]]
+    up = sorted([r for r in results if r["log2_fold_change"] > 0], key=lambda r: r["p_value"])
+    down = sorted([r for r in results if r["log2_fold_change"] < 0], key=lambda r: r["p_value"])
 
     return {
         "total_genes": len(results),
+        "n_genes": len(results),
         "significant_biomarkers": len(significant),
+        "n_significant": len(significant),
         "alpha": request.alpha,
         "results": results,
+        "top_upregulated": up[:5],
+        "top_downregulated": down[:5],
         "volcano_data": [
             {"gene": r["gene"], "x": r["log2_fold_change"], "y": r["neg_log10_p"], "significant": r["significant"]}
             for r in results
