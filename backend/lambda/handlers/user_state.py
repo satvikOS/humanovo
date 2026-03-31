@@ -1,9 +1,9 @@
 """
-Hypotheses Lambda Handler - CRUD operations for hypotheses.
-Uses DynamoDB for storage.
+User State Lambda Handler - Sync user state (localStorage) across devices.
+Uses DynamoDB for storage with last-write-wins conflict resolution.
 """
 
-print("[HYPOTHESES] Module loading...")
+print("[USER_STATE] Module loading...")
 
 import json
 import logging
@@ -13,7 +13,6 @@ import traceback
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
-from uuid import uuid4
 
 import boto3
 
@@ -24,10 +23,10 @@ try:
     from aws_lambda_powertools.utilities.typing import LambdaContext
     logger = Logger()
     metrics = Metrics()
-    print("[HYPOTHESES] Powertools loaded OK")
+    print("[USER_STATE] Powertools loaded OK")
 except ImportError as _import_err:
     logging.error(f"aws_lambda_powertools import failed: {_import_err}")
-    logger = logging.getLogger("hypotheses")
+    logger = logging.getLogger("user_state")
     logger.setLevel(logging.DEBUG)
 
     import re as _re_stub
@@ -47,14 +46,9 @@ except ImportError as _import_err:
                 self._register("GET", path, func)
                 return func
             return decorator
-        def post(self, path):
+        def put(self, path):
             def decorator(func):
-                self._register("POST", path, func)
-                return func
-            return decorator
-        def patch(self, path):
-            def decorator(func):
-                self._register("PATCH", path, func)
+                self._register("PUT", path, func)
                 return func
             return decorator
         def delete(self, path):
@@ -99,19 +93,35 @@ except ImportError as _import_err:
         def add_metric(self, **kwargs): pass
     metrics = _NoopMetrics()
 
-    print("[HYPOTHESES] Using STUB resolver (powertools unavailable)")
+    print("[USER_STATE] Using STUB resolver (powertools unavailable)")
 
 app = APIGatewayHttpResolver()
 
 dynamodb = boto3.resource("dynamodb")
-HYPOTHESES_TABLE = os.environ.get("HYPOTHESES_TABLE", "genup-dev-hypotheses")
+USER_STATE_TABLE = os.environ.get("USER_STATE_TABLE", "genup-dev-user-state")
+
+# Valid state keys that can be synced
+VALID_KEYS = {
+    "experiments",
+    "mc-simulations",
+    "eq-history",
+    "comp-history",
+    "activity-log",
+    "notebook-index",
+    "workspace-tabs",
+    "workspace-active-tab",
+    "charts",
+    "research-papers",
+    "tab-counter",
+    "citations",
+    "project-documents",
+}
 
 
 class DecimalEncoder(json.JSONEncoder):
     def default(self, o):
         if isinstance(o, Decimal):
             f = float(o)
-            # Guard against NaN/Infinity from corrupted data
             if not math.isfinite(f):
                 return 0.0
             return f if o % 1 else int(o)
@@ -122,135 +132,105 @@ def serialize_item(item: dict) -> dict:
     return json.loads(json.dumps(item, cls=DecimalEncoder))
 
 
-@app.get("/api/v1/hypotheses")
-def list_hypotheses():
-    """List hypotheses with optional filtering."""
-    table = dynamodb.Table(HYPOTHESES_TABLE)
-    params = app.current_event.query_string_parameters or {}
-    page = int(params.get("page", "1"))
-    page_size = int(params.get("page_size", "50"))
-    project_id = params.get("project_id")
-    status_filter = params.get("status")
-
-    if project_id:
-        response = table.query(
-            IndexName="project_id-created_at-index",
-            KeyConditionExpression="project_id = :pid",
-            ExpressionAttributeValues={":pid": project_id},
-            ScanIndexForward=False,
-        )
-    else:
-        response = table.scan(Limit=page_size * 2)
-
+@app.get("/api/v1/user-state")
+def list_state_keys():
+    """List all stored state keys with their updated_at timestamps."""
+    table = dynamodb.Table(USER_STATE_TABLE)
+    response = table.scan(
+        ProjectionExpression="#k, updated_at",
+        ExpressionAttributeNames={"#k": "key"},
+    )
     items = response.get("Items", [])
 
-    if status_filter:
-        items = [i for i in items if i.get("status") == status_filter]
-
-    start = (page - 1) * page_size
-    end = start + page_size
-    page_items = items[start:end] if start < len(items) else []
-
     return {
-        "items": [serialize_item(h) for h in page_items],
-        "total": len(items),
-        "page": page,
-        "page_size": page_size,
+        "items": [
+            {"key": item["key"], "updated_at": item.get("updated_at", "")}
+            for item in items
+        ],
     }
 
 
-@app.post("/api/v1/hypotheses")
-def create_hypothesis():
-    """Create a new hypothesis."""
-    body = app.current_event.json_body or {}
-    table = dynamodb.Table(HYPOTHESES_TABLE)
-
-    now = datetime.utcnow().isoformat()
-    hypothesis_id = str(uuid4())
-
-    item = {
-        "id": hypothesis_id,
-        "project_id": body.get("project_id", ""),
-        "statement": body.get("statement", ""),
-        "mechanism": body.get("mechanism", ""),
-        "rationale": body.get("rationale", ""),
-        "status": "draft",
-        "confidence_score": Decimal(str(body.get("confidence_score", 0.5))),
-        "novelty_score": Decimal(str(body.get("novelty_score", 0.5))),
-        "evidence_refs": body.get("evidence_refs", []),
-        "contradiction_count": 0,
-        "supporting_count": 0,
-        "tags": body.get("tags", []),
-        "version": 1,
-        "created_at": now,
-        "updated_at": now,
-    }
-
-    table.put_item(Item=item)
-    metrics.add_metric(name="HypothesesCreated", unit="Count", value=1)
-
-    return serialize_item(item)
-
-
-@app.get("/api/v1/hypotheses/<hypothesis_id>")
-def get_hypothesis(hypothesis_id: str):
-    """Get a single hypothesis."""
-    table = dynamodb.Table(HYPOTHESES_TABLE)
-    response = table.get_item(Key={"id": hypothesis_id})
+@app.get("/api/v1/user-state/<key>")
+def get_state(key: str):
+    """Get a state value by key."""
+    table = dynamodb.Table(USER_STATE_TABLE)
+    response = table.get_item(Key={"key": key})
     item = response.get("Item")
 
     if not item:
-        return {"error": "Hypothesis not found"}, 404
+        return Response(
+            status_code=404,
+            body=json.dumps({"detail": f"State key not found: {key}"}),
+            content_type="application/json",
+        )
 
-    return serialize_item(item)
+    result = {
+        "key": item["key"],
+        "value": json.loads(item["value"]) if isinstance(item.get("value"), str) else item.get("value"),
+        "updated_at": item.get("updated_at", ""),
+    }
+    return serialize_item(result)
 
 
-@app.patch("/api/v1/hypotheses/<hypothesis_id>")
-def update_hypothesis(hypothesis_id: str):
-    """Update a hypothesis."""
+@app.put("/api/v1/user-state/<key>")
+def put_state(key: str):
+    """Set a state value by key. Body: { value: any }."""
     body = app.current_event.json_body or {}
-    table = dynamodb.Table(HYPOTHESES_TABLE)
 
-    update_parts = []
-    expr_names = {}
-    expr_values = {":updated_at": datetime.utcnow().isoformat()}
-    update_parts.append("#updated_at = :updated_at")
-    expr_names["#updated_at"] = "updated_at"
+    if "value" not in body:
+        return Response(
+            status_code=400,
+            body=json.dumps({"detail": "Request body must include 'value' field"}),
+            content_type="application/json",
+        )
 
-    for field in ["statement", "mechanism", "rationale", "status", "tags", "user_notes"]:
-        if field in body:
-            update_parts.append(f"#{field} = :{field}")
-            expr_names[f"#{field}"] = field
-            expr_values[f":{field}"] = body[field]
+    now = datetime.utcnow().isoformat()
+    value_json = json.dumps(body["value"])
 
-    for field in ["confidence_score", "novelty_score"]:
-        if field in body:
-            val = body[field]
-            # Guard against NaN/Infinity values
-            if val is None or (isinstance(val, float) and not math.isfinite(val)):
-                val = 0.0
-            update_parts.append(f"#{field} = :{field}")
-            expr_names[f"#{field}"] = field
-            expr_values[f":{field}"] = Decimal(str(val))
+    table = dynamodb.Table(USER_STATE_TABLE)
+    item = {
+        "key": key,
+        "value": value_json,
+        "updated_at": now,
+    }
+    table.put_item(Item=item)
 
-    response = table.update_item(
-        Key={"id": hypothesis_id},
-        UpdateExpression="SET " + ", ".join(update_parts),
-        ExpressionAttributeNames=expr_names,
-        ExpressionAttributeValues=expr_values,
-        ReturnValues="ALL_NEW",
-    )
+    metrics.add_metric(name="UserStatePut", unit="Count", value=1)
 
-    return serialize_item(response.get("Attributes", {}))
+    return {
+        "key": key,
+        "value": body["value"],
+        "updated_at": now,
+    }
+
+
+@app.delete("/api/v1/user-state/<key>")
+def delete_state(key: str):
+    """Delete a state key."""
+    table = dynamodb.Table(USER_STATE_TABLE)
+
+    # Check existence first
+    response = table.get_item(Key={"key": key})
+    if not response.get("Item"):
+        return Response(
+            status_code=404,
+            body=json.dumps({"detail": f"State key not found: {key}"}),
+            content_type="application/json",
+        )
+
+    table.delete_item(Key={"key": key})
+    metrics.add_metric(name="UserStateDelete", unit="Count", value=1)
+
+    return {"detail": f"State key '{key}' deleted"}
 
 
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """Lambda handler entry point — catches ALL errors to prevent 500 with no body."""
-    print(f"[HYPOTHESES] method={event.get('requestContext', {}).get('http', {}).get('method', '?')} path={event.get('rawPath', '?')}")
+    print(f"[USER_STATE] method={event.get('requestContext', {}).get('http', {}).get('method', '?')} path={event.get('rawPath', '?')}")
     try:
         return app.resolve(event, context)
     except Exception as e:
-        print(f"[HYPOTHESES] UNHANDLED ERROR: {e}\n{traceback.format_exc()}")
+        print(f"[USER_STATE] UNHANDLED ERROR: {e}\n{traceback.format_exc()}")
         return {
             "statusCode": 500,
             "headers": {"Content-Type": "application/json"},

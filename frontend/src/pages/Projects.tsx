@@ -29,16 +29,17 @@ type StatusFilter = 'all' | 'active' | 'paused' | 'completed' | 'archived'
 
 function StatsBar({ projects }: { projects: Project[] }) {
   const totalHypotheses = projects.reduce((sum, p) => sum + (p.hypothesis_count || 0), 0)
-  const totalEvidence = projects.reduce((sum, p) => sum + (p.evidence_count || 0), 0)
+  const allDocs = persistGet<{ id: string; project_id: string }[]>('project-documents', [])
+  const totalEvidence = projects.reduce((sum, p) => sum + (p.evidence_count || 0), 0) + allDocs.length
   const activeCount = projects.filter(p => (p.status || 'active') === 'active').length
   const allPapers = persistGet<SavedResearchPaper[]>('research-papers', [])
 
   const stats = [
-    { label: 'Total Projects', value: projects.length, icon: FiFolder, color: 'var(--color-accent-blue)' },
-    { label: 'Active', value: activeCount, icon: FiZap, color: 'var(--color-accent-green)' },
-    { label: 'Hypotheses', value: totalHypotheses, icon: FiTarget, color: 'var(--color-accent-purple)' },
-    { label: 'Evidence Items', value: totalEvidence, icon: FiDatabase, color: 'var(--color-accent-cyan)' },
-    { label: 'Research Papers', value: allPapers.length, icon: FiFileText, color: 'var(--color-accent-orange)' },
+    { label: 'Total Projects', value: projects.length, icon: FiFolder, color: 'var(--color-text-secondary)' },
+    { label: 'Active', value: activeCount, icon: FiZap, color: 'var(--color-text-secondary)' },
+    { label: 'Hypotheses', value: totalHypotheses, icon: FiTarget, color: 'var(--color-text-secondary)' },
+    { label: 'Evidence Items', value: totalEvidence, icon: FiDatabase, color: 'var(--color-text-secondary)' },
+    { label: 'Research Papers', value: allPapers.length, icon: FiFileText, color: 'var(--color-text-secondary)' },
   ]
 
   return (
@@ -204,7 +205,7 @@ function CreateProjectModal({ onClose, onCreate }: { onClose: () => void; onCrea
           </div>
 
           {error && (
-            <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-red-400">
+            <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-[var(--color-text-muted)]">
               {error}
             </div>
           )}
@@ -233,6 +234,8 @@ function CreateProjectModal({ onClose, onCreate }: { onClose: () => void; onCrea
 function ProjectCardGrid({ project, onDelete }: { project: Project; onDelete: (id: string) => void }) {
   const allPapers = persistGet<SavedResearchPaper[]>('research-papers', [])
   const paperCount = allPapers.filter(p => p.project_id === project.id).length
+  const allDocs = persistGet<{ id: string; project_id: string }[]>('project-documents', [])
+  const docCount = allDocs.filter(d => d.project_id === project.id).length
 
   return (
     <div className="glass-card hover:border-white/10 transition-all duration-200 group relative overflow-hidden">
@@ -266,7 +269,7 @@ function ProjectCardGrid({ project, onDelete }: { project: Project; onDelete: (i
             <div className="text-[10px] text-[var(--color-text-muted)] uppercase tracking-wider">Hypotheses</div>
           </div>
           <div className="text-center p-2 rounded-lg bg-white/[0.02]">
-            <div className="text-sm font-bold text-white">{project.evidence_count || 0}</div>
+            <div className="text-sm font-bold text-white">{(project.evidence_count || 0) + docCount}</div>
             <div className="text-[10px] text-[var(--color-text-muted)] uppercase tracking-wider">Evidence</div>
           </div>
           <div className="text-center p-2 rounded-lg bg-white/[0.02]">
@@ -316,6 +319,8 @@ function ProjectCardGrid({ project, onDelete }: { project: Project; onDelete: (i
 function ProjectCardList({ project, onDelete }: { project: Project; onDelete: (id: string) => void }) {
   const allPapers = persistGet<SavedResearchPaper[]>('research-papers', [])
   const paperCount = allPapers.filter(p => p.project_id === project.id).length
+  const allDocs = persistGet<{ id: string; project_id: string }[]>('project-documents', [])
+  const docCount = allDocs.filter(d => d.project_id === project.id).length
   return (
     <div className="glass-card hover:border-white/10 transition-all group">
       <Link to={`/projects/${project.id}`} className="flex items-center gap-4 p-4">
@@ -340,7 +345,7 @@ function ProjectCardList({ project, onDelete }: { project: Project; onDelete: (i
             <div className="text-[10px] text-[var(--color-text-muted)]">Hyp.</div>
           </div>
           <div className="text-center w-16">
-            <div className="font-bold text-white">{project.evidence_count || 0}</div>
+            <div className="font-bold text-white">{(project.evidence_count || 0) + docCount}</div>
             <div className="text-[10px] text-[var(--color-text-muted)]">Evidence</div>
           </div>
           <div className="text-center w-16">
@@ -681,7 +686,7 @@ export default function Projects() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setDeleteConfirmId(null)}>
           <div className="glass-card p-6 max-w-sm mx-4 text-center" onClick={e => e.stopPropagation()}>
             <div className="inline-flex p-3 rounded-xl bg-red-500/10 mb-4">
-              <FiTrash2 className="w-6 h-6 text-red-400" />
+              <FiTrash2 className="w-6 h-6 text-[var(--color-text-muted)]" />
             </div>
             <h3 className="text-lg font-semibold mb-2">Delete Project?</h3>
             <p className="text-sm text-[var(--color-text-muted)] mb-6 leading-relaxed">
@@ -691,7 +696,7 @@ export default function Projects() {
               <button onClick={() => setDeleteConfirmId(null)} className="btn px-4 py-2 text-sm text-[var(--color-text-muted)]">
                 Cancel
               </button>
-              <button onClick={handleDeleteConfirm} className="btn px-4 py-2 text-sm bg-red-500/10 text-red-400 hover:bg-red-500/20 font-medium">
+              <button onClick={handleDeleteConfirm} className="btn px-4 py-2 text-sm bg-red-500/10 text-[var(--color-text-muted)] hover:text-red-400 hover:bg-red-500/20 font-medium">
                 Delete Permanently
               </button>
             </div>

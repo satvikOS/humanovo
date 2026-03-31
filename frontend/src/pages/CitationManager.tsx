@@ -4,6 +4,8 @@ import {
   FiCheck, FiUpload, FiFolder, FiEdit3, FiExternalLink,
   FiFile, FiX, FiRefreshCw, FiStar, FiBookOpen, FiHash,
 } from 'react-icons/fi'
+import { usePersistentState, logActivity } from '../utils/persistence'
+import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 
 interface Citation {
   id: string
@@ -28,23 +30,96 @@ interface Citation {
   createdAt: string
 }
 
-type CitationStyle = 'apa' | 'mla' | 'chicago' | 'vancouver' | 'harvard'
+type CitationStyle = 'apa' | 'mla' | 'chicago' | 'vancouver'
+
+/**
+ * Format author names for different citation styles.
+ */
+function formatAuthorsAPA(authors: string[]): string {
+  if (authors.length === 0) return 'Unknown'
+  if (authors.length === 1) return authors[0]
+  if (authors.length === 2) return `${authors[0]} & ${authors[1]}`
+  if (authors.length <= 20) return `${authors.slice(0, -1).join(', ')}, & ${authors[authors.length - 1]}`
+  return `${authors.slice(0, 19).join(', ')}, ... ${authors[authors.length - 1]}`
+}
+
+function formatAuthorsMLA(authors: string[]): string {
+  if (authors.length === 0) return 'Unknown'
+  if (authors.length === 1) return authors[0]
+  if (authors.length === 2) return `${authors[0]}, and ${authors[1]}`
+  return `${authors[0]}, et al.`
+}
+
+function formatAuthorsVancouver(authors: string[]): string {
+  if (authors.length === 0) return 'Unknown'
+  if (authors.length <= 6) return authors.join(', ')
+  return `${authors.slice(0, 6).join(', ')}, et al.`
+}
 
 function formatCitation(c: Citation, style: CitationStyle): string {
-  const authorStr = c.authors.length > 0 ? c.authors.join(', ') : 'Unknown'
   switch (style) {
-    case 'apa':
-      return `${authorStr} (${c.year}). ${c.title}. ${c.journal ? `*${c.journal}*` : ''}${c.volume ? `, ${c.volume}` : ''}${c.issue ? `(${c.issue})` : ''}${c.pages ? `, ${c.pages}` : ''}.${c.doi ? ` https://doi.org/${c.doi}` : ''}`
-    case 'mla':
-      return `${authorStr}. "${c.title}." ${c.journal || ''} ${c.volume || ''}.${c.issue || ''} (${c.year}): ${c.pages || 'n.p.'}.`
-    case 'chicago':
-      return `${authorStr}. "${c.title}." ${c.journal || ''} ${c.volume || ''}, no. ${c.issue || '-'} (${c.year}): ${c.pages || ''}.`
-    case 'vancouver':
-      return `${authorStr}. ${c.title}. ${c.journal || ''}. ${c.year};${c.volume || ''}(${c.issue || ''}):${c.pages || ''}.`
-    case 'harvard':
-      return `${authorStr} (${c.year}) '${c.title}', ${c.journal || ''}${c.volume ? `, vol. ${c.volume}` : ''}${c.issue ? `, no. ${c.issue}` : ''}${c.pages ? `, pp. ${c.pages}` : ''}.`
+    case 'apa': {
+      const authors = formatAuthorsAPA(c.authors)
+      let ref = `${authors} (${c.year}). ${c.title}.`
+      if (c.journal) {
+        ref += ` ${c.journal}`
+        if (c.volume) {
+          ref += `, ${c.volume}`
+          if (c.issue) ref += `(${c.issue})`
+        }
+        if (c.pages) ref += `, ${c.pages}`
+        ref += '.'
+      }
+      if (c.doi) ref += ` https://doi.org/${c.doi}`
+      return ref
+    }
+    case 'mla': {
+      const authors = formatAuthorsMLA(c.authors)
+      let ref = `${authors}. "${c.title}."`
+      if (c.journal) {
+        ref += ` ${c.journal}`
+        if (c.volume) {
+          ref += `, vol. ${c.volume}`
+          if (c.issue) ref += `, no. ${c.issue}`
+        }
+        ref += `, ${c.year}`
+        if (c.pages) ref += `, pp. ${c.pages}`
+        ref += '.'
+      }
+      if (c.doi) ref += ` https://doi.org/${c.doi}`
+      return ref
+    }
+    case 'chicago': {
+      const authors = c.authors.length > 0 ? c.authors.join(', ') : 'Unknown'
+      let ref = `${authors}. "${c.title}."`
+      if (c.journal) {
+        ref += ` ${c.journal}`
+        if (c.volume) ref += ` ${c.volume}`
+        if (c.issue) ref += `, no. ${c.issue}`
+        ref += ` (${c.year})`
+        if (c.pages) ref += `: ${c.pages}`
+        ref += '.'
+      }
+      if (c.doi) ref += ` https://doi.org/${c.doi}`
+      return ref
+    }
+    case 'vancouver': {
+      const authors = formatAuthorsVancouver(c.authors)
+      let ref = `${authors}. ${c.title}.`
+      if (c.journal) {
+        ref += ` ${c.journal}. ${c.year}`
+        if (c.volume) {
+          ref += `;${c.volume}`
+          if (c.issue) ref += `(${c.issue})`
+        }
+        if (c.pages) ref += `:${c.pages}`
+        ref += '.'
+      }
+      if (c.doi) ref += ` doi:${c.doi}`
+      return ref
+    }
     default:
-      return `${authorStr} (${c.year}). ${c.title}.`
+      return `${c.authors.length > 0 ? c.authors.join(', ') : 'Unknown'} (${c.year}). ${c.title}.`
   }
 }
 
@@ -101,7 +176,7 @@ async function fetchFromPMID(pmid: string): Promise<Partial<Citation> | null> {
 }
 
 export default function CitationManager() {
-  const [citations, setCitations] = useState<Citation[]>([])
+  const [citations, setCitations] = usePersistentState<Citation[]>('citations', [])
   const [searchQuery, setSearchQuery] = useState('')
   const [showAddForm, setShowAddForm] = useState(false)
   const [showImport, setShowImport] = useState(false)
@@ -113,6 +188,7 @@ export default function CitationManager() {
   const [importId, setImportId] = useState('')
   const [importing, setImporting] = useState(false)
   const [activeTab, setActiveTab] = useState<'all' | 'starred' | 'collections'>('all')
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const [form, setForm] = useState({
@@ -182,6 +258,7 @@ export default function CitationManager() {
     saveCitation([citation, ...citations])
     setForm({ type: 'journal', title: '', authors: '', journal: '', volume: '', issue: '', pages: '', year: new Date().getFullYear(), doi: '', pmid: '', url: '', publisher: '', tags: '', collection: '', abstract: '' })
     setShowAddForm(false)
+    logActivity({ type: 'notebook', action: 'created', title: `Added citation: ${citation.title}` })
 
     // Persist to backend
     ;(async () => {
@@ -239,6 +316,7 @@ export default function CitationManager() {
         saveCitation([citation, ...citations])
         setImportId('')
         setShowImport(false)
+        logActivity({ type: 'notebook', action: 'imported', title: `Imported citation: ${citation.title}` })
       }
     } catch { /* import failed */ }
     setImporting(false)
@@ -260,6 +338,7 @@ export default function CitationManager() {
       createdAt: new Date().toISOString(),
     }
     saveCitation([citation, ...citations])
+    logActivity({ type: 'notebook', action: 'imported', title: `Uploaded PDF citation: ${name}` })
 
     // Upload to backend
     try {
@@ -273,7 +352,16 @@ export default function CitationManager() {
   }
 
   const deleteCitation = (id: string) => {
-    saveCitation(citations.filter(c => c.id !== id))
+    setDeleteConfirmId(id)
+  }
+
+  const confirmDelete = () => {
+    if (deleteConfirmId) {
+      const deletedCitation = citations.find(c => c.id === deleteConfirmId)
+      saveCitation(citations.filter(c => c.id !== deleteConfirmId))
+      setDeleteConfirmId(null)
+      logActivity({ type: 'notebook', action: 'deleted', title: `Deleted citation: ${deletedCitation?.title || deleteConfirmId}` })
+    }
   }
 
   const toggleStar = (id: string) => {
@@ -320,18 +408,17 @@ export default function CitationManager() {
             <select value={citationStyle} onChange={e => setCitationStyle(e.target.value as CitationStyle)} className="input text-xs py-1.5">
               <option value="apa">APA 7th</option>
               <option value="mla">MLA 9th</option>
-              <option value="chicago">Chicago</option>
+              <option value="chicago">Chicago 17th</option>
               <option value="vancouver">Vancouver</option>
-              <option value="harvard">Harvard</option>
             </select>
-            <button onClick={exportBibliography} disabled={filtered.length === 0} className="btn text-sm disabled:opacity-30" style={{ color: 'var(--color-accent-blue)' }}>
+            <button onClick={exportBibliography} disabled={filtered.length === 0} className="btn text-sm disabled:opacity-30" style={{ color: 'var(--color-text-secondary)' }}>
               <FiDownload className="w-4 h-4" /> Export
             </button>
             <input ref={fileInputRef} type="file" accept=".pdf" onChange={handlePdfUpload} className="hidden" />
-            <button onClick={() => fileInputRef.current?.click()} className="btn text-sm" style={{ color: 'var(--color-accent-orange)' }}>
+            <button onClick={() => fileInputRef.current?.click()} className="btn text-sm" style={{ color: 'var(--color-text-secondary)' }}>
               <FiUpload className="w-4 h-4" /> Upload PDF
             </button>
-            <button onClick={() => { setShowImport(!showImport); setShowAddForm(false) }} className="btn text-sm" style={{ color: 'var(--color-accent-purple)' }}>
+            <button onClick={() => { setShowImport(!showImport); setShowAddForm(false) }} className="btn text-sm" style={{ color: 'var(--color-text-secondary)' }}>
               <FiHash className="w-4 h-4" /> Import DOI/PMID
             </button>
             <button onClick={() => { setShowAddForm(!showAddForm); setShowImport(false) }} className="btn text-sm" style={{ color: 'var(--color-success)' }}>
@@ -383,7 +470,7 @@ export default function CitationManager() {
                 placeholder="e.g., 10.1038/nature12373 or 25123456"
                 className="input flex-1 text-sm"
               />
-              <button onClick={importFromId} disabled={importing || !importId.trim()} className="btn text-xs disabled:opacity-30" style={{ color: 'var(--color-accent-purple)' }}>
+              <button onClick={importFromId} disabled={importing || !importId.trim()} className="btn text-xs disabled:opacity-30" style={{ color: 'var(--color-text-secondary)' }}>
                 {importing ? <FiRefreshCw className="w-3.5 h-3.5 animate-spin" /> : <FiDownload className="w-3.5 h-3.5" />}
                 {importing ? 'Fetching...' : 'Import'}
               </button>
@@ -472,7 +559,7 @@ export default function CitationManager() {
                     </div>
                     <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
                       <button onClick={(e) => { e.stopPropagation(); toggleStar(citation.id) }} className="p-1.5 rounded hover:bg-[var(--glass-bg)]" title="Star">
-                        <FiStar className={`w-3.5 h-3.5 ${citation.starred ? 'text-yellow-400 fill-yellow-400' : 'text-[var(--color-text-muted)]'}`} />
+                        <FiStar className={`w-3.5 h-3.5 ${citation.starred ? 'text-[var(--color-text-secondary)] fill-[var(--color-text-secondary)]' : 'text-[var(--color-text-muted)]'}`} />
                       </button>
                       <button onClick={(e) => { e.stopPropagation(); copyFormatted(citation) }} className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)]" title="Copy formatted">
                         {copied === citation.id ? <FiCheck className="w-3.5 h-3.5" style={{ color: 'var(--color-success)' }} /> : <FiCopy className="w-3.5 h-3.5" />}
@@ -575,6 +662,14 @@ export default function CitationManager() {
           </div>
         )}
       </div>
+      {deleteConfirmId && (
+        <ConfirmDeleteDialog
+          title="Delete Citation?"
+          message="This will permanently remove this citation from your library. This action cannot be undone."
+          onConfirm={confirmDelete}
+          onCancel={() => setDeleteConfirmId(null)}
+        />
+      )}
     </div>
   )
 }

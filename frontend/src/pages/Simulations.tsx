@@ -403,8 +403,8 @@ const MC_RUNNERS: Record<string, (p: MCParams) => number> = {
   drug_interaction: mcDrugInteraction,
 }
 
-// Ephemeral storage for simulation history (no localStorage)
-// MC simulations, equation plots, and computational runs are kept in component state only
+// Persistent storage for simulation history (localStorage)
+// MC simulations, equation plots, and computational runs persist across sessions
 
 interface EqHistoryEntry { id: string; expr: string; xMin: number; xMax: number; createdAt: string }
 interface CompHistoryEntry { id: string; env: string; template: string; code: string; output: string; createdAt: string }
@@ -415,18 +415,18 @@ function saveEqHistory(entries: EqHistoryEntry[]) { persistSet('eq-history', ent
 function loadCompHistory(): CompHistoryEntry[] { return persistGet<CompHistoryEntry[]>('comp-history', []) }
 function saveCompHistory(entries: CompHistoryEntry[]) { persistSet('comp-history', entries.slice(0, 50)) }
 
+type UnifiedEntry = {
+  id: string; type: 'monte-carlo' | 'equation' | 'computational'
+  title: string; subtitle: string; createdAt: string; stats?: string
+  mcData?: MCResult; eqData?: EqHistoryEntry; compData?: CompHistoryEntry
+}
+
 function SavedSimulations() {
   const mcSims: MCResult[] = persistGet<MCResult[]>('mc-simulations', [])
   const eqPlots = useMemo(() => loadEqHistory(), [])
   const compRuns = useMemo(() => loadCompHistory(), [])
   const [filter, setFilter] = useState<'all' | 'monte-carlo' | 'equation' | 'computational'>('all')
-  const [expandedId, setExpandedId] = useState<string | null>(null)
-
-  type UnifiedEntry = {
-    id: string; type: 'monte-carlo' | 'equation' | 'computational'
-    title: string; subtitle: string; createdAt: string; stats?: string
-    mcData?: MCResult; eqData?: EqHistoryEntry; compData?: CompHistoryEntry
-  }
+  const [overlayEntry, setOverlayEntry] = useState<UnifiedEntry | null>(null)
 
   const allEntries = useMemo<UnifiedEntry[]>(() => {
     const entries: UnifiedEntry[] = []
@@ -492,7 +492,7 @@ function SavedSimulations() {
     if (entry.type === 'monte-carlo' && entry.mcData) {
       const mc = entry.mcData
       return (
-        <div className="mt-3 pt-3 border-t border-[var(--color-border)] space-y-3">
+        <div className="space-y-4">
           {/* Stats grid */}
           <div className="grid grid-cols-5 gap-2">
             {[
@@ -502,39 +502,44 @@ function SavedSimulations() {
               { label: '95% CI Low', value: (Number.isFinite(mc.stats.ci95Lower) ? mc.stats.ci95Lower : 0).toFixed(4) },
               { label: '95% CI High', value: (Number.isFinite(mc.stats.ci95Upper) ? mc.stats.ci95Upper : 0).toFixed(4) },
             ].map(s => (
-              <div key={s.label} className="text-center p-2 rounded-lg bg-[var(--glass-bg)]">
+              <div key={s.label} className="text-center p-3 rounded-lg bg-[var(--glass-bg)]">
                 <div className="text-xxs text-[var(--color-text-muted)]">{s.label}</div>
-                <div className="text-xs font-mono font-medium text-[var(--color-text)]">{s.value}</div>
+                <div className="text-sm font-mono font-medium text-[var(--color-text)]">{s.value}</div>
               </div>
             ))}
           </div>
           {/* Distribution histogram */}
           {mc.histogramData && mc.histogramData.length > 0 && (
-            <div className="h-40">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={mc.histogramData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                  <XAxis dataKey="bin" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} interval="preserveStartEnd" />
-                  <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
-                  <Tooltip contentStyle={{ background: 'var(--color-surface-solid)', border: '1px solid var(--color-border)', borderRadius: 8, fontSize: 11 }} />
-                  <Bar dataKey="count" fill="var(--color-accent-blue)" radius={[2, 2, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+            <div>
+              <div className="text-xs text-[var(--color-text-muted)] mb-2 font-medium">Distribution</div>
+              <div className="h-56">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={mc.histogramData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                    <XAxis dataKey="bin" tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} interval="preserveStartEnd" />
+                    <YAxis tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} />
+                    <Tooltip contentStyle={{ background: 'var(--color-surface-solid)', border: '1px solid var(--color-border)', borderRadius: 8, fontSize: 12 }} />
+                    <Bar dataKey="count" fill="var(--color-accent-blue)" radius={[3, 3, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
             </div>
           )}
           {/* Convergence chart */}
           {mc.convergenceData && mc.convergenceData.length > 0 && (
-            <div className="h-32">
-              <div className="text-xxs text-[var(--color-text-muted)] mb-1">Convergence</div>
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={mc.convergenceData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                  <XAxis dataKey="iteration" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
-                  <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
-                  <Tooltip contentStyle={{ background: 'var(--color-surface-solid)', border: '1px solid var(--color-border)', borderRadius: 8, fontSize: 11 }} />
-                  <Line type="monotone" dataKey="mean" stroke="var(--color-accent-green)" strokeWidth={1.5} dot={false} />
-                </LineChart>
-              </ResponsiveContainer>
+            <div>
+              <div className="text-xs text-[var(--color-text-muted)] mb-2 font-medium">Convergence</div>
+              <div className="h-48">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={mc.convergenceData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                    <XAxis dataKey="iteration" tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} />
+                    <YAxis tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} />
+                    <Tooltip contentStyle={{ background: 'var(--color-surface-solid)', border: '1px solid var(--color-border)', borderRadius: 8, fontSize: 12 }} />
+                    <Line type="monotone" dataKey="mean" stroke="var(--color-accent-green)" strokeWidth={2} dot={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
             </div>
           )}
         </div>
@@ -545,14 +550,14 @@ function SavedSimulations() {
       const eq = entry.eqData
       const plotData = evaluateExpression(eq.expr, eq.xMin, eq.xMax)
       return (
-        <div className="mt-3 pt-3 border-t border-[var(--color-border)]">
-          <div className="h-48">
+        <div>
+          <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={plotData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                <XAxis dataKey="x" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} tickFormatter={(v: number) => v.toFixed(1)} />
-                <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
-                <Tooltip contentStyle={{ background: 'var(--color-surface-solid)', border: '1px solid var(--color-border)', borderRadius: 8, fontSize: 11 }} />
+                <XAxis dataKey="x" tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} tickFormatter={(v: number) => v.toFixed(1)} />
+                <YAxis tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} />
+                <Tooltip contentStyle={{ background: 'var(--color-surface-solid)', border: '1px solid var(--color-border)', borderRadius: 8, fontSize: 12 }} />
                 <defs>
                   <linearGradient id="savedEqGrad" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="var(--color-accent-green)" stopOpacity={0.3} />
@@ -570,12 +575,21 @@ function SavedSimulations() {
     if (entry.type === 'computational' && entry.compData) {
       const cr = entry.compData
       return (
-        <div className="mt-3 pt-3 border-t border-[var(--color-border)] space-y-2">
+        <div className="space-y-3">
           <div className="flex items-center gap-2">
-            <span className="text-xxs px-1.5 py-0.5 rounded bg-[var(--glass-bg)] text-[var(--color-text-muted)] font-mono">{cr.env}</span>
-            <span className="text-xxs text-[var(--color-text-muted)]">{cr.template}</span>
+            <span className="text-xs px-2 py-1 rounded bg-[var(--glass-bg)] text-[var(--color-text-muted)] font-mono">{cr.env}</span>
+            <span className="text-xs text-[var(--color-text-muted)]">{cr.template}</span>
           </div>
-          <pre className="text-xxs font-mono text-[var(--color-text-secondary)] bg-[var(--glass-bg)] rounded-lg p-3 max-h-40 overflow-auto whitespace-pre-wrap">{cr.code.slice(0, 800)}{cr.code.length > 800 ? '\n...' : ''}</pre>
+          <div>
+            <div className="text-xs text-[var(--color-text-muted)] mb-2 font-medium">Code</div>
+            <pre className="text-xs font-mono text-[var(--color-text-secondary)] bg-[var(--glass-bg)] rounded-lg p-4 max-h-64 overflow-auto whitespace-pre-wrap">{cr.code}</pre>
+          </div>
+          {cr.output && (
+            <div>
+              <div className="text-xs text-[var(--color-text-muted)] mb-2 font-medium">Output</div>
+              <pre className="text-xs font-mono text-[var(--color-text-secondary)] bg-[var(--glass-bg)] rounded-lg p-4 max-h-48 overflow-auto whitespace-pre-wrap">{cr.output}</pre>
+            </div>
+          )}
         </div>
       )
     }
@@ -611,36 +625,69 @@ function SavedSimulations() {
         </div>
       ) : (
         <div className="space-y-2">
-          {filtered.map(entry => {
-            const isExpanded = expandedId === entry.id
-            return (
-              <div key={entry.id} className="glass-card p-4 transition-all">
-                <button
-                  onClick={() => setExpandedId(isExpanded ? null : entry.id)}
-                  className="w-full text-left flex items-start gap-3"
-                >
-                  <div className="p-2 rounded-lg flex-shrink-0" style={{ background: `color-mix(in srgb, ${typeColor(entry.type)} 12%, transparent)` }}>
-                    <span style={{ color: typeColor(entry.type) }}>{typeIcon(entry.type)}</span>
+          {filtered.map(entry => (
+            <button
+              key={entry.id}
+              onClick={() => setOverlayEntry(entry)}
+              className="glass-card p-4 transition-all w-full text-left hover:bg-[var(--glass-bg-hover)] cursor-pointer"
+            >
+              <div className="flex items-start gap-3">
+                <div className="p-2 rounded-lg flex-shrink-0" style={{ background: `color-mix(in srgb, ${typeColor(entry.type)} 12%, transparent)` }}>
+                  <span style={{ color: typeColor(entry.type) }}>{typeIcon(entry.type)}</span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <span className="text-sm font-medium text-[var(--color-text)] truncate">{entry.title}</span>
+                    <span className="text-xxs px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ color: typeColor(entry.type), background: `color-mix(in srgb, ${typeColor(entry.type)} 12%, transparent)` }}>
+                      {typeLabel(entry.type)}
+                    </span>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-0.5">
-                      <span className="text-sm font-medium text-[var(--color-text)] truncate">{entry.title}</span>
-                      <span className="text-xxs px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ color: typeColor(entry.type), background: `color-mix(in srgb, ${typeColor(entry.type)} 12%, transparent)` }}>
-                        {typeLabel(entry.type)}
-                      </span>
-                    </div>
-                    <p className="text-xs text-[var(--color-text-muted)]">{entry.subtitle}</p>
-                    {!isExpanded && entry.stats && <p className="text-xxs text-[var(--color-text-muted)] mt-1 font-mono">{entry.stats}</p>}
-                  </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    <span className="text-xxs text-[var(--color-text-muted)] whitespace-nowrap">{formatTimeAgo(entry.createdAt)}</span>
-                    <FiBarChart2 className={clsx('w-3.5 h-3.5 text-[var(--color-text-muted)] transition-transform', isExpanded && 'rotate-180')} />
-                  </div>
-                </button>
-                {isExpanded && renderExpandedContent(entry)}
+                  <p className="text-xs text-[var(--color-text-muted)]">{entry.subtitle}</p>
+                  {entry.stats && <p className="text-xxs text-[var(--color-text-muted)] mt-1 font-mono">{entry.stats}</p>}
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <span className="text-xxs text-[var(--color-text-muted)] whitespace-nowrap">{formatTimeAgo(entry.createdAt)}</span>
+                  <FiMaximize2 className="w-3.5 h-3.5 text-[var(--color-text-muted)]" />
+                </div>
               </div>
-            )
-          })}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* ── Result Overlay Modal ── */}
+      {overlayEntry && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setOverlayEntry(null)}>
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+          <div
+            className="relative w-full max-w-3xl max-h-[85vh] overflow-y-auto rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-solid)] shadow-2xl"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-4 border-b border-[var(--color-border)] bg-[var(--color-surface-solid)]">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="p-2 rounded-lg" style={{ background: `color-mix(in srgb, ${typeColor(overlayEntry.type)} 12%, transparent)` }}>
+                  <span style={{ color: typeColor(overlayEntry.type) }}>{typeIcon(overlayEntry.type)}</span>
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-base font-semibold text-[var(--color-text)] truncate">{overlayEntry.title}</h2>
+                    <span className="text-xxs px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ color: typeColor(overlayEntry.type), background: `color-mix(in srgb, ${typeColor(overlayEntry.type)} 12%, transparent)` }}>
+                      {typeLabel(overlayEntry.type)}
+                    </span>
+                  </div>
+                  <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{overlayEntry.subtitle} · {formatTimeAgo(overlayEntry.createdAt)}</p>
+                </div>
+              </div>
+              <button onClick={() => setOverlayEntry(null)} className="p-2 rounded-lg hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors">
+                <FiX className="w-5 h-5" />
+              </button>
+            </div>
+            {/* Content */}
+            <div className="p-6">
+              {renderExpandedContent(overlayEntry)}
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -2402,7 +2449,7 @@ function EquationPlotter() {
                   onClick={copyEqChartToClipboard}
                   className="px-2 py-1 rounded text-xxs border border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-all"
                 >
-                  {eqCopied ? <FiCheck className="w-3 h-3 inline mr-1 text-green-400" /> : <FiClipboard className="w-3 h-3 inline mr-1" />}
+                  {eqCopied ? <FiCheck className="w-3 h-3 inline mr-1 text-[var(--color-text-secondary)]" /> : <FiClipboard className="w-3 h-3 inline mr-1" />}
                   {eqCopied ? 'Copied' : 'Copy'}
                 </button>
                 <button
@@ -3407,7 +3454,7 @@ export default function Simulations() {
       {deleteConfirmId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
           <div className="glass-card p-6 max-w-sm mx-4 text-center" style={{ background: 'var(--color-surface-solid)' }}>
-            <FiX className="w-8 h-8 text-red-400 mx-auto mb-3" />
+            <FiX className="w-8 h-8 text-[var(--color-text-muted)] mx-auto mb-3" />
             <h3 className="text-lg font-semibold mb-2">Delete Simulation?</h3>
             <p className="text-sm text-[var(--color-text-muted)] mb-4">
               This will permanently delete this simulation and its results. This action cannot be undone.
@@ -3416,7 +3463,7 @@ export default function Simulations() {
               <button onClick={() => setDeleteConfirmId(null)} className="btn px-4 py-2 text-sm text-[var(--color-text-muted)]">
                 Cancel
               </button>
-              <button onClick={confirmDelete} className="btn px-4 py-2 text-sm bg-red-500/10 text-red-400 hover:bg-red-500/20">
+              <button onClick={confirmDelete} className="btn px-4 py-2 text-sm bg-red-500/10 text-[var(--color-text-muted)] hover:text-red-400 hover:bg-red-500/20">
                 Delete Permanently
               </button>
             </div>

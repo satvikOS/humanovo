@@ -3,7 +3,8 @@ import {
   FiFileText, FiPlus, FiTrash2, FiEdit3, FiUsers, FiSend,
   FiDownload, FiSave,
 } from 'react-icons/fi'
-import { formatDate } from '../utils/persistence'
+import { formatDate, logActivity } from '../utils/persistence'
+import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 
 interface Manuscript {
   id: string; title: string; status: string; journal_target: string
@@ -26,6 +27,7 @@ export default function ManuscriptManager() {
   const [newJournal, setNewJournal] = useState('')
   const [showAuthorAdd, setShowAuthorAdd] = useState(false)
   const [newAuthor, setNewAuthor] = useState({ name: '', affiliation: '', email: '', role: 'Co-Author' })
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
   const load = async () => { try { const r = await fetch(API); if (r.ok) setManuscripts((await r.json()).items || []) } catch {} }
   useEffect(() => { load() }, [])
@@ -38,31 +40,41 @@ export default function ManuscriptManager() {
   const createMs = async () => {
     if (!newTitle.trim()) return
     const r = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: newTitle, journal_target: newJournal }) })
-    if (r.ok) { load(); setShowAdd(false); setNewTitle(''); setNewJournal('') }
+    if (r.ok) { load(); setShowAdd(false); logActivity({ type: 'notebook', action: 'created', title: `Created manuscript: ${newTitle}` }); setNewTitle(''); setNewJournal('') }
   }
 
-  const deleteMs = async (id: string) => {
-    await fetch(`${API}/${id}`, { method: 'DELETE' })
-    if (selected?.id === id) setSelected(null); load()
+  const deleteMs = (id: string) => {
+    setDeleteConfirmId(id)
+  }
+
+  const confirmDelete = async () => {
+    if (!deleteConfirmId) return
+    const deletedMs = manuscripts.find(m => m.id === deleteConfirmId)
+    await fetch(`${API}/${deleteConfirmId}`, { method: 'DELETE' })
+    if (selected?.id === deleteConfirmId) setSelected(null); load()
+    setDeleteConfirmId(null)
+    logActivity({ type: 'notebook', action: 'deleted', title: `Deleted manuscript: ${deletedMs?.title || deleteConfirmId}` })
   }
 
   const saveSection = async () => {
     if (!selected || !editSection) return
     const sections = { ...selected.sections, [editSection]: editText }
     const r = await fetch(`${API}/${selected.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sections }) })
-    if (r.ok) { const ms = await r.json(); setSelected(ms); setEditSection(null) }
+    if (r.ok) { const ms = await r.json(); setSelected(ms); setEditSection(null); logActivity({ type: 'notebook', action: 'updated', title: `Updated section ${editSection}: ${selected.title}` }) }
   }
 
   const addAuthor = async () => {
     if (!selected || !newAuthor.name.trim()) return
     const r = await fetch(`${API}/${selected.id}/authors`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newAuthor) })
-    if (r.ok) { selectMs(selected.id); setShowAuthorAdd(false); setNewAuthor({ name: '', affiliation: '', email: '', role: 'Co-Author' }) }
+    if (r.ok) { selectMs(selected.id); setShowAuthorAdd(false); setNewAuthor({ name: '', affiliation: '', email: '', role: 'Co-Author' }); logActivity({ type: 'notebook', action: 'updated', title: `Added author ${newAuthor.name} to: ${selected.title}` }) }
   }
 
   const removeAuthor = async (authorId: string) => {
     if (!selected) return
+    const removedAuthor = selected.authors.find(a => a.id === authorId)
     await fetch(`${API}/${selected.id}/authors/${authorId}`, { method: 'DELETE' })
     selectMs(selected.id)
+    logActivity({ type: 'notebook', action: 'updated', title: `Removed author ${removedAuthor?.name || authorId} from: ${selected.title}` })
   }
 
   const exportMs = async () => {
@@ -74,7 +86,7 @@ export default function ManuscriptManager() {
   const submitMs = async () => {
     if (!selected || !selected.journal_target) return
     const r = await fetch(`${API}/${selected.id}/submit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ journal: selected.journal_target }) })
-    if (r.ok) selectMs(selected.id)
+    if (r.ok) { selectMs(selected.id); logActivity({ type: 'notebook', action: 'updated', title: `Submitted manuscript: ${selected.title}` }) }
   }
 
   return (
@@ -82,7 +94,7 @@ export default function ManuscriptManager() {
       <div className="p-6 border-b border-[var(--color-border)]">
         <div className="flex items-center justify-between mb-2">
           <div><h1 className="text-2xl font-semibold tracking-tight">Manuscript Manager</h1><p className="text-sm text-[var(--color-text-muted)] mt-1">Draft, format, and track manuscript submissions</p></div>
-          <button onClick={() => setShowAdd(!showAdd)} className="btn text-sm" style={{ color: 'var(--color-accent-blue)' }}><FiPlus className="w-4 h-4" /> New Manuscript</button>
+          <button onClick={() => setShowAdd(!showAdd)} className="btn text-sm" style={{ color: 'var(--color-text-secondary)' }}><FiPlus className="w-4 h-4" /> New Manuscript</button>
         </div>
       </div>
 
@@ -124,7 +136,7 @@ export default function ManuscriptManager() {
                 <div className="flex gap-1">
                   <button onClick={exportMs} className="btn text-xs text-[var(--color-text-muted)]"><FiDownload className="w-3.5 h-3.5" /> Export</button>
                   {selected.status === 'draft' && selected.journal_target && (
-                    <button onClick={submitMs} className="btn text-xs" style={{ color: 'var(--color-accent-blue)' }}><FiSend className="w-3.5 h-3.5" /> Submit</button>
+                    <button onClick={submitMs} className="btn text-xs" style={{ color: 'var(--color-text-secondary)' }}><FiSend className="w-3.5 h-3.5" /> Submit</button>
                   )}
                 </div>
               </div>
@@ -192,6 +204,13 @@ export default function ManuscriptManager() {
           )}
         </div>
       </div>
+      <ConfirmDeleteDialog
+        open={deleteConfirmId !== null}
+        entityName="Manuscript"
+        message="This will permanently delete this manuscript. This action cannot be undone."
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteConfirmId(null)}
+      />
     </div>
   )
 }

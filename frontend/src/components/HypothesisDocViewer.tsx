@@ -929,7 +929,7 @@ export default function HypothesisDocViewer({
           {onGenerateResearchPaper && (
             <button
               onClick={onGenerateResearchPaper}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-purple-500/20 text-purple-400 hover:bg-purple-500/30 text-xs font-medium transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-white/10 text-[var(--color-text-secondary)] hover:bg-white/15 text-xs font-medium transition-colors"
               title="Generate Research Paper"
             >
               <FiFileText className="w-3.5 h-3.5" />
@@ -938,7 +938,7 @@ export default function HypothesisDocViewer({
           )}
           <button
             onClick={handleExportPdf}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-green-500/20 text-green-400 hover:bg-green-500/30 text-xs font-medium transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-white/10 text-[var(--color-text-secondary)] hover:bg-white/15 text-xs font-medium transition-colors"
             title="Export PDF"
           >
             <FiDownload className="w-3.5 h-3.5" />

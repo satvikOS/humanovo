@@ -352,7 +352,7 @@ export default function BillingDashboard() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="glass-card p-5 flex items-center gap-3">
           <div className="p-2.5 rounded-lg bg-emerald-500/10">
-            <FiDollarSign className="w-5 h-5 text-emerald-400" />
+            <FiDollarSign className="w-5 h-5 text-[var(--color-text-secondary)]" />
           </div>
           <div>
             <div className="text-2xl font-bold text-white">{formatUSD(spendCents)}</div>
@@ -362,7 +362,7 @@ export default function BillingDashboard() {
 
         <div className="glass-card p-5 flex items-center gap-3">
           <div className="p-2.5 rounded-lg bg-blue-500/10">
-            <FiTarget className="w-5 h-5 text-blue-400" />
+            <FiTarget className="w-5 h-5 text-[var(--color-text-secondary)]" />
           </div>
           <div>
             <div className="text-2xl font-bold text-white">{formatUSD(budgetRemaining)}</div>
@@ -379,7 +379,7 @@ export default function BillingDashboard() {
             <div className="text-xs text-[var(--color-text-muted)] flex items-center gap-1">
               Projected End-of-Month
               {projectedCents > budgetCents && (
-                <span className="text-red-400 flex items-center gap-0.5">
+                <span className="text-[var(--color-text-muted)] flex items-center gap-0.5">
                   <FiAlertTriangle className="w-3 h-3" /> Over
                 </span>
               )}
@@ -389,7 +389,7 @@ export default function BillingDashboard() {
 
         <div className="glass-card p-5 flex items-center gap-3">
           <div className="p-2.5 rounded-lg bg-purple-500/10">
-            <FiActivity className="w-5 h-5 text-purple-400" />
+            <FiActivity className="w-5 h-5 text-[var(--color-text-secondary)]" />
           </div>
           <div>
             <div className="text-2xl font-bold text-white">{(summary?.total_requests ?? 0).toLocaleString()}</div>
@@ -657,7 +657,7 @@ export default function BillingDashboard() {
                       </span>
                     )}
                     {b.hard_limit && (
-                      <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-500/15 text-red-400">
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-500/15 text-[var(--color-text-muted)]">
                         HARD LIMIT
                       </span>
                     )}
@@ -676,7 +676,7 @@ export default function BillingDashboard() {
                   <div className="text-[10px] text-[var(--color-text-muted)] mt-1">
                     Alert at {b.alert_threshold_pct}%
                     {pct >= b.alert_threshold_pct && (
-                      <span className="text-amber-400 ml-2 inline-flex items-center gap-0.5">
+                      <span className="text-[var(--color-text-muted)] ml-2 inline-flex items-center gap-0.5">
                         <FiAlertTriangle className="w-2.5 h-2.5" /> Threshold reached
                       </span>
                     )}

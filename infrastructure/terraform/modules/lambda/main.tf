@@ -58,6 +58,11 @@ variable "notebook_table_name" {
   default = ""
 }
 
+variable "user_state_table_name" {
+  type    = string
+  default = ""
+}
+
 variable "data_bucket_name" {
   type = string
 }
@@ -202,6 +207,7 @@ locals {
     SIMULATIONS_TABLE          = var.simulations_table_name
     NOTEBOOK_TABLE             = var.notebook_table_name
     AGENT_TASKS_TABLE          = var.agent_tasks_table_name != "" ? var.agent_tasks_table_name : "${var.name_prefix}-agent-tasks"
+    USER_STATE_TABLE           = var.user_state_table_name != "" ? var.user_state_table_name : "${var.name_prefix}-user-state"
     # Unified bucket with prefix-based organization
     GENUP_BUCKET               = var.data_bucket_name
     DATA_PREFIX                = "data"
@@ -392,6 +398,13 @@ locals {
       handler     = "handlers.bulk_etl.handler"
       memory      = 1024
       timeout     = 900  # 15 min max — processes one dataset per invocation
+    }
+
+    user_state = {
+      description = "User state sync for cross-device localStorage persistence"
+      handler     = "handlers.user_state.handler"
+      memory      = 256
+      timeout     = 10
     }
   }
 }

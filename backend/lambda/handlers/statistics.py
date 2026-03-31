@@ -574,37 +574,106 @@ def sample_size_calculator():
     alpha = float(body.get("alpha", 0.05))
     power = float(body.get("power", 0.8))
     test_type = body.get("test_type", "two_sample_t")
-    z_alpha = 1.96 if alpha == 0.05 else (2.576 if alpha == 0.01 else 1.645)
-    z_beta = 0.842 if abs(power - 0.8) < 0.01 else (1.282 if abs(power - 0.9) < 0.01 else 1.645)
+    table_rows = int(body.get("table_rows", 2))
+    table_cols = int(body.get("table_cols", 2))
+    num_groups = int(body.get("num_groups", 3))
+    warnings = []
+
+    if d <= 0:
+        return {"test_type": test_type, "effect_size": d, "alpha": alpha, "power": power,
+                "n_per_group": 0, "total_n": 0, "warnings": ["Effect size must be greater than 0."]}
+    if not (0 < alpha < 1):
+        return {"test_type": test_type, "effect_size": d, "alpha": alpha, "power": power,
+                "n_per_group": 0, "total_n": 0, "warnings": ["Alpha must be between 0 and 1."]}
+    if not (0 < power < 1):
+        return {"test_type": test_type, "effect_size": d, "alpha": alpha, "power": power,
+                "n_per_group": 0, "total_n": 0, "warnings": ["Power must be between 0 and 1."]}
+
+    def _z(p):
+        if p <= 0 or p >= 1:
+            return 1.96
+        t = math.sqrt(-2 * math.log(p))
+        return t - (2.30753 + t * 0.27061) / (1 + t * (0.99229 + t * 0.04481))
+
+    z_alpha = 1.96 if alpha == 0.05 else (2.576 if alpha == 0.01 else (1.645 if alpha == 0.10 else _z(alpha / 2)))
+    z_beta = 0.842 if abs(power - 0.8) < 0.01 else (1.282 if abs(power - 0.9) < 0.01 else (1.645 if abs(power - 0.95) < 0.01 else _z(1 - power)))
+
+    effect_label = "Cohen's d"
+    extra = {}
+
     if test_type == "two_sample_t":
-        n_per_group = math.ceil(2 * ((z_alpha + z_beta) / d) ** 2) if d > 0 else 0
+        n_per_group = math.ceil(2 * ((z_alpha + z_beta) / d) ** 2)
         total_n = n_per_group * 2
         desc = f"Two-sample t-test: {n_per_group} per group, {total_n} total"
-    elif test_type == "one_sample_t":
-        n = math.ceil(((z_alpha + z_beta) / d) ** 2) if d > 0 else 0
-        n_per_group = n
-        total_n = n
-        desc = f"One-sample t-test: {n} subjects needed"
+        if d > 2:
+            warnings.append("Effect size d > 2.0 is unusually large.")
+    elif test_type in ("one_sample_t", "paired_t"):
+        n_per_group = math.ceil(((z_alpha + z_beta) / d) ** 2)
+        total_n = n_per_group
+        label = "One-sample t-test" if test_type == "one_sample_t" else "Paired t-test"
+        desc = f"{label}: {n_per_group} subjects needed"
+        if d > 2:
+            warnings.append("Effect size d > 2.0 is unusually large.")
     elif test_type == "chi_square":
-        n = math.ceil(((z_alpha + z_beta) / d) ** 2) if d > 0 else 0
+        effect_label = "Cohen's w"
+        rows = max(2, table_rows)
+        cols = max(2, table_cols)
+        df = (rows - 1) * (cols - 1)
+        n = math.ceil(((z_alpha + z_beta) / d) ** 2 + df)
+        min_n = math.ceil(5 * rows * cols)
+        if n < min_n:
+            n = min_n
+            warnings.append(f"Sample size increased to {min_n} to ensure expected cell count >= 5 ({rows}x{cols}).")
         n_per_group = n
         total_n = n
-        desc = f"Chi-square test: {n} total subjects needed"
+        desc = f"Chi-square test ({rows}x{cols}, df={df}): {n} total subjects"
+        extra = {"table_rows": rows, "table_cols": cols, "df": df}
+        if d < 0.1:
+            warnings.append("Cohen's w < 0.1 is very small. Large samples needed.")
+        if d > 0.5:
+            warnings.append("Cohen's w > 0.5 is large. Verify your estimate.")
+    elif test_type == "anova":
+        effect_label = "Cohen's f"
+        k = max(2, num_groups)
+        n_per_group = math.ceil(((z_alpha + z_beta) / d) ** 2 + 1)
+        total_n = n_per_group * k
+        desc = f"One-way ANOVA ({k} groups): {n_per_group} per group, {total_n} total"
+        extra = {"num_groups": k}
+        if d > 0.8:
+            warnings.append("Cohen's f > 0.8 is unusually large.")
     else:
         n_per_group = 0
         total_n = 0
         desc = "Unknown test type"
-    effect_interpretation = "small" if d < 0.3 else ("medium" if d < 0.7 else "large")
+
+    if test_type == "chi_square":
+        effect_interpretation = "small" if d < 0.2 else ("medium" if d < 0.4 else "large")
+    elif test_type == "anova":
+        effect_interpretation = "small" if d < 0.15 else ("medium" if d < 0.35 else "large")
+    else:
+        effect_interpretation = "small" if d < 0.3 else ("medium" if d < 0.7 else "large")
+
+    if alpha > 0.10:
+        warnings.append("Alpha > 0.10 is unconventional.")
+    if power < 0.7:
+        warnings.append("Power < 0.70 increases risk of missing real effects.")
+    if 0 < total_n < 10:
+        warnings.append("Very small sample size. Results may be unreliable.")
+
+    buffer_n = math.ceil(total_n * 1.15) if total_n > 0 else 0
+
     return {
-        "test_type": test_type, "effect_size": d, "effect_interpretation": effect_interpretation,
-        "alpha": alpha, "power": power, "n_per_group": n_per_group, "total_n": total_n,
-        "description": desc,
+        "test_type": test_type, "effect_size": d, "effect_label": effect_label,
+        "effect_interpretation": effect_interpretation, "alpha": alpha, "power": power,
+        "n_per_group": n_per_group, "total_n": total_n, "buffer_n": buffer_n,
+        "description": desc, "warnings": warnings,
         "recommendations": [
-            f"Based on a {effect_interpretation} effect size (d={d}), alpha={alpha}, power={power}",
+            f"Based on a {effect_interpretation} {effect_label} ({d}), α={alpha}, power={power}",
             f"Required sample size: {total_n} total participants",
             "Consider adding 10-20% for dropout/attrition",
-            f"Recommended total with 15% buffer: {math.ceil(total_n * 1.15)}",
-        ]
+            f"Recommended total with 15% buffer: {buffer_n}",
+        ],
+        **extra,
     }
 
 

@@ -11,6 +11,8 @@ import {
   FiCalendar,
   FiFileText,
 } from 'react-icons/fi'
+import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
+import { logActivity } from '../utils/persistence'
 
 interface Paper {
   id: string
@@ -42,6 +44,7 @@ export default function LiteratureReview() {
   const [filterTag, setFilterTag] = useState('')
   const [editingNotes, setEditingNotes] = useState(false)
   const [notesText, setNotesText] = useState('')
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
   // New paper form
   const [newPaper, setNewPaper] = useState({
@@ -70,6 +73,7 @@ export default function LiteratureReview() {
       starred: false,
     }
     savePapers([paper, ...papers])
+    logActivity({ type: 'notebook', action: 'created', title: `Added paper: ${paper.title}` })
     setNewPaper({ title: '', authors: '', journal: '', year: new Date().getFullYear(), doi: '', abstract: '', tags: '', relevance: 'medium' })
     setShowAddForm(false)
   }
@@ -79,8 +83,16 @@ export default function LiteratureReview() {
   }
 
   const deletePaper = (id: string) => {
-    savePapers(papers.filter(p => p.id !== id))
-    if (selectedPaper?.id === id) setSelectedPaper(null)
+    setDeleteConfirmId(id)
+  }
+
+  const confirmDelete = () => {
+    if (!deleteConfirmId) return
+    const deletedPaper = papers.find(p => p.id === deleteConfirmId)
+    savePapers(papers.filter(p => p.id !== deleteConfirmId))
+    logActivity({ type: 'notebook', action: 'deleted', title: `Deleted paper: ${deletedPaper?.title || deleteConfirmId}` })
+    if (selectedPaper?.id === deleteConfirmId) setSelectedPaper(null)
+    setDeleteConfirmId(null)
   }
 
   const saveNotes = () => {
@@ -111,7 +123,7 @@ export default function LiteratureReview() {
               <FiBookOpen className="w-4 h-4 text-[var(--color-text-muted)]" />
               <h2 className="text-sm font-medium">Literature Review</h2>
             </div>
-            <button onClick={() => setShowAddForm(!showAddForm)} className="btn btn-sm text-xs" style={{ color: 'var(--color-accent-blue)' }}>
+            <button onClick={() => setShowAddForm(!showAddForm)} className="btn btn-sm text-xs" style={{ color: 'var(--color-text-secondary)' }}>
               <FiPlus className="w-3.5 h-3.5" /> Add Paper
             </button>
           </div>
@@ -238,7 +250,7 @@ export default function LiteratureReview() {
               </div>
               <div className="flex items-center gap-1">
                 {selectedPaper.doi && (
-                  <a href={`https://doi.org/${selectedPaper.doi}`} target="_blank" rel="noopener noreferrer" className="btn btn-sm text-xs" style={{ color: 'var(--color-accent-blue)' }}>
+                  <a href={`https://doi.org/${selectedPaper.doi}`} target="_blank" rel="noopener noreferrer" className="btn btn-sm text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                     <FiExternalLink className="w-3.5 h-3.5" /> DOI
                   </a>
                 )}
@@ -303,6 +315,14 @@ export default function LiteratureReview() {
           </div>
         </div>
       )}
+
+      <ConfirmDeleteDialog
+        open={deleteConfirmId !== null}
+        entityName="Paper"
+        message="This will permanently remove this paper from your review. This action cannot be undone."
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteConfirmId(null)}
+      />
     </div>
   )
 }

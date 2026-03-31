@@ -1,6 +1,6 @@
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
-import { formatDateTime } from '../utils/persistence'
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { formatDateTime, persistGet, getActivityLog } from '../utils/persistence'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import {
   FiHome,
@@ -37,6 +37,7 @@ import {
   FiHeart,
   FiGrid,
   FiUpload,
+  FiPaperclip,
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import { useTheme } from '../contexts/ThemeContext'
@@ -167,41 +168,147 @@ function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
     { label: 'Open Settings', icon: FiSettings, category: 'Actions', action: () => { navigate('/settings'); onClose() } },
   ]
 
+  // Build data search results from local storage when user types a query
+  const dataResults = useMemo<CommandAction[]>(() => {
+    if (!query || query.length < 2) return []
+    const lq = query.toLowerCase()
+    const results: CommandAction[] = []
+
+    // Search activity log
+    const activities = getActivityLog()
+    const seen = new Set<string>()
+    for (const a of activities) {
+      if (seen.has(a.title)) continue
+      if (a.title?.toLowerCase().includes(lq) || a.project?.toLowerCase().includes(lq)) {
+        seen.add(a.title)
+        const typeIcon = a.type === 'hypothesis' ? FiZap : a.type === 'simulation' ? FiTrendingUp : a.type === 'evidence' ? FiDatabase : a.type === 'notebook' ? FiBook : FiFolder
+        results.push({
+          label: a.title,
+          icon: typeIcon,
+          description: `${a.type} · ${a.action}${a.project ? ` · ${a.project}` : ''}`,
+          category: 'Results',
+          action: () => {
+            if (a.type === 'project') navigate(`/projects`)
+            else if (a.type === 'hypothesis') navigate(`/agents`)
+            else if (a.type === 'notebook') navigate(`/notebook`)
+            else if (a.type === 'simulation') navigate(`/simulations`)
+            else navigate(`/search?q=${encodeURIComponent(a.title)}`)
+            onClose()
+          },
+        })
+      }
+      if (results.length >= 5) break
+    }
+
+    // Search MC simulations
+    const mcSims = persistGet<any[]>('mc-simulations', [])
+    for (const s of mcSims) {
+      if (results.length >= 8) break
+      if (s.name?.toLowerCase().includes(lq) || s.simulationType?.toLowerCase().includes(lq)) {
+        results.push({
+          label: s.name || 'Untitled Simulation',
+          icon: FiTrendingUp,
+          description: `Monte Carlo · ${s.simulationType}`,
+          category: 'Results',
+          action: () => { navigate('/simulations?tab=history'); onClose() },
+        })
+      }
+    }
+
+    // Search notebook pages
+    const notebooks = persistGet<any[]>('notebook-index', [])
+    for (const n of notebooks) {
+      if (results.length >= 10) break
+      if (n.title?.toLowerCase().includes(lq) || n.tags?.some((t: string) => t.toLowerCase().includes(lq))) {
+        results.push({
+          label: n.title || 'Untitled Page',
+          icon: FiBook,
+          description: `Notebook · ${n.tags?.join(', ') || ''}`,
+          category: 'Results',
+          action: () => { navigate(`/notebook?page=${n.id}`); onClose() },
+        })
+      }
+    }
+
+    // Search experiments
+    const experiments = persistGet<any[]>('experiments', [])
+    for (const e of experiments) {
+      if (results.length >= 12) break
+      if (e.title?.toLowerCase().includes(lq) || e.hypothesis?.toLowerCase().includes(lq)) {
+        results.push({
+          label: e.title,
+          icon: FiClipboard,
+          description: `Experiment · ${e.status}`,
+          category: 'Results',
+          action: () => { navigate('/experiments'); onClose() },
+        })
+      }
+    }
+
+    return results
+  }, [query, navigate, onClose])
+
   const filtered = query
     ? actions.filter(a => a.label.toLowerCase().includes(query.toLowerCase()) || a.description?.toLowerCase().includes(query.toLowerCase()))
     : actions
 
-  const categories = [...new Set(filtered.map(a => a.category))]
+  // Combine navigation + data results
+  const allItems = [...filtered, ...dataResults]
+  const categories = [...new Set(allItems.map(a => a.category))]
+
+  // If query is long enough and no data results, offer to do a full search
+  const showFullSearchOption = query.length >= 2
 
   useEffect(() => {
     if (isOpen) setQuery('')
   }, [isOpen])
 
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && query.trim().length >= 2) {
+      navigate(`/search?q=${encodeURIComponent(query.trim())}`)
+      onClose()
+    }
+  }
+
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[20vh] animate-fade-in">
+    <div className="fixed inset-0 z-50 flex items-center justify-center animate-fade-in">
       <div className="absolute inset-0 modal-overlay" onClick={onClose} />
-      <div className="relative w-full max-w-xl glass-card-static overflow-hidden animate-scale-in" style={{ background: 'var(--color-surface-solid)', boxShadow: 'var(--glass-shadow)' }}>
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-[var(--color-border)]">
-          <FiSearch className="w-4 h-4 text-[var(--color-text-muted)]" />
+      <div className="relative w-full max-w-2xl mx-4 glass-card-static overflow-hidden animate-scale-in" style={{ background: 'var(--color-surface-solid)', boxShadow: 'var(--glass-shadow)' }}>
+        <div className="flex items-center gap-3 px-5 py-4 border-b border-[var(--color-border)]">
+          <FiSearch className="w-5 h-5 text-[var(--color-text-muted)]" />
           <input
             type="text"
             value={query}
             onChange={e => setQuery(e.target.value)}
+            onKeyDown={handleKeyDown}
             placeholder="Type a command or search..."
-            className="flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--color-text-muted)]"
+            className="flex-1 bg-transparent text-base outline-none placeholder:text-[var(--color-text-muted)]"
             autoFocus
           />
           <kbd className="px-1.5 py-0.5 text-xxs text-[var(--color-text-muted)] bg-[var(--glass-bg)] rounded border border-[var(--color-border)]">ESC</kbd>
         </div>
-        <div className="max-h-[320px] overflow-y-auto p-2">
+        <div className="max-h-[60vh] overflow-y-auto p-3">
+          {showFullSearchOption && (
+            <button
+              onClick={() => { navigate(`/search?q=${encodeURIComponent(query.trim())}`); onClose() }}
+              className="flex items-center gap-3 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--glass-bg-hover)] transition-all group mb-1"
+            >
+              <FiSearch className="w-4 h-4 text-[var(--color-accent-purple)] group-hover:text-[var(--color-text)]" />
+              <div className="flex-1 text-left">
+                <span className="text-[var(--color-text-secondary)] group-hover:text-[var(--color-text)]">Search for "{query}"</span>
+                <span className="block text-xs text-[var(--color-text-muted)]">Full search across all platform data</span>
+              </div>
+              <span className="text-xxs text-[var(--color-text-muted)]">Enter</span>
+            </button>
+          )}
           {categories.map(cat => (
             <div key={cat}>
               <div className="text-xxs text-[var(--color-text-muted)] px-2 py-1.5 uppercase tracking-wider font-medium">{cat}</div>
-              {filtered.filter(a => a.category === cat).map(item => (
+              {allItems.filter(a => a.category === cat).map((item, idx) => (
                 <button
-                  key={item.label}
+                  key={`${item.label}-${idx}`}
                   onClick={item.action}
                   className="flex items-center gap-3 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--glass-bg-hover)] transition-all group"
                 >
@@ -217,7 +324,7 @@ function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
               ))}
             </div>
           ))}
-          {filtered.length === 0 && (
+          {allItems.length === 0 && !showFullSearchOption && (
             <div className="text-center py-8 text-sm text-[var(--color-text-muted)]">No results found</div>
           )}
         </div>
@@ -367,29 +474,37 @@ function ConstantChat() {
   const [streamingText, setStreamingText] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
   const chatEndRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const [uploading, setUploading] = useState(false)
+  const [attachedFiles, setAttachedFiles] = useState<File[]>([])
+  const MAX_FILE_SIZE = 20 * 1024 * 1024 // 20MB
+  const MAX_FILES = 2
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, loading, streamingText])
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
     if (!files || files.length === 0) return
-    setUploading(true)
+    const newFiles: File[] = []
     for (const file of Array.from(files)) {
-      try {
-        const { api } = await import('../services/api')
-        await api.uploadDocument(file)
-        setMessages(prev => [...prev, { role: 'assistant', text: `Document **${file.name}** uploaded successfully and will be processed for the knowledge base.` }])
-      } catch {
-        setMessages(prev => [...prev, { role: 'assistant', text: `Failed to upload **${file.name}**. Please check that the backend is running and try again.` }])
+      if (file.size > MAX_FILE_SIZE) {
+        setMessages(prev => [...prev, { role: 'assistant', text: `**${file.name}** exceeds the 20 MB size limit. Please use a smaller file.` }])
+        continue
       }
+      if (attachedFiles.length + newFiles.length >= MAX_FILES) {
+        setMessages(prev => [...prev, { role: 'assistant', text: `Maximum ${MAX_FILES} documents per message. Remove an attachment first.` }])
+        break
+      }
+      newFiles.push(file)
     }
-    setUploading(false)
+    if (newFiles.length > 0) setAttachedFiles(prev => [...prev, ...newFiles].slice(0, MAX_FILES))
     if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  const removeAttachment = (index: number) => {
+    setAttachedFiles(prev => prev.filter((_, i) => i !== index))
   }
 
   const getLocalContext = () => {
@@ -399,11 +514,13 @@ function ConstantChat() {
       const hypotheses = JSON.parse(localStorage.getItem('humanovo-hypotheses') || '[]')
       const papers = JSON.parse(localStorage.getItem('humanovo-research-papers') || '[]')
       const simulations = JSON.parse(localStorage.getItem('humanovo-mc-simulations') || '[]')
+      const docs = JSON.parse(localStorage.getItem('humanovo-project-documents') || '[]')
       return {
         totalProjects: projects.length,
         totalHypotheses: hypotheses.length,
         totalPapers: papers.length,
         totalSimulations: simulations.length,
+        totalDocuments: docs.length,
         projects: projects.map((p: any) => ({
           name: p.name || p.title,
           disease: p.disease_focus || p.disease,
@@ -421,6 +538,15 @@ function ConstantChat() {
           title: p.hypothesis_title,
           disease: p.disease,
         })).filter((p: any) => p.title),
+        documents: docs.map((d: any) => ({
+          title: d.title,
+          doc_type: d.doc_type,
+          authors: d.authors,
+          description: d.description,
+          tags: d.tags,
+          knowledge_base: d.knowledge_base || 'private',
+          project_id: d.project_id,
+        })).filter((d: any) => d.title),
       }
     } catch { return {} }
   }
@@ -428,6 +554,9 @@ function ConstantChat() {
   useEffect(() => {
     if (isOpen) {
       setTimeout(() => inputRef.current?.focus(), 100)
+    } else {
+      // Clear attachments when chat closes
+      setAttachedFiles([])
     }
   }, [isOpen])
 
@@ -658,15 +787,36 @@ function ConstantChat() {
   }
 
   const sendMessage = async () => {
-    if (!input.trim() || loading) return
+    if ((!input.trim() && attachedFiles.length === 0) || loading) return
     const userMsg = input.trim()
+    const filesToSend = [...attachedFiles]
     setInput('')
-    setMessages(prev => [...prev, { role: 'user', text: userMsg }])
+    setAttachedFiles([])
+    // Reset textarea height
+    if (inputRef.current) inputRef.current.style.height = 'auto'
+
+    const displayText = filesToSend.length > 0
+      ? `${userMsg}${userMsg ? '\n' : ''}${filesToSend.map(f => `📎 ${f.name}`).join('\n')}`
+      : userMsg
+    setMessages(prev => [...prev, { role: 'user', text: displayText }])
     setLoading(true)
+
+    // Upload attached files first (if any)
+    for (const file of filesToSend) {
+      try {
+        const { api } = await import('../services/api')
+        await api.uploadDocument(file)
+      } catch {
+        // Silently continue — file upload to backend is best-effort
+      }
+    }
 
     // Scope guard: check before hitting backend
     let fullResponse = ''
-    if (isOutOfScope(userMsg.toLowerCase().trim())) {
+    const hasOnlyFiles = !userMsg && filesToSend.length > 0
+    if (hasOnlyFiles) {
+      fullResponse = `Got it! I've received ${filesToSend.length === 1 ? `**${filesToSend[0].name}**` : `${filesToSend.length} documents`}. They'll be processed for the knowledge base. What would you like to do with ${filesToSend.length === 1 ? 'it' : 'them'}?`
+    } else if (isOutOfScope(userMsg.toLowerCase().trim())) {
       fullResponse = generateSmartFallbackResponse(userMsg)
     } else {
       // Call the backend AI endpoint (routes to API Gateway → Lambda → Bedrock Claude)
@@ -676,7 +826,13 @@ function ConstantChat() {
         const res = await fetch(`${_apiBase}/api/v1/orchestrator/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: userMsg, context: 'general', platform_context: platformContext }),
+          body: JSON.stringify({
+            message: userMsg,
+            context: 'general',
+            platform_context: platformContext,
+            knowledge_base: { include_documents: true, retrieval_mode: 'hybrid' },
+            attached_files: filesToSend.map(f => ({ name: f.name, size: f.size, type: f.type })),
+          }),
         })
         if (res.ok) {
           const data = await res.json()
@@ -769,43 +925,69 @@ function ConstantChat() {
         </div>
 
         {/* Input */}
-        <div className="px-5 py-4 border-t border-[var(--color-border)]">
+        <div className="px-5 py-3 border-t border-[var(--color-border)]">
           <input
             ref={fileInputRef}
             type="file"
             multiple
             accept=".pdf,.txt,.csv,.json,.docx,.xlsx,.md,.tsv"
-            onChange={handleFileUpload}
+            onChange={handleFileSelect}
             className="hidden"
           />
-          <div className="flex items-center gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--glass-bg)] px-4 py-3">
+          {/* Attachment chips */}
+          {attachedFiles.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-2">
+              {attachedFiles.map((f, i) => (
+                <div key={i} className="flex items-center gap-1.5 bg-white/5 border border-[var(--color-border)] rounded-lg px-2.5 py-1 text-xs text-[var(--color-text-secondary)]">
+                  <FiPaperclip className="w-3 h-3 shrink-0" />
+                  <span className="truncate max-w-[140px]">{f.name}</span>
+                  <span className="text-[var(--color-text-muted)]">({(f.size / 1024 / 1024).toFixed(1)}MB)</span>
+                  <button onClick={() => removeAttachment(i)} className="p-0.5 rounded hover:bg-white/10 text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
+                    <FiX className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex items-end gap-2">
             <button
               onClick={() => fileInputRef.current?.click()}
-              disabled={uploading}
-              className="p-1.5 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)] transition-all disabled:opacity-30"
-              title="Upload document"
+              disabled={attachedFiles.length >= MAX_FILES}
+              className="p-2 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-white/5 transition-all disabled:opacity-30 shrink-0 mb-0.5"
+              title={attachedFiles.length >= MAX_FILES ? `Max ${MAX_FILES} files` : 'Attach document'}
             >
               <FiUpload className="w-4 h-4" />
             </button>
-            <input
+            <textarea
               ref={inputRef}
-              type="text"
               value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && sendMessage()}
+              onChange={e => {
+                setInput(e.target.value)
+                // Auto-resize
+                e.target.style.height = 'auto'
+                e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px'
+              }}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  sendMessage()
+                }
+              }}
               placeholder="Ask Constant anything — research, biology, stats..."
-              className="flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--color-text-muted)]"
+              rows={1}
+              className="flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--color-text-muted)] resize-none leading-relaxed py-2"
+              style={{ maxHeight: '120px' }}
             />
             <button
               onClick={sendMessage}
-              disabled={!input.trim() || loading || isStreaming}
-              className="p-2 rounded-lg text-white disabled:opacity-30 transition-all"
+              disabled={(!input.trim() && attachedFiles.length === 0) || loading || isStreaming}
+              className="p-2 rounded-lg text-white disabled:opacity-30 transition-all shrink-0 mb-0.5"
               style={{ background: 'var(--color-accent-purple)' }}
             >
               <FiSend className="w-4 h-4" />
             </button>
           </div>
-          <p className="text-xxs text-[var(--color-text-muted)] mt-2 text-center">Press Enter to send, Escape to close</p>
+          <p className="text-xxs text-[var(--color-text-muted)] mt-1.5 text-center">Enter to send · Shift+Enter for new line · Escape to close</p>
         </div>
       </div>
     </div>,
@@ -832,37 +1014,37 @@ export default function Layout() {
   const [isCommandOpen, setIsCommandOpen] = useState(false)
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false)
-  const [notifications, setNotifications] = useState<Array<{ id: string; title: string; description: string; time: string }>>([])
+  const [notifications, setNotifications] = useState<Array<{ id: string; title: string; description: string; time: string; timestamp: string }>>([])
   const [hasUnread, setHasUnread] = useState(false)
   const location = useLocation()
   const navigate = useNavigate()
 
-  // Fetch recent activities as notifications
+  // Load notifications from localStorage activity log
   useEffect(() => {
-    const fetchNotifications = async () => {
+    const loadNotifications = () => {
       try {
-        const { api } = await import('../services/api')
-        const result = await api.getActivities({ page: 1, page_size: 5 })
-        if (result?.items && result.items.length > 0) {
-          const lastRead = localStorage.getItem('humanovo-notifs-read') || '0'
-          setNotifications(result.items.map((a: any) => ({
-            id: a.id,
-            title: a.title || `${(a.type || 'activity').replace(/_/g, ' ')} ${(a.action || '').replace(/_/g, ' ')}`,
-            description: a.description || a.project_name || '',
-            time: a.created_at ? formatDateTime(a.created_at) : '',
-          })))
-          const newestTime = result.items[0]?.created_at || ''
-          setHasUnread(newestTime > lastRead)
-        }
+        const activities = getActivityLog()
+        const lastRead = localStorage.getItem('humanovo-notifs-read') || '0'
+        const recent = activities.slice(0, 20)
+        setNotifications(recent.map((a: any) => ({
+          id: a.id,
+          title: a.title || `${(a.type || 'activity').replace(/_/g, ' ')} ${(a.action || '').replace(/_/g, ' ')}`,
+          description: a.project || '',
+          time: formatDateTime(a.timestamp),
+          timestamp: a.timestamp || '',
+        })))
+        const newestTime = recent[0]?.timestamp || ''
+        setHasUnread(newestTime > lastRead)
       } catch {
-        // Activities endpoint may not be available yet
+        // Activity log may not be available
       }
     }
-    fetchNotifications()
+    loadNotifications()
   }, [location.pathname])
 
   const markAllRead = () => {
     setHasUnread(false)
+    setNotifications([])
     localStorage.setItem('humanovo-notifs-read', new Date().toISOString())
   }
 
@@ -1121,10 +1303,19 @@ if (path === '/clinical-trials') return 'Clinical Trials'
                     {notifications.length > 0 ? (
                       <div className="max-h-64 overflow-y-auto">
                         {notifications.map(n => (
-                          <div key={n.id} className="px-3 py-2 hover:bg-[var(--glass-bg)] transition-all">
-                            <div className="text-xs font-medium text-[var(--color-text-secondary)] capitalize">{n.title}</div>
-                            <div className="text-xxs text-[var(--color-text-muted)] mt-0.5 truncate">{n.description}</div>
-                            <div className="text-xxs text-[var(--color-text-muted)] mt-0.5">{n.time}</div>
+                          <div key={n.id} className="px-3 py-2 hover:bg-[var(--glass-bg)] transition-all flex gap-2">
+                            <div className="flex-shrink-0 mt-1.5">
+                              {n.timestamp > (localStorage.getItem('humanovo-notifs-read') || '0') ? (
+                                <span className="block w-2 h-2 rounded-full bg-[var(--color-accent-blue)]" />
+                              ) : (
+                                <span className="block w-2 h-2" />
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-xs font-medium text-[var(--color-text-secondary)] capitalize">{n.title}</div>
+                              <div className="text-xxs text-[var(--color-text-muted)] mt-0.5 truncate">{n.description}</div>
+                              <div className="text-xxs text-[var(--color-text-muted)] mt-0.5">{n.time}</div>
+                            </div>
                           </div>
                         ))}
                       </div>

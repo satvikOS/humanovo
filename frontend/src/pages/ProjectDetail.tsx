@@ -4,11 +4,13 @@ import {
   FiArrowLeft, FiActivity, FiTarget,
   FiChevronRight, FiFileText, FiRefreshCw,
   FiTrash2, FiBook, FiX, FiPrinter,
+  FiUpload, FiFile, FiEye,
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import api, { Project } from '../services/api'
-import { logActivity, formatDate } from '../utils/persistence'
+import { logActivity, formatDate, usePersistentState, blobPut, blobGet, blobDelete } from '../utils/persistence'
 import HypothesisDocViewer from '../components/HypothesisDocViewer'
+import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 
 const _BACKEND = import.meta.env.VITE_API_BASE_URL || ''
 const API_BASE = `${_BACKEND}/api/v1`
@@ -39,7 +41,138 @@ interface SavedHypothesis {
   translational_roadmap?: any
 }
 
-type ViewMode = 'list' | 'hypothesis_viewer' | 'hypothesis_paper'
+interface ProjectDocument {
+  id: string
+  project_id: string
+  title: string
+  doc_type: string
+  authors: string
+  date: string
+  description: string
+  tags: string[]
+  filename: string
+  file_size: number
+  mime_type: string
+  uploaded_at: string
+  knowledge_base: 'private' | 'common'
+  // data_base64 is stored in IndexedDB, NOT in this object (to avoid localStorage size limits)
+}
+
+const DOC_TYPES = ['Protocol', 'Report', 'Dataset', 'Consent Form', 'IRB Approval', 'Lab Notes', 'Manuscript', 'Supplementary', 'Other'] as const
+
+type ViewMode = 'list' | 'hypothesis_viewer' | 'hypothesis_paper' | 'document_viewer'
+
+/** Standalone doc viewer that loads blob content from IndexedDB asynchronously */
+function DocumentViewer({ doc, onClose }: { doc: ProjectDocument; onClose: () => void }) {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null)
+  const [textContent, setTextContent] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const isImage = doc.mime_type.startsWith('image/')
+  const isPdf = doc.mime_type === 'application/pdf'
+  const isText = doc.mime_type.startsWith('text/') || doc.mime_type.includes('json') || doc.mime_type.includes('xml')
+
+  useEffect(() => {
+    let cancelled = false
+    let objectUrl: string | null = null
+    ;(async () => {
+      setLoading(true)
+      setError(null)
+      try {
+        const base64 = await blobGet(doc.id)
+        if (cancelled) return
+        if (!base64) {
+          setError('File content not found. It may need to be re-uploaded on this device.')
+          setLoading(false)
+          return
+        }
+        // Convert base64 to Blob → ObjectURL (handles large files properly)
+        const binary = atob(base64)
+        const bytes = new Uint8Array(binary.length)
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+        const blob = new Blob([bytes], { type: doc.mime_type })
+        objectUrl = URL.createObjectURL(blob)
+        setBlobUrl(objectUrl)
+        if (isText) {
+          try { setTextContent(new TextDecoder().decode(bytes)) } catch { setTextContent(null) }
+        }
+      } catch (e) {
+        if (!cancelled) setError(`Failed to load document: ${e instanceof Error ? e.message : String(e)}`)
+      }
+      if (!cancelled) setLoading(false)
+    })()
+    return () => {
+      cancelled = true
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [doc.id])
+
+  return (
+    <div className="h-full flex flex-col">
+      <div className="px-6 py-3 border-b border-[var(--color-border)] flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-2">
+          <button onClick={onClose} className="text-[var(--color-text-secondary)] hover:text-[var(--color-text)] text-sm flex items-center gap-1">
+            <FiArrowLeft className="w-3.5 h-3.5" />Back
+          </button>
+          <span className="text-[var(--color-text-muted)]">/</span>
+          <span className="text-[var(--color-text)] text-sm font-medium truncate max-w-md">{doc.title}</span>
+        </div>
+        <div className="flex items-center gap-3 text-xs text-[var(--color-text-muted)]">
+          <span>{doc.doc_type}</span>
+          {doc.authors && <span>{doc.authors}</span>}
+          <span>{formatDate(doc.date)}</span>
+          {blobUrl && (
+            <a href={blobUrl} download={doc.filename} className="p-1.5 rounded hover:bg-white/5 text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="Download">
+              <FiFile className="w-3.5 h-3.5" />
+            </a>
+          )}
+          <button onClick={onClose} className="p-1.5 rounded hover:bg-white/5 text-[var(--color-text-muted)]">
+            <FiX className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+      <div className="flex-1 min-h-0 relative">
+        {loading && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="w-6 h-6 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+          </div>
+        )}
+        {!loading && error && (
+          <div className="flex flex-col items-center justify-center h-full gap-4">
+            <FiFile className="w-16 h-16 text-[var(--color-text-muted)] opacity-30" />
+            <p className="text-[var(--color-text-muted)] text-sm">{error}</p>
+          </div>
+        )}
+        {!loading && blobUrl && isPdf && (
+          <iframe src={`${blobUrl}#toolbar=0&navpanes=0`} className="w-full h-full border-0" title={doc.title} />
+        )}
+        {!loading && blobUrl && isImage && (
+          <div className="flex items-center justify-center h-full p-8">
+            <img src={blobUrl} alt={doc.title} className="max-w-full max-h-full object-contain rounded" />
+          </div>
+        )}
+        {!loading && blobUrl && isText && textContent && (
+          <div className="p-8 overflow-auto h-full">
+            <pre className="text-sm text-[var(--color-text-secondary)] whitespace-pre-wrap font-mono">{textContent}</pre>
+          </div>
+        )}
+        {!loading && blobUrl && !isPdf && !isImage && !isText && (
+          <div className="flex flex-col items-center justify-center h-full gap-4">
+            <FiFile className="w-16 h-16 text-[var(--color-text-muted)] opacity-30" />
+            <p className="text-[var(--color-text-muted)]">Preview not available for this file type</p>
+            <a href={blobUrl} download={doc.filename} className="text-sm text-[var(--color-text-secondary)] hover:underline">Download {doc.filename}</a>
+          </div>
+        )}
+      </div>
+      {doc.description && (
+        <div className="px-6 py-3 border-t border-[var(--color-border)] text-xs text-[var(--color-text-muted)]">
+          {doc.description}
+        </div>
+      )}
+    </div>
+  )
+}
 
 const PAPER_PHASES = [
   { label: 'Initializing research pipeline...', duration: 2000 },
@@ -67,6 +200,25 @@ export default function ProjectDetail() {
   const [paperHtml, setPaperHtml] = useState<string | null>(null)
   const [paperError, setPaperError] = useState<string | null>(null)
   const [activeHypothesis, setActiveHypothesis] = useState<SavedHypothesis | null>(null)
+  const [deletePaperId, setDeletePaperId] = useState<string | null>(null)
+
+  // Documents state
+  const [allDocs, setAllDocs] = usePersistentState<ProjectDocument[]>('project-documents', [])
+  const projectDocs = allDocs.filter(d => d.project_id === projectId)
+  const setProjectDocs = useCallback((updater: ProjectDocument[] | ((prev: ProjectDocument[]) => ProjectDocument[])) => {
+    setAllDocs(prev => {
+      const others = prev.filter(d => d.project_id !== projectId)
+      const current = prev.filter(d => d.project_id === projectId)
+      const next = typeof updater === 'function' ? updater(current) : updater
+      return [...next, ...others]
+    })
+  }, [projectId, setAllDocs])
+  const [showDocUpload, setShowDocUpload] = useState(false)
+  const [docForm, setDocForm] = useState({ title: '', doc_type: 'Protocol' as string, authors: '', date: '', description: '', tags: '', knowledge_base: 'private' as 'private' | 'common' })
+  const [docFile, setDocFile] = useState<File | null>(null)
+  const [deleteDocId, setDeleteDocId] = useState<string | null>(null)
+  const [viewingDoc, setViewingDoc] = useState<ProjectDocument | null>(null)
+  const docInputRef = useRef<HTMLInputElement>(null)
 
   // Loading phase animation
   const [currentPhase, setCurrentPhase] = useState(0)
@@ -115,7 +267,7 @@ export default function ProjectDetail() {
     title: h.title,
     description: h.description,
     mechanism: h.mechanism,
-    confidence: h.confidence,
+    confidence: (h as any).confidence ?? (h as any).confidence_score ?? 0,
     tags: [] as string[],
     disease: project?.disease_focus || '',
     discovery_type: 'treatment',
@@ -124,8 +276,17 @@ export default function ProjectDetail() {
     model_used: h.model_used,
   }))
 
-  // Research papers state (ephemeral, tracked in component state)
-  const [projectPapers, setProjectPapers] = useState<SavedResearchPaper[]>([])
+  // Research papers state — persisted + synced across devices
+  const [allPapers, setAllPapers] = usePersistentState<SavedResearchPaper[]>('research-papers', [])
+  const projectPapers = allPapers.filter(p => p.project_id === projectId)
+  const setProjectPapers = useCallback((updater: SavedResearchPaper[] | ((prev: SavedResearchPaper[]) => SavedResearchPaper[])) => {
+    setAllPapers(prev => {
+      const otherPapers = prev.filter(p => p.project_id !== projectId)
+      const currentProjectPapers = prev.filter(p => p.project_id === projectId)
+      const next = typeof updater === 'function' ? updater(currentProjectPapers) : updater
+      return [...next, ...otherPapers]
+    })
+  }, [projectId, setAllPapers])
 
   // Cleanup timers on unmount
   useEffect(() => {
@@ -371,6 +532,8 @@ export default function ProjectDetail() {
     }
   }, [project, startPhaseAnimation, stopPhaseAnimation])
 
+  const confirmDeletePaper = () => { if (deletePaperId) { setProjectPapers(prev => prev.filter(p => p.id !== deletePaperId)); setDeletePaperId(null) } }
+
   const _saveResearchPaper = useCallback((hypothesis: SavedHypothesis, html?: string) => {
     setProjectPapers(prev => {
       // If paper already exists, update its HTML if we have new HTML
@@ -397,6 +560,53 @@ export default function ProjectDetail() {
     })
     logActivity({ type: 'evidence', action: 'created', title: `Research paper: ${hypothesis.title}`, project: project?.name })
   }, [project])
+
+  const handleDocUpload = useCallback(async () => {
+    if (!docFile || !docForm.title.trim() || !projectId) return
+    const reader = new FileReader()
+    reader.onload = async () => {
+      const base64 = (reader.result as string).split(',')[1] || ''
+      const docId = `doc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      // Store the file blob in IndexedDB (no size limits)
+      await blobPut(docId, base64)
+      // Store metadata in localStorage (small, syncs across devices)
+      const doc: ProjectDocument = {
+        id: docId,
+        project_id: projectId,
+        title: docForm.title.trim(),
+        doc_type: docForm.doc_type,
+        authors: docForm.authors.trim(),
+        date: docForm.date || new Date().toISOString().split('T')[0],
+        description: docForm.description.trim(),
+        tags: docForm.tags.split(',').map(t => t.trim()).filter(Boolean),
+        filename: docFile.name,
+        file_size: docFile.size,
+        mime_type: docFile.type,
+        uploaded_at: new Date().toISOString(),
+        knowledge_base: docForm.knowledge_base,
+      }
+      setProjectDocs(prev => [doc, ...prev])
+      // Also upload to backend ingestion for AI knowledge base
+      try {
+        const { default: apiService } = await import('../services/api')
+        await apiService.uploadDocument(docFile, { project_id: projectId })
+      } catch { /* Backend may be unavailable — local storage still works */ }
+      logActivity({ type: 'evidence', action: 'imported', title: `Uploaded document: ${docForm.title} (${docForm.knowledge_base} KB)`, project: project?.name })
+      setShowDocUpload(false)
+      setDocForm({ title: '', doc_type: 'Protocol', authors: '', date: '', description: '', tags: '', knowledge_base: 'private' })
+      setDocFile(null)
+    }
+    reader.readAsDataURL(docFile)
+  }, [docFile, docForm, projectId, project, setProjectDocs])
+
+  const confirmDeleteDoc = async () => {
+    if (!deleteDocId) return
+    const doc = projectDocs.find(d => d.id === deleteDocId)
+    await blobDelete(deleteDocId).catch(() => {})
+    setProjectDocs(prev => prev.filter(d => d.id !== deleteDocId))
+    logActivity({ type: 'evidence', action: 'deleted', title: `Deleted document: ${doc?.title || deleteDocId}`, project: project?.name })
+    setDeleteDocId(null)
+  }
 
   const printPaper = useCallback(() => {
     // Print the paper via the iframe's contentWindow
@@ -438,7 +648,7 @@ export default function ProjectDetail() {
   if (!project) {
     return (
       <div className="p-8">
-        <Link to="/projects" className="inline-flex items-center text-accent-blue hover:underline mb-6">
+        <Link to="/projects" className="inline-flex items-center text-[var(--color-text-secondary)] hover:underline mb-6">
           <FiArrowLeft className="w-4 h-4 mr-2" />
           Back to Projects
         </Link>
@@ -450,7 +660,7 @@ export default function ProjectDetail() {
           </p>
           <button
             onClick={loadProject}
-            className="mt-4 btn text-accent-blue hover:bg-accent-blue/10"
+            className="mt-4 btn text-[var(--color-text-secondary)] hover:bg-white/5"
           >
             <FiRefreshCw className="w-4 h-4 mr-1" />
             Retry
@@ -525,11 +735,11 @@ export default function ProjectDetail() {
       <div className="h-full flex flex-col">
         <div className="px-4 py-2 border-b border-[var(--color-border)] flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2">
-            <Link to="/projects" className="text-accent-blue hover:underline text-sm">
+            <Link to="/projects" className="text-[var(--color-text-secondary)] hover:underline text-sm">
               <FiArrowLeft className="w-3.5 h-3.5 inline mr-1" />Projects
             </Link>
             <span className="text-[var(--color-text-muted)]">/</span>
-            <button onClick={closeViewer} className="text-accent-blue hover:underline text-sm">
+            <button onClick={closeViewer} className="text-[var(--color-text-secondary)] hover:underline text-sm">
               {project.name}
             </button>
             <span className="text-[var(--color-text-muted)]">/</span>
@@ -537,7 +747,7 @@ export default function ProjectDetail() {
           </div>
           <div className="flex items-center gap-2">
             {paperHtml && (
-              <button onClick={printPaper} className="btn text-accent-purple hover:bg-accent-purple/10 text-sm">
+              <button onClick={printPaper} className="btn text-[var(--color-text-secondary)] hover:bg-white/5 text-sm">
                 <FiPrinter className="w-3.5 h-3.5 mr-1" />
                 Print
               </button>
@@ -553,14 +763,14 @@ export default function ProjectDetail() {
             <div className="absolute inset-0 flex flex-col items-center justify-center z-10">
               <div className="relative w-24 h-24 mb-6">
                 <div className="absolute inset-0 rounded-full border-4 border-white/10" />
-                <div className="absolute inset-0 rounded-full border-4 border-t-accent-purple animate-spin" />
-                <FiFileText className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 text-accent-purple" />
+                <div className="absolute inset-0 rounded-full border-4 border-t-white animate-spin" />
+                <FiFileText className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 text-[var(--color-text-secondary)]" />
               </div>
               <h3 className="text-lg font-semibold text-white mb-2">Generating Research Paper</h3>
               <p className="text-[var(--color-text-muted)] text-sm mb-1">{activeHypothesis.title}</p>
               <div className="mt-6 w-full max-w-lg px-8">
                 <div className="mb-3">
-                  <p className="text-accent-purple text-sm font-medium text-center">
+                  <p className="text-[var(--color-text-secondary)] text-sm font-medium text-center">
                     {PAPER_PHASES[currentPhase]?.label || 'Processing...'}
                   </p>
                   <p className="text-[var(--color-text-muted)] text-xs text-center mt-1">
@@ -569,7 +779,7 @@ export default function ProjectDetail() {
                 </div>
                 <div className="h-2 bg-white/5 rounded-full overflow-hidden mb-2">
                   <div
-                    className="h-full bg-accent-purple rounded-full transition-all duration-200 ease-linear"
+                    className="h-full bg-white/20 rounded-full transition-all duration-200 ease-linear"
                     style={{ width: `${((currentPhase + phaseProgress / 100) / PAPER_PHASES.length) * 100}%` }}
                   />
                 </div>
@@ -579,8 +789,8 @@ export default function ProjectDetail() {
                       key={idx}
                       className={clsx(
                         'w-2 h-2 rounded-full transition-colors',
-                        idx < currentPhase ? 'bg-accent-purple' :
-                        idx === currentPhase ? 'bg-accent-purple/60 animate-pulse' : 'bg-white/10'
+                        idx < currentPhase ? 'bg-white/20' :
+                        idx === currentPhase ? 'bg-white/20/60 animate-pulse' : 'bg-white/10'
                       )}
                     />
                   ))}
@@ -603,8 +813,8 @@ export default function ProjectDetail() {
 
           {paperError && !generatingPaper && (
             <div className="absolute inset-0 flex flex-col items-center justify-center z-10">
-              <div className="w-16 h-16 rounded-full bg-accent-purple/10 flex items-center justify-center mb-4">
-                <FiFileText className="w-8 h-8 text-accent-purple" />
+              <div className="w-16 h-16 rounded-full bg-white/20/10 flex items-center justify-center mb-4">
+                <FiFileText className="w-8 h-8 text-[var(--color-text-secondary)]" />
               </div>
               <h3 className="text-lg font-semibold text-white mb-2">
                 {paperError.includes('not cached') ? 'Paper Not Cached' : 'Generation Failed'}
@@ -615,7 +825,7 @@ export default function ProjectDetail() {
               <div className="flex gap-3">
                 <button
                   onClick={() => generateHypothesisPaper(activeHypothesis)}
-                  className="btn text-accent-purple hover:bg-accent-purple/10"
+                  className="btn text-[var(--color-text-secondary)] hover:bg-white/5"
                 >
                   <FiRefreshCw className="w-4 h-4 mr-1" />
                   {paperError.includes('not cached') ? 'Regenerate Paper' : 'Retry'}
@@ -649,47 +859,65 @@ export default function ProjectDetail() {
     )
   }
 
+  // Document viewer — loads blob from IndexedDB
+  if (viewMode === 'document_viewer' && viewingDoc) {
+    return <DocumentViewer doc={viewingDoc} onClose={() => { setViewingDoc(null); setViewMode('list') }} />
+  }
+
   // Default list view
-  const highConf = uniqueHypotheses.filter(h => h.confidence >= 0.7).length
-  const medConf = uniqueHypotheses.filter(h => h.confidence >= 0.5 && h.confidence < 0.7).length
-  const lowConf = uniqueHypotheses.filter(h => h.confidence < 0.5).length
+  const safeConf = (c: unknown) => (typeof c === 'number' && !isNaN(c)) ? c : 0
+  const highConf = uniqueHypotheses.filter(h => safeConf(h.confidence) >= 0.7).length
+  const medConf = uniqueHypotheses.filter(h => safeConf(h.confidence) >= 0.5 && safeConf(h.confidence) < 0.7).length
+  const lowConf = uniqueHypotheses.filter(h => safeConf(h.confidence) < 0.5).length
+
+  // Parse project title — show disease name only, move supporting info to subtitle
+  const titleParts = project.name.split(' — ')
+  const displayTitle = project.disease_focus || titleParts[0] || project.name
+  const subtitleParts = [
+    titleParts[1] && titleParts[0] !== displayTitle ? titleParts[0] : null,
+    titleParts[1] || null,
+    titleParts[2] || null,
+  ].filter(Boolean)
 
   return (
-    <div className="p-8">
-      <Link to="/projects" className="inline-flex items-center text-accent-blue hover:underline mb-6">
+    <div className="p-10 max-w-7xl mx-auto">
+      <Link to="/projects" className="inline-flex items-center text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors mb-8 text-sm">
         <FiArrowLeft className="w-4 h-4 mr-2" />
         Back to Projects
       </Link>
 
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-white">{project.name}</h1>
+      <div className="mb-10">
+        <h1 className="text-3xl font-bold text-white">{displayTitle}</h1>
+        {subtitleParts.length > 0 && (
+          <p className="text-[var(--color-text-muted)] text-sm mt-1.5">{subtitleParts.join(' \u00B7 ')}</p>
+        )}
         {project.description && (
-          <p className="text-[var(--color-text-muted)] mt-2">{project.description}</p>
+          <p className="text-[var(--color-text-secondary)] mt-3 text-sm leading-relaxed max-w-2xl">{project.description}</p>
         )}
         {uniqueHypotheses.length > 0 && (
-          <div className="relative inline-block">
+          <div className="relative inline-block mt-5">
             <button
               onClick={() => setShowChooser(!showChooser)}
               disabled={generatingPaper}
-              className="mt-4 btn text-accent-purple hover:bg-accent-purple/10 disabled:opacity-50"
+              className="btn text-[var(--color-text-secondary)] hover:text-[var(--color-text)] hover:bg-white/5 border border-[var(--color-border)] disabled:opacity-50"
             >
               {generatingPaper ? (
-                <FiRefreshCw className="w-4 h-4 animate-spin mr-1" />
+                <FiRefreshCw className="w-4 h-4 animate-spin mr-1.5" />
               ) : (
-                <FiFileText className="w-4 h-4 mr-1" />
+                <FiFileText className="w-4 h-4 mr-1.5" />
               )}
               {generatingPaper ? 'Generating Paper...' : 'Generate Research Paper'}
             </button>
 
             {showChooser && !generatingPaper && (
               <div className="absolute z-50 mt-2 w-96 max-h-80 overflow-y-auto glass-card p-0">
-                <div className="p-3 border-b border-[var(--color-border)] flex items-center justify-between">
-                  <span className="text-sm font-medium text-white">Choose a hypothesis for the paper</span>
+                <div className="px-4 py-3 border-b border-[var(--color-border)] flex items-center justify-between">
+                  <span className="text-sm font-medium text-white">Choose a hypothesis</span>
                   <button onClick={() => setShowChooser(false)} className="p-1 rounded hover:bg-white/5 text-[var(--color-text-muted)]">
                     <FiX className="w-3.5 h-3.5" />
                   </button>
                 </div>
-                <div className="p-1">
+                <div className="p-1.5">
                   {uniqueHypotheses.map((h, idx) => (
                     <button
                       key={h.id}
@@ -699,12 +927,8 @@ export default function ProjectDetail() {
                       <div className="flex items-center gap-2">
                         <span className="text-[var(--color-text-muted)] font-mono text-xs shrink-0">#{idx + 1}</span>
                         <span className="text-white text-sm font-medium truncate flex-1">{h.title}</span>
-                        <span className={clsx(
-                          'text-xs font-bold shrink-0',
-                          h.confidence >= 0.7 ? 'text-accent-green' :
-                          h.confidence >= 0.5 ? 'text-accent-yellow' : 'text-accent-orange'
-                        )}>
-                          {(h.confidence * 100).toFixed(1)}%
+                        <span className="text-xs text-[var(--color-text-secondary)] shrink-0">
+                          {(safeConf(h.confidence) * 100).toFixed(0)}%
                         </span>
                       </div>
                       {h.description && (
@@ -719,29 +943,31 @@ export default function ProjectDetail() {
         )}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-2 space-y-6">
-          <div className="glass-card">
-            <h2 className="text-lg font-semibold text-white mb-4">Details</h2>
-            <dl className="space-y-3">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
+        <div className="lg:col-span-2 space-y-8">
+          {/* Details */}
+          <div className="glass-card p-6">
+            <h2 className="text-base font-semibold text-white mb-5">Details</h2>
+            <dl className="space-y-4">
               {project.disease_focus && (
                 <div>
-                  <dt className="text-[var(--color-text-muted)] text-sm">Disease Focus</dt>
-                  <dd className="text-white">{project.disease_focus}</dd>
+                  <dt className="text-[var(--color-text-muted)] text-xs uppercase tracking-wider mb-1">Disease Focus</dt>
+                  <dd className="text-white text-sm">{project.disease_focus}</dd>
                 </div>
               )}
               {project.research_question && (
                 <div>
-                  <dt className="text-[var(--color-text-muted)] text-sm">Research Question</dt>
-                  <dd className="text-white">{project.research_question}</dd>
+                  <dt className="text-[var(--color-text-muted)] text-xs uppercase tracking-wider mb-1">Research Question</dt>
+                  <dd className="text-white text-sm">{project.research_question}</dd>
                 </div>
               )}
             </dl>
           </div>
 
-          <div className="glass-card">
-            <h2 className="text-lg font-semibold text-white mb-4 flex items-center">
-              <FiActivity className="w-5 h-5 mr-2 text-accent-blue" />
+          {/* Hypotheses */}
+          <div className="glass-card p-6">
+            <h2 className="text-base font-semibold text-white mb-5 flex items-center">
+              <FiActivity className="w-4 h-4 mr-2 text-[var(--color-text-muted)]" />
               Hypotheses ({uniqueHypotheses.length})
             </h2>
 
@@ -750,46 +976,42 @@ export default function ProjectDetail() {
                 {uniqueHypotheses.map((h, idx) => (
                   <div
                     key={h.id}
-                    className="border rounded-lg transition-colors border-[var(--color-border)] hover:border-white/10"
+                    className="border rounded-lg transition-colors border-[var(--color-border)] hover:border-[var(--color-border-strong)]"
                   >
                     <button
                       onClick={() => openHypothesisViewer(h)}
-                      className="w-full text-left p-4"
+                      className="w-full text-left px-5 py-4"
                     >
-                      <div className="flex items-start justify-between">
-                        <div className="flex items-center space-x-2 flex-1 min-w-0">
-                          <span className="text-[var(--color-text-muted)] font-mono text-sm shrink-0">#{idx + 1}</span>
-                          <h3 className="font-medium text-white truncate">{h.title}</h3>
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          <span className="text-[var(--color-text-muted)] font-mono text-xs shrink-0">#{idx + 1}</span>
+                          <h3 className="font-medium text-white text-sm truncate">{h.title}</h3>
                         </div>
-                        <div className="flex items-center space-x-2 shrink-0 ml-2">
-                          <span className={clsx(
-                            'text-sm font-bold',
-                            h.confidence >= 0.7 ? 'text-accent-green' :
-                            h.confidence >= 0.5 ? 'text-accent-yellow' : 'text-accent-orange'
-                          )}>
-                            {(h.confidence * 100).toFixed(1)}%
+                        <div className="flex items-center gap-3 shrink-0">
+                          <span className="text-sm text-[var(--color-text-secondary)]">
+                            {(safeConf(h.confidence) * 100).toFixed(0)}%
                           </span>
                           <FiChevronRight className="w-4 h-4 text-[var(--color-text-muted)]" />
                         </div>
                       </div>
                       {h.description && (
-                        <p className="text-[var(--color-text-muted)] text-sm mt-1 line-clamp-1 ml-8">{h.description}</p>
+                        <p className="text-[var(--color-text-muted)] text-xs mt-2 line-clamp-1 ml-8">{h.description}</p>
                       )}
                     </button>
                   </div>
                 ))}
               </div>
             ) : (
-              <p className="text-[var(--color-text-muted)]">
-                No hypotheses stored in this project yet. Run a discovery from the Agents page
-                and save results to populate this project.
+              <p className="text-[var(--color-text-muted)] text-sm">
+                No hypotheses yet. Run a discovery from the Agents page to populate this project.
               </p>
             )}
           </div>
 
-          <div className="glass-card">
-            <h2 className="text-lg font-semibold text-white mb-4 flex items-center">
-              <FiBook className="w-5 h-5 mr-2 text-accent-purple" />
+          {/* Research Papers */}
+          <div className="glass-card p-6">
+            <h2 className="text-base font-semibold text-white mb-5 flex items-center">
+              <FiBook className="w-4 h-4 mr-2 text-[var(--color-text-muted)]" />
               Research Papers ({projectPapers.length})
             </h2>
 
@@ -800,9 +1022,8 @@ export default function ProjectDetail() {
                   return (
                     <div
                       key={paper.id}
-                      className="flex items-center justify-between p-3 border border-[var(--color-border)] rounded-lg hover:border-white/10 transition-colors cursor-pointer"
+                      className="flex items-center justify-between px-4 py-3 border border-[var(--color-border)] rounded-lg hover:border-[var(--color-border-strong)] transition-colors cursor-pointer"
                       onClick={async () => {
-                        // Open the already-generated research paper
                         const h = hyp || {
                           id: paper.hypothesis_id,
                           title: paper.hypothesis_title,
@@ -820,16 +1041,13 @@ export default function ProjectDetail() {
                         setGeneratingPaper(false)
                         setPdfBlobUrl(null)
 
-                        // Use the paper's stored HTML
                         const storedHtml = paper.paper_html
-
                         if (storedHtml && storedHtml.length > 100) {
                           setPaperHtml(storedHtml)
                           setViewMode('hypothesis_paper')
                           return
                         }
 
-                        // Try fetching from Lambda cache
                         try {
                           const statusRes = await fetch(`${API_BASE}/orchestrator/paper-status`)
                           if (statusRes.ok) {
@@ -844,40 +1062,32 @@ export default function ProjectDetail() {
                           }
                         } catch { /* Lambda unavailable */ }
 
-                        // No cached paper found — show paper view with a "not cached" message
-                        // so user can regenerate explicitly
                         setPaperHtml(null)
                         setPaperError('This paper was generated in a previous session and the content was not cached. Click "Regenerate" below to generate it again.')
                         setViewMode('hypothesis_paper')
                       }}
                     >
                       <div className="flex items-center gap-3 min-w-0">
-                        <FiFileText className="w-4 h-4 text-accent-purple shrink-0" />
+                        <FiFileText className="w-4 h-4 text-[var(--color-text-muted)] shrink-0" />
                         <div className="min-w-0">
                           <p className="text-white text-sm font-medium truncate">{paper.hypothesis_title}</p>
-                          <p className="text-[var(--color-text-muted)] text-xs">
+                          <p className="text-[var(--color-text-muted)] text-xs mt-0.5">
                             {formatDate(paper.generated_at)} &middot; {paper.disease}
                           </p>
                         </div>
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
                         <button
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            if (hyp) generateHypothesisPaper(hyp)
-                          }}
+                          onClick={(e) => { e.stopPropagation(); if (hyp) generateHypothesisPaper(hyp) }}
                           disabled={generatingPaper}
-                          className="p-1.5 rounded hover:bg-white/5 text-[var(--color-text-muted)] hover:text-accent-purple transition-colors"
-                          title="Regenerate & view"
+                          className="p-1.5 rounded hover:bg-white/5 text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+                          title="Regenerate"
                         >
                           <FiRefreshCw className="w-3.5 h-3.5" />
                         </button>
                         <button
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setProjectPapers(prev => prev.filter(p => p.id !== paper.id))
-                          }}
-                          className="p-1.5 rounded hover:bg-white/5 text-[var(--color-text-muted)] hover:text-red-400 transition-colors"
+                          onClick={(e) => { e.stopPropagation(); setDeletePaperId(paper.id) }}
+                          className="p-1.5 rounded hover:bg-white/5 text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
                           title="Remove"
                         >
                           <FiTrash2 className="w-3.5 h-3.5" />
@@ -889,50 +1099,117 @@ export default function ProjectDetail() {
               </div>
             ) : (
               <p className="text-[var(--color-text-muted)] text-sm">
-                No research papers generated yet. Click &ldquo;Generate Research Paper&rdquo; above
-                and choose a hypothesis, or click a hypothesis to view it and generate from there.
+                No research papers generated yet. Click &ldquo;Generate Research Paper&rdquo; above to create one.
+              </p>
+            )}
+          </div>
+
+          {/* Documents */}
+          <div className="glass-card p-6">
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-base font-semibold text-white flex items-center">
+                <FiFile className="w-4 h-4 mr-2 text-[var(--color-text-muted)]" />
+                Documents ({projectDocs.length})
+              </h2>
+              <button
+                onClick={() => setShowDocUpload(true)}
+                className="btn text-[var(--color-text-secondary)] hover:text-[var(--color-text)] hover:bg-white/5 border border-[var(--color-border)] text-xs"
+              >
+                <FiUpload className="w-3.5 h-3.5 mr-1.5" />
+                Upload Document
+              </button>
+            </div>
+
+            {projectDocs.length > 0 ? (
+              <div className="space-y-2">
+                {projectDocs.map(doc => (
+                  <div
+                    key={doc.id}
+                    className="flex items-center justify-between px-4 py-3 border border-[var(--color-border)] rounded-lg hover:border-[var(--color-border-strong)] transition-colors cursor-pointer"
+                    onClick={() => { setViewingDoc(doc); setViewMode('document_viewer') }}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <FiFile className="w-4 h-4 text-[var(--color-text-muted)] shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-white text-sm font-medium truncate">{doc.title}</p>
+                        <p className="text-[var(--color-text-muted)] text-xs mt-0.5">
+                          {doc.doc_type} &middot; {formatDate(doc.date)} &middot; {(doc.file_size / 1024).toFixed(0)} KB
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setViewingDoc(doc); setViewMode('document_viewer') }}
+                        className="p-1.5 rounded hover:bg-white/5 text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+                        title="View"
+                      >
+                        <FiEye className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setDeleteDocId(doc.id) }}
+                        className="p-1.5 rounded hover:bg-white/5 text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+                        title="Remove"
+                      >
+                        <FiTrash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-[var(--color-text-muted)] text-sm">
+                No documents uploaded yet. Upload protocols, reports, datasets, or any relevant files.
               </p>
             )}
           </div>
         </div>
 
-        <div className="space-y-6">
-          <div className="glass-card">
-            <h2 className="text-lg font-semibold text-white mb-4">Statistics</h2>
-            <dl className="space-y-3">
+        {/* Sidebar */}
+        <div className="space-y-8">
+          <div className="glass-card p-6">
+            <h2 className="text-base font-semibold text-white mb-5">Statistics</h2>
+            <dl className="space-y-4">
               <div className="flex justify-between">
-                <dt className="text-[var(--color-text-muted)]">Hypotheses</dt>
+                <dt className="text-[var(--color-text-muted)] text-sm">Hypotheses</dt>
                 <dd className="text-white font-medium">{uniqueHypotheses.length}</dd>
               </div>
               <div className="flex justify-between">
-                <dt className="text-[var(--color-text-muted)]">Research Papers</dt>
+                <dt className="text-[var(--color-text-muted)] text-sm">Research Papers</dt>
                 <dd className="text-white font-medium">{projectPapers.length}</dd>
               </div>
               <div className="flex justify-between">
-                <dt className="text-[var(--color-text-muted)]">Status</dt>
+                <dt className="text-[var(--color-text-muted)] text-sm">Documents</dt>
+                <dd className="text-white font-medium">{projectDocs.length}</dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-[var(--color-text-muted)] text-sm">Evidence</dt>
+                <dd className="text-white font-medium">{(project.evidence_count || 0) + projectDocs.length}</dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-[var(--color-text-muted)] text-sm">Status</dt>
                 <dd className="text-white font-medium capitalize">{project.status || 'active'}</dd>
               </div>
             </dl>
           </div>
 
           {uniqueHypotheses.length > 0 && (
-            <div className="glass-card">
-              <h2 className="text-lg font-semibold text-white mb-4">Confidence Distribution</h2>
-              <div className="space-y-2">
+            <div className="glass-card p-6">
+              <h2 className="text-base font-semibold text-white mb-5">Confidence Distribution</h2>
+              <div className="space-y-3">
                 {[
-                  { label: 'High (>=70%)', count: highConf, color: 'bg-accent-green' },
-                  { label: 'Medium (50-70%)', count: medConf, color: 'bg-accent-yellow' },
-                  { label: 'Low (<50%)', count: lowConf, color: 'bg-accent-orange' },
-                ].map(({ label, count, color }) => {
+                  { label: 'High (\u226570%)', count: highConf },
+                  { label: 'Medium (50\u201370%)', count: medConf },
+                  { label: 'Low (<50%)', count: lowConf },
+                ].map(({ label, count }) => {
                   const pct = uniqueHypotheses.length > 0 ? (count / uniqueHypotheses.length) * 100 : 0
                   return (
                     <div key={label}>
-                      <div className="flex justify-between text-sm mb-1">
+                      <div className="flex justify-between text-sm mb-1.5">
                         <span className="text-[var(--color-text-muted)]">{label}</span>
                         <span className="text-white">{count}</span>
                       </div>
-                      <div className="h-2 bg-white/5 rounded-full">
-                        <div className={`h-full ${color} rounded-full`} style={{ width: `${pct}%` }} />
+                      <div className="h-1.5 bg-white/5 rounded-full">
+                        <div className="h-full bg-white/20 rounded-full transition-all" style={{ width: `${pct}%` }} />
                       </div>
                     </div>
                   )
@@ -942,11 +1219,11 @@ export default function ProjectDetail() {
           )}
 
           {project.tags && project.tags.length > 0 && (
-            <div className="glass-card">
-              <h2 className="text-lg font-semibold text-white mb-4">Tags</h2>
+            <div className="glass-card p-6">
+              <h2 className="text-base font-semibold text-white mb-5">Tags</h2>
               <div className="flex flex-wrap gap-2">
                 {project.tags.map((tag: string) => (
-                  <span key={tag} className="text-xs px-2 py-1 rounded bg-white/5 text-[var(--color-text-secondary)]">
+                  <span key={tag} className="text-xs px-2.5 py-1 rounded bg-white/5 text-[var(--color-text-secondary)] border border-[var(--color-border)]">
                     {tag}
                   </span>
                 ))}
@@ -955,6 +1232,180 @@ export default function ProjectDetail() {
           )}
         </div>
       </div>
+
+      {/* Document Upload Modal */}
+      {showDocUpload && (
+        <>
+          <div className="fixed inset-0 bg-black/50 z-40" onClick={() => setShowDocUpload(false)} />
+          <div className="fixed inset-0 flex items-center justify-center z-50 p-4">
+            <div className="w-full max-w-lg glass-card p-0" style={{ background: 'var(--color-surface-solid)' }}>
+              <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--color-border)]">
+                <h3 className="text-base font-semibold text-white">Upload Document</h3>
+                <button onClick={() => setShowDocUpload(false)} className="p-1 rounded hover:bg-white/5 text-[var(--color-text-muted)]">
+                  <FiX className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="p-6 space-y-4">
+                {/* File drop zone */}
+                <div
+                  onClick={() => docInputRef.current?.click()}
+                  className="border-2 border-dashed border-[var(--color-border)] rounded-lg p-6 text-center cursor-pointer hover:border-[var(--color-border-strong)] transition-colors"
+                >
+                  <input
+                    ref={docInputRef}
+                    type="file"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0]
+                      if (f) {
+                        setDocFile(f)
+                        if (!docForm.title) setDocForm(prev => ({ ...prev, title: f.name.replace(/\.[^.]+$/, '') }))
+                      }
+                    }}
+                  />
+                  {docFile ? (
+                    <div className="flex items-center justify-center gap-2">
+                      <FiFile className="w-5 h-5 text-[var(--color-text-secondary)]" />
+                      <span className="text-sm text-white">{docFile.name}</span>
+                      <span className="text-xs text-[var(--color-text-muted)]">({(docFile.size / 1024).toFixed(0)} KB)</span>
+                    </div>
+                  ) : (
+                    <>
+                      <FiUpload className="w-8 h-8 text-[var(--color-text-muted)] mx-auto mb-2" />
+                      <p className="text-sm text-[var(--color-text-muted)]">Click to select a file</p>
+                      <p className="text-xs text-[var(--color-text-muted)] mt-1">PDF, DOC, images, spreadsheets, etc.</p>
+                    </>
+                  )}
+                </div>
+
+                {/* Title */}
+                <div>
+                  <label className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-1.5 block">Title *</label>
+                  <input
+                    value={docForm.title}
+                    onChange={e => setDocForm(prev => ({ ...prev, title: e.target.value }))}
+                    className="w-full px-3 py-2 text-sm rounded-lg bg-white/5 border border-[var(--color-border)] text-white placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-border-strong)]"
+                    placeholder="Document title"
+                  />
+                </div>
+
+                {/* Type + Date row */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-1.5 block">Type</label>
+                    <select
+                      value={docForm.doc_type}
+                      onChange={e => setDocForm(prev => ({ ...prev, doc_type: e.target.value }))}
+                      className="w-full px-3 py-2 text-sm rounded-lg bg-white/5 border border-[var(--color-border)] text-white focus:outline-none focus:border-[var(--color-border-strong)]"
+                    >
+                      {DOC_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-1.5 block">Date</label>
+                    <input
+                      type="date"
+                      value={docForm.date}
+                      onChange={e => setDocForm(prev => ({ ...prev, date: e.target.value }))}
+                      className="w-full px-3 py-2 text-sm rounded-lg bg-white/5 border border-[var(--color-border)] text-white focus:outline-none focus:border-[var(--color-border-strong)]"
+                    />
+                  </div>
+                </div>
+
+                {/* Authors */}
+                <div>
+                  <label className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-1.5 block">Authors</label>
+                  <input
+                    value={docForm.authors}
+                    onChange={e => setDocForm(prev => ({ ...prev, authors: e.target.value }))}
+                    className="w-full px-3 py-2 text-sm rounded-lg bg-white/5 border border-[var(--color-border)] text-white placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-border-strong)]"
+                    placeholder="Author names"
+                  />
+                </div>
+
+                {/* Description */}
+                <div>
+                  <label className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-1.5 block">Description</label>
+                  <textarea
+                    value={docForm.description}
+                    onChange={e => setDocForm(prev => ({ ...prev, description: e.target.value }))}
+                    rows={2}
+                    className="w-full px-3 py-2 text-sm rounded-lg bg-white/5 border border-[var(--color-border)] text-white placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-border-strong)] resize-none"
+                    placeholder="Brief description of this document"
+                  />
+                </div>
+
+                {/* Tags */}
+                <div>
+                  <label className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-1.5 block">Tags</label>
+                  <input
+                    value={docForm.tags}
+                    onChange={e => setDocForm(prev => ({ ...prev, tags: e.target.value }))}
+                    className="w-full px-3 py-2 text-sm rounded-lg bg-white/5 border border-[var(--color-border)] text-white placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-border-strong)]"
+                    placeholder="Comma-separated tags"
+                  />
+                </div>
+
+                {/* Knowledge Base */}
+                <div>
+                  <label className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-2 block">Knowledge Base</label>
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setDocForm(prev => ({ ...prev, knowledge_base: 'private' }))}
+                      className={`flex-1 p-3 rounded-lg border text-left transition-colors ${docForm.knowledge_base === 'private' ? 'border-[var(--color-border-strong)] bg-white/5' : 'border-[var(--color-border)] hover:border-[var(--color-border-strong)]'}`}
+                    >
+                      <div className="text-sm text-white font-medium">Private</div>
+                      <div className="text-xs text-[var(--color-text-muted)] mt-0.5">Only you and your AI can access this document</div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDocForm(prev => ({ ...prev, knowledge_base: 'common' }))}
+                      className={`flex-1 p-3 rounded-lg border text-left transition-colors ${docForm.knowledge_base === 'common' ? 'border-[var(--color-border-strong)] bg-white/5' : 'border-[var(--color-border)] hover:border-[var(--color-border-strong)]'}`}
+                    >
+                      <div className="text-sm text-white font-medium">Common</div>
+                      <div className="text-xs text-[var(--color-text-muted)] mt-0.5">Shared with all users. May earn royalties if used in others' discoveries</div>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 px-6 py-4 border-t border-[var(--color-border)]">
+                <button
+                  onClick={() => setShowDocUpload(false)}
+                  className="px-4 py-2 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] rounded-lg hover:bg-white/5 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDocUpload}
+                  disabled={!docFile || !docForm.title.trim()}
+                  className="px-4 py-2 text-sm text-white bg-white/10 hover:bg-white/15 rounded-lg border border-[var(--color-border)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                >
+                  Upload
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {deletePaperId && (
+        <ConfirmDeleteDialog
+          title="Delete Research Paper?"
+          message="This will permanently delete this generated research paper. This action cannot be undone."
+          onConfirm={confirmDeletePaper}
+          onCancel={() => setDeletePaperId(null)}
+        />
+      )}
+      {deleteDocId && (
+        <ConfirmDeleteDialog
+          title="Delete Document?"
+          message="This will permanently delete this document. This action cannot be undone."
+          onConfirm={confirmDeleteDoc}
+          onCancel={() => setDeleteDocId(null)}
+        />
+      )}
     </div>
   )
 }

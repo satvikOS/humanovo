@@ -1221,7 +1221,7 @@ export default function HumanAnatomy() {
               className={clsx(
                 'px-3 py-1 text-xs rounded transition-colors',
                 sex === 'male'
-                  ? 'bg-blue-500/20 text-blue-400'
+                  ? 'bg-white/10 text-[var(--color-text-secondary)]'
                   : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
               )}
             >
@@ -1232,7 +1232,7 @@ export default function HumanAnatomy() {
               className={clsx(
                 'px-3 py-1 text-xs rounded transition-colors',
                 sex === 'female'
-                  ? 'bg-pink-500/20 text-pink-400'
+                  ? 'bg-white/10 text-[var(--color-text-secondary)]'
                   : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
               )}
             >
@@ -1314,7 +1314,7 @@ export default function HumanAnatomy() {
                   />
                   <span className="flex-1 text-left font-medium">{layer.name}</span>
                   {visibleSystems.has(layer.id) ? (
-                    <FiEye className="w-3.5 h-3.5 text-green-400" />
+                    <FiEye className="w-3.5 h-3.5 text-[var(--color-text-secondary)]" />
                   ) : (
                     <FiEyeOff className="w-3.5 h-3.5" />
                   )}

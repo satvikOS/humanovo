@@ -88,6 +88,9 @@ export default function DiscoveryRunner() {
 
   const startDiscovery = async () => {
     if (!projectId || !disease.trim()) return
+    // Include uploaded documents for AI context
+    const allDocs = JSON.parse(localStorage.getItem('humanovo-project-documents') || '[]')
+    const projectDocIds = allDocs.filter((d: any) => d.project_id === projectId).map((d: any) => d.id)
     const body = {
       disease,
       discovery_type: discoveryType,
@@ -98,6 +101,8 @@ export default function DiscoveryRunner() {
       verbosity,
       grant_type: outputFormat === 'grant_sections' ? grantType || null : null,
       citation_style: citationStyle,
+      knowledge_base_ids: projectDocIds.length > 0 ? projectDocIds : undefined,
+      document_context: projectDocIds.length > 0 ? true : undefined,
     }
 
     try {
@@ -334,7 +339,7 @@ export default function DiscoveryRunner() {
           <span className="font-mono" style={{ color: 'var(--color-text-muted)' }}>
             {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}
           </span>
-          <span className="font-mono font-medium" style={{ color: 'var(--color-accent-blue)' }}>{costDollars(totalCost)}</span>
+          <span className="font-mono font-medium" style={{ color: 'var(--color-text-secondary)' }}>{costDollars(totalCost)}</span>
           {phase === 'running' && (
             <button onClick={cancelRun} className="px-3 py-1 rounded text-xs font-medium"
               style={{ background: '#ef444420', color: '#ef4444' }}>Cancel</button>

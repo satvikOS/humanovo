@@ -48,10 +48,10 @@ function HypothesisCard({ hypothesis }: { hypothesis: Hypothesis }) {
 
   const statusConfig = {
     draft: { icon: FiClock, color: 'text-secondary-400', bg: 'bg-secondary-600/20' },
-    generating: { icon: FiClock, color: 'text-yellow-400', bg: 'bg-yellow-600/20' },
-    active: { icon: FiZap, color: 'text-blue-400', bg: 'bg-blue-600/20' },
-    validated: { icon: FiCheck, color: 'text-green-400', bg: 'bg-green-600/20' },
-    rejected: { icon: FiAlertTriangle, color: 'text-red-400', bg: 'bg-red-600/20' },
+    generating: { icon: FiClock, color: 'text-[var(--color-text-muted)]', bg: 'bg-yellow-600/20' },
+    active: { icon: FiZap, color: 'text-[var(--color-text-secondary)]', bg: 'bg-blue-600/20' },
+    validated: { icon: FiCheck, color: 'text-[var(--color-text-secondary)]', bg: 'bg-green-600/20' },
+    rejected: { icon: FiAlertTriangle, color: 'text-[var(--color-text-muted)]', bg: 'bg-red-600/20' },
     archived: { icon: FiClock, color: 'text-secondary-400', bg: 'bg-secondary-600/20' },
   }
 
@@ -105,7 +105,7 @@ function HypothesisCard({ hypothesis }: { hypothesis: Hypothesis }) {
             {hypothesis.status}
           </span>
           <span className="text-secondary-400 text-sm">
-            {hypothesis.confidence_score != null && !isNaN(hypothesis.confidence_score)
+            {Number.isFinite(hypothesis.confidence_score) && hypothesis.confidence_score != null
               ? `${Math.round(hypothesis.confidence_score * 100)}% confidence`
               : '-- confidence'}
           </span>
@@ -114,7 +114,7 @@ function HypothesisCard({ hypothesis }: { hypothesis: Hypothesis }) {
           <button
             onClick={handleExportPdf}
             disabled={exporting}
-            className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-purple-500/20 text-purple-400 hover:bg-purple-500/30 disabled:opacity-50 transition-colors"
+            className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-white/5 text-[var(--color-text-secondary)] hover:bg-white/10 disabled:opacity-50 transition-colors"
             title="Export as PDF"
           >
             {exporting ? (
@@ -131,10 +131,10 @@ function HypothesisCard({ hypothesis }: { hypothesis: Hypothesis }) {
       </div>
 
       <div className="mt-3 flex items-center space-x-4 text-sm">
-        <span className="text-green-400">
+        <span className="text-[var(--color-text-secondary)]">
           {hypothesis.supporting_count} supporting
         </span>
-        <span className="text-red-400">
+        <span className="text-[var(--color-text-muted)]">
           {hypothesis.contradiction_count} contradicting
         </span>
       </div>
@@ -165,7 +165,7 @@ export default function Hypotheses() {
       </div>
 
       {isError && (
-        <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-400">
+        <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-[var(--color-text-muted)]">
           Backend is offline. Run a discovery from the Agents page first.
         </div>
       )}

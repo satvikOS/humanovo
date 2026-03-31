@@ -4,6 +4,8 @@ import {
   FiPlus, FiTrash2,
 } from 'react-icons/fi'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
+import { logActivity } from '../utils/persistence'
 
 interface Trial {
   id: string; protocol_number: string; title: string; phase: string; status: string
@@ -25,6 +27,7 @@ export default function ClinicalTrials() {
   const [viewTab, setViewTab] = useState<ViewTab>('overview')
   const [showAdd, setShowAdd] = useState(false)
   const [form, setForm] = useState({ protocol_number: '', title: '', phase: 'Phase I', pi: '', target_enrollment: 0 })
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
   const load = async () => { try { const r = await fetch(API); if (r.ok) setTrials((await r.json()).items || []) } catch {} }
   useEffect(() => { load() }, [])
@@ -39,13 +42,21 @@ export default function ClinicalTrials() {
   const createTrial = async () => {
     if (!form.title.trim()) return
     const r = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) })
-    if (r.ok) { load(); setShowAdd(false); setForm({ protocol_number: '', title: '', phase: 'Phase I', pi: '', target_enrollment: 0 }) }
+    if (r.ok) { load(); setShowAdd(false); logActivity({ type: 'discovery', action: 'created', title: `Created trial: ${form.title}` }); setForm({ protocol_number: '', title: '', phase: 'Phase I', pi: '', target_enrollment: 0 }) }
   }
 
-  const deleteTrial = async (id: string) => {
-    await fetch(`${API}/${id}`, { method: 'DELETE' })
-    if (selected?.id === id) setSelected(null)
+  const deleteTrial = (id: string) => {
+    setDeleteConfirmId(id)
+  }
+
+  const confirmDelete = async () => {
+    if (!deleteConfirmId) return
+    const deletedTrial = trials.find(t => t.id === deleteConfirmId)
+    await fetch(`${API}/${deleteConfirmId}`, { method: 'DELETE' })
+    if (selected?.id === deleteConfirmId) setSelected(null)
     load()
+    setDeleteConfirmId(null)
+    logActivity({ type: 'discovery', action: 'deleted', title: `Deleted trial: ${deletedTrial?.title || deleteConfirmId}` })
   }
 
   const enrollPct = selected ? Math.round((selected.current_enrollment / Math.max(selected.target_enrollment, 1)) * 100) : 0
@@ -56,7 +67,7 @@ export default function ClinicalTrials() {
         <div className="flex items-center justify-between mb-2">
           <div><h1 className="text-2xl font-semibold tracking-tight">Clinical Trial Management</h1>
             <p className="text-sm text-[var(--color-text-muted)] mt-1">Protocol registry, enrollment, visits, and budgets</p></div>
-          <button onClick={() => setShowAdd(!showAdd)} className="btn text-sm" style={{ color: 'var(--color-accent-blue)' }}><FiPlus className="w-4 h-4" /> New Trial</button>
+          <button onClick={() => setShowAdd(!showAdd)} className="btn text-sm" style={{ color: 'var(--color-text-secondary)' }}><FiPlus className="w-4 h-4" /> New Trial</button>
         </div>
       </div>
 
@@ -151,7 +162,7 @@ export default function ClinicalTrials() {
                         <tr key={s.id} className="border-b border-[var(--color-border)]/30">
                           <td className="p-3 font-mono">{s.subject_number}</td><td className="p-3">{s.age}</td><td className="p-3">{s.sex}</td>
                           <td className="p-3">{s.arm}</td>
-                          <td className="p-3"><span className={`px-1.5 py-0.5 rounded-full text-xxs ${s.status === 'active' ? 'bg-green-500/10 text-green-400' : s.status === 'withdrawn' ? 'bg-red-500/10 text-red-400' : 'bg-[var(--glass-bg)]'}`}>{s.status}</span></td>
+                          <td className="p-3"><span className={`px-1.5 py-0.5 rounded-full text-xxs ${s.status === 'active' ? 'bg-[var(--glass-bg)] text-[var(--color-text-secondary)]' : s.status === 'withdrawn' ? 'bg-[var(--glass-bg)] text-[var(--color-text-muted)]' : 'bg-[var(--glass-bg)]'}`}>{s.status}</span></td>
                           <td className="p-3 text-[var(--color-text-muted)]">{s.enrolled_date}</td>
                         </tr>
                       ))}
@@ -168,7 +179,7 @@ export default function ClinicalTrials() {
                         <FiFileText className="w-4 h-4 text-[var(--color-text-muted)]" />
                         <div><div className="text-xs font-medium">{d.name}</div><div className="text-xxs text-[var(--color-text-muted)]">{d.document_type} | v{d.version}</div></div>
                       </div>
-                      <span className={`text-xxs px-2 py-0.5 rounded-full ${d.status === 'approved' ? 'bg-green-500/10 text-green-400' : 'bg-yellow-500/10 text-yellow-400'}`}>{d.status}</span>
+                      <span className={`text-xxs px-2 py-0.5 rounded-full ${d.status === 'approved' ? 'bg-[var(--glass-bg)] text-[var(--color-text-secondary)]' : 'bg-[var(--glass-bg)] text-[var(--color-text-muted)]'}`}>{d.status}</span>
                     </div>
                   ))}
                 </div>
@@ -177,8 +188,8 @@ export default function ClinicalTrials() {
               {viewTab === 'budget' && selected.budget && (
                 <div className="space-y-4">
                   <div className="grid grid-cols-2 gap-3">
-                    <div className="glass-card p-4 text-center"><div className="text-2xl font-semibold" style={{ color: 'var(--color-accent-blue)' }}>${(selected.budget.total / 1000000).toFixed(1)}M</div><div className="text-xs text-[var(--color-text-muted)]">Total Budget</div></div>
-                    <div className="glass-card p-4 text-center"><div className="text-2xl font-semibold" style={{ color: 'var(--color-accent-purple)' }}>${(selected.budget.spent / 1000000).toFixed(1)}M</div><div className="text-xs text-[var(--color-text-muted)]">Spent ({Math.round(selected.budget.spent / selected.budget.total * 100)}%)</div></div>
+                    <div className="glass-card p-4 text-center"><div className="text-2xl font-semibold" style={{ color: 'var(--color-text-secondary)' }}>${(selected.budget.total / 1000000).toFixed(1)}M</div><div className="text-xs text-[var(--color-text-muted)]">Total Budget</div></div>
+                    <div className="glass-card p-4 text-center"><div className="text-2xl font-semibold" style={{ color: 'var(--color-text-secondary)' }}>${(selected.budget.spent / 1000000).toFixed(1)}M</div><div className="text-xs text-[var(--color-text-muted)]">Spent ({Math.round(selected.budget.spent / selected.budget.total * 100)}%)</div></div>
                   </div>
                   {selected.budget.categories && (
                     <div className="glass-card p-4">
@@ -201,6 +212,13 @@ export default function ClinicalTrials() {
           )}
         </div>
       </div>
+      <ConfirmDeleteDialog
+        open={deleteConfirmId !== null}
+        entityName="Clinical Trial"
+        message="This will permanently delete this clinical trial record. This action cannot be undone."
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteConfirmId(null)}
+      />
     </div>
   )
 }

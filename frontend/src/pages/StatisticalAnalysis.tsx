@@ -256,19 +256,100 @@ export function _computeSurvival(times: number[], events: number[], groups: numb
   return { curves, n_total: data.length, n_events: data.filter(d => d.event === 1).length }
 }
 
-export function _computeSampleSize(effectSize: number, alpha: number, power: number, testType: string) {
-  const zAlpha = 1.96, zBeta = 0.842
-  let n: number
+export function _computeSampleSize(
+  effectSize: number, alpha: number, power: number, testType: string,
+  options?: { df?: number; numGroups?: number; tableRows?: number; tableCols?: number }
+) {
+  if (effectSize <= 0) return { test_type: testType, effect_size: effectSize, alpha, power, required_n: 0, total_n: 0, n_per_group: 0, warnings: ['Effect size must be greater than 0.'] }
+  if (alpha <= 0 || alpha >= 1) return { test_type: testType, effect_size: effectSize, alpha, power, required_n: 0, total_n: 0, n_per_group: 0, warnings: ['Alpha must be between 0 and 1 (exclusive).'] }
+  if (power <= 0 || power >= 1) return { test_type: testType, effect_size: effectSize, alpha, power, required_n: 0, total_n: 0, n_per_group: 0, warnings: ['Power must be between 0 and 1 (exclusive).'] }
+
+  // Z-values for alpha (two-tailed) and beta
+  const zAlpha = alpha === 0.05 ? 1.96 : (alpha === 0.01 ? 2.576 : (alpha === 0.10 ? 1.645 : -Math.sqrt(2) * erfcinv(2 * (alpha / 2))))
+  const zBeta = power === 0.8 ? 0.842 : (power === 0.9 ? 1.282 : (power === 0.95 ? 1.645 : -Math.sqrt(2) * erfcinv(2 * power)))
+
+  const warnings: string[] = []
+  let n_per_group: number
+  let total_n: number
+  let effect_label = 'Cohen\'s d'
+
   if (testType === 'two_sample_t') {
-    n = Math.ceil(2 * ((zAlpha + zBeta) / effectSize) ** 2)
-  } else if (testType === 'paired_t') {
-    n = Math.ceil(((zAlpha + zBeta) / effectSize) ** 2)
-  } else if (testType === 'one_proportion') {
-    n = Math.ceil((zAlpha + zBeta) ** 2 * 0.25 / (effectSize ** 2))
+    // Cohen's d — two independent groups
+    n_per_group = Math.ceil(2 * ((zAlpha + zBeta) / effectSize) ** 2)
+    total_n = n_per_group * 2
+    if (effectSize > 2) warnings.push('Effect size > 2.0 is unusually large for Cohen\'s d. Verify your estimate.')
+  } else if (testType === 'one_sample_t' || testType === 'paired_t') {
+    // Cohen's d — single group or paired
+    n_per_group = Math.ceil(((zAlpha + zBeta) / effectSize) ** 2)
+    total_n = n_per_group
+    if (effectSize > 2) warnings.push('Effect size > 2.0 is unusually large for Cohen\'s d. Verify your estimate.')
+  } else if (testType === 'chi_square') {
+    // Cohen's w — chi-square requires degrees of freedom
+    effect_label = 'Cohen\'s w'
+    const rows = options?.tableRows || 2
+    const cols = options?.tableCols || 2
+    const df = (rows - 1) * (cols - 1)
+    // Chi-square sample size: N = ((z_alpha + z_beta)^2) / w^2 adjusted for df
+    // Using the non-central chi-square approximation: N ≈ (chi2_crit + z_beta * sqrt(2*df))^2 / w^2
+    // Simplified: N = (z_alpha_chi + z_beta)^2 / w^2 where z_alpha_chi accounts for df
+    // Standard formula: N = ((z_alpha + z_beta) / w)^2 for 1 df, scale for higher df
+    n_per_group = Math.ceil(((zAlpha + zBeta) / effectSize) ** 2 + df) // df correction
+    total_n = n_per_group
+    // Validate expected cell counts
+    const minExpected = total_n / (rows * cols)
+    if (minExpected < 5) {
+      const minN = Math.ceil(5 * rows * cols)
+      if (total_n < minN) {
+        total_n = minN
+        n_per_group = total_n
+        warnings.push(`Sample size increased to ${minN} to ensure minimum expected cell count ≥ 5 (${rows}×${cols} table).`)
+      }
+    }
+    if (effectSize < 0.1) warnings.push('Cohen\'s w < 0.1 is considered a very small effect. Large samples will be needed.')
+    if (effectSize > 0.5) warnings.push('Cohen\'s w > 0.5 is considered a large effect. Verify your estimate.')
+  } else if (testType === 'anova') {
+    // Cohen's f — ANOVA
+    effect_label = 'Cohen\'s f'
+    const k = options?.numGroups || 3
+    n_per_group = Math.ceil(((zAlpha + zBeta) / effectSize) ** 2 + 1)
+    total_n = n_per_group * k
+    if (effectSize > 0.8) warnings.push('Cohen\'s f > 0.8 is unusually large. Verify your estimate.')
   } else {
-    n = Math.ceil(2 * ((zAlpha + zBeta) / effectSize) ** 2)
+    n_per_group = Math.ceil(2 * ((zAlpha + zBeta) / effectSize) ** 2)
+    total_n = n_per_group * 2
   }
-  return { test_type: testType, effect_size: effectSize, alpha, power, required_n: n, total_n: testType.includes('two') ? n * 2 : n }
+
+  if (alpha > 0.10) warnings.push('Alpha > 0.10 is unconventional. Consider using 0.05 or 0.01.')
+  if (power < 0.7) warnings.push('Power < 0.70 increases risk of failing to detect a real effect.')
+  if (total_n < 10) warnings.push('Very small sample size. Results may be unreliable.')
+
+  return {
+    test_type: testType, effect_size: effectSize, effect_label, alpha, power,
+    required_n: n_per_group, n_per_group, total_n, warnings,
+    ...(testType === 'chi_square' ? { table_rows: options?.tableRows || 2, table_cols: options?.tableCols || 2, df: ((options?.tableRows || 2) - 1) * ((options?.tableCols || 2) - 1) } : {}),
+    ...(testType === 'anova' ? { num_groups: options?.numGroups || 3 } : {}),
+  }
+}
+
+/** Inverse complementary error function (rational approximation) */
+function erfcinv(p: number): number {
+  if (p <= 0) return Infinity
+  if (p >= 2) return -Infinity
+  if (p === 1) return 0
+  const pp = p < 1 ? p : 2 - p
+  const t = Math.sqrt(-2 * Math.log(pp / 2))
+  let x = -0.70711 * ((2.30753 + t * 0.27061) / (1 + t * (0.99229 + t * 0.04481)) - t)
+  for (let j = 0; j < 2; j++) {
+    const err = erfc(x) - pp
+    x += err / (1.12837916709551 * Math.exp(-x * x) - x * err)
+  }
+  return p < 1 ? x : -x
+}
+function erfc(x: number): number {
+  const t = 1 / (1 + 0.3275911 * Math.abs(x))
+  const poly = t * (0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429))))
+  const val = poly * Math.exp(-x * x)
+  return x >= 0 ? val : 2 - val
 }
 
 export default function StatisticalAnalysis() {
@@ -321,6 +402,9 @@ export default function StatisticalAnalysis() {
   const [ssAlpha, setSsAlpha] = useState(0.05)
   const [ssPower, setSsPower] = useState(0.8)
   const [ssTest, setSsTest] = useState('two_sample_t')
+  const [ssTableRows, setSsTableRows] = useState(2)
+  const [ssTableCols, setSsTableCols] = useState(2)
+  const [ssNumGroups, setSsNumGroups] = useState(3)
 
   const parseNums = (s: string): number[] => s.split(',').map(x => parseFloat(x.trim())).filter(x => !isNaN(x))
   const parseRows = (s: string): number[][] => s.split('\n').filter(l => l.trim()).map(l => parseNums(l))
@@ -376,7 +460,11 @@ export default function StatisticalAnalysis() {
           break
         case 'sample_size':
           endpoint = '/sample-size'
-          body = { effect_size: ssEffect, alpha: ssAlpha, power: ssPower, test_type: ssTest }
+          body = {
+            effect_size: ssEffect, alpha: ssAlpha, power: ssPower, test_type: ssTest,
+            ...(ssTest === 'chi_square' ? { table_rows: ssTableRows, table_cols: ssTableCols } : {}),
+            ...(ssTest === 'anova' ? { num_groups: ssNumGroups } : {}),
+          }
           break
       }
 
@@ -775,31 +863,59 @@ export default function StatisticalAnalysis() {
               <>
                 <div>
                   <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Test Type</label>
-                  <select value={ssTest} onChange={e => setSsTest(e.target.value)} className="input w-full text-xs">
+                  <select value={ssTest} onChange={e => { setSsTest(e.target.value); setSsEffect(e.target.value === 'chi_square' ? 0.3 : e.target.value === 'anova' ? 0.25 : 0.5) }} className="input w-full text-xs">
                     <option value="two_sample_t">Two-sample t-test</option>
                     <option value="one_sample_t">One-sample t-test</option>
+                    <option value="paired_t">Paired t-test</option>
                     <option value="chi_square">Chi-square test</option>
+                    <option value="anova">One-way ANOVA</option>
                   </select>
                 </div>
                 <div className="grid grid-cols-3 gap-2">
                   <div>
-                    <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Effect Size (d)</label>
-                    <input type="number" step="0.1" value={ssEffect} onChange={e => setSsEffect(parseFloat(e.target.value) || 0.5)} className="input w-full text-xs" />
+                    <label className="text-xs text-[var(--color-text-muted)] mb-1 block">
+                      Effect Size ({ssTest === 'chi_square' ? 'w' : ssTest === 'anova' ? 'f' : 'd'})
+                    </label>
+                    <input type="number" step="0.1" min="0.01" value={ssEffect} onChange={e => setSsEffect(parseFloat(e.target.value) || 0.5)} className="input w-full text-xs" />
+                    <span className="text-[9px] text-[var(--color-text-muted)] mt-0.5 block">
+                      {ssTest === 'chi_square' ? 'Small: 0.1 · Med: 0.3 · Large: 0.5' : ssTest === 'anova' ? 'Small: 0.1 · Med: 0.25 · Large: 0.4' : 'Small: 0.2 · Med: 0.5 · Large: 0.8'}
+                    </span>
                   </div>
                   <div>
                     <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Alpha (α)</label>
-                    <input type="number" step="0.01" value={ssAlpha} onChange={e => setSsAlpha(parseFloat(e.target.value) || 0.05)} className="input w-full text-xs" />
+                    <input type="number" step="0.01" min="0.001" max="0.5" value={ssAlpha} onChange={e => setSsAlpha(parseFloat(e.target.value) || 0.05)} className="input w-full text-xs" />
                   </div>
                   <div>
                     <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Power (1-β)</label>
-                    <input type="number" step="0.05" value={ssPower} onChange={e => setSsPower(parseFloat(e.target.value) || 0.8)} className="input w-full text-xs" />
+                    <input type="number" step="0.05" min="0.5" max="0.999" value={ssPower} onChange={e => setSsPower(parseFloat(e.target.value) || 0.8)} className="input w-full text-xs" />
                   </div>
                 </div>
+                {ssTest === 'chi_square' && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Table Rows</label>
+                      <input type="number" min="2" max="20" value={ssTableRows} onChange={e => setSsTableRows(Math.max(2, parseInt(e.target.value) || 2))} className="input w-full text-xs" />
+                    </div>
+                    <div>
+                      <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Table Columns</label>
+                      <input type="number" min="2" max="20" value={ssTableCols} onChange={e => setSsTableCols(Math.max(2, parseInt(e.target.value) || 2))} className="input w-full text-xs" />
+                    </div>
+                    <div className="col-span-2 text-[9px] text-[var(--color-text-muted)]">
+                      Contingency table: {ssTableRows}×{ssTableCols} = {ssTableRows * ssTableCols} cells · df = {(ssTableRows - 1) * (ssTableCols - 1)}
+                    </div>
+                  </div>
+                )}
+                {ssTest === 'anova' && (
+                  <div>
+                    <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Number of Groups (k)</label>
+                    <input type="number" min="2" max="20" value={ssNumGroups} onChange={e => setSsNumGroups(Math.max(2, parseInt(e.target.value) || 3))} className="input w-full text-xs" />
+                  </div>
+                )}
               </>
             )}
 
             <div className="flex gap-2 pt-2">
-              <button onClick={runAnalysis} disabled={loading} className="btn text-xs flex items-center gap-1.5" style={{ color: 'var(--color-accent-blue)' }}>
+              <button onClick={runAnalysis} disabled={loading} className="btn text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text-secondary)' }}>
                 <FiPlay className="w-3.5 h-3.5" /> {loading ? 'Running...' : 'Run Analysis'}
               </button>
               <input ref={fileInputRef} type="file" accept=".csv,.tsv,.txt" onChange={handleCSVUpload} className="hidden" />
@@ -843,10 +959,10 @@ export default function StatisticalAnalysis() {
                 {result.p_value !== undefined && (
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-[var(--color-text-muted)]">p = {typeof result.p_value === 'number' ? result.p_value.toFixed(4) : result.p_value}</span>
-                    <span className={`text-xxs px-2 py-0.5 rounded-full ${(result.significant_at_05 || result.significant || result.p_value < 0.05) ? 'bg-green-500/10 text-green-400' : 'bg-yellow-500/10 text-yellow-400'}`}>
+                    <span className={`text-xxs px-2 py-0.5 rounded-full ${(result.significant_at_05 || result.significant || result.p_value < 0.05) ? 'bg-[var(--glass-bg)] text-[var(--color-text-secondary)]' : 'bg-[var(--glass-bg)] text-[var(--color-text-muted)]'}`}>
                       {(result.significant_at_05 || result.significant || result.p_value < 0.05) ? 'p < 0.05' : 'p >= 0.05'}
                     </span>
-                    {(result.significant_at_01 || result.p_value < 0.01) && <span className="text-xxs px-2 py-0.5 rounded-full bg-green-500/10 text-green-400">p &lt; 0.01</span>}
+                    {(result.significant_at_01 || result.p_value < 0.01) && <span className="text-xxs px-2 py-0.5 rounded-full bg-[var(--glass-bg)] text-[var(--color-text-secondary)]">p &lt; 0.01</span>}
                   </div>
                 )}
 
@@ -1055,22 +1171,44 @@ export default function StatisticalAnalysis() {
                 {/* Sample size results - handle both formats */}
                 {result.total_n !== undefined && (
                   <div className="space-y-3">
-                    <div className="grid grid-cols-2 gap-3 text-xs">
+                    {/* Warnings */}
+                    {Array.isArray(result.warnings) && result.warnings.length > 0 && (
+                      <div className="p-2.5 rounded-lg bg-yellow-500/5 border border-yellow-500/20 text-xs space-y-1">
+                        {result.warnings.map((w: string, i: number) => (
+                          <p key={i} className="text-yellow-200/80">⚠ {w}</p>
+                        ))}
+                      </div>
+                    )}
+                    <div className={`grid gap-3 text-xs ${result.test_type === 'chi_square' ? 'grid-cols-1' : 'grid-cols-2'}`}>
                       <div className="p-3 rounded-lg bg-[var(--glass-bg)] border border-[var(--color-border)] text-center">
-                        <div className="text-2xl font-semibold" style={{ color: 'var(--color-accent-blue)' }}>{result.total_n}</div>
+                        <div className="text-2xl font-semibold" style={{ color: 'var(--color-text-secondary)' }}>{result.total_n}</div>
                         <div className="text-[var(--color-text-muted)] mt-1">Total N Required</div>
                       </div>
-                      <div className="p-3 rounded-lg bg-[var(--glass-bg)] border border-[var(--color-border)] text-center">
-                        <div className="text-2xl font-semibold" style={{ color: 'var(--color-accent-purple)' }}>{result.n_per_group || result.required_n || Math.ceil(result.total_n / 2)}</div>
-                        <div className="text-[var(--color-text-muted)] mt-1">Per Group</div>
-                      </div>
+                      {result.test_type !== 'chi_square' && (
+                        <div className="p-3 rounded-lg bg-[var(--glass-bg)] border border-[var(--color-border)] text-center">
+                          <div className="text-2xl font-semibold" style={{ color: 'var(--color-text-secondary)' }}>{result.n_per_group || result.required_n}</div>
+                          <div className="text-[var(--color-text-muted)] mt-1">
+                            {result.test_type === 'anova' ? `Per Group (${result.num_groups || '?'} groups)` : result.test_type === 'two_sample_t' ? 'Per Group (2 groups)' : 'Participants'}
+                          </div>
+                        </div>
+                      )}
                     </div>
                     {result.test_type && (
-                      <div className="p-2 rounded bg-[var(--glass-bg)] text-xs">
-                        <span className="text-[var(--color-text-muted)]">Test: </span>{result.test_type.replace(/_/g, ' ')}
-                        <span className="text-[var(--color-text-muted)] ml-3">Effect size: </span>{result.effect_size}
-                        <span className="text-[var(--color-text-muted)] ml-3">Alpha: </span>{result.alpha}
-                        <span className="text-[var(--color-text-muted)] ml-3">Power: </span>{result.power}
+                      <div className="p-2 rounded bg-[var(--glass-bg)] text-xs space-y-0.5">
+                        <div>
+                          <span className="text-[var(--color-text-muted)]">Test: </span>{result.test_type.replace(/_/g, ' ')}
+                          <span className="text-[var(--color-text-muted)] ml-3">{result.effect_label || 'Effect size'}: </span>{result.effect_size}
+                          {result.effect_interpretation && <span className="text-[var(--color-text-muted)]"> ({result.effect_interpretation})</span>}
+                        </div>
+                        <div>
+                          <span className="text-[var(--color-text-muted)]">α = </span>{result.alpha}
+                          <span className="text-[var(--color-text-muted)] ml-3">Power = </span>{result.power}
+                          {result.df !== undefined && <span className="text-[var(--color-text-muted)] ml-3">df = {result.df}</span>}
+                          {result.table_rows && <span className="text-[var(--color-text-muted)] ml-3">Table: {result.table_rows}×{result.table_cols}</span>}
+                        </div>
+                        {result.buffer_n && (
+                          <div><span className="text-[var(--color-text-muted)]">With 15% attrition buffer: </span>{result.buffer_n}</div>
+                        )}
                       </div>
                     )}
                     {Array.isArray(result.recommendations) && result.recommendations.map((r: string, i: number) => (

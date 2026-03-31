@@ -13,6 +13,7 @@ import {
   FiUser,
   FiX,
   FiEdit3,
+  FiEye,
   FiSave,
   FiTrash2,
   FiLink,
@@ -23,9 +24,13 @@ import {
   FiTag,
   FiGlobe,
   FiShare2,
+  FiDownload,
+  FiPrinter,
 } from 'react-icons/fi'
 import api from '../services/api'
 import type { Evidence as EvidenceType, Hypothesis, Entity } from '../services/api'
+import { logActivity, persistGet, persistSet } from '../utils/persistence'
+import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 
 const sourceTypeColors: Record<string, string> = {
   pubmed: 'var(--color-accent-blue)',
@@ -185,6 +190,12 @@ export default function Evidence() {
   const [saving, setSaving] = useState(false)
   const [graphStats, setGraphStats] = useState<{ total_entities: number; total_relations: number; entity_counts: Record<string, number>; relation_counts: Record<string, number> } | null>(null)
   const [linkedEntities, setLinkedEntities] = useState<Entity[]>([])
+  const [viewingDocOverlay, setViewingDocOverlay] = useState<{ id: string; title: string; mime_type: string; filename: string; description?: string; authors?: string; date?: string; doc_type?: string } | null>(null)
+  const [viewingDocBlobUrl, setViewingDocBlobUrl] = useState<string | null>(null)
+  const [viewingDocLoading, setViewingDocLoading] = useState(false)
+  const [editingDocId, setEditingDocId] = useState<string | null>(null)
+  const [editDocForm, setEditDocForm] = useState({ title: '', doc_type: '', authors: '', description: '', tags: '' })
+  const [deleteDocConfirmId, setDeleteDocConfirmId] = useState<string | null>(null)
   const pageSize = 30
 
   const fetchEvidence = useCallback(async () => {
@@ -215,6 +226,30 @@ export default function Evidence() {
   }, [searchQuery, filterType, page])
 
   useEffect(() => { fetchEvidence() }, [fetchEvidence])
+
+  // Merge project documents into evidence list
+  const allProjectDocs = persistGet<Array<{ id: string; project_id: string; title: string; doc_type: string; authors: string; date: string; description: string; tags: string[]; filename: string; file_size: number; mime_type: string; uploaded_at: string }>>('project-documents', [])
+  const docEvidence: EvidenceType[] = allProjectDocs.map(d => ({
+    id: `doc-ev-${d.id}`,
+    title: d.title,
+    abstract: d.description,
+    source_type: 'user_upload',
+    source_url: '',
+    authors: d.authors ? [d.authors] : [],
+    publication_date: d.date,
+    status: 'verified',
+    relevance_score: 1.0,
+    tags: [...d.tags, d.doc_type],
+    entities: [],
+    notes: '',
+    created_at: d.uploaded_at,
+    updated_at: d.uploaded_at,
+    citation_count: 0,
+    metadata: { filename: d.filename, file_size: d.file_size, mime_type: d.mime_type, project_id: d.project_id },
+  }))
+  const mergedEvidence = filterType === 'user_upload' || filterType === 'all'
+    ? [...docEvidence.filter(d => !searchQuery || d.title.toLowerCase().includes(searchQuery.toLowerCase())), ...evidence]
+    : evidence
 
   // Fetch knowledge base stats on mount
   useEffect(() => {
@@ -262,6 +297,7 @@ export default function Evidence() {
       const updated = await api.updateEvidence(selectedId, { [field]: value })
       setEvidence(prev => prev.map(e => e.id === selectedId ? { ...e, ...updated } : e))
       setEditField(null)
+      logActivity({ type: 'evidence', action: 'updated', title: `Updated evidence field ${field}: ${selectedItem?.title || selectedId}` })
     } catch (err) {
       console.error('Failed to update:', err)
     }
@@ -274,6 +310,7 @@ export default function Evidence() {
     try {
       const updated = await api.updateEvidence(selectedId, { status: newStatus })
       setEvidence(prev => prev.map(e => e.id === selectedId ? { ...e, ...updated } : e))
+      logActivity({ type: 'evidence', action: 'updated', title: `Updated evidence status to ${newStatus}: ${selectedItem?.title || selectedId}` })
     } catch (err) {
       console.error('Failed to update status:', err)
     }
@@ -314,9 +351,11 @@ export default function Evidence() {
     const id = deleteConfirmId
     setDeleteConfirmId(null)
     try {
+      const deletedItem = evidence.find(e => e.id === id)
       await api.deleteEvidence(id)
       setEvidence(prev => prev.filter(e => e.id !== id))
       if (selectedId === id) setSelectedId(null)
+      logActivity({ type: 'evidence', action: 'deleted', title: `Deleted evidence: ${deletedItem?.title || id}` })
     } catch (err) {
       console.error('Failed to delete evidence:', err)
     }
@@ -346,6 +385,62 @@ export default function Evidence() {
     }
   }
 
+  const openDocViewer = async (docId: string) => {
+    const realId = docId.replace('doc-ev-', '')
+    const doc = allProjectDocs.find(d => d.id === realId)
+    if (!doc) return
+    setViewingDocOverlay({ id: realId, title: doc.title, mime_type: doc.mime_type, filename: doc.filename, description: doc.description, authors: doc.authors, date: doc.date, doc_type: doc.doc_type })
+    setViewingDocLoading(true)
+    try {
+      const { blobGet } = await import('../utils/persistence')
+      const base64 = await blobGet(realId)
+      if (base64) {
+        const binary = atob(base64)
+        const bytes = new Uint8Array(binary.length)
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+        const blob = new Blob([bytes], { type: doc.mime_type })
+        setViewingDocBlobUrl(URL.createObjectURL(blob))
+      }
+    } catch { /* blob not available */ }
+    setViewingDocLoading(false)
+  }
+
+  const closeDocViewer = () => {
+    if (viewingDocBlobUrl) URL.revokeObjectURL(viewingDocBlobUrl)
+    setViewingDocOverlay(null)
+    setViewingDocBlobUrl(null)
+  }
+
+  const startEditDoc = (docId: string) => {
+    const realId = docId.replace('doc-ev-', '')
+    const doc = allProjectDocs.find(d => d.id === realId)
+    if (!doc) return
+    setEditingDocId(realId)
+    setEditDocForm({ title: doc.title, doc_type: doc.doc_type, authors: doc.authors, description: doc.description, tags: doc.tags.join(', ') })
+  }
+
+  const saveEditDoc = () => {
+    if (!editingDocId) return
+    const docs = persistGet<any[]>('project-documents', [])
+    const updated = docs.map(d => d.id === editingDocId ? { ...d, title: editDocForm.title, doc_type: editDocForm.doc_type, authors: editDocForm.authors, description: editDocForm.description, tags: editDocForm.tags.split(',').map((t: string) => t.trim()).filter(Boolean) } : d)
+    persistSet('project-documents', updated)
+    setEditingDocId(null)
+    fetchEvidence()
+  }
+
+  const confirmDeleteDoc = async () => {
+    if (!deleteDocConfirmId) return
+    const realId = deleteDocConfirmId.replace('doc-ev-', '')
+    try {
+      const { blobDelete } = await import('../utils/persistence')
+      await blobDelete(realId)
+    } catch {}
+    const docs = persistGet<any[]>('project-documents', [])
+    persistSet('project-documents', docs.filter(d => d.id !== realId))
+    setDeleteDocConfirmId(null)
+    fetchEvidence()
+  }
+
   const handleAddEvidence = async (form: any) => {
     try {
       const created = await api.createEvidence({
@@ -359,6 +454,7 @@ export default function Evidence() {
       })
       setEvidence(prev => [created, ...prev])
       setShowAddModal(false)
+      logActivity({ type: 'evidence', action: 'created', title: `Added evidence: ${form.title}` })
     } catch (err) {
       console.error('Failed to create evidence:', err)
     }
@@ -415,18 +511,18 @@ export default function Evidence() {
 
         {/* List */}
         <div className="flex-1 overflow-y-auto p-4">
-          {loading && evidence.length === 0 ? (
+          {loading && mergedEvidence.length === 0 ? (
             <div className="text-center py-16">
               <FiLoader className="w-8 h-8 animate-spin mx-auto mb-3 text-[var(--color-text-muted)]" />
             </div>
-          ) : evidence.length === 0 ? (
+          ) : mergedEvidence.length === 0 ? (
             <div className="text-center py-16">
               <FiDatabase className="w-10 h-10 mx-auto mb-3 text-[var(--color-text-muted)] opacity-30" />
               <p className="text-sm text-[var(--color-text-muted)]">No evidence found</p>
             </div>
           ) : (
             <div className="space-y-2">
-              {evidence.map(item => {
+              {mergedEvidence.map(item => {
                 const color = sourceTypeColors[item.source_type] || 'var(--color-text-muted)'
                 const status = statusConfig[item.status || 'pending'] || statusConfig.pending
                 return (
@@ -445,10 +541,18 @@ export default function Evidence() {
                           <span style={{ color }}>{item.source_type}</span>
                           {item.publication_date && <span>{item.publication_date}</span>}
                           {item.citation_count !== undefined && <span>{item.citation_count} citations</span>}
-                          <a href={item.source_url || getEvidenceSearchUrl(item)} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
-                            className="ml-auto flex items-center gap-0.5 text-[var(--color-accent-blue)] hover:underline flex-shrink-0">
-                            <FiExternalLink className="w-3 h-3" /> View
-                          </a>
+                          {item.id.startsWith('doc-ev-') ? (
+                            <div className="ml-auto flex items-center gap-1 flex-shrink-0">
+                              <button onClick={e => { e.stopPropagation(); openDocViewer(item.id) }} className="p-1 rounded hover:bg-white/5 text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="View"><FiEye className="w-3 h-3" /></button>
+                              <button onClick={e => { e.stopPropagation(); startEditDoc(item.id) }} className="p-1 rounded hover:bg-white/5 text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="Edit"><FiEdit3 className="w-3 h-3" /></button>
+                              <button onClick={e => { e.stopPropagation(); setDeleteDocConfirmId(item.id) }} className="p-1 rounded hover:bg-white/5 text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="Delete"><FiTrash2 className="w-3 h-3" /></button>
+                            </div>
+                          ) : (
+                            <a href={item.source_url || getEvidenceSearchUrl(item)} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
+                              className="ml-auto flex items-center gap-0.5 text-[var(--color-text-secondary)] hover:underline flex-shrink-0">
+                              <FiExternalLink className="w-3 h-3" /> View
+                            </a>
+                          )}
                         </div>
                         <div className="flex items-center justify-between mt-2">
                           <div className="flex items-center gap-1.5">
@@ -524,7 +628,7 @@ export default function Evidence() {
                 <a href={selectedItem.source_url || getEvidenceSearchUrl(selectedItem)} target="_blank" rel="noopener noreferrer" className="btn btn-sm border border-[var(--color-border)]">
                   <FiExternalLink className="w-3 h-3" /> {selectedItem.source_url ? 'Source' : 'Search'}
                 </a>
-                <button onClick={openLinkDialog} className="btn btn-sm" style={{ color: 'var(--color-accent-purple)' }}>
+                <button onClick={openLinkDialog} className="btn btn-sm" style={{ color: 'var(--color-text-secondary)' }}>
                   <FiLink className="w-3 h-3" /> Link to Hypothesis
                 </button>
                 <button onClick={() => handleDelete(selectedItem.id)} className="btn btn-sm ml-auto" style={{ color: 'var(--color-error)' }}>
@@ -696,12 +800,103 @@ export default function Evidence() {
               <button onClick={() => setDeleteConfirmId(null)} className="btn px-4 py-2 text-sm text-[var(--color-text-muted)]">
                 Cancel
               </button>
-              <button onClick={confirmDelete} className="btn px-4 py-2 text-sm bg-red-500/10 text-red-400 hover:bg-red-500/20">
+              <button onClick={confirmDelete} className="btn px-4 py-2 text-sm bg-red-500/10 text-[var(--color-text-muted)] hover:text-red-400 hover:bg-red-500/20">
                 Delete Permanently
               </button>
             </div>
           </div>
         </div>
+      )}
+
+      {/* Document Viewer Overlay */}
+      {viewingDocOverlay && (
+        <>
+          <div className="fixed inset-0 bg-black/60 z-40 backdrop-blur-sm" onClick={closeDocViewer} />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-8">
+            <div className="w-full max-w-4xl h-[80vh] flex flex-col rounded-2xl border border-[var(--color-border)] overflow-hidden" style={{ background: 'var(--color-surface-solid)' }}>
+              <div className="px-5 py-3 border-b border-[var(--color-border)] flex items-center justify-between shrink-0">
+                <div className="min-w-0 flex-1 mr-3">
+                  <h3 className="text-sm font-medium text-white truncate">{viewingDocOverlay.title}</h3>
+                  <p className="text-xs text-[var(--color-text-muted)] mt-0.5 truncate">{viewingDocOverlay.doc_type} {viewingDocOverlay.authors && `· ${viewingDocOverlay.authors}`} {viewingDocOverlay.date && `· ${viewingDocOverlay.date}`}</p>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {viewingDocBlobUrl && (
+                    <>
+                      <button
+                        onClick={() => {
+                          const w = window.open('')
+                          if (w) { w.document.write(`<iframe src="${viewingDocBlobUrl}" style="width:100%;height:100%;border:none"></iframe>`); w.document.title = viewingDocOverlay.title; w.print() }
+                        }}
+                        className="p-1.5 rounded-lg hover:bg-white/5 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                        title="Print"
+                      >
+                        <FiPrinter className="w-4 h-4" />
+                      </button>
+                      <a
+                        href={viewingDocBlobUrl}
+                        download={viewingDocOverlay.filename || viewingDocOverlay.title}
+                        className="p-1.5 rounded-lg hover:bg-white/5 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                        title="Download"
+                      >
+                        <FiDownload className="w-4 h-4" />
+                      </a>
+                    </>
+                  )}
+                  <button onClick={closeDocViewer} className="p-1.5 rounded-lg hover:bg-white/5 text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
+                    <FiX className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+              <div className="flex-1 min-h-0 relative">
+                {viewingDocLoading && <div className="absolute inset-0 flex items-center justify-center"><div className="w-6 h-6 border-2 border-white/20 border-t-white rounded-full animate-spin" /></div>}
+                {!viewingDocLoading && viewingDocBlobUrl && viewingDocOverlay.mime_type === 'application/pdf' && (
+                  <iframe src={`${viewingDocBlobUrl}#toolbar=0&navpanes=0`} className="w-full h-full border-0" title={viewingDocOverlay.title} />
+                )}
+                {!viewingDocLoading && viewingDocBlobUrl && viewingDocOverlay.mime_type.startsWith('image/') && (
+                  <div className="flex items-center justify-center h-full p-8"><img src={viewingDocBlobUrl} alt={viewingDocOverlay.title} className="max-w-full max-h-full object-contain rounded" /></div>
+                )}
+                {!viewingDocLoading && !viewingDocBlobUrl && (
+                  <div className="flex flex-col items-center justify-center h-full"><p className="text-[var(--color-text-muted)]">File content not available</p></div>
+                )}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Edit Doc Modal */}
+      {editingDocId && (
+        <>
+          <div className="fixed inset-0 bg-black/50 z-40" onClick={() => setEditingDocId(null)} />
+          <div className="fixed inset-0 flex items-center justify-center z-50 p-4">
+            <div className="w-full max-w-md glass-card p-0" style={{ background: 'var(--color-surface-solid)' }}>
+              <div className="flex items-center justify-between px-5 py-3 border-b border-[var(--color-border)]">
+                <h3 className="text-sm font-semibold text-white">Edit Document</h3>
+                <button onClick={() => setEditingDocId(null)} className="p-1 rounded hover:bg-white/5 text-[var(--color-text-muted)]"><FiX className="w-4 h-4" /></button>
+              </div>
+              <div className="p-5 space-y-3">
+                <input value={editDocForm.title} onChange={e => setEditDocForm(prev => ({ ...prev, title: e.target.value }))} className="w-full px-3 py-2 text-sm rounded-lg bg-white/5 border border-[var(--color-border)] text-white" placeholder="Title" />
+                <input value={editDocForm.authors} onChange={e => setEditDocForm(prev => ({ ...prev, authors: e.target.value }))} className="w-full px-3 py-2 text-sm rounded-lg bg-white/5 border border-[var(--color-border)] text-white" placeholder="Authors" />
+                <textarea value={editDocForm.description} onChange={e => setEditDocForm(prev => ({ ...prev, description: e.target.value }))} rows={2} className="w-full px-3 py-2 text-sm rounded-lg bg-white/5 border border-[var(--color-border)] text-white resize-none" placeholder="Description" />
+                <input value={editDocForm.tags} onChange={e => setEditDocForm(prev => ({ ...prev, tags: e.target.value }))} className="w-full px-3 py-2 text-sm rounded-lg bg-white/5 border border-[var(--color-border)] text-white" placeholder="Tags (comma-separated)" />
+              </div>
+              <div className="flex justify-end gap-2 px-5 py-3 border-t border-[var(--color-border)]">
+                <button onClick={() => setEditingDocId(null)} className="px-3 py-1.5 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] rounded-lg hover:bg-white/5">Cancel</button>
+                <button onClick={saveEditDoc} className="px-3 py-1.5 text-sm text-white bg-white/10 hover:bg-white/15 rounded-lg border border-[var(--color-border)]">Save</button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Delete Doc Confirm */}
+      {deleteDocConfirmId && (
+        <ConfirmDeleteDialog
+          title="Delete Document?"
+          message="This will permanently delete this document from all locations. This action cannot be undone."
+          onConfirm={confirmDeleteDoc}
+          onCancel={() => setDeleteDocConfirmId(null)}
+        />
       )}
     </div>
   )

@@ -123,7 +123,7 @@ export default function Collaboration() {
                   </select>
                   <input value={newComment} onChange={e => setNewComment(e.target.value)} onKeyDown={e => e.key === 'Enter' && addComment()}
                     placeholder="Write a comment..." className="input flex-1 text-xs" />
-                  <button onClick={addComment} disabled={!newComment.trim()} className="btn text-xs" style={{ color: 'var(--color-accent-blue)' }}>
+                  <button onClick={addComment} disabled={!newComment.trim()} className="btn text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                     <FiSend className="w-3.5 h-3.5" />
                   </button>
                 </div>

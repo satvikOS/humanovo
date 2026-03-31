@@ -4,6 +4,8 @@ import {
   FiPlus, FiEye, FiBarChart2, FiBook,
 } from 'react-icons/fi'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
+import { logActivity } from '../utils/persistence'
 
 interface Dataset {
   id: string; name: string; description: string; format: string
@@ -25,6 +27,7 @@ export default function DataManager() {
   const [newDesc, setNewDesc] = useState('')
   const [search, setSearch] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
   const load = async () => {
     try {
@@ -38,19 +41,27 @@ export default function DataManager() {
   const createDataset = async () => {
     if (!newName.trim()) return
     const res = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: newName, description: newDesc }) })
-    if (res.ok) { const ds = await res.json(); setDatasets(prev => [ds, ...prev]); setNewName(''); setNewDesc(''); setShowAdd(false) }
+    if (res.ok) { const ds = await res.json(); setDatasets(prev => [ds, ...prev]); setNewName(''); setNewDesc(''); setShowAdd(false); logActivity({ type: 'discovery', action: 'created', title: `Created dataset: ${newName}` }) }
   }
 
-  const deleteDataset = async (id: string) => {
-    await fetch(`${API}/${id}`, { method: 'DELETE' })
-    setDatasets(prev => prev.filter(d => d.id !== id))
-    if (selected?.id === id) { setSelected(null); setView('list') }
+  const deleteDataset = (id: string) => {
+    setDeleteConfirmId(id)
+  }
+
+  const confirmDelete = async () => {
+    if (!deleteConfirmId) return
+    const deletedDs = datasets.find(d => d.id === deleteConfirmId)
+    await fetch(`${API}/${deleteConfirmId}`, { method: 'DELETE' })
+    setDatasets(prev => prev.filter(d => d.id !== deleteConfirmId))
+    if (selected?.id === deleteConfirmId) { setSelected(null); setView('list') }
+    setDeleteConfirmId(null)
+    logActivity({ type: 'discovery', action: 'deleted', title: `Deleted dataset: ${deletedDs?.name || deleteConfirmId}` })
   }
 
   const uploadFile = async (dsId: string, file: File) => {
     const form = new FormData(); form.append('file', file)
     const res = await fetch(`${API}/${dsId}/upload`, { method: 'POST', body: form })
-    if (res.ok) { load(); selectDs(dsId) }
+    if (res.ok) { load(); selectDs(dsId); logActivity({ type: 'discovery', action: 'imported', title: `Uploaded file to dataset: ${file.name}` }) }
   }
 
   const selectDs = async (id: string) => {
@@ -82,7 +93,7 @@ export default function DataManager() {
             <h1 className="text-2xl font-semibold tracking-tight">Research Data Manager</h1>
             <p className="text-sm text-[var(--color-text-muted)] mt-1">Import, explore, and manage research datasets</p>
           </div>
-          <button onClick={() => setShowAdd(!showAdd)} className="btn text-sm" style={{ color: 'var(--color-accent-blue)' }}>
+          <button onClick={() => setShowAdd(!showAdd)} className="btn text-sm" style={{ color: 'var(--color-text-secondary)' }}>
             <FiPlus className="w-4 h-4" /> New Dataset
           </button>
         </div>
@@ -221,7 +232,7 @@ export default function DataManager() {
                     <div key={c.name} className="glass-card p-3">
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-xs font-medium">{c.name}</span>
-                        <span className={`text-xxs px-2 py-0.5 rounded-full ${c.completeness === 1 ? 'bg-green-500/10 text-green-400' : 'bg-yellow-500/10 text-yellow-400'}`}>
+                        <span className={`text-xxs px-2 py-0.5 rounded-full ${c.completeness === 1 ? 'bg-[var(--glass-bg)] text-[var(--color-text-secondary)]' : 'bg-[var(--glass-bg)] text-[var(--color-text-muted)]'}`}>
                           {(c.completeness * 100).toFixed(0)}% complete
                         </span>
                       </div>
@@ -265,6 +276,13 @@ export default function DataManager() {
           )}
         </div>
       </div>
+      <ConfirmDeleteDialog
+        open={deleteConfirmId !== null}
+        entityName="Dataset"
+        message="This will permanently delete this dataset. This action cannot be undone."
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteConfirmId(null)}
+      />
     </div>
   )
 }

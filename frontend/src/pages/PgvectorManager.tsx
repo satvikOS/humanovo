@@ -129,7 +129,7 @@ export default function PgvectorManager() {
         {TABS.map(t => (
           <button key={t} onClick={() => setTab(t)}
             className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${tab === t ? '' : 'border-transparent'}`}
-            style={tab === t ? { color: 'var(--color-accent-blue)', borderColor: 'var(--color-accent-blue)' } : { color: 'var(--color-text-muted)' }}>
+            style={tab === t ? { color: 'var(--color-text-secondary)', borderColor: 'var(--color-text-secondary)' } : { color: 'var(--color-text-muted)' }}>
             {t}
           </button>
         ))}
@@ -192,7 +192,7 @@ export default function PgvectorManager() {
               {searchResults.map(r => (
                 <div key={r.id} className="rounded-lg p-3 text-sm" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
                   <div className="flex justify-between mb-1">
-                    <span className="text-xs font-medium" style={{ color: 'var(--color-accent-blue)' }}>{r.source}</span>
+                    <span className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>{r.source}</span>
                     <span className="text-xs font-mono" style={{ color: r.similarity_score >= 0.8 ? '#22c55e' : '#eab308' }}>
                       {(r.similarity_score * 100).toFixed(1)}%
                     </span>

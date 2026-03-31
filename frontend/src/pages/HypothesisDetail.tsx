@@ -546,11 +546,11 @@ export default function HypothesisDetail() {
               <div className="relative w-24 h-24 mb-6">
                 <div className="absolute inset-0 rounded-full border-4 border-secondary-700" />
                 <div className="absolute inset-0 rounded-full border-4 border-t-purple-500 animate-spin" />
-                <FiFileText className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 text-purple-400" />
+                <FiFileText className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 text-[var(--color-text-secondary)]" />
               </div>
               <h3 className="text-lg font-semibold text-white mb-2">Generating Research Paper</h3>
               <div className="mt-4 w-full max-w-lg px-8">
-                <p className="text-purple-300 text-sm font-medium text-center mb-1">
+                <p className="text-[var(--color-text-secondary)] text-sm font-medium text-center mb-1">
                   {PAPER_PHASES[currentPhase]?.label || 'Processing...'}
                 </p>
                 <p className="text-secondary-500 text-xs text-center mb-3">
@@ -581,9 +581,9 @@ export default function HypothesisDetail() {
           {/* Error */}
           {paperError && !generatingPaper && (
             <div className="absolute inset-0 flex flex-col items-center justify-center bg-secondary-900 z-10">
-              <FiX className="w-12 h-12 text-red-400 mb-4" />
+              <FiX className="w-12 h-12 text-[var(--color-text-muted)] mb-4" />
               <h3 className="text-lg font-semibold text-white mb-2">Generation Failed</h3>
-              <p className="text-red-400 text-sm mb-4 max-w-md text-center">{paperError}</p>
+              <p className="text-[var(--color-text-muted)] text-sm mb-4 max-w-md text-center">{paperError}</p>
               <button onClick={generatePaper} className="btn bg-purple-500 text-white hover:bg-purple-600">
                 <FiRefreshCw className="w-4 h-4" /> Retry
               </button>

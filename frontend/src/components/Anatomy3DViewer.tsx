@@ -466,7 +466,7 @@ export default function Anatomy3DViewer({
                       <span className="flex-1 text-left font-medium">{SYSTEM_NAMES[system]}</span>
                       <span className="text-xxs text-[var(--color-text-muted)]">({systemModels.length})</span>
                       {visibleSystems.has(system) ? (
-                        <FiEye className="w-3.5 h-3.5 text-green-400" />
+                        <FiEye className="w-3.5 h-3.5 text-[var(--color-text-secondary)]" />
                       ) : (
                         <FiEyeOff className="w-3.5 h-3.5" />
                       )}

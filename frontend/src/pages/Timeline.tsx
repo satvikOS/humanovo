@@ -260,7 +260,7 @@ export default function Timeline() {
                                   : formatRelativeTime(activity.timestamp)}
                               </span>
                               {activity.metadata?.confidence !== undefined && (
-                                <span style={{ color: 'var(--color-accent-purple)' }}>
+                                <span style={{ color: 'var(--color-text-secondary)' }}>
                                   Confidence: {Math.round(Number(activity.metadata.confidence) * 100)}%
                                 </span>
                               )}

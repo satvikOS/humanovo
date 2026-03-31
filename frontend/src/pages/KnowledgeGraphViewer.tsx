@@ -3,6 +3,8 @@ import {
   FiSearch, FiPlus, FiTrash2, FiZoomIn, FiZoomOut, FiMaximize2,
   FiLink,
 } from 'react-icons/fi'
+import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
+import { logActivity } from '../utils/persistence'
 
 interface GNode { id: string; name: string; type: string; description: string; created_at: string }
 interface GEdge { id: string; source: string; target: string; source_name: string; target_name: string; relationship: string; strength: number; evidence: string }
@@ -137,12 +139,21 @@ export default function KnowledgeGraphViewer() {
   const addNode = async () => {
     if (!newNode.name.trim()) return
     const res = await fetch(`${API}/nodes`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newNode) })
-    if (res.ok) { setNewNode({ name: '', type: 'gene', description: '' }); setShowAdd(false); load() }
+    if (res.ok) { logActivity({ type: 'discovery', action: 'created', title: `Added node: ${newNode.name} (${newNode.type})` }); setNewNode({ name: '', type: 'gene', description: '' }); setShowAdd(false); load() }
   }
 
-  const deleteNode = async (id: string) => {
-    await fetch(`${API}/nodes/${id}`, { method: 'DELETE' })
-    if (selected?.id === id) setSelected(null); load()
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+
+  const deleteNode = (id: string) => { setDeleteConfirmId(id) }
+
+  const confirmDeleteNode = async () => {
+    if (!deleteConfirmId) return
+    const deletedNode = nodes.find(n => n.id === deleteConfirmId)
+    await fetch(`${API}/nodes/${deleteConfirmId}`, { method: 'DELETE' })
+    if (selected?.id === deleteConfirmId) setSelected(null)
+    logActivity({ type: 'discovery', action: 'deleted', title: `Deleted node: ${deletedNode?.name || deleteConfirmId}` })
+    setDeleteConfirmId(null)
+    load()
   }
 
   const searchNodes = async () => {
@@ -164,7 +175,7 @@ export default function KnowledgeGraphViewer() {
               {stats && <span className="ml-2">({stats.total_nodes} nodes, {stats.total_edges} edges)</span>}
             </p>
           </div>
-          <button onClick={() => setShowAdd(!showAdd)} className="btn text-sm" style={{ color: 'var(--color-accent-blue)' }}><FiPlus className="w-4 h-4" /> Add Node</button>
+          <button onClick={() => setShowAdd(!showAdd)} className="btn text-sm" style={{ color: 'var(--color-text-secondary)' }}><FiPlus className="w-4 h-4" /> Add Node</button>
         </div>
         <div className="flex gap-2 mt-3">
           <div className="relative flex-1 max-w-xs">
@@ -236,6 +247,15 @@ export default function KnowledgeGraphViewer() {
           </div>
         )}
       </div>
+
+      {deleteConfirmId && (
+        <ConfirmDeleteDialog
+          title="Delete Graph Node?"
+          message="This will permanently delete this node and all its connections. This action cannot be undone."
+          onConfirm={confirmDeleteNode}
+          onCancel={() => setDeleteConfirmId(null)}
+        />
+      )}
     </div>
   )
 }

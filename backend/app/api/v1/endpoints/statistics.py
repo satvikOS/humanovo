@@ -72,7 +72,10 @@ class SampleSizeRequest(BaseModel):
     effect_size: float = 0.5
     alpha: float = 0.05
     power: float = 0.8
-    test_type: str = "two_sample_t"  # two_sample_t, one_sample_t, chi_square
+    test_type: str = "two_sample_t"  # two_sample_t, one_sample_t, paired_t, chi_square, anova
+    table_rows: int = 2  # for chi-square contingency table
+    table_cols: int = 2  # for chi-square contingency table
+    num_groups: int = 3  # for ANOVA
 
 
 class SaveAnalysisRequest(BaseModel):
@@ -684,49 +687,134 @@ async def sample_size_calculator(request: SampleSizeRequest):
     alpha = request.alpha
     power = request.power
     d = request.effect_size
+    warnings = []
 
-    # Z-values approximation
-    z_alpha = 1.96 if alpha == 0.05 else (2.576 if alpha == 0.01 else 1.645)
-    z_beta = 0.842 if abs(power - 0.8) < 0.01 else (1.282 if abs(power - 0.9) < 0.01 else 1.645)
+    # Input validation
+    if d <= 0:
+        return {"test_type": request.test_type, "effect_size": d, "alpha": alpha, "power": power,
+                "n_per_group": 0, "total_n": 0, "warnings": ["Effect size must be greater than 0."]}
+    if not (0 < alpha < 1):
+        return {"test_type": request.test_type, "effect_size": d, "alpha": alpha, "power": power,
+                "n_per_group": 0, "total_n": 0, "warnings": ["Alpha must be between 0 and 1 (exclusive)."]}
+    if not (0 < power < 1):
+        return {"test_type": request.test_type, "effect_size": d, "alpha": alpha, "power": power,
+                "n_per_group": 0, "total_n": 0, "warnings": ["Power must be between 0 and 1 (exclusive)."]}
+
+    # Z-values: two-tailed alpha, one-tailed beta
+    z_alpha = 1.96 if alpha == 0.05 else (2.576 if alpha == 0.01 else (1.645 if alpha == 0.10 else _z_from_alpha(alpha)))
+    z_beta = 0.842 if abs(power - 0.8) < 0.01 else (1.282 if abs(power - 0.9) < 0.01 else (1.645 if abs(power - 0.95) < 0.01 else _z_from_power(power)))
+
+    effect_label = "Cohen's d"
+    extra = {}
 
     if request.test_type == "two_sample_t":
-        n_per_group = math.ceil(2 * ((z_alpha + z_beta) / d) ** 2) if d > 0 else 0
+        n_per_group = math.ceil(2 * ((z_alpha + z_beta) / d) ** 2)
         total_n = n_per_group * 2
         desc = f"Two-sample t-test: {n_per_group} per group, {total_n} total"
-    elif request.test_type == "one_sample_t":
-        n = math.ceil(((z_alpha + z_beta) / d) ** 2) if d > 0 else 0
-        n_per_group = n
-        total_n = n
-        desc = f"One-sample t-test: {n} subjects needed"
+        if d > 2:
+            warnings.append("Effect size d > 2.0 is unusually large. Verify your estimate.")
+
+    elif request.test_type in ("one_sample_t", "paired_t"):
+        n_per_group = math.ceil(((z_alpha + z_beta) / d) ** 2)
+        total_n = n_per_group
+        label = "One-sample t-test" if request.test_type == "one_sample_t" else "Paired t-test"
+        desc = f"{label}: {n_per_group} subjects needed"
+        if d > 2:
+            warnings.append("Effect size d > 2.0 is unusually large. Verify your estimate.")
+
     elif request.test_type == "chi_square":
-        w = d  # effect size w for chi-square
-        n = math.ceil(((z_alpha + z_beta) / w) ** 2) if w > 0 else 0
+        effect_label = "Cohen's w"
+        w = d
+        rows = max(2, request.table_rows)
+        cols = max(2, request.table_cols)
+        df = (rows - 1) * (cols - 1)
+        # Chi-square sample size with df correction
+        n = math.ceil(((z_alpha + z_beta) / w) ** 2 + df)
+        # Ensure minimum expected cell counts >= 5
+        min_n_for_cells = math.ceil(5 * rows * cols)
+        if n < min_n_for_cells:
+            n = min_n_for_cells
+            warnings.append(f"Sample size increased to {min_n_for_cells} to ensure minimum expected cell count >= 5 ({rows}x{cols} table).")
         n_per_group = n
         total_n = n
-        desc = f"Chi-square test: {n} total subjects needed"
+        desc = f"Chi-square test ({rows}x{cols} table, df={df}): {n} total subjects needed"
+        extra = {"table_rows": rows, "table_cols": cols, "df": df}
+        if w < 0.1:
+            warnings.append("Cohen's w < 0.1 is a very small effect. Large samples needed.")
+        if w > 0.5:
+            warnings.append("Cohen's w > 0.5 is a large effect. Verify your estimate.")
+
+    elif request.test_type == "anova":
+        effect_label = "Cohen's f"
+        k = max(2, request.num_groups)
+        n_per_group = math.ceil(((z_alpha + z_beta) / d) ** 2 + 1)
+        total_n = n_per_group * k
+        desc = f"One-way ANOVA ({k} groups): {n_per_group} per group, {total_n} total"
+        extra = {"num_groups": k}
+        if d > 0.8:
+            warnings.append("Cohen's f > 0.8 is unusually large. Verify your estimate.")
+
     else:
         n_per_group = 0
         total_n = 0
         desc = "Unknown test type"
+        warnings.append(f"Unrecognized test type: {request.test_type}")
 
-    effect_interpretation = "small" if d < 0.3 else ("medium" if d < 0.7 else "large")
+    # Determine effect size interpretation based on test type
+    if request.test_type == "chi_square":
+        effect_interpretation = "small" if d < 0.2 else ("medium" if d < 0.4 else "large")
+    elif request.test_type == "anova":
+        effect_interpretation = "small" if d < 0.15 else ("medium" if d < 0.35 else "large")
+    else:
+        effect_interpretation = "small" if d < 0.3 else ("medium" if d < 0.7 else "large")
+
+    if alpha > 0.10:
+        warnings.append("Alpha > 0.10 is unconventional. Consider using 0.05 or 0.01.")
+    if power < 0.7:
+        warnings.append("Power < 0.70 increases risk of failing to detect a real effect.")
+    if total_n > 0 and total_n < 10:
+        warnings.append("Very small sample size. Results may be unreliable.")
+
+    buffer_n = math.ceil(total_n * 1.15) if total_n > 0 else 0
 
     return {
         "test_type": request.test_type,
         "effect_size": d,
+        "effect_label": effect_label,
         "effect_interpretation": effect_interpretation,
         "alpha": alpha,
         "power": power,
         "n_per_group": n_per_group,
         "total_n": total_n,
+        "buffer_n": buffer_n,
         "description": desc,
+        "warnings": warnings,
         "recommendations": [
-            f"Based on a {effect_interpretation} effect size (d={d}), α={alpha}, power={power}",
+            f"Based on a {effect_interpretation} {effect_label} ({d}), α={alpha}, power={power}",
             f"Required sample size: {total_n} total participants",
             "Consider adding 10-20% for dropout/attrition",
-            f"Recommended total with 15% buffer: {math.ceil(total_n * 1.15)}",
-        ]
+            f"Recommended total with 15% buffer: {buffer_n}",
+        ],
+        **extra,
     }
+
+
+def _z_from_alpha(alpha: float) -> float:
+    """Approximate z-value for two-tailed alpha using rational approximation."""
+    p = alpha / 2
+    if p <= 0 or p >= 1:
+        return 1.96
+    t = math.sqrt(-2 * math.log(p))
+    return t - (2.30753 + t * 0.27061) / (1 + t * (0.99229 + t * 0.04481))
+
+
+def _z_from_power(power: float) -> float:
+    """Approximate z-value for power (one-tailed)."""
+    p = 1 - power
+    if p <= 0 or p >= 1:
+        return 0.842
+    t = math.sqrt(-2 * math.log(p))
+    return t - (2.30753 + t * 0.27061) / (1 + t * (0.99229 + t * 0.04481))
 
 
 # ── Saved Analyses CRUD ─────────────────────────────────────────

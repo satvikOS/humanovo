@@ -521,7 +521,7 @@ export default function HumanAnatomyViewer({ className, onElementSelect }: Human
               className={clsx(
                 'px-2 py-1 text-xs rounded transition-colors',
                 sex === 'male'
-                  ? 'bg-blue-500/20 text-blue-400'
+                  ? 'bg-white/10 text-[var(--color-text-secondary)]'
                   : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
               )}
             >
@@ -532,7 +532,7 @@ export default function HumanAnatomyViewer({ className, onElementSelect }: Human
               className={clsx(
                 'px-2 py-1 text-xs rounded transition-colors',
                 sex === 'female'
-                  ? 'bg-pink-500/20 text-pink-400'
+                  ? 'bg-white/10 text-[var(--color-text-secondary)]'
                   : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
               )}
             >
@@ -584,7 +584,7 @@ export default function HumanAnatomyViewer({ className, onElementSelect }: Human
                   />
                   <span className="flex-1 text-left">{layer.name}</span>
                   {visibleLayers.has(layer.id) ? (
-                    <FiEye className="w-3.5 h-3.5 text-green-400" />
+                    <FiEye className="w-3.5 h-3.5 text-[var(--color-text-secondary)]" />
                   ) : (
                     <FiEyeOff className="w-3.5 h-3.5" />
                   )}
@@ -726,11 +726,11 @@ export default function HumanAnatomyViewer({ className, onElementSelect }: Human
 
               {selectedPoint.libraryId && (
                 <div className="mb-3 p-2 bg-green-500/10 rounded border border-green-500/20">
-                  <div className="flex items-center gap-1 text-xxs text-green-400 mb-1">
+                  <div className="flex items-center gap-1 text-xxs text-[var(--color-text-secondary)] mb-1">
                     <FiInfo className="w-3 h-3" />
                     Linked to Master Library
                   </div>
-                  <div className="text-xs font-mono text-green-300">{selectedPoint.libraryId}</div>
+                  <div className="text-xs font-mono text-[var(--color-text-muted)]">{selectedPoint.libraryId}</div>
                 </div>
               )}
 

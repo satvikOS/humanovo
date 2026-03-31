@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
-import { formatDate, formatDateTime } from '../utils/persistence'
+import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
+import { formatDate, formatDateTime, usePersistentState, logActivity } from '../utils/persistence'
 import {
   FiClipboard,
   FiPlus,
@@ -32,30 +33,32 @@ interface Experiment {
 
 const STATUS_CONFIG = {
   planned: { label: 'Planned', color: 'var(--color-text-muted)', icon: FiClock },
-  in_progress: { label: 'In Progress', color: 'var(--color-accent-blue)', icon: FiPlay },
+  in_progress: { label: 'In Progress', color: 'var(--color-text-secondary)', icon: FiPlay },
   completed: { label: 'Completed', color: 'var(--color-success)', icon: FiCheck },
   failed: { label: 'Failed', color: 'var(--color-error)', icon: FiAlertTriangle },
   paused: { label: 'Paused', color: 'var(--color-warning)', icon: FiPause },
 }
 
 export default function ExperimentTracker() {
-  const [experiments, setExperiments] = useState<Experiment[]>([])
+  const [experiments, setExperiments] = usePersistentState<Experiment[]>('experiments', [])
   const [selected, setSelected] = useState<Experiment | null>(null)
   const [showAdd, setShowAdd] = useState(false)
   const [filterStatus, setFilterStatus] = useState('')
   const [editing, setEditing] = useState(false)
   const [editData, setEditData] = useState<Partial<Experiment>>({})
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
   const save = useCallback((updated: Experiment[]) => {
     setExperiments(updated)
-  }, [])
+  }, [setExperiments])
 
   const [form, setForm] = useState({ title: '', hypothesis: '', tags: '' })
 
   const addExperiment = () => {
     if (!form.title.trim()) return
+    const now = new Date().toISOString()
     const exp: Experiment = {
-      id: `exp-${Date.now()}`,
+      id: `exp-${crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`}`,
       title: form.title,
       hypothesis: form.hypothesis,
       status: 'planned',
@@ -65,24 +68,36 @@ export default function ExperimentTracker() {
       results: '',
       conclusion: '',
       tags: form.tags.split(',').map(t => t.trim()).filter(Boolean),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      createdAt: now,
+      updatedAt: now,
     }
     save([exp, ...experiments])
+    logActivity({ type: 'project', action: 'created', title: exp.title })
     setForm({ title: '', hypothesis: '', tags: '' })
     setShowAdd(false)
     setSelected(exp)
   }
 
   const updateExperiment = (id: string, updates: Partial<Experiment>) => {
+    const exp = experiments.find(e => e.id === id)
     const updated = experiments.map(e => e.id === id ? { ...e, ...updates, updatedAt: new Date().toISOString() } : e)
     save(updated)
     if (selected?.id === id) setSelected({ ...selected, ...updates, updatedAt: new Date().toISOString() })
+    logActivity({ type: 'evidence', action: 'updated', title: `Updated experiment: ${exp?.title || id}` })
   }
 
   const deleteExperiment = (id: string) => {
-    save(experiments.filter(e => e.id !== id))
-    if (selected?.id === id) setSelected(null)
+    setDeleteConfirmId(id)
+  }
+
+  const confirmDelete = () => {
+    if (deleteConfirmId) {
+      const deletedExp = experiments.find(e => e.id === deleteConfirmId)
+      save(experiments.filter(e => e.id !== deleteConfirmId))
+      logActivity({ type: 'project', action: 'deleted', title: `Deleted experiment: ${deletedExp?.title || deleteConfirmId}` })
+      if (selected?.id === deleteConfirmId) setSelected(null)
+      setDeleteConfirmId(null)
+    }
   }
 
   const filtered = experiments.filter(e => !filterStatus || e.status === filterStatus)
@@ -97,7 +112,7 @@ export default function ExperimentTracker() {
               <FiClipboard className="w-4 h-4 text-[var(--color-text-muted)]" />
               <h2 className="text-sm font-medium">Experiment Tracker</h2>
             </div>
-            <button onClick={() => setShowAdd(!showAdd)} className="btn btn-sm text-xs" style={{ color: 'var(--color-accent-blue)' }}>
+            <button onClick={() => setShowAdd(!showAdd)} className="btn btn-sm text-xs" style={{ color: 'var(--color-text-secondary)' }}>
               <FiPlus className="w-3.5 h-3.5" />
             </button>
           </div>
@@ -168,7 +183,7 @@ export default function ExperimentTracker() {
                 </div>
               </div>
               <div className="flex items-center gap-1">
-                <button onClick={() => { setEditing(!editing); setEditData(selected) }} className="btn btn-sm text-xs" style={{ color: 'var(--color-accent-blue)' }}>
+                <button onClick={() => { setEditing(!editing); setEditData(selected) }} className="btn btn-sm text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                   <FiEdit3 className="w-3.5 h-3.5" /> {editing ? 'Cancel' : 'Edit'}
                 </button>
                 <button onClick={() => deleteExperiment(selected.id)} className="btn btn-sm text-xs" style={{ color: 'var(--color-error)' }}>
@@ -254,6 +269,14 @@ export default function ExperimentTracker() {
             <p className="text-xs mt-1">or create a new one to start tracking</p>
           </div>
         </div>
+      )}
+      {deleteConfirmId && (
+        <ConfirmDeleteDialog
+          title="Delete Experiment?"
+          message="This will permanently delete this experiment and all its data. This action cannot be undone."
+          onConfirm={confirmDelete}
+          onCancel={() => setDeleteConfirmId(null)}
+        />
       )}
     </div>
   )

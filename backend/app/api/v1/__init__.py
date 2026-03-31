@@ -39,6 +39,7 @@ from app.api.v1.endpoints import (
     regulatory,
     simulation,
     statistics,
+    user_state,
     websocket,
     ws_streaming,
 )
@@ -108,3 +109,6 @@ router.include_router(ws_streaming.router)
 
 # Computational Lab (Python/R/Julia code execution)
 router.include_router(compute.router)
+
+# User State (localStorage sync across devices)
+router.include_router(user_state.router, prefix="/user-state", tags=["user-state"])

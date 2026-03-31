@@ -7,14 +7,14 @@ import {
   FiFileText,
   FiClock,
   FiArrowRight,
-  FiArrowUpRight,
-  FiArrowDownRight,
   FiSearch,
   FiBook,
   FiChevronRight,
   FiCpu,
+  FiTrendingUp,
+  FiCode,
 } from 'react-icons/fi'
-import { AreaChart, Area, ResponsiveContainer, Tooltip } from 'recharts'
+// recharts not used in dashboard
 import api from '../services/api'
 import type { Project } from '../services/api'
 import { persistGet, getActivityLog, type ActivityEntry } from '../utils/persistence'
@@ -24,11 +24,9 @@ import { persistGet, getActivityLog, type ActivityEntry } from '../utils/persist
 interface StatData {
   label: string
   value: number
-  change?: number
   icon: typeof FiFolder
   accentColor: string
   href: string
-  chartData?: Array<{ name: string; value: number }>
 }
 
 function StatCard({ stat }: { stat: StatData }) {
@@ -37,57 +35,11 @@ function StatCard({ stat }: { stat: StatData }) {
       to={stat.href}
       className="glass-card p-5 text-left transition-all duration-300 hover:bg-[var(--glass-bg-hover)] group block"
     >
-      <div className="flex items-start justify-between mb-3">
-        <div className={`p-2 rounded-lg`} style={{ background: `${stat.accentColor}12` }}>
-          <stat.icon className="w-4 h-4" style={{ color: stat.accentColor }} />
-        </div>
-        {stat.change !== undefined && stat.change !== 0 && (
-          <span className="flex items-center gap-0.5 text-xs" style={{ color: stat.change > 0 ? 'var(--color-success)' : 'var(--color-error)' }}>
-            {stat.change > 0 ? <FiArrowUpRight className="w-3 h-3" /> : <FiArrowDownRight className="w-3 h-3" />}
-            {Math.abs(stat.change)}%
-          </span>
-        )}
+      <div className="mb-3">
+        <stat.icon className="w-5 h-5" style={{ color: stat.accentColor }} />
       </div>
       <div className="text-3xl font-semibold tracking-tight mb-1">{stat.value}</div>
       <div className="text-sm text-[var(--color-text-muted)]">{stat.label}</div>
-
-      {stat.chartData && stat.chartData.length > 0 && (
-        <div className="mt-3 h-0 group-hover:h-16 overflow-visible transition-all duration-300 ease-in-out opacity-0 group-hover:opacity-100">
-          <ResponsiveContainer width="100%" height={64}>
-            <AreaChart data={stat.chartData} margin={{ top: 2, right: 4, bottom: 8, left: 4 }}>
-              <defs>
-                <linearGradient id={`grad-${stat.label}`} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor={stat.accentColor} stopOpacity={0.2} />
-                  <stop offset="95%" stopColor={stat.accentColor} stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: 'rgba(17, 17, 17, 0.95)',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
-                  borderRadius: '8px',
-                  padding: '6px 10px',
-                  fontSize: '11px',
-                  color: '#fff',
-                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.4)',
-                }}
-                itemStyle={{ color: '#fff', fontSize: '11px' }}
-                labelStyle={{ color: 'rgba(255, 255, 255, 0.6)', fontSize: '10px', marginBottom: '2px' }}
-                cursor={{ stroke: stat.accentColor, strokeWidth: 1, strokeDasharray: '3 3' }}
-                formatter={(value: any) => [value ?? 0, 'Count']}
-              />
-              <Area
-                type="monotone"
-                dataKey="value"
-                stroke={stat.accentColor}
-                fill={`url(#grad-${stat.label})`}
-                strokeWidth={1.5}
-                isAnimationActive={false}
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-      )}
 
       <div className="flex items-center gap-1 mt-2 text-xs text-[var(--color-text-muted)] opacity-0 group-hover:opacity-100 transition-opacity">
         View details <FiChevronRight className="w-3 h-3" />
@@ -102,7 +54,8 @@ interface SimulationSummary {
   id: string
   name: string
   simulationType: string
-  stats: { mean: number; median: number; std: number; ci95Lower: number; ci95Upper: number }
+  kind: 'monte-carlo' | 'equation' | 'computational'
+  stats?: { mean: number; median: number; std: number; ci95Lower: number; ci95Upper: number }
   createdAt: string
 }
 
@@ -113,6 +66,8 @@ const SIM_TYPE_LABELS: Record<string, string> = {
   pathway_dynamics: 'Pathway Dynamics',
   drug_interaction: 'Drug Interaction',
   survival_analysis: 'Survival Analysis',
+  equation: 'Equation Plot',
+  computational: 'Computational Lab',
 }
 
 const SIM_TYPE_COLORS: Record<string, string> = {
@@ -122,6 +77,14 @@ const SIM_TYPE_COLORS: Record<string, string> = {
   pathway_dynamics: 'var(--color-accent-orange)',
   drug_interaction: 'var(--color-accent-cyan)',
   survival_analysis: '#ef4444',
+  equation: 'var(--color-accent-green)',
+  computational: 'var(--color-accent-purple)',
+}
+
+const SIM_KIND_ICONS: Record<string, typeof FiActivity> = {
+  'monte-carlo': FiActivity,
+  equation: FiTrendingUp,
+  computational: FiCode,
 }
 
 function formatTimeAgo(ts: string) {
@@ -139,18 +102,51 @@ function RecentSimulationsWidget() {
   const [simulations, setSimulations] = useState<SimulationSummary[]>([])
 
   useEffect(() => {
-    // Load from localStorage first for instant display
-    const cached = persistGet<SimulationSummary[]>('mc-simulations', [])
-    if (cached.length > 0) {
-      setSimulations(cached.slice(0, 3).map((s: any) => ({
+    // Gather all simulation types from localStorage
+    const allSims: SimulationSummary[] = []
+
+    // MC simulations
+    const mcSims = persistGet<any[]>('mc-simulations', [])
+    for (const s of mcSims) {
+      allSims.push({
         id: s.id,
         name: s.name || 'Untitled Simulation',
         simulationType: s.simulationType || s.simulation_type || 'unknown',
-        stats: s.stats || { mean: 0, median: 0, std: 0, ci95Lower: 0, ci95Upper: 0 },
+        kind: 'monte-carlo',
+        stats: s.stats,
         createdAt: s.createdAt || s.created_at || new Date().toISOString(),
-      })))
+      })
     }
-    // Also try API
+
+    // Equation plots
+    const eqHistory = persistGet<any[]>('eq-history', [])
+    for (const eq of eqHistory) {
+      allSims.push({
+        id: eq.id,
+        name: `f(x) = ${eq.expr}`,
+        simulationType: 'equation',
+        kind: 'equation',
+        createdAt: eq.createdAt || new Date().toISOString(),
+      })
+    }
+
+    // Computational lab runs
+    const compHistory = persistGet<any[]>('comp-history', [])
+    for (const cr of compHistory) {
+      allSims.push({
+        id: cr.id,
+        name: cr.template || cr.env || 'Code Run',
+        simulationType: 'computational',
+        kind: 'computational',
+        createdAt: cr.createdAt || new Date().toISOString(),
+      })
+    }
+
+    // Sort by date, take top 4
+    allSims.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    if (allSims.length > 0) setSimulations(allSims.slice(0, 4))
+
+    // Also try API for MC simulations
     const fetchSimulations = async () => {
       try {
         const res = await api.getSimulations({ page_size: 3 })
@@ -158,10 +154,19 @@ function RecentSimulationsWidget() {
           id: s.id,
           name: s.name || 'Untitled Simulation',
           simulationType: s.simulation_type || s.simulationType || 'unknown',
-          stats: s.results?.stats || s.stats || { mean: 0, median: 0, std: 0, ci95Lower: 0, ci95Upper: 0 },
+          kind: 'monte-carlo' as const,
+          stats: s.results?.stats || s.stats,
           createdAt: s.created_at || s.createdAt || new Date().toISOString(),
         }))
-        if (items.length > 0) setSimulations(items)
+        if (items.length > 0) {
+          // Merge API items with local (dedup by id)
+          setSimulations(prev => {
+            const ids = new Set(items.map((i: any) => i.id))
+            const merged = [...items, ...prev.filter(p => !ids.has(p.id))]
+            merged.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+            return merged.slice(0, 4)
+          })
+        }
       } catch {
         // API unavailable — localStorage data is already displayed
       }
@@ -185,7 +190,7 @@ function RecentSimulationsWidget() {
         <div className="text-center py-4 text-[var(--color-text-muted)]">
           <FiActivity className="w-5 h-5 mx-auto mb-1.5 opacity-40" />
           <p className="text-xs">No simulations yet</p>
-          <button onClick={() => navigate('/simulations?tab=history')} className="text-xs mt-1 text-[var(--color-text)] hover:text-[var(--color-text-secondary)] transition-colors">
+          <button onClick={() => navigate('/simulations')} className="text-xs mt-1 text-[var(--color-text)] hover:text-[var(--color-text-secondary)] transition-colors">
             Run a simulation
           </button>
         </div>
@@ -193,15 +198,14 @@ function RecentSimulationsWidget() {
         <div className="space-y-0">
           {simulations.map(sim => {
             const color = SIM_TYPE_COLORS[sim.simulationType] || 'var(--color-text-muted)'
+            const IconComp = SIM_KIND_ICONS[sim.kind] || FiActivity
             return (
               <button
                 key={sim.id}
-                onClick={() => navigate('/simulations')}
+                onClick={() => navigate('/simulations?tab=history')}
                 className="w-full text-left flex items-center gap-2.5 py-2.5 border-b border-[var(--color-border)] last:border-0 hover:bg-[var(--glass-bg)] rounded-lg px-2 transition-all"
               >
-                <div className="p-1 rounded-md flex-shrink-0" style={{ background: `${color}12` }}>
-                  <FiActivity className="w-3 h-3" style={{ color }} />
-                </div>
+                <IconComp className="w-3.5 h-3.5 flex-shrink-0" style={{ color }} />
                 <div className="flex-1 min-w-0">
                   <div className="text-xs font-medium truncate">{sim.name}</div>
                   <div className="flex items-center gap-1.5 mt-0.5">
@@ -292,7 +296,7 @@ function RecentNotebooksWidget() {
               className="w-full text-left flex items-center gap-2.5 py-2.5 border-b border-[var(--color-border)] last:border-0 hover:bg-[var(--glass-bg)] rounded-lg px-2 transition-all"
             >
               <div className="p-1 rounded-md flex-shrink-0" style={{ background: 'rgba(249, 115, 22, 0.08)' }}>
-                <FiBook className="w-3 h-3" style={{ color: 'var(--color-accent-orange)' }} />
+                <FiBook className="w-3 h-3" style={{ color: 'var(--color-text-secondary)' }} />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="text-xs font-medium truncate">{nb.title}</div>
@@ -401,9 +405,7 @@ function ActivityFeed() {
             const color = typeColors[activity.type] || 'var(--color-text-muted)'
             return (
               <div key={activity.id} className="flex items-start gap-3 py-3 border-b border-[var(--color-border)] last:border-0 group">
-                <div className="p-1.5 rounded-lg flex-shrink-0" style={{ background: `${color}12` }}>
-                  <Icon className="w-3.5 h-3.5" style={{ color }} />
-                </div>
+                <Icon className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" style={{ color }} />
                 <div className="flex-1 min-w-0">
                   <div className="text-sm truncate">{activity.title}</div>
                   <div className="flex items-center gap-2 mt-0.5">
@@ -428,73 +430,13 @@ function ActivityFeed() {
   )
 }
 
-// ── Helpers for real stats ──────────────────────────────────────
-
-function computeChangePercent(activities: ActivityEntry[], type: string): number {
-  const now = Date.now()
-  const weekAgo = now - 7 * 86400000
-  const twoWeeksAgo = now - 14 * 86400000
-  const thisWeek = activities.filter(a => a.type === type && new Date(a.timestamp).getTime() >= weekAgo).length
-  const lastWeek = activities.filter(a => a.type === type && new Date(a.timestamp).getTime() >= twoWeeksAgo && new Date(a.timestamp).getTime() < weekAgo).length
-  // Don't show misleading 100% when there's no baseline data
-  if (lastWeek === 0) return 0
-  return Math.round(((thisWeek - lastWeek) / lastWeek) * 100)
-}
-
-function buildChartData(activities: ActivityEntry[], type: string): Array<{ name: string; value: number }> {
-  const now = new Date()
-  const days: Array<{ name: string; value: number }> = []
-  // Only return chart data if we have activities to plot — avoids flat random-looking lines
-  const relevant = activities.filter(a => a.type === type)
-  for (let i = 6; i >= 0; i--) {
-    const dayStart = new Date(now)
-    dayStart.setDate(dayStart.getDate() - i)
-    dayStart.setHours(0, 0, 0, 0)
-    const dayEnd = new Date(dayStart)
-    dayEnd.setDate(dayEnd.getDate() + 1)
-    const count = relevant.filter(a => {
-      const t = new Date(a.timestamp).getTime()
-      return t >= dayStart.getTime() && t < dayEnd.getTime()
-    }).length
-    const dayLabel = dayStart.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
-    days.push({ name: dayLabel, value: count })
-  }
-  // Don't show chart if all values are zero — prevents misleading flat line
-  const hasData = days.some(d => d.value > 0)
-  return hasData ? days : []
-}
-
 // ── Main Dashboard ──────────────────────────────────────────────
 
 export default function Dashboard() {
   const navigate = useNavigate()
   const [projects, setProjects] = useState<Project[]>([])
 
-  const [allActivities, setAllActivities] = useState<ActivityEntry[]>([])
   const [simulationCount, setSimulationCount] = useState(0)
-
-  // Fetch activities from API for trend data
-  useEffect(() => {
-    const fetchActivities = async () => {
-      try {
-        const res = await api.getActivities({ page_size: 100 })
-        const items = (res?.items || []).map((a: any) => ({
-          id: a.id,
-          type: a.type || 'project',
-          action: a.action || 'created',
-          title: a.title || '',
-          project: a.project_name,
-          timestamp: a.created_at || new Date().toISOString(),
-        }))
-        if (items.length > 0) {
-          setAllActivities(items)
-          return
-        }
-      } catch { /* fall back to local */ }
-      setAllActivities(getActivityLog())
-    }
-    fetchActivities()
-  }, [])
 
   // Fetch API projects (no localStorage fallback)
   useEffect(() => {
@@ -513,14 +455,19 @@ export default function Dashboard() {
 
   // Fetch simulation count from localStorage + API
   useEffect(() => {
-    // Instant count from localStorage
-    const cached = persistGet<unknown[]>('mc-simulations', [])
-    if (cached.length > 0) setSimulationCount(cached.length)
+    // Count from localStorage — MC sims + equation plots + computational runs
+    const mcSims = persistGet<unknown[]>('mc-simulations', [])
+    const eqHistory = persistGet<unknown[]>('eq-history', [])
+    const compHistory = persistGet<unknown[]>('comp-history', [])
+    const localCount = mcSims.length + eqHistory.length + compHistory.length
+    setSimulationCount(localCount)
+
     const fetchSimCount = async () => {
       try {
         const res = await api.getSimulations({ page_size: 1 })
         const apiCount = res?.total || 0
-        if (apiCount > 0) setSimulationCount(apiCount)
+        // Use whichever is higher — API may have extra, or local may have unsynced
+        if (apiCount > localCount) setSimulationCount(apiCount)
       } catch {
         // API unavailable — localStorage count already set
       }
@@ -537,43 +484,25 @@ export default function Dashboard() {
       return sum + (p.hypothesis_count || 0)
     }, 0)
   }, [projects])
-  // Count research papers from project evidence counts
+  // Count evidence: API evidence + project documents from localStorage
   const totalPapers = useMemo(() => {
-    return projects.reduce((sum, p) => sum + (p.evidence_count || 0), 0)
+    const apiEvidence = projects.reduce((sum, p) => sum + (p.evidence_count || 0), 0)
+    const docs = persistGet<Array<{ id: string }>>('project-documents', [])
+    return apiEvidence + docs.length
   }, [projects])
 
   const stats: StatData[] = [
-    {
-      label: 'Active Projects', value: totalProjects,
-      change: computeChangePercent(allActivities, 'project'),
-      icon: FiFolder, accentColor: '#a1a1a1', href: '/projects',
-      chartData: buildChartData(allActivities, 'project'),
-    },
-    {
-      label: 'Hypotheses', value: totalHypotheses,
-      change: computeChangePercent(allActivities, 'hypothesis'),
-      icon: FiZap, accentColor: '#a855f7', href: '/agents',
-      chartData: buildChartData(allActivities, 'hypothesis'),
-    },
-    {
-      label: 'Research Papers', value: totalPapers,
-      change: computeChangePercent(allActivities, 'evidence'),
-      icon: FiFileText, accentColor: '#22c55e', href: '/projects',
-      chartData: buildChartData(allActivities, 'evidence'),
-    },
-    {
-      label: 'Simulations', value: simulationCount,
-      change: computeChangePercent(allActivities, 'simulation'),
-      icon: FiActivity, accentColor: '#3b82f6', href: '/simulations',
-      chartData: buildChartData(allActivities, 'simulation'),
-    },
+    { label: 'Active Projects', value: totalProjects, icon: FiFolder, accentColor: '#a1a1a1', href: '/projects' },
+    { label: 'Hypotheses', value: totalHypotheses, icon: FiZap, accentColor: '#a855f7', href: '/agents' },
+    { label: 'Evidence', value: totalPapers, icon: FiFileText, accentColor: '#22c55e', href: '/evidence' },
+    { label: 'Simulations', value: simulationCount, icon: FiActivity, accentColor: '#3b82f6', href: '/simulations?tab=history' },
   ]
 
   const quickActions = [
     { label: 'New Project', icon: FiFolder, action: () => navigate('/projects?new=1'), color: 'var(--color-text)' },
-    { label: 'Start Discovery', icon: FiZap, action: () => navigate('/agents?start=1'), color: 'var(--color-accent-purple)' },
-    { label: 'Search', icon: FiSearch, action: () => navigate('/search'), color: 'var(--color-accent-blue)' },
-    { label: 'Notebook', icon: FiBook, action: () => navigate('/notebook'), color: 'var(--color-accent-orange)' },
+    { label: 'Start Discovery', icon: FiZap, action: () => navigate('/agents?start=1'), color: 'var(--color-text-secondary)' },
+    { label: 'Search', icon: FiSearch, action: () => navigate('/search'), color: 'var(--color-text-secondary)' },
+    { label: 'Notebook', icon: FiBook, action: () => navigate('/notebook'), color: 'var(--color-text-secondary)' },
   ]
 
   return (
@@ -655,7 +584,7 @@ export default function Dashboard() {
                   <div className="flex items-center gap-2">
                     <FiFolder className="w-4 h-4 text-[var(--color-text-muted)]" />
                   </div>
-                  <FiArrowUpRight className="w-3.5 h-3.5 text-[var(--color-text-muted)] opacity-0 group-hover:opacity-100 transition-opacity" />
+                  <FiChevronRight className="w-3.5 h-3.5 text-[var(--color-text-muted)] opacity-0 group-hover:opacity-100 transition-opacity" />
                 </div>
                 <div className="text-sm font-medium mb-1 truncate">{project.name}</div>
                 {project.disease_focus && (

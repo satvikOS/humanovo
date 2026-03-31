@@ -1796,7 +1796,7 @@ function PropertiesPanel({ component }: { component: BiologicalComponent | null 
                 <ul className="space-y-1">
                   {component.therapeuticTargets.map((target, i) => (
                     <li key={i} className="flex gap-2 text-[var(--color-text-secondary)]">
-                      <FiTarget className="w-3 h-3 text-green-500 mt-0.5 flex-shrink-0" />
+                      <FiTarget className="w-3 h-3 text-[var(--color-text-secondary)] mt-0.5 flex-shrink-0" />
                       <span>{target}</span>
                     </li>
                   ))}
@@ -1948,7 +1948,7 @@ function MasterLibraryDetails({ element, onAddToCanvas }: { element: MasterLibra
             <span>Categories:</span>
             <span className="text-primary-400">{libraryStats.categories}</span>
             <span>AI-Ready:</span>
-            <span className="text-green-400">{libraryStats.aiSimulationReady}</span>
+            <span className="text-[var(--color-text-secondary)]">{libraryStats.aiSimulationReady}</span>
           </div>
         </div>
       </div>
@@ -1961,7 +1961,7 @@ function MasterLibraryDetails({ element, onAddToCanvas }: { element: MasterLibra
       <div className="p-3 border-b border-[var(--color-border)]">
         <div className="flex items-center gap-2 mb-1">
           {element.aiSimulationReady && (
-            <FiCpu className="w-3.5 h-3.5 text-green-400" title="AI Simulation Ready" />
+            <FiCpu className="w-3.5 h-3.5 text-[var(--color-text-secondary)]" title="AI Simulation Ready" />
           )}
           <span className="text-sm font-medium flex-1">{element.name}</span>
           {onAddToCanvas && (
@@ -2164,10 +2164,10 @@ function renderWorkbenchMarkdown(text: string): React.ReactNode {
 
   for (const line of lines) {
     if (/^[-•]\s/.test(line.trim())) {
-      elements.push(<div key={elements.length} className="flex gap-1 ml-1"><span className="text-cyan-400">-</span><span>{processInline(line.trim().replace(/^[-•]\s/, ''))}</span></div>)
+      elements.push(<div key={elements.length} className="flex gap-1 ml-1"><span className="text-[var(--color-text-secondary)]">-</span><span>{processInline(line.trim().replace(/^[-•]\s/, ''))}</span></div>)
     } else if (/^\d+\.\s/.test(line.trim())) {
       const num = line.trim().match(/^(\d+)\.\s/)
-      elements.push(<div key={elements.length} className="flex gap-1 ml-1"><span className="text-cyan-400 font-medium">{num?.[1]}.</span><span>{processInline(line.trim().replace(/^\d+\.\s/, ''))}</span></div>)
+      elements.push(<div key={elements.length} className="flex gap-1 ml-1"><span className="text-[var(--color-text-secondary)] font-medium">{num?.[1]}.</span><span>{processInline(line.trim().replace(/^\d+\.\s/, ''))}</span></div>)
     } else if (line.trim() === '') {
       elements.push(<div key={elements.length} className="h-1.5" />)
     } else {
@@ -2188,7 +2188,7 @@ function WorkbenchCopyButton({ text }: { text: string }) {
   }
   return (
     <button onClick={handleCopy} className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-[var(--color-surface)] text-[var(--color-text-muted)]" title="Copy">
-      {copied ? <FiCheck className="w-3 h-3 text-green-400" /> : <FiClipboard className="w-3 h-3" />}
+      {copied ? <FiCheck className="w-3 h-3 text-[var(--color-text-secondary)]" /> : <FiClipboard className="w-3 h-3" />}
     </button>
   )
 }
@@ -2217,7 +2217,7 @@ function ConstantPanel({
     <div className="w-80 border-l border-[var(--color-border)] bg-[var(--color-bg-elevated)] flex flex-col">
       <div className="p-3 border-b border-[var(--color-border)] flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+          <div className="w-2 h-2 rounded-full bg-white/40 animate-pulse" />
           <h3 className="text-sm font-medium">Constant AI</h3>
         </div>
         <button onClick={onToggle} className="p-1 hover:bg-[var(--color-surface)] rounded transition-colors">
@@ -2244,13 +2244,13 @@ function ConstantPanel({
             className={clsx(
               'text-xs leading-relaxed rounded-lg px-3 py-2 max-w-[95%] group relative',
               msg.role === 'user'
-                ? 'ml-auto bg-cyan-500/20 text-cyan-100'
+                ? 'ml-auto bg-white/10 text-[var(--color-text-secondary)]'
                 : 'bg-[var(--color-surface)] text-[var(--color-text-secondary)]'
             )}
           >
             {msg.role === 'assistant' && (
               <div className="flex items-center justify-between mb-1">
-                <span className="text-cyan-400 font-medium text-[10px]">Constant</span>
+                <span className="text-[var(--color-text-secondary)] font-medium text-[10px]">Constant</span>
                 <WorkbenchCopyButton text={msg.text} />
               </div>
             )}
@@ -2280,7 +2280,7 @@ function ConstantPanel({
             className="flex-1 bg-transparent text-xs outline-none px-2"
           />
           <button onClick={onSend} disabled={loading || !input.trim()} className="p-1.5 rounded hover:bg-[var(--color-surface)] transition-colors disabled:opacity-30">
-            <FiSend className="w-3.5 h-3.5 text-cyan-400" />
+            <FiSend className="w-3.5 h-3.5 text-[var(--color-text-secondary)]" />
           </button>
         </div>
       </div>
@@ -2380,7 +2380,7 @@ function EdgeLabelModal({
         onClick={e => e.stopPropagation()}
       >
         <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
-          <FiLink className="w-4 h-4 text-cyan-400" />
+          <FiLink className="w-4 h-4 text-[var(--color-text-secondary)]" />
           Connection Label
         </h3>
         <input
@@ -3260,7 +3260,7 @@ IMPORTANT: If the user asks you to connect nodes, suggest connections, or explai
           <div className="px-3 pt-3 pb-2 border-b border-[var(--color-border)]">
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-sm font-medium">Sapien Corridor</h3>
-              <span className="text-xxs text-green-400">{components.length} entities</span>
+              <span className="text-xxs text-[var(--color-text-secondary)]">{components.length} entities</span>
             </div>
             <div className="relative">
               <FiSearch className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--color-text-muted)]" />
@@ -3293,7 +3293,7 @@ IMPORTANT: If the user asks you to connect nodes, suggest connections, or explai
                         : 'hover:bg-[var(--color-surface)] text-[var(--color-text-secondary)]'
                     )}
                   >
-                    {elem.aiSimulationReady && <FiCpu className="w-3 h-3 text-green-400" />}
+                    {elem.aiSimulationReady && <FiCpu className="w-3 h-3 text-[var(--color-text-secondary)]" />}
                     <span className="truncate flex-1">{elem.name}</span>
                     <span className="text-xxs text-[var(--color-text-muted)]">{elem.category.split('_')[0]}</span>
                     <button
@@ -3351,7 +3351,7 @@ IMPORTANT: If the user asks you to connect nodes, suggest connections, or explai
                   >
                     <FiEdit3 className="w-3 h-3" />
                   </button>
-                  <button onClick={deleteSelectedNode} className="btn btn-sm btn-secondary text-red-400" title="Delete Node">
+                  <button onClick={deleteSelectedNode} className="btn btn-sm btn-secondary text-[var(--color-text-muted)] hover:text-[var(--color-text-muted)]" title="Delete Node">
                     <FiTrash2 className="w-3 h-3" />
                   </button>
                   <div className="w-px h-5 bg-[var(--color-border)] mx-1" />
@@ -3419,7 +3419,7 @@ IMPORTANT: If the user asks you to connect nodes, suggest connections, or explai
               />
               {/* Connection hint */}
               {connectingFrom && (
-                <div className="absolute top-3 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-full bg-cyan-500/20 text-cyan-400 text-xxs border border-cyan-500/30 backdrop-blur animate-pulse">
+                <div className="absolute top-3 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-full bg-white/10 text-[var(--color-text-secondary)] text-xxs border border-white/10 backdrop-blur animate-pulse">
                   Click a pulsing handle on another node to connect, or click empty space to cancel
                 </div>
               )}
@@ -3605,13 +3605,13 @@ IMPORTANT: If the user asks you to connect nodes, suggest connections, or explai
               </div>
 
               {discoveryError && (
-                <div className="text-xs text-red-400 bg-red-500/10 rounded p-2 border border-red-500/20">
+                <div className="text-xs text-[var(--color-text-muted)] bg-white/5 rounded p-2 border border-white/10">
                   {discoveryError}
                 </div>
               )}
 
               {discoveryRunId && (
-                <div className="text-xs text-green-400 bg-green-500/10 rounded p-2 border border-green-500/20">
+                <div className="text-xs text-[var(--color-text-secondary)] bg-white/5 rounded p-2 border border-white/10">
                   Discovery launched! Run ID: {discoveryRunId.slice(0, 8)}...
                 </div>
               )}
@@ -3658,7 +3658,7 @@ IMPORTANT: If the user asks you to connect nodes, suggest connections, or explai
                 </h3>
                 <div className="flex items-center gap-1">
                   {selectedLibraryId && selectedLibraryElement && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-400">
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-[var(--color-text-secondary)]">
                       {selectedLibraryElement.aiSimulationReady ? 'AI Ready' : 'Manual'}
                     </span>
                   )}
@@ -3700,7 +3700,7 @@ IMPORTANT: If the user asks you to connect nodes, suggest connections, or explai
       {deleteConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setDeleteConfirm(null)}>
           <div className="bg-[var(--color-bg-elevated)] border border-[var(--color-border)] rounded-xl p-5 w-80 shadow-2xl" onClick={e => e.stopPropagation()}>
-            <h3 className="text-sm font-semibold mb-2 text-red-400">
+            <h3 className="text-sm font-semibold mb-2 text-[var(--color-text-muted)]">
               {deleteConfirm.type === 'graph' ? 'Clear Entire Graph?' : deleteConfirm.type === 'node' ? 'Delete Node?' : 'Delete Connection?'}
             </h3>
             <p className="text-xs text-[var(--color-text-muted)] mb-4">
@@ -3712,7 +3712,7 @@ IMPORTANT: If the user asks you to connect nodes, suggest connections, or explai
             </p>
             <div className="flex justify-end gap-2">
               <button onClick={() => setDeleteConfirm(null)} className="btn btn-sm btn-secondary">Cancel</button>
-              <button onClick={confirmDeleteAction} className="btn btn-sm text-red-400 bg-red-500/10 hover:bg-red-500/20">
+              <button onClick={confirmDeleteAction} className="btn btn-sm text-[var(--color-text-muted)] hover:text-[var(--color-text-muted)] bg-white/5 hover:bg-white/10">
                 <FiTrash2 className="w-3 h-3" /> Delete
               </button>
             </div>

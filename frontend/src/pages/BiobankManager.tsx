@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { FiSearch, FiPlus, FiTrash2, FiAlertTriangle, FiLogOut, FiLogIn } from 'react-icons/fi'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
+import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
+import { logActivity } from '../utils/persistence'
 
 interface Sample {
   id: string; barcode: string; sample_type: string; status: string; project: string
@@ -11,7 +13,7 @@ interface Inventory { total_samples: number; by_type: Record<string, number>; by
 
 const API = '/api/v1/biobank'
 const PIE_COLORS = ['#3b82f6', '#8b5cf6', '#22c55e', '#f97316', '#06b6d4', '#ef4444']
-const STATUS_COLORS: Record<string, string> = { available: 'text-green-400 bg-green-500/10', checked_out: 'text-yellow-400 bg-yellow-500/10', depleted: 'text-red-400 bg-red-500/10', reserved: 'text-blue-400 bg-blue-500/10' }
+const STATUS_COLORS: Record<string, string> = { available: 'text-[var(--color-text-secondary)] bg-[var(--glass-bg)]', checked_out: 'text-[var(--color-text-muted)] bg-[var(--glass-bg)]', depleted: 'text-[var(--color-text-muted)] bg-[var(--glass-bg)]', reserved: 'text-[var(--color-text-secondary)] bg-[var(--glass-bg)]' }
 
 export default function BiobankManager() {
   const [samples, setSamples] = useState<Sample[]>([])
@@ -23,6 +25,7 @@ export default function BiobankManager() {
   const [statusFilter, setStatusFilter] = useState('')
   const [showAdd, setShowAdd] = useState(false)
   const [form, setForm] = useState({ barcode: '', sample_type: 'tissue', tissue_type: '', project: '', patient_id: '', quantity: '' })
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
   const load = async () => {
     try { const r = await fetch(`${API}/samples`); if (r.ok) setSamples((await r.json()).items || []) } catch {}
@@ -32,22 +35,30 @@ export default function BiobankManager() {
 
   const createSample = async () => {
     const r = await fetch(`${API}/samples`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) })
-    if (r.ok) { load(); setShowAdd(false); setForm({ barcode: '', sample_type: 'tissue', tissue_type: '', project: '', patient_id: '', quantity: '' }) }
+    if (r.ok) { load(); setShowAdd(false); logActivity({ type: 'discovery', action: 'created', title: `Added biobank sample: ${form.barcode || form.sample_type}` }); setForm({ barcode: '', sample_type: 'tissue', tissue_type: '', project: '', patient_id: '', quantity: '' }) }
   }
 
-  const deleteSample = async (id: string) => {
-    await fetch(`${API}/samples/${id}`, { method: 'DELETE' })
-    if (selected?.id === id) setSelected(null); load()
+  const deleteSample = (id: string) => {
+    setDeleteConfirmId(id)
+  }
+
+  const confirmDelete = async () => {
+    if (!deleteConfirmId) return
+    const deletedSample = samples.find(s => s.id === deleteConfirmId)
+    await fetch(`${API}/samples/${deleteConfirmId}`, { method: 'DELETE' })
+    if (selected?.id === deleteConfirmId) setSelected(null); load()
+    setDeleteConfirmId(null)
+    logActivity({ type: 'discovery', action: 'deleted', title: `Deleted biobank sample: ${deletedSample?.barcode || deleteConfirmId}` })
   }
 
   const checkout = async (id: string) => {
     const r = await fetch(`${API}/samples/${id}/checkout`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ researcher: 'Current Researcher', purpose: 'Analysis' }) })
-    if (r.ok) { const s = await r.json(); setSelected(s); load() }
+    if (r.ok) { const s = await r.json(); setSelected(s); load(); logActivity({ type: 'discovery', action: 'updated', title: `Checked out sample: ${s.barcode || id}` }) }
   }
 
   const checkin = async (id: string) => {
     const r = await fetch(`${API}/samples/${id}/checkin?condition=good`, { method: 'POST' })
-    if (r.ok) { const s = await r.json(); setSelected(s); load() }
+    if (r.ok) { const s = await r.json(); setSelected(s); load(); logActivity({ type: 'discovery', action: 'updated', title: `Returned sample: ${s.barcode || id}` }) }
   }
 
   const filtered = samples.filter(s => {
@@ -66,7 +77,7 @@ export default function BiobankManager() {
           <div><h1 className="text-2xl font-semibold tracking-tight">Biobank Manager</h1><p className="text-sm text-[var(--color-text-muted)] mt-1">Sample registry, storage, and chain of custody</p></div>
           <div className="flex gap-2">
             <button onClick={() => setView(view === 'list' ? 'inventory' : 'list')} className="btn text-xs text-[var(--color-text-muted)]">{view === 'list' ? 'Inventory' : 'Sample List'}</button>
-            <button onClick={() => setShowAdd(!showAdd)} className="btn text-sm" style={{ color: 'var(--color-accent-blue)' }}><FiPlus className="w-4 h-4" /> New Sample</button>
+            <button onClick={() => setShowAdd(!showAdd)} className="btn text-sm" style={{ color: 'var(--color-text-secondary)' }}><FiPlus className="w-4 h-4" /> New Sample</button>
           </div>
         </div>
       </div>
@@ -98,15 +109,15 @@ export default function BiobankManager() {
             {/* Alerts */}
             {inventory.alerts.map((a, i) => (
               <div key={i} className={`glass-card p-3 flex items-center gap-2 ${a.severity === 'warning' ? 'border-l-2 border-l-yellow-400' : ''}`}>
-                <FiAlertTriangle className="w-4 h-4 text-yellow-400" /><span className="text-xs">{a.message}</span>
+                <FiAlertTriangle className="w-4 h-4 text-[var(--color-text-muted)]" /><span className="text-xs">{a.message}</span>
               </div>
             ))}
 
             <div className="grid grid-cols-4 gap-3">
               <div className="glass-card p-4 text-center"><div className="text-2xl font-semibold">{inventory.total_samples}</div><div className="text-xs text-[var(--color-text-muted)]">Total Samples</div></div>
-              <div className="glass-card p-4 text-center"><div className="text-2xl font-semibold text-green-400">{inventory.by_status.available || 0}</div><div className="text-xs text-[var(--color-text-muted)]">Available</div></div>
-              <div className="glass-card p-4 text-center"><div className="text-2xl font-semibold text-yellow-400">{inventory.by_status.checked_out || 0}</div><div className="text-xs text-[var(--color-text-muted)]">Checked Out</div></div>
-              <div className="glass-card p-4 text-center"><div className="text-2xl font-semibold text-red-400">{inventory.by_status.depleted || 0}</div><div className="text-xs text-[var(--color-text-muted)]">Depleted</div></div>
+              <div className="glass-card p-4 text-center"><div className="text-2xl font-semibold text-white">{inventory.by_status.available || 0}</div><div className="text-xs text-[var(--color-text-muted)]">Available</div></div>
+              <div className="glass-card p-4 text-center"><div className="text-2xl font-semibold text-white">{inventory.by_status.checked_out || 0}</div><div className="text-xs text-[var(--color-text-muted)]">Checked Out</div></div>
+              <div className="glass-card p-4 text-center"><div className="text-2xl font-semibold text-white">{inventory.by_status.depleted || 0}</div><div className="text-xs text-[var(--color-text-muted)]">Depleted</div></div>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -196,7 +207,7 @@ export default function BiobankManager() {
                     </div>
                     <div className="flex gap-2 mt-3">
                       {selected.status === 'available' && (
-                        <button onClick={() => checkout(selected.id)} className="btn text-xxs" style={{ color: 'var(--color-accent-blue)' }}><FiLogOut className="w-3 h-3" /> Checkout</button>
+                        <button onClick={() => checkout(selected.id)} className="btn text-xxs" style={{ color: 'var(--color-text-secondary)' }}><FiLogOut className="w-3 h-3" /> Checkout</button>
                       )}
                       {selected.status === 'checked_out' && (
                         <button onClick={() => checkin(selected.id)} className="btn text-xxs" style={{ color: 'var(--color-success)' }}><FiLogIn className="w-3 h-3" /> Return</button>
@@ -220,6 +231,13 @@ export default function BiobankManager() {
           </div>
         )}
       </div>
+      <ConfirmDeleteDialog
+        open={deleteConfirmId !== null}
+        entityName="Biobank Sample"
+        message="This will permanently delete this biobank sample record. This action cannot be undone."
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteConfirmId(null)}
+      />
     </div>
   )
 }

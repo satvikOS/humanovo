@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { FiImage, FiPlus, FiTrash2, FiZoomIn, FiZoomOut, FiCpu, FiSquare, FiCircle, FiType } from 'react-icons/fi'
+import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
+import { logActivity } from '../utils/persistence'
 
 interface Study { id: string; title: string; modality: string; body_part: string; findings: string; status: string; annotations: Annotation[]; ai_analysis: any; width: number; height: number }
 interface Annotation { id: string; type: string; x: number; y: number; width: number; height: number; label: string; color: string; notes: string }
@@ -16,6 +18,7 @@ export default function ResearchImaging() {
   const [annotLabel, setAnnotLabel] = useState('')
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [zoom, setZoom] = useState(1)
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
   const load = async () => { try { const r = await fetch(`${API}/studies`); if (r.ok) setStudies((await r.json()).items || []) } catch {} }
   useEffect(() => { load() }, [])
@@ -25,18 +28,26 @@ export default function ResearchImaging() {
   const createStudy = async () => {
     if (!form.title.trim()) return
     const r = await fetch(`${API}/studies`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) })
-    if (r.ok) { load(); setShowAdd(false); setForm({ title: '', modality: 'CT', body_part: '', findings: '' }) }
+    if (r.ok) { load(); setShowAdd(false); logActivity({ type: 'discovery', action: 'created', title: `Created imaging study: ${form.title}` }); setForm({ title: '', modality: 'CT', body_part: '', findings: '' }) }
   }
 
-  const deleteStudy = async (id: string) => {
-    await fetch(`${API}/studies/${id}`, { method: 'DELETE' })
-    if (selected?.id === id) setSelected(null); load()
+  const deleteStudy = (id: string) => {
+    setDeleteConfirmId(id)
+  }
+
+  const confirmDelete = async () => {
+    if (!deleteConfirmId) return
+    const deletedStudy = studies.find(s => s.id === deleteConfirmId)
+    await fetch(`${API}/studies/${deleteConfirmId}`, { method: 'DELETE' })
+    if (selected?.id === deleteConfirmId) setSelected(null); load()
+    setDeleteConfirmId(null)
+    logActivity({ type: 'discovery', action: 'deleted', title: `Deleted imaging study: ${deletedStudy?.title || deleteConfirmId}` })
   }
 
   const runAnalysis = async () => {
     if (!selected) return
     const r = await fetch(`${API}/studies/${selected.id}/analysis`)
-    if (r.ok) setAnalysis(await r.json())
+    if (r.ok) { setAnalysis(await r.json()); logActivity({ type: 'discovery', action: 'started', title: `Ran AI analysis on: ${selected.title}` }) }
   }
 
   const addAnnotation = async (e: React.MouseEvent) => {
@@ -85,7 +96,7 @@ export default function ResearchImaging() {
       <div className="p-6 border-b border-[var(--color-border)]">
         <div className="flex items-center justify-between mb-2">
           <div><h1 className="text-2xl font-semibold tracking-tight">Research Imaging</h1><p className="text-sm text-[var(--color-text-muted)] mt-1">Image viewer, annotations, and AI-assisted analysis</p></div>
-          <button onClick={() => setShowAdd(!showAdd)} className="btn text-sm" style={{ color: 'var(--color-accent-blue)' }}><FiPlus className="w-4 h-4" /> New Study</button>
+          <button onClick={() => setShowAdd(!showAdd)} className="btn text-sm" style={{ color: 'var(--color-text-secondary)' }}><FiPlus className="w-4 h-4" /> New Study</button>
         </div>
       </div>
 
@@ -127,7 +138,7 @@ export default function ResearchImaging() {
                 <div className="flex gap-1">
                   <button onClick={() => setZoom(z => Math.min(3, z + 0.2))} className="btn text-xs"><FiZoomIn className="w-3.5 h-3.5" /></button>
                   <button onClick={() => setZoom(z => Math.max(0.5, z - 0.2))} className="btn text-xs"><FiZoomOut className="w-3.5 h-3.5" /></button>
-                  <button onClick={runAnalysis} className="btn text-xs" style={{ color: 'var(--color-accent-blue)' }}><FiCpu className="w-3.5 h-3.5" /> AI Analysis</button>
+                  <button onClick={runAnalysis} className="btn text-xs" style={{ color: 'var(--color-text-secondary)' }}><FiCpu className="w-3.5 h-3.5" /> AI Analysis</button>
                 </div>
               </div>
 
@@ -184,6 +195,13 @@ export default function ResearchImaging() {
           )}
         </div>
       </div>
+      <ConfirmDeleteDialog
+        open={deleteConfirmId !== null}
+        entityName="Research Study"
+        message="This will permanently delete this imaging study. This action cannot be undone."
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteConfirmId(null)}
+      />
     </div>
   )
 }

@@ -1,6 +1,6 @@
-import { useState, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { formatDate } from '../utils/persistence'
+import { useState, useCallback, useEffect, useRef } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { formatDate, persistGet, getActivityLog } from '../utils/persistence'
 import {
   FiSearch,
   FiCalendar,
@@ -22,18 +22,18 @@ import type { SearchResult } from '../services/api'
 type SortBy = 'relevance' | 'date' | 'citations'
 
 const SOURCE_COLORS: Record<string, { color: string; bg: string; label: string }> = {
-  evidence: { color: 'var(--color-accent-blue)', bg: 'rgba(59, 130, 246, 0.08)', label: 'Evidence' },
-  hypothesis: { color: 'var(--color-accent-purple)', bg: 'rgba(168, 85, 247, 0.08)', label: 'Hypothesis' },
-  project: { color: 'var(--color-accent-green)', bg: 'rgba(34, 197, 94, 0.08)', label: 'Project' },
-  entity: { color: 'var(--color-accent-orange)', bg: 'rgba(249, 115, 22, 0.08)', label: 'Entity' },
-  notebook: { color: 'var(--color-accent-cyan)', bg: 'rgba(6, 182, 212, 0.08)', label: 'Notebook' },
-  gene: { color: 'var(--color-accent-orange)', bg: 'rgba(249, 115, 22, 0.08)', label: 'Gene' },
-  protein: { color: 'var(--color-accent-pink)', bg: 'rgba(236, 72, 153, 0.08)', label: 'Protein' },
-  drug: { color: 'var(--color-accent-cyan)', bg: 'rgba(6, 182, 212, 0.08)', label: 'Drug' },
-  disease: { color: 'var(--color-accent-red)', bg: 'rgba(239, 68, 68, 0.08)', label: 'Disease' },
-  pathway: { color: 'var(--color-accent-yellow)', bg: 'rgba(234, 179, 8, 0.08)', label: 'Pathway' },
-  pubmed: { color: 'var(--color-accent-blue)', bg: 'rgba(59, 130, 246, 0.08)', label: 'PubMed' },
-  clinical_trial: { color: 'var(--color-accent-green)', bg: 'rgba(34, 197, 94, 0.08)', label: 'Clinical Trial' },
+  evidence: { color: 'var(--color-text-secondary)', bg: 'var(--glass-bg)', label: 'Evidence' },
+  hypothesis: { color: 'var(--color-text-secondary)', bg: 'var(--glass-bg)', label: 'Hypothesis' },
+  project: { color: 'var(--color-text-secondary)', bg: 'var(--glass-bg)', label: 'Project' },
+  entity: { color: 'var(--color-text-secondary)', bg: 'var(--glass-bg)', label: 'Entity' },
+  notebook: { color: 'var(--color-text-secondary)', bg: 'var(--glass-bg)', label: 'Notebook' },
+  gene: { color: 'var(--color-text-secondary)', bg: 'var(--glass-bg)', label: 'Gene' },
+  protein: { color: 'var(--color-text-secondary)', bg: 'var(--glass-bg)', label: 'Protein' },
+  drug: { color: 'var(--color-text-secondary)', bg: 'var(--glass-bg)', label: 'Drug' },
+  disease: { color: 'var(--color-text-secondary)', bg: 'var(--glass-bg)', label: 'Disease' },
+  pathway: { color: 'var(--color-text-muted)', bg: 'var(--glass-bg)', label: 'Pathway' },
+  pubmed: { color: 'var(--color-text-secondary)', bg: 'var(--glass-bg)', label: 'PubMed' },
+  clinical_trial: { color: 'var(--color-text-secondary)', bg: 'var(--glass-bg)', label: 'Clinical Trial' },
   rag: { color: 'var(--color-text-muted)', bg: 'var(--glass-bg)', label: 'RAG' },
   unknown: { color: 'var(--color-text-muted)', bg: 'var(--glass-bg)', label: 'Other' },
 }
@@ -60,7 +60,9 @@ const FILTER_TYPES = [
 
 export default function Search() {
   const navigate = useNavigate()
-  const [query, setQuery] = useState('')
+  const [searchParams] = useSearchParams()
+  const initialQuery = searchParams.get('q') || ''
+  const [query, setQuery] = useState(initialQuery)
   const [filterType, setFilterType] = useState('')
   const [dateRange, setDateRange] = useState({ from: '', to: '' })
   const [minRelevance, setMinRelevance] = useState(0)
@@ -71,6 +73,113 @@ export default function Search() {
   const [totalResults, setTotalResults] = useState(0)
   const [recentSearches, setRecentSearches] = useState<string[]>([])
   const [savedSearches, setSavedSearches] = useState<string[]>([])
+  const didAutoSearch = useRef(false)
+
+  // Search local data as fallback when API is unavailable
+  const searchLocalData = useCallback((q: string): SearchResult[] => {
+    const localResults: SearchResult[] = []
+    const lq = q.toLowerCase()
+
+    // Search activity log for projects, hypotheses, simulations, etc.
+    const activities = getActivityLog()
+    const seen = new Set<string>()
+    for (const a of activities) {
+      if (seen.has(a.title)) continue
+      if (a.title?.toLowerCase().includes(lq) || a.project?.toLowerCase().includes(lq)) {
+        seen.add(a.title)
+        localResults.push({
+          id: a.id,
+          type: a.type === 'hypothesis' ? 'hypothesis' : a.type === 'evidence' ? 'evidence' : a.type === 'notebook' ? 'notebook' : 'project',
+          title: a.title,
+          snippet: `${a.action} ${a.project ? `in ${a.project}` : ''} — ${a.type}`,
+          source: a.type,
+          source_type: a.type,
+          relevance_score: 0.6,
+          metadata: {},
+          created_at: a.timestamp,
+          tags: [],
+        })
+      }
+    }
+
+    // Search MC simulations
+    const mcSims = persistGet<any[]>('mc-simulations', [])
+    for (const s of mcSims) {
+      if (s.name?.toLowerCase().includes(lq) || s.simulationType?.toLowerCase().includes(lq)) {
+        localResults.push({
+          id: s.id,
+          type: 'project' as any,
+          title: s.name || 'Untitled Simulation',
+          snippet: `Monte Carlo · ${s.iterations?.toLocaleString() || 0} iterations · μ=${s.stats?.mean?.toFixed(2) || 0}`,
+          source: 'simulation',
+          source_type: 'simulation',
+          relevance_score: 0.7,
+          metadata: { simulationType: s.simulationType },
+          created_at: s.createdAt,
+          tags: [],
+        })
+      }
+    }
+
+    // Search notebook pages
+    const notebooks = persistGet<any[]>('notebook-index', [])
+    for (const n of notebooks) {
+      if (n.title?.toLowerCase().includes(lq) || n.tags?.some((t: string) => t.toLowerCase().includes(lq))) {
+        localResults.push({
+          id: n.id,
+          type: 'notebook',
+          title: n.title || 'Untitled Page',
+          snippet: n.tags?.join(', ') || 'Notebook page',
+          source: 'notebook',
+          source_type: 'notebook',
+          relevance_score: 0.65,
+          metadata: {},
+          created_at: n.updatedAt || n.updated_at || n.createdAt,
+          tags: n.tags || [],
+        })
+      }
+    }
+
+    // Search experiments
+    const experiments = persistGet<any[]>('experiments', [])
+    for (const e of experiments) {
+      if (e.title?.toLowerCase().includes(lq) || e.hypothesis?.toLowerCase().includes(lq) || e.tags?.some((t: string) => t.toLowerCase().includes(lq))) {
+        localResults.push({
+          id: e.id,
+          type: 'project' as any,
+          title: e.title,
+          snippet: e.hypothesis || `Experiment · ${e.status}`,
+          source: 'experiment',
+          source_type: 'experiment',
+          relevance_score: 0.65,
+          metadata: { status: e.status },
+          created_at: e.createdAt,
+          tags: e.tags || [],
+        })
+      }
+    }
+
+    // Search equation history
+    const eqHistory = persistGet<any[]>('eq-history', [])
+    for (const eq of eqHistory) {
+      if (eq.expr?.toLowerCase().includes(lq)) {
+        localResults.push({
+          id: eq.id,
+          type: 'project' as any,
+          title: `f(x) = ${eq.expr}`,
+          snippet: `Equation plot · x ∈ [${eq.xMin}, ${eq.xMax}]`,
+          source: 'equation',
+          source_type: 'equation',
+          relevance_score: 0.5,
+          metadata: {},
+          created_at: eq.createdAt,
+          tags: [],
+        })
+      }
+    }
+
+    return localResults
+  }, [])
 
   const handleSearch = useCallback(async (searchQuery?: string) => {
     const q = searchQuery || query
@@ -92,7 +201,12 @@ export default function Search() {
       })
       apiResults = res.results || []
     } catch (err) {
-      console.warn('Search API unavailable:', err)
+      console.warn('Search API unavailable, falling back to local search:', err)
+    }
+
+    // If API returned nothing, search local data
+    if (apiResults.length === 0) {
+      apiResults = searchLocalData(q)
     }
 
     // Apply type filter
@@ -119,7 +233,15 @@ export default function Search() {
     setResults(filtered)
     setTotalResults(filtered.length)
     setIsSearching(false)
-  }, [query, filterType, dateRange, minRelevance, sortBy])
+  }, [query, filterType, dateRange, minRelevance, sortBy, searchLocalData])
+
+  // Auto-search when opened with ?q= parameter
+  useEffect(() => {
+    if (initialQuery && !didAutoSearch.current) {
+      didAutoSearch.current = true
+      handleSearch(initialQuery)
+    }
+  }, [initialQuery, handleSearch])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') handleSearch()

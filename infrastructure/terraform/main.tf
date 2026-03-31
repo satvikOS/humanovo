@@ -222,6 +222,7 @@ module "iam" {
     module.dynamodb.knowledge_table_arn,
     module.dynamodb.knowledge_metadata_table_arn,
     module.dynamodb.notebook_table_arn,
+    module.dynamodb.user_state_table_arn,
   ]
 }
 
@@ -262,6 +263,7 @@ module "lambda" {
   simulations_table_name = module.dynamodb.simulations_table_name
   agent_tasks_table_name = module.dynamodb.agent_tasks_table_name
   notebook_table_name    = module.dynamodb.notebook_table_name
+  user_state_table_name  = module.dynamodb.user_state_table_name
 
   # S3 buckets
   data_bucket_name      = module.s3.data_bucket_name
