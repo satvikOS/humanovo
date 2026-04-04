@@ -428,6 +428,7 @@ function SavedSimulations() {
   const [filter, setFilter] = useState<'all' | 'monte-carlo' | 'equation' | 'computational'>('all')
   const [overlayEntry, setOverlayEntry] = useState<UnifiedEntry | null>(null)
   const [copiedId, setCopiedId] = useState<string | null>(null)
+  const [deleteConfirmEntry, setDeleteConfirmEntry] = useState<UnifiedEntry | null>(null)
 
   const deleteEntry = useCallback((entry: UnifiedEntry) => {
     if (entry.type === 'monte-carlo') {
@@ -451,11 +452,24 @@ function SavedSimulations() {
     let text = ''
     if (entry.type === 'monte-carlo' && entry.mcData) {
       const mc = entry.mcData
-      text = `${entry.title}\n${entry.subtitle}\nMean: ${mc.stats.mean.toFixed(4)}\nMedian: ${mc.stats.median.toFixed(4)}\nStd Dev: ${mc.stats.std.toFixed(4)}\n95% CI: [${mc.stats.ci95Lower.toFixed(4)}, ${mc.stats.ci95Upper.toFixed(4)}]`
+      text = `Monte Carlo Simulation: ${entry.title}\n${entry.subtitle}\n\n` +
+        `Results:\n` +
+        `  Mean: ${mc.stats.mean.toFixed(4)}\n` +
+        `  Median: ${mc.stats.median.toFixed(4)}\n` +
+        `  Std Dev: ${mc.stats.std.toFixed(4)}\n` +
+        `  95% CI: [${mc.stats.ci95Lower.toFixed(4)}, ${mc.stats.ci95Upper.toFixed(4)}]\n` +
+        `  Min: ${mc.stats.min.toFixed(4)}\n` +
+        `  Max: ${mc.stats.max.toFixed(4)}\n` +
+        `  Iterations: ${mc.iterations.toLocaleString()}`
     } else if (entry.type === 'equation' && entry.eqData) {
-      text = `f(x) = ${entry.eqData.expr}\nx range: [${entry.eqData.xMin}, ${entry.eqData.xMax}]`
+      text = `Equation Plot\n\n` +
+        `Expression: f(x) = ${entry.eqData.expr}\n` +
+        `Range: x ∈ [${entry.eqData.xMin}, ${entry.eqData.xMax}]`
     } else if (entry.type === 'computational' && entry.compData) {
-      text = entry.compData.code
+      text = `Computational Lab: ${entry.compData.env}\n` +
+        `Template: ${entry.compData.template || 'Custom'}\n\n` +
+        `--- Code ---\n${entry.compData.code}\n\n` +
+        `--- Output ---\n${entry.compData.output}`
     }
     navigator.clipboard.writeText(text)
     setCopiedId(entry.id)
@@ -689,7 +703,7 @@ function SavedSimulations() {
                     {copiedId === entry.id ? <FiCheck className="w-3.5 h-3.5 text-[var(--color-accent-green)]" /> : <FiCopy className="w-3.5 h-3.5" />}
                   </button>
                   <button
-                    onClick={(e) => { e.stopPropagation(); deleteEntry(entry) }}
+                    onClick={(e) => { e.stopPropagation(); setDeleteConfirmEntry(entry) }}
                     className="p-1.5 rounded hover:bg-red-500/10 text-[var(--color-text-muted)] hover:text-red-400 transition-all opacity-0 group-hover:opacity-100"
                     title="Delete"
                   >
@@ -727,13 +741,49 @@ function SavedSimulations() {
                   <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{overlayEntry.subtitle} · {formatTimeAgo(overlayEntry.createdAt)}</p>
                 </div>
               </div>
-              <button onClick={() => setOverlayEntry(null)} className="p-2 rounded-lg hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors">
-                <FiX className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => copyEntryContent(overlayEntry)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)] transition-all"
+                >
+                  {copiedId === overlayEntry.id ? <FiCheck className="w-3.5 h-3.5 text-[var(--color-accent-green)]" /> : <FiCopy className="w-3.5 h-3.5" />}
+                  {copiedId === overlayEntry.id ? 'Copied' : 'Copy'}
+                </button>
+                <button onClick={() => setOverlayEntry(null)} className="p-2 rounded-lg hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors">
+                  <FiX className="w-5 h-5" />
+                </button>
+              </div>
             </div>
             {/* Content */}
             <div className="p-6">
               {renderExpandedContent(overlayEntry)}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation */}
+      {deleteConfirmEntry && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={() => setDeleteConfirmEntry(null)}>
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+          <div className="relative glass-card p-6 max-w-sm text-center" onClick={e => e.stopPropagation()}>
+            <div className="inline-flex p-3 rounded-xl bg-red-500/10 mb-4">
+              <FiTrash2 className="w-6 h-6 text-[var(--color-text-muted)]" />
+            </div>
+            <h3 className="text-lg font-semibold mb-2">Delete Simulation?</h3>
+            <p className="text-sm text-[var(--color-text-muted)] mb-6 leading-relaxed">
+              This will permanently delete &ldquo;{deleteConfirmEntry.title}&rdquo;. This action cannot be undone.
+            </p>
+            <div className="flex gap-3 justify-center">
+              <button onClick={() => setDeleteConfirmEntry(null)} className="btn px-4 py-2 text-sm text-[var(--color-text-muted)]">
+                Cancel
+              </button>
+              <button
+                onClick={() => { deleteEntry(deleteConfirmEntry); setDeleteConfirmEntry(null) }}
+                className="btn px-4 py-2 text-sm bg-red-500/10 text-[var(--color-text-muted)] hover:text-red-400 hover:bg-red-500/20 font-medium"
+              >
+                Delete Permanently
+              </button>
             </div>
           </div>
         </div>
@@ -2270,10 +2320,16 @@ println("Herd immunity threshold: $(round(100*(1-1/R0_eff), digits=1))%")
 
 // ── Equation Plotter / Symbolic Math Engine ────────────────────
 function EquationPlotter() {
-  const [equationExpr, setEquationExpr] = useState('sin(x) * exp(-x/5)')
-  const [xMin, setXMin] = useState(-2)
-  const [xMax, setXMax] = useState(20)
-  const [plotData, setPlotData] = useState<{ x: number; y: number }[]>([])
+  const [equationExpr, setEquationExpr] = useState(() => persistGet<string>('eq-plotter-expr', 'sin(x) * exp(-x/5)'))
+  const [xMin, setXMin] = useState(() => persistGet<number>('eq-plotter-xmin', -2))
+  const [xMax, setXMax] = useState(() => persistGet<number>('eq-plotter-xmax', 20))
+  const [plotData, setPlotData] = useState<{ x: number; y: number }[]>(() => {
+    // Restore last plot on mount
+    const expr = persistGet<string>('eq-plotter-expr', 'sin(x) * exp(-x/5)')
+    const min = persistGet<number>('eq-plotter-xmin', -2)
+    const max = persistGet<number>('eq-plotter-xmax', 20)
+    return evaluateExpression(expr, min, max)
+  })
   const [selectedPreset, setSelectedPreset] = useState<PredefinedEquation | null>(null)
   const [plotHistory, setPlotHistory] = useState<{ expr: string; data: { x: number; y: number }[] }[]>([])
   const [showOverlay, setShowOverlay] = useState(false)
@@ -2313,6 +2369,9 @@ function EquationPlotter() {
     if (!equationExpr.trim()) return
     const data = evaluateExpression(equationExpr, xMin, xMax)
     setPlotData(data)
+    persistSet('eq-plotter-expr', equationExpr)
+    persistSet('eq-plotter-xmin', xMin)
+    persistSet('eq-plotter-xmax', xMax)
     if (data.length > 0) {
       setPlotHistory(prev => {
         const next = [{ expr: equationExpr, data }, ...prev.filter(h => h.expr !== equationExpr)]
@@ -2333,6 +2392,9 @@ function EquationPlotter() {
     setXMax(eq.xMax)
     const data = evaluateExpression(eq.expression, eq.xMin, eq.xMax)
     setPlotData(data)
+    persistSet('eq-plotter-expr', eq.expression)
+    persistSet('eq-plotter-xmin', eq.xMin)
+    persistSet('eq-plotter-xmax', eq.xMax)
     setPlotHistory(prev => {
       const next = [{ expr: eq.expression, data }, ...prev.filter(h => h.expr !== eq.expression)]
       return next.slice(0, 10)

@@ -1212,7 +1212,7 @@ export default function ProjectDetail() {
                 {[
                   { label: 'High (\u226570%)', count: highConf, color: '#2d6a4f' },
                   { label: 'Medium (50\u201370%)', count: medConf, color: '#0096c7' },
-                  { label: 'Low (<50%)', count: lowConf, color: '#d00000' },
+                  { label: 'Low (<50%)', count: lowConf, color: '#991b1b' },
                 ].map(({ label, count, color }) => {
                   const pct = uniqueHypotheses.length > 0 ? (count / uniqueHypotheses.length) * 100 : 0
                   return (

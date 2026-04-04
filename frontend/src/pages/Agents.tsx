@@ -144,7 +144,7 @@ function confidenceColor(c: number) {
   if (c >= 0.8) return '#2d6a4f'
   if (c >= 0.6) return '#0096c7'
   if (c >= 0.4) return '#0077b6'
-  return '#d00000'
+  return '#991b1b'
 }
 
 export default function Agents() {
