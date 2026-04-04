@@ -57,7 +57,6 @@ function formatAuthorsVancouver(authors: string[]): string {
 }
 
 function formatCitation(c: Citation, style: CitationStyle): string {
-  const isJournalLike = c.type === 'journal' || c.type === 'preprint'
   const isBook = c.type === 'book'
   const isWebsite = c.type === 'website'
   const isThesis = c.type === 'thesis'
