@@ -7,7 +7,7 @@ import {
   FiCpu, FiCode, FiGrid, FiBarChart2, FiZap, FiDatabase,
   FiUpload, FiDownload, FiMaximize2, FiMinimize2,
   FiTerminal, FiLayers, FiTrendingUp, FiTarget,
-  FiHeart, FiRefreshCw, FiClipboard
+  FiHeart, FiRefreshCw, FiClipboard, FiTrash2, FiCopy
 } from 'react-icons/fi'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -422,11 +422,45 @@ type UnifiedEntry = {
 }
 
 function SavedSimulations() {
-  const mcSims: MCResult[] = persistGet<MCResult[]>('mc-simulations', [])
-  const eqPlots = useMemo(() => loadEqHistory(), [])
-  const compRuns = useMemo(() => loadCompHistory(), [])
+  const [mcSims, setMcSims] = useState<MCResult[]>(() => persistGet<MCResult[]>('mc-simulations', []))
+  const [eqPlots, setEqPlots] = useState(() => loadEqHistory())
+  const [compRuns, setCompRuns] = useState(() => loadCompHistory())
   const [filter, setFilter] = useState<'all' | 'monte-carlo' | 'equation' | 'computational'>('all')
   const [overlayEntry, setOverlayEntry] = useState<UnifiedEntry | null>(null)
+  const [copiedId, setCopiedId] = useState<string | null>(null)
+
+  const deleteEntry = useCallback((entry: UnifiedEntry) => {
+    if (entry.type === 'monte-carlo') {
+      const next = mcSims.filter(m => m.id !== entry.id)
+      persistSet('mc-simulations', next)
+      setMcSims(next)
+    } else if (entry.type === 'equation') {
+      const next = eqPlots.filter(e => e.id !== entry.id)
+      saveEqHistory(next)
+      setEqPlots(next)
+    } else {
+      const next = compRuns.filter(c => c.id !== entry.id)
+      saveCompHistory(next)
+      setCompRuns(next)
+    }
+    if (overlayEntry?.id === entry.id) setOverlayEntry(null)
+    logActivity({ type: 'simulation', action: 'deleted', title: `Deleted saved: ${entry.title}` })
+  }, [mcSims, eqPlots, compRuns, overlayEntry])
+
+  const copyEntryContent = useCallback((entry: UnifiedEntry) => {
+    let text = ''
+    if (entry.type === 'monte-carlo' && entry.mcData) {
+      const mc = entry.mcData
+      text = `${entry.title}\n${entry.subtitle}\nMean: ${mc.stats.mean.toFixed(4)}\nMedian: ${mc.stats.median.toFixed(4)}\nStd Dev: ${mc.stats.std.toFixed(4)}\n95% CI: [${mc.stats.ci95Lower.toFixed(4)}, ${mc.stats.ci95Upper.toFixed(4)}]`
+    } else if (entry.type === 'equation' && entry.eqData) {
+      text = `f(x) = ${entry.eqData.expr}\nx range: [${entry.eqData.xMin}, ${entry.eqData.xMax}]`
+    } else if (entry.type === 'computational' && entry.compData) {
+      text = entry.compData.code
+    }
+    navigator.clipboard.writeText(text)
+    setCopiedId(entry.id)
+    setTimeout(() => setCopiedId(null), 2000)
+  }, [])
 
   const allEntries = useMemo<UnifiedEntry[]>(() => {
     const entries: UnifiedEntry[] = []
@@ -629,7 +663,7 @@ function SavedSimulations() {
             <button
               key={entry.id}
               onClick={() => setOverlayEntry(entry)}
-              className="glass-card p-4 transition-all w-full text-left hover:bg-[var(--glass-bg-hover)] cursor-pointer"
+              className="glass-card p-4 transition-all w-full text-left hover:bg-[var(--glass-bg-hover)] cursor-pointer group"
             >
               <div className="flex items-start gap-3">
                 <div className="p-2 rounded-lg flex-shrink-0" style={{ background: `color-mix(in srgb, ${typeColor(entry.type)} 12%, transparent)` }}>
@@ -645,8 +679,22 @@ function SavedSimulations() {
                   <p className="text-xs text-[var(--color-text-muted)]">{entry.subtitle}</p>
                   {entry.stats && <p className="text-xxs text-[var(--color-text-muted)] mt-1 font-mono">{entry.stats}</p>}
                 </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  <span className="text-xxs text-[var(--color-text-muted)] whitespace-nowrap">{formatTimeAgo(entry.createdAt)}</span>
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  <span className="text-xxs text-[var(--color-text-muted)] whitespace-nowrap mr-1">{formatTimeAgo(entry.createdAt)}</span>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); copyEntryContent(entry) }}
+                    className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-all opacity-0 group-hover:opacity-100"
+                    title="Copy content"
+                  >
+                    {copiedId === entry.id ? <FiCheck className="w-3.5 h-3.5 text-[var(--color-accent-green)]" /> : <FiCopy className="w-3.5 h-3.5" />}
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); deleteEntry(entry) }}
+                    className="p-1.5 rounded hover:bg-red-500/10 text-[var(--color-text-muted)] hover:text-red-400 transition-all opacity-0 group-hover:opacity-100"
+                    title="Delete"
+                  >
+                    <FiTrash2 className="w-3.5 h-3.5" />
+                  </button>
                   <FiMaximize2 className="w-3.5 h-3.5 text-[var(--color-text-muted)]" />
                 </div>
               </div>
@@ -2721,11 +2769,40 @@ function ComputationalLab() {
     if (!file) return
     const reader = new FileReader()
     reader.onload = (ev) => {
-      setCode(ev.target?.result as string || '')
+      const content = ev.target?.result as string || ''
+      // Preserve file content exactly as-is, no trimming or transformation
+      setCode(content)
       setSelectedTemplate(null)
+      setOutput('')
     }
-    reader.readAsText(file)
+    reader.readAsText(file, 'utf-8')
+    // Reset input so the same file can be re-uploaded
+    e.target.value = ''
   }
+
+  const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    // For pasted files (e.g. drag-and-drop of file content), read as text
+    const items = e.clipboardData?.items
+    if (items) {
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i]
+        if (item.kind === 'file') {
+          e.preventDefault()
+          const file = item.getAsFile()
+          if (file) {
+            const reader = new FileReader()
+            reader.onload = (ev) => {
+              setCode(ev.target?.result as string || '')
+              setSelectedTemplate(null)
+            }
+            reader.readAsText(file, 'utf-8')
+          }
+          return
+        }
+      }
+    }
+    // Normal text paste is handled by the textarea natively
+  }, [])
 
   const downloadCode = () => {
     const ext = selectedEnv === 'octave' ? 'm' : selectedEnv === 'python' ? 'py' : selectedEnv === 'r' ? 'R' : 'jl'
@@ -2747,7 +2824,7 @@ function ComputationalLab() {
         {COMPUTE_ENVIRONMENTS.map(env => (
           <button
             key={env.id}
-            onClick={() => { setSelectedEnv(env.id); setSelectedTemplate(null); setCode(''); setOutput('') }}
+            onClick={() => { setSelectedEnv(env.id); setSelectedTemplate(null); setCode(''); setOutput(''); setShowOutputOverlay(false) }}
             className={clsx(
               'flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm transition-all border',
               selectedEnv === env.id
@@ -2848,17 +2925,20 @@ function ComputationalLab() {
               ref={textareaRef}
               value={code}
               onChange={e => { setCode(e.target.value); setSelectedTemplate(null) }}
+              onPaste={handlePaste}
               className="flex-1 w-full p-4 bg-transparent text-xs font-mono resize-none outline-none leading-relaxed text-[var(--color-text)]"
               placeholder={`Write your ${envConfig.name} code here, or select a template from the sidebar...`}
               spellCheck={false}
             />
           </div>
 
-          {/* Output Overlay — slides over the editor */}
+          {/* Output Overlay — centered modal */}
           {showOutputOverlay && (
-            <div className="absolute inset-0 z-20 flex flex-col bg-[var(--color-bg)]/95 backdrop-blur-sm rounded-xl border border-[var(--color-border)]" style={{ margin: '-1px' }}>
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => !isRunning && setShowOutputOverlay(false)}>
+              <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+              <div className="relative w-full max-w-3xl max-h-[85vh] flex flex-col rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-solid)] shadow-2xl" onClick={e => e.stopPropagation()}>
               {/* Overlay header */}
-              <div className="flex items-center justify-between px-4 py-2.5 border-b border-[var(--color-border)] flex-shrink-0">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--color-border)] flex-shrink-0">
                 <div className="flex items-center gap-3">
                   <FiTerminal className="w-3.5 h-3.5 text-[var(--color-accent-green)]" />
                   <span className="text-sm font-medium text-[var(--color-text)]">Output</span>
@@ -2973,6 +3053,7 @@ function ComputationalLab() {
                   </div>
                 )}
               </div>
+              </div>
             </div>
           )}
         </div>
@@ -3004,8 +3085,63 @@ async function loadPyodide(): Promise<any> {
   return _pyodidePromise
 }
 
+/** Detect imports in Python code and auto-install missing packages via micropip */
+async function autoInstallPackages(pyodide: any, code: string): Promise<void> {
+  // Map common import names to their pyodide/micropip package names
+  const PACKAGE_MAP: Record<string, string> = {
+    'sklearn': 'scikit-learn',
+    'cv2': 'opencv-python',
+    'PIL': 'Pillow',
+    'bs4': 'beautifulsoup4',
+    'yaml': 'pyyaml',
+    'Bio': 'biopython',
+  }
+  // Extract all import names from the code
+  const importRegex = /(?:^|\n)\s*(?:import|from)\s+([a-zA-Z_][a-zA-Z0-9_]*)/g
+  const imports = new Set<string>()
+  let match
+  while ((match = importRegex.exec(code)) !== null) {
+    imports.add(match[1])
+  }
+  // Filter to packages that need installation
+  const builtins = new Set(['sys', 'os', 'io', 'math', 'json', 're', 'random', 'collections',
+    'itertools', 'functools', 'operator', 'string', 'datetime', 'time', 'copy',
+    'csv', 'pathlib', 'typing', 'abc', 'enum', 'dataclasses', 'statistics',
+    'textwrap', 'struct', 'hashlib', 'base64', 'urllib', 'html', 'xml',
+    'unittest', 'contextlib', 'warnings', 'traceback', 'inspect', 'types',
+    'numbers', 'decimal', 'fractions', 'cmath', 'array', 'bisect', 'heapq',
+    'pprint', 'calendar', 'locale', 'gettext', 'logging', 'platform',
+    'signal', 'threading', 'queue', 'socket', 'email', 'http', 'ftplib',
+    'imaplib', 'smtplib', 'uuid', 'tempfile', 'glob', 'shutil', 'zipfile',
+    'gzip', 'bz2', 'lzma', 'tarfile', 'configparser', 'argparse', 'code',
+    'codecs', 'pickle', 'shelve', 'sqlite3', 'ast', 'dis', 'tokenize',
+    '_pyodide', 'pyodide', 'micropip', 'js', 'pyodide_js'])
+  // Already loaded: numpy, scipy, micropip
+  const preloaded = new Set(['numpy', 'scipy', 'micropip'])
+  const toInstall: string[] = []
+  for (const imp of imports) {
+    if (builtins.has(imp) || preloaded.has(imp)) continue
+    const pkgName = PACKAGE_MAP[imp] || imp
+    toInstall.push(pkgName)
+  }
+  if (toInstall.length > 0) {
+    for (const pkg of toInstall) {
+      try {
+        await pyodide.runPythonAsync(`import micropip; await micropip.install("${pkg}")`)
+      } catch {
+        // Try loadPackage as fallback (for packages included in pyodide distribution)
+        try {
+          await pyodide.loadPackage(pkg)
+        } catch { /* package unavailable — will error at runtime */ }
+      }
+    }
+  }
+}
+
 async function executePython(code: string): Promise<string> {
   const pyodide = await loadPyodide()
+  // Auto-install any missing packages before execution
+  await autoInstallPackages(pyodide, code)
   // Redirect stdout/stderr
   pyodide.runPython(`
 import sys, io

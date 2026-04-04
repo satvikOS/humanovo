@@ -1210,9 +1210,9 @@ export default function ProjectDetail() {
               <h2 className="text-base font-semibold text-white mb-5">Confidence Distribution</h2>
               <div className="space-y-3">
                 {[
-                  { label: 'High (\u226570%)', count: highConf, color: '#3b82f6' },
-                  { label: 'Medium (50\u201370%)', count: medConf, color: '#06b6d4' },
-                  { label: 'Low (<50%)', count: lowConf, color: '#8b5cf6' },
+                  { label: 'High (\u226570%)', count: highConf, color: '#2d6a4f' },
+                  { label: 'Medium (50\u201370%)', count: medConf, color: '#0096c7' },
+                  { label: 'Low (<50%)', count: lowConf, color: '#d00000' },
                 ].map(({ label, count, color }) => {
                   const pct = uniqueHypotheses.length > 0 ? (count / uniqueHypotheses.length) * 100 : 0
                   return (
