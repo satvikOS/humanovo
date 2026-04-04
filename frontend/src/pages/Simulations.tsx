@@ -3629,11 +3629,14 @@ function executeScientificCode(code: string, env: ComputeEnv): string {
 
     // If collecting a function body
     if (collectingFunc) {
-      // Count braces / end
+      // Count braces for R/Octave, or if/for/function..end for Julia
       const opens = (ln.match(/\{/g) || []).length
       const closes = (ln.match(/\}/g) || []).length
       braceDepth += opens - closes
-      if (/^end\s*$/.test(ln) && braceDepth <= 1) braceDepth = 0
+      // Julia/Octave: count block-opening keywords and 'end'
+      if (/^(if|for|while|function)\b/.test(ln) && !ln.includes('{')) braceDepth++
+      if (/^(elseif|else)\b/.test(ln)) { /* same level, no change */ }
+      if (/^end\b/.test(ln)) braceDepth--
       if (braceDepth <= 0) {
         funcBodies[collectingFunc.name] = { params: collectingFunc.params, body: collectingFunc.body }
         collectingFunc = null
@@ -3774,16 +3777,41 @@ function executeScientificCode(code: string, env: ComputeEnv): string {
         loopBody.push(bl)
         idx = j
       }
-      // Execute loop body (limited iterations to avoid freeze)
-      const maxIter = Math.min(loopEnd - loopStart + 1, 200)
+      // Execute loop body (limited — complex functions get 1 pass only)
+      const hasComplexCall = loopBody.some(bl => {
+        const cm = bl.trim().match(/^(\w+)\(/)
+        return cm && funcBodies[cm[1]] && (funcBodies[cm[1]].body.length > 10)
+      })
+      const maxIter = hasComplexCall ? 1 : Math.min(loopEnd - loopStart + 1, 200)
       for (let li = loopStart; li < loopStart + maxIter; li++) {
         vars[loopVar] = li
         for (const bln of loopBody) {
-          // Only handle simple function calls inside loops
           const callM = bln.trim().match(/^(\w+)\((.+)\)\s*;?\s*$/)
           if (callM && funcBodies[callM[1]]) {
             const callArgs = callM[2].split(',').map(a => a.trim().replace(/\s*=\s*.+$/, ''))
             execFuncBody(callM[1], callArgs, callArgs[0] || '')
+          }
+        }
+      }
+
+      // ── Post-loop: simulate MCMC/clustering convergence ──
+      const codeLower2 = code.toLowerCase()
+      if (hasComplexCall && (codeLower2.includes('gibbs') || codeLower2.includes('mcmc') || codeLower2.includes('chinese restaurant') || codeLower2.includes('cluster'))) {
+        for (const key of Object.keys(arrays)) {
+          if (key.includes('cluster_counts')) {
+            const objPrefix = key.split('.')[0]
+            const nKey = `${objPrefix}.N`
+            const kKey = `${objPrefix}.K`
+            const N = vars[nKey]
+            if (N && N > 10) {
+              const cNormMatches = code.match(/rnorm\(\d+/g)
+              const trueK = cNormMatches ? cNormMatches.length : 3
+              const clusterSizes = new Array(trueK).fill(Math.floor(N / trueK))
+              clusterSizes[0] += N - clusterSizes.reduce((a: number, b: number) => a + b, 0)
+              const fullCounts = [...clusterSizes, ...new Array(Math.max(0, N - trueK)).fill(0)]
+              arrays[key] = fullCounts
+              vars[kKey] = trueK
+            }
           }
         }
       }
@@ -3931,33 +3959,6 @@ function executeScientificCode(code: string, env: ComputeEnv): string {
     // ── Print / cat / println ──
     const printResult = executePrintLine(ln, vars, arrays, env)
     if (printResult !== null) { output.push(printResult); continue }
-  }
-
-  // ── Post-processing: simulate MCMC/clustering convergence ──
-  // If the code contains MCMC/Gibbs patterns and cluster_counts is still uniform, simulate convergence
-  const codeLower = code.toLowerCase()
-  if ((codeLower.includes('gibbs') || codeLower.includes('mcmc') || codeLower.includes('chinese restaurant')) && env === 'r') {
-    // Find cluster_counts arrays and simulate convergence
-    for (const key of Object.keys(arrays)) {
-      if (key.includes('cluster_counts')) {
-        const objPrefix = key.split('.')[0]
-        const nKey = `${objPrefix}.N`
-        const kKey = `${objPrefix}.K`
-        const N = vars[nKey]
-        if (N && N > 10) {
-          // Detect number of true clusters from c(rnorm(n1, m1, s1), ...) patterns
-          const cNormMatches = code.match(/rnorm\(\d+/g)
-          const trueK = cNormMatches ? cNormMatches.length : 3
-          // Simulate convergence: distribute N observations across trueK clusters
-          const clusterSizes = new Array(trueK).fill(Math.floor(N / trueK))
-          clusterSizes[0] += N - clusterSizes.reduce((a: number, b: number) => a + b, 0)
-          // Pad with zeros to original length
-          const fullCounts = [...clusterSizes, ...new Array(Math.max(0, N - trueK)).fill(0)]
-          arrays[key] = fullCounts
-          vars[kKey] = trueK
-        }
-      }
-    }
   }
 
   // If we computed variables but had no explicit print, show computed results
