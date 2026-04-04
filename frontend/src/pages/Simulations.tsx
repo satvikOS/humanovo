@@ -3460,7 +3460,7 @@ function executePrintLine(
   ln: string,
   vars: Record<string, number>,
   arrays: Record<string, number[]>,
-  env: string,
+  _env: string,
 ): string | null {
   const formatNum = (v: number): string => Number.isInteger(v) ? String(v) : (Math.abs(v) > 1e6 || (Math.abs(v) < 0.001 && v !== 0) ? v.toExponential(4) : v.toFixed(4))
 
@@ -3727,7 +3727,7 @@ function executeScientificCode(code: string, env: ComputeEnv): string {
         const repM = rhs.match(/rep\(([\d.]+),\s*(?:(?:state|self|obj|env)\$)?(\w+)\)/)
         if (repM) {
           const rv = parseFloat(repM[1])
-          const n = vars[`${targetVar}.${repM[2]}`] ?? vars[repM[2]] ?? parseInt(repM[2]) || 0
+          const n = vars[`${targetVar}.${repM[2]}`] ?? vars[repM[2]] ?? (parseInt(repM[2]) || 0)
           arrays[`${targetVar}.${field}`] = new Array(n).fill(rv)
           vars[`${targetVar}.${field}`] = n
           continue
