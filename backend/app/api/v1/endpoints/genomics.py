@@ -85,19 +85,14 @@ async def pathway_analysis(
         K = len(pathway_genes)
         N = request.background_size
 
-        # Hypergeometric p-value approximation using Poisson
+        # Exact hypergeometric p-value via scipy (replaces Poisson approximation)
+        from scipy.stats import hypergeom
         expected = n * K / N
-        if expected > 0:
-            fold_enrichment = k / expected
-        else:
-            fold_enrichment = 0
+        fold_enrichment = k / expected if expected > 0 else 0
 
-        p_value = 1.0
-        if expected > 0:
-            p_value = math.exp(-expected)
-            for i in range(1, k):
-                p_value += (expected ** i) * math.exp(-expected) / math.factorial(i)
-            p_value = max(1 - p_value, 1e-10)
+        # P(X >= k) = survival function at k-1
+        p_value = float(hypergeom.sf(k - 1, N, K, n))
+        p_value = max(p_value, 1e-300)
 
         results.append({
             "pathway_id": pid,
@@ -163,18 +158,31 @@ async def gene_set_enrichment(
 
         nes = es * math.sqrt(nh) if nh > 0 else 0
 
-        # Approximate p-value from NES magnitude
-        abs_nes = abs(nes)
-        if abs_nes > 3.0:
-            p_val = 0.001
-        elif abs_nes > 2.0:
-            p_val = 0.01
-        elif abs_nes > 1.5:
-            p_val = 0.05
-        elif abs_nes > 1.0:
-            p_val = 0.1
+        # Permutation-based p-value (replaces NES-magnitude approximation)
+        from numpy.random import default_rng
+        _prng = default_rng(42)
+        n_perm = 1000
+        null_es = []
+        for _p in range(n_perm):
+            perm_hits = set(_prng.choice(n, size=nh, replace=False))
+            perm_current = 0.0
+            perm_es = 0.0
+            for idx in range(n):
+                if idx in perm_hits:
+                    perm_current += p_hit
+                else:
+                    perm_current -= p_miss
+                if abs(perm_current) > abs(perm_es):
+                    perm_es = perm_current
+            null_es.append(perm_es)
+
+        import numpy as _np
+        null_arr = _np.array(null_es)
+        if es >= 0:
+            p_val = float(_np.mean(null_arr >= es))
         else:
-            p_val = min(1.0, 0.5 + (1 - abs_nes) * 0.5)
+            p_val = float(_np.mean(null_arr <= es))
+        p_val = max(p_val, 1 / (n_perm + 1))
 
         results.append({
             "pathway_id": pid,
@@ -336,14 +344,17 @@ async def discover_biomarkers(
         else:
             log2fc = 0.0
 
-        # Welch's t-test (group2 - group1 to match fold change direction)
+        # Exact Welch's t-test via scipy (replaces normal approximation)
+        from scipy.stats import ttest_ind
+        t_result = ttest_ind(g2, g1, equal_var=False, alternative="two-sided")
+        t_stat = float(t_result.statistic)
+        p_value = float(t_result.pvalue)
+        p_value = max(min(p_value, 1.0), 1e-300)
+
+        # Welch-Satterthwaite degrees of freedom
         var1 = sum((x - mean1) ** 2 for x in g1) / (len(g1) - 1) if len(g1) > 1 else 0
         var2 = sum((x - mean2) ** 2 for x in g2) / (len(g2) - 1) if len(g2) > 1 else 0
         se_sq = var1 / len(g1) + var2 / len(g2)
-        se = math.sqrt(se_sq) if se_sq > 0 else 1e-10
-        t_stat = (mean2 - mean1) / se  # direction matches log2FC
-
-        # Welch-Satterthwaite degrees of freedom
         if se_sq > 0:
             num = se_sq ** 2
             den = (var1 / len(g1)) ** 2 / max(len(g1) - 1, 1) + (var2 / len(g2)) ** 2 / max(len(g2) - 1, 1)
@@ -351,10 +362,6 @@ async def discover_biomarkers(
         else:
             df = len(g1) + len(g2) - 2
 
-        # Approximate p-value using normal approximation for t
-        z = abs(t_stat) / math.sqrt(1 + t_stat * t_stat / max(df, 1))
-        p_value = 2 * 0.5 * math.erfc(z / math.sqrt(2)) if z > 0 else 1.0
-        p_value = max(min(p_value, 1.0), 1e-300)
         neg_log_p = -math.log10(p_value)
 
         results.append({
@@ -371,6 +378,16 @@ async def discover_biomarkers(
         })
 
     results.sort(key=lambda r: r["p_value"])
+
+    # Benjamini-Hochberg FDR correction on biomarker p-values
+    n_tests_bm = len(results)
+    if n_tests_bm > 0:
+        for i, r in enumerate(results):
+            rank = i + 1
+            r["fdr"] = round(min(1.0, r["p_value"] * n_tests_bm / rank), 8)
+            # Re-evaluate significance using FDR
+            r["significant_fdr"] = r["fdr"] < request.alpha and abs(r["log2_fold_change"]) > 1
+
     significant = [r for r in results if r["significant"]]
     up = sorted([r for r in results if r["log2_fold_change"] > 0], key=lambda r: r["p_value"])
     down = sorted([r for r in results if r["log2_fold_change"] < 0], key=lambda r: r["p_value"])

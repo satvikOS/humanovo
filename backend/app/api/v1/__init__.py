@@ -14,6 +14,7 @@ from app.api.v1.endpoints import (
     clinical_trials,
     collaboration,
     compute,
+    compute_engine,
     config_endpoints,
     data_sources,
     datasets,
@@ -109,6 +110,9 @@ router.include_router(ws_streaming.router)
 
 # Computational Lab (Python/R/Julia code execution)
 router.include_router(compute.router)
+
+# Unified Compute Engine (all biomedical numeric computation domains)
+router.include_router(compute_engine.router)
 
 # User State (localStorage sync across devices)
 router.include_router(user_state.router, prefix="/user-state", tags=["user-state"])
