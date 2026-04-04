@@ -4621,11 +4621,23 @@ function executeByPattern(code: string, env: ComputeEnv): string | null {
       return text
     }
 
+    // Helper: strip trailing Octave comments (% ...) but preserve % inside strings
+    const stripComment = (s: string): string => {
+      let inQ: string | null = null
+      for (let k = 0; k < s.length; k++) {
+        const ch = s[k]
+        if (inQ) { if (ch === inQ) inQ = null; continue }
+        if (ch === "'" || ch === '"') { inQ = ch; continue }
+        if (ch === '%') return s.slice(0, k).trimEnd()
+      }
+      return s
+    }
+
     // Walk code top-to-bottom, executing each statement in order
     let i = 0
     let funcDepth = 0
     while (i < lines.length) {
-      const ln = lines[i].trim()
+      const ln = stripComment(lines[i].trim()).trim()
       i++
       if (!ln || ln.startsWith('%')) continue
 
@@ -4696,10 +4708,10 @@ function executeByPattern(code: string, env: ComputeEnv): string | null {
         const bodyLines: string[] = []
         let depth = 1
         while (i < lines.length && depth > 0) {
-          const bl = lines[i].trim()
+          const bl = stripComment(lines[i].trim()).trim()
           if (/^(for|while|if)\b/.test(bl)) depth++
           if (/^end\b/.test(bl)) depth--
-          if (depth > 0) bodyLines.push(bl)
+          if (depth > 0 && bl) bodyLines.push(bl)
           i++
         }
 
@@ -4711,9 +4723,10 @@ function executeByPattern(code: string, env: ComputeEnv): string | null {
         while (j < bodyLines.length) {
           const bl = bodyLines[j]
           // Check for: if mod(var, N) == 0
-          const modM = bl.match(/^if\s+mod\s*\(\s*\w+\s*,\s*(\d+)\s*\)\s*==\s*0/)
+          const modM = bl.match(/^if\s+mod\s*\(\s*\w+\s*,\s*([\w\d.]+)\s*\)\s*==\s*0/)
           if (modM) {
-            const modVal = parseInt(modM[1])
+            const modRaw = modM[1]
+            const modVal = /^\d+$/.test(modRaw) ? parseInt(modRaw) : ((vars[modRaw] ?? parseInt(modRaw)) || 500)
             // Collect all fprintf inside this if block until its end
             j++
             let ifDepth = 1
@@ -4759,7 +4772,7 @@ function executeByPattern(code: string, env: ComputeEnv): string | null {
       if (/^while\b/.test(ln)) {
         let depth = 1
         while (i < lines.length && depth > 0) {
-          const bl = lines[i].trim()
+          const bl = stripComment(lines[i].trim()).trim()
           if (/^(for|while|if)\b/.test(bl)) depth++
           if (/^end\b/.test(bl)) depth--
           i++
@@ -4767,13 +4780,20 @@ function executeByPattern(code: string, env: ComputeEnv): string | null {
         continue
       }
 
-      // Bare if/end blocks at top level: skip through
+      // Bare if/end blocks at top level: process fprintf inside them too
       if (/^if\b/.test(ln)) {
         let depth = 1
         while (i < lines.length && depth > 0) {
-          const bl = lines[i].trim()
+          const bl = stripComment(lines[i].trim()).trim()
           if (/^(for|while|if)\b/.test(bl)) depth++
           if (/^end\b/.test(bl)) depth--
+          if (depth > 0) {
+            const fpInIf = bl.match(/fprintf\(\s*['"](.+?)['"]\s*(?:,\s*(.*?))?\)\s*;?\s*$/)
+            if (fpInIf) {
+              const text = resolveFprintf(fpInIf[1], fpInIf[2] || '', {})
+              if (text.trim()) output.push(text)
+            }
+          }
           i++
         }
         continue
