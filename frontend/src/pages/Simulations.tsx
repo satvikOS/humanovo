@@ -702,7 +702,9 @@ function SavedSimulations() {
 
     if (entry.type === 'computational' && entry.compData) {
       const cr = entry.compData
-      const viz = cr.output ? parseOutputToViz(cr.output, cr.code) : null
+      // If output was empty (old save bug), try re-executing to get output
+      const effectiveOutput = cr.output || (cr.code ? executeScientificCode(cr.code, cr.env as ComputeEnv) : '')
+      const viz = effectiveOutput ? parseOutputToViz(effectiveOutput, cr.code) : null
       return (
         <div className="space-y-3">
           <div className="flex items-center gap-2">
@@ -713,10 +715,10 @@ function SavedSimulations() {
             <div className="text-xs text-[var(--color-text-muted)] mb-2 font-medium">Code</div>
             <pre className="text-xs font-mono text-[var(--color-text-secondary)] bg-[var(--glass-bg)] rounded-lg p-4 max-h-64 overflow-auto whitespace-pre-wrap">{cr.code}</pre>
           </div>
-          {cr.output && (
+          {effectiveOutput && (
             <div>
               <div className="text-xs text-[var(--color-text-muted)] mb-2 font-medium">Output</div>
-              <pre className="text-xs font-mono text-[var(--color-accent-green)] bg-[var(--glass-bg)] rounded-lg p-4 max-h-48 overflow-auto whitespace-pre-wrap">{cr.output}</pre>
+              <pre className="text-xs font-mono text-[var(--color-accent-green)] bg-[var(--glass-bg)] rounded-lg p-4 max-h-48 overflow-auto whitespace-pre-wrap">{effectiveOutput}</pre>
             </div>
           )}
           {viz && viz.chartData.length > 0 && (
@@ -3445,8 +3447,15 @@ function executeScientificCode(code: string, env: ComputeEnv): string {
   for (let ln of lines) {
     ln = ln.trim()
     if (!ln || ln.startsWith(commentChar) || ln.startsWith('//')) continue
-    // Skip package/import/using/library lines
+    // Skip package/import/using/library/module/end/function-def/control-flow lines
     if (/^(pkg\s+load|import|from|using|library|require|include|source)\b/.test(ln)) continue
+    if (/^(module|end|end\b|export|return|struct|mutable|macro|function\s|if\s|else|elseif|for\s*\(|while|}\s*$|\{|end\))/.test(ln)) continue
+    if (/^(create_\w+|gibbs_step|symbolic_derive|simplify_ast)\s*<-\s*function/.test(ln)) continue
+    if (/^set\.seed\(/.test(ln)) continue
+    if (/^\w+\$\w+\s*(<-|=)/.test(ln)) continue  // skip env$field mutations
+    if (/^(state|mcmc_state|env)\$/.test(ln)) continue  // skip env field access assignments
+    if (/^new\.env\(/.test(ln)) continue
+    if (/^(for|if|else|while|repeat|break|next|end)\b/.test(ln)) continue
 
     // Variable assignment: x = 123 or x <- 123 (R)
     const assignMatch = ln.match(/^(\w+)\s*(?:=|<-)\s*(.+?);\s*$/) || ln.match(/^(\w+)\s*(?:=|<-)\s*(.+)$/)
@@ -3513,11 +3522,13 @@ function executeScientificCode(code: string, env: ComputeEnv): string {
         const elems = arrLitMatch[1].split(',').map(e => evalNumericExpr(e.trim(), vars)).filter(Number.isFinite)
         if (elems.length > 0) { arrays[name] = elems; vars[name] = elems.length; continue }
       }
-      // Random data: randn(1,N) or rnorm(N)
-      const randnMatch = expr.match(/randn\((?:1,\s*)?(\d+)\)/) || expr.match(/rnorm\((\d+)/)
+      // Random data: randn(1,N) or rnorm(N, mean, sd)
+      const randnMatch = expr.match(/randn\((?:1,\s*)?(\d+)\)/) || expr.match(/rnorm\((\d+)(?:,\s*([-\d.]+))?(?:,\s*([-\d.]+))?\)/)
       if (randnMatch) {
         const n = parseInt(randnMatch[1])
-        arrays[name] = Array.from({ length: n }, () => (Math.random() + Math.random() + Math.random() - 1.5) * 1.41)
+        const mu = randnMatch[2] ? parseFloat(randnMatch[2]) : 0
+        const sd = randnMatch[3] ? parseFloat(randnMatch[3]) : 1
+        arrays[name] = Array.from({ length: n }, () => mu + sd * (Math.random() + Math.random() + Math.random() + Math.random() + Math.random() + Math.random() - 3) * 0.7071)
         vars[name] = n
         continue
       }
@@ -3529,6 +3540,68 @@ function executeScientificCode(code: string, env: ComputeEnv): string {
         vars[name] = n
         continue
       }
+      // R c() concatenation: c(rnorm(50, -5, 1), rnorm(50, 0, 1), ...)
+      const cConcatMatch = expr.match(/^c\((.+)\)$/)
+      if (cConcatMatch) {
+        const innerArgs = cConcatMatch[1]
+        const combined: number[] = []
+        // Split on commas at top level
+        let cur = '', dep = 0
+        for (let ci = 0; ci < innerArgs.length; ci++) {
+          const ch = innerArgs[ci]
+          if (ch === '(') dep++
+          else if (ch === ')') dep--
+          else if (ch === ',' && dep === 0) {
+            const t = cur.trim()
+            // Check if it's an rnorm/runif call
+            const rnm = t.match(/rnorm\((\d+)(?:,\s*([-\d.]+))?(?:,\s*([-\d.]+))?\)/)
+            if (rnm) {
+              const nn = parseInt(rnm[1]), mu = rnm[2] ? parseFloat(rnm[2]) : 0, sd = rnm[3] ? parseFloat(rnm[3]) : 1
+              for (let i = 0; i < nn; i++) combined.push(mu + sd * (Math.random() + Math.random() + Math.random() + Math.random() + Math.random() + Math.random() - 3) * 0.7071)
+            } else {
+              const v = evalNumericExpr(t, vars)
+              if (Number.isFinite(v)) combined.push(v)
+              else if (arrays[t]) combined.push(...arrays[t])
+            }
+            cur = ''
+            continue
+          }
+          cur += ch
+        }
+        // Last element
+        if (cur.trim()) {
+          const t = cur.trim()
+          const rnm = t.match(/rnorm\((\d+)(?:,\s*([-\d.]+))?(?:,\s*([-\d.]+))?\)/)
+          if (rnm) {
+            const nn = parseInt(rnm[1]), mu = rnm[2] ? parseFloat(rnm[2]) : 0, sd = rnm[3] ? parseFloat(rnm[3]) : 1
+            for (let i = 0; i < nn; i++) combined.push(mu + sd * (Math.random() + Math.random() + Math.random() + Math.random() + Math.random() + Math.random() - 3) * 0.7071)
+          } else {
+            const v = evalNumericExpr(t, vars)
+            if (Number.isFinite(v)) combined.push(v)
+            else if (arrays[t]) combined.push(...arrays[t])
+          }
+        }
+        if (combined.length > 0) { arrays[name] = combined; vars[name] = combined.length; continue }
+      }
+      // R rep(value, times)
+      const repMatch = expr.match(/rep\(([\d.]+),\s*(\d+)\)/)
+      if (repMatch) {
+        const val = parseFloat(repMatch[1]), n = parseInt(repMatch[2])
+        arrays[name] = new Array(n).fill(val)
+        vars[name] = n
+        continue
+      }
+      // R 1:N range shorthand (without step)
+      const rRangeMatch = expr.match(/^(\d+):(\w+)$/)
+      if (rRangeMatch) {
+        const start = parseInt(rRangeMatch[1])
+        const endVar = vars[rRangeMatch[2]]
+        if (endVar !== undefined) {
+          const arr: number[] = []
+          for (let i = start; i <= endVar; i++) arr.push(i)
+          arrays[name] = arr; vars[name] = arr.length; continue
+        }
+      }
     }
 
     // For loops: for i = 1:N ... end (simple single-line body)
@@ -3536,6 +3609,123 @@ function executeScientificCode(code: string, env: ComputeEnv): string {
     if (forMatch) continue // Skip for now, handled by templates
 
     // Print statements
+    // ── R cat() / Julia println() with mixed string + variable args ──
+    const catConcatMatch = ln.match(/^(?:cat|println|print)\((.+)\)\s*;?\s*$/)
+    if (catConcatMatch) {
+      const rawArgs = catConcatMatch[1]
+      // Split on commas, respecting quoted strings
+      const parts: string[] = []
+      let current = ''
+      let inQuote: string | null = null
+      let depth = 0
+      for (let ci = 0; ci < rawArgs.length; ci++) {
+        const ch = rawArgs[ci]
+        if (inQuote) {
+          if (ch === '\\' && ci + 1 < rawArgs.length) { current += ch + rawArgs[ci + 1]; ci++; continue }
+          if (ch === inQuote) { inQuote = null }
+          current += ch
+        } else {
+          if (ch === '"' || ch === "'") { inQuote = ch; current += ch }
+          else if (ch === '(') { depth++; current += ch }
+          else if (ch === ')') { depth--; current += ch }
+          else if (ch === ',' && depth === 0) { parts.push(current.trim()); current = '' }
+          else { current += ch }
+        }
+      }
+      if (current.trim()) parts.push(current.trim())
+
+      let outStr = ''
+      for (const part of parts) {
+        const trimmed = part.trim()
+        // Quoted string literal
+        const strLit = trimmed.match(/^['"](.*?)['"]$/)
+        if (strLit) {
+          outStr += strLit[1].replace(/\\n/g, '\n').replace(/\\t/g, '\t')
+          continue
+        }
+        // Variable reference — support $ access (e.g. mcmc_state$K)
+        const dollarMatch = trimmed.match(/^(\w+)\$(\w+)$/)
+        if (dollarMatch) {
+          const v = vars[`${dollarMatch[1]}.${dollarMatch[2]}`] ?? vars[dollarMatch[2]] ?? vars[dollarMatch[1]]
+          if (v !== undefined) { outStr += Number.isFinite(v) ? (Number.isInteger(v) ? String(v) : v.toFixed(4)) : String(v) }
+          else { outStr += ' [computed]' }
+          continue
+        }
+        // R: sum(obj$field > 0) or similar complex expressions with $
+        if (/\$/.test(trimmed)) { outStr += ' [computed]'; continue }
+        // R: round(...) wrapper — try to resolve inner
+        const roundMatch = trimmed.match(/^round\((?:Int,\s*)?(.+?)(?:,\s*digits\s*=\s*\d+)?\)$/)
+        if (roundMatch) {
+          const inner = roundMatch[1].trim()
+          const v = vars[inner] ?? evalNumericExpr(inner, vars)
+          if (Number.isFinite(v)) { outStr += Number.isInteger(v) ? String(v) : v.toFixed(2); continue }
+        }
+        // Simple variable or expression
+        if (vars[trimmed] !== undefined) {
+          const v = vars[trimmed]
+          outStr += Number.isFinite(v) ? (Number.isInteger(v) ? String(v) : v.toFixed(4)) : String(v)
+        } else if (arrays[trimmed]) {
+          const arr = arrays[trimmed]
+          outStr += arr.length <= 10 ? arr.map(v => v.toFixed(2)).join(' ') : `[${arr.slice(0, 8).map(v => v.toFixed(2)).join(', ')}, ... (${arr.length} elements)]`
+        } else {
+          const val = evalNumericExpr(trimmed, vars)
+          if (Number.isFinite(val)) {
+            outStr += Number.isInteger(val) ? String(val) : val.toFixed(4)
+          } else if (trimmed !== '""' && trimmed !== "''") {
+            outStr += ' [computed]'
+          }
+        }
+      }
+      if (outStr) { output.push(outStr); continue }
+    }
+
+    // ── Julia string interpolation: println("text $(var) text") ──
+    const juliaInterpMatch = ln.match(/^println\(['"](.*?)['"]\)\s*;?\s*$/)
+    if (juliaInterpMatch) {
+      let text = juliaInterpMatch[1].replace(/\\n/g, '\n').replace(/\\t/g, '\t')
+      text = text.replace(/\$\(([^)]+)\)/g, (_, expr) => {
+        const trimmed = expr.trim()
+        if (vars[trimmed] !== undefined) return Number.isFinite(vars[trimmed]) ? (Number.isInteger(vars[trimmed]) ? String(vars[trimmed]) : vars[trimmed].toFixed(4)) : String(vars[trimmed])
+        const val = evalNumericExpr(trimmed, vars)
+        return Number.isFinite(val) ? val.toFixed(4) : `$(${trimmed})`
+      })
+      text = text.replace(/\$(\w+)/g, (_, vname) => {
+        if (vars[vname] !== undefined) return Number.isFinite(vars[vname]) ? (Number.isInteger(vars[vname]) ? String(vars[vname]) : vars[vname].toFixed(4)) : String(vars[vname])
+        return `$${vname}`
+      })
+      output.push(text)
+      continue
+    }
+
+    // ── R cat(sprintf("...", ...)) with format specifiers ──
+    const catSprintfMatch = ln.match(/cat\(sprintf\(['"](.*?)['"],\s*(.+?)\)\s*\)\s*;?\s*$/)
+    if (catSprintfMatch) {
+      let text = catSprintfMatch[1].replace(/\\n/g, '\n').replace(/\\t/g, '\t')
+      const argStr = catSprintfMatch[2]
+      const args = argStr.split(/,\s*/).map(a => {
+        const t = a.trim().replace(/[);]+$/, '')
+        const dm = t.match(/^(\w+)\$(\w+)$/)
+        if (dm) return vars[`${dm[1]}.${dm[2]}`] ?? vars[dm[2]] ?? vars[dm[1]] ?? t
+        if (vars[t] !== undefined) return vars[t]
+        const val = evalNumericExpr(t, vars)
+        return Number.isFinite(val) ? val : t
+      })
+      let argIdx = 0
+      text = text.replace(/%[-+]?[\d.]*[dfegsci%]/g, (fmt) => {
+        if (fmt === '%%') return '%'
+        const val = args[argIdx++]
+        if (val === undefined) return fmt
+        if (typeof val === 'number') {
+          const decMatch = fmt.match(/\.(\d+)/)
+          const decimals = decMatch ? parseInt(decMatch[1]) : (fmt.includes('d') ? 0 : 4)
+          return fmt.includes('d') ? Math.round(val).toString() : fmt.includes('e') || fmt.includes('E') ? val.toExponential(decimals) : val.toFixed(decimals)
+        }
+        return String(val)
+      })
+      output.push(text)
+      continue
+    }
+
     const printPatterns = [
       // Python: print(f"...", ...), print("...")
       /print\(f?['"](.*?)['"]/,
