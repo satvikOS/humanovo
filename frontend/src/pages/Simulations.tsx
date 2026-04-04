@@ -3643,14 +3643,21 @@ function executeByPattern(code: string, env: ComputeEnv): string | null {
     if (alphaM) stateVars['alpha_prior'] = alphaM[1]
 
     let beforeLoop = true
+    let funcBodyDepth = 0
     for (const rawLine of lines) {
       const ln = rawLine.trim()
       if (!ln || ln.startsWith('#')) continue
+      // Skip function bodies entirely
+      if (/^\w+\s*<-\s*function/.test(ln)) { funcBodyDepth = 1; continue }
+      if (funcBodyDepth > 0) {
+        funcBodyDepth += (ln.match(/\{/g) || []).length - (ln.match(/\}/g) || []).length
+        if (funcBodyDepth <= 0) funcBodyDepth = 0
+        continue
+      }
       // Track if we're before or after the for loop
       if (/^for\s*\(/.test(ln)) { beforeLoop = false; continue }
       if (ln === '}' || /^end\b/.test(ln)) continue
-      // Skip function defs, assignments, library calls
-      if (/^\w+\s*<-\s*function/.test(ln)) { /* skip until closing brace */ continue }
+      // Skip assignments, library calls
       if (/^(set\.seed|library|require|source|state\s*<-|data\s*<-|N\s*<-|alpha|for\s*\()/.test(ln)) continue
       if (/^\w+\s*<-/.test(ln) && !ln.startsWith('cat') && !ln.startsWith('print')) continue
 
@@ -3746,12 +3753,27 @@ function executeByPattern(code: string, env: ComputeEnv): string | null {
   // ── Julia: @symdiff macro / symbolic differentiation ──
   if (env === 'julia' && (codeLower.includes('@symdiff') || codeLower.includes('symbolic') || codeLower.includes('derivative'))) {
     // Find the @symdiff usage: result = @symdiff var (expression)
-    const symdiffM = code.match(/@symdiff\s+(\w+)\s+\((.+?)\)/)
+    // Must handle nested parens like (x^3 * exp(y) + x * y)
+    let symdiffVar = ''
+    let symdiffExpr = ''
+    const symdiffStart = code.match(/@symdiff\s+(\w+)\s+\(/)
+    if (symdiffStart) {
+      symdiffVar = symdiffStart[1]
+      const startIdx = code.indexOf(symdiffStart[0]) + symdiffStart[0].length
+      let depth = 1
+      let i = startIdx
+      while (i < code.length && depth > 0) {
+        if (code[i] === '(') depth++
+        else if (code[i] === ')') depth--
+        if (depth > 0) i++
+      }
+      symdiffExpr = code.slice(startIdx, i)
+    }
     const output: string[] = []
 
-    if (symdiffM) {
-      const diffVar = symdiffM[1]
-      const bodyExpr = symdiffM[2]
+    if (symdiffVar && symdiffExpr) {
+      const diffVar = symdiffVar
+      const bodyExpr = symdiffExpr
 
       // Find the value of the differentiation variable
       const varValM = code.match(new RegExp(`${diffVar}\\s*=\\s*([\\d.e+-]+)`))
@@ -3797,47 +3819,63 @@ function executeByPattern(code: string, env: ComputeEnv): string | null {
         const ln = rawLine.trim()
         if (!ln || ln.startsWith('#') || ln.startsWith('//')) continue
 
-        // println("text $(expr) text") with interpolation
-        const printlnInterpM = ln.match(/^println\(['"](.*?)['"]\)\s*;?\s*$/)
-        if (printlnInterpM) {
-          let text = printlnInterpM[1].replace(/\\n/g, '\n').replace(/\\t/g, '\t')
-          text = text.replace(/\$\(([^)]+)\)/g, (_, innerExpr) => {
-            const trimE = innerExpr.trim()
-            // round(Int, varname)
-            const roundIntM = trimE.match(/^round\(Int,\s*(\w+)\)$/)
-            if (roundIntM) {
-              if (roundIntM[1] === 'result' || roundIntM[1] === 'df' || roundIntM[1] === 'derivative') return String(Math.round(derivative))
-              if (vars[roundIntM[1]] !== undefined) return String(Math.round(vars[roundIntM[1]]))
+        // println(...) with any combination of string literals, variables, interpolation
+        const printlnFullM = ln.match(/^println\((.+)\)\s*;?\s*$/)
+        if (printlnFullM) {
+          const resolveJuliaVal = (token: string): string => {
+            const t = token.trim()
+            // String literal
+            const strLit = t.match(/^['"](.*?)['"]$/)
+            if (strLit) {
+              let text = strLit[1].replace(/\\n/g, '\n').replace(/\\t/g, '\t')
+              // Handle $(...) interpolation
+              text = text.replace(/\$\(([^)]+)\)/g, (_, ie) => {
+                const trimE = ie.trim()
+                const roundIntM2 = trimE.match(/^round\(Int,\s*(\w+)\)$/)
+                if (roundIntM2) {
+                  if (['result', 'df', 'derivative'].includes(roundIntM2[1])) return String(Math.round(derivative))
+                  if (vars[roundIntM2[1]] !== undefined) return String(Math.round(vars[roundIntM2[1]]))
+                }
+                if (['result', 'df', 'derivative'].includes(trimE)) return formatDeriv(derivative)
+                if (vars[trimE] !== undefined) return String(vars[trimE])
+                return trimE
+              })
+              // Handle $var interpolation
+              text = text.replace(/\$(\w+)/g, (_, vn) => {
+                if (['result', 'df', 'derivative'].includes(vn)) return formatDeriv(derivative)
+                if (vars[vn] !== undefined) return String(vars[vn])
+                return vn
+              })
+              return text
             }
-            // Just a variable name
-            if (trimE === 'result' || trimE === 'df' || trimE === 'derivative') {
-              return Number.isFinite(derivative) ? (Math.abs(derivative) > 1e6 || (Math.abs(derivative) < 0.01 && derivative !== 0) ? derivative.toExponential(4) : derivative.toFixed(4)) : 'NaN'
+            // round(Int, expr) or round(expr, digits)
+            const roundM2 = t.match(/^round\((?:Int,\s*)?(.+?)(?:,\s*digits\s*=\s*(\d+))?\)$/)
+            if (roundM2) {
+              const inner = roundM2[1].trim()
+              const d = roundM2[2] ? parseInt(roundM2[2]) : 0
+              if (['result', 'df', 'derivative'].includes(inner)) return derivative.toFixed(d)
+              if (vars[inner] !== undefined) return vars[inner].toFixed(d)
             }
-            if (vars[trimE] !== undefined) return String(vars[trimE])
-            // Try evaluating
-            const v = evalExpr(parseFloat(trimE) || vars[trimE] || 0)
-            return Number.isFinite(v) ? v.toFixed(4) : trimE
-          })
-          text = text.replace(/\$(\w+)/g, (_, vn) => {
-            if (vn === 'result' || vn === 'df' || vn === 'derivative') {
-              return Number.isFinite(derivative) ? derivative.toFixed(4) : 'NaN'
-            }
-            if (vars[vn] !== undefined) return String(vars[vn])
-            return vn
-          })
-          output.push(text)
-          continue
-        }
-
-        // println(expr) without string
-        const printlnM = ln.match(/^println\((.+)\)\s*;?\s*$/)
-        if (printlnM) {
-          const arg = printlnM[1].trim()
-          if (arg === 'result' || arg === 'df' || arg === 'derivative') {
-            output.push(Number.isFinite(derivative) ? derivative.toFixed(4) : 'NaN')
-          } else if (vars[arg] !== undefined) {
-            output.push(String(vars[arg]))
+            // Known derivative result names
+            if (['result', 'df', 'derivative'].includes(t)) return formatDeriv(derivative)
+            // Known variable
+            if (vars[t] !== undefined) return String(vars[t])
+            // Try numeric eval
+            const v = evalExpr(vars[t] ?? parseFloat(t))
+            if (Number.isFinite(v)) return formatDeriv(v)
+            return t
           }
+          const formatDeriv = (v: number): string => {
+            if (!Number.isFinite(v)) return 'NaN'
+            if (Math.abs(v) > 1e6 || (Math.abs(v) < 0.01 && v !== 0)) return v.toExponential(4)
+            return v.toFixed(4)
+          }
+          const parts = splitArgs(printlnFullM[1])
+          let text = ''
+          for (const part of parts) {
+            text += resolveJuliaVal(part)
+          }
+          if (text) output.push(text)
           continue
         }
 
