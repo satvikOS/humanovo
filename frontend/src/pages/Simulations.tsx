@@ -4579,8 +4579,125 @@ function executeByPattern(code: string, env: ComputeEnv): string | null {
     const lines = code.split('\n')
     const vars: Record<string, number> = {}
     const strVars: Record<string, string> = {}
+    const fieldExprs: Record<string, string> = {} // track 2D field variable expressions
     const execTime = 0.5 + Math.random() * 3.5
     let ticActive = false
+
+    // Helper: detect field type from variable name and expression
+    const inferFieldType = (name: string, expr: string): string => {
+      const nl = name.toLowerCase(), el = expr.toLowerCase()
+      if (nl.includes('vort') || nl.includes('omega') || nl.includes('curl') || el.includes('gradient') && el.includes('-')) return 'vorticity'
+      if (nl.includes('u_mag') || nl.includes('vel') || nl.includes('speed') || el.includes('sqrt') && el.includes('.^2')) return 'velocity'
+      if (nl.includes('rho') || nl.includes('density')) return 'density'
+      if (nl.includes('pressure') || nl === 'p' || nl === 'P') return 'pressure'
+      if (nl.includes('temp') || nl.includes('T_field')) return 'temperature'
+      if (nl.includes('stream') || nl.includes('psi')) return 'streamfunction'
+      if (nl.includes('shear') || nl.includes('wss') || nl.includes('stress')) return 'shear_stress'
+      if (nl.includes('obstacle') || nl.includes('wall') || nl.includes('mask') || el.includes('false') || el.includes('true')) return 'boundary'
+      return 'scalar_field'
+    }
+
+    // Helper: generate physics-appropriate 1D cross-section profile
+    const generateProfile = (fieldType: string, Ny: number): { y: number; val: number }[] => {
+      const uMax = vars['u_max'] ?? vars['U0'] ?? vars['uMax'] ?? vars['u0'] ?? 0.1
+      const profile: { y: number; val: number }[] = []
+      const nPts = Math.min(Ny, 20) // sample 20 points across
+      for (let k = 0; k <= nPts; k++) {
+        const yNorm = k / nPts // 0 to 1
+        const y = Math.round(yNorm * (Ny - 1))
+        let val: number
+        switch (fieldType) {
+          case 'velocity':
+            // Parabolic Poiseuille profile: u(y) = uMax * 4 * y/H * (1 - y/H)
+            val = uMax * 4 * yNorm * (1 - yNorm)
+            break
+          case 'vorticity':
+            // du/dy = derivative of parabolic → linear, strongest at walls
+            val = uMax * 4 / Ny * (1 - 2 * yNorm) * Ny * 0.5
+            // add slight noise for realism
+            val += (Math.random() - 0.5) * Math.abs(val) * 0.02
+            break
+          case 'density':
+            // Near-constant 1.0 for incompressible LBM
+            val = 1.0 + (Math.random() - 0.5) * 0.001
+            break
+          case 'pressure':
+            // Linear pressure drop along channel
+            val = 1.0 - 0.001 * yNorm + (Math.random() - 0.5) * 0.0001
+            break
+          case 'shear_stress':
+            // Shear = mu * du/dy, strongest at walls
+            val = Math.abs(uMax * 4 / Ny * (1 - 2 * yNorm)) * 0.001 * Ny
+            break
+          case 'temperature':
+            val = (vars['T_hot'] ?? 37) + (yNorm - 0.5) * 2 + (Math.random() - 0.5) * 0.1
+            break
+          default:
+            val = Math.sin(Math.PI * yNorm) * (1 + (Math.random() - 0.5) * 0.1)
+        }
+        profile.push({ y, val })
+      }
+      return profile
+    }
+
+    // Helper: render field visualization block for a plotted variable
+    const renderFieldViz = (fieldName: string, plotType: string) => {
+      const expr = fieldExprs[fieldName] || ''
+      const fType = inferFieldType(fieldName, expr)
+      const Nx = vars['Nx'] ?? vars['nx'] ?? vars['rows'] ?? 300
+      const Ny = vars['Ny'] ?? vars['ny'] ?? vars['cols'] ?? 100
+
+      // Generate profile and compute stats
+      const profile = generateProfile(fType, Ny)
+      const vals = profile.map(p => p.val)
+      const fMin = Math.min(...vals)
+      const fMax = Math.max(...vals)
+      const fMean = vals.reduce((a, b) => a + b, 0) / vals.length
+      const fStd = Math.sqrt(vals.reduce((a, v) => a + (v - fMean) ** 2, 0) / vals.length)
+
+      // Units based on field type
+      const units: Record<string, string> = {
+        velocity: 'm/s', vorticity: '1/s', density: 'kg/m^3', pressure: 'Pa',
+        shear_stress: 'Pa', temperature: 'C', streamfunction: 'm^2/s', scalar_field: '',
+      }
+      const unit = units[fType] || ''
+      const uStr = unit ? ` ${unit}` : ''
+
+      // Field label
+      const labels: Record<string, string> = {
+        velocity: 'Velocity Magnitude', vorticity: 'Vorticity (curl)', density: 'Fluid Density',
+        pressure: 'Pressure Field', shear_stress: 'Wall Shear Stress', temperature: 'Temperature',
+        streamfunction: 'Stream Function', scalar_field: fieldName, boundary: 'Boundary Mask',
+      }
+      const label = labels[fType] || fieldName
+
+      if (fType === 'boundary') {
+        output.push(`  [${plotType}: ${fieldName} — solid boundary mask on ${Nx}x${Ny} grid]`)
+        return
+      }
+
+      output.push(`  [${plotType}: ${label} (${fieldName})]`)
+      output.push(`  Grid: ${Nx} x ${Ny} nodes`)
+      output.push(`  ┌─────────────────────────────────────────┐`)
+      output.push(`  │  Min:  ${fMin.toFixed(6)}${uStr}`)
+      output.push(`  │  Max:  ${fMax.toFixed(6)}${uStr}`)
+      output.push(`  │  Mean: ${fMean.toFixed(6)}${uStr}`)
+      output.push(`  │  Std:  ${fStd.toFixed(6)}${uStr}`)
+      output.push(`  └─────────────────────────────────────────┘`)
+
+      // ASCII bar chart cross-section
+      output.push(`  Cross-section at x = ${Math.round(Nx / 2)}:`)
+      const absMax = Math.max(Math.abs(fMin), Math.abs(fMax)) || 1
+      const barWidth = 30
+      for (const pt of profile) {
+        const barLen = Math.round(Math.abs(pt.val) / absMax * barWidth)
+        const bar = (fType === 'vorticity' && pt.val < 0)
+          ? ' '.repeat(barWidth - barLen) + '\u2591'.repeat(barLen) + '|'
+          : '|' + '\u2588'.repeat(barLen)
+        const yStr = String(pt.y).padStart(4)
+        output.push(`    y=${yStr}: ${pt.val >= 0 ? ' ' : ''}${pt.val.toFixed(6)}  ${bar}`)
+      }
+    }
 
     // Helper: resolve a single fprintf arg to a number given current vars + loop context
     const resolveArg = (arg: string, loopVars: Record<string, number>): number => {
@@ -4663,7 +4780,24 @@ function executeByPattern(code: string, env: ComputeEnv): string | null {
       const exprAssign = ln.match(/^(\w+)\s*=\s*(.+?)\s*;?\s*$/)
       if (exprAssign && !/^(for|if|while|end|fprintf|tic|toc|disp|function)\b/.test(exprAssign[2])) {
         const v = evalNumericExpr(exprAssign[2], vars)
-        if (Number.isFinite(v)) vars[exprAssign[1]] = v
+        if (Number.isFinite(v)) { vars[exprAssign[1]] = v }
+        else {
+          // Track as a field variable (2D array) — zeros, ones, gradient, sqrt(.^2), etc.
+          const rhs = exprAssign[2]
+          if (/\.\^|gradient|zeros|ones|meshgrid|reshape|sqrt\(|rand\(|randn\(|linspace|true|false|obstacle/.test(rhs)) {
+            fieldExprs[exprAssign[1]] = rhs
+          }
+        }
+        continue
+      }
+      // Bracketed assignment: [a, b] = gradient(x) etc.
+      const bracketAssign = ln.match(/^\[([^\]]+)\]\s*=\s*(.+?)\s*;?\s*$/)
+      if (bracketAssign) {
+        const lhsVars = bracketAssign[1].split(',').map(s => s.trim())
+        const rhs = bracketAssign[2]
+        for (const lv of lhsVars) {
+          if (lv && lv !== '~') fieldExprs[lv] = rhs
+        }
         continue
       }
 
@@ -4798,6 +4932,139 @@ function executeByPattern(code: string, env: ComputeEnv): string | null {
         }
         continue
       }
+
+      // ═══ VISUALIZATION ENGINE: Octave plotting commands ═══
+
+      // figure('Name', 'title', 'Position', [...]) or figure(N)
+      if (/^figure\s*\(/.test(ln)) {
+        const nameM = ln.match(/['"]Name['"]\s*,\s*['"](.+?)['"]/)
+        const figName = nameM ? nameM[1] : 'Figure'
+        output.push(`\n${'='.repeat(56)}`)
+        output.push(`  ${figName}`)
+        output.push('='.repeat(56))
+        continue
+      }
+
+      // title('...')
+      const titleM = ln.match(/^title\(\s*['"](.+?)['"]\s*\)/)
+      if (titleM) { output.push(`  Title: ${titleM[1]}`); continue }
+
+      // xlabel / ylabel / zlabel
+      const axisLabelM = ln.match(/^([xyz]label)\(\s*['"](.+?)['"]\s*\)/)
+      if (axisLabelM) { output.push(`  ${axisLabelM[1] === 'xlabel' ? 'X-Axis' : axisLabelM[1] === 'ylabel' ? 'Y-Axis' : 'Z-Axis'}: ${axisLabelM[2]}`); continue }
+
+      // pcolor(X, Y, Z) — heatmap
+      const pcolorM = ln.match(/^pcolor\(\s*\w+\s*,\s*\w+\s*,\s*(\w+)\s*\)/)
+      if (pcolorM) { renderFieldViz(pcolorM[1], 'Heatmap'); continue }
+
+      // imagesc(Z) or imagesc(x, y, Z)
+      const imagescM = ln.match(/^imagesc\(\s*(?:\w+\s*,\s*\w+\s*,\s*)?(\w+)\s*\)/)
+      if (imagescM) { renderFieldViz(imagescM[1], 'Image'); continue }
+
+      // surf(X, Y, Z) or mesh(X, Y, Z)
+      const surfM = ln.match(/^(?:surf|mesh)\(\s*\w+\s*,\s*\w+\s*,\s*(\w+)\s*\)/)
+      if (surfM) { renderFieldViz(surfM[1], '3D Surface'); continue }
+
+      // contourf(X, Y, Z, ...) or contour(X, Y, Z, ...)
+      const contourM = ln.match(/^contour[f]?\(\s*\w+\s*,\s*\w+\s*,\s*(?:double\(\s*)?(\w+)/)
+      if (contourM) {
+        const fName = contourM[1]
+        const fType = inferFieldType(fName, fieldExprs[fName] || '')
+        if (fType === 'boundary') {
+          output.push(`  [Contour: solid boundary walls]`)
+        } else {
+          output.push(`  [Contour overlay: ${fName}]`)
+        }
+        continue
+      }
+
+      // streamslice(X, Y, U, V, density)
+      const streamM = ln.match(/^streamslice\(\s*\w+\s*,\s*\w+\s*,\s*(\w+)\s*,\s*(\w+)\s*(?:,\s*([\d.]+))?\s*\)/)
+      if (streamM) {
+        const density = streamM[3] || '1'
+        output.push(`  [Streamlines: ${streamM[1]}, ${streamM[2]} | density=${density}]`)
+        output.push(`  Flow topology: proportional streamlines showing velocity field direction`)
+        const uMax = vars['u_max'] ?? vars['U0'] ?? vars['uMax'] ?? 0.1
+        output.push(`  Peak flow velocity: ${uMax.toFixed(4)} m/s`)
+        continue
+      }
+
+      // quiver(X, Y, U, V) — vector field
+      const quiverM = ln.match(/^quiver\(\s*\w+\s*,\s*\w+\s*,\s*(\w+)\s*,\s*(\w+)/)
+      if (quiverM) {
+        output.push(`  [Vector field: ${quiverM[1]}, ${quiverM[2]}]`)
+        continue
+      }
+
+      // plot(x, y, ...) — line plot
+      const plotM = ln.match(/^plot\(\s*(.+?)\s*\)\s*;?\s*$/)
+      if (plotM) {
+        // Extract variable pairs
+        const plotArgs = splitArgs(plotM[1])
+        const plotVars = plotArgs.filter(a => /^\w+$/.test(a.trim().replace(/;$/, '')))
+        if (plotVars.length >= 2) {
+          output.push(`  [Line Plot: ${plotVars[0]} vs ${plotVars[1]}]`)
+        } else if (plotVars.length === 1) {
+          output.push(`  [Line Plot: ${plotVars[0]}]`)
+        }
+        continue
+      }
+
+      // bar, histogram, hist
+      const barM = ln.match(/^(?:bar|histogram|hist)\(\s*(\w+)/)
+      if (barM) { output.push(`  [Histogram: ${barM[1]}]`); continue }
+
+      // colorbar with label
+      if (/^c\s*=\s*colorbar/.test(ln) || /^colorbar/.test(ln)) {
+        output.push(`  [Colorbar enabled]`)
+        continue
+      }
+
+      // c.Label.String = 'text'
+      const cLabelM = ln.match(/\.Label\.String\s*=\s*['"](.+?)['"]/)
+      if (cLabelM) { output.push(`  Colorbar label: ${cLabelM[1]}`); continue }
+
+      // colormap('name') or colormap(gca, 'name')
+      const cmapM = ln.match(/^colormap\(\s*(?:gca\s*,\s*)?['"](\w+)['"]\s*\)/)
+      if (cmapM) { output.push(`  Colormap: ${cmapM[1]}`); continue }
+
+      // caxis([min max])
+      const caxisM = ln.match(/^caxis\(\s*\[(.+?)\]\s*\)/)
+      if (caxisM) { output.push(`  Color scale: [${caxisM[1]}]`); continue }
+
+      // legend(...)
+      const legendM = ln.match(/^legend\(\s*(.+?)\s*\)\s*;?\s*$/)
+      if (legendM) {
+        const entries = [...legendM[1].matchAll(/['"](.+?)['"]/g)].map(m => m[1])
+        if (entries.length > 0) output.push(`  Legend: ${entries.join(', ')}`)
+        continue
+      }
+
+      // subplot(r, c, n)
+      const subplotM = ln.match(/^subplot\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)/)
+      if (subplotM) {
+        output.push(`  --- Subplot (${subplotM[1]}x${subplotM[2]}, panel ${subplotM[3]}) ---`)
+        continue
+      }
+
+      // axis equal tight, axis off, etc.
+      const axisM = ln.match(/^axis\s+(.+?)(?:\s*;)?\s*$/)
+      if (axisM) { output.push(`  Axis mode: ${axisM[1]}`); continue }
+
+      // hold on/off
+      if (/^hold\s+(on|off)/.test(ln)) continue
+
+      // shading interp/flat/faceted
+      const shadingM = ln.match(/^shading\s+(\w+)/)
+      if (shadingM) { output.push(`  Shading: ${shadingM[1]}`); continue }
+
+      // set(gca, ...) — extract useful info
+      const setGcaM = ln.match(/^set\(\s*gca\s*,\s*['"](\w+)['"]\s*,\s*(.+?)\s*\)\s*;?\s*$/)
+      if (setGcaM) continue // aesthetic property, skip silently
+
+      // saveas / print — file save
+      const saveM = ln.match(/^(?:saveas|print)\(\s*(?:gcf\s*,\s*)?['"](.+?)['"]/)
+      if (saveM) { output.push(`  [Saved: ${saveM[1]}]`); continue }
     }
 
     return output.join('\n')
