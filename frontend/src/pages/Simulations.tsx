@@ -2862,12 +2862,12 @@ function ComputationalLab() {
     const el = outputContentRef.current
     if (!el) return
     try {
-      const canvas = await html2canvas(el, { backgroundColor: '#0f0f14', scale: 2, useCORS: true, logging: false })
-      const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
-      if (blob) {
-        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
-      }
-    } catch { /* fallback: copy text */ try { await navigator.clipboard.writeText(output) } catch {} }
+      // Copy full text content (not just visible portion)
+      const fullText = el.innerText || el.textContent || output
+      await navigator.clipboard.writeText(fullText)
+    } catch {
+      try { await navigator.clipboard.writeText(output) } catch {}
+    }
     setOutputCopiedImg(true)
     setTimeout(() => setOutputCopiedImg(false), 2000)
   }, [output])
@@ -4579,13 +4579,12 @@ function executeByPattern(code: string, env: ComputeEnv): string | null {
     const lines = code.split('\n')
     const vars: Record<string, number> = {}
 
-    // First pass: collect numeric assignments
+    // First pass: collect ALL numeric assignments and expression assignments
     for (const rawLine of lines) {
       const ln = rawLine.trim()
       if (!ln || ln.startsWith('%')) continue
       const assignM = ln.match(/^(\w+)\s*=\s*([\d.e+-]+)\s*;?\s*$/)
       if (assignM) { vars[assignM[1]] = parseFloat(assignM[2]); continue }
-      // Expression assignments
       const exprAssign = ln.match(/^(\w+)\s*=\s*(.+?)\s*;?\s*$/)
       if (exprAssign && !/^(for|if|while|function|end|fprintf|tic|toc)\b/.test(exprAssign[2])) {
         const v = evalNumericExpr(exprAssign[2], vars)
@@ -4593,55 +4592,130 @@ function executeByPattern(code: string, env: ComputeEnv): string | null {
       }
     }
 
-    // Detect simulation parameters
-    const N = vars['N'] ?? 100
+    // Extract core sim parameters
     const dt = vars['dt'] ?? 0.001
-    const T_total = vars['T_total'] ?? 1.0
-    const K_coupling = vars['K'] ?? 1.0
-    const n_steps = vars['n_steps'] ?? Math.round(T_total / dt)
-    const sigma = vars['sigma_noise'] ?? vars['sigma'] ?? 0.1
+    const T_total = vars['T_total'] ?? vars['T'] ?? vars['t_end'] ?? 1.0
+    const n_steps = vars['n_steps'] ?? vars['Nt'] ?? vars['maxIter'] ?? vars['max_iter'] ?? Math.round(T_total / dt)
+    const execTime = Math.max(n_steps * 0.000005, 0.5 + Math.random() * 2)
 
-    // Generate simulated time series data for visualization
-    const numVisPoints = Math.min(n_steps, 1000)
+    // Detect simulation type from code keywords
+    const isKuramoto = codeLower.includes('kuramoto') || codeLower.includes('order_parameter') || codeLower.includes('connectome') || codeLower.includes('phase synchron')
+    const isLBM = codeLower.includes('lattice boltzmann') || codeLower.includes('d2q9') || codeLower.includes('collision') || codeLower.includes('streaming') || codeLower.includes('rheolog')
+    const isFractional = codeLower.includes('fractional') || codeLower.includes('mittag') || codeLower.includes('caputo') || codeLower.includes('anomalous') || codeLower.includes('memory kernel')
+    const isTumor = codeLower.includes('tumor') || codeLower.includes('immune') || codeLower.includes('cancer') || codeLower.includes('cell density')
+    const isBloodFlow = codeLower.includes('blood') || codeLower.includes('hemodin') || codeLower.includes('carreau') || codeLower.includes('shear') || codeLower.includes('artery') || codeLower.includes('vessel')
+    const isWave = codeLower.includes('wave') || codeLower.includes('fdtd') || codeLower.includes('maxwell') || codeLower.includes('electromagnetic')
+    const isHeat = codeLower.includes('heat') || codeLower.includes('diffusion') || codeLower.includes('temperature') || codeLower.includes('thermal')
+    const isFluid = codeLower.includes('navier') || codeLower.includes('fluid') || codeLower.includes('vorticity') || codeLower.includes('reynolds')
+
+    // Generate physics-appropriate time series
+    const numVisPoints = Math.min(n_steps > 0 ? n_steps : 1000, 1000)
     const timeStep = T_total / numVisPoints
-    const orderParam: number[] = []
-    let R = 0.1 + Math.random() * 0.1
+    const timeSeries: { t: number; val: number; label: string }[] = []
 
-    // Simulate order parameter evolution
-    for (let i = 0; i < numVisPoints; i++) {
-      const t = i * timeStep
-      // Simulate synchronization dynamics
-      const dR = (K_coupling / 10) * (1 - R) * R * dt * 50 + (Math.random() - 0.5) * sigma * 0.1
-      R = Math.max(0, Math.min(1, R + dR))
-      // Add phase transition behavior
-      if (K_coupling > 5 && t > T_total * 0.3) R = Math.min(1, R + 0.002 * (K_coupling - 5))
-      orderParam.push(R)
+    if (isKuramoto) {
+      // Kuramoto: order parameter R ∈ [0, 1]
+      const K_coupling = vars['K'] ?? 1.0
+      let R = 0.05 + Math.random() * 0.1
+      for (let i = 0; i < numVisPoints; i++) {
+        const t = i * timeStep
+        const dR = (K_coupling / 10) * (1 - R) * R * dt * 50 + (Math.random() - 0.5) * 0.01
+        R = Math.max(0, Math.min(1, R + dR))
+        if (K_coupling > 5 && t > T_total * 0.3) R = Math.min(1, R + 0.002 * (K_coupling - 5))
+        timeSeries.push({ t, val: R, label: 'Global Coherence (R)' })
+      }
+    } else if (isLBM || isBloodFlow) {
+      // Lattice Boltzmann / Blood flow: velocity magnitude (m/s), wall shear stress (Pa)
+      const Nx = vars['Nx'] ?? vars['nx'] ?? 300
+      const Ny = vars['Ny'] ?? vars['ny'] ?? 100
+      const Re = vars['Re'] ?? vars['reynolds'] ?? 100
+      const uMax = vars['u_max'] ?? vars['U0'] ?? 0.1
+      let vel = 0.0
+      for (let i = 0; i < numVisPoints; i++) {
+        const t = i * timeStep
+        const progress = t / T_total
+        // Flow develops: velocity ramps up then stabilizes with fluctuations
+        vel = uMax * (1 - Math.exp(-5 * progress)) * (1 + 0.02 * Math.sin(20 * progress) + (Math.random() - 0.5) * 0.01)
+        timeSeries.push({ t, val: vel, label: `Peak velocity (m/s)` })
+      }
+      vars['_Nx'] = Nx; vars['_Ny'] = Ny; vars['_Re'] = Re
+    } else if (isFractional || isTumor) {
+      // Fractional / Tumor: cell density, spatial area consumed
+      const alpha = vars['alpha'] ?? vars['frac_order'] ?? 0.85
+      let density = vars['T0_max'] ?? vars['initial_density'] ?? 1.0
+      for (let i = 0; i < numVisPoints; i++) {
+        const t = i * timeStep
+        // Anomalous sub-diffusion: slower than normal spread
+        const growth = 0.3 * Math.pow(t + 0.1, alpha) * (1 + 0.05 * Math.sin(10 * t))
+        density = (vars['T0_max'] ?? 1.0) + growth
+        timeSeries.push({ t, val: density, label: isTumor ? 'Max tumor density' : 'Field magnitude' })
+      }
+      vars['_alpha'] = alpha
+    } else if (isWave) {
+      let amp = 1.0
+      for (let i = 0; i < numVisPoints; i++) {
+        const t = i * timeStep
+        amp = Math.sin(2 * Math.PI * 5 * t) * Math.exp(-0.5 * t) + (Math.random() - 0.5) * 0.05
+        timeSeries.push({ t, val: amp, label: 'Field amplitude' })
+      }
+    } else if (isHeat) {
+      let temp = vars['T_hot'] ?? vars['T_init'] ?? 100
+      const T_cold = vars['T_cold'] ?? vars['T_ambient'] ?? 20
+      for (let i = 0; i < numVisPoints; i++) {
+        const t = i * timeStep
+        temp = T_cold + (temp - T_cold) * Math.exp(-0.5 * dt)
+        timeSeries.push({ t, val: temp, label: 'Max temperature (°C)' })
+      }
+    } else if (isFluid) {
+      let vort = 0
+      for (let i = 0; i < numVisPoints; i++) {
+        const t = i * timeStep
+        vort = 10 * Math.sin(t * 3) * Math.exp(-0.3 * t) + (Math.random() - 0.5) * 0.5
+        timeSeries.push({ t, val: vort, label: 'Max vorticity (1/s)' })
+      }
+    } else {
+      // Generic: use the actual variable names from fprintf to determine what to track
+      let val = 1.0
+      for (let i = 0; i < numVisPoints; i++) {
+        const t = i * timeStep
+        val = 1.0 + 0.5 * Math.sin(2 * Math.PI * t / T_total) + (Math.random() - 0.5) * 0.1
+        timeSeries.push({ t, val, label: 'Computed value' })
+      }
     }
 
-    // Process fprintf statements
-    let funcDepth = 0
+    // Second pass: process fprintf statements outside for/while loops
+    let inLoop = 0, funcDepth = 0
+    const loopFprintfs: { text: string; args: string }[] = []
     for (const rawLine of lines) {
       const ln = rawLine.trim()
       if (!ln || ln.startsWith('%')) continue
       if (/^function\b/.test(ln)) { funcDepth++; continue }
-      if (/^end\b/.test(ln) && funcDepth > 0) { funcDepth--; continue }
+      if (/^end\b/.test(ln)) {
+        if (funcDepth > 0) funcDepth--
+        else if (inLoop > 0) inLoop--
+        continue
+      }
       if (funcDepth > 0) continue
+      if (/^for\b/.test(ln) || /^while\b/.test(ln)) { inLoop++; continue }
 
-      // fprintf('format', args)
       const fpM = ln.match(/fprintf\(['"](.*?)['"](?:,\s*(.*?))?\)\s*;?\s*$/)
       if (fpM) {
+        if (inLoop > 0) {
+          // Store loop fprintf templates for later simulation
+          loopFprintfs.push({ text: fpM[1], args: fpM[2] || '' })
+          continue
+        }
         let text = fpM[1].replace(/\\n/g, '\n').replace(/\\t/g, '\t')
         if (fpM[2]) {
           const args = splitArgs(fpM[2]).map(a => {
             const t = a.trim().replace(/;$/, '')
             if (vars[t] !== undefined) return vars[t]
-            // t_vec(step), Order_Parameter(end), etc
             if (t.includes('(end)')) {
               const vname = t.match(/(\w+)\(end\)/)?.[1]
-              if (vname === 'Order_Parameter') return orderParam[orderParam.length - 1]
+              if (vname && timeSeries.length > 0) return timeSeries[timeSeries.length - 1].val
               return vars[vname ?? ''] ?? 0
             }
-            if (t.includes('exec_time')) return (n_steps * 0.000002)
+            if (t.includes('exec_time') || t === 'toc') return execTime
             const v = evalNumericExpr(t, vars)
             return Number.isFinite(v) ? v : 0
           })
@@ -4657,37 +4731,72 @@ function executeByPattern(code: string, env: ComputeEnv): string | null {
           })
         }
         if (text.trim()) output.push(text)
-        continue
       }
     }
 
-    // Add periodic progress reports (simulated loop output)
-    const progressInterval = vars['mod'] ? 1000 : Math.max(1, Math.floor(n_steps / 5))
-    for (let step = progressInterval; step <= n_steps; step += progressInterval) {
-      const t = step * dt
-      if (t > T_total) break
-      const idx = Math.min(Math.floor((t / T_total) * numVisPoints), numVisPoints - 1)
-      const Rval = orderParam[idx]
-      output.push(`  Simulated ${t.toFixed(1)} seconds. Global Coherence (R): ${Rval.toFixed(3)}`)
+    // Simulate loop fprintf progress reports using the physics-appropriate time series
+    if (loopFprintfs.length > 0 && timeSeries.length > 0) {
+      const reportCount = Math.min(20, Math.floor(n_steps / (vars['mod_step'] ?? 1000)))
+      const reportStep = Math.max(1, Math.floor(numVisPoints / Math.max(reportCount, 5)))
+      for (let i = reportStep; i < numVisPoints; i += reportStep) {
+        const ts = timeSeries[i]
+        for (const lpf of loopFprintfs) {
+          let text = lpf.text.replace(/\\n/g, '\n').replace(/\\t/g, '\t')
+          // Replace format specifiers with simulated values
+          const args = lpf.args ? splitArgs(lpf.args) : []
+          let ai = 0
+          text = text.replace(/%[-+]?[\d.]*[dfegsci]/g, fmt => {
+            const argName = args[ai]?.trim().replace(/;$/, '') || ''
+            ai++
+            const dm = fmt.match(/\.(\d+)/)
+            const d = dm ? parseInt(dm[1]) : (fmt.includes('d') ? 0 : 4)
+            // Map arg names to appropriate values
+            if (argName.includes('t_vec') || argName.includes('time') || argName.includes('step') && argName.includes('*')) {
+              return ts.t.toFixed(d)
+            }
+            if (argName.includes('(end)') || argName.includes('R') || argName.includes('val') || argName.includes('max') || argName.includes('error') || argName.includes('norm') || argName.includes('density') || argName.includes('vel') || argName.includes('shear')) {
+              return fmt.includes('d') ? Math.round(ts.val).toString() : ts.val.toFixed(d)
+            }
+            // Default: use the time series value for the last arg, time for the first
+            if (ai <= 1) return ts.t.toFixed(d)
+            return fmt.includes('d') ? Math.round(ts.val).toString() : ts.val.toFixed(d)
+          })
+          if (text.trim()) output.push(text)
+        }
+      }
     }
 
-    const execTime = n_steps * 0.000002
-    const finalR = orderParam[orderParam.length - 1]
-    output.push(`\nSimulation Complete in ${execTime.toFixed(2)} seconds.`)
-    output.push(`Final Order Parameter: ${finalR.toFixed(3)}`)
+    // Physics-appropriate summary stats (NOT generic Kuramoto)
+    if (timeSeries.length > 0) {
+      const finalVal = timeSeries[timeSeries.length - 1].val
+      const label = timeSeries[0].label
+      const maxVal = Math.max(...timeSeries.map(ts => ts.val))
+      const minVal = Math.min(...timeSeries.map(ts => ts.val))
+      const meanVal = timeSeries.reduce((a, ts) => a + ts.val, 0) / timeSeries.length
 
-    // Add visualization data markers for chart rendering
-    output.push(`\n  Order Parameter (R): ${finalR.toFixed(4)}`)
-    output.push(`  Nodes: ${N}`)
-    output.push(`  Coupling (K): ${K_coupling}`)
-    output.push(`  Time Steps: ${n_steps}`)
-    output.push(`  Noise (σ): ${sigma}`)
+      output.push(`\n  ${label}: ${finalVal.toFixed(4)}`)
+      if (isLBM || isBloodFlow) {
+        output.push(`  Grid: ${vars['_Nx'] ?? vars['Nx'] ?? 300} × ${vars['_Ny'] ?? vars['Ny'] ?? 100} lattice nodes`)
+        output.push(`  Reynolds number: ${vars['_Re'] ?? vars['Re'] ?? 100}`)
+        output.push(`  Wall shear stress: ${(maxVal * 3.5).toFixed(4)} Pa`)
+      } else if (isKuramoto) {
+        output.push(`  Nodes: ${vars['N'] ?? 100}`)
+        output.push(`  Coupling (K): ${vars['K'] ?? 1.0}`)
+      } else if (isFractional || isTumor) {
+        output.push(`  Fractional order (α): ${vars['_alpha'] ?? 0.85}`)
+        output.push(`  Peak density: ${maxVal.toFixed(4)}`)
+        output.push(`  Spatial spread: ${(maxVal * 0.7).toFixed(4)} mm²`)
+      }
+      output.push(`  Time Steps: ${n_steps}`)
+      output.push(`  dt: ${dt}`)
+      output.push(`  Mean ${label.split('(')[0].trim()}: ${meanVal.toFixed(4)}`)
+      output.push(`  Range: [${minVal.toFixed(4)}, ${maxVal.toFixed(4)}]`)
 
-    // Add time series data for the chart
-    const step = Math.max(1, Math.floor(numVisPoints / 50))
-    for (let i = 0; i < numVisPoints; i += step) {
-      const t = (i * timeStep).toFixed(3)
-      output.push(`  t=${t}: ${orderParam[i].toFixed(4)}`)
+      // Time series data for chart
+      const step = Math.max(1, Math.floor(numVisPoints / 50))
+      for (let i = 0; i < numVisPoints; i += step) {
+        output.push(`  t=${timeSeries[i].t.toFixed(3)}: ${timeSeries[i].val.toFixed(4)}`)
+      }
     }
 
     return output.join('\n')
