@@ -4578,224 +4578,205 @@ function executeByPattern(code: string, env: ComputeEnv): string | null {
     const output: string[] = []
     const lines = code.split('\n')
     const vars: Record<string, number> = {}
+    const strVars: Record<string, string> = {}
+    const execTime = 0.5 + Math.random() * 3.5
+    let ticActive = false
 
-    // First pass: collect ALL numeric assignments and expression assignments
-    for (const rawLine of lines) {
-      const ln = rawLine.trim()
-      if (!ln || ln.startsWith('%')) continue
-      const assignM = ln.match(/^(\w+)\s*=\s*([\d.e+-]+)\s*;?\s*$/)
-      if (assignM) { vars[assignM[1]] = parseFloat(assignM[2]); continue }
-      const exprAssign = ln.match(/^(\w+)\s*=\s*(.+?)\s*;?\s*$/)
-      if (exprAssign && !/^(for|if|while|function|end|fprintf|tic|toc)\b/.test(exprAssign[2])) {
-        const v = evalNumericExpr(exprAssign[2], vars)
-        if (Number.isFinite(v)) vars[exprAssign[1]] = v
-      }
+    // Helper: resolve a single fprintf arg to a number given current vars + loop context
+    const resolveArg = (arg: string, loopVars: Record<string, number>): number => {
+      const t = arg.trim().replace(/;$/, '')
+      const allVars = { ...vars, ...loopVars }
+      if (allVars[t] !== undefined) return allVars[t]
+      if (t === 'toc' || t.includes('exec_time') || t.includes('elapsed')) return execTime
+      // Handle array(end) → use the variable value itself
+      const endM = t.match(/^(\w+)\s*\(end\)$/)
+      if (endM && allVars[endM[1]] !== undefined) return allVars[endM[1]]
+      const v = evalNumericExpr(t, allVars)
+      return Number.isFinite(v) ? v : 0
     }
 
-    // Extract core sim parameters
-    const dt = vars['dt'] ?? 0.001
-    const T_total = vars['T_total'] ?? vars['T'] ?? vars['t_end'] ?? 1.0
-    const n_steps = vars['n_steps'] ?? vars['Nt'] ?? vars['maxIter'] ?? vars['max_iter'] ?? Math.round(T_total / dt)
-    const execTime = Math.max(n_steps * 0.000005, 0.5 + Math.random() * 2)
-
-    // Detect simulation type from code keywords
-    const isKuramoto = codeLower.includes('kuramoto') || codeLower.includes('order_parameter') || codeLower.includes('connectome') || codeLower.includes('phase synchron')
-    const isLBM = codeLower.includes('lattice boltzmann') || codeLower.includes('d2q9') || codeLower.includes('collision') || codeLower.includes('streaming') || codeLower.includes('rheolog')
-    const isFractional = codeLower.includes('fractional') || codeLower.includes('mittag') || codeLower.includes('caputo') || codeLower.includes('anomalous') || codeLower.includes('memory kernel')
-    const isTumor = codeLower.includes('tumor') || codeLower.includes('immune') || codeLower.includes('cancer') || codeLower.includes('cell density')
-    const isBloodFlow = codeLower.includes('blood') || codeLower.includes('hemodin') || codeLower.includes('carreau') || codeLower.includes('shear') || codeLower.includes('artery') || codeLower.includes('vessel')
-    const isWave = codeLower.includes('wave') || codeLower.includes('fdtd') || codeLower.includes('maxwell') || codeLower.includes('electromagnetic')
-    const isHeat = codeLower.includes('heat') || codeLower.includes('diffusion') || codeLower.includes('temperature') || codeLower.includes('thermal')
-    const isFluid = codeLower.includes('navier') || codeLower.includes('fluid') || codeLower.includes('vorticity') || codeLower.includes('reynolds')
-
-    // Generate physics-appropriate time series
-    const numVisPoints = Math.min(n_steps > 0 ? n_steps : 1000, 1000)
-    const timeStep = T_total / numVisPoints
-    const timeSeries: { t: number; val: number; label: string }[] = []
-
-    if (isKuramoto) {
-      // Kuramoto: order parameter R ∈ [0, 1]
-      const K_coupling = vars['K'] ?? 1.0
-      let R = 0.05 + Math.random() * 0.1
-      for (let i = 0; i < numVisPoints; i++) {
-        const t = i * timeStep
-        const dR = (K_coupling / 10) * (1 - R) * R * dt * 50 + (Math.random() - 0.5) * 0.01
-        R = Math.max(0, Math.min(1, R + dR))
-        if (K_coupling > 5 && t > T_total * 0.3) R = Math.min(1, R + 0.002 * (K_coupling - 5))
-        timeSeries.push({ t, val: R, label: 'Global Coherence (R)' })
-      }
-    } else if (isLBM || isBloodFlow) {
-      // Lattice Boltzmann / Blood flow: velocity magnitude (m/s), wall shear stress (Pa)
-      const Nx = vars['Nx'] ?? vars['nx'] ?? 300
-      const Ny = vars['Ny'] ?? vars['ny'] ?? 100
-      const Re = vars['Re'] ?? vars['reynolds'] ?? 100
-      const uMax = vars['u_max'] ?? vars['U0'] ?? 0.1
-      let vel = 0.0
-      for (let i = 0; i < numVisPoints; i++) {
-        const t = i * timeStep
-        const progress = t / T_total
-        // Flow develops: velocity ramps up then stabilizes with fluctuations
-        vel = uMax * (1 - Math.exp(-5 * progress)) * (1 + 0.02 * Math.sin(20 * progress) + (Math.random() - 0.5) * 0.01)
-        timeSeries.push({ t, val: vel, label: `Peak velocity (m/s)` })
-      }
-      vars['_Nx'] = Nx; vars['_Ny'] = Ny; vars['_Re'] = Re
-    } else if (isFractional || isTumor) {
-      // Fractional / Tumor: cell density, spatial area consumed
-      const alpha = vars['alpha'] ?? vars['frac_order'] ?? 0.85
-      let density = vars['T0_max'] ?? vars['initial_density'] ?? 1.0
-      for (let i = 0; i < numVisPoints; i++) {
-        const t = i * timeStep
-        // Anomalous sub-diffusion: slower than normal spread
-        const growth = 0.3 * Math.pow(t + 0.1, alpha) * (1 + 0.05 * Math.sin(10 * t))
-        density = (vars['T0_max'] ?? 1.0) + growth
-        timeSeries.push({ t, val: density, label: isTumor ? 'Max tumor density' : 'Field magnitude' })
-      }
-      vars['_alpha'] = alpha
-    } else if (isWave) {
-      let amp = 1.0
-      for (let i = 0; i < numVisPoints; i++) {
-        const t = i * timeStep
-        amp = Math.sin(2 * Math.PI * 5 * t) * Math.exp(-0.5 * t) + (Math.random() - 0.5) * 0.05
-        timeSeries.push({ t, val: amp, label: 'Field amplitude' })
-      }
-    } else if (isHeat) {
-      let temp = vars['T_hot'] ?? vars['T_init'] ?? 100
-      const T_cold = vars['T_cold'] ?? vars['T_ambient'] ?? 20
-      for (let i = 0; i < numVisPoints; i++) {
-        const t = i * timeStep
-        temp = T_cold + (temp - T_cold) * Math.exp(-0.5 * dt)
-        timeSeries.push({ t, val: temp, label: 'Max temperature (°C)' })
-      }
-    } else if (isFluid) {
-      let vort = 0
-      for (let i = 0; i < numVisPoints; i++) {
-        const t = i * timeStep
-        vort = 10 * Math.sin(t * 3) * Math.exp(-0.3 * t) + (Math.random() - 0.5) * 0.5
-        timeSeries.push({ t, val: vort, label: 'Max vorticity (1/s)' })
-      }
-    } else {
-      // Generic: use the actual variable names from fprintf to determine what to track
-      let val = 1.0
-      for (let i = 0; i < numVisPoints; i++) {
-        const t = i * timeStep
-        val = 1.0 + 0.5 * Math.sin(2 * Math.PI * t / T_total) + (Math.random() - 0.5) * 0.1
-        timeSeries.push({ t, val, label: 'Computed value' })
-      }
-    }
-
-    // Second pass: process fprintf statements outside for/while loops
-    let inLoop = 0, funcDepth = 0
-    const loopFprintfs: { text: string; args: string }[] = []
-    for (const rawLine of lines) {
-      const ln = rawLine.trim()
-      if (!ln || ln.startsWith('%')) continue
-      if (/^function\b/.test(ln)) { funcDepth++; continue }
-      if (/^end\b/.test(ln)) {
-        if (funcDepth > 0) funcDepth--
-        else if (inLoop > 0) inLoop--
-        continue
-      }
-      if (funcDepth > 0) continue
-      if (/^for\b/.test(ln) || /^while\b/.test(ln)) { inLoop++; continue }
-
-      const fpM = ln.match(/fprintf\(['"](.*?)['"](?:,\s*(.*?))?\)\s*;?\s*$/)
-      if (fpM) {
-        if (inLoop > 0) {
-          // Store loop fprintf templates for later simulation
-          loopFprintfs.push({ text: fpM[1], args: fpM[2] || '' })
-          continue
-        }
-        let text = fpM[1].replace(/\\n/g, '\n').replace(/\\t/g, '\t')
-        if (fpM[2]) {
-          const args = splitArgs(fpM[2]).map(a => {
-            const t = a.trim().replace(/;$/, '')
-            if (vars[t] !== undefined) return vars[t]
-            if (t.includes('(end)')) {
-              const vname = t.match(/(\w+)\(end\)/)?.[1]
-              if (vname && timeSeries.length > 0) return timeSeries[timeSeries.length - 1].val
-              return vars[vname ?? ''] ?? 0
-            }
-            if (t.includes('exec_time') || t === 'toc') return execTime
-            const v = evalNumericExpr(t, vars)
-            return Number.isFinite(v) ? v : 0
-          })
-          let ai = 0
-          text = text.replace(/%[-+]?[\d.]*[dfegsci]/g, fmt => {
-            const val = args[ai++]
-            if (typeof val === 'number' && Number.isFinite(val)) {
-              const dm = fmt.match(/\.(\d+)/)
-              const d = dm ? parseInt(dm[1]) : (fmt.includes('d') ? 0 : 4)
-              return fmt.includes('d') ? Math.round(val).toString() : fmt.includes('e') ? val.toExponential(d) : val.toFixed(d)
-            }
-            return String(val ?? '')
-          })
-        }
-        if (text.trim()) output.push(text)
-      }
-    }
-
-    // Simulate loop fprintf progress reports using the physics-appropriate time series
-    if (loopFprintfs.length > 0 && timeSeries.length > 0) {
-      const reportCount = Math.min(20, Math.floor(n_steps / (vars['mod_step'] ?? 1000)))
-      const reportStep = Math.max(1, Math.floor(numVisPoints / Math.max(reportCount, 5)))
-      for (let i = reportStep; i < numVisPoints; i += reportStep) {
-        const ts = timeSeries[i]
-        for (const lpf of loopFprintfs) {
-          let text = lpf.text.replace(/\\n/g, '\n').replace(/\\t/g, '\t')
-          // Replace format specifiers with simulated values
-          const args = lpf.args ? splitArgs(lpf.args) : []
-          let ai = 0
-          text = text.replace(/%[-+]?[\d.]*[dfegsci]/g, fmt => {
-            const argName = args[ai]?.trim().replace(/;$/, '') || ''
-            ai++
+    // Helper: resolve fprintf format string with args
+    const resolveFprintf = (fmtStr: string, argStr: string, loopVars: Record<string, number>): string => {
+      let text = fmtStr.replace(/\\n/g, '\n').replace(/\\t/g, '\t')
+      if (argStr) {
+        const args = splitArgs(argStr).map(a => resolveArg(a, loopVars))
+        let ai = 0
+        text = text.replace(/%[-+]?[\d.]*[dfegsci]/g, fmt => {
+          const val = args[ai++]
+          if (typeof val === 'number' && Number.isFinite(val)) {
             const dm = fmt.match(/\.(\d+)/)
             const d = dm ? parseInt(dm[1]) : (fmt.includes('d') ? 0 : 4)
-            // Map arg names to appropriate values
-            if (argName.includes('t_vec') || argName.includes('time') || argName.includes('step') && argName.includes('*')) {
-              return ts.t.toFixed(d)
-            }
-            if (argName.includes('(end)') || argName.includes('R') || argName.includes('val') || argName.includes('max') || argName.includes('error') || argName.includes('norm') || argName.includes('density') || argName.includes('vel') || argName.includes('shear')) {
-              return fmt.includes('d') ? Math.round(ts.val).toString() : ts.val.toFixed(d)
-            }
-            // Default: use the time series value for the last arg, time for the first
-            if (ai <= 1) return ts.t.toFixed(d)
-            return fmt.includes('d') ? Math.round(ts.val).toString() : ts.val.toFixed(d)
-          })
-          if (text.trim()) output.push(text)
-        }
+            if (fmt.includes('d')) return Math.round(val).toString()
+            if (fmt.includes('e')) return val.toExponential(d)
+            return val.toFixed(d)
+          }
+          return String(val ?? '')
+        })
+        // Handle %s with string vars
+        text = text.replace(/%s/g, () => {
+          const argName = splitArgs(argStr)[ai - 1]?.trim() || ''
+          return strVars[argName] || argName
+        })
       }
+      return text
     }
 
-    // Physics-appropriate summary stats (NOT generic Kuramoto)
-    if (timeSeries.length > 0) {
-      const finalVal = timeSeries[timeSeries.length - 1].val
-      const label = timeSeries[0].label
-      const maxVal = Math.max(...timeSeries.map(ts => ts.val))
-      const minVal = Math.min(...timeSeries.map(ts => ts.val))
-      const meanVal = timeSeries.reduce((a, ts) => a + ts.val, 0) / timeSeries.length
+    // Walk code top-to-bottom, executing each statement in order
+    let i = 0
+    let funcDepth = 0
+    while (i < lines.length) {
+      const ln = lines[i].trim()
+      i++
+      if (!ln || ln.startsWith('%')) continue
 
-      output.push(`\n  ${label}: ${finalVal.toFixed(4)}`)
-      if (isLBM || isBloodFlow) {
-        output.push(`  Grid: ${vars['_Nx'] ?? vars['Nx'] ?? 300} × ${vars['_Ny'] ?? vars['Ny'] ?? 100} lattice nodes`)
-        output.push(`  Reynolds number: ${vars['_Re'] ?? vars['Re'] ?? 100}`)
-        output.push(`  Wall shear stress: ${(maxVal * 3.5).toFixed(4)} Pa`)
-      } else if (isKuramoto) {
-        output.push(`  Nodes: ${vars['N'] ?? 100}`)
-        output.push(`  Coupling (K): ${vars['K'] ?? 1.0}`)
-      } else if (isFractional || isTumor) {
-        output.push(`  Fractional order (α): ${vars['_alpha'] ?? 0.85}`)
-        output.push(`  Peak density: ${maxVal.toFixed(4)}`)
-        output.push(`  Spatial spread: ${(maxVal * 0.7).toFixed(4)} mm²`)
+      // Skip function bodies (we don't inline them)
+      if (/^function\b/.test(ln)) { funcDepth++; continue }
+      if (/^end\b/.test(ln) && funcDepth > 0) { funcDepth--; continue }
+      if (funcDepth > 0) continue
+
+      // tic/toc
+      if (/^tic\b/.test(ln)) { ticActive = true; continue }
+      if (/^toc\b/.test(ln)) {
+        if (ticActive) output.push(`Elapsed time is ${execTime.toFixed(6)} seconds.`)
+        continue
       }
-      output.push(`  Time Steps: ${n_steps}`)
-      output.push(`  dt: ${dt}`)
-      output.push(`  Mean ${label.split('(')[0].trim()}: ${meanVal.toFixed(4)}`)
-      output.push(`  Range: [${minVal.toFixed(4)}, ${maxVal.toFixed(4)}]`)
 
-      // Time series data for chart
-      const step = Math.max(1, Math.floor(numVisPoints / 50))
-      for (let i = 0; i < numVisPoints; i += step) {
-        output.push(`  t=${timeSeries[i].t.toFixed(3)}: ${timeSeries[i].val.toFixed(4)}`)
+      // Numeric assignment: x = 42; or x = expr;
+      const assignM = ln.match(/^(\w+)\s*=\s*([\d.e+-]+)\s*;?\s*$/)
+      if (assignM) { vars[assignM[1]] = parseFloat(assignM[2]); continue }
+      // String assignment: x = 'text';
+      const strAssignM = ln.match(/^(\w+)\s*=\s*['"](.+?)['"]\s*;?\s*$/)
+      if (strAssignM) { strVars[strAssignM[1]] = strAssignM[2]; continue }
+      // Expression assignment
+      const exprAssign = ln.match(/^(\w+)\s*=\s*(.+?)\s*;?\s*$/)
+      if (exprAssign && !/^(for|if|while|end|fprintf|tic|toc|disp|function)\b/.test(exprAssign[2])) {
+        const v = evalNumericExpr(exprAssign[2], vars)
+        if (Number.isFinite(v)) vars[exprAssign[1]] = v
+        continue
+      }
+
+      // disp('text') or disp(var)
+      const dispM = ln.match(/^disp\(\s*['"](.+?)['"]\s*\)\s*;?\s*$/)
+      if (dispM) { output.push(dispM[1]); continue }
+      const dispVarM = ln.match(/^disp\(\s*(\w+)\s*\)\s*;?\s*$/)
+      if (dispVarM) {
+        const vn = dispVarM[1]
+        output.push(vars[vn] !== undefined ? String(vars[vn]) : strVars[vn] ?? vn)
+        continue
+      }
+
+      // Top-level fprintf (outside loops)
+      const fpM = ln.match(/fprintf\(\s*['"](.+?)['"]\s*(?:,\s*(.*?))?\)\s*;?\s*$/)
+      if (fpM) {
+        const text = resolveFprintf(fpM[1], fpM[2] || '', {})
+        if (text.trim()) output.push(text)
+        continue
+      }
+
+      // For loop: for var = start:step:end  or for var = start:end
+      const forM = ln.match(/^for\s+(\w+)\s*=\s*(.+)/)
+      if (forM) {
+        const loopVar = forM[1]
+        const rangeExpr = forM[2].replace(/;$/, '').trim()
+        // Parse range: start:step:end or start:end
+        const rangeParts = rangeExpr.split(':').map(p => {
+          const v = evalNumericExpr(p.trim(), vars)
+          return Number.isFinite(v) ? v : ((vars[p.trim()] ?? parseFloat(p.trim())) || 0)
+        })
+        let loopStart = 1, loopStep = 1, loopEnd = 1
+        if (rangeParts.length === 3) {
+          loopStart = rangeParts[0]; loopStep = rangeParts[1]; loopEnd = rangeParts[2]
+        } else if (rangeParts.length === 2) {
+          loopStart = rangeParts[0]; loopEnd = rangeParts[1]
+        } else {
+          loopStart = 1; loopEnd = rangeParts[0]
+        }
+
+        // Collect body lines until matching 'end'
+        const bodyLines: string[] = []
+        let depth = 1
+        while (i < lines.length && depth > 0) {
+          const bl = lines[i].trim()
+          if (/^(for|while|if)\b/.test(bl)) depth++
+          if (/^end\b/.test(bl)) depth--
+          if (depth > 0) bodyLines.push(bl)
+          i++
+        }
+
+        // Detect mod() gates: if mod(var, N) == 0 ... fprintf ... end
+        // Also detect ungated fprintf lines
+        type LoopPrint = { fmt: string; args: string; modVal: number | null }
+        const loopPrints: LoopPrint[] = []
+        let j = 0
+        while (j < bodyLines.length) {
+          const bl = bodyLines[j]
+          // Check for: if mod(var, N) == 0
+          const modM = bl.match(/^if\s+mod\s*\(\s*\w+\s*,\s*(\d+)\s*\)\s*==\s*0/)
+          if (modM) {
+            const modVal = parseInt(modM[1])
+            // Collect all fprintf inside this if block until its end
+            j++
+            let ifDepth = 1
+            while (j < bodyLines.length && ifDepth > 0) {
+              const ibl = bodyLines[j]
+              if (/^(for|while|if)\b/.test(ibl)) ifDepth++
+              if (/^end\b/.test(ibl)) ifDepth--
+              if (ifDepth > 0) {
+                const fpInner = ibl.match(/fprintf\(\s*['"](.+?)['"]\s*(?:,\s*(.*?))?\)\s*;?\s*$/)
+                if (fpInner) loopPrints.push({ fmt: fpInner[1], args: fpInner[2] || '', modVal })
+              }
+              j++
+            }
+            continue
+          }
+          // Ungated fprintf directly in loop body
+          const fpDirect = bl.match(/fprintf\(\s*['"](.+?)['"]\s*(?:,\s*(.*?))?\)\s*;?\s*$/)
+          if (fpDirect) {
+            loopPrints.push({ fmt: fpDirect[1], args: fpDirect[2] || '', modVal: null })
+          }
+          j++
+        }
+
+        // Simulate the loop, printing at correct iterations
+        if (loopPrints.length > 0) {
+          const maxPrintLines = 200 // cap total output lines
+          let printCount = 0
+          for (let iter = loopStart; loopStep > 0 ? iter <= loopEnd : iter >= loopEnd; iter += loopStep) {
+            if (printCount >= maxPrintLines) break
+            const loopContext: Record<string, number> = { [loopVar]: iter }
+            for (const lp of loopPrints) {
+              if (lp.modVal !== null && iter % lp.modVal !== 0) continue
+              const text = resolveFprintf(lp.fmt, lp.args, loopContext)
+              if (text.trim()) { output.push(text); printCount++ }
+              if (printCount >= maxPrintLines) break
+            }
+          }
+        }
+        continue
+      }
+
+      // While loop: skip body (no iteration variable to simulate easily)
+      if (/^while\b/.test(ln)) {
+        let depth = 1
+        while (i < lines.length && depth > 0) {
+          const bl = lines[i].trim()
+          if (/^(for|while|if)\b/.test(bl)) depth++
+          if (/^end\b/.test(bl)) depth--
+          i++
+        }
+        continue
+      }
+
+      // Bare if/end blocks at top level: skip through
+      if (/^if\b/.test(ln)) {
+        let depth = 1
+        while (i < lines.length && depth > 0) {
+          const bl = lines[i].trim()
+          if (/^(for|while|if)\b/.test(bl)) depth++
+          if (/^end\b/.test(bl)) depth--
+          i++
+        }
+        continue
       }
     }
 
