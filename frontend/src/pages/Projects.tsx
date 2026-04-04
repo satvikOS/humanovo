@@ -4,7 +4,7 @@ import {
   FiPlus, FiFolder, FiX, FiTrash2, FiSearch, FiRefreshCw,
   FiGrid, FiList, FiFilter, FiChevronDown,
   FiTarget, FiFileText, FiClock, FiZap,
-  FiDatabase,
+  FiDatabase, FiTag, FiCalendar,
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import api, { Project, ProjectCreate } from '../services/api'
@@ -382,6 +382,9 @@ export default function Projects() {
   const [sortBy, setSortBy] = useState<SortOption>('recent')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [showFilters, setShowFilters] = useState(false)
+  const [diseaseFocusFilter, setDiseaseFocusFilter] = useState('')
+  const [tagFilter, setTagFilter] = useState('')
+  const [dateRange, setDateRange] = useState<'all' | '7d' | '30d' | '90d' | '1y'>('all')
 
   useEffect(() => {
     loadProjects()
@@ -455,6 +458,29 @@ export default function Projects() {
     }
   }
 
+  // Collect unique disease focuses and tags for filter dropdowns
+  const uniqueDiseaseFocuses = useMemo(() => {
+    const set = new Set<string>()
+    projects.forEach(p => { if (p.disease_focus) set.add(p.disease_focus) })
+    return [...set].sort()
+  }, [projects])
+
+  const uniqueTags = useMemo(() => {
+    const set = new Set<string>()
+    const excluded = new Set(['AI generated', 'ai-generated', '12-stage-pipeline', '10-stage-pipeline', 'well-grounded', 'partially-grounded', 'needs-grounding'])
+    projects.forEach(p => (p.tags || []).forEach(t => { if (!excluded.has(t)) set.add(t) }))
+    return [...set].sort()
+  }, [projects])
+
+  const activeFilterCount = useMemo(() => {
+    let count = 0
+    if (statusFilter !== 'all') count++
+    if (diseaseFocusFilter) count++
+    if (tagFilter) count++
+    if (dateRange !== 'all') count++
+    return count
+  }, [statusFilter, diseaseFocusFilter, tagFilter, dateRange])
+
   // Filtered and sorted projects
   const displayProjects = useMemo(() => {
     let filtered = projects
@@ -462,6 +488,24 @@ export default function Projects() {
     // Status filter
     if (statusFilter !== 'all') {
       filtered = filtered.filter(p => (p.status || 'active') === statusFilter)
+    }
+
+    // Disease focus filter
+    if (diseaseFocusFilter) {
+      filtered = filtered.filter(p => p.disease_focus === diseaseFocusFilter)
+    }
+
+    // Tag filter
+    if (tagFilter) {
+      filtered = filtered.filter(p => (p.tags || []).includes(tagFilter))
+    }
+
+    // Date range filter
+    if (dateRange !== 'all') {
+      const now = Date.now()
+      const msMap: Record<string, number> = { '7d': 7 * 86400000, '30d': 30 * 86400000, '90d': 90 * 86400000, '1y': 365 * 86400000 }
+      const cutoff = now - (msMap[dateRange] || 0)
+      filtered = filtered.filter(p => new Date(p.updated_at || p.created_at).getTime() >= cutoff)
     }
 
     // Search
@@ -492,7 +536,7 @@ export default function Projects() {
     }
 
     return sorted
-  }, [projects, statusFilter, searchQuery, sortBy])
+  }, [projects, statusFilter, diseaseFocusFilter, tagFilter, dateRange, searchQuery, sortBy])
 
   const statusCounts = useMemo(() => {
     const counts: Record<string, number> = { all: projects.length, active: 0, paused: 0, completed: 0, archived: 0 }
@@ -542,40 +586,20 @@ export default function Projects() {
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Status filter */}
-          <div className="relative">
-            <button
-              onClick={() => setShowFilters(!showFilters)}
-              className={clsx(
-                'btn flex items-center gap-2 px-3 py-2 text-sm',
-                statusFilter !== 'all' ? 'text-[var(--color-accent-blue)]' : 'text-[var(--color-text-muted)]'
-              )}
-            >
-              <FiFilter className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">{statusFilter === 'all' ? 'Filter' : statusFilter}</span>
-              <FiChevronDown className="w-3 h-3" />
-            </button>
-            {showFilters && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setShowFilters(false)} />
-                <div className="absolute right-0 top-full mt-1 glass-card p-1 min-w-[140px] z-50">
-                  {(['all', 'active', 'paused', 'completed', 'archived'] as StatusFilter[]).map(status => (
-                    <button
-                      key={status}
-                      onClick={() => { setStatusFilter(status); setShowFilters(false) }}
-                      className={clsx(
-                        'w-full text-left px-3 py-1.5 rounded text-sm flex items-center justify-between',
-                        statusFilter === status ? 'text-white bg-white/5' : 'text-[var(--color-text-muted)] hover:text-white hover:bg-white/5'
-                      )}
-                    >
-                      <span className="capitalize">{status}</span>
-                      <span className="text-xs opacity-50">{statusCounts[status] || 0}</span>
-                    </button>
-                  ))}
-                </div>
-              </>
+          {/* Filter toggle */}
+          <button
+            onClick={() => setShowFilters(!showFilters)}
+            className={clsx(
+              'btn flex items-center gap-2 px-3 py-2 text-sm',
+              activeFilterCount > 0 ? 'text-[var(--color-accent-blue)]' : 'text-[var(--color-text-muted)]'
             )}
-          </div>
+          >
+            <FiFilter className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Filters</span>
+            {activeFilterCount > 0 && (
+              <span className="ml-0.5 px-1.5 py-0.5 text-[10px] font-bold bg-[var(--color-accent-blue)]/20 text-[var(--color-accent-blue)] rounded-full">{activeFilterCount}</span>
+            )}
+          </button>
 
           {/* Sort */}
           <select
@@ -612,6 +636,90 @@ export default function Projects() {
         </div>
       </div>
 
+      {/* Expanded Filters Panel */}
+      {showFilters && (
+        <div className="glass-card p-4 mb-6 animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="flex flex-wrap items-end gap-3">
+            {/* Status */}
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] text-[var(--color-text-muted)] uppercase tracking-wider font-medium">Status</label>
+              <select
+                value={statusFilter}
+                onChange={e => setStatusFilter(e.target.value as StatusFilter)}
+                className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg text-sm text-[var(--color-text-muted)] px-3 py-1.5 focus:outline-none min-w-[120px]"
+              >
+                {(['all', 'active', 'paused', 'completed', 'archived'] as StatusFilter[]).map(s => (
+                  <option key={s} value={s}>{s === 'all' ? `All (${statusCounts.all})` : `${s.charAt(0).toUpperCase() + s.slice(1)} (${statusCounts[s] || 0})`}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Disease Focus */}
+            {uniqueDiseaseFocuses.length > 0 && (
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] text-[var(--color-text-muted)] uppercase tracking-wider font-medium flex items-center gap-1">
+                  <FiTarget className="w-3 h-3" /> Disease Focus
+                </label>
+                <select
+                  value={diseaseFocusFilter}
+                  onChange={e => setDiseaseFocusFilter(e.target.value)}
+                  className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg text-sm text-[var(--color-text-muted)] px-3 py-1.5 focus:outline-none min-w-[160px]"
+                >
+                  <option value="">All Diseases</option>
+                  {uniqueDiseaseFocuses.map(d => <option key={d} value={d}>{d}</option>)}
+                </select>
+              </div>
+            )}
+
+            {/* Tag */}
+            {uniqueTags.length > 0 && (
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] text-[var(--color-text-muted)] uppercase tracking-wider font-medium flex items-center gap-1">
+                  <FiTag className="w-3 h-3" /> Tag
+                </label>
+                <select
+                  value={tagFilter}
+                  onChange={e => setTagFilter(e.target.value)}
+                  className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg text-sm text-[var(--color-text-muted)] px-3 py-1.5 focus:outline-none min-w-[140px]"
+                >
+                  <option value="">All Tags</option>
+                  {uniqueTags.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+            )}
+
+            {/* Date Range */}
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] text-[var(--color-text-muted)] uppercase tracking-wider font-medium flex items-center gap-1">
+                <FiCalendar className="w-3 h-3" /> Updated
+              </label>
+              <select
+                value={dateRange}
+                onChange={e => setDateRange(e.target.value as typeof dateRange)}
+                className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg text-sm text-[var(--color-text-muted)] px-3 py-1.5 focus:outline-none min-w-[120px]"
+              >
+                <option value="all">Any Time</option>
+                <option value="7d">Last 7 Days</option>
+                <option value="30d">Last 30 Days</option>
+                <option value="90d">Last 90 Days</option>
+                <option value="1y">Last Year</option>
+              </select>
+            </div>
+
+            {/* Clear all filters */}
+            {activeFilterCount > 0 && (
+              <button
+                onClick={() => { setStatusFilter('all'); setDiseaseFocusFilter(''); setTagFilter(''); setDateRange('all') }}
+                className="btn text-xs text-[var(--color-accent-blue)] hover:bg-[var(--color-accent-blue)]/10 px-3 py-1.5"
+              >
+                <FiX className="w-3 h-3 mr-1 inline" />
+                Clear All
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Content */}
       {loading ? (
         <div className="flex items-center justify-center py-20">
@@ -643,7 +751,7 @@ export default function Projects() {
             Try adjusting your search or filters
           </p>
           <button
-            onClick={() => { setSearchQuery(''); setStatusFilter('all') }}
+            onClick={() => { setSearchQuery(''); setStatusFilter('all'); setDiseaseFocusFilter(''); setTagFilter(''); setDateRange('all') }}
             className="btn text-[var(--color-accent-blue)] hover:bg-[var(--color-accent-blue)]/10 text-sm"
           >
             Clear Filters

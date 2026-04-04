@@ -56,15 +56,71 @@ function formatAuthorsVancouver(authors: string[]): string {
   return `${authors.slice(0, 6).join(', ')}, et al.`
 }
 
+/** Convert title to APA sentence case: capitalize first word, first word after colon, and preserve acronyms */
+function toSentenceCase(title: string): string {
+  return title.replace(/[^:]+/g, (segment, offset) => {
+    return segment.replace(/\S+/g, (word, wordOffset) => {
+      // Keep the very first word of the title or first word after a colon capitalized
+      if ((offset === 0 && wordOffset === 0) || (offset > 0 && wordOffset <= 1)) {
+        return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+      }
+      // Preserve all-uppercase acronyms (DNA, RNA, BRCA1, etc.)
+      if (word === word.toUpperCase() && word.length >= 2 && /[A-Z]/.test(word)) return word
+      return word.toLowerCase()
+    })
+  })
+}
+
+/** Ensure author string ends with a period for APA */
+function apaAuthorBlock(authors: string[]): string {
+  const formatted = formatAuthorsAPA(authors)
+  // Add trailing period if not already present
+  return formatted.endsWith('.') ? formatted : `${formatted}.`
+}
+
 function formatCitation(c: Citation, style: CitationStyle): string {
+  const isBook = c.type === 'book'
+  const isWebsite = c.type === 'website'
+  const isThesis = c.type === 'thesis'
+  const isConference = c.type === 'conference'
+
   switch (style) {
     case 'apa': {
-      const authors = formatAuthorsAPA(c.authors)
-      let ref = `${authors} (${c.year}). ${c.title}.`
+      const authors = apaAuthorBlock(c.authors)
+      const title = toSentenceCase(c.title)
+      if (isBook) {
+        let ref = `${authors} (${c.year}). <em>${title}</em>.`
+        if (c.publisher) ref += ` ${c.publisher}.`
+        if (c.doi) ref += ` https://doi.org/${c.doi}`
+        return ref
+      }
+      if (isWebsite) {
+        let ref = `${authors} (${c.year}). ${title}.`
+        if (c.publisher) ref += ` ${c.publisher}.`
+        if (c.url) ref += ` ${c.url}`
+        return ref
+      }
+      if (isThesis) {
+        let ref = `${authors} (${c.year}). <em>${title}</em> [Doctoral dissertation].`
+        if (c.publisher) ref += ` ${c.publisher}.`
+        if (c.doi) ref += ` https://doi.org/${c.doi}`
+        return ref
+      }
+      if (isConference) {
+        let ref = `${authors} (${c.year}). ${title}.`
+        if (c.journal) ref += ` In <em>${c.journal}</em>`
+        if (c.pages) ref += ` (pp. ${c.pages})`
+        ref += '.'
+        if (c.publisher) ref += ` ${c.publisher}.`
+        if (c.doi) ref += ` https://doi.org/${c.doi}`
+        return ref
+      }
+      // journal / preprint
+      let ref = `${authors} (${c.year}). ${title}.`
       if (c.journal) {
-        ref += ` ${c.journal}`
+        ref += ` <em>${c.journal}</em>`
         if (c.volume) {
-          ref += `, ${c.volume}`
+          ref += `, <em>${c.volume}</em>`
           if (c.issue) ref += `(${c.issue})`
         }
         if (c.pages) ref += `, ${c.pages}`
@@ -75,9 +131,24 @@ function formatCitation(c: Citation, style: CitationStyle): string {
     }
     case 'mla': {
       const authors = formatAuthorsMLA(c.authors)
+      if (isBook) {
+        let ref = `${authors}. <em>${c.title}</em>.`
+        if (c.publisher) ref += ` ${c.publisher},`
+        ref += ` ${c.year}.`
+        if (c.doi) ref += ` https://doi.org/${c.doi}`
+        return ref
+      }
+      if (isWebsite) {
+        let ref = `${authors}. "${c.title}."`
+        if (c.publisher) ref += ` <em>${c.publisher}</em>,`
+        ref += ` ${c.year}.`
+        if (c.url) ref += ` ${c.url}`
+        return ref
+      }
+      // journal / conference / preprint / thesis
       let ref = `${authors}. "${c.title}."`
       if (c.journal) {
-        ref += ` ${c.journal}`
+        ref += ` <em>${c.journal}</em>`
         if (c.volume) {
           ref += `, vol. ${c.volume}`
           if (c.issue) ref += `, no. ${c.issue}`
@@ -91,9 +162,17 @@ function formatCitation(c: Citation, style: CitationStyle): string {
     }
     case 'chicago': {
       const authors = c.authors.length > 0 ? c.authors.join(', ') : 'Unknown'
+      if (isBook) {
+        let ref = `${authors}. <em>${c.title}</em>.`
+        if (c.publisher) ref += ` ${c.publisher},`
+        ref += ` ${c.year}.`
+        if (c.doi) ref += ` https://doi.org/${c.doi}`
+        return ref
+      }
+      // journal / conference / preprint / website / thesis
       let ref = `${authors}. "${c.title}."`
       if (c.journal) {
-        ref += ` ${c.journal}`
+        ref += ` <em>${c.journal}</em>`
         if (c.volume) ref += ` ${c.volume}`
         if (c.issue) ref += `, no. ${c.issue}`
         ref += ` (${c.year})`
@@ -105,6 +184,14 @@ function formatCitation(c: Citation, style: CitationStyle): string {
     }
     case 'vancouver': {
       const authors = formatAuthorsVancouver(c.authors)
+      if (isBook) {
+        let ref = `${authors}. ${c.title}.`
+        if (c.publisher) ref += ` ${c.publisher};`
+        ref += ` ${c.year}.`
+        if (c.doi) ref += ` doi:${c.doi}`
+        return ref
+      }
+      // journal / conference / preprint / website / thesis
       let ref = `${authors}. ${c.title}.`
       if (c.journal) {
         ref += ` ${c.journal}. ${c.year}`
@@ -373,14 +460,14 @@ export default function CitationManager() {
   }
 
   const copyFormatted = (citation: Citation) => {
-    const text = formatCitation(citation, citationStyle)
+    const text = formatCitation(citation, citationStyle).replace(/<[^>]*>/g, '')
     navigator.clipboard.writeText(text)
     setCopied(citation.id)
     setTimeout(() => setCopied(null), 2000)
   }
 
   const exportBibliography = () => {
-    const text = filtered.map((c, i) => `[${i + 1}] ${formatCitation(c, citationStyle)}`).join('\n\n')
+    const text = filtered.map((c, i) => `[${i + 1}] ${formatCitation(c, citationStyle).replace(/<[^>]*>/g, '')}`).join('\n\n')
     const blob = new Blob([text], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -495,12 +582,31 @@ export default function CitationManager() {
               </select>
               <input type="number" value={form.year} onChange={e => setForm(f => ({ ...f, year: parseInt(e.target.value) }))} className="input text-xs w-24" />
             </div>
-            <input type="text" value={form.journal} onChange={e => setForm(f => ({ ...f, journal: e.target.value }))} placeholder="Journal / Source" className="input text-xs" />
-            <div className="flex gap-2">
-              <input type="text" value={form.volume} onChange={e => setForm(f => ({ ...f, volume: e.target.value }))} placeholder="Vol" className="input text-xs flex-1" />
-              <input type="text" value={form.issue} onChange={e => setForm(f => ({ ...f, issue: e.target.value }))} placeholder="Issue" className="input text-xs flex-1" />
-              <input type="text" value={form.pages} onChange={e => setForm(f => ({ ...f, pages: e.target.value }))} placeholder="Pages" className="input text-xs flex-1" />
-            </div>
+            {(form.type === 'journal' || form.type === 'preprint' || form.type === 'conference') && (
+              <>
+                <input type="text" value={form.journal} onChange={e => setForm(f => ({ ...f, journal: e.target.value }))} placeholder={form.type === 'conference' ? 'Conference / Proceedings' : 'Journal / Source'} className="input text-xs" />
+                <div className="flex gap-2">
+                  <input type="text" value={form.volume} onChange={e => setForm(f => ({ ...f, volume: e.target.value }))} placeholder="Vol" className="input text-xs flex-1" />
+                  <input type="text" value={form.issue} onChange={e => setForm(f => ({ ...f, issue: e.target.value }))} placeholder="Issue" className="input text-xs flex-1" />
+                  <input type="text" value={form.pages} onChange={e => setForm(f => ({ ...f, pages: e.target.value }))} placeholder="Pages" className="input text-xs flex-1" />
+                </div>
+              </>
+            )}
+            {form.type === 'book' && (
+              <input type="text" value={form.publisher} onChange={e => setForm(f => ({ ...f, publisher: e.target.value }))} placeholder="Publisher" className="input text-xs col-span-2" />
+            )}
+            {form.type === 'thesis' && (
+              <>
+                <input type="text" value={form.publisher} onChange={e => setForm(f => ({ ...f, publisher: e.target.value }))} placeholder="University / Institution" className="input text-xs" />
+                <input type="text" value={form.url} onChange={e => setForm(f => ({ ...f, url: e.target.value }))} placeholder="URL" className="input text-xs" />
+              </>
+            )}
+            {form.type === 'website' && (
+              <>
+                <input type="text" value={form.publisher} onChange={e => setForm(f => ({ ...f, publisher: e.target.value }))} placeholder="Website / Publisher Name" className="input text-xs" />
+                <input type="text" value={form.url} onChange={e => setForm(f => ({ ...f, url: e.target.value }))} placeholder="URL *" className="input text-xs" />
+              </>
+            )}
             <input type="text" value={form.doi} onChange={e => setForm(f => ({ ...f, doi: e.target.value }))} placeholder="DOI" className="input text-xs" />
             <input type="text" value={form.pmid} onChange={e => setForm(f => ({ ...f, pmid: e.target.value }))} placeholder="PMID" className="input text-xs" />
             <input type="text" value={form.collection} onChange={e => setForm(f => ({ ...f, collection: e.target.value }))} placeholder="Collection (e.g., Literature Review)" className="input text-xs" />
@@ -589,7 +695,7 @@ export default function CitationManager() {
               {/* Formatted citation */}
               <div className="p-3 rounded-lg bg-[var(--glass-bg)] border border-[var(--color-border)]">
                 <p className="text-xs text-[var(--color-text-muted)] mb-1 font-medium">Formatted ({citationStyle.toUpperCase()})</p>
-                <p className="text-sm text-[var(--color-text-secondary)] leading-relaxed">{formatCitation(selectedCitation, citationStyle)}</p>
+                <p className="text-sm text-[var(--color-text-secondary)] leading-relaxed" dangerouslySetInnerHTML={{ __html: formatCitation(selectedCitation, citationStyle) }} />
               </div>
 
               {/* Title */}
@@ -636,14 +742,33 @@ export default function CitationManager() {
                 )}
               </div>
 
-              {/* Metadata */}
+              {/* Metadata — type-aware: only show fields relevant to this citation type */}
               <div className="grid grid-cols-2 gap-3 text-xs">
-                {selectedCitation.journal && <div><span className="text-[var(--color-text-muted)]">Journal:</span> <span className="text-[var(--color-text-secondary)]">{selectedCitation.journal}</span></div>}
-                {selectedCitation.volume && <div><span className="text-[var(--color-text-muted)]">Volume:</span> <span className="text-[var(--color-text-secondary)]">{selectedCitation.volume}</span></div>}
-                {selectedCitation.issue && <div><span className="text-[var(--color-text-muted)]">Issue:</span> <span className="text-[var(--color-text-secondary)]">{selectedCitation.issue}</span></div>}
-                {selectedCitation.pages && <div><span className="text-[var(--color-text-muted)]">Pages:</span> <span className="text-[var(--color-text-secondary)]">{selectedCitation.pages}</span></div>}
+                <div><span className="text-[var(--color-text-muted)]">Type:</span> <span className="text-[var(--color-text-secondary)] capitalize">{selectedCitation.type}</span></div>
                 <div><span className="text-[var(--color-text-muted)]">Year:</span> <span className="text-[var(--color-text-secondary)]">{selectedCitation.year}</span></div>
-                <div><span className="text-[var(--color-text-muted)]">Type:</span> <span className="text-[var(--color-text-secondary)]">{selectedCitation.type}</span></div>
+                {/* Journal/conference/preprint fields */}
+                {(selectedCitation.type === 'journal' || selectedCitation.type === 'preprint' || selectedCitation.type === 'conference') && selectedCitation.journal && (
+                  <div><span className="text-[var(--color-text-muted)]">{selectedCitation.type === 'conference' ? 'Conference:' : 'Journal:'}</span> <span className="text-[var(--color-text-secondary)]">{selectedCitation.journal}</span></div>
+                )}
+                {(selectedCitation.type === 'journal' || selectedCitation.type === 'preprint' || selectedCitation.type === 'conference') && selectedCitation.volume && (
+                  <div><span className="text-[var(--color-text-muted)]">Volume:</span> <span className="text-[var(--color-text-secondary)]">{selectedCitation.volume}</span></div>
+                )}
+                {(selectedCitation.type === 'journal' || selectedCitation.type === 'preprint' || selectedCitation.type === 'conference') && selectedCitation.issue && (
+                  <div><span className="text-[var(--color-text-muted)]">Issue:</span> <span className="text-[var(--color-text-secondary)]">{selectedCitation.issue}</span></div>
+                )}
+                {(selectedCitation.type === 'journal' || selectedCitation.type === 'preprint' || selectedCitation.type === 'conference') && selectedCitation.pages && (
+                  <div><span className="text-[var(--color-text-muted)]">Pages:</span> <span className="text-[var(--color-text-secondary)]">{selectedCitation.pages}</span></div>
+                )}
+                {/* Book/thesis/website fields */}
+                {(selectedCitation.type === 'book' || selectedCitation.type === 'thesis') && selectedCitation.publisher && (
+                  <div><span className="text-[var(--color-text-muted)]">{selectedCitation.type === 'thesis' ? 'Institution:' : 'Publisher:'}</span> <span className="text-[var(--color-text-secondary)]">{selectedCitation.publisher}</span></div>
+                )}
+                {(selectedCitation.type === 'website') && selectedCitation.publisher && (
+                  <div><span className="text-[var(--color-text-muted)]">Website:</span> <span className="text-[var(--color-text-secondary)]">{selectedCitation.publisher}</span></div>
+                )}
+                {(selectedCitation.type === 'website' || selectedCitation.type === 'thesis') && selectedCitation.url && (
+                  <div className="col-span-2"><span className="text-[var(--color-text-muted)]">URL:</span> <span className="text-[var(--color-text-secondary)] break-all">{selectedCitation.url}</span></div>
+                )}
               </div>
 
               {/* Notes / Annotations */}

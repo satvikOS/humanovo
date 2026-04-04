@@ -75,10 +75,10 @@ const ZOOM_MAX = 200
 const ZOOM_STEP = 10
 
 function confidenceTier(c: number) {
-  if (c >= 0.8) return { label: 'Very High', color: '#166534', bg: '#dcfce7' }
-  if (c >= 0.7) return { label: 'High', color: '#166534', bg: '#dcfce7' }
-  if (c >= 0.5) return { label: 'Moderate', color: '#854d0e', bg: '#fef9c3' }
-  return { label: 'Preliminary', color: '#9a3412', bg: '#fed7aa' }
+  if (c >= 0.8) return { label: 'Very High', color: '#1b4332', bg: '#d8f3dc' }
+  if (c >= 0.7) return { label: 'High', color: '#1b4332', bg: '#d8f3dc' }
+  if (c >= 0.5) return { label: 'Moderate', color: '#0077b6', bg: '#caf0f8' }
+  return { label: 'Preliminary', color: '#7f1d1d', bg: '#fce4e4' }
 }
 
 function formatDocDate(dateStr?: string): string {
@@ -579,9 +579,9 @@ function buildDocumentHtml(h: HypothesisDocData): string {
 
     <div class="confidence-meter">
       <div class="confidence-bar-bg">
-        <div class="confidence-bar-fill" style="width:${confPct}%;background:${h.confidence >= 0.7 ? '#22c55e' : h.confidence >= 0.5 ? '#eab308' : '#f97316'}"></div>
+        <div class="confidence-bar-fill" style="width:${confPct}%;background:${h.confidence >= 0.7 ? '#2d6a4f' : h.confidence >= 0.5 ? '#0096c7' : '#991b1b'}"></div>
       </div>
-      <div class="confidence-label" style="color:${h.confidence >= 0.7 ? '#16a34a' : h.confidence >= 0.5 ? '#ca8a04' : '#ea580c'}">${confPct}%</div>
+      <div class="confidence-label" style="color:${h.confidence >= 0.7 ? '#1b4332' : h.confidence >= 0.5 ? '#0077b6' : '#7f1d1d'}">${confPct}%</div>
     </div>
 
     <p>${h.confidence >= 0.7

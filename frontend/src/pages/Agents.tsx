@@ -141,10 +141,10 @@ const PHASE_META: Record<string, { label: string; color: string; icon: string; c
 }
 
 function confidenceColor(c: number) {
-  if (c >= 0.8) return 'var(--color-success)'
-  if (c >= 0.6) return 'var(--color-warning)'
-  if (c >= 0.4) return 'var(--color-accent-orange)'
-  return 'var(--color-error)'
+  if (c >= 0.8) return '#2d6a4f'
+  if (c >= 0.6) return '#0096c7'
+  if (c >= 0.4) return '#0077b6'
+  return '#991b1b'
 }
 
 export default function Agents() {
