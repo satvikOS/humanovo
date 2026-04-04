@@ -57,14 +57,48 @@ function formatAuthorsVancouver(authors: string[]): string {
 }
 
 function formatCitation(c: Citation, style: CitationStyle): string {
+  const isJournalLike = c.type === 'journal' || c.type === 'preprint'
+  const isBook = c.type === 'book'
+  const isWebsite = c.type === 'website'
+  const isThesis = c.type === 'thesis'
+  const isConference = c.type === 'conference'
+
   switch (style) {
     case 'apa': {
       const authors = formatAuthorsAPA(c.authors)
+      if (isBook) {
+        let ref = `${authors} (${c.year}). *${c.title}*.`
+        if (c.publisher) ref += ` ${c.publisher}.`
+        if (c.doi) ref += ` https://doi.org/${c.doi}`
+        return ref
+      }
+      if (isWebsite) {
+        let ref = `${authors} (${c.year}). ${c.title}.`
+        if (c.publisher) ref += ` ${c.publisher}.`
+        if (c.url) ref += ` ${c.url}`
+        return ref
+      }
+      if (isThesis) {
+        let ref = `${authors} (${c.year}). *${c.title}* [Doctoral dissertation].`
+        if (c.publisher) ref += ` ${c.publisher}.`
+        if (c.doi) ref += ` https://doi.org/${c.doi}`
+        return ref
+      }
+      if (isConference) {
+        let ref = `${authors} (${c.year}). ${c.title}.`
+        if (c.journal) ref += ` In *${c.journal}*`
+        if (c.pages) ref += ` (pp. ${c.pages})`
+        ref += '.'
+        if (c.publisher) ref += ` ${c.publisher}.`
+        if (c.doi) ref += ` https://doi.org/${c.doi}`
+        return ref
+      }
+      // journal / preprint
       let ref = `${authors} (${c.year}). ${c.title}.`
       if (c.journal) {
-        ref += ` ${c.journal}`
+        ref += ` *${c.journal}*`
         if (c.volume) {
-          ref += `, ${c.volume}`
+          ref += `, *${c.volume}*`
           if (c.issue) ref += `(${c.issue})`
         }
         if (c.pages) ref += `, ${c.pages}`
@@ -75,9 +109,24 @@ function formatCitation(c: Citation, style: CitationStyle): string {
     }
     case 'mla': {
       const authors = formatAuthorsMLA(c.authors)
+      if (isBook) {
+        let ref = `${authors}. *${c.title}*.`
+        if (c.publisher) ref += ` ${c.publisher},`
+        ref += ` ${c.year}.`
+        if (c.doi) ref += ` https://doi.org/${c.doi}`
+        return ref
+      }
+      if (isWebsite) {
+        let ref = `${authors}. "${c.title}."`
+        if (c.publisher) ref += ` *${c.publisher}*,`
+        ref += ` ${c.year}.`
+        if (c.url) ref += ` ${c.url}`
+        return ref
+      }
+      // journal / conference / preprint / thesis
       let ref = `${authors}. "${c.title}."`
       if (c.journal) {
-        ref += ` ${c.journal}`
+        ref += ` *${c.journal}*`
         if (c.volume) {
           ref += `, vol. ${c.volume}`
           if (c.issue) ref += `, no. ${c.issue}`
@@ -91,9 +140,17 @@ function formatCitation(c: Citation, style: CitationStyle): string {
     }
     case 'chicago': {
       const authors = c.authors.length > 0 ? c.authors.join(', ') : 'Unknown'
+      if (isBook) {
+        let ref = `${authors}. *${c.title}*.`
+        if (c.publisher) ref += ` ${c.publisher},`
+        ref += ` ${c.year}.`
+        if (c.doi) ref += ` https://doi.org/${c.doi}`
+        return ref
+      }
+      // journal / conference / preprint / website / thesis
       let ref = `${authors}. "${c.title}."`
       if (c.journal) {
-        ref += ` ${c.journal}`
+        ref += ` *${c.journal}*`
         if (c.volume) ref += ` ${c.volume}`
         if (c.issue) ref += `, no. ${c.issue}`
         ref += ` (${c.year})`
@@ -105,6 +162,14 @@ function formatCitation(c: Citation, style: CitationStyle): string {
     }
     case 'vancouver': {
       const authors = formatAuthorsVancouver(c.authors)
+      if (isBook) {
+        let ref = `${authors}. ${c.title}.`
+        if (c.publisher) ref += ` ${c.publisher};`
+        ref += ` ${c.year}.`
+        if (c.doi) ref += ` doi:${c.doi}`
+        return ref
+      }
+      // journal / conference / preprint / website / thesis
       let ref = `${authors}. ${c.title}.`
       if (c.journal) {
         ref += ` ${c.journal}. ${c.year}`

@@ -870,14 +870,27 @@ export default function ProjectDetail() {
   const medConf = uniqueHypotheses.filter(h => safeConf(h.confidence) >= 0.5 && safeConf(h.confidence) < 0.7).length
   const lowConf = uniqueHypotheses.filter(h => safeConf(h.confidence) < 0.5).length
 
-  // Parse project title — show disease name only, move supporting info to subtitle
+  // Parse project title — show disease name only, strip discovery type and datetime from subtitle
   const titleParts = project.name.split(' — ')
   const displayTitle = project.disease_focus || titleParts[0] || project.name
-  const subtitleParts = [
-    titleParts[1] && titleParts[0] !== displayTitle ? titleParts[0] : null,
-    titleParts[1] || null,
-    titleParts[2] || null,
-  ].filter(Boolean)
+  const discoveryPattern = /discovery$/i
+  const dateTimePattern = /^\w{3}\s+\d{1,2}\s+\d{4}|^\d{4}-\d{2}-\d{2}|^\d{1,2}\/\d{1,2}\/\d{4}|^\d{2}:\d{2}/
+  const subtitleParts = titleParts
+    .slice(1)
+    .filter(part => {
+      const trimmed = part.trim()
+      if (discoveryPattern.test(trimmed)) return false
+      if (dateTimePattern.test(trimmed)) return false
+      return true
+    })
+    .filter(Boolean)
+  // Also include the first part if it differs from displayTitle
+  if (titleParts[1] && titleParts[0] !== displayTitle) {
+    const first = titleParts[0].trim()
+    if (!discoveryPattern.test(first) && !dateTimePattern.test(first)) {
+      subtitleParts.unshift(first)
+    }
+  }
 
   return (
     <div className="p-10 max-w-7xl mx-auto">
@@ -1197,10 +1210,10 @@ export default function ProjectDetail() {
               <h2 className="text-base font-semibold text-white mb-5">Confidence Distribution</h2>
               <div className="space-y-3">
                 {[
-                  { label: 'High (\u226570%)', count: highConf },
-                  { label: 'Medium (50\u201370%)', count: medConf },
-                  { label: 'Low (<50%)', count: lowConf },
-                ].map(({ label, count }) => {
+                  { label: 'High (\u226570%)', count: highConf, color: '#3b82f6' },
+                  { label: 'Medium (50\u201370%)', count: medConf, color: '#06b6d4' },
+                  { label: 'Low (<50%)', count: lowConf, color: '#8b5cf6' },
+                ].map(({ label, count, color }) => {
                   const pct = uniqueHypotheses.length > 0 ? (count / uniqueHypotheses.length) * 100 : 0
                   return (
                     <div key={label}>
@@ -1209,7 +1222,7 @@ export default function ProjectDetail() {
                         <span className="text-white">{count}</span>
                       </div>
                       <div className="h-1.5 bg-white/5 rounded-full">
-                        <div className="h-full bg-white/20 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                        <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: color }} />
                       </div>
                     </div>
                   )
