@@ -89,7 +89,7 @@ function formatCitation(c: Citation, style: CitationStyle): string {
       const authors = apaAuthorBlock(c.authors)
       const title = toSentenceCase(c.title)
       if (isBook) {
-        let ref = `${authors} (${c.year}). *${title}*.`
+        let ref = `${authors} (${c.year}). ${title}.`
         if (c.publisher) ref += ` ${c.publisher}.`
         if (c.doi) ref += ` https://doi.org/${c.doi}`
         return ref
@@ -101,14 +101,14 @@ function formatCitation(c: Citation, style: CitationStyle): string {
         return ref
       }
       if (isThesis) {
-        let ref = `${authors} (${c.year}). *${title}* [Doctoral dissertation].`
+        let ref = `${authors} (${c.year}). ${title} [Doctoral dissertation].`
         if (c.publisher) ref += ` ${c.publisher}.`
         if (c.doi) ref += ` https://doi.org/${c.doi}`
         return ref
       }
       if (isConference) {
         let ref = `${authors} (${c.year}). ${title}.`
-        if (c.journal) ref += ` In *${c.journal}*`
+        if (c.journal) ref += ` In ${c.journal}`
         if (c.pages) ref += ` (pp. ${c.pages})`
         ref += '.'
         if (c.publisher) ref += ` ${c.publisher}.`
@@ -118,9 +118,9 @@ function formatCitation(c: Citation, style: CitationStyle): string {
       // journal / preprint
       let ref = `${authors} (${c.year}). ${title}.`
       if (c.journal) {
-        ref += ` *${c.journal}*`
+        ref += ` ${c.journal}`
         if (c.volume) {
-          ref += `, *${c.volume}*`
+          ref += `, ${c.volume}`
           if (c.issue) ref += `(${c.issue})`
         }
         if (c.pages) ref += `, ${c.pages}`
@@ -132,7 +132,7 @@ function formatCitation(c: Citation, style: CitationStyle): string {
     case 'mla': {
       const authors = formatAuthorsMLA(c.authors)
       if (isBook) {
-        let ref = `${authors}. *${c.title}*.`
+        let ref = `${authors}. ${c.title}.`
         if (c.publisher) ref += ` ${c.publisher},`
         ref += ` ${c.year}.`
         if (c.doi) ref += ` https://doi.org/${c.doi}`
@@ -140,7 +140,7 @@ function formatCitation(c: Citation, style: CitationStyle): string {
       }
       if (isWebsite) {
         let ref = `${authors}. "${c.title}."`
-        if (c.publisher) ref += ` *${c.publisher}*,`
+        if (c.publisher) ref += ` ${c.publisher},`
         ref += ` ${c.year}.`
         if (c.url) ref += ` ${c.url}`
         return ref
@@ -148,7 +148,7 @@ function formatCitation(c: Citation, style: CitationStyle): string {
       // journal / conference / preprint / thesis
       let ref = `${authors}. "${c.title}."`
       if (c.journal) {
-        ref += ` *${c.journal}*`
+        ref += ` ${c.journal}`
         if (c.volume) {
           ref += `, vol. ${c.volume}`
           if (c.issue) ref += `, no. ${c.issue}`
@@ -163,7 +163,7 @@ function formatCitation(c: Citation, style: CitationStyle): string {
     case 'chicago': {
       const authors = c.authors.length > 0 ? c.authors.join(', ') : 'Unknown'
       if (isBook) {
-        let ref = `${authors}. *${c.title}*.`
+        let ref = `${authors}. ${c.title}.`
         if (c.publisher) ref += ` ${c.publisher},`
         ref += ` ${c.year}.`
         if (c.doi) ref += ` https://doi.org/${c.doi}`
@@ -172,7 +172,7 @@ function formatCitation(c: Citation, style: CitationStyle): string {
       // journal / conference / preprint / website / thesis
       let ref = `${authors}. "${c.title}."`
       if (c.journal) {
-        ref += ` *${c.journal}*`
+        ref += ` ${c.journal}`
         if (c.volume) ref += ` ${c.volume}`
         if (c.issue) ref += `, no. ${c.issue}`
         ref += ` (${c.year})`
