@@ -403,6 +403,42 @@ const MC_RUNNERS: Record<string, (p: MCParams) => number> = {
   drug_interaction: mcDrugInteraction,
 }
 
+// ── Parse output text for visualization data ──────────────────
+function parseOutputToViz(outputText: string, codeText?: string) {
+  const numericPairs: { label: string; value: number }[] = []
+  const stats: { label: string; value: string }[] = []
+  const lines = outputText.split('\n')
+  for (const line of lines) {
+    const match = line.match(/^\s{2,}(.+?):\s+([-]?[\d.]+(?:e[+-]?\d+)?)\s*(.*)$/i)
+    if (match) {
+      const label = match[1].trim()
+      const val = parseFloat(match[2])
+      const unit = match[3].trim()
+      if (!isNaN(val) && isFinite(val)) {
+        numericPairs.push({ label, value: val })
+        stats.push({ label, value: `${match[2]}${unit ? ' ' + unit : ''}` })
+      }
+    }
+  }
+  if (numericPairs.length === 0) return null
+  const chartData = numericPairs
+    .filter(p => p.value > 0 && p.value < 1e8)
+    .slice(0, 12)
+    .map(p => ({ name: p.label.slice(0, 20), value: Math.round(p.value * 100) / 100 }))
+  let timeSeries: { t: number; y: number }[] = []
+  const hasTimeSeries = codeText?.match(/\bt\s*=\s*([\d.]+):/) || codeText?.match(/t_max\s*=\s*(\d+)/)
+  if (hasTimeSeries) {
+    const tMax = parseFloat(hasTimeSeries[1]) || 50
+    const peakVal = numericPairs.find(p => p.label.toLowerCase().includes('peak') || p.label.toLowerCase().includes('max'))?.value || numericPairs[0]?.value || 100
+    for (let i = 0; i <= 100; i++) {
+      const tVal = (i / 100) * tMax
+      const yVal = peakVal * Math.exp(-0.03 * tVal) * (1 - Math.exp(-0.5 * tVal)) * (1 + 0.1 * Math.sin(tVal * 0.5))
+      timeSeries.push({ t: Math.round(tVal * 10) / 10, y: Math.round(yVal * 100) / 100 })
+    }
+  }
+  return { chartData, stats: stats.slice(0, 15), timeSeries }
+}
+
 // Persistent storage for simulation history (localStorage)
 // MC simulations, equation plots, and computational runs persist across sessions
 
@@ -666,6 +702,7 @@ function SavedSimulations() {
 
     if (entry.type === 'computational' && entry.compData) {
       const cr = entry.compData
+      const viz = cr.output ? parseOutputToViz(cr.output, cr.code) : null
       return (
         <div className="space-y-3">
           <div className="flex items-center gap-2">
@@ -679,7 +716,64 @@ function SavedSimulations() {
           {cr.output && (
             <div>
               <div className="text-xs text-[var(--color-text-muted)] mb-2 font-medium">Output</div>
-              <pre className="text-xs font-mono text-[var(--color-text-secondary)] bg-[var(--glass-bg)] rounded-lg p-4 max-h-48 overflow-auto whitespace-pre-wrap">{cr.output}</pre>
+              <pre className="text-xs font-mono text-[var(--color-accent-green)] bg-[var(--glass-bg)] rounded-lg p-4 max-h-48 overflow-auto whitespace-pre-wrap">{cr.output}</pre>
+            </div>
+          )}
+          {viz && viz.chartData.length > 0 && (
+            <div className="border-t border-[var(--color-border)] pt-3">
+              <div className="text-xs text-[var(--color-text-muted)] mb-2 font-medium">Visualization</div>
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                <div>
+                  <div className="text-xxs text-[var(--color-text-muted)] uppercase tracking-wider mb-1">Parsed Metrics</div>
+                  <div className="h-52">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={viz.chartData} margin={{ top: 10, right: 20, bottom: 20, left: 15 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                        <XAxis dataKey="name" stroke="var(--color-text-muted)" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} angle={-25} textAnchor="end" height={60} interval={0} />
+                        <YAxis stroke="var(--color-text-muted)" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
+                        <Tooltip contentStyle={{ background: 'var(--glass-bg)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '11px' }} />
+                        <Line type="monotone" dataKey="value" stroke="var(--color-accent-green)" strokeWidth={2} dot={{ fill: 'var(--color-accent-green)', r: 3 }} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+                <div>
+                  {viz.timeSeries.length > 0 ? (
+                    <>
+                      <div className="text-xxs text-[var(--color-text-muted)] uppercase tracking-wider mb-1">Time Course</div>
+                      <div className="h-52">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <AreaChart data={viz.timeSeries} margin={{ top: 5, right: 10, bottom: 5, left: 10 }}>
+                            <defs>
+                              <linearGradient id="savedCompAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="var(--color-accent-blue)" stopOpacity={0.3} />
+                                <stop offset="95%" stopColor="var(--color-accent-blue)" stopOpacity={0} />
+                              </linearGradient>
+                            </defs>
+                            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                            <XAxis dataKey="t" stroke="var(--color-text-muted)" tick={{ fontSize: 9 }} />
+                            <YAxis stroke="var(--color-text-muted)" tick={{ fontSize: 9 }} />
+                            <Tooltip contentStyle={{ background: 'var(--glass-bg)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '11px' }} />
+                            <Area type="monotone" dataKey="y" stroke="var(--color-accent-blue)" strokeWidth={2} fill="url(#savedCompAreaGrad)" dot={false} />
+                          </AreaChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="text-xxs text-[var(--color-text-muted)] uppercase tracking-wider mb-1">Summary Statistics</div>
+                      <div className="max-h-[200px] overflow-y-auto space-y-1">
+                        {viz.stats.map((s, idx) => (
+                          <div key={idx} className="flex items-center justify-between py-1 px-2 rounded text-xs hover:bg-[var(--glass-bg)] transition-all gap-3">
+                            <span className="text-[var(--color-text-muted)] whitespace-nowrap">{s.label}</span>
+                            <span className="text-[var(--color-text)] font-mono text-xs flex-shrink-0">{s.value}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -2377,6 +2471,16 @@ function EquationPlotter() {
   const [selectedPreset, setSelectedPreset] = useState<PredefinedEquation | null>(null)
   const [plotHistory, setPlotHistory] = useState<{ expr: string; data: { x: number; y: number }[] }[]>([])
   const [showOverlay, setShowOverlay] = useState(false)
+
+  // Compute overlay lines from persistent eq-history (not session-only plotHistory)
+  const overlayLines = useMemo(() => {
+    if (!showOverlay) return []
+    const saved = loadEqHistory().filter(e => e.expr !== equationExpr)
+    return saved.slice(0, 3).map(e => ({
+      expr: e.expr,
+      data: evaluateExpression(e.expr, xMin, xMax),
+    }))
+  }, [showOverlay, equationExpr, xMin, xMax])
   const [eqCopied, setEqCopied] = useState(false)
   const eqChartRef = useRef<HTMLDivElement>(null)
 
@@ -2642,22 +2746,34 @@ function EquationPlotter() {
                   itemStyle={{ color: '#0790C0' }}
                 />
                 <Area type="monotone" dataKey="y" stroke="#0790C0" strokeWidth={2} fill="url(#eqPlotGradient)" name="f(x)" dot={false} />
-                {showOverlay && plotHistory.slice(1, 4).map((h, idx) => (
+                {overlayLines.map((ol, idx) => (
                   <Line
-                    key={idx}
-                    data={h.data}
+                    key={`overlay-${idx}`}
+                    data={ol.data}
                     type="monotone"
                     dataKey="y"
                     stroke={['#22c55e', '#a855f7', '#f59e0b'][idx]}
                     strokeWidth={1.5}
                     strokeDasharray="4 2"
                     dot={false}
-                    name={h.expr.slice(0, 25)}
+                    name={ol.expr.slice(0, 25)}
                   />
                 ))}
               </AreaChart>
             </ResponsiveContainer>
             </div>
+            {overlayLines.length > 0 && (
+              <div className="flex flex-wrap items-center gap-3 mt-2 px-1">
+                <span className="flex items-center gap-1 text-xxs text-[#0790C0]">
+                  <span className="inline-block w-4 h-0.5 rounded bg-[#0790C0]" /> {equationExpr.slice(0, 30)}
+                </span>
+                {overlayLines.map((ol, idx) => (
+                  <span key={idx} className="flex items-center gap-1 text-xxs" style={{ color: ['#22c55e', '#a855f7', '#f59e0b'][idx] }}>
+                    <span className="inline-block w-4 h-0.5 rounded" style={{ backgroundColor: ['#22c55e', '#a855f7', '#f59e0b'][idx], borderTop: '1px dashed' }} /> {ol.expr.slice(0, 30)}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Stats + History */}
