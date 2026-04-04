@@ -4,7 +4,7 @@ import {
   FiArrowLeft, FiActivity, FiTarget,
   FiChevronRight, FiFileText, FiRefreshCw,
   FiTrash2, FiBook, FiX, FiPrinter,
-  FiUpload, FiFile, FiEye,
+  FiUpload, FiFile, FiEye, FiEdit2, FiCheck,
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import api, { Project } from '../services/api'
@@ -219,6 +219,44 @@ export default function ProjectDetail() {
   const [deleteDocId, setDeleteDocId] = useState<string | null>(null)
   const [viewingDoc, setViewingDoc] = useState<ProjectDocument | null>(null)
   const docInputRef = useRef<HTMLInputElement>(null)
+
+  // Project edit state
+  const [isEditing, setIsEditing] = useState(false)
+  const [editForm, setEditForm] = useState({ name: '', description: '', disease_focus: '', tags: '', research_question: '' })
+  const [editSaving, setEditSaving] = useState(false)
+
+  const startEditing = useCallback(() => {
+    if (!project) return
+    setEditForm({
+      name: project.name,
+      description: project.description || '',
+      disease_focus: project.disease_focus || '',
+      tags: (project.tags || []).join(', '),
+      research_question: project.research_question || '',
+    })
+    setIsEditing(true)
+  }, [project])
+
+  const saveEdit = useCallback(async () => {
+    if (!project || !projectId) return
+    setEditSaving(true)
+    try {
+      const updated = await api.updateProject(projectId, {
+        name: editForm.name.trim(),
+        description: editForm.description.trim() || undefined,
+        disease_focus: editForm.disease_focus.trim() || undefined,
+        research_question: editForm.research_question.trim() || undefined,
+        tags: editForm.tags.split(',').map(t => t.trim()).filter(Boolean),
+      })
+      setProject(updated)
+      setIsEditing(false)
+      logActivity({ type: 'project', action: 'updated', title: `Edited project: ${updated.name}` })
+    } catch (err: any) {
+      console.error('Failed to update project', err)
+    } finally {
+      setEditSaving(false)
+    }
+  }, [project, projectId, editForm])
 
   // Loading phase animation
   const [currentPhase, setCurrentPhase] = useState(0)
@@ -900,14 +938,97 @@ export default function ProjectDetail() {
       </Link>
 
       <div className="mb-10">
-        <h1 className="text-3xl font-bold text-white">{displayTitle}</h1>
-        {subtitleParts.length > 0 && (
-          <p className="text-[var(--color-text-muted)] text-sm mt-1.5">{subtitleParts.join(' \u00B7 ')}</p>
+        {isEditing ? (
+          <div className="glass-card p-6 space-y-4 max-w-2xl">
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-base font-semibold text-white">Edit Project</h2>
+              <button onClick={() => setIsEditing(false)} className="p-1 rounded hover:bg-white/5 text-[var(--color-text-muted)]">
+                <FiX className="w-4 h-4" />
+              </button>
+            </div>
+            <div>
+              <label className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-1.5 block">Project Name</label>
+              <input
+                value={editForm.name}
+                onChange={e => setEditForm(prev => ({ ...prev, name: e.target.value }))}
+                className="w-full px-3 py-2 text-sm rounded-lg bg-white/5 border border-[var(--color-border)] text-white placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-border-strong)]"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-1.5 block">Description</label>
+              <textarea
+                value={editForm.description}
+                onChange={e => setEditForm(prev => ({ ...prev, description: e.target.value }))}
+                rows={3}
+                className="w-full px-3 py-2 text-sm rounded-lg bg-white/5 border border-[var(--color-border)] text-white placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-border-strong)] resize-none"
+                placeholder="Project description"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-1.5 block">Disease Focus</label>
+                <input
+                  value={editForm.disease_focus}
+                  onChange={e => setEditForm(prev => ({ ...prev, disease_focus: e.target.value }))}
+                  className="w-full px-3 py-2 text-sm rounded-lg bg-white/5 border border-[var(--color-border)] text-white placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-border-strong)]"
+                  placeholder="e.g. Alzheimer's Disease"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-1.5 block">Tags</label>
+                <input
+                  value={editForm.tags}
+                  onChange={e => setEditForm(prev => ({ ...prev, tags: e.target.value }))}
+                  className="w-full px-3 py-2 text-sm rounded-lg bg-white/5 border border-[var(--color-border)] text-white placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-border-strong)]"
+                  placeholder="Comma-separated tags"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-1.5 block">Research Question</label>
+              <textarea
+                value={editForm.research_question}
+                onChange={e => setEditForm(prev => ({ ...prev, research_question: e.target.value }))}
+                rows={2}
+                className="w-full px-3 py-2 text-sm rounded-lg bg-white/5 border border-[var(--color-border)] text-white placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-border-strong)] resize-none"
+                placeholder="What is the main research question?"
+              />
+            </div>
+            <div className="flex justify-end gap-3 pt-2">
+              <button onClick={() => setIsEditing(false)} className="px-4 py-2 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] rounded-lg hover:bg-white/5 transition-colors">
+                Cancel
+              </button>
+              <button
+                onClick={saveEdit}
+                disabled={!editForm.name.trim() || editSaving}
+                className="px-4 py-2 text-sm text-white bg-white/10 hover:bg-white/15 rounded-lg border border-[var(--color-border)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
+              >
+                {editSaving ? <FiRefreshCw className="w-3.5 h-3.5 animate-spin" /> : <FiCheck className="w-3.5 h-3.5" />}
+                {editSaving ? 'Saving...' : 'Save Changes'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center gap-3">
+              <h1 className="text-3xl font-bold text-white">{displayTitle}</h1>
+              <button
+                onClick={startEditing}
+                className="p-2 rounded-lg hover:bg-white/5 text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+                title="Edit project info"
+              >
+                <FiEdit2 className="w-4 h-4" />
+              </button>
+            </div>
+            {subtitleParts.length > 0 && (
+              <p className="text-[var(--color-text-muted)] text-sm mt-1.5">{subtitleParts.join(' \u00B7 ')}</p>
+            )}
+            {project.description && (
+              <p className="text-[var(--color-text-secondary)] mt-3 text-sm leading-relaxed max-w-2xl">{project.description}</p>
+            )}
+          </>
         )}
-        {project.description && (
-          <p className="text-[var(--color-text-secondary)] mt-3 text-sm leading-relaxed max-w-2xl">{project.description}</p>
-        )}
-        {uniqueHypotheses.length > 0 && (
+        {!isEditing && uniqueHypotheses.length > 0 && (
           <div className="relative inline-block mt-5">
             <button
               onClick={() => setShowChooser(!showChooser)}
@@ -960,7 +1081,15 @@ export default function ProjectDetail() {
         <div className="lg:col-span-2 space-y-8">
           {/* Details */}
           <div className="glass-card p-6">
-            <h2 className="text-base font-semibold text-white mb-5">Details</h2>
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-base font-semibold text-white">Details</h2>
+              <button
+                onClick={startEditing}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-white/5 border border-[var(--color-border)] transition-colors"
+              >
+                <FiEdit2 className="w-3 h-3" /> Edit
+              </button>
+            </div>
             <dl className="space-y-4">
               {project.disease_focus && (
                 <div>
@@ -973,6 +1102,9 @@ export default function ProjectDetail() {
                   <dt className="text-[var(--color-text-muted)] text-xs uppercase tracking-wider mb-1">Research Question</dt>
                   <dd className="text-white text-sm">{project.research_question}</dd>
                 </div>
+              )}
+              {!project.disease_focus && !project.research_question && (
+                <p className="text-[var(--color-text-muted)] text-sm">No details added yet. Click Edit to add disease focus, research question, and tags.</p>
               )}
             </dl>
           </div>

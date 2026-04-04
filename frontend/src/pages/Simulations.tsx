@@ -429,6 +429,7 @@ function SavedSimulations() {
   const [overlayEntry, setOverlayEntry] = useState<UnifiedEntry | null>(null)
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [deleteConfirmEntry, setDeleteConfirmEntry] = useState<UnifiedEntry | null>(null)
+  const [savedEqOverlay, setSavedEqOverlay] = useState(false)
 
   const deleteEntry = useCallback((entry: UnifiedEntry) => {
     if (entry.type === 'monte-carlo') {
@@ -595,8 +596,40 @@ function SavedSimulations() {
     if (entry.type === 'equation' && entry.eqData) {
       const eq = entry.eqData
       const plotData = evaluateExpression(eq.expr, eq.xMin, eq.xMax)
+      // Build overlay lines from other saved equations
+      const overlayLines = savedEqOverlay
+        ? eqPlots
+            .filter(e => e.id !== eq.id)
+            .slice(0, 3)
+            .map(e => ({ expr: e.expr, data: evaluateExpression(e.expr, eq.xMin, eq.xMax) }))
+        : []
+      const overlayColors = ['#22c55e', '#a855f7', '#f59e0b']
       return (
         <div>
+          <div className="flex items-center gap-2 mb-3">
+            <button
+              onClick={() => setSavedEqOverlay(!savedEqOverlay)}
+              className={clsx(
+                'flex items-center gap-1 px-2.5 py-1 rounded text-xs transition-all border',
+                savedEqOverlay
+                  ? 'border-[var(--color-accent-green)]/40 bg-[var(--color-accent-green)]/10 text-[var(--color-accent-green)]'
+                  : 'border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
+              )}
+            >
+              <FiLayers className="w-3 h-3" />
+              Overlay ({eqPlots.filter(e => e.id !== eq.id).length})
+            </button>
+            {savedEqOverlay && overlayLines.length > 0 && (
+              <div className="flex items-center gap-2 text-xxs text-[var(--color-text-muted)]">
+                {overlayLines.map((ol, idx) => (
+                  <span key={idx} className="flex items-center gap-1">
+                    <span className="inline-block w-3 h-0.5 rounded" style={{ backgroundColor: overlayColors[idx] }} />
+                    <span className="font-mono truncate max-w-[120px]">{ol.expr}</span>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={plotData}>
@@ -610,7 +643,20 @@ function SavedSimulations() {
                     <stop offset="95%" stopColor="var(--color-accent-green)" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <Area type="monotone" dataKey="y" stroke="var(--color-accent-green)" strokeWidth={2} fill="url(#savedEqGrad)" dot={false} />
+                <Area type="monotone" dataKey="y" stroke="var(--color-accent-green)" strokeWidth={2} fill="url(#savedEqGrad)" dot={false} name={eq.expr} />
+                {overlayLines.map((ol, idx) => (
+                  <Line
+                    key={idx}
+                    data={ol.data}
+                    type="monotone"
+                    dataKey="y"
+                    stroke={overlayColors[idx]}
+                    strokeWidth={1.5}
+                    strokeDasharray="4 2"
+                    dot={false}
+                    name={ol.expr.slice(0, 25)}
+                  />
+                ))}
               </AreaChart>
             </ResponsiveContainer>
           </div>
@@ -2691,6 +2737,22 @@ function ComputationalLab() {
   const [resultTimeSeries, setResultTimeSeries] = useState<{ t: number; y: number }[]>([])
   const [resultStats, setResultStats] = useState<{ label: string; value: string }[]>([])
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const outputContentRef = useRef<HTMLDivElement>(null)
+  const [outputCopiedImg, setOutputCopiedImg] = useState(false)
+
+  const copyOutputAsImage = useCallback(async () => {
+    const el = outputContentRef.current
+    if (!el) return
+    try {
+      const canvas = await html2canvas(el, { backgroundColor: '#0f0f14', scale: 2, useCORS: true, logging: false })
+      const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
+      if (blob) {
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+      }
+    } catch { /* fallback: copy text */ try { await navigator.clipboard.writeText(output) } catch {} }
+    setOutputCopiedImg(true)
+    setTimeout(() => setOutputCopiedImg(false), 2000)
+  }, [output])
 
   // Parse simulation output for auto-visualization
   const parseOutputForViz = useCallback((outputText: string) => {
@@ -2813,16 +2875,23 @@ function ComputationalLab() {
       }
     } finally {
       setIsRunning(false)
+    }
+  }, [code, selectedEnv, selectedTemplate, isRunning, parseOutputForViz])
+
+  // Save to history after output is available (runs when output changes after execution)
+  const lastSavedOutputRef = useRef('')
+  useEffect(() => {
+    if (output && output !== lastSavedOutputRef.current && !isRunning) {
+      lastSavedOutputRef.current = output
       const entry: CompHistoryEntry = {
         id: crypto.randomUUID(), env: selectedEnv,
         template: selectedTemplate?.name || 'Custom', code,
-        output: '', createdAt: new Date().toISOString(),
+        output, createdAt: new Date().toISOString(),
       }
       const prev = loadCompHistory()
       saveCompHistory([entry, ...prev])
-      logActivity({ type: 'simulation', action: 'created', title: `Comp Lab: ${selectedTemplate?.name || selectedEnv}` })
     }
-  }, [code, selectedEnv, selectedTemplate, isRunning, parseOutputForViz])
+  }, [output, isRunning])
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -3022,12 +3091,11 @@ function ComputationalLab() {
                 </div>
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={async () => {
-                      try { await navigator.clipboard.writeText(output) } catch { /* ignore */ }
-                    }}
+                    onClick={copyOutputAsImage}
                     className="flex items-center gap-1 px-2 py-0.5 rounded text-xxs border border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-all"
                   >
-                    <FiClipboard className="w-3 h-3" /> Copy
+                    {outputCopiedImg ? <FiCheck className="w-3 h-3 text-[var(--color-accent-green)]" /> : <FiClipboard className="w-3 h-3" />}
+                    {outputCopiedImg ? 'Copied!' : 'Copy'}
                   </button>
                   {resultStats.length > 0 && (
                     <button
@@ -3054,7 +3122,7 @@ function ComputationalLab() {
               </div>
 
               {/* Overlay body — scrollable output + viz */}
-              <div className="flex-1 overflow-y-auto">
+              <div ref={outputContentRef} className="flex-1 overflow-y-auto">
                 <pre className="p-4 text-xs font-mono text-[var(--color-accent-green)] leading-relaxed whitespace-pre-wrap min-h-[100px]">
                   {output || (isRunning ? 'Executing...' : 'No output yet')}
                 </pre>
