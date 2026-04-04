@@ -56,6 +56,28 @@ function formatAuthorsVancouver(authors: string[]): string {
   return `${authors.slice(0, 6).join(', ')}, et al.`
 }
 
+/** Convert title to APA sentence case: capitalize first word, first word after colon, and preserve acronyms */
+function toSentenceCase(title: string): string {
+  return title.replace(/[^:]+/g, (segment, offset) => {
+    return segment.replace(/\S+/g, (word, wordOffset) => {
+      // Keep the very first word of the title or first word after a colon capitalized
+      if ((offset === 0 && wordOffset === 0) || (offset > 0 && wordOffset <= 1)) {
+        return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+      }
+      // Preserve all-uppercase acronyms (DNA, RNA, BRCA1, etc.)
+      if (word === word.toUpperCase() && word.length >= 2 && /[A-Z]/.test(word)) return word
+      return word.toLowerCase()
+    })
+  })
+}
+
+/** Ensure author string ends with a period for APA */
+function apaAuthorBlock(authors: string[]): string {
+  const formatted = formatAuthorsAPA(authors)
+  // Add trailing period if not already present
+  return formatted.endsWith('.') ? formatted : `${formatted}.`
+}
+
 function formatCitation(c: Citation, style: CitationStyle): string {
   const isBook = c.type === 'book'
   const isWebsite = c.type === 'website'
@@ -64,27 +86,28 @@ function formatCitation(c: Citation, style: CitationStyle): string {
 
   switch (style) {
     case 'apa': {
-      const authors = formatAuthorsAPA(c.authors)
+      const authors = apaAuthorBlock(c.authors)
+      const title = toSentenceCase(c.title)
       if (isBook) {
-        let ref = `${authors} (${c.year}). *${c.title}*.`
+        let ref = `${authors} (${c.year}). *${title}*.`
         if (c.publisher) ref += ` ${c.publisher}.`
         if (c.doi) ref += ` https://doi.org/${c.doi}`
         return ref
       }
       if (isWebsite) {
-        let ref = `${authors} (${c.year}). ${c.title}.`
+        let ref = `${authors} (${c.year}). ${title}.`
         if (c.publisher) ref += ` ${c.publisher}.`
         if (c.url) ref += ` ${c.url}`
         return ref
       }
       if (isThesis) {
-        let ref = `${authors} (${c.year}). *${c.title}* [Doctoral dissertation].`
+        let ref = `${authors} (${c.year}). *${title}* [Doctoral dissertation].`
         if (c.publisher) ref += ` ${c.publisher}.`
         if (c.doi) ref += ` https://doi.org/${c.doi}`
         return ref
       }
       if (isConference) {
-        let ref = `${authors} (${c.year}). ${c.title}.`
+        let ref = `${authors} (${c.year}). ${title}.`
         if (c.journal) ref += ` In *${c.journal}*`
         if (c.pages) ref += ` (pp. ${c.pages})`
         ref += '.'
@@ -93,7 +116,7 @@ function formatCitation(c: Citation, style: CitationStyle): string {
         return ref
       }
       // journal / preprint
-      let ref = `${authors} (${c.year}). ${c.title}.`
+      let ref = `${authors} (${c.year}). ${title}.`
       if (c.journal) {
         ref += ` *${c.journal}*`
         if (c.volume) {
