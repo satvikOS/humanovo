@@ -559,12 +559,31 @@ export default function CitationManager() {
               </select>
               <input type="number" value={form.year} onChange={e => setForm(f => ({ ...f, year: parseInt(e.target.value) }))} className="input text-xs w-24" />
             </div>
-            <input type="text" value={form.journal} onChange={e => setForm(f => ({ ...f, journal: e.target.value }))} placeholder="Journal / Source" className="input text-xs" />
-            <div className="flex gap-2">
-              <input type="text" value={form.volume} onChange={e => setForm(f => ({ ...f, volume: e.target.value }))} placeholder="Vol" className="input text-xs flex-1" />
-              <input type="text" value={form.issue} onChange={e => setForm(f => ({ ...f, issue: e.target.value }))} placeholder="Issue" className="input text-xs flex-1" />
-              <input type="text" value={form.pages} onChange={e => setForm(f => ({ ...f, pages: e.target.value }))} placeholder="Pages" className="input text-xs flex-1" />
-            </div>
+            {(form.type === 'journal' || form.type === 'preprint' || form.type === 'conference') && (
+              <>
+                <input type="text" value={form.journal} onChange={e => setForm(f => ({ ...f, journal: e.target.value }))} placeholder={form.type === 'conference' ? 'Conference / Proceedings' : 'Journal / Source'} className="input text-xs" />
+                <div className="flex gap-2">
+                  <input type="text" value={form.volume} onChange={e => setForm(f => ({ ...f, volume: e.target.value }))} placeholder="Vol" className="input text-xs flex-1" />
+                  <input type="text" value={form.issue} onChange={e => setForm(f => ({ ...f, issue: e.target.value }))} placeholder="Issue" className="input text-xs flex-1" />
+                  <input type="text" value={form.pages} onChange={e => setForm(f => ({ ...f, pages: e.target.value }))} placeholder="Pages" className="input text-xs flex-1" />
+                </div>
+              </>
+            )}
+            {form.type === 'book' && (
+              <input type="text" value={form.publisher} onChange={e => setForm(f => ({ ...f, publisher: e.target.value }))} placeholder="Publisher" className="input text-xs col-span-2" />
+            )}
+            {form.type === 'thesis' && (
+              <>
+                <input type="text" value={form.publisher} onChange={e => setForm(f => ({ ...f, publisher: e.target.value }))} placeholder="University / Institution" className="input text-xs" />
+                <input type="text" value={form.url} onChange={e => setForm(f => ({ ...f, url: e.target.value }))} placeholder="URL" className="input text-xs" />
+              </>
+            )}
+            {form.type === 'website' && (
+              <>
+                <input type="text" value={form.publisher} onChange={e => setForm(f => ({ ...f, publisher: e.target.value }))} placeholder="Website / Publisher Name" className="input text-xs" />
+                <input type="text" value={form.url} onChange={e => setForm(f => ({ ...f, url: e.target.value }))} placeholder="URL *" className="input text-xs" />
+              </>
+            )}
             <input type="text" value={form.doi} onChange={e => setForm(f => ({ ...f, doi: e.target.value }))} placeholder="DOI" className="input text-xs" />
             <input type="text" value={form.pmid} onChange={e => setForm(f => ({ ...f, pmid: e.target.value }))} placeholder="PMID" className="input text-xs" />
             <input type="text" value={form.collection} onChange={e => setForm(f => ({ ...f, collection: e.target.value }))} placeholder="Collection (e.g., Literature Review)" className="input text-xs" />
@@ -700,14 +719,33 @@ export default function CitationManager() {
                 )}
               </div>
 
-              {/* Metadata */}
+              {/* Metadata — type-aware: only show fields relevant to this citation type */}
               <div className="grid grid-cols-2 gap-3 text-xs">
-                {selectedCitation.journal && <div><span className="text-[var(--color-text-muted)]">Journal:</span> <span className="text-[var(--color-text-secondary)]">{selectedCitation.journal}</span></div>}
-                {selectedCitation.volume && <div><span className="text-[var(--color-text-muted)]">Volume:</span> <span className="text-[var(--color-text-secondary)]">{selectedCitation.volume}</span></div>}
-                {selectedCitation.issue && <div><span className="text-[var(--color-text-muted)]">Issue:</span> <span className="text-[var(--color-text-secondary)]">{selectedCitation.issue}</span></div>}
-                {selectedCitation.pages && <div><span className="text-[var(--color-text-muted)]">Pages:</span> <span className="text-[var(--color-text-secondary)]">{selectedCitation.pages}</span></div>}
+                <div><span className="text-[var(--color-text-muted)]">Type:</span> <span className="text-[var(--color-text-secondary)] capitalize">{selectedCitation.type}</span></div>
                 <div><span className="text-[var(--color-text-muted)]">Year:</span> <span className="text-[var(--color-text-secondary)]">{selectedCitation.year}</span></div>
-                <div><span className="text-[var(--color-text-muted)]">Type:</span> <span className="text-[var(--color-text-secondary)]">{selectedCitation.type}</span></div>
+                {/* Journal/conference/preprint fields */}
+                {(selectedCitation.type === 'journal' || selectedCitation.type === 'preprint' || selectedCitation.type === 'conference') && selectedCitation.journal && (
+                  <div><span className="text-[var(--color-text-muted)]">{selectedCitation.type === 'conference' ? 'Conference:' : 'Journal:'}</span> <span className="text-[var(--color-text-secondary)]">{selectedCitation.journal}</span></div>
+                )}
+                {(selectedCitation.type === 'journal' || selectedCitation.type === 'preprint' || selectedCitation.type === 'conference') && selectedCitation.volume && (
+                  <div><span className="text-[var(--color-text-muted)]">Volume:</span> <span className="text-[var(--color-text-secondary)]">{selectedCitation.volume}</span></div>
+                )}
+                {(selectedCitation.type === 'journal' || selectedCitation.type === 'preprint' || selectedCitation.type === 'conference') && selectedCitation.issue && (
+                  <div><span className="text-[var(--color-text-muted)]">Issue:</span> <span className="text-[var(--color-text-secondary)]">{selectedCitation.issue}</span></div>
+                )}
+                {(selectedCitation.type === 'journal' || selectedCitation.type === 'preprint' || selectedCitation.type === 'conference') && selectedCitation.pages && (
+                  <div><span className="text-[var(--color-text-muted)]">Pages:</span> <span className="text-[var(--color-text-secondary)]">{selectedCitation.pages}</span></div>
+                )}
+                {/* Book/thesis/website fields */}
+                {(selectedCitation.type === 'book' || selectedCitation.type === 'thesis') && selectedCitation.publisher && (
+                  <div><span className="text-[var(--color-text-muted)]">{selectedCitation.type === 'thesis' ? 'Institution:' : 'Publisher:'}</span> <span className="text-[var(--color-text-secondary)]">{selectedCitation.publisher}</span></div>
+                )}
+                {(selectedCitation.type === 'website') && selectedCitation.publisher && (
+                  <div><span className="text-[var(--color-text-muted)]">Website:</span> <span className="text-[var(--color-text-secondary)]">{selectedCitation.publisher}</span></div>
+                )}
+                {(selectedCitation.type === 'website' || selectedCitation.type === 'thesis') && selectedCitation.url && (
+                  <div className="col-span-2"><span className="text-[var(--color-text-muted)]">URL:</span> <span className="text-[var(--color-text-secondary)] break-all">{selectedCitation.url}</span></div>
+                )}
               </div>
 
               {/* Notes / Annotations */}
