@@ -458,8 +458,6 @@ function SavedSimulations() {
         `  Median: ${mc.stats.median.toFixed(4)}\n` +
         `  Std Dev: ${mc.stats.std.toFixed(4)}\n` +
         `  95% CI: [${mc.stats.ci95Lower.toFixed(4)}, ${mc.stats.ci95Upper.toFixed(4)}]\n` +
-        `  Min: ${mc.stats.min.toFixed(4)}\n` +
-        `  Max: ${mc.stats.max.toFixed(4)}\n` +
         `  Iterations: ${mc.iterations.toLocaleString()}`
     } else if (entry.type === 'equation' && entry.eqData) {
       text = `Equation Plot\n\n` +
