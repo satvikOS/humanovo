@@ -1,17 +1,18 @@
 """
-Biomechanics Computation Processor -- motion capture, gait analysis, and
-inverse dynamics for human movement research.
+Biomechanics computation processor.
 
-Provides C3D/TRC loading, marker filtering, gap filling, joint angle
-computation, kinematic analysis, inverse dynamics, gait analysis,
-center-of-mass estimation, and ground reaction force processing.
+Provides motion capture parsing (C3D, TRC), marker filtering, gap filling,
+joint angle computation, inverse dynamics, gait analysis, center of mass,
+and ground reaction force processing.
 """
 
 from __future__ import annotations
 
-import logging
-import math
+import io
+import struct
+import warnings
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -24,9 +25,24 @@ from app.compute.types import (
     DescriptiveStats,
     FigureFormat,
     GeneratedFigure,
+    StatisticalTest,
 )
 
-logger = logging.getLogger(__name__)
+# ---------------------------------------------------------------------------
+# De Leva (1996) default segment mass fractions
+# ---------------------------------------------------------------------------
+_DE_LEVA_MASS_FRACTIONS: dict[str, float] = {
+    "head": 0.0694,
+    "trunk": 0.4346,
+    "upper_arm": 0.0271,
+    "forearm": 0.0162,
+    "hand": 0.0061,
+    "thigh": 0.1416,
+    "shank": 0.0433,
+    "foot": 0.0137,
+}
+
+_GRAVITY = np.array([0.0, -9.81, 0.0])
 
 _OPERATIONS = [
     "load_c3d",
@@ -41,139 +57,228 @@ _OPERATIONS = [
     "ground_reaction_forces",
 ]
 
-# de Leva (1996) male body-segment mass fractions
-_DE_LEVA_MASS_FRACTIONS: dict[str, float] = {
-    "head": 0.0694,
-    "trunk": 0.4346,
-    "upper_arm_r": 0.0271,
-    "upper_arm_l": 0.0271,
-    "forearm_r": 0.0162,
-    "forearm_l": 0.0162,
-    "hand_r": 0.0061,
-    "hand_l": 0.0061,
-    "thigh_r": 0.1416,
-    "thigh_l": 0.1416,
-    "shank_r": 0.0433,
-    "shank_l": 0.0433,
-    "foot_r": 0.0137,
-    "foot_l": 0.0137,
-}
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _safe_float(val: Any) -> float:
-    v = float(val)
-    if np.isnan(v) or np.isinf(v):
-        return 0.0
-    return v
+def _to_array(data: Any) -> np.ndarray:
+    """Convert nested lists / mixed None values to a float ndarray with NaN for gaps."""
+    if isinstance(data, np.ndarray):
+        return data.astype(float)
+    arr = np.array(data, dtype=float)
+    return arr
 
 
-def _array_to_list(arr: np.ndarray) -> list[float]:
-    result = np.asarray(arr, dtype=np.float64)
-    result = np.nan_to_num(result, nan=0.0, posinf=0.0, neginf=0.0)
-    return result.tolist()
+def _has_matplotlib() -> bool:
+    try:
+        import matplotlib  # noqa: F401
+        return True
+    except ImportError:
+        return False
 
 
-def _make_result(request: ComputeRequest, **kwargs: Any) -> ComputeResult:
-    return ComputeResult(
-        request_id=request.id,
-        domain=ComputeDomain.BIOMECHANICS,
-        operation=request.operation,
-        status=ComputeStatus.COMPLETED,
-        **kwargs,
-    )
-
-
-def _fail(request: ComputeRequest, error: str) -> ComputeResult:
-    return ComputeResult(
-        request_id=request.id,
-        domain=ComputeDomain.BIOMECHANICS,
-        operation=request.operation,
-        status=ComputeStatus.FAILED,
-        error=error,
-    )
-
-
-def _interpolate_nans(data: np.ndarray) -> np.ndarray:
-    """Linearly interpolate NaN values in a 1-D array."""
-    nans = np.isnan(data)
-    if not np.any(nans):
-        return data
-    if np.all(nans):
-        return data
-    x = np.arange(len(data))
-    data_out = data.copy()
-    data_out[nans] = np.interp(x[nans], x[~nans], data[~nans])
-    return data_out
-
-
-def _build_coordinate_system(
-    origin: np.ndarray, p1: np.ndarray, p2: np.ndarray
-) -> np.ndarray:
-    """Build a right-handed coordinate system from three markers.
-
-    Returns a 3x3 rotation matrix whose columns are the unit axes.
-    """
-    v1 = p1 - origin
-    v1 = v1 / (np.linalg.norm(v1) + 1e-12)
-    temp = p2 - origin
-    v3 = np.cross(v1, temp)
-    v3 = v3 / (np.linalg.norm(v3) + 1e-12)
-    v2 = np.cross(v3, v1)
-    v2 = v2 / (np.linalg.norm(v2) + 1e-12)
-    return np.column_stack([v1, v2, v3])
-
-
-def _rotation_matrix_to_euler_zxy(R: np.ndarray) -> tuple[float, float, float]:
-    """Decompose rotation matrix into ZXY Euler angles (in degrees)."""
-    # ZXY: Rz * Rx * Ry
-    # R[2,1] = sin(x)
-    sin_x = np.clip(R[2, 1], -1.0, 1.0)
-    x = math.asin(sin_x)
-    cos_x = math.cos(x)
-    if abs(cos_x) > 1e-6:
-        y = math.atan2(-R[2, 0], R[2, 2])
-        z = math.atan2(-R[0, 1], R[1, 1])
-    else:
-        y = 0.0
-        z = math.atan2(R[1, 0], R[0, 0])
-    return (
-        math.degrees(z),
-        math.degrees(x),
-        math.degrees(y),
-    )
-
-
-def _get_matplotlib():
-    """Import matplotlib with Agg backend."""
+def _make_figure(plot_fn: Callable, title: str) -> GeneratedFigure | None:
+    """Create a GeneratedFigure by calling *plot_fn(fig, ax)*."""
+    if not _has_matplotlib():
+        return None
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    return plt
 
+    fig, ax = plt.subplots(figsize=(8, 4))
+    plot_fn(fig, ax)
+    gen = GeneratedFigure.from_matplotlib(fig, title, FigureFormat.PNG)
+    plt.close(fig)
+    return gen
+
+
+def _safe_tolist(arr: np.ndarray) -> list:
+    """Recursively convert ndarray to nested Python list with None for NaN."""
+    if arr.ndim == 1:
+        return [None if np.isnan(v) else float(v) for v in arr]
+    return [_safe_tolist(row) for row in arr]
 
 
 # ---------------------------------------------------------------------------
-# Processor
+# C3D binary parsing helpers
 # ---------------------------------------------------------------------------
 
+def _parse_c3d_binary(raw: bytes) -> dict[str, Any]:
+    """Manually parse a C3D binary file when the ``c3d`` package is unavailable."""
+
+    if len(raw) < 512:
+        raise ValueError("File too small to be a valid C3D file")
+
+    param_block_ptr = raw[0]
+    magic = raw[1]
+    if magic != 0x50:
+        raise ValueError(f"Invalid C3D magic byte: expected 0x50, got 0x{magic:02X}")
+
+    # --- Parameter section ---------------------------------------------------
+    param_offset = (param_block_ptr - 1) * 512
+    if param_offset + 4 > len(raw):
+        raise ValueError("Parameter section offset out of range")
+
+    # First 4 bytes of param section: reserved(1), reserved(1), n_param_blocks(1), processor_type(1)
+    n_param_blocks = raw[param_offset + 2]
+    processor_type = raw[param_offset + 3]  # 1=Intel, 2=DEC, 3=SGI
+
+    # Parse groups and parameters
+    groups: dict[int, str] = {}
+    params: dict[str, Any] = {}
+    pos = param_offset + 4
+
+    while pos < param_offset + n_param_blocks * 512:
+        if pos + 2 > len(raw):
+            break
+        name_len = struct.unpack_from("b", raw, pos)[0]
+        group_id = struct.unpack_from("b", raw, pos + 1)[0]
+
+        if name_len == 0 and group_id == 0:
+            break
+
+        abs_name_len = abs(name_len)
+        if pos + 2 + abs_name_len > len(raw):
+            break
+
+        name = raw[pos + 2 : pos + 2 + abs_name_len].decode("ascii", errors="replace").strip()
+        offset_next = struct.unpack_from("<h", raw, pos + 2 + abs_name_len)[0]
+
+        if group_id < 0:
+            # This is a group entry
+            gid = -group_id
+            groups[gid] = name.upper()
+            next_pos = pos + 2 + abs_name_len + 2
+            # skip description
+            if next_pos < len(raw):
+                desc_len = raw[next_pos]
+                next_pos += 1 + desc_len
+            pos = pos + offset_next + 2 + abs_name_len if offset_next != 0 else next_pos
+        else:
+            # This is a parameter entry
+            base = pos + 2 + abs_name_len + 2
+            if base + 3 <= len(raw):
+                data_type = struct.unpack_from("b", raw, base)[0]
+                n_dims = raw[base + 1]
+                dim_start = base + 2
+                dims = []
+                for d in range(n_dims):
+                    if dim_start + d < len(raw):
+                        dims.append(raw[dim_start + d])
+
+                data_start = dim_start + n_dims
+                group_name = groups.get(group_id, f"GROUP{group_id}")
+                full_name = f"{group_name}:{name.upper()}"
+
+                total_elems = 1
+                for d in dims:
+                    total_elems *= d
+
+                if data_type == -1 and data_start + total_elems <= len(raw):
+                    # Character data
+                    val = raw[data_start : data_start + total_elems].decode("ascii", errors="replace")
+                    params[full_name] = val
+                elif data_type == 1 and data_start + total_elems <= len(raw):
+                    # Byte data
+                    params[full_name] = list(raw[data_start : data_start + total_elems])
+                elif data_type == 2 and data_start + 2 * total_elems <= len(raw):
+                    # 16-bit int
+                    vals = struct.unpack_from(f"<{total_elems}h", raw, data_start)
+                    params[full_name] = vals[0] if total_elems == 1 else list(vals)
+                elif data_type == 4 and data_start + 4 * total_elems <= len(raw):
+                    # 32-bit float
+                    vals = struct.unpack_from(f"<{total_elems}f", raw, data_start)
+                    params[full_name] = vals[0] if total_elems == 1 else list(vals)
+
+            if offset_next == 0:
+                break
+            pos = pos + offset_next + 2 + abs_name_len
+        if offset_next == 0:
+            break
+
+    # Extract key parameters with safe defaults
+    n_points = params.get("POINT:USED", 0)
+    frame_rate = params.get("POINT:RATE", 100.0)
+    n_frames_param = params.get("POINT:FRAMES", 0)
+    scale = params.get("POINT:SCALE", -1.0)
+
+    # Marker labels
+    labels_raw = params.get("POINT:LABELS", "")
+    if isinstance(labels_raw, str):
+        # Labels are stored as a fixed-width character array
+        label_width = 4
+        if n_points > 0 and len(labels_raw) >= n_points:
+            label_width = max(4, len(labels_raw) // n_points)
+        marker_names = [
+            labels_raw[i * label_width : (i + 1) * label_width].strip()
+            for i in range(n_points)
+        ]
+    else:
+        marker_names = [f"Marker{i}" for i in range(n_points)]
+
+    marker_names = [m for m in marker_names if m]
+    n_points = len(marker_names)
+
+    # --- Data section --------------------------------------------------------
+    data_block_start = params.get("POINT:DATA_START", param_block_ptr + n_param_blocks)
+    if isinstance(data_block_start, (list, tuple)):
+        data_block_start = data_block_start[0]
+    data_offset = (int(data_block_start) - 1) * 512
+
+    use_float = scale < 0
+    point_size = 4 if use_float else 2  # bytes per coordinate value
+    frame_size = n_points * 4 * point_size + n_points * point_size  # 4 words per point (x,y,z,residual)
+
+    # Read available frames
+    available_bytes = len(raw) - data_offset
+    if frame_size > 0:
+        n_frames = min(n_frames_param, available_bytes // (n_points * 4 * point_size)) if n_points > 0 else 0
+    else:
+        n_frames = 0
+
+    marker_positions: dict[str, list[list[float]]] = {name: [] for name in marker_names}
+    pos = data_offset
+
+    for frame_idx in range(n_frames):
+        for m_idx, m_name in enumerate(marker_names):
+            if use_float and pos + 16 <= len(raw):
+                x, y, z, res = struct.unpack_from("<4f", raw, pos)
+                pos += 16
+            elif not use_float and pos + 8 <= len(raw):
+                xi, yi, zi, resi = struct.unpack_from("<4h", raw, pos)
+                s = abs(scale)
+                x, y, z = xi * s, yi * s, zi * s
+                pos += 8
+            else:
+                x, y, z = float("nan"), float("nan"), float("nan")
+                pos += 16 if use_float else 8
+
+            marker_positions[m_name].append([float(x), float(y), float(z)])
+
+    duration = n_frames / frame_rate if frame_rate > 0 else 0.0
+
+    return {
+        "marker_names": marker_names,
+        "n_frames": n_frames,
+        "frame_rate": float(frame_rate),
+        "marker_positions": marker_positions,
+        "analog_channels": [],
+        "duration_seconds": float(duration),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Processor class
+# ---------------------------------------------------------------------------
 
 class BiomechanicsProcessor:
-    """Biomechanics computation engine.
+    """Domain processor for biomechanics computations."""
 
-    Dispatches operations for motion-capture loading, marker processing,
-    joint kinematics/kinetics, gait analysis, centre-of-mass estimation,
-    and ground-reaction-force processing.
-    """
-
-    # -- Public interface ---------------------------------------------------
+    # ── public interface ────────────────────────────────────────────
 
     @staticmethod
     def list_operations() -> list[str]:
-        """Return names of all supported operations."""
         return list(_OPERATIONS)
 
     async def execute(
@@ -181,758 +286,1013 @@ class BiomechanicsProcessor:
         request: ComputeRequest,
         progress_callback: Callable[[int, int], None] | None = None,
     ) -> ComputeResult:
-        """Execute a biomechanics computation request."""
         op = request.operation
-        if op not in _OPERATIONS:
-            return _fail(request, f"Unknown operation: {op!r}. Available: {_OPERATIONS}")
+        params = {**request.parameters, **(request.data or {})}
 
-        handler = getattr(self, f"_op_{op}", None)
+        dispatch = {
+            "load_c3d": self._load_c3d,
+            "load_trc": self._load_trc,
+            "filter_markers": self._filter_markers,
+            "fill_gaps": self._fill_gaps,
+            "joint_angles": self._joint_angles,
+            "joint_kinematics": self._joint_kinematics,
+            "inverse_dynamics": self._inverse_dynamics,
+            "gait_analysis": self._gait_analysis,
+            "center_of_mass": self._center_of_mass,
+            "ground_reaction_forces": self._ground_reaction_forces,
+        }
+
+        handler = dispatch.get(op)
         if handler is None:
-            return _fail(request, f"Operation {op!r} is declared but not implemented.")
+            return ComputeResult(
+                request_id=request.id,
+                domain=ComputeDomain.BIOMECHANICS,
+                operation=op,
+                status=ComputeStatus.FAILED,
+                error=f"Unknown biomechanics operation: {op}. Available: {_OPERATIONS}",
+            )
 
         try:
-            return await handler(request, progress_callback)
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("Biomechanics operation %s failed", op)
-            return _fail(request, str(exc))
+            return await handler(request, params, progress_callback)
+        except Exception as exc:
+            return ComputeResult(
+                request_id=request.id,
+                domain=ComputeDomain.BIOMECHANICS,
+                operation=op,
+                status=ComputeStatus.FAILED,
+                error=str(exc),
+            )
 
-    # -- Operations ---------------------------------------------------------
+    # ── 1. load_c3d ────────────────────────────────────────────────
 
-    async def _op_load_c3d(
-        self, request: ComputeRequest, _cb: Callable | None
+    async def _load_c3d(
+        self,
+        request: ComputeRequest,
+        params: dict[str, Any],
+        progress_callback: Callable | None,
     ) -> ComputeResult:
-        """Parse a C3D motion-capture file."""
+        file_path = params["file_path"]
+        raw = Path(file_path).read_bytes()
+
+        # Try the c3d Python package first
         try:
             import c3d
-        except ImportError:
-            return _fail(request, "c3d package is not installed. Install via: pip install c3d")
 
-        params = request.parameters
-        file_path = params.get("file_path")
-        if not file_path:
-            return _fail(request, "Parameter 'file_path' is required for load_c3d.")
+            reader = c3d.Reader(io.BytesIO(raw))
+            marker_names = [label.strip() for label in reader.point_labels]
+            frame_rate = reader.point_rate
+            marker_positions: dict[str, list[list[float]]] = {n: [] for n in marker_names}
+            n_frames = 0
 
-        with open(file_path, "rb") as fh:
-            reader = c3d.Reader(fh)
+            for i, points, analog in reader.read_frames():
+                n_frames += 1
+                for idx, name in enumerate(marker_names):
+                    if idx < points.shape[0]:
+                        marker_positions[name].append(
+                            [float(points[idx, 0]), float(points[idx, 1]), float(points[idx, 2])]
+                        )
 
-        point_labels = [
-            label.strip() for label in reader.point_labels
-        ]
-        frame_rate = reader.point_rate
-        frames = list(reader.read_frames())
-        n_frames = len(frames)
-        duration = n_frames / frame_rate if frame_rate > 0 else 0.0
+            analog_channels = [ch.strip() for ch in reader.analog_labels] if hasattr(reader, "analog_labels") else []
+            duration = n_frames / frame_rate if frame_rate > 0 else 0.0
 
-        markers: dict[str, list[list[float]]] = {name: [] for name in point_labels}
-        for _, points, _ in frames:
-            for idx, name in enumerate(point_labels):
-                markers[name].append(points[idx, :3].tolist())
-
-        return _make_result(
-            request,
-            results={
-                "marker_names": point_labels,
+            result_data = {
+                "marker_names": marker_names,
                 "n_frames": n_frames,
-                "frame_rate": _safe_float(frame_rate),
-                "duration": _safe_float(duration),
-                "markers": markers,
-            },
+                "frame_rate": float(frame_rate),
+                "marker_positions": marker_positions,
+                "analog_channels": analog_channels,
+                "duration_seconds": float(duration),
+            }
+
+        except ImportError:
+            result_data = _parse_c3d_binary(raw)
+
+        return ComputeResult(
+            request_id=request.id,
+            domain=ComputeDomain.BIOMECHANICS,
+            operation="load_c3d",
+            status=ComputeStatus.COMPLETED,
+            results=result_data,
         )
 
-    async def _op_load_trc(
-        self, request: ComputeRequest, _cb: Callable | None
+    # ── 2. load_trc ────────────────────────────────────────────────
+
+    async def _load_trc(
+        self,
+        request: ComputeRequest,
+        params: dict[str, Any],
+        progress_callback: Callable | None,
     ) -> ComputeResult:
-        """Parse a TRC (Track Row Column) motion-capture text file."""
-        params = request.parameters
-        content = params.get("content")
-        file_path = params.get("file_path")
+        if "content" in params:
+            text = params["content"]
+        else:
+            text = Path(params["file_path"]).read_text()
 
-        if content is None and file_path is None:
-            return _fail(request, "Either 'content' or 'file_path' must be provided.")
-
-        if content is None:
-            with open(file_path, "r") as fh:
-                content = fh.read()
-
-        lines = content.strip().splitlines()
+        lines = text.strip().splitlines()
         if len(lines) < 6:
-            return _fail(request, "TRC file has fewer than 6 lines; cannot parse header.")
+            raise ValueError("TRC file must have at least 6 header/data lines")
 
-        # Line 1: PathFileType header
-        # Line 2: DataRate  CameraRate  NumFrames  NumMarkers  Units  ...
-        # Line 3: values for the above
-        # Line 4: marker names (tab-separated, first two cols are Frame# and Time)
-        # Line 5: coordinate labels (X1 Y1 Z1 ...)
-        # Line 6+: data rows
+        # Line 1: PathFileType declaration
+        # Line 2: key names  (DataRate  CameraRate  NumFrames  NumMarkers  Units ...)
+        # Line 3: key values
+        # Line 4: marker names row  (Frame#  Time  marker1  ...  )
+        # Line 5: axis labels       (        X1 Y1 Z1 X2 Y2 Z2 ...)
+        # Line 6+: data
 
-        header_keys = lines[1].split("	")
-        header_vals = lines[2].split("	")
-        header = {}
-        for k, v in zip(header_keys, header_vals):
-            k = k.strip()
-            v = v.strip()
-            if k:
-                header[k] = v
+        header_keys = lines[1].split("\t")
+        header_vals = lines[2].split("\t")
+        header = dict(zip(header_keys, header_vals))
 
-        data_rate = float(header.get("DataRate", header.get("data_rate", "0")))
+        data_rate = float(header.get("DataRate", header.get("data_rate", "100")))
         num_frames = int(header.get("NumFrames", header.get("num_frames", "0")))
         num_markers = int(header.get("NumMarkers", header.get("num_markers", "0")))
         units = header.get("Units", header.get("units", "mm"))
 
-        marker_line = lines[3].split("	")
+        marker_row = lines[3].split("\t")
         # First two columns are Frame# and Time
-        marker_names = [m.strip() for m in marker_line[2:] if m.strip()]
-        # Each marker occupies 3 columns (X, Y, Z), so deduplicate
-        if len(marker_names) > num_markers:
-            marker_names = marker_names[:num_markers]
+        marker_names = [m.strip() for m in marker_row[2:] if m.strip()]
+        # TRC often repeats marker name 3 times (for x, y, z) or lists once
+        # Deduplicate by taking every unique name in order
+        seen: set[str] = set()
+        unique_markers: list[str] = []
+        for m in marker_names:
+            if m not in seen:
+                seen.add(m)
+                unique_markers.append(m)
+        marker_names = unique_markers[:num_markers] if num_markers > 0 else unique_markers
 
-        markers: dict[str, list[list[float]]] = {name: [] for name in marker_names}
+        marker_positions: dict[str, list[list[float]]] = {n: [] for n in marker_names}
         actual_frames = 0
-        for line in lines[5:]:
-            cols = line.split("	")
+
+        for line in lines[5:]:  # skip axis-label row (line 4, index 4)
+            cols = line.split("\t")
             if len(cols) < 3:
                 continue
             actual_frames += 1
-            for mi, mname in enumerate(marker_names):
-                base = 2 + mi * 3
+            # Data columns after Frame# and Time come in triplets (x, y, z)
+            for idx, name in enumerate(marker_names):
+                base = 2 + idx * 3
                 try:
-                    x = float(cols[base])
-                    y = float(cols[base + 1])
-                    z = float(cols[base + 2])
-                    markers[mname].append([x, y, z])
+                    x = float(cols[base]) if cols[base].strip() else float("nan")
+                    y = float(cols[base + 1]) if cols[base + 1].strip() else float("nan")
+                    z = float(cols[base + 2]) if cols[base + 2].strip() else float("nan")
                 except (IndexError, ValueError):
-                    markers[mname].append([float("nan")] * 3)
+                    x, y, z = float("nan"), float("nan"), float("nan")
+                marker_positions[name].append([x, y, z])
 
-        n_frames = actual_frames if actual_frames > 0 else num_frames
+        n_frames = actual_frames or num_frames
         duration = n_frames / data_rate if data_rate > 0 else 0.0
 
-        return _make_result(
-            request,
+        return ComputeResult(
+            request_id=request.id,
+            domain=ComputeDomain.BIOMECHANICS,
+            operation="load_trc",
+            status=ComputeStatus.COMPLETED,
             results={
                 "marker_names": marker_names,
                 "n_frames": n_frames,
-                "frame_rate": _safe_float(data_rate),
-                "duration": _safe_float(duration),
+                "frame_rate": float(data_rate),
+                "marker_positions": {k: v for k, v in marker_positions.items()},
+                "analog_channels": [],
+                "duration_seconds": float(duration),
                 "units": units,
-                "markers": markers,
             },
         )
 
+    # ── 3. filter_markers ──────────────────────────────────────────
 
-    async def _op_filter_markers(
-        self, request: ComputeRequest, _cb: Callable | None
+    async def _filter_markers(
+        self,
+        request: ComputeRequest,
+        params: dict[str, Any],
+        progress_callback: Callable | None,
     ) -> ComputeResult:
-        """Apply Butterworth low-pass filter to marker trajectories."""
         from scipy.signal import butter, filtfilt
 
-        params = request.parameters
-        markers = params.get("markers")
-        sampling_rate = float(params.get("sampling_rate", 0))
+        markers_raw = params["markers"]
+        sampling_rate = float(params["sampling_rate"])
         cutoff_freq = float(params.get("cutoff_freq", 6.0))
         order = int(params.get("order", 4))
 
-        if markers is None:
-            return _fail(request, "Parameter 'markers' is required.")
-        if sampling_rate <= 0:
-            return _fail(request, "Parameter 'sampling_rate' must be positive.")
-
         nyquist = sampling_rate / 2.0
         if cutoff_freq >= nyquist:
-            return _fail(
-                request,
-                f"Cutoff frequency ({cutoff_freq} Hz) must be less than Nyquist ({nyquist} Hz).",
+            raise ValueError(
+                f"Cutoff frequency ({cutoff_freq} Hz) must be less than Nyquist ({nyquist} Hz)"
             )
 
         b, a = butter(order, cutoff_freq / nyquist, btype="low")
-        filtered_markers: dict[str, list[list[float]]] = {}
 
-        for name, trajectory in markers.items():
-            arr = np.array(trajectory, dtype=np.float64)  # (N, 3)
+        filtered_markers: dict[str, list[list[float]]] = {}
+        warn_list: list[str] = []
+
+        for name, trajectory in markers_raw.items():
+            arr = _to_array(trajectory)  # (n_frames, 3)
             if arr.ndim != 2 or arr.shape[1] != 3:
-                filtered_markers[name] = trajectory
+                warn_list.append(f"Marker '{name}': unexpected shape {arr.shape}, skipping")
+                filtered_markers[name] = _safe_tolist(arr)
                 continue
 
             filtered = np.empty_like(arr)
-            for col in range(3):
-                signal = arr[:, col].copy()
-                # Interpolate NaN gaps before filtering
-                signal = _interpolate_nans(signal)
-                if len(signal) > 3 * max(len(a), len(b)):
-                    filtered[:, col] = filtfilt(b, a, signal)
-                else:
-                    filtered[:, col] = signal
-            filtered_markers[name] = filtered.tolist()
+            for axis in range(3):
+                col = arr[:, axis].copy()
+                nan_mask = np.isnan(col)
 
-        return _make_result(
-            request,
-            results={
-                "markers": filtered_markers,
-                "filter_type": "butterworth_lowpass",
-                "cutoff_freq": cutoff_freq,
-                "order": order,
-                "sampling_rate": sampling_rate,
-            },
+                if nan_mask.all():
+                    filtered[:, axis] = col
+                    continue
+
+                # Interpolate over NaN gaps for filtering
+                if nan_mask.any():
+                    valid_idx = np.where(~nan_mask)[0]
+                    col[nan_mask] = np.interp(
+                        np.where(nan_mask)[0], valid_idx, col[valid_idx]
+                    )
+
+                # Apply zero-phase Butterworth filter
+                if len(col) > 3 * max(len(a), len(b)):
+                    col = filtfilt(b, a, col)
+                else:
+                    warn_list.append(
+                        f"Marker '{name}' axis {axis}: too few samples for filtfilt, skipping filter"
+                    )
+
+                # Re-insert NaN at original gap locations
+                col[nan_mask] = float("nan")
+                filtered[:, axis] = col
+
+            filtered_markers[name] = _safe_tolist(filtered)
+
+        return ComputeResult(
+            request_id=request.id,
+            domain=ComputeDomain.BIOMECHANICS,
+            operation="filter_markers",
+            status=ComputeStatus.COMPLETED,
+            results={"filtered_markers": filtered_markers},
+            warnings=warn_list,
         )
 
-    async def _op_fill_gaps(
-        self, request: ComputeRequest, _cb: Callable | None
+    # ── 4. fill_gaps ───────────────────────────────────────────────
+
+    async def _fill_gaps(
+        self,
+        request: ComputeRequest,
+        params: dict[str, Any],
+        progress_callback: Callable | None,
     ) -> ComputeResult:
-        """Interpolate missing (NaN/None) marker data."""
-        params = request.parameters
-        marker_data = params.get("marker_data")
+        from scipy.interpolate import CubicSpline, PchipInterpolator, interp1d
+
+        marker_data = _to_array(params["marker_data"])  # (n_frames, 3)
         method = params.get("method", "linear")
 
-        if marker_data is None:
-            return _fail(request, "Parameter 'marker_data' is required.")
+        if marker_data.ndim == 1:
+            marker_data = marker_data.reshape(-1, 1)
 
-        # marker_data: list of [x, y, z] with possible None/NaN
-        arr = np.array(
-            [
-                [
-                    float(v) if v is not None else float("nan")
-                    for v in row
-                ]
-                for row in marker_data
-            ],
-            dtype=np.float64,
-        )
+        n_frames, n_cols = marker_data.shape
+        filled = marker_data.copy()
+        gap_info: list[dict[str, Any]] = []
 
-        n_gaps_before = int(np.sum(np.isnan(arr)))
-        filled = np.empty_like(arr)
+        for col_idx in range(n_cols):
+            col = marker_data[:, col_idx]
+            nan_mask = np.isnan(col)
 
-        for col in range(arr.shape[1]):
-            signal = arr[:, col].copy()
-            nans = np.isnan(signal)
-            if not np.any(nans) or np.all(nans):
-                filled[:, col] = signal
+            if not nan_mask.any():
+                continue
+            if (~nan_mask).sum() < 2:
                 continue
 
-            valid_idx = np.where(~nans)[0]
-            valid_vals = signal[valid_idx]
-            nan_idx = np.where(nans)[0]
+            # Identify gap regions
+            diff = np.diff(nan_mask.astype(int))
+            starts = np.where(diff == 1)[0] + 1
+            ends = np.where(diff == -1)[0] + 1
 
-            if method == "linear":
-                filled[:, col] = signal
-                filled[nan_idx, col] = np.interp(nan_idx, valid_idx, valid_vals)
-            elif method == "cubic_spline":
-                from scipy.interpolate import CubicSpline
+            # Handle edge cases
+            if nan_mask[0]:
+                starts = np.concatenate(([0], starts))
+            if nan_mask[-1]:
+                ends = np.concatenate((ends, [n_frames]))
+
+            for s, e in zip(starts, ends):
+                gap_info.append({
+                    "axis": int(col_idx),
+                    "start": int(s),
+                    "end": int(e),
+                    "duration": int(e - s),
+                })
+
+            valid_idx = np.where(~nan_mask)[0]
+            valid_vals = col[valid_idx]
+            interp_idx = np.where(nan_mask)[0]
+
+            if method == "cubic_spline":
                 cs = CubicSpline(valid_idx, valid_vals, extrapolate=True)
-                filled[:, col] = signal
-                filled[nan_idx, col] = cs(nan_idx)
+                filled[interp_idx, col_idx] = cs(interp_idx)
             elif method == "pchip":
-                from scipy.interpolate import PchipInterpolator
                 pchip = PchipInterpolator(valid_idx, valid_vals, extrapolate=True)
-                filled[:, col] = signal
-                filled[nan_idx, col] = pchip(nan_idx)
+                filled[interp_idx, col_idx] = pchip(interp_idx)
             else:
-                return _fail(
-                    request,
-                    f"Unknown interpolation method: {method!r}. Use linear, cubic_spline, or pchip.",
-                )
+                f = interp1d(valid_idx, valid_vals, kind="linear", fill_value="extrapolate")
+                filled[interp_idx, col_idx] = f(interp_idx)
 
-        n_gaps_after = int(np.sum(np.isnan(filled)))
-
-        return _make_result(
-            request,
+        return ComputeResult(
+            request_id=request.id,
+            domain=ComputeDomain.BIOMECHANICS,
+            operation="fill_gaps",
+            status=ComputeStatus.COMPLETED,
             results={
-                "filled_data": filled.tolist(),
-                "method": method,
-                "gaps_before": n_gaps_before,
-                "gaps_after": n_gaps_after,
-                "gaps_filled": n_gaps_before - n_gaps_after,
+                "filled_data": _safe_tolist(filled),
+                "gap_info": gap_info,
             },
         )
 
+    # ── 5. joint_angles ────────────────────────────────────────────
 
-    async def _op_joint_angles(
-        self, request: ComputeRequest, _cb: Callable | None
+    async def _joint_angles(
+        self,
+        request: ComputeRequest,
+        params: dict[str, Any],
+        progress_callback: Callable | None,
     ) -> ComputeResult:
-        """Compute joint angles from proximal/distal segment markers."""
-        params = request.parameters
-        proximal_markers = params.get("proximal_markers")
-        distal_markers = params.get("distal_markers")
-        sampling_rate = float(params.get("sampling_rate", 0))
+        proximal = [_to_array(m) for m in params["proximal_markers"]]  # 3 markers, each (n,3)
+        distal = [_to_array(m) for m in params["distal_markers"]]
+        joint_type = params.get("joint_type", "flexion_extension")
+        sequence = params.get("sequence", "ZXY")
 
-        if proximal_markers is None or distal_markers is None:
-            return _fail(
-                request,
-                "Parameters 'proximal_markers' and 'distal_markers' are required "
-                "(each a list of 3 marker trajectories, each trajectory a list of [x,y,z]).",
-            )
-        if len(proximal_markers) != 3 or len(distal_markers) != 3:
-            return _fail(request, "Each segment requires exactly 3 markers.")
-
-        prox = [np.array(m, dtype=np.float64) for m in proximal_markers]
-        dist = [np.array(m, dtype=np.float64) for m in distal_markers]
-        n_frames = prox[0].shape[0]
-
-        angles_z, angles_x, angles_y = [], [], []
+        n_frames = proximal[0].shape[0]
+        angles = np.zeros(n_frames)
+        angular_velocity = np.zeros(n_frames)
 
         for i in range(n_frames):
-            p0, p1, p2 = prox[0][i], prox[1][i], prox[2][i]
-            d0, d1, d2 = dist[0][i], dist[1][i], dist[2][i]
+            R_prox = self._build_segment_cs(
+                proximal[0][i], proximal[1][i], proximal[2][i]
+            )
+            R_dist = self._build_segment_cs(
+                distal[0][i], distal[1][i], distal[2][i]
+            )
+            if R_prox is None or R_dist is None:
+                angles[i] = float("nan")
+                continue
 
-            R_prox = _build_coordinate_system(p0, p1, p2)
-            R_dist = _build_coordinate_system(d0, d1, d2)
-
-            # Relative rotation: R_rel = R_prox^T @ R_dist
             R_rel = R_prox.T @ R_dist
-            z_ang, x_ang, y_ang = _rotation_matrix_to_euler_zxy(R_rel)
-            angles_z.append(z_ang)
-            angles_x.append(x_ang)
-            angles_y.append(y_ang)
+            euler = self._decompose_euler(R_rel, sequence)
+            if euler is None:
+                angles[i] = float("nan")
+                continue
 
-        angles_z = np.array(angles_z)
-        angles_x = np.array(angles_x)
-        angles_y = np.array(angles_y)
-
-        # Range of motion
-        rom = {
-            "flexion_extension": _safe_float(np.ptp(angles_x)),
-            "abduction_adduction": _safe_float(np.ptp(angles_y)),
-            "internal_external_rotation": _safe_float(np.ptp(angles_z)),
-        }
-
-        # Angular velocity (degrees/s)
-        angular_velocity: dict[str, list[float]] = {}
-        if sampling_rate > 0:
-            dt = 1.0 / sampling_rate
-            angular_velocity = {
-                "flexion_extension": _array_to_list(np.gradient(angles_x, dt)),
-                "abduction_adduction": _array_to_list(np.gradient(angles_y, dt)),
-                "internal_external_rotation": _array_to_list(np.gradient(angles_z, dt)),
+            type_map = {
+                "flexion_extension": 0,
+                "abduction_adduction": 1,
+                "internal_external_rotation": 2,
             }
+            idx = type_map.get(joint_type, 0)
+            angles[i] = np.degrees(euler[idx])
 
-        descriptive: dict[str, DescriptiveStats] = {}
-        for label, arr in [
-            ("flexion_extension", angles_x),
-            ("abduction_adduction", angles_y),
-            ("internal_external_rotation", angles_z),
-        ]:
-            descriptive[label] = DescriptiveStats.from_array(arr)
+        # Angular velocity via central differences
+        valid = ~np.isnan(angles)
+        if valid.sum() > 2:
+            dt = 1.0  # normalized; caller can scale by 1/sampling_rate
+            for i in range(1, n_frames - 1):
+                if valid[i - 1] and valid[i + 1]:
+                    angular_velocity[i] = (angles[i + 1] - angles[i - 1]) / (2 * dt)
 
-        return _make_result(
-            request,
-            results={
-                "angles": {
-                    "flexion_extension": _array_to_list(angles_x),
-                    "abduction_adduction": _array_to_list(angles_y),
-                    "internal_external_rotation": _array_to_list(angles_z),
-                },
-                "rom": rom,
-                "angular_velocity": angular_velocity,
-                "decomposition": "ZXY",
-                "units": "degrees",
-            },
-            descriptive=descriptive,
+        valid_angles = angles[~np.isnan(angles)]
+        rom = float(np.ptp(valid_angles)) if len(valid_angles) > 0 else 0.0
+        peak_flex = float(np.max(valid_angles)) if len(valid_angles) > 0 else 0.0
+        peak_ext = float(np.min(valid_angles)) if len(valid_angles) > 0 else 0.0
+
+        figures: list[GeneratedFigure] = []
+        fig = _make_figure(
+            lambda f, ax: (
+                ax.plot(angles, linewidth=1.2),
+                ax.set_xlabel("Frame"),
+                ax.set_ylabel("Angle (deg)"),
+                ax.set_title(f"Joint Angle — {joint_type}"),
+                ax.grid(True, alpha=0.3),
+            ),
+            f"Joint Angle — {joint_type}",
         )
+        if fig is not None:
+            figures.append(fig)
 
-    async def _op_joint_kinematics(
-        self, request: ComputeRequest, _cb: Callable | None
-    ) -> ComputeResult:
-        """Compute position, velocity, and acceleration from marker trajectory."""
-        params = request.parameters
-        positions = params.get("positions")
-        sampling_rate = float(params.get("sampling_rate", 0))
-
-        if positions is None:
-            return _fail(request, "Parameter 'positions' is required.")
-        if sampling_rate <= 0:
-            return _fail(request, "Parameter 'sampling_rate' must be positive.")
-
-        pos = np.array(positions, dtype=np.float64)
-        dt = 1.0 / sampling_rate
-
-        # Central finite differences for velocity
-        velocity = np.gradient(pos, dt, axis=0)
-        # Second derivative for acceleration
-        acceleration = np.gradient(velocity, dt, axis=0)
-
-        speed = np.linalg.norm(velocity, axis=1) if pos.ndim == 2 else np.abs(velocity)
-
-        descriptive: dict[str, DescriptiveStats] = {
-            "speed": DescriptiveStats.from_array(speed),
-        }
-
-        return _make_result(
-            request,
+        return ComputeResult(
+            request_id=request.id,
+            domain=ComputeDomain.BIOMECHANICS,
+            operation="joint_angles",
+            status=ComputeStatus.COMPLETED,
             results={
-                "positions": _array_to_list(pos.ravel()) if pos.ndim == 1 else pos.tolist(),
-                "velocity": velocity.tolist(),
-                "acceleration": acceleration.tolist(),
-                "speed": _array_to_list(speed),
-                "sampling_rate": sampling_rate,
+                "angles": _safe_tolist(angles),
+                "range_of_motion": rom,
+                "peak_flexion": peak_flex,
+                "peak_extension": peak_ext,
+                "angular_velocity": _safe_tolist(angular_velocity),
             },
-            descriptive=descriptive,
-        )
-
-
-    async def _op_inverse_dynamics(
-        self, request: ComputeRequest, _cb: Callable | None
-    ) -> ComputeResult:
-        """Compute joint moments via Newton-Euler inverse dynamics (2-D sagittal).
-
-        Simplified 2-D sagittal-plane model:
-            M = I * alpha + r x F
-        where I is the segment moment of inertia, alpha is angular acceleration,
-        r is the moment arm, and F is the external force.
-        """
-        params = request.parameters
-        joint_angles = np.array(params.get("joint_angles", []), dtype=np.float64)
-        angular_velocities = np.array(params.get("angular_velocities", []), dtype=np.float64)
-        angular_accelerations = np.array(params.get("angular_accelerations", []), dtype=np.float64)
-        segment_mass = float(params.get("segment_mass", 0))
-        segment_length = float(params.get("segment_length", 0))
-        external_force = np.array(params.get("external_force", [0.0, 0.0]), dtype=np.float64)
-
-        if joint_angles.size == 0:
-            return _fail(request, "Parameter 'joint_angles' is required.")
-        if segment_mass <= 0:
-            return _fail(request, "Parameter 'segment_mass' must be positive.")
-        if segment_length <= 0:
-            return _fail(request, "Parameter 'segment_length' must be positive.")
-
-        # Moment of inertia (uniform rod approximation): I = (1/12) * m * L^2
-        I_seg = (1.0 / 12.0) * segment_mass * segment_length ** 2  # noqa: E741
-        # Moment arm (half segment length for COM)
-        r = segment_length / 2.0
-
-        n = len(joint_angles)
-        moments = np.zeros(n)
-
-        for i in range(n):
-            alpha = angular_accelerations[i] if i < len(angular_accelerations) else 0.0
-            # Convert angle to radians for cross product
-            theta = np.radians(joint_angles[i])
-            # 2-D cross product: r x F = r * (Fx * sin(theta) + Fy * cos(theta))
-            if external_force.ndim >= 1 and external_force.size >= 2:
-                cross = r * (
-                    external_force[0] * math.sin(theta)
-                    + external_force[1] * math.cos(theta)
-                )
-            else:
-                cross = 0.0
-            moments[i] = I_seg * alpha + cross
-
-        descriptive = {"moments": DescriptiveStats.from_array(moments)}
-
-        return _make_result(
-            request,
-            results={
-                "moments": _array_to_list(moments),
-                "units": "Nm",
-                "segment_mass": segment_mass,
-                "segment_length": segment_length,
-                "moment_of_inertia": _safe_float(I_seg),
-                "method": "newton_euler_2d_sagittal",
-            },
-            descriptive=descriptive,
-        )
-
-    async def _op_gait_analysis(
-        self, request: ComputeRequest, _cb: Callable | None
-    ) -> ComputeResult:
-        """Detect gait events and compute spatio-temporal parameters."""
-        from scipy.signal import find_peaks
-
-        params = request.parameters
-        heel_marker = params.get("heel_marker")
-        sampling_rate = float(params.get("sampling_rate", 0))
-        body_height = float(params.get("body_height", 1.75))  # metres, for normalization
-
-        if heel_marker is None:
-            return _fail(request, "Parameter 'heel_marker' is required (list of [x,y,z]).")
-        if sampling_rate <= 0:
-            return _fail(request, "Parameter 'sampling_rate' must be positive.")
-
-        heel = np.array(heel_marker, dtype=np.float64)
-        if heel.ndim != 2 or heel.shape[1] < 3:
-            return _fail(request, "'heel_marker' must be an Nx3 array.")
-
-        vertical = heel[:, 1]  # Y is typically vertical
-
-        # Detect heel strikes as local minima in vertical position
-        neg_vertical = -vertical
-        peaks, properties = find_peaks(neg_vertical, distance=int(sampling_rate * 0.4))
-        heel_strikes = peaks.tolist()
-
-        if len(heel_strikes) < 2:
-            return _fail(
-                request,
-                f"Detected only {len(heel_strikes)} heel strike(s); need at least 2 for gait cycle analysis.",
-            )
-
-        # Segment into gait cycles
-        stride_times = []
-        stride_lengths = []
-        gait_cycles: list[dict[str, Any]] = []
-
-        for i in range(len(heel_strikes) - 1):
-            hs1 = heel_strikes[i]
-            hs2 = heel_strikes[i + 1]
-            stride_time = (hs2 - hs1) / sampling_rate
-            stride_times.append(stride_time)
-
-            # Stride length from horizontal displacement
-            dx = heel[hs2, 0] - heel[hs1, 0]
-            dz = heel[hs2, 2] - heel[hs1, 2]
-            stride_len = math.sqrt(dx ** 2 + dz ** 2)
-            stride_lengths.append(stride_len)
-
-            # Time-normalize to 0-100%
-            cycle_data = vertical[hs1: hs2 + 1]
-            normalized = np.interp(
-                np.linspace(0, 100, 101),
-                np.linspace(0, 100, len(cycle_data)),
-                cycle_data,
-            )
-            gait_cycles.append({
-                "start_frame": hs1,
-                "end_frame": hs2,
-                "normalized_vertical": _array_to_list(normalized),
-            })
-
-        stride_times_arr = np.array(stride_times)
-        stride_lengths_arr = np.array(stride_lengths)
-
-        cadence = 60.0 / np.mean(stride_times_arr) if np.mean(stride_times_arr) > 0 else 0.0
-        gait_speed = np.mean(stride_lengths_arr) / np.mean(stride_times_arr) if np.mean(stride_times_arr) > 0 else 0.0
-
-        # Estimate stance/swing (approximate: stance ~60%, swing ~40% of gait cycle)
-        # Use vertical velocity to find toe-off
-        stance_percents = []
-        for i in range(len(heel_strikes) - 1):
-            hs1 = heel_strikes[i]
-            hs2 = heel_strikes[i + 1]
-            cycle_v = vertical[hs1:hs2]
-            cycle_vel = np.gradient(cycle_v, 1.0 / sampling_rate)
-            # Toe-off: point of maximum upward velocity in first 80% of cycle
-            search_end = int(0.8 * len(cycle_vel))
-            if search_end > 0:
-                toe_off_idx = np.argmax(cycle_vel[:search_end])
-                stance_pct = 100.0 * toe_off_idx / len(cycle_vel)
-            else:
-                stance_pct = 60.0
-            stance_percents.append(stance_pct)
-
-        mean_stance = _safe_float(np.mean(stance_percents))
-        mean_swing = _safe_float(100.0 - mean_stance)
-
-        # Generate gait cycle figure
-        figures = []
-        try:
-            plt = _get_matplotlib()
-            fig, ax = plt.subplots(figsize=(10, 5))
-            for idx, gc in enumerate(gait_cycles):
-                pct = np.linspace(0, 100, 101)
-                ax.plot(pct, gc["normalized_vertical"], alpha=0.5, label=f"Cycle {idx + 1}")
-            if gait_cycles:
-                mean_cycle = np.mean(
-                    [gc["normalized_vertical"] for gc in gait_cycles], axis=0
-                )
-                ax.plot(
-                    np.linspace(0, 100, 101), mean_cycle,
-                    "k-", linewidth=2.5, label="Mean",
-                )
-            ax.set_xlabel("Gait Cycle (%)")
-            ax.set_ylabel("Vertical Heel Position")
-            ax.set_title("Gait Cycle Analysis")
-            ax.legend(loc="best", fontsize=8)
-            ax.grid(True, alpha=0.3)
-            fig.tight_layout()
-            figures.append(GeneratedFigure.from_matplotlib(fig, "Gait Cycle"))
-            plt.close(fig)
-        except Exception:
-            logger.warning("Could not generate gait cycle figure.", exc_info=True)
-
-        descriptive = {
-            "stride_time": DescriptiveStats.from_array(stride_times_arr),
-            "stride_length": DescriptiveStats.from_array(stride_lengths_arr),
-        }
-
-        return _make_result(
-            request,
-            results={
-                "heel_strikes": heel_strikes,
-                "n_cycles": len(gait_cycles),
-                "stride_time_mean": _safe_float(np.mean(stride_times_arr)),
-                "stride_length_mean": _safe_float(np.mean(stride_lengths_arr)),
-                "cadence": _safe_float(cadence),
-                "gait_speed": _safe_float(gait_speed),
-                "stance_percent": mean_stance,
-                "swing_percent": mean_swing,
-                "gait_cycles": gait_cycles,
-            },
-            descriptive=descriptive,
+            descriptive={"angles": DescriptiveStats.from_array(angles)},
             figures=figures,
         )
 
+    # -- helpers for coordinate systems and Euler decomposition -----
 
-    async def _op_center_of_mass(
-        self, request: ComputeRequest, _cb: Callable | None
+    @staticmethod
+    def _build_segment_cs(
+        p1: np.ndarray, p2: np.ndarray, p3: np.ndarray
+    ) -> np.ndarray | None:
+        """Build a right-handed orthonormal coordinate system from three markers.
+
+        p1-p2 defines the primary (longitudinal) axis.
+        p1-p3 lies in the plane used to derive the second axis.
+        """
+        v1 = p2 - p1
+        v2 = p3 - p1
+        if np.any(np.isnan(v1)) or np.any(np.isnan(v2)):
+            return None
+
+        e1 = v1 / (np.linalg.norm(v1) + 1e-12)
+        temp = np.cross(v1, v2)
+        e3 = temp / (np.linalg.norm(temp) + 1e-12)
+        e2 = np.cross(e3, e1)
+        e2 = e2 / (np.linalg.norm(e2) + 1e-12)
+
+        return np.column_stack([e1, e2, e3])
+
+    @staticmethod
+    def _decompose_euler(R: np.ndarray, sequence: str = "ZXY") -> np.ndarray | None:
+        """Decompose a 3x3 rotation matrix into Euler/Cardan angles.
+
+        Supports common biomechanical sequences: ZXY, XYZ, YXZ, ZYX.
+        Returns angles in radians as [angle1, angle2, angle3].
+        """
+        try:
+            if sequence == "ZXY":
+                sy = R[2, 1]
+                sy = np.clip(sy, -1.0, 1.0)
+                angle2 = np.arcsin(sy)
+                if np.abs(np.cos(angle2)) > 1e-6:
+                    angle1 = np.arctan2(-R[0, 1], R[1, 1])
+                    angle3 = np.arctan2(-R[2, 0], R[2, 2])
+                else:
+                    angle1 = np.arctan2(R[0, 2], R[0, 0])
+                    angle3 = 0.0
+                return np.array([angle1, angle2, angle3])
+
+            elif sequence == "XYZ":
+                sy = -R[2, 0]
+                sy = np.clip(sy, -1.0, 1.0)
+                angle2 = np.arcsin(sy)
+                if np.abs(np.cos(angle2)) > 1e-6:
+                    angle1 = np.arctan2(R[2, 1], R[2, 2])
+                    angle3 = np.arctan2(R[1, 0], R[0, 0])
+                else:
+                    angle1 = np.arctan2(-R[1, 2], R[1, 1])
+                    angle3 = 0.0
+                return np.array([angle1, angle2, angle3])
+
+            elif sequence == "YXZ":
+                sy = R[1, 2]
+                sy = np.clip(sy, -1.0, 1.0)
+                angle2 = np.arcsin(-sy)
+                if np.abs(np.cos(angle2)) > 1e-6:
+                    angle1 = np.arctan2(R[0, 2], R[2, 2])
+                    angle3 = np.arctan2(R[1, 0], R[1, 1])
+                else:
+                    angle1 = np.arctan2(-R[0, 1], R[0, 0])
+                    angle3 = 0.0
+                return np.array([angle1, angle2, angle3])
+
+            elif sequence == "ZYX":
+                sy = R[0, 2]
+                sy = np.clip(sy, -1.0, 1.0)
+                angle2 = np.arcsin(sy)
+                if np.abs(np.cos(angle2)) > 1e-6:
+                    angle1 = np.arctan2(-R[1, 2], R[2, 2])
+                    angle3 = np.arctan2(-R[0, 1], R[0, 0])
+                else:
+                    angle1 = np.arctan2(R[1, 0], R[1, 1])
+                    angle3 = 0.0
+                return np.array([angle1, angle2, angle3])
+
+            else:
+                warnings.warn(f"Unsupported Euler sequence '{sequence}', using ZXY")
+                return BiomechanicsProcessor._decompose_euler(R, "ZXY")
+        except Exception:
+            return None
+
+    # ── 6. joint_kinematics ────────────────────────────────────────
+
+    async def _joint_kinematics(
+        self,
+        request: ComputeRequest,
+        params: dict[str, Any],
+        progress_callback: Callable | None,
     ) -> ComputeResult:
-        """Compute whole-body centre of mass from segmental data (de Leva 1996)."""
-        params = request.parameters
-        segments = params.get("segments")
-        body_mass = float(params.get("body_mass", 0))
-        custom_fractions = params.get("mass_fractions")
+        positions = _to_array(params["positions"])  # (n, 3)
+        sampling_rate = float(params["sampling_rate"])
+        filter_cutoff = params.get("filter_cutoff")
 
-        if segments is None:
-            return _fail(
-                request,
-                "Parameter 'segments' is required: dict mapping segment names to "
-                "position trajectories (list of [x,y,z]).",
-            )
+        if positions.ndim == 1:
+            positions = positions.reshape(-1, 1)
 
-        fractions = dict(_DE_LEVA_MASS_FRACTIONS)
-        if custom_fractions:
-            fractions.update(custom_fractions)
+        n = positions.shape[0]
+        dt = 1.0 / sampling_rate
 
-        # Determine n_frames from first segment
-        first_seg = next(iter(segments.values()))
-        n_frames = len(first_seg)
+        # Optional low-pass filter
+        if filter_cutoff is not None:
+            from scipy.signal import butter, filtfilt
 
-        total_mass = 0.0
-        weighted_pos = np.zeros((n_frames, 3), dtype=np.float64)
+            nyq = sampling_rate / 2.0
+            cutoff = float(filter_cutoff)
+            if cutoff < nyq:
+                b, a = butter(4, cutoff / nyq, btype="low")
+                for col in range(positions.shape[1]):
+                    mask = ~np.isnan(positions[:, col])
+                    if mask.sum() > 15:
+                        positions[mask, col] = filtfilt(b, a, positions[mask, col])
 
-        for seg_name, positions in segments.items():
-            frac = fractions.get(seg_name, 0.0)
-            if frac == 0.0:
-                logger.warning("No mass fraction for segment %r; skipping.", seg_name)
-                continue
-            seg_mass = frac * body_mass if body_mass > 0 else frac
-            total_mass += seg_mass
-            pos_arr = np.array(positions, dtype=np.float64)
-            if pos_arr.shape[0] != n_frames:
-                return _fail(
-                    request,
-                    f"Segment '{seg_name}' has {pos_arr.shape[0]} frames; expected {n_frames}.",
-                )
-            weighted_pos += seg_mass * pos_arr
+        # Central finite differences for velocity
+        velocities = np.zeros_like(positions)
+        if n > 2:
+            velocities[1:-1] = (positions[2:] - positions[:-2]) / (2 * dt)
+            velocities[0] = (positions[1] - positions[0]) / dt
+            velocities[-1] = (positions[-1] - positions[-2]) / dt
 
-        if total_mass > 0:
-            com = weighted_pos / total_mass
-        else:
-            com = weighted_pos
+        # Central finite differences for acceleration
+        accelerations = np.zeros_like(positions)
+        if n > 2:
+            accelerations[1:-1] = (positions[2:] - 2 * positions[1:-1] + positions[:-2]) / (dt ** 2)
+            accelerations[0] = accelerations[1] if n > 1 else 0.0
+            accelerations[-1] = accelerations[-2] if n > 1 else 0.0
 
-        com_list = com.tolist()
+        # Speed magnitudes
+        speed = np.linalg.norm(velocities, axis=1) if velocities.ndim > 1 else np.abs(velocities.ravel())
+        accel_mag = np.linalg.norm(accelerations, axis=1) if accelerations.ndim > 1 else np.abs(accelerations.ravel())
 
-        descriptive: dict[str, DescriptiveStats] = {}
-        for axis_idx, axis_name in enumerate(["com_x", "com_y", "com_z"]):
-            descriptive[axis_name] = DescriptiveStats.from_array(com[:, axis_idx])
+        peak_velocity = float(np.nanmax(speed))
+        peak_acceleration = float(np.nanmax(accel_mag))
 
-        return _make_result(
-            request,
+        descriptive: dict[str, DescriptiveStats] = {
+            "speed": DescriptiveStats.from_array(speed),
+            "acceleration_magnitude": DescriptiveStats.from_array(accel_mag),
+        }
+
+        return ComputeResult(
+            request_id=request.id,
+            domain=ComputeDomain.BIOMECHANICS,
+            operation="joint_kinematics",
+            status=ComputeStatus.COMPLETED,
             results={
-                "center_of_mass": com_list,
-                "n_frames": n_frames,
-                "total_mass_used": _safe_float(total_mass),
-                "segments_included": list(segments.keys()),
-                "method": "de_leva_1996",
+                "velocities": _safe_tolist(velocities),
+                "accelerations": _safe_tolist(accelerations),
+                "peak_velocity": peak_velocity,
+                "peak_acceleration": peak_acceleration,
             },
             descriptive=descriptive,
         )
 
-    async def _op_ground_reaction_forces(
-        self, request: ComputeRequest, _cb: Callable | None
+    # ── 7. inverse_dynamics ────────────────────────────────────────
+
+    async def _inverse_dynamics(
+        self,
+        request: ComputeRequest,
+        params: dict[str, Any],
+        progress_callback: Callable | None,
     ) -> ComputeResult:
-        """Process force-plate ground reaction force data."""
-        params = request.parameters
-        force_data = params.get("force_data")
-        sampling_rate = float(params.get("sampling_rate", 0))
-        body_weight = float(params.get("body_weight", 0))
+        joint_angles_rad = _to_array(params["joint_angles"])  # (n,) in radians
+        angular_velocities = _to_array(params.get("angular_velocities", np.zeros_like(joint_angles_rad)))
+        angular_accelerations = _to_array(params.get("angular_accelerations", np.zeros_like(joint_angles_rad)))
 
-        if force_data is None:
-            return _fail(
-                request,
-                "Parameter 'force_data' is required (Nx3 array of [Fx, Fy, Fz]).",
-            )
-        if sampling_rate <= 0:
-            return _fail(request, "Parameter 'sampling_rate' must be positive.")
+        segment_mass = float(params["segment_mass"])
+        segment_length = float(params["segment_length"])
+        com_ratio = float(params.get("segment_com_ratio", 0.5))
 
-        forces = np.array(force_data, dtype=np.float64)
-        if forces.ndim != 2 or forces.shape[1] < 3:
-            return _fail(request, "'force_data' must be an Nx3 array ([Fx, Fy, Fz]).")
-
-        Fx, Fy, Fz = forces[:, 0], forces[:, 1], forces[:, 2]
-        dt = 1.0 / sampling_rate
-        n = len(Fx)
-        time = np.arange(n) * dt
-
-        # Normalise to body weight if provided
-        if body_weight > 0:
-            Fx_norm = Fx / body_weight
-            Fy_norm = Fy / body_weight
-            Fz_norm = Fz / body_weight
-            normalised = True
+        # Moment of inertia: approximate as slender rod if not given
+        if "moment_of_inertia" in params and params["moment_of_inertia"] is not None:
+            moi = float(params["moment_of_inertia"])
         else:
-            Fx_norm = Fx
-            Fy_norm = Fy
-            Fz_norm = Fz
-            normalised = False
+            moi = (1.0 / 12.0) * segment_mass * segment_length ** 2
 
-        # Peak vertical force (assume Fy or Fz is vertical -- use Fy by convention)
-        peak_vertical = _safe_float(np.max(np.abs(Fy)))
-        peak_vertical_norm = _safe_float(np.max(np.abs(Fy_norm)))
+        external_force = _to_array(params["external_force"]) if "external_force" in params and params["external_force"] is not None else None
+        external_moment = _to_array(params["external_moment"]) if "external_moment" in params and params["external_moment"] is not None else None
 
-        # Loading rate: max derivative of vertical force in first 50 ms
-        samples_50ms = max(1, int(0.05 * sampling_rate))
-        vert_deriv = np.gradient(Fy[:samples_50ms], dt)
-        loading_rate = _safe_float(np.max(np.abs(vert_deriv)))
+        n = len(joint_angles_rad)
+        is_2d = joint_angles_rad.ndim == 1
 
-        # Impulse (integral of force over time)
-        impulse_x = _safe_float(np.trapz(Fx, dx=dt))
-        impulse_y = _safe_float(np.trapz(Fy, dx=dt))
-        impulse_z = _safe_float(np.trapz(Fz, dx=dt))
+        if is_2d:
+            # Simplified 2D sagittal-plane inverse dynamics
+            # M = I * alpha + m * g * L_com * cos(theta)
+            g = 9.81
+            L_com = segment_length * com_ratio
+            joint_moments = np.zeros(n)
 
-        # Centre of pressure (if moment data provided)
-        cop_x_data = params.get("cop_x")
-        cop_y_data = params.get("cop_y")
-        cop = None
-        if cop_x_data is not None and cop_y_data is not None:
-            cop = {
-                "x": _array_to_list(np.array(cop_x_data, dtype=np.float64)),
-                "y": _array_to_list(np.array(cop_y_data, dtype=np.float64)),
-            }
+            for i in range(n):
+                theta = joint_angles_rad[i]
+                alpha = angular_accelerations[i] if i < len(angular_accelerations) else 0.0
+                omega = angular_velocities[i] if i < len(angular_velocities) else 0.0
 
-        # Generate GRF figure
-        figures = []
-        try:
-            plt = _get_matplotlib()
-            fig, axes = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
-            labels = ["Anterior-Posterior (Fx)", "Vertical (Fy)", "Medio-Lateral (Fz)"]
-            data_norm = [Fx_norm, Fy_norm, Fz_norm]
-            for ax, label, d in zip(axes, labels, data_norm):
-                ax.plot(time, d, linewidth=1.0)
-                ax.set_ylabel("Force (BW)" if normalised else "Force (N)")
-                ax.set_title(label)
-                ax.grid(True, alpha=0.3)
-            axes[-1].set_xlabel("Time (s)")
-            fig.suptitle("Ground Reaction Forces", fontsize=14)
-            fig.tight_layout()
-            figures.append(GeneratedFigure.from_matplotlib(fig, "Ground Reaction Forces"))
-            plt.close(fig)
-        except Exception:
-            logger.warning("Could not generate GRF figure.", exc_info=True)
+                # Net moment = inertial + gravitational
+                M_inertial = moi * alpha
+                M_gravity = segment_mass * g * L_com * np.cos(theta)
 
-        descriptive = {
-            "Fx": DescriptiveStats.from_array(Fx),
-            "Fy": DescriptiveStats.from_array(Fy),
-            "Fz": DescriptiveStats.from_array(Fz),
+                M_ext = 0.0
+                if external_moment is not None and i < len(external_moment):
+                    M_ext = float(external_moment[i]) if np.ndim(external_moment[i]) == 0 else float(external_moment[i][-1])
+
+                joint_moments[i] = M_inertial + M_gravity - M_ext
+
+            joint_forces = segment_mass * _GRAVITY[1] * np.ones(n)  # simplified
+
+        else:
+            # 3D Newton-Euler (simplified single-segment)
+            joint_moments = np.zeros(n)
+            joint_forces = np.zeros((n, 3))
+
+            g_vec = _GRAVITY
+            L_com = segment_length * com_ratio
+
+            for i in range(n):
+                alpha_i = angular_accelerations[i] if i < len(angular_accelerations) else 0.0
+                omega_i = angular_velocities[i] if i < len(angular_velocities) else 0.0
+
+                M_inertial = moi * alpha_i
+                # Gyroscopic term: omega x (I * omega) — scalar approximation
+                M_gyro = 0.0  # negligible for slow movements
+
+                M_gravity = segment_mass * 9.81 * L_com
+
+                F_ext = np.zeros(3)
+                M_ext = 0.0
+                if external_force is not None and i < len(external_force):
+                    F_ext = _to_array(external_force[i])
+                if external_moment is not None and i < len(external_moment):
+                    M_ext = float(external_moment[i]) if np.ndim(external_moment[i]) == 0 else float(np.linalg.norm(external_moment[i]))
+
+                joint_moments[i] = M_inertial + M_gyro + M_gravity - M_ext
+                joint_forces[i] = segment_mass * g_vec - F_ext
+
+        peak_moment = float(np.nanmax(np.abs(joint_moments)))
+
+        figures: list[GeneratedFigure] = []
+        fig = _make_figure(
+            lambda f, ax: (
+                ax.plot(joint_moments, linewidth=1.2, color="tab:red"),
+                ax.set_xlabel("Frame"),
+                ax.set_ylabel("Moment (Nm)"),
+                ax.set_title("Joint Moment"),
+                ax.grid(True, alpha=0.3),
+            ),
+            "Joint Moment",
+        )
+        if fig is not None:
+            figures.append(fig)
+
+        return ComputeResult(
+            request_id=request.id,
+            domain=ComputeDomain.BIOMECHANICS,
+            operation="inverse_dynamics",
+            status=ComputeStatus.COMPLETED,
+            results={
+                "joint_moments": _safe_tolist(joint_moments),
+                "joint_forces": _safe_tolist(joint_forces) if isinstance(joint_forces, np.ndarray) and joint_forces.ndim > 1 else [float(v) for v in joint_forces],
+                "peak_moment": peak_moment,
+            },
+            descriptive={"joint_moments": DescriptiveStats.from_array(joint_moments)},
+            figures=figures,
+        )
+
+    # ── 8. gait_analysis ───────────────────────────────────────────
+
+    async def _gait_analysis(
+        self,
+        request: ComputeRequest,
+        params: dict[str, Any],
+        progress_callback: Callable | None,
+    ) -> ComputeResult:
+        from scipy.signal import argrelmin
+
+        heel_marker = _to_array(params["heel_marker"])  # (n, 3) or (n,)
+        sampling_rate = float(params["sampling_rate"])
+        vertical_axis = int(params.get("vertical_axis", 2))  # default z
+
+        if heel_marker.ndim == 2:
+            vertical = heel_marker[:, vertical_axis]
+        else:
+            vertical = heel_marker
+
+        n = len(vertical)
+        dt = 1.0 / sampling_rate
+
+        # Detect heel strikes as local minima in the vertical position
+        order = max(1, int(sampling_rate * 0.05))  # search window ~50 ms
+        minima_idx = argrelmin(vertical, order=order)[0]
+
+        if len(minima_idx) < 2:
+            return ComputeResult(
+                request_id=request.id,
+                domain=ComputeDomain.BIOMECHANICS,
+                operation="gait_analysis",
+                status=ComputeStatus.COMPLETED,
+                results={"gait_events": [], "gait_parameters": {}, "error_detail": "Fewer than 2 heel strikes detected"},
+                warnings=["Insufficient heel strikes detected for gait cycle analysis"],
+            )
+
+        heel_strikes = minima_idx.tolist()
+
+        # Segment into gait cycles
+        cycles: list[np.ndarray] = []
+        stride_times: list[float] = []
+        stride_lengths: list[float] = []
+
+        for c in range(len(heel_strikes) - 1):
+            start = heel_strikes[c]
+            end = heel_strikes[c + 1]
+            cycle_data = vertical[start:end]
+            cycles.append(cycle_data)
+
+            stride_time = (end - start) * dt
+            stride_times.append(stride_time)
+
+            # Stride length from horizontal displacement if 2D+ data available
+            if heel_marker.ndim == 2:
+                horiz_axes = [a for a in range(heel_marker.shape[1]) if a != vertical_axis]
+                disp = heel_marker[end, horiz_axes] - heel_marker[start, horiz_axes]
+                stride_lengths.append(float(np.linalg.norm(disp)))
+            else:
+                stride_lengths.append(0.0)
+
+        # Time-normalize each cycle to 0-100%
+        normalized_cycles: list[list[float]] = []
+        target_points = 101
+        for cycle in cycles:
+            x_old = np.linspace(0, 100, len(cycle))
+            x_new = np.linspace(0, 100, target_points)
+            normalized = np.interp(x_new, x_old, cycle)
+            normalized_cycles.append(normalized.tolist())
+
+        # Ensemble average
+        if normalized_cycles:
+            ensemble = np.mean(normalized_cycles, axis=0).tolist()
+            ensemble_std = np.std(normalized_cycles, axis=0).tolist()
+        else:
+            ensemble = []
+            ensemble_std = []
+
+        # Gait parameters
+        stride_times_arr = np.array(stride_times)
+        stride_lengths_arr = np.array(stride_lengths)
+        cadence = 60.0 / np.mean(stride_times_arr) if len(stride_times_arr) > 0 and np.mean(stride_times_arr) > 0 else 0.0
+        gait_speed = float(np.mean(stride_lengths_arr / stride_times_arr)) if len(stride_times_arr) > 0 and all(t > 0 for t in stride_times) else 0.0
+
+        # Estimate stance/swing from vertical position within each cycle
+        # Stance ~ foot on ground (lower vertical values), swing ~ foot in air
+        stance_percents: list[float] = []
+        for cycle in cycles:
+            threshold = np.min(cycle) + 0.3 * (np.max(cycle) - np.min(cycle))
+            stance_samples = np.sum(cycle <= threshold)
+            stance_percents.append(100.0 * stance_samples / len(cycle))
+
+        avg_stance = float(np.mean(stance_percents)) if stance_percents else 60.0
+        avg_swing = 100.0 - avg_stance
+
+        gait_params = {
+            "stride_length_mean": float(np.mean(stride_lengths_arr)) if len(stride_lengths_arr) > 0 else 0.0,
+            "stride_time_mean": float(np.mean(stride_times_arr)) if len(stride_times_arr) > 0 else 0.0,
+            "cadence_steps_per_min": float(cadence),
+            "gait_speed": gait_speed,
+            "stance_phase_percent": avg_stance,
+            "swing_phase_percent": avg_swing,
+            "n_cycles": len(cycles),
         }
 
-        return _make_result(
-            request,
+        # Gait events
+        gait_events = [
+            {"event": "heel_strike", "frame": int(hs), "time": float(hs * dt)}
+            for hs in heel_strikes
+        ]
+
+        figures: list[GeneratedFigure] = []
+        if normalized_cycles:
+            ens_arr = np.array(ensemble)
+            std_arr = np.array(ensemble_std)
+            pct = np.linspace(0, 100, target_points)
+
+            def _plot_gait(fig, ax):
+                for i, nc in enumerate(normalized_cycles):
+                    ax.plot(pct, nc, alpha=0.25, color="gray", linewidth=0.8)
+                ax.plot(pct, ens_arr, color="tab:blue", linewidth=2, label="Ensemble mean")
+                ax.fill_between(pct, ens_arr - std_arr, ens_arr + std_arr, alpha=0.2, color="tab:blue")
+                ax.set_xlabel("Gait Cycle (%)")
+                ax.set_ylabel("Vertical Position")
+                ax.set_title("Gait Cycle Analysis")
+                ax.legend()
+                ax.grid(True, alpha=0.3)
+
+            gait_fig = _make_figure(_plot_gait, "Gait Cycle Analysis")
+            if gait_fig is not None:
+                figures.append(gait_fig)
+
+        return ComputeResult(
+            request_id=request.id,
+            domain=ComputeDomain.BIOMECHANICS,
+            operation="gait_analysis",
+            status=ComputeStatus.COMPLETED,
             results={
-                "peak_vertical_force": peak_vertical,
-                "peak_vertical_force_bw": peak_vertical_norm if normalised else None,
-                "loading_rate": loading_rate,
-                "impulse": {"x": impulse_x, "y": impulse_y, "z": impulse_z},
-                "cop": cop,
-                "normalised_to_bw": normalised,
-                "sampling_rate": sampling_rate,
-                "duration": _safe_float(n * dt),
+                "gait_events": gait_events,
+                "gait_parameters": gait_params,
+                "normalized_cycles": normalized_cycles,
+                "ensemble_average": ensemble,
+                "ensemble_std": ensemble_std,
             },
-            descriptive=descriptive,
+            descriptive={
+                "stride_time": DescriptiveStats.from_array(stride_times_arr),
+                "stride_length": DescriptiveStats.from_array(stride_lengths_arr),
+            },
+            figures=figures,
+        )
+
+    # ── 9. center_of_mass ──────────────────────────────────────────
+
+    async def _center_of_mass(
+        self,
+        request: ComputeRequest,
+        params: dict[str, Any],
+        progress_callback: Callable | None,
+    ) -> ComputeResult:
+        segment_data = params["segment_data"]
+        # Each item: {name, marker_positions: [[x,y,z],...], mass_fraction (optional)}
+
+        # Determine number of frames from first segment
+        first_positions = _to_array(segment_data[0]["marker_positions"])
+        n_frames = first_positions.shape[0]
+
+        total_mass_fraction = 0.0
+        weighted_sum = np.zeros((n_frames, 3))
+
+        warn_list: list[str] = []
+
+        for seg in segment_data:
+            seg_name = seg.get("name", "unknown")
+            positions = _to_array(seg["marker_positions"])  # (n_frames, 3)
+            if positions.ndim == 1:
+                positions = positions.reshape(1, -1)
+            if positions.shape[0] < n_frames:
+                # Pad with last known position
+                pad = np.tile(positions[-1], (n_frames - positions.shape[0], 1))
+                positions = np.vstack([positions, pad])
+                warn_list.append(f"Segment '{seg_name}' had fewer frames; padded with last position")
+
+            mass_frac = seg.get("mass_fraction")
+            if mass_frac is None:
+                mass_frac = _DE_LEVA_MASS_FRACTIONS.get(seg_name.lower())
+            if mass_frac is None:
+                warn_list.append(
+                    f"No mass fraction for segment '{seg_name}', using 1/n_segments"
+                )
+                mass_frac = 1.0 / len(segment_data)
+
+            mass_frac = float(mass_frac)
+            total_mass_fraction += mass_frac
+            weighted_sum += mass_frac * positions[:n_frames, :3]
+
+        com_trajectory = weighted_sum / total_mass_fraction if total_mass_fraction > 0 else weighted_sum
+
+        # COM velocity and acceleration via finite differences
+        dt = 1.0  # frame-normalized; caller scales with 1/sampling_rate
+        com_velocity = np.zeros_like(com_trajectory)
+        com_acceleration = np.zeros_like(com_trajectory)
+
+        if n_frames > 2:
+            com_velocity[1:-1] = (com_trajectory[2:] - com_trajectory[:-2]) / (2 * dt)
+            com_velocity[0] = (com_trajectory[1] - com_trajectory[0]) / dt
+            com_velocity[-1] = (com_trajectory[-1] - com_trajectory[-2]) / dt
+
+            com_acceleration[1:-1] = (com_trajectory[2:] - 2 * com_trajectory[1:-1] + com_trajectory[:-2]) / (dt ** 2)
+
+        # Stability metrics (sway area, path length in horizontal plane)
+        com_horiz = com_trajectory[:, [0, 2]] if com_trajectory.shape[1] >= 3 else com_trajectory[:, :2]
+        path_length = float(np.sum(np.linalg.norm(np.diff(com_horiz, axis=0), axis=1)))
+        sway_range_x = float(np.ptp(com_horiz[:, 0])) if com_horiz.shape[1] > 0 else 0.0
+        sway_range_z = float(np.ptp(com_horiz[:, 1])) if com_horiz.shape[1] > 1 else 0.0
+        sway_area = sway_range_x * sway_range_z  # bounding-box approximation
+
+        return ComputeResult(
+            request_id=request.id,
+            domain=ComputeDomain.BIOMECHANICS,
+            operation="center_of_mass",
+            status=ComputeStatus.COMPLETED,
+            results={
+                "com_trajectory": _safe_tolist(com_trajectory),
+                "com_velocity": _safe_tolist(com_velocity),
+                "com_acceleration": _safe_tolist(com_acceleration),
+                "stability_metrics": {
+                    "path_length": path_length,
+                    "sway_area": sway_area,
+                    "sway_range_ml": sway_range_x,
+                    "sway_range_ap": sway_range_z,
+                },
+            },
+            warnings=warn_list,
+        )
+
+    # ── 10. ground_reaction_forces ─────────────────────────────────
+
+    async def _ground_reaction_forces(
+        self,
+        request: ComputeRequest,
+        params: dict[str, Any],
+        progress_callback: Callable | None,
+    ) -> ComputeResult:
+        forces = _to_array(params["forces"])  # (n, 3) — Fx, Fy, Fz
+        moments = _to_array(params["moments"]) if params.get("moments") is not None else None
+        sampling_rate = float(params["sampling_rate"])
+        body_mass = float(params["body_mass"])
+
+        if forces.ndim == 1:
+            forces = forces.reshape(-1, 1)
+
+        body_weight = body_mass * 9.81
+        n = forces.shape[0]
+        dt = 1.0 / sampling_rate
+
+        # Normalize to body weight
+        normalized_forces = forces / body_weight
+
+        # Vertical force is typically the Y component (index 1)
+        vert_idx = 1 if forces.shape[1] >= 2 else 0
+        vertical_force = forces[:, vert_idx]
+        vertical_norm = normalized_forces[:, vert_idx]
+
+        peak_vertical = float(np.nanmax(vertical_force))
+        peak_vertical_bw = float(np.nanmax(vertical_norm))
+
+        # Loading rate: max slope of vertical force in first 20% of stance
+        stance_20 = max(1, int(0.2 * n))
+        loading_segment = vertical_force[:stance_20]
+        if len(loading_segment) > 1:
+            gradients = np.diff(loading_segment) / dt
+            loading_rate = float(np.nanmax(gradients))
+        else:
+            loading_rate = 0.0
+
+        # Impulse: integral of force over time (trapezoidal rule)
+        impulse_components: list[float] = []
+        for col in range(forces.shape[1]):
+            imp = float(np.trapz(forces[:, col], dx=dt))
+            impulse_components.append(imp)
+
+        # Center of pressure (if moments available)
+        cop: list[list[float]] | None = None
+        if moments is not None and moments.ndim == 2 and moments.shape[1] >= 3:
+            cop_list: list[list[float]] = []
+            for i in range(n):
+                fz = forces[i, vert_idx] if abs(forces[i, vert_idx]) > 1.0 else float("nan")
+                # COP_x = -M_y / F_z,  COP_y = M_x / F_z (sign convention dependent)
+                if not np.isnan(fz):
+                    cop_x = -moments[i, 1] / fz
+                    cop_y = moments[i, 0] / fz
+                else:
+                    cop_x, cop_y = float("nan"), float("nan")
+                cop_list.append([float(cop_x), float(cop_y)])
+            cop = cop_list
+
+        grf_params = {
+            "peak_vertical_force_N": peak_vertical,
+            "peak_vertical_force_BW": peak_vertical_bw,
+            "loading_rate_N_per_s": loading_rate,
+            "impulse": impulse_components,
+        }
+
+        figures: list[GeneratedFigure] = []
+        time_axis = np.arange(n) * dt
+
+        def _plot_grf(fig, ax):
+            labels = ["Fx (ML)", "Fy (Vertical)", "Fz (AP)"]
+            colors = ["tab:green", "tab:blue", "tab:red"]
+            for col in range(min(forces.shape[1], 3)):
+                lbl = labels[col] if col < len(labels) else f"F{col}"
+                clr = colors[col] if col < len(colors) else None
+                ax.plot(time_axis, normalized_forces[:, col], label=lbl, color=clr, linewidth=1.2)
+            ax.set_xlabel("Time (s)")
+            ax.set_ylabel("Force (BW)")
+            ax.set_title("Ground Reaction Forces")
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+
+        grf_fig = _make_figure(_plot_grf, "Ground Reaction Forces")
+        if grf_fig is not None:
+            figures.append(grf_fig)
+
+        results: dict[str, Any] = {
+            "normalized_forces": _safe_tolist(normalized_forces),
+            "grf_parameters": grf_params,
+        }
+        if cop is not None:
+            results["center_of_pressure"] = cop
+
+        return ComputeResult(
+            request_id=request.id,
+            domain=ComputeDomain.BIOMECHANICS,
+            operation="ground_reaction_forces",
+            status=ComputeStatus.COMPLETED,
+            results=results,
+            descriptive={
+                "vertical_force_BW": DescriptiveStats.from_array(vertical_norm),
+            },
             figures=figures,
         )
