@@ -38,6 +38,14 @@ _OPERATIONS = [
     "compute_erp",
     "coherence",
     "hjorth_parameters",
+    # Cardiovascular (MATLAB equivalent)
+    "pan_tompkins_qrs",
+    "ecg_delineation",
+    "hrv_analysis",
+    "windkessel_model",
+    "arrhythmia_classification",
+    "pulse_wave_analysis",
+    "cardiac_output",
 ]
 
 # Standard EEG frequency bands (Hz)
@@ -92,8 +100,12 @@ class SignalProcessor:
 
     Dispatches operations such as EDF loading, filtering, spectral analysis,
     peak detection, artifact removal, ERP computation, coherence analysis,
-    and Hjorth parameter extraction.
+    Hjorth parameter extraction, and cardiovascular signal processing.
     """
+
+    def __init__(self) -> None:
+        from app.compute.signals.cardiac import CardiacProcessor
+        self._cardiac = CardiacProcessor()
 
     # ── Public interface ────────────────────────────────────────────
 
@@ -111,6 +123,10 @@ class SignalProcessor:
         op = request.operation
         if op not in _OPERATIONS:
             return _fail(request, f"Unknown operation: {op!r}. Available: {_OPERATIONS}")
+
+        # Delegate cardiovascular operations
+        if op in self._cardiac.OPERATIONS:
+            return await self._cardiac.execute(request, progress_callback)
 
         handler = getattr(self, f"_op_{op}", None)
         if handler is None:

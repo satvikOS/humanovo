@@ -38,9 +38,11 @@ class PharmacokineticsProcessor:
     """Pharmacokinetics and systems biology computation processor."""
 
     OPERATIONS = [
-        "solve_ode", "one_compartment", "two_compartment", "multiple_dosing",
-        "dose_optimization", "noncompartmental_analysis", "pk_fitting",
+        "solve_ode", "one_compartment", "two_compartment", "three_compartment",
+        "multiple_dosing", "dose_optimization", "noncompartmental_analysis", "pk_fitting",
         "michaelis_menten", "systems_biology", "bioequivalence",
+        "population_pk", "drug_interaction", "target_mediated_disposition",
+        "physiologically_based", "allometric_scaling",
     ]
 
     def list_operations(self) -> list[str]:
@@ -656,4 +658,630 @@ class PharmacokineticsProcessor:
                 "overall_bioequivalent": overall_be,
                 "limits": limits,
             },
+        )
+
+    # ── Three-Compartment Model ─────────────────────────────────────
+
+    async def _three_compartment(self, req: ComputeRequest, params: dict) -> ComputeResult:
+        """Three-compartment PK model with deep + shallow peripheral compartments."""
+        dose = params["dose"]
+        F = params.get("bioavailability", 1.0)
+        V1 = params["V1"]
+        V2 = params["V2"]
+        V3 = params["V3"]
+        CL = params["CL"]
+        Q2 = params["Q2"]
+        Q3 = params["Q3"]
+        ka = params.get("ka")
+        t_end = params.get("t_end", 72)
+        n_pts = params.get("n_points", 500)
+
+        def deriv(t, y):
+            if ka:
+                A, C1, C2, C3 = y
+                dAdt = -ka * A
+                inp = ka * A / V1
+            else:
+                C1, C2, C3 = y
+                inp = 0.0
+
+            dC1dt = -(CL/V1 + Q2/V1 + Q3/V1) * C1 + (Q2/V2) * C2 + (Q3/V3) * C3 + inp
+            dC2dt = (Q2/V1) * C1 - (Q2/V2) * C2
+            dC3dt = (Q3/V1) * C1 - (Q3/V3) * C3
+
+            return [dAdt, dC1dt, dC2dt, dC3dt] if ka else [dC1dt, dC2dt, dC3dt]
+
+        y0 = [dose * F, 0.0, 0.0, 0.0] if ka else [dose * F / V1, 0.0, 0.0]
+        t_eval = np.linspace(0, t_end, n_pts)
+        sol = integrate.solve_ivp(deriv, (0, t_end), y0, t_eval=t_eval, method="RK45", rtol=1e-8)
+
+        idx = 1 if ka else 0
+        C1, C2, C3 = sol.y[idx], sol.y[idx+1], sol.y[idx+2]
+        Cmax = float(np.max(C1))
+        Tmax = float(t_eval[np.argmax(C1)])
+        AUC = float(np.trapz(C1, t_eval))
+
+        # Micro-rate constants and half-lives
+        alpha = CL/V1 + Q2/V1 + Q3/V1 + Q2/V2 + Q3/V3
+        results_dict = {
+            "time": t_eval.tolist(), "central": C1.tolist(),
+            "shallow_peripheral": C2.tolist(), "deep_peripheral": C3.tolist(),
+            "Cmax": round(Cmax, 4), "Tmax": round(Tmax, 4), "AUC": round(AUC, 4),
+        }
+
+        figures = []
+        try:
+            import matplotlib
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
+            fig, ax = plt.subplots(figsize=(10, 5))
+            ax.plot(t_eval, C1, "b-", linewidth=2, label="Central")
+            ax.plot(t_eval, C2, "r--", linewidth=1.5, label="Shallow Peripheral")
+            ax.plot(t_eval, C3, "g:", linewidth=1.5, label="Deep Peripheral")
+            ax.set_xlabel("Time (h)")
+            ax.set_ylabel("Concentration (mg/L)")
+            ax.set_title("Three-Compartment PK Model")
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            figures.append(GeneratedFigure.from_matplotlib(fig, "pk_three_compartment"))
+            plt.close(fig)
+        except ImportError:
+            pass
+
+        return ComputeResult(
+            request_id=req.id, domain=ComputeDomain.PHARMACOKINETICS, operation="three_compartment",
+            results=results_dict, figures=figures,
+        )
+
+    # ── Population PK (Naïve Pooled + Two-Stage) ───────────────────
+
+    async def _population_pk(self, req: ComputeRequest, params: dict) -> ComputeResult:
+        """Population pharmacokinetics — naïve pooled and two-stage approaches."""
+        subjects = params["subjects"]  # list of {times, concentrations, dose, covariates}
+        model = params.get("model", "one_compartment")
+        route = params.get("route", "iv_bolus")
+
+        # Individual fits
+        individual_params = []
+        for subj in subjects:
+            t = np.array(subj["times"], dtype=float)
+            c = np.array(subj["concentrations"], dtype=float)
+            d = subj["dose"]
+
+            if model == "one_compartment" and route == "iv_bolus":
+                def pk(t_arr, C0, ke):
+                    return C0 * np.exp(-ke * t_arr)
+                p0 = [float(c[0]) if c[0] > 0 else d / 10, 0.1]
+                bounds = ([0, 0], [np.inf, 10])
+            elif model == "one_compartment" and route == "oral":
+                def pk(t_arr, C0, ka_p, ke):
+                    if abs(ka_p - ke) < 1e-10:
+                        return C0 * t_arr * np.exp(-ke * t_arr)
+                    return C0 * ka_p / (ka_p - ke) * (np.exp(-ke * t_arr) - np.exp(-ka_p * t_arr))
+                p0 = [float(np.max(c)) * 2, 1.0, 0.1]
+                bounds = ([0, 0, 0], [np.inf, 50, 10])
+            else:
+                continue
+
+            try:
+                popt, pcov = optimize.curve_fit(pk, t, c, p0=p0, bounds=bounds, maxfev=10000)
+                perr = np.sqrt(np.diag(pcov))
+                individual_params.append({
+                    "subject_id": subj.get("id", len(individual_params)),
+                    "parameters": [round(float(v), 6) for v in popt],
+                    "std_errors": [round(float(v), 6) for v in perr],
+                    "covariates": subj.get("covariates", {}),
+                })
+            except Exception:
+                individual_params.append({
+                    "subject_id": subj.get("id", len(individual_params)),
+                    "parameters": None, "error": "Fit failed",
+                })
+
+        # Population statistics (Two-Stage)
+        valid = [ip for ip in individual_params if ip["parameters"] is not None]
+        if valid:
+            param_matrix = np.array([ip["parameters"] for ip in valid])
+            pop_mean = param_matrix.mean(axis=0).tolist()
+            pop_sd = param_matrix.std(axis=0, ddof=1).tolist()
+            pop_cv = (param_matrix.std(axis=0, ddof=1) / (param_matrix.mean(axis=0) + 1e-10) * 100).tolist()
+
+            # Between-subject variability (omega²)
+            omega2 = np.var(np.log(param_matrix + 1e-10), axis=0, ddof=1).tolist()
+
+            # Covariate relationships (simple linear regression)
+            cov_effects = {}
+            all_covs = set()
+            for ip in valid:
+                if ip.get("covariates"):
+                    all_covs.update(ip["covariates"].keys())
+            for cov_name in all_covs:
+                cov_vals = []
+                param_vals = []
+                for ip in valid:
+                    if ip.get("covariates") and cov_name in ip["covariates"]:
+                        cov_vals.append(float(ip["covariates"][cov_name]))
+                        param_vals.append(ip["parameters"])
+                if len(cov_vals) >= 3:
+                    cov_arr = np.array(cov_vals)
+                    for pi in range(len(pop_mean)):
+                        p_arr = np.array([pv[pi] for pv in param_vals])
+                        r, p_val = sp_stats.pearsonr(cov_arr, p_arr)
+                        if abs(r) > 0.3:
+                            cov_effects[f"{cov_name}_vs_p{pi}"] = {
+                                "r": round(float(r), 4), "p": round(float(p_val), 6),
+                            }
+        else:
+            pop_mean, pop_sd, pop_cv, omega2, cov_effects = [], [], [], [], {}
+
+        return ComputeResult(
+            request_id=req.id, domain=ComputeDomain.PHARMACOKINETICS, operation="population_pk",
+            results={
+                "n_subjects": len(subjects), "n_successful_fits": len(valid),
+                "population_mean": [round(v, 6) for v in pop_mean],
+                "population_sd": [round(v, 6) for v in pop_sd],
+                "population_cv_pct": [round(v, 1) for v in pop_cv],
+                "between_subject_variability": [round(v, 6) for v in omega2],
+                "individual_parameters": individual_params,
+                "covariate_effects": cov_effects,
+                "model": model, "route": route,
+            },
+        )
+
+    # ── Drug-Drug Interaction ───────────────────────────────────────
+
+    async def _drug_interaction(self, req: ComputeRequest, params: dict) -> ComputeResult:
+        """Drug-drug interaction modeling (competitive/noncompetitive inhibition, induction)."""
+        interaction_type = params.get("type", "competitive_inhibition")
+        t_end = params.get("t_end", 48)
+        n_pts = params.get("n_points", 500)
+
+        # Substrate (victim drug) parameters
+        dose_s = params["substrate_dose"]
+        Vd_s = params["substrate_Vd"]
+        Vmax_s = params["substrate_Vmax"]  # max metabolic rate
+        Km_s = params["substrate_Km"]  # Michaelis constant
+        ka_s = params.get("substrate_ka", 1.0)
+        F_s = params.get("substrate_F", 1.0)
+
+        # Inhibitor/inducer parameters
+        dose_i = params["perpetrator_dose"]
+        Vd_i = params["perpetrator_Vd"]
+        ke_i = params["perpetrator_ke"]
+        ka_i = params.get("perpetrator_ka", 1.0)
+        F_i = params.get("perpetrator_F", 1.0)
+        Ki = params.get("Ki", 1.0)  # inhibition constant
+
+        if interaction_type == "competitive_inhibition":
+            def deriv(t, y):
+                As, Cs, Ai, Ci = y
+                dAs = -ka_s * As
+                dAi = -ka_i * Ai
+                # Competitive: apparent Km increases
+                Km_app = Km_s * (1 + Ci / Ki)
+                rate_s = (Vmax_s * Cs) / (Km_app + Cs)
+                dCs = ka_s * As / Vd_s - rate_s / Vd_s
+                dCi = ka_i * Ai / Vd_i - ke_i * Ci
+                return [dAs, dCs, dAi, dCi]
+        elif interaction_type == "noncompetitive_inhibition":
+            def deriv(t, y):
+                As, Cs, Ai, Ci = y
+                dAs = -ka_s * As
+                dAi = -ka_i * Ai
+                # Noncompetitive: Vmax decreases
+                Vmax_app = Vmax_s / (1 + Ci / Ki)
+                rate_s = (Vmax_app * Cs) / (Km_s + Cs)
+                dCs = ka_s * As / Vd_s - rate_s / Vd_s
+                dCi = ka_i * Ai / Vd_i - ke_i * Ci
+                return [dAs, dCs, dAi, dCi]
+        elif interaction_type == "induction":
+            Emax = params.get("Emax", 2.0)  # max fold induction
+            EC50 = params.get("EC50", 1.0)
+            def deriv(t, y):
+                As, Cs, Ai, Ci = y
+                dAs = -ka_s * As
+                dAi = -ka_i * Ai
+                induction_factor = 1 + Emax * Ci / (EC50 + Ci)
+                rate_s = (Vmax_s * induction_factor * Cs) / (Km_s + Cs)
+                dCs = ka_s * As / Vd_s - rate_s / Vd_s
+                dCi = ka_i * Ai / Vd_i - ke_i * Ci
+                return [dAs, dCs, dAi, dCi]
+        else:
+            return ComputeResult(
+                request_id=req.id, domain=ComputeDomain.PHARMACOKINETICS, operation="drug_interaction",
+                status=ComputeStatus.FAILED, error=f"Unknown interaction type: {interaction_type}",
+            )
+
+        y0 = [dose_s * F_s, 0.0, dose_i * F_i, 0.0]
+        t_eval = np.linspace(0, t_end, n_pts)
+        sol_ddi = integrate.solve_ivp(deriv, (0, t_end), y0, t_eval=t_eval, method="RK45", rtol=1e-8)
+
+        # Baseline (no inhibitor)
+        def deriv_base(t, y):
+            As, Cs = y
+            dAs = -ka_s * As
+            rate_s = (Vmax_s * Cs) / (Km_s + Cs)
+            dCs = ka_s * As / Vd_s - rate_s / Vd_s
+            return [dAs, dCs]
+
+        sol_base = integrate.solve_ivp(deriv_base, (0, t_end), [dose_s * F_s, 0.0], t_eval=t_eval, method="RK45", rtol=1e-8)
+
+        Cs_ddi = sol_ddi.y[1]
+        Cs_base = sol_base.y[1]
+
+        AUC_ddi = float(np.trapz(Cs_ddi, t_eval))
+        AUC_base = float(np.trapz(Cs_base, t_eval))
+        AUC_ratio = AUC_ddi / AUC_base if AUC_base > 0 else float("inf")
+        Cmax_ddi = float(np.max(Cs_ddi))
+        Cmax_base = float(np.max(Cs_base))
+        Cmax_ratio = Cmax_ddi / Cmax_base if Cmax_base > 0 else float("inf")
+
+        # Clinical significance classification
+        if AUC_ratio >= 5:
+            classification = "Strong interaction"
+        elif AUC_ratio >= 2:
+            classification = "Moderate interaction"
+        elif AUC_ratio >= 1.25:
+            classification = "Weak interaction"
+        else:
+            classification = "No significant interaction"
+
+        figures = []
+        try:
+            import matplotlib
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
+            fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+            axes[0].plot(t_eval, Cs_base, "b-", linewidth=2, label="Substrate alone")
+            axes[0].plot(t_eval, Cs_ddi, "r--", linewidth=2, label=f"+ {interaction_type}")
+            axes[0].set_xlabel("Time (h)")
+            axes[0].set_ylabel("Substrate Concentration")
+            axes[0].set_title("Drug-Drug Interaction")
+            axes[0].legend()
+            axes[0].grid(True, alpha=0.3)
+
+            axes[1].plot(t_eval, sol_ddi.y[3], "g-", linewidth=2)
+            axes[1].set_xlabel("Time (h)")
+            axes[1].set_ylabel("Perpetrator Concentration")
+            axes[1].set_title("Perpetrator Drug PK")
+            axes[1].grid(True, alpha=0.3)
+            fig.tight_layout()
+            figures.append(GeneratedFigure.from_matplotlib(fig, "drug_interaction"))
+            plt.close(fig)
+        except ImportError:
+            pass
+
+        return ComputeResult(
+            request_id=req.id, domain=ComputeDomain.PHARMACOKINETICS, operation="drug_interaction",
+            results={
+                "interaction_type": interaction_type,
+                "AUC_ratio": round(AUC_ratio, 4),
+                "Cmax_ratio": round(Cmax_ratio, 4),
+                "AUC_with_interaction": round(AUC_ddi, 4),
+                "AUC_baseline": round(AUC_base, 4),
+                "Cmax_with_interaction": round(Cmax_ddi, 4),
+                "Cmax_baseline": round(Cmax_base, 4),
+                "classification": classification,
+                "time": t_eval.tolist(),
+                "concentration_baseline": Cs_base.tolist(),
+                "concentration_with_interaction": Cs_ddi.tolist(),
+            },
+            figures=figures,
+        )
+
+    # ── Target-Mediated Drug Disposition (TMDD) ─────────────────────
+
+    async def _target_mediated_disposition(self, req: ComputeRequest, params: dict) -> ComputeResult:
+        """Full TMDD model (Mager & Jusko 2001) for biologics/monoclonal antibodies."""
+        dose = params["dose"]
+        V = params["V"]
+        kel = params["kel"]  # linear elimination rate
+        kon = params["kon"]  # binding on-rate
+        koff = params["koff"]  # binding off-rate
+        kint = params["kint"]  # internalization rate
+        R0 = params["R0"]  # baseline receptor concentration
+        ksyn = params.get("ksyn", kint * R0)  # receptor synthesis rate (steady-state default)
+        kdeg = params.get("kdeg", kint)  # receptor degradation rate
+        ka = params.get("ka")
+        F = params.get("bioavailability", 1.0)
+        t_end = params.get("t_end", 720)  # biologics have long half-lives
+        n_pts = params.get("n_points", 1000)
+
+        def deriv(t, y):
+            if ka:
+                A, L, R, LR = y
+                dA = -ka * A
+                inp = ka * A / V
+            else:
+                L, R, LR = y
+                inp = 0.0
+
+            dL = inp - kel * L - kon * L * R + koff * LR
+            dR = ksyn - kdeg * R - kon * L * R + koff * LR
+            dLR = kon * L * R - koff * LR - kint * LR
+
+            if ka:
+                return [dA, dL, dR, dLR]
+            return [dL, dR, dLR]
+
+        if ka:
+            y0 = [dose * F, 0.0, R0, 0.0]
+        else:
+            y0 = [dose * F / V, R0, 0.0]
+
+        t_eval = np.linspace(0, t_end, n_pts)
+        sol = integrate.solve_ivp(deriv, (0, t_end), y0, t_eval=t_eval, method="LSODA", rtol=1e-10, atol=1e-12)
+
+        idx = 1 if ka else 0
+        L = sol.y[idx]
+        R = sol.y[idx + 1]
+        LR = sol.y[idx + 2]
+        total_drug = L + LR
+
+        Kd = koff / kon
+        AUC = float(np.trapz(total_drug, t_eval))
+
+        figures = []
+        try:
+            import matplotlib
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
+            fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+            axes[0, 0].semilogy(t_eval, np.maximum(L, 1e-15), "b-", linewidth=1.5)
+            axes[0, 0].set_title("Free Drug (L)")
+            axes[0, 0].set_ylabel("Concentration")
+            axes[0, 1].plot(t_eval, R, "g-", linewidth=1.5)
+            axes[0, 1].set_title("Free Receptor (R)")
+            axes[1, 0].plot(t_eval, LR, "r-", linewidth=1.5)
+            axes[1, 0].set_title("Drug-Receptor Complex (LR)")
+            axes[1, 0].set_xlabel("Time (h)")
+            axes[1, 1].semilogy(t_eval, np.maximum(total_drug, 1e-15), "k-", linewidth=2)
+            axes[1, 1].set_title("Total Drug (L + LR)")
+            axes[1, 1].set_xlabel("Time (h)")
+            for ax in axes.flat:
+                ax.grid(True, alpha=0.3)
+            fig.suptitle("Target-Mediated Drug Disposition", fontsize=14)
+            fig.tight_layout()
+            figures.append(GeneratedFigure.from_matplotlib(fig, "tmdd"))
+            plt.close(fig)
+        except ImportError:
+            pass
+
+        return ComputeResult(
+            request_id=req.id, domain=ComputeDomain.PHARMACOKINETICS, operation="target_mediated_disposition",
+            results={
+                "time": t_eval.tolist(),
+                "free_drug": L.tolist(), "free_receptor": R.tolist(), "complex": LR.tolist(),
+                "total_drug": total_drug.tolist(),
+                "AUC_total": round(AUC, 4),
+                "Kd": round(Kd, 6), "R0": R0,
+                "target_occupancy_max": round(float(np.max(LR) / (R0 + 1e-15) * 100), 1),
+            },
+            figures=figures,
+        )
+
+    # ── Physiologically-Based PK (PBPK) Simplified ─────────────────
+
+    async def _physiologically_based(self, req: ComputeRequest, params: dict) -> ComputeResult:
+        """Simplified whole-body PBPK model (perfusion-limited, 7 tissue compartments)."""
+        dose = params["dose"]
+        route = params.get("route", "iv")
+        ka = params.get("ka", 1.0) if route == "oral" else None
+        F = params.get("bioavailability", 1.0)
+        BW = params.get("body_weight", 70)  # kg
+        CO = params.get("cardiac_output", 6.5)  # L/min -> L/h
+        CO_Lh = CO * 60
+
+        # Tissue volumes (fraction of BW, L) and blood flows (fraction of CO)
+        tissues = params.get("tissues", {
+            "lung":    {"V_frac": 0.0076, "Q_frac": 1.0,   "Kp": 0.5},
+            "liver":   {"V_frac": 0.026,  "Q_frac": 0.25,  "Kp": params.get("Kp_liver", 3.0)},
+            "kidney":  {"V_frac": 0.0044, "Q_frac": 0.19,  "Kp": 2.0},
+            "muscle":  {"V_frac": 0.40,   "Q_frac": 0.17,  "Kp": 1.0},
+            "adipose": {"V_frac": 0.21,   "Q_frac": 0.05,  "Kp": params.get("Kp_adipose", 0.5)},
+            "brain":   {"V_frac": 0.02,   "Q_frac": 0.12,  "Kp": params.get("Kp_brain", 0.1)},
+            "rest":    {"V_frac": 0.10,   "Q_frac": 0.22,  "Kp": 1.5},
+        })
+
+        CL_hepatic = params["hepatic_clearance"]  # L/h
+        CL_renal = params.get("renal_clearance", 0.0)
+        fu = params.get("fraction_unbound", 1.0)
+
+        # Build tissue parameters
+        tissue_names = list(tissues.keys())
+        n_tissues = len(tissue_names)
+        V_t = np.array([tissues[t]["V_frac"] * BW for t in tissue_names])
+        Q_t = np.array([tissues[t]["Q_frac"] * CO_Lh for t in tissue_names])
+        Kp = np.array([tissues[t]["Kp"] for t in tissue_names])
+
+        V_blood = 0.079 * BW  # ~5.5L for 70kg
+
+        # State: [A_gut (if oral), C_blood, C_tissue_1, ..., C_tissue_n]
+        n_states = (1 if ka else 0) + 1 + n_tissues
+        liver_idx = tissue_names.index("liver") if "liver" in tissue_names else -1
+        kidney_idx = tissue_names.index("kidney") if "kidney" in tissue_names else -1
+
+        def deriv(t, y):
+            offset = 1 if ka else 0
+            if ka:
+                A_gut = y[0]
+                C_blood = y[1]
+            else:
+                C_blood = y[0]
+            C_t = y[offset + 1:]
+
+            dydt = np.zeros(n_states)
+
+            if ka:
+                dydt[0] = -ka * A_gut  # gut absorption
+
+            # Blood compartment
+            blood_in = 0.0
+            blood_out = 0.0
+            for i in range(n_tissues):
+                # Venous blood from tissue
+                blood_in += Q_t[i] * C_t[i] / Kp[i]
+                # Arterial blood to tissue
+                blood_out += Q_t[i] * C_blood
+                # Tissue change
+                dydt[offset + 1 + i] = (Q_t[i] * C_blood - Q_t[i] * C_t[i] / Kp[i]) / V_t[i]
+                # Hepatic elimination
+                if i == liver_idx:
+                    elim = CL_hepatic * fu * C_t[i] / Kp[i]
+                    dydt[offset + 1 + i] -= elim / V_t[i]
+                # Renal elimination
+                if i == kidney_idx and CL_renal > 0:
+                    elim_r = CL_renal * fu * C_t[i] / Kp[i]
+                    dydt[offset + 1 + i] -= elim_r / V_t[i]
+
+            dydt[offset] = (blood_in - blood_out) / V_blood
+            if ka:
+                dydt[offset] += ka * A_gut / V_blood
+
+            return dydt.tolist()
+
+        y0 = np.zeros(n_states)
+        if ka:
+            y0[0] = dose * F
+        else:
+            y0[0 if not ka else 1] = dose / V_blood
+
+        t_end = params.get("t_end", 72)
+        t_eval = np.linspace(0, t_end, params.get("n_points", 500))
+        sol = integrate.solve_ivp(deriv, (0, t_end), y0, t_eval=t_eval, method="LSODA", rtol=1e-8, atol=1e-10)
+
+        offset = 1 if ka else 0
+        C_blood = sol.y[offset]
+        tissue_concs = {tissue_names[i]: sol.y[offset + 1 + i].tolist() for i in range(n_tissues)}
+
+        AUC = float(np.trapz(C_blood, t_eval))
+        Cmax = float(np.max(C_blood))
+
+        figures = []
+        try:
+            import matplotlib
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
+            fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+            axes[0].semilogy(t_eval, np.maximum(C_blood, 1e-15), "b-", linewidth=2, label="Blood")
+            for tn in ["liver", "kidney", "brain"]:
+                if tn in tissue_concs:
+                    axes[0].semilogy(t_eval, np.maximum(sol.y[offset + 1 + tissue_names.index(tn)], 1e-15), "--", linewidth=1, label=tn.capitalize())
+            axes[0].set_xlabel("Time (h)")
+            axes[0].set_ylabel("Concentration")
+            axes[0].set_title("PBPK — Plasma + Key Tissues")
+            axes[0].legend(fontsize=8)
+            axes[0].grid(True, alpha=0.3)
+
+            # Bar chart of tissue AUCs
+            tissue_aucs = {tn: float(np.trapz(sol.y[offset + 1 + i], t_eval)) for i, tn in enumerate(tissue_names)}
+            axes[1].barh(list(tissue_aucs.keys()), list(tissue_aucs.values()), color="steelblue")
+            axes[1].set_xlabel("AUC")
+            axes[1].set_title("Tissue Exposure (AUC)")
+            fig.tight_layout()
+            figures.append(GeneratedFigure.from_matplotlib(fig, "pbpk"))
+            plt.close(fig)
+        except ImportError:
+            pass
+
+        return ComputeResult(
+            request_id=req.id, domain=ComputeDomain.PHARMACOKINETICS, operation="physiologically_based",
+            results={
+                "time": t_eval.tolist(), "plasma_concentration": C_blood.tolist(),
+                "tissue_concentrations": tissue_concs,
+                "AUC_plasma": round(AUC, 4), "Cmax_plasma": round(Cmax, 4),
+                "body_weight": BW, "cardiac_output_Lh": CO_Lh,
+            },
+            figures=figures,
+        )
+
+    # ── Allometric Scaling ──────────────────────────────────────────
+
+    async def _allometric_scaling(self, req: ComputeRequest, params: dict) -> ComputeResult:
+        """Allometric scaling of PK parameters across species."""
+        species_data = params["species"]  # list of {name, body_weight, clearance, volume, half_life}
+        target_weight = params["target_body_weight"]
+        method = params.get("method", "simple")
+
+        weights = np.array([s["body_weight"] for s in species_data], dtype=float)
+        names = [s["name"] for s in species_data]
+
+        predictions = {}
+        figures_data = {}
+
+        for pk_param in ["clearance", "volume", "half_life"]:
+            values = []
+            for s in species_data:
+                if pk_param in s and s[pk_param] is not None:
+                    values.append(float(s[pk_param]))
+                else:
+                    values.append(None)
+
+            valid = [(w, v) for w, v in zip(weights, values) if v is not None]
+            if len(valid) < 2:
+                continue
+
+            w_valid = np.array([v[0] for v in valid])
+            v_valid = np.array([v[1] for v in valid])
+
+            # Log-log regression: log(Y) = log(a) + b*log(BW)
+            log_w = np.log(w_valid)
+            log_v = np.log(v_valid)
+            slope, intercept, r, p_val, se = sp_stats.linregress(log_w, log_v)
+
+            a = math.exp(intercept)
+            b = slope
+            predicted = a * target_weight ** b
+            r2 = r ** 2
+
+            # Known allometric exponents
+            expected_exp = {"clearance": 0.75, "volume": 1.0, "half_life": 0.25}
+            exp_note = f"Expected exponent ~{expected_exp.get(pk_param, '?')}, observed {b:.3f}"
+
+            predictions[pk_param] = {
+                "predicted_value": round(predicted, 4),
+                "coefficient_a": round(a, 6),
+                "exponent_b": round(b, 4),
+                "r_squared": round(r2, 4),
+                "p_value": round(float(p_val), 6),
+                "note": exp_note,
+            }
+            figures_data[pk_param] = (w_valid, v_valid, a, b)
+
+        figures = []
+        try:
+            import matplotlib
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
+            n_plots = len(figures_data)
+            if n_plots > 0:
+                fig, axes = plt.subplots(1, n_plots, figsize=(5 * n_plots, 4))
+                if n_plots == 1:
+                    axes = [axes]
+                for ax, (param_name, (ws, vs, a, b)) in zip(axes, figures_data.items()):
+                    ax.loglog(ws, vs, "ko", markersize=8)
+                    w_range = np.logspace(np.log10(ws.min() * 0.1), np.log10(max(target_weight, ws.max()) * 2), 100)
+                    ax.loglog(w_range, a * w_range ** b, "r-", linewidth=1.5)
+                    ax.loglog(target_weight, a * target_weight ** b, "r*", markersize=15)
+                    for i, name in enumerate([n for n, v in zip(names, values) if v is not None]):
+                        ax.annotate(name, (ws[i], vs[i]), fontsize=7, xytext=(5, 5), textcoords="offset points")
+                    ax.set_xlabel("Body Weight (kg)")
+                    ax.set_ylabel(param_name.replace("_", " ").title())
+                    ax.set_title(f"Allometric Scaling: {param_name}")
+                    ax.grid(True, alpha=0.3, which="both")
+                fig.tight_layout()
+                figures.append(GeneratedFigure.from_matplotlib(fig, "allometric_scaling"))
+                plt.close(fig)
+        except ImportError:
+            pass
+
+        return ComputeResult(
+            request_id=req.id, domain=ComputeDomain.PHARMACOKINETICS, operation="allometric_scaling",
+            results={
+                "predictions": predictions,
+                "target_body_weight": target_weight,
+                "n_species": len(species_data),
+                "species": names,
+            },
+            figures=figures,
         )

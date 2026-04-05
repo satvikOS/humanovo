@@ -55,6 +55,14 @@ _OPERATIONS = [
     "gait_analysis",
     "center_of_mass",
     "ground_reaction_forces",
+    # Advanced biomechanics (MATLAB equivalent)
+    "emg_processing",
+    "finite_element_bone",
+    "micro_ct_morphometry",
+    "muscle_force_estimation",
+    "body_segment_parameters",
+    "gait_events",
+    "joint_stiffness",
 ]
 
 
@@ -275,6 +283,10 @@ def _parse_c3d_binary(raw: bytes) -> dict[str, Any]:
 class BiomechanicsProcessor:
     """Domain processor for biomechanics computations."""
 
+    def __init__(self) -> None:
+        from app.compute.biomechanics.advanced import AdvancedBiomechanicsProcessor
+        self._advanced = AdvancedBiomechanicsProcessor()
+
     # ── public interface ────────────────────────────────────────────
 
     @staticmethod
@@ -287,6 +299,11 @@ class BiomechanicsProcessor:
         progress_callback: Callable[[int, int], None] | None = None,
     ) -> ComputeResult:
         op = request.operation
+
+        # Delegate advanced biomechanics operations
+        if op in self._advanced.OPERATIONS:
+            return await self._advanced.execute(request, progress_callback)
+
         params = {**request.parameters, **(request.data or {})}
 
         dispatch = {

@@ -48,6 +48,7 @@ class ComputeEngine(LoggerMixin):
         from app.compute.biomechanics import BiomechanicsProcessor
         from app.compute.pharmacokinetics import PharmacokineticsProcessor
         from app.compute.statistics import StatisticsProcessor
+        from app.compute.clinical import ClinicalProcessor
 
         self._processors = {
             ComputeDomain.IMAGING: ImagingProcessor(),
@@ -56,6 +57,7 @@ class ComputeEngine(LoggerMixin):
             ComputeDomain.BIOMECHANICS: BiomechanicsProcessor(),
             ComputeDomain.PHARMACOKINETICS: PharmacokineticsProcessor(),
             ComputeDomain.STATISTICS: StatisticsProcessor(),
+            ComputeDomain.CLINICAL: ClinicalProcessor(),
         }
 
     async def execute(

@@ -217,12 +217,13 @@ async def list_domains() -> list[DomainInfo]:
     ops = engine.list_operations()
 
     descriptions = {
-        "imaging": "Medical imaging — DICOM/NIfTI processing, segmentation, volumetrics, radiomics",
-        "electrophysiology": "Signal processing — EEG/ECG filtering, FFT, PSD, spectrograms, ERP, artifact removal",
-        "genomics": "Bioinformatics — sequence alignment, differential expression, pathway enrichment, GSEA, phylogenetics",
-        "biomechanics": "Movement science — motion capture, joint kinematics, inverse dynamics, gait analysis",
-        "pharmacokinetics": "PK/PD modeling — ODE solver, compartmental models, dosing optimization, bioequivalence",
-        "statistics": "Statistical analysis — exact tests, ANOVA, survival, bootstrap, Bayesian, multiple testing correction",
+        "imaging": "Medical imaging & neuroimaging — DICOM/NIfTI, segmentation, volumetrics, radiomics, voxel-wise GLM, HRF convolution, RFT correction, functional connectivity, atlas ROI, ICA, DCM",
+        "electrophysiology": "Signal processing & cardiovascular — EEG/ECG filtering, PSD, spectrograms, ERP, Pan-Tompkins QRS, ECG delineation, full HRV pipeline, Windkessel hemodynamics, arrhythmia classification, pulse wave analysis",
+        "genomics": "Bioinformatics & expression — sequence alignment, negative binomial RNA-seq (DESeq2-equivalent), GSEA, co-expression networks (WGCNA), clustergram, PCA/t-SNE/UMAP, gene set variation, pathway topology",
+        "biomechanics": "Movement science & musculoskeletal — motion capture, inverse dynamics, gait analysis, EMG processing, finite element bone analysis, micro-CT morphometry, muscle force estimation, joint stiffness",
+        "pharmacokinetics": "PK/PD modeling — ODE solver, compartmental models, dosing optimization, bioequivalence, Michaelis-Menten, systems biology",
+        "statistics": "Statistical analysis — exact tests, ANOVA, survival, bootstrap, Bayesian, multiple testing correction, effect sizes",
+        "clinical": "Clinical & psychiatry — linear mixed-effects models, clinical rating scales (HAM-D/PANSS/PHQ-9/GAD-7/MADRS/YMRS/CGI), HRV biomarkers, classification with ROC/AUC, factor analysis, repeated measures ANOVA, ICC, Bland-Altman, clinical trial power analysis",
     }
 
     return [
@@ -338,4 +339,12 @@ async def stats_shortcut(operation: str, params: dict[str, Any]) -> ComputeExecu
     """Shortcut for statistics operations."""
     return await execute_computation(ComputeExecuteRequest(
         domain=ComputeDomain.STATISTICS, operation=operation, parameters=params,
+    ))
+
+
+@router.post("/clinical/{operation}")
+async def clinical_shortcut(operation: str, params: dict[str, Any]) -> ComputeExecuteResponse:
+    """Shortcut for clinical/psychiatry operations."""
+    return await execute_computation(ComputeExecuteRequest(
+        domain=ComputeDomain.CLINICAL, operation=operation, parameters=params,
     ))

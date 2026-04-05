@@ -38,7 +38,15 @@ class ImagingProcessor:
         "load_dicom", "load_nifti", "filter_image", "enhance_contrast",
         "segment", "measure_volume", "morphological_ops", "extract_radiomics",
         "register_images",
+        # Neuroimaging (SPM/FSL equivalent)
+        "voxel_glm", "hrf_convolve", "rft_correction",
+        "functional_connectivity", "atlas_roi_analysis",
+        "ica_decomposition", "dcm", "brain_extraction",
     ]
+
+    def __init__(self) -> None:
+        from app.compute.imaging.neuroimaging import NeuroimagingProcessor
+        self._neuro = NeuroimagingProcessor()
 
     def list_operations(self) -> list[str]:
         return self.OPERATIONS
@@ -50,6 +58,10 @@ class ImagingProcessor:
     ) -> ComputeResult:
         op = request.operation
         params = request.parameters
+
+        # Delegate neuroimaging operations
+        if op in self._neuro.OPERATIONS:
+            return await self._neuro.execute(request, progress_callback)
 
         dispatch = {
             "load_dicom": self._load_dicom,

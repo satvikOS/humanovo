@@ -122,12 +122,24 @@ class GenomicsProcessor:
         "read_fasta", "pairwise_alignment", "multiple_alignment",
         "differential_expression", "pathway_enrichment", "gsea",
         "phylogenetic_tree", "gc_content_analysis", "codon_usage",
+        # Expression analysis (DESeq2/WGCNA equivalent)
+        "negative_binomial_test", "coexpression_network", "clustergram",
+        "dimensionality_reduction", "gene_set_variation", "volcano_plot",
+        "pathway_topology",
     ]
+
+    def __init__(self) -> None:
+        from app.compute.genomics.expression import ExpressionProcessor
+        self._expression = ExpressionProcessor()
 
     def list_operations(self) -> list[str]:
         return self.OPERATIONS
 
     async def execute(self, request: ComputeRequest, progress_callback: Callable | None = None) -> ComputeResult:
+        # Delegate expression analysis operations
+        if request.operation in self._expression.OPERATIONS:
+            return await self._expression.execute(request, progress_callback)
+
         dispatch = {
             "read_fasta": self._read_fasta,
             "pairwise_alignment": self._pairwise_alignment,

@@ -31,6 +31,7 @@ class ComputeDomain(str, Enum):
     PHARMACOKINETICS = "pharmacokinetics"
     SIMULATION = "simulation"
     STATISTICS = "statistics"
+    CLINICAL = "clinical"
 
 
 class ComputeStatus(str, Enum):
