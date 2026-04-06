@@ -1,13 +1,9 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import {
   FiUpload, FiGrid, FiSettings, FiDatabase, FiPlay, FiCpu,
-  FiChevronDown, FiChevronRight, FiX, FiCopy, FiDownload,
-  FiFile, FiAlertCircle, FiCheck, FiLoader, FiImage, FiActivity
+  FiChevronDown, FiChevronRight, FiCopy, FiDownload,
+  FiFile, FiAlertCircle, FiCheck, FiLoader
 } from 'react-icons/fi'
-import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, BarChart, Bar
-} from 'recharts'
 
 const API_BASE = (import.meta as any).env?.VITE_API_BASE_URL || ''
 const API = `${API_BASE}/api/v1/compute-engine`
@@ -68,7 +64,6 @@ export default function NumericCompute() {
   const [matrixData, setMatrixData] = useState<string[][]>([['', '', ''], ['', '', ''], ['', '', '']])
   const [matrixTarget, setMatrixTarget] = useState('')  // which param to fill
   const [parsedFile, setParsedFile] = useState<ParsedFile | null>(null)
-  const [codeInput, setCodeInput] = useState('')
   const [datasets, setDatasets] = useState<any[]>([])
   const [selectedDataset, setSelectedDataset] = useState<any>(null)
 
@@ -79,7 +74,6 @@ export default function NumericCompute() {
 
   // UI state
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['General']))
-  const [showFilePreview, setShowFilePreview] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [dragOver, setDragOver] = useState(false)
 
