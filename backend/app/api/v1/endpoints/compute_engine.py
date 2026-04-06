@@ -17,7 +17,7 @@ import time
 from typing import Any
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 from app.core.logging import get_logger
@@ -288,6 +288,149 @@ async def execute_batch(requests: list[ComputeExecuteRequest]) -> list[ComputeEx
         ))
 
     return results
+
+
+# ── File Upload & Ingestion ─────────────────────────────────────
+
+
+@router.post("/upload")
+async def upload_and_parse(file: UploadFile = File(...)) -> dict[str, Any]:
+    """Upload a file and auto-parse it into compute-ready data.
+
+    Supports: CSV, Excel, JSON, XML, Parquet, HDF5, MAT, NetCDF, NPY/NPZ,
+    EDF/BDF, WAV, DICOM, NIfTI, TIFF, PNG/JPEG, FASTA, FASTQ, VCF, C3D, TRC.
+
+    Returns parsed data with metadata, preview, shape, and column definitions.
+    """
+    if file.size and file.size > 500 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File exceeds 500MB limit")
+
+    content = await file.read()
+    filename = file.filename or "unknown"
+
+    try:
+        from app.compute.ingestion import DataIngestionEngine
+        result = await DataIngestionEngine.parse(content, filename)
+        return result
+    except ImportError:
+        raise HTTPException(status_code=501, detail="Data ingestion module not available")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"File parse error: {e}")
+        raise HTTPException(status_code=422, detail=f"Failed to parse file: {e}")
+
+
+@router.post("/upload-and-execute")
+async def upload_and_execute(
+    file: UploadFile = File(...),
+    domain: str = Form(...),
+    operation: str = Form(...),
+    parameters_json: str = Form("{}"),
+) -> ComputeExecuteResponse:
+    """Upload a file, parse it, and immediately execute a computation.
+
+    The parsed data is merged into the operation parameters automatically.
+    """
+    import json
+
+    if file.size and file.size > 500 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File exceeds 500MB limit")
+
+    content = await file.read()
+    filename = file.filename or "unknown"
+
+    try:
+        extra_params = json.loads(parameters_json)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid parameters_json")
+
+    try:
+        from app.compute.ingestion import DataIngestionEngine
+        parsed = await DataIngestionEngine.parse(content, filename)
+    except ImportError:
+        raise HTTPException(status_code=501, detail="Data ingestion module not available")
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Failed to parse file: {e}")
+
+    # Merge parsed data into parameters
+    merged_params = {**extra_params}
+    if "data" in parsed:
+        merged_params["_parsed_data"] = parsed["data"]
+    if "metadata" in parsed:
+        merged_params["_file_metadata"] = parsed["metadata"]
+
+    return await execute_computation(ComputeExecuteRequest(
+        domain=ComputeDomain(domain),
+        operation=operation,
+        parameters=merged_params,
+        data_format=DataFormat(parsed["format"]) if parsed.get("format") in [e.value for e in DataFormat] else None,
+    ))
+
+
+@router.get("/schemas")
+async def get_operation_schemas() -> dict[str, Any]:
+    """Get parameter schemas for all operations (for frontend form generation)."""
+    try:
+        from app.compute.schemas import OPERATION_SCHEMAS
+        return OPERATION_SCHEMAS
+    except ImportError:
+        return {}
+
+
+@router.get("/schemas/{domain}/{operation}")
+async def get_operation_schema(domain: str, operation: str) -> dict[str, Any]:
+    """Get parameter schema for a specific operation."""
+    try:
+        from app.compute.schemas import OPERATION_SCHEMAS
+        key = f"{domain}/{operation}"
+        if key not in OPERATION_SCHEMAS:
+            raise HTTPException(status_code=404, detail=f"No schema for {key}")
+        return OPERATION_SCHEMAS[key]
+    except ImportError:
+        raise HTTPException(status_code=501, detail="Schemas module not available")
+
+
+@router.get("/formats")
+async def list_supported_formats() -> dict[str, Any]:
+    """List all supported file formats with descriptions."""
+    return {
+        "tabular": {
+            "csv": {"extensions": [".csv"], "description": "Comma-separated values with auto-delimiter detection"},
+            "excel": {"extensions": [".xlsx", ".xls"], "description": "Microsoft Excel workbook (multi-sheet support)"},
+            "json": {"extensions": [".json"], "description": "JSON arrays/objects, nested structures flattened"},
+            "xml": {"extensions": [".xml"], "description": "XML with tabular element extraction"},
+            "parquet": {"extensions": [".parquet"], "description": "Apache Parquet columnar format"},
+        },
+        "scientific": {
+            "hdf5": {"extensions": [".h5", ".hdf5"], "description": "HDF5 hierarchical data — groups, datasets, attributes"},
+            "mat": {"extensions": [".mat"], "description": "MATLAB .mat files (v5 and v7.3/HDF5)"},
+            "netcdf": {"extensions": [".nc"], "description": "NetCDF climate/scientific data with dimensions"},
+            "npy": {"extensions": [".npy"], "description": "NumPy single array binary"},
+            "npz": {"extensions": [".npz"], "description": "NumPy compressed archive of arrays"},
+        },
+        "biomedical_signals": {
+            "edf": {"extensions": [".edf"], "description": "European Data Format — EEG/ECG/PSG multichannel signals"},
+            "bdf": {"extensions": [".bdf"], "description": "BioSemi Data Format — 24-bit resolution signals"},
+            "wav": {"extensions": [".wav"], "description": "Audio waveform — sample rate + amplitude array"},
+        },
+        "medical_imaging": {
+            "dicom": {"extensions": [".dcm", ".dicom"], "description": "DICOM — medical images with patient/study metadata"},
+            "nifti": {"extensions": [".nii", ".nii.gz"], "description": "NIfTI neuroimaging — 3D/4D volumes with affine"},
+            "tiff": {"extensions": [".tif", ".tiff"], "description": "TIFF — multi-page stacks, microscopy, micro-CT"},
+            "png": {"extensions": [".png"], "description": "PNG image — grayscale or RGB as numpy array"},
+            "jpeg": {"extensions": [".jpg", ".jpeg"], "description": "JPEG image"},
+        },
+        "genomics": {
+            "fasta": {"extensions": [".fa", ".fasta", ".fna"], "description": "FASTA sequences with headers"},
+            "fastq": {"extensions": [".fq", ".fastq"], "description": "FASTQ sequences with quality scores"},
+            "vcf": {"extensions": [".vcf"], "description": "Variant Call Format — genomic variants"},
+        },
+        "biomechanics": {
+            "c3d": {"extensions": [".c3d"], "description": "C3D motion capture — markers + analog channels"},
+            "trc": {"extensions": [".trc"], "description": "TRC marker trajectories — tab-delimited"},
+        },
+    }
 
 
 # ── Convenience Shortcuts ────────────────────────────────────────

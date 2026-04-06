@@ -38,6 +38,7 @@ import {
   FiGrid,
   FiUpload,
   FiPaperclip,
+  FiCpu,
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import { useTheme } from '../contexts/ThemeContext'
@@ -68,6 +69,7 @@ const researchNavItems = [
 const analysisNavItems = [
   { to: '/statistical-analysis', icon: FiTarget, label: 'Statistics' },
   { to: '/genomics', icon: FiHeart, label: 'Genomics' },
+  { to: '/numeric-compute', icon: FiCpu, label: 'Compute Engine' },
 ]
 
 const managementNavItems = [

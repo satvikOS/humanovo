@@ -43,30 +43,43 @@ class ComputeStatus(str, Enum):
 
 
 class DataFormat(str, Enum):
-    """Supported input data formats."""
+    """Supported input data formats — MATLAB-equivalent coverage."""
 
-    # Imaging
+    # ── Imaging ──
     DICOM = "dicom"
     NIFTI = "nifti"
     PNG = "png"
+    JPEG = "jpeg"
+    BMP = "bmp"
     TIFF = "tiff"
-    # Electrophysiology
+    # ── Electrophysiology / Audio ──
     EDF = "edf"
     BDF = "bdf"
+    WAV = "wav"
     CSV_TIMESERIES = "csv_timeseries"
-    # Genomics
+    # ── Genomics ──
     FASTA = "fasta"
     FASTQ = "fastq"
     VCF = "vcf"
     GFF = "gff"
     CSV_EXPRESSION = "csv_expression"
-    # Biomechanics
+    # ── Biomechanics ──
     C3D = "c3d"
     CSV_MOTION = "csv_motion"
     TRC = "trc"
-    # General
-    JSON = "json"
+    # ── Scientific Containers ──
+    HDF5 = "hdf5"
+    MAT = "mat"
+    NETCDF = "netcdf"
+    NPY = "npy"
+    NPZ = "npz"
+    # ── Tabular ──
     CSV = "csv"
+    JSON = "json"
+    EXCEL = "excel"
+    PARQUET = "parquet"
+    XML = "xml"
+    # ── Legacy ──
     NUMPY = "numpy"
 
 
