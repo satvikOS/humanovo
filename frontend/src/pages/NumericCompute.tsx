@@ -134,7 +134,6 @@ export default function NumericCompute() {
       }
       const parsed = await res.json()
       setParsedFile(parsed)
-      setShowFilePreview(true)
       // Auto-populate parameters from parsed data
       if (parsed.data) {
         setParamValues(prev => ({ ...prev, _parsed_data: parsed.data, _file_metadata: parsed.metadata }))
