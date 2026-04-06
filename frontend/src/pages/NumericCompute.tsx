@@ -79,8 +79,12 @@ export default function NumericCompute() {
 
   // ── Load domains and schemas on mount ──
   useEffect(() => {
-    fetch(`${API}/domains`).then(r => r.json()).then(setDomains).catch(() => {})
-    fetch(`${API}/schemas`).then(r => r.json()).then(setSchemas).catch(() => {})
+    fetch(`${API}/domains`).then(r => r.json())
+      .then(d => setDomains(Array.isArray(d) ? d : []))
+      .catch(() => {})
+    fetch(`${API}/schemas`).then(r => r.json())
+      .then(s => setSchemas(s && typeof s === 'object' && !Array.isArray(s) ? s : {}))
+      .catch(() => {})
     fetch(`${API_BASE}/api/v1/datasets`).then(r => r.json())
       .then(d => setDatasets(Array.isArray(d) ? d : d.items || []))
       .catch(() => {})
