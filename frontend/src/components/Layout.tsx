@@ -63,12 +63,12 @@ const researchNavItems = [
 { to: '/citation-manager', icon: FiList, label: 'Citations' },
   { to: '/experiment-tracker', icon: FiClipboard, label: 'Experiments' },
   { to: '/data-visualization', icon: FiBarChart2, label: 'Visualization' },
-  { to: '/simulations', icon: FiActivity, label: 'Simulations' },
 ]
 
 const analysisNavItems = [
   { to: '/statistical-analysis', icon: FiTarget, label: 'Statistics' },
   { to: '/genomics', icon: FiHeart, label: 'Genomics' },
+  { to: '/simulations', icon: FiActivity, label: 'Simulations' },
   { to: '/numeric-compute', icon: FiCpu, label: 'Compute Engine' },
 ]
 
