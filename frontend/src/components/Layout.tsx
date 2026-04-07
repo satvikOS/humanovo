@@ -66,6 +66,7 @@ const researchNavItems = [
 ]
 
 const analysisNavItems = [
+  { to: '/matlab-compute', icon: FiCpu, label: 'MATLAB Compute' },
   { to: '/statistical-analysis', icon: FiTarget, label: 'Statistics' },
   { to: '/genomics', icon: FiHeart, label: 'Genomics' },
   { to: '/simulations', icon: FiActivity, label: 'Simulations' },
