@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useMemo } from 'react'
 import {
   FiUpload, FiPlay, FiCpu, FiCopy, FiDownload,
-  FiFile, FiAlertCircle, FiCheck, FiLoader, FiChevronDown, FiChevronRight,
+  FiFile, FiAlertCircle, FiCheck, FiLoader,
   FiGrid, FiBarChart2, FiPlus, FiTrash2, FiX
 } from 'react-icons/fi'
 import {
@@ -54,7 +54,7 @@ function normCDF(z: number): number {
   const erf = 1 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-z * z)
   return 0.5 * (1 + sign * erf)
 }
-function normPDF(z: number): number { return Math.exp(-0.5 * z * z) / Math.sqrt(2 * Math.PI) }
+// normPDF available if needed: Math.exp(-0.5 * z * z) / Math.sqrt(2 * Math.PI)
 
 // t-distribution CDF approximation (via regularized incomplete beta)
 function betaInc(x: number, a: number, b: number): number {
@@ -108,7 +108,7 @@ function fCDF(f: number, d1: number, d2: number): number {
 function shapiroWilk(a: number[]): { W: number; p: number } {
   const n = a.length; if (n < 3) return { W: 1, p: 1 }
   const sorted = [...a].sort((x, y) => x - y)
-  const m = mean(sorted), ss = sum(sorted.map(v => (v - m) ** 2))
+  const m = mean(sorted)
   // Approximate expected normal order statistics
   const expected = Array.from({ length: n }, (_, i) => {
     const p = (i + 1 - 0.375) / (n + 0.25)
@@ -517,8 +517,6 @@ const DOMAINS: Domain[] = [
             stats.push({ label: `Predicted Y at X=${px}`, value: (reg.slope * px + reg.intercept).toFixed(6) })
           }
           // Line + scatter
-          const sorted = [...x.slice(0, n)].sort((a, b) => a - b)
-          const lineData = [sorted[0], sorted[sorted.length - 1]].map(xv => ({ x: xv, y: reg.slope * xv + reg.intercept }))
           return {
             results: { equation: `y = ${reg.slope.toFixed(4)}x + ${reg.intercept.toFixed(4)}`, residuals },
             statistics: stats,
@@ -533,7 +531,7 @@ const DOMAINS: Domain[] = [
         params: [
           { name: 'observed', label: 'Observed counts (matrix)', type: 'matrix', required: true, description: 'Enter as matrix — rows are categories, columns are groups' },
         ],
-        compute: (p, data) => {
+        compute: (_p, data) => {
           // Try to get matrix from data or param
           let matrix: number[][] = []
           if (data.raw.length > 0) {
@@ -1140,7 +1138,7 @@ export default function NumericCompute() {
   const [error, setError] = useState('')
 
   // UI
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['General', 'Parameters']))
+  const [_expandedGroups] = useState<Set<string>>(new Set(['General', 'Parameters'])) // reserved for future group collapsing
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [dragOver, setDragOver] = useState(false)
 
@@ -1412,7 +1410,6 @@ export default function NumericCompute() {
               </div>
               <div className="space-y-2">
                 {operation.params.map(param => {
-                  const group = param.group || 'General'
                   return (
                     <div key={param.name} className="space-y-0.5">
                       <label className="flex items-center justify-between">
