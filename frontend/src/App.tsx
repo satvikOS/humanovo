@@ -28,6 +28,7 @@ import ManuscriptManager from './pages/ManuscriptManager'
 import RegulatoryCompliance from './pages/RegulatoryCompliance'
 import ResearchImaging from './pages/ResearchImaging'
 import BiobankManager from './pages/BiobankManager'
+import NumericCompute from './pages/NumericCompute'
 
 // Project Jamison — new pages (lazy-loaded for code splitting)
 const ProjectWorkspace = lazy(() => import('./pages/ProjectWorkspace'))
@@ -130,6 +131,7 @@ function App() {
         <Route path="regulatory" element={<PageWrapper><RegulatoryCompliance /></PageWrapper>} />
         <Route path="imaging" element={<PageWrapper><ResearchImaging /></PageWrapper>} />
         <Route path="biobank" element={<PageWrapper><BiobankManager /></PageWrapper>} />
+        <Route path="numeric-compute" element={<PageWrapper><NumericCompute /></PageWrapper>} />
         {/* Project Jamison — platform-level pages */}
         {/* Pipeline Intelligence removed */}
         <Route path="dev/pgvector" element={<LazyPageWrapper><PgvectorManager /></LazyPageWrapper>} />
