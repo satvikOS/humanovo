@@ -124,17 +124,6 @@ function linearRegression(x: number[], y: number[]): { slope: number; intercept:
   const predicted = x.slice(0, n).map(v => slope * v + intercept)
   return { slope, intercept, r2, p, se_slope, predicted }
 }
-function _ranks(a: number[]): number[] {
-  const s = a.map((v, i) => ({ v, i })).sort((a, b) => a.v - b.v)
-  const r = new Array(a.length)
-  for (let i = 0; i < a.length;) {
-    let j = i; while (j < a.length - 1 && s[j + 1].v === s[i].v) j++
-    const avg = (i + j) / 2 + 1
-    for (let k = i; k <= j; k++) r[s[k].i] = avg
-    i = j + 1
-  }
-  return r
-}
 
 // ── ODE Solver (Runge-Kutta 4th order — ode45 equivalent) ───────────
 function ode45(
