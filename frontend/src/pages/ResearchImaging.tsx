@@ -12,6 +12,7 @@ import {
   FiRotateCw, FiEye, FiBarChart2,
 } from 'react-icons/fi'
 import clsx from 'clsx'
+import { parseMedicalFile, parsedToDataURL } from '../utils/medicalImaging'
 
 type Modality = 'CT' | 'MRI' | 'X-Ray' | 'Ultrasound' | 'PET' | 'Microscopy' | 'Fundus' | 'OCT' | 'Mammography' | 'Endoscopy'
 type Tool = 'pan' | 'window' | 'rect' | 'circle' | 'line' | 'point' | 'polygon' | 'measure' | 'ruler'
@@ -491,38 +492,100 @@ export default function ResearchImaging() {
     updateStudy({ ...selected, annotations: selected.annotations.filter(a => a.id !== annId) })
   }
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const [uploadError, setUploadError] = useState<string | null>(null)
+
+  const inferModality = (filename: string): Modality => {
+    const n = filename.toLowerCase()
+    if (n.includes('ct')) return 'CT'
+    if (n.includes('mr') || n.includes('mri')) return 'MRI'
+    if (n.includes('xray') || n.includes('x-ray') || n.includes('cr_')) return 'X-Ray'
+    if (n.includes('us') || n.includes('ultra')) return 'Ultrasound'
+    if (n.includes('pet')) return 'PET'
+    if (n.includes('mam')) return 'Mammography'
+    if (n.includes('oct')) return 'OCT'
+    if (n.includes('fundus') || n.includes('retin')) return 'Fundus'
+    if (n.includes('micro') || n.includes('histo')) return 'Microscopy'
+    if (n.includes('endo')) return 'Endoscopy'
+    return 'CT'
+  }
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
     if (!files || files.length === 0) return
-    Array.from(files).forEach(file => {
-      const reader = new FileReader()
-      reader.onload = (ev) => {
-        const dataUrl = ev.target?.result as string
-        const img = new Image()
-        img.onload = () => {
+    setUploadError(null)
+
+    for (const file of Array.from(files)) {
+      try {
+        // Try the medical-format parser first (DICOM, NIfTI, TIFF)
+        const parsed = await parseMedicalFile(file)
+        if (parsed) {
+          const dataUrl = parsedToDataURL(parsed)
+          const modality = parsed.meta.modality
+            ? (parsed.meta.modality as Modality)
+            : inferModality(file.name)
+          const validModality: Modality = (MODALITIES.find(m => m.id === modality)?.id) || inferModality(file.name)
           const study: Study = {
             id: crypto.randomUUID(),
             title: file.name.replace(/\.[^.]+$/, ''),
-            modality: 'CT',
+            modality: validModality,
             bodyPart: '',
             patientId: '',
             acquiredAt: new Date().toISOString(),
             imageData: dataUrl,
-            width: img.width,
-            height: img.height,
-            windowCenter: 128,
-            windowWidth: 256,
+            width: parsed.width,
+            height: parsed.height,
+            windowCenter: parsed.meta.windowCenter ?? 128,
+            windowWidth: parsed.meta.windowWidth ?? 256,
             filter: 'none',
             annotations: [],
-            notes: '',
+            notes: parsed.meta.format === 'dicom'
+              ? `Loaded from DICOM (${parsed.width}×${parsed.height})`
+              : parsed.meta.format === 'nifti'
+                ? `NIfTI volume, ${parsed.meta.slices ?? 1} slice${(parsed.meta.slices ?? 1) > 1 ? 's' : ''}, showing slice ${parsed.meta.sliceIndex ?? 0}`
+                : `Loaded from TIFF (${parsed.meta.bitsPerSample ?? 8}-bit)`,
           }
           setStudies(prev => [study, ...prev])
           setSelectedId(study.id)
+          continue
         }
-        img.src = dataUrl
+
+        // Fall through to native image loader for JPEG/PNG/WebP/BMP/GIF/SVG
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onload = () => resolve(reader.result as string)
+          reader.onerror = () => reject(new Error('Unable to read file'))
+          reader.readAsDataURL(file)
+        })
+        const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+          const el = new Image()
+          el.onload = () => resolve(el)
+          el.onerror = () => reject(new Error(`"${file.name}" is not a recognized image format`))
+          el.src = dataUrl
+        })
+        const study: Study = {
+          id: crypto.randomUUID(),
+          title: file.name.replace(/\.[^.]+$/, ''),
+          modality: inferModality(file.name),
+          bodyPart: '',
+          patientId: '',
+          acquiredAt: new Date().toISOString(),
+          imageData: dataUrl,
+          width: img.width,
+          height: img.height,
+          windowCenter: 128,
+          windowWidth: 256,
+          filter: 'none',
+          annotations: [],
+          notes: '',
+        }
+        setStudies(prev => [study, ...prev])
+        setSelectedId(study.id)
+      } catch (err: any) {
+        setUploadError(err?.message || `Failed to load "${file.name}"`)
       }
-      reader.readAsDataURL(file)
-    })
+    }
+    // Reset the input so the same file can be re-uploaded after an error
+    if (e.target) e.target.value = ''
   }
 
   // Compute analysis stats for selected
@@ -591,7 +654,7 @@ export default function ResearchImaging() {
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*"
+              accept=".jpg,.jpeg,.png,.webp,.bmp,.gif,.svg,.tif,.tiff,.dcm,.dicom,.nii,image/jpeg,image/png,image/webp,image/bmp,image/gif,image/svg+xml,image/tiff,application/dicom"
               multiple
               onChange={handleFileUpload}
               style={{ display: 'none' }}
@@ -618,6 +681,31 @@ export default function ResearchImaging() {
             <option value="all">All modalities</option>
             {MODALITIES.map(m => <option key={m.id} value={m.id}>{m.id}</option>)}
           </select>
+
+          {uploadError && (
+            <div
+              className="mt-2 px-2 py-1.5 rounded-md text-[11px] flex items-start gap-1.5"
+              style={{
+                background: 'rgba(239, 68, 68, 0.08)',
+                border: '1px solid rgba(239, 68, 68, 0.25)',
+                color: 'var(--color-error)',
+              }}
+            >
+              <FiX className="mt-[1px] flex-shrink-0" />
+              <span className="flex-1 break-words">{uploadError}</span>
+              <button
+                onClick={() => setUploadError(null)}
+                className="text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                title="Dismiss"
+              >
+                ×
+              </button>
+            </div>
+          )}
+
+          <div className="mt-2 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+            Supported: JPEG, PNG, WebP, BMP, GIF, SVG, TIFF, DICOM (.dcm), NIfTI (.nii)
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
