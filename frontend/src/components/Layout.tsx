@@ -33,7 +33,6 @@ import {
   FiImage,
   FiShield,
   FiPackage,
-  FiTarget,
   FiHeart,
   FiGrid,
   FiUpload,
@@ -66,21 +65,18 @@ const researchNavItems = [
 ]
 
 const analysisNavItems = [
-  { to: '/matlab-compute', icon: FiCpu, label: 'MATLAB Compute' },
-  { to: '/statistical-analysis', icon: FiTarget, label: 'Statistics' },
+  { to: '/compute-lab', icon: FiCpu, label: 'Compute Lab' },
   { to: '/genomics', icon: FiHeart, label: 'Genomics' },
-  { to: '/simulations', icon: FiActivity, label: 'Simulations' },
-  { to: '/numeric-compute', icon: FiCpu, label: 'Compute Engine' },
+  { to: '/imaging', icon: FiImage, label: 'Imaging' },
 ]
 
 const managementNavItems = [
-  { to: '/data-manager', icon: FiDatabase, label: 'Data Manager', comingSoon: true },
+  { to: '/data-manager', icon: FiDatabase, label: 'Data Manager' },
   { to: '/clinical-trials', icon: FiClipboard, label: 'Clinical Trials', comingSoon: true },
   { to: '/manuscripts', icon: FiFileText, label: 'Manuscripts', comingSoon: true },
   { to: '/biobank', icon: FiPackage, label: 'Biobank', comingSoon: true },
   { to: '/collaboration', icon: FiGrid, label: 'Collaboration', comingSoon: true },
   { to: '/regulatory', icon: FiShield, label: 'Regulatory', comingSoon: true },
-  { to: '/imaging', icon: FiImage, label: 'Imaging', comingSoon: true },
 ]
 
 function TabIcon({ type }: { type: WorkspaceTab['type'] }) {
@@ -161,7 +157,7 @@ function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
     { label: 'Go to Projects', icon: FiFolder, category: 'Navigation', action: () => { navigate('/projects'); onClose() } },
     { label: 'Go to Evidence', icon: FiDatabase, category: 'Navigation', action: () => { navigate('/evidence'); onClose() } },
     { label: 'Go to Discovery', icon: FiActivity, category: 'Navigation', action: () => { navigate('/agents'); onClose() } },
-    { label: 'Go to Simulations', icon: FiTrendingUp, category: 'Navigation', action: () => { navigate('/simulations'); onClose() } },
+    { label: 'Go to Compute Lab', icon: FiTrendingUp, category: 'Navigation', action: () => { navigate('/compute-lab'); onClose() } },
     { label: 'Go to Notebook', icon: FiBook, category: 'Navigation', action: () => { navigate('/notebook'); onClose() } },
     { label: 'Go to Search', icon: FiSearch, category: 'Navigation', action: () => { navigate('/search'); onClose() } },
     { label: 'Go to Timeline', icon: FiClock, category: 'Navigation', action: () => { navigate('/timeline'); onClose() } },
@@ -194,7 +190,7 @@ function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
             if (a.type === 'project') navigate(`/projects`)
             else if (a.type === 'hypothesis') navigate(`/agents`)
             else if (a.type === 'notebook') navigate(`/notebook`)
-            else if (a.type === 'simulation') navigate(`/simulations`)
+            else if (a.type === 'simulation') navigate(`/compute-lab`)
             else navigate(`/search?q=${encodeURIComponent(a.title)}`)
             onClose()
           },
@@ -213,7 +209,7 @@ function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
           icon: FiTrendingUp,
           description: `Monte Carlo · ${s.simulationType}`,
           category: 'Results',
-          action: () => { navigate('/simulations?tab=history'); onClose() },
+          action: () => { navigate('/compute-lab'); onClose() },
         })
       }
     }
@@ -653,8 +649,8 @@ function ConstantChat() {
         [/discover|hypothes/i, 'Discovery', 'Open **Discovery** in the sidebar. Enter a disease or research area, then click "Start" to generate AI-powered hypotheses.'],
         [/workbench|graph|knowledge/i, 'Workbench', 'Open the **Workbench** from the sidebar. Drag biological structures from the library onto the canvas and connect them to build knowledge graphs.'],
         [/notebook|note/i, 'Notebook', 'Go to **Notebook** in the sidebar under Tools. You can create pages using templates (research notes, experiment logs, protocols) and write in Markdown.'],
-        [/simulat/i, 'Simulations', 'Head to **Simulations** in the sidebar under Tools. You can run Monte Carlo simulations to test hypothesis robustness.'],
-        [/statistic|t-test|anova|regression/i, 'Statistics', 'Go to **Statistics** under Analysis in the sidebar. It has tabs for descriptive stats, hypothesis testing, regression, survival analysis, and sample size calculation.'],
+        [/simulat/i, 'Compute Lab', 'Head to **Compute Lab** in the sidebar under Analysis. It includes Monte Carlo simulations, equation plotter, and 70+ one-click presets.'],
+        [/statistic|t-test|anova|regression/i, 'Compute Lab', 'Go to **Compute Lab** under Analysis in the sidebar. The Presets tab has descriptive stats, t-tests, ANOVA, regression, survival analysis, sample size calculation, and more.'],
         [/genom|pathway|gsea|variant/i, 'Genomics', 'Open **Genomics** under Analysis. You can run pathway enrichment, GSEA, variant annotation, and biomarker discovery.'],
         [/timeline|activity|history/i, 'Timeline', 'Check the **Timeline** in the sidebar under Tools to see your complete research activity history.'],
         [/search/i, 'Search', 'Use **Search** in the sidebar or press **Cmd+K** to search across all your projects, hypotheses, and papers.'],
@@ -737,9 +733,9 @@ function ConstantChat() {
 
     if (/simulat/i.test(q)) {
       if (totalSimulations > 0) {
-        return `You have **${totalSimulations}** simulation${totalSimulations > 1 ? 's' : ''}. Head to the **Simulations** page in the sidebar to view results or run new ones.`
+        return `You have **${totalSimulations}** simulation${totalSimulations > 1 ? 's' : ''}. Head to the **Compute Lab → Monte Carlo** tab in the sidebar to view results or run new ones.`
       }
-      return 'No simulations yet. Go to **Simulations** in the sidebar to run Monte Carlo simulations on your hypotheses — they help validate robustness and sensitivity.'
+      return 'No simulations yet. Go to **Compute Lab** in the sidebar and pick the Monte Carlo tab to run stochastic simulations on your hypotheses.'
     }
 
     if (/how many|count|total|number|overview|summary|status/i.test(q)) {
@@ -1079,19 +1075,18 @@ export default function Layout() {
     if (path === '/agents') return 'Discovery'
     if (path === '/hypotheses') return 'Hypotheses'
     if (path.startsWith('/hypotheses/')) return 'Hypothesis Detail'
-    if (path === '/simulations') return 'Simulations'
+    if (path === '/compute-lab') return 'Compute Lab'
+    if (path === '/simulations' || path === '/statistical-analysis' || path === '/numeric-compute' || path === '/matlab-compute') return 'Compute Lab'
     if (path === '/workbench') return 'Workbench'
     if (path === '/anatomy') return '3D Anatomy'
     if (path === '/notebook') return 'Notebook'
     if (path === '/timeline') return 'Timeline'
     if (path === '/search') return 'Search'
     if (path === '/settings') return 'Settings'
-    if (path === '/simulations') return 'Simulations'
     if (path === '/literature-review') return 'Literature Review'
     if (path === '/citation-manager') return 'Citation Manager'
     if (path === '/experiment-tracker') return 'Experiment Tracker'
     if (path === '/data-visualization') return 'Data Visualization'
-    if (path === '/statistical-analysis') return 'Statistical Analysis'
     if (path === '/data-manager') return 'Data Manager'
     if (path === '/collaboration') return 'Collaboration'
 if (path === '/clinical-trials') return 'Clinical Trials'
