@@ -2,9 +2,9 @@ import { useState, useRef, useCallback, useMemo } from 'react'
 import {
   FiPlay, FiCpu, FiCopy, FiDownload, FiSearch,
   FiCheck, FiLoader, FiBarChart2, FiChevronRight,
-  FiAlertCircle, FiCode, FiGrid, FiUpload, FiX,
+  FiAlertCircle, FiCode, FiGrid,
   FiTarget, FiActivity, FiHeart, FiZap, FiTrendingUp,
-  FiFilter, FiLayers, FiBox
+  FiLayers
 } from 'react-icons/fi'
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -124,7 +124,7 @@ function linearRegression(x: number[], y: number[]): { slope: number; intercept:
   const predicted = x.slice(0, n).map(v => slope * v + intercept)
   return { slope, intercept, r2, p, se_slope, predicted }
 }
-function ranks(a: number[]): number[] {
+function _ranks(a: number[]): number[] {
   const s = a.map((v, i) => ({ v, i })).sort((a, b) => a.v - b.v)
   const r = new Array(a.length)
   for (let i = 0; i < a.length;) {
@@ -686,7 +686,6 @@ const PRESETS: Preset[] = [
     }
     const N = allData.length, k = groups.length
     let H = 0
-    let idx = 0
     for (let gi = 0; gi < k; gi++) {
       const ni = groups[gi].length
       let rankSum = 0
@@ -879,9 +878,9 @@ const PRESETS: Preset[] = [
       b0 += lr * db0 / n; b1 += lr * db1 / n
     }
     const probs = x.slice(0, n).map(v => 1 / (1 + Math.exp(-(b0 + b1 * v))))
-    const preds = probs.map(p => p >= 0.5 ? 1 : 0)
-    const accuracy = preds.reduce((s, v, i) => s + (v === y[i] ? 1 : 0), 0) / n
-    const logLikelihood = y.slice(0, n).reduce((s, yi, i) => s + yi * Math.log(probs[i] + 1e-10) + (1 - yi) * Math.log(1 - probs[i] + 1e-10), 0)
+    const preds = probs.map(pp => pp >= 0.5 ? 1 : 0)
+    const accuracy = preds.reduce((s: number, v: number, i: number) => s + (v === y[i] ? 1 : 0), 0) / n
+    const logLikelihood = (y.slice(0, n) as number[]).reduce((s: number, yi: number, i: number) => s + yi * Math.log(probs[i] + 1e-10) + (1 - yi) * Math.log(1 - probs[i] + 1e-10), 0)
     return {
       statistics: [
         { label: 'Intercept (β₀)', value: b0.toFixed(6) }, { label: 'Slope (β₁)', value: b1.toFixed(6) },
@@ -918,7 +917,7 @@ const PRESETS: Preset[] = [
         ...result.explained.map((v, i) => ({ label: `Variance Explained PC${i + 1}`, value: v.toFixed(2) + '%' })),
         { label: 'Total Variance Explained', value: sum(result.explained).toFixed(2) + '%' },
       ],
-      chartData: result.scores.map((s, i) => ({ x: s[0] || 0, y: s[1] || 0 })),
+      chartData: result.scores.map((s) => ({ x: s[0] || 0, y: s[1] || 0 })),
       chartType: 'scatter' as const, chartTitle: 'PCA Scores (PC1 vs PC2)', xLabel: 'PC1', yLabel: 'PC2',
     }
   }
@@ -1268,7 +1267,7 @@ const PRESETS: Preset[] = [
       if (phase > 0.35 && phase < 0.5) v = 0.2 * Math.sin((phase - 0.35) / 0.15 * Math.PI) // T wave
       return v + 0.05 * (Math.random() - 0.5)
     })
-    const { indices, heights } = findPeaks(ecg, 0.4, Math.floor(fs * 0.4))
+    const { indices } = findPeaks(ecg, 0.4, Math.floor(fs * 0.4))
     const rrIntervals = indices.slice(1).map((v, i) => (v - indices[i]) / fs)
     const computedHR = rrIntervals.length ? 60 / mean(rrIntervals) : 0
     const hrv = rrIntervals.length > 1 ? std(rrIntervals) * 1000 : 0 // SDNN in ms
@@ -1569,7 +1568,7 @@ const PRESETS: Preset[] = [
     const L = parseInt(p.levels) || 8, sz = 30
     // Generate synthetic texture (two regions)
     const img = Array.from({ length: sz * sz }, (_, i) => {
-      const x = i % sz, y = Math.floor(i / sz)
+      const x = i % sz
       if (x < sz / 2) return Math.floor(Math.random() * L * 0.5)  // smooth
       return Math.floor(Math.random() * L)  // rough
     })
@@ -2693,7 +2692,6 @@ const PRESETS: Preset[] = [
     let nAtRisk = n, S = 1.0
     const uniqueTimes = [...new Set(data.filter(d => d.e === 1).map(d => d.t))].sort((a, b) => a - b)
     for (const t of uniqueTimes) {
-      const censored = data.filter(d => d.t < t && d.e === 0).length
       const events_at_t = data.filter(d => d.t === t && d.e === 1).length
       nAtRisk = data.filter(d => d.t >= t).length
       S *= (1 - events_at_t / nAtRisk)
@@ -2850,10 +2848,10 @@ const PRESETS: Preset[] = [
       }
       return votes1 > votes0 ? 1 : 0
     })
-    const accuracy = predictions.reduce((s, pred, i) => s + (pred === data[i].y ? 1 : 0), 0) / nSamp
-    const tp = predictions.reduce((s, pred, i) => s + (pred === 1 && data[i].y === 1 ? 1 : 0), 0)
-    const fp = predictions.reduce((s, pred, i) => s + (pred === 1 && data[i].y === 0 ? 1 : 0), 0)
-    const fn = predictions.reduce((s, pred, i) => s + (pred === 0 && data[i].y === 1 ? 1 : 0), 0)
+    const accuracy = predictions.reduce<number>((s, pred, i) => s + (pred === data[i].y ? 1 : 0), 0) / nSamp
+    const tp = predictions.reduce<number>((s, pred, i) => s + (pred === 1 && data[i].y === 1 ? 1 : 0), 0)
+    const fp = predictions.reduce<number>((s, pred, i) => s + (pred === 1 && data[i].y === 0 ? 1 : 0), 0)
+    const fn = predictions.reduce<number>((s, pred, i) => s + (pred === 0 && data[i].y === 1 ? 1 : 0), 0)
     const precision = tp / (tp + fp || 1), recall = tp / (tp + fn || 1)
     return {
       statistics: [
@@ -3199,11 +3197,10 @@ export default function MatlabCompute() {
         {/* ──── LEFT SIDEBAR: Toolbox Categories ──── */}
         <div className="w-48 flex-shrink-0 flex flex-col gap-1 overflow-y-auto">
           <button
-            className={clsx('text-left text-xs px-3 py-2 rounded-lg transition-all', !selectedToolbox && 'ring-1')}
+            className={clsx('text-left text-xs px-3 py-2 rounded-lg transition-all', !selectedToolbox && 'ring-1 ring-blue-500')}
             style={{
               background: !selectedToolbox ? 'rgba(59,130,246,0.15)' : 'var(--glass-bg)',
               color: !selectedToolbox ? 'var(--color-accent-blue)' : 'var(--color-text-secondary)',
-              ringColor: !selectedToolbox ? 'var(--color-accent-blue)' : undefined,
             }}
             onClick={() => { setSelectedToolbox(null); setSelectedPreset(null); setResult(null) }}
           >
@@ -3223,7 +3220,7 @@ export default function MatlabCompute() {
                 style={{
                   background: active ? `${cat.color}20` : 'var(--glass-bg)',
                   color: active ? cat.color : 'var(--color-text-secondary)',
-                  ringColor: active ? cat.color : undefined,
+                  outlineColor: active ? cat.color : undefined,
                 }}
                 onClick={() => { setSelectedToolbox(cat.id); setSelectedPreset(null); setResult(null) }}
               >
