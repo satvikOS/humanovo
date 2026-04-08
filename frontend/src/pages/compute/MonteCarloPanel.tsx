@@ -385,67 +385,73 @@ const styles: Record<string, React.CSSProperties> = {
   container: {
     display: 'flex',
     flexDirection: 'column',
-    gap: 24,
-    padding: 24,
+    gap: 20,
+    padding: '20px 24px 32px',
     color: 'var(--color-text)',
+    height: '100%',
+    overflowY: 'auto',
+    boxSizing: 'border-box',
   },
   heading: {
-    fontSize: 22,
-    fontWeight: 700,
+    fontSize: 16,
+    fontWeight: 600,
     margin: 0,
+    letterSpacing: '-0.01em',
   },
   subtitle: {
-    fontSize: 13,
+    fontSize: 12,
     color: 'var(--color-text-muted)',
-    margin: 0,
+    margin: '2px 0 0',
   },
   grid3x2: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(3, 1fr)',
-    gap: 12,
+    gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
+    gap: 8,
   },
   card: {
     background: 'var(--glass-bg)',
     border: '1px solid var(--glass-border)',
-    borderRadius: 10,
-    padding: '14px 16px',
+    borderRadius: 8,
+    padding: '10px 12px',
     cursor: 'pointer',
-    transition: 'border-color 0.2s, box-shadow 0.2s',
+    transition: 'border-color 0.15s, background 0.15s',
   },
   cardSelected: {
     borderColor: 'var(--color-accent-blue)',
-    boxShadow: '0 0 0 2px var(--color-accent-blue)',
+    background: 'rgba(59, 130, 246, 0.08)',
   },
   cardName: {
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: 600,
     display: 'flex',
     alignItems: 'center',
-    gap: 8,
-    marginBottom: 4,
+    gap: 6,
+    marginBottom: 2,
+    color: 'var(--color-text)',
   },
   cardDesc: {
-    fontSize: 12,
+    fontSize: 11,
     color: 'var(--color-text-muted)',
-    lineHeight: 1.4,
+    lineHeight: 1.35,
   },
   columns: {
     display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
-    gap: 24,
+    gridTemplateColumns: 'minmax(280px, 1fr) minmax(320px, 1.4fr)',
+    gap: 16,
   },
   panel: {
     background: 'var(--glass-bg)',
     border: '1px solid var(--glass-border)',
-    borderRadius: 10,
-    padding: 20,
+    borderRadius: 8,
+    padding: 16,
     display: 'flex',
     flexDirection: 'column' as const,
-    gap: 16,
+    gap: 14,
+    minWidth: 0,
   },
   label: {
-    fontSize: 12,
-    fontWeight: 600,
+    fontSize: 11,
+    fontWeight: 500,
     color: 'var(--color-text-muted)',
     marginBottom: 4,
   },
@@ -454,53 +460,55 @@ const styles: Record<string, React.CSSProperties> = {
     accentColor: 'var(--color-accent-blue)',
   },
   input: {
-    width: 72,
+    width: 80,
     padding: '4px 8px',
     borderRadius: 6,
     border: '1px solid var(--glass-border)',
-    background: 'var(--glass-bg)',
+    background: 'var(--color-bg)',
     color: 'var(--color-text)',
-    fontSize: 13,
+    fontSize: 12,
     textAlign: 'right' as const,
+    outline: 'none',
   },
   runBtn: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    padding: '10px 0',
-    borderRadius: 8,
+    padding: '9px 0',
+    borderRadius: 6,
     border: 'none',
     background: 'var(--color-accent-blue)',
     color: '#fff',
     fontWeight: 600,
-    fontSize: 14,
+    fontSize: 12,
     cursor: 'pointer',
+    marginTop: 'auto',
   },
   statsTable: {
     width: '100%',
-    fontSize: 13,
+    fontSize: 12,
     borderCollapse: 'collapse' as const,
   },
   td: {
-    padding: '6px 10px',
+    padding: '6px 8px',
     borderBottom: '1px solid var(--glass-border)',
   },
   exportRow: {
     display: 'flex',
-    gap: 10,
+    gap: 8,
     flexWrap: 'wrap' as const,
   },
   exportBtn: {
     display: 'flex',
     alignItems: 'center',
     gap: 6,
-    padding: '8px 14px',
-    borderRadius: 8,
+    padding: '7px 12px',
+    borderRadius: 6,
     border: '1px solid var(--glass-border)',
     background: 'var(--glass-bg)',
-    color: 'var(--color-text)',
-    fontSize: 13,
+    color: 'var(--color-text-secondary)',
+    fontSize: 11,
     cursor: 'pointer',
     fontWeight: 500,
   },
@@ -620,11 +628,11 @@ export default function MonteCarloPanel() {
       <div>
         <h2 style={styles.heading}>Monte Carlo Simulations</h2>
         <p style={styles.subtitle}>
-          Select a stochastic simulation, configure parameters, and explore the output distribution.
+          Select a model, configure parameters, and inspect the output distribution.
         </p>
       </div>
 
-      {/* Simulation selector - 3x2 grid */}
+      {/* Simulation selector */}
       <div style={styles.grid3x2}>
         {SIMULATIONS.map((sim) => (
           <div
@@ -720,7 +728,7 @@ export default function MonteCarloPanel() {
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Results</h3>
 
           {!results && (
-            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-muted)', fontSize: 14 }}>
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-muted)', fontSize: 12, minHeight: 180 }}>
               Configure parameters and run a simulation to see results.
             </div>
           )}
