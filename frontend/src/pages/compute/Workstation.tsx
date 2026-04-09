@@ -3762,22 +3762,33 @@ export default function Workstation() {
             </div>
           )}
           <div style={styles.editorBody}>
-            <div style={styles.editorGutterClip} aria-hidden>
+            <div style={styles.editorGutterClip}>
               <div ref={gutterRef} style={styles.editorGutterNumbers}>
                 {Array.from({ length: lineCount }, (_, i) => {
                   const n = i + 1
                   const isErr = errorLine === n
                   const isSec = sectionStartSet.has(n) && n !== 1
+                  const isCur = cursor.line === n
                   return (
                     <div
                       key={n}
+                      onClick={() => jumpToLine(n)}
+                      role="button"
+                      tabIndex={-1}
                       style={{
                         height: '1.6em',
-                        color: isErr ? 'var(--color-error)' : isSec ? 'var(--color-text)' : undefined,
-                        fontWeight: isErr || isSec ? 600 : undefined,
+                        cursor: 'pointer',
+                        color: isErr ? 'var(--color-error)'
+                          : isCur ? 'var(--color-text)'
+                          : isSec ? 'var(--color-text)' : undefined,
+                        fontWeight: isErr || isSec || isCur ? 600 : undefined,
                         borderTop: isSec ? '1px solid var(--color-border-strong)' : undefined,
                       }}
-                      title={isSec ? (sections.names[n] ? `Section: ${sections.names[n]}` : 'Section') : undefined}
+                      title={
+                        isSec
+                          ? (sections.names[n] ? `Section: ${sections.names[n]} — click to jump` : 'Section — click to jump')
+                          : `Line ${n} — click to jump`
+                      }
                     >
                       {isErr ? '● ' + n : n}
                     </div>
