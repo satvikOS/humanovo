@@ -4189,6 +4189,9 @@ export default function Workstation() {
                         gap: 6,
                       }}>
                         <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{v.summary}</span>
+                        {v.value.kind === 'mat' && (v.value.rows === 1 || v.value.cols === 1) && v.value.data.length >= 2 && (
+                          <Sparkline data={v.value.data} />
+                        )}
                         <button
                           style={styles.varAction}
                           onClick={e => { e.stopPropagation(); insertVariableAtCaret(v.name) }}
@@ -4745,6 +4748,38 @@ function PlotView({ plot, opts = DEFAULT_PLOT_OPTS }: { plot: PlotSpec | null; o
 // 20×20), scalars/strings/functions are shown inline.
 const VAR_MAX_ROWS = 20
 const VAR_MAX_COLS = 20
+
+// Tiny inline line chart used as a thumbnail preview for vector-shaped
+// workspace variables. Downsampled to at most 48 points so very long
+// vectors still render instantly, and rendered as a plain SVG path so
+// it inherits the current text colour without a second colour token.
+function Sparkline({ data, width = 64, height = 16 }: { data: Float64Array; width?: number; height?: number }) {
+  const n = data.length
+  if (n < 2) return null
+  const maxPts = 48
+  const step = n > maxPts ? Math.ceil(n / maxPts) : 1
+  const pts: number[] = []
+  for (let i = 0; i < n; i += step) pts.push(data[i])
+  // Always include the final sample so the line ends at the real last value.
+  if ((n - 1) % step !== 0) pts.push(data[n - 1])
+  let min = Infinity, max = -Infinity
+  for (const v of pts) { if (Number.isFinite(v)) { if (v < min) min = v; if (v > max) max = v } }
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return null
+  const pad = 1
+  const span = max - min || 1
+  const w = width - pad * 2
+  const h = height - pad * 2
+  const path = pts.map((v, i) => {
+    const x = pad + (pts.length === 1 ? w / 2 : (i / (pts.length - 1)) * w)
+    const y = pad + (1 - (v - min) / span) * h
+    return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`
+  }).join(' ')
+  return (
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ flexShrink: 0, opacity: 0.75 }} aria-hidden="true">
+      <path d={path} fill="none" stroke="currentColor" strokeWidth={1} strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
+  )
+}
 
 function VarExpandView({ value }: { value: MValue }) {
   switch (value.kind) {
