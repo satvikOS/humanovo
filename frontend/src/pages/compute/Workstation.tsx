@@ -660,6 +660,24 @@ export default function Workstation() {
   // Null when the user isn't selecting any text.
   const [selectionInfo, setSelectionInfo] = useState<{ chars: number; lines: number } | null>(null)
   const [lastRunMs, setLastRunMs] = useState<number | null>(null)
+  // Session elapsed time — ticks once per minute so the status bar can
+  // show how long this Workstation tab has been open. The ref captures
+  // the mount time exactly once; `sessionTick` forces a re-render each
+  // minute, with the label derived inline from the delta at render time.
+  const sessionStartedAtRef = useRef<number>(Date.now())
+  const [sessionTick, setSessionTick] = useState(0)
+  useEffect(() => {
+    const id = window.setInterval(() => setSessionTick(t => t + 1), 60_000)
+    return () => window.clearInterval(id)
+  }, [])
+  const sessionElapsedLabel = (() => {
+    void sessionTick // force re-read on each tick
+    const mins = Math.floor((Date.now() - sessionStartedAtRef.current) / 60_000)
+    if (mins < 1) return 'session <1m'
+    if (mins < 60) return `session ${mins}m`
+    const h = Math.floor(mins / 60), m = mins % 60
+    return `session ${h}h ${m}m`
+  })()
 
   // Editor appearance prefs — font size (clamped) and soft word wrap.
   // Persisted to localStorage so the user's choice survives a reload.
@@ -5082,7 +5100,14 @@ export default function Workstation() {
         </span>
         <span>·</span>
         <span>{plots.length} figure{plots.length === 1 ? '' : 's'}</span>
-        <span style={{ marginLeft: 'auto' }}>
+        <span
+          style={{ marginLeft: 'auto', color: 'var(--color-text-muted)' }}
+          title={`Workstation session opened at ${new Date(sessionStartedAtRef.current).toLocaleTimeString()}`}
+        >
+          {sessionElapsedLabel}
+        </span>
+        <span>·</span>
+        <span>
           {lastRunMs !== null
             ? `last run ${lastRunMs < 1000 ? lastRunMs.toFixed(1) + ' ms' : (lastRunMs / 1000).toFixed(2) + ' s'}`
             : 'ready'}
