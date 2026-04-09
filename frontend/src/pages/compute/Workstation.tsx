@@ -1825,6 +1825,44 @@ export default function Workstation() {
   // snippet is removed and becomes the final caret position; otherwise
   // the caret lands at the end of the inserted block. Used by the
   // palette commands below to stamp out common MATLAB skeletons.
+  // Strip trailing spaces and tabs from every line in the script. Keeps
+  // the caret on the same logical line, clamping its column so it lands
+  // on the new end-of-line when the user sat inside the removed run.
+  const trimTrailingWhitespace = useCallback(() => {
+    const ta = editorRef.current
+    if (!ta) return
+    const value = ta.value
+    const trimmed = value.replace(/[ \t]+$/gm, '')
+    if (trimmed === value) return
+    // Map the current caret from old-space to new-space by walking line
+    // by line and accounting for how much each line shrank.
+    const oldLines = value.split('\n')
+    const newLines = trimmed.split('\n')
+    const caret = ta.selectionStart
+    let oldOff = 0
+    let newOff = 0
+    let targetNew = 0
+    for (let i = 0; i < oldLines.length; i++) {
+      const oldLen = oldLines[i].length
+      const newLen = newLines[i].length
+      if (caret <= oldOff + oldLen) {
+        const col = caret - oldOff
+        targetNew = newOff + Math.min(col, newLen)
+        break
+      }
+      oldOff += oldLen + 1 // + '\n'
+      newOff += newLen + 1
+      targetNew = newOff
+    }
+    setScript(trimmed)
+    requestAnimationFrame(() => {
+      const ta2 = editorRef.current
+      if (!ta2) return
+      ta2.focus()
+      ta2.setSelectionRange(targetNew, targetNew)
+    })
+  }, [setScript])
+
   const insertSnippet = useCallback((snippet: string) => {
     const ta = editorRef.current
     if (!ta) return
@@ -3128,11 +3166,12 @@ export default function Workstation() {
     { id: 'snip-try',     title: 'Insert snippet: try / catch',  hint: '',                 run: () => insertSnippet('try\n  $0\ncatch err\n  disp(err.message)\nend\n') },
     { id: 'snip-sec',     title: 'Insert snippet: %% section header', hint: '',            run: () => insertSnippet('%% $0\n') },
     { id: 'rename-id',    title: 'Rename identifier at caret',   hint: '',                 run: () => renameIdentifierAtCaret() },
+    { id: 'trim-ws',      title: 'Trim trailing whitespace',     hint: '',                 run: () => trimTrailingWhitespace() },
     { id: 'goto-bracket', title: 'Go to matching bracket',       hint: 'Ctrl+M',           run: () => gotoMatchingBracket(false) },
     { id: 'sel-bracket',  title: 'Select to matching bracket',   hint: 'Ctrl+Shift+M',     run: () => gotoMatchingBracket(true) },
     { id: 'goto-sym',     title: 'Go to symbol in script',       hint: 'Ctrl+Shift+O',     run: () => openSymbolNav() },
     { id: 'help',         title: 'Show keyboard shortcuts',      hint: 'F1',               run: () => setHelpOpen(true) },
-  ], [runScript, runSelection, runSection, openFind, openGoto, openSymbolNav, newScript, duplicateScript, closeScript, reopenLastClosedScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, copyConsole, downloadConsole, exportPlotSVG, exportPlotPNG, exportPlotCSV, toggleBookmarkAtCaret, gotoBookmark, clearAllBookmarks, insertSnippet, renameIdentifierAtCaret, gotoMatchingBracket])
+  ], [runScript, runSelection, runSection, openFind, openGoto, openSymbolNav, newScript, duplicateScript, closeScript, reopenLastClosedScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, copyConsole, downloadConsole, exportPlotSVG, exportPlotPNG, exportPlotCSV, toggleBookmarkAtCaret, gotoBookmark, clearAllBookmarks, insertSnippet, renameIdentifierAtCaret, gotoMatchingBracket, trimTrailingWhitespace])
 
   // Fuzzy-ish filter: split the query into tokens and require each to
   // appear (substring, case-insensitive) in the command title. Keeps
