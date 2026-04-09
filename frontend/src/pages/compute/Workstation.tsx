@@ -958,6 +958,55 @@ export default function Workstation() {
     URL.revokeObjectURL(url)
   }, [plots, activePlot])
 
+  // Download the whole workspace as JSON so it can be reloaded later.
+  // Uses the same SerialMValue shape that powers localStorage persistence.
+  const exportWorkspaceJson = useCallback(() => {
+    const out: Record<string, SerialMValue> = {}
+    for (const [name, v] of workspaceRef.current.vars) {
+      if (name.startsWith('__')) continue
+      const s = serializeMValue(v)
+      if (s) out[name] = s
+    }
+    const blob = new Blob([JSON.stringify({ vars: out }, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'workspace.json'
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [])
+
+  // Import a workspace JSON file, merging its variables into the live
+  // workspace (existing names are overwritten). Silently ignores entries
+  // that fail validation rather than aborting the whole import.
+  const importWorkspaceJson = useCallback((file: File) => {
+    const r = new FileReader()
+    r.onload = () => {
+      try {
+        const parsed = JSON.parse(String(r.result ?? ''))
+        if (!parsed || typeof parsed.vars !== 'object') {
+          setEntries(prev => [...prev, { id: nextEntryId++, kind: 'error', text: `${file.name}: not a workspace JSON file` }])
+          return
+        }
+        let n = 0
+        for (const [name, ser] of Object.entries(parsed.vars)) {
+          const v = deserializeMValue(ser as SerialMValue)
+          if (v) { workspaceRef.current.vars.set(name, v); n++ }
+        }
+        setVars(snapshotWorkspace(workspaceRef.current))
+        saveWorkspace(workspaceRef.current)
+        setEntries(prev => [...prev, {
+          id: nextEntryId++,
+          kind: 'output',
+          text: `Imported ${n} variable${n === 1 ? '' : 's'} from ${file.name}`,
+        }])
+      } catch (e: any) {
+        setEntries(prev => [...prev, { id: nextEntryId++, kind: 'error', text: `${file.name}: ${String(e?.message ?? e)}` }])
+      }
+    }
+    r.readAsText(file)
+  }, [])
+
   // Delete a single variable from the workspace. Resets the inspector
   // and collapses the row if it was open.
   const deleteVariable = useCallback((name: string) => {
@@ -1516,6 +1565,8 @@ export default function Workstation() {
       const ext = f.name.toLowerCase().replace(/^.*\./, '')
       if (ext === 'csv') {
         importCsv(f)
+      } else if (ext === 'json') {
+        importWorkspaceJson(f)
       } else if (ext === 'm' || ext === 'txt') {
         const r = new FileReader()
         r.onload = () => {
@@ -1531,7 +1582,7 @@ export default function Workstation() {
         r.readAsText(f)
       }
     }
-  }, [importCsv])
+  }, [importCsv, importWorkspaceJson])
 
   const handleDownload = useCallback(() => {
     const blob = new Blob([script], { type: 'text/plain' })
@@ -2287,7 +2338,7 @@ export default function Workstation() {
       {dropHover && (
         <div style={styles.dropOverlay} aria-hidden="true">
           <div style={styles.dropOverlayInner}>
-            Drop a .csv, .m, or .txt file to import
+            Drop .csv data · .json workspace · .m or .txt script to import
           </div>
         </div>
       )}
@@ -2344,6 +2395,13 @@ export default function Workstation() {
 
         <button style={{ ...styles.btn, ...styles.btnGhost }} onClick={clearConsole} title="Clear console">
           <FiTrash2 /> Clear console
+        </button>
+        <button
+          style={{ ...styles.btn, ...styles.btnGhost }}
+          onClick={exportWorkspaceJson}
+          title="Download the current workspace as a JSON file"
+        >
+          Export workspace
         </button>
         <button style={{ ...styles.btn, ...styles.btnGhost }} onClick={resetWorkspace} title="Clear all variables">
           Reset workspace
