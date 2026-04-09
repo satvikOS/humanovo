@@ -4824,17 +4824,39 @@ export default function Workstation() {
             )}
             {visibleEntries.map(e => {
               const clickable = e.kind === 'error' && typeof e.line === 'number'
+              // Double-clicking any input line drops its command back into
+              // the prompt so the user can edit and rerun it — mirrors the
+              // way terminals treat their scrollback. Output and error
+              // lines still drop their text in (minus the leading '>> '
+              // for input entries) so users can grab a computed value or
+              // reuse part of an error message.
+              const reuseText = e.kind === 'input'
+                ? e.text.replace(/^>>\s?/, '')
+                : e.text
               return (
                 <div
                   key={e.id}
                   onClick={clickable ? () => jumpToLine(e.line!) : undefined}
+                  onDoubleClick={() => {
+                    setCmd(reuseText)
+                    requestAnimationFrame(() => {
+                      const inp = cmdInputRef.current
+                      if (!inp) return
+                      inp.focus()
+                      inp.setSelectionRange(reuseText.length, reuseText.length)
+                    })
+                  }}
                   style={{
                     ...(e.kind === 'input' ? styles.entryInput
                       : e.kind === 'error' ? styles.entryError
                       : styles.entryOutput),
                     ...(clickable ? { cursor: 'pointer', textDecoration: 'underline', textUnderlineOffset: 3 } : null),
                   }}
-                  title={clickable ? `Click to jump to line ${e.line}` : undefined}
+                  title={
+                    clickable
+                      ? `Click to jump to line ${e.line}, double-click to copy to prompt`
+                      : 'Double-click to copy to prompt'
+                  }
                 >
                   {e.text}
                 </div>
