@@ -568,6 +568,7 @@ export default function Workstation() {
     legend: 'auto',
   })
   const [vars, setVars] = useState<VarSnapshot[]>([])
+  const [varFilter, setVarFilter] = useState('')
   const [expandedVar, setExpandedVar] = useState<string | null>(null)
   const [inspectVar, setInspectVar] = useState<string | null>(null)
   const [library, setLibrary] = useState<'open' | 'closed'>('open')
@@ -716,6 +717,14 @@ export default function Workstation() {
     const q = consoleFilter.toLowerCase()
     return entries.filter(e => e.text.toLowerCase().includes(q))
   }, [entries, consoleFilter])
+
+  // Same idea for the workspace inspector — filter by variable name,
+  // substring, case-insensitive.
+  const visibleVars = useMemo(() => {
+    if (!varFilter.trim()) return vars
+    const q = varFilter.toLowerCase()
+    return vars.filter(v => v.name.toLowerCase().includes(q))
+  }, [vars, varFilter])
 
   // The autocomplete anchor is computed in viewport coordinates, so any
   // window resize / scroll would leave it stale — easiest fix is to just
@@ -2138,6 +2147,17 @@ export default function Workstation() {
       fontSize: 11,
       padding: '6px 10px',
     },
+    varFilter: {
+      background: 'var(--glass-bg)',
+      border: '1px solid var(--glass-border)',
+      color: 'var(--color-text)',
+      padding: '3px 8px',
+      fontSize: 11,
+      borderRadius: 3,
+      outline: 'none',
+      width: 140,
+      fontFamily: "'Inter', sans-serif",
+    },
     varRow: {
       display: 'grid',
       gridTemplateColumns: 'minmax(0, 1fr) auto minmax(0, 1.2fr)',
@@ -2935,7 +2955,23 @@ export default function Workstation() {
 
           <div style={styles.varPanel}>
             <div style={styles.panelHeader}>
-              <span>Workspace · {vars.length} variable{vars.length === 1 ? '' : 's'}</span>
+              <span>
+                Workspace · {vars.length} variable{vars.length === 1 ? '' : 's'}
+                {varFilter.trim() && (
+                  <span style={{ marginLeft: 8, color: 'var(--color-text-muted)', fontWeight: 400 }}>
+                    ({visibleVars.length} shown)
+                  </span>
+                )}
+              </span>
+              <input
+                style={styles.varFilter}
+                value={varFilter}
+                onChange={e => setVarFilter(e.target.value)}
+                placeholder="Filter…"
+                aria-label="Filter workspace variables"
+                spellCheck={false}
+                disabled={vars.length === 0}
+              />
             </div>
             <div style={styles.varList}>
               {vars.length === 0 && (
@@ -2943,7 +2979,12 @@ export default function Workstation() {
                   No variables yet. Run a script or enter a command.
                 </div>
               )}
-              {vars.map(v => {
+              {vars.length > 0 && visibleVars.length === 0 && (
+                <div style={{ color: 'var(--color-text-muted)', fontStyle: 'italic', padding: '10px 6px', fontSize: 12 }}>
+                  No variables match "{varFilter}".
+                </div>
+              )}
+              {visibleVars.map(v => {
                 const isOpen = expandedVar === v.name
                 return (
                   <div key={v.name}>
