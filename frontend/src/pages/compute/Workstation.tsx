@@ -569,6 +569,15 @@ export default function Workstation() {
   const [running, setRunning] = useState(false)
   const [history, setHistory] = useState<string[]>(loadHistory)
   const [histIdx, setHistIdx] = useState<number | null>(null)
+  // Reverse history search (Ctrl+R) overlay. `histSearchOpen` toggles the
+  // inline search bar above the command line, `histSearchQuery` drives the
+  // filter, and `histSearchCursor` walks through the matches from most to
+  // least recent.
+  const [histSearchOpen, setHistSearchOpen] = useState(false)
+  const [histSearchQuery, setHistSearchQuery] = useState('')
+  const [histSearchCursor, setHistSearchCursor] = useState(0)
+  const histSearchInputRef = useRef<HTMLInputElement>(null)
+  const cmdInputRef = useRef<HTMLInputElement>(null)
   const [plots, setPlots] = useState<PlotSpec[]>([])
   const [activePlot, setActivePlot] = useState(0)
   const [plotFullscreen, setPlotFullscreen] = useState(false)
@@ -1176,6 +1185,18 @@ export default function Workstation() {
   }, [history, appendOutputs])
 
   const onCmdKey = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    // Ctrl/Cmd + R — open the reverse history search overlay. Mirrors the
+    // bash/zsh shortcut: start typing to narrow matches, Ctrl+R again to
+    // cycle, Enter to accept, Esc to bail out.
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'r' || e.key === 'R')) {
+      e.preventDefault()
+      if (history.length === 0) return
+      setHistSearchOpen(true)
+      setHistSearchQuery('')
+      setHistSearchCursor(0)
+      requestAnimationFrame(() => histSearchInputRef.current?.focus())
+      return
+    }
     if (e.key === 'Enter') { e.preventDefault(); runCommand(cmd); return }
     if (e.key === 'ArrowUp') {
       e.preventDefault()
@@ -1192,6 +1213,72 @@ export default function Workstation() {
       else { setHistIdx(idx); setCmd(history[idx]) }
     }
   }, [cmd, history, histIdx, runCommand])
+
+  // Filtered history matches for the Ctrl+R search overlay — deduped and
+  // ordered from most recent to least recent, so the first hit is the
+  // entry the user most likely wants.
+  const histSearchMatches = useMemo(() => {
+    if (!histSearchOpen) return []
+    const q = histSearchQuery.toLowerCase()
+    const seen = new Set<string>()
+    const out: string[] = []
+    for (let i = history.length - 1; i >= 0; i--) {
+      const h = history[i]
+      if (seen.has(h)) continue
+      if (q && !h.toLowerCase().includes(q)) continue
+      seen.add(h)
+      out.push(h)
+    }
+    return out
+  }, [history, histSearchOpen, histSearchQuery])
+
+  // Keep the cursor in range as the filter narrows or widens.
+  useEffect(() => {
+    if (!histSearchOpen) return
+    if (histSearchCursor >= histSearchMatches.length) {
+      setHistSearchCursor(Math.max(0, histSearchMatches.length - 1))
+    }
+  }, [histSearchOpen, histSearchCursor, histSearchMatches.length])
+
+  const closeHistSearch = useCallback(() => {
+    setHistSearchOpen(false)
+    setHistSearchQuery('')
+    setHistSearchCursor(0)
+    requestAnimationFrame(() => cmdInputRef.current?.focus())
+  }, [])
+
+  const commitHistSearch = useCallback(() => {
+    const pick = histSearchMatches[histSearchCursor]
+    if (pick !== undefined) {
+      setCmd(pick)
+      setHistIdx(null)
+    }
+    closeHistSearch()
+  }, [histSearchMatches, histSearchCursor, closeHistSearch])
+
+  const onHistSearchKey = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Escape') { e.preventDefault(); closeHistSearch(); return }
+    if (e.key === 'Enter') { e.preventDefault(); commitHistSearch(); return }
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'r' || e.key === 'R')) {
+      e.preventDefault()
+      // Walk to the next older match, wrapping back to the top.
+      if (histSearchMatches.length === 0) return
+      setHistSearchCursor(c => (c + 1) % histSearchMatches.length)
+      return
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      if (histSearchMatches.length === 0) return
+      setHistSearchCursor(c => (c + 1) % histSearchMatches.length)
+      return
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      if (histSearchMatches.length === 0) return
+      setHistSearchCursor(c => (c - 1 + histSearchMatches.length) % histSearchMatches.length)
+      return
+    }
+  }, [histSearchMatches, closeHistSearch, commitHistSearch])
 
   const clearConsole = () => setEntries([])
 
@@ -3257,6 +3344,42 @@ export default function Workstation() {
       borderTop: '1px solid var(--glass-border)',
       background: 'transparent',
     },
+    histSearchBar: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 8,
+      padding: '6px 20px',
+      borderTop: '1px solid var(--glass-border)',
+      background: 'var(--glass-bg)',
+      fontFamily: "'JetBrains Mono', monospace",
+      fontSize: 11,
+    },
+    histSearchLabel: {
+      color: 'var(--color-text-muted)',
+      whiteSpace: 'nowrap' as const,
+    },
+    histSearchInput: {
+      background: 'transparent',
+      border: 'none',
+      outline: 'none',
+      color: 'var(--color-text)',
+      fontFamily: "'JetBrains Mono', monospace",
+      fontSize: 11,
+      minWidth: 140,
+      maxWidth: 220,
+    },
+    histSearchPreview: {
+      flex: 1,
+      color: 'var(--color-text-secondary)',
+      whiteSpace: 'nowrap' as const,
+      overflow: 'hidden' as const,
+      textOverflow: 'ellipsis' as const,
+    },
+    histSearchCount: {
+      color: 'var(--color-text-muted)',
+      fontSize: 10,
+      whiteSpace: 'nowrap' as const,
+    },
     prompt: {
       fontFamily: "'JetBrains Mono', monospace",
       fontSize: 12,
@@ -4524,9 +4647,44 @@ export default function Workstation() {
       </div>
 
       {/* ─── Command line ────────────────────────────────────────────── */}
+      {histSearchOpen && (
+        <div style={styles.histSearchBar}>
+          <span style={styles.histSearchLabel}>(reverse-i-search)</span>
+          <input
+            ref={histSearchInputRef}
+            style={styles.histSearchInput}
+            value={histSearchQuery}
+            onChange={e => { setHistSearchQuery(e.target.value); setHistSearchCursor(0) }}
+            onKeyDown={onHistSearchKey}
+            placeholder="type to filter history…"
+            spellCheck={false}
+            autoComplete="off"
+          />
+          <span style={styles.histSearchPreview}>
+            {histSearchMatches.length === 0
+              ? (histSearchQuery ? `no match for "${histSearchQuery}"` : 'history empty')
+              : `› ${histSearchMatches[histSearchCursor] ?? ''}`}
+          </span>
+          <span style={styles.histSearchCount}>
+            {histSearchMatches.length > 0 && `${histSearchCursor + 1}/${histSearchMatches.length}`}
+          </span>
+          <button
+            style={{ ...styles.btn, ...styles.btnGhost, padding: '3px 8px', fontSize: 11 }}
+            onClick={commitHistSearch}
+            disabled={histSearchMatches.length === 0}
+            title="Use this command (Enter)"
+          >use</button>
+          <button
+            style={{ ...styles.btn, ...styles.btnGhost, padding: '3px 8px', fontSize: 11 }}
+            onClick={closeHistSearch}
+            title="Close (Esc)"
+          >×</button>
+        </div>
+      )}
       <div style={styles.cmdBar}>
         <span style={styles.prompt}>{'>>'}</span>
         <input
+          ref={cmdInputRef}
           style={styles.cmd}
           value={cmd}
           onChange={e => setCmd(e.target.value)}
@@ -5148,6 +5306,7 @@ const SHORTCUT_GROUPS: { title: string; items: [string, string][] }[] = [
     title: 'Console',
     items: [
       ['Arrow Up / Down', 'Recall command history'],
+      ['Ctrl / Cmd + R', 'Reverse-search command history'],
       ['Enter', 'Run command'],
     ],
   },
