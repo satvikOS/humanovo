@@ -25,7 +25,8 @@ import {
 } from './workstationTemplates'
 
 /* ── Persistence keys ────────────────────────────────────────────────── */
-const SCRIPT_KEY = 'compute-workstation-script'
+const SCRIPT_KEY = 'compute-workstation-script'          // legacy single-script key
+const SCRIPTS_KEY = 'compute-workstation-scripts'        // { list, activeId }
 const HISTORY_KEY = 'compute-workstation-history'
 
 const STARTER_SCRIPT = `% MATLAB/Octave Workstation
@@ -46,6 +47,9 @@ s = std(y1);
 printf('sin: mean = %.4f, std = %.4f\\n', m, s);
 `
 
+interface SavedScript { id: string; name: string; code: string }
+interface ScriptStore { list: SavedScript[]; activeId: string }
+
 interface ConsoleEntry {
   id: number
   kind: 'input' | 'output' | 'error'
@@ -53,13 +57,41 @@ interface ConsoleEntry {
 }
 
 let nextEntryId = 1
+let nextScriptId = 1
+const makeScriptId = () => `s${Date.now().toString(36)}${(nextScriptId++).toString(36)}`
 
 /* ── Small helpers ───────────────────────────────────────────────────── */
-function loadScript(): string {
-  try { return localStorage.getItem(SCRIPT_KEY) ?? STARTER_SCRIPT } catch { return STARTER_SCRIPT }
+function loadScripts(): ScriptStore {
+  try {
+    const raw = localStorage.getItem(SCRIPTS_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      if (parsed && Array.isArray(parsed.list) && parsed.list.length > 0) {
+        return {
+          list: parsed.list.map((s: any) => ({
+            id: String(s.id ?? makeScriptId()),
+            name: String(s.name ?? 'untitled.m'),
+            code: String(s.code ?? ''),
+          })),
+          activeId: String(parsed.activeId ?? parsed.list[0].id),
+        }
+      }
+    }
+    // Migrate legacy single-script storage if present.
+    const legacy = localStorage.getItem(SCRIPT_KEY)
+    const first: SavedScript = {
+      id: makeScriptId(),
+      name: 'main.m',
+      code: legacy ?? STARTER_SCRIPT,
+    }
+    return { list: [first], activeId: first.id }
+  } catch {
+    const first: SavedScript = { id: makeScriptId(), name: 'main.m', code: STARTER_SCRIPT }
+    return { list: [first], activeId: first.id }
+  }
 }
-function saveScript(src: string) {
-  try { localStorage.setItem(SCRIPT_KEY, src) } catch { /* quota */ }
+function saveScripts(s: ScriptStore) {
+  try { localStorage.setItem(SCRIPTS_KEY, JSON.stringify(s)) } catch { /* quota */ }
 }
 function loadHistory(): string[] {
   try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]') } catch { return [] }
@@ -118,7 +150,24 @@ function formatScalar(n: number): string {
 
 /* ── Component ───────────────────────────────────────────────────────── */
 export default function Workstation() {
-  const [script, setScript] = useState<string>(loadScript)
+  const [scriptStore, setScriptStore] = useState<ScriptStore>(loadScripts)
+  const activeScript = useMemo(
+    () => scriptStore.list.find(s => s.id === scriptStore.activeId) ?? scriptStore.list[0],
+    [scriptStore]
+  )
+  const script = activeScript?.code ?? ''
+  const setScript = useCallback((next: string | ((prev: string) => string)) => {
+    setScriptStore(store => {
+      const current = store.list.find(s => s.id === store.activeId)
+      if (!current) return store
+      const nextCode = typeof next === 'function' ? (next as (p: string) => string)(current.code) : next
+      if (nextCode === current.code) return store
+      return {
+        ...store,
+        list: store.list.map(s => s.id === store.activeId ? { ...s, code: nextCode } : s),
+      }
+    })
+  }, [])
   const [entries, setEntries] = useState<ConsoleEntry[]>([])
   const [cmd, setCmd] = useState('')
   const [running, setRunning] = useState(false)
@@ -145,11 +194,11 @@ export default function Workstation() {
     if (el) el.scrollTop = el.scrollHeight
   }, [entries])
 
-  // Persist script as user types (debounced via microtask is overkill — 300ms).
+  // Persist script store as the user edits (debounced).
   useEffect(() => {
-    const h = setTimeout(() => saveScript(script), 300)
+    const h = setTimeout(() => saveScripts(scriptStore), 300)
     return () => clearTimeout(h)
-  }, [script])
+  }, [scriptStore])
 
   /** Push engine outputs into the console entry list and plot buffer. */
   const appendOutputs = useCallback((outs: RunOutput[]) => {
@@ -334,8 +383,19 @@ export default function Workstation() {
   const handleUpload = useCallback((ev: React.ChangeEvent<HTMLInputElement>) => {
     const f = ev.target.files?.[0]
     if (!f) return
+    const fname = f.name
     const r = new FileReader()
-    r.onload = () => { setScript(String(r.result ?? '')) }
+    r.onload = () => {
+      const code = String(r.result ?? '')
+      // Create a new script tab from the uploaded file.
+      setScriptStore(store => {
+        const id = makeScriptId()
+        return {
+          list: [...store.list, { id, name: fname || 'upload.m', code }],
+          activeId: id,
+        }
+      })
+    }
     r.readAsText(f)
     ev.target.value = ''
   }, [])
@@ -345,10 +405,53 @@ export default function Workstation() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = 'script.m'
+    a.download = activeScript?.name || 'script.m'
     a.click()
     URL.revokeObjectURL(url)
-  }, [script])
+  }, [script, activeScript])
+
+  /* ── Script tab handlers ─────────────────────────────────────────── */
+  const newScript = useCallback(() => {
+    setScriptStore(store => {
+      const id = makeScriptId()
+      // Pick a unique default name.
+      const base = 'untitled'
+      let n = 1
+      while (store.list.some(s => s.name === `${base}${n}.m`)) n++
+      return {
+        list: [...store.list, { id, name: `${base}${n}.m`, code: '% New script\n' }],
+        activeId: id,
+      }
+    })
+  }, [])
+
+  const switchScript = useCallback((id: string) => {
+    setScriptStore(store => store.activeId === id ? store : { ...store, activeId: id })
+  }, [])
+
+  const closeScript = useCallback((id: string) => {
+    setScriptStore(store => {
+      if (store.list.length <= 1) return store // never close the last one
+      const idx = store.list.findIndex(s => s.id === id)
+      if (idx < 0) return store
+      const list = store.list.filter(s => s.id !== id)
+      const activeId = store.activeId === id
+        ? (list[idx] ?? list[idx - 1] ?? list[0]).id
+        : store.activeId
+      return { list, activeId }
+    })
+  }, [])
+
+  const renameScript = useCallback((id: string) => {
+    const current = scriptStore.list.find(s => s.id === id)
+    if (!current) return
+    const next = prompt('Rename script', current.name)
+    if (!next) return
+    setScriptStore(store => ({
+      ...store,
+      list: store.list.map(s => s.id === id ? { ...s, name: next } : s),
+    }))
+  }, [scriptStore])
 
   /* ── styles (keyed off Humanovo CSS variables) ─────────────────────── */
   const styles = useMemo<Record<string, React.CSSProperties>>(() => ({
@@ -490,6 +593,61 @@ export default function Workstation() {
       letterSpacing: 0.6,
       color: 'var(--color-text-muted)',
       background: 'var(--glass-bg)',
+    },
+    tabBar: {
+      display: 'flex',
+      alignItems: 'stretch',
+      gap: 0,
+      padding: '0 8px',
+      borderBottom: '1px solid var(--glass-border)',
+      background: 'rgba(0, 0, 0, 0.25)',
+      minHeight: 28,
+      overflowX: 'auto' as const,
+    },
+    tab: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 6,
+      padding: '4px 10px',
+      fontSize: 11,
+      fontFamily: "'JetBrains Mono', monospace",
+      color: 'var(--color-text-muted)',
+      background: 'transparent',
+      border: 'none',
+      borderRight: '1px solid rgba(255,255,255,0.05)',
+      cursor: 'pointer',
+      whiteSpace: 'nowrap' as const,
+    },
+    tabActive: {
+      color: 'var(--color-text)',
+      background: 'rgba(59, 130, 246, 0.08)',
+      borderBottom: '2px solid var(--color-accent-blue)',
+    },
+    tabCloseBtn: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: 14,
+      height: 14,
+      background: 'transparent',
+      border: 'none',
+      color: 'var(--color-text-muted)',
+      cursor: 'pointer',
+      fontSize: 12,
+      lineHeight: 1,
+      borderRadius: 3,
+      padding: 0,
+    },
+    tabAddBtn: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: '0 10px',
+      fontSize: 14,
+      color: 'var(--color-text-muted)',
+      background: 'transparent',
+      border: 'none',
+      cursor: 'pointer',
     },
     editorBody: {
       flex: 1,
@@ -652,7 +810,23 @@ export default function Workstation() {
   }, [filteredTemplates])
 
   const loadTemplate = useCallback((t: WorkstationTemplate) => {
-    setScript(t.code)
+    // If the active script is empty or already matches this template, replace
+    // in place. Otherwise open the template as a new tab so user work is safe.
+    setScriptStore(store => {
+      const current = store.list.find(s => s.id === store.activeId)
+      const inPlace = !current || current.code.trim() === '' || current.code === t.code
+      if (inPlace && current) {
+        return {
+          ...store,
+          list: store.list.map(s => s.id === store.activeId ? { ...s, code: t.code, name: `${t.id}.m` } : s),
+        }
+      }
+      const id = makeScriptId()
+      return {
+        list: [...store.list, { id, name: `${t.id}.m`, code: t.code }],
+        activeId: id,
+      }
+    })
     setActiveTemplate(t.id)
   }, [])
 
@@ -758,8 +932,33 @@ export default function Workstation() {
 
         <div style={styles.editorWrap}>
           <div style={styles.editorHeader}>
-            <span>Script</span>
+            <span>Scripts</span>
             <span style={{ opacity: 0.7 }}>Ctrl/Cmd + Enter to run · Tab to indent</span>
+          </div>
+          <div style={styles.tabBar}>
+            {scriptStore.list.map(s => {
+              const active = s.id === scriptStore.activeId
+              return (
+                <button
+                  key={s.id}
+                  style={{ ...styles.tab, ...(active ? styles.tabActive : null) }}
+                  onClick={() => switchScript(s.id)}
+                  onDoubleClick={() => renameScript(s.id)}
+                  title={`${s.name} — double-click to rename`}
+                >
+                  <span>{s.name}</span>
+                  {scriptStore.list.length > 1 && (
+                    <span
+                      style={styles.tabCloseBtn}
+                      onClick={e => { e.stopPropagation(); closeScript(s.id) }}
+                      role="button"
+                      aria-label={`Close ${s.name}`}
+                    >×</span>
+                  )}
+                </button>
+              )
+            })}
+            <button style={styles.tabAddBtn} onClick={newScript} title="New script">+</button>
           </div>
           <div style={styles.editorBody}>
             <div style={styles.editorGutterClip} aria-hidden>
