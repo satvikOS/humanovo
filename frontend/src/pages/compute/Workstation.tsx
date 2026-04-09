@@ -582,6 +582,7 @@ export default function Workstation() {
   const gutterRef = useRef<HTMLDivElement>(null)
   const highlightRef = useRef<HTMLPreElement>(null)
   const bracketOverlayRef = useRef<HTMLDivElement>(null)
+  const currentLineRef = useRef<HTMLDivElement>(null)
   const plotBodyRef = useRef<HTMLDivElement>(null)
 
   // Memoized token stream for the syntax-highlighting overlay. Recomputes
@@ -1160,6 +1161,10 @@ export default function Workstation() {
     if (bracketOverlayRef.current) {
       bracketOverlayRef.current.style.transform = `translate(${-scrollLeft}px, ${-scrollTop}px)`
     }
+    if (currentLineRef.current) {
+      // Only the vertical scroll matters for the horizontal strip.
+      currentLineRef.current.style.transform = `translateY(${-scrollTop}px)`
+    }
   }, [])
 
   // Case-insensitive substring match positions for find/replace. Recomputed
@@ -1622,6 +1627,15 @@ export default function Workstation() {
       position: 'absolute' as const,
       top: 0,
       left: 0,
+      pointerEvents: 'none' as const,
+      willChange: 'transform',
+    },
+    currentLineStrip: {
+      position: 'absolute' as const,
+      left: 0,
+      right: 0,
+      height: 19.2,
+      background: 'var(--glass-bg)',
       pointerEvents: 'none' as const,
       willChange: 'transform',
     },
@@ -2193,6 +2207,14 @@ export default function Workstation() {
               </div>
             </div>
             <div style={styles.editorTextWrap}>
+              <div
+                ref={currentLineRef}
+                aria-hidden="true"
+                style={{
+                  ...styles.currentLineStrip,
+                  top: 14 + (cursor.line - 1) * 19.2,
+                }}
+              />
               <pre ref={highlightRef} style={styles.editorHighlight} aria-hidden="true">
                 {highlightTokens.map((t, idx) => (
                   <span key={idx} style={HL_COLORS[t.kind]}>{t.text}</span>
