@@ -647,6 +647,7 @@ export default function Workstation() {
   const gutterRef = useRef<HTMLDivElement>(null)
   const highlightRef = useRef<HTMLPreElement>(null)
   const bracketOverlayRef = useRef<HTMLDivElement>(null)
+  const findOverlayRef = useRef<HTMLDivElement>(null)
   const currentLineRef = useRef<HTMLDivElement>(null)
   const plotBodyRef = useRef<HTMLDivElement>(null)
 
@@ -1675,6 +1676,9 @@ export default function Workstation() {
     if (bracketOverlayRef.current) {
       bracketOverlayRef.current.style.transform = `translate(${-scrollLeft}px, ${-scrollTop}px)`
     }
+    if (findOverlayRef.current) {
+      findOverlayRef.current.style.transform = `translate(${-scrollLeft}px, ${-scrollTop}px)`
+    }
     if (currentLineRef.current) {
       // Only the vertical scroll matters for the horizontal strip.
       currentLineRef.current.style.transform = `translateY(${-scrollTop}px)`
@@ -1716,12 +1720,12 @@ export default function Workstation() {
     const end = start + findQuery.length
     ta.focus()
     ta.setSelectionRange(start, end)
-    // Scroll the match into view by approximating line height.
-    const lineHeight = 12 * 1.6
+    // Scroll the match into view using the live editor line height so the
+    // math stays right when the user has bumped the font size.
     const lineOfMatch = (script.slice(0, start).match(/\n/g)?.length ?? 0)
-    ta.scrollTop = Math.max(0, lineOfMatch * lineHeight - ta.clientHeight / 2)
+    ta.scrollTop = Math.max(0, lineOfMatch * editorLineHeight - ta.clientHeight / 2)
     setMatchIdx(safe)
-  }, [findMatches, findQuery, script])
+  }, [findMatches, findQuery, script, editorLineHeight])
 
   const findNext = useCallback(() => selectMatch(matchIdx + 1), [selectMatch, matchIdx])
   const findPrev = useCallback(() => selectMatch(matchIdx - 1), [selectMatch, matchIdx])
@@ -2243,6 +2247,25 @@ export default function Workstation() {
       borderRadius: 2,
       boxSizing: 'border-box' as const,
       opacity: 0.55,
+    },
+    findOverlay: {
+      position: 'absolute' as const,
+      top: 0,
+      left: 0,
+      pointerEvents: 'none' as const,
+      willChange: 'transform',
+    },
+    findMatchHL: {
+      position: 'absolute' as const,
+      height: editorLineHeight,
+      background: 'var(--glass-bg-hover)',
+      border: '1px solid var(--glass-border)',
+      borderRadius: 2,
+      boxSizing: 'border-box' as const,
+    },
+    findMatchHLActive: {
+      background: 'var(--color-bg-elevated)',
+      borderColor: 'var(--color-border-strong)',
     },
     statusBar: {
       display: 'flex',
@@ -3052,6 +3075,31 @@ export default function Workstation() {
                           ...styles.bracketHL,
                           top: 14 + lc.line * editorLineHeight,
                           left: 14 + lc.col * editorCharWidth,
+                        }}
+                      />
+                    )
+                  })}
+                </div>
+              )}
+              {!editorWrapOn && findOpen && findQuery && findMatches.length > 0 && (
+                <div ref={findOverlayRef} style={styles.findOverlay} aria-hidden="true">
+                  {findMatches.map((start, idx) => {
+                    // Multi-line matches would need a rect per line; in
+                    // practice find queries rarely cross newlines, so only
+                    // draw single-line matches and skip the rest.
+                    const end = start + findQuery.length
+                    if (script.slice(start, end).indexOf('\n') >= 0) return null
+                    const lc = lineColForPos(script, start)
+                    const active = idx === matchIdx
+                    return (
+                      <div
+                        key={idx}
+                        style={{
+                          ...styles.findMatchHL,
+                          ...(active ? styles.findMatchHLActive : null),
+                          top: 14 + lc.line * editorLineHeight,
+                          left: 14 + lc.col * editorCharWidth,
+                          width: findQuery.length * editorCharWidth,
                         }}
                       />
                     )
