@@ -3216,6 +3216,44 @@ export default function Workstation() {
     })
   }, [])
 
+  // Close every tab except the given id. Pushes all closed scripts onto
+  // the reopen ring (newest last) so Ctrl+Shift+T can walk back through
+  // them one at a time, mirroring browser tab behaviour.
+  const closeOtherScripts = useCallback((keepId: string) => {
+    setScriptStore(store => {
+      if (store.list.length <= 1) return store
+      const keepIdx = store.list.findIndex(s => s.id === keepId)
+      if (keepIdx < 0) return store
+      const victims = store.list.filter(s => s.id !== keepId)
+      for (const v of victims) {
+        const originalIdx = store.list.findIndex(s => s.id === v.id)
+        closedScriptsRef.current.push({ script: v, index: originalIdx })
+      }
+      while (closedScriptsRef.current.length > 12) closedScriptsRef.current.shift()
+      return { list: [store.list[keepIdx]], activeId: keepId }
+    })
+  }, [])
+
+  // Close every tab to the right of the given id. Useful after opening
+  // a bunch of scratch tabs and wanting to clear them without touching
+  // the pinned leftmost set.
+  const closeScriptsToRight = useCallback((pivotId: string) => {
+    setScriptStore(store => {
+      const pivot = store.list.findIndex(s => s.id === pivotId)
+      if (pivot < 0 || pivot >= store.list.length - 1) return store
+      const keepers = store.list.slice(0, pivot + 1)
+      const victims = store.list.slice(pivot + 1)
+      for (let i = 0; i < victims.length; i++) {
+        closedScriptsRef.current.push({ script: victims[i], index: pivot + 1 + i })
+      }
+      while (closedScriptsRef.current.length > 12) closedScriptsRef.current.shift()
+      const activeId = keepers.some(s => s.id === store.activeId)
+        ? store.activeId
+        : pivotId
+      return { list: keepers, activeId }
+    })
+  }, [])
+
   const renameScript = useCallback((id: string) => {
     const current = scriptStore.list.find(s => s.id === id)
     if (!current) return
@@ -3300,6 +3338,8 @@ export default function Workstation() {
     { id: 'new-script',   title: 'New script',                   hint: '',                 run: () => newScript() },
     { id: 'dup-script',   title: 'Duplicate current script',     hint: '',                 run: () => duplicateScript(scriptStore.activeId) },
     { id: 'close-script', title: 'Close current script',         hint: 'Ctrl+W',           run: () => closeScript(scriptStore.activeId) },
+    { id: 'close-other',  title: 'Close other script tabs',      hint: '',                 run: () => closeOtherScripts(scriptStore.activeId) },
+    { id: 'close-right',  title: 'Close script tabs to the right', hint: '',               run: () => closeScriptsToRight(scriptStore.activeId) },
     { id: 'reopen',       title: 'Reopen last closed script',    hint: 'Ctrl+Shift+T',     run: () => reopenLastClosedScript() },
     { id: 'rename',       title: 'Rename current script',        hint: '',                 run: () => renameScript(scriptStore.activeId) },
     { id: 'wrap',         title: 'Toggle word wrap',             hint: '',                 run: () => toggleEditorWrap() },
@@ -3336,7 +3376,7 @@ export default function Workstation() {
     { id: 'next-err',     title: 'Jump to next error',           hint: 'F8',               run: () => gotoNextError(1) },
     { id: 'prev-err',     title: 'Jump to previous error',       hint: 'Shift+F8',         run: () => gotoNextError(-1) },
     { id: 'help',         title: 'Show keyboard shortcuts',      hint: 'F1',               run: () => setHelpOpen(true) },
-  ], [runScript, runSelection, runSection, runUntilCursor, rerunLastFragment, openFind, openGoto, openSymbolNav, gotoNextError, newScript, duplicateScript, closeScript, reopenLastClosedScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, copyConsole, downloadConsole, clearConsoleErrors, exportPlotSVG, exportPlotPNG, exportPlotCSV, toggleBookmarkAtCaret, gotoBookmark, clearAllBookmarks, insertSnippet, renameIdentifierAtCaret, gotoMatchingBracket, trimTrailingWhitespace, applySelectionTransform, sortSelectedLines])
+  ], [runScript, runSelection, runSection, runUntilCursor, rerunLastFragment, openFind, openGoto, openSymbolNav, gotoNextError, newScript, duplicateScript, closeScript, closeOtherScripts, closeScriptsToRight, reopenLastClosedScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, copyConsole, downloadConsole, clearConsoleErrors, exportPlotSVG, exportPlotPNG, exportPlotCSV, toggleBookmarkAtCaret, gotoBookmark, clearAllBookmarks, insertSnippet, renameIdentifierAtCaret, gotoMatchingBracket, trimTrailingWhitespace, applySelectionTransform, sortSelectedLines])
 
   // Fuzzy-ish filter: split the query into tokens and require each to
   // appear (substring, case-insensitive) in the command title. Keeps
