@@ -107,6 +107,8 @@ interface VarSnapshot {
   kind: MValue['kind']
   summary: string
   shape: string
+  /** Full value retained so the inspector can render expanded contents. */
+  value: MValue
 }
 
 function snapshotWorkspace(ws: Workspace): VarSnapshot[] {
@@ -121,23 +123,23 @@ function snapshotWorkspace(ws: Workspace): VarSnapshot[] {
 function describeVar(name: string, v: MValue): VarSnapshot {
   switch (v.kind) {
     case 'num':
-      return { name, kind: 'num', shape: '1x1', summary: formatScalar(v.v) }
+      return { name, kind: 'num', shape: '1x1', summary: formatScalar(v.v), value: v }
     case 'bool':
-      return { name, kind: 'bool', shape: '1x1', summary: v.v ? 'true' : 'false' }
+      return { name, kind: 'bool', shape: '1x1', summary: v.v ? 'true' : 'false', value: v }
     case 'str':
-      return { name, kind: 'str', shape: `1x${v.v.length}`, summary: JSON.stringify(v.v.slice(0, 40)) }
+      return { name, kind: 'str', shape: `1x${v.v.length}`, summary: JSON.stringify(v.v.slice(0, 40)), value: v }
     case 'mat': {
       const shape = `${v.rows}x${v.cols}`
-      if (v.rows === 1 && v.cols === 1) return { name, kind: 'mat', shape, summary: formatScalar(v.data[0]) }
+      if (v.rows === 1 && v.cols === 1) return { name, kind: 'mat', shape, summary: formatScalar(v.data[0]), value: v }
       const n = Math.min(4, v.data.length)
       const preview = Array.from(v.data.slice(0, n)).map(formatScalar).join(', ')
       const suffix = v.data.length > n ? ', …' : ''
-      return { name, kind: 'mat', shape, summary: `[${preview}${suffix}]` }
+      return { name, kind: 'mat', shape, summary: `[${preview}${suffix}]`, value: v }
     }
     case 'fn':
-      return { name, kind: 'fn', shape: `arity ${v.arity}`, summary: `@${v.name}` }
+      return { name, kind: 'fn', shape: `arity ${v.arity}`, summary: `@${v.name}`, value: v }
     case 'void':
-      return { name, kind: 'void', shape: '—', summary: '—' }
+      return { name, kind: 'void', shape: '—', summary: '—', value: v }
   }
 }
 
@@ -344,6 +346,7 @@ export default function Workstation() {
   const [plots, setPlots] = useState<PlotSpec[]>([])
   const [activePlot, setActivePlot] = useState(0)
   const [vars, setVars] = useState<VarSnapshot[]>([])
+  const [expandedVar, setExpandedVar] = useState<string | null>(null)
   const [library, setLibrary] = useState<'open' | 'closed'>('open')
   const [libFilter, setLibFilter] = useState('')
   const [activeTemplate, setActiveTemplate] = useState<string | null>(null)
@@ -1229,6 +1232,18 @@ export default function Workstation() {
       padding: '5px 6px',
       borderRadius: 4,
     },
+    varExpand: {
+      margin: '2px 6px 10px 6px',
+      padding: '8px 10px',
+      background: 'var(--glass-bg)',
+      border: '1px solid var(--glass-border)',
+      borderRadius: 4,
+      maxHeight: 220,
+      overflow: 'auto',
+      fontFamily: "'JetBrains Mono', monospace",
+      fontSize: 11,
+      color: 'var(--color-text-secondary)',
+    },
     panelHeader: {
       display: 'flex',
       alignItems: 'center',
@@ -1616,19 +1631,41 @@ export default function Workstation() {
                   No variables yet. Run a script or enter a command.
                 </div>
               )}
-              {vars.map(v => (
-                <div
-                  key={v.name}
-                  style={styles.varRow}
-                  title={`${v.name}: ${v.kind}  ${v.shape}  ${v.summary}`}
-                >
-                  <span style={{ color: 'var(--color-text)', fontWeight: 500 }}>{v.name}</span>
-                  <span style={{ color: 'var(--color-text-muted)' }}>{v.shape}</span>
-                  <span style={{ color: 'var(--color-text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {v.summary}
-                  </span>
-                </div>
-              ))}
+              {vars.map(v => {
+                const isOpen = expandedVar === v.name
+                return (
+                  <div key={v.name}>
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setExpandedVar(prev => prev === v.name ? null : v.name)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          setExpandedVar(prev => prev === v.name ? null : v.name)
+                        }
+                      }}
+                      style={{
+                        ...styles.varRow,
+                        cursor: 'pointer',
+                        background: isOpen ? 'var(--glass-bg-hover)' : 'transparent',
+                      }}
+                      title={`${v.name}: ${v.kind}  ${v.shape}  ${v.summary}`}
+                    >
+                      <span style={{ color: 'var(--color-text)', fontWeight: 500 }}>{v.name}</span>
+                      <span style={{ color: 'var(--color-text-muted)' }}>{v.shape}</span>
+                      <span style={{ color: 'var(--color-text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {v.summary}
+                      </span>
+                    </div>
+                    {isOpen && (
+                      <div style={styles.varExpand}>
+                        <VarExpandView value={v.value} />
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           </div>
         </div>
@@ -1813,4 +1850,71 @@ function PlotView({ plot }: { plot: PlotSpec | null }) {
       </ResponsiveContainer>
     </div>
   )
+}
+
+/* ── Variable expand view ────────────────────────────────────────────── */
+// Renders the full contents of a workspace variable when the user clicks
+// its row in the inspector. Matrices are shown as a compact grid (first
+// 20×20), scalars/strings/functions are shown inline.
+const VAR_MAX_ROWS = 20
+const VAR_MAX_COLS = 20
+
+function VarExpandView({ value }: { value: MValue }) {
+  switch (value.kind) {
+    case 'num':
+      return <span>{formatScalar(value.v)}</span>
+    case 'bool':
+      return <span>{value.v ? 'true' : 'false'}</span>
+    case 'str':
+      return <span style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(value.v)}</span>
+    case 'fn':
+      return <span>@{value.name} (arity {value.arity})</span>
+    case 'void':
+      return <span>—</span>
+    case 'mat': {
+      const rows = Math.min(value.rows, VAR_MAX_ROWS)
+      const cols = Math.min(value.cols, VAR_MAX_COLS)
+      const rowTrunc = value.rows > VAR_MAX_ROWS
+      const colTrunc = value.cols > VAR_MAX_COLS
+      // MATLAB stores matrices column-major, but our engine uses a flat
+      // row-major Float64Array (see mathLib). Access via data[r*cols + c].
+      const data = value.data
+      const full = value.cols
+      return (
+        <div>
+          <table style={{ borderCollapse: 'collapse', fontVariantNumeric: 'tabular-nums' }}>
+            <tbody>
+              {Array.from({ length: rows }, (_, r) => (
+                <tr key={r}>
+                  {Array.from({ length: cols }, (_, c) => (
+                    <td
+                      key={c}
+                      style={{
+                        padding: '2px 8px',
+                        textAlign: 'right',
+                        color: 'var(--color-text)',
+                        borderRight: c < cols - 1 ? '1px solid var(--glass-border)' : 'none',
+                      }}
+                    >
+                      {formatScalar(data[r * full + c])}
+                    </td>
+                  ))}
+                  {colTrunc && (
+                    <td style={{ padding: '2px 6px', color: 'var(--color-text-muted)' }}>…</td>
+                  )}
+                </tr>
+              ))}
+              {rowTrunc && (
+                <tr>
+                  <td colSpan={cols + (colTrunc ? 1 : 0)} style={{ padding: '2px 6px', color: 'var(--color-text-muted)' }}>
+                    … {value.rows - VAR_MAX_ROWS} more row{value.rows - VAR_MAX_ROWS === 1 ? '' : 's'}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )
+    }
+  }
 }
