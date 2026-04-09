@@ -1,23 +1,23 @@
 import { useState } from 'react'
 import {
-  FiCpu, FiGrid, FiActivity, FiTrendingUp, FiCode,
+  FiCpu, FiTerminal, FiGrid, FiActivity, FiTrendingUp,
 } from 'react-icons/fi'
 import clsx from 'clsx'
+import Workstation from './Workstation'
 import PresetRunner from './PresetRunner'
 import MonteCarloPanel from './MonteCarloPanel'
 import EquationPlotter from './EquationPlotter'
-import CodeLab from './CodeLab'
 import type { ComputeMode } from './types'
 
 const tabs: { id: ComputeMode; label: string; icon: typeof FiGrid; desc: string }[] = [
-  { id: 'presets', label: 'Compute Presets', icon: FiGrid, desc: '73+ one-click analyses organized by toolbox' },
+  { id: 'workstation', label: 'Workstation', icon: FiTerminal, desc: 'In-browser MATLAB / Octave workstation' },
+  { id: 'presets', label: 'Presets', icon: FiGrid, desc: '73+ one-click analyses organized by toolbox' },
   { id: 'montecarlo', label: 'Monte Carlo', icon: FiActivity, desc: 'Stochastic simulations & convergence' },
   { id: 'equations', label: 'Equation Plotter', icon: FiTrendingUp, desc: 'Plot, overlay & compare equations' },
-  { id: 'codelab', label: 'Code Lab', icon: FiCode, desc: 'Octave · Python · R · Julia' },
 ]
 
 export default function ComputeLab() {
-  const [mode, setMode] = useState<ComputeMode>('presets')
+  const [mode, setMode] = useState<ComputeMode>('workstation')
 
   return (
     <div className="flex flex-col h-full" style={{ color: 'var(--color-text)' }}>
@@ -60,10 +60,10 @@ export default function ComputeLab() {
 
       {/* ── Content ── */}
       <div className="flex-1 overflow-hidden">
+        {mode === 'workstation' && <Workstation />}
         {mode === 'presets' && <PresetRunner />}
         {mode === 'montecarlo' && <MonteCarloPanel />}
         {mode === 'equations' && <EquationPlotter />}
-        {mode === 'codelab' && <CodeLab />}
       </div>
     </div>
   )
