@@ -31,6 +31,7 @@ const SCRIPTS_KEY = 'compute-workstation-scripts'        // { list, activeId }
 const HISTORY_KEY = 'compute-workstation-history'
 const WORKSPACE_KEY = 'compute-workstation-workspace-v1' // serialized vars
 const EDITOR_PREFS_KEY = 'compute-workstation-editor-prefs'  // { fontSize, wrap }
+const PINNED_VARS_KEY = 'compute-workstation-pinned-vars' // string[] of names
 
 const EDITOR_FONT_MIN = 10
 const EDITOR_FONT_MAX = 20
@@ -53,6 +54,19 @@ function loadEditorPrefs(): EditorPrefs {
 }
 function saveEditorPrefs(p: EditorPrefs) {
   try { localStorage.setItem(EDITOR_PREFS_KEY, JSON.stringify(p)) } catch { /* quota */ }
+}
+
+function loadPinnedVars(): Set<string> {
+  try {
+    const raw = localStorage.getItem(PINNED_VARS_KEY)
+    if (!raw) return new Set()
+    const arr = JSON.parse(raw)
+    if (Array.isArray(arr)) return new Set(arr.filter(x => typeof x === 'string'))
+  } catch { /* fall through */ }
+  return new Set()
+}
+function savePinnedVars(set: ReadonlySet<string>) {
+  try { localStorage.setItem(PINNED_VARS_KEY, JSON.stringify([...set])) } catch { /* quota */ }
 }
 
 const STARTER_SCRIPT = `% MATLAB/Octave Workstation
@@ -593,6 +607,19 @@ export default function Workstation() {
   })
   const [vars, setVars] = useState<VarSnapshot[]>([])
   const [varFilter, setVarFilter] = useState('')
+  // Pinned workspace variables — float to the top of the list regardless
+  // of the current sort order. Persisted to localStorage so the user's
+  // favourites survive a reload.
+  const [pinnedVars, setPinnedVars] = useState<ReadonlySet<string>>(loadPinnedVars)
+  useEffect(() => { savePinnedVars(pinnedVars) }, [pinnedVars])
+  const togglePinnedVar = useCallback((name: string) => {
+    setPinnedVars(prev => {
+      const next = new Set(prev)
+      if (next.has(name)) next.delete(name)
+      else next.add(name)
+      return next
+    })
+  }, [])
   // Sort key for the workspace inspector. Cycled through via a small chip
   // in the panel header so power users can reorder by size when hunting
   // the largest matrix in the ws, or by type when scanning kinds.
@@ -842,6 +869,9 @@ export default function Workstation() {
 
   // Same idea for the workspace inspector — filter by variable name,
   // substring, case-insensitive. Then sort by the current varSort key.
+  // Pinned variables always float to the top regardless of sort key so
+  // the user can keep an eye on the handful of values they care about
+  // while iterating on a script.
   const visibleVars = useMemo(() => {
     const q = varFilter.trim().toLowerCase()
     const base = q ? vars.filter(v => v.name.toLowerCase().includes(q)) : vars
@@ -874,8 +904,17 @@ export default function Workstation() {
         return d !== 0 ? d : a.name.localeCompare(b.name)
       })
     }
-    return sorted
-  }, [vars, varFilter, varSort])
+    // Stable partition: pinned first (keeping their relative order within
+    // the sorted list), then everything else.
+    if (pinnedVars.size === 0) return sorted
+    const pinned: VarSnapshot[] = []
+    const rest: VarSnapshot[] = []
+    for (const v of sorted) {
+      if (pinnedVars.has(v.name)) pinned.push(v)
+      else rest.push(v)
+    }
+    return [...pinned, ...rest]
+  }, [vars, varFilter, varSort, pinnedVars])
 
   // The autocomplete anchor is computed in viewport coordinates, so any
   // window resize / scroll would leave it stale — easiest fix is to just
@@ -4453,6 +4492,17 @@ export default function Workstation() {
                       title={`${v.name}: ${v.kind}  ${v.shape}  ${v.summary}${varUsageCounts[v.name] ? `  (used ${varUsageCounts[v.name]}× in script)` : '  (unused in script)'}`}
                     >
                       <span style={{ color: 'var(--color-text)', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        {pinnedVars.has(v.name) && (
+                          <span
+                            aria-hidden="true"
+                            title="Pinned — click the pin to unpin"
+                            style={{
+                              fontSize: 10,
+                              color: 'var(--color-text)',
+                              lineHeight: 1,
+                            }}
+                          >◆</span>
+                        )}
                         {v.name}
                         {(() => {
                           const n = varUsageCounts[v.name] || 0
@@ -4482,6 +4532,15 @@ export default function Workstation() {
                         {v.value.kind === 'mat' && (v.value.rows === 1 || v.value.cols === 1) && v.value.data.length >= 2 && (
                           <Sparkline data={v.value.data} />
                         )}
+                        <button
+                          style={{
+                            ...styles.varAction,
+                            ...(pinnedVars.has(v.name) ? { color: 'var(--color-text)' } : null),
+                          }}
+                          onClick={e => { e.stopPropagation(); togglePinnedVar(v.name) }}
+                          title={pinnedVars.has(v.name) ? 'Unpin from top' : 'Pin to top of workspace'}
+                          aria-label={pinnedVars.has(v.name) ? `Unpin ${v.name}` : `Pin ${v.name}`}
+                        >{pinnedVars.has(v.name) ? '◆' : '◇'}</button>
                         <button
                           style={styles.varAction}
                           onClick={e => { e.stopPropagation(); insertVariableAtCaret(v.name) }}
