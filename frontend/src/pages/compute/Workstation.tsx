@@ -84,6 +84,10 @@ interface ConsoleEntry {
   line?: number
 }
 
+/** Target formats for the workspace "copy variable" action. */
+type CopyFormat = 'matlab' | 'python' | 'latex' | 'json' | 'csv'
+const COPY_FORMATS: CopyFormat[] = ['matlab', 'python', 'latex', 'json', 'csv']
+
 let nextEntryId = 1
 let nextScriptId = 1
 const makeScriptId = () => `s${Date.now().toString(36)}${(nextScriptId++).toString(36)}`
@@ -580,6 +584,11 @@ export default function Workstation() {
   // in the panel header so power users can reorder by size when hunting
   // the largest matrix in the ws, or by type when scanning kinds.
   const [varSort, setVarSort] = useState<'name' | 'size' | 'type'>('name')
+  // Target format used by the ⧉ copy button on each workspace row.
+  // Cycled through via a small chip in the panel header so users can
+  // paste the same matrix into MATLAB, Python, LaTeX, JSON, or CSV
+  // without retyping anything.
+  const [copyFormat, setCopyFormat] = useState<CopyFormat>('matlab')
   const [expandedVar, setExpandedVar] = useState<string | null>(null)
   const [inspectVar, setInspectVar] = useState<string | null>(null)
   const [library, setLibrary] = useState<'open' | 'closed'>('open')
@@ -1376,32 +1385,67 @@ export default function Workstation() {
   // Copy a variable's contents as a literal MATLAB expression, so users
   // can paste a matrix straight into a script. Scalars and booleans use
   // their natural literal form.
-  const copyVariableExpr = useCallback((name: string, v: MValue) => {
-    let text = ''
+  // Render a workspace value in the chosen target language. Formats are
+  // picked via the small chip in the workspace panel header so users can
+  // move matrices into MATLAB, Python/numpy, LaTeX, JSON, or plain CSV
+  // without hand-rewriting them.
+  const formatVariableAs = useCallback((v: MValue, fmt: CopyFormat): string => {
+    const num = (x: number) => String(x)
     switch (v.kind) {
-      case 'num': text = String(v.v); break
-      case 'bool': text = v.v ? 'true' : 'false'; break
-      case 'str': text = JSON.stringify(v.v).replace(/"/g, "'"); break
-      case 'void': text = '[]'; break
-      case 'fn': text = `@${v.name}`; break
-      case 'mat': {
-        const rows: string[] = []
-        for (let r = 0; r < v.rows; r++) {
-          const cells: string[] = []
-          for (let c = 0; c < v.cols; c++) cells.push(String(v.data[r * v.cols + c]))
-          rows.push(cells.join(', '))
+      case 'num':  return num(v.v)
+      case 'bool':
+        switch (fmt) {
+          case 'python': return v.v ? 'True' : 'False'
+          case 'json':   return v.v ? 'true' : 'false'
+          default:       return v.v ? 'true' : 'false'
         }
-        text = `[${rows.join('; ')}]`
-        break
+      case 'str':
+        switch (fmt) {
+          case 'python': return JSON.stringify(v.v)
+          case 'json':   return JSON.stringify(v.v)
+          case 'latex':  return v.v.replace(/[\\{}$&#%_^~]/g, m => '\\' + m)
+          case 'csv':    return v.v
+          default:       return `'${v.v.replace(/'/g, "''")}'`
+        }
+      case 'void': return fmt === 'python' ? '[]' : fmt === 'json' ? '[]' : '[]'
+      case 'fn':   return `@${v.name}`
+      case 'mat': {
+        const { rows, cols, data } = v
+        const row = (r: number) => Array.from({ length: cols }, (_, c) => num(data[r * cols + c]))
+        switch (fmt) {
+          case 'matlab': {
+            const lines = Array.from({ length: rows }, (_, r) => row(r).join(', '))
+            return `[${lines.join('; ')}]`
+          }
+          case 'python': {
+            const lines = Array.from({ length: rows }, (_, r) => `[${row(r).join(', ')}]`)
+            return `np.array([${lines.join(', ')}])`
+          }
+          case 'latex': {
+            const lines = Array.from({ length: rows }, (_, r) => row(r).join(' & '))
+            return `\\begin{bmatrix}\n  ${lines.join(' \\\\\n  ')}\n\\end{bmatrix}`
+          }
+          case 'json': {
+            const arr = Array.from({ length: rows }, (_, r) => row(r).map(Number))
+            return rows === 1 ? JSON.stringify(arr[0]) : JSON.stringify(arr)
+          }
+          case 'csv': {
+            return Array.from({ length: rows }, (_, r) => row(r).join(',')).join('\n')
+          }
+        }
       }
     }
+  }, [])
+
+  const copyVariableExpr = useCallback((name: string, v: MValue) => {
+    const text = formatVariableAs(v, copyFormat)
     navigator.clipboard?.writeText(text).catch(() => { /* clipboard may be blocked */ })
     setEntries(prev => [...prev, {
       id: nextEntryId++,
       kind: 'output',
-      text: `Copied ${name} to clipboard (${text.length} chars)`,
+      text: `Copied ${name} to clipboard as ${copyFormat} (${text.length} chars)`,
     }])
-  }, [])
+  }, [copyFormat, formatVariableAs])
 
   // Insert a variable name at the script editor's caret (replacing any
   // active selection). Keeps focus on the editor afterwards so the user
@@ -4064,6 +4108,17 @@ export default function Workstation() {
                   title="Cycle sort key: name → size → type"
                   aria-label={`Sort workspace by ${varSort}`}
                 >sort: {varSort} ↓</button>
+                <button
+                  type="button"
+                  style={{ ...styles.plotChip, ...styles.plotChipActive }}
+                  onClick={() => setCopyFormat(f => {
+                    const i = COPY_FORMATS.indexOf(f)
+                    return COPY_FORMATS[(i + 1) % COPY_FORMATS.length]
+                  })}
+                  disabled={vars.length === 0}
+                  title="Cycle copy format used by the row ⧉ button: matlab → python → latex → json → csv"
+                  aria-label={`Copy format: ${copyFormat}`}
+                >copy: {copyFormat}</button>
                 <input
                   style={styles.varFilter}
                   value={varFilter}
