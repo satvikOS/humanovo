@@ -3877,6 +3877,21 @@ export default function Workstation() {
       minHeight: 0,
       overflow: 'hidden',
     },
+    overviewRuler: {
+      flex: '0 0 auto',
+      width: 10,
+      position: 'relative' as const,
+      borderLeft: '1px solid var(--glass-border)',
+      background: 'var(--glass-bg)',
+      cursor: 'pointer',
+    },
+    overviewMark: {
+      position: 'absolute' as const,
+      left: 1,
+      right: 1,
+      height: 2,
+      pointerEvents: 'none' as const,
+    },
     editorHighlight: {
       position: 'absolute' as const,
       top: 0,
@@ -5246,6 +5261,69 @@ export default function Workstation() {
                 wrap={editorWrapOn ? 'soft' : 'off'}
               />
             </div>
+            {lineCount > 0 && (
+              <div
+                style={styles.overviewRuler}
+                aria-label="Script overview"
+                title="Click to jump to that line"
+                onClick={(ev) => {
+                  const rect = ev.currentTarget.getBoundingClientRect()
+                  const frac = (ev.clientY - rect.top) / rect.height
+                  const line = Math.max(1, Math.min(lineCount, Math.round(frac * lineCount)))
+                  jumpToLine(line)
+                }}
+              >
+                {/* Sections — faint hairlines */}
+                {sectionOutline.map(sec => (
+                  <div
+                    key={`sec-${sec.line}`}
+                    style={{
+                      ...styles.overviewMark,
+                      top: `${Math.max(0, Math.min(100, ((sec.line - 1) / Math.max(1, lineCount)) * 100))}%`,
+                      background: 'var(--color-text-muted)',
+                      opacity: 0.45,
+                      height: 1,
+                    }}
+                  />
+                ))}
+                {/* Bookmarks — solid text colour */}
+                {Array.from(bookmarkLines).map(n => (
+                  <div
+                    key={`bm-${n}`}
+                    style={{
+                      ...styles.overviewMark,
+                      top: `${Math.max(0, Math.min(100, ((n - 1) / Math.max(1, lineCount)) * 100))}%`,
+                      background: 'var(--color-text)',
+                    }}
+                  />
+                ))}
+                {/* Errors — red, rendered last so they stack on top */}
+                {errorLines.map(n => (
+                  <div
+                    key={`err-${n}`}
+                    style={{
+                      ...styles.overviewMark,
+                      top: `${Math.max(0, Math.min(100, ((n - 1) / Math.max(1, lineCount)) * 100))}%`,
+                      background: 'var(--color-error)',
+                      height: 3,
+                    }}
+                  />
+                ))}
+                {/* Caret — thin translucent bar tracking the cursor's line */}
+                <div
+                  style={{
+                    position: 'absolute',
+                    left: 0,
+                    right: 0,
+                    top: `${Math.max(0, Math.min(100, ((cursor.line - 1) / Math.max(1, lineCount)) * 100))}%`,
+                    height: 2,
+                    background: 'var(--color-text)',
+                    opacity: 0.35,
+                    pointerEvents: 'none',
+                  }}
+                />
+              </div>
+            )}
           </div>
         </div>
 
