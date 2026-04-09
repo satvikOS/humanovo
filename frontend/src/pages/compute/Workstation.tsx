@@ -1719,6 +1719,29 @@ export default function Workstation() {
     })
   }, [setScript])
 
+  // Jump the caret to the bracket that matches the one at the current
+  // caret. Pass `extend=true` to grow the selection across the pair,
+  // which is handy for yanking a whole parenthesised expression.
+  const gotoMatchingBracket = useCallback((extend: boolean) => {
+    const ta = editorRef.current
+    if (!ta) return
+    const pair = findBracketMatch(ta.value, ta.selectionStart)
+    if (!pair) return
+    const [from, to] = pair
+    if (extend) {
+      const start = Math.min(from, to)
+      const end = Math.max(from, to) + 1
+      ta.selectionStart = start
+      ta.selectionEnd = end
+    } else {
+      ta.selectionStart = to
+      ta.selectionEnd = to
+    }
+    const lineOfTarget = (ta.value.slice(0, to).match(/\n/g)?.length ?? 0)
+    ta.scrollTop = Math.max(0, lineOfTarget * editorLineHeight - ta.clientHeight / 2)
+    ta.focus()
+  }, [editorLineHeight])
+
   // Insert a multi-line snippet at the current caret, matching the
   // indentation of the line the caret is on. Any `$0` token in the
   // snippet is removed and becomes the final caret position; otherwise
@@ -1985,6 +2008,18 @@ export default function Workstation() {
     if ((e.metaKey || e.ctrlKey) && (e.key === 'g' || e.key === 'G')) {
       e.preventDefault()
       openGoto()
+      return
+    }
+    // Ctrl/Cmd + M — jump to matching bracket at caret. Shift extends the
+    // selection from the current caret to the match, making it easy to
+    // grab an entire parenthesised expression or brace block.
+    if ((e.metaKey || e.ctrlKey) && (e.key === 'm' || e.key === 'M')) {
+      e.preventDefault()
+      gotoMatchingBracket(e.shiftKey)
+      requestAnimationFrame(() => {
+        const ta2 = editorRef.current
+        if (ta2) updateCursor(ta2)
+      })
       return
     }
     // F2 family — line bookmarks.
@@ -2441,7 +2476,7 @@ export default function Workstation() {
         ta.selectionStart = ta.selectionEnd = s + 1 + newIndent.length
       })
     }
-  }, [runScript, runSelection, runSection, openFind, openGoto, setScript, vars, acOpen, acItems, acIndex, acceptAutocomplete, closeAutocomplete, editorFontSize, sigHint, toggleBookmarkAtCaret, gotoBookmark])
+  }, [runScript, runSelection, runSection, openFind, openGoto, setScript, vars, acOpen, acItems, acIndex, acceptAutocomplete, closeAutocomplete, editorFontSize, sigHint, toggleBookmarkAtCaret, gotoBookmark, gotoMatchingBracket])
 
   // Track cursor position and selection size for the status bar.
   const updateCursor = useCallback((ta: HTMLTextAreaElement) => {
@@ -2945,8 +2980,10 @@ export default function Workstation() {
     { id: 'snip-try',     title: 'Insert snippet: try / catch',  hint: '',                 run: () => insertSnippet('try\n  $0\ncatch err\n  disp(err.message)\nend\n') },
     { id: 'snip-sec',     title: 'Insert snippet: %% section header', hint: '',            run: () => insertSnippet('%% $0\n') },
     { id: 'rename-id',    title: 'Rename identifier at caret',   hint: '',                 run: () => renameIdentifierAtCaret() },
+    { id: 'goto-bracket', title: 'Go to matching bracket',       hint: 'Ctrl+M',           run: () => gotoMatchingBracket(false) },
+    { id: 'sel-bracket',  title: 'Select to matching bracket',   hint: 'Ctrl+Shift+M',     run: () => gotoMatchingBracket(true) },
     { id: 'help',         title: 'Show keyboard shortcuts',      hint: 'F1',               run: () => setHelpOpen(true) },
-  ], [runScript, runSelection, runSection, openFind, openGoto, newScript, duplicateScript, closeScript, reopenLastClosedScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, copyConsole, exportPlotSVG, exportPlotPNG, exportPlotCSV, toggleBookmarkAtCaret, gotoBookmark, clearAllBookmarks, insertSnippet, renameIdentifierAtCaret])
+  ], [runScript, runSelection, runSection, openFind, openGoto, newScript, duplicateScript, closeScript, reopenLastClosedScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, copyConsole, exportPlotSVG, exportPlotPNG, exportPlotCSV, toggleBookmarkAtCaret, gotoBookmark, clearAllBookmarks, insertSnippet, renameIdentifierAtCaret, gotoMatchingBracket])
 
   // Fuzzy-ish filter: split the query into tokens and require each to
   // appear (substring, case-insensitive) in the command title. Keeps
@@ -5649,6 +5686,8 @@ const SHORTCUT_GROUPS: { title: string; items: [string, string][] }[] = [
     items: [
       ['Ctrl / Cmd + F', 'Find and replace'],
       ['Ctrl / Cmd + G', 'Go to line'],
+      ['Ctrl / Cmd + M', 'Jump to matching bracket'],
+      ['Ctrl / Cmd + Shift + M', 'Select to matching bracket'],
       ['Enter / Shift + Enter (find)', 'Next / previous match'],
       ['Ctrl / Cmd + F2', 'Toggle bookmark on current line'],
       ['F2 / Shift + F2', 'Next / previous bookmark'],
