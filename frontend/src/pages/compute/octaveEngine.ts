@@ -891,6 +891,95 @@ function matTranspose(a: MMat): MMat {
   return { kind: 'mat', rows: a.cols, cols: a.rows, data: out }
 }
 
+/** LU decomposition with partial pivoting. Returns L, U, piv such that
+ *  P*A = L*U. Used by det/inv/linsolve. In-place on a copy. */
+function luDecompose(a: MMat): { LU: Float64Array; piv: Int32Array; sign: number } {
+  if (a.rows !== a.cols) throw new RuntimeError('LU: matrix must be square')
+  const n = a.rows
+  const LU = new Float64Array(a.data) // row-major copy
+  const piv = new Int32Array(n)
+  for (let i = 0; i < n; i++) piv[i] = i
+  let sign = 1
+
+  for (let k = 0; k < n; k++) {
+    // find pivot row
+    let maxAbs = Math.abs(LU[k * n + k])
+    let maxRow = k
+    for (let i = k + 1; i < n; i++) {
+      const v = Math.abs(LU[i * n + k])
+      if (v > maxAbs) { maxAbs = v; maxRow = i }
+    }
+    if (maxAbs < 1e-14) throw new RuntimeError('LU: matrix is singular')
+    if (maxRow !== k) {
+      // swap rows k and maxRow
+      for (let j = 0; j < n; j++) {
+        const tmp = LU[k * n + j]
+        LU[k * n + j] = LU[maxRow * n + j]
+        LU[maxRow * n + j] = tmp
+      }
+      const tp = piv[k]; piv[k] = piv[maxRow]; piv[maxRow] = tp
+      sign = -sign
+    }
+    // eliminate
+    const pivot = LU[k * n + k]
+    for (let i = k + 1; i < n; i++) {
+      const factor = LU[i * n + k] / pivot
+      LU[i * n + k] = factor
+      for (let j = k + 1; j < n; j++) {
+        LU[i * n + j] -= factor * LU[k * n + j]
+      }
+    }
+  }
+  return { LU, piv, sign }
+}
+
+/** Solve A * x = b using LU (b can be a matrix, one solve per column). */
+function luSolve(n: number, LU: Float64Array, piv: Int32Array, b: MMat): MMat {
+  if (b.rows !== n) throw new RuntimeError(`\\: dim mismatch (A is ${n}x${n}, b has ${b.rows} rows)`)
+  const cols = b.cols
+  const x = new Float64Array(n * cols)
+  // For each column of b
+  for (let c = 0; c < cols; c++) {
+    // Apply pivot permutation
+    const y = new Float64Array(n)
+    for (let i = 0; i < n; i++) y[i] = b.data[piv[i] * cols + c]
+    // Forward substitution (L has unit diagonal)
+    for (let i = 0; i < n; i++) {
+      let s = y[i]
+      for (let j = 0; j < i; j++) s -= LU[i * n + j] * y[j]
+      y[i] = s
+    }
+    // Back substitution
+    for (let i = n - 1; i >= 0; i--) {
+      let s = y[i]
+      for (let j = i + 1; j < n; j++) s -= LU[i * n + j] * y[j]
+      y[i] = s / LU[i * n + i]
+    }
+    for (let i = 0; i < n; i++) x[i * cols + c] = y[i]
+  }
+  return { kind: 'mat', rows: n, cols, data: x }
+}
+
+function matDet(a: MMat): number {
+  try {
+    const { LU, sign } = luDecompose(a)
+    let det = sign
+    for (let i = 0; i < a.rows; i++) det *= LU[i * a.rows + i]
+    return det
+  } catch {
+    return 0 // singular
+  }
+}
+
+function matInv(a: MMat): MMat {
+  const n = a.rows
+  const I = new Float64Array(n * n)
+  for (let i = 0; i < n; i++) I[i * n + i] = 1
+  const Iden: MMat = { kind: 'mat', rows: n, cols: n, data: I }
+  const { LU, piv } = luDecompose(a)
+  return luSolve(n, LU, piv, Iden)
+}
+
 function matPow(a: MMat, p: number): MMat {
   if (a.rows !== a.cols) throw new RuntimeError('^: matrix must be square')
   if (!Number.isInteger(p) || p < 0) throw new RuntimeError('^: only non-negative integer powers are supported')
@@ -932,7 +1021,10 @@ function applyBinOp(op: string, l: MValue, r: MValue): MValue {
     }
     case '\\': {
       if (isScalar(A)) return elemBinary(A, B, (x, y) => y / x, '\\')
-      throw new RuntimeError('\\: matrix left-division not implemented (use .\\)')
+      // Matrix left-division via LU: solve A * x = B
+      if (A.rows !== A.cols) throw new RuntimeError('\\: left operand must be square')
+      const { LU, piv } = luDecompose(A)
+      return luSolve(A.rows, LU, piv, B)
     }
     case '^': {
       if (isScalar(A) && isScalar(B)) return mscalar(Math.pow(A.data[0], B.data[0]))
@@ -1811,6 +1903,241 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
       ctx.currentPlot = { series: [] }
     }
     return MVOID
+  })
+
+  // ---- Linear algebra --------------------------------------------------
+  def('det', 1, args => {
+    need(args, 1, 'det')
+    const m = toMat(args[0])
+    if (m.rows !== m.cols) throw new RuntimeError('det: matrix must be square')
+    return mnum(matDet(m))
+  })
+  def('inv', 1, args => {
+    need(args, 1, 'inv')
+    return matInv(toMat(args[0]))
+  })
+  def('trace', 1, args => {
+    need(args, 1, 'trace')
+    const m = toMat(args[0])
+    const n = Math.min(m.rows, m.cols)
+    let s = 0
+    for (let i = 0; i < n; i++) s += m.data[i * m.cols + i]
+    return mnum(s)
+  })
+  def('diag', 1, args => {
+    need(args, 1, 'diag')
+    const m = toMat(args[0])
+    // Vector -> diagonal matrix
+    if (m.rows === 1 || m.cols === 1) {
+      const n = m.data.length
+      const d = new Float64Array(n * n)
+      for (let i = 0; i < n; i++) d[i * n + i] = m.data[i]
+      return mmat(n, n, d)
+    }
+    // Matrix -> diagonal vector
+    const n = Math.min(m.rows, m.cols)
+    const out = new Float64Array(n)
+    for (let i = 0; i < n; i++) out[i] = m.data[i * m.cols + i]
+    return mmat(n, 1, out)
+  })
+  def('norm', -1, args => {
+    need(args, 1, 'norm')
+    const m = toMat(args[0])
+    const p = args[1] ? (args[1].kind === 'str' ? args[1].v : toNumber(args[1])) : 2
+    // Vector norms
+    if (m.rows === 1 || m.cols === 1) {
+      if (p === 'fro' || p === 2) {
+        let s = 0
+        for (let i = 0; i < m.data.length; i++) s += m.data[i] * m.data[i]
+        return mnum(Math.sqrt(s))
+      }
+      if (p === 1) {
+        let s = 0
+        for (let i = 0; i < m.data.length; i++) s += Math.abs(m.data[i])
+        return mnum(s)
+      }
+      if (p === Infinity || p === 'inf') {
+        let mx = 0
+        for (let i = 0; i < m.data.length; i++) mx = Math.max(mx, Math.abs(m.data[i]))
+        return mnum(mx)
+      }
+      const pn = p as number
+      let s = 0
+      for (let i = 0; i < m.data.length; i++) s += Math.pow(Math.abs(m.data[i]), pn)
+      return mnum(Math.pow(s, 1 / pn))
+    }
+    // Matrix Frobenius norm (default fallback)
+    let s = 0
+    for (let i = 0; i < m.data.length; i++) s += m.data[i] * m.data[i]
+    return mnum(Math.sqrt(s))
+  })
+  def('linsolve', 2, args => {
+    need(args, 2, 'linsolve')
+    const A = toMat(args[0]), b = toMat(args[1])
+    if (A.rows !== A.cols) throw new RuntimeError('linsolve: A must be square')
+    const { LU, piv } = luDecompose(A)
+    return luSolve(A.rows, LU, piv, b)
+  })
+  def('mldivide', 2, args => applyBinOp('\\', args[0], args[1]))
+  def('mrdivide', 2, args => applyBinOp('/', args[0], args[1]))
+  def('transpose', 1, args => matTranspose(toMat(args[0])))
+  def('rank', 1, args => {
+    // Row-reduce to count non-zero rows (cheap, not SVD-accurate).
+    const m = toMat(args[0])
+    const r = m.rows, c = m.cols
+    const M = new Float64Array(m.data)
+    let rank = 0
+    const tol = 1e-10
+    const rowUsed = new Uint8Array(r)
+    for (let col = 0; col < c; col++) {
+      let pivot = -1
+      for (let row = 0; row < r; row++) {
+        if (!rowUsed[row] && Math.abs(M[row * c + col]) > tol) { pivot = row; break }
+      }
+      if (pivot < 0) continue
+      rowUsed[pivot] = 1
+      rank++
+      const pv = M[pivot * c + col]
+      for (let row = 0; row < r; row++) {
+        if (row === pivot) continue
+        const val = M[row * c + col]
+        if (Math.abs(val) < tol) continue
+        const factor = val / pv
+        for (let k = col; k < c; k++) M[row * c + k] -= factor * M[pivot * c + k]
+      }
+    }
+    return mnum(rank)
+  })
+  def('dot', 2, args => {
+    const a = toArray(args[0]), b = toArray(args[1])
+    if (a.length !== b.length) throw new RuntimeError('dot: length mismatch')
+    let s = 0
+    for (let i = 0; i < a.length; i++) s += a[i] * b[i]
+    return mnum(s)
+  })
+  def('cross', 2, args => {
+    const a = toArray(args[0]), b = toArray(args[1])
+    if (a.length !== 3 || b.length !== 3) throw new RuntimeError('cross: inputs must be 3-element vectors')
+    return mmat(1, 3, [
+      a[1] * b[2] - a[2] * b[1],
+      a[2] * b[0] - a[0] * b[2],
+      a[0] * b[1] - a[1] * b[0],
+    ])
+  })
+
+  // ---- Predicates & reducers -------------------------------------------
+  def('any', 1, args => {
+    const a = toArray(args[0])
+    for (let i = 0; i < a.length; i++) if (a[i] !== 0 && !Number.isNaN(a[i])) return mbool(true)
+    return mbool(false)
+  })
+  def('all', 1, args => {
+    const a = toArray(args[0])
+    if (a.length === 0) return mbool(true)
+    for (let i = 0; i < a.length; i++) if (a[i] === 0 || Number.isNaN(a[i])) return mbool(false)
+    return mbool(true)
+  })
+  def('find', 1, args => {
+    const a = toArray(args[0])
+    const out: number[] = []
+    for (let i = 0; i < a.length; i++) if (a[i] !== 0 && !Number.isNaN(a[i])) out.push(i + 1)
+    return mmat(1, out.length, out)
+  })
+  def('nnz', 1, args => {
+    const a = toArray(args[0])
+    let n = 0
+    for (let i = 0; i < a.length; i++) if (a[i] !== 0) n++
+    return mnum(n)
+  })
+  def('isnan', 1, args => elemMap(args[0], x => Number.isNaN(x) ? 1 : 0))
+  def('isinf', 1, args => elemMap(args[0], x => !Number.isFinite(x) && !Number.isNaN(x) ? 1 : 0))
+  def('isfinite', 1, args => elemMap(args[0], x => Number.isFinite(x) ? 1 : 0))
+  def('isreal', 1, () => mbool(true))
+  def('isequal', -1, args => {
+    if (args.length < 2) return mbool(true)
+    const first = args[0]
+    for (let k = 1; k < args.length; k++) {
+      const other = args[k]
+      if (first.kind !== other.kind) {
+        // Allow num/mat scalar equivalence
+        try {
+          const a = toArray(first), b = toArray(other)
+          if (a.length !== b.length) return mbool(false)
+          for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return mbool(false)
+          continue
+        } catch {
+          return mbool(false)
+        }
+      }
+      if (first.kind === 'str') {
+        if ((other as MStr).v !== first.v) return mbool(false)
+      } else {
+        const a = toArray(first), b = toArray(other)
+        if (a.length !== b.length) return mbool(false)
+        for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return mbool(false)
+      }
+    }
+    return mbool(true)
+  })
+
+  // ---- Combinatorial ---------------------------------------------------
+  const fact = (n: number): number => {
+    if (n < 0 || !Number.isFinite(n)) return NaN
+    let r = 1
+    for (let i = 2; i <= n; i++) r *= i
+    return r
+  }
+  def('factorial', 1, args => elemMap(args[0], x => fact(Math.round(x))))
+  def('nchoosek', 2, args => {
+    const n = Math.round(toNumber(args[0]))
+    const k = Math.round(toNumber(args[1]))
+    if (k < 0 || k > n) return mnum(0)
+    const kk = Math.min(k, n - k)
+    let r = 1
+    for (let i = 0; i < kk; i++) r = r * (n - i) / (i + 1)
+    return mnum(Math.round(r))
+  })
+
+  // ---- Higher-order / solvers ------------------------------------------
+  def('arrayfun', 2, args => {
+    const fn = args[0]
+    if (fn.kind !== 'fn') throw new RuntimeError('arrayfun: first argument must be a function')
+    const m = toMat(args[1])
+    const out = new Float64Array(m.data.length)
+    for (let i = 0; i < m.data.length; i++) {
+      const r = callFn(fn, [mnum(m.data[i])], ctx)
+      out[i] = toNumber(r)
+    }
+    return mmat(m.rows, m.cols, out)
+  })
+  def('ode45', -1, args => {
+    need(args, 3, 'ode45')
+    const fn = args[0]
+    if (fn.kind !== 'fn') throw new RuntimeError('ode45: first argument must be a function')
+    const tSpan = toArray(args[1])
+    if (tSpan.length < 2) throw new RuntimeError('ode45: tspan must have at least 2 elements')
+    const y0 = toArray(args[2])
+    const steps = args[3] ? Math.round(toNumber(args[3])) : 500
+    const result = ML.ode45(
+      (t, y) => {
+        const yMat = mmat(y.length, 1, y)
+        const dy = callFn(fn, [mnum(t), yMat], ctx)
+        return toArray(dy)
+      },
+      [tSpan[0], tSpan[tSpan.length - 1]],
+      y0,
+      steps,
+    )
+    // Return t as column and y as matrix [steps+1 x y0.length]
+    const nrows = result.t.length
+    const ncols = y0.length
+    const flat = new Float64Array(nrows * ncols)
+    for (let i = 0; i < nrows; i++) {
+      for (let j = 0; j < ncols; j++) flat[i * ncols + j] = result.y[i][j]
+    }
+    // Store t in workspace for convenience
+    ctx.ws.vars.set('__ode_t__', mmat(nrows, 1, result.t))
+    return mmat(nrows, ncols, flat)
   })
 
   return B
