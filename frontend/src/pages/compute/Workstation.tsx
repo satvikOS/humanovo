@@ -657,6 +657,13 @@ export default function Workstation() {
   })())
   const consoleRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<HTMLTextAreaElement>(null)
+  // Per-script remembered editor state (scroll offsets + selection). Keyed
+  // by script id so switching tabs returns the user to exactly where they
+  // left off rather than snapping to the top of the file.
+  const scriptViewStateRef = useRef<Map<string, {
+    scrollTop: number; scrollLeft: number; selStart: number; selEnd: number
+  }>>(new Map())
+  const prevScriptIdRef = useRef<string>(scriptStore.activeId)
   const gutterRef = useRef<HTMLDivElement>(null)
   const highlightRef = useRef<HTMLPreElement>(null)
   const bracketOverlayRef = useRef<HTMLDivElement>(null)
@@ -1964,6 +1971,56 @@ export default function Workstation() {
   const onEditorSelect = useCallback((e: React.SyntheticEvent<HTMLTextAreaElement>) => {
     updateCursor(e.currentTarget)
   }, [updateCursor])
+
+  // Save and restore per-script editor state (scroll + selection) when the
+  // active tab changes. We capture the outgoing script's state directly
+  // from the textarea before React rerenders, then apply the incoming
+  // script's state on the next frame (after the new code has been
+  // committed to the DOM). New scripts with no saved state fall back to
+  // scroll-to-top, caret at 0 — matching a fresh open.
+  useEffect(() => {
+    const prevId = prevScriptIdRef.current
+    const currId = scriptStore.activeId
+    if (prevId === currId) return
+    const ta = editorRef.current
+    if (ta && prevId) {
+      scriptViewStateRef.current.set(prevId, {
+        scrollTop: ta.scrollTop,
+        scrollLeft: ta.scrollLeft,
+        selStart: ta.selectionStart,
+        selEnd: ta.selectionEnd,
+      })
+    }
+    prevScriptIdRef.current = currId
+    requestAnimationFrame(() => {
+      const ta2 = editorRef.current
+      if (!ta2) return
+      const saved = scriptViewStateRef.current.get(currId)
+      if (saved) {
+        const len = ta2.value.length
+        ta2.scrollTop = saved.scrollTop
+        ta2.scrollLeft = saved.scrollLeft
+        ta2.selectionStart = Math.min(saved.selStart, len)
+        ta2.selectionEnd = Math.min(saved.selEnd, len)
+      } else {
+        ta2.scrollTop = 0
+        ta2.scrollLeft = 0
+        ta2.selectionStart = ta2.selectionEnd = 0
+      }
+      updateCursor(ta2)
+      // Setting scrollTop/scrollLeft programmatically doesn't always fire
+      // the scroll event consistently, so nudge the overlay transforms
+      // directly to match.
+      const sTop = ta2.scrollTop
+      const sLeft = ta2.scrollLeft
+      if (gutterRef.current) gutterRef.current.style.transform = `translateY(${-sTop}px)`
+      if (highlightRef.current) highlightRef.current.style.transform = `translate(${-sLeft}px, ${-sTop}px)`
+      if (bracketOverlayRef.current) bracketOverlayRef.current.style.transform = `translate(${-sLeft}px, ${-sTop}px)`
+      if (findOverlayRef.current) findOverlayRef.current.style.transform = `translate(${-sLeft}px, ${-sTop}px)`
+      if (wordOverlayRef.current) wordOverlayRef.current.style.transform = `translate(${-sLeft}px, ${-sTop}px)`
+      if (currentLineRef.current) currentLineRef.current.style.transform = `translateY(${-sTop}px)`
+    })
+  }, [scriptStore.activeId, updateCursor])
 
   const onEditorScroll = useCallback((e: React.UIEvent<HTMLTextAreaElement>) => {
     const { scrollTop, scrollLeft } = e.currentTarget
