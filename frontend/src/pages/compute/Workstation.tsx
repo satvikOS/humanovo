@@ -333,6 +333,8 @@ export default function Workstation() {
         list: store.list.map(s => s.id === store.activeId ? { ...s, code: nextCode } : s),
       }
     })
+    // Any edit invalidates the previous error marker.
+    setErrorLine(null)
   }, [])
   const [entries, setEntries] = useState<ConsoleEntry[]>([])
   const [cmd, setCmd] = useState('')
@@ -347,6 +349,9 @@ export default function Workstation() {
   const [activeTemplate, setActiveTemplate] = useState<string | null>(null)
   const [cursor, setCursor] = useState<{ line: number; col: number }>({ line: 1, col: 1 })
   const [lastRunMs, setLastRunMs] = useState<number | null>(null)
+  // Line number of the most recent script error (1-based), or null if clean.
+  // Shown as a red stripe in the gutter until the user starts editing.
+  const [errorLine, setErrorLine] = useState<number | null>(null)
 
   // Find & replace state. `findOpen` toggles the slim bar above the editor.
   // `matchIdx` is the index of the currently highlighted match in `matches`.
@@ -417,6 +422,7 @@ export default function Workstation() {
   const runScript = useCallback(() => {
     if (running) return
     setRunning(true)
+    setErrorLine(null)
     setEntries(prev => [...prev, { id: nextEntryId++, kind: 'input', text: '▶ run script' }])
     // Defer one tick so the UI can paint the "running" state.
     setTimeout(() => {
@@ -424,6 +430,9 @@ export default function Workstation() {
       try {
         const res = runOctave(script, workspaceRef.current)
         appendOutputs(res.outputs)
+        // Surface the first located error line so the gutter can flag it.
+        const firstErr = res.outputs.find(o => o.kind === 'error' && typeof o.line === 'number')
+        if (firstErr?.line) setErrorLine(firstErr.line)
       } catch (e: any) {
         setEntries(prev => [...prev, { id: nextEntryId++, kind: 'error', text: String(e?.message ?? e) }])
       } finally {
@@ -1512,7 +1521,22 @@ export default function Workstation() {
           <div style={styles.editorBody}>
             <div style={styles.editorGutterClip} aria-hidden>
               <div ref={gutterRef} style={styles.editorGutterNumbers}>
-                {Array.from({ length: lineCount }, (_, i) => i + 1).join('\n')}
+                {Array.from({ length: lineCount }, (_, i) => {
+                  const n = i + 1
+                  const isErr = errorLine === n
+                  return (
+                    <div
+                      key={n}
+                      style={{
+                        height: '1.6em',
+                        color: isErr ? 'var(--color-error)' : undefined,
+                        fontWeight: isErr ? 600 : undefined,
+                      }}
+                    >
+                      {isErr ? '● ' + n : n}
+                    </div>
+                  )
+                })}
               </div>
             </div>
             <div style={styles.editorTextWrap}>

@@ -319,6 +319,8 @@ export interface RunOutput {
   kind: 'text' | 'error' | 'plot' | 'value'
   text?: string
   plot?: PlotSpec
+  /** 1-based source line number for errors we can locate (ParseError). */
+  line?: number
 }
 
 export interface PlotSpec {
@@ -2323,7 +2325,8 @@ export function run(source: string, workspace: Workspace = createWorkspace()): R
       outputs.push({ kind: 'plot', plot: ctx.currentPlot })
     }
   } catch (err: any) {
-    outputs.push({ kind: 'error', text: String(err?.message ?? err) })
+    const line = typeof err?.line === 'number' ? err.line : undefined
+    outputs.push({ kind: 'error', text: String(err?.message ?? err), line })
   }
   return { outputs, workspace }
 }
