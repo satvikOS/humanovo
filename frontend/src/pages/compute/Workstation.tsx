@@ -1993,6 +1993,32 @@ export default function Workstation() {
     })
   }, [applySelectionTransform])
 
+  // Convert every hard tab in the script into two spaces — the same
+  // indent width used by the editor's Tab handler. Useful after pasting
+  // code from an external editor that still indents with tabs. Caret
+  // position is mapped forward so it tracks its old character even
+  // when expansion shifts later characters to the right.
+  const convertTabsToSpaces = useCallback(() => {
+    const ta = editorRef.current
+    if (!ta) return
+    const value = ta.value
+    if (value.indexOf('\t') < 0) return
+    const caret = ta.selectionStart
+    // Count tabs that sit before the caret so we know how many extra
+    // characters were inserted ahead of it by the expansion.
+    let tabsBeforeCaret = 0
+    for (let i = 0; i < caret; i++) if (value[i] === '\t') tabsBeforeCaret++
+    const next = value.replace(/\t/g, '  ')
+    setScript(next)
+    const newCaret = caret + tabsBeforeCaret
+    requestAnimationFrame(() => {
+      const ta2 = editorRef.current
+      if (!ta2) return
+      ta2.focus()
+      ta2.setSelectionRange(newCaret, newCaret)
+    })
+  }, [setScript])
+
   // Join the current line with the next — replacing the intervening
   // newline (and any run of indent whitespace on the follower) with a
   // single space. When a range of lines is selected, every internal
@@ -3524,6 +3550,7 @@ export default function Workstation() {
     { id: 'snip-sec',     title: 'Insert snippet: %% section header', hint: '',            run: () => insertSnippet('%% $0\n') },
     { id: 'rename-id',    title: 'Rename identifier at caret',   hint: '',                 run: () => renameIdentifierAtCaret() },
     { id: 'trim-ws',      title: 'Trim trailing whitespace',     hint: '',                 run: () => trimTrailingWhitespace() },
+    { id: 'tabs-spaces',  title: 'Convert tabs to spaces',       hint: '',                 run: () => convertTabsToSpaces() },
     { id: 'join-lines',   title: 'Join line with next',          hint: 'Ctrl+J',           run: () => joinLines() },
     { id: 'upper-sel',    title: 'Uppercase selection',          hint: '',                 run: () => applySelectionTransform(s => s.toUpperCase()) },
     { id: 'lower-sel',    title: 'Lowercase selection',          hint: '',                 run: () => applySelectionTransform(s => s.toLowerCase()) },
@@ -3537,7 +3564,7 @@ export default function Workstation() {
     { id: 'next-err',     title: 'Jump to next error',           hint: 'F8',               run: () => gotoNextError(1) },
     { id: 'prev-err',     title: 'Jump to previous error',       hint: 'Shift+F8',         run: () => gotoNextError(-1) },
     { id: 'help',         title: 'Show keyboard shortcuts',      hint: 'F1',               run: () => setHelpOpen(true) },
-  ], [runScript, runSelection, runSection, runUntilCursor, rerunLastFragment, openFind, openGoto, openSymbolNav, gotoNextError, newScript, duplicateScript, closeScript, closeOtherScripts, closeScriptsToRight, reopenLastClosedScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, copyConsole, downloadConsole, clearConsoleErrors, exportPlotSVG, exportPlotPNG, exportPlotCSV, toggleBookmarkAtCaret, gotoBookmark, clearAllBookmarks, insertSnippet, renameIdentifierAtCaret, gotoMatchingBracket, trimTrailingWhitespace, applySelectionTransform, sortSelectedLines, uniqueSelectedLines, removeEmptySelectedLines, joinLines])
+  ], [runScript, runSelection, runSection, runUntilCursor, rerunLastFragment, openFind, openGoto, openSymbolNav, gotoNextError, newScript, duplicateScript, closeScript, closeOtherScripts, closeScriptsToRight, reopenLastClosedScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, copyConsole, downloadConsole, clearConsoleErrors, exportPlotSVG, exportPlotPNG, exportPlotCSV, toggleBookmarkAtCaret, gotoBookmark, clearAllBookmarks, insertSnippet, renameIdentifierAtCaret, gotoMatchingBracket, trimTrailingWhitespace, convertTabsToSpaces, applySelectionTransform, sortSelectedLines, uniqueSelectedLines, removeEmptySelectedLines, joinLines])
 
   // Fuzzy-ish filter: split the query into tokens and require each to
   // appear (substring, case-insensitive) in the command title. Keeps
