@@ -864,6 +864,26 @@ export default function Workstation() {
 
   const sectionStartSet = useMemo(() => new Set(sections.starts), [sections])
 
+  // Flatten the sections into an ordered chip list for the outline strip.
+  // Unnamed sections fall back to "section N" so the chip is still clickable.
+  const sectionOutline = useMemo(() => {
+    return sections.starts.map((line, idx) => ({
+      line,
+      label: sections.names[line] || `section ${idx + 1}`,
+    }))
+  }, [sections])
+
+  // Pick the outline entry whose start is the largest <= current caret line.
+  // That's the "I'm inside this section" answer we show as active.
+  const activeSectionLine = useMemo(() => {
+    let best = sections.starts[0] ?? 1
+    for (const s of sections.starts) {
+      if (s <= cursor.line) best = s
+      else break
+    }
+    return best
+  }, [sections, cursor.line])
+
   // Core runner. Takes an arbitrary source fragment plus a label that is
   // echoed into the console so the user can tell a full run from a
   // "Run Selection". Used by both runScript and runSelection.
@@ -2172,6 +2192,42 @@ export default function Workstation() {
       border: 'none',
       cursor: 'pointer',
     },
+    sectionStrip: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 6,
+      padding: '5px 12px',
+      borderBottom: '1px solid var(--glass-border)',
+      background: 'transparent',
+      overflowX: 'auto' as const,
+      minHeight: 28,
+    },
+    sectionStripLabel: {
+      fontSize: 10,
+      letterSpacing: 0.6,
+      textTransform: 'uppercase' as const,
+      color: 'var(--color-text-muted)',
+      fontFamily: "'JetBrains Mono', monospace",
+      flexShrink: 0,
+    },
+    sectionChip: {
+      padding: '2px 10px',
+      fontSize: 11,
+      fontFamily: "'JetBrains Mono', monospace",
+      color: 'var(--color-text-muted)',
+      background: 'transparent',
+      border: '1px solid var(--glass-border)',
+      borderRadius: 3,
+      cursor: 'pointer',
+      flexShrink: 0,
+      whiteSpace: 'nowrap' as const,
+      transition: 'background 0.12s, color 0.12s, border-color 0.12s',
+    },
+    sectionChipActive: {
+      color: 'var(--color-text)',
+      background: 'var(--glass-bg-hover)',
+      borderColor: 'var(--color-border-strong)',
+    },
     editorBody: {
       flex: 1,
       display: 'flex',
@@ -2964,6 +3020,23 @@ export default function Workstation() {
             })}
             <button style={styles.tabAddBtn} onClick={newScript} title="New script">+</button>
           </div>
+          {sectionOutline.length > 1 && (
+            <div style={styles.sectionStrip} aria-label="Script sections">
+              <span style={styles.sectionStripLabel}>§</span>
+              {sectionOutline.map(sec => {
+                const active = sec.line === activeSectionLine
+                return (
+                  <button
+                    key={sec.line}
+                    type="button"
+                    style={{ ...styles.sectionChip, ...(active ? styles.sectionChipActive : null) }}
+                    onClick={() => jumpToLine(sec.line)}
+                    title={`Jump to line ${sec.line}: ${sec.label}`}
+                  >{sec.label}</button>
+                )
+              })}
+            </div>
+          )}
           {findOpen && (
             <div style={styles.findBar}>
               <input
