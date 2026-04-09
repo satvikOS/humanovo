@@ -333,6 +333,8 @@ export interface RunResult {
   workspace: Workspace
 }
 
+import * as ML from './mathLib'
+
 // -----------------------------------------------------------------------------
 // Parser
 // -----------------------------------------------------------------------------
@@ -792,6 +794,8 @@ interface EvalContext {
   outputs: RunOutput[]
   /** Per-run plot accumulator — flushed on figure()/show or at end of run. */
   currentPlot: PlotSpec | null
+  /** Built-in function registry bound to this context. */
+  builtins: Map<string, MFn>
 }
 
 // ---- Value helpers ---------------------------------------------------------
@@ -1121,7 +1125,7 @@ function evalExpr(e: Expr, ctx: EvalContext): MValue {
     case 'ident': {
       const v = ctx.ws.vars.get(e.name)
       if (v) return v
-      const fn = ctx.ws.fns.get(e.name)
+      const fn = ctx.ws.fns.get(e.name) ?? ctx.builtins.get(e.name)
       if (fn) {
         // Identifier in value position with no args: if zero-arity, invoke it
         if (fn.arity === 0) return callFn(fn, [], ctx)
@@ -1165,17 +1169,17 @@ function evalExpr(e: Expr, ctx: EvalContext): MValue {
       // Could be function call or indexing — decide by what callee resolves to.
       if (e.callee.type === 'ident') {
         const name = e.callee.name
-        // Functions first (user then builtin)
-        const userFn = ctx.ws.fns.get(name)
+        // If it's a variable, treat as indexing
+        const vv = ctx.ws.vars.get(name)
+        if (vv && vv.kind !== 'fn') {
+          const args = e.args.map(a => a.type === 'colon' ? 'colon' as const : evalExpr(a, ctx))
+          return getIndexed(vv, args)
+        }
+        // Functions: user first, then built-ins
+        const userFn = ctx.ws.fns.get(name) ?? (vv && vv.kind === 'fn' ? vv : undefined) ?? ctx.builtins.get(name)
         if (userFn) {
           const args = e.args.map(a => evalExpr(a, ctx))
           return callFn(userFn, args, ctx)
-        }
-        // If it's a variable, treat as indexing
-        const vv = ctx.ws.vars.get(name)
-        if (vv) {
-          const args = e.args.map(a => a.type === 'colon' ? 'colon' as const : evalExpr(a, ctx))
-          return getIndexed(vv, args)
         }
         throw new RuntimeError(`'${name}' is undefined`)
       }
@@ -1410,12 +1414,446 @@ function formatNum(n: number): string {
 }
 
 // -----------------------------------------------------------------------------
-// Public run() — real evaluator. Built-ins land in Batch 3d.
+// Built-ins
+// -----------------------------------------------------------------------------
+
+/** Convert any MValue to a flat JS array of numbers for mathLib calls. */
+function toArray(v: MValue): number[] {
+  if (v.kind === 'num') return [v.v]
+  if (v.kind === 'bool') return [v.v ? 1 : 0]
+  if (v.kind === 'mat') return Array.from(v.data)
+  throw new RuntimeError(`cannot convert ${v.kind} to array`)
+}
+
+/** Apply a scalar math function element-wise. */
+function elemMap(v: MValue, fn: (x: number) => number): MValue {
+  const m = toMat(v)
+  const out = new Float64Array(m.data.length)
+  for (let i = 0; i < m.data.length; i++) out[i] = fn(m.data[i])
+  return { kind: 'mat', rows: m.rows, cols: m.cols, data: out }
+}
+
+function need(args: MValue[], n: number, name: string): void {
+  if (args.length < n) throw new RuntimeError(`${name}: expected ${n} argument(s), got ${args.length}`)
+}
+
+/** Build the built-in registry bound to this run's context (so plot/print
+ *  functions can reach currentPlot / outputs). */
+function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
+  const B = new Map<string, MFn>()
+  const def = (name: string, arity: number, fn: (args: MValue[]) => MValue) => {
+    B.set(name, { kind: 'fn', name, arity, builtin: fn })
+  }
+
+  const ensurePlot = (): PlotSpec => {
+    if (!ctx.currentPlot) ctx.currentPlot = { series: [] }
+    return ctx.currentPlot
+  }
+
+  // ---- Element-wise math ------------------------------------------------
+  const unaryMath: [string, (x: number) => number][] = [
+    ['sin', Math.sin], ['cos', Math.cos], ['tan', Math.tan],
+    ['asin', Math.asin], ['acos', Math.acos], ['atan', Math.atan],
+    ['sinh', Math.sinh], ['cosh', Math.cosh], ['tanh', Math.tanh],
+    ['exp', Math.exp], ['log', Math.log], ['log2', Math.log2], ['log10', Math.log10],
+    ['sqrt', Math.sqrt], ['abs', Math.abs], ['sign', Math.sign],
+    ['floor', Math.floor], ['ceil', Math.ceil], ['round', Math.round], ['fix', Math.trunc],
+  ]
+  for (const [n, f] of unaryMath) def(n, 1, args => { need(args, 1, n); return elemMap(args[0], f) })
+
+  def('atan2', 2, args => {
+    need(args, 2, 'atan2')
+    return elemBinary(toMat(args[0]), toMat(args[1]), Math.atan2, 'atan2')
+  })
+  def('mod', 2, args => {
+    need(args, 2, 'mod')
+    return elemBinary(toMat(args[0]), toMat(args[1]), (x, y) => x - y * Math.floor(x / y), 'mod')
+  })
+  def('rem', 2, args => {
+    need(args, 2, 'rem')
+    return elemBinary(toMat(args[0]), toMat(args[1]), (x, y) => x - y * Math.trunc(x / y), 'rem')
+  })
+  def('power', 2, args => applyBinOp('.^', args[0], args[1]))
+  def('pi', 0, () => mnum(Math.PI))
+  def('e', 0, () => mnum(Math.E))
+  def('Inf', 0, () => mnum(Infinity))
+  def('inf', 0, () => mnum(Infinity))
+  def('NaN', 0, () => mnum(NaN))
+  def('nan', 0, () => mnum(NaN))
+  def('eps', 0, () => mnum(Number.EPSILON))
+  def('true', 0, () => mbool(true))
+  def('false', 0, () => mbool(false))
+
+  // ---- Matrix constructors ---------------------------------------------
+  const dimsFromArgs = (args: MValue[]): [number, number] => {
+    if (args.length === 0) return [1, 1]
+    if (args.length === 1) {
+      const n = Math.round(toNumber(args[0]))
+      return [n, n]
+    }
+    return [Math.round(toNumber(args[0])), Math.round(toNumber(args[1]))]
+  }
+  def('zeros', -1, args => {
+    const [r, c] = dimsFromArgs(args)
+    return mmat(r, c, new Float64Array(r * c))
+  })
+  def('ones', -1, args => {
+    const [r, c] = dimsFromArgs(args)
+    const d = new Float64Array(r * c); d.fill(1)
+    return mmat(r, c, d)
+  })
+  def('eye', -1, args => {
+    const [r, c] = dimsFromArgs(args)
+    const d = new Float64Array(r * c)
+    const m = Math.min(r, c)
+    for (let i = 0; i < m; i++) d[i * c + i] = 1
+    return mmat(r, c, d)
+  })
+  def('rand', -1, args => {
+    const [r, c] = dimsFromArgs(args)
+    const d = new Float64Array(r * c)
+    for (let i = 0; i < d.length; i++) d[i] = Math.random()
+    return mmat(r, c, d)
+  })
+  def('randn', -1, args => {
+    const [r, c] = dimsFromArgs(args)
+    const d = new Float64Array(r * c)
+    for (let i = 0; i < d.length; i++) d[i] = ML.randNorm(0, 1)
+    return mmat(r, c, d)
+  })
+  def('linspace', -1, args => {
+    need(args, 2, 'linspace')
+    const a = toNumber(args[0]), b = toNumber(args[1])
+    const n = args[2] ? Math.round(toNumber(args[2])) : 100
+    const d = new Float64Array(n)
+    if (n === 1) d[0] = b
+    else {
+      const step = (b - a) / (n - 1)
+      for (let i = 0; i < n; i++) d[i] = a + i * step
+    }
+    return mmat(1, n, d)
+  })
+  def('logspace', -1, args => {
+    need(args, 2, 'logspace')
+    const a = toNumber(args[0]), b = toNumber(args[1])
+    const n = args[2] ? Math.round(toNumber(args[2])) : 50
+    const d = new Float64Array(n)
+    if (n === 1) d[0] = Math.pow(10, b)
+    else {
+      const step = (b - a) / (n - 1)
+      for (let i = 0; i < n; i++) d[i] = Math.pow(10, a + i * step)
+    }
+    return mmat(1, n, d)
+  })
+  def('repmat', 3, args => {
+    need(args, 3, 'repmat')
+    const m = toMat(args[0])
+    const rr = Math.round(toNumber(args[1]))
+    const cc = Math.round(toNumber(args[2]))
+    const R = m.rows * rr, C = m.cols * cc
+    const d = new Float64Array(R * C)
+    for (let i = 0; i < R; i++) {
+      for (let j = 0; j < C; j++) {
+        d[i * C + j] = m.data[(i % m.rows) * m.cols + (j % m.cols)]
+      }
+    }
+    return mmat(R, C, d)
+  })
+  def('reshape', -1, args => {
+    need(args, 3, 'reshape')
+    const m = toMat(args[0])
+    const r = Math.round(toNumber(args[1]))
+    const c = Math.round(toNumber(args[2]))
+    if (r * c !== m.data.length) throw new RuntimeError('reshape: element count must match')
+    return mmat(r, c, new Float64Array(m.data))
+  })
+
+  // ---- Queries ---------------------------------------------------------
+  def('size', -1, args => {
+    const m = toMat(args[0])
+    if (args.length === 2) {
+      const dim = Math.round(toNumber(args[1]))
+      return mnum(dim === 1 ? m.rows : m.cols)
+    }
+    return mmat(1, 2, [m.rows, m.cols])
+  })
+  def('length', 1, args => {
+    const m = toMat(args[0])
+    return mnum(Math.max(m.rows, m.cols))
+  })
+  def('numel', 1, args => mnum(toMat(args[0]).data.length))
+  def('rows', 1, args => mnum(toMat(args[0]).rows))
+  def('columns', 1, args => mnum(toMat(args[0]).cols))
+  def('isempty', 1, args => mbool(toMat(args[0]).data.length === 0))
+  def('isnumeric', 1, args => mbool(args[0].kind === 'num' || args[0].kind === 'mat'))
+
+  // ---- Reductions ------------------------------------------------------
+  def('sum', 1, args => { const a = toArray(args[0]); return mnum(ML.sum(a)) })
+  def('prod', 1, args => { const a = toArray(args[0]); return mnum(a.reduce((p, v) => p * v, 1)) })
+  def('mean', 1, args => mnum(ML.mean(toArray(args[0]))))
+  def('median', 1, args => mnum(ML.median(toArray(args[0]))))
+  def('std', 1, args => mnum(ML.std(toArray(args[0]))))
+  def('var', 1, args => mnum(ML.variance(toArray(args[0]))))
+  def('min', -1, args => {
+    if (args.length === 2) return elemBinary(toMat(args[0]), toMat(args[1]), Math.min, 'min')
+    const a = toArray(args[0]); return mnum(Math.min(...a))
+  })
+  def('max', -1, args => {
+    if (args.length === 2) return elemBinary(toMat(args[0]), toMat(args[1]), Math.max, 'max')
+    const a = toArray(args[0]); return mnum(Math.max(...a))
+  })
+  def('range', 1, args => { const a = toArray(args[0]); return mnum(Math.max(...a) - Math.min(...a)) })
+  def('quantile', 2, args => mnum(ML.quantile(toArray(args[0]), toNumber(args[1]))))
+  def('sort', 1, args => {
+    const a = [...toArray(args[0])].sort((x, y) => x - y)
+    return mmat(1, a.length, a)
+  })
+  def('unique', 1, args => {
+    const a = Array.from(new Set(toArray(args[0]))).sort((x, y) => x - y)
+    return mmat(1, a.length, a)
+  })
+  def('cumsum', 1, args => {
+    const a = toArray(args[0]); const out = new Float64Array(a.length)
+    let s = 0; for (let i = 0; i < a.length; i++) { s += a[i]; out[i] = s }
+    return mmat(1, a.length, out)
+  })
+  def('cumprod', 1, args => {
+    const a = toArray(args[0]); const out = new Float64Array(a.length)
+    let s = 1; for (let i = 0; i < a.length; i++) { s *= a[i]; out[i] = s }
+    return mmat(1, a.length, out)
+  })
+  def('skewness', 1, args => mnum(ML.skewness(toArray(args[0]))))
+  def('kurtosis', 1, args => mnum(ML.kurtosis(toArray(args[0]))))
+  def('sem', 1, args => mnum(ML.sem(toArray(args[0]))))
+  def('cov', 2, args => mnum(ML.covariance(toArray(args[0]), toArray(args[1]))))
+  def('corr', 2, args => mnum(ML.pearsonR(toArray(args[0]), toArray(args[1])).r))
+  def('normcdf', 1, args => mnum(ML.normCDF(toNumber(args[0]))))
+  def('norminv', 1, args => mnum(ML.invNorm(toNumber(args[0]))))
+  def('tcdf', 2, args => mnum(ML.tCDF(toNumber(args[0]), toNumber(args[1]))))
+  def('chi2cdf', 2, args => mnum(ML.chiCDF(toNumber(args[0]), toNumber(args[1]))))
+  def('fcdf', 3, args => mnum(ML.fCDF(toNumber(args[0]), toNumber(args[1]), toNumber(args[2]))))
+  def('gammaln', 1, args => elemMap(args[0], ML.lnGamma))
+
+  // ---- Signal processing ----------------------------------------------
+  def('fft', -1, args => {
+    const sig = toArray(args[0])
+    const fs = args[1] ? toNumber(args[1]) : 1
+    const r = ML.fft(sig, fs)
+    return mmat(1, r.magnitude.length, r.magnitude)
+  })
+  def('butter', -1, args => {
+    need(args, 3, 'butter')
+    const data = toArray(args[0])
+    const cutoff = toNumber(args[1])
+    const fs = toNumber(args[2])
+    const order = args[3] ? Math.round(toNumber(args[3])) : 4
+    const type = (args[4] && args[4].kind === 'str' ? args[4].v : 'low') as 'low' | 'high'
+    const out = ML.butterworth(data, cutoff, fs, order, type)
+    return mmat(1, out.length, out)
+  })
+  def('movmean', 2, args => {
+    const r = ML.movingAverage(toArray(args[0]), Math.round(toNumber(args[1])))
+    return mmat(1, r.length, r)
+  })
+  def('findpeaks', 1, args => {
+    const r = ML.findPeaks(toArray(args[0]))
+    return mmat(1, r.heights.length, r.heights)
+  })
+
+  // ---- Regression / fitting -------------------------------------------
+  def('polyfit', 3, args => {
+    const coeffs = ML.polyfit(toArray(args[0]), toArray(args[1]), Math.round(toNumber(args[2])))
+    return mmat(1, coeffs.length, coeffs)
+  })
+  def('polyval', 2, args => {
+    const c = toArray(args[0]); const x = toArray(args[1])
+    const out = x.map(xi => ML.polyval(c, xi))
+    return mmat(1, out.length, out)
+  })
+
+  // ---- Printing --------------------------------------------------------
+  const valueToText = (v: MValue): string => {
+    if (v.kind === 'str') return v.v
+    if (v.kind === 'num') return formatNum(v.v)
+    if (v.kind === 'bool') return v.v ? '1' : '0'
+    if (v.kind === 'mat' && v.rows === 1 && v.cols === 1) return formatNum(v.data[0])
+    if (v.kind === 'mat') return formatValue('', v).trim()
+    return ''
+  }
+  def('disp', 1, args => {
+    ctx.outputs.push({ kind: 'text', text: valueToText(args[0]) })
+    return MVOID
+  })
+  def('display', 1, args => {
+    ctx.outputs.push({ kind: 'text', text: valueToText(args[0]) })
+    return MVOID
+  })
+  def('printf', -1, args => {
+    const fmt = args[0] && args[0].kind === 'str' ? args[0].v : ''
+    ctx.outputs.push({ kind: 'text', text: sprintf(fmt, args.slice(1)) })
+    return MVOID
+  })
+  def('fprintf', -1, args => {
+    // fprintf(fid, fmt, ...) or fprintf(fmt, ...)
+    let fmtArg = args[0]
+    let rest = args.slice(1)
+    if (fmtArg.kind === 'num') { // fid, treat as stdout
+      fmtArg = args[1] ?? { kind: 'str', v: '' }
+      rest = args.slice(2)
+    }
+    const fmt = fmtArg.kind === 'str' ? fmtArg.v : ''
+    ctx.outputs.push({ kind: 'text', text: sprintf(fmt, rest) })
+    return MVOID
+  })
+  def('sprintf', -1, args => {
+    const fmt = args[0] && args[0].kind === 'str' ? args[0].v : ''
+    return mstr(sprintf(fmt, args.slice(1)))
+  })
+  def('num2str', 1, args => mstr(valueToText(args[0])))
+  def('str2num', 1, args => {
+    if (args[0].kind !== 'str') throw new RuntimeError('str2num: expected string')
+    return mnum(parseFloat(args[0].v))
+  })
+  def('strcat', -1, args => mstr(args.map(a => a.kind === 'str' ? a.v : valueToText(a)).join('')))
+  def('error', -1, args => {
+    const msg = args[0] && args[0].kind === 'str' ? args[0].v : 'error'
+    throw new RuntimeError(msg)
+  })
+  def('warning', -1, args => {
+    const msg = args[0] && args[0].kind === 'str' ? args[0].v : 'warning'
+    ctx.outputs.push({ kind: 'text', text: `warning: ${msg}` })
+    return MVOID
+  })
+  def('tic', 0, () => { ctx.ws.vars.set('__tic__', mnum(performance.now())); return MVOID })
+  def('toc', 0, () => {
+    const t0 = ctx.ws.vars.get('__tic__')
+    if (!t0 || t0.kind !== 'num') return mnum(0)
+    const dt = (performance.now() - t0.v) / 1000
+    ctx.outputs.push({ kind: 'text', text: `Elapsed time is ${dt.toFixed(4)} seconds.` })
+    return mnum(dt)
+  })
+
+  // ---- Plotting --------------------------------------------------------
+  const pushSeries = (name: string, x: number[], y: number[], type: 'line' | 'scatter' | 'bar') => {
+    const p = ensurePlot()
+    p.series.push({ name, x, y, type })
+  }
+  def('figure', -1, () => {
+    // Flush current plot into outputs; start fresh
+    if (ctx.currentPlot && ctx.currentPlot.series.length > 0) {
+      ctx.outputs.push({ kind: 'plot', plot: ctx.currentPlot })
+    }
+    ctx.currentPlot = { series: [] }
+    return MVOID
+  })
+  def('clf', 0, () => { ctx.currentPlot = { series: [] }; return MVOID })
+  def('plot', -1, args => {
+    need(args, 1, 'plot')
+    let x: number[], y: number[]
+    let idx = 0
+    if (args.length >= 2 && (args[1].kind === 'num' || args[1].kind === 'mat')) {
+      x = toArray(args[0]); y = toArray(args[1]); idx = 2
+    } else {
+      y = toArray(args[0]); x = y.map((_, i) => i + 1); idx = 1
+    }
+    const lbl = (args[idx] && args[idx].kind === 'str') ? (args[idx] as MStr).v : ''
+    pushSeries(lbl || `y${ensurePlot().series.length + 1}`, x, y, 'line')
+    return MVOID
+  })
+  def('scatter', -1, args => {
+    need(args, 2, 'scatter')
+    pushSeries('scatter', toArray(args[0]), toArray(args[1]), 'scatter')
+    return MVOID
+  })
+  def('bar', -1, args => {
+    need(args, 1, 'bar')
+    let x: number[], y: number[]
+    if (args.length >= 2) { x = toArray(args[0]); y = toArray(args[1]) }
+    else { y = toArray(args[0]); x = y.map((_, i) => i + 1) }
+    pushSeries('bar', x, y, 'bar')
+    return MVOID
+  })
+  def('stem', -1, args => {
+    need(args, 1, 'stem')
+    let x: number[], y: number[]
+    if (args.length >= 2) { x = toArray(args[0]); y = toArray(args[1]) }
+    else { y = toArray(args[0]); x = y.map((_, i) => i + 1) }
+    pushSeries('stem', x, y, 'scatter')
+    return MVOID
+  })
+  def('hist', -1, args => {
+    const data = toArray(args[0])
+    const bins = args[1] ? Math.round(toNumber(args[1])) : 20
+    const h = ML.buildHistogram(data, bins)
+    const x = h.map((_, i) => i + 1)
+    const y = h.map(b => b.count)
+    pushSeries('histogram', x, y, 'bar')
+    return MVOID
+  })
+  def('title', 1, args => { ensurePlot().title = args[0].kind === 'str' ? args[0].v : ''; return MVOID })
+  def('xlabel', 1, args => { ensurePlot().xLabel = args[0].kind === 'str' ? args[0].v : ''; return MVOID })
+  def('ylabel', 1, args => { ensurePlot().yLabel = args[0].kind === 'str' ? args[0].v : ''; return MVOID })
+  def('legend', -1, args => {
+    // Assign labels to existing series in order
+    const p = ensurePlot()
+    for (let i = 0; i < args.length; i++) {
+      const a = args[i]
+      if (p.series[i] && a.kind === 'str') p.series[i].name = a.v
+    }
+    return MVOID
+  })
+  def('grid', -1, () => MVOID) // no-op
+  def('hold', -1, () => MVOID) // no-op (we always hold)
+  def('axis', -1, () => MVOID) // no-op for now
+  def('show', 0, () => {
+    if (ctx.currentPlot && ctx.currentPlot.series.length > 0) {
+      ctx.outputs.push({ kind: 'plot', plot: ctx.currentPlot })
+      ctx.currentPlot = { series: [] }
+    }
+    return MVOID
+  })
+
+  return B
+}
+
+function sprintf(fmt: string, args: MValue[]): string {
+  let i = 0
+  return fmt.replace(/%(-?\d+)?(?:\.(\d+))?([dfgesc%])/g, (_m, width, prec, spec) => {
+    if (spec === '%') return '%'
+    const a = args[i++]
+    if (a === undefined) return ''
+    if (spec === 's') {
+      const s = a.kind === 'str' ? a.v : String(toNumber(a))
+      return width ? s.padStart(parseInt(width, 10)) : s
+    }
+    const n = toNumber(a)
+    let s: string
+    if (spec === 'd') s = Math.round(n).toString()
+    else if (spec === 'f') s = n.toFixed(prec ? parseInt(prec, 10) : 6)
+    else if (spec === 'e') s = n.toExponential(prec ? parseInt(prec, 10) : 6)
+    else if (spec === 'g') s = prec ? n.toPrecision(parseInt(prec, 10)) : String(n)
+    else s = String(n)
+    if (width) {
+      const w = parseInt(width, 10)
+      s = w < 0 ? s.padEnd(-w) : s.padStart(w)
+    }
+    return s
+  }).replace(/\\n/g, '\n').replace(/\\t/g, '\t')
+}
+
+// -----------------------------------------------------------------------------
+// Public run() — full evaluator with built-ins wired in.
 // -----------------------------------------------------------------------------
 
 export function run(source: string, workspace: Workspace = createWorkspace()): RunResult {
   const outputs: RunOutput[] = []
-  const ctx: EvalContext = { ws: workspace, outputs, currentPlot: null }
+  const ctx: EvalContext = {
+    ws: workspace,
+    outputs,
+    currentPlot: null,
+    builtins: new Map(),
+  }
+  ctx.builtins = makeBuiltins(ctx)
   try {
     const stmts = parse(source)
     workspace.history.push(source)
