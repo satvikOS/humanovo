@@ -96,6 +96,16 @@ interface ConsoleEntry {
   text: string
   /** Optional 1-based source line for click-to-jump on error entries. */
   line?: number
+  /** Wall-clock time the entry was emitted (epoch ms). Optional for
+   *  backwards-compat with persisted sessions that predate the field. */
+  at?: number
+}
+
+// Helper for constructing entries with an auto-populated wall-clock
+// timestamp. Centralising this keeps the dozens of setEntries call
+// sites from having to thread `Date.now()` around by hand.
+function mkEntry(partial: Omit<ConsoleEntry, 'id' | 'at'> & { line?: number }): ConsoleEntry {
+  return { id: nextEntryId++, at: Date.now(), ...partial }
 }
 
 /** Target formats for the workspace "copy variable" action. */
@@ -600,6 +610,15 @@ export default function Workstation() {
   // Kind-scoped console view: 'all' shows everything, the others narrow to
   // a single entry kind. Combines with the text filter above.
   const [consoleKind, setConsoleKind] = useState<'all' | 'input' | 'output' | 'error'>('all')
+  // Inline timestamps chip — when on, each console entry is prefixed
+  // with an HH:MM:SS hint. Persisted so the user's preference survives
+  // a reload, same pattern as the other console chips.
+  const [consoleShowTimestamps, setConsoleShowTimestamps] = useState<boolean>(() => {
+    try { return localStorage.getItem('compute-workstation-console-timestamps') === '1' } catch { return false }
+  })
+  useEffect(() => {
+    try { localStorage.setItem('compute-workstation-console-timestamps', consoleShowTimestamps ? '1' : '0') } catch { /* noop */ }
+  }, [consoleShowTimestamps])
   const [running, setRunning] = useState(false)
   const [history, setHistory] = useState<string[]>(loadHistory)
   const [histIdx, setHistIdx] = useState<number | null>(null)
@@ -990,17 +1009,16 @@ export default function Workstation() {
       const next = [...prev]
       for (const o of outs) {
         if (o.kind === 'text' && o.text) {
-          next.push({ id: nextEntryId++, kind: 'output', text: o.text })
+          next.push(mkEntry({ kind: 'output', text: o.text }))
         } else if (o.kind === 'error') {
-          next.push({ id: nextEntryId++, kind: 'error', text: o.text ?? 'error', line: o.line })
+          next.push(mkEntry({ kind: 'error', text: o.text ?? 'error', line: o.line }))
         } else if (o.kind === 'plot' && o.plot) {
           newPlots.push(o.plot)
           const n = o.plot.series.length
-          next.push({
-            id: nextEntryId++,
+          next.push(mkEntry({
             kind: 'output',
             text: `[figure] ${n} series${o.plot.title ? ' — ' + o.plot.title : ''}`,
-          })
+          }))
         }
       }
       return next
@@ -1201,7 +1219,7 @@ export default function Workstation() {
     if (!src.trim()) return
     setRunning(true)
     setErrorLine(null)
-    setEntries(prev => [...prev, { id: nextEntryId++, kind: 'input', text: label }])
+    setEntries(prev => [...prev, mkEntry({ kind: 'input', text: label })])
     setTimeout(() => {
       const t0 = performance.now()
       try {
@@ -1210,7 +1228,7 @@ export default function Workstation() {
         const firstErr = res.outputs.find(o => o.kind === 'error' && typeof o.line === 'number')
         if (firstErr?.line) setErrorLine(firstErr.line)
       } catch (e: any) {
-        setEntries(prev => [...prev, { id: nextEntryId++, kind: 'error', text: String(e?.message ?? e) }])
+        setEntries(prev => [...prev, mkEntry({ kind: 'error', text: String(e?.message ?? e) })])
       } finally {
         setLastRunMs(performance.now() - t0)
         setRunning(false)
@@ -1275,14 +1293,14 @@ export default function Workstation() {
   const runCommand = useCallback((text: string) => {
     const line = text.trim()
     if (!line) return
-    setEntries(prev => [...prev, { id: nextEntryId++, kind: 'input', text: `>> ${line}` }])
+    setEntries(prev => [...prev, mkEntry({ kind: 'input', text: `>> ${line}` })])
     const h = [...history, line]
     setHistory(h); saveHistory(h); setHistIdx(null)
     try {
       const res = runOctave(line, workspaceRef.current)
       appendOutputs(res.outputs)
     } catch (e: any) {
-      setEntries(prev => [...prev, { id: nextEntryId++, kind: 'error', text: String(e?.message ?? e) }])
+      setEntries(prev => [...prev, mkEntry({ kind: 'error', text: String(e?.message ?? e) })])
     }
     setCmd('')
   }, [history, appendOutputs])
@@ -1519,7 +1537,7 @@ export default function Workstation() {
     setVars([])
     setPlots([])
     setActivePlot(0)
-    setEntries(prev => [...prev, { id: nextEntryId++, kind: 'output', text: '— workspace cleared —' }])
+    setEntries(prev => [...prev, mkEntry({ kind: 'output', text: '— workspace cleared —' })])
   }
 
   // Clone the currently displayed chart SVG with a solid dark background
@@ -1650,7 +1668,7 @@ export default function Workstation() {
       try {
         const parsed = JSON.parse(String(r.result ?? ''))
         if (!parsed || typeof parsed.vars !== 'object') {
-          setEntries(prev => [...prev, { id: nextEntryId++, kind: 'error', text: `${file.name}: not a workspace JSON file` }])
+          setEntries(prev => [...prev, mkEntry({ kind: 'error', text: `${file.name}: not a workspace JSON file` })])
           return
         }
         let n = 0
@@ -1660,13 +1678,12 @@ export default function Workstation() {
         }
         setVars(snapshotWorkspace(workspaceRef.current))
         saveWorkspace(workspaceRef.current)
-        setEntries(prev => [...prev, {
-          id: nextEntryId++,
+        setEntries(prev => [...prev, mkEntry({
           kind: 'output',
           text: `Imported ${n} variable${n === 1 ? '' : 's'} from ${file.name}`,
-        }])
+        })])
       } catch (e: any) {
-        setEntries(prev => [...prev, { id: nextEntryId++, kind: 'error', text: `${file.name}: ${String(e?.message ?? e)}` }])
+        setEntries(prev => [...prev, mkEntry({ kind: 'error', text: `${file.name}: ${String(e?.message ?? e)}` })])
       }
     }
     r.readAsText(file)
@@ -1740,11 +1757,10 @@ export default function Workstation() {
   const copyVariableExpr = useCallback((name: string, v: MValue) => {
     const text = formatVariableAs(v, copyFormat)
     navigator.clipboard?.writeText(text).catch(() => { /* clipboard may be blocked */ })
-    setEntries(prev => [...prev, {
-      id: nextEntryId++,
+    setEntries(prev => [...prev, mkEntry({
       kind: 'output',
       text: `Copied ${name} to clipboard as ${copyFormat} (${text.length} chars)`,
-    }])
+    })])
   }, [copyFormat, formatVariableAs])
 
   // Insert a variable name at the script editor's caret (replacing any
@@ -3010,11 +3026,10 @@ export default function Workstation() {
       workspaceRef.current.vars.set(name, mat)
       setVars(snapshotWorkspace(workspaceRef.current))
       saveWorkspace(workspaceRef.current)
-      setEntries(prev => [...prev, {
-        id: nextEntryId++,
+      setEntries(prev => [...prev, mkEntry({
         kind: 'output',
         text: `Imported ${file.name} → ${name} (${rows}×${cols})${firstIsHeader ? ' · header row skipped' : ''}`,
-      }])
+      })])
     }
     r.readAsText(file)
   }, [])
@@ -5218,6 +5233,14 @@ export default function Workstation() {
               aria-label="Filter console entries"
               spellCheck={false}
             />
+            <button
+              type="button"
+              style={{ ...styles.plotChip, ...(consoleShowTimestamps ? styles.plotChipActive : null) }}
+              onClick={() => setConsoleShowTimestamps(v => !v)}
+              title="Toggle inline timestamps on console entries"
+            >
+              time
+            </button>
             {(consoleFilter || consoleKind !== 'all') && (
               <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
                 {visibleEntries.length} / {entries.length}
@@ -5255,6 +5278,20 @@ export default function Workstation() {
               const reuseText = e.kind === 'input'
                 ? e.text.replace(/^>>\s?/, '')
                 : e.text
+              // Prefix each entry with a monospace HH:MM:SS hint when
+              // the "time" chip is active. Older entries without an
+              // `at` field (e.g. loaded from persisted sessions) get a
+              // dim placeholder so columns still line up.
+              let stamp: string | null = null
+              if (consoleShowTimestamps) {
+                if (typeof e.at === 'number') {
+                  const d = new Date(e.at)
+                  const pad = (n: number) => String(n).padStart(2, '0')
+                  stamp = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+                } else {
+                  stamp = '--:--:--'
+                }
+              }
               return (
                 <div
                   key={e.id}
@@ -5275,11 +5312,17 @@ export default function Workstation() {
                     ...(clickable ? { cursor: 'pointer', textDecoration: 'underline', textUnderlineOffset: 3 } : null),
                   }}
                   title={
-                    clickable
+                    (clickable
                       ? `Click to jump to line ${e.line}, double-click to copy to prompt`
-                      : 'Double-click to copy to prompt'
+                      : 'Double-click to copy to prompt') +
+                    (typeof e.at === 'number' ? `\n${new Date(e.at).toLocaleString()}` : '')
                   }
                 >
+                  {stamp && (
+                    <span style={{ color: 'var(--color-text-muted)', marginRight: 8 }}>
+                      {stamp}
+                    </span>
+                  )}
                   {e.text}
                 </div>
               )
