@@ -612,8 +612,19 @@ export default function Workstation() {
   const [cmd, setCmd] = useState('')
   const [consoleFilter, setConsoleFilter] = useState('')
   // Kind-scoped console view: 'all' shows everything, the others narrow to
-  // a single entry kind. Combines with the text filter above.
-  const [consoleKind, setConsoleKind] = useState<'all' | 'input' | 'output' | 'error'>('all')
+  // a single entry kind. Combines with the text filter above. Persisted so
+  // users who live in an "errors only" view don't have to re-click it on
+  // every reload.
+  const [consoleKind, setConsoleKind] = useState<'all' | 'input' | 'output' | 'error'>(() => {
+    try {
+      const v = localStorage.getItem('compute-workstation-console-kind')
+      if (v === 'input' || v === 'output' || v === 'error' || v === 'all') return v
+    } catch { /* noop */ }
+    return 'all'
+  })
+  useEffect(() => {
+    try { localStorage.setItem('compute-workstation-console-kind', consoleKind) } catch { /* noop */ }
+  }, [consoleKind])
   // Inline timestamps chip — when on, each console entry is prefixed
   // with an HH:MM:SS hint. Persisted so the user's preference survives
   // a reload, same pattern as the other console chips.
