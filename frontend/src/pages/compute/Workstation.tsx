@@ -1106,6 +1106,22 @@ export default function Workstation() {
     }])
   }, [])
 
+  // Insert a variable name at the script editor's caret (replacing any
+  // active selection). Keeps focus on the editor afterwards so the user
+  // can keep typing. Used by the ➤ button in the workspace var row.
+  const insertVariableAtCaret = useCallback((name: string) => {
+    const ta = editorRef.current
+    if (!ta) return
+    const s = ta.selectionStart
+    const ePos = ta.selectionEnd
+    setScript(prev => prev.slice(0, s) + name + prev.slice(ePos))
+    requestAnimationFrame(() => {
+      ta.focus()
+      const pos = s + name.length
+      ta.setSelectionRange(pos, pos)
+    })
+  }, [setScript])
+
   // Dump a workspace matrix to CSV. Cells are written with full precision
   // so round-tripping through another tool doesn't introduce noise.
   const exportMatrixCsv = useCallback((name: string, v: MValue & { kind: 'mat' }) => {
@@ -3102,6 +3118,12 @@ export default function Workstation() {
                         gap: 6,
                       }}>
                         <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{v.summary}</span>
+                        <button
+                          style={styles.varAction}
+                          onClick={e => { e.stopPropagation(); insertVariableAtCaret(v.name) }}
+                          title="Insert name at editor caret"
+                          aria-label={`Insert ${v.name} at caret`}
+                        >↵</button>
                         <button
                           style={styles.varAction}
                           onClick={e => { e.stopPropagation(); copyVariableExpr(v.name, v.value) }}
