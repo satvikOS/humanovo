@@ -3407,6 +3407,15 @@ export default function Workstation() {
       borderLeft: '1px dotted var(--glass-border)',
       opacity: 0.7,
     },
+    columnRuler: {
+      position: 'absolute' as const,
+      top: 0,
+      bottom: 0,
+      width: 0,
+      borderLeft: '1px dashed var(--glass-border)',
+      opacity: 0.45,
+      pointerEvents: 'none' as const,
+    },
     bracketHL: {
       position: 'absolute' as const,
       width: editorCharWidth,
@@ -4465,6 +4474,15 @@ export default function Workstation() {
                   style={{
                     ...styles.currentLineStrip,
                     top: 14 + (cursor.line - 1) * editorLineHeight,
+                  }}
+                />
+              )}
+              {!editorWrapOn && (
+                <div
+                  aria-hidden="true"
+                  style={{
+                    ...styles.columnRuler,
+                    left: 14 + 80 * editorCharWidth,
                   }}
                 />
               )}
