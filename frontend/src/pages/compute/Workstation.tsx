@@ -3556,6 +3556,7 @@ export default function Workstation() {
     { id: 'font-reset',   title: 'Reset editor font size',       hint: 'Ctrl+0',           run: () => resetEditorFont() },
     { id: 'clear-con',    title: 'Clear console',                hint: 'Ctrl+L',           run: () => clearConsole() },
     { id: 'clear-err',    title: 'Clear only error entries',     hint: '',                 run: () => clearConsoleErrors() },
+    { id: 'con-time',     title: 'Toggle console timestamps',    hint: '',                 run: () => setConsoleShowTimestamps(v => !v) },
     { id: 'copy-con',     title: 'Copy console to clipboard',    hint: '',                 run: () => copyConsole() },
     { id: 'dl-con',       title: 'Download console transcript',  hint: '',                 run: () => downloadConsole() },
     { id: 'reset-ws',     title: 'Reset workspace',              hint: '',                 run: () => resetWorkspace() },
@@ -3563,6 +3564,7 @@ export default function Workstation() {
     { id: 'exp-svg',      title: 'Export current figure as SVG', hint: '',                 run: () => exportPlotSVG() },
     { id: 'exp-png',      title: 'Export current figure as PNG', hint: '',                 run: () => exportPlotPNG() },
     { id: 'exp-csv',      title: 'Export figure data as CSV',    hint: '',                 run: () => exportPlotCSV() },
+    { id: 'clear-figs',   title: 'Clear all figures',            hint: '',                 run: () => { setPlots([]); setActivePlot(0) } },
     { id: 'bm-toggle',    title: 'Toggle bookmark on current line', hint: 'Ctrl+F2',       run: () => toggleBookmarkAtCaret() },
     { id: 'bm-next',      title: 'Jump to next bookmark',        hint: 'F2',               run: () => gotoBookmark(1) },
     { id: 'bm-prev',      title: 'Jump to previous bookmark',    hint: 'Shift+F2',         run: () => gotoBookmark(-1) },
@@ -5453,21 +5455,10 @@ export default function Workstation() {
                 <button
                   style={{ ...styles.btn, ...styles.btnGhost, padding: '2px 8px', fontSize: 11 }}
                   disabled={plots.length === 0}
-                  onClick={exportPlotCSV}
-                  title="Download series data as CSV"
-                >csv</button>
-                <button
-                  style={{ ...styles.btn, ...styles.btnGhost, padding: '2px 8px', fontSize: 11 }}
-                  disabled={plots.length === 0}
                   onClick={() => setPlotFullscreen(true)}
-                  title="Expand figure to fullscreen"
-                >expand</button>
-                <button
-                  style={{ ...styles.btn, ...styles.btnGhost, padding: '2px 8px', fontSize: 11 }}
-                  disabled={plots.length === 0}
-                  onClick={() => { setPlots([]); setActivePlot(0) }}
-                  title="Discard all figures"
-                >clear</button>
+                  title="Expand figure to fullscreen (double-click chart)"
+                  aria-label="Expand figure"
+                >⤢</button>
               </div>
             </div>
             {plots.length > 1 && (
@@ -5705,23 +5696,6 @@ export default function Workstation() {
               aria-label="Filter console entries"
               spellCheck={false}
             />
-            <button
-              type="button"
-              style={{ ...styles.plotChip, ...(consoleShowTimestamps ? styles.plotChipActive : null) }}
-              onClick={() => setConsoleShowTimestamps(v => !v)}
-              title="Toggle inline timestamps on console entries"
-            >
-              time
-            </button>
-            <button
-              type="button"
-              style={styles.plotChip}
-              onClick={clearConsoleErrors}
-              disabled={consoleCounts.error === 0}
-              title="Remove only error entries, keep input and output history"
-            >
-              clear errors
-            </button>
             {(consoleFilter || consoleKind !== 'all') && (
               <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
                 {visibleEntries.length} / {entries.length}
