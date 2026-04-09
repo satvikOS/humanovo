@@ -1674,6 +1674,51 @@ export default function Workstation() {
     })
   }, [setScript])
 
+  // Rename every whole-word occurrence of the identifier under the caret
+  // (or the current selection, when it already covers a valid identifier)
+  // to a user-supplied replacement. The replace pass is anchored with
+  // word boundaries so we don't mangle substring matches inside other
+  // names. Returns the number of replacements for the caller to surface.
+  const renameIdentifierAtCaret = useCallback(() => {
+    const ta = editorRef.current
+    if (!ta) return
+    const s = ta.selectionStart
+    const ePos = ta.selectionEnd
+    const value = ta.value
+    let wStart = s, wEnd = ePos
+    // If the user hasn't selected anything, expand to the identifier the
+    // caret is sitting on.
+    if (s === ePos) {
+      while (wStart > 0 && /[A-Za-z0-9_]/.test(value[wStart - 1])) wStart--
+      while (wEnd < value.length && /[A-Za-z0-9_]/.test(value[wEnd])) wEnd++
+    }
+    const old = value.slice(wStart, wEnd)
+    if (!old || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(old)) return
+    const next = prompt(`Rename "${old}" to:`, old)
+    if (!next || next === old) return
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(next)) {
+      alert(`"${next}" is not a valid MATLAB identifier.`)
+      return
+    }
+    const esc = old.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const re = new RegExp(`\\b${esc}\\b`, 'g')
+    let count = 0
+    const replaced = value.replace(re, () => { count++; return next })
+    if (count === 0) return
+    setScript(replaced)
+    // After the edit lands, restore a caret on the first replacement so
+    // the user can see where the change took effect.
+    requestAnimationFrame(() => {
+      const ta2 = editorRef.current
+      if (!ta2) return
+      const firstIdx = replaced.search(re)
+      if (firstIdx >= 0) {
+        ta2.focus()
+        ta2.setSelectionRange(firstIdx, firstIdx + next.length)
+      }
+    })
+  }, [setScript])
+
   // Insert a multi-line snippet at the current caret, matching the
   // indentation of the line the caret is on. Any `$0` token in the
   // snippet is removed and becomes the final caret position; otherwise
@@ -2899,8 +2944,9 @@ export default function Workstation() {
     { id: 'snip-fn',      title: 'Insert snippet: function',     hint: '',                 run: () => insertSnippet('function [out] = $0(in)\n  \nend\n') },
     { id: 'snip-try',     title: 'Insert snippet: try / catch',  hint: '',                 run: () => insertSnippet('try\n  $0\ncatch err\n  disp(err.message)\nend\n') },
     { id: 'snip-sec',     title: 'Insert snippet: %% section header', hint: '',            run: () => insertSnippet('%% $0\n') },
+    { id: 'rename-id',    title: 'Rename identifier at caret',   hint: '',                 run: () => renameIdentifierAtCaret() },
     { id: 'help',         title: 'Show keyboard shortcuts',      hint: 'F1',               run: () => setHelpOpen(true) },
-  ], [runScript, runSelection, runSection, openFind, openGoto, newScript, duplicateScript, closeScript, reopenLastClosedScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, copyConsole, exportPlotSVG, exportPlotPNG, exportPlotCSV, toggleBookmarkAtCaret, gotoBookmark, clearAllBookmarks, insertSnippet])
+  ], [runScript, runSelection, runSection, openFind, openGoto, newScript, duplicateScript, closeScript, reopenLastClosedScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, copyConsole, exportPlotSVG, exportPlotPNG, exportPlotCSV, toggleBookmarkAtCaret, gotoBookmark, clearAllBookmarks, insertSnippet, renameIdentifierAtCaret])
 
   // Fuzzy-ish filter: split the query into tokens and require each to
   // appear (substring, case-insensitive) in the command title. Keeps
