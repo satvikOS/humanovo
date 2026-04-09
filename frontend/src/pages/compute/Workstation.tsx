@@ -397,6 +397,82 @@ const HL_COLORS: Record<HTokenKind, React.CSSProperties> = {
   text:    { color: 'var(--color-text)' },
 }
 
+// Build a per-character mask of positions that fall inside a MATLAB
+// comment (%…\n) or a string literal so bracket-matching can skip them.
+// The transpose heuristic mirrors the syntax-highlighter so `a'` is read
+// as transpose, not as an unterminated string.
+function maskCommentsAndStrings(src: string): Uint8Array {
+  const m = new Uint8Array(src.length)
+  let i = 0
+  while (i < src.length) {
+    const c = src[i]
+    if (c === '%') {
+      while (i < src.length && src[i] !== '\n') { m[i] = 1; i++ }
+      continue
+    }
+    if (c === '"') {
+      m[i] = 1; i++
+      while (i < src.length && src[i] !== '"') { m[i] = 1; i++ }
+      if (i < src.length) { m[i] = 1; i++ }
+      continue
+    }
+    if (c === "'") {
+      const prev = src[i - 1] ?? ''
+      if (/[A-Za-z0-9_)\].]/.test(prev)) { i++; continue }
+      m[i] = 1; i++
+      while (i < src.length && src[i] !== "'") { m[i] = 1; i++ }
+      if (i < src.length) { m[i] = 1; i++ }
+      continue
+    }
+    i++
+  }
+  return m
+}
+
+// Walk forward or backward from a bracket character to find its mate,
+// using a depth counter and skipping anything inside comments or string
+// literals. Returns the absolute char positions of both brackets.
+function findBracketMatch(src: string, pos: number): [number, number] | null {
+  const opens = '([{', closes = ')]}'
+  let bracket = ''
+  let bracketPos = -1
+  if (pos < src.length && (opens.includes(src[pos]) || closes.includes(src[pos]))) {
+    bracket = src[pos]; bracketPos = pos
+  } else if (pos > 0 && (opens.includes(src[pos - 1]) || closes.includes(src[pos - 1]))) {
+    bracket = src[pos - 1]; bracketPos = pos - 1
+  } else {
+    return null
+  }
+  const masked = maskCommentsAndStrings(src)
+  if (masked[bracketPos]) return null
+  const isOpen = opens.includes(bracket)
+  const target = isOpen
+    ? closes[opens.indexOf(bracket)]
+    : opens[closes.indexOf(bracket)]
+  const dir = isOpen ? 1 : -1
+  let depth = 0
+  for (let j = bracketPos + dir; j >= 0 && j < src.length; j += dir) {
+    if (masked[j]) continue
+    const cc = src[j]
+    if (cc === bracket) depth++
+    else if (cc === target) {
+      if (depth === 0) return [bracketPos, j]
+      depth--
+    }
+  }
+  return null
+}
+
+// Convert an absolute char index in `src` to (line, col), both 0-based.
+function lineColForPos(src: string, pos: number): { line: number; col: number } {
+  let line = 0, col = 0
+  for (let i = 0; i < pos && i < src.length; i++) {
+    if (src[i] === '\n') { line++; col = 0 }
+    else col++
+  }
+  return { line, col }
+}
+
 // Walk back from `pos` while we sit on identifier characters and return
 // the resulting partial token (or null if there is none / it starts with
 // a digit, which would not be a valid identifier).
@@ -505,12 +581,27 @@ export default function Workstation() {
   const editorRef = useRef<HTMLTextAreaElement>(null)
   const gutterRef = useRef<HTMLDivElement>(null)
   const highlightRef = useRef<HTMLPreElement>(null)
+  const bracketOverlayRef = useRef<HTMLDivElement>(null)
   const plotBodyRef = useRef<HTMLDivElement>(null)
 
   // Memoized token stream for the syntax-highlighting overlay. Recomputes
   // on every keystroke; the tokenizer is O(n) and cheap enough for scripts
   // up to a few thousand lines.
   const highlightTokens = useMemo(() => highlightMatlab(script), [script])
+
+  // Convert (line, col) cursor → absolute char index. Used by the bracket
+  // matcher; the cursor itself comes from the textarea via updateCursor().
+  const caretPos = useMemo(() => {
+    const lines = script.split('\n')
+    let pos = 0
+    for (let i = 0; i < cursor.line - 1 && i < lines.length; i++) pos += lines[i].length + 1
+    pos += Math.max(0, cursor.col - 1)
+    return Math.min(pos, script.length)
+  }, [cursor, script])
+
+  // Pair of absolute char positions for bracket-match highlighting, or
+  // null when the caret isn't sitting next to a bracket.
+  const bracketPair = useMemo(() => findBracketMatch(script, caretPos), [script, caretPos])
 
   // Auto-scroll console to bottom on new entries.
   useEffect(() => {
@@ -1033,6 +1124,9 @@ export default function Workstation() {
     if (highlightRef.current) {
       highlightRef.current.style.transform = `translate(${-scrollLeft}px, ${-scrollTop}px)`
     }
+    if (bracketOverlayRef.current) {
+      bracketOverlayRef.current.style.transform = `translate(${-scrollLeft}px, ${-scrollTop}px)`
+    }
   }, [])
 
   // Case-insensitive substring match positions for find/replace. Recomputed
@@ -1490,6 +1584,22 @@ export default function Workstation() {
       overflowWrap: 'normal' as const,
       wordBreak: 'normal' as const,
       overflow: 'auto' as const,
+    },
+    bracketOverlay: {
+      position: 'absolute' as const,
+      top: 0,
+      left: 0,
+      pointerEvents: 'none' as const,
+      willChange: 'transform',
+    },
+    bracketHL: {
+      position: 'absolute' as const,
+      width: 7.2,
+      height: 19.2,
+      border: '1px solid var(--color-text)',
+      borderRadius: 2,
+      boxSizing: 'border-box' as const,
+      opacity: 0.55,
     },
     statusBar: {
       display: 'flex',
@@ -2049,6 +2159,21 @@ export default function Workstation() {
                     user's cursor is on it. */}
                 {'\n'}
               </pre>
+              <div ref={bracketOverlayRef} style={styles.bracketOverlay} aria-hidden="true">
+                {bracketPair && bracketPair.map((p, idx) => {
+                  const lc = lineColForPos(script, p)
+                  return (
+                    <div
+                      key={idx}
+                      style={{
+                        ...styles.bracketHL,
+                        top: 14 + lc.line * 19.2,
+                        left: 14 + lc.col * 7.2,
+                      }}
+                    />
+                  )
+                })}
+              </div>
               <textarea
                 ref={editorRef}
                 style={styles.editor}
