@@ -261,7 +261,7 @@ function formatScalar(n: number): string {
 // textarea. Keeps the tokenizer intentionally tolerant: anything it can't
 // classify falls through as 'text' so the whole source is always rendered
 // exactly as typed (essential for the transparent-textarea overlay trick).
-type HTokenKind = 'comment' | 'string' | 'number' | 'keyword' | 'text'
+type HTokenKind = 'comment' | 'string' | 'number' | 'keyword' | 'variable' | 'text'
 interface HToken { kind: HTokenKind; text: string }
 
 const MATLAB_KEYWORDS = new Set([
@@ -272,7 +272,7 @@ const MATLAB_KEYWORDS = new Set([
   'true', 'false',
 ])
 
-function highlightMatlab(src: string): HToken[] {
+function highlightMatlab(src: string, varNames?: Set<string>): HToken[] {
   const out: HToken[] = []
   let buf = ''
   const flush = () => { if (buf) { out.push({ kind: 'text', text: buf }); buf = '' } }
@@ -382,6 +382,9 @@ function highlightMatlab(src: string): HToken[] {
       if (MATLAB_KEYWORDS.has(word)) {
         flush()
         out.push({ kind: 'keyword', text: word })
+      } else if (varNames && varNames.has(word)) {
+        flush()
+        out.push({ kind: 'variable', text: word })
       } else {
         buf += word
       }
@@ -414,11 +417,12 @@ function highlightMatlab(src: string): HToken[] {
 }
 
 const HL_COLORS: Record<HTokenKind, React.CSSProperties> = {
-  comment: { color: 'var(--color-text-muted)', fontStyle: 'italic' },
-  string:  { color: 'var(--color-text-secondary)' },
-  number:  { color: 'var(--color-text-secondary)' },
-  keyword: { color: 'var(--color-text)', fontWeight: 600 },
-  text:    { color: 'var(--color-text)' },
+  comment:  { color: 'var(--color-text-muted)', fontStyle: 'italic' },
+  string:   { color: 'var(--color-text-secondary)' },
+  number:   { color: 'var(--color-text-secondary)' },
+  keyword:  { color: 'var(--color-text)', fontWeight: 600 },
+  variable: { color: 'var(--color-text)', textDecoration: 'underline', textDecorationColor: 'var(--color-text-muted)', textDecorationStyle: 'dotted', textUnderlineOffset: 3 },
+  text:     { color: 'var(--color-text)' },
 }
 
 // Build a per-character mask of positions that fall inside a MATLAB
@@ -661,10 +665,15 @@ export default function Workstation() {
   const currentLineRef = useRef<HTMLDivElement>(null)
   const plotBodyRef = useRef<HTMLDivElement>(null)
 
+  // Set of workspace variable names so the syntax highlighter can give
+  // user-defined identifiers a distinct visual treatment — a subtle dotted
+  // underline — making it obvious at a glance which symbols are live.
+  const varNameSet = useMemo(() => new Set(vars.map(v => v.name)), [vars])
+
   // Memoized token stream for the syntax-highlighting overlay. Recomputes
   // on every keystroke; the tokenizer is O(n) and cheap enough for scripts
   // up to a few thousand lines.
-  const highlightTokens = useMemo(() => highlightMatlab(script), [script])
+  const highlightTokens = useMemo(() => highlightMatlab(script, varNameSet), [script, varNameSet])
 
   // Convert (line, col) cursor → absolute char index. Used by the bracket
   // matcher; the cursor itself comes from the textarea via updateCursor().
