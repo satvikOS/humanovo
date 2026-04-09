@@ -2682,6 +2682,17 @@ export default function Workstation() {
       background: 'var(--glass-bg-hover)',
       borderColor: 'var(--color-border-strong)',
     },
+    figurePillStrip: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 4,
+      padding: '5px 12px',
+      borderBottom: '1px solid var(--glass-border)',
+      background: 'transparent',
+      overflowX: 'auto' as const,
+      minHeight: 28,
+      flexShrink: 0,
+    },
     editorBody: {
       flex: 1,
       display: 'flex',
@@ -3911,6 +3922,39 @@ export default function Workstation() {
                 >clear</button>
               </div>
             </div>
+            {plots.length > 1 && (
+              <div style={styles.figurePillStrip}>
+                {plots.map((p, idx) => {
+                  const active = idx === activePlot
+                  const label = p.title?.trim() || `figure ${idx + 1}`
+                  return (
+                    <button
+                      key={idx}
+                      type="button"
+                      style={active ? { ...styles.plotChip, ...styles.plotChipActive } : styles.plotChip}
+                      onClick={() => setActivePlot(idx)}
+                      title={`${label} (${p.series.length} series)`}
+                      aria-label={`Switch to figure ${idx + 1}`}
+                      aria-current={active ? 'true' : undefined}
+                    >
+                      {idx + 1}
+                      {p.title?.trim() && (
+                        <span style={{
+                          marginLeft: 6,
+                          color: active ? 'var(--color-text)' : 'var(--color-text-muted)',
+                          maxWidth: 96,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          display: 'inline-block',
+                          verticalAlign: 'bottom',
+                        }}>{p.title.trim()}</span>
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
             <div ref={plotBodyRef} style={styles.plotBody}>
               <PlotView plot={currentPlot} opts={plotOpts} />
             </div>
