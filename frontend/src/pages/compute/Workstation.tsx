@@ -526,6 +526,7 @@ export default function Workstation() {
   }, [])
   const [entries, setEntries] = useState<ConsoleEntry[]>([])
   const [cmd, setCmd] = useState('')
+  const [consoleFilter, setConsoleFilter] = useState('')
   const [running, setRunning] = useState(false)
   const [history, setHistory] = useState<string[]>(loadHistory)
   const [histIdx, setHistIdx] = useState<number | null>(null)
@@ -647,15 +648,32 @@ export default function Workstation() {
   }, [inspectVar])
 
   // F1 anywhere in the Workstation toggles the keyboard-shortcut help
-  // modal. Esc closes it.
+  // modal. Esc closes it. Ctrl+L clears the console (bash convention).
   useEffect(() => {
     const onKey = (ev: KeyboardEvent) => {
       if (ev.key === 'F1') { ev.preventDefault(); setHelpOpen(h => !h) }
       else if (ev.key === 'Escape' && helpOpen) setHelpOpen(false)
+      else if ((ev.metaKey || ev.ctrlKey) && (ev.key === 'l' || ev.key === 'L')) {
+        // Don't swallow the browser's URL-bar focus when the user has
+        // focused something outside the Workstation.
+        const tgt = ev.target as HTMLElement | null
+        if (tgt && (tgt.tagName === 'TEXTAREA' || tgt.tagName === 'INPUT' || tgt.closest?.('[data-workstation]'))) {
+          ev.preventDefault()
+          setEntries([])
+        }
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [helpOpen])
+
+  // Apply the console filter (substring, case-insensitive). Empty query
+  // means no filtering — common case, so skip the work.
+  const visibleEntries = useMemo(() => {
+    if (!consoleFilter.trim()) return entries
+    const q = consoleFilter.toLowerCase()
+    return entries.filter(e => e.text.toLowerCase().includes(q))
+  }, [entries, consoleFilter])
 
   // The autocomplete anchor is computed in viewport coordinates, so any
   // window resize / scroll would leave it stale — easiest fix is to just
@@ -1888,16 +1906,48 @@ export default function Workstation() {
       background: 'transparent',
       borderBottom: '1px solid var(--glass-border)',
     },
+    consoleWrap: {
+      display: 'flex',
+      flexDirection: 'column' as const,
+      minHeight: 0,
+      gridColumn: library === 'open' ? '2 / -1' : '1 / -1',
+      borderTop: '1px solid var(--glass-border)',
+      background: 'transparent',
+    },
+    consoleHeader: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 10,
+      padding: '6px 20px',
+      fontSize: 11,
+      letterSpacing: 0.6,
+      textTransform: 'uppercase' as const,
+      color: 'var(--color-text-muted)',
+      borderBottom: '1px solid var(--glass-border)',
+    },
+    consoleFilter: {
+      marginLeft: 'auto',
+      background: 'var(--glass-bg)',
+      border: '1px solid var(--glass-border)',
+      color: 'var(--color-text)',
+      padding: '3px 8px',
+      fontSize: 11,
+      borderRadius: 3,
+      outline: 'none',
+      width: 180,
+      fontFamily: "'Inter', sans-serif",
+      textTransform: 'none' as const,
+      letterSpacing: 0,
+    },
     console: {
       minHeight: 0,
+      flex: 1,
       overflowY: 'auto',
       padding: '12px 20px',
       fontFamily: "'JetBrains Mono', monospace",
       fontSize: 12,
       lineHeight: 1.6,
       background: 'transparent',
-      gridColumn: library === 'open' ? '2 / -1' : '1 / -1',
-      borderTop: '1px solid var(--glass-border)',
     },
     entryInput: { color: 'var(--color-text)', fontWeight: 500 },
     entryOutput: { color: 'var(--color-text-secondary)', whiteSpace: 'pre-wrap' },
@@ -2124,6 +2174,7 @@ export default function Workstation() {
   return (
     <div
       style={styles.container}
+      data-workstation="1"
       onDragOver={onWsDragOver}
       onDragLeave={onWsDragLeave}
       onDrop={onWsDrop}
@@ -2606,30 +2657,53 @@ export default function Workstation() {
           </div>
         </div>
 
-        <div ref={consoleRef} style={styles.console}>
-          {entries.length === 0 && (
-            <div style={{ color: 'var(--color-text-muted)', fontStyle: 'italic', fontSize: 12 }}>
-              Console ready. Type a command below or hit Run.
-            </div>
-          )}
-          {entries.map(e => {
-            const clickable = e.kind === 'error' && typeof e.line === 'number'
-            return (
-              <div
-                key={e.id}
-                onClick={clickable ? () => jumpToLine(e.line!) : undefined}
-                style={{
-                  ...(e.kind === 'input' ? styles.entryInput
-                    : e.kind === 'error' ? styles.entryError
-                    : styles.entryOutput),
-                  ...(clickable ? { cursor: 'pointer', textDecoration: 'underline', textUnderlineOffset: 3 } : null),
-                }}
-                title={clickable ? `Click to jump to line ${e.line}` : undefined}
-              >
-                {e.text}
+        <div style={styles.consoleWrap}>
+          <div style={styles.consoleHeader}>
+            <span>Console</span>
+            <input
+              style={styles.consoleFilter}
+              value={consoleFilter}
+              onChange={e => setConsoleFilter(e.target.value)}
+              placeholder="Filter…"
+              aria-label="Filter console entries"
+              spellCheck={false}
+            />
+            {consoleFilter && (
+              <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+                {visibleEntries.length} / {entries.length}
+              </span>
+            )}
+          </div>
+          <div ref={consoleRef} style={styles.console}>
+            {entries.length === 0 && (
+              <div style={{ color: 'var(--color-text-muted)', fontStyle: 'italic', fontSize: 12 }}>
+                Console ready. Type a command below or hit Run.
               </div>
-            )
-          })}
+            )}
+            {entries.length > 0 && visibleEntries.length === 0 && (
+              <div style={{ color: 'var(--color-text-muted)', fontStyle: 'italic', fontSize: 12 }}>
+                No entries match "{consoleFilter}".
+              </div>
+            )}
+            {visibleEntries.map(e => {
+              const clickable = e.kind === 'error' && typeof e.line === 'number'
+              return (
+                <div
+                  key={e.id}
+                  onClick={clickable ? () => jumpToLine(e.line!) : undefined}
+                  style={{
+                    ...(e.kind === 'input' ? styles.entryInput
+                      : e.kind === 'error' ? styles.entryError
+                      : styles.entryOutput),
+                    ...(clickable ? { cursor: 'pointer', textDecoration: 'underline', textUnderlineOffset: 3 } : null),
+                  }}
+                  title={clickable ? `Click to jump to line ${e.line}` : undefined}
+                >
+                  {e.text}
+                </div>
+              )
+            })}
+          </div>
         </div>
       </div>
 
