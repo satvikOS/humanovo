@@ -986,6 +986,35 @@ export default function Workstation() {
   }, [cmd, history, histIdx, runCommand])
 
   const clearConsole = () => setEntries([])
+
+  // Copy the currently visible console entries as plain text so the user
+  // can paste them into a note or bug report. Re-uses the visibleEntries
+  // pipeline so the export respects the active kind / text filters —
+  // "copy what you see" rather than dumping the full backlog.
+  const [copyFlash, setCopyFlash] = useState(false)
+  const copyConsole = useCallback(() => {
+    const text = visibleEntries.map(e => {
+      if (e.kind === 'input') return `> ${e.text}`
+      if (e.kind === 'error') return `! ${e.text}`
+      return e.text
+    }).join('\n')
+    if (!text) return
+    const done = () => { setCopyFlash(true); setTimeout(() => setCopyFlash(false), 900) }
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(() => {/* ignore */})
+    } else {
+      // Fallback for older browsers / non-secure contexts.
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      try { document.execCommand('copy'); done() } catch { /* ignore */ }
+      document.body.removeChild(ta)
+    }
+  }, [visibleEntries])
+
   const resetWorkspace = () => {
     workspaceRef.current = createWorkspace()
     clearSavedWorkspace()
@@ -3485,6 +3514,13 @@ export default function Workstation() {
                 {visibleEntries.length} / {entries.length}
               </span>
             )}
+            <button
+              type="button"
+              style={{ ...styles.plotChip, ...(copyFlash ? styles.plotChipActive : null) }}
+              onClick={copyConsole}
+              disabled={visibleEntries.length === 0}
+              title="Copy visible console entries to clipboard"
+            >{copyFlash ? 'copied' : 'copy'}</button>
           </div>
           <div ref={consoleRef} style={styles.console}>
             {entries.length === 0 && (
