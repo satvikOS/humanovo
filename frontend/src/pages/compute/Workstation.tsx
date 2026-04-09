@@ -319,6 +319,35 @@ const HL_COLORS: Record<HTokenKind, React.CSSProperties> = {
   text:    { color: 'var(--color-text)' },
 }
 
+// Walk back from `pos` while we sit on identifier characters and return
+// the resulting partial token (or null if there is none / it starts with
+// a digit, which would not be a valid identifier).
+function getWordBefore(value: string, pos: number): { word: string; start: number } | null {
+  let start = pos
+  while (start > 0 && /[A-Za-z0-9_]/.test(value[start - 1])) start--
+  if (start === pos) return null
+  if (/[0-9]/.test(value[start])) return null
+  return { word: value.slice(start, pos), start }
+}
+
+// Approximate viewport coordinates of the textarea caret. JetBrains Mono
+// at 12px is ~7.2px wide and our line-height is 1.6 * 12 = 19.2px. Good
+// enough for placing the autocomplete popup just below the active line.
+function caretViewportAnchor(ta: HTMLTextAreaElement): { top: number; left: number } {
+  const rect = ta.getBoundingClientRect()
+  const pos = ta.selectionStart
+  const before = ta.value.slice(0, pos)
+  const lineIdx = (before.match(/\n/g)?.length ?? 0)
+  const lastNL = before.lastIndexOf('\n')
+  const col = pos - lastNL - 1
+  const padTop = 14, padLeft = 14
+  const lineHeight = 19.2
+  const charWidth = 7.2
+  const top = rect.top + padTop + (lineIdx + 1) * lineHeight - ta.scrollTop
+  const left = rect.left + padLeft + col * charWidth - ta.scrollLeft
+  return { top, left }
+}
+
 /* ── Component ───────────────────────────────────────────────────────── */
 export default function Workstation() {
   const [scriptStore, setScriptStore] = useState<ScriptStore>(loadScripts)
@@ -369,6 +398,15 @@ export default function Workstation() {
   const [matchIdx, setMatchIdx] = useState(0)
   const findInputRef = useRef<HTMLInputElement>(null)
 
+  // Tab autocomplete state. The popup floats below the caret and lists
+  // matching builtins, workspace variables and language keywords.
+  type AcItem = { name: string; kind: 'fn' | 'var' | 'kw'; desc?: string }
+  const [acOpen, setAcOpen] = useState(false)
+  const [acItems, setAcItems] = useState<AcItem[]>([])
+  const [acIndex, setAcIndex] = useState(0)
+  const [acAnchor, setAcAnchor] = useState<{ top: number; left: number } | null>(null)
+  const [acRange, setAcRange] = useState<{ start: number; end: number } | null>(null)
+
   // Single persistent workspace across runs.
   const workspaceRef = useRef<Workspace>(createWorkspace())
   const consoleRef = useRef<HTMLDivElement>(null)
@@ -403,6 +441,20 @@ export default function Workstation() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [plotFullscreen])
+
+  // The autocomplete anchor is computed in viewport coordinates, so any
+  // window resize / scroll would leave it stale — easiest fix is to just
+  // close the popup when that happens.
+  useEffect(() => {
+    if (!acOpen) return
+    const dismiss = () => setAcOpen(false)
+    window.addEventListener('scroll', dismiss, true)
+    window.addEventListener('resize', dismiss)
+    return () => {
+      window.removeEventListener('scroll', dismiss, true)
+      window.removeEventListener('resize', dismiss)
+    }
+  }, [acOpen])
 
   /** Push engine outputs into the console entry list and plot buffer. */
   const appendOutputs = useCallback((outs: RunOutput[]) => {
@@ -570,6 +622,31 @@ export default function Workstation() {
     editorRef.current?.focus()
   }, [])
 
+  // Close the autocomplete popup and reset its bookkeeping.
+  const closeAutocomplete = useCallback(() => {
+    setAcOpen(false)
+    setAcItems([])
+    setAcAnchor(null)
+    setAcRange(null)
+    setAcIndex(0)
+  }, [])
+
+  // Replace the in-progress identifier (acRange) with the chosen item and
+  // restore focus to the editor at the new caret position.
+  const acceptAutocomplete = useCallback((name: string) => {
+    const ta = editorRef.current
+    if (!ta || !acRange) { closeAutocomplete(); return }
+    const v = ta.value
+    const newVal = v.slice(0, acRange.start) + name + v.slice(acRange.end)
+    setScript(newVal)
+    const newPos = acRange.start + name.length
+    closeAutocomplete()
+    requestAnimationFrame(() => {
+      ta.focus()
+      ta.selectionStart = ta.selectionEnd = newPos
+    })
+  }, [acRange, closeAutocomplete, setScript])
+
   // Jump the editor caret to a 1-based line and select the entire line so
   // it's visible at a glance. Used by click-to-jump on error console entries.
   const jumpToLine = useCallback((line: number) => {
@@ -596,6 +673,34 @@ export default function Workstation() {
   //   ) ] }           — skip over matching closer
   //   Backspace       — delete matching pair when between them
   const onEditorKey = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Autocomplete popup keyboard navigation. Handled before everything
+    // else so the popup behaves like a focus-trapping menu while open.
+    if (acOpen && acItems.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setAcIndex(i => (i + 1) % acItems.length)
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setAcIndex(i => (i - 1 + acItems.length) % acItems.length)
+        return
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        acceptAutocomplete(acItems[acIndex].name)
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        closeAutocomplete()
+        return
+      }
+      // Any other key dismisses the popup but lets the keystroke fall
+      // through, so the user can keep typing without an extra Esc.
+      closeAutocomplete()
+    }
+
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
       e.preventDefault()
       runScript()
@@ -659,6 +764,53 @@ export default function Workstation() {
           })
         }
         return
+      }
+      // Try Tab autocomplete: when the cursor sits at the end of an
+      // identifier-prefix, look up matching builtins, workspace variables
+      // and language keywords. With one match we expand directly; with
+      // many we open a small popup. With zero we fall through to indent.
+      const wb = getWordBefore(value, s)
+      if (wb && !e.shiftKey) {
+        const prefix = wb.word
+        const lower = prefix.toLowerCase()
+        const seen = new Set<string>()
+        const items: AcItem[] = []
+        for (const v of vars) {
+          if (v.name.toLowerCase().startsWith(lower) && v.name !== prefix && !seen.has(v.name)) {
+            items.push({ name: v.name, kind: 'var' })
+            seen.add(v.name)
+          }
+        }
+        for (const d of BUILTIN_DOCS) {
+          if (d.name.toLowerCase().startsWith(lower) && d.name !== prefix && !seen.has(d.name)) {
+            items.push({ name: d.name, kind: 'fn', desc: d.signature })
+            seen.add(d.name)
+          }
+        }
+        for (const k of MATLAB_KEYWORDS) {
+          if (k.toLowerCase().startsWith(lower) && k !== prefix && !seen.has(k)) {
+            items.push({ name: k, kind: 'kw' })
+            seen.add(k)
+          }
+        }
+        items.sort((a, b) => a.name.length - b.name.length || a.name.localeCompare(b.name))
+        const top = items.slice(0, 20)
+        if (top.length === 1) {
+          const item = top[0]
+          const newVal = value.slice(0, wb.start) + item.name + value.slice(s)
+          setScript(newVal)
+          const newPos = wb.start + item.name.length
+          requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = newPos })
+          return
+        }
+        if (top.length > 1) {
+          setAcItems(top)
+          setAcIndex(0)
+          setAcRange({ start: wb.start, end: s })
+          setAcAnchor(caretViewportAnchor(ta))
+          setAcOpen(true)
+          return
+        }
       }
       // Cursor insert: simple 2-space indent
       const newVal = value.slice(0, s) + '  ' + value.slice(ePos)
@@ -756,7 +908,7 @@ export default function Workstation() {
         ta.selectionStart = ta.selectionEnd = s + 1 + indent.length
       })
     }
-  }, [runScript, openFind, setScript])
+  }, [runScript, openFind, setScript, vars, acOpen, acItems, acIndex, acceptAutocomplete, closeAutocomplete])
 
   // Track cursor position for the status bar.
   const updateCursor = useCallback((ta: HTMLTextAreaElement) => {
@@ -1371,6 +1523,52 @@ export default function Workstation() {
       borderRadius: 8,
       padding: 24,
     },
+    acPopup: {
+      position: 'fixed' as const,
+      background: 'var(--color-bg-elevated)',
+      border: '1px solid var(--color-border-strong)',
+      borderRadius: 4,
+      padding: 4,
+      fontFamily: "'JetBrains Mono', monospace",
+      fontSize: 11,
+      zIndex: 200,
+      maxHeight: 240,
+      overflowY: 'auto' as const,
+      minWidth: 220,
+      maxWidth: 420,
+      boxShadow: '0 8px 24px rgba(0, 0, 0, 0.5)',
+    },
+    acItem: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 8,
+      padding: '4px 8px',
+      borderRadius: 3,
+      cursor: 'pointer',
+      color: 'var(--color-text-secondary)',
+      whiteSpace: 'nowrap' as const,
+    },
+    acItemActive: {
+      background: 'var(--glass-bg-hover)',
+      color: 'var(--color-text)',
+    },
+    acItemKind: {
+      display: 'inline-block',
+      width: 14,
+      textAlign: 'center' as const,
+      color: 'var(--color-text-muted)',
+      fontStyle: 'italic' as const,
+      flex: '0 0 auto',
+    },
+    acItemName: { flex: '0 0 auto', fontWeight: 500 },
+    acItemDesc: {
+      flex: 1,
+      color: 'var(--color-text-muted)',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      fontSize: 10,
+      marginLeft: 8,
+    },
   }), [library])
 
   const currentPlot = plots[activePlot] ?? null
@@ -1735,11 +1933,12 @@ export default function Workstation() {
                 ref={editorRef}
                 style={styles.editor}
                 value={script}
-                onChange={e => { setScript(e.target.value); updateCursor(e.target) }}
+                onChange={e => { setScript(e.target.value); updateCursor(e.target); if (acOpen) closeAutocomplete() }}
                 onKeyDown={onEditorKey}
                 onKeyUp={onEditorSelect}
                 onClick={onEditorSelect}
                 onScroll={onEditorScroll}
+                onBlur={() => { if (acOpen) closeAutocomplete() }}
                 spellCheck={false}
                 wrap="off"
               />
@@ -1947,6 +2146,34 @@ export default function Workstation() {
           <div style={styles.fullscreenBody}>
             <PlotView plot={currentPlot} />
           </div>
+        </div>
+      )}
+
+      {/* ─── Autocomplete popup (position: fixed, viewport coords) ──── */}
+      {acOpen && acAnchor && acItems.length > 0 && (
+        <div
+          style={{ ...styles.acPopup, top: acAnchor.top, left: acAnchor.left }}
+          role="listbox"
+        >
+          {acItems.map((it, i) => (
+            <div
+              key={it.name}
+              role="option"
+              aria-selected={i === acIndex}
+              style={i === acIndex ? { ...styles.acItem, ...styles.acItemActive } : styles.acItem}
+              onMouseEnter={() => setAcIndex(i)}
+              onMouseDown={ev => {
+                ev.preventDefault()
+                acceptAutocomplete(it.name)
+              }}
+            >
+              <span style={styles.acItemKind}>
+                {it.kind === 'fn' ? 'ƒ' : it.kind === 'var' ? 'v' : 'kw'}
+              </span>
+              <span style={styles.acItemName}>{it.name}</span>
+              {it.desc && <span style={styles.acItemDesc}>{it.desc}</span>}
+            </div>
+          ))}
         </div>
       )}
     </div>
