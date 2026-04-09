@@ -1457,6 +1457,63 @@ export default function Workstation() {
     const ta = e.currentTarget
     const { selectionStart: s, selectionEnd: ePos, value } = ta
 
+    // Ctrl / Cmd + D — select word at caret, or if the current selection
+    // is already a word, jump to and select the next occurrence. Mirrors
+    // VSCode's "Select next occurrence" shortcut as closely as a single-
+    // selection textarea allows (no true multi-cursor).
+    if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && (e.key === 'd' || e.key === 'D')) {
+      e.preventDefault()
+      const isWordChar = (c: string) => /[A-Za-z0-9_]/.test(c)
+      if (s === ePos) {
+        // Nothing selected: expand to the identifier under the caret.
+        let wStart = s, wEnd = s
+        while (wStart > 0 && isWordChar(value[wStart - 1])) wStart--
+        while (wEnd < value.length && isWordChar(value[wEnd])) wEnd++
+        if (wStart === wEnd) return
+        ta.selectionStart = wStart
+        ta.selectionEnd = wEnd
+        updateCursor(ta)
+        return
+      }
+      // Current selection is the seed; jump to the next whole-word match.
+      const seed = value.slice(s, ePos)
+      if (!seed || !/^[A-Za-z0-9_]+$/.test(seed)) return
+      let from = ePos
+      while (from <= value.length - seed.length) {
+        const idx = value.indexOf(seed, from)
+        if (idx < 0) break
+        const before = idx > 0 ? value[idx - 1] : ''
+        const after = idx + seed.length < value.length ? value[idx + seed.length] : ''
+        if (!isWordChar(before) && !isWordChar(after)) {
+          ta.selectionStart = idx
+          ta.selectionEnd = idx + seed.length
+          const lineOfMatch = (value.slice(0, idx).match(/\n/g)?.length ?? 0)
+          ta.scrollTop = Math.max(0, lineOfMatch * editorLineHeight - ta.clientHeight / 2)
+          updateCursor(ta)
+          return
+        }
+        from = idx + seed.length
+      }
+      // No next match: wrap to the start of the buffer and try once more.
+      from = 0
+      while (from < s) {
+        const idx = value.indexOf(seed, from)
+        if (idx < 0 || idx >= s) break
+        const before = idx > 0 ? value[idx - 1] : ''
+        const after = idx + seed.length < value.length ? value[idx + seed.length] : ''
+        if (!isWordChar(before) && !isWordChar(after)) {
+          ta.selectionStart = idx
+          ta.selectionEnd = idx + seed.length
+          const lineOfMatch = (value.slice(0, idx).match(/\n/g)?.length ?? 0)
+          ta.scrollTop = Math.max(0, lineOfMatch * editorLineHeight - ta.clientHeight / 2)
+          updateCursor(ta)
+          return
+        }
+        from = idx + seed.length
+      }
+      return
+    }
+
     // Ctrl+/ — toggle MATLAB line comment (%)
     if ((e.metaKey || e.ctrlKey) && e.key === '/') {
       e.preventDefault()
@@ -4186,6 +4243,7 @@ const SHORTCUT_GROUPS: { title: string; items: [string, string][] }[] = [
       ['Alt + ↑ / ↓', 'Move current line(s) up or down'],
       ['Shift + Alt + ↑ / ↓', 'Duplicate current line(s)'],
       ['Ctrl / Cmd + Shift + K', 'Delete current line(s)'],
+      ['Ctrl / Cmd + D', 'Select word / jump to next occurrence'],
       ['( [ { " \'', 'Auto-pair brackets and quotes'],
       ['Backspace between pair', 'Delete matching pair'],
       ['Tab on identifier', 'Autocomplete variable / builtin'],
