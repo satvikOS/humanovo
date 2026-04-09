@@ -5,7 +5,7 @@
 // Later batches add the preset library sidebar and polish.
 // ═══════════════════════════════════════════════════════════════════════
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { FiPlay, FiSquare, FiUpload, FiDownload, FiTrash2 } from 'react-icons/fi'
+import { FiPlay, FiSquare, FiUpload, FiDownload } from 'react-icons/fi'
 import {
   LineChart, Line, ScatterChart, Scatter, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
@@ -3559,6 +3559,7 @@ export default function Workstation() {
     { id: 'copy-con',     title: 'Copy console to clipboard',    hint: '',                 run: () => copyConsole() },
     { id: 'dl-con',       title: 'Download console transcript',  hint: '',                 run: () => downloadConsole() },
     { id: 'reset-ws',     title: 'Reset workspace',              hint: '',                 run: () => resetWorkspace() },
+    { id: 'exp-ws',       title: 'Export workspace as JSON',     hint: '',                 run: () => exportWorkspaceJson() },
     { id: 'exp-svg',      title: 'Export current figure as SVG', hint: '',                 run: () => exportPlotSVG() },
     { id: 'exp-png',      title: 'Export current figure as PNG', hint: '',                 run: () => exportPlotPNG() },
     { id: 'exp-csv',      title: 'Export figure data as CSV',    hint: '',                 run: () => exportPlotCSV() },
@@ -3589,7 +3590,7 @@ export default function Workstation() {
     { id: 'next-err',     title: 'Jump to next error',           hint: 'F8',               run: () => gotoNextError(1) },
     { id: 'prev-err',     title: 'Jump to previous error',       hint: 'Shift+F8',         run: () => gotoNextError(-1) },
     { id: 'help',         title: 'Show keyboard shortcuts',      hint: 'F1',               run: () => setHelpOpen(true) },
-  ], [runScript, runSelection, runSection, runUntilCursor, rerunLastFragment, openFind, openGoto, openSymbolNav, gotoNextError, newScript, duplicateScript, closeScript, closeOtherScripts, closeScriptsToRight, reopenLastClosedScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, resetEditorFont, copyConsole, downloadConsole, clearConsoleErrors, exportPlotSVG, exportPlotPNG, exportPlotCSV, toggleBookmarkAtCaret, gotoBookmark, clearAllBookmarks, insertSnippet, renameIdentifierAtCaret, gotoMatchingBracket, trimTrailingWhitespace, convertTabsToSpaces, applySelectionTransform, sortSelectedLines, uniqueSelectedLines, removeEmptySelectedLines, joinLines])
+  ], [runScript, runSelection, runSection, runUntilCursor, rerunLastFragment, openFind, openGoto, openSymbolNav, gotoNextError, newScript, duplicateScript, closeScript, closeOtherScripts, closeScriptsToRight, reopenLastClosedScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, resetEditorFont, copyConsole, downloadConsole, clearConsoleErrors, exportWorkspaceJson, exportPlotSVG, exportPlotPNG, exportPlotCSV, toggleBookmarkAtCaret, gotoBookmark, clearAllBookmarks, insertSnippet, renameIdentifierAtCaret, gotoMatchingBracket, trimTrailingWhitespace, convertTabsToSpaces, applySelectionTransform, sortSelectedLines, uniqueSelectedLines, removeEmptySelectedLines, joinLines])
 
   // Fuzzy-ish filter: split the query into tokens and require each to
   // appear (substring, case-insensitive) in the command title. Keeps
@@ -4689,41 +4690,22 @@ export default function Workstation() {
       {/* ─── Toolbar ─────────────────────────────────────────────────── */}
       <div style={styles.toolbar}>
         <button
-          style={{ ...styles.btn, ...styles.btnGhost }}
+          style={{ ...styles.btn, ...styles.btnGhost, padding: '6px 10px' }}
           onClick={() => setLibrary(l => l === 'open' ? 'closed' : 'open')}
-          title="Toggle template library"
+          title={library === 'open' ? 'Hide library' : 'Show library'}
+          aria-label="Toggle template library"
         >
-          {library === 'open' ? 'Hide library' : 'Show library'}
+          {library === 'open' ? '‹ library' : 'library ›'}
         </button>
-
-        <div style={{ width: 1, height: 18, background: 'var(--glass-border)', margin: '0 6px' }} />
 
         <button
           style={{ ...styles.btn, ...styles.btnPrimary }}
           onClick={runScript}
           disabled={running}
-          title="Run script (Ctrl/Cmd + Enter)"
+          title="Run script (Ctrl/Cmd + Enter) · F9 runs selection · Alt+Enter runs %% section"
         >
           {running ? <FiSquare /> : <FiPlay />}
           {running ? 'Running…' : 'Run'}
-        </button>
-
-        <button
-          style={{ ...styles.btn, ...styles.btnGhost }}
-          onClick={runSelection}
-          disabled={running}
-          title="Run current selection — or the caret's line if nothing is selected (F9 or Shift+Ctrl/Cmd+Enter)"
-        >
-          <FiPlay style={{ opacity: 0.7 }} /> Run selection
-        </button>
-
-        <button
-          style={{ ...styles.btn, ...styles.btnGhost }}
-          onClick={runSection}
-          disabled={running || sections.starts.length < 2}
-          title="Run the %% section containing the caret (Alt+Ctrl/Cmd+Enter)"
-        >
-          <FiPlay style={{ opacity: 0.7 }} /> Run section
         </button>
 
         <label style={{ ...styles.btn, ...styles.btnGhost }} title="Upload one or more .m scripts">
@@ -4735,34 +4717,23 @@ export default function Workstation() {
           <FiDownload /> Download
         </button>
 
-        <div style={{ width: 1, height: 18, background: 'var(--glass-border)', margin: '0 6px' }} />
-
-        <button style={{ ...styles.btn, ...styles.btnGhost }} onClick={clearConsole} title="Clear console">
-          <FiTrash2 /> Clear console
-        </button>
-        <button
-          style={{ ...styles.btn, ...styles.btnGhost }}
-          onClick={exportWorkspaceJson}
-          title="Download the current workspace as a JSON file"
-        >
-          Export workspace
-        </button>
-        <button style={{ ...styles.btn, ...styles.btnGhost }} onClick={resetWorkspace} title="Clear all variables">
-          Reset workspace
-        </button>
-
-        <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--color-text-muted)' }}>
-          MATLAB / Octave compatible · running locally in-browser
+        <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button
+            style={{ ...styles.btn, ...styles.btnGhost }}
+            onClick={openPalette}
+            title="Command palette (Ctrl/Cmd + Shift + P)"
+          >
+            ⌘K
+          </button>
+          <button
+            style={{ ...styles.btn, ...styles.btnGhost }}
+            onClick={() => setHelpOpen(true)}
+            title="Keyboard shortcuts (F1)"
+            aria-label="Keyboard shortcuts"
+          >
+            ?
+          </button>
         </span>
-
-        <button
-          style={{ ...styles.btn, ...styles.btnGhost, marginLeft: 10 }}
-          onClick={() => setHelpOpen(true)}
-          title="Keyboard shortcuts (F1)"
-          aria-label="Keyboard shortcuts"
-        >
-          ?
-        </button>
       </div>
 
       {/* ─── Library (left) + Editor + Right rail + Console (bottom) ── */}
@@ -4872,9 +4843,6 @@ export default function Workstation() {
           <div style={styles.editorHeader}>
             <span>Scripts</span>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span style={{ opacity: 0.7, fontWeight: 400 }}>
-                Ctrl/Cmd + Enter to run · F9 runs selection · Alt+Ctrl/Cmd + Enter runs %% section · Ctrl/Cmd + F to find
-              </span>
               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                 <button
                   type="button"
