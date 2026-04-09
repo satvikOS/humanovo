@@ -733,6 +733,9 @@ export default function Workstation() {
       fontSize: Math.max(EDITOR_FONT_MIN, Math.min(EDITOR_FONT_MAX, p.fontSize + delta)),
     }))
   }, [])
+  const resetEditorFont = useCallback(() => {
+    setEditorPrefs(p => ({ ...p, fontSize: EDITOR_FONT_DEFAULT }))
+  }, [])
   const toggleEditorWrap = useCallback(() => {
     setEditorPrefs(p => ({ ...p, wrap: !p.wrap }))
   }, [])
@@ -2497,6 +2500,26 @@ export default function Workstation() {
       joinLines()
       return
     }
+    // Ctrl/Cmd + = / + — grow the editor font size. Ctrl+- shrinks,
+    // Ctrl+0 resets to the default. Matches the browser zoom shortcuts
+    // so the muscle memory carries over. We only preventDefault when
+    // the editor actually has focus, so the page-level browser zoom
+    // still works elsewhere in the Workstation.
+    if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && (e.key === '=' || e.key === '+')) {
+      e.preventDefault()
+      bumpEditorFont(1)
+      return
+    }
+    if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key === '-') {
+      e.preventDefault()
+      bumpEditorFont(-1)
+      return
+    }
+    if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key === '0') {
+      e.preventDefault()
+      resetEditorFont()
+      return
+    }
     if ((e.metaKey || e.ctrlKey) && (e.key === 'g' || e.key === 'G')) {
       e.preventDefault()
       openGoto()
@@ -2973,7 +2996,7 @@ export default function Workstation() {
         ta.selectionStart = ta.selectionEnd = s + 1 + newIndent.length
       })
     }
-  }, [runScript, runSelection, runSection, runUntilCursor, rerunLastFragment, openFind, openGoto, openSymbolNav, setScript, vars, acOpen, acItems, acIndex, acceptAutocomplete, closeAutocomplete, editorFontSize, sigHint, toggleBookmarkAtCaret, gotoBookmark, gotoMatchingBracket, gotoNextError, joinLines])
+  }, [runScript, runSelection, runSection, runUntilCursor, rerunLastFragment, openFind, openGoto, openSymbolNav, setScript, vars, acOpen, acItems, acIndex, acceptAutocomplete, closeAutocomplete, editorFontSize, sigHint, toggleBookmarkAtCaret, gotoBookmark, gotoMatchingBracket, gotoNextError, joinLines, bumpEditorFont, resetEditorFont])
 
   // Track cursor position and selection size for the status bar.
   const updateCursor = useCallback((ta: HTMLTextAreaElement) => {
@@ -3527,8 +3550,9 @@ export default function Workstation() {
     { id: 'reopen',       title: 'Reopen last closed script',    hint: 'Ctrl+Shift+T',     run: () => reopenLastClosedScript() },
     { id: 'rename',       title: 'Rename current script',        hint: '',                 run: () => renameScript(scriptStore.activeId) },
     { id: 'wrap',         title: 'Toggle word wrap',             hint: '',                 run: () => toggleEditorWrap() },
-    { id: 'font-up',      title: 'Increase editor font size',    hint: '',                 run: () => bumpEditorFont(1) },
-    { id: 'font-down',    title: 'Decrease editor font size',    hint: '',                 run: () => bumpEditorFont(-1) },
+    { id: 'font-up',      title: 'Increase editor font size',    hint: 'Ctrl+=',           run: () => bumpEditorFont(1) },
+    { id: 'font-down',    title: 'Decrease editor font size',    hint: 'Ctrl+-',           run: () => bumpEditorFont(-1) },
+    { id: 'font-reset',   title: 'Reset editor font size',       hint: 'Ctrl+0',           run: () => resetEditorFont() },
     { id: 'clear-con',    title: 'Clear console',                hint: 'Ctrl+L',           run: () => clearConsole() },
     { id: 'clear-err',    title: 'Clear only error entries',     hint: '',                 run: () => clearConsoleErrors() },
     { id: 'copy-con',     title: 'Copy console to clipboard',    hint: '',                 run: () => copyConsole() },
@@ -3564,7 +3588,7 @@ export default function Workstation() {
     { id: 'next-err',     title: 'Jump to next error',           hint: 'F8',               run: () => gotoNextError(1) },
     { id: 'prev-err',     title: 'Jump to previous error',       hint: 'Shift+F8',         run: () => gotoNextError(-1) },
     { id: 'help',         title: 'Show keyboard shortcuts',      hint: 'F1',               run: () => setHelpOpen(true) },
-  ], [runScript, runSelection, runSection, runUntilCursor, rerunLastFragment, openFind, openGoto, openSymbolNav, gotoNextError, newScript, duplicateScript, closeScript, closeOtherScripts, closeScriptsToRight, reopenLastClosedScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, copyConsole, downloadConsole, clearConsoleErrors, exportPlotSVG, exportPlotPNG, exportPlotCSV, toggleBookmarkAtCaret, gotoBookmark, clearAllBookmarks, insertSnippet, renameIdentifierAtCaret, gotoMatchingBracket, trimTrailingWhitespace, convertTabsToSpaces, applySelectionTransform, sortSelectedLines, uniqueSelectedLines, removeEmptySelectedLines, joinLines])
+  ], [runScript, runSelection, runSection, runUntilCursor, rerunLastFragment, openFind, openGoto, openSymbolNav, gotoNextError, newScript, duplicateScript, closeScript, closeOtherScripts, closeScriptsToRight, reopenLastClosedScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, resetEditorFont, copyConsole, downloadConsole, clearConsoleErrors, exportPlotSVG, exportPlotPNG, exportPlotCSV, toggleBookmarkAtCaret, gotoBookmark, clearAllBookmarks, insertSnippet, renameIdentifierAtCaret, gotoMatchingBracket, trimTrailingWhitespace, convertTabsToSpaces, applySelectionTransform, sortSelectedLines, uniqueSelectedLines, removeEmptySelectedLines, joinLines])
 
   // Fuzzy-ish filter: split the query into tokens and require each to
   // appear (substring, case-insensitive) in the command title. Keeps
@@ -6643,6 +6667,8 @@ const SHORTCUT_GROUPS: { title: string; items: [string, string][] }[] = [
     items: [
       ['F1', 'Toggle this help dialog'],
       ['Ctrl / Cmd + Shift + P', 'Open the command palette'],
+      ['Ctrl / Cmd + = / -', 'Grow / shrink editor font size'],
+      ['Ctrl / Cmd + 0', 'Reset editor font size to default'],
     ],
   },
 ]
