@@ -55,6 +55,8 @@ interface ConsoleEntry {
   id: number
   kind: 'input' | 'output' | 'error'
   text: string
+  /** Optional 1-based source line for click-to-jump on error entries. */
+  line?: number
 }
 
 let nextEntryId = 1
@@ -346,6 +348,7 @@ export default function Workstation() {
   const [histIdx, setHistIdx] = useState<number | null>(null)
   const [plots, setPlots] = useState<PlotSpec[]>([])
   const [activePlot, setActivePlot] = useState(0)
+  const [plotFullscreen, setPlotFullscreen] = useState(false)
   const [vars, setVars] = useState<VarSnapshot[]>([])
   const [expandedVar, setExpandedVar] = useState<string | null>(null)
   const [library, setLibrary] = useState<'open' | 'closed'>('open')
@@ -391,6 +394,16 @@ export default function Workstation() {
     return () => clearTimeout(h)
   }, [scriptStore])
 
+  // Esc closes the fullscreen plot overlay.
+  useEffect(() => {
+    if (!plotFullscreen) return
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') setPlotFullscreen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [plotFullscreen])
+
   /** Push engine outputs into the console entry list and plot buffer. */
   const appendOutputs = useCallback((outs: RunOutput[]) => {
     const newPlots: PlotSpec[] = []
@@ -400,7 +413,7 @@ export default function Workstation() {
         if (o.kind === 'text' && o.text) {
           next.push({ id: nextEntryId++, kind: 'output', text: o.text })
         } else if (o.kind === 'error') {
-          next.push({ id: nextEntryId++, kind: 'error', text: o.text ?? 'error' })
+          next.push({ id: nextEntryId++, kind: 'error', text: o.text ?? 'error', line: o.line })
         } else if (o.kind === 'plot' && o.plot) {
           newPlots.push(o.plot)
           const n = o.plot.series.length
@@ -556,6 +569,22 @@ export default function Workstation() {
     setFindOpen(false)
     editorRef.current?.focus()
   }, [])
+
+  // Jump the editor caret to a 1-based line and select the entire line so
+  // it's visible at a glance. Used by click-to-jump on error console entries.
+  const jumpToLine = useCallback((line: number) => {
+    const ta = editorRef.current
+    if (!ta) return
+    const lines = script.split('\n')
+    if (line < 1 || line > lines.length) return
+    let start = 0
+    for (let i = 0; i < line - 1; i++) start += lines[i].length + 1
+    const end = start + lines[line - 1].length
+    ta.focus()
+    ta.setSelectionRange(start, end)
+    const lineHeight = 12 * 1.6
+    ta.scrollTop = Math.max(0, (line - 1) * lineHeight - ta.clientHeight / 2)
+  }, [script])
 
   // Keyboard shortcuts inside the editor:
   //   Cmd/Ctrl+Enter  — run script
@@ -1315,6 +1344,33 @@ export default function Workstation() {
       fontFamily: "'JetBrains Mono', monospace",
       fontSize: 12,
     },
+    fullscreenOverlay: {
+      position: 'fixed' as const,
+      inset: 0,
+      background: 'rgba(0, 0, 0, 0.85)',
+      backdropFilter: 'blur(8px)',
+      zIndex: 1000,
+      display: 'flex',
+      flexDirection: 'column',
+      padding: 20,
+    },
+    fullscreenHeader: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      padding: '0 0 16px 0',
+      color: 'var(--color-text)',
+      fontSize: 13,
+      fontWeight: 600,
+    },
+    fullscreenBody: {
+      flex: 1,
+      minHeight: 0,
+      background: 'var(--glass-bg)',
+      border: '1px solid var(--glass-border)',
+      borderRadius: 8,
+      padding: 24,
+    },
   }), [library])
 
   const currentPlot = plots[activePlot] ?? null
@@ -1723,6 +1779,12 @@ export default function Workstation() {
                 <button
                   style={{ ...styles.btn, ...styles.btnGhost, padding: '2px 8px', fontSize: 11 }}
                   disabled={plots.length === 0}
+                  onClick={() => setPlotFullscreen(true)}
+                  title="Expand figure to fullscreen"
+                >expand</button>
+                <button
+                  style={{ ...styles.btn, ...styles.btnGhost, padding: '2px 8px', fontSize: 11 }}
+                  disabled={plots.length === 0}
                   onClick={() => { setPlots([]); setActivePlot(0) }}
                   title="Discard all figures"
                 >clear</button>
@@ -1788,18 +1850,24 @@ export default function Workstation() {
               Console ready. Type a command below or hit Run.
             </div>
           )}
-          {entries.map(e => (
-            <div
-              key={e.id}
-              style={
-                e.kind === 'input' ? styles.entryInput
-                : e.kind === 'error' ? styles.entryError
-                : styles.entryOutput
-              }
-            >
-              {e.text}
-            </div>
-          ))}
+          {entries.map(e => {
+            const clickable = e.kind === 'error' && typeof e.line === 'number'
+            return (
+              <div
+                key={e.id}
+                onClick={clickable ? () => jumpToLine(e.line!) : undefined}
+                style={{
+                  ...(e.kind === 'input' ? styles.entryInput
+                    : e.kind === 'error' ? styles.entryError
+                    : styles.entryOutput),
+                  ...(clickable ? { cursor: 'pointer', textDecoration: 'underline', textUnderlineOffset: 3 } : null),
+                }}
+                title={clickable ? `Click to jump to line ${e.line}` : undefined}
+              >
+                {e.text}
+              </div>
+            )
+          })}
         </div>
       </div>
 
@@ -1832,6 +1900,55 @@ export default function Workstation() {
           autoComplete="off"
         />
       </div>
+
+      {/* ─── Fullscreen figure overlay ──────────────────────────────── */}
+      {plotFullscreen && currentPlot && (
+        <div
+          style={styles.fullscreenOverlay}
+          role="dialog"
+          aria-modal="true"
+          onClick={e => { if (e.target === e.currentTarget) setPlotFullscreen(false) }}
+        >
+          <div style={styles.fullscreenHeader}>
+            <span>
+              Figure {plots.length > 0 ? `${activePlot + 1} / ${plots.length}` : ''}
+              {currentPlot.title ? ` · ${currentPlot.title}` : ''}
+            </span>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button
+                style={{ ...styles.btn, ...styles.btnGhost, padding: '4px 10px', fontSize: 11 }}
+                disabled={plots.length < 2}
+                onClick={() => setActivePlot(i => Math.max(0, i - 1))}
+                title="Previous figure"
+              >◀</button>
+              <button
+                style={{ ...styles.btn, ...styles.btnGhost, padding: '4px 10px', fontSize: 11 }}
+                disabled={plots.length < 2}
+                onClick={() => setActivePlot(i => Math.min(plots.length - 1, i + 1))}
+                title="Next figure"
+              >▶</button>
+              <button
+                style={{ ...styles.btn, ...styles.btnGhost, padding: '4px 10px', fontSize: 11 }}
+                onClick={exportPlotSVG}
+                title="Download current figure as SVG"
+              >svg</button>
+              <button
+                style={{ ...styles.btn, ...styles.btnGhost, padding: '4px 10px', fontSize: 11 }}
+                onClick={exportPlotCSV}
+                title="Download series data as CSV"
+              >csv</button>
+              <button
+                style={{ ...styles.btn, ...styles.btnGhost, padding: '4px 10px', fontSize: 11 }}
+                onClick={() => setPlotFullscreen(false)}
+                title="Close fullscreen (Esc)"
+              >close</button>
+            </div>
+          </div>
+          <div style={styles.fullscreenBody}>
+            <PlotView plot={currentPlot} />
+          </div>
+        </div>
+      )}
     </div>
   )
 }
