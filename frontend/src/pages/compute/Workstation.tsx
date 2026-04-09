@@ -651,6 +651,7 @@ export default function Workstation() {
   const highlightRef = useRef<HTMLPreElement>(null)
   const bracketOverlayRef = useRef<HTMLDivElement>(null)
   const findOverlayRef = useRef<HTMLDivElement>(null)
+  const wordOverlayRef = useRef<HTMLDivElement>(null)
   const currentLineRef = useRef<HTMLDivElement>(null)
   const plotBodyRef = useRef<HTMLDivElement>(null)
 
@@ -863,6 +864,51 @@ export default function Workstation() {
   }, [script])
 
   const sectionStartSet = useMemo(() => new Set(sections.starts), [sections])
+
+  // Caret offset (0-based) derived from line/col so we can run regex scans
+  // without hitting the DOM. Keeps the memo pipeline declarative.
+  const caretOffset = useMemo(() => {
+    const lines = script.split('\n')
+    let off = 0
+    for (let i = 0; i < cursor.line - 1 && i < lines.length; i++) off += lines[i].length + 1
+    return off + (cursor.col - 1)
+  }, [script, cursor])
+
+  // The identifier containing the caret, or '' if the caret sits on
+  // whitespace / punctuation / a single-letter token (too noisy to
+  // highlight). Used to drive the subtle "all occurrences" overlay below.
+  const wordAtCaret = useMemo(() => {
+    const pos = caretOffset
+    if (pos < 0 || pos > script.length) return ''
+    let start = pos, end = pos
+    while (start > 0 && /[A-Za-z0-9_]/.test(script[start - 1])) start--
+    while (end < script.length && /[A-Za-z0-9_]/.test(script[end])) end++
+    if (start === end) return ''
+    if (/[0-9]/.test(script[start])) return ''
+    const word = script.slice(start, end)
+    return word.length >= 2 ? word : ''
+  }, [script, caretOffset])
+
+  // Whole-word occurrence offsets for wordAtCaret. Short-circuits when
+  // nothing is selected or the find bar is open (their highlights would
+  // clash). Returns empty when the word has only one occurrence since
+  // highlighting a unique identifier is pure visual noise.
+  const wordOccurrences = useMemo<number[]>(() => {
+    if (!wordAtCaret || findOpen) return []
+    const out: number[] = []
+    const n = wordAtCaret.length
+    const isWordChar = (c: string) => /[A-Za-z0-9_]/.test(c)
+    let from = 0
+    while (from <= script.length - n) {
+      const idx = script.indexOf(wordAtCaret, from)
+      if (idx < 0) break
+      const before = idx > 0 ? script[idx - 1] : ''
+      const after = idx + n < script.length ? script[idx + n] : ''
+      if (!isWordChar(before) && !isWordChar(after)) out.push(idx)
+      from = idx + n
+    }
+    return out.length >= 2 ? out : []
+  }, [script, wordAtCaret, findOpen])
 
   // Flatten the sections into an ordered chip list for the outline strip.
   // Unnamed sections fall back to "section N" so the chip is still clickable.
@@ -1829,6 +1875,9 @@ export default function Workstation() {
     if (findOverlayRef.current) {
       findOverlayRef.current.style.transform = `translate(${-scrollLeft}px, ${-scrollTop}px)`
     }
+    if (wordOverlayRef.current) {
+      wordOverlayRef.current.style.transform = `translate(${-scrollLeft}px, ${-scrollTop}px)`
+    }
     if (currentLineRef.current) {
       // Only the vertical scroll matters for the horizontal strip.
       currentLineRef.current.style.transform = `translateY(${-scrollTop}px)`
@@ -2452,6 +2501,20 @@ export default function Workstation() {
     findMatchHLActive: {
       background: 'var(--color-bg-elevated)',
       borderColor: 'var(--color-border-strong)',
+    },
+    wordOverlay: {
+      position: 'absolute' as const,
+      top: 0,
+      left: 0,
+      pointerEvents: 'none' as const,
+      willChange: 'transform',
+    },
+    wordHL: {
+      position: 'absolute' as const,
+      height: editorLineHeight,
+      borderBottom: '1px dashed var(--color-text-muted)',
+      opacity: 0.65,
+      boxSizing: 'border-box' as const,
     },
     statusBar: {
       display: 'flex',
@@ -3278,6 +3341,28 @@ export default function Workstation() {
                           ...styles.bracketHL,
                           top: 14 + lc.line * editorLineHeight,
                           left: 14 + lc.col * editorCharWidth,
+                        }}
+                      />
+                    )
+                  })}
+                </div>
+              )}
+              {!editorWrapOn && wordOccurrences.length > 0 && (
+                <div ref={wordOverlayRef} style={styles.wordOverlay} aria-hidden="true">
+                  {wordOccurrences.map((start, idx) => {
+                    // Skip the occurrence that contains the caret itself —
+                    // highlighting the identifier you're typing reads as
+                    // noise and competes with the current-line strip.
+                    if (caretOffset >= start && caretOffset <= start + wordAtCaret.length) return null
+                    const lc = lineColForPos(script, start)
+                    return (
+                      <div
+                        key={idx}
+                        style={{
+                          ...styles.wordHL,
+                          top: 14 + lc.line * editorLineHeight,
+                          left: 14 + lc.col * editorCharWidth,
+                          width: wordAtCaret.length * editorCharWidth,
                         }}
                       />
                     )
