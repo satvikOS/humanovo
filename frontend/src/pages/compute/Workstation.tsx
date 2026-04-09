@@ -569,6 +569,10 @@ export default function Workstation() {
   })
   const [vars, setVars] = useState<VarSnapshot[]>([])
   const [varFilter, setVarFilter] = useState('')
+  // Sort key for the workspace inspector. Cycled through via a small chip
+  // in the panel header so power users can reorder by size when hunting
+  // the largest matrix in the ws, or by type when scanning kinds.
+  const [varSort, setVarSort] = useState<'name' | 'size' | 'type'>('name')
   const [expandedVar, setExpandedVar] = useState<string | null>(null)
   const [inspectVar, setInspectVar] = useState<string | null>(null)
   const [library, setLibrary] = useState<'open' | 'closed'>('open')
@@ -733,12 +737,41 @@ export default function Workstation() {
   }, [entries, consoleFilter])
 
   // Same idea for the workspace inspector — filter by variable name,
-  // substring, case-insensitive.
+  // substring, case-insensitive. Then sort by the current varSort key.
   const visibleVars = useMemo(() => {
-    if (!varFilter.trim()) return vars
-    const q = varFilter.toLowerCase()
-    return vars.filter(v => v.name.toLowerCase().includes(q))
-  }, [vars, varFilter])
+    const q = varFilter.trim().toLowerCase()
+    const base = q ? vars.filter(v => v.name.toLowerCase().includes(q)) : vars
+    const kindRank = (k: VarSnapshot['kind']): number => {
+      switch (k) {
+        case 'mat':  return 0
+        case 'num':  return 1
+        case 'bool': return 2
+        case 'str':  return 3
+        case 'fn':   return 4
+        default:     return 5
+      }
+    }
+    const sizeOf = (v: VarSnapshot): number => {
+      if (v.kind === 'mat' && v.value.kind === 'mat') return v.value.rows * v.value.cols
+      if (v.kind === 'str' && v.value.kind === 'str') return v.value.v.length
+      return 1
+    }
+    const sorted = base.slice()
+    if (varSort === 'name') {
+      sorted.sort((a, b) => a.name.localeCompare(b.name))
+    } else if (varSort === 'size') {
+      sorted.sort((a, b) => {
+        const d = sizeOf(b) - sizeOf(a)
+        return d !== 0 ? d : a.name.localeCompare(b.name)
+      })
+    } else {
+      sorted.sort((a, b) => {
+        const d = kindRank(a.kind) - kindRank(b.kind)
+        return d !== 0 ? d : a.name.localeCompare(b.name)
+      })
+    }
+    return sorted
+  }, [vars, varFilter, varSort])
 
   // The autocomplete anchor is computed in viewport coordinates, so any
   // window resize / scroll would leave it stale — easiest fix is to just
@@ -3127,15 +3160,25 @@ export default function Workstation() {
                   </span>
                 )}
               </span>
-              <input
-                style={styles.varFilter}
-                value={varFilter}
-                onChange={e => setVarFilter(e.target.value)}
-                placeholder="Filter…"
-                aria-label="Filter workspace variables"
-                spellCheck={false}
-                disabled={vars.length === 0}
-              />
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <button
+                  type="button"
+                  style={{ ...styles.plotChip, ...styles.plotChipActive }}
+                  onClick={() => setVarSort(s => s === 'name' ? 'size' : s === 'size' ? 'type' : 'name')}
+                  disabled={vars.length === 0}
+                  title="Cycle sort key: name → size → type"
+                  aria-label={`Sort workspace by ${varSort}`}
+                >sort: {varSort} ↓</button>
+                <input
+                  style={styles.varFilter}
+                  value={varFilter}
+                  onChange={e => setVarFilter(e.target.value)}
+                  placeholder="Filter…"
+                  aria-label="Filter workspace variables"
+                  spellCheck={false}
+                  disabled={vars.length === 0}
+                />
+              </div>
             </div>
             <div style={styles.varList}>
               {vars.length === 0 && (
