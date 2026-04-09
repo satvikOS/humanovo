@@ -1229,7 +1229,76 @@ export default function Workstation() {
     setCmd('')
   }, [history, appendOutputs])
 
+  // Tab-completion cycle state for the console: when the user presses Tab
+  // repeatedly after a partial word, we walk through the same candidate
+  // list rather than re-inferring it each time. Cleared as soon as the
+  // user types anything else or commits the line.
+  const cmdTabCycleRef = useRef<{ prefix: string; start: number; items: string[]; idx: number } | null>(null)
+
   const onCmdKey = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    // Tab — autocomplete the partial identifier under the caret against
+    // workspace variables, MATLAB builtins, and keywords. A second Tab
+    // without editing cycles to the next candidate; any other keystroke
+    // drops the cycle so the user can keep typing naturally.
+    if (e.key === 'Tab') {
+      e.preventDefault()
+      const inp = e.currentTarget
+      const pos = inp.selectionStart ?? cmd.length
+      if (inp.selectionEnd !== pos) return
+      // If the previous call left us mid-cycle and the user hasn't
+      // touched the text, advance to the next candidate.
+      const cached = cmdTabCycleRef.current
+      if (cached && cmd.slice(0, cached.start) + cached.items[cached.idx] === cmd.slice(0, pos)) {
+        const nextIdx = (cached.idx + (e.shiftKey ? -1 : 1) + cached.items.length) % cached.items.length
+        const next = cached.items[nextIdx]
+        const newVal = cmd.slice(0, cached.start) + next + cmd.slice(pos)
+        setCmd(newVal)
+        cmdTabCycleRef.current = { ...cached, idx: nextIdx }
+        requestAnimationFrame(() => {
+          const p = cached.start + next.length
+          inp.setSelectionRange(p, p)
+        })
+        return
+      }
+      // Fresh completion from the word immediately left of the caret.
+      const wb = getWordBefore(cmd, pos)
+      if (!wb) return
+      const prefix = wb.word
+      const lower = prefix.toLowerCase()
+      const seen = new Set<string>()
+      const items: string[] = []
+      for (const v of vars) {
+        if (v.name.toLowerCase().startsWith(lower) && !seen.has(v.name)) {
+          items.push(v.name); seen.add(v.name)
+        }
+      }
+      for (const d of BUILTIN_DOCS) {
+        if (d.name.toLowerCase().startsWith(lower) && !seen.has(d.name)) {
+          items.push(d.name); seen.add(d.name)
+        }
+      }
+      for (const k of MATLAB_KEYWORDS) {
+        if (k.toLowerCase().startsWith(lower) && !seen.has(k)) {
+          items.push(k); seen.add(k)
+        }
+      }
+      // Put exact-prefix items that only differ in case at the front so
+      // the first Tab "just works" for the obvious completion.
+      items.sort((a, b) => a.length - b.length || a.localeCompare(b))
+      if (items.length === 0) return
+      const pick = items[0]
+      const newVal = cmd.slice(0, wb.start) + pick + cmd.slice(pos)
+      setCmd(newVal)
+      cmdTabCycleRef.current = { prefix, start: wb.start, items, idx: 0 }
+      requestAnimationFrame(() => {
+        const p = wb.start + pick.length
+        inp.setSelectionRange(p, p)
+      })
+      return
+    }
+    // Any keystroke that isn't Tab invalidates the cycle.
+    if (cmdTabCycleRef.current) cmdTabCycleRef.current = null
+
     // Ctrl/Cmd + R — open the reverse history search overlay. Mirrors the
     // bash/zsh shortcut: start typing to narrow matches, Ctrl+R again to
     // cycle, Enter to accept, Esc to bail out.
@@ -1257,7 +1326,7 @@ export default function Workstation() {
       if (idx >= history.length) { setHistIdx(null); setCmd('') }
       else { setHistIdx(idx); setCmd(history[idx]) }
     }
-  }, [cmd, history, histIdx, runCommand])
+  }, [cmd, history, histIdx, runCommand, vars])
 
   // Filtered history matches for the Ctrl+R search overlay — deduped and
   // ordered from most recent to least recent, so the first hit is the
