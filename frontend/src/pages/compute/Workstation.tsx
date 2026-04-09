@@ -1993,6 +1993,50 @@ export default function Workstation() {
     })
   }, [applySelectionTransform])
 
+  // Join the current line with the next — replacing the intervening
+  // newline (and any run of indent whitespace on the follower) with a
+  // single space. When a range of lines is selected, every internal
+  // newline in the selection is joined, matching VS Code's "Join Lines"
+  // behaviour. No-op on the final line when nothing is selected.
+  const joinLines = useCallback(() => {
+    const ta = editorRef.current
+    if (!ta) return
+    const value = ta.value
+    let { selectionStart: s, selectionEnd: e } = ta
+    if (s === e) {
+      // Expand to "current line" so the join replaces the newline
+      // between it and the next line.
+      const lineStart = value.lastIndexOf('\n', s - 1) + 1
+      const nextNl = value.indexOf('\n', s)
+      if (nextNl < 0) return // already the last line, nothing to join
+      const nextLineEnd = value.indexOf('\n', nextNl + 1)
+      s = lineStart
+      e = nextLineEnd < 0 ? value.length : nextLineEnd
+    }
+    const before = value.slice(0, s)
+    const middle = value.slice(s, e)
+    const after = value.slice(e)
+    // Collapse each newline + run of leading whitespace into a single
+    // space, but drop the space if the previous character is already
+    // whitespace so joins don't introduce doubled gaps.
+    const joined = middle.replace(/\n[ \t]*/g, (_m, offset: number) => {
+      // offset is relative to `middle` — check the char immediately
+      // before the match in the joined substring we're building.
+      const prev = offset > 0 ? middle[offset - 1] : ''
+      return prev && /\s/.test(prev) ? '' : ' '
+    })
+    if (joined === middle) return
+    const next = before + joined + after
+    setScript(next)
+    const caret = before.length + joined.length
+    requestAnimationFrame(() => {
+      const ta2 = editorRef.current
+      if (!ta2) return
+      ta2.focus()
+      ta2.setSelectionRange(caret, caret)
+    })
+  }, [setScript])
+
   // Strip trailing spaces and tabs from every line in the script. Keeps
   // the caret on the same logical line, clamping its column so it lands
   // on the new end-of-line when the user sat inside the removed run.
@@ -2417,6 +2461,14 @@ export default function Workstation() {
     if ((e.metaKey || e.ctrlKey) && (e.key === 'f' || e.key === 'F')) {
       e.preventDefault()
       openFind()
+      return
+    }
+    // Ctrl/Cmd + J — join the current line (or selection of lines) with
+    // the next, collapsing the intervening newline plus indent run into
+    // a single space. Matches VS Code's "Join Lines" binding.
+    if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && (e.key === 'j' || e.key === 'J')) {
+      e.preventDefault()
+      joinLines()
       return
     }
     if ((e.metaKey || e.ctrlKey) && (e.key === 'g' || e.key === 'G')) {
@@ -2895,7 +2947,7 @@ export default function Workstation() {
         ta.selectionStart = ta.selectionEnd = s + 1 + newIndent.length
       })
     }
-  }, [runScript, runSelection, runSection, runUntilCursor, rerunLastFragment, openFind, openGoto, openSymbolNav, setScript, vars, acOpen, acItems, acIndex, acceptAutocomplete, closeAutocomplete, editorFontSize, sigHint, toggleBookmarkAtCaret, gotoBookmark, gotoMatchingBracket, gotoNextError])
+  }, [runScript, runSelection, runSection, runUntilCursor, rerunLastFragment, openFind, openGoto, openSymbolNav, setScript, vars, acOpen, acItems, acIndex, acceptAutocomplete, closeAutocomplete, editorFontSize, sigHint, toggleBookmarkAtCaret, gotoBookmark, gotoMatchingBracket, gotoNextError, joinLines])
 
   // Track cursor position and selection size for the status bar.
   const updateCursor = useCallback((ta: HTMLTextAreaElement) => {
@@ -3472,6 +3524,7 @@ export default function Workstation() {
     { id: 'snip-sec',     title: 'Insert snippet: %% section header', hint: '',            run: () => insertSnippet('%% $0\n') },
     { id: 'rename-id',    title: 'Rename identifier at caret',   hint: '',                 run: () => renameIdentifierAtCaret() },
     { id: 'trim-ws',      title: 'Trim trailing whitespace',     hint: '',                 run: () => trimTrailingWhitespace() },
+    { id: 'join-lines',   title: 'Join line with next',          hint: 'Ctrl+J',           run: () => joinLines() },
     { id: 'upper-sel',    title: 'Uppercase selection',          hint: '',                 run: () => applySelectionTransform(s => s.toUpperCase()) },
     { id: 'lower-sel',    title: 'Lowercase selection',          hint: '',                 run: () => applySelectionTransform(s => s.toLowerCase()) },
     { id: 'sort-lines',   title: 'Sort selected lines',          hint: '',                 run: () => sortSelectedLines() },
@@ -3484,7 +3537,7 @@ export default function Workstation() {
     { id: 'next-err',     title: 'Jump to next error',           hint: 'F8',               run: () => gotoNextError(1) },
     { id: 'prev-err',     title: 'Jump to previous error',       hint: 'Shift+F8',         run: () => gotoNextError(-1) },
     { id: 'help',         title: 'Show keyboard shortcuts',      hint: 'F1',               run: () => setHelpOpen(true) },
-  ], [runScript, runSelection, runSection, runUntilCursor, rerunLastFragment, openFind, openGoto, openSymbolNav, gotoNextError, newScript, duplicateScript, closeScript, closeOtherScripts, closeScriptsToRight, reopenLastClosedScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, copyConsole, downloadConsole, clearConsoleErrors, exportPlotSVG, exportPlotPNG, exportPlotCSV, toggleBookmarkAtCaret, gotoBookmark, clearAllBookmarks, insertSnippet, renameIdentifierAtCaret, gotoMatchingBracket, trimTrailingWhitespace, applySelectionTransform, sortSelectedLines, uniqueSelectedLines, removeEmptySelectedLines])
+  ], [runScript, runSelection, runSection, runUntilCursor, rerunLastFragment, openFind, openGoto, openSymbolNav, gotoNextError, newScript, duplicateScript, closeScript, closeOtherScripts, closeScriptsToRight, reopenLastClosedScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, copyConsole, downloadConsole, clearConsoleErrors, exportPlotSVG, exportPlotPNG, exportPlotCSV, toggleBookmarkAtCaret, gotoBookmark, clearAllBookmarks, insertSnippet, renameIdentifierAtCaret, gotoMatchingBracket, trimTrailingWhitespace, applySelectionTransform, sortSelectedLines, uniqueSelectedLines, removeEmptySelectedLines, joinLines])
 
   // Fuzzy-ish filter: split the query into tokens and require each to
   // appear (substring, case-insensitive) in the command title. Keeps
@@ -6518,6 +6571,7 @@ const SHORTCUT_GROUPS: { title: string; items: [string, string][] }[] = [
       ['Alt + ↑ / ↓', 'Move current line(s) up or down'],
       ['Shift + Alt + ↑ / ↓', 'Duplicate current line(s)'],
       ['Ctrl / Cmd + Shift + K', 'Delete current line(s)'],
+      ['Ctrl / Cmd + J', 'Join line with the next line'],
       ['Ctrl / Cmd + D', 'Select word / jump to next occurrence'],
       ['( [ { " \'', 'Auto-pair brackets and quotes'],
       ['Backspace between pair', 'Delete matching pair'],
