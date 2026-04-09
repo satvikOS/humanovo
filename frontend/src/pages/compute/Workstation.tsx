@@ -1693,17 +1693,39 @@ export default function Workstation() {
     }
 
     if (e.key === 'Enter' && !e.shiftKey) {
-      // Copy leading whitespace of the current line to the new one.
+      // Copy leading whitespace of the current line to the new one, and add
+      // one extra indent step if the previous line opens a block. Mirrors
+      // the feel of a standard MATLAB editor — `if cond⏎` lands the caret
+      // two spaces deeper than `cond` itself.
       const lineStart = value.lastIndexOf('\n', s - 1) + 1
       const currentLine = value.slice(lineStart, s)
       const m = currentLine.match(/^\s*/)
       const indent = m ? m[0] : ''
-      if (!indent) return // let default handle it
+      // Strip trailing comments (% …) before checking the first token so
+      // "if cond  % guard" still triggers the extra indent.
+      const codePart = currentLine.replace(/%.*$/, '').trimEnd()
+      const firstTokMatch = codePart.trimStart().match(/^([A-Za-z_]\w*)/)
+      const firstTok = firstTokMatch ? firstTokMatch[1] : ''
+      const BLOCK_OPENERS = new Set([
+        'if', 'elseif', 'else',
+        'for', 'while', 'do',
+        'switch', 'case', 'otherwise',
+        'try', 'catch',
+        'function',
+      ])
+      // Avoid double-indenting one-liners like `if cond; body; end`. Crude
+      // but effective: if the line already contains an `end` token, treat
+      // the block as closed inline.
+      const hasInlineEnd = /(^|[\s;,])end(\b|[\s;,]|$)/.test(codePart)
+      const opensBlock = BLOCK_OPENERS.has(firstTok) && !hasInlineEnd
+      const extraIndent = opensBlock ? '  ' : ''
+      if (!indent && !extraIndent) return // let default handle it
       e.preventDefault()
-      const newVal = value.slice(0, s) + '\n' + indent + value.slice(ePos)
+      const newIndent = indent + extraIndent
+      const newVal = value.slice(0, s) + '\n' + newIndent + value.slice(ePos)
       setScript(newVal)
       requestAnimationFrame(() => {
-        ta.selectionStart = ta.selectionEnd = s + 1 + indent.length
+        ta.selectionStart = ta.selectionEnd = s + 1 + newIndent.length
       })
     }
   }, [runScript, runSelection, runSection, openFind, openGoto, setScript, vars, acOpen, acItems, acIndex, acceptAutocomplete, closeAutocomplete, editorFontSize, sigHint])
