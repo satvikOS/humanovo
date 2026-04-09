@@ -542,6 +542,7 @@ export default function Workstation() {
   })
   const [vars, setVars] = useState<VarSnapshot[]>([])
   const [expandedVar, setExpandedVar] = useState<string | null>(null)
+  const [inspectVar, setInspectVar] = useState<string | null>(null)
   const [library, setLibrary] = useState<'open' | 'closed'>('open')
   const [libFilter, setLibFilter] = useState('')
   const [libMode, setLibMode] = useState<'templates' | 'functions'>('templates')
@@ -632,6 +633,16 @@ export default function Workstation() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [plotFullscreen])
+
+  // Esc closes the variable inspector modal.
+  useEffect(() => {
+    if (!inspectVar) return
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') setInspectVar(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [inspectVar])
 
   // The autocomplete anchor is computed in viewport coordinates, so any
   // window resize / scroll would leave it stale — easiest fix is to just
@@ -866,6 +877,27 @@ export default function Workstation() {
     a.click()
     URL.revokeObjectURL(url)
   }, [plots, activePlot])
+
+  // Dump a workspace matrix to CSV. Cells are written with full precision
+  // so round-tripping through another tool doesn't introduce noise.
+  const exportMatrixCsv = useCallback((name: string, v: MValue & { kind: 'mat' }) => {
+    const rows: string[] = []
+    for (let r = 0; r < v.rows; r++) {
+      const cells: string[] = []
+      for (let c = 0; c < v.cols; c++) {
+        const x = v.data[r * v.cols + c]
+        cells.push(Number.isFinite(x) ? String(x) : String(x))
+      }
+      rows.push(cells.join(','))
+    }
+    const blob = new Blob([rows.join('\n')], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${name}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [])
 
   // Open the find panel, seeding it with the current selection if any.
   const openFind = useCallback(() => {
@@ -2422,6 +2454,15 @@ export default function Workstation() {
                     {isOpen && (
                       <div style={styles.varExpand}>
                         <VarExpandView value={v.value} />
+                        {v.value.kind === 'mat' && (v.value.rows > VAR_MAX_ROWS || v.value.cols > VAR_MAX_COLS) && (
+                          <div style={{ marginTop: 6, display: 'flex', gap: 6 }}>
+                            <button
+                              style={{ ...styles.btn, ...styles.btnGhost, padding: '2px 8px', fontSize: 11 }}
+                              onClick={(e) => { e.stopPropagation(); setInspectVar(v.name) }}
+                              title="Open full matrix viewer"
+                            >View full</button>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -2536,6 +2577,43 @@ export default function Workstation() {
           </div>
         </div>
       )}
+
+      {/* ─── Variable inspector modal ───────────────────────────────── */}
+      {inspectVar && (() => {
+        const snap = vars.find(v => v.name === inspectVar)
+        if (!snap) return null
+        return (
+          <div
+            style={styles.fullscreenOverlay}
+            role="dialog"
+            aria-modal="true"
+            onClick={e => { if (e.target === e.currentTarget) setInspectVar(null) }}
+          >
+            <div style={styles.fullscreenHeader}>
+              <span>
+                {snap.name} <span style={{ color: 'var(--color-text-muted)', marginLeft: 10 }}>{snap.kind} · {snap.shape}</span>
+              </span>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {snap.value.kind === 'mat' && (
+                  <button
+                    style={{ ...styles.btn, ...styles.btnGhost, padding: '4px 10px', fontSize: 11 }}
+                    onClick={() => exportMatrixCsv(snap.name, snap.value as MValue & { kind: 'mat' })}
+                    title="Download this matrix as CSV"
+                  >csv</button>
+                )}
+                <button
+                  style={{ ...styles.btn, ...styles.btnGhost, padding: '4px 10px', fontSize: 11 }}
+                  onClick={() => setInspectVar(null)}
+                  title="Close (Esc)"
+                >close</button>
+              </div>
+            </div>
+            <div style={{ ...styles.fullscreenBody, overflow: 'auto', padding: 20 }}>
+              <FullMatrixView value={snap.value} />
+            </div>
+          </div>
+        )
+      })()}
 
       {/* ─── Autocomplete popup (position: fixed, viewport coords) ──── */}
       {acOpen && acAnchor && acItems.length > 0 && (
@@ -2779,6 +2857,75 @@ function VarExpandView({ value }: { value: MValue }) {
                   </td>
                 </tr>
               )}
+            </tbody>
+          </table>
+        </div>
+      )
+    }
+  }
+}
+
+// Full, un-truncated variable view used inside the inspector modal.
+// Matrices above ~50k cells are chunked by row so scrolling stays smooth;
+// strings display their full contents, scalars display with max precision.
+const FULL_VIEW_CELL_CAP = 50_000
+function FullMatrixView({ value }: { value: MValue }) {
+  switch (value.kind) {
+    case 'num':
+      return <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14 }}>{value.v}</div>
+    case 'bool':
+      return <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14 }}>{value.v ? 'true' : 'false'}</div>
+    case 'str':
+      return (
+        <pre style={{ whiteSpace: 'pre-wrap', fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: 'var(--color-text)' }}>
+          {value.v}
+        </pre>
+      )
+    case 'fn':
+      return <div>@{value.name} (arity {value.arity})</div>
+    case 'void':
+      return <div>—</div>
+    case 'mat': {
+      const { rows, cols, data } = value
+      const total = rows * cols
+      const rowCap = total > FULL_VIEW_CELL_CAP ? Math.max(1, Math.floor(FULL_VIEW_CELL_CAP / Math.max(1, cols))) : rows
+      const truncated = rowCap < rows
+      return (
+        <div>
+          <div style={{ marginBottom: 8, color: 'var(--color-text-muted)', fontSize: 11 }}>
+            {rows}×{cols}
+            {truncated && <> · showing first {rowCap} rows · use the CSV export to get the full matrix</>}
+          </div>
+          <table style={{ borderCollapse: 'collapse', fontVariantNumeric: 'tabular-nums', fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}>
+            <thead>
+              <tr>
+                <th style={{ padding: '4px 8px', color: 'var(--color-text-muted)', fontWeight: 400, textAlign: 'right' }}></th>
+                {Array.from({ length: cols }, (_, c) => (
+                  <th key={c} style={{ padding: '4px 8px', color: 'var(--color-text-muted)', fontWeight: 400, textAlign: 'right' }}>
+                    {c + 1}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {Array.from({ length: rowCap }, (_, r) => (
+                <tr key={r}>
+                  <td style={{ padding: '2px 8px', color: 'var(--color-text-muted)', textAlign: 'right' }}>{r + 1}</td>
+                  {Array.from({ length: cols }, (_, c) => (
+                    <td
+                      key={c}
+                      style={{
+                        padding: '2px 8px',
+                        textAlign: 'right',
+                        color: 'var(--color-text)',
+                        borderLeft: '1px solid var(--glass-border)',
+                      }}
+                    >
+                      {formatScalar(data[r * cols + c])}
+                    </td>
+                  ))}
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
