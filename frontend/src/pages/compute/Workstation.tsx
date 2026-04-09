@@ -1599,6 +1599,35 @@ export default function Workstation() {
     })
   }, [setScript])
 
+  // Insert a multi-line snippet at the current caret, matching the
+  // indentation of the line the caret is on. Any `$0` token in the
+  // snippet is removed and becomes the final caret position; otherwise
+  // the caret lands at the end of the inserted block. Used by the
+  // palette commands below to stamp out common MATLAB skeletons.
+  const insertSnippet = useCallback((snippet: string) => {
+    const ta = editorRef.current
+    if (!ta) return
+    const s = ta.selectionStart
+    const ePos = ta.selectionEnd
+    const value = ta.value
+    const lineStart = value.lastIndexOf('\n', s - 1) + 1
+    const indentMatch = value.slice(lineStart, s).match(/^[ \t]*/)
+    const indent = indentMatch ? indentMatch[0] : ''
+    const lines = snippet.split('\n')
+    // Prefix every continuation line with the caret's indent so the
+    // pasted block aligns with the surrounding code.
+    const indented = lines.map((l, i) => (i === 0 ? l : indent + l)).join('\n')
+    const zero = indented.indexOf('$0')
+    const final = zero >= 0 ? indented.slice(0, zero) + indented.slice(zero + 2) : indented
+    const newVal = value.slice(0, s) + final + value.slice(ePos)
+    setScript(newVal)
+    const caret = zero >= 0 ? s + zero : s + final.length
+    requestAnimationFrame(() => {
+      ta.focus()
+      ta.setSelectionRange(caret, caret)
+    })
+  }, [setScript])
+
   // Dump a workspace matrix to CSV. Cells are written with full precision
   // so round-tripping through another tool doesn't introduce noise.
   const exportMatrixCsv = useCallback((name: string, v: MValue & { kind: 'mat' }) => {
@@ -2711,8 +2740,15 @@ export default function Workstation() {
     { id: 'bm-next',      title: 'Jump to next bookmark',        hint: 'F2',               run: () => gotoBookmark(1) },
     { id: 'bm-prev',      title: 'Jump to previous bookmark',    hint: 'Shift+F2',         run: () => gotoBookmark(-1) },
     { id: 'bm-clear',     title: 'Clear bookmarks in this script', hint: '',               run: () => clearAllBookmarks() },
+    { id: 'snip-for',     title: 'Insert snippet: for loop',     hint: '',                 run: () => insertSnippet('for i = 1:$0\n  \nend\n') },
+    { id: 'snip-while',   title: 'Insert snippet: while loop',   hint: '',                 run: () => insertSnippet('while $0\n  \nend\n') },
+    { id: 'snip-if',      title: 'Insert snippet: if / else',    hint: '',                 run: () => insertSnippet('if $0\n  \nelse\n  \nend\n') },
+    { id: 'snip-switch',  title: 'Insert snippet: switch / case', hint: '',                run: () => insertSnippet('switch $0\n  case \n    \n  otherwise\n    \nend\n') },
+    { id: 'snip-fn',      title: 'Insert snippet: function',     hint: '',                 run: () => insertSnippet('function [out] = $0(in)\n  \nend\n') },
+    { id: 'snip-try',     title: 'Insert snippet: try / catch',  hint: '',                 run: () => insertSnippet('try\n  $0\ncatch err\n  disp(err.message)\nend\n') },
+    { id: 'snip-sec',     title: 'Insert snippet: %% section header', hint: '',            run: () => insertSnippet('%% $0\n') },
     { id: 'help',         title: 'Show keyboard shortcuts',      hint: 'F1',               run: () => setHelpOpen(true) },
-  ], [runScript, runSelection, runSection, openFind, openGoto, newScript, closeScript, reopenLastClosedScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, copyConsole, exportPlotSVG, exportPlotPNG, exportPlotCSV, toggleBookmarkAtCaret, gotoBookmark, clearAllBookmarks])
+  ], [runScript, runSelection, runSection, openFind, openGoto, newScript, closeScript, reopenLastClosedScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, copyConsole, exportPlotSVG, exportPlotPNG, exportPlotCSV, toggleBookmarkAtCaret, gotoBookmark, clearAllBookmarks, insertSnippet])
 
   // Fuzzy-ish filter: split the query into tokens and require each to
   // appear (substring, case-insensitive) in the command title. Keeps
