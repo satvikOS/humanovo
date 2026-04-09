@@ -1836,6 +1836,44 @@ export default function Workstation() {
   // snippet is removed and becomes the final caret position; otherwise
   // the caret lands at the end of the inserted block. Used by the
   // palette commands below to stamp out common MATLAB skeletons.
+  // Apply an in-place text transform to the current selection, or to the
+  // current line when nothing is selected. Returns early if the result
+  // would be identical (avoids clobbering undo history with no-ops).
+  const applySelectionTransform = useCallback((transform: (text: string) => string) => {
+    const ta = editorRef.current
+    if (!ta) return
+    let { selectionStart: s, selectionEnd: e } = ta
+    const value = ta.value
+    if (s === e) {
+      // No selection: expand to the caret's full line.
+      s = value.lastIndexOf('\n', s - 1) + 1
+      const nl = value.indexOf('\n', e)
+      e = nl < 0 ? value.length : nl
+    }
+    const before = value.slice(s, e)
+    const after = transform(before)
+    if (after === before) return
+    const next = value.slice(0, s) + after + value.slice(e)
+    setScript(next)
+    requestAnimationFrame(() => {
+      const ta2 = editorRef.current
+      if (!ta2) return
+      ta2.focus()
+      ta2.setSelectionRange(s, s + after.length)
+    })
+  }, [setScript])
+
+  // Sort the selected lines alphabetically, falling back to the caret's
+  // line if nothing is selected (a no-op in that case). Stable-ish sort
+  // via localeCompare so mixed case and numbers behave naturally.
+  const sortSelectedLines = useCallback(() => {
+    applySelectionTransform(text => {
+      const lines = text.split('\n')
+      if (lines.length < 2) return text
+      return lines.slice().sort((a, b) => a.localeCompare(b)).join('\n')
+    })
+  }, [applySelectionTransform])
+
   // Strip trailing spaces and tabs from every line in the script. Keeps
   // the caret on the same logical line, clamping its column so it lands
   // on the new end-of-line when the user sat inside the removed run.
@@ -3180,11 +3218,15 @@ export default function Workstation() {
     { id: 'snip-sec',     title: 'Insert snippet: %% section header', hint: '',            run: () => insertSnippet('%% $0\n') },
     { id: 'rename-id',    title: 'Rename identifier at caret',   hint: '',                 run: () => renameIdentifierAtCaret() },
     { id: 'trim-ws',      title: 'Trim trailing whitespace',     hint: '',                 run: () => trimTrailingWhitespace() },
+    { id: 'upper-sel',    title: 'Uppercase selection',          hint: '',                 run: () => applySelectionTransform(s => s.toUpperCase()) },
+    { id: 'lower-sel',    title: 'Lowercase selection',          hint: '',                 run: () => applySelectionTransform(s => s.toLowerCase()) },
+    { id: 'sort-lines',   title: 'Sort selected lines',          hint: '',                 run: () => sortSelectedLines() },
+    { id: 'reverse-lines', title: 'Reverse selected lines',      hint: '',                 run: () => applySelectionTransform(s => s.split('\n').reverse().join('\n')) },
     { id: 'goto-bracket', title: 'Go to matching bracket',       hint: 'Ctrl+M',           run: () => gotoMatchingBracket(false) },
     { id: 'sel-bracket',  title: 'Select to matching bracket',   hint: 'Ctrl+Shift+M',     run: () => gotoMatchingBracket(true) },
     { id: 'goto-sym',     title: 'Go to symbol in script',       hint: 'Ctrl+Shift+O',     run: () => openSymbolNav() },
     { id: 'help',         title: 'Show keyboard shortcuts',      hint: 'F1',               run: () => setHelpOpen(true) },
-  ], [runScript, runSelection, runSection, runUntilCursor, openFind, openGoto, openSymbolNav, newScript, duplicateScript, closeScript, reopenLastClosedScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, copyConsole, downloadConsole, exportPlotSVG, exportPlotPNG, exportPlotCSV, toggleBookmarkAtCaret, gotoBookmark, clearAllBookmarks, insertSnippet, renameIdentifierAtCaret, gotoMatchingBracket, trimTrailingWhitespace])
+  ], [runScript, runSelection, runSection, runUntilCursor, openFind, openGoto, openSymbolNav, newScript, duplicateScript, closeScript, reopenLastClosedScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, copyConsole, downloadConsole, exportPlotSVG, exportPlotPNG, exportPlotCSV, toggleBookmarkAtCaret, gotoBookmark, clearAllBookmarks, insertSnippet, renameIdentifierAtCaret, gotoMatchingBracket, trimTrailingWhitespace, applySelectionTransform, sortSelectedLines])
 
   // Fuzzy-ish filter: split the query into tokens and require each to
   // appear (substring, case-insensitive) in the command title. Keeps
