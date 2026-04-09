@@ -3685,8 +3685,8 @@ export default function Workstation() {
     toolbar: {
       display: 'flex',
       alignItems: 'center',
-      gap: 6,
-      padding: '10px 20px',
+      gap: 8,
+      padding: '12px 20px',
       borderBottom: '1px solid var(--glass-border)',
       background: 'transparent',
     },
@@ -3694,7 +3694,7 @@ export default function Workstation() {
       display: 'inline-flex',
       alignItems: 'center',
       gap: 6,
-      padding: '6px 12px',
+      padding: '7px 14px',
       fontSize: 12,
       fontWeight: 500,
       color: 'var(--color-text-secondary)',
@@ -3732,7 +3732,7 @@ export default function Workstation() {
       gridRow: '1 / -1',
     },
     libraryHeader: {
-      padding: '10px 16px',
+      padding: '12px 16px',
       borderBottom: '1px solid var(--glass-border)',
       background: 'transparent',
       fontSize: 12,
@@ -3742,6 +3742,7 @@ export default function Workstation() {
       alignItems: 'center',
       justifyContent: 'space-between',
       gap: 8,
+      whiteSpace: 'nowrap' as const,
     },
     libraryModeBar: {
       display: 'flex',
@@ -3825,12 +3826,13 @@ export default function Workstation() {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
-      padding: '10px 16px',
+      padding: '12px 16px',
       fontSize: 12,
       fontWeight: 600,
       color: 'var(--color-text)',
       background: 'transparent',
       borderBottom: '1px solid var(--glass-border)',
+      whiteSpace: 'nowrap' as const,
     },
     tabBar: {
       display: 'flex',
@@ -4169,14 +4171,15 @@ export default function Workstation() {
       padding: '6px 10px',
     },
     varFilter: {
+      flex: '1 1 auto',
+      minWidth: 0,
       background: 'var(--glass-bg)',
       border: '1px solid var(--glass-border)',
       color: 'var(--color-text)',
-      padding: '3px 8px',
-      fontSize: 11,
-      borderRadius: 3,
+      padding: '5px 10px',
+      fontSize: 12,
+      borderRadius: 4,
       outline: 'none',
-      width: 140,
       fontFamily: "'Inter', sans-serif",
     },
     varRow: {
@@ -4234,12 +4237,15 @@ export default function Workstation() {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
-      padding: '10px 16px',
+      padding: '12px 16px',
       fontSize: 12,
       fontWeight: 600,
       color: 'var(--color-text)',
       background: 'transparent',
       borderBottom: '1px solid var(--glass-border)',
+      whiteSpace: 'nowrap' as const,
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
     },
     consoleWrap: {
       display: 'flex',
@@ -4268,27 +4274,33 @@ export default function Workstation() {
     consoleHeader: {
       display: 'flex',
       alignItems: 'center',
-      gap: 10,
-      padding: '6px 20px',
-      fontSize: 11,
-      letterSpacing: 0.6,
-      textTransform: 'uppercase' as const,
-      color: 'var(--color-text-muted)',
+      justifyContent: 'space-between',
+      gap: 12,
+      padding: '12px 20px',
+      fontSize: 12,
+      fontWeight: 600,
+      color: 'var(--color-text)',
       borderBottom: '1px solid var(--glass-border)',
     },
     consoleFilter: {
-      marginLeft: 'auto',
+      flex: '1 1 auto',
+      minWidth: 0,
       background: 'var(--glass-bg)',
       border: '1px solid var(--glass-border)',
       color: 'var(--color-text)',
-      padding: '3px 8px',
-      fontSize: 11,
-      borderRadius: 3,
+      padding: '5px 10px',
+      fontSize: 12,
+      borderRadius: 4,
       outline: 'none',
-      width: 180,
       fontFamily: "'Inter', sans-serif",
-      textTransform: 'none' as const,
-      letterSpacing: 0,
+    },
+    panelToolbar: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 8,
+      padding: '8px 16px',
+      borderBottom: '1px solid var(--glass-border)',
+      background: 'transparent',
     },
     console: {
       minHeight: 0,
@@ -4581,17 +4593,18 @@ export default function Workstation() {
       marginLeft: 8,
     },
     plotChip: {
-      padding: '2px 8px',
-      fontSize: 10,
+      padding: '4px 10px',
+      fontSize: 11,
       fontFamily: "'JetBrains Mono', monospace",
       letterSpacing: '0.02em',
       color: 'var(--color-text-muted)',
       background: 'transparent',
       border: '1px solid var(--glass-border)',
-      borderRadius: 3,
+      borderRadius: 4,
       cursor: 'pointer',
       lineHeight: 1.4,
       transition: 'background 0.12s, color 0.12s, border-color 0.12s',
+      whiteSpace: 'nowrap' as const,
     },
     plotChipActive: {
       color: 'var(--color-text)',
@@ -5487,61 +5500,66 @@ export default function Workstation() {
         <div style={styles.rightRail}>
           <div style={styles.plotPanel}>
             <div style={styles.panelHeader}>
-              <span>Figure {plots.length > 0 ? `${activePlot + 1} / ${plots.length}` : ''}</span>
-              <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                <button
-                  style={plotOpts.grid ? { ...styles.plotChip, ...styles.plotChipActive } : styles.plotChip}
-                  onClick={() => setPlotOpts(o => ({ ...o, grid: !o.grid }))}
-                  title="Toggle gridlines"
-                >grid</button>
-                <button
-                  style={plotOpts.logX ? { ...styles.plotChip, ...styles.plotChipActive } : styles.plotChip}
-                  onClick={() => setPlotOpts(o => ({ ...o, logX: !o.logX }))}
-                  title="Toggle logarithmic x-axis"
-                >log&nbsp;x</button>
-                <button
-                  style={plotOpts.logY ? { ...styles.plotChip, ...styles.plotChipActive } : styles.plotChip}
-                  onClick={() => setPlotOpts(o => ({ ...o, logY: !o.logY }))}
-                  title="Toggle logarithmic y-axis"
-                >log&nbsp;y</button>
-                <button
-                  style={plotOpts.legend !== 'off' ? { ...styles.plotChip, ...styles.plotChipActive } : styles.plotChip}
-                  onClick={() => setPlotOpts(o => ({ ...o, legend: o.legend === 'off' ? 'on' : 'off' }))}
-                  title="Toggle legend"
-                >legend</button>
-                <span style={{ width: 1, height: 14, background: 'var(--glass-border)', margin: '0 4px' }} />
-                <button
-                  style={{ ...styles.btn, ...styles.btnGhost, padding: '2px 8px', fontSize: 11 }}
-                  disabled={plots.length < 2}
-                  onClick={() => setActivePlot(i => Math.max(0, i - 1))}
-                  title="Previous figure"
-                >◀</button>
-                <button
-                  style={{ ...styles.btn, ...styles.btnGhost, padding: '2px 8px', fontSize: 11 }}
-                  disabled={plots.length < 2}
-                  onClick={() => setActivePlot(i => Math.min(plots.length - 1, i + 1))}
-                  title="Next figure"
-                >▶</button>
-                <button
-                  style={{ ...styles.btn, ...styles.btnGhost, padding: '2px 8px', fontSize: 11 }}
-                  disabled={plots.length === 0}
-                  onClick={exportPlotSVG}
-                  title="Download current figure as SVG"
-                >svg</button>
-                <button
-                  style={{ ...styles.btn, ...styles.btnGhost, padding: '2px 8px', fontSize: 11 }}
-                  disabled={plots.length === 0}
-                  onClick={exportPlotPNG}
-                  title="Download current figure as PNG"
-                >png</button>
-                <button
-                  style={{ ...styles.btn, ...styles.btnGhost, padding: '2px 8px', fontSize: 11 }}
-                  disabled={plots.length === 0}
-                  onClick={() => setPlotFullscreen(true)}
-                  title="Expand figure to fullscreen (double-click chart)"
-                  aria-label="Expand figure"
-                >⤢</button>
-              </div>
+              <span>Figure</span>
+              <span style={{ fontWeight: 400, color: 'var(--color-text-muted)', fontSize: 11 }}>
+                {plots.length > 0 ? `${activePlot + 1} / ${plots.length}` : 'none'}
+              </span>
+            </div>
+            <div style={styles.panelToolbar}>
+              <button
+                style={plotOpts.grid ? { ...styles.plotChip, ...styles.plotChipActive } : styles.plotChip}
+                onClick={() => setPlotOpts(o => ({ ...o, grid: !o.grid }))}
+                title="Toggle gridlines"
+              >grid</button>
+              <button
+                style={plotOpts.logX ? { ...styles.plotChip, ...styles.plotChipActive } : styles.plotChip}
+                onClick={() => setPlotOpts(o => ({ ...o, logX: !o.logX }))}
+                title="Toggle logarithmic x-axis"
+              >log&nbsp;x</button>
+              <button
+                style={plotOpts.logY ? { ...styles.plotChip, ...styles.plotChipActive } : styles.plotChip}
+                onClick={() => setPlotOpts(o => ({ ...o, logY: !o.logY }))}
+                title="Toggle logarithmic y-axis"
+              >log&nbsp;y</button>
+              <button
+                style={plotOpts.legend !== 'off' ? { ...styles.plotChip, ...styles.plotChipActive } : styles.plotChip}
+                onClick={() => setPlotOpts(o => ({ ...o, legend: o.legend === 'off' ? 'on' : 'off' }))}
+                title="Toggle legend"
+              >legend</button>
+              <span style={{ flex: 1 }} />
+              <button
+                style={styles.plotChip}
+                disabled={plots.length < 2}
+                onClick={() => setActivePlot(i => Math.max(0, i - 1))}
+                title="Previous figure"
+                aria-label="Previous figure"
+              >◀</button>
+              <button
+                style={styles.plotChip}
+                disabled={plots.length < 2}
+                onClick={() => setActivePlot(i => Math.min(plots.length - 1, i + 1))}
+                title="Next figure"
+                aria-label="Next figure"
+              >▶</button>
+              <button
+                style={styles.plotChip}
+                disabled={plots.length === 0}
+                onClick={exportPlotSVG}
+                title="Download current figure as SVG"
+              >svg</button>
+              <button
+                style={styles.plotChip}
+                disabled={plots.length === 0}
+                onClick={exportPlotPNG}
+                title="Download current figure as PNG"
+              >png</button>
+              <button
+                style={styles.plotChip}
+                disabled={plots.length === 0}
+                onClick={() => setPlotFullscreen(true)}
+                title="Expand figure to fullscreen (double-click chart)"
+                aria-label="Expand figure"
+              >⤢</button>
             </div>
             {plots.length > 1 && (
               <div style={styles.figurePillStrip}>
@@ -5583,44 +5601,41 @@ export default function Workstation() {
 
           <div style={styles.varPanel}>
             <div style={styles.panelHeader}>
-              <span>
-                Workspace · {vars.length} variable{vars.length === 1 ? '' : 's'}
-                {varFilter.trim() && (
-                  <span style={{ marginLeft: 8, color: 'var(--color-text-muted)', fontWeight: 400 }}>
-                    ({visibleVars.length} shown)
-                  </span>
-                )}
+              <span>Workspace</span>
+              <span style={{ fontWeight: 400, color: 'var(--color-text-muted)', fontSize: 11 }}>
+                {vars.length} variable{vars.length === 1 ? '' : 's'}
+                {varFilter.trim() && ` · ${visibleVars.length} shown`}
               </span>
-              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                <button
-                  type="button"
-                  style={{ ...styles.plotChip, ...styles.plotChipActive }}
-                  onClick={() => setVarSort(s => s === 'name' ? 'size' : s === 'size' ? 'type' : 'name')}
-                  disabled={vars.length === 0}
-                  title="Cycle sort key: name → size → type"
-                  aria-label={`Sort workspace by ${varSort}`}
-                >sort: {varSort} ↓</button>
-                <button
-                  type="button"
-                  style={{ ...styles.plotChip, ...styles.plotChipActive }}
-                  onClick={() => setCopyFormat(f => {
-                    const i = COPY_FORMATS.indexOf(f)
-                    return COPY_FORMATS[(i + 1) % COPY_FORMATS.length]
-                  })}
-                  disabled={vars.length === 0}
-                  title="Cycle copy format used by the row ⧉ button: matlab → python → latex → json → csv"
-                  aria-label={`Copy format: ${copyFormat}`}
-                >copy: {copyFormat}</button>
-                <input
-                  style={styles.varFilter}
-                  value={varFilter}
-                  onChange={e => setVarFilter(e.target.value)}
-                  placeholder="Filter…"
-                  aria-label="Filter workspace variables"
-                  spellCheck={false}
-                  disabled={vars.length === 0}
-                />
-              </div>
+            </div>
+            <div style={styles.panelToolbar}>
+              <input
+                style={styles.varFilter}
+                value={varFilter}
+                onChange={e => setVarFilter(e.target.value)}
+                placeholder="Filter variables…"
+                aria-label="Filter workspace variables"
+                spellCheck={false}
+                disabled={vars.length === 0}
+              />
+              <button
+                type="button"
+                style={{ ...styles.plotChip, minWidth: 54, justifyContent: 'center', display: 'inline-flex' }}
+                onClick={() => setVarSort(s => s === 'name' ? 'size' : s === 'size' ? 'type' : 'name')}
+                disabled={vars.length === 0}
+                title={`Sort by ${varSort} — click to cycle (name → size → type)`}
+                aria-label={`Sort workspace by ${varSort}`}
+              >sort ↕</button>
+              <button
+                type="button"
+                style={{ ...styles.plotChip, minWidth: 54, justifyContent: 'center', display: 'inline-flex' }}
+                onClick={() => setCopyFormat(f => {
+                  const i = COPY_FORMATS.indexOf(f)
+                  return COPY_FORMATS[(i + 1) % COPY_FORMATS.length]
+                })}
+                disabled={vars.length === 0}
+                title={`Row copy format: ${copyFormat} — click to cycle (matlab → python → latex → json → csv)`}
+                aria-label={`Copy format: ${copyFormat}`}
+              >copy ⧉</button>
             </div>
             <div style={styles.varList}>
               {vars.length === 0 && (
@@ -5755,7 +5770,14 @@ export default function Workstation() {
         <div style={styles.consoleWrap}>
           <div style={styles.consoleHeader}>
             <span>Console</span>
-            <div style={{ display: 'flex', gap: 4, marginLeft: 6 }}>
+            <span style={{ fontWeight: 400, color: 'var(--color-text-muted)', fontSize: 11 }}>
+              {(consoleFilter || consoleKind !== 'all')
+                ? `${visibleEntries.length} / ${entries.length} shown`
+                : `${entries.length} ${entries.length === 1 ? 'entry' : 'entries'}`}
+            </span>
+          </div>
+          <div style={styles.panelToolbar}>
+            <div style={{ display: 'flex', gap: 6 }}>
               {(['all', 'input', 'output', 'error'] as const).map(k => {
                 const isActive = consoleKind === k
                 const count = consoleCounts[k]
@@ -5774,18 +5796,13 @@ export default function Workstation() {
               style={styles.consoleFilter}
               value={consoleFilter}
               onChange={e => setConsoleFilter(e.target.value)}
-              placeholder="Filter…"
+              placeholder="Filter console…"
               aria-label="Filter console entries"
               spellCheck={false}
             />
-            {(consoleFilter || consoleKind !== 'all') && (
-              <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
-                {visibleEntries.length} / {entries.length}
-              </span>
-            )}
             <button
               type="button"
-              style={{ ...styles.plotChip, ...(copyFlash ? styles.plotChipActive : null) }}
+              style={{ ...styles.plotChip, ...(copyFlash ? styles.plotChipActive : null), minWidth: 54, justifyContent: 'center', display: 'inline-flex' }}
               onClick={copyConsole}
               disabled={visibleEntries.length === 0}
               title="Copy visible console entries to clipboard"
