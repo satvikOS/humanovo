@@ -348,6 +348,14 @@ export default function Workstation() {
   const [cursor, setCursor] = useState<{ line: number; col: number }>({ line: 1, col: 1 })
   const [lastRunMs, setLastRunMs] = useState<number | null>(null)
 
+  // Find & replace state. `findOpen` toggles the slim bar above the editor.
+  // `matchIdx` is the index of the currently highlighted match in `matches`.
+  const [findOpen, setFindOpen] = useState(false)
+  const [findQuery, setFindQuery] = useState('')
+  const [replaceQuery, setReplaceQuery] = useState('')
+  const [matchIdx, setMatchIdx] = useState(0)
+  const findInputRef = useRef<HTMLInputElement>(null)
+
   // Single persistent workspace across runs.
   const workspaceRef = useRef<Workspace>(createWorkspace())
   const consoleRef = useRef<HTMLDivElement>(null)
@@ -466,14 +474,36 @@ export default function Workstation() {
     setEntries(prev => [...prev, { id: nextEntryId++, kind: 'output', text: '— workspace cleared —' }])
   }
 
+  // Open the find panel, seeding it with the current selection if any.
+  const openFind = useCallback(() => {
+    setFindOpen(true)
+    const ta = editorRef.current
+    if (ta) {
+      const sel = ta.value.slice(ta.selectionStart, ta.selectionEnd)
+      if (sel && !sel.includes('\n')) setFindQuery(sel)
+    }
+    requestAnimationFrame(() => { findInputRef.current?.focus(); findInputRef.current?.select() })
+  }, [])
+
+  const closeFind = useCallback(() => {
+    setFindOpen(false)
+    editorRef.current?.focus()
+  }, [])
+
   // Keyboard shortcuts inside the editor:
   //   Cmd/Ctrl+Enter  — run script
+  //   Cmd/Ctrl+F      — find / replace panel
   //   Tab / Shift+Tab — indent / outdent current selection (2 spaces)
   //   Enter           — auto-indent to match the previous line
   const onEditorKey = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
       e.preventDefault()
       runScript()
+      return
+    }
+    if ((e.metaKey || e.ctrlKey) && (e.key === 'f' || e.key === 'F')) {
+      e.preventDefault()
+      openFind()
       return
     }
     const ta = e.currentTarget
@@ -529,7 +559,7 @@ export default function Workstation() {
         ta.selectionStart = ta.selectionEnd = s + 1 + indent.length
       })
     }
-  }, [runScript])
+  }, [runScript, openFind, setScript])
 
   // Track cursor position for the status bar.
   const updateCursor = useCallback((ta: HTMLTextAreaElement) => {
@@ -553,6 +583,74 @@ export default function Workstation() {
       highlightRef.current.style.transform = `translate(${-scrollLeft}px, ${-scrollTop}px)`
     }
   }, [])
+
+  // Case-insensitive substring match positions for find/replace. Recomputed
+  // whenever the script or query changes; kept as plain offsets so we can
+  // map them straight to textarea selections.
+  const findMatches = useMemo<number[]>(() => {
+    if (!findQuery) return []
+    const hay = script.toLowerCase()
+    const needle = findQuery.toLowerCase()
+    const out: number[] = []
+    let from = 0
+    while (from <= hay.length - needle.length) {
+      const idx = hay.indexOf(needle, from)
+      if (idx < 0) break
+      out.push(idx)
+      from = idx + Math.max(1, needle.length)
+    }
+    return out
+  }, [script, findQuery])
+
+  // Keep matchIdx in range as matches shift.
+  useEffect(() => {
+    if (findMatches.length === 0) { setMatchIdx(0); return }
+    if (matchIdx >= findMatches.length) setMatchIdx(0)
+  }, [findMatches, matchIdx])
+
+  const selectMatch = useCallback((idx: number) => {
+    const ta = editorRef.current
+    if (!ta || findMatches.length === 0) return
+    const safe = ((idx % findMatches.length) + findMatches.length) % findMatches.length
+    const start = findMatches[safe]
+    const end = start + findQuery.length
+    ta.focus()
+    ta.setSelectionRange(start, end)
+    // Scroll the match into view by approximating line height.
+    const lineHeight = 12 * 1.6
+    const lineOfMatch = (script.slice(0, start).match(/\n/g)?.length ?? 0)
+    ta.scrollTop = Math.max(0, lineOfMatch * lineHeight - ta.clientHeight / 2)
+    setMatchIdx(safe)
+  }, [findMatches, findQuery, script])
+
+  const findNext = useCallback(() => selectMatch(matchIdx + 1), [selectMatch, matchIdx])
+  const findPrev = useCallback(() => selectMatch(matchIdx - 1), [selectMatch, matchIdx])
+
+  const replaceOne = useCallback(() => {
+    if (findMatches.length === 0 || !findQuery) return
+    const safe = Math.min(matchIdx, findMatches.length - 1)
+    const start = findMatches[safe]
+    const end = start + findQuery.length
+    const next = script.slice(0, start) + replaceQuery + script.slice(end)
+    setScript(next)
+    // After the state update lands, highlight the next occurrence (or stay
+    // in place if none remain).
+    requestAnimationFrame(() => {
+      const ta = editorRef.current
+      if (!ta) return
+      const pos = start + replaceQuery.length
+      ta.focus()
+      ta.setSelectionRange(pos, pos)
+    })
+  }, [findMatches, findQuery, matchIdx, replaceQuery, script, setScript])
+
+  const replaceAll = useCallback(() => {
+    if (findMatches.length === 0 || !findQuery) return
+    // Case-insensitive global replace without touching case elsewhere.
+    const esc = findQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const re = new RegExp(esc, 'gi')
+    setScript(script.replace(re, replaceQuery))
+  }, [findMatches, findQuery, replaceQuery, script, setScript])
 
   const lineCount = useMemo(() => script.split('\n').length, [script])
 
@@ -849,6 +947,32 @@ export default function Workstation() {
       whiteSpace: 'pre',
       willChange: 'transform',
     },
+    findBar: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 6,
+      padding: '6px 10px',
+      borderBottom: '1px solid var(--glass-border)',
+      background: 'var(--glass-bg)',
+    },
+    findInput: {
+      background: 'var(--glass-bg-hover)',
+      border: '1px solid var(--glass-border)',
+      borderRadius: 4,
+      padding: '4px 8px',
+      color: 'var(--color-text)',
+      fontFamily: "'JetBrains Mono', monospace",
+      fontSize: 11,
+      outline: 'none',
+      width: 180,
+    },
+    findCount: {
+      fontSize: 11,
+      fontFamily: "'JetBrains Mono', monospace",
+      color: 'var(--color-text-muted)',
+      minWidth: 48,
+      textAlign: 'center' as const,
+    },
     editorTextWrap: {
       position: 'relative' as const,
       flex: 1,
@@ -1138,7 +1262,7 @@ export default function Workstation() {
         <div style={styles.editorWrap}>
           <div style={styles.editorHeader}>
             <span>Scripts</span>
-            <span style={{ opacity: 0.7 }}>Ctrl/Cmd + Enter to run · Tab to indent</span>
+            <span style={{ opacity: 0.7 }}>Ctrl/Cmd + Enter to run · Ctrl/Cmd + F to find · Tab to indent</span>
           </div>
           <div style={styles.tabBar}>
             {scriptStore.list.map(s => {
@@ -1165,6 +1289,72 @@ export default function Workstation() {
             })}
             <button style={styles.tabAddBtn} onClick={newScript} title="New script">+</button>
           </div>
+          {findOpen && (
+            <div style={styles.findBar}>
+              <input
+                ref={findInputRef}
+                style={styles.findInput}
+                value={findQuery}
+                onChange={e => setFindQuery(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Escape') { e.preventDefault(); closeFind() }
+                  else if (e.key === 'Enter') {
+                    e.preventDefault()
+                    if (e.shiftKey) findPrev(); else findNext()
+                  }
+                }}
+                placeholder="Find"
+                spellCheck={false}
+                autoComplete="off"
+              />
+              <input
+                style={styles.findInput}
+                value={replaceQuery}
+                onChange={e => setReplaceQuery(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Escape') { e.preventDefault(); closeFind() }
+                  else if (e.key === 'Enter') { e.preventDefault(); replaceOne() }
+                }}
+                placeholder="Replace"
+                spellCheck={false}
+                autoComplete="off"
+              />
+              <span style={styles.findCount}>
+                {findMatches.length === 0
+                  ? (findQuery ? '0 / 0' : '')
+                  : `${Math.min(matchIdx + 1, findMatches.length)} / ${findMatches.length}`}
+              </span>
+              <button
+                style={{ ...styles.btn, ...styles.btnGhost, padding: '3px 8px', fontSize: 11 }}
+                onClick={findPrev}
+                disabled={findMatches.length === 0}
+                title="Previous match (Shift+Enter)"
+              >↑</button>
+              <button
+                style={{ ...styles.btn, ...styles.btnGhost, padding: '3px 8px', fontSize: 11 }}
+                onClick={findNext}
+                disabled={findMatches.length === 0}
+                title="Next match (Enter)"
+              >↓</button>
+              <button
+                style={{ ...styles.btn, ...styles.btnGhost, padding: '3px 8px', fontSize: 11 }}
+                onClick={replaceOne}
+                disabled={findMatches.length === 0}
+                title="Replace current match"
+              >Replace</button>
+              <button
+                style={{ ...styles.btn, ...styles.btnGhost, padding: '3px 8px', fontSize: 11 }}
+                onClick={replaceAll}
+                disabled={findMatches.length === 0}
+                title="Replace all matches"
+              >Replace all</button>
+              <button
+                style={{ ...styles.btn, ...styles.btnGhost, padding: '3px 8px', fontSize: 11, marginLeft: 'auto' }}
+                onClick={closeFind}
+                title="Close (Esc)"
+              >×</button>
+            </div>
+          )}
           <div style={styles.editorBody}>
             <div style={styles.editorGutterClip} aria-hidden>
               <div ref={gutterRef} style={styles.editorGutterNumbers}>
