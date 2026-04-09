@@ -681,18 +681,20 @@ export default function Workstation() {
     saveWorkspace(workspaceRef.current)
   }, [])
 
-  const runScript = useCallback(() => {
+  // Core runner. Takes an arbitrary source fragment plus a label that is
+  // echoed into the console so the user can tell a full run from a
+  // "Run Selection". Used by both runScript and runSelection.
+  const runFragment = useCallback((src: string, label: string) => {
     if (running) return
+    if (!src.trim()) return
     setRunning(true)
     setErrorLine(null)
-    setEntries(prev => [...prev, { id: nextEntryId++, kind: 'input', text: '▶ run script' }])
-    // Defer one tick so the UI can paint the "running" state.
+    setEntries(prev => [...prev, { id: nextEntryId++, kind: 'input', text: label }])
     setTimeout(() => {
       const t0 = performance.now()
       try {
-        const res = runOctave(script, workspaceRef.current)
+        const res = runOctave(src, workspaceRef.current)
         appendOutputs(res.outputs)
-        // Surface the first located error line so the gutter can flag it.
         const firstErr = res.outputs.find(o => o.kind === 'error' && typeof o.line === 'number')
         if (firstErr?.line) setErrorLine(firstErr.line)
       } catch (e: any) {
@@ -702,7 +704,30 @@ export default function Workstation() {
         setRunning(false)
       }
     }, 0)
-  }, [script, running, appendOutputs])
+  }, [running, appendOutputs])
+
+  const runScript = useCallback(() => {
+    runFragment(script, '▶ run script')
+  }, [script, runFragment])
+
+  // Run the current textarea selection, or the caret's line if nothing
+  // is selected. Standard MATLAB F9 behaviour.
+  const runSelection = useCallback(() => {
+    const ta = editorRef.current
+    if (!ta) return
+    let { selectionStart: s, selectionEnd: e } = ta
+    const value = ta.value
+    if (s === e) {
+      // No selection: expand to the current line.
+      s = value.lastIndexOf('\n', s - 1) + 1
+      const nl = value.indexOf('\n', e)
+      e = nl < 0 ? value.length : nl
+    }
+    const fragment = value.slice(s, e)
+    if (!fragment.trim()) return
+    const preview = fragment.split('\n')[0].trim().slice(0, 40)
+    runFragment(fragment, `▶ run selection — ${preview}${fragment.split('\n')[0].length > 40 ? '…' : ''}`)
+  }, [runFragment])
 
   const runCommand = useCallback((text: string) => {
     const line = text.trim()
@@ -857,9 +882,11 @@ export default function Workstation() {
   }, [script])
 
   // Keyboard shortcuts inside the editor:
-  //   Cmd/Ctrl+Enter  — run script
-  //   Cmd/Ctrl+F      — find / replace panel
-  //   Ctrl+/          — toggle line comment (%)
+  //   Cmd/Ctrl+Enter        — run script
+  //   Shift+Cmd/Ctrl+Enter  — run selection (or current line)
+  //   F9                     — run selection (MATLAB convention)
+  //   Cmd/Ctrl+F            — find / replace panel
+  //   Ctrl+/                — toggle line comment (%)
   //   Tab / Shift+Tab — indent / outdent current selection (2 spaces)
   //   Enter           — auto-indent to match the previous line
   //   ( [ { " '       — auto-pair brackets / quotes
@@ -896,7 +923,13 @@ export default function Workstation() {
 
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
       e.preventDefault()
-      runScript()
+      if (e.shiftKey) runSelection()
+      else runScript()
+      return
+    }
+    if (e.key === 'F9') {
+      e.preventDefault()
+      runSelection()
       return
     }
     if ((e.metaKey || e.ctrlKey) && (e.key === 'f' || e.key === 'F')) {
@@ -1101,7 +1134,7 @@ export default function Workstation() {
         ta.selectionStart = ta.selectionEnd = s + 1 + indent.length
       })
     }
-  }, [runScript, openFind, setScript, vars, acOpen, acItems, acIndex, acceptAutocomplete, closeAutocomplete])
+  }, [runScript, runSelection, openFind, setScript, vars, acOpen, acItems, acIndex, acceptAutocomplete, closeAutocomplete])
 
   // Track cursor position for the status bar.
   const updateCursor = useCallback((ta: HTMLTextAreaElement) => {
@@ -1907,6 +1940,15 @@ export default function Workstation() {
           {running ? 'Running…' : 'Run'}
         </button>
 
+        <button
+          style={{ ...styles.btn, ...styles.btnGhost }}
+          onClick={runSelection}
+          disabled={running}
+          title="Run current selection — or the caret's line if nothing is selected (F9 or Shift+Ctrl/Cmd+Enter)"
+        >
+          <FiPlay style={{ opacity: 0.7 }} /> Run selection
+        </button>
+
         <label style={{ ...styles.btn, ...styles.btnGhost }} title="Upload .m script">
           <FiUpload /> Upload
           <input type="file" accept=".m,.txt" style={{ display: 'none' }} onChange={handleUpload} />
@@ -2036,7 +2078,7 @@ export default function Workstation() {
         <div style={styles.editorWrap}>
           <div style={styles.editorHeader}>
             <span>Scripts</span>
-            <span style={{ opacity: 0.7 }}>Ctrl/Cmd + Enter to run · Ctrl/Cmd + F to find · Tab to indent</span>
+            <span style={{ opacity: 0.7 }}>Ctrl/Cmd + Enter to run · F9 runs selection · Ctrl/Cmd + F to find · Tab to indent</span>
           </div>
           <div style={styles.tabBar}>
             {scriptStore.list.map(s => {
