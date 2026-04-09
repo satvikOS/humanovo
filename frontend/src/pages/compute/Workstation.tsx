@@ -784,10 +784,42 @@ export default function Workstation() {
   const editorRef = useRef<HTMLTextAreaElement>(null)
   // Per-script remembered editor state (scroll offsets + selection). Keyed
   // by script id so switching tabs returns the user to exactly where they
-  // left off rather than snapping to the top of the file.
+  // left off rather than snapping to the top of the file. Seeded from
+  // localStorage on mount so a page refresh also preserves the caret and
+  // scroll position per script.
   const scriptViewStateRef = useRef<Map<string, {
     scrollTop: number; scrollLeft: number; selStart: number; selEnd: number
-  }>>(new Map())
+  }>>((() => {
+    try {
+      const raw = localStorage.getItem('compute-workstation-view-state')
+      if (!raw) return new Map()
+      const parsed = JSON.parse(raw)
+      if (!parsed || typeof parsed !== 'object') return new Map()
+      const map = new Map<string, { scrollTop: number; scrollLeft: number; selStart: number; selEnd: number }>()
+      for (const [k, v] of Object.entries(parsed)) {
+        if (v && typeof v === 'object') {
+          const o = v as any
+          map.set(k, {
+            scrollTop: Number(o.scrollTop) || 0,
+            scrollLeft: Number(o.scrollLeft) || 0,
+            selStart: Number(o.selStart) || 0,
+            selEnd: Number(o.selEnd) || 0,
+          })
+        }
+      }
+      return map
+    } catch { return new Map() }
+  })())
+  // Persist the current view-state map to localStorage. Called whenever
+  // we mutate the map (switching tabs) and from a beforeunload handler so
+  // the active script's live caret also survives a refresh.
+  const persistScriptViewState = useCallback(() => {
+    try {
+      const obj: Record<string, { scrollTop: number; scrollLeft: number; selStart: number; selEnd: number }> = {}
+      scriptViewStateRef.current.forEach((v, k) => { obj[k] = v })
+      localStorage.setItem('compute-workstation-view-state', JSON.stringify(obj))
+    } catch { /* storage full or disabled — silently skip */ }
+  }, [])
   const prevScriptIdRef = useRef<string>(scriptStore.activeId)
   // Per-script line bookmarks, keyed by script id. Each entry is a Set of
   // 1-indexed line numbers. Lives in a ref so typing doesn't force a full
@@ -2895,6 +2927,7 @@ export default function Workstation() {
         selStart: ta.selectionStart,
         selEnd: ta.selectionEnd,
       })
+      persistScriptViewState()
     }
     prevScriptIdRef.current = currId
     // Sync the visible bookmark set to whatever the new script has saved.
@@ -2929,7 +2962,35 @@ export default function Workstation() {
       if (wordOverlayRef.current) wordOverlayRef.current.style.transform = `translate(${-sLeft}px, ${-sTop}px)`
       if (currentLineRef.current) currentLineRef.current.style.transform = `translateY(${-sTop}px)`
     })
-  }, [scriptStore.activeId, updateCursor])
+  }, [scriptStore.activeId, updateCursor, persistScriptViewState])
+
+  // Catch a page unload / tab switch (visibility hide) and flush the
+  // current caret position of the active script into the persisted view
+  // state. Without this the activeId-change handler only ever saves on
+  // *tab switch*, so a straight refresh after typing would lose the
+  // current caret.
+  useEffect(() => {
+    const flush = () => {
+      const ta = editorRef.current
+      const id = scriptStore.activeId
+      if (!ta || !id) return
+      scriptViewStateRef.current.set(id, {
+        scrollTop: ta.scrollTop,
+        scrollLeft: ta.scrollLeft,
+        selStart: ta.selectionStart,
+        selEnd: ta.selectionEnd,
+      })
+      persistScriptViewState()
+    }
+    const onVis = () => { if (document.visibilityState === 'hidden') flush() }
+    window.addEventListener('beforeunload', flush)
+    document.addEventListener('visibilitychange', onVis)
+    return () => {
+      flush()
+      window.removeEventListener('beforeunload', flush)
+      document.removeEventListener('visibilitychange', onVis)
+    }
+  }, [scriptStore.activeId, persistScriptViewState])
 
   const onEditorScroll = useCallback((e: React.UIEvent<HTMLTextAreaElement>) => {
     const { scrollTop, scrollLeft } = e.currentTarget
