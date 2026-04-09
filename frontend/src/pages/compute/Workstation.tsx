@@ -1472,6 +1472,13 @@ export default function Workstation() {
 
   const clearConsole = () => setEntries([])
 
+  // Strip only error entries, leaving input / output scrollback intact. Useful
+  // after fixing a batch of reported problems — the user can wipe the red
+  // noise without losing their command history or computed values.
+  const clearConsoleErrors = useCallback(() => {
+    setEntries(prev => prev.some(e => e.kind === 'error') ? prev.filter(e => e.kind !== 'error') : prev)
+  }, [])
+
   // Copy the currently visible console entries as plain text so the user
   // can paste them into a note or bug report. Re-uses the visibleEntries
   // pipeline so the export respects the active kind / text filters —
@@ -3267,6 +3274,7 @@ export default function Workstation() {
     { id: 'font-up',      title: 'Increase editor font size',    hint: '',                 run: () => bumpEditorFont(1) },
     { id: 'font-down',    title: 'Decrease editor font size',    hint: '',                 run: () => bumpEditorFont(-1) },
     { id: 'clear-con',    title: 'Clear console',                hint: 'Ctrl+L',           run: () => clearConsole() },
+    { id: 'clear-err',    title: 'Clear only error entries',     hint: '',                 run: () => clearConsoleErrors() },
     { id: 'copy-con',     title: 'Copy console to clipboard',    hint: '',                 run: () => copyConsole() },
     { id: 'dl-con',       title: 'Download console transcript',  hint: '',                 run: () => downloadConsole() },
     { id: 'reset-ws',     title: 'Reset workspace',              hint: '',                 run: () => resetWorkspace() },
@@ -3296,7 +3304,7 @@ export default function Workstation() {
     { id: 'next-err',     title: 'Jump to next error',           hint: 'F8',               run: () => gotoNextError(1) },
     { id: 'prev-err',     title: 'Jump to previous error',       hint: 'Shift+F8',         run: () => gotoNextError(-1) },
     { id: 'help',         title: 'Show keyboard shortcuts',      hint: 'F1',               run: () => setHelpOpen(true) },
-  ], [runScript, runSelection, runSection, runUntilCursor, openFind, openGoto, openSymbolNav, gotoNextError, newScript, duplicateScript, closeScript, reopenLastClosedScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, copyConsole, downloadConsole, exportPlotSVG, exportPlotPNG, exportPlotCSV, toggleBookmarkAtCaret, gotoBookmark, clearAllBookmarks, insertSnippet, renameIdentifierAtCaret, gotoMatchingBracket, trimTrailingWhitespace, applySelectionTransform, sortSelectedLines])
+  ], [runScript, runSelection, runSection, runUntilCursor, openFind, openGoto, openSymbolNav, gotoNextError, newScript, duplicateScript, closeScript, reopenLastClosedScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, copyConsole, downloadConsole, clearConsoleErrors, exportPlotSVG, exportPlotPNG, exportPlotCSV, toggleBookmarkAtCaret, gotoBookmark, clearAllBookmarks, insertSnippet, renameIdentifierAtCaret, gotoMatchingBracket, trimTrailingWhitespace, applySelectionTransform, sortSelectedLines])
 
   // Fuzzy-ish filter: split the query into tokens and require each to
   // appear (substring, case-insensitive) in the command title. Keeps
@@ -5280,6 +5288,15 @@ export default function Workstation() {
               title="Toggle inline timestamps on console entries"
             >
               time
+            </button>
+            <button
+              type="button"
+              style={styles.plotChip}
+              onClick={clearConsoleErrors}
+              disabled={consoleCounts.error === 0}
+              title="Remove only error entries, keep input and output history"
+            >
+              clear errors
             </button>
             {(consoleFilter || consoleKind !== 'all') && (
               <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
