@@ -1721,6 +1721,39 @@ export default function Workstation() {
       }
     }
 
+    // Smart dedent: when the user finishes typing a block-closing keyword
+    // as the only content on an otherwise-blank line, pop one indent level
+    // so the closer lines up with its opener. Complements the Enter
+    // auto-indent: typing `if⏎ body⏎ end` now lands `end` at the outer
+    // indent without any manual correction.
+    if (
+      s === ePos && !e.ctrlKey && !e.metaKey && !e.altKey && !acOpen &&
+      e.key.length === 1 && /[A-Za-z]/.test(e.key)
+    ) {
+      const lineStart = value.lastIndexOf('\n', s - 1) + 1
+      const currentLine = value.slice(lineStart, s)
+      const afterInsert = currentLine + e.key
+      const trimmed = afterInsert.trimStart()
+      const indentStr = afterInsert.slice(0, afterInsert.length - trimmed.length)
+      // Closer set is intentionally chosen so none is a prefix of another
+      // (so typing `endif` only fires once at `end`, not again at `endif`).
+      const CLOSERS = new Set(['end', 'else', 'catch', 'otherwise', 'case'])
+      if (CLOSERS.has(trimmed) && indentStr.length >= 2) {
+        e.preventDefault()
+        const newVal =
+          value.slice(0, lineStart) +
+          indentStr.slice(2) +
+          trimmed +
+          value.slice(ePos)
+        setScript(newVal)
+        requestAnimationFrame(() => {
+          const pos = s - 1 // removed 2 indent chars, added 1 key char
+          ta.selectionStart = ta.selectionEnd = pos
+        })
+        return
+      }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       // Copy leading whitespace of the current line to the new one, and add
       // one extra indent step if the previous line opens a block. Mirrors
