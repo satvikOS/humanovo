@@ -666,6 +666,7 @@ export default function Workstation() {
   const prevScriptIdRef = useRef<string>(scriptStore.activeId)
   const gutterRef = useRef<HTMLDivElement>(null)
   const highlightRef = useRef<HTMLPreElement>(null)
+  const indentGuideRef = useRef<HTMLDivElement>(null)
   const bracketOverlayRef = useRef<HTMLDivElement>(null)
   const findOverlayRef = useRef<HTMLDivElement>(null)
   const wordOverlayRef = useRef<HTMLDivElement>(null)
@@ -898,6 +899,57 @@ export default function Workstation() {
   }, [])
 
   const lineCount = useMemo(() => script.split('\n').length, [script])
+
+  // Indent-guide runs. For each 2-column indent level, collects contiguous
+  // vertical ranges of lines where at least that many spaces of indent are
+  // present. Blank lines inherit the greater of their neighbours so guides
+  // don't break across empty separators in the middle of a block. The
+  // overlay renderer turns each run into a single absolutely-positioned
+  // vertical divider, keeping the DOM tiny even for deeply nested code.
+  const indentGuides = useMemo<Array<{ col: number; startLine: number; endLine: number }>>(() => {
+    const lines = script.split('\n')
+    const n = lines.length
+    if (n === 0) return []
+    // Leading-space count per line (tabs are expanded at 2 spaces since
+    // the editor's own indent handlers always emit pairs of spaces).
+    const indents = new Int32Array(n)
+    const isBlank = new Uint8Array(n)
+    for (let i = 0; i < n; i++) {
+      const ln = lines[i]
+      if (ln.trim() === '') { isBlank[i] = 1; indents[i] = -1; continue }
+      let k = 0
+      while (k < ln.length && (ln[k] === ' ' || ln[k] === '\t')) {
+        k += ln[k] === '\t' ? 2 : 1
+      }
+      indents[i] = k
+    }
+    // Smooth blank lines so a run of them inherits min(neighbours). This
+    // lets guides span across empty separators in the middle of a block.
+    for (let i = 0; i < n; i++) {
+      if (!isBlank[i]) continue
+      let left = 0, right = 0
+      for (let j = i - 1; j >= 0; j--) { if (!isBlank[j]) { left = indents[j]; break } }
+      for (let j = i + 1; j < n; j++) { if (!isBlank[j]) { right = indents[j]; break } }
+      indents[i] = Math.min(left, right)
+    }
+    const out: Array<{ col: number; startLine: number; endLine: number }> = []
+    // Walk columns 2, 4, 6, … until no line reaches that depth.
+    let maxIndent = 0
+    for (let i = 0; i < n; i++) if (indents[i] > maxIndent) maxIndent = indents[i]
+    for (let col = 2; col < maxIndent; col += 2) {
+      let runStart = -1
+      for (let i = 0; i < n; i++) {
+        if (indents[i] > col) {
+          if (runStart < 0) runStart = i
+        } else if (runStart >= 0) {
+          out.push({ col, startLine: runStart + 1, endLine: i }) // 1-based inclusive
+          runStart = -1
+        }
+      }
+      if (runStart >= 0) out.push({ col, startLine: runStart + 1, endLine: n })
+    }
+    return out
+  }, [script])
 
   // Section boundaries for %% markers. `starts` holds 1-based line numbers
   // of lines that begin a new section. A leading implicit section 1 is
@@ -2015,6 +2067,7 @@ export default function Workstation() {
       const sLeft = ta2.scrollLeft
       if (gutterRef.current) gutterRef.current.style.transform = `translateY(${-sTop}px)`
       if (highlightRef.current) highlightRef.current.style.transform = `translate(${-sLeft}px, ${-sTop}px)`
+      if (indentGuideRef.current) indentGuideRef.current.style.transform = `translate(${-sLeft}px, ${-sTop}px)`
       if (bracketOverlayRef.current) bracketOverlayRef.current.style.transform = `translate(${-sLeft}px, ${-sTop}px)`
       if (findOverlayRef.current) findOverlayRef.current.style.transform = `translate(${-sLeft}px, ${-sTop}px)`
       if (wordOverlayRef.current) wordOverlayRef.current.style.transform = `translate(${-sLeft}px, ${-sTop}px)`
@@ -2029,6 +2082,9 @@ export default function Workstation() {
     }
     if (highlightRef.current) {
       highlightRef.current.style.transform = `translate(${-scrollLeft}px, ${-scrollTop}px)`
+    }
+    if (indentGuideRef.current) {
+      indentGuideRef.current.style.transform = `translate(${-scrollLeft}px, ${-scrollTop}px)`
     }
     if (bracketOverlayRef.current) {
       bracketOverlayRef.current.style.transform = `translate(${-scrollLeft}px, ${-scrollTop}px)`
@@ -2701,6 +2757,19 @@ export default function Workstation() {
       background: 'var(--glass-bg)',
       pointerEvents: 'none' as const,
       willChange: 'transform',
+    },
+    indentGuideOverlay: {
+      position: 'absolute' as const,
+      top: 0,
+      left: 0,
+      pointerEvents: 'none' as const,
+      willChange: 'transform',
+    },
+    indentGuide: {
+      position: 'absolute' as const,
+      width: 0,
+      borderLeft: '1px dotted var(--glass-border)',
+      opacity: 0.7,
     },
     bracketHL: {
       position: 'absolute' as const,
@@ -3639,6 +3708,21 @@ export default function Workstation() {
                     user's cursor is on it. */}
                 {'\n'}
               </pre>
+              {!editorWrapOn && indentGuides.length > 0 && (
+                <div ref={indentGuideRef} style={styles.indentGuideOverlay} aria-hidden="true">
+                  {indentGuides.map((g, idx) => (
+                    <div
+                      key={idx}
+                      style={{
+                        ...styles.indentGuide,
+                        top: 14 + (g.startLine - 1) * editorLineHeight,
+                        left: 14 + g.col * editorCharWidth,
+                        height: (g.endLine - g.startLine + 1) * editorLineHeight,
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
               {!editorWrapOn && (
                 <div ref={bracketOverlayRef} style={styles.bracketOverlay} aria-hidden="true">
                   {bracketPair && bracketPair.map((p, idx) => {
