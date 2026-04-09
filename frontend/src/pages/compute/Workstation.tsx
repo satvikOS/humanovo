@@ -537,6 +537,10 @@ function caretViewportAnchor(ta: HTMLTextAreaElement, fontSize: number): { top: 
 /* ── Component ───────────────────────────────────────────────────────── */
 export default function Workstation() {
   const [scriptStore, setScriptStore] = useState<ScriptStore>(loadScripts)
+  // Drag-and-drop tab reordering. Ref holds the source id during the drag;
+  // state drives the visual drop indicator. We clear both on drop / dragend.
+  const draggedTabIdRef = useRef<string | null>(null)
+  const [dragOverTabId, setDragOverTabId] = useState<string | null>(null)
   const activeScript = useMemo(
     () => scriptStore.list.find(s => s.id === scriptStore.activeId) ?? scriptStore.list[0],
     [scriptStore]
@@ -2525,6 +2529,23 @@ export default function Workstation() {
     }))
   }, [scriptStore])
 
+  // Reorder a script tab — used by the drag-and-drop handlers in the tab
+  // bar. `targetId` is the tab currently being hovered; the dragged tab
+  // slides into the target's position. Dropping onto the already-dragged
+  // tab is a no-op.
+  const reorderScriptTab = useCallback((draggedId: string, targetId: string) => {
+    if (draggedId === targetId) return
+    setScriptStore(store => {
+      const list = store.list.slice()
+      const fromIdx = list.findIndex(s => s.id === draggedId)
+      const toIdx = list.findIndex(s => s.id === targetId)
+      if (fromIdx < 0 || toIdx < 0) return store
+      const [moved] = list.splice(fromIdx, 1)
+      list.splice(toIdx, 0, moved)
+      return { ...store, list }
+    })
+  }, [])
+
   // Command palette handlers. Open resets the query and focuses the input
   // so the user can start typing immediately; close returns focus to the
   // editor so the keyboard flow stays uninterrupted.
@@ -3778,13 +3799,47 @@ export default function Workstation() {
           <div style={styles.tabBar}>
             {scriptStore.list.map(s => {
               const active = s.id === scriptStore.activeId
+              const isDropTarget = dragOverTabId === s.id && draggedTabIdRef.current !== s.id
               return (
                 <button
                   key={s.id}
-                  style={{ ...styles.tab, ...(active ? styles.tabActive : null) }}
+                  style={{
+                    ...styles.tab,
+                    ...(active ? styles.tabActive : null),
+                    ...(isDropTarget ? { boxShadow: 'inset 2px 0 0 var(--color-text)' } : null),
+                    ...(draggedTabIdRef.current === s.id ? { opacity: 0.5 } : null),
+                  }}
                   onClick={() => switchScript(s.id)}
                   onDoubleClick={() => renameScript(s.id)}
-                  title={`${s.name} — double-click to rename`}
+                  draggable
+                  onDragStart={(ev) => {
+                    draggedTabIdRef.current = s.id
+                    ev.dataTransfer.effectAllowed = 'move'
+                    // Firefox requires some data on the transfer to actually
+                    // start a drag; the value is unused but must be set.
+                    try { ev.dataTransfer.setData('text/plain', s.id) } catch { /* noop */ }
+                  }}
+                  onDragOver={(ev) => {
+                    if (!draggedTabIdRef.current) return
+                    ev.preventDefault()
+                    ev.dataTransfer.dropEffect = 'move'
+                    if (dragOverTabId !== s.id) setDragOverTabId(s.id)
+                  }}
+                  onDragLeave={() => {
+                    if (dragOverTabId === s.id) setDragOverTabId(null)
+                  }}
+                  onDrop={(ev) => {
+                    ev.preventDefault()
+                    const from = draggedTabIdRef.current
+                    draggedTabIdRef.current = null
+                    setDragOverTabId(null)
+                    if (from) reorderScriptTab(from, s.id)
+                  }}
+                  onDragEnd={() => {
+                    draggedTabIdRef.current = null
+                    setDragOverTabId(null)
+                  }}
+                  title={`${s.name} — drag to reorder, double-click to rename`}
                 >
                   <span>{s.name}</span>
                   {scriptStore.list.length > 1 && (
