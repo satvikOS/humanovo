@@ -4,7 +4,7 @@
 // Batch 4b: adds variable inspector and plot panel on the right rail.
 // Later batches add the preset library sidebar and polish.
 // ═══════════════════════════════════════════════════════════════════════
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FiPlay, FiSquare, FiUpload, FiDownload, FiTrash2 } from 'react-icons/fi'
 import {
   LineChart, Line, ScatterChart, Scatter, BarChart, Bar,
@@ -532,6 +532,7 @@ export default function Workstation() {
   const [plots, setPlots] = useState<PlotSpec[]>([])
   const [activePlot, setActivePlot] = useState(0)
   const [plotFullscreen, setPlotFullscreen] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
   // Per-figure rendering options. Toggled by the small chip buttons in the
   // figure header (grid / log-x / log-y / legend) and applied to PlotView.
   const [plotOpts, setPlotOpts] = useState<PlotOpts>({
@@ -643,6 +644,17 @@ export default function Workstation() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [inspectVar])
+
+  // F1 anywhere in the Workstation toggles the keyboard-shortcut help
+  // modal. Esc closes it.
+  useEffect(() => {
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === 'F1') { ev.preventDefault(); setHelpOpen(h => !h) }
+      else if (ev.key === 'Escape' && helpOpen) setHelpOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [helpOpen])
 
   // The autocomplete anchor is computed in viewport coordinates, so any
   // window resize / scroll would leave it stale — easiest fix is to just
@@ -2071,6 +2083,15 @@ export default function Workstation() {
         <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--color-text-muted)' }}>
           MATLAB / Octave compatible · running locally in-browser
         </span>
+
+        <button
+          style={{ ...styles.btn, ...styles.btnGhost, marginLeft: 10 }}
+          onClick={() => setHelpOpen(true)}
+          title="Keyboard shortcuts (F1)"
+          aria-label="Keyboard shortcuts"
+        >
+          ?
+        </button>
       </div>
 
       {/* ─── Library (left) + Editor + Right rail + Console (bottom) ── */}
@@ -2615,6 +2636,30 @@ export default function Workstation() {
         )
       })()}
 
+      {/* ─── Keyboard shortcut help modal ───────────────────────────── */}
+      {helpOpen && (
+        <div
+          style={styles.fullscreenOverlay}
+          role="dialog"
+          aria-modal="true"
+          onClick={e => { if (e.target === e.currentTarget) setHelpOpen(false) }}
+        >
+          <div style={styles.fullscreenHeader}>
+            <span>Keyboard shortcuts</span>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button
+                style={{ ...styles.btn, ...styles.btnGhost, padding: '4px 10px', fontSize: 11 }}
+                onClick={() => setHelpOpen(false)}
+                title="Close (Esc or F1)"
+              >close</button>
+            </div>
+          </div>
+          <div style={{ ...styles.fullscreenBody, overflow: 'auto', padding: '24px 28px' }}>
+            <ShortcutHelp />
+          </div>
+        </div>
+      )}
+
       {/* ─── Autocomplete popup (position: fixed, viewport coords) ──── */}
       {acOpen && acAnchor && acItems.length > 0 && (
         <div
@@ -2932,4 +2977,92 @@ function FullMatrixView({ value }: { value: MValue }) {
       )
     }
   }
+}
+
+// Keyboard shortcut reference rendered inside the help modal. Grouped
+// by area so it's easy to scan.
+const SHORTCUT_GROUPS: { title: string; items: [string, string][] }[] = [
+  {
+    title: 'Running code',
+    items: [
+      ['Ctrl / Cmd + Enter', 'Run the full script'],
+      ['Shift + Ctrl / Cmd + Enter', 'Run selection (or current line)'],
+      ['F9', 'Run selection (MATLAB-style)'],
+      ['Alt + Ctrl / Cmd + Enter', 'Run current %% section'],
+    ],
+  },
+  {
+    title: 'Editing',
+    items: [
+      ['Tab / Shift + Tab', 'Indent / outdent selection'],
+      ['Enter', 'Auto-indent to the previous line'],
+      ['Ctrl + /', 'Toggle line comment (%)'],
+      ['( [ { " \'', 'Auto-pair brackets and quotes'],
+      ['Backspace between pair', 'Delete matching pair'],
+      ['Tab on identifier', 'Autocomplete variable / builtin'],
+    ],
+  },
+  {
+    title: 'Navigation',
+    items: [
+      ['Ctrl / Cmd + F', 'Find and replace'],
+      ['Enter / Shift + Enter (find)', 'Next / previous match'],
+      ['Esc', 'Close find, autocomplete, fullscreen or help'],
+    ],
+  },
+  {
+    title: 'Console',
+    items: [
+      ['Arrow Up / Down', 'Recall command history'],
+      ['Enter', 'Run command'],
+    ],
+  },
+  {
+    title: 'Help',
+    items: [
+      ['F1', 'Toggle this help dialog'],
+    ],
+  },
+]
+
+function ShortcutHelp() {
+  return (
+    <div style={{ display: 'grid', gap: 18, maxWidth: 720 }}>
+      {SHORTCUT_GROUPS.map(group => (
+        <div key={group.title}>
+          <div style={{
+            fontSize: 11,
+            letterSpacing: 1.2,
+            textTransform: 'uppercase',
+            color: 'var(--color-text-muted)',
+            marginBottom: 6,
+          }}>
+            {group.title}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', gap: '6px 16px' }}>
+            {group.items.map(([keys, desc]) => (
+              <Fragment key={keys}>
+                <div style={{
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: 11,
+                  color: 'var(--color-text)',
+                  padding: '3px 8px',
+                  background: 'var(--glass-bg)',
+                  border: '1px solid var(--glass-border)',
+                  borderRadius: 3,
+                  alignSelf: 'start',
+                  textAlign: 'center',
+                }}>
+                  {keys}
+                </div>
+                <div style={{ color: 'var(--color-text-secondary)', fontSize: 12, alignSelf: 'center' }}>
+                  {desc}
+                </div>
+              </Fragment>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
 }
