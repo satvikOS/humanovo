@@ -2066,7 +2066,9 @@ export default function Workstation() {
 
   // Collect the script line of every error entry in the console. Used by
   // F8 (next error) and Shift+F8 (previous error) to step through all
-  // reported issues without visually scanning the console.
+  // reported issues without visually scanning the console, and by the
+  // gutter so every offending line gets a marker — not just the most
+  // recent one that setErrorLine captured.
   const errorLines = useMemo(() => {
     const seen = new Set<number>()
     const out: number[] = []
@@ -2079,6 +2081,7 @@ export default function Workstation() {
     out.sort((a, b) => a - b)
     return out
   }, [entries])
+  const errorLineSet = useMemo(() => new Set(errorLines), [errorLines])
 
   // Jump to the next (or previous) reported error line, wrapping around
   // when the caret is past the last one. No-op when there are no errors.
@@ -4797,7 +4800,7 @@ export default function Workstation() {
               <div ref={gutterRef} style={styles.editorGutterNumbers}>
                 {Array.from({ length: lineCount }, (_, i) => {
                   const n = i + 1
-                  const isErr = errorLine === n
+                  const isErr = errorLine === n || errorLineSet.has(n)
                   const isSec = sectionStartSet.has(n) && n !== 1
                   const isCur = cursor.line === n
                   const isBm = bookmarkLines.has(n)
