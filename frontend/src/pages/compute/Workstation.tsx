@@ -18,6 +18,11 @@ import {
   type PlotSpec,
   type MValue,
 } from './octaveEngine'
+import {
+  WORKSTATION_CATEGORIES,
+  WORKSTATION_TEMPLATES,
+  type WorkstationTemplate,
+} from './workstationTemplates'
 
 /* ── Persistence keys ────────────────────────────────────────────────── */
 const SCRIPT_KEY = 'compute-workstation-script'
@@ -122,6 +127,9 @@ export default function Workstation() {
   const [plots, setPlots] = useState<PlotSpec[]>([])
   const [activePlot, setActivePlot] = useState(0)
   const [vars, setVars] = useState<VarSnapshot[]>([])
+  const [library, setLibrary] = useState<'open' | 'closed'>('open')
+  const [libFilter, setLibFilter] = useState('')
+  const [activeTemplate, setActiveTemplate] = useState<string | null>(null)
 
   // Single persistent workspace across runs.
   const workspaceRef = useRef<Workspace>(createWorkspace())
@@ -297,9 +305,85 @@ export default function Workstation() {
     },
     body: {
       display: 'grid',
-      gridTemplateColumns: 'minmax(0, 1.3fr) minmax(320px, 1fr)',
+      gridTemplateColumns: library === 'open'
+        ? '240px minmax(0, 1.3fr) minmax(320px, 1fr)'
+        : 'minmax(0, 1.3fr) minmax(320px, 1fr)',
       gridTemplateRows: 'minmax(0, 1.5fr) minmax(0, 1fr)',
       minHeight: 0,
+      transition: 'grid-template-columns 180ms ease',
+    },
+    library: {
+      display: 'flex',
+      flexDirection: 'column',
+      minHeight: 0,
+      borderRight: '1px solid var(--glass-border)',
+      background: 'rgba(0, 0, 0, 0.35)',
+      overflow: 'hidden',
+      gridRow: '1 / -1',
+    },
+    libraryHeader: {
+      padding: '6px 12px',
+      borderBottom: '1px solid var(--glass-border)',
+      background: 'var(--glass-bg)',
+      fontSize: 11,
+      fontWeight: 500,
+      textTransform: 'uppercase',
+      letterSpacing: 0.6,
+      color: 'var(--color-text-muted)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 8,
+    },
+    librarySearch: {
+      padding: '8px 10px',
+      borderBottom: '1px solid var(--glass-border)',
+    },
+    librarySearchInput: {
+      width: '100%',
+      background: 'rgba(0,0,0,0.4)',
+      border: '1px solid var(--glass-border)',
+      borderRadius: 4,
+      padding: '4px 8px',
+      color: 'var(--color-text)',
+      fontSize: 11,
+      outline: 'none',
+    },
+    libraryScroll: {
+      flex: 1,
+      overflowY: 'auto',
+      padding: '6px 0',
+    },
+    libraryCategory: {
+      padding: '6px 12px 2px 12px',
+      fontSize: 10,
+      fontWeight: 600,
+      textTransform: 'uppercase',
+      letterSpacing: 0.5,
+      color: 'var(--color-text-muted)',
+    },
+    libraryItem: {
+      display: 'block',
+      width: '100%',
+      textAlign: 'left' as const,
+      padding: '6px 12px',
+      background: 'transparent',
+      border: 'none',
+      color: 'var(--color-text)',
+      fontSize: 11.5,
+      cursor: 'pointer',
+      borderLeft: '2px solid transparent',
+    },
+    libraryItemActive: {
+      background: 'rgba(59, 130, 246, 0.1)',
+      borderLeft: '2px solid var(--color-accent-blue)',
+      color: 'var(--color-accent-blue)',
+    },
+    libraryItemDesc: {
+      fontSize: 10,
+      color: 'var(--color-text-muted)',
+      marginTop: 2,
+      lineHeight: 1.35,
     },
     editorWrap: {
       display: 'flex',
@@ -391,7 +475,7 @@ export default function Workstation() {
       fontSize: 12,
       lineHeight: 1.55,
       background: 'rgba(0, 0, 0, 0.55)',
-      gridColumn: '1 / -1',
+      gridColumn: library === 'open' ? '2 / -1' : '1 / -1',
     },
     entryInput: { color: 'var(--color-accent-blue)' },
     entryOutput: { color: 'var(--color-text)', whiteSpace: 'pre-wrap' },
@@ -422,10 +506,46 @@ export default function Workstation() {
 
   const currentPlot = plots[activePlot] ?? null
 
+  // Filter and group templates for the library sidebar.
+  const filteredTemplates = useMemo<WorkstationTemplate[]>(() => {
+    const q = libFilter.trim().toLowerCase()
+    if (!q) return WORKSTATION_TEMPLATES
+    return WORKSTATION_TEMPLATES.filter(t =>
+      t.name.toLowerCase().includes(q) ||
+      t.description.toLowerCase().includes(q) ||
+      t.category.toLowerCase().includes(q)
+    )
+  }, [libFilter])
+
+  const groupedTemplates = useMemo(() => {
+    const groups: Record<string, WorkstationTemplate[]> = {}
+    for (const cat of WORKSTATION_CATEGORIES) groups[cat] = []
+    for (const t of filteredTemplates) {
+      if (!groups[t.category]) groups[t.category] = []
+      groups[t.category].push(t)
+    }
+    return groups
+  }, [filteredTemplates])
+
+  const loadTemplate = useCallback((t: WorkstationTemplate) => {
+    setScript(t.code)
+    setActiveTemplate(t.id)
+  }, [])
+
   return (
     <div style={styles.container}>
       {/* ─── Toolbar ─────────────────────────────────────────────────── */}
       <div style={styles.toolbar}>
+        <button
+          style={{ ...styles.btn, ...styles.btnGhost }}
+          onClick={() => setLibrary(l => l === 'open' ? 'closed' : 'open')}
+          title="Toggle template library"
+        >
+          {library === 'open' ? 'Hide library' : 'Show library'}
+        </button>
+
+        <div style={{ width: 1, height: 20, background: 'var(--glass-border)', margin: '0 4px' }} />
+
         <button
           style={{ ...styles.btn, ...(running ? {} : styles.btnPrimary) }}
           onClick={runScript}
@@ -459,8 +579,59 @@ export default function Workstation() {
         </span>
       </div>
 
-      {/* ─── Editor (left) + Right rail + Console (bottom) ───────────── */}
+      {/* ─── Library (left) + Editor + Right rail + Console (bottom) ── */}
       <div style={styles.body}>
+        {library === 'open' && (
+          <div style={styles.library}>
+            <div style={styles.libraryHeader}>
+              <span>Library · {filteredTemplates.length}</span>
+              <button
+                style={{ ...styles.btn, ...styles.btnGhost, padding: '2px 8px', fontSize: 10 }}
+                onClick={() => setLibrary('closed')}
+                title="Collapse library"
+              >hide</button>
+            </div>
+            <div style={styles.librarySearch}>
+              <input
+                style={styles.librarySearchInput}
+                placeholder="Search templates…"
+                value={libFilter}
+                onChange={e => setLibFilter(e.target.value)}
+              />
+            </div>
+            <div style={styles.libraryScroll}>
+              {WORKSTATION_CATEGORIES.map(cat => {
+                const items = groupedTemplates[cat] ?? []
+                if (items.length === 0) return null
+                return (
+                  <div key={cat}>
+                    <div style={styles.libraryCategory}>{cat}</div>
+                    {items.map(t => (
+                      <button
+                        key={t.id}
+                        style={{
+                          ...styles.libraryItem,
+                          ...(activeTemplate === t.id ? styles.libraryItemActive : null),
+                        }}
+                        onClick={() => loadTemplate(t)}
+                        title={t.description}
+                      >
+                        <div>{t.name}</div>
+                        <div style={styles.libraryItemDesc}>{t.description}</div>
+                      </button>
+                    ))}
+                  </div>
+                )
+              })}
+              {filteredTemplates.length === 0 && (
+                <div style={{ padding: '10px 12px', color: 'var(--color-text-muted)', fontStyle: 'italic', fontSize: 11 }}>
+                  No templates match "{libFilter}".
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         <div style={styles.editorWrap}>
           <div style={styles.editorHeader}>
             <span>Script</span>
