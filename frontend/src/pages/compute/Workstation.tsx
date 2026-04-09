@@ -362,6 +362,7 @@ export default function Workstation() {
   const editorRef = useRef<HTMLTextAreaElement>(null)
   const gutterRef = useRef<HTMLDivElement>(null)
   const highlightRef = useRef<HTMLPreElement>(null)
+  const plotBodyRef = useRef<HTMLDivElement>(null)
 
   // Memoized token stream for the syntax-highlighting overlay. Recomputes
   // on every keystroke; the tokenizer is O(n) and cheap enough for scripts
@@ -473,6 +474,58 @@ export default function Workstation() {
     setActivePlot(0)
     setEntries(prev => [...prev, { id: nextEntryId++, kind: 'output', text: '— workspace cleared —' }])
   }
+
+  /** Export the currently rendered figure as SVG. */
+  const exportPlotSVG = useCallback(() => {
+    const host = plotBodyRef.current
+    if (!host) return
+    const svg = host.querySelector('svg')
+    if (!svg) return
+    const clone = svg.cloneNode(true) as SVGSVGElement
+    // Inline a white-on-dark background so the exported file is self-contained.
+    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+    const bgRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
+    bgRect.setAttribute('width', '100%')
+    bgRect.setAttribute('height', '100%')
+    bgRect.setAttribute('fill', '#0a0a0a')
+    clone.insertBefore(bgRect, clone.firstChild)
+    const xml = new XMLSerializer().serializeToString(clone)
+    const blob = new Blob([xml], { type: 'image/svg+xml' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    const title = plots[activePlot]?.title?.replace(/[^\w-]+/g, '_') || `figure-${activePlot + 1}`
+    a.href = url
+    a.download = `${title}.svg`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [plots, activePlot])
+
+  /** Export the underlying series data of the current figure as CSV. */
+  const exportPlotCSV = useCallback(() => {
+    const plot = plots[activePlot]
+    if (!plot || plot.series.length === 0) return
+    const xSet = new Set<number>()
+    for (const s of plot.series) for (const x of s.x) xSet.add(x)
+    const xs = Array.from(xSet).sort((a, b) => a - b)
+    const header = ['x', ...plot.series.map(s => s.name)].join(',')
+    const rows = xs.map(x => {
+      const cells = [String(x)]
+      for (const s of plot.series) {
+        const idx = s.x.indexOf(x)
+        cells.push(idx >= 0 ? String(s.y[idx]) : '')
+      }
+      return cells.join(',')
+    })
+    const csv = [header, ...rows].join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    const title = plot.title?.replace(/[^\w-]+/g, '_') || `figure-${activePlot + 1}`
+    a.href = url
+    a.download = `${title}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [plots, activePlot])
 
   // Open the find panel, seeding it with the current selection if any.
   const openFind = useCallback(() => {
@@ -1496,20 +1549,35 @@ export default function Workstation() {
                   style={{ ...styles.btn, ...styles.btnGhost, padding: '2px 8px', fontSize: 11 }}
                   disabled={plots.length < 2}
                   onClick={() => setActivePlot(i => Math.max(0, i - 1))}
+                  title="Previous figure"
                 >◀</button>
                 <button
                   style={{ ...styles.btn, ...styles.btnGhost, padding: '2px 8px', fontSize: 11 }}
                   disabled={plots.length < 2}
                   onClick={() => setActivePlot(i => Math.min(plots.length - 1, i + 1))}
+                  title="Next figure"
                 >▶</button>
                 <button
                   style={{ ...styles.btn, ...styles.btnGhost, padding: '2px 8px', fontSize: 11 }}
                   disabled={plots.length === 0}
+                  onClick={exportPlotSVG}
+                  title="Download current figure as SVG"
+                >svg</button>
+                <button
+                  style={{ ...styles.btn, ...styles.btnGhost, padding: '2px 8px', fontSize: 11 }}
+                  disabled={plots.length === 0}
+                  onClick={exportPlotCSV}
+                  title="Download series data as CSV"
+                >csv</button>
+                <button
+                  style={{ ...styles.btn, ...styles.btnGhost, padding: '2px 8px', fontSize: 11 }}
+                  disabled={plots.length === 0}
                   onClick={() => { setPlots([]); setActivePlot(0) }}
+                  title="Discard all figures"
                 >clear</button>
               </div>
             </div>
-            <div style={styles.plotBody}>
+            <div ref={plotBodyRef} style={styles.plotBody}>
               <PlotView plot={currentPlot} />
             </div>
           </div>
