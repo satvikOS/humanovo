@@ -673,6 +673,12 @@ export default function Workstation() {
     scrollTop: number; scrollLeft: number; selStart: number; selEnd: number
   }>>(new Map())
   const prevScriptIdRef = useRef<string>(scriptStore.activeId)
+  // Per-script line bookmarks, keyed by script id. Each entry is a Set of
+  // 1-indexed line numbers. Lives in a ref so typing doesn't force a full
+  // re-render; the visible set is mirrored in `bookmarkLines` state whenever
+  // we mutate the active script's entry.
+  const scriptBookmarksRef = useRef<Map<string, Set<number>>>(new Map())
+  const [bookmarkLines, setBookmarkLines] = useState<ReadonlySet<number>>(() => new Set())
   const gutterRef = useRef<HTMLDivElement>(null)
   const highlightRef = useRef<HTMLPreElement>(null)
   const indentGuideRef = useRef<HTMLDivElement>(null)
@@ -1568,6 +1574,67 @@ export default function Workstation() {
     setGotoOpen(false)
   }, [gotoQuery, jumpToLine])
 
+  // Bookmarks. We keep a Set<number> of 1-indexed line numbers in a ref map
+  // keyed by script id. Callers mutate the active script's entry and then
+  // mirror it into `bookmarkLines` state so React re-renders the gutter.
+  const getActiveBookmarkSet = useCallback((): Set<number> => {
+    const id = scriptStore.activeId
+    let set = scriptBookmarksRef.current.get(id)
+    if (!set) {
+      set = new Set()
+      scriptBookmarksRef.current.set(id, set)
+    }
+    return set
+  }, [scriptStore.activeId])
+
+  const toggleBookmark = useCallback((line: number) => {
+    if (line < 1) return
+    const set = getActiveBookmarkSet()
+    if (set.has(line)) set.delete(line)
+    else set.add(line)
+    setBookmarkLines(new Set(set))
+  }, [getActiveBookmarkSet])
+
+  const toggleBookmarkAtCaret = useCallback(() => {
+    const ta = editorRef.current
+    if (!ta) return
+    const before = ta.value.slice(0, ta.selectionStart)
+    const line = (before.match(/\n/g)?.length ?? 0) + 1
+    toggleBookmark(line)
+  }, [toggleBookmark])
+
+  const gotoBookmark = useCallback((dir: 1 | -1) => {
+    const set = getActiveBookmarkSet()
+    if (set.size === 0) return
+    const sorted = Array.from(set).sort((a, b) => a - b)
+    const ta = editorRef.current
+    const curLine = (() => {
+      if (!ta) return 1
+      const before = ta.value.slice(0, ta.selectionStart)
+      return (before.match(/\n/g)?.length ?? 0) + 1
+    })()
+    let target: number
+    if (dir === 1) {
+      target = sorted.find(l => l > curLine) ?? sorted[0]
+    } else {
+      let found = sorted[sorted.length - 1]
+      for (let i = sorted.length - 1; i >= 0; i--) {
+        if (sorted[i] < curLine) { found = sorted[i]; break }
+      }
+      // If current line was before the first bookmark, wrap to the last.
+      if (sorted.every(l => l >= curLine)) found = sorted[sorted.length - 1]
+      target = found
+    }
+    jumpToLine(target)
+  }, [getActiveBookmarkSet, jumpToLine])
+
+  const clearAllBookmarks = useCallback(() => {
+    const set = getActiveBookmarkSet()
+    if (set.size === 0) return
+    set.clear()
+    setBookmarkLines(new Set())
+  }, [getActiveBookmarkSet])
+
   // Keyboard shortcuts inside the editor:
   //   Cmd/Ctrl+Enter        — run script
   //   Shift+Cmd/Ctrl+Enter  — run selection (or current line)
@@ -1639,6 +1706,21 @@ export default function Workstation() {
     if ((e.metaKey || e.ctrlKey) && (e.key === 'g' || e.key === 'G')) {
       e.preventDefault()
       openGoto()
+      return
+    }
+    // F2 family — line bookmarks.
+    //   Ctrl/Cmd + F2 → toggle bookmark on current line
+    //   F2            → jump to next bookmark (wraps)
+    //   Shift + F2    → jump to previous bookmark (wraps)
+    if (e.key === 'F2') {
+      e.preventDefault()
+      if (e.metaKey || e.ctrlKey) {
+        toggleBookmarkAtCaret()
+      } else if (e.shiftKey) {
+        gotoBookmark(-1)
+      } else {
+        gotoBookmark(1)
+      }
       return
     }
     const ta = e.currentTarget
@@ -2080,7 +2162,7 @@ export default function Workstation() {
         ta.selectionStart = ta.selectionEnd = s + 1 + newIndent.length
       })
     }
-  }, [runScript, runSelection, runSection, openFind, openGoto, setScript, vars, acOpen, acItems, acIndex, acceptAutocomplete, closeAutocomplete, editorFontSize, sigHint])
+  }, [runScript, runSelection, runSection, openFind, openGoto, setScript, vars, acOpen, acItems, acIndex, acceptAutocomplete, closeAutocomplete, editorFontSize, sigHint, toggleBookmarkAtCaret, gotoBookmark])
 
   // Track cursor position and selection size for the status bar.
   const updateCursor = useCallback((ta: HTMLTextAreaElement) => {
@@ -2125,6 +2207,9 @@ export default function Workstation() {
       })
     }
     prevScriptIdRef.current = currId
+    // Sync the visible bookmark set to whatever the new script has saved.
+    const nextBookmarks = scriptBookmarksRef.current.get(currId)
+    setBookmarkLines(nextBookmarks ? new Set(nextBookmarks) : new Set())
     requestAnimationFrame(() => {
       const ta2 = editorRef.current
       if (!ta2) return
@@ -2475,8 +2560,12 @@ export default function Workstation() {
     { id: 'exp-svg',      title: 'Export current figure as SVG', hint: '',                 run: () => exportPlotSVG() },
     { id: 'exp-png',      title: 'Export current figure as PNG', hint: '',                 run: () => exportPlotPNG() },
     { id: 'exp-csv',      title: 'Export figure data as CSV',    hint: '',                 run: () => exportPlotCSV() },
+    { id: 'bm-toggle',    title: 'Toggle bookmark on current line', hint: 'Ctrl+F2',       run: () => toggleBookmarkAtCaret() },
+    { id: 'bm-next',      title: 'Jump to next bookmark',        hint: 'F2',               run: () => gotoBookmark(1) },
+    { id: 'bm-prev',      title: 'Jump to previous bookmark',    hint: 'Shift+F2',         run: () => gotoBookmark(-1) },
+    { id: 'bm-clear',     title: 'Clear bookmarks in this script', hint: '',               run: () => clearAllBookmarks() },
     { id: 'help',         title: 'Show keyboard shortcuts',      hint: 'F1',               run: () => setHelpOpen(true) },
-  ], [runScript, runSelection, runSection, openFind, openGoto, newScript, closeScript, reopenLastClosedScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, copyConsole, exportPlotSVG, exportPlotPNG, exportPlotCSV])
+  ], [runScript, runSelection, runSection, openFind, openGoto, newScript, closeScript, reopenLastClosedScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, copyConsole, exportPlotSVG, exportPlotPNG, exportPlotCSV, toggleBookmarkAtCaret, gotoBookmark, clearAllBookmarks])
 
   // Fuzzy-ish filter: split the query into tokens and require each to
   // appear (substring, case-insensitive) in the command title. Keeps
@@ -3839,10 +3928,17 @@ export default function Workstation() {
                   const isErr = errorLine === n
                   const isSec = sectionStartSet.has(n) && n !== 1
                   const isCur = cursor.line === n
+                  const isBm = bookmarkLines.has(n)
                   return (
                     <div
                       key={n}
-                      onClick={() => jumpToLine(n)}
+                      onClick={(ev) => {
+                        // Alt/Option + click on the gutter toggles a bookmark
+                        // instead of jumping, so users can manage marks with
+                        // the mouse as well as Ctrl+F2.
+                        if (ev.altKey) { toggleBookmark(n); return }
+                        jumpToLine(n)
+                      }}
                       role="button"
                       tabIndex={-1}
                       style={{
@@ -3853,13 +3949,29 @@ export default function Workstation() {
                           : isSec ? 'var(--color-text)' : undefined,
                         fontWeight: isErr || isSec || isCur ? 600 : undefined,
                         borderTop: isSec ? '1px solid var(--color-border-strong)' : undefined,
+                        position: 'relative',
                       }}
                       title={
                         isSec
                           ? (sections.names[n] ? `Section: ${sections.names[n]} — click to jump` : 'Section — click to jump')
-                          : `Line ${n} — click to jump`
+                          : `Line ${n} — click to jump, Alt+click to bookmark`
                       }
                     >
+                      {isBm && (
+                        <span
+                          aria-hidden="true"
+                          style={{
+                            position: 'absolute',
+                            left: 2,
+                            top: '50%',
+                            width: 5,
+                            height: 5,
+                            transform: 'translateY(-50%) rotate(45deg)',
+                            background: 'var(--color-text)',
+                            opacity: 0.85,
+                          }}
+                        />
+                      )}
                       {isErr ? '● ' + n : n}
                     </div>
                   )
@@ -4962,6 +5074,9 @@ const SHORTCUT_GROUPS: { title: string; items: [string, string][] }[] = [
       ['Ctrl / Cmd + F', 'Find and replace'],
       ['Ctrl / Cmd + G', 'Go to line'],
       ['Enter / Shift + Enter (find)', 'Next / previous match'],
+      ['Ctrl / Cmd + F2', 'Toggle bookmark on current line'],
+      ['F2 / Shift + F2', 'Next / previous bookmark'],
+      ['Alt + click gutter', 'Toggle bookmark on that line'],
       ['Esc', 'Close find, autocomplete, fullscreen or help'],
     ],
   },
