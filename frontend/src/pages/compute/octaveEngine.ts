@@ -352,10 +352,6 @@ class Parser {
 
   private peek(k = 0): Token { return this.toks[Math.min(this.i + k, this.toks.length - 1)] }
   private eof(): boolean { return this.peek().type === 'eof' }
-  private eat(type: TokType): Token | null {
-    if (this.peek().type === type) return this.toks[this.i++]
-    return null
-  }
   private expect(type: TokType, what?: string): Token {
     const t = this.peek()
     if (t.type !== type) {
@@ -779,25 +775,656 @@ export function parse(source: string): Stmt[] {
 }
 
 // -----------------------------------------------------------------------------
-// Placeholder run() — will be replaced in Batch 3c with a real evaluator.
-// Kept here so the rest of the UI can begin wiring against a stable API.
+// Evaluator
+// -----------------------------------------------------------------------------
+
+export class RuntimeError extends Error {
+  constructor(msg: string) { super(msg) }
+}
+
+// Lightweight flow-control exceptions (cheaper than threading flags everywhere).
+class BreakSignal {}
+class ContinueSignal {}
+class ReturnSignal {}
+
+interface EvalContext {
+  ws: Workspace
+  outputs: RunOutput[]
+  /** Per-run plot accumulator — flushed on figure()/show or at end of run. */
+  currentPlot: PlotSpec | null
+}
+
+// ---- Value helpers ---------------------------------------------------------
+
+export function mnum(v: number): MNum { return { kind: 'num', v } }
+export function mbool(v: boolean): MBool { return { kind: 'bool', v } }
+export function mstr(v: string): MStr { return { kind: 'str', v } }
+export function mmat(rows: number, cols: number, data: Float64Array | number[]): MMat {
+  const arr = data instanceof Float64Array ? data : Float64Array.from(data)
+  return { kind: 'mat', rows, cols, data: arr }
+}
+export function mscalar(v: number): MMat { return mmat(1, 1, [v]) }
+export const MVOID: MVoid = { kind: 'void' }
+
+export function toNumber(v: MValue): number {
+  if (v.kind === 'num') return v.v
+  if (v.kind === 'bool') return v.v ? 1 : 0
+  if (v.kind === 'mat' && v.rows === 1 && v.cols === 1) return v.data[0]
+  throw new RuntimeError(`cannot convert ${v.kind} to scalar`)
+}
+export function toBool(v: MValue): boolean {
+  if (v.kind === 'bool') return v.v
+  if (v.kind === 'num') return v.v !== 0
+  if (v.kind === 'mat') {
+    if (v.data.length === 0) return false
+    for (let i = 0; i < v.data.length; i++) if (v.data[i] === 0) return false
+    return true
+  }
+  if (v.kind === 'str') return v.v.length > 0
+  return false
+}
+export function toMat(v: MValue): MMat {
+  if (v.kind === 'mat') return v
+  if (v.kind === 'num') return mscalar(v.v)
+  if (v.kind === 'bool') return mscalar(v.v ? 1 : 0)
+  throw new RuntimeError(`cannot convert ${v.kind} to matrix`)
+}
+
+function isScalar(v: MValue): boolean {
+  return v.kind === 'num' || v.kind === 'bool' || (v.kind === 'mat' && v.rows === 1 && v.cols === 1)
+}
+
+// ---- Arithmetic ------------------------------------------------------------
+
+function elemBinary(a: MMat, b: MMat, fn: (x: number, y: number) => number, op: string): MMat {
+  // Scalar broadcasting
+  if (a.rows === 1 && a.cols === 1) {
+    const s = a.data[0]
+    const out = new Float64Array(b.data.length)
+    for (let i = 0; i < b.data.length; i++) out[i] = fn(s, b.data[i])
+    return { kind: 'mat', rows: b.rows, cols: b.cols, data: out }
+  }
+  if (b.rows === 1 && b.cols === 1) {
+    const s = b.data[0]
+    const out = new Float64Array(a.data.length)
+    for (let i = 0; i < a.data.length; i++) out[i] = fn(a.data[i], s)
+    return { kind: 'mat', rows: a.rows, cols: a.cols, data: out }
+  }
+  if (a.rows !== b.rows || a.cols !== b.cols) {
+    throw new RuntimeError(`${op}: nonconformant arguments (${a.rows}x${a.cols} vs ${b.rows}x${b.cols})`)
+  }
+  const out = new Float64Array(a.data.length)
+  for (let i = 0; i < a.data.length; i++) out[i] = fn(a.data[i], b.data[i])
+  return { kind: 'mat', rows: a.rows, cols: a.cols, data: out }
+}
+
+function matMul(a: MMat, b: MMat): MMat {
+  if (a.rows === 1 && a.cols === 1) return elemBinary(a, b, (x, y) => x * y, '*')
+  if (b.rows === 1 && b.cols === 1) return elemBinary(a, b, (x, y) => x * y, '*')
+  if (a.cols !== b.rows) {
+    throw new RuntimeError(`*: dim mismatch (${a.rows}x${a.cols} * ${b.rows}x${b.cols})`)
+  }
+  const out = new Float64Array(a.rows * b.cols)
+  for (let i = 0; i < a.rows; i++) {
+    for (let k = 0; k < a.cols; k++) {
+      const aik = a.data[i * a.cols + k]
+      if (aik === 0) continue
+      for (let j = 0; j < b.cols; j++) {
+        out[i * b.cols + j] += aik * b.data[k * b.cols + j]
+      }
+    }
+  }
+  return { kind: 'mat', rows: a.rows, cols: b.cols, data: out }
+}
+
+function matTranspose(a: MMat): MMat {
+  const out = new Float64Array(a.data.length)
+  for (let i = 0; i < a.rows; i++) {
+    for (let j = 0; j < a.cols; j++) {
+      out[j * a.rows + i] = a.data[i * a.cols + j]
+    }
+  }
+  return { kind: 'mat', rows: a.cols, cols: a.rows, data: out }
+}
+
+function matPow(a: MMat, p: number): MMat {
+  if (a.rows !== a.cols) throw new RuntimeError('^: matrix must be square')
+  if (!Number.isInteger(p) || p < 0) throw new RuntimeError('^: only non-negative integer powers are supported')
+  // Identity
+  let result: MMat = mmat(a.rows, a.cols, new Float64Array(a.rows * a.cols))
+  for (let i = 0; i < a.rows; i++) result.data[i * a.rows + i] = 1
+  let base = a
+  while (p > 0) {
+    if (p & 1) result = matMul(result, base)
+    p >>= 1
+    if (p > 0) base = matMul(base, base)
+  }
+  return result
+}
+
+// ---- Binary op dispatch ----------------------------------------------------
+
+function applyBinOp(op: string, l: MValue, r: MValue): MValue {
+  // String concat with +  (Octave has [a,b]; we keep '+' as numeric only and use str+str only when both strings)
+  if (l.kind === 'str' && r.kind === 'str' && (op === '+' || op === '.+')) {
+    return { kind: 'str', v: l.v + r.v }
+  }
+  if (op === '&&') return mbool(toBool(l) && toBool(r))
+  if (op === '||') return mbool(toBool(l) || toBool(r))
+
+  const A = toMat(l), B = toMat(r)
+
+  switch (op) {
+    case '+': case '.+': return elemBinary(A, B, (x, y) => x + y, op)
+    case '-': case '.-': return elemBinary(A, B, (x, y) => x - y, op)
+    case '.*': return elemBinary(A, B, (x, y) => x * y, op)
+    case './': return elemBinary(A, B, (x, y) => x / y, op)
+    case '.\\': return elemBinary(A, B, (x, y) => y / x, op)
+    case '.^': return elemBinary(A, B, (x, y) => Math.pow(x, y), op)
+    case '*': return matMul(A, B)
+    case '/': {
+      if (isScalar(B)) return elemBinary(A, B, (x, y) => x / y, '/')
+      throw new RuntimeError('/: matrix right-division not implemented (use ./)')
+    }
+    case '\\': {
+      if (isScalar(A)) return elemBinary(A, B, (x, y) => y / x, '\\')
+      throw new RuntimeError('\\: matrix left-division not implemented (use .\\)')
+    }
+    case '^': {
+      if (isScalar(A) && isScalar(B)) return mscalar(Math.pow(A.data[0], B.data[0]))
+      if (isScalar(B)) return matPow(A, B.data[0])
+      throw new RuntimeError('^: exponent must be scalar')
+    }
+    case '==': return elemBinary(A, B, (x, y) => x === y ? 1 : 0, op)
+    case '~=': case '!=': return elemBinary(A, B, (x, y) => x !== y ? 1 : 0, op)
+    case '<': return elemBinary(A, B, (x, y) => x < y ? 1 : 0, op)
+    case '<=': return elemBinary(A, B, (x, y) => x <= y ? 1 : 0, op)
+    case '>': return elemBinary(A, B, (x, y) => x > y ? 1 : 0, op)
+    case '>=': return elemBinary(A, B, (x, y) => x >= y ? 1 : 0, op)
+    case '&': return elemBinary(A, B, (x, y) => (x !== 0 && y !== 0) ? 1 : 0, op)
+    case '|': return elemBinary(A, B, (x, y) => (x !== 0 || y !== 0) ? 1 : 0, op)
+  }
+  throw new RuntimeError(`unsupported operator ${op}`)
+}
+
+function applyUnaryOp(op: string, v: MValue): MValue {
+  switch (op) {
+    case '-': {
+      const m = toMat(v)
+      const out = new Float64Array(m.data.length)
+      for (let i = 0; i < m.data.length; i++) out[i] = -m.data[i]
+      return { kind: 'mat', rows: m.rows, cols: m.cols, data: out }
+    }
+    case '+': return v
+    case '!': case '~': {
+      const m = toMat(v)
+      const out = new Float64Array(m.data.length)
+      for (let i = 0; i < m.data.length; i++) out[i] = m.data[i] === 0 ? 1 : 0
+      return { kind: 'mat', rows: m.rows, cols: m.cols, data: out }
+    }
+    case "'": case ".'": return matTranspose(toMat(v))
+  }
+  throw new RuntimeError(`unsupported unary ${op}`)
+}
+
+// ---- Ranges & matrix literals ----------------------------------------------
+
+function rangeToMat(startN: number, stepN: number, stopN: number): MMat {
+  const vals: number[] = []
+  const step = stepN === 0 ? 1 : stepN
+  // Octave semantics: 1:5 -> 1..5; 5:-1:1 -> 5..1
+  if (step > 0) {
+    for (let v = startN; v <= stopN + 1e-12; v += step) vals.push(v)
+  } else {
+    for (let v = startN; v >= stopN - 1e-12; v += step) vals.push(v)
+  }
+  return mmat(1, vals.length, vals)
+}
+
+function buildMatrixFromRows(rowsEval: MValue[][]): MMat {
+  if (rowsEval.length === 0) return mmat(0, 0, [])
+  const rowMats: MMat[] = []
+  for (const row of rowsEval) {
+    if (row.length === 0) continue
+    // Horizontally concatenate items in each row
+    const parts: MMat[] = row.map(toMat)
+    const firstRows = parts[0].rows
+    let totalCols = 0
+    for (const p of parts) {
+      if (p.rows !== firstRows) throw new RuntimeError('horizontal cat: row counts differ')
+      totalCols += p.cols
+    }
+    const out = new Float64Array(firstRows * totalCols)
+    for (let r = 0; r < firstRows; r++) {
+      let col = 0
+      for (const p of parts) {
+        for (let c = 0; c < p.cols; c++) {
+          out[r * totalCols + (col + c)] = p.data[r * p.cols + c]
+        }
+        col += p.cols
+      }
+    }
+    rowMats.push({ kind: 'mat', rows: firstRows, cols: totalCols, data: out })
+  }
+  if (rowMats.length === 1) return rowMats[0]
+  // Vertical concat
+  const firstCols = rowMats[0].cols
+  let totalRows = 0
+  for (const m of rowMats) {
+    if (m.cols !== firstCols) throw new RuntimeError('vertical cat: column counts differ')
+    totalRows += m.rows
+  }
+  const out = new Float64Array(totalRows * firstCols)
+  let rOff = 0
+  for (const m of rowMats) {
+    out.set(m.data, rOff * firstCols)
+    rOff += m.rows
+  }
+  return { kind: 'mat', rows: totalRows, cols: firstCols, data: out }
+}
+
+// ---- Indexing --------------------------------------------------------------
+
+function resolveIndices(arg: MValue | 'colon', size: number): number[] {
+  if (arg === 'colon') {
+    const out = new Array(size)
+    for (let i = 0; i < size; i++) out[i] = i
+    return out
+  }
+  const m = toMat(arg)
+  const out = new Array(m.data.length)
+  for (let i = 0; i < m.data.length; i++) {
+    const v = Math.round(m.data[i])
+    if (v < 1 || v > size) throw new RuntimeError(`index out of bounds: ${v} (size ${size})`)
+    out[i] = v - 1
+  }
+  return out
+}
+
+function getIndexed(target: MValue, args: (MValue | 'colon')[]): MValue {
+  const m = toMat(target)
+  if (args.length === 1) {
+    // Linear indexing
+    const idx = resolveIndices(args[0], m.rows * m.cols)
+    const out = new Float64Array(idx.length)
+    // Octave/MATLAB linear index is column-major. But our data is row-major —
+    // translate: element (r,c) -> data[r*cols+c]; linear index k -> c=floor(k/rows), r=k%rows
+    for (let i = 0; i < idx.length; i++) {
+      const k = idx[i]
+      const c = Math.floor(k / m.rows)
+      const r = k % m.rows
+      out[i] = m.data[r * m.cols + c]
+    }
+    // Preserve orientation: scalar -> scalar; vector -> row if input vector was row
+    if (idx.length === 1) return mscalar(out[0])
+    const sourceIsRow = m.rows === 1
+    return sourceIsRow
+      ? mmat(1, idx.length, out)
+      : mmat(idx.length, 1, out)
+  }
+  if (args.length === 2) {
+    const rIdx = resolveIndices(args[0], m.rows)
+    const cIdx = resolveIndices(args[1], m.cols)
+    const out = new Float64Array(rIdx.length * cIdx.length)
+    for (let i = 0; i < rIdx.length; i++) {
+      for (let j = 0; j < cIdx.length; j++) {
+        out[i * cIdx.length + j] = m.data[rIdx[i] * m.cols + cIdx[j]]
+      }
+    }
+    if (rIdx.length === 1 && cIdx.length === 1) return mscalar(out[0])
+    return mmat(rIdx.length, cIdx.length, out)
+  }
+  throw new RuntimeError(`indexing with ${args.length} subscripts not supported`)
+}
+
+function setIndexed(target: MMat, args: (MValue | 'colon')[], value: MValue): MMat {
+  const v = toMat(value)
+  if (args.length === 1) {
+    const idx = resolveIndices(args[0], target.rows * target.cols)
+    const src = v.data
+    if (src.length !== idx.length && src.length !== 1) {
+      throw new RuntimeError(`assignment shape mismatch (${src.length} vs ${idx.length})`)
+    }
+    for (let i = 0; i < idx.length; i++) {
+      const k = idx[i]
+      const c = Math.floor(k / target.rows)
+      const r = k % target.rows
+      target.data[r * target.cols + c] = src.length === 1 ? src[0] : src[i]
+    }
+    return target
+  }
+  if (args.length === 2) {
+    const rIdx = resolveIndices(args[0], target.rows)
+    const cIdx = resolveIndices(args[1], target.cols)
+    const expected = rIdx.length * cIdx.length
+    if (v.data.length !== expected && v.data.length !== 1) {
+      throw new RuntimeError(`assignment shape mismatch (${v.data.length} vs ${expected})`)
+    }
+    for (let i = 0; i < rIdx.length; i++) {
+      for (let j = 0; j < cIdx.length; j++) {
+        const src = v.data.length === 1 ? v.data[0] : v.data[i * cIdx.length + j]
+        target.data[rIdx[i] * target.cols + cIdx[j]] = src
+      }
+    }
+    return target
+  }
+  throw new RuntimeError(`assignment with ${args.length} subscripts not supported`)
+}
+
+// ---- Core eval --------------------------------------------------------------
+
+function evalExpr(e: Expr, ctx: EvalContext): MValue {
+  switch (e.type) {
+    case 'num': return mnum(e.value)
+    case 'str': return mstr(e.value)
+    case 'bool': return mbool(e.value)
+    case 'ident': {
+      const v = ctx.ws.vars.get(e.name)
+      if (v) return v
+      const fn = ctx.ws.fns.get(e.name)
+      if (fn) {
+        // Identifier in value position with no args: if zero-arity, invoke it
+        if (fn.arity === 0) return callFn(fn, [], ctx)
+        return fn
+      }
+      throw new RuntimeError(`'${e.name}' is undefined`)
+    }
+    case 'end': throw new RuntimeError(`'end' used outside an indexing context`)
+    case 'colon': throw new RuntimeError(`':' used outside an indexing context`)
+    case 'range': {
+      const s = toNumber(evalExpr(e.start, ctx))
+      const stop = toNumber(evalExpr(e.stop, ctx))
+      const step = e.step ? toNumber(evalExpr(e.step, ctx)) : 1
+      return rangeToMat(s, step, stop)
+    }
+    case 'matrix': {
+      const rowsEval = e.rows.map(row => row.map(c => evalExpr(c, ctx)))
+      return buildMatrixFromRows(rowsEval)
+    }
+    case 'cell': {
+      // Cells not fully modeled — fall back to numeric matrix if possible
+      const rowsEval = e.rows.map(row => row.map(c => evalExpr(c, ctx)))
+      return buildMatrixFromRows(rowsEval)
+    }
+    case 'un': return applyUnaryOp(e.op, evalExpr(e.arg, ctx))
+    case 'bin': {
+      // Short-circuit logical ops
+      if (e.op === '&&') {
+        const l = evalExpr(e.l, ctx)
+        if (!toBool(l)) return mbool(false)
+        return mbool(toBool(evalExpr(e.r, ctx)))
+      }
+      if (e.op === '||') {
+        const l = evalExpr(e.l, ctx)
+        if (toBool(l)) return mbool(true)
+        return mbool(toBool(evalExpr(e.r, ctx)))
+      }
+      return applyBinOp(e.op, evalExpr(e.l, ctx), evalExpr(e.r, ctx))
+    }
+    case 'call': {
+      // Could be function call or indexing — decide by what callee resolves to.
+      if (e.callee.type === 'ident') {
+        const name = e.callee.name
+        // Functions first (user then builtin)
+        const userFn = ctx.ws.fns.get(name)
+        if (userFn) {
+          const args = e.args.map(a => evalExpr(a, ctx))
+          return callFn(userFn, args, ctx)
+        }
+        // If it's a variable, treat as indexing
+        const vv = ctx.ws.vars.get(name)
+        if (vv) {
+          const args = e.args.map(a => a.type === 'colon' ? 'colon' as const : evalExpr(a, ctx))
+          return getIndexed(vv, args)
+        }
+        throw new RuntimeError(`'${name}' is undefined`)
+      }
+      // Expression call: invoke anonymous function or index result
+      const callee = evalExpr(e.callee, ctx)
+      if (callee.kind === 'fn') {
+        const args = e.args.map(a => evalExpr(a, ctx))
+        return callFn(callee, args, ctx)
+      }
+      const args = e.args.map(a => a.type === 'colon' ? 'colon' as const : evalExpr(a, ctx))
+      return getIndexed(callee, args)
+    }
+    case 'index': {
+      const target = evalExpr(e.target, ctx)
+      const args = e.args.map(a => a.type === 'colon' ? 'colon' as const : evalExpr(a, ctx))
+      return getIndexed(target, args)
+    }
+    case 'anon': {
+      const params = e.params
+      const body = e.body
+      // Capture snapshot of workspace vars (by reference — Octave-ish)
+      const captured = new Map(ctx.ws.vars)
+      const fn: MFn = {
+        kind: 'fn',
+        name: '<anonymous>',
+        arity: params.length,
+        builtin: (args) => {
+          const savedVars = ctx.ws.vars
+          const scope = new Map(captured)
+          for (let i = 0; i < params.length; i++) scope.set(params[i], args[i] ?? MVOID)
+          ctx.ws.vars = scope
+          try { return evalExpr(body, ctx) }
+          finally { ctx.ws.vars = savedVars }
+        },
+      }
+      return fn
+    }
+  }
+  throw new RuntimeError(`unknown expression`)
+}
+
+function callFn(fn: MFn, args: MValue[], ctx: EvalContext): MValue {
+  if (fn.builtin) return fn.builtin(args)
+  if (!fn.body || !fn.params) throw new RuntimeError(`function '${fn.name}' has no body`)
+  const savedVars = ctx.ws.vars
+  const scope = new Map<string, MValue>()
+  for (let i = 0; i < fn.params.length; i++) scope.set(fn.params[i], args[i] ?? MVOID)
+  ctx.ws.vars = scope
+  try {
+    evalBlock(fn.body, ctx)
+  } catch (sig) {
+    if (!(sig instanceof ReturnSignal)) throw sig
+  }
+  // First output variable, or 'ans'
+  // (User-defined output variables are handled in Batch 3d when we parse them fully.)
+  const ans = ctx.ws.vars.get('ans') ?? MVOID
+  ctx.ws.vars = savedVars
+  return ans
+}
+
+function evalBlock(stmts: Stmt[], ctx: EvalContext): void {
+  for (const s of stmts) evalStmt(s, ctx)
+}
+
+function assignTo(target: Expr, value: MValue, ctx: EvalContext): void {
+  if (target.type === 'ident') {
+    ctx.ws.vars.set(target.name, value)
+    return
+  }
+  if (target.type === 'call' && target.callee.type === 'ident') {
+    const name = target.callee.name
+    const existing = ctx.ws.vars.get(name)
+    let mat: MMat
+    if (existing && existing.kind === 'mat') {
+      mat = { kind: 'mat', rows: existing.rows, cols: existing.cols, data: new Float64Array(existing.data) }
+    } else if (existing && existing.kind === 'num') {
+      mat = mscalar(existing.v)
+    } else {
+      // Create a new matrix sized to fit the assignment
+      mat = mmat(0, 0, new Float64Array(0))
+    }
+    const args = target.args.map(a => a.type === 'colon' ? 'colon' as const : evalExpr(a, ctx))
+    const updated = setIndexed(mat, args, value)
+    ctx.ws.vars.set(name, updated)
+    return
+  }
+  throw new RuntimeError('invalid assignment target')
+}
+
+function evalStmt(s: Stmt, ctx: EvalContext): void {
+  switch (s.type) {
+    case 'expr': {
+      const v = evalExpr(s.expr, ctx)
+      if (v.kind !== 'void') {
+        ctx.ws.vars.set('ans', v)
+        if (!s.silent) ctx.outputs.push({ kind: 'text', text: formatValue('ans', v) })
+      }
+      return
+    }
+    case 'assign': {
+      const v = evalExpr(s.value, ctx)
+      assignTo(s.target, v, ctx)
+      if (!s.silent && s.target.type === 'ident') {
+        ctx.outputs.push({ kind: 'text', text: formatValue(s.target.name, v) })
+      }
+      return
+    }
+    case 'multiassign': {
+      // Best-effort: evaluate RHS once, unpack into identifiers.
+      const v = evalExpr(s.value, ctx)
+      for (let i = 0; i < s.targets.length; i++) {
+        const t = s.targets[i]
+        if (t.type !== 'ident') throw new RuntimeError('multi-assign targets must be identifiers')
+        // If value is a matrix, distribute columns; otherwise same value to first target
+        if (v.kind === 'mat' && v.cols >= s.targets.length) {
+          const col = new Float64Array(v.rows)
+          for (let r = 0; r < v.rows; r++) col[r] = v.data[r * v.cols + i]
+          ctx.ws.vars.set(t.name, v.rows === 1 ? mnum(col[0]) : mmat(v.rows, 1, col))
+        } else if (i === 0) {
+          ctx.ws.vars.set(t.name, v)
+        } else {
+          ctx.ws.vars.set(t.name, MVOID)
+        }
+      }
+      return
+    }
+    case 'if': {
+      if (toBool(evalExpr(s.cond, ctx))) { evalBlock(s.then, ctx); return }
+      for (const el of s.elifs) {
+        if (toBool(evalExpr(el.cond, ctx))) { evalBlock(el.body, ctx); return }
+      }
+      if (s.else) evalBlock(s.else, ctx)
+      return
+    }
+    case 'for': {
+      const it = evalExpr(s.iter, ctx)
+      const m = toMat(it)
+      // MATLAB iterates over columns
+      for (let c = 0; c < m.cols; c++) {
+        let col: MValue
+        if (m.rows === 1) col = mnum(m.data[c])
+        else {
+          const colData = new Float64Array(m.rows)
+          for (let r = 0; r < m.rows; r++) colData[r] = m.data[r * m.cols + c]
+          col = mmat(m.rows, 1, colData)
+        }
+        ctx.ws.vars.set(s.var, col)
+        try { evalBlock(s.body, ctx) }
+        catch (sig) {
+          if (sig instanceof BreakSignal) return
+          if (sig instanceof ContinueSignal) continue
+          throw sig
+        }
+      }
+      return
+    }
+    case 'while': {
+      let guard = 0
+      while (toBool(evalExpr(s.cond, ctx))) {
+        if (++guard > 1_000_000) throw new RuntimeError('while: iteration limit exceeded')
+        try { evalBlock(s.body, ctx) }
+        catch (sig) {
+          if (sig instanceof BreakSignal) return
+          if (sig instanceof ContinueSignal) continue
+          throw sig
+        }
+      }
+      return
+    }
+    case 'dountil': {
+      let guard = 0
+      do {
+        if (++guard > 1_000_000) throw new RuntimeError('do: iteration limit exceeded')
+        try { evalBlock(s.body, ctx) }
+        catch (sig) {
+          if (sig instanceof BreakSignal) return
+          if (sig instanceof ContinueSignal) continue
+          throw sig
+        }
+      } while (!toBool(evalExpr(s.cond, ctx)))
+      return
+    }
+    case 'break': throw new BreakSignal()
+    case 'continue': throw new ContinueSignal()
+    case 'return': throw new ReturnSignal()
+    case 'function': {
+      ctx.ws.fns.set(s.name, {
+        kind: 'fn',
+        name: s.name,
+        arity: s.params.length,
+        params: s.params,
+        body: s.body,
+      })
+      return
+    }
+  }
+}
+
+// ---- Pretty printing -------------------------------------------------------
+
+export function formatValue(name: string, v: MValue): string {
+  if (v.kind === 'void') return ''
+  if (v.kind === 'num') return `${name} = ${formatNum(v.v)}`
+  if (v.kind === 'bool') return `${name} = ${v.v ? '1' : '0'}`
+  if (v.kind === 'str') return `${name} = ${v.v}`
+  if (v.kind === 'fn') return `${name} = @${v.name}`
+  if (v.kind === 'mat') {
+    if (v.rows === 1 && v.cols === 1) return `${name} = ${formatNum(v.data[0])}`
+    const lines: string[] = [`${name} =`, '']
+    const maxRows = Math.min(v.rows, 24)
+    const maxCols = Math.min(v.cols, 12)
+    for (let r = 0; r < maxRows; r++) {
+      const row: string[] = []
+      for (let c = 0; c < maxCols; c++) row.push(formatNum(v.data[r * v.cols + c]).padStart(12))
+      if (maxCols < v.cols) row.push(' …')
+      lines.push('  ' + row.join(' '))
+    }
+    if (maxRows < v.rows) lines.push(`  ⋮  (${v.rows - maxRows} more rows)`)
+    lines.push('')
+    return lines.join('\n')
+  }
+  return String(v)
+}
+
+function formatNum(n: number): string {
+  if (!Number.isFinite(n)) return String(n)
+  if (n === 0) return '0'
+  const abs = Math.abs(n)
+  if (abs >= 1e5 || abs < 1e-4) return n.toExponential(4)
+  if (Number.isInteger(n)) return String(n)
+  return n.toPrecision(5).replace(/\.?0+$/, '')
+}
+
+// -----------------------------------------------------------------------------
+// Public run() — real evaluator. Built-ins land in Batch 3d.
 // -----------------------------------------------------------------------------
 
 export function run(source: string, workspace: Workspace = createWorkspace()): RunResult {
+  const outputs: RunOutput[] = []
+  const ctx: EvalContext = { ws: workspace, outputs, currentPlot: null }
   try {
     const stmts = parse(source)
     workspace.history.push(source)
-    return {
-      outputs: [{
-        kind: 'text',
-        text: `[engine] parsed ${stmts.length} statement(s) — evaluator arriving in next batch`,
-      }],
-      workspace,
+    evalBlock(stmts, ctx)
+    if (ctx.currentPlot && ctx.currentPlot.series.length > 0) {
+      outputs.push({ kind: 'plot', plot: ctx.currentPlot })
     }
   } catch (err: any) {
-    return {
-      outputs: [{ kind: 'error', text: String(err?.message ?? err) }],
-      workspace,
-    }
+    outputs.push({ kind: 'error', text: String(err?.message ?? err) })
   }
+  return { outputs, workspace }
 }
