@@ -149,6 +149,171 @@ function formatScalar(n: number): string {
   return n.toPrecision(5).replace(/\.?0+$/, '')
 }
 
+/* ── MATLAB syntax highlighter ───────────────────────────────────────── */
+// Produces a flat token list for an overlay <pre> that sits behind the
+// textarea. Keeps the tokenizer intentionally tolerant: anything it can't
+// classify falls through as 'text' so the whole source is always rendered
+// exactly as typed (essential for the transparent-textarea overlay trick).
+type HTokenKind = 'comment' | 'string' | 'number' | 'keyword' | 'text'
+interface HToken { kind: HTokenKind; text: string }
+
+const MATLAB_KEYWORDS = new Set([
+  'if', 'else', 'elseif', 'end', 'endif', 'endfor', 'endwhile', 'endfunction',
+  'for', 'while', 'do', 'until', 'break', 'continue',
+  'function', 'return', 'switch', 'case', 'otherwise',
+  'try', 'catch', 'global', 'persistent',
+  'true', 'false',
+])
+
+function highlightMatlab(src: string): HToken[] {
+  const out: HToken[] = []
+  let buf = ''
+  const flush = () => { if (buf) { out.push({ kind: 'text', text: buf }); buf = '' } }
+
+  const n = src.length
+  let i = 0
+  // Tracks the previous non-whitespace char on the current line so we can
+  // distinguish a transpose apostrophe (`a'`) from a char-vector literal.
+  let prevSig = ''
+
+  while (i < n) {
+    const c = src[i]
+    const c2 = src[i + 1]
+
+    // Block comment %{ ... %}
+    if (c === '%' && c2 === '{') {
+      flush()
+      let j = i + 2
+      while (j < n && !(src[j] === '%' && src[j + 1] === '}')) j++
+      if (j < n) j += 2
+      out.push({ kind: 'comment', text: src.slice(i, j) })
+      i = j
+      prevSig = ''
+      continue
+    }
+
+    // Line comment % ... or # ... (Octave accepts both)
+    if (c === '%' || c === '#') {
+      flush()
+      let j = i
+      while (j < n && src[j] !== '\n') j++
+      out.push({ kind: 'comment', text: src.slice(i, j) })
+      i = j
+      continue
+    }
+
+    // Double-quoted string (Octave + MATLAB R2017+)
+    if (c === '"') {
+      flush()
+      let j = i + 1
+      while (j < n) {
+        if (src[j] === '"' && src[j + 1] === '"') { j += 2; continue }
+        if (src[j] === '"') { j++; break }
+        if (src[j] === '\n') break
+        j++
+      }
+      out.push({ kind: 'string', text: src.slice(i, j) })
+      i = j
+      prevSig = '"'
+      continue
+    }
+
+    // Single-quoted: either a char-vector or a transpose operator. If the
+    // previous significant char is an identifier/number/close-paren, it's
+    // a transpose and must be emitted as plain text.
+    if (c === "'") {
+      if (/[A-Za-z0-9_\)\]\.]/.test(prevSig)) {
+        buf += c
+        i++
+        prevSig = "'"
+        continue
+      }
+      flush()
+      let j = i + 1
+      while (j < n) {
+        if (src[j] === "'" && src[j + 1] === "'") { j += 2; continue }
+        if (src[j] === "'") { j++; break }
+        if (src[j] === '\n') break
+        j++
+      }
+      out.push({ kind: 'string', text: src.slice(i, j) })
+      i = j
+      prevSig = "'"
+      continue
+    }
+
+    // Numbers — integer/float with optional exponent
+    if ((c >= '0' && c <= '9') || (c === '.' && c2 >= '0' && c2 <= '9')) {
+      flush()
+      let j = i
+      while (j < n && src[j] >= '0' && src[j] <= '9') j++
+      if (src[j] === '.') {
+        j++
+        while (j < n && src[j] >= '0' && src[j] <= '9') j++
+      }
+      if (src[j] === 'e' || src[j] === 'E') {
+        j++
+        if (src[j] === '+' || src[j] === '-') j++
+        while (j < n && src[j] >= '0' && src[j] <= '9') j++
+      }
+      if (src[j] === 'i' || src[j] === 'j') j++ // imaginary suffix
+      out.push({ kind: 'number', text: src.slice(i, j) })
+      i = j
+      prevSig = '0'
+      continue
+    }
+
+    // Identifiers / keywords
+    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c === '_') {
+      let j = i + 1
+      while (j < n) {
+        const ch = src[j]
+        if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch === '_') j++
+        else break
+      }
+      const word = src.slice(i, j)
+      if (MATLAB_KEYWORDS.has(word)) {
+        flush()
+        out.push({ kind: 'keyword', text: word })
+      } else {
+        buf += word
+      }
+      i = j
+      prevSig = 'a'
+      continue
+    }
+
+    // Whitespace / newlines don't change prevSig (we want `a '` to still
+    // be read as transpose), but newline resets it.
+    if (c === '\n') {
+      buf += c
+      prevSig = ''
+      i++
+      continue
+    }
+    if (c === ' ' || c === '\t') {
+      buf += c
+      i++
+      continue
+    }
+
+    // Everything else is punctuation/operator text.
+    buf += c
+    prevSig = c
+    i++
+  }
+  flush()
+  return out
+}
+
+const HL_COLORS: Record<HTokenKind, React.CSSProperties> = {
+  comment: { color: 'var(--color-text-muted)', fontStyle: 'italic' },
+  string:  { color: 'var(--color-text-secondary)' },
+  number:  { color: 'var(--color-text-secondary)' },
+  keyword: { color: 'var(--color-text)', fontWeight: 600 },
+  text:    { color: 'var(--color-text)' },
+}
+
 /* ── Component ───────────────────────────────────────────────────────── */
 export default function Workstation() {
   const [scriptStore, setScriptStore] = useState<ScriptStore>(loadScripts)
@@ -188,6 +353,12 @@ export default function Workstation() {
   const consoleRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<HTMLTextAreaElement>(null)
   const gutterRef = useRef<HTMLDivElement>(null)
+  const highlightRef = useRef<HTMLPreElement>(null)
+
+  // Memoized token stream for the syntax-highlighting overlay. Recomputes
+  // on every keystroke; the tokenizer is O(n) and cheap enough for scripts
+  // up to a few thousand lines.
+  const highlightTokens = useMemo(() => highlightMatlab(script), [script])
 
   // Auto-scroll console to bottom on new entries.
   useEffect(() => {
@@ -374,8 +545,12 @@ export default function Workstation() {
   }, [updateCursor])
 
   const onEditorScroll = useCallback((e: React.UIEvent<HTMLTextAreaElement>) => {
+    const { scrollTop, scrollLeft } = e.currentTarget
     if (gutterRef.current) {
-      gutterRef.current.style.transform = `translateY(${-e.currentTarget.scrollTop}px)`
+      gutterRef.current.style.transform = `translateY(${-scrollTop}px)`
+    }
+    if (highlightRef.current) {
+      highlightRef.current.style.transform = `translate(${-scrollLeft}px, ${-scrollTop}px)`
     }
   }, [])
 
@@ -674,8 +849,34 @@ export default function Workstation() {
       whiteSpace: 'pre',
       willChange: 'transform',
     },
-    editor: {
+    editorTextWrap: {
+      position: 'relative' as const,
       flex: 1,
+      minWidth: 0,
+      minHeight: 0,
+      overflow: 'hidden',
+    },
+    editorHighlight: {
+      position: 'absolute' as const,
+      top: 0,
+      left: 0,
+      margin: 0,
+      padding: '14px 16px 14px 14px',
+      fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+      fontSize: 12,
+      lineHeight: 1.6,
+      whiteSpace: 'pre' as const,
+      pointerEvents: 'none' as const,
+      willChange: 'transform',
+      tabSize: 2,
+      color: 'var(--color-text)',
+      background: 'transparent',
+    },
+    editor: {
+      position: 'absolute' as const,
+      inset: 0,
+      width: '100%',
+      height: '100%',
       resize: 'none',
       outline: 'none',
       border: 'none',
@@ -683,10 +884,15 @@ export default function Workstation() {
       fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
       fontSize: 12,
       lineHeight: 1.6,
-      color: 'var(--color-text)',
+      color: 'transparent',
+      caretColor: 'var(--color-text)',
       background: 'transparent',
       tabSize: 2,
       minHeight: 0,
+      whiteSpace: 'pre' as const,
+      overflowWrap: 'normal' as const,
+      wordBreak: 'normal' as const,
+      overflow: 'auto' as const,
     },
     statusBar: {
       display: 'flex',
@@ -965,17 +1171,28 @@ export default function Workstation() {
                 {Array.from({ length: lineCount }, (_, i) => i + 1).join('\n')}
               </div>
             </div>
-            <textarea
-              ref={editorRef}
-              style={styles.editor}
-              value={script}
-              onChange={e => { setScript(e.target.value); updateCursor(e.target) }}
-              onKeyDown={onEditorKey}
-              onKeyUp={onEditorSelect}
-              onClick={onEditorSelect}
-              onScroll={onEditorScroll}
-              spellCheck={false}
-            />
+            <div style={styles.editorTextWrap}>
+              <pre ref={highlightRef} style={styles.editorHighlight} aria-hidden="true">
+                {highlightTokens.map((t, idx) => (
+                  <span key={idx} style={HL_COLORS[t.kind]}>{t.text}</span>
+                ))}
+                {/* Trailing newline so the last line is still visible when the
+                    user's cursor is on it. */}
+                {'\n'}
+              </pre>
+              <textarea
+                ref={editorRef}
+                style={styles.editor}
+                value={script}
+                onChange={e => { setScript(e.target.value); updateCursor(e.target) }}
+                onKeyDown={onEditorKey}
+                onKeyUp={onEditorSelect}
+                onClick={onEditorSelect}
+                onScroll={onEditorScroll}
+                spellCheck={false}
+                wrap="off"
+              />
+            </div>
           </div>
         </div>
 
