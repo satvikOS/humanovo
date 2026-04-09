@@ -958,6 +958,46 @@ export default function Workstation() {
     URL.revokeObjectURL(url)
   }, [plots, activePlot])
 
+  // Delete a single variable from the workspace. Resets the inspector
+  // and collapses the row if it was open.
+  const deleteVariable = useCallback((name: string) => {
+    workspaceRef.current.vars.delete(name)
+    setVars(snapshotWorkspace(workspaceRef.current))
+    saveWorkspace(workspaceRef.current)
+    setExpandedVar(prev => prev === name ? null : prev)
+    setInspectVar(prev => prev === name ? null : prev)
+  }, [])
+
+  // Copy a variable's contents as a literal MATLAB expression, so users
+  // can paste a matrix straight into a script. Scalars and booleans use
+  // their natural literal form.
+  const copyVariableExpr = useCallback((name: string, v: MValue) => {
+    let text = ''
+    switch (v.kind) {
+      case 'num': text = String(v.v); break
+      case 'bool': text = v.v ? 'true' : 'false'; break
+      case 'str': text = JSON.stringify(v.v).replace(/"/g, "'"); break
+      case 'void': text = '[]'; break
+      case 'fn': text = `@${v.name}`; break
+      case 'mat': {
+        const rows: string[] = []
+        for (let r = 0; r < v.rows; r++) {
+          const cells: string[] = []
+          for (let c = 0; c < v.cols; c++) cells.push(String(v.data[r * v.cols + c]))
+          rows.push(cells.join(', '))
+        }
+        text = `[${rows.join('; ')}]`
+        break
+      }
+    }
+    navigator.clipboard?.writeText(text).catch(() => { /* clipboard may be blocked */ })
+    setEntries(prev => [...prev, {
+      id: nextEntryId++,
+      kind: 'output',
+      text: `Copied ${name} to clipboard (${text.length} chars)`,
+    }])
+  }, [])
+
   // Dump a workspace matrix to CSV. Cells are written with full precision
   // so round-tripping through another tool doesn't introduce noise.
   const exportMatrixCsv = useCallback((name: string, v: MValue & { kind: 'mat' }) => {
@@ -1932,6 +1972,22 @@ export default function Workstation() {
       padding: '5px 6px',
       borderRadius: 4,
     },
+    varAction: {
+      background: 'transparent',
+      border: '1px solid var(--glass-border)',
+      color: 'var(--color-text-muted)',
+      width: 18,
+      height: 18,
+      borderRadius: 3,
+      fontSize: 11,
+      cursor: 'pointer',
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 0,
+      lineHeight: 1,
+      opacity: 0.7,
+    },
     varExpand: {
       margin: '2px 6px 10px 6px',
       padding: '8px 10px',
@@ -2687,8 +2743,28 @@ export default function Workstation() {
                     >
                       <span style={{ color: 'var(--color-text)', fontWeight: 500 }}>{v.name}</span>
                       <span style={{ color: 'var(--color-text-muted)' }}>{v.shape}</span>
-                      <span style={{ color: 'var(--color-text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {v.summary}
+                      <span style={{
+                        color: 'var(--color-text-secondary)',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                      }}>
+                        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{v.summary}</span>
+                        <button
+                          style={styles.varAction}
+                          onClick={e => { e.stopPropagation(); copyVariableExpr(v.name, v.value) }}
+                          title="Copy as MATLAB expression"
+                          aria-label={`Copy ${v.name}`}
+                        >⧉</button>
+                        <button
+                          style={styles.varAction}
+                          onClick={e => { e.stopPropagation(); deleteVariable(v.name) }}
+                          title="Delete this variable"
+                          aria-label={`Delete ${v.name}`}
+                        >×</button>
                       </span>
                     </div>
                     {isOpen && (
