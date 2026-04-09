@@ -23,6 +23,7 @@ import {
   WORKSTATION_TEMPLATES,
   type WorkstationTemplate,
 } from './workstationTemplates'
+import { BUILTIN_CATEGORIES, BUILTIN_DOCS, type BuiltinDoc } from './builtinDocs'
 
 /* ── Persistence keys ────────────────────────────────────────────────── */
 const SCRIPT_KEY = 'compute-workstation-script'          // legacy single-script key
@@ -349,6 +350,7 @@ export default function Workstation() {
   const [expandedVar, setExpandedVar] = useState<string | null>(null)
   const [library, setLibrary] = useState<'open' | 'closed'>('open')
   const [libFilter, setLibFilter] = useState('')
+  const [libMode, setLibMode] = useState<'templates' | 'functions'>('templates')
   const [activeTemplate, setActiveTemplate] = useState<string | null>(null)
   const [cursor, setCursor] = useState<{ line: number; col: number }>({ line: 1, col: 1 })
   const [lastRunMs, setLastRunMs] = useState<number | null>(null)
@@ -965,6 +967,28 @@ export default function Workstation() {
       justifyContent: 'space-between',
       gap: 8,
     },
+    libraryModeBar: {
+      display: 'flex',
+      gap: 0,
+      padding: '0 8px',
+      borderBottom: '1px solid var(--glass-border)',
+    },
+    libraryModeBtn: {
+      flex: 1,
+      padding: '6px 8px',
+      fontSize: 11,
+      fontWeight: 500,
+      color: 'var(--color-text-muted)',
+      background: 'transparent',
+      border: 'none',
+      borderBottom: '2px solid transparent',
+      cursor: 'pointer',
+      transition: 'color 0.15s',
+    },
+    libraryModeBtnActive: {
+      color: 'var(--color-text)',
+      borderBottom: '2px solid var(--color-text)',
+    },
     librarySearch: {
       padding: '8px 12px',
       borderBottom: '1px solid var(--glass-border)',
@@ -1337,6 +1361,44 @@ export default function Workstation() {
     setActiveTemplate(t.id)
   }, [])
 
+  // Filter and group built-in function docs the same way templates work.
+  const filteredBuiltins = useMemo<BuiltinDoc[]>(() => {
+    const q = libFilter.trim().toLowerCase()
+    if (!q) return BUILTIN_DOCS
+    return BUILTIN_DOCS.filter(d =>
+      d.name.toLowerCase().includes(q) ||
+      d.description.toLowerCase().includes(q) ||
+      d.category.toLowerCase().includes(q) ||
+      d.signature.toLowerCase().includes(q)
+    )
+  }, [libFilter])
+
+  const groupedBuiltins = useMemo(() => {
+    const groups: Record<string, BuiltinDoc[]> = {}
+    for (const cat of BUILTIN_CATEGORIES) groups[cat] = []
+    for (const d of filteredBuiltins) {
+      if (!groups[d.category]) groups[d.category] = []
+      groups[d.category].push(d)
+    }
+    return groups
+  }, [filteredBuiltins])
+
+  // Insert a builtin's snippet at the editor cursor (or replace selection).
+  const insertBuiltin = useCallback((doc: BuiltinDoc) => {
+    const ta = editorRef.current
+    if (!ta) return
+    const s = ta.selectionStart
+    const e = ta.selectionEnd
+    const before = script.slice(0, s)
+    const after = script.slice(e)
+    const next = before + doc.snippet + after
+    setScript(next)
+    requestAnimationFrame(() => {
+      ta.focus()
+      ta.selectionStart = ta.selectionEnd = s + doc.snippet.length
+    })
+  }, [script, setScript])
+
   return (
     <div style={styles.container}>
       {/* ─── Toolbar ─────────────────────────────────────────────────── */}
@@ -1389,49 +1451,99 @@ export default function Workstation() {
         {library === 'open' && (
           <div style={styles.library}>
             <div style={styles.libraryHeader}>
-              <span>Library · {filteredTemplates.length}</span>
+              <span>
+                Library · {libMode === 'templates' ? filteredTemplates.length : filteredBuiltins.length}
+              </span>
               <button
                 style={{ ...styles.btn, ...styles.btnGhost, padding: '2px 8px', fontSize: 11 }}
                 onClick={() => setLibrary('closed')}
                 title="Collapse library"
               >hide</button>
             </div>
+            <div style={styles.libraryModeBar}>
+              <button
+                style={{
+                  ...styles.libraryModeBtn,
+                  ...(libMode === 'templates' ? styles.libraryModeBtnActive : null),
+                }}
+                onClick={() => setLibMode('templates')}
+              >Templates</button>
+              <button
+                style={{
+                  ...styles.libraryModeBtn,
+                  ...(libMode === 'functions' ? styles.libraryModeBtnActive : null),
+                }}
+                onClick={() => setLibMode('functions')}
+              >Functions</button>
+            </div>
             <div style={styles.librarySearch}>
               <input
                 style={styles.librarySearchInput}
-                placeholder="Search templates…"
+                placeholder={libMode === 'templates' ? 'Search templates…' : 'Search functions…'}
                 value={libFilter}
                 onChange={e => setLibFilter(e.target.value)}
               />
             </div>
             <div style={styles.libraryScroll}>
-              {WORKSTATION_CATEGORIES.map(cat => {
-                const items = groupedTemplates[cat] ?? []
-                if (items.length === 0) return null
-                return (
-                  <div key={cat}>
-                    <div style={styles.libraryCategory}>{cat}</div>
-                    {items.map(t => (
-                      <button
-                        key={t.id}
-                        style={{
-                          ...styles.libraryItem,
-                          ...(activeTemplate === t.id ? styles.libraryItemActive : null),
-                        }}
-                        onClick={() => loadTemplate(t)}
-                        title={t.description}
-                      >
-                        <div>{t.name}</div>
-                        <div style={styles.libraryItemDesc}>{t.description}</div>
-                      </button>
-                    ))}
-                  </div>
-                )
-              })}
-              {filteredTemplates.length === 0 && (
-                <div style={{ padding: '12px 16px', color: 'var(--color-text-muted)', fontStyle: 'italic', fontSize: 12 }}>
-                  No templates match "{libFilter}".
-                </div>
+              {libMode === 'templates' ? (
+                <>
+                  {WORKSTATION_CATEGORIES.map(cat => {
+                    const items = groupedTemplates[cat] ?? []
+                    if (items.length === 0) return null
+                    return (
+                      <div key={cat}>
+                        <div style={styles.libraryCategory}>{cat}</div>
+                        {items.map(t => (
+                          <button
+                            key={t.id}
+                            style={{
+                              ...styles.libraryItem,
+                              ...(activeTemplate === t.id ? styles.libraryItemActive : null),
+                            }}
+                            onClick={() => loadTemplate(t)}
+                            title={t.description}
+                          >
+                            <div>{t.name}</div>
+                            <div style={styles.libraryItemDesc}>{t.description}</div>
+                          </button>
+                        ))}
+                      </div>
+                    )
+                  })}
+                  {filteredTemplates.length === 0 && (
+                    <div style={{ padding: '12px 16px', color: 'var(--color-text-muted)', fontStyle: 'italic', fontSize: 12 }}>
+                      No templates match "{libFilter}".
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  {BUILTIN_CATEGORIES.map(cat => {
+                    const items = groupedBuiltins[cat] ?? []
+                    if (items.length === 0) return null
+                    return (
+                      <div key={cat}>
+                        <div style={styles.libraryCategory}>{cat}</div>
+                        {items.map(d => (
+                          <button
+                            key={d.name}
+                            style={styles.libraryItem}
+                            onClick={() => insertBuiltin(d)}
+                            title={`${d.signature} — ${d.description}`}
+                          >
+                            <div style={{ fontFamily: "'JetBrains Mono', monospace" }}>{d.signature}</div>
+                            <div style={styles.libraryItemDesc}>{d.description}</div>
+                          </button>
+                        ))}
+                      </div>
+                    )
+                  })}
+                  {filteredBuiltins.length === 0 && (
+                    <div style={{ padding: '12px 16px', color: 'var(--color-text-muted)', fontStyle: 'italic', fontSize: 12 }}>
+                      No functions match "{libFilter}".
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </div>
