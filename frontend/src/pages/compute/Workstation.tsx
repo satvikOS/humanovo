@@ -456,6 +456,14 @@ export default function Workstation() {
   const [plots, setPlots] = useState<PlotSpec[]>([])
   const [activePlot, setActivePlot] = useState(0)
   const [plotFullscreen, setPlotFullscreen] = useState(false)
+  // Per-figure rendering options. Toggled by the small chip buttons in the
+  // figure header (grid / log-x / log-y / legend) and applied to PlotView.
+  const [plotOpts, setPlotOpts] = useState<PlotOpts>({
+    grid: true,
+    logX: false,
+    logY: false,
+    legend: 'auto',
+  })
   const [vars, setVars] = useState<VarSnapshot[]>([])
   const [expandedVar, setExpandedVar] = useState<string | null>(null)
   const [library, setLibrary] = useState<'open' | 'closed'>('open')
@@ -1663,6 +1671,24 @@ export default function Workstation() {
       fontSize: 10,
       marginLeft: 8,
     },
+    plotChip: {
+      padding: '2px 8px',
+      fontSize: 10,
+      fontFamily: "'JetBrains Mono', monospace",
+      letterSpacing: '0.02em',
+      color: 'var(--color-text-muted)',
+      background: 'transparent',
+      border: '1px solid var(--glass-border)',
+      borderRadius: 3,
+      cursor: 'pointer',
+      lineHeight: 1.4,
+      transition: 'background 0.12s, color 0.12s, border-color 0.12s',
+    },
+    plotChipActive: {
+      color: 'var(--color-text)',
+      background: 'var(--glass-bg-hover)',
+      borderColor: 'var(--color-border-strong)',
+    },
   }), [library])
 
   const currentPlot = plots[activePlot] ?? null
@@ -2044,7 +2070,28 @@ export default function Workstation() {
           <div style={styles.plotPanel}>
             <div style={styles.panelHeader}>
               <span>Figure {plots.length > 0 ? `${activePlot + 1} / ${plots.length}` : ''}</span>
-              <div style={{ display: 'flex', gap: 4 }}>
+              <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                <button
+                  style={plotOpts.grid ? { ...styles.plotChip, ...styles.plotChipActive } : styles.plotChip}
+                  onClick={() => setPlotOpts(o => ({ ...o, grid: !o.grid }))}
+                  title="Toggle gridlines"
+                >grid</button>
+                <button
+                  style={plotOpts.logX ? { ...styles.plotChip, ...styles.plotChipActive } : styles.plotChip}
+                  onClick={() => setPlotOpts(o => ({ ...o, logX: !o.logX }))}
+                  title="Toggle logarithmic x-axis"
+                >log&nbsp;x</button>
+                <button
+                  style={plotOpts.logY ? { ...styles.plotChip, ...styles.plotChipActive } : styles.plotChip}
+                  onClick={() => setPlotOpts(o => ({ ...o, logY: !o.logY }))}
+                  title="Toggle logarithmic y-axis"
+                >log&nbsp;y</button>
+                <button
+                  style={plotOpts.legend !== 'off' ? { ...styles.plotChip, ...styles.plotChipActive } : styles.plotChip}
+                  onClick={() => setPlotOpts(o => ({ ...o, legend: o.legend === 'off' ? 'on' : 'off' }))}
+                  title="Toggle legend"
+                >legend</button>
+                <span style={{ width: 1, height: 14, background: 'var(--glass-border)', margin: '0 4px' }} />
                 <button
                   style={{ ...styles.btn, ...styles.btnGhost, padding: '2px 8px', fontSize: 11 }}
                   disabled={plots.length < 2}
@@ -2084,7 +2131,7 @@ export default function Workstation() {
               </div>
             </div>
             <div ref={plotBodyRef} style={styles.plotBody}>
-              <PlotView plot={currentPlot} />
+              <PlotView plot={currentPlot} opts={plotOpts} />
             </div>
           </div>
 
@@ -2238,7 +2285,7 @@ export default function Workstation() {
             </div>
           </div>
           <div style={styles.fullscreenBody}>
-            <PlotView plot={currentPlot} />
+            <PlotView plot={currentPlot} opts={plotOpts} />
           </div>
         </div>
       )}
@@ -2280,7 +2327,16 @@ export default function Workstation() {
 // category colors.
 const SERIES_COLORS = ['#ededed', '#a1a1a1', '#d4d4d4', '#737373', '#8a8a8a', '#bfbfbf', '#525252', '#e5e5e5']
 
-function PlotView({ plot }: { plot: PlotSpec | null }) {
+// Per-figure render options surfaced through the figure-panel chips.
+interface PlotOpts {
+  grid: boolean
+  logX: boolean
+  logY: boolean
+  legend: 'auto' | 'on' | 'off'
+}
+const DEFAULT_PLOT_OPTS: PlotOpts = { grid: true, logX: false, logY: false, legend: 'auto' }
+
+function PlotView({ plot, opts = DEFAULT_PLOT_OPTS }: { plot: PlotSpec | null; opts?: PlotOpts }) {
   if (!plot || plot.series.length === 0) {
     return (
       <div style={{
@@ -2317,16 +2373,31 @@ function PlotView({ plot }: { plot: PlotSpec | null }) {
     return row
   })
 
+  // Recharts log scale needs an explicit numeric domain, otherwise it
+  // collapses zero/negative ticks to NaN and the axis disappears.
+  const xScale = opts.logX ? 'log' : 'auto'
+  const yScale = opts.logY ? 'log' : 'auto'
+  const xDomain = opts.logX ? ['auto', 'auto'] as [string, string] : undefined
+  const yDomain = opts.logY ? ['auto', 'auto'] as [string, string] : undefined
+  const showLegend = opts.legend === 'on' || (opts.legend === 'auto' && plot.series.length > 1)
+
   const common = (
     <>
-      <CartesianGrid stroke="var(--glass-border)" strokeDasharray="3 3" />
+      {opts.grid && <CartesianGrid stroke="var(--glass-border)" strokeDasharray="3 3" />}
       <XAxis
         dataKey="x"
+        type="number"
+        scale={xScale}
+        domain={xDomain}
+        allowDataOverflow={opts.logX}
         stroke="var(--glass-border)"
         tick={{ fontSize: 11, fill: 'var(--color-text-muted)' }}
         label={plot.xLabel ? { value: plot.xLabel, position: 'insideBottom', offset: -2, fill: 'var(--color-text-muted)', fontSize: 11 } : undefined}
       />
       <YAxis
+        scale={yScale}
+        domain={yDomain}
+        allowDataOverflow={opts.logY}
         stroke="var(--glass-border)"
         tick={{ fontSize: 11, fill: 'var(--color-text-muted)' }}
         label={plot.yLabel ? { value: plot.yLabel, angle: -90, position: 'insideLeft', fill: 'var(--color-text-muted)', fontSize: 11 } : undefined}
@@ -2340,7 +2411,7 @@ function PlotView({ plot }: { plot: PlotSpec | null }) {
           color: 'var(--color-text)',
         }}
       />
-      {plot.series.length > 1 && (
+      {showLegend && (
         <Legend wrapperStyle={{ fontSize: 11, color: 'var(--color-text-secondary)' }} />
       )}
     </>
