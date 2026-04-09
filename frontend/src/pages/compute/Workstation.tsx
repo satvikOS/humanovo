@@ -130,10 +130,14 @@ export default function Workstation() {
   const [library, setLibrary] = useState<'open' | 'closed'>('open')
   const [libFilter, setLibFilter] = useState('')
   const [activeTemplate, setActiveTemplate] = useState<string | null>(null)
+  const [cursor, setCursor] = useState<{ line: number; col: number }>({ line: 1, col: 1 })
+  const [lastRunMs, setLastRunMs] = useState<number | null>(null)
 
   // Single persistent workspace across runs.
   const workspaceRef = useRef<Workspace>(createWorkspace())
   const consoleRef = useRef<HTMLDivElement>(null)
+  const editorRef = useRef<HTMLTextAreaElement>(null)
+  const gutterRef = useRef<HTMLDivElement>(null)
 
   // Auto-scroll console to bottom on new entries.
   useEffect(() => {
@@ -186,12 +190,14 @@ export default function Workstation() {
     setEntries(prev => [...prev, { id: nextEntryId++, kind: 'input', text: '▶ run script' }])
     // Defer one tick so the UI can paint the "running" state.
     setTimeout(() => {
+      const t0 = performance.now()
       try {
         const res = runOctave(script, workspaceRef.current)
         appendOutputs(res.outputs)
       } catch (e: any) {
         setEntries(prev => [...prev, { id: nextEntryId++, kind: 'error', text: String(e?.message ?? e) }])
       } finally {
+        setLastRunMs(performance.now() - t0)
         setRunning(false)
       }
     }, 0)
@@ -239,10 +245,91 @@ export default function Workstation() {
     setEntries(prev => [...prev, { id: nextEntryId++, kind: 'output', text: '— workspace cleared —' }])
   }
 
-  // Keyboard shortcut: Cmd/Ctrl+Enter inside editor runs the script.
+  // Keyboard shortcuts inside the editor:
+  //   Cmd/Ctrl+Enter  — run script
+  //   Tab / Shift+Tab — indent / outdent current selection (2 spaces)
+  //   Enter           — auto-indent to match the previous line
   const onEditorKey = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); runScript() }
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      e.preventDefault()
+      runScript()
+      return
+    }
+    const ta = e.currentTarget
+    const { selectionStart: s, selectionEnd: ePos, value } = ta
+
+    if (e.key === 'Tab') {
+      e.preventDefault()
+      if (s !== ePos) {
+        // Multi-line indent / outdent on the selection range
+        const lineStart = value.lastIndexOf('\n', s - 1) + 1
+        const before = value.slice(0, lineStart)
+        const middle = value.slice(lineStart, ePos)
+        const after = value.slice(ePos)
+        if (e.shiftKey) {
+          const dedented = middle.replace(/^ {1,2}/gm, '')
+          const newVal = before + dedented + after
+          setScript(newVal)
+          requestAnimationFrame(() => {
+            ta.selectionStart = lineStart
+            ta.selectionEnd = lineStart + dedented.length
+          })
+        } else {
+          const indented = middle.replace(/^/gm, '  ')
+          const newVal = before + indented + after
+          setScript(newVal)
+          requestAnimationFrame(() => {
+            ta.selectionStart = lineStart
+            ta.selectionEnd = lineStart + indented.length
+          })
+        }
+        return
+      }
+      // Cursor insert: simple 2-space indent
+      const newVal = value.slice(0, s) + '  ' + value.slice(ePos)
+      setScript(newVal)
+      requestAnimationFrame(() => {
+        ta.selectionStart = ta.selectionEnd = s + 2
+      })
+      return
+    }
+
+    if (e.key === 'Enter' && !e.shiftKey) {
+      // Copy leading whitespace of the current line to the new one.
+      const lineStart = value.lastIndexOf('\n', s - 1) + 1
+      const currentLine = value.slice(lineStart, s)
+      const m = currentLine.match(/^\s*/)
+      const indent = m ? m[0] : ''
+      if (!indent) return // let default handle it
+      e.preventDefault()
+      const newVal = value.slice(0, s) + '\n' + indent + value.slice(ePos)
+      setScript(newVal)
+      requestAnimationFrame(() => {
+        ta.selectionStart = ta.selectionEnd = s + 1 + indent.length
+      })
+    }
   }, [runScript])
+
+  // Track cursor position for the status bar.
+  const updateCursor = useCallback((ta: HTMLTextAreaElement) => {
+    const pos = ta.selectionStart
+    const before = ta.value.slice(0, pos)
+    const line = (before.match(/\n/g)?.length ?? 0) + 1
+    const col = pos - before.lastIndexOf('\n')
+    setCursor({ line, col })
+  }, [])
+
+  const onEditorSelect = useCallback((e: React.SyntheticEvent<HTMLTextAreaElement>) => {
+    updateCursor(e.currentTarget)
+  }, [updateCursor])
+
+  const onEditorScroll = useCallback((e: React.UIEvent<HTMLTextAreaElement>) => {
+    if (gutterRef.current) {
+      gutterRef.current.style.transform = `translateY(${-e.currentTarget.scrollTop}px)`
+    }
+  }, [])
+
+  const lineCount = useMemo(() => script.split('\n').length, [script])
 
   const handleUpload = useCallback((ev: React.ChangeEvent<HTMLInputElement>) => {
     const f = ev.target.files?.[0]
@@ -267,7 +354,7 @@ export default function Workstation() {
   const styles = useMemo<Record<string, React.CSSProperties>>(() => ({
     container: {
       display: 'grid',
-      gridTemplateRows: 'auto 1fr auto',
+      gridTemplateRows: 'auto 1fr auto auto',
       height: '100%',
       color: 'var(--color-text)',
       background: 'transparent',
@@ -404,19 +491,56 @@ export default function Workstation() {
       color: 'var(--color-text-muted)',
       background: 'var(--glass-bg)',
     },
+    editorBody: {
+      flex: 1,
+      display: 'flex',
+      minHeight: 0,
+      background: 'rgba(0, 0, 0, 0.35)',
+    },
+    editorGutterClip: {
+      flex: '0 0 auto',
+      width: 44,
+      overflow: 'hidden',
+      background: 'rgba(0, 0, 0, 0.25)',
+      borderRight: '1px solid rgba(255,255,255,0.05)',
+      position: 'relative' as const,
+    },
+    editorGutterNumbers: {
+      padding: '12px 8px 12px 0',
+      fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+      fontSize: 13,
+      lineHeight: 1.5,
+      color: 'rgba(255,255,255,0.28)',
+      textAlign: 'right' as const,
+      userSelect: 'none' as const,
+      whiteSpace: 'pre',
+      willChange: 'transform',
+    },
     editor: {
       flex: 1,
       resize: 'none',
       outline: 'none',
       border: 'none',
-      padding: '12px 16px',
+      padding: '12px 16px 12px 12px',
       fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
       fontSize: 13,
       lineHeight: 1.5,
       color: 'var(--color-text)',
-      background: 'rgba(0, 0, 0, 0.35)',
+      background: 'transparent',
       tabSize: 2,
       minHeight: 0,
+    },
+    statusBar: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 16,
+      padding: '4px 16px',
+      borderTop: '1px solid var(--glass-border)',
+      background: 'rgba(0, 0, 0, 0.5)',
+      fontFamily: "'JetBrains Mono', monospace",
+      fontSize: 10,
+      color: 'var(--color-text-muted)',
+      letterSpacing: 0.3,
     },
     rightRail: {
       display: 'grid',
@@ -635,15 +759,26 @@ export default function Workstation() {
         <div style={styles.editorWrap}>
           <div style={styles.editorHeader}>
             <span>Script</span>
-            <span style={{ opacity: 0.7 }}>Ctrl/Cmd + Enter to run</span>
+            <span style={{ opacity: 0.7 }}>Ctrl/Cmd + Enter to run · Tab to indent</span>
           </div>
-          <textarea
-            style={styles.editor}
-            value={script}
-            onChange={e => setScript(e.target.value)}
-            onKeyDown={onEditorKey}
-            spellCheck={false}
-          />
+          <div style={styles.editorBody}>
+            <div style={styles.editorGutterClip} aria-hidden>
+              <div ref={gutterRef} style={styles.editorGutterNumbers}>
+                {Array.from({ length: lineCount }, (_, i) => i + 1).join('\n')}
+              </div>
+            </div>
+            <textarea
+              ref={editorRef}
+              style={styles.editor}
+              value={script}
+              onChange={e => { setScript(e.target.value); updateCursor(e.target) }}
+              onKeyDown={onEditorKey}
+              onKeyUp={onEditorSelect}
+              onClick={onEditorSelect}
+              onScroll={onEditorScroll}
+              spellCheck={false}
+            />
+          </div>
         </div>
 
         <div style={styles.rightRail}>
@@ -719,6 +854,22 @@ export default function Workstation() {
             </div>
           ))}
         </div>
+      </div>
+
+      {/* ─── Status bar ──────────────────────────────────────────────── */}
+      <div style={styles.statusBar}>
+        <span>Ln {cursor.line}, Col {cursor.col}</span>
+        <span>·</span>
+        <span>{lineCount} line{lineCount === 1 ? '' : 's'}</span>
+        <span>·</span>
+        <span>{vars.length} var{vars.length === 1 ? '' : 's'}</span>
+        <span>·</span>
+        <span>{plots.length} figure{plots.length === 1 ? '' : 's'}</span>
+        <span style={{ marginLeft: 'auto' }}>
+          {lastRunMs !== null
+            ? `last run ${lastRunMs < 1000 ? lastRunMs.toFixed(1) + ' ms' : (lastRunMs / 1000).toFixed(2) + ' s'}`
+            : 'ready'}
+        </span>
       </div>
 
       {/* ─── Command line ────────────────────────────────────────────── */}
