@@ -2806,6 +2806,35 @@ export default function Workstation() {
     }))
   }, [scriptStore])
 
+  // Duplicate a script tab — creates an exact copy of the given script's
+  // code under a derived name (` (copy)`, ` (copy 2)`, …) immediately
+  // after the source in the tab bar and switches focus to it. Used by
+  // the palette command and the tab right-click menu.
+  const duplicateScript = useCallback((id: string) => {
+    setScriptStore(store => {
+      const src = store.list.find(s => s.id === id)
+      if (!src) return store
+      // Build a non-colliding name: "foo.m" → "foo (copy).m",
+      // "foo (copy).m" → "foo (copy 2).m", and so on.
+      const dotIdx = src.name.lastIndexOf('.')
+      const base = dotIdx > 0 ? src.name.slice(0, dotIdx) : src.name
+      const ext  = dotIdx > 0 ? src.name.slice(dotIdx) : ''
+      const stripped = base.replace(/\s*\(copy(?:\s+\d+)?\)\s*$/, '')
+      const existing = new Set(store.list.map(s => s.name))
+      let candidate = `${stripped} (copy)${ext}`
+      let n = 2
+      while (existing.has(candidate)) {
+        candidate = `${stripped} (copy ${n})${ext}`
+        n++
+      }
+      const dup: SavedScript = { id: makeScriptId(), name: candidate, code: src.code }
+      const idx = store.list.findIndex(s => s.id === id)
+      const list = store.list.slice()
+      list.splice(idx + 1, 0, dup)
+      return { list, activeId: dup.id }
+    })
+  }, [])
+
   // Reorder a script tab — used by the drag-and-drop handlers in the tab
   // bar. `targetId` is the tab currently being hovered; the dragged tab
   // slides into the target's position. Dropping onto the already-dragged
@@ -2846,6 +2875,7 @@ export default function Workstation() {
     { id: 'find',         title: 'Find and replace',             hint: 'Ctrl+F',           run: () => openFind() },
     { id: 'goto',         title: 'Go to line',                   hint: 'Ctrl+G',           run: () => openGoto() },
     { id: 'new-script',   title: 'New script',                   hint: '',                 run: () => newScript() },
+    { id: 'dup-script',   title: 'Duplicate current script',     hint: '',                 run: () => duplicateScript(scriptStore.activeId) },
     { id: 'close-script', title: 'Close current script',         hint: 'Ctrl+W',           run: () => closeScript(scriptStore.activeId) },
     { id: 'reopen',       title: 'Reopen last closed script',    hint: 'Ctrl+Shift+T',     run: () => reopenLastClosedScript() },
     { id: 'rename',       title: 'Rename current script',        hint: '',                 run: () => renameScript(scriptStore.activeId) },
@@ -2870,7 +2900,7 @@ export default function Workstation() {
     { id: 'snip-try',     title: 'Insert snippet: try / catch',  hint: '',                 run: () => insertSnippet('try\n  $0\ncatch err\n  disp(err.message)\nend\n') },
     { id: 'snip-sec',     title: 'Insert snippet: %% section header', hint: '',            run: () => insertSnippet('%% $0\n') },
     { id: 'help',         title: 'Show keyboard shortcuts',      hint: 'F1',               run: () => setHelpOpen(true) },
-  ], [runScript, runSelection, runSection, openFind, openGoto, newScript, closeScript, reopenLastClosedScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, copyConsole, exportPlotSVG, exportPlotPNG, exportPlotCSV, toggleBookmarkAtCaret, gotoBookmark, clearAllBookmarks, insertSnippet])
+  ], [runScript, runSelection, runSection, openFind, openGoto, newScript, duplicateScript, closeScript, reopenLastClosedScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, copyConsole, exportPlotSVG, exportPlotPNG, exportPlotCSV, toggleBookmarkAtCaret, gotoBookmark, clearAllBookmarks, insertSnippet])
 
   // Fuzzy-ish filter: split the query into tokens and require each to
   // appear (substring, case-insensitive) in the command title. Keeps
