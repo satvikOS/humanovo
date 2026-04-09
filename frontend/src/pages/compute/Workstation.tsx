@@ -576,6 +576,9 @@ export default function Workstation() {
   const [libMode, setLibMode] = useState<'templates' | 'functions'>('templates')
   const [activeTemplate, setActiveTemplate] = useState<string | null>(null)
   const [cursor, setCursor] = useState<{ line: number; col: number }>({ line: 1, col: 1 })
+  // Live selection size (characters and logical lines) for the status bar.
+  // Null when the user isn't selecting any text.
+  const [selectionInfo, setSelectionInfo] = useState<{ chars: number; lines: number } | null>(null)
   const [lastRunMs, setLastRunMs] = useState<number | null>(null)
 
   // Editor appearance prefs — font size (clamped) and soft word wrap.
@@ -1516,13 +1519,21 @@ export default function Workstation() {
     }
   }, [runScript, runSelection, runSection, openFind, setScript, vars, acOpen, acItems, acIndex, acceptAutocomplete, closeAutocomplete, editorFontSize])
 
-  // Track cursor position for the status bar.
+  // Track cursor position and selection size for the status bar.
   const updateCursor = useCallback((ta: HTMLTextAreaElement) => {
     const pos = ta.selectionStart
     const before = ta.value.slice(0, pos)
     const line = (before.match(/\n/g)?.length ?? 0) + 1
     const col = pos - before.lastIndexOf('\n')
     setCursor({ line, col })
+    const selLen = ta.selectionEnd - ta.selectionStart
+    if (selLen > 0) {
+      const selText = ta.value.slice(ta.selectionStart, ta.selectionEnd)
+      const nl = (selText.match(/\n/g)?.length ?? 0)
+      setSelectionInfo({ chars: selLen, lines: nl + 1 })
+    } else {
+      setSelectionInfo(null)
+    }
   }, [])
 
   const onEditorSelect = useCallback((e: React.SyntheticEvent<HTMLTextAreaElement>) => {
@@ -3107,6 +3118,16 @@ export default function Workstation() {
         <span>Ln {cursor.line}, Col {cursor.col}</span>
         <span>·</span>
         <span>{lineCount} line{lineCount === 1 ? '' : 's'}</span>
+        {selectionInfo && (
+          <>
+            <span>·</span>
+            <span style={{ color: 'var(--color-text)' }}>
+              {selectionInfo.chars} char{selectionInfo.chars === 1 ? '' : 's'}
+              {selectionInfo.lines > 1 && `, ${selectionInfo.lines} lines`}
+              {' selected'}
+            </span>
+          </>
+        )}
         <span>·</span>
         <span>{vars.length} var{vars.length === 1 ? '' : 's'}</span>
         <span>·</span>
