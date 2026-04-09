@@ -2057,6 +2057,36 @@ export default function Workstation() {
     setGotoOpen(false)
   }, [gotoQuery, jumpToLine])
 
+  // Collect the script line of every error entry in the console. Used by
+  // F8 (next error) and Shift+F8 (previous error) to step through all
+  // reported issues without visually scanning the console.
+  const errorLines = useMemo(() => {
+    const seen = new Set<number>()
+    const out: number[] = []
+    for (const e of entries) {
+      if (e.kind === 'error' && typeof e.line === 'number' && !seen.has(e.line)) {
+        seen.add(e.line)
+        out.push(e.line)
+      }
+    }
+    out.sort((a, b) => a - b)
+    return out
+  }, [entries])
+
+  // Jump to the next (or previous) reported error line, wrapping around
+  // when the caret is past the last one. No-op when there are no errors.
+  const gotoNextError = useCallback((dir: 1 | -1) => {
+    if (errorLines.length === 0) return
+    const line = cursor.line
+    if (dir === 1) {
+      const next = errorLines.find(l => l > line) ?? errorLines[0]
+      jumpToLine(next)
+    } else {
+      const prev = [...errorLines].reverse().find(l => l < line) ?? errorLines[errorLines.length - 1]
+      jumpToLine(prev)
+    }
+  }, [errorLines, cursor.line, jumpToLine])
+
   // Scan the current script for symbols — %% section headers and top-level
   // `function` definitions. Captured greedily (no scope analysis) because
   // MATLAB allows multiple local functions per file and nested functions.
@@ -2254,6 +2284,14 @@ export default function Workstation() {
       e.preventDefault()
       if (e.shiftKey) runUntilCursor()
       else runSelection()
+      return
+    }
+    // F8 steps to the next error reported in the console. Shift+F8
+    // walks backwards. Both wrap around and no-op when the console
+    // has no errors yet.
+    if (e.key === 'F8') {
+      e.preventDefault()
+      gotoNextError(e.shiftKey ? -1 : 1)
       return
     }
     if ((e.metaKey || e.ctrlKey) && e.altKey && e.key === 'Enter') {
@@ -2742,7 +2780,7 @@ export default function Workstation() {
         ta.selectionStart = ta.selectionEnd = s + 1 + newIndent.length
       })
     }
-  }, [runScript, runSelection, runSection, runUntilCursor, openFind, openGoto, openSymbolNav, setScript, vars, acOpen, acItems, acIndex, acceptAutocomplete, closeAutocomplete, editorFontSize, sigHint, toggleBookmarkAtCaret, gotoBookmark, gotoMatchingBracket])
+  }, [runScript, runSelection, runSection, runUntilCursor, openFind, openGoto, openSymbolNav, setScript, vars, acOpen, acItems, acIndex, acceptAutocomplete, closeAutocomplete, editorFontSize, sigHint, toggleBookmarkAtCaret, gotoBookmark, gotoMatchingBracket, gotoNextError])
 
   // Track cursor position and selection size for the status bar.
   const updateCursor = useCallback((ta: HTMLTextAreaElement) => {
@@ -3255,8 +3293,10 @@ export default function Workstation() {
     { id: 'goto-bracket', title: 'Go to matching bracket',       hint: 'Ctrl+M',           run: () => gotoMatchingBracket(false) },
     { id: 'sel-bracket',  title: 'Select to matching bracket',   hint: 'Ctrl+Shift+M',     run: () => gotoMatchingBracket(true) },
     { id: 'goto-sym',     title: 'Go to symbol in script',       hint: 'Ctrl+Shift+O',     run: () => openSymbolNav() },
+    { id: 'next-err',     title: 'Jump to next error',           hint: 'F8',               run: () => gotoNextError(1) },
+    { id: 'prev-err',     title: 'Jump to previous error',       hint: 'Shift+F8',         run: () => gotoNextError(-1) },
     { id: 'help',         title: 'Show keyboard shortcuts',      hint: 'F1',               run: () => setHelpOpen(true) },
-  ], [runScript, runSelection, runSection, runUntilCursor, openFind, openGoto, openSymbolNav, newScript, duplicateScript, closeScript, reopenLastClosedScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, copyConsole, downloadConsole, exportPlotSVG, exportPlotPNG, exportPlotCSV, toggleBookmarkAtCaret, gotoBookmark, clearAllBookmarks, insertSnippet, renameIdentifierAtCaret, gotoMatchingBracket, trimTrailingWhitespace, applySelectionTransform, sortSelectedLines])
+  ], [runScript, runSelection, runSection, runUntilCursor, openFind, openGoto, openSymbolNav, gotoNextError, newScript, duplicateScript, closeScript, reopenLastClosedScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, copyConsole, downloadConsole, exportPlotSVG, exportPlotPNG, exportPlotCSV, toggleBookmarkAtCaret, gotoBookmark, clearAllBookmarks, insertSnippet, renameIdentifierAtCaret, gotoMatchingBracket, trimTrailingWhitespace, applySelectionTransform, sortSelectedLines])
 
   // Fuzzy-ish filter: split the query into tokens and require each to
   // appear (substring, case-insensitive) in the command title. Keeps
@@ -6126,6 +6166,7 @@ const SHORTCUT_GROUPS: { title: string; items: [string, string][] }[] = [
       ['Enter / Shift + Enter (find)', 'Next / previous match'],
       ['Ctrl / Cmd + F2', 'Toggle bookmark on current line'],
       ['F2 / Shift + F2', 'Next / previous bookmark'],
+      ['F8 / Shift + F8', 'Jump to next / previous reported error'],
       ['Alt + click gutter', 'Toggle bookmark on that line'],
       ['Esc', 'Close find, autocomplete, fullscreen or help'],
     ],
