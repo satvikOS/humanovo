@@ -1905,6 +1905,104 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
     return MVOID
   })
 
+  // ---- Statistical tests -----------------------------------------------
+  def('ttest2', 2, args => {
+    const r = ML.welchTTest(toArray(args[0]), toArray(args[1]))
+    return mmat(1, 4, [r.t, r.df, r.p, r.cohenD])
+  })
+  def('ttest', 2, args => {
+    const r = ML.pairedTTest(toArray(args[0]), toArray(args[1]))
+    return mmat(1, 4, [r.t, r.df, r.p, r.cohenD])
+  })
+  def('ranksum', 2, args => {
+    const r = ML.mannWhitneyU(toArray(args[0]), toArray(args[1]))
+    return mmat(1, 4, [r.u, r.z, r.p, r.effectSize])
+  })
+  def('shapiro', 1, args => {
+    const r = ML.shapiroWilk(toArray(args[0]))
+    return mmat(1, 2, [r.w, r.p])
+  })
+  def('iqr', 1, args => {
+    const a = toArray(args[0])
+    return mnum(ML.quantile(a, 0.75) - ML.quantile(a, 0.25))
+  })
+  def('prctile', 2, args => mnum(ML.quantile(toArray(args[0]), toNumber(args[1]) / 100)))
+  def('regress', 2, args => {
+    // regress(y, x) -> [slope, intercept, r2, p]
+    const r = ML.linearRegression(toArray(args[1]), toArray(args[0]))
+    return mmat(1, 4, [r.slope, r.intercept, r.r2, r.pValue])
+  })
+
+  // ---- Extra scalar math / element-wise --------------------------------
+  // Abramowitz & Stegun 7.1.26 approximation for erf
+  const erfScalar = (x: number): number => {
+    const sign = x < 0 ? -1 : 1
+    const ax = Math.abs(x)
+    const a1 =  0.254829592, a2 = -0.284496736, a3 =  1.421413741
+    const a4 = -1.453152027, a5 =  1.061405429, p  =  0.3275911
+    const t = 1 / (1 + p * ax)
+    const y = 1 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-ax * ax)
+    return sign * y
+  }
+  def('erf', 1, args => elemMap(args[0], erfScalar))
+  def('erfc', 1, args => elemMap(args[0], x => 1 - erfScalar(x)))
+  def('sinc', 1, args => elemMap(args[0], x => x === 0 ? 1 : Math.sin(Math.PI * x) / (Math.PI * x)))
+  def('deg2rad', 1, args => elemMap(args[0], x => x * Math.PI / 180))
+  def('rad2deg', 1, args => elemMap(args[0], x => x * 180 / Math.PI))
+  def('log1p', 1, args => elemMap(args[0], Math.log1p))
+  def('expm1', 1, args => elemMap(args[0], Math.expm1))
+  def('cbrt', 1, args => elemMap(args[0], Math.cbrt))
+  def('hypot', 2, args => elemBinary(toMat(args[0]), toMat(args[1]), Math.hypot, 'hypot'))
+
+  // ---- Matrix flips / arrangement --------------------------------------
+  def('flipud', 1, args => {
+    const m = toMat(args[0])
+    const out = new Float64Array(m.data.length)
+    for (let i = 0; i < m.rows; i++) {
+      for (let j = 0; j < m.cols; j++) {
+        out[(m.rows - 1 - i) * m.cols + j] = m.data[i * m.cols + j]
+      }
+    }
+    return mmat(m.rows, m.cols, out)
+  })
+  def('fliplr', 1, args => {
+    const m = toMat(args[0])
+    const out = new Float64Array(m.data.length)
+    for (let i = 0; i < m.rows; i++) {
+      for (let j = 0; j < m.cols; j++) {
+        out[i * m.cols + (m.cols - 1 - j)] = m.data[i * m.cols + j]
+      }
+    }
+    return mmat(m.rows, m.cols, out)
+  })
+  def('rot90', -1, args => {
+    const m = toMat(args[0])
+    const k = ((args[1] ? Math.round(toNumber(args[1])) : 1) % 4 + 4) % 4
+    let cur = m
+    for (let n = 0; n < k; n++) {
+      const r = cur.rows, c = cur.cols
+      const out = new Float64Array(r * c)
+      for (let i = 0; i < r; i++) {
+        for (let j = 0; j < c; j++) {
+          out[(c - 1 - j) * r + i] = cur.data[i * c + j]
+        }
+      }
+      cur = { kind: 'mat', rows: c, cols: r, data: out }
+    }
+    return cur
+  })
+
+  // ---- Random extras ---------------------------------------------------
+  def('randi', -1, args => {
+    need(args, 1, 'randi')
+    const imax = Math.round(toNumber(args[0]))
+    const rr = args[1] ? Math.round(toNumber(args[1])) : 1
+    const cc = args[2] ? Math.round(toNumber(args[2])) : rr
+    const d = new Float64Array(rr * cc)
+    for (let i = 0; i < d.length; i++) d[i] = Math.floor(Math.random() * imax) + 1
+    return mmat(rr, cc, d)
+  })
+
   // ---- Linear algebra --------------------------------------------------
   def('det', 1, args => {
     need(args, 1, 'det')

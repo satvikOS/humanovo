@@ -20,6 +20,7 @@ export const WORKSTATION_CATEGORIES = [
   'Linear Algebra',
   'Curve Fitting',
   'Simulation',
+  'Differential Equations',
   'Plotting',
 ]
 
@@ -252,5 +253,215 @@ plot(t, sin(t) .* cos(t), 'sin*cos');
 title('Overlay demo');
 xlabel('t'); ylabel('value');
 legend('sin', 'cos', 'sin*cos');`,
+  },
+
+  // ── New: Getting Started extras ─────────────────────────────────────
+  {
+    id: 'gs-anon',
+    name: 'Anonymous functions',
+    category: 'Getting Started',
+    description: 'Define an anonymous function and apply it with arrayfun.',
+    code: `% Anonymous function via arrayfun
+f = @(x) x.^2 - 2*x + 1;
+x = linspace(-2, 4, 60);
+y = arrayfun(f, x);
+plot(x, y, 'f(x) = x^2 - 2x + 1');
+title('Anonymous function');
+xlabel('x'); ylabel('f(x)');`,
+  },
+
+  // ── New: Statistics extras ─────────────────────────────────────────
+  {
+    id: 'stat-ttest',
+    name: 'Two-sample t-test',
+    category: 'Statistics',
+    description: 'Welch two-sample t-test between two normal samples.',
+    code: `% Two-sample Welch t-test
+a = 5 + randn(1, 40) * 1.2;
+b = 5.6 + randn(1, 40) * 1.1;
+
+r = ttest2(a, b);     % [t, df, p, cohenD]
+printf('t = %.3f, df = %.1f, p = %.4f, d = %.3f\\n', ...
+       r(1), r(2), r(3), r(4));
+
+printf('mean A = %.3f, mean B = %.3f\\n', mean(a), mean(b));`,
+  },
+  {
+    id: 'stat-regress',
+    name: 'Linear regression',
+    category: 'Statistics',
+    description: 'Fit a linear model and extract slope, intercept, R^2 and p.',
+    code: `% Linear regression
+x = linspace(0, 10, 40);
+y = 1.8 * x + 2 + randn(1, 40) * 1.5;
+
+r = regress(y, x);    % [slope, intercept, r2, p]
+printf('slope     = %.4f\\n', r(1));
+printf('intercept = %.4f\\n', r(2));
+printf('R^2       = %.4f\\n', r(3));
+printf('p         = %.4g\\n', r(4));
+
+xf = linspace(0, 10, 100);
+yf = r(1) * xf + r(2);
+
+scatter(x, y);
+plot(xf, yf, 'fit');
+title('Linear regression');
+xlabel('x'); ylabel('y');`,
+  },
+  {
+    id: 'stat-shapiro',
+    name: 'Shapiro\u2013Wilk normality',
+    category: 'Statistics',
+    description: 'Test whether a sample looks normal vs. log-normal.',
+    code: `% Normality check on two samples
+a = randn(1, 60);
+b = exp(0.5 * randn(1, 60));  % log-normal
+
+ra = shapiro(a);    % [W, p]
+rb = shapiro(b);
+
+printf('normal sample   : W = %.4f, p = %.4f\\n', ra(1), ra(2));
+printf('lognormal sample: W = %.4f, p = %.4f\\n', rb(1), rb(2));`,
+  },
+
+  // ── New: Linear Algebra extras ─────────────────────────────────────
+  {
+    id: 'la-solve',
+    name: 'Solve Ax = b',
+    category: 'Linear Algebra',
+    description: 'Compare the \\ operator with inv(A)*b for a 4x4 system.',
+    code: `% Linear system solve
+A = [4 1 0 0; 1 4 1 0; 0 1 4 1; 0 0 1 4];
+b = [15; 10; 10; 15];
+
+x1 = A \\ b;        % preferred: LU solve
+x2 = inv(A) * b;   % explicit inverse
+
+printf('x (via \\\\):\\n');
+disp(x1);
+printf('residual = %.2e\\n', norm(A*x1 - b));
+printf('diff vs inv: %.2e\\n', norm(x1 - x2));`,
+  },
+  {
+    id: 'la-det-inv',
+    name: 'Determinant & inverse',
+    category: 'Linear Algebra',
+    description: 'Build a random matrix, compute det, inv, and verify A*inv(A)=I.',
+    code: `% Determinant & inverse
+A = [3 1 2; 1 4 1; 2 1 5];
+
+d  = det(A);
+Ai = inv(A);
+I  = A * Ai;
+
+printf('det(A) = %.4f\\n', d);
+printf('trace(A) = %.4f\\n', trace(A));
+printf('||A*inv(A) - eye(3)|| = %.2e\\n', norm(I - eye(3)));
+disp(Ai);`,
+  },
+  {
+    id: 'la-rank',
+    name: 'Rank & null structure',
+    category: 'Linear Algebra',
+    description: 'Rank of a deliberately-singular matrix.',
+    code: `% Rank of a rank-2 matrix
+A = [1 2 3; 2 4 6; 1 0 1];
+printf('rank(A) = %d\\n', rank(A));
+printf('det(A)  = %.4e\\n', det(A));
+
+B = eye(3) + 0.01 * randn(3, 3);
+printf('rank(B) = %d  (expect 3)\\n', rank(B));`,
+  },
+
+  // ── New: Differential Equations ────────────────────────────────────
+  {
+    id: 'ode-lorenz',
+    name: 'Lorenz attractor',
+    category: 'Differential Equations',
+    description: 'Integrate the Lorenz system with ode45 and plot x vs z.',
+    code: `% Lorenz attractor via ode45
+sigma = 10; rho = 28; beta = 8/3;
+f = @(t, y) [sigma*(y(2)-y(1)); y(1)*(rho-y(3))-y(2); y(1)*y(2)-beta*y(3)];
+
+Y = ode45(f, [0 40], [1; 1; 1], 4000);  % [N x 3]
+x = Y(:,1); z = Y(:,3);
+
+plot(x, z, 'lorenz');
+title('Lorenz attractor (x vs z)');
+xlabel('x'); ylabel('z');`,
+  },
+  {
+    id: 'ode-predator',
+    name: 'Predator\u2013prey model',
+    category: 'Differential Equations',
+    description: 'Lotka\u2013Volterra equations integrated with ode45.',
+    code: `% Lotka-Volterra predator-prey
+a = 1.1; b = 0.4; c = 0.4; d = 0.1;
+f = @(t, y) [a*y(1) - b*y(1)*y(2); -c*y(2) + d*y(1)*y(2)];
+
+Y = ode45(f, [0 50], [10; 2], 1500);
+prey = Y(:,1); pred = Y(:,2);
+t = __ode_t__;
+
+plot(t, prey, 'prey');
+plot(t, pred, 'predator');
+title('Lotka-Volterra');
+xlabel('t'); ylabel('population');
+legend('prey', 'predator');`,
+  },
+  {
+    id: 'ode-harmonic',
+    name: 'Damped harmonic oscillator',
+    category: 'Differential Equations',
+    description: 'Classic second-order ODE rewritten as a 2-D first-order system.',
+    code: `% Damped harmonic oscillator: x'' + 2*zeta*w*x' + w^2 x = 0
+w = 2*pi; zeta = 0.1;
+f = @(t, y) [y(2); -2*zeta*w*y(2) - w^2*y(1)];
+
+Y = ode45(f, [0 6], [1; 0], 800);
+t = __ode_t__;
+
+plot(t, Y(:,1), 'x(t)');
+plot(t, Y(:,2), "x'(t)");
+title('Damped harmonic oscillator');
+xlabel('t'); ylabel('state');
+legend('position', 'velocity');`,
+  },
+
+  // ── New: Simulation extras ─────────────────────────────────────────
+  {
+    id: 'sim-logistic',
+    name: 'Logistic map orbit',
+    category: 'Simulation',
+    description: 'Iterate the logistic map and watch chaos emerge at r = 3.9.',
+    code: `% Logistic map orbit
+r = 3.9; n = 200; x = zeros(1, n);
+x(1) = 0.4;
+for k = 1:n-1
+  x(k+1) = r * x(k) * (1 - x(k));
+end
+plot(1:n, x, 'orbit');
+title(sprintf('Logistic map (r = %.2f)', r));
+xlabel('iteration'); ylabel('x_k');`,
+  },
+
+  // ── New: Signal Processing extras ──────────────────────────────────
+  {
+    id: 'sig-smoothing',
+    name: 'Moving average smoothing',
+    category: 'Signal Processing',
+    description: 'Compare raw and smoothed signal with movmean.',
+    code: `% Moving average smoothing
+fs = 200;
+t = 0:1/fs:3-1/fs;
+clean = sin(2*pi*1.5*t) + 0.5*sin(2*pi*0.3*t);
+noisy = clean + 0.6*randn(1, length(t));
+smooth = movmean(noisy, 15);
+
+plot(t, noisy, 'noisy');
+plot(t, smooth, 'smooth');
+title('Moving-average smoothing (window = 15)');
+xlabel('t (s)'); ylabel('amplitude');`,
   },
 ]
