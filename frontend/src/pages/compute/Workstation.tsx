@@ -1921,6 +1921,35 @@ export default function Workstation() {
     })
   }, [applySelectionTransform])
 
+  // Collapse the selection down to its unique lines, preserving first-
+  // seen order so the shape of the block is closer to what the user
+  // started with. Handy for de-duplicating pasted output or variable
+  // name lists.
+  const uniqueSelectedLines = useCallback(() => {
+    applySelectionTransform(text => {
+      const lines = text.split('\n')
+      if (lines.length < 2) return text
+      const seen = new Set<string>()
+      const out: string[] = []
+      for (const ln of lines) {
+        if (!seen.has(ln)) { seen.add(ln); out.push(ln) }
+      }
+      return out.join('\n')
+    })
+  }, [applySelectionTransform])
+
+  // Drop blank lines (lines that are empty or only whitespace) from the
+  // selection. Pairs well with sortSelectedLines for cleaning up pasted
+  // text.
+  const removeEmptySelectedLines = useCallback(() => {
+    applySelectionTransform(text => {
+      const lines = text.split('\n')
+      const filtered = lines.filter(ln => ln.trim().length > 0)
+      if (filtered.length === lines.length) return text
+      return filtered.join('\n')
+    })
+  }, [applySelectionTransform])
+
   // Strip trailing spaces and tabs from every line in the script. Keeps
   // the caret on the same logical line, clamping its column so it lands
   // on the new end-of-line when the user sat inside the removed run.
@@ -3374,6 +3403,8 @@ export default function Workstation() {
     { id: 'upper-sel',    title: 'Uppercase selection',          hint: '',                 run: () => applySelectionTransform(s => s.toUpperCase()) },
     { id: 'lower-sel',    title: 'Lowercase selection',          hint: '',                 run: () => applySelectionTransform(s => s.toLowerCase()) },
     { id: 'sort-lines',   title: 'Sort selected lines',          hint: '',                 run: () => sortSelectedLines() },
+    { id: 'unique-lines', title: 'Unique selected lines',        hint: '',                 run: () => uniqueSelectedLines() },
+    { id: 'drop-blank',   title: 'Remove empty selected lines',  hint: '',                 run: () => removeEmptySelectedLines() },
     { id: 'reverse-lines', title: 'Reverse selected lines',      hint: '',                 run: () => applySelectionTransform(s => s.split('\n').reverse().join('\n')) },
     { id: 'goto-bracket', title: 'Go to matching bracket',       hint: 'Ctrl+M',           run: () => gotoMatchingBracket(false) },
     { id: 'sel-bracket',  title: 'Select to matching bracket',   hint: 'Ctrl+Shift+M',     run: () => gotoMatchingBracket(true) },
@@ -3381,7 +3412,7 @@ export default function Workstation() {
     { id: 'next-err',     title: 'Jump to next error',           hint: 'F8',               run: () => gotoNextError(1) },
     { id: 'prev-err',     title: 'Jump to previous error',       hint: 'Shift+F8',         run: () => gotoNextError(-1) },
     { id: 'help',         title: 'Show keyboard shortcuts',      hint: 'F1',               run: () => setHelpOpen(true) },
-  ], [runScript, runSelection, runSection, runUntilCursor, rerunLastFragment, openFind, openGoto, openSymbolNav, gotoNextError, newScript, duplicateScript, closeScript, closeOtherScripts, closeScriptsToRight, reopenLastClosedScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, copyConsole, downloadConsole, clearConsoleErrors, exportPlotSVG, exportPlotPNG, exportPlotCSV, toggleBookmarkAtCaret, gotoBookmark, clearAllBookmarks, insertSnippet, renameIdentifierAtCaret, gotoMatchingBracket, trimTrailingWhitespace, applySelectionTransform, sortSelectedLines])
+  ], [runScript, runSelection, runSection, runUntilCursor, rerunLastFragment, openFind, openGoto, openSymbolNav, gotoNextError, newScript, duplicateScript, closeScript, closeOtherScripts, closeScriptsToRight, reopenLastClosedScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, copyConsole, downloadConsole, clearConsoleErrors, exportPlotSVG, exportPlotPNG, exportPlotCSV, toggleBookmarkAtCaret, gotoBookmark, clearAllBookmarks, insertSnippet, renameIdentifierAtCaret, gotoMatchingBracket, trimTrailingWhitespace, applySelectionTransform, sortSelectedLines, uniqueSelectedLines, removeEmptySelectedLines])
 
   // Fuzzy-ish filter: split the query into tokens and require each to
   // appear (substring, case-insensitive) in the command title. Keeps
