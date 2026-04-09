@@ -672,6 +672,12 @@ export default function Workstation() {
   // `matchIdx` is the index of the currently highlighted match in `matches`.
   const [findOpen, setFindOpen] = useState(false)
   const [findQuery, setFindQuery] = useState('')
+  // Find modifiers. `findRegex` reinterprets the query as a JavaScript
+  // regular expression; `findCaseSensitive` flips the default case-fold
+  // behaviour. Both are applied to the matches memo and to replaceAll.
+  const [findRegex, setFindRegex] = useState(false)
+  const [findCaseSensitive, setFindCaseSensitive] = useState(false)
+  const [findError, setFindError] = useState<string | null>(null)
   const [replaceQuery, setReplaceQuery] = useState('')
   const [matchIdx, setMatchIdx] = useState(0)
   const findInputRef = useRef<HTMLInputElement>(null)
@@ -2429,23 +2435,46 @@ export default function Workstation() {
     setSigHint(null)
   }, [])
 
-  // Case-insensitive substring match positions for find/replace. Recomputed
-  // whenever the script or query changes; kept as plain offsets so we can
-  // map them straight to textarea selections.
-  const findMatches = useMemo<number[]>(() => {
-    if (!findQuery) return []
-    const hay = script.toLowerCase()
-    const needle = findQuery.toLowerCase()
-    const out: number[] = []
-    let from = 0
-    while (from <= hay.length - needle.length) {
-      const idx = hay.indexOf(needle, from)
-      if (idx < 0) break
-      out.push(idx)
-      from = idx + Math.max(1, needle.length)
+  // Match positions for find/replace. Each entry has a start offset and
+  // a length, so regex matches with variable widths work the same as
+  // plain substring matches. Recomputed whenever script, query, or the
+  // find modifiers change. A syntactically invalid regex falls back to
+  // an empty result and surfaces the error in `findError`.
+  const findMatches = useMemo<Array<{ start: number; len: number }>>(() => {
+    if (!findQuery) { setFindError(null); return [] }
+    const out: Array<{ start: number; len: number }> = []
+    if (findRegex) {
+      try {
+        const flags = findCaseSensitive ? 'g' : 'gi'
+        const re = new RegExp(findQuery, flags)
+        let m: RegExpExecArray | null
+        let guard = 0
+        while ((m = re.exec(script)) !== null) {
+          // Empty matches (e.g. "a*") would loop forever — nudge past.
+          const len = m[0].length
+          out.push({ start: m.index, len })
+          if (len === 0) re.lastIndex = m.index + 1
+          if (++guard > 10000) break
+        }
+        setFindError(null)
+      } catch (err) {
+        setFindError(err instanceof Error ? err.message : 'invalid regex')
+        return []
+      }
+    } else {
+      const hay = findCaseSensitive ? script : script.toLowerCase()
+      const needle = findCaseSensitive ? findQuery : findQuery.toLowerCase()
+      let from = 0
+      while (from <= hay.length - needle.length) {
+        const idx = hay.indexOf(needle, from)
+        if (idx < 0) break
+        out.push({ start: idx, len: needle.length })
+        from = idx + Math.max(1, needle.length)
+      }
+      setFindError(null)
     }
     return out
-  }, [script, findQuery])
+  }, [script, findQuery, findRegex, findCaseSensitive])
 
   // Keep matchIdx in range as matches shift.
   useEffect(() => {
@@ -2457,8 +2486,9 @@ export default function Workstation() {
     const ta = editorRef.current
     if (!ta || findMatches.length === 0) return
     const safe = ((idx % findMatches.length) + findMatches.length) % findMatches.length
-    const start = findMatches[safe]
-    const end = start + findQuery.length
+    const m = findMatches[safe]
+    const start = m.start
+    const end = start + m.len
     ta.focus()
     ta.setSelectionRange(start, end)
     // Scroll the match into view using the live editor line height so the
@@ -2466,7 +2496,7 @@ export default function Workstation() {
     const lineOfMatch = (script.slice(0, start).match(/\n/g)?.length ?? 0)
     ta.scrollTop = Math.max(0, lineOfMatch * editorLineHeight - ta.clientHeight / 2)
     setMatchIdx(safe)
-  }, [findMatches, findQuery, script, editorLineHeight])
+  }, [findMatches, script, editorLineHeight])
 
   const findNext = useCallback(() => selectMatch(matchIdx + 1), [selectMatch, matchIdx])
   const findPrev = useCallback(() => selectMatch(matchIdx - 1), [selectMatch, matchIdx])
@@ -2474,28 +2504,51 @@ export default function Workstation() {
   const replaceOne = useCallback(() => {
     if (findMatches.length === 0 || !findQuery) return
     const safe = Math.min(matchIdx, findMatches.length - 1)
-    const start = findMatches[safe]
-    const end = start + findQuery.length
-    const next = script.slice(0, start) + replaceQuery + script.slice(end)
+    const m = findMatches[safe]
+    const start = m.start
+    const end = start + m.len
+    // In regex mode honour backreferences like $1 in the replacement.
+    let piece = replaceQuery
+    if (findRegex) {
+      try {
+        const flags = findCaseSensitive ? '' : 'i'
+        const re = new RegExp(findQuery, flags)
+        piece = script.slice(start, end).replace(re, replaceQuery)
+      } catch { /* fall through to literal replacement */ }
+    }
+    const next = script.slice(0, start) + piece + script.slice(end)
     setScript(next)
     // After the state update lands, highlight the next occurrence (or stay
     // in place if none remain).
     requestAnimationFrame(() => {
       const ta = editorRef.current
       if (!ta) return
-      const pos = start + replaceQuery.length
+      const pos = start + piece.length
       ta.focus()
       ta.setSelectionRange(pos, pos)
     })
-  }, [findMatches, findQuery, matchIdx, replaceQuery, script, setScript])
+  }, [findMatches, findQuery, findRegex, findCaseSensitive, matchIdx, replaceQuery, script, setScript])
 
   const replaceAll = useCallback(() => {
     if (findMatches.length === 0 || !findQuery) return
-    // Case-insensitive global replace without touching case elsewhere.
-    const esc = findQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    const re = new RegExp(esc, 'gi')
-    setScript(script.replace(re, replaceQuery))
-  }, [findMatches, findQuery, replaceQuery, script, setScript])
+    try {
+      if (findRegex) {
+        const flags = findCaseSensitive ? 'g' : 'gi'
+        const re = new RegExp(findQuery, flags)
+        setScript(script.replace(re, replaceQuery))
+      } else {
+        // Plain substring replace, escaped into a regex so we can do it in
+        // one pass while still honouring the case-sensitivity toggle.
+        const esc = findQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        const flags = findCaseSensitive ? 'g' : 'gi'
+        const re = new RegExp(esc, flags)
+        // Escape $ in the literal replacement so '$1' etc. aren't
+        // interpreted as backreferences in non-regex mode.
+        const literal = replaceQuery.replace(/\$/g, '$$$$')
+        setScript(script.replace(re, literal))
+      }
+    } catch { /* invalid regex — surfaced via findError already */ }
+  }, [findMatches, findQuery, findRegex, findCaseSensitive, replaceQuery, script, setScript])
 
   const handleUpload = useCallback((ev: React.ChangeEvent<HTMLInputElement>) => {
     const files = ev.target.files
@@ -4100,10 +4153,38 @@ export default function Workstation() {
                 spellCheck={false}
                 autoComplete="off"
               />
+              <button
+                type="button"
+                style={{
+                  ...styles.btn,
+                  ...styles.btnGhost,
+                  padding: '3px 8px',
+                  fontSize: 11,
+                  ...(findCaseSensitive ? { color: 'var(--color-text)', borderColor: 'var(--color-border-strong)' } : null),
+                }}
+                onClick={() => setFindCaseSensitive(v => !v)}
+                title="Case sensitive"
+                aria-pressed={findCaseSensitive}
+              >Aa</button>
+              <button
+                type="button"
+                style={{
+                  ...styles.btn,
+                  ...styles.btnGhost,
+                  padding: '3px 8px',
+                  fontSize: 11,
+                  ...(findRegex ? { color: 'var(--color-text)', borderColor: 'var(--color-border-strong)' } : null),
+                }}
+                onClick={() => setFindRegex(v => !v)}
+                title="Regular expression"
+                aria-pressed={findRegex}
+              >.*</button>
               <span style={styles.findCount}>
-                {findMatches.length === 0
-                  ? (findQuery ? '0 / 0' : '')
-                  : `${Math.min(matchIdx + 1, findMatches.length)} / ${findMatches.length}`}
+                {findError
+                  ? <span style={{ color: 'var(--color-error)' }}>regex err</span>
+                  : findMatches.length === 0
+                    ? (findQuery ? '0 / 0' : '')
+                    : `${Math.min(matchIdx + 1, findMatches.length)} / ${findMatches.length}`}
               </span>
               <button
                 style={{ ...styles.btn, ...styles.btnGhost, padding: '3px 8px', fontSize: 11 }}
@@ -4306,11 +4387,13 @@ export default function Workstation() {
               )}
               {!editorWrapOn && findOpen && findQuery && findMatches.length > 0 && (
                 <div ref={findOverlayRef} style={styles.findOverlay} aria-hidden="true">
-                  {findMatches.map((start, idx) => {
+                  {findMatches.map((m, idx) => {
                     // Multi-line matches would need a rect per line; in
                     // practice find queries rarely cross newlines, so only
                     // draw single-line matches and skip the rest.
-                    const end = start + findQuery.length
+                    const start = m.start
+                    const end = start + m.len
+                    if (m.len === 0) return null
                     if (script.slice(start, end).indexOf('\n') >= 0) return null
                     const lc = lineColForPos(script, start)
                     const active = idx === matchIdx
@@ -4322,7 +4405,7 @@ export default function Workstation() {
                           ...(active ? styles.findMatchHLActive : null),
                           top: 14 + lc.line * editorLineHeight,
                           left: 14 + lc.col * editorCharWidth,
-                          width: findQuery.length * editorCharWidth,
+                          width: m.len * editorCharWidth,
                         }}
                       />
                     )
