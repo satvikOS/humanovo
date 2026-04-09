@@ -675,6 +675,18 @@ export default function Workstation() {
   // up to a few thousand lines.
   const highlightTokens = useMemo(() => highlightMatlab(script, varNameSet), [script, varNameSet])
 
+  // Piggyback on the tokenizer to count how many times each workspace
+  // variable is used in the current script. Free since we already emit
+  // 'variable' tokens for exactly these identifiers. Shown in the
+  // workspace panel as a small muted badge so users can spot unused vars.
+  const varUsageCounts = useMemo<Record<string, number>>(() => {
+    const counts: Record<string, number> = {}
+    for (const t of highlightTokens) {
+      if (t.kind === 'variable') counts[t.text] = (counts[t.text] || 0) + 1
+    }
+    return counts
+  }, [highlightTokens])
+
   // Convert (line, col) cursor → absolute char index. Used by the bracket
   // matcher; the cursor itself comes from the textarea via updateCursor().
   const caretPos = useMemo(() => {
@@ -3786,9 +3798,24 @@ export default function Workstation() {
                         cursor: 'pointer',
                         background: isOpen ? 'var(--glass-bg-hover)' : 'transparent',
                       }}
-                      title={`${v.name}: ${v.kind}  ${v.shape}  ${v.summary}`}
+                      title={`${v.name}: ${v.kind}  ${v.shape}  ${v.summary}${varUsageCounts[v.name] ? `  (used ${varUsageCounts[v.name]}× in script)` : '  (unused in script)'}`}
                     >
-                      <span style={{ color: 'var(--color-text)', fontWeight: 500 }}>{v.name}</span>
+                      <span style={{ color: 'var(--color-text)', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        {v.name}
+                        {(() => {
+                          const n = varUsageCounts[v.name] || 0
+                          return (
+                            <span style={{
+                              fontSize: 10,
+                              fontWeight: 400,
+                              color: n === 0 ? 'var(--color-text-muted)' : 'var(--color-text-secondary)',
+                              fontStyle: n === 0 ? 'italic' : 'normal',
+                            }}>
+                              {n === 0 ? 'unused' : `${n}×`}
+                            </span>
+                          )
+                        })()}
+                      </span>
                       <span style={{ color: 'var(--color-text-muted)' }}>{v.shape}</span>
                       <span style={{
                         color: 'var(--color-text-secondary)',
