@@ -1211,12 +1211,19 @@ export default function Workstation() {
     return `${(b / (1024 * 1024 * 1024)).toFixed(2)} GB`
   }, [workspaceBytes])
 
+  // Remembers the most recent fragment handed to runFragment so that a
+  // single keystroke (Ctrl+Shift+R) can re-run the exact same slice of
+  // script without reselecting. Useful for iterating on a REPL-style
+  // workflow: tweak code, re-run the same cell, repeat.
+  const lastFragmentRef = useRef<{ src: string; label: string } | null>(null)
+
   // Core runner. Takes an arbitrary source fragment plus a label that is
   // echoed into the console so the user can tell a full run from a
   // "Run Selection". Used by both runScript and runSelection.
   const runFragment = useCallback((src: string, label: string) => {
     if (running) return
     if (!src.trim()) return
+    lastFragmentRef.current = { src, label }
     setRunning(true)
     setErrorLine(null)
     setEntries(prev => [...prev, mkEntry({ kind: 'input', text: label })])
@@ -1289,6 +1296,18 @@ export default function Workstation() {
     if (!fragment.trim()) return
     runFragment(fragment, `▶ run until line ${upto}`)
   }, [script, cursor.line, runFragment])
+
+  // Re-execute the most recent fragment — whether it was a full script,
+  // a selection, a section, or a "run until cursor". Falls back to a
+  // full-script run if nothing has been executed yet in this session.
+  const rerunLastFragment = useCallback(() => {
+    const last = lastFragmentRef.current
+    if (last) {
+      runFragment(last.src, `↻ ${last.label.replace(/^▶\s*/, '')}`)
+    } else {
+      runFragment(script, '▶ run script')
+    }
+  }, [runFragment, script])
 
   const runCommand = useCallback((text: string) => {
     const line = text.trim()
@@ -2296,6 +2315,15 @@ export default function Workstation() {
       else runSelection()
       return
     }
+    // Ctrl/Cmd + Shift + R — re-run the most recent fragment regardless of
+    // what's currently selected. Mirrors the "Rerun" convention from most
+    // JetBrains IDEs and shells. Plain Ctrl+R is taken by reverse history
+    // search on the command line, so the shift variant avoids the clash.
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'r' || e.key === 'R')) {
+      e.preventDefault()
+      rerunLastFragment()
+      return
+    }
     // F8 steps to the next error reported in the console. Shift+F8
     // walks backwards. Both wrap around and no-op when the console
     // has no errors yet.
@@ -2790,7 +2818,7 @@ export default function Workstation() {
         ta.selectionStart = ta.selectionEnd = s + 1 + newIndent.length
       })
     }
-  }, [runScript, runSelection, runSection, runUntilCursor, openFind, openGoto, openSymbolNav, setScript, vars, acOpen, acItems, acIndex, acceptAutocomplete, closeAutocomplete, editorFontSize, sigHint, toggleBookmarkAtCaret, gotoBookmark, gotoMatchingBracket, gotoNextError])
+  }, [runScript, runSelection, runSection, runUntilCursor, rerunLastFragment, openFind, openGoto, openSymbolNav, setScript, vars, acOpen, acItems, acIndex, acceptAutocomplete, closeAutocomplete, editorFontSize, sigHint, toggleBookmarkAtCaret, gotoBookmark, gotoMatchingBracket, gotoNextError])
 
   // Track cursor position and selection size for the status bar.
   const updateCursor = useCallback((ta: HTMLTextAreaElement) => {
@@ -3263,6 +3291,7 @@ export default function Workstation() {
   // cheap and the array identity is stable across renders.
   const paletteCommands = useMemo(() => [
     { id: 'run',          title: 'Run script',                   hint: 'Ctrl+Enter',       run: () => runScript() },
+    { id: 'run-last',     title: 'Re-run last fragment',         hint: 'Ctrl+Shift+R',     run: () => rerunLastFragment() },
     { id: 'run-sel',      title: 'Run selection',                hint: 'F9',               run: () => runSelection() },
     { id: 'run-sec',      title: 'Run current %% section',       hint: 'Alt+Ctrl+Enter',   run: () => runSection() },
     { id: 'run-until',    title: 'Run until cursor line',        hint: 'Shift+F9',         run: () => runUntilCursor() },
@@ -3307,7 +3336,7 @@ export default function Workstation() {
     { id: 'next-err',     title: 'Jump to next error',           hint: 'F8',               run: () => gotoNextError(1) },
     { id: 'prev-err',     title: 'Jump to previous error',       hint: 'Shift+F8',         run: () => gotoNextError(-1) },
     { id: 'help',         title: 'Show keyboard shortcuts',      hint: 'F1',               run: () => setHelpOpen(true) },
-  ], [runScript, runSelection, runSection, runUntilCursor, openFind, openGoto, openSymbolNav, gotoNextError, newScript, duplicateScript, closeScript, reopenLastClosedScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, copyConsole, downloadConsole, clearConsoleErrors, exportPlotSVG, exportPlotPNG, exportPlotCSV, toggleBookmarkAtCaret, gotoBookmark, clearAllBookmarks, insertSnippet, renameIdentifierAtCaret, gotoMatchingBracket, trimTrailingWhitespace, applySelectionTransform, sortSelectedLines])
+  ], [runScript, runSelection, runSection, runUntilCursor, rerunLastFragment, openFind, openGoto, openSymbolNav, gotoNextError, newScript, duplicateScript, closeScript, reopenLastClosedScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, copyConsole, downloadConsole, clearConsoleErrors, exportPlotSVG, exportPlotPNG, exportPlotCSV, toggleBookmarkAtCaret, gotoBookmark, clearAllBookmarks, insertSnippet, renameIdentifierAtCaret, gotoMatchingBracket, trimTrailingWhitespace, applySelectionTransform, sortSelectedLines])
 
   // Fuzzy-ish filter: split the query into tokens and require each to
   // appear (substring, case-insensitive) in the command title. Keeps
@@ -6157,6 +6186,7 @@ const SHORTCUT_GROUPS: { title: string; items: [string, string][] }[] = [
       ['Shift + Ctrl / Cmd + Enter', 'Run selection (or current line)'],
       ['F9', 'Run selection (MATLAB-style)'],
       ['Shift + F9', 'Run everything up to the cursor line'],
+      ['Ctrl / Cmd + Shift + R', 'Re-run the most recent fragment'],
       ['Alt + Ctrl / Cmd + Enter', 'Run current %% section'],
     ],
   },
