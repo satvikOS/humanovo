@@ -2343,11 +2343,36 @@ export default function Workstation() {
       if (store.list.length <= 1) return store // never close the last one
       const idx = store.list.findIndex(s => s.id === id)
       if (idx < 0) return store
+      // Remember the closed script (plus its original position) so
+      // Ctrl+Shift+T can restore it at the same spot.
+      const closed = store.list[idx]
+      closedScriptsRef.current.push({ script: closed, index: idx })
+      // Cap the ring so we don't grow without bound.
+      if (closedScriptsRef.current.length > 12) closedScriptsRef.current.shift()
       const list = store.list.filter(s => s.id !== id)
       const activeId = store.activeId === id
         ? (list[idx] ?? list[idx - 1] ?? list[0]).id
         : store.activeId
       return { list, activeId }
+    })
+  }, [])
+
+  // Ring of recently-closed scripts so the user can undo an accidental
+  // tab close via Ctrl/Cmd+Shift+T — standard IDE behaviour. Held in a
+  // ref rather than state because we only read it inside event handlers;
+  // no render depends on the ring contents.
+  const closedScriptsRef = useRef<Array<{ script: SavedScript; index: number }>>([])
+  const reopenLastClosedScript = useCallback(() => {
+    const entry = closedScriptsRef.current.pop()
+    if (!entry) return
+    setScriptStore(store => {
+      // Don't re-add a script whose id is already present (edge case if
+      // the user rapidly new-script / reopen — just no-op to stay safe).
+      if (store.list.some(s => s.id === entry.script.id)) return store
+      const list = store.list.slice()
+      const at = Math.min(Math.max(0, entry.index), list.length)
+      list.splice(at, 0, entry.script)
+      return { list, activeId: entry.script.id }
     })
   }, [])
 
@@ -2385,6 +2410,8 @@ export default function Workstation() {
     { id: 'find',         title: 'Find and replace',             hint: 'Ctrl+F',           run: () => openFind() },
     { id: 'goto',         title: 'Go to line',                   hint: 'Ctrl+G',           run: () => openGoto() },
     { id: 'new-script',   title: 'New script',                   hint: '',                 run: () => newScript() },
+    { id: 'close-script', title: 'Close current script',         hint: 'Ctrl+W',           run: () => closeScript(scriptStore.activeId) },
+    { id: 'reopen',       title: 'Reopen last closed script',    hint: 'Ctrl+Shift+T',     run: () => reopenLastClosedScript() },
     { id: 'rename',       title: 'Rename current script',        hint: '',                 run: () => renameScript(scriptStore.activeId) },
     { id: 'wrap',         title: 'Toggle word wrap',             hint: '',                 run: () => toggleEditorWrap() },
     { id: 'font-up',      title: 'Increase editor font size',    hint: '',                 run: () => bumpEditorFont(1) },
@@ -2396,7 +2423,7 @@ export default function Workstation() {
     { id: 'exp-png',      title: 'Export current figure as PNG', hint: '',                 run: () => exportPlotPNG() },
     { id: 'exp-csv',      title: 'Export figure data as CSV',    hint: '',                 run: () => exportPlotCSV() },
     { id: 'help',         title: 'Show keyboard shortcuts',      hint: 'F1',               run: () => setHelpOpen(true) },
-  ], [runScript, runSelection, runSection, openFind, openGoto, newScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, copyConsole, exportPlotSVG, exportPlotPNG, exportPlotCSV])
+  ], [runScript, runSelection, runSection, openFind, openGoto, newScript, closeScript, reopenLastClosedScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, copyConsole, exportPlotSVG, exportPlotPNG, exportPlotCSV])
 
   // Fuzzy-ish filter: split the query into tokens and require each to
   // appear (substring, case-insensitive) in the command title. Keeps
@@ -2417,17 +2444,38 @@ export default function Workstation() {
   }, [visiblePaletteCommands, paletteIndex])
 
   // Ctrl / Cmd + Shift + P global opener. Scoped to document so it fires
-  // from anywhere inside the Workstation, not just the editor.
+  // from anywhere inside the Workstation, not just the editor. Also
+  // handles Ctrl/Cmd+W to close the active script tab and
+  // Ctrl/Cmd+Shift+T to reopen the most recently closed tab.
   useEffect(() => {
     const onKey = (ev: KeyboardEvent) => {
-      if ((ev.metaKey || ev.ctrlKey) && ev.shiftKey && (ev.key === 'p' || ev.key === 'P')) {
+      const mod = ev.metaKey || ev.ctrlKey
+      if (!mod) return
+      if (ev.shiftKey && (ev.key === 'p' || ev.key === 'P')) {
         ev.preventDefault()
         openPalette()
+        return
+      }
+      if (ev.shiftKey && (ev.key === 't' || ev.key === 'T')) {
+        // Browsers bind Ctrl+Shift+T to "reopen closed tab" natively;
+        // intercepting here means the Workstation wins focus first.
+        ev.preventDefault()
+        reopenLastClosedScript()
+        return
+      }
+      if (!ev.shiftKey && !ev.altKey && (ev.key === 'w' || ev.key === 'W')) {
+        // Guard: only intercept when the command palette isn't open,
+        // so Ctrl+W inside the palette input still reaches the browser
+        // if the user really needs it.
+        if (paletteOpen) return
+        ev.preventDefault()
+        closeScript(scriptStore.activeId)
+        return
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [openPalette])
+  }, [openPalette, reopenLastClosedScript, closeScript, scriptStore.activeId, paletteOpen])
 
   /* ── styles (keyed off Humanovo CSS variables) ─────────────────────── */
   const styles = useMemo<Record<string, React.CSSProperties>>(() => ({
@@ -4769,6 +4817,13 @@ const SHORTCUT_GROUPS: { title: string; items: [string, string][] }[] = [
       ['Ctrl / Cmd + G', 'Go to line'],
       ['Enter / Shift + Enter (find)', 'Next / previous match'],
       ['Esc', 'Close find, autocomplete, fullscreen or help'],
+    ],
+  },
+  {
+    title: 'Scripts',
+    items: [
+      ['Ctrl / Cmd + W', 'Close the active script tab'],
+      ['Ctrl / Cmd + Shift + T', 'Reopen the most recently closed tab'],
     ],
   },
   {
