@@ -1386,6 +1386,33 @@ export default function Workstation() {
       return
     }
 
+    // Ctrl / Cmd + Shift + K — delete the current line(s). Mirrors VSCode
+    // behaviour: the caret lands at the start of whatever followed the
+    // deleted region, with no text selected.
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'k' || e.key === 'K')) {
+      e.preventDefault()
+      const lineStart = value.lastIndexOf('\n', s - 1) + 1
+      const lineEnd = value.indexOf('\n', ePos)
+      // If the region ends at EOF, also drop the preceding '\n' so we don't
+      // leave a dangling empty line behind.
+      let regionStart = lineStart
+      let regionEnd: number
+      if (lineEnd < 0) {
+        regionEnd = value.length
+        if (lineStart > 0) regionStart = lineStart - 1
+      } else {
+        regionEnd = lineEnd + 1
+      }
+      const newVal = value.slice(0, regionStart) + value.slice(regionEnd)
+      setScript(newVal)
+      requestAnimationFrame(() => {
+        const pos = Math.min(regionStart, newVal.length)
+        ta.selectionStart = pos
+        ta.selectionEnd = pos
+      })
+      return
+    }
+
     // Shift + Alt + ArrowDown / ArrowUp — duplicate the current line(s)
     if (e.altKey && e.shiftKey && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
       e.preventDefault()
@@ -3909,6 +3936,7 @@ const SHORTCUT_GROUPS: { title: string; items: [string, string][] }[] = [
       ['Ctrl / Cmd + /', 'Toggle line comment (%)'],
       ['Alt + ↑ / ↓', 'Move current line(s) up or down'],
       ['Shift + Alt + ↑ / ↓', 'Duplicate current line(s)'],
+      ['Ctrl / Cmd + Shift + K', 'Delete current line(s)'],
       ['( [ { " \'', 'Auto-pair brackets and quotes'],
       ['Backspace between pair', 'Delete matching pair'],
       ['Tab on identifier', 'Autocomplete variable / builtin'],
