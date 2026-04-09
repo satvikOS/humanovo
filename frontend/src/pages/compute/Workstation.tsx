@@ -1448,12 +1448,19 @@ export default function Workstation() {
   // pipeline so the export respects the active kind / text filters —
   // "copy what you see" rather than dumping the full backlog.
   const [copyFlash, setCopyFlash] = useState(false)
-  const copyConsole = useCallback(() => {
-    const text = visibleEntries.map(e => {
+  // Serialize the visible console into a plain-text transcript. Shared by
+  // the clipboard copy button and the "download transcript" command so
+  // both paths produce the same formatting.
+  const serializeConsole = useCallback(() => {
+    return visibleEntries.map(e => {
       if (e.kind === 'input') return `> ${e.text}`
       if (e.kind === 'error') return `! ${e.text}`
       return e.text
     }).join('\n')
+  }, [visibleEntries])
+
+  const copyConsole = useCallback(() => {
+    const text = serializeConsole()
     if (!text) return
     const done = () => { setCopyFlash(true); setTimeout(() => setCopyFlash(false), 900) }
     if (navigator.clipboard?.writeText) {
@@ -1469,7 +1476,31 @@ export default function Workstation() {
       try { document.execCommand('copy'); done() } catch { /* ignore */ }
       document.body.removeChild(ta)
     }
-  }, [visibleEntries])
+  }, [serializeConsole])
+
+  // Download the console transcript as a .txt file. Named with the
+  // active script and a short timestamp so repeated exports don't
+  // clobber each other in the user's downloads folder.
+  const downloadConsole = useCallback(() => {
+    const text = serializeConsole()
+    if (!text) return
+    const now = new Date()
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
+    const scriptName = scriptStore.list.find(s => s.id === scriptStore.activeId)?.name ?? 'session'
+    const base = scriptName.replace(/\.m$/i, '').replace(/[^A-Za-z0-9._-]+/g, '_') || 'session'
+    const filename = `workstation-${base}-${stamp}.txt`
+    const header = `% Humanovo Workstation console transcript\n% script: ${scriptName}\n% saved: ${now.toISOString()}\n\n`
+    const blob = new Blob([header + text + '\n'], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }, [serializeConsole, scriptStore.list, scriptStore.activeId])
 
   const resetWorkspace = () => {
     workspaceRef.current = createWorkspace()
@@ -3080,6 +3111,7 @@ export default function Workstation() {
     { id: 'font-down',    title: 'Decrease editor font size',    hint: '',                 run: () => bumpEditorFont(-1) },
     { id: 'clear-con',    title: 'Clear console',                hint: 'Ctrl+L',           run: () => clearConsole() },
     { id: 'copy-con',     title: 'Copy console to clipboard',    hint: '',                 run: () => copyConsole() },
+    { id: 'dl-con',       title: 'Download console transcript',  hint: '',                 run: () => downloadConsole() },
     { id: 'reset-ws',     title: 'Reset workspace',              hint: '',                 run: () => resetWorkspace() },
     { id: 'exp-svg',      title: 'Export current figure as SVG', hint: '',                 run: () => exportPlotSVG() },
     { id: 'exp-png',      title: 'Export current figure as PNG', hint: '',                 run: () => exportPlotPNG() },
@@ -3100,7 +3132,7 @@ export default function Workstation() {
     { id: 'sel-bracket',  title: 'Select to matching bracket',   hint: 'Ctrl+Shift+M',     run: () => gotoMatchingBracket(true) },
     { id: 'goto-sym',     title: 'Go to symbol in script',       hint: 'Ctrl+Shift+O',     run: () => openSymbolNav() },
     { id: 'help',         title: 'Show keyboard shortcuts',      hint: 'F1',               run: () => setHelpOpen(true) },
-  ], [runScript, runSelection, runSection, openFind, openGoto, openSymbolNav, newScript, duplicateScript, closeScript, reopenLastClosedScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, copyConsole, exportPlotSVG, exportPlotPNG, exportPlotCSV, toggleBookmarkAtCaret, gotoBookmark, clearAllBookmarks, insertSnippet, renameIdentifierAtCaret, gotoMatchingBracket])
+  ], [runScript, runSelection, runSection, openFind, openGoto, openSymbolNav, newScript, duplicateScript, closeScript, reopenLastClosedScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, copyConsole, downloadConsole, exportPlotSVG, exportPlotPNG, exportPlotCSV, toggleBookmarkAtCaret, gotoBookmark, clearAllBookmarks, insertSnippet, renameIdentifierAtCaret, gotoMatchingBracket])
 
   // Fuzzy-ish filter: split the query into tokens and require each to
   // appear (substring, case-insensitive) in the command title. Keeps
