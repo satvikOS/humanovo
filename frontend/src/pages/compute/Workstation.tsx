@@ -585,6 +585,10 @@ export default function Workstation() {
   // state drives the visual drop indicator. We clear both on drop / dragend.
   const draggedTabIdRef = useRef<string | null>(null)
   const [dragOverTabId, setDragOverTabId] = useState<string | null>(null)
+  // Right-click context menu on a script tab. Stores the id of the tab
+  // the menu applies to plus the click coordinates so the menu opens
+  // anchored to the mouse pointer rather than the tab itself.
+  const [tabMenu, setTabMenu] = useState<{ id: string; x: number; y: number } | null>(null)
   const activeScript = useMemo(
     () => scriptStore.list.find(s => s.id === scriptStore.activeId) ?? scriptStore.list[0],
     [scriptStore]
@@ -901,6 +905,7 @@ export default function Workstation() {
     const onKey = (ev: KeyboardEvent) => {
       if (ev.key === 'F1') { ev.preventDefault(); setHelpOpen(h => !h) }
       else if (ev.key === 'Escape' && helpOpen) setHelpOpen(false)
+      else if (ev.key === 'Escape') setTabMenu(null)
       else if ((ev.metaKey || ev.ctrlKey) && (ev.key === 'l' || ev.key === 'L')) {
         // Don't swallow the browser's URL-bar focus when the user has
         // focused something outside the Workstation.
@@ -4273,6 +4278,43 @@ export default function Workstation() {
       fontSize: 12,
       textAlign: 'center' as const,
     },
+    tabMenu: {
+      position: 'fixed' as const,
+      minWidth: 180,
+      background: 'var(--color-bg-elevated)',
+      border: '1px solid var(--color-border-strong)',
+      borderRadius: 6,
+      boxShadow: '0 16px 40px rgba(0, 0, 0, 0.55)',
+      padding: 4,
+      zIndex: 1120,
+      display: 'flex',
+      flexDirection: 'column' as const,
+      gap: 1,
+      fontFamily: "'Inter', sans-serif",
+      fontSize: 12,
+    },
+    tabMenuItem: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      padding: '6px 10px',
+      borderRadius: 4,
+      border: 'none',
+      background: 'transparent',
+      color: 'var(--color-text-secondary)',
+      cursor: 'pointer',
+      textAlign: 'left' as const,
+      font: 'inherit',
+    },
+    tabMenuItemDisabled: {
+      color: 'var(--color-text-muted)',
+      cursor: 'not-allowed',
+    },
+    tabMenuSep: {
+      height: 1,
+      background: 'var(--glass-border)',
+      margin: '4px 2px',
+    },
     acItem: {
       display: 'flex',
       alignItems: 'center',
@@ -4672,6 +4714,15 @@ export default function Workstation() {
                       closeScript(s.id)
                     }
                   }}
+                  onContextMenu={e => {
+                    // Right-click a script tab → open the action menu
+                    // anchored at the cursor. Preventing the browser's
+                    // default means users only see our in-app commands,
+                    // keeping the tab bar experience consistent.
+                    e.preventDefault()
+                    e.stopPropagation()
+                    setTabMenu({ id: s.id, x: e.clientX, y: e.clientY })
+                  }}
                   draggable
                   onDragStart={(ev) => {
                     draggedTabIdRef.current = s.id
@@ -4716,6 +4767,53 @@ export default function Workstation() {
             })}
             <button style={styles.tabAddBtn} onClick={newScript} title="New script">+</button>
           </div>
+          {tabMenu && (() => {
+            const menuW = 200
+            const menuH = 210
+            const left = Math.min(tabMenu.x, window.innerWidth - menuW - 8)
+            const top = Math.min(tabMenu.y, window.innerHeight - menuH - 8)
+            const target = scriptStore.list.find(s => s.id === tabMenu.id)
+            if (!target) return null
+            const pivotIdx = scriptStore.list.findIndex(s => s.id === tabMenu.id)
+            const canCloseOthers = scriptStore.list.length > 1
+            const canCloseRight = pivotIdx >= 0 && pivotIdx < scriptStore.list.length - 1
+            const canClose = scriptStore.list.length > 1
+            const closeMenu = () => setTabMenu(null)
+            const item = (label: string, enabled: boolean, onClick: () => void) => (
+              <button
+                type="button"
+                style={{ ...styles.tabMenuItem, ...(enabled ? null : styles.tabMenuItemDisabled) }}
+                disabled={!enabled}
+                onClick={() => { if (enabled) { onClick(); closeMenu() } }}
+                onMouseEnter={(e) => { if (enabled) (e.currentTarget as HTMLButtonElement).style.background = 'var(--glass-bg-hover)' }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
+              >
+                <span>{label}</span>
+              </button>
+            )
+            return (
+              <>
+                <div
+                  style={{ position: 'fixed', inset: 0, zIndex: 1115 }}
+                  onClick={closeMenu}
+                  onContextMenu={(e) => { e.preventDefault(); closeMenu() }}
+                />
+                <div
+                  role="menu"
+                  aria-label={`Actions for ${target.name}`}
+                  style={{ ...styles.tabMenu, left, top }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {item('Rename…', true, () => renameScript(target.id))}
+                  {item('Duplicate', true, () => duplicateScript(target.id))}
+                  <div style={styles.tabMenuSep} />
+                  {item('Close', canClose, () => closeScript(target.id))}
+                  {item('Close others', canCloseOthers, () => closeOtherScripts(target.id))}
+                  {item('Close to the right', canCloseRight, () => closeScriptsToRight(target.id))}
+                </div>
+              </>
+            )
+          })()}
           {sectionOutline.length > 1 && (
             <div style={styles.sectionStrip} aria-label="Script sections">
               <span style={styles.sectionStripLabel}>§</span>
