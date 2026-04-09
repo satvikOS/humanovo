@@ -4512,6 +4512,16 @@ export default function Workstation() {
                   }}
                   onClick={() => switchScript(s.id)}
                   onDoubleClick={() => renameScript(s.id)}
+                  onAuxClick={e => {
+                    // Middle-click closes the tab (browser-tab convention).
+                    // Only fires when more than one script is open so we
+                    // never end up with an empty tab bar.
+                    if (e.button === 1 && scriptStore.list.length > 1) {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      closeScript(s.id)
+                    }
+                  }}
                   draggable
                   onDragStart={(ev) => {
                     draggedTabIdRef.current = s.id
@@ -4540,7 +4550,7 @@ export default function Workstation() {
                     draggedTabIdRef.current = null
                     setDragOverTabId(null)
                   }}
-                  title={`${s.name} — drag to reorder, double-click to rename`}
+                  title={`${s.name} — drag to reorder, double-click to rename, middle-click to close`}
                 >
                   <span>{s.name}</span>
                   {scriptStore.list.length > 1 && (
