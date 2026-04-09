@@ -118,6 +118,9 @@ export const BUILTIN_DOCS: BuiltinDoc[] = [
   { name: 'regress', category: 'Statistics', signature: 'regress(y, X)', description: 'Linear regression', snippet: 'regress(y, X)' },
   { name: 'polyfit', category: 'Statistics', signature: 'polyfit(x, y, n)', description: 'Fit polynomial of degree n', snippet: 'polyfit(x, y, 2)' },
   { name: 'polyval', category: 'Statistics', signature: 'polyval(p, x)', description: 'Evaluate polynomial', snippet: 'polyval(p, x)' },
+  { name: 'polyder', category: 'Statistics', signature: 'polyder(p)', description: 'Derivative of polynomial', snippet: 'polyder(p)' },
+  { name: 'polyint', category: 'Statistics', signature: 'polyint(p)', description: 'Antiderivative of polynomial', snippet: 'polyint(p)' },
+  { name: 'roots', category: 'Statistics', signature: 'roots(p)', description: 'Roots of polynomial (n×2 [real imag])', snippet: 'roots(p)' },
 
   // ─── Linear algebra ──────────────────────────────────────────────────
   { name: 'det', category: 'Linear algebra', signature: 'det(A)', description: 'Determinant', snippet: 'det(A)' },
@@ -142,11 +145,20 @@ export const BUILTIN_DOCS: BuiltinDoc[] = [
   { name: 'cumprod', category: 'Calculus', signature: 'cumprod(v)', description: 'Cumulative product', snippet: 'cumprod(v)' },
 
   // ─── Signal ──────────────────────────────────────────────────────────
-  { name: 'fft', category: 'Signal', signature: 'fft(x)', description: 'Fast Fourier transform', snippet: 'fft(x)' },
+  { name: 'fft', category: 'Signal', signature: 'fft(x)', description: 'Fast Fourier transform (magnitude)', snippet: 'fft(x)' },
+  { name: 'fftshift', category: 'Signal', signature: 'fftshift(x)', description: 'Shift zero-frequency component to centre', snippet: 'fftshift(x)' },
   { name: 'butter', category: 'Signal', signature: 'butter(n, Wn)', description: 'Butterworth filter coefficients', snippet: 'butter(4, 0.3)' },
   { name: 'movmean', category: 'Signal', signature: 'movmean(x, k)', description: 'Moving mean', snippet: 'movmean(x, 5)' },
   { name: 'findpeaks', category: 'Signal', signature: 'findpeaks(x)', description: 'Local maxima of a signal', snippet: 'findpeaks(x)' },
   { name: 'sinc', category: 'Signal', signature: 'sinc(x)', description: 'Normalized sinc', snippet: 'sinc(x)' },
+  { name: 'conv', category: 'Signal', signature: 'conv(a, b)', description: 'Discrete convolution / poly multiply', snippet: 'conv(a, b)' },
+  { name: 'xcorr', category: 'Signal', signature: 'xcorr(a, b)', description: 'Cross-correlation (autocorr if 1 arg)', snippet: 'xcorr(a, b)' },
+  { name: 'rms', category: 'Signal', signature: 'rms(x)', description: 'Root-mean-square value', snippet: 'rms(x)' },
+  { name: 'detrend', category: 'Signal', signature: 'detrend(x)', description: 'Remove linear trend (or mean)', snippet: 'detrend(x)' },
+  { name: 'hann', category: 'Signal', signature: 'hann(n)', description: 'Hann window of length n', snippet: 'hann(64)' },
+  { name: 'hanning', category: 'Signal', signature: 'hanning(n)', description: 'Periodic Hanning window', snippet: 'hanning(64)' },
+  { name: 'hamming', category: 'Signal', signature: 'hamming(n)', description: 'Hamming window of length n', snippet: 'hamming(64)' },
+  { name: 'blackman', category: 'Signal', signature: 'blackman(n)', description: 'Blackman window of length n', snippet: 'blackman(64)' },
 
   // ─── Sets ────────────────────────────────────────────────────────────
   { name: 'unique', category: 'Sets', signature: 'unique(v)', description: 'Unique sorted elements', snippet: 'unique(v)' },

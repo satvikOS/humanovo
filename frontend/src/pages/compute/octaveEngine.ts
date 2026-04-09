@@ -1799,6 +1799,199 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
     const out = x.map(xi => ML.polyval(c, xi))
     return mmat(1, out.length, out)
   })
+  // d/dx of a polynomial given as a row of descending coefficients.
+  def('polyder', 1, args => {
+    const c = toArray(args[0])
+    const n = c.length
+    if (n <= 1) return mmat(1, 1, [0])
+    const out = new Float64Array(n - 1)
+    for (let i = 0; i < n - 1; i++) out[i] = c[i] * (n - 1 - i)
+    return mmat(1, n - 1, out)
+  })
+  // Antiderivative (constant of integration = 0).
+  def('polyint', 1, args => {
+    const c = toArray(args[0])
+    const n = c.length
+    if (n === 0) return mmat(1, 1, [0])
+    const out = new Float64Array(n + 1)
+    for (let i = 0; i < n; i++) out[i] = c[i] / (n - i)
+    out[n] = 0
+    return mmat(1, n + 1, out)
+  })
+  // Polynomial roots via Durand–Kerner. Returns an n×2 matrix of [real imag]
+  // because the engine has no native complex type — column 1 is the real
+  // part, column 2 is the imaginary part of each root.
+  def('roots', 1, args => {
+    const raw = toArray(args[0])
+    let start = 0
+    while (start < raw.length && raw[start] === 0) start++
+    const p = raw.slice(start)
+    const n = p.length - 1
+    if (n <= 0) return mmat(0, 2, new Float64Array(0))
+    const lead = p[0]
+    const a = p.map(v => v / lead)
+    const re = new Array<number>(n)
+    const im = new Array<number>(n)
+    const r0 = 0.4 + Math.max(...a.map(Math.abs)) * 0.1
+    for (let i = 0; i < n; i++) {
+      const t = (2 * Math.PI * i) / n + 0.7
+      re[i] = r0 * Math.cos(t)
+      im[i] = r0 * Math.sin(t)
+    }
+    const evalPoly = (rx: number, ix: number): [number, number] => {
+      let yr = a[0], yi = 0
+      for (let i = 1; i < a.length; i++) {
+        const nr = yr * rx - yi * ix + a[i]
+        const ni = yr * ix + yi * rx
+        yr = nr; yi = ni
+      }
+      return [yr, yi]
+    }
+    for (let iter = 0; iter < 400; iter++) {
+      let maxDelta = 0
+      for (let i = 0; i < n; i++) {
+        const [pr, pi] = evalPoly(re[i], im[i])
+        let dr = 1, di = 0
+        for (let j = 0; j < n; j++) {
+          if (i === j) continue
+          const ar = re[i] - re[j]
+          const ai = im[i] - im[j]
+          const nr = dr * ar - di * ai
+          const ni = dr * ai + di * ar
+          dr = nr; di = ni
+        }
+        const dd = dr * dr + di * di
+        if (dd === 0) continue
+        const cr = (pr * dr + pi * di) / dd
+        const ci = (pi * dr - pr * di) / dd
+        re[i] -= cr
+        im[i] -= ci
+        const m = Math.hypot(cr, ci)
+        if (m > maxDelta) maxDelta = m
+      }
+      if (maxDelta < 1e-14) break
+    }
+    const out = new Float64Array(n * 2)
+    for (let i = 0; i < n; i++) {
+      out[i * 2] = re[i]
+      out[i * 2 + 1] = im[i]
+    }
+    return mmat(n, 2, out)
+  })
+  // Discrete convolution / polynomial multiplication.
+  def('conv', 2, args => {
+    const a = toArray(args[0])
+    const b = toArray(args[1])
+    const n = a.length, m = b.length
+    if (n === 0 || m === 0) return mmat(1, 0, new Float64Array(0))
+    const out = new Float64Array(n + m - 1)
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < m; j++) out[i + j] += a[i] * b[j]
+    }
+    return mmat(1, n + m - 1, out)
+  })
+  // Cross-correlation: xcorr(a) is the autocorrelation, xcorr(a,b) computes
+  // the cross-correlation of a and b. Result length is n+m-1.
+  def('xcorr', -1, args => {
+    const a = toArray(args[0])
+    const b = args[1] ? toArray(args[1]) : a
+    const n = a.length, m = b.length
+    if (n === 0 || m === 0) return mmat(1, 0, new Float64Array(0))
+    const out = new Float64Array(n + m - 1)
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < m; j++) out[i + (m - 1 - j)] += a[i] * b[j]
+    }
+    return mmat(1, n + m - 1, out)
+  })
+  // Shift the zero-frequency component of an FFT result to the center.
+  // Works for both 1-D vectors and 2-D matrices (independent shift per axis).
+  def('fftshift', 1, args => {
+    const m = toMat(args[0])
+    if (m.rows === 1 || m.cols === 1) {
+      const n = m.data.length
+      const k = Math.floor(n / 2)
+      const out = new Float64Array(n)
+      for (let i = 0; i < n; i++) out[i] = m.data[(i + k) % n]
+      return m.rows === 1 ? mmat(1, n, out) : mmat(n, 1, out)
+    }
+    const R = m.rows, C = m.cols
+    const kr = Math.floor(R / 2), kc = Math.floor(C / 2)
+    const out = new Float64Array(R * C)
+    for (let r = 0; r < R; r++) {
+      for (let c = 0; c < C; c++) {
+        out[r * C + c] = m.data[((r + kr) % R) * C + ((c + kc) % C)]
+      }
+    }
+    return mmat(R, C, out)
+  })
+  // Common window functions, returned as column vectors to match MATLAB.
+  def('hann', 1, args => {
+    const n = Math.round(toNumber(args[0]))
+    if (n <= 0) return mmat(0, 1, new Float64Array(0))
+    const out = new Float64Array(n)
+    if (n === 1) { out[0] = 1; return mmat(1, 1, out) }
+    for (let i = 0; i < n; i++) out[i] = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (n - 1)))
+    return mmat(n, 1, out)
+  })
+  def('hanning', 1, args => {
+    const n = Math.round(toNumber(args[0]))
+    if (n <= 0) return mmat(0, 1, new Float64Array(0))
+    const out = new Float64Array(n)
+    if (n === 1) { out[0] = 1; return mmat(1, 1, out) }
+    for (let i = 0; i < n; i++) out[i] = 0.5 * (1 - Math.cos((2 * Math.PI * (i + 1)) / (n + 1)))
+    return mmat(n, 1, out)
+  })
+  def('hamming', 1, args => {
+    const n = Math.round(toNumber(args[0]))
+    if (n <= 0) return mmat(0, 1, new Float64Array(0))
+    const out = new Float64Array(n)
+    if (n === 1) { out[0] = 1; return mmat(1, 1, out) }
+    for (let i = 0; i < n; i++) out[i] = 0.54 - 0.46 * Math.cos((2 * Math.PI * i) / (n - 1))
+    return mmat(n, 1, out)
+  })
+  def('blackman', 1, args => {
+    const n = Math.round(toNumber(args[0]))
+    if (n <= 0) return mmat(0, 1, new Float64Array(0))
+    const out = new Float64Array(n)
+    if (n === 1) { out[0] = 1; return mmat(1, 1, out) }
+    for (let i = 0; i < n; i++) {
+      const t = (2 * Math.PI * i) / (n - 1)
+      out[i] = 0.42 - 0.5 * Math.cos(t) + 0.08 * Math.cos(2 * t)
+    }
+    return mmat(n, 1, out)
+  })
+  // Root-mean-square value of a vector.
+  def('rms', 1, args => {
+    const a = toArray(args[0])
+    if (a.length === 0) return mnum(0)
+    let s = 0
+    for (let i = 0; i < a.length; i++) s += a[i] * a[i]
+    return mnum(Math.sqrt(s / a.length))
+  })
+  // Detrend: remove a linear trend (default) or just the mean ('constant').
+  def('detrend', -1, args => {
+    const a = toArray(args[0])
+    const n = a.length
+    if (n === 0) return mmat(1, 0, new Float64Array(0))
+    const mode = args[1] && args[1].kind === 'str' ? args[1].v : 'linear'
+    const out = new Float64Array(n)
+    if (mode === 'constant' || n < 2) {
+      let m = 0
+      for (let i = 0; i < n; i++) m += a[i]
+      m /= n
+      for (let i = 0; i < n; i++) out[i] = a[i] - m
+    } else {
+      let sx = 0, sy = 0, sxx = 0, sxy = 0
+      for (let i = 0; i < n; i++) {
+        sx += i; sy += a[i]; sxx += i * i; sxy += i * a[i]
+      }
+      const denom = n * sxx - sx * sx
+      const slope = denom !== 0 ? (n * sxy - sx * sy) / denom : 0
+      const intercept = (sy - slope * sx) / n
+      for (let i = 0; i < n; i++) out[i] = a[i] - (intercept + slope * i)
+    }
+    return mmat(1, n, out)
+  })
 
   // ---- Printing --------------------------------------------------------
   const valueToText = (v: MValue): string => {
