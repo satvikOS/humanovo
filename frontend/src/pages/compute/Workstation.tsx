@@ -30,6 +30,30 @@ const SCRIPT_KEY = 'compute-workstation-script'          // legacy single-script
 const SCRIPTS_KEY = 'compute-workstation-scripts'        // { list, activeId }
 const HISTORY_KEY = 'compute-workstation-history'
 const WORKSPACE_KEY = 'compute-workstation-workspace-v1' // serialized vars
+const EDITOR_PREFS_KEY = 'compute-workstation-editor-prefs'  // { fontSize, wrap }
+
+const EDITOR_FONT_MIN = 10
+const EDITOR_FONT_MAX = 20
+const EDITOR_FONT_DEFAULT = 12
+
+interface EditorPrefs { fontSize: number; wrap: boolean }
+function loadEditorPrefs(): EditorPrefs {
+  try {
+    const raw = localStorage.getItem(EDITOR_PREFS_KEY)
+    if (raw) {
+      const p = JSON.parse(raw)
+      const fs = Number(p?.fontSize)
+      return {
+        fontSize: Number.isFinite(fs) ? Math.max(EDITOR_FONT_MIN, Math.min(EDITOR_FONT_MAX, fs)) : EDITOR_FONT_DEFAULT,
+        wrap: !!p?.wrap,
+      }
+    }
+  } catch { /* fall through */ }
+  return { fontSize: EDITOR_FONT_DEFAULT, wrap: false }
+}
+function saveEditorPrefs(p: EditorPrefs) {
+  try { localStorage.setItem(EDITOR_PREFS_KEY, JSON.stringify(p)) } catch { /* quota */ }
+}
 
 const STARTER_SCRIPT = `% MATLAB/Octave Workstation
 % Variables persist across runs. Use the command window at the bottom
@@ -485,9 +509,9 @@ function getWordBefore(value: string, pos: number): { word: string; start: numbe
 }
 
 // Approximate viewport coordinates of the textarea caret. JetBrains Mono
-// at 12px is ~7.2px wide and our line-height is 1.6 * 12 = 19.2px. Good
-// enough for placing the autocomplete popup just below the active line.
-function caretViewportAnchor(ta: HTMLTextAreaElement): { top: number; left: number } {
+// line-height ≈ fontSize * 1.6 and average glyph width ≈ fontSize * 0.6.
+// Good enough for placing the autocomplete popup just below the active line.
+function caretViewportAnchor(ta: HTMLTextAreaElement, fontSize: number): { top: number; left: number } {
   const rect = ta.getBoundingClientRect()
   const pos = ta.selectionStart
   const before = ta.value.slice(0, pos)
@@ -495,8 +519,8 @@ function caretViewportAnchor(ta: HTMLTextAreaElement): { top: number; left: numb
   const lastNL = before.lastIndexOf('\n')
   const col = pos - lastNL - 1
   const padTop = 14, padLeft = 14
-  const lineHeight = 19.2
-  const charWidth = 7.2
+  const lineHeight = fontSize * 1.6
+  const charWidth = fontSize * 0.6
   const top = rect.top + padTop + (lineIdx + 1) * lineHeight - ta.scrollTop
   const left = rect.left + padLeft + col * charWidth - ta.scrollLeft
   return { top, left }
@@ -552,6 +576,24 @@ export default function Workstation() {
   const [activeTemplate, setActiveTemplate] = useState<string | null>(null)
   const [cursor, setCursor] = useState<{ line: number; col: number }>({ line: 1, col: 1 })
   const [lastRunMs, setLastRunMs] = useState<number | null>(null)
+
+  // Editor appearance prefs — font size (clamped) and soft word wrap.
+  // Persisted to localStorage so the user's choice survives a reload.
+  const [editorPrefs, setEditorPrefs] = useState<EditorPrefs>(loadEditorPrefs)
+  const editorFontSize = editorPrefs.fontSize
+  const editorWrapOn = editorPrefs.wrap
+  const editorLineHeight = editorFontSize * 1.6
+  const editorCharWidth = editorFontSize * 0.6
+  useEffect(() => { saveEditorPrefs(editorPrefs) }, [editorPrefs])
+  const bumpEditorFont = useCallback((delta: number) => {
+    setEditorPrefs(p => ({
+      ...p,
+      fontSize: Math.max(EDITOR_FONT_MIN, Math.min(EDITOR_FONT_MAX, p.fontSize + delta)),
+    }))
+  }, [])
+  const toggleEditorWrap = useCallback(() => {
+    setEditorPrefs(p => ({ ...p, wrap: !p.wrap }))
+  }, [])
   // Line number of the most recent script error (1-based), or null if clean.
   // Shown as a red stripe in the gutter until the user starts editing.
   const [errorLine, setErrorLine] = useState<number | null>(null)
@@ -1283,7 +1325,7 @@ export default function Workstation() {
           setAcItems(top)
           setAcIndex(0)
           setAcRange({ start: wb.start, end: s })
-          setAcAnchor(caretViewportAnchor(ta))
+          setAcAnchor(caretViewportAnchor(ta, editorFontSize))
           setAcOpen(true)
           return
         }
@@ -1384,7 +1426,7 @@ export default function Workstation() {
         ta.selectionStart = ta.selectionEnd = s + 1 + indent.length
       })
     }
-  }, [runScript, runSelection, runSection, openFind, setScript, vars, acOpen, acItems, acIndex, acceptAutocomplete, closeAutocomplete])
+  }, [runScript, runSelection, runSection, openFind, setScript, vars, acOpen, acItems, acIndex, acceptAutocomplete, closeAutocomplete, editorFontSize])
 
   // Track cursor position for the status bar.
   const updateCursor = useCallback((ta: HTMLTextAreaElement) => {
@@ -1871,7 +1913,7 @@ export default function Workstation() {
     editorGutterNumbers: {
       padding: '14px 8px 14px 0',
       fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-      fontSize: 12,
+      fontSize: editorFontSize,
       lineHeight: 1.6,
       color: 'var(--color-text-muted)',
       textAlign: 'right' as const,
@@ -1919,9 +1961,10 @@ export default function Workstation() {
       margin: 0,
       padding: '14px 16px 14px 14px',
       fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-      fontSize: 12,
+      fontSize: editorFontSize,
       lineHeight: 1.6,
-      whiteSpace: 'pre' as const,
+      whiteSpace: (editorWrapOn ? 'pre-wrap' : 'pre') as 'pre' | 'pre-wrap',
+      wordBreak: (editorWrapOn ? 'break-word' : 'normal') as 'break-word' | 'normal',
       pointerEvents: 'none' as const,
       willChange: 'transform',
       tabSize: 2,
@@ -1938,16 +1981,16 @@ export default function Workstation() {
       border: 'none',
       padding: '14px 16px 14px 14px',
       fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-      fontSize: 12,
+      fontSize: editorFontSize,
       lineHeight: 1.6,
       color: 'transparent',
       caretColor: 'var(--color-text)',
       background: 'transparent',
       tabSize: 2,
       minHeight: 0,
-      whiteSpace: 'pre' as const,
-      overflowWrap: 'normal' as const,
-      wordBreak: 'normal' as const,
+      whiteSpace: (editorWrapOn ? 'pre-wrap' : 'pre') as 'pre' | 'pre-wrap',
+      overflowWrap: (editorWrapOn ? 'break-word' : 'normal') as 'break-word' | 'normal',
+      wordBreak: (editorWrapOn ? 'break-word' : 'normal') as 'break-word' | 'normal',
       overflow: 'auto' as const,
     },
     bracketOverlay: {
@@ -1961,15 +2004,15 @@ export default function Workstation() {
       position: 'absolute' as const,
       left: 0,
       right: 0,
-      height: 19.2,
+      height: editorLineHeight,
       background: 'var(--glass-bg)',
       pointerEvents: 'none' as const,
       willChange: 'transform',
     },
     bracketHL: {
       position: 'absolute' as const,
-      width: 7.2,
-      height: 19.2,
+      width: editorCharWidth,
+      height: editorLineHeight,
       border: '1px solid var(--color-text)',
       borderRadius: 2,
       boxSizing: 'border-box' as const,
@@ -2243,7 +2286,7 @@ export default function Workstation() {
       background: 'var(--glass-bg-hover)',
       borderColor: 'var(--color-border-strong)',
     },
-  }), [library])
+  }), [library, editorFontSize, editorWrapOn, editorLineHeight, editorCharWidth])
 
   const currentPlot = plots[activePlot] ?? null
 
@@ -2527,7 +2570,46 @@ export default function Workstation() {
         <div style={styles.editorWrap}>
           <div style={styles.editorHeader}>
             <span>Scripts</span>
-            <span style={{ opacity: 0.7 }}>Ctrl/Cmd + Enter to run · F9 runs selection · Alt+Ctrl/Cmd + Enter runs %% section · Ctrl/Cmd + F to find</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ opacity: 0.7, fontWeight: 400 }}>
+                Ctrl/Cmd + Enter to run · F9 runs selection · Alt+Ctrl/Cmd + Enter runs %% section · Ctrl/Cmd + F to find
+              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <button
+                  type="button"
+                  style={styles.plotChip}
+                  onClick={() => bumpEditorFont(-1)}
+                  disabled={editorFontSize <= EDITOR_FONT_MIN}
+                  title="Decrease editor font size"
+                  aria-label="Decrease editor font size"
+                >A−</button>
+                <span
+                  style={{
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: 10,
+                    color: 'var(--color-text-muted)',
+                    minWidth: 18,
+                    textAlign: 'center',
+                  }}
+                  title="Editor font size"
+                >{editorFontSize}</span>
+                <button
+                  type="button"
+                  style={styles.plotChip}
+                  onClick={() => bumpEditorFont(1)}
+                  disabled={editorFontSize >= EDITOR_FONT_MAX}
+                  title="Increase editor font size"
+                  aria-label="Increase editor font size"
+                >A+</button>
+                <button
+                  type="button"
+                  style={{ ...styles.plotChip, ...(editorWrapOn ? styles.plotChipActive : null) }}
+                  onClick={toggleEditorWrap}
+                  title="Toggle soft word wrap"
+                  aria-pressed={editorWrapOn}
+                >wrap</button>
+              </div>
+            </div>
           </div>
           <div style={styles.tabBar}>
             {scriptStore.list.map(s => {
@@ -2645,14 +2727,16 @@ export default function Workstation() {
               </div>
             </div>
             <div style={styles.editorTextWrap}>
-              <div
-                ref={currentLineRef}
-                aria-hidden="true"
-                style={{
-                  ...styles.currentLineStrip,
-                  top: 14 + (cursor.line - 1) * 19.2,
-                }}
-              />
+              {!editorWrapOn && (
+                <div
+                  ref={currentLineRef}
+                  aria-hidden="true"
+                  style={{
+                    ...styles.currentLineStrip,
+                    top: 14 + (cursor.line - 1) * editorLineHeight,
+                  }}
+                />
+              )}
               <pre ref={highlightRef} style={styles.editorHighlight} aria-hidden="true">
                 {highlightTokens.map((t, idx) => (
                   <span key={idx} style={HL_COLORS[t.kind]}>{t.text}</span>
@@ -2661,21 +2745,23 @@ export default function Workstation() {
                     user's cursor is on it. */}
                 {'\n'}
               </pre>
-              <div ref={bracketOverlayRef} style={styles.bracketOverlay} aria-hidden="true">
-                {bracketPair && bracketPair.map((p, idx) => {
-                  const lc = lineColForPos(script, p)
-                  return (
-                    <div
-                      key={idx}
-                      style={{
-                        ...styles.bracketHL,
-                        top: 14 + lc.line * 19.2,
-                        left: 14 + lc.col * 7.2,
-                      }}
-                    />
-                  )
-                })}
-              </div>
+              {!editorWrapOn && (
+                <div ref={bracketOverlayRef} style={styles.bracketOverlay} aria-hidden="true">
+                  {bracketPair && bracketPair.map((p, idx) => {
+                    const lc = lineColForPos(script, p)
+                    return (
+                      <div
+                        key={idx}
+                        style={{
+                          ...styles.bracketHL,
+                          top: 14 + lc.line * editorLineHeight,
+                          left: 14 + lc.col * editorCharWidth,
+                        }}
+                      />
+                    )
+                  })}
+                </div>
+              )}
               <textarea
                 ref={editorRef}
                 style={styles.editor}
@@ -2687,7 +2773,7 @@ export default function Workstation() {
                 onScroll={onEditorScroll}
                 onBlur={() => { if (acOpen) closeAutocomplete() }}
                 spellCheck={false}
-                wrap="off"
+                wrap={editorWrapOn ? 'soft' : 'off'}
               />
             </div>
           </div>
