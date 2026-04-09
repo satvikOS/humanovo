@@ -2064,6 +2064,21 @@ export default function Workstation() {
     return out
   }, [script])
 
+  // Name of the enclosing function at the caret (or null if the caret
+  // is in top-level script space). Uses the symbol list: the answer is
+  // the last function-kind symbol at or before the caret line, unless
+  // a subsequent function or section has already opened a new scope.
+  const enclosingFunctionName = useMemo(() => {
+    const fns = scriptSymbols.filter(s => s.kind === 'fn')
+    if (fns.length === 0) return null
+    let current: ScriptSymbol | null = null
+    for (const fn of fns) {
+      if (fn.line <= cursor.line) current = fn
+      else break
+    }
+    return current?.name ?? null
+  }, [scriptSymbols, cursor.line])
+
   const visibleScriptSymbols = useMemo(() => {
     const q = symbolNavQuery.trim().toLowerCase()
     if (!q) return scriptSymbols
@@ -5305,6 +5320,17 @@ export default function Workstation() {
               title={`Jump to the start of this %% section (line ${activeSectionLine})`}
             >
               §{' '}{activeSectionLabel}
+            </span>
+          </>
+        )}
+        {enclosingFunctionName && (
+          <>
+            <span>·</span>
+            <span
+              style={{ color: 'var(--color-text)' }}
+              title={`Caret is inside function "${enclosingFunctionName}"`}
+            >
+              ƒ {enclosingFunctionName}
             </span>
           </>
         )}
