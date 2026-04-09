@@ -5,7 +5,7 @@
 // Later batches add the preset library sidebar and polish.
 // ═══════════════════════════════════════════════════════════════════════
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { FiPlay, FiSquare, FiUpload, FiDownload } from 'react-icons/fi'
+import { FiPlay, FiSquare } from 'react-icons/fi'
 import {
   LineChart, Line, ScatterChart, Scatter, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
@@ -589,6 +589,14 @@ export default function Workstation() {
   // the menu applies to plus the click coordinates so the menu opens
   // anchored to the mouse pointer rather than the tab itself.
   const [tabMenu, setTabMenu] = useState<{ id: string; x: number; y: number } | null>(null)
+  // Which toolbar dropdown is currently open. The File button is an
+  // anchor point for a rect-derived menu position; null means nothing
+  // is open and the backdrop is inert.
+  const [toolbarMenu, setToolbarMenu] = useState<null | { kind: 'file'; x: number; y: number }>(null)
+  // Hidden file input refs driven by the File menu items. Kept outside
+  // the menu so the pickers survive menu close/reopen.
+  const scriptFileInputRef = useRef<HTMLInputElement | null>(null)
+  const workspaceFileInputRef = useRef<HTMLInputElement | null>(null)
   const activeScript = useMemo(
     () => scriptStore.list.find(s => s.id === scriptStore.activeId) ?? scriptStore.list[0],
     [scriptStore]
@@ -951,7 +959,7 @@ export default function Workstation() {
     const onKey = (ev: KeyboardEvent) => {
       if (ev.key === 'F1') { ev.preventDefault(); setHelpOpen(h => !h) }
       else if (ev.key === 'Escape' && helpOpen) setHelpOpen(false)
-      else if (ev.key === 'Escape') setTabMenu(null)
+      else if (ev.key === 'Escape') { setTabMenu(null); setToolbarMenu(null) }
       else if ((ev.metaKey || ev.ctrlKey) && (ev.key === 'l' || ev.key === 'L')) {
         // Don't swallow the browser's URL-bar focus when the user has
         // focused something outside the Workstation.
@@ -4710,14 +4718,40 @@ export default function Workstation() {
           {running ? 'Running…' : 'Run'}
         </button>
 
-        <label style={{ ...styles.btn, ...styles.btnGhost }} title="Upload one or more .m scripts">
-          <FiUpload /> Upload
-          <input type="file" accept=".m,.txt" multiple style={{ display: 'none' }} onChange={handleUpload} />
-        </label>
-
-        <button style={{ ...styles.btn, ...styles.btnGhost }} onClick={handleDownload} title="Download as .m">
-          <FiDownload /> Download
+        <button
+          style={{ ...styles.btn, ...styles.btnGhost, ...(toolbarMenu?.kind === 'file' ? styles.btnPrimary : null) }}
+          onClick={(e) => {
+            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+            setToolbarMenu(prev => prev?.kind === 'file' ? null : { kind: 'file', x: rect.left, y: rect.bottom + 4 })
+          }}
+          aria-haspopup="menu"
+          aria-expanded={toolbarMenu?.kind === 'file'}
+          title="File actions"
+        >
+          File ▾
         </button>
+
+        {/* Hidden pickers driven by the File menu. Kept outside the menu
+            DOM so unmounting the menu doesn't interrupt the file dialog. */}
+        <input
+          ref={scriptFileInputRef}
+          type="file"
+          accept=".m,.txt"
+          multiple
+          style={{ display: 'none' }}
+          onChange={handleUpload}
+        />
+        <input
+          ref={workspaceFileInputRef}
+          type="file"
+          accept=".json,application/json"
+          style={{ display: 'none' }}
+          onChange={(ev) => {
+            const f = ev.target.files?.[0]
+            if (f) importWorkspaceJson(f)
+            ev.target.value = ''
+          }}
+        />
 
         <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
           <button
@@ -4737,6 +4771,54 @@ export default function Workstation() {
           </button>
         </span>
       </div>
+
+      {/* ─── Toolbar dropdown (File) ─────────────────────────────────── */}
+      {toolbarMenu?.kind === 'file' && (() => {
+        const menuW = 220
+        const menuH = 260
+        const left = Math.min(toolbarMenu.x, window.innerWidth - menuW - 8)
+        const top = Math.min(toolbarMenu.y, window.innerHeight - menuH - 8)
+        const closeMenu = () => setToolbarMenu(null)
+        const item = (label: string, hint: string, enabled: boolean, onClick: () => void) => (
+          <button
+            key={label}
+            type="button"
+            role="menuitem"
+            style={{ ...styles.tabMenuItem, ...(enabled ? null : styles.tabMenuItemDisabled) }}
+            disabled={!enabled}
+            onClick={() => { if (enabled) { onClick(); closeMenu() } }}
+            onMouseEnter={(e) => { if (enabled) (e.currentTarget as HTMLButtonElement).style.background = 'var(--glass-bg-hover)' }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
+          >
+            <span>{label}</span>
+            {hint && <span style={{ marginLeft: 18, color: 'var(--color-text-muted)', fontSize: 10 }}>{hint}</span>}
+          </button>
+        )
+        return (
+          <>
+            <div
+              style={{ position: 'fixed', inset: 0, zIndex: 1115 }}
+              onClick={closeMenu}
+              onContextMenu={(e) => { e.preventDefault(); closeMenu() }}
+            />
+            <div
+              role="menu"
+              aria-label="File actions"
+              style={{ ...styles.tabMenu, left, top, minWidth: 220 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {item('New script', '', true, () => newScript())}
+              {item('Open .m file…', '', true, () => scriptFileInputRef.current?.click())}
+              {item('Save as .m', '', !!activeScript, () => handleDownload())}
+              <div style={styles.tabMenuSep} />
+              {item('Import workspace .json…', '', true, () => workspaceFileInputRef.current?.click())}
+              {item('Export workspace .json', '', vars.length > 0, () => exportWorkspaceJson())}
+              <div style={styles.tabMenuSep} />
+              {item('Reset workspace', '', vars.length > 0, () => resetWorkspace())}
+            </div>
+          </>
+        )
+      })()}
 
       {/* ─── Library (left) + Editor + Right rail + Console (bottom) ── */}
       <div style={styles.body}>
