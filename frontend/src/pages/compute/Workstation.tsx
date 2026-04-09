@@ -2472,10 +2472,27 @@ export default function Workstation() {
         closeScript(scriptStore.activeId)
         return
       }
+      // Ctrl/Cmd + 1..9 jumps directly to that script tab (9 wraps to
+      // the last tab regardless of count, matching Chrome's tab-bar
+      // convention). No-op when the palette is open so number keys
+      // stay usable for filtering.
+      if (!ev.shiftKey && !ev.altKey && /^[1-9]$/.test(ev.key)) {
+        if (paletteOpen) return
+        const n = Number(ev.key)
+        const list = scriptStore.list
+        if (list.length === 0) return
+        const targetIdx = n === 9 ? list.length - 1 : Math.min(n - 1, list.length - 1)
+        const target = list[targetIdx]
+        if (target && target.id !== scriptStore.activeId) {
+          ev.preventDefault()
+          switchScript(target.id)
+        }
+        return
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [openPalette, reopenLastClosedScript, closeScript, scriptStore.activeId, paletteOpen])
+  }, [openPalette, reopenLastClosedScript, closeScript, switchScript, scriptStore.activeId, scriptStore.list, paletteOpen])
 
   /* ── styles (keyed off Humanovo CSS variables) ─────────────────────── */
   const styles = useMemo<Record<string, React.CSSProperties>>(() => ({
@@ -4833,6 +4850,8 @@ const SHORTCUT_GROUPS: { title: string; items: [string, string][] }[] = [
   {
     title: 'Scripts',
     items: [
+      ['Ctrl / Cmd + 1 … 8', 'Switch to script tab 1–8'],
+      ['Ctrl / Cmd + 9', 'Switch to the last script tab'],
       ['Ctrl / Cmd + W', 'Close the active script tab'],
       ['Ctrl / Cmd + Shift + T', 'Reopen the most recently closed tab'],
     ],
