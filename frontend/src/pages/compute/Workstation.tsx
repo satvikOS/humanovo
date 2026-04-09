@@ -29,6 +29,7 @@ import { BUILTIN_CATEGORIES, BUILTIN_DOCS, type BuiltinDoc } from './builtinDocs
 const SCRIPT_KEY = 'compute-workstation-script'          // legacy single-script key
 const SCRIPTS_KEY = 'compute-workstation-scripts'        // { list, activeId }
 const HISTORY_KEY = 'compute-workstation-history'
+const WORKSPACE_KEY = 'compute-workstation-workspace-v1' // serialized vars
 
 const STARTER_SCRIPT = `% MATLAB/Octave Workstation
 % Variables persist across runs. Use the command window at the bottom
@@ -102,6 +103,83 @@ function loadHistory(): string[] {
 }
 function saveHistory(h: string[]) {
   try { localStorage.setItem(HISTORY_KEY, JSON.stringify(h.slice(-100))) } catch { /* quota */ }
+}
+
+/* ── Workspace persistence ──────────────────────────────────────────────
+ * Serializes the user's variables (excluding closures and engine
+ * internals like __tic__) so they survive a page refresh. We hard-cap
+ * total bytes so a runaway 1e8-element matrix can't destroy the
+ * localStorage quota — past that limit we just save what fits.
+ */
+const WORKSPACE_BUDGET_BYTES = 1_500_000
+
+interface SerialMValue {
+  kind: 'num' | 'bool' | 'str' | 'mat'
+  v?: number | string | boolean
+  rows?: number
+  cols?: number
+  data?: number[]
+}
+
+function serializeMValue(v: MValue): SerialMValue | null {
+  switch (v.kind) {
+    case 'num':  return { kind: 'num',  v: v.v }
+    case 'bool': return { kind: 'bool', v: v.v }
+    case 'str':  return { kind: 'str',  v: v.v }
+    case 'mat':  return { kind: 'mat',  rows: v.rows, cols: v.cols, data: Array.from(v.data) }
+    case 'fn':
+    case 'void': return null
+  }
+}
+
+function deserializeMValue(s: SerialMValue): MValue | null {
+  if (!s || typeof s.kind !== 'string') return null
+  switch (s.kind) {
+    case 'num':  return typeof s.v === 'number'  ? { kind: 'num',  v: s.v } : null
+    case 'bool': return typeof s.v === 'boolean' ? { kind: 'bool', v: s.v } : null
+    case 'str':  return typeof s.v === 'string'  ? { kind: 'str',  v: s.v } : null
+    case 'mat': {
+      if (typeof s.rows !== 'number' || typeof s.cols !== 'number' || !Array.isArray(s.data)) return null
+      if (s.rows * s.cols !== s.data.length) return null
+      return { kind: 'mat', rows: s.rows, cols: s.cols, data: Float64Array.from(s.data) }
+    }
+    default: return null
+  }
+}
+
+function saveWorkspace(ws: Workspace) {
+  try {
+    const out: Record<string, SerialMValue> = {}
+    let bytes = 0
+    for (const [name, v] of ws.vars) {
+      if (name.startsWith('__')) continue
+      const s = serializeMValue(v)
+      if (!s) continue
+      // Cheap byte estimate; for matrices it's dominated by data length.
+      const est = name.length + 16 + (s.data ? s.data.length * 9 : 32)
+      if (bytes + est > WORKSPACE_BUDGET_BYTES) break
+      bytes += est
+      out[name] = s
+    }
+    localStorage.setItem(WORKSPACE_KEY, JSON.stringify({ vars: out }))
+  } catch { /* quota / serialization fail — silently drop */ }
+}
+
+function loadWorkspaceInto(ws: Workspace) {
+  try {
+    const raw = localStorage.getItem(WORKSPACE_KEY)
+    if (!raw) return
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed.vars !== 'object') return
+    for (const [name, ser] of Object.entries(parsed.vars)) {
+      const v = deserializeMValue(ser as SerialMValue)
+      if (v) ws.vars.set(name, v)
+    }
+  } catch { /* corrupted — ignore */ }
+}
+
+function clearSavedWorkspace() {
+  try { localStorage.removeItem(WORKSPACE_KEY) } catch { /* quota */ }
 }
 
 /* ── Variable snapshot (for inspector) ──────────────────────────────── */
@@ -407,8 +485,14 @@ export default function Workstation() {
   const [acAnchor, setAcAnchor] = useState<{ top: number; left: number } | null>(null)
   const [acRange, setAcRange] = useState<{ start: number; end: number } | null>(null)
 
-  // Single persistent workspace across runs.
-  const workspaceRef = useRef<Workspace>(createWorkspace())
+  // Single persistent workspace across runs. Hydrated from localStorage so
+  // variables survive a full page refresh; functions and engine internals
+  // are intentionally not restored (they can't be safely serialized).
+  const workspaceRef = useRef<Workspace>((() => {
+    const ws = createWorkspace()
+    loadWorkspaceInto(ws)
+    return ws
+  })())
   const consoleRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<HTMLTextAreaElement>(null)
   const gutterRef = useRef<HTMLDivElement>(null)
@@ -425,6 +509,13 @@ export default function Workstation() {
     const el = consoleRef.current
     if (el) el.scrollTop = el.scrollHeight
   }, [entries])
+
+  // Hydrate the variable inspector from the persisted workspace once on
+  // mount (the workspaceRef itself was loaded synchronously above).
+  useEffect(() => {
+    setVars(snapshotWorkspace(workspaceRef.current))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Persist script store as the user edits (debounced).
   useEffect(() => {
@@ -485,8 +576,10 @@ export default function Workstation() {
         return merged.slice(-12) // keep last 12 figures
       })
     }
-    // Refresh the variable inspector snapshot.
+    // Refresh the variable inspector snapshot and persist the workspace
+    // so variables survive a refresh of the page.
     setVars(snapshotWorkspace(workspaceRef.current))
+    saveWorkspace(workspaceRef.current)
   }, [])
 
   const runScript = useCallback(() => {
@@ -548,6 +641,7 @@ export default function Workstation() {
   const clearConsole = () => setEntries([])
   const resetWorkspace = () => {
     workspaceRef.current = createWorkspace()
+    clearSavedWorkspace()
     setVars([])
     setPlots([])
     setActivePlot(0)
