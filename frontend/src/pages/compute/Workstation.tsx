@@ -1036,6 +1036,43 @@ export default function Workstation() {
     return best
   }, [sections, cursor.line])
 
+  // Display name for the active %% section (or null if the file has no
+  // real sections). Used to drop a small "Section: foo" breadcrumb into
+  // the status bar so users always know which block they're editing.
+  const activeSectionLabel = useMemo(() => {
+    if (sections.starts.length <= 1) return null
+    const idx = sections.starts.indexOf(activeSectionLine)
+    if (idx < 0) return null
+    return sections.names[activeSectionLine] || `section ${idx + 1}`
+  }, [sections, activeSectionLine])
+
+  // Rough live estimate of how much memory the workspace is holding,
+  // dominated by matrix storage (8 bytes per double). Strings contribute
+  // ~2 bytes per UTF-16 code unit; scalars are negligible but still
+  // counted for honesty. Shown in the status bar as a human-friendly
+  // size so the user can spot runaway allocations before the engine
+  // grinds to a halt.
+  const workspaceBytes = useMemo(() => {
+    let total = 0
+    for (const v of vars) {
+      switch (v.value.kind) {
+        case 'mat':  total += v.value.data.length * 8; break
+        case 'str':  total += v.value.v.length * 2; break
+        case 'num':  total += 8; break
+        case 'bool': total += 1; break
+        default:     break
+      }
+    }
+    return total
+  }, [vars])
+  const workspaceSizeLabel = useMemo(() => {
+    const b = workspaceBytes
+    if (b < 1024) return `${b} B`
+    if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`
+    if (b < 1024 * 1024 * 1024) return `${(b / (1024 * 1024)).toFixed(1)} MB`
+    return `${(b / (1024 * 1024 * 1024)).toFixed(2)} GB`
+  }, [workspaceBytes])
+
   // Core runner. Takes an arbitrary source fragment plus a label that is
   // echoed into the console so the user can tell a full run from a
   // "Run Selection". Used by both runScript and runSelection.
@@ -4106,8 +4143,23 @@ export default function Workstation() {
             </span>
           </>
         )}
+        {activeSectionLabel && (
+          <>
+            <span>·</span>
+            <span
+              style={{ color: 'var(--color-text)', cursor: 'pointer' }}
+              onClick={() => jumpToLine(activeSectionLine)}
+              title={`Jump to the start of this %% section (line ${activeSectionLine})`}
+            >
+              §{' '}{activeSectionLabel}
+            </span>
+          </>
+        )}
         <span>·</span>
-        <span>{vars.length} var{vars.length === 1 ? '' : 's'}</span>
+        <span title={`${workspaceBytes.toLocaleString()} bytes across ${vars.length} variable${vars.length === 1 ? '' : 's'}`}>
+          {vars.length} var{vars.length === 1 ? '' : 's'}
+          {vars.length > 0 && ` · ${workspaceSizeLabel}`}
+        </span>
         <span>·</span>
         <span>{plots.length} figure{plots.length === 1 ? '' : 's'}</span>
         <span style={{ marginLeft: 'auto' }}>
