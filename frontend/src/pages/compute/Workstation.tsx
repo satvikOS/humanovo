@@ -493,8 +493,12 @@ export default function Workstation() {
   // Keyboard shortcuts inside the editor:
   //   Cmd/Ctrl+Enter  — run script
   //   Cmd/Ctrl+F      — find / replace panel
+  //   Ctrl+/          — toggle line comment (%)
   //   Tab / Shift+Tab — indent / outdent current selection (2 spaces)
   //   Enter           — auto-indent to match the previous line
+  //   ( [ { " '       — auto-pair brackets / quotes
+  //   ) ] }           — skip over matching closer
+  //   Backspace       — delete matching pair when between them
   const onEditorKey = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
       e.preventDefault()
@@ -508,6 +512,30 @@ export default function Workstation() {
     }
     const ta = e.currentTarget
     const { selectionStart: s, selectionEnd: ePos, value } = ta
+
+    // Ctrl+/ — toggle MATLAB line comment (%)
+    if ((e.metaKey || e.ctrlKey) && e.key === '/') {
+      e.preventDefault()
+      const lineStart = value.lastIndexOf('\n', s - 1) + 1
+      // Expand to all lines in selection
+      const lineEnd = value.indexOf('\n', ePos)
+      const regionEnd = lineEnd < 0 ? value.length : lineEnd
+      const before = value.slice(0, lineStart)
+      const middle = value.slice(lineStart, regionEnd)
+      const after = value.slice(regionEnd)
+      const lines = middle.split('\n')
+      const allCommented = lines.every(l => /^\s*%/.test(l) || l.trim() === '')
+      const toggled = allCommented
+        ? lines.map(l => l.replace(/^(\s*)% ?/, '$1')).join('\n')
+        : lines.map(l => l === '' ? l : '% ' + l).join('\n')
+      const newVal = before + toggled + after
+      setScript(newVal)
+      requestAnimationFrame(() => {
+        ta.selectionStart = lineStart
+        ta.selectionEnd = lineStart + toggled.length
+      })
+      return
+    }
 
     if (e.key === 'Tab') {
       e.preventDefault()
@@ -543,6 +571,79 @@ export default function Workstation() {
         ta.selectionStart = ta.selectionEnd = s + 2
       })
       return
+    }
+
+    // Auto-pair brackets and quotes
+    const PAIRS: Record<string, string> = { '(': ')', '[': ']', '{': '}' }
+    const CLOSERS = new Set([')', ']', '}'])
+    const QUOTE_PAIRS: Record<string, string> = { '"': '"', "'": "'" }
+
+    if (PAIRS[e.key]) {
+      e.preventDefault()
+      const open = e.key, close = PAIRS[e.key]
+      if (s !== ePos) {
+        // Wrap selection
+        const wrapped = open + value.slice(s, ePos) + close
+        const newVal = value.slice(0, s) + wrapped + value.slice(ePos)
+        setScript(newVal)
+        requestAnimationFrame(() => {
+          ta.selectionStart = s + 1
+          ta.selectionEnd = ePos + 1
+        })
+      } else {
+        const newVal = value.slice(0, s) + open + close + value.slice(ePos)
+        setScript(newVal)
+        requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = s + 1 })
+      }
+      return
+    }
+
+    if (CLOSERS.has(e.key) && s === ePos && value[s] === e.key) {
+      // Closing bracket that already exists: skip over it
+      e.preventDefault()
+      requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = s + 1 })
+      return
+    }
+
+    if (QUOTE_PAIRS[e.key]) {
+      // Don't auto-pair single-quote after an identifier (transpose in MATLAB)
+      if (e.key === "'" && /[A-Za-z0-9_\)\]\.]/.test(value[s - 1] ?? '')) {
+        return // let default handle it
+      }
+      if (s === ePos && value[s] === e.key) {
+        // Skip over existing quote
+        e.preventDefault()
+        requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = s + 1 })
+        return
+      }
+      e.preventDefault()
+      const q = e.key
+      if (s !== ePos) {
+        const wrapped = q + value.slice(s, ePos) + q
+        const newVal = value.slice(0, s) + wrapped + value.slice(ePos)
+        setScript(newVal)
+        requestAnimationFrame(() => { ta.selectionStart = s + 1; ta.selectionEnd = ePos + 1 })
+      } else {
+        const newVal = value.slice(0, s) + q + q + value.slice(ePos)
+        setScript(newVal)
+        requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = s + 1 })
+      }
+      return
+    }
+
+    // Backspace between matched pair: delete both
+    if (e.key === 'Backspace' && s === ePos && s > 0) {
+      const prev = value[s - 1]
+      const next = value[s]
+      if ((prev === '(' && next === ')') || (prev === '[' && next === ']') ||
+          (prev === '{' && next === '}') || (prev === '"' && next === '"') ||
+          (prev === "'" && next === "'")) {
+        e.preventDefault()
+        const newVal = value.slice(0, s - 1) + value.slice(s + 1)
+        setScript(newVal)
+        requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = s - 1 })
+        return
+      }
     }
 
     if (e.key === 'Enter' && !e.shiftKey) {
