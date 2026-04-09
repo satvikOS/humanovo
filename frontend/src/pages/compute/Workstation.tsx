@@ -4703,12 +4703,31 @@ function VarExpandView({ value }: { value: MValue }) {
       // row-major Float64Array (see mathLib). Access via data[r*cols + c].
       const data = value.data
       const full = value.cols
+      const headerStyle: React.CSSProperties = {
+        padding: '2px 8px',
+        color: 'var(--color-text-muted)',
+        fontSize: 10,
+        textAlign: 'right',
+        fontFamily: "'JetBrains Mono', monospace",
+      }
       return (
         <div>
           <table style={{ borderCollapse: 'collapse', fontVariantNumeric: 'tabular-nums' }}>
+            <thead>
+              <tr>
+                <th style={{ ...headerStyle, borderRight: '1px solid var(--glass-border)', borderBottom: '1px solid var(--glass-border)' }}></th>
+                {Array.from({ length: cols }, (_, c) => (
+                  <th key={c} style={{ ...headerStyle, borderBottom: '1px solid var(--glass-border)' }}>
+                    {c + 1}
+                  </th>
+                ))}
+                {colTrunc && <th style={{ ...headerStyle, borderBottom: '1px solid var(--glass-border)' }}>…</th>}
+              </tr>
+            </thead>
             <tbody>
               {Array.from({ length: rows }, (_, r) => (
                 <tr key={r}>
+                  <td style={{ ...headerStyle, borderRight: '1px solid var(--glass-border)' }}>{r + 1}</td>
                   {Array.from({ length: cols }, (_, c) => (
                     <td
                       key={c}
@@ -4729,7 +4748,7 @@ function VarExpandView({ value }: { value: MValue }) {
               ))}
               {rowTrunc && (
                 <tr>
-                  <td colSpan={cols + (colTrunc ? 1 : 0)} style={{ padding: '2px 6px', color: 'var(--color-text-muted)' }}>
+                  <td colSpan={cols + 1 + (colTrunc ? 1 : 0)} style={{ padding: '2px 6px', color: 'var(--color-text-muted)' }}>
                     … {value.rows - VAR_MAX_ROWS} more row{value.rows - VAR_MAX_ROWS === 1 ? '' : 's'}
                   </td>
                 </tr>
