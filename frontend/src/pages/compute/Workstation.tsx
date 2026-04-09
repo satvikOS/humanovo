@@ -682,6 +682,28 @@ export default function Workstation() {
     saveWorkspace(workspaceRef.current)
   }, [])
 
+  const lineCount = useMemo(() => script.split('\n').length, [script])
+
+  // Section boundaries for %% markers. `starts` holds 1-based line numbers
+  // of lines that begin a new section. A leading implicit section 1 is
+  // always present even if the file doesn't contain a %% marker.
+  const sections = useMemo(() => {
+    const lines = script.split('\n')
+    const starts: number[] = [1]
+    const names: Record<number, string> = {}
+    for (let i = 0; i < lines.length; i++) {
+      if (/^\s*%%/.test(lines[i])) {
+        const n = i + 1
+        if (!starts.includes(n)) starts.push(n)
+        const name = lines[i].replace(/^\s*%%\s*/, '').trim()
+        if (name) names[n] = name
+      }
+    }
+    return { starts, names }
+  }, [script])
+
+  const sectionStartSet = useMemo(() => new Set(sections.starts), [sections])
+
   // Core runner. Takes an arbitrary source fragment plus a label that is
   // echoed into the console so the user can tell a full run from a
   // "Run Selection". Used by both runScript and runSelection.
@@ -729,6 +751,26 @@ export default function Workstation() {
     const preview = fragment.split('\n')[0].trim().slice(0, 40)
     runFragment(fragment, `▶ run selection — ${preview}${fragment.split('\n')[0].length > 40 ? '…' : ''}`)
   }, [runFragment])
+
+  // Run the %%-delimited section containing the caret. Sections are
+  // MATLAB's standard script partitioning: a block starting at either
+  // the file head or a `%% name` marker line and running to the next
+  // such marker (or end-of-file). Useful for long scripts where you
+  // want to re-run one stage without touching the rest of the workspace.
+  const runSection = useCallback(() => {
+    const starts = sections.starts
+    const caretLine = cursor.line
+    let sectionStart = starts[0]
+    for (const ln of starts) if (ln <= caretLine) sectionStart = ln
+    const nextStart = starts.find(ln => ln > sectionStart) ?? lineCount + 1
+    const lines = script.split('\n')
+    // Skip the `%%` marker line itself so its comment text isn't echoed.
+    const from = sectionStart - 1 + (/^\s*%%/.test(lines[sectionStart - 1] ?? '') ? 1 : 0)
+    const to = nextStart - 1
+    const fragment = lines.slice(from, to).join('\n')
+    const name = sections.names[sectionStart] ?? `line ${sectionStart}`
+    runFragment(fragment, `▶ run section — ${name}`)
+  }, [sections, cursor.line, lineCount, script, runFragment])
 
   const runCommand = useCallback((text: string) => {
     const line = text.trim()
@@ -885,6 +927,7 @@ export default function Workstation() {
   // Keyboard shortcuts inside the editor:
   //   Cmd/Ctrl+Enter        — run script
   //   Shift+Cmd/Ctrl+Enter  — run selection (or current line)
+  //   Alt+Cmd/Ctrl+Enter    — run current %% section
   //   F9                     — run selection (MATLAB convention)
   //   Cmd/Ctrl+F            — find / replace panel
   //   Ctrl+/                — toggle line comment (%)
@@ -931,6 +974,11 @@ export default function Workstation() {
     if (e.key === 'F9') {
       e.preventDefault()
       runSelection()
+      return
+    }
+    if ((e.metaKey || e.ctrlKey) && e.altKey && e.key === 'Enter') {
+      e.preventDefault()
+      runSection()
       return
     }
     if ((e.metaKey || e.ctrlKey) && (e.key === 'f' || e.key === 'F')) {
@@ -1135,7 +1183,7 @@ export default function Workstation() {
         ta.selectionStart = ta.selectionEnd = s + 1 + indent.length
       })
     }
-  }, [runScript, runSelection, openFind, setScript, vars, acOpen, acItems, acIndex, acceptAutocomplete, closeAutocomplete])
+  }, [runScript, runSelection, runSection, openFind, setScript, vars, acOpen, acItems, acIndex, acceptAutocomplete, closeAutocomplete])
 
   // Track cursor position for the status bar.
   const updateCursor = useCallback((ta: HTMLTextAreaElement) => {
@@ -1234,8 +1282,6 @@ export default function Workstation() {
     const re = new RegExp(esc, 'gi')
     setScript(script.replace(re, replaceQuery))
   }, [findMatches, findQuery, replaceQuery, script, setScript])
-
-  const lineCount = useMemo(() => script.split('\n').length, [script])
 
   const handleUpload = useCallback((ev: React.ChangeEvent<HTMLInputElement>) => {
     const f = ev.target.files?.[0]
@@ -1963,6 +2009,15 @@ export default function Workstation() {
           <FiPlay style={{ opacity: 0.7 }} /> Run selection
         </button>
 
+        <button
+          style={{ ...styles.btn, ...styles.btnGhost }}
+          onClick={runSection}
+          disabled={running || sections.starts.length < 2}
+          title="Run the %% section containing the caret (Alt+Ctrl/Cmd+Enter)"
+        >
+          <FiPlay style={{ opacity: 0.7 }} /> Run section
+        </button>
+
         <label style={{ ...styles.btn, ...styles.btnGhost }} title="Upload .m script">
           <FiUpload /> Upload
           <input type="file" accept=".m,.txt" style={{ display: 'none' }} onChange={handleUpload} />
@@ -2092,7 +2147,7 @@ export default function Workstation() {
         <div style={styles.editorWrap}>
           <div style={styles.editorHeader}>
             <span>Scripts</span>
-            <span style={{ opacity: 0.7 }}>Ctrl/Cmd + Enter to run · F9 runs selection · Ctrl/Cmd + F to find · Tab to indent</span>
+            <span style={{ opacity: 0.7 }}>Ctrl/Cmd + Enter to run · F9 runs selection · Alt+Ctrl/Cmd + Enter runs %% section · Ctrl/Cmd + F to find</span>
           </div>
           <div style={styles.tabBar}>
             {scriptStore.list.map(s => {
@@ -2191,14 +2246,17 @@ export default function Workstation() {
                 {Array.from({ length: lineCount }, (_, i) => {
                   const n = i + 1
                   const isErr = errorLine === n
+                  const isSec = sectionStartSet.has(n) && n !== 1
                   return (
                     <div
                       key={n}
                       style={{
                         height: '1.6em',
-                        color: isErr ? 'var(--color-error)' : undefined,
-                        fontWeight: isErr ? 600 : undefined,
+                        color: isErr ? 'var(--color-error)' : isSec ? 'var(--color-text)' : undefined,
+                        fontWeight: isErr || isSec ? 600 : undefined,
+                        borderTop: isSec ? '1px solid var(--color-border-strong)' : undefined,
                       }}
+                      title={isSec ? (sections.names[n] ? `Section: ${sections.names[n]}` : 'Section') : undefined}
                     >
                       {isErr ? '● ' + n : n}
                     </div>
