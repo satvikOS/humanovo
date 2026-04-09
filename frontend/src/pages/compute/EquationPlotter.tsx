@@ -227,7 +227,7 @@ const PRESETS: PredefinedEq[] = [
   { id: 'damped-oscillation', name: 'Damped Oscillation', expr: 'exp(-0.1*x)*sin(x)', xMin: 0, xMax: 40, category: 'Systems Biology' },
 ]
 
-const OVERLAY_COLORS = ['#f97316', '#a855f7', '#14b8a6']
+const OVERLAY_COLORS = ['#60a5fa', '#93c5fd', '#1d4ed8']
 
 interface SavedOverlay {
   expr: string

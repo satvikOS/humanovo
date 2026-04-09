@@ -198,12 +198,12 @@ export default function PresetRunner() {
               <XAxis dataKey="x" type="number" tick={axisStyle} />
               <YAxis tick={axisStyle} />
               <Tooltip content={<ChartTip />} />
-              <Line type="monotone" dataKey="y" stroke="var(--color-accent-blue)" dot={false} strokeWidth={1.5} name={res.seriesLabels?.[0] || 'y'} />
+              <Line type="monotone" dataKey="y" stroke="#3b82f6" dot={false} strokeWidth={1.5} name={res.seriesLabels?.[0] || 'y'} />
               {res.chartData.some(d => d.y2 !== undefined) && (
-                <Line type="monotone" dataKey="y2" stroke="#22c55e" dot={false} strokeWidth={1.5} name={res.seriesLabels?.[1] || 'y2'} />
+                <Line type="monotone" dataKey="y2" stroke="#60a5fa" dot={false} strokeWidth={1.5} name={res.seriesLabels?.[1] || 'y2'} />
               )}
               {res.chartData.some(d => d.y3 !== undefined) && (
-                <Line type="monotone" dataKey="y3" stroke="#a855f7" dot={false} strokeWidth={1.5} name={res.seriesLabels?.[2] || 'y3'} />
+                <Line type="monotone" dataKey="y3" stroke="#93c5fd" dot={false} strokeWidth={1.5} name={res.seriesLabels?.[2] || 'y3'} />
               )}
             </LineChart>
           </ResponsiveContainer>

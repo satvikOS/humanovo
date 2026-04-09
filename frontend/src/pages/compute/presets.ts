@@ -29,17 +29,21 @@ const parseArray = (raw: any): number[] => {
 }
 
 /* ── Toolbox Categories ──────────────────────────────────────────────── */
+// Category color used to be a rainbow palette. The rest of Humanovo sticks
+// to a single accent blue, so Compute Lab now matches.
+const ACCENT = '#3b82f6'
+
 export const TOOLBOX_CATEGORIES: ToolboxCategory[] = [
-  { id: 'statistics', name: 'Statistics & Testing', icon: FiTarget, color: '#3b82f6' },
-  { id: 'signal', name: 'Signal Processing', icon: FiActivity, color: '#10b981' },
-  { id: 'image', name: 'Image Processing', icon: FiGrid, color: '#8b5cf6' },
-  { id: 'bioinformatics', name: 'Bioinformatics', icon: FiHeart, color: '#ec4899' },
-  { id: 'curvefitting', name: 'Curve Fitting', icon: FiTrendingUp, color: '#f59e0b' },
-  { id: 'ode', name: 'ODE & Simulation', icon: FiZap, color: '#ef4444' },
-  { id: 'survival', name: 'Survival Analysis', icon: FiBarChart2, color: '#06b6d4' },
-  { id: 'ml', name: 'Machine Learning', icon: FiLayers, color: '#6366f1' },
-  { id: 'pk', name: 'Pharmacokinetics', icon: FiCpu, color: '#f97316' },
-  { id: 'normality', name: 'Normality & Distribution', icon: FiAlertCircle, color: '#84cc16' },
+  { id: 'statistics', name: 'Statistics & Testing', icon: FiTarget, color: ACCENT },
+  { id: 'signal', name: 'Signal Processing', icon: FiActivity, color: ACCENT },
+  { id: 'image', name: 'Image Processing', icon: FiGrid, color: ACCENT },
+  { id: 'bioinformatics', name: 'Bioinformatics', icon: FiHeart, color: ACCENT },
+  { id: 'curvefitting', name: 'Curve Fitting', icon: FiTrendingUp, color: ACCENT },
+  { id: 'ode', name: 'ODE & Simulation', icon: FiZap, color: ACCENT },
+  { id: 'survival', name: 'Survival Analysis', icon: FiBarChart2, color: ACCENT },
+  { id: 'ml', name: 'Machine Learning', icon: FiLayers, color: ACCENT },
+  { id: 'pk', name: 'Pharmacokinetics', icon: FiCpu, color: ACCENT },
+  { id: 'normality', name: 'Normality & Distribution', icon: FiAlertCircle, color: ACCENT },
 ]
 
 /* ═══ STATISTICS (15 presets) ════════════════════════════════════════ */
