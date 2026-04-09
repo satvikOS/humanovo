@@ -725,6 +725,15 @@ export default function Workstation() {
   const [gotoQuery, setGotoQuery] = useState('')
   const gotoInputRef = useRef<HTMLInputElement>(null)
 
+  // "Go to symbol" overlay — scans the current script for %% section
+  // headers and top-level function definitions, lets the user fuzzy-
+  // filter them and jumps the editor to the chosen line. Bound to
+  // Ctrl / Cmd + Shift + O.
+  const [symbolNavOpen, setSymbolNavOpen] = useState(false)
+  const [symbolNavQuery, setSymbolNavQuery] = useState('')
+  const [symbolNavIndex, setSymbolNavIndex] = useState(0)
+  const symbolNavInputRef = useRef<HTMLInputElement>(null)
+
   // Tab autocomplete state. The popup floats below the caret and lists
   // matching builtins, workspace variables and language keywords.
   type AcItem = { name: string; kind: 'fn' | 'var' | 'kw'; desc?: string }
@@ -1914,6 +1923,70 @@ export default function Workstation() {
     setGotoOpen(false)
   }, [gotoQuery, jumpToLine])
 
+  // Scan the current script for symbols — %% section headers and top-level
+  // `function` definitions. Captured greedily (no scope analysis) because
+  // MATLAB allows multiple local functions per file and nested functions.
+  type ScriptSymbol = { kind: 'section' | 'fn'; name: string; line: number }
+  const scriptSymbols = useMemo<ScriptSymbol[]>(() => {
+    const out: ScriptSymbol[] = []
+    const lines = script.split('\n')
+    for (let i = 0; i < lines.length; i++) {
+      const ln = lines[i]
+      const secM = /^\s*%%\s*(.*)$/.exec(ln)
+      if (secM) {
+        out.push({ kind: 'section', name: secM[1].trim() || `section ${out.filter(s => s.kind === 'section').length + 1}`, line: i + 1 })
+        continue
+      }
+      // Accept both `function name(` and `function [out] = name(` forms.
+      const fnM = /^\s*function\s+(?:[\[\]\w,\s]+=\s*)?([A-Za-z_]\w*)\s*\(/.exec(ln)
+      if (fnM) {
+        out.push({ kind: 'fn', name: fnM[1], line: i + 1 })
+      }
+    }
+    return out
+  }, [script])
+
+  const visibleScriptSymbols = useMemo(() => {
+    const q = symbolNavQuery.trim().toLowerCase()
+    if (!q) return scriptSymbols
+    const tokens = q.split(/\s+/)
+    return scriptSymbols.filter(s => {
+      const hay = s.name.toLowerCase()
+      return tokens.every(t => hay.includes(t))
+    })
+  }, [scriptSymbols, symbolNavQuery])
+
+  const openSymbolNav = useCallback(() => {
+    setFindOpen(false)
+    setGotoOpen(false)
+    setSymbolNavOpen(true)
+    setSymbolNavQuery('')
+    setSymbolNavIndex(0)
+    requestAnimationFrame(() => {
+      symbolNavInputRef.current?.focus()
+      symbolNavInputRef.current?.select()
+    })
+  }, [])
+
+  const closeSymbolNav = useCallback(() => {
+    setSymbolNavOpen(false)
+    editorRef.current?.focus()
+  }, [])
+
+  const commitSymbolNav = useCallback(() => {
+    const sym = visibleScriptSymbols[symbolNavIndex]
+    if (!sym) return
+    setSymbolNavOpen(false)
+    jumpToLine(sym.line)
+  }, [visibleScriptSymbols, symbolNavIndex, jumpToLine])
+
+  // Keep the active row inside the filtered range as the user types.
+  useEffect(() => {
+    if (symbolNavIndex >= visibleScriptSymbols.length) {
+      setSymbolNavIndex(Math.max(0, visibleScriptSymbols.length - 1))
+    }
+  }, [visibleScriptSymbols, symbolNavIndex])
+
   // Bookmarks. We keep a Set<number> of 1-indexed line numbers in a ref map
   // keyed by script id. Callers mutate the active script's entry and then
   // mirror it into `bookmarkLines` state so React re-renders the gutter.
@@ -2046,6 +2119,11 @@ export default function Workstation() {
     if ((e.metaKey || e.ctrlKey) && (e.key === 'g' || e.key === 'G')) {
       e.preventDefault()
       openGoto()
+      return
+    }
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'o' || e.key === 'O')) {
+      e.preventDefault()
+      openSymbolNav()
       return
     }
     // Ctrl/Cmd + M — jump to matching bracket at caret. Shift extends the
@@ -2514,7 +2592,7 @@ export default function Workstation() {
         ta.selectionStart = ta.selectionEnd = s + 1 + newIndent.length
       })
     }
-  }, [runScript, runSelection, runSection, openFind, openGoto, setScript, vars, acOpen, acItems, acIndex, acceptAutocomplete, closeAutocomplete, editorFontSize, sigHint, toggleBookmarkAtCaret, gotoBookmark, gotoMatchingBracket])
+  }, [runScript, runSelection, runSection, openFind, openGoto, openSymbolNav, setScript, vars, acOpen, acItems, acIndex, acceptAutocomplete, closeAutocomplete, editorFontSize, sigHint, toggleBookmarkAtCaret, gotoBookmark, gotoMatchingBracket])
 
   // Track cursor position and selection size for the status bar.
   const updateCursor = useCallback((ta: HTMLTextAreaElement) => {
@@ -3020,8 +3098,9 @@ export default function Workstation() {
     { id: 'rename-id',    title: 'Rename identifier at caret',   hint: '',                 run: () => renameIdentifierAtCaret() },
     { id: 'goto-bracket', title: 'Go to matching bracket',       hint: 'Ctrl+M',           run: () => gotoMatchingBracket(false) },
     { id: 'sel-bracket',  title: 'Select to matching bracket',   hint: 'Ctrl+Shift+M',     run: () => gotoMatchingBracket(true) },
+    { id: 'goto-sym',     title: 'Go to symbol in script',       hint: 'Ctrl+Shift+O',     run: () => openSymbolNav() },
     { id: 'help',         title: 'Show keyboard shortcuts',      hint: 'F1',               run: () => setHelpOpen(true) },
-  ], [runScript, runSelection, runSection, openFind, openGoto, newScript, duplicateScript, closeScript, reopenLastClosedScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, copyConsole, exportPlotSVG, exportPlotPNG, exportPlotCSV, toggleBookmarkAtCaret, gotoBookmark, clearAllBookmarks, insertSnippet, renameIdentifierAtCaret, gotoMatchingBracket])
+  ], [runScript, runSelection, runSection, openFind, openGoto, openSymbolNav, newScript, duplicateScript, closeScript, reopenLastClosedScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, copyConsole, exportPlotSVG, exportPlotPNG, exportPlotCSV, toggleBookmarkAtCaret, gotoBookmark, clearAllBookmarks, insertSnippet, renameIdentifierAtCaret, gotoMatchingBracket])
 
   // Fuzzy-ish filter: split the query into tokens and require each to
   // appear (substring, case-insensitive) in the command title. Keeps
@@ -5379,6 +5458,87 @@ export default function Workstation() {
           </div>
         </div>
       )}
+
+      {/* ─── Go to symbol (Ctrl/Cmd + Shift + O) ──────────────────── */}
+      {symbolNavOpen && (
+        <div
+          style={styles.paletteBackdrop}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Go to symbol"
+          onClick={e => { if (e.target === e.currentTarget) closeSymbolNav() }}
+        >
+          <div style={styles.paletteCard}>
+            <input
+              ref={symbolNavInputRef}
+              style={styles.paletteInput}
+              value={symbolNavQuery}
+              onChange={e => { setSymbolNavQuery(e.target.value); setSymbolNavIndex(0) }}
+              placeholder="Go to symbol — type to filter sections and functions…"
+              aria-label="Filter symbols"
+              spellCheck={false}
+              onKeyDown={e => {
+                if (e.key === 'Escape') { e.preventDefault(); closeSymbolNav() }
+                else if (e.key === 'ArrowDown') {
+                  e.preventDefault()
+                  setSymbolNavIndex(i => Math.min(i + 1, Math.max(0, visibleScriptSymbols.length - 1)))
+                } else if (e.key === 'ArrowUp') {
+                  e.preventDefault()
+                  setSymbolNavIndex(i => Math.max(i - 1, 0))
+                } else if (e.key === 'Enter') {
+                  e.preventDefault()
+                  commitSymbolNav()
+                }
+              }}
+            />
+            <div style={styles.paletteList}>
+              {visibleScriptSymbols.length === 0 && (
+                <div style={styles.paletteEmpty}>
+                  {scriptSymbols.length === 0
+                    ? 'No %% sections or function definitions in this script.'
+                    : `No symbols match "${symbolNavQuery}".`}
+                </div>
+              )}
+              {visibleScriptSymbols.map((sym, i) => {
+                const active = i === symbolNavIndex
+                return (
+                  <div
+                    key={`${sym.kind}-${sym.line}-${sym.name}`}
+                    role="option"
+                    aria-selected={active}
+                    style={active ? { ...styles.paletteItem, ...styles.paletteItemActive } : styles.paletteItem}
+                    onMouseEnter={() => setSymbolNavIndex(i)}
+                    onMouseDown={e => {
+                      e.preventDefault()
+                      setSymbolNavIndex(i)
+                      setSymbolNavOpen(false)
+                      jumpToLine(sym.line)
+                    }}
+                  >
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                      <span style={{
+                        display: 'inline-block',
+                        width: 14,
+                        textAlign: 'center',
+                        color: 'var(--color-text-muted)',
+                        fontFamily: "'JetBrains Mono', monospace",
+                        fontSize: 10,
+                        flex: '0 0 auto',
+                      }}>
+                        {sym.kind === 'section' ? '§' : 'ƒ'}
+                      </span>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {sym.name}
+                      </span>
+                    </span>
+                    <span style={styles.paletteHint}>line {sym.line}</span>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -5754,6 +5914,7 @@ const SHORTCUT_GROUPS: { title: string; items: [string, string][] }[] = [
     items: [
       ['Ctrl / Cmd + F', 'Find and replace'],
       ['Ctrl / Cmd + G', 'Go to line'],
+      ['Ctrl / Cmd + Shift + O', 'Go to symbol (sections + functions)'],
       ['Ctrl / Cmd + M', 'Jump to matching bracket'],
       ['Ctrl / Cmd + Shift + M', 'Select to matching bracket'],
       ['Enter / Shift + Enter (find)', 'Next / previous match'],
