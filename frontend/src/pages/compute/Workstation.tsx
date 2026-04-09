@@ -1261,6 +1261,17 @@ export default function Workstation() {
     runFragment(fragment, `▶ run section — ${name}`)
   }, [sections, cursor.line, lineCount, script, runFragment])
 
+  // Run everything from the start of the script up to and including the
+  // line the caret is on. Handy for stepping through a long script one
+  // chunk at a time without having to re-run earlier cells manually.
+  const runUntilCursor = useCallback(() => {
+    const lines = script.split('\n')
+    const upto = Math.max(1, Math.min(cursor.line, lines.length))
+    const fragment = lines.slice(0, upto).join('\n')
+    if (!fragment.trim()) return
+    runFragment(fragment, `▶ run until line ${upto}`)
+  }, [script, cursor.line, runFragment])
+
   const runCommand = useCallback((text: string) => {
     const line = text.trim()
     if (!line) return
@@ -2172,7 +2183,8 @@ export default function Workstation() {
     }
     if (e.key === 'F9') {
       e.preventDefault()
-      runSelection()
+      if (e.shiftKey) runUntilCursor()
+      else runSelection()
       return
     }
     if ((e.metaKey || e.ctrlKey) && e.altKey && e.key === 'Enter') {
@@ -2661,7 +2673,7 @@ export default function Workstation() {
         ta.selectionStart = ta.selectionEnd = s + 1 + newIndent.length
       })
     }
-  }, [runScript, runSelection, runSection, openFind, openGoto, openSymbolNav, setScript, vars, acOpen, acItems, acIndex, acceptAutocomplete, closeAutocomplete, editorFontSize, sigHint, toggleBookmarkAtCaret, gotoBookmark, gotoMatchingBracket])
+  }, [runScript, runSelection, runSection, runUntilCursor, openFind, openGoto, openSymbolNav, setScript, vars, acOpen, acItems, acIndex, acceptAutocomplete, closeAutocomplete, editorFontSize, sigHint, toggleBookmarkAtCaret, gotoBookmark, gotoMatchingBracket])
 
   // Track cursor position and selection size for the status bar.
   const updateCursor = useCallback((ta: HTMLTextAreaElement) => {
@@ -3137,6 +3149,7 @@ export default function Workstation() {
     { id: 'run',          title: 'Run script',                   hint: 'Ctrl+Enter',       run: () => runScript() },
     { id: 'run-sel',      title: 'Run selection',                hint: 'F9',               run: () => runSelection() },
     { id: 'run-sec',      title: 'Run current %% section',       hint: 'Alt+Ctrl+Enter',   run: () => runSection() },
+    { id: 'run-until',    title: 'Run until cursor line',        hint: 'Shift+F9',         run: () => runUntilCursor() },
     { id: 'find',         title: 'Find and replace',             hint: 'Ctrl+F',           run: () => openFind() },
     { id: 'goto',         title: 'Go to line',                   hint: 'Ctrl+G',           run: () => openGoto() },
     { id: 'new-script',   title: 'New script',                   hint: '',                 run: () => newScript() },
@@ -3171,7 +3184,7 @@ export default function Workstation() {
     { id: 'sel-bracket',  title: 'Select to matching bracket',   hint: 'Ctrl+Shift+M',     run: () => gotoMatchingBracket(true) },
     { id: 'goto-sym',     title: 'Go to symbol in script',       hint: 'Ctrl+Shift+O',     run: () => openSymbolNav() },
     { id: 'help',         title: 'Show keyboard shortcuts',      hint: 'F1',               run: () => setHelpOpen(true) },
-  ], [runScript, runSelection, runSection, openFind, openGoto, openSymbolNav, newScript, duplicateScript, closeScript, reopenLastClosedScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, copyConsole, downloadConsole, exportPlotSVG, exportPlotPNG, exportPlotCSV, toggleBookmarkAtCaret, gotoBookmark, clearAllBookmarks, insertSnippet, renameIdentifierAtCaret, gotoMatchingBracket, trimTrailingWhitespace])
+  ], [runScript, runSelection, runSection, runUntilCursor, openFind, openGoto, openSymbolNav, newScript, duplicateScript, closeScript, reopenLastClosedScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, copyConsole, downloadConsole, exportPlotSVG, exportPlotPNG, exportPlotCSV, toggleBookmarkAtCaret, gotoBookmark, clearAllBookmarks, insertSnippet, renameIdentifierAtCaret, gotoMatchingBracket, trimTrailingWhitespace])
 
   // Fuzzy-ish filter: split the query into tokens and require each to
   // appear (substring, case-insensitive) in the command title. Keeps
@@ -5962,6 +5975,7 @@ const SHORTCUT_GROUPS: { title: string; items: [string, string][] }[] = [
       ['Ctrl / Cmd + Enter', 'Run the full script'],
       ['Shift + Ctrl / Cmd + Enter', 'Run selection (or current line)'],
       ['F9', 'Run selection (MATLAB-style)'],
+      ['Shift + F9', 'Run everything up to the cursor line'],
       ['Alt + Ctrl / Cmd + Enter', 'Run current %% section'],
     ],
   },
