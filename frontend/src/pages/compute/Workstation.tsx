@@ -533,6 +533,7 @@ export default function Workstation() {
   const [activePlot, setActivePlot] = useState(0)
   const [plotFullscreen, setPlotFullscreen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
+  const [dropHover, setDropHover] = useState(false)
   // Per-figure rendering options. Toggled by the small chip buttons in the
   // figure header (grid / log-x / log-y / legend) and applied to PlotView.
   const [plotOpts, setPlotOpts] = useState<PlotOpts>({
@@ -1347,6 +1348,84 @@ export default function Workstation() {
     ev.target.value = ''
   }, [])
 
+  // Parse a CSV blob into a numeric matrix and bind it to the workspace
+  // under a name derived from the filename. Non-numeric cells become NaN
+  // so the user can still inspect the shape and see what failed to parse.
+  const importCsv = useCallback((file: File) => {
+    const r = new FileReader()
+    r.onload = () => {
+      const text = String(r.result ?? '').replace(/\r/g, '')
+      const rawLines = text.split('\n').filter(l => l.length > 0)
+      if (rawLines.length === 0) return
+      // If the first line has any non-numeric cells, treat it as a header.
+      const first = rawLines[0].split(',').map(s => s.trim())
+      const firstIsHeader = first.some(s => s !== '' && !Number.isFinite(Number(s)))
+      const lines = firstIsHeader ? rawLines.slice(1) : rawLines
+      if (lines.length === 0) return
+      const cols = lines[0].split(',').length
+      const rows = lines.length
+      const data = new Float64Array(rows * cols)
+      for (let r = 0; r < rows; r++) {
+        const parts = lines[r].split(',')
+        for (let c = 0; c < cols; c++) {
+          const cell = (parts[c] ?? '').trim()
+          data[r * cols + c] = cell === '' ? NaN : Number(cell)
+        }
+      }
+      const mat: MValue = { kind: 'mat', rows, cols, data }
+      // Derive a valid identifier from the filename.
+      const base = file.name.replace(/\.[^.]+$/, '').replace(/[^A-Za-z0-9_]/g, '_')
+      let name = /^[A-Za-z_]/.test(base) ? base : `data_${base}`
+      if (!name) name = 'data'
+      workspaceRef.current.vars.set(name, mat)
+      setVars(snapshotWorkspace(workspaceRef.current))
+      saveWorkspace(workspaceRef.current)
+      setEntries(prev => [...prev, {
+        id: nextEntryId++,
+        kind: 'output',
+        text: `Imported ${file.name} → ${name} (${rows}×${cols})${firstIsHeader ? ' · header row skipped' : ''}`,
+      }])
+    }
+    r.readAsText(file)
+  }, [])
+
+  // Top-level drag/drop on the whole Workstation: .csv files become
+  // workspace variables, .m/.txt files become new script tabs.
+  const onWsDragOver = useCallback((ev: React.DragEvent<HTMLDivElement>) => {
+    if (ev.dataTransfer.types.includes('Files')) {
+      ev.preventDefault()
+      setDropHover(true)
+    }
+  }, [])
+  const onWsDragLeave = useCallback((ev: React.DragEvent<HTMLDivElement>) => {
+    // Only clear when the drag actually leaves the outer container.
+    if (ev.target === ev.currentTarget) setDropHover(false)
+  }, [])
+  const onWsDrop = useCallback((ev: React.DragEvent<HTMLDivElement>) => {
+    if (!ev.dataTransfer.files.length) return
+    ev.preventDefault()
+    setDropHover(false)
+    for (const f of Array.from(ev.dataTransfer.files)) {
+      const ext = f.name.toLowerCase().replace(/^.*\./, '')
+      if (ext === 'csv') {
+        importCsv(f)
+      } else if (ext === 'm' || ext === 'txt') {
+        const r = new FileReader()
+        r.onload = () => {
+          const code = String(r.result ?? '')
+          setScriptStore(store => {
+            const id = makeScriptId()
+            return {
+              list: [...store.list, { id, name: f.name, code }],
+              activeId: id,
+            }
+          })
+        }
+        r.readAsText(f)
+      }
+    }
+  }, [importCsv])
+
   const handleDownload = useCallback(() => {
     const blob = new Blob([script], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
@@ -1855,6 +1934,28 @@ export default function Workstation() {
       flexDirection: 'column',
       padding: 20,
     },
+    dropOverlay: {
+      position: 'absolute' as const,
+      inset: 0,
+      background: 'rgba(0, 0, 0, 0.55)',
+      border: '2px dashed var(--color-border-strong)',
+      borderRadius: 8,
+      zIndex: 900,
+      pointerEvents: 'none' as const,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    dropOverlayInner: {
+      fontSize: 14,
+      fontWeight: 500,
+      letterSpacing: 0.3,
+      color: 'var(--color-text)',
+      padding: '14px 22px',
+      background: 'var(--color-bg-elevated)',
+      border: '1px solid var(--glass-border)',
+      borderRadius: 6,
+    },
     fullscreenHeader: {
       display: 'flex',
       alignItems: 'center',
@@ -2021,7 +2122,19 @@ export default function Workstation() {
   }, [script, setScript])
 
   return (
-    <div style={styles.container}>
+    <div
+      style={styles.container}
+      onDragOver={onWsDragOver}
+      onDragLeave={onWsDragLeave}
+      onDrop={onWsDrop}
+    >
+      {dropHover && (
+        <div style={styles.dropOverlay} aria-hidden="true">
+          <div style={styles.dropOverlayInner}>
+            Drop a .csv, .m, or .txt file to import
+          </div>
+        </div>
+      )}
       {/* ─── Toolbar ─────────────────────────────────────────────────── */}
       <div style={styles.toolbar}>
         <button
