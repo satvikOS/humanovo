@@ -551,6 +551,9 @@ export default function Workstation() {
   const [entries, setEntries] = useState<ConsoleEntry[]>([])
   const [cmd, setCmd] = useState('')
   const [consoleFilter, setConsoleFilter] = useState('')
+  // Kind-scoped console view: 'all' shows everything, the others narrow to
+  // a single entry kind. Combines with the text filter above.
+  const [consoleKind, setConsoleKind] = useState<'all' | 'input' | 'output' | 'error'>('all')
   const [running, setRunning] = useState(false)
   const [history, setHistory] = useState<string[]>(loadHistory)
   const [histIdx, setHistIdx] = useState<number | null>(null)
@@ -729,13 +732,29 @@ export default function Workstation() {
     return () => window.removeEventListener('keydown', onKey)
   }, [helpOpen])
 
-  // Apply the console filter (substring, case-insensitive). Empty query
-  // means no filtering — common case, so skip the work.
+  // Apply the console filter (substring, case-insensitive) and the
+  // kind-scope filter. Both are cheap linear passes so we just fuse them.
   const visibleEntries = useMemo(() => {
-    if (!consoleFilter.trim()) return entries
-    const q = consoleFilter.toLowerCase()
-    return entries.filter(e => e.text.toLowerCase().includes(q))
-  }, [entries, consoleFilter])
+    const q = consoleFilter.trim().toLowerCase()
+    if (!q && consoleKind === 'all') return entries
+    return entries.filter(e => {
+      if (consoleKind !== 'all' && e.kind !== consoleKind) return false
+      if (q && !e.text.toLowerCase().includes(q)) return false
+      return true
+    })
+  }, [entries, consoleFilter, consoleKind])
+
+  // Per-kind counts for the console header badges. Recomputed when entries
+  // change; O(n) scan but small compared to rendering the list.
+  const consoleCounts = useMemo(() => {
+    let input = 0, output = 0, error = 0
+    for (const e of entries) {
+      if (e.kind === 'input') input++
+      else if (e.kind === 'output') output++
+      else if (e.kind === 'error') error++
+    }
+    return { all: entries.length, input, output, error }
+  }, [entries])
 
   // Same idea for the workspace inspector — filter by variable name,
   // substring, case-insensitive. Then sort by the current varSort key.
@@ -3316,6 +3335,21 @@ export default function Workstation() {
         <div style={styles.consoleWrap}>
           <div style={styles.consoleHeader}>
             <span>Console</span>
+            <div style={{ display: 'flex', gap: 4, marginLeft: 6 }}>
+              {(['all', 'input', 'output', 'error'] as const).map(k => {
+                const isActive = consoleKind === k
+                const count = consoleCounts[k]
+                return (
+                  <button
+                    key={k}
+                    type="button"
+                    style={{ ...styles.plotChip, ...(isActive ? styles.plotChipActive : null) }}
+                    onClick={() => setConsoleKind(k)}
+                    title={`Show ${k === 'all' ? 'every entry' : `only ${k} entries`}`}
+                  >{k} {count}</button>
+                )
+              })}
+            </div>
             <input
               style={styles.consoleFilter}
               value={consoleFilter}
@@ -3324,7 +3358,7 @@ export default function Workstation() {
               aria-label="Filter console entries"
               spellCheck={false}
             />
-            {consoleFilter && (
+            {(consoleFilter || consoleKind !== 'all') && (
               <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
                 {visibleEntries.length} / {entries.length}
               </span>
@@ -3338,7 +3372,9 @@ export default function Workstation() {
             )}
             {entries.length > 0 && visibleEntries.length === 0 && (
               <div style={{ color: 'var(--color-text-muted)', fontStyle: 'italic', fontSize: 12 }}>
-                No entries match "{consoleFilter}".
+                {consoleFilter
+                  ? `No entries match "${consoleFilter}".`
+                  : `No ${consoleKind} entries yet.`}
               </div>
             )}
             {visibleEntries.map(e => {
