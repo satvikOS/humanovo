@@ -624,6 +624,12 @@ export default function Workstation() {
   const [acAnchor, setAcAnchor] = useState<{ top: number; left: number } | null>(null)
   const [acRange, setAcRange] = useState<{ start: number; end: number } | null>(null)
 
+  // Function-signature hint popup: opens when the user types "(" right after
+  // a known builtin identifier, closes on Escape, ")", Enter, blur, or when
+  // the caret leaves the hint's line.
+  interface SigHint { signature: string; description: string; line: number; anchor: { top: number; left: number } }
+  const [sigHint, setSigHint] = useState<SigHint | null>(null)
+
   // Single persistent workspace across runs. Hydrated from localStorage so
   // variables survive a full page refresh; functions and engine internals
   // are intentionally not restored (they can't be safely serialized).
@@ -1240,6 +1246,12 @@ export default function Workstation() {
   //   ) ] }           — skip over matching closer
   //   Backspace       — delete matching pair when between them
   const onEditorKey = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Dismiss the signature hint on Escape. Other keys are handled by
+    // updateCursor (line change) or the auto-skip of ')' below.
+    if (e.key === 'Escape' && sigHint) {
+      setSigHint(null)
+      // fall through so Escape can also close autocomplete if open
+    }
     // Autocomplete popup keyboard navigation. Handled before everything
     // else so the popup behaves like a focus-trapping menu while open.
     if (acOpen && acItems.length > 0) {
@@ -1504,13 +1516,37 @@ export default function Workstation() {
         const newVal = value.slice(0, s) + open + close + value.slice(ePos)
         setScript(newVal)
         requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = s + 1 })
+        // If we just opened a function call like "sin(", pop up the
+        // signature hint for the matching builtin.
+        if (open === '(') {
+          const wb = getWordBefore(value, s)
+          if (wb) {
+            const doc = BUILTIN_DOCS.find(d => d.name === wb.word)
+            if (doc) {
+              const before = value.slice(0, s)
+              const ln = (before.match(/\n/g)?.length ?? 0) + 1
+              requestAnimationFrame(() => {
+                const anchor = caretViewportAnchor(ta, editorFontSize)
+                setSigHint({
+                  signature: doc.signature,
+                  description: doc.description,
+                  line: ln,
+                  anchor,
+                })
+              })
+            }
+          }
+        }
       }
       return
     }
 
     if (CLOSERS.has(e.key) && s === ePos && value[s] === e.key) {
-      // Closing bracket that already exists: skip over it
+      // Closing bracket that already exists: skip over it. If it was ')'
+      // and the signature hint is open, dismiss it — the user is done
+      // with the call.
       e.preventDefault()
+      if (e.key === ')' && sigHint) setSigHint(null)
       requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = s + 1 })
       return
     }
@@ -1570,7 +1606,7 @@ export default function Workstation() {
         ta.selectionStart = ta.selectionEnd = s + 1 + indent.length
       })
     }
-  }, [runScript, runSelection, runSection, openFind, openGoto, setScript, vars, acOpen, acItems, acIndex, acceptAutocomplete, closeAutocomplete, editorFontSize])
+  }, [runScript, runSelection, runSection, openFind, openGoto, setScript, vars, acOpen, acItems, acIndex, acceptAutocomplete, closeAutocomplete, editorFontSize, sigHint])
 
   // Track cursor position and selection size for the status bar.
   const updateCursor = useCallback((ta: HTMLTextAreaElement) => {
@@ -1587,6 +1623,8 @@ export default function Workstation() {
     } else {
       setSelectionInfo(null)
     }
+    // Close the signature hint if the caret walked off its line.
+    setSigHint(prev => (prev && prev.line !== line ? null : prev))
   }, [])
 
   const onEditorSelect = useCallback((e: React.SyntheticEvent<HTMLTextAreaElement>) => {
@@ -1608,6 +1646,9 @@ export default function Workstation() {
       // Only the vertical scroll matters for the horizontal strip.
       currentLineRef.current.style.transform = `translateY(${-scrollTop}px)`
     }
+    // The signature hint uses fixed-viewport coordinates, so scrolling the
+    // editor would leave it stranded. Dismiss rather than chasing the anchor.
+    setSigHint(null)
   }, [])
 
   // Case-insensitive substring match positions for find/replace. Recomputed
@@ -2400,6 +2441,28 @@ export default function Workstation() {
       maxWidth: 420,
       boxShadow: '0 8px 24px rgba(0, 0, 0, 0.5)',
     },
+    sigHintPopup: {
+      position: 'fixed' as const,
+      background: 'var(--color-bg-elevated)',
+      border: '1px solid var(--color-border-strong)',
+      borderRadius: 4,
+      padding: '6px 10px',
+      zIndex: 200,
+      maxWidth: 520,
+      boxShadow: '0 8px 24px rgba(0, 0, 0, 0.5)',
+      pointerEvents: 'none' as const,
+    },
+    sigHintSignature: {
+      fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+      fontSize: 12,
+      color: 'var(--color-text)',
+    },
+    sigHintDescription: {
+      fontFamily: "'Inter', sans-serif",
+      fontSize: 11,
+      color: 'var(--color-text-secondary)',
+      marginTop: 2,
+    },
     acItem: {
       display: 'flex',
       alignItems: 'center',
@@ -2971,7 +3034,7 @@ export default function Workstation() {
                 onKeyUp={onEditorSelect}
                 onClick={onEditorSelect}
                 onScroll={onEditorScroll}
-                onBlur={() => { if (acOpen) closeAutocomplete() }}
+                onBlur={() => { if (acOpen) closeAutocomplete(); if (sigHint) setSigHint(null) }}
                 spellCheck={false}
                 wrap={editorWrapOn ? 'soft' : 'off'}
               />
@@ -3389,6 +3452,22 @@ export default function Workstation() {
               {it.desc && <span style={styles.acItemDesc}>{it.desc}</span>}
             </div>
           ))}
+        </div>
+      )}
+
+      {/* ─── Function signature hint (fixed-viewport, opens on "(") ───── */}
+      {sigHint && (
+        <div
+          style={{
+            ...styles.sigHintPopup,
+            top: sigHint.anchor.top,
+            left: sigHint.anchor.left,
+          }}
+          role="tooltip"
+          aria-live="polite"
+        >
+          <div style={styles.sigHintSignature}>{sigHint.signature}</div>
+          <div style={styles.sigHintDescription}>{sigHint.description}</div>
         </div>
       )}
     </div>
