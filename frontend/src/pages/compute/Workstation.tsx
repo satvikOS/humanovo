@@ -1256,6 +1256,85 @@ export default function Workstation() {
       return
     }
 
+    // Shift + Alt + ArrowDown / ArrowUp — duplicate the current line(s)
+    if (e.altKey && e.shiftKey && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+      e.preventDefault()
+      const lineStart = value.lastIndexOf('\n', s - 1) + 1
+      const lineEnd = value.indexOf('\n', ePos)
+      const regionEnd = lineEnd < 0 ? value.length : lineEnd
+      const block = value.slice(lineStart, regionEnd)
+      // Insert '\n' + block directly after the current region so we get one
+      // clean copy immediately below. The original block keeps its position.
+      const newVal = value.slice(0, regionEnd) + '\n' + block + value.slice(regionEnd)
+      setScript(newVal)
+      const shift = block.length + 1
+      requestAnimationFrame(() => {
+        if (e.key === 'ArrowDown') {
+          // Move caret/selection to the duplicated copy below.
+          ta.selectionStart = s + shift
+          ta.selectionEnd = ePos + shift
+        } else {
+          // Keep caret/selection on the original (top) copy.
+          ta.selectionStart = s
+          ta.selectionEnd = ePos
+        }
+      })
+      return
+    }
+
+    // Alt + ArrowUp / ArrowDown — move the current line(s) up or down by one.
+    if (e.altKey && !e.shiftKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      const lineStart = value.lastIndexOf('\n', s - 1) + 1
+      const lineEnd = value.indexOf('\n', ePos)
+      const regionEnd = lineEnd < 0 ? value.length : lineEnd
+      if (e.key === 'ArrowUp') {
+        if (lineStart === 0) return // already at the top
+        e.preventDefault()
+        const prevStart = value.lastIndexOf('\n', lineStart - 2) + 1
+        const prevBlock = value.slice(prevStart, lineStart) // includes trailing '\n'
+        const block = value.slice(lineStart, regionEnd)
+        // If the current block was the last line (no trailing '\n'), we need
+        // to donate a '\n' to the now-top block and strip the '\n' off the
+        // prevBlock so the separator stays in place after the swap.
+        const curHasNL = regionEnd < value.length && value[regionEnd] === '\n'
+        const newBottom = curHasNL ? prevBlock : prevBlock.slice(0, -1)
+        const tailStart = curHasNL ? regionEnd + 1 : regionEnd
+        const newVal =
+          value.slice(0, prevStart) +
+          block + '\n' +
+          newBottom +
+          value.slice(tailStart)
+        setScript(newVal)
+        const delta = -prevBlock.length
+        requestAnimationFrame(() => {
+          ta.selectionStart = s + delta
+          ta.selectionEnd = ePos + delta
+        })
+        return
+      } else {
+        if (regionEnd >= value.length) return // already at the bottom
+        e.preventDefault()
+        const nextStart = regionEnd + 1 // skip the '\n' separator
+        const nextEndNL = value.indexOf('\n', nextStart)
+        const nextEnd = nextEndNL < 0 ? value.length : nextEndNL
+        const block = value.slice(lineStart, regionEnd)
+        const nextBlock = value.slice(nextStart, nextEnd)
+        const nextTrailing = value.slice(nextEnd, nextEnd + 1) // '\n' or ''
+        const newVal =
+          value.slice(0, lineStart) +
+          nextBlock + '\n' +
+          block + nextTrailing +
+          value.slice(nextEnd + nextTrailing.length)
+        setScript(newVal)
+        const delta = nextBlock.length + 1
+        requestAnimationFrame(() => {
+          ta.selectionStart = s + delta
+          ta.selectionEnd = ePos + delta
+        })
+        return
+      }
+    }
+
     if (e.key === 'Tab') {
       e.preventDefault()
       if (s !== ePos) {
@@ -3463,7 +3542,9 @@ const SHORTCUT_GROUPS: { title: string; items: [string, string][] }[] = [
     items: [
       ['Tab / Shift + Tab', 'Indent / outdent selection'],
       ['Enter', 'Auto-indent to the previous line'],
-      ['Ctrl + /', 'Toggle line comment (%)'],
+      ['Ctrl / Cmd + /', 'Toggle line comment (%)'],
+      ['Alt + ↑ / ↓', 'Move current line(s) up or down'],
+      ['Shift + Alt + ↑ / ↓', 'Duplicate current line(s)'],
       ['( [ { " \'', 'Auto-pair brackets and quotes'],
       ['Backspace between pair', 'Delete matching pair'],
       ['Tab on identifier', 'Autocomplete variable / builtin'],
