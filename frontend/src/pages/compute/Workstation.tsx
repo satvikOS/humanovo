@@ -234,6 +234,26 @@ interface VarSnapshot {
   value: MValue
 }
 
+// Short glyph for the variable kind badge in the workspace panel. Kept
+// to one monochrome character so the badges line up at the start of
+// each row without pulling focus away from the variable name.
+const VAR_KIND_LABEL: Record<MValue['kind'], string> = {
+  num:  'N',
+  bool: 'B',
+  str:  'S',
+  mat:  'M',
+  fn:   'ƒ',
+  void: '·',
+}
+const VAR_KIND_TITLE: Record<MValue['kind'], string> = {
+  num:  'number',
+  bool: 'logical',
+  str:  'string',
+  mat:  'matrix',
+  fn:   'function handle',
+  void: 'void',
+}
+
 function snapshotWorkspace(ws: Workspace): VarSnapshot[] {
   const out: VarSnapshot[] = []
   for (const [name, v] of ws.vars) {
@@ -3554,6 +3574,22 @@ export default function Workstation() {
       padding: '5px 6px',
       borderRadius: 4,
     },
+    varKindBadge: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: 14,
+      height: 14,
+      fontSize: 9,
+      fontFamily: "'JetBrains Mono', monospace",
+      fontWeight: 600,
+      color: 'var(--color-text-muted)',
+      background: 'var(--glass-bg)',
+      border: '1px solid var(--glass-border)',
+      borderRadius: 2,
+      flex: '0 0 auto',
+      letterSpacing: 0,
+    },
     varAction: {
       background: 'transparent',
       border: '1px solid var(--glass-border)',
@@ -4811,6 +4847,13 @@ export default function Workstation() {
                       title={`${v.name}: ${v.kind}  ${v.shape}  ${v.summary}${varUsageCounts[v.name] ? `  (used ${varUsageCounts[v.name]}× in script)` : '  (unused in script)'}`}
                     >
                       <span style={{ color: 'var(--color-text)', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span
+                          aria-hidden="true"
+                          title={VAR_KIND_TITLE[v.kind]}
+                          style={styles.varKindBadge}
+                        >
+                          {VAR_KIND_LABEL[v.kind]}
+                        </span>
                         {pinnedVars.has(v.name) && (
                           <span
                             aria-hidden="true"
