@@ -590,6 +590,12 @@ export default function Workstation() {
 
   // Editor appearance prefs — font size (clamped) and soft word wrap.
   // Persisted to localStorage so the user's choice survives a reload.
+  // Command palette modal — a filter-and-run launcher for every
+  // action the Workstation exposes. Bound to Ctrl / Cmd + Shift + P.
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const [paletteQuery, setPaletteQuery] = useState('')
+  const [paletteIndex, setPaletteIndex] = useState(0)
+  const paletteInputRef = useRef<HTMLInputElement>(null)
   const [editorPrefs, setEditorPrefs] = useState<EditorPrefs>(loadEditorPrefs)
   const editorFontSize = editorPrefs.fontSize
   const editorWrapOn = editorPrefs.wrap
@@ -2165,6 +2171,73 @@ export default function Workstation() {
     }))
   }, [scriptStore])
 
+  // Command palette handlers. Open resets the query and focuses the input
+  // so the user can start typing immediately; close returns focus to the
+  // editor so the keyboard flow stays uninterrupted.
+  const openPalette = useCallback(() => {
+    setPaletteQuery('')
+    setPaletteIndex(0)
+    setPaletteOpen(true)
+    requestAnimationFrame(() => paletteInputRef.current?.focus())
+  }, [])
+  const closePalette = useCallback(() => {
+    setPaletteOpen(false)
+    editorRef.current?.focus()
+  }, [])
+
+  // Ordered command list. Kept as a memo so downstream filter passes are
+  // cheap and the array identity is stable across renders.
+  const paletteCommands = useMemo(() => [
+    { id: 'run',          title: 'Run script',                   hint: 'Ctrl+Enter',       run: () => runScript() },
+    { id: 'run-sel',      title: 'Run selection',                hint: 'F9',               run: () => runSelection() },
+    { id: 'run-sec',      title: 'Run current %% section',       hint: 'Alt+Ctrl+Enter',   run: () => runSection() },
+    { id: 'find',         title: 'Find and replace',             hint: 'Ctrl+F',           run: () => openFind() },
+    { id: 'goto',         title: 'Go to line',                   hint: 'Ctrl+G',           run: () => openGoto() },
+    { id: 'new-script',   title: 'New script',                   hint: '',                 run: () => newScript() },
+    { id: 'rename',       title: 'Rename current script',        hint: '',                 run: () => renameScript(scriptStore.activeId) },
+    { id: 'wrap',         title: 'Toggle word wrap',             hint: '',                 run: () => toggleEditorWrap() },
+    { id: 'font-up',      title: 'Increase editor font size',    hint: '',                 run: () => bumpEditorFont(1) },
+    { id: 'font-down',    title: 'Decrease editor font size',    hint: '',                 run: () => bumpEditorFont(-1) },
+    { id: 'clear-con',    title: 'Clear console',                hint: 'Ctrl+L',           run: () => clearConsole() },
+    { id: 'copy-con',     title: 'Copy console to clipboard',    hint: '',                 run: () => copyConsole() },
+    { id: 'reset-ws',     title: 'Reset workspace',              hint: '',                 run: () => resetWorkspace() },
+    { id: 'exp-svg',      title: 'Export current figure as SVG', hint: '',                 run: () => exportPlotSVG() },
+    { id: 'exp-png',      title: 'Export current figure as PNG', hint: '',                 run: () => exportPlotPNG() },
+    { id: 'exp-csv',      title: 'Export figure data as CSV',    hint: '',                 run: () => exportPlotCSV() },
+    { id: 'help',         title: 'Show keyboard shortcuts',      hint: 'F1',               run: () => setHelpOpen(true) },
+  ], [runScript, runSelection, runSection, openFind, openGoto, newScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, copyConsole, exportPlotSVG, exportPlotPNG, exportPlotCSV])
+
+  // Fuzzy-ish filter: split the query into tokens and require each to
+  // appear (substring, case-insensitive) in the command title. Keeps
+  // results predictable without pulling in a scoring library.
+  const visiblePaletteCommands = useMemo(() => {
+    const q = paletteQuery.trim().toLowerCase()
+    if (!q) return paletteCommands
+    const tokens = q.split(/\s+/)
+    return paletteCommands.filter(c => {
+      const hay = c.title.toLowerCase()
+      return tokens.every(t => hay.includes(t))
+    })
+  }, [paletteCommands, paletteQuery])
+
+  // Keep the highlighted item index in range as the filter narrows.
+  useEffect(() => {
+    if (paletteIndex >= visiblePaletteCommands.length) setPaletteIndex(0)
+  }, [visiblePaletteCommands, paletteIndex])
+
+  // Ctrl / Cmd + Shift + P global opener. Scoped to document so it fires
+  // from anywhere inside the Workstation, not just the editor.
+  useEffect(() => {
+    const onKey = (ev: KeyboardEvent) => {
+      if ((ev.metaKey || ev.ctrlKey) && ev.shiftKey && (ev.key === 'p' || ev.key === 'P')) {
+        ev.preventDefault()
+        openPalette()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [openPalette])
+
   /* ── styles (keyed off Humanovo CSS variables) ─────────────────────── */
   const styles = useMemo<Record<string, React.CSSProperties>>(() => ({
     container: {
@@ -2824,6 +2897,71 @@ export default function Workstation() {
       fontSize: 11,
       color: 'var(--color-text-secondary)',
       marginTop: 2,
+    },
+    paletteBackdrop: {
+      position: 'fixed' as const,
+      inset: 0,
+      background: 'rgba(0, 0, 0, 0.6)',
+      backdropFilter: 'blur(6px)',
+      zIndex: 1100,
+      display: 'flex',
+      alignItems: 'flex-start',
+      justifyContent: 'center',
+      paddingTop: '12vh',
+    },
+    paletteCard: {
+      width: 'min(560px, 92vw)',
+      maxHeight: '70vh',
+      background: 'var(--color-bg-elevated)',
+      border: '1px solid var(--color-border-strong)',
+      borderRadius: 8,
+      boxShadow: '0 20px 60px rgba(0, 0, 0, 0.5)',
+      display: 'flex',
+      flexDirection: 'column',
+      overflow: 'hidden',
+    },
+    paletteInput: {
+      padding: '12px 16px',
+      border: 'none',
+      borderBottom: '1px solid var(--glass-border)',
+      background: 'transparent',
+      color: 'var(--color-text)',
+      fontFamily: "'JetBrains Mono', monospace",
+      fontSize: 13,
+      outline: 'none',
+    },
+    paletteList: {
+      flex: 1,
+      minHeight: 0,
+      overflowY: 'auto' as const,
+      padding: 4,
+    },
+    paletteItem: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      padding: '8px 12px',
+      borderRadius: 4,
+      cursor: 'pointer',
+      color: 'var(--color-text-secondary)',
+      fontFamily: "'Inter', sans-serif",
+      fontSize: 12,
+    },
+    paletteItemActive: {
+      background: 'var(--glass-bg-hover)',
+      color: 'var(--color-text)',
+    },
+    paletteHint: {
+      fontFamily: "'JetBrains Mono', monospace",
+      fontSize: 10,
+      color: 'var(--color-text-muted)',
+    },
+    paletteEmpty: {
+      padding: '16px',
+      color: 'var(--color-text-muted)',
+      fontStyle: 'italic' as const,
+      fontSize: 12,
+      textAlign: 'center' as const,
     },
     acItem: {
       display: 'flex',
@@ -3930,6 +4068,64 @@ export default function Workstation() {
           <div style={styles.sigHintDescription}>{sigHint.description}</div>
         </div>
       )}
+
+      {/* ─── Command palette (Ctrl/Cmd + Shift + P) ────────────────── */}
+      {paletteOpen && (
+        <div
+          style={styles.paletteBackdrop}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Command palette"
+          onClick={e => { if (e.target === e.currentTarget) closePalette() }}
+        >
+          <div style={styles.paletteCard}>
+            <input
+              ref={paletteInputRef}
+              style={styles.paletteInput}
+              value={paletteQuery}
+              onChange={e => { setPaletteQuery(e.target.value); setPaletteIndex(0) }}
+              placeholder="Type a command…"
+              aria-label="Filter commands"
+              spellCheck={false}
+              onKeyDown={e => {
+                if (e.key === 'Escape') { e.preventDefault(); closePalette() }
+                else if (e.key === 'ArrowDown') {
+                  e.preventDefault()
+                  setPaletteIndex(i => Math.min(i + 1, Math.max(0, visiblePaletteCommands.length - 1)))
+                } else if (e.key === 'ArrowUp') {
+                  e.preventDefault()
+                  setPaletteIndex(i => Math.max(i - 1, 0))
+                } else if (e.key === 'Enter') {
+                  e.preventDefault()
+                  const cmd = visiblePaletteCommands[paletteIndex]
+                  if (cmd) { closePalette(); cmd.run() }
+                }
+              }}
+            />
+            <div style={styles.paletteList}>
+              {visiblePaletteCommands.length === 0 && (
+                <div style={styles.paletteEmpty}>No commands match "{paletteQuery}".</div>
+              )}
+              {visiblePaletteCommands.map((cmd, i) => {
+                const active = i === paletteIndex
+                return (
+                  <div
+                    key={cmd.id}
+                    role="option"
+                    aria-selected={active}
+                    style={active ? { ...styles.paletteItem, ...styles.paletteItemActive } : styles.paletteItem}
+                    onMouseEnter={() => setPaletteIndex(i)}
+                    onMouseDown={e => { e.preventDefault(); closePalette(); cmd.run() }}
+                  >
+                    <span>{cmd.title}</span>
+                    {cmd.hint && <span style={styles.paletteHint}>{cmd.hint}</span>}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -4269,6 +4465,7 @@ const SHORTCUT_GROUPS: { title: string; items: [string, string][] }[] = [
     title: 'Help',
     items: [
       ['F1', 'Toggle this help dialog'],
+      ['Ctrl / Cmd + Shift + P', 'Open the command palette'],
     ],
   },
 ]
