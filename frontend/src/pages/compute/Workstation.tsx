@@ -680,11 +680,31 @@ export default function Workstation() {
   // null when the caret isn't sitting next to a bracket.
   const bracketPair = useMemo(() => findBracketMatch(script, caretPos), [script, caretPos])
 
-  // Auto-scroll console to bottom on new entries.
+  // Auto-scroll console to bottom on new entries — but only while the
+  // user is already pinned to the bottom. If they've scrolled up to
+  // inspect history, we stop chasing the tail so the scroll position
+  // stays put and they can read in peace.
+  const consolePinnedRef = useRef(true)
+  const [consolePinned, setConsolePinned] = useState(true)
   useEffect(() => {
     const el = consoleRef.current
-    if (el) el.scrollTop = el.scrollHeight
+    if (el && consolePinnedRef.current) el.scrollTop = el.scrollHeight
   }, [entries])
+  const onConsoleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget
+    const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 4
+    if (atBottom !== consolePinnedRef.current) {
+      consolePinnedRef.current = atBottom
+      setConsolePinned(atBottom)
+    }
+  }, [])
+  const scrollConsoleToBottom = useCallback(() => {
+    const el = consoleRef.current
+    if (!el) return
+    el.scrollTop = el.scrollHeight
+    consolePinnedRef.current = true
+    setConsolePinned(true)
+  }, [])
 
   // Hydrate the variable inspector from the persisted workspace once on
   // mount (the workspaceRef itself was loaded synchronously above).
@@ -2751,6 +2771,22 @@ export default function Workstation() {
       gridColumn: library === 'open' ? '2 / -1' : '1 / -1',
       borderTop: '1px solid var(--glass-border)',
       background: 'transparent',
+      position: 'relative' as const,
+    },
+    consoleJumpBtn: {
+      position: 'absolute' as const,
+      right: 24,
+      bottom: 60,
+      padding: '4px 10px',
+      fontSize: 10,
+      fontFamily: "'JetBrains Mono', monospace",
+      color: 'var(--color-text)',
+      background: 'var(--color-bg-elevated)',
+      border: '1px solid var(--color-border-strong)',
+      borderRadius: 12,
+      cursor: 'pointer',
+      boxShadow: '0 4px 12px rgba(0, 0, 0, 0.4)',
+      zIndex: 5,
     },
     consoleHeader: {
       display: 'flex',
@@ -3835,7 +3871,7 @@ export default function Workstation() {
               title="Copy visible console entries to clipboard"
             >{copyFlash ? 'copied' : 'copy'}</button>
           </div>
-          <div ref={consoleRef} style={styles.console}>
+          <div ref={consoleRef} style={styles.console} onScroll={onConsoleScroll}>
             {entries.length === 0 && (
               <div style={{ color: 'var(--color-text-muted)', fontStyle: 'italic', fontSize: 12 }}>
                 Console ready. Type a command below or hit Run.
@@ -3867,6 +3903,14 @@ export default function Workstation() {
               )
             })}
           </div>
+          {!consolePinned && entries.length > 0 && (
+            <button
+              type="button"
+              style={styles.consoleJumpBtn}
+              onClick={scrollConsoleToBottom}
+              title="Jump to bottom and resume auto-scroll"
+            >↓ live</button>
+          )}
         </div>
       </div>
 
