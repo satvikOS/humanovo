@@ -610,6 +610,11 @@ export default function Workstation() {
   const [matchIdx, setMatchIdx] = useState(0)
   const findInputRef = useRef<HTMLInputElement>(null)
 
+  // "Go to line" popup — mutually exclusive with the find panel.
+  const [gotoOpen, setGotoOpen] = useState(false)
+  const [gotoQuery, setGotoQuery] = useState('')
+  const gotoInputRef = useRef<HTMLInputElement>(null)
+
   // Tab autocomplete state. The popup floats below the caret and lists
   // matching builtins, workspace variables and language keywords.
   type AcItem = { name: string; kind: 'fn' | 'var' | 'kw'; desc?: string }
@@ -1164,7 +1169,8 @@ export default function Workstation() {
   }, [acRange, closeAutocomplete, setScript])
 
   // Jump the editor caret to a 1-based line and select the entire line so
-  // it's visible at a glance. Used by click-to-jump on error console entries.
+  // it's visible at a glance. Used by click-to-jump on error console entries
+  // and by the Ctrl+G "Go to line" popup.
   const jumpToLine = useCallback((line: number) => {
     const ta = editorRef.current
     if (!ta) return
@@ -1175,9 +1181,35 @@ export default function Workstation() {
     const end = start + lines[line - 1].length
     ta.focus()
     ta.setSelectionRange(start, end)
-    const lineHeight = 12 * 1.6
-    ta.scrollTop = Math.max(0, (line - 1) * lineHeight - ta.clientHeight / 2)
-  }, [script])
+    ta.scrollTop = Math.max(0, (line - 1) * editorLineHeight - ta.clientHeight / 2)
+  }, [script, editorLineHeight])
+
+  // "Go to line" popup handlers. Seeds the input with the current line
+  // number so the user can tweak the digits rather than retyping.
+  const openGoto = useCallback(() => {
+    setFindOpen(false) // keep the editor bar area mutually exclusive
+    setGotoOpen(true)
+    const ta = editorRef.current
+    if (ta) {
+      const before = ta.value.slice(0, ta.selectionStart)
+      const ln = (before.match(/\n/g)?.length ?? 0) + 1
+      setGotoQuery(String(ln))
+    }
+    requestAnimationFrame(() => { gotoInputRef.current?.focus(); gotoInputRef.current?.select() })
+  }, [])
+
+  const closeGoto = useCallback(() => {
+    setGotoOpen(false)
+    editorRef.current?.focus()
+  }, [])
+
+  const commitGoto = useCallback(() => {
+    const n = parseInt(gotoQuery, 10)
+    if (Number.isFinite(n) && n >= 1) {
+      jumpToLine(n)
+    }
+    setGotoOpen(false)
+  }, [gotoQuery, jumpToLine])
 
   // Keyboard shortcuts inside the editor:
   //   Cmd/Ctrl+Enter        — run script
@@ -1239,6 +1271,11 @@ export default function Workstation() {
     if ((e.metaKey || e.ctrlKey) && (e.key === 'f' || e.key === 'F')) {
       e.preventDefault()
       openFind()
+      return
+    }
+    if ((e.metaKey || e.ctrlKey) && (e.key === 'g' || e.key === 'G')) {
+      e.preventDefault()
+      openGoto()
       return
     }
     const ta = e.currentTarget
@@ -1517,7 +1554,7 @@ export default function Workstation() {
         ta.selectionStart = ta.selectionEnd = s + 1 + indent.length
       })
     }
-  }, [runScript, runSelection, runSection, openFind, setScript, vars, acOpen, acItems, acIndex, acceptAutocomplete, closeAutocomplete, editorFontSize])
+  }, [runScript, runSelection, runSection, openFind, openGoto, setScript, vars, acOpen, acItems, acIndex, acceptAutocomplete, closeAutocomplete, editorFontSize])
 
   // Track cursor position and selection size for the status bar.
   const updateCursor = useCallback((ta: HTMLTextAreaElement) => {
@@ -2812,6 +2849,43 @@ export default function Workstation() {
               >×</button>
             </div>
           )}
+          {gotoOpen && (
+            <div style={styles.findBar}>
+              <span style={{
+                fontSize: 11,
+                fontFamily: "'JetBrains Mono', monospace",
+                color: 'var(--color-text-muted)',
+              }}>Go to line</span>
+              <input
+                ref={gotoInputRef}
+                style={styles.findInput}
+                value={gotoQuery}
+                onChange={e => setGotoQuery(e.target.value.replace(/[^0-9]/g, ''))}
+                onKeyDown={e => {
+                  if (e.key === 'Escape') { e.preventDefault(); closeGoto() }
+                  else if (e.key === 'Enter') { e.preventDefault(); commitGoto() }
+                }}
+                placeholder={`1 – ${lineCount}`}
+                inputMode="numeric"
+                spellCheck={false}
+                autoComplete="off"
+              />
+              <span style={styles.findCount}>
+                {gotoQuery ? `of ${lineCount}` : ''}
+              </span>
+              <button
+                style={{ ...styles.btn, ...styles.btnGhost, padding: '3px 8px', fontSize: 11 }}
+                onClick={commitGoto}
+                disabled={!gotoQuery}
+                title="Jump to line (Enter)"
+              >Go</button>
+              <button
+                style={{ ...styles.btn, ...styles.btnGhost, padding: '3px 8px', fontSize: 11, marginLeft: 'auto' }}
+                onClick={closeGoto}
+                title="Close (Esc)"
+              >×</button>
+            </div>
+          )}
           <div style={styles.editorBody}>
             <div style={styles.editorGutterClip} aria-hidden>
               <div ref={gutterRef} style={styles.editorGutterNumbers}>
@@ -3616,6 +3690,7 @@ const SHORTCUT_GROUPS: { title: string; items: [string, string][] }[] = [
     title: 'Navigation',
     items: [
       ['Ctrl / Cmd + F', 'Find and replace'],
+      ['Ctrl / Cmd + G', 'Go to line'],
       ['Enter / Shift + Enter (find)', 'Next / previous match'],
       ['Esc', 'Close find, autocomplete, fullscreen or help'],
     ],
