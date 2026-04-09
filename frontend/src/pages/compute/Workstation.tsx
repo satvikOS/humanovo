@@ -857,20 +857,33 @@ export default function Workstation() {
     setEntries(prev => [...prev, { id: nextEntryId++, kind: 'output', text: '— workspace cleared —' }])
   }
 
-  /** Export the currently rendered figure as SVG. */
-  const exportPlotSVG = useCallback(() => {
+  // Clone the currently displayed chart SVG with a solid dark background
+  // baked in. Shared between the SVG and PNG exporters so both produce
+  // the same image.
+  const cloneCurrentPlotSvg = useCallback((): SVGSVGElement | null => {
     const host = plotBodyRef.current
-    if (!host) return
+    if (!host) return null
     const svg = host.querySelector('svg')
-    if (!svg) return
+    if (!svg) return null
     const clone = svg.cloneNode(true) as SVGSVGElement
-    // Inline a white-on-dark background so the exported file is self-contained.
     clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+    // Preserve the original width/height as attributes so <img> can render
+    // it without additional hints when we rasterize.
+    const rect = svg.getBoundingClientRect()
+    if (!clone.getAttribute('width')) clone.setAttribute('width', String(rect.width))
+    if (!clone.getAttribute('height')) clone.setAttribute('height', String(rect.height))
     const bgRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
     bgRect.setAttribute('width', '100%')
     bgRect.setAttribute('height', '100%')
     bgRect.setAttribute('fill', '#0a0a0a')
     clone.insertBefore(bgRect, clone.firstChild)
+    return clone
+  }, [])
+
+  /** Export the currently rendered figure as SVG. */
+  const exportPlotSVG = useCallback(() => {
+    const clone = cloneCurrentPlotSvg()
+    if (!clone) return
     const xml = new XMLSerializer().serializeToString(clone)
     const blob = new Blob([xml], { type: 'image/svg+xml' })
     const url = URL.createObjectURL(blob)
@@ -880,7 +893,43 @@ export default function Workstation() {
     a.download = `${title}.svg`
     a.click()
     URL.revokeObjectURL(url)
-  }, [plots, activePlot])
+  }, [plots, activePlot, cloneCurrentPlotSvg])
+
+  /** Export the currently rendered figure as PNG (rasterized at 2× DPR). */
+  const exportPlotPNG = useCallback(() => {
+    const clone = cloneCurrentPlotSvg()
+    if (!clone) return
+    const xml = new XMLSerializer().serializeToString(clone)
+    const svgBlob = new Blob([xml], { type: 'image/svg+xml;charset=utf-8' })
+    const svgUrl = URL.createObjectURL(svgBlob)
+    const img = new Image()
+    img.onload = () => {
+      const widthAttr = Number(clone.getAttribute('width')) || img.width || 800
+      const heightAttr = Number(clone.getAttribute('height')) || img.height || 480
+      const scale = 2 // produce crisp, retina-ready output
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.round(widthAttr * scale)
+      canvas.height = Math.round(heightAttr * scale)
+      const ctx = canvas.getContext('2d')
+      if (!ctx) { URL.revokeObjectURL(svgUrl); return }
+      ctx.fillStyle = '#0a0a0a'
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+      URL.revokeObjectURL(svgUrl)
+      canvas.toBlob(blob => {
+        if (!blob) return
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        const title = plots[activePlot]?.title?.replace(/[^\w-]+/g, '_') || `figure-${activePlot + 1}`
+        a.href = url
+        a.download = `${title}.png`
+        a.click()
+        URL.revokeObjectURL(url)
+      }, 'image/png')
+    }
+    img.onerror = () => { URL.revokeObjectURL(svgUrl) }
+    img.src = svgUrl
+  }, [plots, activePlot, cloneCurrentPlotSvg])
 
   /** Export the underlying series data of the current figure as CSV. */
   const exportPlotCSV = useCallback(() => {
@@ -2577,6 +2626,12 @@ export default function Workstation() {
                 <button
                   style={{ ...styles.btn, ...styles.btnGhost, padding: '2px 8px', fontSize: 11 }}
                   disabled={plots.length === 0}
+                  onClick={exportPlotPNG}
+                  title="Download current figure as PNG"
+                >png</button>
+                <button
+                  style={{ ...styles.btn, ...styles.btnGhost, padding: '2px 8px', fontSize: 11 }}
+                  disabled={plots.length === 0}
                   onClick={exportPlotCSV}
                   title="Download series data as CSV"
                 >csv</button>
@@ -2768,6 +2823,11 @@ export default function Workstation() {
                 onClick={exportPlotSVG}
                 title="Download current figure as SVG"
               >svg</button>
+              <button
+                style={{ ...styles.btn, ...styles.btnGhost, padding: '4px 10px', fontSize: 11 }}
+                onClick={exportPlotPNG}
+                title="Download current figure as PNG"
+              >png</button>
               <button
                 style={{ ...styles.btn, ...styles.btnGhost, padding: '4px 10px', fontSize: 11 }}
                 onClick={exportPlotCSV}
