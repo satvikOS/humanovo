@@ -2210,22 +2210,31 @@ export default function Workstation() {
   }, [findMatches, findQuery, replaceQuery, script, setScript])
 
   const handleUpload = useCallback((ev: React.ChangeEvent<HTMLInputElement>) => {
-    const f = ev.target.files?.[0]
-    if (!f) return
-    const fname = f.name
-    const r = new FileReader()
-    r.onload = () => {
-      const code = String(r.result ?? '')
-      // Create a new script tab from the uploaded file.
-      setScriptStore(store => {
-        const id = makeScriptId()
-        return {
-          list: [...store.list, { id, name: fname || 'upload.m', code }],
-          activeId: id,
+    const files = ev.target.files
+    if (!files || files.length === 0) return
+    // Walk every selected file (the input supports multi-select) and
+    // turn each one into its own script tab. The last file read wins
+    // the active slot so the user lands on the final one they picked.
+    const list = Array.from(files)
+    let completed = 0
+    const loaded: Array<{ name: string; code: string }> = new Array(list.length)
+    list.forEach((f, idx) => {
+      const r = new FileReader()
+      r.onload = () => {
+        loaded[idx] = { name: f.name || `upload-${idx + 1}.m`, code: String(r.result ?? '') }
+        completed++
+        if (completed === list.length) {
+          setScriptStore(store => {
+            const newScripts: SavedScript[] = loaded.map(x => ({ id: makeScriptId(), name: x.name, code: x.code }))
+            return {
+              list: [...store.list, ...newScripts],
+              activeId: newScripts[newScripts.length - 1].id,
+            }
+          })
         }
-      })
-    }
-    r.readAsText(f)
+      }
+      r.readAsText(f)
+    })
     ev.target.value = ''
   }, [])
 
@@ -3447,9 +3456,9 @@ export default function Workstation() {
           <FiPlay style={{ opacity: 0.7 }} /> Run section
         </button>
 
-        <label style={{ ...styles.btn, ...styles.btnGhost }} title="Upload .m script">
+        <label style={{ ...styles.btn, ...styles.btnGhost }} title="Upload one or more .m scripts">
           <FiUpload /> Upload
-          <input type="file" accept=".m,.txt" style={{ display: 'none' }} onChange={handleUpload} />
+          <input type="file" accept=".m,.txt" multiple style={{ display: 'none' }} onChange={handleUpload} />
         </label>
 
         <button style={{ ...styles.btn, ...styles.btnGhost }} onClick={handleDownload} title="Download as .m">
