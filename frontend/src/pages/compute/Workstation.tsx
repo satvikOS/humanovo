@@ -690,9 +690,9 @@ export default function Workstation() {
   const [libMode, setLibMode] = useState<'templates' | 'functions'>('templates')
   const [activeTemplate, setActiveTemplate] = useState<string | null>(null)
   const [cursor, setCursor] = useState<{ line: number; col: number }>({ line: 1, col: 1 })
-  // Live selection size (characters and logical lines) for the status bar.
-  // Null when the user isn't selecting any text.
-  const [selectionInfo, setSelectionInfo] = useState<{ chars: number; lines: number } | null>(null)
+  // Live selection size (characters, logical lines and word count) for the
+  // status bar. Null when the user isn't selecting any text.
+  const [selectionInfo, setSelectionInfo] = useState<{ chars: number; lines: number; words: number } | null>(null)
   const [lastRunMs, setLastRunMs] = useState<number | null>(null)
   // Session elapsed time — ticks once per minute so the status bar can
   // show how long this Workstation tab has been open. The ref captures
@@ -3009,7 +3009,8 @@ export default function Workstation() {
     if (selLen > 0) {
       const selText = ta.value.slice(ta.selectionStart, ta.selectionEnd)
       const nl = (selText.match(/\n/g)?.length ?? 0)
-      setSelectionInfo({ chars: selLen, lines: nl + 1 })
+      const words = (selText.match(/[A-Za-z0-9_]+/g)?.length ?? 0)
+      setSelectionInfo({ chars: selLen, lines: nl + 1, words })
     } else {
       setSelectionInfo(null)
     }
@@ -5859,8 +5860,12 @@ export default function Workstation() {
         {selectionInfo && (
           <>
             <span>·</span>
-            <span style={{ color: 'var(--color-text)' }}>
+            <span
+              style={{ color: 'var(--color-text)' }}
+              title={`${selectionInfo.chars} char${selectionInfo.chars === 1 ? '' : 's'}, ${selectionInfo.words} word${selectionInfo.words === 1 ? '' : 's'}, ${selectionInfo.lines} line${selectionInfo.lines === 1 ? '' : 's'} selected`}
+            >
               {selectionInfo.chars} char{selectionInfo.chars === 1 ? '' : 's'}
+              {selectionInfo.words > 0 && `, ${selectionInfo.words} word${selectionInfo.words === 1 ? '' : 's'}`}
               {selectionInfo.lines > 1 && `, ${selectionInfo.lines} lines`}
               {' selected'}
             </span>
