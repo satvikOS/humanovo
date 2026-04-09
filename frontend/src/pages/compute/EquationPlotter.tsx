@@ -227,7 +227,8 @@ const PRESETS: PredefinedEq[] = [
   { id: 'damped-oscillation', name: 'Damped Oscillation', expr: 'exp(-0.1*x)*sin(x)', xMin: 0, xMax: 40, category: 'Systems Biology' },
 ]
 
-const OVERLAY_COLORS = ['#60a5fa', '#93c5fd', '#1d4ed8']
+// Monochrome overlay palette — distinguishable shades without category color.
+const OVERLAY_COLORS = ['#a1a1a1', '#d4d4d4', '#737373']
 
 interface SavedOverlay {
   expr: string
@@ -438,18 +439,18 @@ export default function EquationPlotter() {
           <div className="flex flex-col flex-1 overflow-y-auto px-2 pb-2 gap-3">
             {/* Presets */}
             <div>
-              <h3 className="text-xs font-semibold uppercase tracking-wide mb-1.5"
-                style={{ color: 'var(--color-text-muted)' }}>Equations</h3>
+              <h3 className="text-xs font-semibold mb-2"
+                style={{ color: 'var(--color-text)' }}>Equations</h3>
               {presetCategories.map(([cat, items]) => (
-                <div key={cat} className="mb-2">
-                  <span className="text-[10px] font-medium uppercase tracking-wider"
-                    style={{ color: 'var(--color-accent-blue)' }}>{cat}</span>
+                <div key={cat} className="mb-3">
+                  <span className="text-[11px] font-medium block mb-0.5"
+                    style={{ color: 'var(--color-text-muted)' }}>{cat}</span>
                   {items.map(p => (
                     <button
                       key={p.id}
                       onClick={() => loadPreset(p)}
-                      className="block w-full text-left text-xs px-2 py-1 rounded hover:bg-white/5 transition-colors truncate"
-                      style={{ color: 'var(--color-text)' }}
+                      className="block w-full text-left text-xs px-2 py-1 rounded hover:bg-white/[0.04] transition-colors truncate"
+                      style={{ color: 'var(--color-text-secondary)' }}
                       title={p.expr}
                     >
                       {p.name}
@@ -461,19 +462,19 @@ export default function EquationPlotter() {
 
             {/* History */}
             <div>
-              <div className="flex items-center justify-between mb-1">
-                <h3 className="text-xs font-semibold uppercase tracking-wide"
-                  style={{ color: 'var(--color-text-muted)' }}>History</h3>
+              <div className="flex items-center justify-between mb-1.5">
+                <h3 className="text-xs font-semibold"
+                  style={{ color: 'var(--color-text)' }}>History</h3>
                 {history.length > 0 && (
                   <button onClick={clearHistory}
-                    className="p-0.5 hover:bg-white/10 rounded transition-colors"
+                    className="p-0.5 hover:bg-white/[0.06] rounded transition-colors"
                     style={{ color: 'var(--color-text-muted)' }} title="Clear history">
                     <FiTrash2 size={11} />
                   </button>
                 )}
               </div>
               {history.length === 0 && (
-                <p className="text-[10px] italic" style={{ color: 'var(--color-text-muted)' }}>
+                <p className="text-[11px] italic" style={{ color: 'var(--color-text-muted)' }}>
                   No history yet
                 </p>
               )}
@@ -481,8 +482,8 @@ export default function EquationPlotter() {
                 <button
                   key={i}
                   onClick={() => restoreHistory(h)}
-                  className="block w-full text-left text-xs px-2 py-1 rounded hover:bg-white/5 transition-colors truncate"
-                  style={{ color: 'var(--color-text)' }}
+                  className="block w-full text-left text-xs px-2 py-1 rounded hover:bg-white/[0.04] transition-colors truncate font-mono"
+                  style={{ color: 'var(--color-text-secondary)' }}
                   title={`${h.expr}  [${h.xMin}, ${h.xMax}]`}
                 >
                   {h.expr}
@@ -498,7 +499,7 @@ export default function EquationPlotter() {
         {/* Expression input bar */}
         <div className="flex items-center gap-2 border rounded-lg px-3 py-2" style={glassCard}>
           <span className="text-sm font-mono font-semibold shrink-0"
-            style={{ color: 'var(--color-accent-blue)' }}>f(x) =</span>
+            style={{ color: 'var(--color-text-muted)' }}>f(x) =</span>
           <input
             ref={inputRef}
             type="text"
@@ -511,8 +512,8 @@ export default function EquationPlotter() {
             spellCheck={false}
           />
           <button onClick={handlePlot}
-            className="flex items-center gap-1 px-3 py-1 rounded text-xs font-medium transition-colors hover:opacity-80"
-            style={{ background: 'var(--color-accent-blue)', color: '#fff' }}>
+            className="flex items-center gap-1 px-3 py-1 rounded text-xs font-medium transition-colors hover:bg-white/[0.06]"
+            style={{ background: 'var(--glass-bg-hover)', color: 'var(--color-text)', border: '1px solid var(--color-border-strong)' }}>
             <FiPlay size={12} /> Plot
           </button>
         </div>
@@ -549,9 +550,9 @@ export default function EquationPlotter() {
             onClick={() => setShowOverlays(p => !p)}
             className={clsx(
               'flex items-center gap-1 text-xs px-2 py-1 rounded transition-colors',
-              showOverlays ? 'bg-white/10' : 'hover:bg-white/5',
+              showOverlays ? 'bg-white/[0.06]' : 'hover:bg-white/[0.04]',
             )}
-            style={{ color: overlays.length > 0 ? 'var(--color-accent-blue)' : 'var(--color-text-muted)' }}
+            style={{ color: overlays.length > 0 ? 'var(--color-text)' : 'var(--color-text-muted)' }}
           >
             <FiLayers size={12} /> Overlays ({overlays.filter(o => o.enabled).length}/3)
           </button>
@@ -575,7 +576,7 @@ export default function EquationPlotter() {
                   type="checkbox"
                   checked={o.enabled}
                   onChange={() => toggleOverlay(idx)}
-                  className="accent-blue-500"
+                  className="accent-white"
                 />
                 <span className="font-mono truncate max-w-[180px]"
                   style={{ color: OVERLAY_COLORS[idx] }}>
@@ -594,7 +595,7 @@ export default function EquationPlotter() {
         {/* Error banner */}
         {error && (
           <div className="text-xs px-3 py-1.5 rounded border"
-            style={{ color: '#f87171', borderColor: '#f8717140', background: '#f8717110' }}>
+            style={{ color: 'var(--color-error)', borderColor: 'rgba(239, 68, 68, 0.25)', background: 'rgba(239, 68, 68, 0.08)' }}>
             Parse error: {error}
           </div>
         )}
@@ -635,7 +636,7 @@ export default function EquationPlotter() {
                 <Line
                   type="monotone"
                   dataKey="y"
-                  stroke="var(--color-accent-blue)"
+                  stroke="var(--color-text)"
                   strokeWidth={2}
                   dot={false}
                   name={expr}

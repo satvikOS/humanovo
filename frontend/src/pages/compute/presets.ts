@@ -29,9 +29,11 @@ const parseArray = (raw: any): number[] => {
 }
 
 /* ── Toolbox Categories ──────────────────────────────────────────────── */
-// Category color used to be a rainbow palette. The rest of Humanovo sticks
-// to a single accent blue, so Compute Lab now matches.
-const ACCENT = '#3b82f6'
+// Categories are rendered monochrome in the UI to match the rest of the
+// Humanovo platform. This hex string is kept as a neutral grey so any
+// downstream consumer that concatenates an opacity suffix still produces
+// valid CSS.
+const ACCENT = '#888888'
 
 export const TOOLBOX_CATEGORIES: ToolboxCategory[] = [
   { id: 'statistics', name: 'Statistics & Testing', icon: FiTarget, color: ACCENT },
@@ -568,7 +570,7 @@ const statisticsPresets: Preset[] = [
       const matrix: number[][] = String(p.data).split(';').map(row => parseArray(row)).filter(r => r.length > 0)
       const k = parseInt(p.k) || 3
       const r = kmeans(matrix, k)
-      const colors = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6']
+      const colors = ['#ededed', '#a1a1a1', '#737373', '#525252', '#d4d4d4']
       return {
         statistics: [
           { label: 'Samples', value: String(matrix.length) },

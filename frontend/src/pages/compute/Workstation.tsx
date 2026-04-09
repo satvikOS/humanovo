@@ -84,6 +84,7 @@ function loadScripts(): ScriptStore {
       name: 'main.m',
       code: legacy ?? STARTER_SCRIPT,
     }
+    if (legacy) { try { localStorage.removeItem(SCRIPT_KEY) } catch { /* quota */ } }
     return { list: [first], activeId: first.id }
   } catch {
     const first: SavedScript = { id: makeScriptId(), name: 'main.m', code: STARTER_SCRIPT }
@@ -462,14 +463,15 @@ export default function Workstation() {
       color: 'var(--color-text)',
       background: 'transparent',
       minHeight: 0,
+      fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
     },
     toolbar: {
       display: 'flex',
       alignItems: 'center',
-      gap: 8,
-      padding: '10px 16px',
+      gap: 6,
+      padding: '10px 20px',
       borderBottom: '1px solid var(--glass-border)',
-      background: 'var(--glass-bg)',
+      background: 'transparent',
     },
     btn: {
       display: 'inline-flex',
@@ -478,20 +480,21 @@ export default function Workstation() {
       padding: '6px 12px',
       fontSize: 12,
       fontWeight: 500,
-      color: 'var(--color-text)',
-      background: 'rgba(255, 255, 255, 0.04)',
+      color: 'var(--color-text-secondary)',
+      background: 'transparent',
       border: '1px solid var(--glass-border)',
       borderRadius: 6,
       cursor: 'pointer',
-      transition: 'background 0.15s, border-color 0.15s',
+      transition: 'background 0.15s, border-color 0.15s, color 0.15s',
     },
     btnPrimary: {
-      background: 'var(--color-accent-blue)',
-      borderColor: 'var(--color-accent-blue)',
-      color: '#fff',
+      color: 'var(--color-text)',
+      background: 'var(--glass-bg-hover)',
+      borderColor: 'var(--color-border-strong)',
     },
     btnGhost: {
       background: 'transparent',
+      border: '1px solid transparent',
     },
     body: {
       display: 'grid',
@@ -507,73 +510,70 @@ export default function Workstation() {
       flexDirection: 'column',
       minHeight: 0,
       borderRight: '1px solid var(--glass-border)',
-      background: 'rgba(0, 0, 0, 0.35)',
+      background: 'transparent',
       overflow: 'hidden',
       gridRow: '1 / -1',
     },
     libraryHeader: {
-      padding: '6px 12px',
+      padding: '10px 16px',
       borderBottom: '1px solid var(--glass-border)',
-      background: 'var(--glass-bg)',
-      fontSize: 11,
-      fontWeight: 500,
-      textTransform: 'uppercase',
-      letterSpacing: 0.6,
-      color: 'var(--color-text-muted)',
+      background: 'transparent',
+      fontSize: 12,
+      fontWeight: 600,
+      color: 'var(--color-text)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
       gap: 8,
     },
     librarySearch: {
-      padding: '8px 10px',
+      padding: '8px 12px',
       borderBottom: '1px solid var(--glass-border)',
     },
     librarySearchInput: {
       width: '100%',
-      background: 'rgba(0,0,0,0.4)',
+      background: 'var(--glass-bg)',
       border: '1px solid var(--glass-border)',
-      borderRadius: 4,
-      padding: '4px 8px',
+      borderRadius: 6,
+      padding: '6px 10px',
       color: 'var(--color-text)',
-      fontSize: 11,
+      fontSize: 12,
       outline: 'none',
     },
     libraryScroll: {
       flex: 1,
       overflowY: 'auto',
-      padding: '6px 0',
+      padding: '8px 0',
     },
     libraryCategory: {
-      padding: '6px 12px 2px 12px',
-      fontSize: 10,
+      padding: '10px 16px 4px 16px',
+      fontSize: 11,
       fontWeight: 600,
-      textTransform: 'uppercase',
-      letterSpacing: 0.5,
       color: 'var(--color-text-muted)',
     },
     libraryItem: {
       display: 'block',
       width: '100%',
       textAlign: 'left' as const,
-      padding: '6px 12px',
+      padding: '6px 16px',
       background: 'transparent',
       border: 'none',
-      color: 'var(--color-text)',
-      fontSize: 11.5,
+      color: 'var(--color-text-secondary)',
+      fontSize: 12,
       cursor: 'pointer',
       borderLeft: '2px solid transparent',
+      transition: 'background 0.15s, color 0.15s',
     },
     libraryItemActive: {
-      background: 'rgba(59, 130, 246, 0.1)',
-      borderLeft: '2px solid var(--color-accent-blue)',
-      color: 'var(--color-accent-blue)',
+      background: 'var(--glass-bg-hover)',
+      borderLeft: '2px solid var(--color-text)',
+      color: 'var(--color-text)',
     },
     libraryItemDesc: {
-      fontSize: 10,
+      fontSize: 11,
       color: 'var(--color-text-muted)',
       marginTop: 2,
-      lineHeight: 1.35,
+      lineHeight: 1.4,
     },
     editorWrap: {
       display: 'flex',
@@ -586,13 +586,12 @@ export default function Workstation() {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
-      padding: '6px 16px',
-      fontSize: 11,
-      fontWeight: 500,
-      textTransform: 'uppercase',
-      letterSpacing: 0.6,
-      color: 'var(--color-text-muted)',
-      background: 'var(--glass-bg)',
+      padding: '10px 16px',
+      fontSize: 12,
+      fontWeight: 600,
+      color: 'var(--color-text)',
+      background: 'transparent',
+      borderBottom: '1px solid var(--glass-border)',
     },
     tabBar: {
       display: 'flex',
@@ -600,28 +599,29 @@ export default function Workstation() {
       gap: 0,
       padding: '0 8px',
       borderBottom: '1px solid var(--glass-border)',
-      background: 'rgba(0, 0, 0, 0.25)',
-      minHeight: 28,
+      background: 'transparent',
+      minHeight: 30,
       overflowX: 'auto' as const,
     },
     tab: {
       display: 'inline-flex',
       alignItems: 'center',
-      gap: 6,
-      padding: '4px 10px',
-      fontSize: 11,
+      gap: 8,
+      padding: '6px 12px',
+      fontSize: 12,
       fontFamily: "'JetBrains Mono', monospace",
       color: 'var(--color-text-muted)',
       background: 'transparent',
       border: 'none',
-      borderRight: '1px solid rgba(255,255,255,0.05)',
+      borderBottom: '2px solid transparent',
       cursor: 'pointer',
       whiteSpace: 'nowrap' as const,
+      transition: 'color 0.15s',
     },
     tabActive: {
       color: 'var(--color-text)',
-      background: 'rgba(59, 130, 246, 0.08)',
-      borderBottom: '2px solid var(--color-accent-blue)',
+      background: 'transparent',
+      borderBottom: '2px solid var(--color-text)',
     },
     tabCloseBtn: {
       display: 'inline-flex',
@@ -642,7 +642,7 @@ export default function Workstation() {
       display: 'inline-flex',
       alignItems: 'center',
       justifyContent: 'center',
-      padding: '0 10px',
+      padding: '0 12px',
       fontSize: 14,
       color: 'var(--color-text-muted)',
       background: 'transparent',
@@ -653,22 +653,22 @@ export default function Workstation() {
       flex: 1,
       display: 'flex',
       minHeight: 0,
-      background: 'rgba(0, 0, 0, 0.35)',
+      background: 'transparent',
     },
     editorGutterClip: {
       flex: '0 0 auto',
       width: 44,
       overflow: 'hidden',
-      background: 'rgba(0, 0, 0, 0.25)',
-      borderRight: '1px solid rgba(255,255,255,0.05)',
+      background: 'transparent',
+      borderRight: '1px solid var(--glass-border)',
       position: 'relative' as const,
     },
     editorGutterNumbers: {
-      padding: '12px 8px 12px 0',
+      padding: '14px 8px 14px 0',
       fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-      fontSize: 13,
-      lineHeight: 1.5,
-      color: 'rgba(255,255,255,0.28)',
+      fontSize: 12,
+      lineHeight: 1.6,
+      color: 'var(--color-text-muted)',
       textAlign: 'right' as const,
       userSelect: 'none' as const,
       whiteSpace: 'pre',
@@ -679,10 +679,10 @@ export default function Workstation() {
       resize: 'none',
       outline: 'none',
       border: 'none',
-      padding: '12px 16px 12px 12px',
+      padding: '14px 16px 14px 14px',
       fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-      fontSize: 13,
-      lineHeight: 1.5,
+      fontSize: 12,
+      lineHeight: 1.6,
       color: 'var(--color-text)',
       background: 'transparent',
       tabSize: 2,
@@ -691,21 +691,20 @@ export default function Workstation() {
     statusBar: {
       display: 'flex',
       alignItems: 'center',
-      gap: 16,
-      padding: '4px 16px',
+      gap: 14,
+      padding: '6px 20px',
       borderTop: '1px solid var(--glass-border)',
-      background: 'rgba(0, 0, 0, 0.5)',
+      background: 'transparent',
       fontFamily: "'JetBrains Mono', monospace",
-      fontSize: 10,
+      fontSize: 11,
       color: 'var(--color-text-muted)',
-      letterSpacing: 0.3,
     },
     rightRail: {
       display: 'grid',
       gridTemplateRows: 'minmax(0, 1fr) auto',
       minHeight: 0,
       borderBottom: '1px solid var(--glass-border)',
-      background: 'rgba(0, 0, 0, 0.25)',
+      background: 'transparent',
     },
     plotPanel: {
       display: 'flex',
@@ -716,7 +715,7 @@ export default function Workstation() {
     plotBody: {
       flex: 1,
       minHeight: 0,
-      padding: 12,
+      padding: 14,
     },
     varPanel: {
       display: 'flex',
@@ -728,52 +727,52 @@ export default function Workstation() {
       overflowY: 'auto',
       fontFamily: "'JetBrains Mono', monospace",
       fontSize: 11,
-      padding: '4px 8px',
+      padding: '6px 10px',
     },
     varRow: {
       display: 'grid',
       gridTemplateColumns: 'minmax(0, 1fr) auto minmax(0, 1.2fr)',
-      gap: 8,
-      padding: '4px 6px',
+      gap: 10,
+      padding: '5px 6px',
       borderRadius: 4,
     },
     panelHeader: {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
-      padding: '6px 16px',
-      fontSize: 11,
-      fontWeight: 500,
-      textTransform: 'uppercase',
-      letterSpacing: 0.6,
-      color: 'var(--color-text-muted)',
-      background: 'var(--glass-bg)',
+      padding: '10px 16px',
+      fontSize: 12,
+      fontWeight: 600,
+      color: 'var(--color-text)',
+      background: 'transparent',
+      borderBottom: '1px solid var(--glass-border)',
     },
     console: {
       minHeight: 0,
       overflowY: 'auto',
-      padding: '10px 16px',
+      padding: '12px 20px',
       fontFamily: "'JetBrains Mono', monospace",
       fontSize: 12,
-      lineHeight: 1.55,
-      background: 'rgba(0, 0, 0, 0.55)',
+      lineHeight: 1.6,
+      background: 'transparent',
       gridColumn: library === 'open' ? '2 / -1' : '1 / -1',
+      borderTop: '1px solid var(--glass-border)',
     },
-    entryInput: { color: 'var(--color-accent-blue)' },
-    entryOutput: { color: 'var(--color-text)', whiteSpace: 'pre-wrap' },
-    entryError: { color: '#f87171', whiteSpace: 'pre-wrap' },
+    entryInput: { color: 'var(--color-text)', fontWeight: 500 },
+    entryOutput: { color: 'var(--color-text-secondary)', whiteSpace: 'pre-wrap' },
+    entryError: { color: 'var(--color-error)', whiteSpace: 'pre-wrap' },
     cmdBar: {
       display: 'flex',
       alignItems: 'center',
-      gap: 8,
-      padding: '8px 16px',
+      gap: 10,
+      padding: '10px 20px',
       borderTop: '1px solid var(--glass-border)',
-      background: 'var(--glass-bg)',
+      background: 'transparent',
     },
     prompt: {
       fontFamily: "'JetBrains Mono', monospace",
       fontSize: 12,
-      color: 'var(--color-accent-blue)',
+      color: 'var(--color-text-muted)',
     },
     cmd: {
       flex: 1,
@@ -784,7 +783,7 @@ export default function Workstation() {
       fontFamily: "'JetBrains Mono', monospace",
       fontSize: 12,
     },
-  }), [])
+  }), [library])
 
   const currentPlot = plots[activePlot] ?? null
 
@@ -842,10 +841,10 @@ export default function Workstation() {
           {library === 'open' ? 'Hide library' : 'Show library'}
         </button>
 
-        <div style={{ width: 1, height: 20, background: 'var(--glass-border)', margin: '0 4px' }} />
+        <div style={{ width: 1, height: 18, background: 'var(--glass-border)', margin: '0 6px' }} />
 
         <button
-          style={{ ...styles.btn, ...(running ? {} : styles.btnPrimary) }}
+          style={{ ...styles.btn, ...styles.btnPrimary }}
           onClick={runScript}
           disabled={running}
           title="Run script (Ctrl/Cmd + Enter)"
@@ -863,7 +862,7 @@ export default function Workstation() {
           <FiDownload /> Download
         </button>
 
-        <div style={{ width: 1, height: 20, background: 'var(--glass-border)', margin: '0 4px' }} />
+        <div style={{ width: 1, height: 18, background: 'var(--glass-border)', margin: '0 6px' }} />
 
         <button style={{ ...styles.btn, ...styles.btnGhost }} onClick={clearConsole} title="Clear console">
           <FiTrash2 /> Clear console
@@ -872,7 +871,7 @@ export default function Workstation() {
           Reset workspace
         </button>
 
-        <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--color-text-muted)' }}>
+        <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--color-text-muted)' }}>
           MATLAB / Octave compatible · running locally in-browser
         </span>
       </div>
@@ -884,7 +883,7 @@ export default function Workstation() {
             <div style={styles.libraryHeader}>
               <span>Library · {filteredTemplates.length}</span>
               <button
-                style={{ ...styles.btn, ...styles.btnGhost, padding: '2px 8px', fontSize: 10 }}
+                style={{ ...styles.btn, ...styles.btnGhost, padding: '2px 8px', fontSize: 11 }}
                 onClick={() => setLibrary('closed')}
                 title="Collapse library"
               >hide</button>
@@ -922,7 +921,7 @@ export default function Workstation() {
                 )
               })}
               {filteredTemplates.length === 0 && (
-                <div style={{ padding: '10px 12px', color: 'var(--color-text-muted)', fontStyle: 'italic', fontSize: 11 }}>
+                <div style={{ padding: '12px 16px', color: 'var(--color-text-muted)', fontStyle: 'italic', fontSize: 12 }}>
                   No templates match "{libFilter}".
                 </div>
               )}
@@ -986,17 +985,17 @@ export default function Workstation() {
               <span>Figure {plots.length > 0 ? `${activePlot + 1} / ${plots.length}` : ''}</span>
               <div style={{ display: 'flex', gap: 4 }}>
                 <button
-                  style={{ ...styles.btn, ...styles.btnGhost, padding: '2px 8px', fontSize: 10 }}
+                  style={{ ...styles.btn, ...styles.btnGhost, padding: '2px 8px', fontSize: 11 }}
                   disabled={plots.length < 2}
                   onClick={() => setActivePlot(i => Math.max(0, i - 1))}
                 >◀</button>
                 <button
-                  style={{ ...styles.btn, ...styles.btnGhost, padding: '2px 8px', fontSize: 10 }}
+                  style={{ ...styles.btn, ...styles.btnGhost, padding: '2px 8px', fontSize: 11 }}
                   disabled={plots.length < 2}
                   onClick={() => setActivePlot(i => Math.min(plots.length - 1, i + 1))}
                 >▶</button>
                 <button
-                  style={{ ...styles.btn, ...styles.btnGhost, padding: '2px 8px', fontSize: 10 }}
+                  style={{ ...styles.btn, ...styles.btnGhost, padding: '2px 8px', fontSize: 11 }}
                   disabled={plots.length === 0}
                   onClick={() => { setPlots([]); setActivePlot(0) }}
                 >clear</button>
@@ -1013,7 +1012,7 @@ export default function Workstation() {
             </div>
             <div style={styles.varList}>
               {vars.length === 0 && (
-                <div style={{ color: 'var(--color-text-muted)', fontStyle: 'italic', padding: '8px 6px' }}>
+                <div style={{ color: 'var(--color-text-muted)', fontStyle: 'italic', padding: '10px 6px', fontSize: 12 }}>
                   No variables yet. Run a script or enter a command.
                 </div>
               )}
@@ -1023,9 +1022,9 @@ export default function Workstation() {
                   style={styles.varRow}
                   title={`${v.name}: ${v.kind}  ${v.shape}  ${v.summary}`}
                 >
-                  <span style={{ color: 'var(--color-accent-blue)' }}>{v.name}</span>
+                  <span style={{ color: 'var(--color-text)', fontWeight: 500 }}>{v.name}</span>
                   <span style={{ color: 'var(--color-text-muted)' }}>{v.shape}</span>
-                  <span style={{ color: 'var(--color-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <span style={{ color: 'var(--color-text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {v.summary}
                   </span>
                 </div>
@@ -1036,7 +1035,7 @@ export default function Workstation() {
 
         <div ref={consoleRef} style={styles.console}>
           {entries.length === 0 && (
-            <div style={{ color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
+            <div style={{ color: 'var(--color-text-muted)', fontStyle: 'italic', fontSize: 12 }}>
               Console ready. Type a command below or hit Run.
             </div>
           )}
@@ -1089,7 +1088,10 @@ export default function Workstation() {
 }
 
 /* ── Plot renderer ───────────────────────────────────────────────────── */
-const SERIES_COLORS = ['#3b82f6', '#60a5fa', '#93c5fd', '#2563eb', '#1d4ed8', '#0ea5e9', '#38bdf8', '#7dd3fc']
+// Monochrome palette — matches the rest of the Humanovo platform. Shades
+// step down so multiple series remain distinguishable without introducing
+// category colors.
+const SERIES_COLORS = ['#ededed', '#a1a1a1', '#d4d4d4', '#737373', '#8a8a8a', '#bfbfbf', '#525252', '#e5e5e5']
 
 function PlotView({ plot }: { plot: PlotSpec | null }) {
   if (!plot || plot.series.length === 0) {
@@ -1103,6 +1105,7 @@ function PlotView({ plot }: { plot: PlotSpec | null }) {
         color: 'var(--color-text-muted)',
         fontSize: 12,
         fontStyle: 'italic',
+        fontFamily: "'Inter', system-ui, sans-serif",
       }}>
         No figure yet. Call plot(x, y) from a script or the command line.
       </div>
@@ -1129,28 +1132,29 @@ function PlotView({ plot }: { plot: PlotSpec | null }) {
 
   const common = (
     <>
-      <CartesianGrid stroke="rgba(255,255,255,0.08)" strokeDasharray="3 3" />
+      <CartesianGrid stroke="var(--glass-border)" strokeDasharray="3 3" />
       <XAxis
         dataKey="x"
-        stroke="rgba(255,255,255,0.45)"
-        tick={{ fontSize: 10, fill: 'rgba(255,255,255,0.65)' }}
-        label={plot.xLabel ? { value: plot.xLabel, position: 'insideBottom', offset: -2, fill: 'rgba(255,255,255,0.55)', fontSize: 10 } : undefined}
+        stroke="var(--glass-border)"
+        tick={{ fontSize: 11, fill: 'var(--color-text-muted)' }}
+        label={plot.xLabel ? { value: plot.xLabel, position: 'insideBottom', offset: -2, fill: 'var(--color-text-muted)', fontSize: 11 } : undefined}
       />
       <YAxis
-        stroke="rgba(255,255,255,0.45)"
-        tick={{ fontSize: 10, fill: 'rgba(255,255,255,0.65)' }}
-        label={plot.yLabel ? { value: plot.yLabel, angle: -90, position: 'insideLeft', fill: 'rgba(255,255,255,0.55)', fontSize: 10 } : undefined}
+        stroke="var(--glass-border)"
+        tick={{ fontSize: 11, fill: 'var(--color-text-muted)' }}
+        label={plot.yLabel ? { value: plot.yLabel, angle: -90, position: 'insideLeft', fill: 'var(--color-text-muted)', fontSize: 11 } : undefined}
       />
       <Tooltip
         contentStyle={{
-          background: 'rgba(10,10,10,0.92)',
-          border: '1px solid rgba(255,255,255,0.15)',
-          borderRadius: 4,
+          background: 'var(--color-bg-elevated)',
+          border: '1px solid var(--glass-border)',
+          borderRadius: 6,
           fontSize: 11,
+          color: 'var(--color-text)',
         }}
       />
       {plot.series.length > 1 && (
-        <Legend wrapperStyle={{ fontSize: 10, color: 'rgba(255,255,255,0.7)' }} />
+        <Legend wrapperStyle={{ fontSize: 11, color: 'var(--color-text-secondary)' }} />
       )}
     </>
   )
@@ -1158,7 +1162,14 @@ function PlotView({ plot }: { plot: PlotSpec | null }) {
   return (
     <div style={{ width: '100%', height: '100%', minHeight: 180 }}>
       {plot.title && (
-        <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 4, textAlign: 'center' }}>
+        <div style={{
+          fontSize: 12,
+          fontWeight: 500,
+          color: 'var(--color-text-secondary)',
+          marginBottom: 6,
+          textAlign: 'center',
+          fontFamily: "'Inter', system-ui, sans-serif",
+        }}>
           {plot.title}
         </div>
       )}

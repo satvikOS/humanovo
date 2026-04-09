@@ -417,8 +417,8 @@ const styles: Record<string, React.CSSProperties> = {
     transition: 'border-color 0.15s, background 0.15s',
   },
   cardSelected: {
-    borderColor: 'var(--color-accent-blue)',
-    background: 'rgba(59, 130, 246, 0.08)',
+    borderColor: 'var(--color-border-strong)',
+    background: 'var(--glass-bg-hover)',
   },
   cardName: {
     fontSize: 12,
@@ -457,7 +457,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   slider: {
     width: '100%',
-    accentColor: 'var(--color-accent-blue)',
+    accentColor: 'var(--color-text)',
   },
   input: {
     width: 80,
@@ -477,13 +477,14 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 8,
     padding: '9px 0',
     borderRadius: 6,
-    border: 'none',
-    background: 'var(--color-accent-blue)',
-    color: '#fff',
+    border: '1px solid var(--color-border-strong)',
+    background: 'var(--glass-bg-hover)',
+    color: 'var(--color-text)',
     fontWeight: 600,
     fontSize: 12,
     cursor: 'pointer',
     marginTop: 'auto',
+    transition: 'background 0.15s, border-color 0.15s',
   },
   statsTable: {
     width: '100%',
@@ -769,17 +770,18 @@ export default function MonteCarloPanel() {
                 <ResponsiveContainer width="100%" height={180}>
                   <BarChart data={histogram}>
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" />
-                    <XAxis dataKey="bin" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
-                    <YAxis tick={{ fontSize: 10 }} />
+                    <XAxis dataKey="bin" tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} interval="preserveStartEnd" stroke="var(--glass-border)" />
+                    <YAxis tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" />
                     <Tooltip
                       contentStyle={{
-                        background: 'var(--glass-bg)',
+                        background: 'var(--color-bg-elevated)',
                         border: '1px solid var(--glass-border)',
                         borderRadius: 6,
-                        fontSize: 12,
+                        fontSize: 11,
+                        color: 'var(--color-text)',
                       }}
                     />
-                    <Bar dataKey="count" fill="var(--color-accent-blue)" radius={[3, 3, 0, 0]} />
+                    <Bar dataKey="count" fill="var(--color-text)" fillOpacity={0.85} radius={[3, 3, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -790,20 +792,21 @@ export default function MonteCarloPanel() {
                 <ResponsiveContainer width="100%" height={160}>
                   <LineChart data={results.convergence}>
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" />
-                    <XAxis dataKey="iteration" tick={{ fontSize: 10 }} />
-                    <YAxis tick={{ fontSize: 10 }} />
+                    <XAxis dataKey="iteration" tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" />
+                    <YAxis tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" />
                     <Tooltip
                       contentStyle={{
-                        background: 'var(--glass-bg)',
+                        background: 'var(--color-bg-elevated)',
                         border: '1px solid var(--glass-border)',
                         borderRadius: 6,
-                        fontSize: 12,
+                        fontSize: 11,
+                        color: 'var(--color-text)',
                       }}
                     />
                     <Line
                       type="monotone"
                       dataKey="runningMean"
-                      stroke="var(--color-accent-blue)"
+                      stroke="var(--color-text)"
                       strokeWidth={2}
                       dot={false}
                     />

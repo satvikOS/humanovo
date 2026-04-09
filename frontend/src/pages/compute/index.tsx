@@ -22,13 +22,13 @@ export default function ComputeLab() {
   return (
     <div className="flex flex-col h-full" style={{ color: 'var(--color-text)' }}>
       {/* ── Header ── */}
-      <div className="flex items-center gap-4 px-4 py-2.5 border-b flex-shrink-0" style={{ borderColor: 'var(--glass-border)' }}>
+      <div className="flex items-center gap-5 px-5 py-3 border-b flex-shrink-0" style={{ borderColor: 'var(--glass-border)' }}>
         <div className="flex items-center gap-2">
-          <FiCpu className="text-lg" style={{ color: 'var(--color-accent-blue)' }} />
-          <h1 className="text-sm font-semibold">Compute Lab</h1>
+          <FiCpu className="text-base" style={{ color: 'var(--color-text-muted)' }} />
+          <h1 className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>Compute Lab</h1>
         </div>
 
-        <div className="flex gap-0.5 ml-4 p-0.5 rounded-lg" style={{ background: 'var(--glass-bg)' }}>
+        <div className="flex gap-1 ml-2">
           {tabs.map(tab => {
             const active = mode === tab.id
             const Icon = tab.icon
@@ -37,12 +37,13 @@ export default function ComputeLab() {
                 key={tab.id}
                 onClick={() => setMode(tab.id)}
                 className={clsx(
-                  'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all',
-                  active ? 'shadow-sm' : 'hover:bg-white/5'
+                  'flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-colors',
+                  !active && 'hover:bg-white/[0.03]'
                 )}
                 style={{
-                  background: active ? 'var(--color-accent-blue)' : 'transparent',
-                  color: active ? '#fff' : 'var(--color-text-muted)',
+                  background: 'transparent',
+                  color: active ? 'var(--color-text)' : 'var(--color-text-muted)',
+                  borderBottom: active ? '2px solid var(--color-text)' : '2px solid transparent',
                 }}
                 title={tab.desc}
               >
@@ -53,7 +54,7 @@ export default function ComputeLab() {
           })}
         </div>
 
-        <span className="ml-auto text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+        <span className="ml-auto text-xs" style={{ color: 'var(--color-text-muted)' }}>
           {tabs.find(t => t.id === mode)?.desc}
         </span>
       </div>

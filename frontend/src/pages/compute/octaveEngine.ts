@@ -796,6 +796,9 @@ interface EvalContext {
   currentPlot: PlotSpec | null
   /** Built-in function registry bound to this context. */
   builtins: Map<string, MFn>
+  /** Stack of dimension sizes used to resolve the `end` keyword inside
+   *  indexing expressions. Pushed before each arg, popped after. */
+  endStack: number[]
 }
 
 // ---- Value helpers ---------------------------------------------------------
@@ -1137,6 +1140,23 @@ function resolveIndices(arg: MValue | 'colon', size: number): number[] {
   return out
 }
 
+/** Evaluate indexing arguments, pushing the relevant dimension size on
+ *  ctx.endStack so that a bare `end` token resolves to the right value. */
+function evalIndexArgs(target: MValue, rawArgs: Expr[], ctx: EvalContext): (MValue | 'colon')[] {
+  const m = toMat(target)
+  const out: (MValue | 'colon')[] = []
+  const oneArg = rawArgs.length === 1
+  for (let i = 0; i < rawArgs.length; i++) {
+    const a = rawArgs[i]
+    if (a.type === 'colon') { out.push('colon'); continue }
+    const dim = oneArg ? m.rows * m.cols : (i === 0 ? m.rows : m.cols)
+    ctx.endStack.push(dim)
+    try { out.push(evalExpr(a, ctx)) }
+    finally { ctx.endStack.pop() }
+  }
+  return out
+}
+
 function getIndexed(target: MValue, args: (MValue | 'colon')[]): MValue {
   const m = toMat(target)
   if (args.length === 1) {
@@ -1225,7 +1245,10 @@ function evalExpr(e: Expr, ctx: EvalContext): MValue {
       }
       throw new RuntimeError(`'${e.name}' is undefined`)
     }
-    case 'end': throw new RuntimeError(`'end' used outside an indexing context`)
+    case 'end': {
+      if (ctx.endStack.length === 0) throw new RuntimeError(`'end' used outside an indexing context`)
+      return mnum(ctx.endStack[ctx.endStack.length - 1])
+    }
     case 'colon': throw new RuntimeError(`':' used outside an indexing context`)
     case 'range': {
       const s = toNumber(evalExpr(e.start, ctx))
@@ -1264,8 +1287,7 @@ function evalExpr(e: Expr, ctx: EvalContext): MValue {
         // If it's a variable, treat as indexing
         const vv = ctx.ws.vars.get(name)
         if (vv && vv.kind !== 'fn') {
-          const args = e.args.map(a => a.type === 'colon' ? 'colon' as const : evalExpr(a, ctx))
-          return getIndexed(vv, args)
+          return getIndexed(vv, evalIndexArgs(vv, e.args, ctx))
         }
         // Functions: user first, then built-ins
         const userFn = ctx.ws.fns.get(name) ?? (vv && vv.kind === 'fn' ? vv : undefined) ?? ctx.builtins.get(name)
@@ -1281,13 +1303,11 @@ function evalExpr(e: Expr, ctx: EvalContext): MValue {
         const args = e.args.map(a => evalExpr(a, ctx))
         return callFn(callee, args, ctx)
       }
-      const args = e.args.map(a => a.type === 'colon' ? 'colon' as const : evalExpr(a, ctx))
-      return getIndexed(callee, args)
+      return getIndexed(callee, evalIndexArgs(callee, e.args, ctx))
     }
     case 'index': {
       const target = evalExpr(e.target, ctx)
-      const args = e.args.map(a => a.type === 'colon' ? 'colon' as const : evalExpr(a, ctx))
-      return getIndexed(target, args)
+      return getIndexed(target, evalIndexArgs(target, e.args, ctx))
     }
     case 'anon': {
       const params = e.params
@@ -1353,7 +1373,7 @@ function assignTo(target: Expr, value: MValue, ctx: EvalContext): void {
       // Create a new matrix sized to fit the assignment
       mat = mmat(0, 0, new Float64Array(0))
     }
-    const args = target.args.map(a => a.type === 'colon' ? 'colon' as const : evalExpr(a, ctx))
+    const args = evalIndexArgs(mat, target.args, ctx)
     const updated = setIndexed(mat, args, value)
     ctx.ws.vars.set(name, updated)
     return
@@ -1680,19 +1700,34 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
   def('isnumeric', 1, args => mbool(args[0].kind === 'num' || args[0].kind === 'mat'))
 
   // ---- Reductions ------------------------------------------------------
-  def('sum', 1, args => { const a = toArray(args[0]); return mnum(ML.sum(a)) })
-  def('prod', 1, args => { const a = toArray(args[0]); return mnum(a.reduce((p, v) => p * v, 1)) })
-  def('mean', 1, args => mnum(ML.mean(toArray(args[0]))))
-  def('median', 1, args => mnum(ML.median(toArray(args[0]))))
-  def('std', 1, args => mnum(ML.std(toArray(args[0]))))
-  def('var', 1, args => mnum(ML.variance(toArray(args[0]))))
+  // MATLAB-style reductions: vector -> scalar, matrix -> row vector of
+  // per-column reductions (dim=1). We fall back to flattening for 1-D input.
+  const reduceVecOrMat = (v: MValue, fn: (a: number[]) => number): MValue => {
+    const m = toMat(v)
+    if (m.rows === 1 || m.cols === 1) {
+      return mnum(fn(Array.from(m.data)))
+    }
+    const out = new Float64Array(m.cols)
+    for (let c = 0; c < m.cols; c++) {
+      const col = new Array(m.rows)
+      for (let r = 0; r < m.rows; r++) col[r] = m.data[r * m.cols + c]
+      out[c] = fn(col)
+    }
+    return mmat(1, m.cols, out)
+  }
+  def('sum', 1, args => reduceVecOrMat(args[0], ML.sum))
+  def('prod', 1, args => reduceVecOrMat(args[0], a => a.reduce((p, v) => p * v, 1)))
+  def('mean', 1, args => reduceVecOrMat(args[0], ML.mean))
+  def('median', 1, args => reduceVecOrMat(args[0], ML.median))
+  def('std', 1, args => reduceVecOrMat(args[0], ML.std))
+  def('var', 1, args => reduceVecOrMat(args[0], ML.variance))
   def('min', -1, args => {
     if (args.length === 2) return elemBinary(toMat(args[0]), toMat(args[1]), Math.min, 'min')
-    const a = toArray(args[0]); return mnum(Math.min(...a))
+    return reduceVecOrMat(args[0], a => Math.min(...a))
   })
   def('max', -1, args => {
     if (args.length === 2) return elemBinary(toMat(args[0]), toMat(args[1]), Math.max, 'max')
-    const a = toArray(args[0]); return mnum(Math.max(...a))
+    return reduceVecOrMat(args[0], a => Math.max(...a))
   })
   def('range', 1, args => { const a = toArray(args[0]); return mnum(Math.max(...a) - Math.min(...a)) })
   def('quantile', 2, args => mnum(ML.quantile(toArray(args[0]), toNumber(args[1]))))
@@ -2277,6 +2312,7 @@ export function run(source: string, workspace: Workspace = createWorkspace()): R
     outputs,
     currentPlot: null,
     builtins: new Map(),
+    endStack: [],
   }
   ctx.builtins = makeBuiltins(ctx)
   try {
