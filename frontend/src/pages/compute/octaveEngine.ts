@@ -2275,7 +2275,279 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
     return mmat(nrows, ncols, flat)
   })
 
+  // ---- Numeric differentiation, integration, interpolation -------------
+  def('diff', -1, args => {
+    need(args, 1, 'diff')
+    const m = toMat(args[0])
+    const k = args[1] ? Math.max(1, Math.round(toNumber(args[1]))) : 1
+    // MATLAB semantics: vectors diff along length; matrices diff along rows.
+    if (m.rows === 1 || m.cols === 1) {
+      let cur = Array.from(m.data)
+      for (let it = 0; it < k; it++) {
+        if (cur.length < 2) { cur = []; break }
+        const next = new Array<number>(cur.length - 1)
+        for (let i = 0; i < next.length; i++) next[i] = cur[i + 1] - cur[i]
+        cur = next
+      }
+      return m.rows === 1 ? mmat(1, cur.length, cur) : mmat(cur.length, 1, cur)
+    }
+    // Matrix case: diff along first dimension (rows).
+    let rows = m.rows, cols = m.cols
+    let cur = Float64Array.from(m.data)
+    for (let it = 0; it < k; it++) {
+      if (rows < 2) { cur = new Float64Array(0); rows = 0; break }
+      const next = new Float64Array((rows - 1) * cols)
+      for (let r = 0; r < rows - 1; r++) {
+        for (let c = 0; c < cols; c++) {
+          next[r * cols + c] = cur[(r + 1) * cols + c] - cur[r * cols + c]
+        }
+      }
+      cur = next
+      rows = rows - 1
+    }
+    return mmat(rows, cols, cur)
+  })
+
+  def('trapz', -1, args => {
+    need(args, 1, 'trapz')
+    let xs: number[] | null = null
+    let ys: number[]
+    if (args.length === 1) {
+      ys = toArray(args[0])
+    } else {
+      xs = toArray(args[0])
+      ys = toArray(args[1])
+    }
+    if (ys.length < 2) return mnum(0)
+    let acc = 0
+    for (let i = 1; i < ys.length; i++) {
+      const dx = xs ? (xs[i] - xs[i - 1]) : 1
+      acc += 0.5 * dx * (ys[i] + ys[i - 1])
+    }
+    return mnum(acc)
+  })
+
+  def('cumtrapz', -1, args => {
+    need(args, 1, 'cumtrapz')
+    let xs: number[] | null = null
+    let ys: number[]
+    if (args.length === 1) { ys = toArray(args[0]) }
+    else { xs = toArray(args[0]); ys = toArray(args[1]) }
+    const out = new Float64Array(ys.length)
+    for (let i = 1; i < ys.length; i++) {
+      const dx = xs ? (xs[i] - xs[i - 1]) : 1
+      out[i] = out[i - 1] + 0.5 * dx * (ys[i] + ys[i - 1])
+    }
+    return mmat(1, ys.length, out)
+  })
+
+  def('interp1', -1, args => {
+    need(args, 3, 'interp1')
+    const xs = toArray(args[0])
+    const ys = toArray(args[1])
+    const xq = toArray(args[2])
+    if (xs.length !== ys.length || xs.length < 2) {
+      throw new RuntimeError('interp1: xs and ys must be same length (>= 2)')
+    }
+    // Assume xs is monotonically increasing (standard MATLAB requirement).
+    const out = new Float64Array(xq.length)
+    for (let k = 0; k < xq.length; k++) {
+      const x = xq[k]
+      if (x <= xs[0]) { out[k] = ys[0]; continue }
+      if (x >= xs[xs.length - 1]) { out[k] = ys[ys.length - 1]; continue }
+      // Binary search the bracketing interval.
+      let lo = 0, hi = xs.length - 1
+      while (hi - lo > 1) {
+        const mid = (lo + hi) >> 1
+        if (xs[mid] <= x) lo = mid
+        else hi = mid
+      }
+      const t = (x - xs[lo]) / (xs[hi] - xs[lo])
+      out[k] = ys[lo] + t * (ys[hi] - ys[lo])
+    }
+    return mmat(1, xq.length, out)
+  })
+
+  def('gradient', 1, args => {
+    const m = toMat(args[0])
+    const a = Array.from(m.data)
+    const n = a.length
+    const out = new Float64Array(n)
+    if (n === 0) return mmat(m.rows, m.cols, out)
+    if (n === 1) { out[0] = 0; return mmat(m.rows, m.cols, out) }
+    out[0] = a[1] - a[0]
+    out[n - 1] = a[n - 1] - a[n - 2]
+    for (let i = 1; i < n - 1; i++) out[i] = 0.5 * (a[i + 1] - a[i - 1])
+    return mmat(m.rows, m.cols, out)
+  })
+
+  // ---- Concatenation ---------------------------------------------------
+  def('horzcat', -1, args => {
+    if (args.length === 0) return mmat(0, 0, new Float64Array(0))
+    const mats = args.map(toMat)
+    const rows = mats[0].rows
+    let totalCols = 0
+    for (const m of mats) {
+      if (m.rows !== rows) throw new RuntimeError('horzcat: row mismatch')
+      totalCols += m.cols
+    }
+    const out = new Float64Array(rows * totalCols)
+    let colOff = 0
+    for (const m of mats) {
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < m.cols; c++) {
+          out[r * totalCols + (colOff + c)] = m.data[r * m.cols + c]
+        }
+      }
+      colOff += m.cols
+    }
+    return mmat(rows, totalCols, out)
+  })
+
+  def('vertcat', -1, args => {
+    if (args.length === 0) return mmat(0, 0, new Float64Array(0))
+    const mats = args.map(toMat)
+    const cols = mats[0].cols
+    let totalRows = 0
+    for (const m of mats) {
+      if (m.cols !== cols) throw new RuntimeError('vertcat: column mismatch')
+      totalRows += m.rows
+    }
+    const out = new Float64Array(totalRows * cols)
+    let rowOff = 0
+    for (const m of mats) {
+      for (let r = 0; r < m.rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          out[(rowOff + r) * cols + c] = m.data[r * m.cols + c]
+        }
+      }
+      rowOff += m.rows
+    }
+    return mmat(totalRows, cols, out)
+  })
+
+  def('cat', -1, args => {
+    need(args, 2, 'cat')
+    const dim = Math.round(toNumber(args[0]))
+    const rest = args.slice(1)
+    if (dim === 1) {
+      // vertical
+      const mats = rest.map(toMat)
+      const cols = mats[0]?.cols ?? 0
+      let totalRows = 0
+      for (const m of mats) {
+        if (m.cols !== cols) throw new RuntimeError('cat: column mismatch')
+        totalRows += m.rows
+      }
+      const out = new Float64Array(totalRows * cols)
+      let off = 0
+      for (const m of mats) {
+        for (let r = 0; r < m.rows; r++)
+          for (let c = 0; c < cols; c++)
+            out[(off + r) * cols + c] = m.data[r * cols + c]
+        off += m.rows
+      }
+      return mmat(totalRows, cols, out)
+    }
+    // dim === 2: horizontal
+    const mats = rest.map(toMat)
+    const rows = mats[0]?.rows ?? 0
+    let totalCols = 0
+    for (const m of mats) {
+      if (m.rows !== rows) throw new RuntimeError('cat: row mismatch')
+      totalCols += m.cols
+    }
+    const out = new Float64Array(rows * totalCols)
+    let off = 0
+    for (const m of mats) {
+      for (let r = 0; r < rows; r++)
+        for (let c = 0; c < m.cols; c++)
+          out[r * totalCols + (off + c)] = m.data[r * m.cols + c]
+      off += m.cols
+    }
+    return mmat(rows, totalCols, out)
+  })
+
+  def('kron', 2, args => {
+    const A = toMat(args[0])
+    const B2 = toMat(args[1])
+    const R = A.rows * B2.rows
+    const C = A.cols * B2.cols
+    const out = new Float64Array(R * C)
+    for (let ai = 0; ai < A.rows; ai++) {
+      for (let aj = 0; aj < A.cols; aj++) {
+        const a = A.data[ai * A.cols + aj]
+        for (let bi = 0; bi < B2.rows; bi++) {
+          for (let bj = 0; bj < B2.cols; bj++) {
+            out[(ai * B2.rows + bi) * C + (aj * B2.cols + bj)] =
+              a * B2.data[bi * B2.cols + bj]
+          }
+        }
+      }
+    }
+    return mmat(R, C, out)
+  })
+
+  def('circshift', 2, args => {
+    const m = toMat(args[0])
+    const shifts = toArray(args[1])
+    const rShift = Math.round(shifts[0] ?? 0)
+    const cShift = Math.round(shifts[1] ?? 0)
+    const r = m.rows, c = m.cols
+    const out = new Float64Array(r * c)
+    for (let i = 0; i < r; i++) {
+      for (let j = 0; j < c; j++) {
+        const ni = ((i + rShift) % r + r) % r
+        const nj = ((j + cShift) % c + c) % c
+        out[ni * c + nj] = m.data[i * c + j]
+      }
+    }
+    return mmat(r, c, out)
+  })
+
+  // ---- Set operations --------------------------------------------------
+  def('ismember', 2, args => {
+    const a = toArray(args[0])
+    const set = new Set(toArray(args[1]))
+    const out = new Float64Array(a.length)
+    for (let i = 0; i < a.length; i++) out[i] = set.has(a[i]) ? 1 : 0
+    return mmat(1, a.length, out)
+  })
+  def('union', 2, args => {
+    const merged = new Set([...toArray(args[0]), ...toArray(args[1])])
+    const sorted = Array.from(merged).sort((x, y) => x - y)
+    return mmat(1, sorted.length, sorted)
+  })
+  def('intersect', 2, args => {
+    const setB = new Set(toArray(args[1]))
+    const res = Array.from(new Set(toArray(args[0]).filter(x => setB.has(x)))).sort((x, y) => x - y)
+    return mmat(1, res.length, res)
+  })
+  def('setdiff', 2, args => {
+    const setB = new Set(toArray(args[1]))
+    const res = Array.from(new Set(toArray(args[0]).filter(x => !setB.has(x)))).sort((x, y) => x - y)
+    return mmat(1, res.length, res)
+  })
+
+  def('mat2str', 1, args => {
+    const m = toMat(args[0])
+    if (m.rows === 1 && m.cols === 1) return mstr(formatNumForStr(m.data[0]))
+    const rows: string[] = []
+    for (let r = 0; r < m.rows; r++) {
+      const cells: string[] = []
+      for (let c = 0; c < m.cols; c++) cells.push(formatNumForStr(m.data[r * m.cols + c]))
+      rows.push(cells.join(' '))
+    }
+    return mstr('[' + rows.join(';') + ']')
+  })
+
   return B
+}
+
+function formatNumForStr(n: number): string {
+  if (!Number.isFinite(n)) return String(n)
+  if (Number.isInteger(n)) return String(n)
+  return n.toPrecision(6).replace(/\.?0+$/, '')
 }
 
 function sprintf(fmt: string, args: MValue[]): string {
