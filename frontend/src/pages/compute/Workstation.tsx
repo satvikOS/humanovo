@@ -702,7 +702,11 @@ export default function Workstation() {
   const [copyFormat, setCopyFormat] = useState<CopyFormat>('matlab')
   const [expandedVar, setExpandedVar] = useState<string | null>(null)
   const [inspectVar, setInspectVar] = useState<string | null>(null)
-  const [library, setLibrary] = useState<'open' | 'closed'>('open')
+  // The library lives behind a Library ▸ button now — it opens as a
+  // full-screen overlay (same pattern as Results) so the editor surface
+  // stays calm by default. Closed at startup so first-time users land on
+  // a clean editor instead of a sidebar full of stuff to read.
+  const [library, setLibrary] = useState<'open' | 'closed'>('closed')
   const [libFilter, setLibFilter] = useState('')
   const [libMode, setLibMode] = useState<'templates' | 'functions'>('templates')
   const [activeTemplate, setActiveTemplate] = useState<string | null>(null)
@@ -978,6 +982,31 @@ export default function Workstation() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [resultsOverlay, plotFullscreen, inspectVar, helpOpen])
+
+  // Esc closes the library overlay. Same guarding as the results overlay
+  // so it never fights a modal that's already on top of it.
+  useEffect(() => {
+    if (library !== 'open') return
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key !== 'Escape') return
+      if (plotFullscreen || inspectVar || helpOpen) return
+      // Allow the search input inside the overlay to receive its own Esc
+      // first — only act when the user has dismissed the input or focused
+      // something inside the overlay shell.
+      const tgt = ev.target as HTMLElement | null
+      if (tgt && tgt.tagName === 'INPUT' && tgt.closest?.('[data-library-overlay]')) {
+        // First Esc clears the filter; second Esc (caught next time) closes.
+        if ((tgt as HTMLInputElement).value) {
+          setLibFilter('')
+          ev.preventDefault()
+          return
+        }
+      }
+      setLibrary('closed')
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [library, plotFullscreen, inspectVar, helpOpen])
 
   // F1 anywhere in the Workstation toggles the keyboard-shortcut help
   // modal. Esc closes it. Ctrl+L clears the console (bash convention).
@@ -3727,22 +3756,22 @@ export default function Workstation() {
     toolbar: {
       display: 'flex',
       alignItems: 'center',
-      gap: 8,
-      padding: '12px 20px',
+      gap: 6,
+      padding: '8px 14px',
       borderBottom: '1px solid var(--glass-border)',
       background: 'transparent',
     },
     btn: {
       display: 'inline-flex',
       alignItems: 'center',
-      gap: 6,
-      padding: '7px 14px',
-      fontSize: 12,
+      gap: 5,
+      padding: '4px 10px',
+      fontSize: 11,
       fontWeight: 500,
       color: 'var(--color-text-secondary)',
       background: 'transparent',
       border: '1px solid var(--glass-border)',
-      borderRadius: 6,
+      borderRadius: 5,
       cursor: 'pointer',
       transition: 'background 0.15s, border-color 0.15s, color 0.15s',
     },
@@ -3757,15 +3786,13 @@ export default function Workstation() {
     },
     body: {
       display: 'grid',
-      // Editor-first layout: just library + editor. Figure / console /
-      // workspace live in the Results overlay so the default surface stays
-      // calm enough for clinicians and surgeons who don't write code daily.
-      gridTemplateColumns: library === 'open'
-        ? '260px minmax(0, 1fr)'
-        : 'minmax(0, 1fr)',
+      // Editor-only body. Library, figures, console and workspace all
+      // live behind their own overlays so the default surface stays calm
+      // enough for clinicians, surgeons and PKPD researchers who don't
+      // write code daily.
+      gridTemplateColumns: 'minmax(0, 1fr)',
       gridTemplateRows: 'minmax(0, 1fr)',
       minHeight: 0,
-      transition: 'grid-template-columns 180ms ease',
     },
     library: {
       display: 'flex',
@@ -3864,29 +3891,27 @@ export default function Workstation() {
       display: 'flex',
       flexDirection: 'column',
       minHeight: 0,
-      borderBottom: '1px solid var(--glass-border)',
-      borderRight: '1px solid var(--glass-border)',
     },
     editorHeader: {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
-      padding: '12px 16px',
-      fontSize: 12,
+      padding: '10px 16px 6px 16px',
+      fontSize: 11,
       fontWeight: 600,
-      color: 'var(--color-text)',
+      letterSpacing: 0.3,
+      textTransform: 'uppercase' as const,
+      color: 'var(--color-text-muted)',
       background: 'transparent',
-      borderBottom: '1px solid var(--glass-border)',
       whiteSpace: 'nowrap' as const,
     },
     tabBar: {
       display: 'flex',
       alignItems: 'stretch',
       gap: 0,
-      padding: '0 8px',
-      borderBottom: '1px solid var(--glass-border)',
+      padding: '0 12px',
       background: 'transparent',
-      minHeight: 30,
+      minHeight: 28,
       overflowX: 'auto' as const,
     },
     tab: {
@@ -3940,7 +3965,6 @@ export default function Workstation() {
       alignItems: 'center',
       gap: 6,
       padding: '5px 12px',
-      borderBottom: '1px solid var(--glass-border)',
       background: 'transparent',
       overflowX: 'auto' as const,
       minHeight: 28,
@@ -3976,7 +4000,6 @@ export default function Workstation() {
       alignItems: 'center',
       gap: 4,
       padding: '5px 12px',
-      borderBottom: '1px solid var(--glass-border)',
       background: 'transparent',
       overflowX: 'auto' as const,
       minHeight: 28,
@@ -3993,7 +4016,6 @@ export default function Workstation() {
       width: 44,
       overflow: 'hidden',
       background: 'transparent',
-      borderRight: '1px solid var(--glass-border)',
       position: 'relative' as const,
     },
     editorGutterNumbers: {
@@ -4282,12 +4304,13 @@ export default function Workstation() {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
-      padding: '12px 16px',
-      fontSize: 12,
+      padding: '12px 18px 8px 18px',
+      fontSize: 11,
       fontWeight: 600,
-      color: 'var(--color-text)',
+      letterSpacing: 0.3,
+      textTransform: 'uppercase' as const,
+      color: 'var(--color-text-muted)',
       background: 'transparent',
-      borderBottom: '1px solid var(--glass-border)',
       whiteSpace: 'nowrap' as const,
       overflow: 'hidden',
       textOverflow: 'ellipsis',
@@ -4320,11 +4343,12 @@ export default function Workstation() {
       alignItems: 'center',
       justifyContent: 'space-between',
       gap: 12,
-      padding: '12px 20px',
-      fontSize: 12,
+      padding: '12px 20px 8px 20px',
+      fontSize: 11,
       fontWeight: 600,
-      color: 'var(--color-text)',
-      borderBottom: '1px solid var(--glass-border)',
+      letterSpacing: 0.3,
+      textTransform: 'uppercase' as const,
+      color: 'var(--color-text-muted)',
     },
     consoleFilter: {
       flex: '1 1 auto',
@@ -4342,8 +4366,7 @@ export default function Workstation() {
       display: 'flex',
       alignItems: 'center',
       gap: 8,
-      padding: '8px 16px',
-      borderBottom: '1px solid var(--glass-border)',
+      padding: '4px 18px 10px 18px',
       background: 'transparent',
     },
     console: {
@@ -4426,6 +4449,98 @@ export default function Workstation() {
       display: 'flex',
       flexDirection: 'column',
       padding: 20,
+    },
+    /* ── Library overlay shell ──────────────────────────────────────── */
+    libraryOverlay: {
+      position: 'fixed' as const,
+      inset: 0,
+      background: 'rgba(0, 0, 0, 0.78)',
+      backdropFilter: 'blur(10px)',
+      zIndex: 950,
+      display: 'flex',
+      flexDirection: 'column' as const,
+      padding: '24px 28px 20px 28px',
+    },
+    libraryCardOverlay: {
+      flex: 1,
+      minHeight: 0,
+      display: 'flex',
+      flexDirection: 'column' as const,
+      background: 'var(--glass-bg)',
+      border: '1px solid var(--glass-border)',
+      borderRadius: 10,
+      overflow: 'hidden' as const,
+      boxShadow: '0 18px 60px rgba(0, 0, 0, 0.55)',
+    },
+    libraryGrid: {
+      flex: 1,
+      minHeight: 0,
+      display: 'grid',
+      gridTemplateColumns: 'minmax(220px, 280px) minmax(0, 1fr)',
+      overflow: 'hidden' as const,
+    },
+    libraryCategoryRail: {
+      borderRight: '1px solid var(--glass-border)',
+      overflowY: 'auto' as const,
+      padding: '14px 0',
+    },
+    libraryCategoryRailItem: {
+      display: 'block',
+      width: '100%',
+      textAlign: 'left' as const,
+      padding: '7px 22px',
+      background: 'transparent',
+      border: 'none',
+      color: 'var(--color-text-muted)',
+      fontSize: 12,
+      cursor: 'pointer',
+      borderLeft: '2px solid transparent',
+      transition: 'background 0.12s, color 0.12s',
+    },
+    libraryCategoryRailItemActive: {
+      color: 'var(--color-text)',
+      background: 'var(--glass-bg-hover)',
+      borderLeft: '2px solid var(--color-text)',
+    },
+    libraryItemsScroll: {
+      overflowY: 'auto' as const,
+      padding: '14px 18px',
+    },
+    libraryItemCard: {
+      display: 'block',
+      width: '100%',
+      textAlign: 'left' as const,
+      padding: '12px 14px',
+      marginBottom: 8,
+      background: 'var(--glass-bg-hover)',
+      border: '1px solid var(--glass-border)',
+      color: 'var(--color-text-secondary)',
+      fontSize: 12,
+      cursor: 'pointer',
+      borderRadius: 6,
+      transition: 'background 0.12s, border-color 0.12s, color 0.12s',
+    },
+    libraryItemCardActive: {
+      background: 'var(--color-bg-elevated)',
+      borderColor: 'var(--color-border-strong)',
+      color: 'var(--color-text)',
+    },
+    libraryItemTitle: {
+      color: 'var(--color-text)',
+      fontWeight: 500,
+      marginBottom: 4,
+    },
+    libraryItemTitleMono: {
+      color: 'var(--color-text)',
+      fontWeight: 500,
+      fontFamily: "'JetBrains Mono', monospace",
+      marginBottom: 4,
+      fontSize: 12,
+    },
+    libraryItemSubtle: {
+      fontSize: 11,
+      color: 'var(--color-text-muted)',
+      lineHeight: 1.4,
     },
     /* ── Results overlay (Figure / Console / Workspace) ─────────────── */
     resultsOverlay: {
@@ -4786,6 +4901,8 @@ export default function Workstation() {
       }
     })
     setActiveTemplate(t.id)
+    // Picking a template should drop the user back into the editor.
+    setLibrary('closed')
   }, [])
 
   // Filter and group built-in function docs the same way templates work.
@@ -4820,6 +4937,8 @@ export default function Workstation() {
     const after = script.slice(e)
     const next = before + doc.snippet + after
     setScript(next)
+    // Drop back into the editor after inserting from the library overlay.
+    setLibrary('closed')
     requestAnimationFrame(() => {
       ta.focus()
       ta.selectionStart = ta.selectionEnd = s + doc.snippet.length
@@ -4844,12 +4963,13 @@ export default function Workstation() {
       {/* ─── Toolbar ─────────────────────────────────────────────────── */}
       <div style={styles.toolbar}>
         <button
-          style={{ ...styles.btn, ...styles.btnGhost, padding: '6px 10px' }}
+          style={{ ...styles.btn, ...styles.btnGhost, ...(library === 'open' ? styles.btnPrimary : null) }}
           onClick={() => setLibrary(l => l === 'open' ? 'closed' : 'open')}
-          title={library === 'open' ? 'Hide library' : 'Show library'}
-          aria-label="Toggle template library"
+          title="Open template & function library (templates, builtins, examples)"
+          aria-label="Open library overlay"
+          aria-expanded={library === 'open'}
         >
-          {library === 'open' ? '‹ library' : 'library ›'}
+          Library ▸
         </button>
 
         <button
@@ -5071,109 +5191,9 @@ export default function Workstation() {
         )
       })()}
 
-      {/* ─── Library (left) + Editor + Right rail + Console (bottom) ── */}
+      {/* ─── Editor body (figures / console / workspace / library all
+           live in their own overlays) ─────────────────────────────── */}
       <div style={styles.body}>
-        {library === 'open' && (
-          <div style={styles.library}>
-            <div style={styles.libraryHeader}>
-              <span>
-                Library · {libMode === 'templates' ? filteredTemplates.length : filteredBuiltins.length}
-              </span>
-              <button
-                style={{ ...styles.btn, ...styles.btnGhost, padding: '2px 8px', fontSize: 11 }}
-                onClick={() => setLibrary('closed')}
-                title="Collapse library"
-              >hide</button>
-            </div>
-            <div style={styles.libraryModeBar}>
-              <button
-                style={{
-                  ...styles.libraryModeBtn,
-                  ...(libMode === 'templates' ? styles.libraryModeBtnActive : null),
-                }}
-                onClick={() => setLibMode('templates')}
-              >Templates</button>
-              <button
-                style={{
-                  ...styles.libraryModeBtn,
-                  ...(libMode === 'functions' ? styles.libraryModeBtnActive : null),
-                }}
-                onClick={() => setLibMode('functions')}
-              >Functions</button>
-            </div>
-            <div style={styles.librarySearch}>
-              <input
-                style={styles.librarySearchInput}
-                placeholder={libMode === 'templates' ? 'Search templates…' : 'Search functions…'}
-                value={libFilter}
-                onChange={e => setLibFilter(e.target.value)}
-              />
-            </div>
-            <div style={styles.libraryScroll}>
-              {libMode === 'templates' ? (
-                <>
-                  {WORKSTATION_CATEGORIES.map(cat => {
-                    const items = groupedTemplates[cat] ?? []
-                    if (items.length === 0) return null
-                    return (
-                      <div key={cat}>
-                        <div style={styles.libraryCategory}>{cat}</div>
-                        {items.map(t => (
-                          <button
-                            key={t.id}
-                            style={{
-                              ...styles.libraryItem,
-                              ...(activeTemplate === t.id ? styles.libraryItemActive : null),
-                            }}
-                            onClick={() => loadTemplate(t)}
-                            title={t.description}
-                          >
-                            <div>{t.name}</div>
-                            <div style={styles.libraryItemDesc}>{t.description}</div>
-                          </button>
-                        ))}
-                      </div>
-                    )
-                  })}
-                  {filteredTemplates.length === 0 && (
-                    <div style={{ padding: '12px 16px', color: 'var(--color-text-muted)', fontStyle: 'italic', fontSize: 12 }}>
-                      No templates match "{libFilter}".
-                    </div>
-                  )}
-                </>
-              ) : (
-                <>
-                  {BUILTIN_CATEGORIES.map(cat => {
-                    const items = groupedBuiltins[cat] ?? []
-                    if (items.length === 0) return null
-                    return (
-                      <div key={cat}>
-                        <div style={styles.libraryCategory}>{cat}</div>
-                        {items.map(d => (
-                          <button
-                            key={d.name}
-                            style={styles.libraryItem}
-                            onClick={() => insertBuiltin(d)}
-                            title={`${d.signature} — ${d.description}`}
-                          >
-                            <div style={{ fontFamily: "'JetBrains Mono', monospace" }}>{d.signature}</div>
-                            <div style={styles.libraryItemDesc}>{d.description}</div>
-                          </button>
-                        ))}
-                      </div>
-                    )
-                  })}
-                  {filteredBuiltins.length === 0 && (
-                    <div style={{ padding: '12px 16px', color: 'var(--color-text-muted)', fontStyle: 'italic', fontSize: 12 }}>
-                      No functions match "{libFilter}".
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          </div>
-        )}
-
         <div style={styles.editorWrap}>
           <div style={styles.editorHeader}>
             <span>Scripts</span>
@@ -5735,6 +5755,185 @@ export default function Workstation() {
           </div>
         </div>
       </div>
+
+      {/* ─── Library overlay (Templates / Functions) ─────────────────── */}
+      {library === 'open' && (() => {
+        // Build the active list and category headings up front so the
+        // grid can render the rail and the items section consistently.
+        const isTpl = libMode === 'templates'
+        const cats = isTpl ? WORKSTATION_CATEGORIES : BUILTIN_CATEGORIES
+        const groups = isTpl ? groupedTemplates : groupedBuiltins
+        const total = isTpl ? filteredTemplates.length : filteredBuiltins.length
+        const visibleCats = cats.filter(c => (groups[c]?.length ?? 0) > 0)
+        return (
+          <div
+            data-library-overlay
+            style={styles.libraryOverlay}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Template library"
+            onClick={e => { if (e.target === e.currentTarget) setLibrary('closed') }}
+          >
+            <div style={styles.libraryCardOverlay}>
+              <div style={styles.resultsHeader}>
+                <span style={styles.resultsTitle}>Library</span>
+                <div style={styles.resultsTabBar} role="tablist" aria-label="Library mode">
+                  {([
+                    { id: 'templates', label: 'Templates', count: filteredTemplates.length },
+                    { id: 'functions', label: 'Functions', count: filteredBuiltins.length },
+                  ] as const).map(t => {
+                    const active = libMode === t.id
+                    return (
+                      <button
+                        key={t.id}
+                        type="button"
+                        role="tab"
+                        aria-selected={active}
+                        style={{ ...styles.resultsTab, ...(active ? styles.resultsTabActive : null) }}
+                        onClick={() => setLibMode(t.id)}
+                        title={`Show ${t.label.toLowerCase()}`}
+                      >
+                        {t.label}
+                        <span style={{ ...styles.resultsTabBadge, ...(active ? styles.resultsTabBadgeActive : null) }}>
+                          {t.count}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+                <div style={{ flex: 1, display: 'flex', justifyContent: 'center', padding: '0 18px' }}>
+                  <input
+                    autoFocus
+                    style={{
+                      ...styles.librarySearchInput,
+                      maxWidth: 380,
+                      background: 'var(--glass-bg-hover)',
+                    }}
+                    placeholder={isTpl ? 'Search templates…' : 'Search functions…'}
+                    value={libFilter}
+                    onChange={e => setLibFilter(e.target.value)}
+                    aria-label="Filter library"
+                    spellCheck={false}
+                  />
+                </div>
+                <button
+                  type="button"
+                  style={{ ...styles.btn, ...styles.btnGhost }}
+                  onClick={() => setLibrary('closed')}
+                  title="Close (Esc)"
+                  aria-label="Close library overlay"
+                >
+                  Close · Esc
+                </button>
+              </div>
+
+              <div style={styles.libraryGrid}>
+                <div style={styles.libraryCategoryRail}>
+                  {visibleCats.length === 0 && (
+                    <div style={{ padding: '12px 22px', color: 'var(--color-text-muted)', fontStyle: 'italic', fontSize: 12 }}>
+                      {libFilter ? `No matches for "${libFilter}".` : 'No items.'}
+                    </div>
+                  )}
+                  {visibleCats.map(cat => (
+                    <button
+                      key={cat}
+                      type="button"
+                      style={styles.libraryCategoryRailItem}
+                      onClick={() => {
+                        const el = document.getElementById(`lib-cat-${cat.replace(/\s+/g, '-')}`)
+                        el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                      }}
+                      onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--glass-bg-hover)' }}
+                      onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
+                    >
+                      {cat}
+                      <span style={{ marginLeft: 8, color: 'var(--color-text-muted)', fontSize: 10 }}>
+                        {groups[cat]?.length ?? 0}
+                      </span>
+                    </button>
+                  ))}
+                  <div style={{ padding: '14px 22px 6px 22px', color: 'var(--color-text-muted)', fontSize: 10 }}>
+                    {total} item{total === 1 ? '' : 's'}
+                  </div>
+                </div>
+
+                <div style={styles.libraryItemsScroll}>
+                  {isTpl ? (
+                    <>
+                      {visibleCats.map(cat => {
+                        const items = groupedTemplates[cat] ?? []
+                        if (items.length === 0) return null
+                        return (
+                          <div key={cat} id={`lib-cat-${cat.replace(/\s+/g, '-')}`}>
+                            <div style={styles.panelHeader}>{cat}</div>
+                            {items.map(t => (
+                              <button
+                                key={t.id}
+                                type="button"
+                                style={{
+                                  ...styles.libraryItemCard,
+                                  ...(activeTemplate === t.id ? styles.libraryItemCardActive : null),
+                                }}
+                                onClick={() => loadTemplate(t)}
+                                title={t.description}
+                                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--color-border-strong)' }}
+                                onMouseLeave={(e) => {
+                                  if (activeTemplate !== t.id) {
+                                    (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--glass-border)'
+                                  }
+                                }}
+                              >
+                                <div style={styles.libraryItemTitle}>{t.name}</div>
+                                <div style={styles.libraryItemSubtle}>{t.description}</div>
+                              </button>
+                            ))}
+                          </div>
+                        )
+                      })}
+                      {filteredTemplates.length === 0 && (
+                        <div style={{ padding: '12px 4px', color: 'var(--color-text-muted)', fontStyle: 'italic', fontSize: 12 }}>
+                          No templates match "{libFilter}".
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      {visibleCats.map(cat => {
+                        const items = groupedBuiltins[cat] ?? []
+                        if (items.length === 0) return null
+                        return (
+                          <div key={cat} id={`lib-cat-${cat.replace(/\s+/g, '-')}`}>
+                            <div style={styles.panelHeader}>{cat}</div>
+                            {items.map(d => (
+                              <button
+                                key={d.name}
+                                type="button"
+                                style={styles.libraryItemCard}
+                                onClick={() => insertBuiltin(d)}
+                                title={`${d.signature} — ${d.description}`}
+                                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--color-border-strong)' }}
+                                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--glass-border)' }}
+                              >
+                                <div style={styles.libraryItemTitleMono}>{d.signature}</div>
+                                <div style={styles.libraryItemSubtle}>{d.description}</div>
+                              </button>
+                            ))}
+                          </div>
+                        )
+                      })}
+                      {filteredBuiltins.length === 0 && (
+                        <div style={{ padding: '12px 4px', color: 'var(--color-text-muted)', fontStyle: 'italic', fontSize: 12 }}>
+                          No functions match "{libFilter}".
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* ─── Results overlay (Figure / Console / Workspace) ─────────── */}
       {resultsOverlay && (
