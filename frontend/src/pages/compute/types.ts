@@ -29,10 +29,10 @@ export interface PresetParam {
 export interface Preset {
   id: string
   name: string
-  matlabFn: string
+  referenceFn: string
   toolbox: string
   description: string
-  matlabCode: string
+  referenceCode: string
   params: PresetParam[]
   sampleData: Record<string, any>
   compute: (params: Record<string, any>) => ComputeResult

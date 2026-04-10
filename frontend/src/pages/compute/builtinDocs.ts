@@ -1,4 +1,4 @@
-// Reference documentation for the Workstation's built-in MATLAB/Octave
+// Reference documentation for the Workstation's built-in numeric compute
 // functions. Used by the library sidebar to surface a searchable index so
 // users can discover what the in-browser engine supports.
 //
@@ -55,7 +55,7 @@ export const BUILTIN_DOCS: BuiltinDoc[] = [
   { name: 'ceil', category: 'Math', signature: 'ceil(x)', description: 'Round toward +Inf', snippet: 'ceil(x)' },
   { name: 'round', category: 'Math', signature: 'round(x)', description: 'Round to nearest integer', snippet: 'round(x)' },
   { name: 'fix', category: 'Math', signature: 'fix(x)', description: 'Round toward zero', snippet: 'fix(x)' },
-  { name: 'mod', category: 'Math', signature: 'mod(a, b)', description: 'Modulo (MATLAB semantics)', snippet: 'mod(a, b)' },
+  { name: 'mod', category: 'Math', signature: 'mod(a, b)', description: 'Modulo (floored division)', snippet: 'mod(a, b)' },
   { name: 'rem', category: 'Math', signature: 'rem(a, b)', description: 'Remainder (C semantics)', snippet: 'rem(a, b)' },
   { name: 'hypot', category: 'Math', signature: 'hypot(a, b)', description: 'sqrt(a^2 + b^2) without overflow', snippet: 'hypot(a, b)' },
   { name: 'erf', category: 'Math', signature: 'erf(x)', description: 'Error function', snippet: 'erf(x)' },

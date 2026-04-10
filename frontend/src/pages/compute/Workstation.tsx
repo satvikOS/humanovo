@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════
-// Compute Lab — MATLAB/Octave Workstation
+// Compute Lab — Numeric Compute Workstation
 // Batch 4a: editor + command window backed by the octaveEngine.
 // Batch 4b: adds variable inspector and plot panel on the right rail.
 // Later batches add the preset library sidebar and polish.
@@ -69,7 +69,7 @@ function savePinnedVars(set: ReadonlySet<string>) {
   try { localStorage.setItem(PINNED_VARS_KEY, JSON.stringify([...set])) } catch { /* quota */ }
 }
 
-const STARTER_SCRIPT = `% MATLAB/Octave Workstation
+const STARTER_SCRIPT = `% Numeric Compute Workstation
 % Variables persist across runs. Use the command window at the bottom
 % for quick expressions; put longer programs up here.
 
@@ -109,8 +109,8 @@ function mkEntry(partial: Omit<ConsoleEntry, 'id' | 'at'> & { line?: number }): 
 }
 
 /** Target formats for the workspace "copy variable" action. */
-type CopyFormat = 'matlab' | 'python' | 'latex' | 'json' | 'csv'
-const COPY_FORMATS: CopyFormat[] = ['matlab', 'python', 'latex', 'json', 'csv']
+type CopyFormat = 'native' | 'python' | 'latex' | 'json' | 'csv'
+const COPY_FORMATS: CopyFormat[] = ['native', 'python', 'latex', 'json', 'csv']
 
 let nextEntryId = 1
 let nextScriptId = 1
@@ -702,7 +702,7 @@ export default function Workstation() {
   // Cycled through via a small chip in the panel header so users can
   // paste the same matrix into MATLAB, Python, LaTeX, JSON, or CSV
   // without retyping anything.
-  const [copyFormat, setCopyFormat] = useState<CopyFormat>('matlab')
+  const [copyFormat, setCopyFormat] = useState<CopyFormat>('native')
   const [expandedVar, setExpandedVar] = useState<string | null>(null)
   const [inspectVar, setInspectVar] = useState<string | null>(null)
   // The library lives behind a Library ▸ button now — it opens as a
@@ -1965,7 +1965,7 @@ export default function Workstation() {
         const { rows, cols, data } = v
         const row = (r: number) => Array.from({ length: cols }, (_, c) => num(data[r * cols + c]))
         switch (fmt) {
-          case 'matlab': {
+          case 'native': {
             const lines = Array.from({ length: rows }, (_, r) => row(r).join(', '))
             return `[${lines.join('; ')}]`
           }
@@ -6429,7 +6429,7 @@ export default function Workstation() {
                  overlay itself is pointer-transparent so clicking
                  outside the inner card drops focus back into the
                  textarea. Designed for clinicians, surgeons, and
-                 PKPD researchers who don't open MATLAB daily and
+                 PKPD researchers who don't compute daily and
                  need an obvious set of next steps. */}
               {script === '' && (
                 <div style={styles.welcomeOverlay} aria-label="Workstation welcome">
@@ -6438,10 +6438,10 @@ export default function Workstation() {
                     role="region"
                     aria-label="Get started"
                   >
-                    <span style={styles.welcomeKicker}>MATLAB · Octave workstation</span>
+                    <span style={styles.welcomeKicker}>Numeric Compute Workstation</span>
                     <h2 style={styles.welcomeTitle}>Start computing</h2>
                     <p style={styles.welcomeSub}>
-                      Type MATLAB or Octave directly into the editor, or pick a starting
+                      Type numeric expressions directly into the editor, or pick a starting
                       point below. Variables and figures persist across runs — your
                       workspace is yours to explore.
                     </p>
@@ -7124,7 +7124,7 @@ export default function Workstation() {
                   return COPY_FORMATS[(i + 1) % COPY_FORMATS.length]
                 })}
                 disabled={vars.length === 0}
-                title={`Row copy format: ${copyFormat} — click to cycle (matlab → python → latex → json → csv)`}
+                title={`Row copy format: ${copyFormat} — click to cycle (native → python → latex → json → csv)`}
                 aria-label={`Copy format: ${copyFormat}`}
               >copy ⧉</button>
             </div>
@@ -7247,7 +7247,7 @@ export default function Workstation() {
                         <button
                           style={styles.varAction}
                           onClick={e => { e.stopPropagation(); copyVariableExpr(v.name, v.value) }}
-                          title="Copy as MATLAB expression"
+                          title="Copy as native expression"
                           aria-label={`Copy ${v.name}`}
                         >⧉</button>
                         <button
@@ -7328,7 +7328,7 @@ export default function Workstation() {
                 <span style={styles.emptyHeroKicker}>Console</span>
                 <h3 style={styles.emptyHeroTitle}>Nothing has been run yet</h3>
                 <p style={styles.emptyHeroSub}>
-                  Hit Run to execute the editor, or type a quick MATLAB
+                  Hit Run to execute the editor, or type a quick
                   expression below — outputs and errors will appear here.
                 </p>
                 <div style={styles.emptyHeroCtaRow}>
@@ -7599,7 +7599,7 @@ export default function Workstation() {
           value={cmd}
           onChange={e => setCmd(e.target.value)}
           onKeyDown={onCmdKey}
-          placeholder="Enter a MATLAB/Octave expression (e.g. mean(1:10))"
+          placeholder="Enter a numeric expression (e.g. mean(1:10))"
           spellCheck={false}
           autoComplete="off"
         />
@@ -8365,7 +8365,7 @@ const SHORTCUT_GROUPS: { title: string; items: [string, string][] }[] = [
     items: [
       ['Ctrl / Cmd + Enter', 'Run the full script'],
       ['Shift + Ctrl / Cmd + Enter', 'Run selection (or current line)'],
-      ['F9', 'Run selection (MATLAB-style)'],
+      ['F9', 'Run selection'],
       ['Shift + F9', 'Run everything up to the cursor line'],
       ['Ctrl / Cmd + Shift + R', 'Re-run the most recent fragment'],
       ['Alt + Ctrl / Cmd + Enter', 'Run current %% section'],

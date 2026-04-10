@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════
-// Workstation — curated MATLAB/Octave script templates
+// Workstation — curated numeric compute script templates
 // Hand-picked to run end-to-end on the in-browser octaveEngine (no
 // toolboxes, no network calls). Each entry is shown in the Workstation
 // preset sidebar and becomes the active script when clicked.

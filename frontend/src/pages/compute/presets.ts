@@ -53,10 +53,10 @@ const statisticsPresets: Preset[] = [
   {
     id: 'stat-descriptive',
     name: 'Descriptive Statistics',
-    matlabFn: 'mean, std, median, prctile',
+    referenceFn: 'mean, std, median, prctile',
     toolbox: 'statistics',
     description: 'Compute mean, median, std, SEM, skewness, kurtosis, quartiles, 95% CI',
-    matlabCode: 'm = mean(x); s = std(x);\nq = quantile(x, [0.25 0.5 0.75]);\nci = m + [-1 1] * 1.96 * s/sqrt(length(x));',
+    referenceCode: 'm = mean(x); s = std(x);\nq = quantile(x, [0.25 0.5 0.75]);\nci = m + [-1 1] * 1.96 * s/sqrt(length(x));',
     workflowStage: 'analysis',
     params: [{ key: 'data', label: 'Data', type: 'textarea', description: 'Comma-separated values' }],
     sampleData: { data: [22.5, 24.1, 25.3, 23.8, 26.2, 22.9, 24.7, 25.5, 23.4, 24.9, 26.1, 23.7, 25.2, 24.3, 25.8, 23.6, 24.5, 25.9, 24.2, 25.6] },
@@ -91,10 +91,10 @@ const statisticsPresets: Preset[] = [
   {
     id: 'stat-ttest1',
     name: 'One-Sample t-Test',
-    matlabFn: 'ttest',
+    referenceFn: 'ttest',
     toolbox: 'statistics',
     description: 'Test if sample mean differs from a hypothesized population mean',
-    matlabCode: '[h, p, ci, stats] = ttest(x, mu0);',
+    referenceCode: '[h, p, ci, stats] = ttest(x, mu0);',
     workflowStage: 'analysis',
     params: [
       { key: 'data', label: 'Sample Data', type: 'textarea' },
@@ -124,10 +124,10 @@ const statisticsPresets: Preset[] = [
   {
     id: 'stat-ttest2',
     name: "Two-Sample t-Test (Welch's)",
-    matlabFn: 'ttest2',
+    referenceFn: 'ttest2',
     toolbox: 'statistics',
     description: 'Compare two independent groups (unequal variances)',
-    matlabCode: "[h, p, ci, stats] = ttest2(x1, x2, 'Vartype', 'unequal');",
+    referenceCode: "[h, p, ci, stats] = ttest2(x1, x2, 'Vartype', 'unequal');",
     workflowStage: 'analysis',
     params: [
       { key: 'group1', label: 'Group 1 (Treatment)', type: 'textarea' },
@@ -159,10 +159,10 @@ const statisticsPresets: Preset[] = [
   {
     id: 'stat-paired-ttest',
     name: 'Paired t-Test',
-    matlabFn: 'ttest',
+    referenceFn: 'ttest',
     toolbox: 'statistics',
     description: 'Compare paired measurements (e.g., before/after intervention)',
-    matlabCode: '[h, p] = ttest(after - before);',
+    referenceCode: '[h, p] = ttest(after - before);',
     workflowStage: 'analysis',
     params: [
       { key: 'before', label: 'Before / Pre-treatment', type: 'textarea' },
@@ -194,10 +194,10 @@ const statisticsPresets: Preset[] = [
   {
     id: 'stat-anova1',
     name: 'One-Way ANOVA',
-    matlabFn: 'anova1',
+    referenceFn: 'anova1',
     toolbox: 'statistics',
     description: 'Compare means across 3+ independent groups',
-    matlabCode: '[p, tbl, stats] = anova1(data, groups);',
+    referenceCode: '[p, tbl, stats] = anova1(data, groups);',
     workflowStage: 'analysis',
     params: [
       { key: 'group1', label: 'Group 1 (Low Dose)', type: 'textarea' },
@@ -230,10 +230,10 @@ const statisticsPresets: Preset[] = [
   {
     id: 'stat-chi2',
     name: 'Chi-Square Test',
-    matlabFn: 'chi2gof, crosstab',
+    referenceFn: 'chi2gof, crosstab',
     toolbox: 'statistics',
     description: 'Test independence in a contingency table',
-    matlabCode: '[h, p, stats] = chi2gof(observed);\n[tbl, chi2, p] = crosstab(x, y);',
+    referenceCode: '[h, p, stats] = chi2gof(observed);\n[tbl, chi2, p] = crosstab(x, y);',
     workflowStage: 'analysis',
     params: [
       { key: 'row1', label: 'Row 1 (e.g., Treated)', type: 'textarea' },
@@ -260,10 +260,10 @@ const statisticsPresets: Preset[] = [
   {
     id: 'stat-kruskal',
     name: 'Kruskal-Wallis Test',
-    matlabFn: 'kruskalwallis',
+    referenceFn: 'kruskalwallis',
     toolbox: 'statistics',
     description: 'Non-parametric ANOVA for ordinal or non-normal data',
-    matlabCode: '[p, tbl, stats] = kruskalwallis(data, groups);',
+    referenceCode: '[p, tbl, stats] = kruskalwallis(data, groups);',
     workflowStage: 'analysis',
     params: [
       { key: 'group1', label: 'Group 1', type: 'textarea' },
@@ -315,10 +315,10 @@ const statisticsPresets: Preset[] = [
   {
     id: 'stat-ranksum',
     name: 'Wilcoxon Rank-Sum (Mann-Whitney)',
-    matlabFn: 'ranksum',
+    referenceFn: 'ranksum',
     toolbox: 'statistics',
     description: 'Non-parametric two-sample test',
-    matlabCode: '[p, h, stats] = ranksum(x1, x2);',
+    referenceCode: '[p, h, stats] = ranksum(x1, x2);',
     workflowStage: 'analysis',
     params: [
       { key: 'group1', label: 'Group 1', type: 'textarea' },
@@ -344,10 +344,10 @@ const statisticsPresets: Preset[] = [
   {
     id: 'stat-signrank',
     name: 'Wilcoxon Signed-Rank',
-    matlabFn: 'signrank',
+    referenceFn: 'signrank',
     toolbox: 'statistics',
     description: 'Non-parametric paired test',
-    matlabCode: '[p, h, stats] = signrank(x1, x2);',
+    referenceCode: '[p, h, stats] = signrank(x1, x2);',
     workflowStage: 'analysis',
     params: [
       { key: 'before', label: 'Before', type: 'textarea' },
@@ -394,10 +394,10 @@ const statisticsPresets: Preset[] = [
   {
     id: 'stat-corr',
     name: 'Pearson Correlation',
-    matlabFn: 'corrcoef, corr',
+    referenceFn: 'corrcoef, corr',
     toolbox: 'statistics',
     description: 'Correlation coefficient with p-value',
-    matlabCode: '[r, p] = corrcoef(x, y);',
+    referenceCode: '[r, p] = corrcoef(x, y);',
     workflowStage: 'analysis',
     params: [
       { key: 'x', label: 'X variable (e.g., Height cm)', type: 'textarea' },
@@ -430,10 +430,10 @@ const statisticsPresets: Preset[] = [
   {
     id: 'stat-linreg',
     name: 'Linear Regression',
-    matlabFn: 'fitlm, regress',
+    referenceFn: 'fitlm, regress',
     toolbox: 'statistics',
     description: 'OLS regression with R², p-value, residuals, fitted line',
-    matlabCode: 'mdl = fitlm(x, y);\nb = polyfit(x, y, 1);',
+    referenceCode: 'mdl = fitlm(x, y);\nb = polyfit(x, y, 1);',
     workflowStage: 'modeling',
     params: [
       { key: 'x', label: 'Predictor (X)', type: 'textarea' },
@@ -466,10 +466,10 @@ const statisticsPresets: Preset[] = [
   {
     id: 'stat-logreg',
     name: 'Logistic Regression',
-    matlabFn: 'mnrfit, fitglm',
+    referenceFn: 'mnrfit, fitglm',
     toolbox: 'statistics',
     description: 'Binary classification via logistic model',
-    matlabCode: "mdl = fitglm(x, y, 'Distribution', 'binomial');",
+    referenceCode: "mdl = fitglm(x, y, 'Distribution', 'binomial');",
     workflowStage: 'modeling',
     params: [
       { key: 'x', label: 'Predictor (e.g., tumor size)', type: 'textarea' },
@@ -522,10 +522,10 @@ const statisticsPresets: Preset[] = [
   {
     id: 'stat-pca-analysis',
     name: 'Principal Component Analysis',
-    matlabFn: 'pca',
+    referenceFn: 'pca',
     toolbox: 'statistics',
     description: 'Dimensionality reduction with scree plot',
-    matlabCode: '[coeff, score, latent, ~, explained] = pca(X);',
+    referenceCode: '[coeff, score, latent, ~, explained] = pca(X);',
     workflowStage: 'preprocessing',
     params: [
       { key: 'data', label: 'Data matrix (rows: samples, semicolons separate rows)', type: 'textarea',
@@ -553,10 +553,10 @@ const statisticsPresets: Preset[] = [
   {
     id: 'stat-kmeans-cluster',
     name: 'K-Means Clustering',
-    matlabFn: 'kmeans',
+    referenceFn: 'kmeans',
     toolbox: 'statistics',
     description: 'Partition data into K clusters',
-    matlabCode: '[idx, C] = kmeans(X, K);',
+    referenceCode: '[idx, C] = kmeans(X, K);',
     workflowStage: 'modeling',
     params: [
       { key: 'data', label: '2D points (semicolon-separated rows)', type: 'textarea' },
@@ -586,10 +586,10 @@ const statisticsPresets: Preset[] = [
   {
     id: 'stat-samplesize',
     name: 'Sample Size & Power',
-    matlabFn: 'sampsizepwr',
+    referenceFn: 'sampsizepwr',
     toolbox: 'statistics',
     description: 'Required sample size for desired statistical power',
-    matlabCode: "n = sampsizepwr('t', [], effect, power, alpha);",
+    referenceCode: "n = sampsizepwr('t', [], effect, power, alpha);",
     workflowStage: 'acquisition',
     params: [
       { key: 'effect', label: "Effect size (Cohen's d)", type: 'number', default: 0.5, step: 0.1 },
@@ -632,10 +632,10 @@ const signalPresets: Preset[] = [
   {
     id: 'sig-butter',
     name: 'Butterworth Filter',
-    matlabFn: 'butter, filtfilt',
+    referenceFn: 'butter, filtfilt',
     toolbox: 'signal',
     description: 'IIR lowpass/highpass filtering with zero phase',
-    matlabCode: '[b, a] = butter(4, cutoff/(fs/2));\ny = filtfilt(b, a, x);',
+    referenceCode: '[b, a] = butter(4, cutoff/(fs/2));\ny = filtfilt(b, a, x);',
     workflowStage: 'preprocessing',
     params: [
       { key: 'data', label: 'Signal data', type: 'textarea' },
@@ -668,10 +668,10 @@ const signalPresets: Preset[] = [
   {
     id: 'sig-fft',
     name: 'FFT Spectrum',
-    matlabFn: 'fft',
+    referenceFn: 'fft',
     toolbox: 'signal',
     description: 'Frequency-domain spectral analysis',
-    matlabCode: 'Y = fft(x);\nf = (0:N-1) * fs / N;',
+    referenceCode: 'Y = fft(x);\nf = (0:N-1) * fs / N;',
     workflowStage: 'analysis',
     params: [
       { key: 'data', label: 'Signal', type: 'textarea' },
@@ -699,10 +699,10 @@ const signalPresets: Preset[] = [
   {
     id: 'sig-psd',
     name: 'Power Spectral Density',
-    matlabFn: 'pwelch',
+    referenceFn: 'pwelch',
     toolbox: 'signal',
     description: "Welch's method for power spectrum estimation",
-    matlabCode: '[pxx, f] = pwelch(x, [], [], [], fs);',
+    referenceCode: '[pxx, f] = pwelch(x, [], [], [], fs);',
     workflowStage: 'analysis',
     params: [
       { key: 'data', label: 'Signal', type: 'textarea' },
@@ -728,10 +728,10 @@ const signalPresets: Preset[] = [
   {
     id: 'sig-peaks',
     name: 'Peak Detection',
-    matlabFn: 'findpeaks',
+    referenceFn: 'findpeaks',
     toolbox: 'signal',
     description: 'Find local maxima with constraints',
-    matlabCode: "[pks, locs] = findpeaks(x, 'MinPeakHeight', h);",
+    referenceCode: "[pks, locs] = findpeaks(x, 'MinPeakHeight', h);",
     workflowStage: 'analysis',
     params: [
       { key: 'data', label: 'Signal', type: 'textarea' },
@@ -759,10 +759,10 @@ const signalPresets: Preset[] = [
   {
     id: 'sig-movavg',
     name: 'Moving Average',
-    matlabFn: 'movmean',
+    referenceFn: 'movmean',
     toolbox: 'signal',
     description: 'Smoothing via sliding window',
-    matlabCode: 'y = movmean(x, w);',
+    referenceCode: 'y = movmean(x, w);',
     workflowStage: 'preprocessing',
     params: [
       { key: 'data', label: 'Signal', type: 'textarea' },
@@ -789,10 +789,10 @@ const signalPresets: Preset[] = [
   {
     id: 'sig-bandpower',
     name: 'EEG Band Power',
-    matlabFn: 'bandpower',
+    referenceFn: 'bandpower',
     toolbox: 'signal',
     description: 'Power in delta/theta/alpha/beta/gamma bands',
-    matlabCode: 'p = bandpower(x, fs, [low high]);',
+    referenceCode: 'p = bandpower(x, fs, [low high]);',
     workflowStage: 'analysis',
     params: [
       { key: 'data', label: 'EEG signal', type: 'textarea' },
@@ -825,10 +825,10 @@ const signalPresets: Preset[] = [
   {
     id: 'sig-hilbert',
     name: 'Hilbert Envelope',
-    matlabFn: 'hilbert, abs',
+    referenceFn: 'hilbert, abs',
     toolbox: 'signal',
     description: 'Analytic signal envelope via FFT',
-    matlabCode: 'h = hilbert(x);\nenv = abs(h);',
+    referenceCode: 'h = hilbert(x);\nenv = abs(h);',
     workflowStage: 'analysis',
     params: [
       { key: 'data', label: 'AM-modulated signal', type: 'textarea' },
@@ -864,10 +864,10 @@ const signalPresets: Preset[] = [
   {
     id: 'sig-ecg-rpeak',
     name: 'ECG R-Peak Detection',
-    matlabFn: 'findpeaks (custom)',
+    referenceFn: 'findpeaks (custom)',
     toolbox: 'signal',
     description: 'Detect heartbeats and compute HR/HRV',
-    matlabCode: "[~, locs] = findpeaks(ecg, 'MinPeakHeight', 0.5);\nrr = diff(locs) / fs * 1000;",
+    referenceCode: "[~, locs] = findpeaks(ecg, 'MinPeakHeight', 0.5);\nrr = diff(locs) / fs * 1000;",
     workflowStage: 'analysis',
     params: [
       { key: 'data', label: 'ECG signal', type: 'textarea' },
@@ -908,10 +908,10 @@ const signalPresets: Preset[] = [
   {
     id: 'sig-eeg-bands',
     name: 'EEG Band Extraction',
-    matlabFn: 'butter + filtfilt',
+    referenceFn: 'butter + filtfilt',
     toolbox: 'signal',
     description: 'Extract delta/theta/alpha/beta from EEG via bandpass',
-    matlabCode: '[b, a] = butter(4, [low high]/(fs/2));\nbandSig = filtfilt(b, a, x);',
+    referenceCode: '[b, a] = butter(4, [low high]/(fs/2));\nbandSig = filtfilt(b, a, x);',
     workflowStage: 'preprocessing',
     params: [
       { key: 'data', label: 'EEG signal', type: 'textarea' },
@@ -938,10 +938,10 @@ const signalPresets: Preset[] = [
   {
     id: 'sig-spectrogram',
     name: 'Spectrogram (STFT)',
-    matlabFn: 'spectrogram',
+    referenceFn: 'spectrogram',
     toolbox: 'signal',
     description: 'Time-frequency representation via STFT',
-    matlabCode: 'spectrogram(x, window, noverlap, nfft, fs);',
+    referenceCode: 'spectrogram(x, window, noverlap, nfft, fs);',
     workflowStage: 'visualization',
     params: [
       { key: 'data', label: 'Signal', type: 'textarea' },
@@ -1004,10 +1004,10 @@ const imagePresets: Preset[] = [
   {
     id: 'img-histogram-eq',
     name: 'Histogram Equalization',
-    matlabFn: 'histeq',
+    referenceFn: 'histeq',
     toolbox: 'image',
     description: 'Enhance image contrast via cumulative histogram',
-    matlabCode: 'J = histeq(I);',
+    referenceCode: 'J = histeq(I);',
     workflowStage: 'preprocessing',
     params: [{ key: 'image', label: '32x32 image (1024 values)', type: 'textarea' }],
     sampleData: { image: genImage(SZ, 'gradient') },
@@ -1043,10 +1043,10 @@ const imagePresets: Preset[] = [
   {
     id: 'img-otsu',
     name: 'Otsu Thresholding',
-    matlabFn: 'graythresh, imbinarize',
+    referenceFn: 'graythresh, imbinarize',
     toolbox: 'image',
     description: 'Automatic threshold via between-class variance',
-    matlabCode: 'level = graythresh(I);\nBW = imbinarize(I, level);',
+    referenceCode: 'level = graythresh(I);\nBW = imbinarize(I, level);',
     workflowStage: 'preprocessing',
     params: [{ key: 'image', label: '32x32 image', type: 'textarea' }],
     sampleData: { image: genImage(SZ, 'bimodal') },
@@ -1085,10 +1085,10 @@ const imagePresets: Preset[] = [
   {
     id: 'img-gauss',
     name: 'Gaussian Smoothing',
-    matlabFn: 'imgaussfilt',
+    referenceFn: 'imgaussfilt',
     toolbox: 'image',
     description: '2D Gaussian blur',
-    matlabCode: 'J = imgaussfilt(I, sigma);',
+    referenceCode: 'J = imgaussfilt(I, sigma);',
     workflowStage: 'preprocessing',
     params: [
       { key: 'image', label: '32x32 image', type: 'textarea' },
@@ -1141,10 +1141,10 @@ const imagePresets: Preset[] = [
   {
     id: 'img-edge',
     name: 'Sobel Edge Detection',
-    matlabFn: "edge(I, 'Sobel')",
+    referenceFn: "edge(I, 'Sobel')",
     toolbox: 'image',
     description: 'Sobel operator for edge detection',
-    matlabCode: "BW = edge(I, 'Sobel');",
+    referenceCode: "BW = edge(I, 'Sobel');",
     workflowStage: 'analysis',
     params: [{ key: 'image', label: '32x32 image', type: 'textarea' }],
     sampleData: { image: genImage(SZ, 'rectangle') },
@@ -1179,10 +1179,10 @@ const imagePresets: Preset[] = [
   {
     id: 'img-glcm',
     name: 'GLCM Texture Analysis',
-    matlabFn: 'graycomatrix, graycoprops',
+    referenceFn: 'graycomatrix, graycoprops',
     toolbox: 'image',
     description: 'Grey-Level Co-occurrence Matrix features',
-    matlabCode: 'glcm = graycomatrix(I);\nstats = graycoprops(glcm);',
+    referenceCode: 'glcm = graycomatrix(I);\nstats = graycoprops(glcm);',
     workflowStage: 'analysis',
     params: [{ key: 'image', label: '32x32 image', type: 'textarea' }],
     sampleData: { image: genImage(SZ, 'texture') },
@@ -1215,10 +1215,10 @@ const imagePresets: Preset[] = [
   {
     id: 'img-regionprops',
     name: 'Region Properties',
-    matlabFn: 'regionprops',
+    referenceFn: 'regionprops',
     toolbox: 'image',
     description: 'Compute area, centroid, bounding box of labeled regions',
-    matlabCode: 'props = regionprops(L, "Area", "Centroid");',
+    referenceCode: 'props = regionprops(L, "Area", "Centroid");',
     workflowStage: 'analysis',
     params: [{ key: 'image', label: 'Binary 32x32 image', type: 'textarea' }],
     sampleData: { image: genImage(SZ, 'rectangle').map(v => v > 0.5 ? 1 : 0) },
@@ -1267,10 +1267,10 @@ const imagePresets: Preset[] = [
   {
     id: 'img-morph',
     name: 'Morphological Operations',
-    matlabFn: 'imerode, imdilate',
+    referenceFn: 'imerode, imdilate',
     toolbox: 'image',
     description: 'Erosion and dilation with structuring element',
-    matlabCode: 'se = strel("disk", 1);\nE = imerode(I, se);\nD = imdilate(I, se);',
+    referenceCode: 'se = strel("disk", 1);\nE = imerode(I, se);\nD = imdilate(I, se);',
     workflowStage: 'preprocessing',
     params: [
       { key: 'image', label: 'Binary 32x32 image', type: 'textarea' },
@@ -1322,10 +1322,10 @@ const imagePresets: Preset[] = [
   {
     id: 'img-registration',
     name: 'Image Registration',
-    matlabFn: 'imregcorr',
+    referenceFn: 'imregcorr',
     toolbox: 'image',
     description: 'Align two images via cross-correlation',
-    matlabCode: 'tform = imregcorr(moving, fixed);',
+    referenceCode: 'tform = imregcorr(moving, fixed);',
     workflowStage: 'preprocessing',
     params: [
       { key: 'fixed', label: 'Fixed image (32x32)', type: 'textarea' },
@@ -1374,10 +1374,10 @@ const bioinformaticsPresets: Preset[] = [
   {
     id: 'bio-diffexpr',
     name: 'Differential Expression',
-    matlabFn: 'ttest2 (per gene)',
+    referenceFn: 'ttest2 (per gene)',
     toolbox: 'bioinformatics',
     description: 'Per-gene t-test between control and treatment',
-    matlabCode: 'for g=1:nGenes; [~,p(g)]=ttest2(ctrl(g,:), trt(g,:)); end',
+    referenceCode: 'for g=1:nGenes; [~,p(g)]=ttest2(ctrl(g,:), trt(g,:)); end',
     workflowStage: 'analysis',
     params: [
       { key: 'control', label: 'Control matrix (genes; samples)', type: 'textarea' },
@@ -1412,10 +1412,10 @@ const bioinformaticsPresets: Preset[] = [
   {
     id: 'bio-fdr',
     name: 'Benjamini-Hochberg FDR',
-    matlabFn: 'mafdr',
+    referenceFn: 'mafdr',
     toolbox: 'bioinformatics',
     description: 'FDR correction for multiple testing',
-    matlabCode: 'fdr = mafdr(pvals);',
+    referenceCode: 'fdr = mafdr(pvals);',
     workflowStage: 'analysis',
     params: [
       { key: 'pvals', label: 'P-values', type: 'textarea' },
@@ -1450,10 +1450,10 @@ const bioinformaticsPresets: Preset[] = [
   {
     id: 'bio-enrichment',
     name: 'Hypergeometric Enrichment',
-    matlabFn: 'hygecdf',
+    referenceFn: 'hygecdf',
     toolbox: 'bioinformatics',
     description: 'Gene set enrichment via hypergeometric test',
-    matlabCode: 'p = 1 - hygecdf(k-1, N, K, n);',
+    referenceCode: 'p = 1 - hygecdf(k-1, N, K, n);',
     workflowStage: 'analysis',
     params: [
       { key: 'hits', label: 'Hits in query (k)', type: 'number', default: 5 },
@@ -1489,10 +1489,10 @@ const bioinformaticsPresets: Preset[] = [
   {
     id: 'bio-hclust',
     name: 'Hierarchical Clustering',
-    matlabFn: 'linkage',
+    referenceFn: 'linkage',
     toolbox: 'bioinformatics',
     description: 'Agglomerative clustering with single linkage',
-    matlabCode: 'Z = linkage(X, "single");',
+    referenceCode: 'Z = linkage(X, "single");',
     workflowStage: 'modeling',
     params: [{ key: 'data', label: 'Expression matrix (samples; genes)', type: 'textarea' }],
     sampleData: { data: '5,8,3,12; 5.1,8.1,3.1,12.1; 7,3,9,2; 7.1,3.1,9.1,2.1; 4,6,5,8; 4.1,6.1,5.1,8.1; 9,2,7,4; 9.1,2.1,7.1,4.1' },
@@ -1532,10 +1532,10 @@ const bioinformaticsPresets: Preset[] = [
   {
     id: 'bio-gc-content',
     name: 'GC Content & Codons',
-    matlabFn: 'basecount, codoncount',
+    referenceFn: 'basecount, codoncount',
     toolbox: 'bioinformatics',
     description: 'Compute %GC and codon composition of a DNA sequence',
-    matlabCode: 'gc = (sum(seq=="G") + sum(seq=="C")) / length(seq);',
+    referenceCode: 'gc = (sum(seq=="G") + sum(seq=="C")) / length(seq);',
     workflowStage: 'analysis',
     params: [{ key: 'seq', label: 'DNA sequence', type: 'textarea' }],
     sampleData: { seq: 'ATGCGATCGATCGATTAGCTAGCTAGCATCGATCGTAGCTAGCATCGATCATCGATCGATCG' },
@@ -1575,10 +1575,10 @@ const bioinformaticsPresets: Preset[] = [
   {
     id: 'bio-rnaseq-norm',
     name: 'RNA-Seq CPM Normalization',
-    matlabFn: 'mrnorm, cpm',
+    referenceFn: 'mrnorm, cpm',
     toolbox: 'bioinformatics',
     description: 'Counts per million normalization',
-    matlabCode: 'cpm = bsxfun(@rdivide, counts, sum(counts)) * 1e6;',
+    referenceCode: 'cpm = bsxfun(@rdivide, counts, sum(counts)) * 1e6;',
     workflowStage: 'preprocessing',
     params: [{ key: 'counts', label: 'Raw counts (samples; genes)', type: 'textarea' }],
     sampleData: { counts: '120,450,3200,80; 130,520,2800,75; 110,480,3500,85; 140,510,3100,90' },
@@ -1599,10 +1599,10 @@ const bioinformaticsPresets: Preset[] = [
   {
     id: 'bio-phylo',
     name: 'Phylogenetic Distance',
-    matlabFn: 'seqpdist',
+    referenceFn: 'seqpdist',
     toolbox: 'bioinformatics',
     description: 'Pairwise Hamming distance between sequences',
-    matlabCode: 'D = seqpdist(seqs);',
+    referenceCode: 'D = seqpdist(seqs);',
     workflowStage: 'analysis',
     params: [{ key: 'seqs', label: 'Sequences (one per line)', type: 'textarea' }],
     sampleData: { seqs: 'ATCGTACG; ATCGTACC; ATCGTAAG; ATCGAACG; ATGGTACG' },
@@ -1630,10 +1630,10 @@ const bioinformaticsPresets: Preset[] = [
   {
     id: 'bio-quantile-norm',
     name: 'Quantile Normalization',
-    matlabFn: 'quantilenorm',
+    referenceFn: 'quantilenorm',
     toolbox: 'bioinformatics',
     description: 'Normalize array distributions to common reference',
-    matlabCode: 'X_norm = quantilenorm(X);',
+    referenceCode: 'X_norm = quantilenorm(X);',
     workflowStage: 'preprocessing',
     params: [{ key: 'data', label: 'Arrays (one per line)', type: 'textarea' }],
     sampleData: { data: '5,2,3,4,1; 4,1,4,2,2; 3,4,6,8,5; 6,7,8,2,3' },
@@ -1668,10 +1668,10 @@ const curveFittingPresets: Preset[] = [
   {
     id: 'fit-polyfit',
     name: 'Polynomial Fit',
-    matlabFn: 'polyfit, polyval',
+    referenceFn: 'polyfit, polyval',
     toolbox: 'curvefitting',
     description: 'Fit a polynomial of degree N to data',
-    matlabCode: 'p = polyfit(x, y, n);\nyfit = polyval(p, x);',
+    referenceCode: 'p = polyfit(x, y, n);\nyfit = polyval(p, x);',
     workflowStage: 'modeling',
     params: [
       { key: 'x', label: 'X data', type: 'textarea' },
@@ -1708,10 +1708,10 @@ const curveFittingPresets: Preset[] = [
   {
     id: 'fit-exponential',
     name: 'Exponential Fit',
-    matlabFn: "fit(x, y, 'exp1')",
+    referenceFn: "fit(x, y, 'exp1')",
     toolbox: 'curvefitting',
     description: 'Fit y = a*exp(b*x) via linearization',
-    matlabCode: "f = fit(x, y, 'exp1');",
+    referenceCode: "f = fit(x, y, 'exp1');",
     workflowStage: 'modeling',
     params: [
       { key: 'x', label: 'Time', type: 'textarea' },
@@ -1745,10 +1745,10 @@ const curveFittingPresets: Preset[] = [
   {
     id: 'fit-gaussian',
     name: 'Gaussian Fit',
-    matlabFn: "fit(x, y, 'gauss1')",
+    referenceFn: "fit(x, y, 'gauss1')",
     toolbox: 'curvefitting',
     description: 'Fit a single Gaussian peak',
-    matlabCode: "f = fit(x, y, 'gauss1');",
+    referenceCode: "f = fit(x, y, 'gauss1');",
     workflowStage: 'modeling',
     params: [
       { key: 'x', label: 'X data', type: 'textarea' },
@@ -1797,10 +1797,10 @@ const curveFittingPresets: Preset[] = [
   {
     id: 'fit-nlsq',
     name: 'Michaelis-Menten Fit',
-    matlabFn: 'lsqcurvefit',
+    referenceFn: 'lsqcurvefit',
     toolbox: 'curvefitting',
     description: 'Nonlinear fit V = Vmax*S/(Km+S)',
-    matlabCode: 'V = @(p, S) p(1)*S./(p(2)+S);\np = lsqcurvefit(V, p0, S, V_obs);',
+    referenceCode: 'V = @(p, S) p(1)*S./(p(2)+S);\np = lsqcurvefit(V, p0, S, V_obs);',
     workflowStage: 'modeling',
     params: [
       { key: 'S', label: 'Substrate [S]', type: 'textarea' },
@@ -1849,10 +1849,10 @@ const curveFittingPresets: Preset[] = [
   {
     id: 'fit-gmm',
     name: 'Gaussian Mixture Model',
-    matlabFn: 'fitgmdist',
+    referenceFn: 'fitgmdist',
     toolbox: 'curvefitting',
     description: 'Fit 2-component GMM via EM',
-    matlabCode: 'gm = fitgmdist(x, 2);',
+    referenceCode: 'gm = fitgmdist(x, 2);',
     workflowStage: 'modeling',
     params: [{ key: 'data', label: 'Data', type: 'textarea' }],
     sampleData: {
@@ -1900,10 +1900,10 @@ const curveFittingPresets: Preset[] = [
   {
     id: 'fit-spline',
     name: 'Cubic Spline Interpolation',
-    matlabFn: 'spline, interp1',
+    referenceFn: 'spline, interp1',
     toolbox: 'curvefitting',
     description: 'Smooth interpolation between data points',
-    matlabCode: 'yy = spline(x, y, xx);',
+    referenceCode: 'yy = spline(x, y, xx);',
     workflowStage: 'modeling',
     params: [
       { key: 'x', label: 'X data', type: 'textarea' },
@@ -1966,10 +1966,10 @@ const odePresets: Preset[] = [
   {
     id: 'ode-pk1',
     name: 'One-Compartment PK (IV)',
-    matlabFn: 'ode45',
+    referenceFn: 'ode45',
     toolbox: 'ode',
     description: 'IV bolus exponential decay: C(t) = C0*exp(-ke*t)',
-    matlabCode: '[t, C] = ode45(@(t,C) -ke*C, [0 48], dose/V);',
+    referenceCode: '[t, C] = ode45(@(t,C) -ke*C, [0 48], dose/V);',
     workflowStage: 'modeling',
     params: [
       { key: 'dose', label: 'Dose (mg)', type: 'number', default: 100 },
@@ -2000,10 +2000,10 @@ const odePresets: Preset[] = [
   {
     id: 'ode-pk2',
     name: 'Two-Compartment PK',
-    matlabFn: 'ode45',
+    referenceFn: 'ode45',
     toolbox: 'ode',
     description: 'Distribution and elimination phases',
-    matlabCode: '[t,Y] = ode45(@pk2model, [0 72], [C0 0]);',
+    referenceCode: '[t,Y] = ode45(@pk2model, [0 72], [C0 0]);',
     workflowStage: 'modeling',
     params: [
       { key: 'dose', label: 'Dose (mg)', type: 'number', default: 100 },
@@ -2039,10 +2039,10 @@ const odePresets: Preset[] = [
   {
     id: 'ode-sir',
     name: 'SIR Epidemic Model',
-    matlabFn: 'ode45',
+    referenceFn: 'ode45',
     toolbox: 'ode',
     description: 'Susceptible-Infected-Recovered dynamics',
-    matlabCode: '[t,Y] = ode45(@sir, [0 160], [S0 I0 R0]);',
+    referenceCode: '[t,Y] = ode45(@sir, [0 160], [S0 I0 R0]);',
     workflowStage: 'modeling',
     params: [
       { key: 'N', label: 'Population (N)', type: 'number', default: 10000 },
@@ -2082,10 +2082,10 @@ const odePresets: Preset[] = [
   {
     id: 'ode-lotka',
     name: 'Lotka-Volterra (Predator-Prey)',
-    matlabFn: 'ode45',
+    referenceFn: 'ode45',
     toolbox: 'ode',
     description: 'Coupled predator-prey population dynamics',
-    matlabCode: '[t,Y] = ode45(@lotka, [0 50], [prey0 pred0]);',
+    referenceCode: '[t,Y] = ode45(@lotka, [0 50], [prey0 pred0]);',
     workflowStage: 'modeling',
     params: [
       { key: 'prey0', label: 'Initial prey', type: 'number', default: 100 },
@@ -2121,10 +2121,10 @@ const odePresets: Preset[] = [
   {
     id: 'ode-mm',
     name: 'Michaelis-Menten Curve',
-    matlabFn: 'V = Vmax*S/(Km+S)',
+    referenceFn: 'V = Vmax*S/(Km+S)',
     toolbox: 'ode',
     description: 'Enzyme kinetics velocity vs substrate',
-    matlabCode: 'V = Vmax * S ./ (Km + S);',
+    referenceCode: 'V = Vmax * S ./ (Km + S);',
     workflowStage: 'modeling',
     params: [
       { key: 'Vmax', label: 'Vmax', type: 'number', default: 100 },
@@ -2155,10 +2155,10 @@ const odePresets: Preset[] = [
   {
     id: 'ode-hill',
     name: 'Hill Equation',
-    matlabFn: 'E = Emax*x^n/(EC50^n + x^n)',
+    referenceFn: 'E = Emax*x^n/(EC50^n + x^n)',
     toolbox: 'ode',
     description: 'Sigmoidal dose-response',
-    matlabCode: 'E = Emax * x.^n ./ (EC50.^n + x.^n);',
+    referenceCode: 'E = Emax * x.^n ./ (EC50.^n + x.^n);',
     workflowStage: 'modeling',
     params: [
       { key: 'Emax', label: 'Emax', type: 'number', default: 100 },
@@ -2191,10 +2191,10 @@ const odePresets: Preset[] = [
   {
     id: 'ode-logistic',
     name: 'Logistic Growth',
-    matlabFn: 'ode45',
+    referenceFn: 'ode45',
     toolbox: 'ode',
     description: 'Bounded population growth dN/dt = rN(1-N/K)',
-    matlabCode: '[t,N] = ode45(@(t,N) r*N*(1-N/K), [0 100], N0);',
+    referenceCode: '[t,N] = ode45(@(t,N) r*N*(1-N/K), [0 100], N0);',
     workflowStage: 'modeling',
     params: [
       { key: 'K', label: 'Carrying capacity (K)', type: 'number', default: 1000 },
@@ -2223,10 +2223,10 @@ const odePresets: Preset[] = [
   {
     id: 'ode-montecarlo',
     name: 'Monte Carlo π Estimation',
-    matlabFn: 'sum(x.^2 + y.^2 < 1) / N * 4',
+    referenceFn: 'sum(x.^2 + y.^2 < 1) / N * 4',
     toolbox: 'ode',
     description: 'Estimate π via random sampling',
-    matlabCode: 'p = sum(x.^2 + y.^2 < 1) / N * 4;',
+    referenceCode: 'p = sum(x.^2 + y.^2 < 1) / N * 4;',
     workflowStage: 'modeling',
     params: [{ key: 'N', label: 'Number of points', type: 'number', default: 10000 }],
     sampleData: { N: 10000 },
@@ -2261,10 +2261,10 @@ const survivalPresets: Preset[] = [
   {
     id: 'surv-km',
     name: 'Kaplan-Meier Survival',
-    matlabFn: 'ecdf, kmplot',
+    referenceFn: 'ecdf, kmplot',
     toolbox: 'survival',
     description: 'Survival curve with optional group stratification',
-    matlabCode: '[f, x] = ecdf(t, "censoring", c, "function", "survivor");',
+    referenceCode: '[f, x] = ecdf(t, "censoring", c, "function", "survivor");',
     workflowStage: 'analysis',
     params: [
       { key: 'times', label: 'Survival times', type: 'textarea' },
@@ -2305,10 +2305,10 @@ const survivalPresets: Preset[] = [
   {
     id: 'surv-cox',
     name: 'Cox Proportional Hazards',
-    matlabFn: 'coxphfit',
+    referenceFn: 'coxphfit',
     toolbox: 'survival',
     description: 'Univariate Cox regression for hazard ratio',
-    matlabCode: '[b, logL, H] = coxphfit(x, t, "Censoring", c);',
+    referenceCode: '[b, logL, H] = coxphfit(x, t, "Censoring", c);',
     workflowStage: 'modeling',
     params: [
       { key: 'times', label: 'Survival times', type: 'textarea' },
@@ -2356,10 +2356,10 @@ const survivalPresets: Preset[] = [
   {
     id: 'surv-logrank',
     name: 'Log-Rank Test',
-    matlabFn: 'logrank',
+    referenceFn: 'logrank',
     toolbox: 'survival',
     description: 'Compare survival curves between two groups',
-    matlabCode: '[p, chi2] = logrank(t1, c1, t2, c2);',
+    referenceCode: '[p, chi2] = logrank(t1, c1, t2, c2);',
     workflowStage: 'analysis',
     params: [
       { key: 'times', label: 'All times', type: 'textarea' },
@@ -2413,10 +2413,10 @@ const mlPresets: Preset[] = [
   {
     id: 'ml-kmeans',
     name: 'K-Means Clustering',
-    matlabFn: 'kmeans',
+    referenceFn: 'kmeans',
     toolbox: 'ml',
     description: 'Unsupervised clustering of patient features into K groups',
-    matlabCode: '[idx, C] = kmeans(X, k);',
+    referenceCode: '[idx, C] = kmeans(X, k);',
     workflowStage: 'modeling',
     params: [
       { key: 'data', label: 'Feature Matrix (one row per sample, x,y per row)', type: 'textarea' },
@@ -2457,10 +2457,10 @@ const mlPresets: Preset[] = [
   {
     id: 'ml-pca',
     name: 'Principal Component Analysis',
-    matlabFn: 'pca',
+    referenceFn: 'pca',
     toolbox: 'ml',
     description: 'Dimensionality reduction with explained variance ratio',
-    matlabCode: '[coeff, score, latent, ~, explained] = pca(X);',
+    referenceCode: '[coeff, score, latent, ~, explained] = pca(X);',
     workflowStage: 'modeling',
     params: [
       { key: 'data', label: 'Feature Matrix (rows=samples)', type: 'textarea' },
@@ -2501,10 +2501,10 @@ const mlPresets: Preset[] = [
   {
     id: 'ml-roc',
     name: 'ROC Curve Analysis',
-    matlabFn: 'perfcurve',
+    referenceFn: 'perfcurve',
     toolbox: 'ml',
     description: 'Compute ROC curve and AUC for binary classifier output',
-    matlabCode: '[X, Y, T, AUC] = perfcurve(labels, scores, 1);',
+    referenceCode: '[X, Y, T, AUC] = perfcurve(labels, scores, 1);',
     workflowStage: 'modeling',
     params: [
       { key: 'scores', label: 'Predicted Scores', type: 'textarea' },
@@ -2549,10 +2549,10 @@ const mlPresets: Preset[] = [
   {
     id: 'ml-knn',
     name: 'K-Nearest Neighbors (1D)',
-    matlabFn: 'fitcknn',
+    referenceFn: 'fitcknn',
     toolbox: 'ml',
     description: 'Classify a query value using k nearest training samples',
-    matlabCode: 'mdl = fitcknn(X, y, "NumNeighbors", k);\npred = predict(mdl, query);',
+    referenceCode: 'mdl = fitcknn(X, y, "NumNeighbors", k);\npred = predict(mdl, query);',
     workflowStage: 'modeling',
     params: [
       { key: 'features', label: 'Training Features', type: 'textarea' },
@@ -2601,10 +2601,10 @@ const mlPresets: Preset[] = [
   {
     id: 'ml-confmat',
     name: 'Confusion Matrix Metrics',
-    matlabFn: 'confusionmat',
+    referenceFn: 'confusionmat',
     toolbox: 'ml',
     description: 'Compute accuracy, precision, recall, F1 from a 2x2 matrix',
-    matlabCode: 'C = confusionmat(yTrue, yPred);\naccuracy = sum(diag(C))/sum(C(:));',
+    referenceCode: 'C = confusionmat(yTrue, yPred);\naccuracy = sum(diag(C))/sum(C(:));',
     workflowStage: 'modeling',
     params: [
       { key: 'tp', label: 'True Positives', type: 'number', default: 85 },
@@ -2651,10 +2651,10 @@ const pkPresets: Preset[] = [
   {
     id: 'pk-1comp-iv',
     name: 'One-Compartment IV Bolus',
-    matlabFn: 'pkOneCompartment',
+    referenceFn: 'pkOneCompartment',
     toolbox: 'pk',
     description: 'Plasma concentration-time profile after a single IV bolus dose',
-    matlabCode: 'C = (Dose/V) * exp(-ke * t);',
+    referenceCode: 'C = (Dose/V) * exp(-ke * t);',
     workflowStage: 'modeling',
     params: [
       { key: 'dose', label: 'Dose (mg)', type: 'number', default: 500 },
@@ -2688,10 +2688,10 @@ const pkPresets: Preset[] = [
   {
     id: 'pk-oral',
     name: 'Oral Absorption (1-Comp)',
-    matlabFn: 'pkOralAbsorption',
+    referenceFn: 'pkOralAbsorption',
     toolbox: 'pk',
     description: 'Bateman equation for first-order absorption with bioavailability F',
-    matlabCode: 'C = (F*D*ka)/(V*(ka-ke)) * (exp(-ke*t) - exp(-ka*t));',
+    referenceCode: 'C = (F*D*ka)/(V*(ka-ke)) * (exp(-ke*t) - exp(-ka*t));',
     workflowStage: 'modeling',
     params: [
       { key: 'dose', label: 'Dose (mg)', type: 'number', default: 250 },
@@ -2728,10 +2728,10 @@ const pkPresets: Preset[] = [
   {
     id: 'pk-multidose',
     name: 'Multiple-Dose Steady State',
-    matlabFn: 'pkMultipleDosing',
+    referenceFn: 'pkMultipleDosing',
     toolbox: 'pk',
     description: 'Accumulation profile across repeated dosing intervals',
-    matlabCode: 'C = sum_n (Dose/V) * exp(-ke*(t-n*tau)) for n = 0..N-1',
+    referenceCode: 'C = sum_n (Dose/V) * exp(-ke*(t-n*tau)) for n = 0..N-1',
     workflowStage: 'modeling',
     params: [
       { key: 'dose', label: 'Dose (mg)', type: 'number', default: 200 },
@@ -2768,10 +2768,10 @@ const pkPresets: Preset[] = [
   {
     id: 'pk-halflife',
     name: 'Half-Life Estimation (Log-Linear Fit)',
-    matlabFn: 'polyfit',
+    referenceFn: 'polyfit',
     toolbox: 'pk',
     description: 'Estimate elimination half-life from concentration-time data',
-    matlabCode: 'p = polyfit(t, log(C), 1);\nke = -p(1); halfLife = log(2)/ke;',
+    referenceCode: 'p = polyfit(t, log(C), 1);\nke = -p(1); halfLife = log(2)/ke;',
     workflowStage: 'analysis',
     params: [
       { key: 't', label: 'Time (h)', type: 'textarea' },
@@ -2809,10 +2809,10 @@ const pkPresets: Preset[] = [
   {
     id: 'pk-bioavail',
     name: 'Absolute Bioavailability (F)',
-    matlabFn: 'trapz',
+    referenceFn: 'trapz',
     toolbox: 'pk',
     description: 'Compute F from AUC ratios of oral vs IV studies',
-    matlabCode: 'F = (AUC_oral/D_oral) / (AUC_iv/D_iv);',
+    referenceCode: 'F = (AUC_oral/D_oral) / (AUC_iv/D_iv);',
     workflowStage: 'analysis',
     params: [
       { key: 'aucOral', label: 'AUC oral (mg·h/L)', type: 'number', default: 18.5 },
@@ -2849,10 +2849,10 @@ const normalityPresets: Preset[] = [
   {
     id: 'norm-shapiro',
     name: 'Shapiro-Wilk Normality Test',
-    matlabFn: 'swtest',
+    referenceFn: 'swtest',
     toolbox: 'normality',
     description: 'Test if data come from a normal distribution',
-    matlabCode: '[H, pValue, W] = swtest(x);',
+    referenceCode: '[H, pValue, W] = swtest(x);',
     workflowStage: 'analysis',
     params: [{ key: 'data', label: 'Data', type: 'textarea' }],
     sampleData: { data: [4.2, 4.5, 4.1, 4.4, 4.3, 4.6, 4.0, 4.5, 4.2, 4.4, 4.3, 4.1, 4.5, 4.2, 4.6, 4.3, 4.4, 4.1, 4.5, 4.3] },
@@ -2878,10 +2878,10 @@ const normalityPresets: Preset[] = [
   {
     id: 'norm-qq',
     name: 'Normal Q-Q Plot',
-    matlabFn: 'qqplot',
+    referenceFn: 'qqplot',
     toolbox: 'normality',
     description: 'Quantile-quantile plot of sample vs. theoretical normal',
-    matlabCode: 'qqplot(x);',
+    referenceCode: 'qqplot(x);',
     workflowStage: 'visualization',
     params: [{ key: 'data', label: 'Data', type: 'textarea' }],
     sampleData: { data: [22, 24, 25, 23, 26, 22, 24, 25, 23, 24, 26, 23, 25, 24, 25, 23, 24, 25, 24, 25] },
@@ -2916,10 +2916,10 @@ const normalityPresets: Preset[] = [
   {
     id: 'norm-ci',
     name: 'Confidence Interval for Mean',
-    matlabFn: 'tinv',
+    referenceFn: 'tinv',
     toolbox: 'normality',
     description: 'Compute (1-α) confidence interval for population mean',
-    matlabCode: 'ci = mean(x) + [-1 1] * tinv(1-alpha/2, n-1) * std(x)/sqrt(n);',
+    referenceCode: 'ci = mean(x) + [-1 1] * tinv(1-alpha/2, n-1) * std(x)/sqrt(n);',
     workflowStage: 'analysis',
     params: [
       { key: 'data', label: 'Data', type: 'textarea' },
@@ -2951,10 +2951,10 @@ const normalityPresets: Preset[] = [
   {
     id: 'norm-zscore',
     name: 'Z-Score Standardization',
-    matlabFn: 'zscore',
+    referenceFn: 'zscore',
     toolbox: 'normality',
     description: 'Convert raw data to z-scores; flag outliers (|z|>2)',
-    matlabCode: 'z = (x - mean(x)) / std(x);',
+    referenceCode: 'z = (x - mean(x)) / std(x);',
     workflowStage: 'preprocessing',
     params: [{ key: 'data', label: 'Data', type: 'textarea' }],
     sampleData: { data: [120, 125, 118, 122, 119, 124, 121, 123, 117, 145, 122, 120, 119, 121, 122, 95, 120, 121, 123, 119] },
@@ -2984,10 +2984,10 @@ const normalityPresets: Preset[] = [
   {
     id: 'norm-fit',
     name: 'Distribution Fit (Normal)',
-    matlabFn: 'fitdist',
+    referenceFn: 'fitdist',
     toolbox: 'normality',
     description: 'Fit normal distribution and overlay theoretical PDF on histogram',
-    matlabCode: 'pd = fitdist(x, "Normal");',
+    referenceCode: 'pd = fitdist(x, "Normal");',
     workflowStage: 'modeling',
     params: [{ key: 'data', label: 'Data', type: 'textarea' }],
     sampleData: { data: Array.from({ length: 80 }, () => 50 + 8 * (Math.random() + Math.random() + Math.random() - 1.5)) },

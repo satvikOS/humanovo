@@ -50,7 +50,7 @@ export default function PresetRunner() {
       const q = search.toLowerCase()
       list = list.filter(p =>
         p.name.toLowerCase().includes(q) ||
-        p.matlabFn.toLowerCase().includes(q) ||
+        p.referenceFn.toLowerCase().includes(q) ||
         p.description.toLowerCase().includes(q) ||
         p.toolbox.toLowerCase().includes(q)
       )
@@ -296,7 +296,7 @@ export default function PresetRunner() {
                     <div className="flex items-start justify-between">
                       <div className="flex-1 min-w-0">
                         <h3 className="text-xs font-semibold truncate" style={{ color: 'var(--color-text)' }}>{preset.name}</h3>
-                        <span className="text-[11px] font-mono" style={{ color: 'var(--color-text-muted)' }}>{preset.matlabFn}</span>
+                        <span className="text-[11px] font-mono" style={{ color: 'var(--color-text-muted)' }}>{preset.referenceFn}</span>
                       </div>
                       <FiChevronRight className="text-sm opacity-0 group-hover:opacity-60 transition-opacity mt-0.5" style={{ color: 'var(--color-text-muted)' }} />
                     </div>
@@ -331,22 +331,22 @@ export default function PresetRunner() {
               <h2 className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{selectedPreset.name}</h2>
               <p className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>{selectedPreset.description}</p>
               <span className="inline-block text-[11px] font-mono mt-2 px-1.5 py-0.5 rounded" style={{ background: 'var(--glass-bg-hover)', color: 'var(--color-text-secondary)' }}>
-                {selectedPreset.matlabFn}
+                {selectedPreset.referenceFn}
               </span>
             </div>
 
-            {/* MATLAB code toggle */}
+            {/* Reference code toggle */}
             <button
               onClick={() => setShowCode(!showCode)}
               className="flex items-center gap-1.5 text-xs mb-3 hover:text-white transition-colors"
               style={{ color: 'var(--color-text-secondary)' }}
             >
               <FiCode className="text-sm" />
-              {showCode ? 'Hide' : 'Show'} MATLAB Equivalent
+              {showCode ? 'Hide' : 'Show'} Code Equivalent
             </button>
             {showCode && (
               <pre className="text-[11px] p-3 rounded-md border mb-4 overflow-x-auto font-mono whitespace-pre-wrap" style={{ background: 'var(--glass-bg)', borderColor: 'var(--glass-border)', color: 'var(--color-text-secondary)' }}>
-                {selectedPreset.matlabCode}
+                {selectedPreset.referenceCode}
               </pre>
             )}
 
