@@ -4300,11 +4300,12 @@ export default function Workstation() {
       alignItems: 'flex-start',
       justifyContent: 'center',
       padding: '32px 32px 24px 32px',
-      pointerEvents: 'none' as const,
+      // Opaque backdrop so gutter line numbers and editor chrome
+      // don't bleed through — keeps the card crisp on both themes.
+      background: 'var(--color-bg-elevated)',
       zIndex: 4,
     },
     welcomeCard: {
-      pointerEvents: 'auto' as const,
       maxWidth: 520,
       width: '100%',
       display: 'flex',
@@ -4313,8 +4314,9 @@ export default function Workstation() {
       padding: '20px 24px 18px 24px',
       borderRadius: 10,
       background: 'var(--color-bg-elevated)',
-      border: '1px solid var(--glass-border)',
-      boxShadow: '0 8px 24px rgba(0, 0, 0, 0.08)',
+      // No border — rely on shadow to float the card. Thinner
+      // boundaries per the design brief.
+      boxShadow: '0 1px 3px rgba(0, 0, 0, 0.06), 0 8px 24px rgba(0, 0, 0, 0.10)',
     },
     welcomeKicker: {
       fontSize: 10,
@@ -4350,7 +4352,7 @@ export default function Workstation() {
       padding: '10px 12px',
       borderRadius: 8,
       border: '1px solid var(--glass-border)',
-      background: 'transparent',
+      background: 'var(--glass-bg)',
       color: 'var(--color-text)',
       cursor: 'pointer',
       textAlign: 'left' as const,
