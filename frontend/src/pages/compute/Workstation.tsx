@@ -4344,6 +4344,20 @@ export default function Workstation() {
       pointerEvents: 'none' as const,
       willChange: 'transform',
     },
+    // Faint red wash painted across the editor for every line that
+    // has an error reported in the console. Lets users spot trouble at
+    // a glance even when the gutter is collapsed or scrolled out of view.
+    errorLineStrip: {
+      position: 'absolute' as const,
+      left: 0,
+      right: 0,
+      height: editorLineHeight,
+      background: 'rgba(220, 38, 38, 0.10)',
+      borderTop: '1px solid rgba(220, 38, 38, 0.18)',
+      borderBottom: '1px solid rgba(220, 38, 38, 0.18)',
+      pointerEvents: 'none' as const,
+      boxSizing: 'border-box' as const,
+    },
     indentGuideOverlay: {
       position: 'absolute' as const,
       top: 0,
@@ -6153,6 +6167,21 @@ export default function Workstation() {
                     top: 14 + (cursor.line - 1) * editorLineHeight,
                   }}
                 />
+              )}
+              {/* Faint red wash on every error line — paints first so the
+                  current-line strip and word/find overlays still sit on top. */}
+              {!editorWrapOn && errorLines.length > 0 && (
+                <div aria-hidden="true" style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+                  {errorLines.map(n => (
+                    <div
+                      key={`err-strip-${n}`}
+                      style={{
+                        ...styles.errorLineStrip,
+                        top: 14 + (n - 1) * editorLineHeight,
+                      }}
+                    />
+                  ))}
+                </div>
               )}
               {!editorWrapOn && (
                 <div
