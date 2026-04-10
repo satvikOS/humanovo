@@ -4800,6 +4800,67 @@ export default function Workstation() {
       flexDirection: 'column' as const,
       overflow: 'hidden' as const,
     },
+    // Shared empty-state look for Figure / Console / Workspace tabs in
+    // the Results overlay (and elsewhere). Centered, calm, with a
+    // small kicker label, a slightly larger heading, and an optional
+    // CTA chip. Replaces the older italic-muted one-liners and gives
+    // every tab a unified resting state.
+    emptyHero: {
+      flex: 1,
+      minHeight: 160,
+      display: 'flex',
+      flexDirection: 'column' as const,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      padding: '28px 24px',
+      textAlign: 'center' as const,
+      color: 'var(--color-text-muted)',
+      fontFamily: "'Inter', system-ui, sans-serif",
+    },
+    emptyHeroKicker: {
+      fontSize: 9.5,
+      fontWeight: 600,
+      letterSpacing: 1.2,
+      textTransform: 'uppercase' as const,
+      color: 'var(--color-text-muted)',
+      opacity: 0.75,
+    },
+    emptyHeroTitle: {
+      margin: 0,
+      fontSize: 14,
+      fontWeight: 600,
+      color: 'var(--color-text-secondary)',
+      letterSpacing: -0.1,
+    },
+    emptyHeroSub: {
+      margin: 0,
+      fontSize: 12,
+      lineHeight: 1.5,
+      color: 'var(--color-text-muted)',
+      maxWidth: 360,
+    },
+    emptyHeroCtaRow: {
+      display: 'flex',
+      gap: 8,
+      marginTop: 6,
+      flexWrap: 'wrap' as const,
+      justifyContent: 'center',
+    },
+    emptyHeroCta: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 5,
+      padding: '5px 12px',
+      borderRadius: 5,
+      border: '1px solid var(--glass-border)',
+      background: 'transparent',
+      color: 'var(--color-text-secondary)',
+      cursor: 'pointer',
+      fontSize: 11,
+      fontWeight: 500,
+      transition: 'background 120ms ease, border-color 120ms ease, color 120ms ease',
+    },
     dropOverlay: {
       position: 'absolute' as const,
       inset: 0,
@@ -6440,8 +6501,29 @@ export default function Workstation() {
             </div>
             <div style={styles.varList}>
               {vars.length === 0 && (
-                <div style={{ color: 'var(--color-text-muted)', fontStyle: 'italic', padding: '10px 6px', fontSize: 12 }}>
-                  No variables yet. Run a script or enter a command.
+                <div style={styles.emptyHero}>
+                  <span style={styles.emptyHeroKicker}>Workspace</span>
+                  <h3 style={styles.emptyHeroTitle}>No variables yet</h3>
+                  <p style={styles.emptyHeroSub}>
+                    Run a script or type an expression below — every value you
+                    compute lands here, ready to inspect, copy, or pin.
+                  </p>
+                  <div style={styles.emptyHeroCtaRow}>
+                    <button
+                      type="button"
+                      style={styles.emptyHeroCta}
+                      onClick={runScript}
+                      onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--glass-bg-hover)' }}
+                      onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
+                    >Run script</button>
+                    <button
+                      type="button"
+                      style={styles.emptyHeroCta}
+                      onClick={() => cmdInputRef.current?.focus()}
+                      onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--glass-bg-hover)' }}
+                      onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
+                    >Focus command line</button>
+                  </div>
                 </div>
               )}
               {vars.length > 0 && visibleVars.length === 0 && (
@@ -6613,8 +6695,29 @@ export default function Workstation() {
           </div>
           <div ref={consoleRef} style={styles.console} onScroll={onConsoleScroll}>
             {entries.length === 0 && (
-              <div style={{ color: 'var(--color-text-muted)', fontStyle: 'italic', fontSize: 12 }}>
-                Console ready. Type a command below or hit Run.
+              <div style={styles.emptyHero}>
+                <span style={styles.emptyHeroKicker}>Console</span>
+                <h3 style={styles.emptyHeroTitle}>Nothing has been run yet</h3>
+                <p style={styles.emptyHeroSub}>
+                  Hit Run to execute the editor, or type a quick MATLAB
+                  expression below — outputs and errors will appear here.
+                </p>
+                <div style={styles.emptyHeroCtaRow}>
+                  <button
+                    type="button"
+                    style={styles.emptyHeroCta}
+                    onClick={runScript}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--glass-bg-hover)' }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
+                  >Run script</button>
+                  <button
+                    type="button"
+                    style={styles.emptyHeroCta}
+                    onClick={() => cmdInputRef.current?.focus()}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--glass-bg-hover)' }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
+                  >Focus command line</button>
+                </div>
               </div>
             )}
             {entries.length > 0 && visibleEntries.length === 0 && (
@@ -7136,14 +7239,38 @@ function PlotView({ plot, opts = DEFAULT_PLOT_OPTS }: { plot: PlotSpec | null; o
         height: '100%',
         minHeight: 180,
         display: 'flex',
+        flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
+        gap: 8,
+        padding: '28px 24px',
+        textAlign: 'center',
         color: 'var(--color-text-muted)',
-        fontSize: 12,
-        fontStyle: 'italic',
         fontFamily: "'Inter', system-ui, sans-serif",
       }}>
-        No figure yet. Call plot(x, y) from a script or the command line.
+        <span style={{
+          fontSize: 9.5,
+          fontWeight: 600,
+          letterSpacing: 1.2,
+          textTransform: 'uppercase',
+          opacity: 0.75,
+        }}>Figure</span>
+        <h3 style={{
+          margin: 0,
+          fontSize: 14,
+          fontWeight: 600,
+          color: 'var(--color-text-secondary)',
+          letterSpacing: -0.1,
+        }}>No figure yet</h3>
+        <p style={{
+          margin: 0,
+          fontSize: 12,
+          lineHeight: 1.5,
+          maxWidth: 360,
+        }}>
+          Call <code style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11 }}>plot(x, y)</code>
+          {' '}from a script or the command line. Figures stack here so you can flip between them.
+        </p>
       </div>
     )
   }
