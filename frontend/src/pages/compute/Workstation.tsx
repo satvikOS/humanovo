@@ -4401,6 +4401,17 @@ export default function Workstation() {
       fontSize: 11,
       color: 'var(--color-text-muted)',
     },
+    // Status bar segments that double as quick actions (caret position →
+    // Go to line, var count → workspace tab, figure count → figure tab).
+    // Calm by default; the hover wash makes the affordance discoverable
+    // without ever feeling like a button.
+    statusBarAction: {
+      cursor: 'pointer',
+      padding: '2px 6px',
+      borderRadius: 4,
+      margin: '-2px -6px',
+      transition: 'background 0.12s, color 0.12s',
+    },
     // Tiny coloured pill that lives at the right edge of the status bar
     // and reflects the most recent run state. Calm by default, accented
     // green or red depending on whether the last run finished cleanly.
@@ -7132,7 +7143,14 @@ export default function Workstation() {
 
       {/* ─── Status bar ──────────────────────────────────────────────── */}
       <div style={styles.statusBar}>
-        <span>Ln {cursor.line}, Col {cursor.col}</span>
+        <span
+          style={styles.statusBarAction}
+          onClick={openGoto}
+          onMouseEnter={e => { (e.currentTarget as HTMLSpanElement).style.background = 'var(--glass-bg-hover)'; (e.currentTarget as HTMLSpanElement).style.color = 'var(--color-text)' }}
+          onMouseLeave={e => { (e.currentTarget as HTMLSpanElement).style.background = 'transparent'; (e.currentTarget as HTMLSpanElement).style.color = '' }}
+          title="Go to line… (Ctrl/Cmd + G)"
+          role="button"
+        >Ln {cursor.line}, Col {cursor.col}</span>
         <span>·</span>
         <span>{lineCount} line{lineCount === 1 ? '' : 's'}</span>
         {selectionInfo && (
@@ -7173,12 +7191,26 @@ export default function Workstation() {
           </>
         )}
         <span>·</span>
-        <span title={`${workspaceBytes.toLocaleString()} bytes across ${vars.length} variable${vars.length === 1 ? '' : 's'}`}>
+        <span
+          style={styles.statusBarAction}
+          onClick={() => { setResultsTab('workspace'); setResultsOverlay(true) }}
+          onMouseEnter={e => { (e.currentTarget as HTMLSpanElement).style.background = 'var(--glass-bg-hover)'; (e.currentTarget as HTMLSpanElement).style.color = 'var(--color-text)' }}
+          onMouseLeave={e => { (e.currentTarget as HTMLSpanElement).style.background = 'transparent'; (e.currentTarget as HTMLSpanElement).style.color = '' }}
+          title={`Open Workspace tab — ${workspaceBytes.toLocaleString()} bytes across ${vars.length} variable${vars.length === 1 ? '' : 's'}`}
+          role="button"
+        >
           {vars.length} var{vars.length === 1 ? '' : 's'}
           {vars.length > 0 && ` · ${workspaceSizeLabel}`}
         </span>
         <span>·</span>
-        <span>{plots.length} figure{plots.length === 1 ? '' : 's'}</span>
+        <span
+          style={styles.statusBarAction}
+          onClick={() => { setResultsTab('figure'); setResultsOverlay(true) }}
+          onMouseEnter={e => { (e.currentTarget as HTMLSpanElement).style.background = 'var(--glass-bg-hover)'; (e.currentTarget as HTMLSpanElement).style.color = 'var(--color-text)' }}
+          onMouseLeave={e => { (e.currentTarget as HTMLSpanElement).style.background = 'transparent'; (e.currentTarget as HTMLSpanElement).style.color = '' }}
+          title={plots.length > 0 ? 'Open Figures tab' : 'No figures yet — click to open the Figures tab'}
+          role="button"
+        >{plots.length} figure{plots.length === 1 ? '' : 's'}</span>
         <span
           style={{ marginLeft: 'auto', color: 'var(--color-text-muted)' }}
           title={`Workstation session opened at ${new Date(sessionStartedAtRef.current).toLocaleTimeString()}`}
