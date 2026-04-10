@@ -9,6 +9,7 @@ import { FiPlay, FiSquare } from 'react-icons/fi'
 import {
   LineChart, Line, ScatterChart, Scatter, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
+  ReferenceLine,
 } from 'recharts'
 import {
   run as runEngine,
@@ -1792,13 +1793,47 @@ export default function Workstation() {
     const rect = svg.getBoundingClientRect()
     if (!clone.getAttribute('width')) clone.setAttribute('width', String(rect.width))
     if (!clone.getAttribute('height')) clone.setAttribute('height', String(rect.height))
+    // Adaptive solid background: white in light mode, dark in dark mode
+    const isDark = document.documentElement.classList.contains('dark')
+    const bgColor = isDark ? '#0a0a0a' : '#ffffff'
     const bgRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
     bgRect.setAttribute('width', '100%')
     bgRect.setAttribute('height', '100%')
-    bgRect.setAttribute('fill', '#0a0a0a')
+    bgRect.setAttribute('fill', bgColor)
     clone.insertBefore(bgRect, clone.firstChild)
     return clone
   }, [])
+
+  /** Copy the current figure to clipboard as PNG with solid adaptive background. */
+  const copyPlotToClipboard = useCallback(async () => {
+    const clone = cloneCurrentPlotSvg()
+    if (!clone) return
+    const xml = new XMLSerializer().serializeToString(clone)
+    const svgBlob = new Blob([xml], { type: 'image/svg+xml;charset=utf-8' })
+    const svgUrl = URL.createObjectURL(svgBlob)
+    const img = new Image()
+    img.onload = async () => {
+      const w = Number(clone.getAttribute('width')) || img.width || 800
+      const h = Number(clone.getAttribute('height')) || img.height || 480
+      const scale = 2
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.round(w * scale)
+      canvas.height = Math.round(h * scale)
+      const ctx = canvas.getContext('2d')
+      if (!ctx) { URL.revokeObjectURL(svgUrl); return }
+      const isDark = document.documentElement.classList.contains('dark')
+      ctx.fillStyle = isDark ? '#0a0a0a' : '#ffffff'
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+      URL.revokeObjectURL(svgUrl)
+      try {
+        const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
+        if (blob) await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+      } catch { /* clipboard write may fail in some browsers */ }
+    }
+    img.onerror = () => { URL.revokeObjectURL(svgUrl) }
+    img.src = svgUrl
+  }, [cloneCurrentPlotSvg])
 
   /** Export the currently rendered figure as SVG. */
   const exportPlotSVG = useCallback(() => {
@@ -1832,7 +1867,8 @@ export default function Workstation() {
       canvas.height = Math.round(heightAttr * scale)
       const ctx = canvas.getContext('2d')
       if (!ctx) { URL.revokeObjectURL(svgUrl); return }
-      ctx.fillStyle = '#0a0a0a'
+      const isDark = document.documentElement.classList.contains('dark')
+      ctx.fillStyle = isDark ? '#0a0a0a' : '#ffffff'
       ctx.fillRect(0, 0, canvas.width, canvas.height)
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
       URL.revokeObjectURL(svgUrl)
@@ -7165,6 +7201,12 @@ export default function Workstation() {
               <button
                 style={styles.plotChip}
                 disabled={plots.length === 0}
+                onClick={() => { copyPlotToClipboard() }}
+                title="Copy figure to clipboard as PNG"
+              >copy</button>
+              <button
+                style={styles.plotChip}
+                disabled={plots.length === 0}
                 onClick={exportPlotSVG}
                 title="Download current figure as SVG"
               >svg</button>
@@ -7774,6 +7816,11 @@ export default function Workstation() {
               >▶</button>
               <button
                 style={{ ...styles.btn, ...styles.btnGhost, padding: '4px 10px', fontSize: 11 }}
+                onClick={() => { copyPlotToClipboard() }}
+                title="Copy figure to clipboard"
+              >copy</button>
+              <button
+                style={{ ...styles.btn, ...styles.btnGhost, padding: '4px 10px', fontSize: 11 }}
                 onClick={exportPlotSVG}
                 title="Download current figure as SVG"
               >svg</button>
@@ -8199,12 +8246,40 @@ function PlotView({ plot, opts = DEFAULT_PLOT_OPTS }: { plot: PlotSpec | null; o
     return row
   })
 
+  // Compute data bounds to decide quadrant display.
+  // If data spans negative and positive ranges, show all 4 quadrants.
+  let xMinVal = Infinity, xMaxVal = -Infinity
+  let yMinVal = Infinity, yMaxVal = -Infinity
+  for (const s of plot.series) {
+    for (const v of s.x) { if (Number.isFinite(v)) { if (v < xMinVal) xMinVal = v; if (v > xMaxVal) xMaxVal = v } }
+    for (const v of s.y) { if (Number.isFinite(v)) { if (v < yMinVal) yMinVal = v; if (v > yMaxVal) yMaxVal = v } }
+  }
+  const hasNegX = xMinVal < 0, hasNegY = yMinVal < 0
+  const hasPosX = xMaxVal > 0, hasPosY = yMaxVal > 0
+  // Determine if we need 4-quadrant display (data crosses both axes)
+  const fourQuadrant = (hasNegX && hasPosX) || (hasNegY && hasPosY)
+
   // Recharts log scale needs an explicit numeric domain, otherwise it
   // collapses zero/negative ticks to NaN and the axis disappears.
   const xScale = opts.logX ? 'log' : 'auto'
   const yScale = opts.logY ? 'log' : 'auto'
-  const xDomain = opts.logX ? ['auto', 'auto'] as [string, string] : undefined
-  const yDomain = opts.logY ? ['auto', 'auto'] as [string, string] : undefined
+
+  // Auto-expand domain to show full quadrants when data has negative values.
+  // Add ~5% padding so points don't sit on the axis edge.
+  let xDomain: [number | string, number | string] | undefined
+  let yDomain: [number | string, number | string] | undefined
+  if (opts.logX) {
+    xDomain = ['auto', 'auto']
+  } else if (fourQuadrant || hasNegX || hasNegY) {
+    const xPad = (xMaxVal - xMinVal) * 0.05 || 1
+    const yPad = (yMaxVal - yMinVal) * 0.05 || 1
+    xDomain = [xMinVal - xPad, xMaxVal + xPad]
+    yDomain = [yMinVal - yPad, yMaxVal + yPad]
+  }
+  if (opts.logY) {
+    yDomain = ['auto', 'auto']
+  }
+
   const showLegend = opts.legend === 'on' || (opts.legend === 'auto' && plot.series.length > 1)
 
   // Axes use --color-border-strong (10% on the foreground) instead of
@@ -8215,6 +8290,13 @@ function PlotView({ plot, opts = DEFAULT_PLOT_OPTS }: { plot: PlotSpec | null; o
   const common = (
     <>
       {opts.grid && <CartesianGrid stroke="var(--color-border-strong)" strokeDasharray="3 3" />}
+      {/* 4-quadrant: draw prominent axis lines at x=0 and y=0 */}
+      {fourQuadrant && hasNegY && hasPosY && (
+        <ReferenceLine y={0} stroke="var(--color-text-muted)" strokeWidth={1} strokeDasharray="" />
+      )}
+      {fourQuadrant && hasNegX && hasPosX && (
+        <ReferenceLine x={0} stroke="var(--color-text-muted)" strokeWidth={1} strokeDasharray="" />
+      )}
       <XAxis
         dataKey="x"
         type="number"
