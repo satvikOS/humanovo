@@ -4095,7 +4095,7 @@ export default function Workstation() {
     tabActive: {
       color: 'var(--color-text)',
       background: 'transparent',
-      borderBottom: '2px solid var(--color-text)',
+      borderBottom: '2px solid var(--color-accent-blue)',
     },
     tabCloseBtn: {
       display: 'inline-flex',
@@ -7494,15 +7494,19 @@ export default function Workstation() {
           {vars.length} var{vars.length === 1 ? '' : 's'}
           {vars.length > 0 && ` · ${workspaceSizeLabel}`}
         </span>
-        <span>·</span>
-        <span
-          style={styles.statusBarAction}
-          onClick={() => { setResultsTab('figure'); setResultsOverlay(true) }}
-          onMouseEnter={e => { (e.currentTarget as HTMLSpanElement).style.background = 'var(--glass-bg-hover)'; (e.currentTarget as HTMLSpanElement).style.color = 'var(--color-text)' }}
-          onMouseLeave={e => { (e.currentTarget as HTMLSpanElement).style.background = 'transparent'; (e.currentTarget as HTMLSpanElement).style.color = '' }}
-          title={plots.length > 0 ? 'Open Figures tab' : 'No figures yet — click to open the Figures tab'}
-          role="button"
-        >{plots.length} figure{plots.length === 1 ? '' : 's'}</span>
+        {plots.length > 0 && (
+          <>
+            <span>·</span>
+            <span
+              style={styles.statusBarAction}
+              onClick={() => { setResultsTab('figure'); setResultsOverlay(true) }}
+              onMouseEnter={e => { (e.currentTarget as HTMLSpanElement).style.background = 'var(--glass-bg-hover)'; (e.currentTarget as HTMLSpanElement).style.color = 'var(--color-text)' }}
+              onMouseLeave={e => { (e.currentTarget as HTMLSpanElement).style.background = 'transparent'; (e.currentTarget as HTMLSpanElement).style.color = '' }}
+              title="Open Figures tab"
+              role="button"
+            >{plots.length} figure{plots.length === 1 ? '' : 's'}</span>
+          </>
+        )}
         <span
           style={{ marginLeft: 'auto', color: 'var(--color-text-muted)' }}
           title={`Workstation session opened at ${new Date(sessionStartedAtRef.current).toLocaleTimeString()}`}
