@@ -4068,19 +4068,6 @@ export default function Workstation() {
       flexDirection: 'column',
       minHeight: 0,
     },
-    editorHeader: {
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      padding: '10px 16px 6px 16px',
-      fontSize: 11,
-      fontWeight: 600,
-      letterSpacing: 0.3,
-      textTransform: 'uppercase' as const,
-      color: 'var(--color-text-muted)',
-      background: 'transparent',
-      whiteSpace: 'nowrap' as const,
-    },
     tabBar: {
       display: 'flex',
       alignItems: 'stretch',
@@ -5933,46 +5920,6 @@ export default function Workstation() {
            live in their own overlays) ─────────────────────────────── */}
       <div style={styles.body}>
         <div style={styles.editorWrap}>
-          <div style={styles.editorHeader}>
-            <span>Scripts</span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                <button
-                  type="button"
-                  style={styles.plotChip}
-                  onClick={() => bumpEditorFont(-1)}
-                  disabled={editorFontSize <= EDITOR_FONT_MIN}
-                  title="Decrease editor font size"
-                  aria-label="Decrease editor font size"
-                >A−</button>
-                <span
-                  style={{
-                    fontFamily: "'JetBrains Mono', monospace",
-                    fontSize: 10,
-                    color: 'var(--color-text-muted)',
-                    minWidth: 18,
-                    textAlign: 'center',
-                  }}
-                  title="Editor font size"
-                >{editorFontSize}</span>
-                <button
-                  type="button"
-                  style={styles.plotChip}
-                  onClick={() => bumpEditorFont(1)}
-                  disabled={editorFontSize >= EDITOR_FONT_MAX}
-                  title="Increase editor font size"
-                  aria-label="Increase editor font size"
-                >A+</button>
-                <button
-                  type="button"
-                  style={{ ...styles.plotChip, ...(editorWrapOn ? styles.plotChipActive : null) }}
-                  onClick={toggleEditorWrap}
-                  title="Toggle soft word wrap"
-                  aria-pressed={editorWrapOn}
-                >wrap</button>
-              </div>
-            </div>
-          </div>
           <div style={styles.tabBar}>
             {scriptStore.list.map(s => {
               const active = s.id === scriptStore.activeId
@@ -6050,6 +5997,45 @@ export default function Workstation() {
               )
             })}
             <button style={styles.tabAddBtn} onClick={newScript} title="New script">+</button>
+
+            {/* Editor font controls — flush right inside the tab bar so
+                we don't burn a whole row on a "SCRIPTS" header that adds
+                nothing the tab names don't already convey. */}
+            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <button
+                type="button"
+                style={styles.plotChip}
+                onClick={() => bumpEditorFont(-1)}
+                disabled={editorFontSize <= EDITOR_FONT_MIN}
+                title="Decrease editor font size"
+                aria-label="Decrease editor font size"
+              >A−</button>
+              <span
+                style={{
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: 10,
+                  color: 'var(--color-text-muted)',
+                  minWidth: 18,
+                  textAlign: 'center' as const,
+                }}
+                title="Editor font size"
+              >{editorFontSize}</span>
+              <button
+                type="button"
+                style={styles.plotChip}
+                onClick={() => bumpEditorFont(1)}
+                disabled={editorFontSize >= EDITOR_FONT_MAX}
+                title="Increase editor font size"
+                aria-label="Increase editor font size"
+              >A+</button>
+              <button
+                type="button"
+                style={{ ...styles.plotChip, ...(editorWrapOn ? styles.plotChipActive : null) }}
+                onClick={toggleEditorWrap}
+                title="Toggle soft word wrap"
+                aria-pressed={editorWrapOn}
+              >wrap</button>
+            </div>
           </div>
           {tabMenu && (() => {
             const menuW = 200
