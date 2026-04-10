@@ -230,6 +230,145 @@ function computeSeries(expr: string, xMin: number, xMax: number, n = 300): { x: 
 }
 
 // ═══════════════════════════════════════════════════════════════════
+//  ODE System Solver — 4th-order Runge-Kutta
+// ═══════════════════════════════════════════════════════════════════
+
+type ODEDerivFn = (t: number, y: number[]) => number[]
+
+function rk4(deriv: ODEDerivFn, y0: number[], tSpan: [number, number], steps = 500): { t: number[]; y: number[][] } {
+  const dt = (tSpan[1] - tSpan[0]) / steps
+  const ts: number[] = [tSpan[0]]
+  const ys: number[][] = [y0.slice()]
+  let y = y0.slice()
+  let t = tSpan[0]
+  for (let i = 0; i < steps; i++) {
+    const k1 = deriv(t, y)
+    const k2 = deriv(t + dt / 2, y.map((v, j) => v + dt / 2 * k1[j]))
+    const k3 = deriv(t + dt / 2, y.map((v, j) => v + dt / 2 * k2[j]))
+    const k4 = deriv(t + dt, y.map((v, j) => v + dt * k3[j]))
+    y = y.map((v, j) => v + (dt / 6) * (k1[j] + 2 * k2[j] + 2 * k3[j] + k4[j]))
+    t = tSpan[0] + (i + 1) * dt
+    ts.push(parseFloat(t.toFixed(6)))
+    ys.push(y.slice())
+  }
+  return { t: ts, y: ys }
+}
+
+interface ODETemplate {
+  id: string
+  name: string
+  category: string
+  vars: string[]
+  params: { key: string; label: string; value: number; min: number; max: number; step: number }[]
+  tSpan: [number, number]
+  y0: number[]
+  deriv: (p: Record<string, number>) => ODEDerivFn
+}
+
+const ODE_TEMPLATES: ODETemplate[] = [
+  {
+    id: 'sir', name: 'SIR Epidemic', category: 'Epidemiology',
+    vars: ['S', 'I', 'R'],
+    params: [
+      { key: 'beta', label: 'beta', value: 0.3, min: 0.01, max: 2, step: 0.01 },
+      { key: 'gamma', label: 'gamma', value: 0.1, min: 0.01, max: 1, step: 0.01 },
+      { key: 'N', label: 'N', value: 1000, min: 100, max: 100000, step: 100 },
+    ],
+    tSpan: [0, 160], y0: [990, 10, 0],
+    deriv: (p) => (_t, y) => {
+      const [S, I] = y; const N = p.N
+      const dS = -p.beta * S * I / N
+      const dI = p.beta * S * I / N - p.gamma * I
+      const dR = p.gamma * I
+      return [dS, dI, dR]
+    },
+  },
+  {
+    id: 'seir', name: 'SEIR Epidemic', category: 'Epidemiology',
+    vars: ['S', 'E', 'I', 'R'],
+    params: [
+      { key: 'beta', label: 'beta', value: 0.5, min: 0.01, max: 2, step: 0.01 },
+      { key: 'sigma', label: 'sigma', value: 0.2, min: 0.01, max: 1, step: 0.01 },
+      { key: 'gamma', label: 'gamma', value: 0.1, min: 0.01, max: 1, step: 0.01 },
+    ],
+    tSpan: [0, 200], y0: [990, 0, 10, 0],
+    deriv: (p) => (_t, y) => {
+      const [S, E, I] = y; const N = 1000
+      return [-p.beta * S * I / N, p.beta * S * I / N - p.sigma * E, p.sigma * E - p.gamma * I, p.gamma * I]
+    },
+  },
+  {
+    id: 'lotka-volterra', name: 'Lotka-Volterra', category: 'Population Dynamics',
+    vars: ['Prey', 'Predator'],
+    params: [
+      { key: 'a', label: 'alpha', value: 1.1, min: 0.1, max: 3, step: 0.1 },
+      { key: 'b', label: 'beta', value: 0.4, min: 0.1, max: 2, step: 0.1 },
+      { key: 'd', label: 'delta', value: 0.1, min: 0.01, max: 1, step: 0.01 },
+      { key: 'g', label: 'gamma', value: 0.4, min: 0.1, max: 2, step: 0.1 },
+    ],
+    tSpan: [0, 50], y0: [40, 9],
+    deriv: (p) => (_t, y) => {
+      const [x, yy] = y
+      return [p.a * x - p.b * x * yy, p.d * x * yy - p.g * yy]
+    },
+  },
+  {
+    id: 'pk-2comp', name: 'PK Two-Compartment', category: 'Pharmacokinetics',
+    vars: ['Central', 'Peripheral'],
+    params: [
+      { key: 'k10', label: 'k10', value: 0.15, min: 0.01, max: 1, step: 0.01 },
+      { key: 'k12', label: 'k12', value: 0.3, min: 0.01, max: 1, step: 0.01 },
+      { key: 'k21', label: 'k21', value: 0.1, min: 0.01, max: 1, step: 0.01 },
+    ],
+    tSpan: [0, 48], y0: [100, 0],
+    deriv: (p) => (_t, y) => {
+      const [c, pe] = y
+      return [-(p.k10 + p.k12) * c + p.k21 * pe, p.k12 * c - p.k21 * pe]
+    },
+  },
+  {
+    id: 'gene-toggle', name: 'Genetic Toggle Switch', category: 'Systems Biology',
+    vars: ['Protein A', 'Protein B'],
+    params: [
+      { key: 'a1', label: 'alpha1', value: 3, min: 0.5, max: 10, step: 0.5 },
+      { key: 'a2', label: 'alpha2', value: 3, min: 0.5, max: 10, step: 0.5 },
+      { key: 'n', label: 'n (Hill)', value: 2, min: 1, max: 5, step: 0.5 },
+      { key: 'dg', label: 'degradation', value: 1, min: 0.1, max: 3, step: 0.1 },
+    ],
+    tSpan: [0, 20], y0: [0.1, 3],
+    deriv: (p) => (_t, y) => {
+      const [a, b] = y
+      return [p.a1 / (1 + Math.pow(b, p.n)) - p.dg * a, p.a2 / (1 + Math.pow(a, p.n)) - p.dg * b]
+    },
+  },
+  {
+    id: 'hodgkin-huxley-simple', name: 'FitzHugh-Nagumo Neuron', category: 'Neuroscience',
+    vars: ['V (membrane)', 'w (recovery)'],
+    params: [
+      { key: 'I', label: 'I_ext', value: 0.5, min: 0, max: 2, step: 0.05 },
+      { key: 'a', label: 'a', value: 0.7, min: 0, max: 2, step: 0.1 },
+      { key: 'b', label: 'b', value: 0.8, min: 0, max: 2, step: 0.1 },
+      { key: 'tau', label: 'tau', value: 12.5, min: 1, max: 30, step: 0.5 },
+    ],
+    tSpan: [0, 100], y0: [-1, 1],
+    deriv: (p) => (_t, y) => {
+      const [v, w] = y
+      return [v - v * v * v / 3 - w + p.I, (v + p.a - p.b * w) / p.tau]
+    },
+  },
+]
+
+const ODE_CATEGORIES = [
+  { name: 'Epidemiology', ids: ['sir', 'seir'] },
+  { name: 'Population Dynamics', ids: ['lotka-volterra'] },
+  { name: 'Pharmacokinetics', ids: ['pk-2comp'] },
+  { name: 'Systems Biology', ids: ['gene-toggle'] },
+  { name: 'Neuroscience', ids: ['hodgkin-huxley-simple'] },
+]
+
+const ODE_COLORS = ['#8b8b8b', '#b0b0b0', '#666666', '#d4d4d4']
+
+// ═══════════════════════════════════════════════════════════════════
 //  Predefined Scientific Equations
 // ═══════════════════════════════════════════════════════════════════
 
@@ -328,6 +467,17 @@ export default function EquationPlotter() {
   const [error, setError] = useState<string | null>(null)
   const [showLibrary, setShowLibrary] = useState(false)
   const [copied, setCopied] = useState(false)
+
+  // ODE mode
+  const [mode, setMode] = useState<'equation' | 'ode'>('equation')
+  const [odeTemplate, setOdeTemplate] = useState(ODE_TEMPLATES[0].id)
+  const [odeParams, setOdeParams] = useState<Record<string, number>>(() => {
+    const p: Record<string, number> = {}
+    ODE_TEMPLATES[0].params.forEach(pp => { p[pp.key] = pp.value })
+    return p
+  })
+  const [odeResult, setOdeResult] = useState<{ t: number[]; y: number[][] } | null>(null)
+  const [showOdeLibrary, setShowOdeLibrary] = useState(false)
 
   const inputRef = useRef<HTMLInputElement>(null)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -487,6 +637,44 @@ export default function EquationPlotter() {
     return { xMn, xMx, yMn, yMx, showXRef, showYRef }
   }, [mainData])
 
+  // ── ODE helpers ────────────────────────────────────────────────
+  const activeODE = useMemo(() => ODE_TEMPLATES.find(t => t.id === odeTemplate) || ODE_TEMPLATES[0], [odeTemplate])
+
+  const selectODE = useCallback((id: string) => {
+    setOdeTemplate(id)
+    const tmpl = ODE_TEMPLATES.find(t => t.id === id)!
+    const p: Record<string, number> = {}
+    tmpl.params.forEach(pp => { p[pp.key] = pp.value })
+    setOdeParams(p)
+    setOdeResult(null)
+    setShowOdeLibrary(false)
+  }, [])
+
+  const runODE = useCallback(() => {
+    const derivFn = activeODE.deriv(odeParams)
+    const result = rk4(derivFn, activeODE.y0, activeODE.tSpan, 500)
+    setOdeResult(result)
+  }, [activeODE, odeParams])
+
+  const odeChartData = useMemo(() => {
+    if (!odeResult) return []
+    return odeResult.t.map((t, i) => {
+      const row: Record<string, number> = { t }
+      activeODE.vars.forEach((v, j) => { row[v] = odeResult.y[i][j] })
+      return row
+    })
+  }, [odeResult, activeODE])
+
+  const exportOdeCSV = useCallback(() => {
+    if (!odeResult) return
+    const header = ['t', ...activeODE.vars].join(',') + '\n'
+    const rows = odeResult.t.map((t, i) => [t, ...activeODE.vars.map((_v, j) => odeResult.y[i][j])].join(',')).join('\n')
+    const blob = new Blob([header + rows], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = `ode_${odeTemplate}.csv`; a.click(); URL.revokeObjectURL(url)
+  }, [odeResult, activeODE, odeTemplate])
+
   // ── Inline styles (MC-matching) ─────────────────────────────
   const chip: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 10px', borderRadius: 5, fontSize: 11, fontWeight: 600, background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', color: 'var(--color-text)', cursor: 'pointer', whiteSpace: 'nowrap' }
   const inp: React.CSSProperties = { width: 64, padding: '3px 6px', borderRadius: 4, fontSize: 11, fontFamily: 'monospace', background: 'transparent', border: '1px solid var(--glass-border)', color: 'var(--color-text)', outline: 'none' }
@@ -494,7 +682,16 @@ export default function EquationPlotter() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10, height: '100%', minHeight: 0 }}>
-      {/* ── Top toolbar ──────────────────────────────────────────── */}
+      {/* ── Mode toggle ──────────────────────────────────────────── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <button onClick={() => setMode('equation')} style={{ ...chip, fontWeight: mode === 'equation' ? 700 : 400, borderColor: mode === 'equation' ? 'var(--color-text)' : undefined }}>f(x) Equation</button>
+        <button onClick={() => setMode('ode')} style={{ ...chip, fontWeight: mode === 'ode' ? 700 : 400, borderColor: mode === 'ode' ? 'var(--color-text)' : undefined }}>ODE Systems</button>
+        <span style={{ flex: 1 }} />
+        <span style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>{mode === 'equation' ? '32 presets + custom expressions' : '6 ODE templates with RK4 solver'}</span>
+      </div>
+
+      {mode === 'equation' ? (<>
+      {/* ── Equation toolbar ─────────────────────────────────────── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <button style={{ ...chip, fontWeight: 600 }} onClick={() => setShowLibrary(true)}>Library</button>
         <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text)', fontFamily: 'monospace' }}>f(x) =</span>
@@ -633,6 +830,106 @@ export default function EquationPlotter() {
           </div>
         </div>
       )}
+      </>) : (<>
+      {/* ══════════════════════════════════════════════════════════ */}
+      {/*  ODE Systems Mode                                        */}
+      {/* ══════════════════════════════════════════════════════════ */}
+
+      {/* ODE toolbar */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <button style={{ ...chip, fontWeight: 600 }} onClick={() => setShowOdeLibrary(true)}>Library</button>
+        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text)' }}>{activeODE.name}</span>
+        <span style={{ fontSize: 11, color: 'var(--color-text-muted)', flex: 1 }}>
+          Variables: {activeODE.vars.join(', ')}
+        </span>
+        <button style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600, background: 'var(--color-text)', color: 'var(--color-bg)', border: 'none', cursor: 'pointer' }} onClick={runODE}>
+          <FiPlay size={12} /> Solve
+        </button>
+      </div>
+
+      {/* ODE parameters */}
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+        {activeODE.params.map(p => (
+          <div key={p.key} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <label style={{ fontSize: 11, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>{p.label}</label>
+            <input type="number" style={inp} value={odeParams[p.key] ?? p.value} min={p.min} max={p.max} step={p.step}
+              onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) setOdeParams(prev => ({ ...prev, [p.key]: v })) }} />
+          </div>
+        ))}
+        <span style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>
+          t: [{activeODE.tSpan[0]}, {activeODE.tSpan[1]}] | y0: [{activeODE.y0.join(', ')}]
+        </span>
+      </div>
+
+      {/* ODE Chart */}
+      <div style={{ flex: 1, minHeight: 0, border: '1px solid var(--glass-border)', borderRadius: 8, padding: 10, background: 'var(--glass-bg)' }}>
+        {odeChartData.length > 0 ? (
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={odeChartData} margin={{ top: 8, right: 16, bottom: 8, left: 8 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" strokeOpacity={0.5} />
+              <XAxis dataKey="t" tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" label={{ value: 'Time', position: 'insideBottom', offset: -2, fontSize: 10, fill: 'var(--color-text-muted)' }} />
+              <YAxis tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" width={56} />
+              <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} />
+              {activeODE.vars.map((v, i) => (
+                <Line key={v} type="monotone" dataKey={v} stroke={ODE_COLORS[i % ODE_COLORS.length]} strokeWidth={1.5} strokeOpacity={0.7} dot={false} name={v} isAnimationActive={false} />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 12, color: 'var(--color-text-muted)' }}>
+            Select an ODE template from the Library and click Solve
+          </div>
+        )}
+      </div>
+
+      {/* ODE stats/export */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        {odeResult && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 11, padding: '4px 10px', borderRadius: 5, border: '1px solid var(--glass-border)', background: 'var(--glass-bg)' }}>
+            <span style={{ color: 'var(--color-text-muted)' }}>Steps: <strong style={{ color: 'var(--color-text)' }}>{odeResult.t.length}</strong></span>
+            <span style={{ color: 'var(--color-text-muted)' }}>dt: <strong style={{ color: 'var(--color-text)' }}>{((activeODE.tSpan[1] - activeODE.tSpan[0]) / 500).toFixed(4)}</strong></span>
+            {activeODE.vars.map((v, j) => {
+              const vals = odeResult.y.map(row => row[j])
+              const mx = Math.max(...vals)
+              return <span key={v} style={{ color: 'var(--color-text-muted)' }}>{v} max: <strong style={{ color: 'var(--color-text)' }}>{mx.toFixed(1)}</strong></span>
+            })}
+          </div>
+        )}
+        <div style={{ flex: 1 }} />
+        <button onClick={exportOdeCSV} disabled={!odeResult} style={{ ...chip, fontWeight: 400, opacity: odeResult ? 1 : 0.3 }}>
+          <FiDownload size={11} /> CSV
+        </button>
+      </div>
+
+      {/* ODE Library overlay */}
+      {showOdeLibrary && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={e => { if (e.target === e.currentTarget) setShowOdeLibrary(false) }}>
+          <div style={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 10, width: 520, maxWidth: '90vw', maxHeight: '80vh', overflow: 'auto', padding: '20px 24px', boxShadow: '0 8px 32px rgba(0,0,0,0.2)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: 'var(--color-text)' }}>ODE Systems Library</h2>
+              <button style={chip} onClick={() => setShowOdeLibrary(false)}>Close</button>
+            </div>
+            {ODE_CATEGORIES.map(cat => (
+              <div key={cat.name} style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--color-text-muted)', marginBottom: 6 }}>{cat.name}</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 6 }}>
+                  {cat.ids.map(id => {
+                    const tmpl = ODE_TEMPLATES.find(t => t.id === id)!
+                    const isActive = odeTemplate === id
+                    return (
+                      <div key={id} style={{ ...card, ...(isActive ? { borderColor: 'var(--color-text)' } : {}) }} onClick={() => selectODE(id)}>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text)' }}>{tmpl.name}</div>
+                        <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginTop: 2 }}>Variables: {tmpl.vars.join(', ')}</div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      </>)}
     </div>
   )
 }
