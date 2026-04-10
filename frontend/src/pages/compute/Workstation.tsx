@@ -745,7 +745,7 @@ export default function Workstation() {
   // summary, and fades out automatically after a few seconds. Designed
   // so users get a visible confirmation without ever having to peek at
   // the status bar.
-  const [runPulse, setRunPulse] = useState<{ kind: 'ok' | 'err'; label: string; key: number } | null>(null)
+  const [runPulse, setRunPulse] = useState<{ kind: 'ok' | 'err'; label: string; key: number; tab: 'figure' | 'console' | 'workspace' } | null>(null)
   useEffect(() => {
     if (!runPulse) return
     const id = window.setTimeout(() => {
@@ -1156,25 +1156,32 @@ export default function Workstation() {
 
   /** Push engine outputs into the console entry list and plot buffer. */
   const appendOutputs = useCallback((outs: RunOutput[]) => {
+    // Build the new entries and plot list synchronously up front. The
+    // previous version mutated `newPlots` from inside a setEntries
+    // updater, which only worked because of React's eager-bailout
+    // optimization — under concurrent rendering or repeated dispatches
+    // the updater can run later than the surrounding code, leaving
+    // newPlots empty and skipping setPlots entirely. Computing both
+    // arrays before any setState removes the ordering trap.
     const newPlots: PlotSpec[] = []
-    setEntries(prev => {
-      const next = [...prev]
-      for (const o of outs) {
-        if (o.kind === 'text' && o.text) {
-          next.push(mkEntry({ kind: 'output', text: o.text }))
-        } else if (o.kind === 'error') {
-          next.push(mkEntry({ kind: 'error', text: o.text ?? 'error', line: o.line }))
-        } else if (o.kind === 'plot' && o.plot) {
-          newPlots.push(o.plot)
-          const n = o.plot.series.length
-          next.push(mkEntry({
-            kind: 'output',
-            text: `[figure] ${n} series${o.plot.title ? ' — ' + o.plot.title : ''}`,
-          }))
-        }
+    const newEntries: ConsoleEntry[] = []
+    for (const o of outs) {
+      if (o.kind === 'text' && o.text) {
+        newEntries.push(mkEntry({ kind: 'output', text: o.text }))
+      } else if (o.kind === 'error') {
+        newEntries.push(mkEntry({ kind: 'error', text: o.text ?? 'error', line: o.line }))
+      } else if (o.kind === 'plot' && o.plot) {
+        newPlots.push(o.plot)
+        const n = o.plot.series.length
+        newEntries.push(mkEntry({
+          kind: 'output',
+          text: `[figure] ${n} series${o.plot.title ? ' — ' + o.plot.title : ''}`,
+        }))
       }
-      return next
-    })
+    }
+    if (newEntries.length > 0) {
+      setEntries(prev => [...prev, ...newEntries])
+    }
     if (newPlots.length > 0) {
       setPlots(prev => {
         const merged = [...prev, ...newPlots]
@@ -1416,25 +1423,30 @@ export default function Workstation() {
         setLastRunMs(ms)
         setLastRunOk(!producedError)
         setRunning(false)
-        // Pop the results overlay open as soon as the run finishes so the
-        // user doesn't have to hunt for output. Pick the most informative
-        // default tab: errors take priority, then a fresh figure, then
-        // console output by default. The user can switch tabs freely once
-        // the overlay is up.
-        setResultsTab(producedError ? 'console' : producedPlot ? 'figure' : 'console')
-        setResultsOverlay(true)
+        // Pre-select the most informative tab in the Results overlay so that
+        // when the user opens it (via the pulse chip, the toolbar Results
+        // button, or a status-bar pill) it lands on the right view. We do
+        // NOT auto-open the overlay anymore — clinicians, surgeons and
+        // PKPD researchers asked for the workstation to stay calm and
+        // uninterrupted after each run. The pulse chip below is the
+        // discoverable, on-demand entry point.
+        const nextTab: 'figure' | 'console' | 'workspace' =
+          producedError ? 'console' : producedPlot ? 'figure' : 'console'
+        setResultsTab(nextTab)
         // Drop a calm pulse chip in the toolbar so the user gets a
         // confirmation that registers even if they never glance at the
-        // status bar. The chip auto-dismisses via the runPulse useEffect.
+        // status bar. The chip is clickable — one click opens Results on
+        // the appropriate tab. Auto-dismisses via the runPulse useEffect.
         const durLabel = ms < 1000 ? `${ms.toFixed(0)} ms` : `${(ms / 1000).toFixed(2)} s`
         setRunPulse({
           kind: producedError ? 'err' : 'ok',
           label: producedError
-            ? 'Error · check console'
+            ? 'Error · view console'
             : producedPlot
-              ? `Done · figure ready · ${durLabel}`
+              ? `Done · view figure · ${durLabel}`
               : `Done · ${durLabel}`,
           key: Date.now(),
+          tab: nextTab,
         })
       }
     }, 0)
@@ -3925,8 +3937,12 @@ export default function Workstation() {
       background: 'var(--glass-bg)',
       color: 'var(--color-text-secondary)',
       whiteSpace: 'nowrap' as const,
-      pointerEvents: 'none' as const,
-      transition: 'opacity 200ms ease',
+      cursor: 'pointer',
+      transition: 'opacity 200ms ease, background 120ms ease, border-color 120ms ease',
+      // Reset native button defaults so this <button> looks identical to
+      // the previous <span>-based pill but stays focusable + clickable.
+      fontFamily: 'inherit',
+      lineHeight: 1.4,
     },
     runPulseOk: {
       borderColor: 'var(--color-border-strong)',
@@ -5619,20 +5635,30 @@ export default function Workstation() {
 
         {/* Calm post-run feedback chip — auto-dismisses via the runPulse
             useEffect. Hidden completely while a run is in flight so the
-            "Running…" button stays the only signal during execution. */}
+            "Running…" button stays the only signal during execution. The
+            chip is the discoverable, on-demand entry point into the
+            Results overlay: one click opens Results on the right tab. */}
         {runPulse && !running && (
-          <span
+          <button
             key={runPulse.key}
+            type="button"
             style={{
               ...styles.runPulse,
               ...(runPulse.kind === 'ok' ? styles.runPulseOk : styles.runPulseErr),
             }}
-            role="status"
+            onClick={() => { setResultsTab(runPulse.tab); setResultsOverlay(true) }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.background = 'var(--glass-bg-hover)'
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.background = 'var(--glass-bg)'
+            }}
             aria-live="polite"
+            title={runPulse.kind === 'err' ? 'Open Results · console' : `Open Results · ${runPulse.tab}`}
           >
             <span style={styles.runPulseDot} />
             {runPulse.label}
-          </span>
+          </button>
         )}
 
         {/* Top-level menu trees. Each button toggles its dropdown and
