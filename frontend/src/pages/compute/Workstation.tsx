@@ -4668,6 +4668,33 @@ export default function Workstation() {
       borderTop: '1px solid var(--glass-border)',
       background: 'transparent',
     },
+    // Subtle ghost hints surfaced inside the command bar so users
+    // organically learn the keyboard shortcuts. Shown only when the
+    // input is empty so the bar stays clean while typing.
+    cmdHint: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 10,
+      fontFamily: "'JetBrains Mono', monospace",
+      fontSize: 10,
+      color: 'var(--color-text-muted)',
+      whiteSpace: 'nowrap' as const,
+      flex: '0 0 auto',
+      pointerEvents: 'none' as const,
+    },
+    cmdHintKbd: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      padding: '1px 5px',
+      borderRadius: 3,
+      border: '1px solid var(--glass-border)',
+      background: 'var(--glass-bg)',
+      color: 'var(--color-text-secondary)',
+      fontFamily: "'JetBrains Mono', monospace",
+      fontSize: 9.5,
+      lineHeight: 1.4,
+      marginRight: 4,
+    },
     histSearchBar: {
       display: 'flex',
       alignItems: 'center',
@@ -7307,6 +7334,13 @@ export default function Workstation() {
           spellCheck={false}
           autoComplete="off"
         />
+        {cmd === '' && (
+          <span style={styles.cmdHint} aria-hidden="true">
+            <span><span style={styles.cmdHintKbd}>↑↓</span>history</span>
+            <span><span style={styles.cmdHintKbd}>⌃R</span>search</span>
+            <span><span style={styles.cmdHintKbd}>⌃L</span>clear</span>
+          </span>
+        )}
       </div>
 
       {/* ─── Fullscreen figure overlay ──────────────────────────────── */}
