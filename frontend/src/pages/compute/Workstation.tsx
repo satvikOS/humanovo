@@ -3760,6 +3760,56 @@ export default function Workstation() {
     })
   }, [paletteCommands, paletteQuery])
 
+  // Map a command id to a human-friendly category. The order in this
+  // list matches the order categories appear in the unfiltered palette
+  // view, so the most-used groups (Run, Edit, Navigate) sit at the top.
+  const PALETTE_CATEGORY_ORDER = [
+    'Run', 'Edit', 'Navigate', 'Scripts', 'View', 'Console', 'Workspace', 'Figures', 'Snippets', 'Help',
+  ] as const
+  const categoryOfPaletteCommand = (id: string): typeof PALETTE_CATEGORY_ORDER[number] => {
+    if (id === 'run' || id.startsWith('run-')) return 'Run'
+    if (id === 'goto-sym' || id === 'next-err' || id === 'prev-err' || id.startsWith('bm-')) return 'Navigate'
+    if (id.startsWith('snip-')) return 'Snippets'
+    if (id === 'find' || id === 'goto' || id === 'rename-id' || id === 'trim-ws' || id === 'tabs-spaces' || id === 'join-lines' || id === 'upper-sel' || id === 'lower-sel' || id === 'sort-lines' || id === 'unique-lines' || id === 'drop-blank' || id === 'reverse-lines' || id === 'goto-bracket' || id === 'sel-bracket') return 'Edit'
+    if (id === 'new-script' || id === 'dup-script' || id === 'close-script' || id === 'close-other' || id === 'close-right' || id === 'reopen' || id === 'rename') return 'Scripts'
+    if (id === 'wrap' || id === 'font-up' || id === 'font-down' || id === 'font-reset' || id.startsWith('res-')) return 'View'
+    if (id === 'clear-con' || id === 'clear-err' || id === 'con-time' || id === 'copy-con' || id === 'dl-con') return 'Console'
+    if (id === 'reset-ws' || id === 'exp-ws') return 'Workspace'
+    if (id === 'exp-svg' || id === 'exp-png' || id === 'exp-csv' || id === 'clear-figs') return 'Figures'
+    if (id === 'help') return 'Help'
+    return 'Edit'
+  }
+  // When the palette is unfiltered, walk paletteCommands once and emit
+  // a flat array of either category headings or commands so the render
+  // pass stays simple and the keyboard cursor still maps cleanly to a
+  // command index in visiblePaletteCommands.
+  const groupedPaletteRows = useMemo(() => {
+    if (paletteQuery.trim()) return null
+    type Row = { kind: 'cat'; label: string } | { kind: 'cmd'; cmd: typeof paletteCommands[number]; flatIdx: number }
+    const grouped: Record<string, typeof paletteCommands> = {}
+    paletteCommands.forEach(c => {
+      const cat = categoryOfPaletteCommand(c.id)
+      if (!grouped[cat]) grouped[cat] = []
+      grouped[cat].push(c)
+    })
+    const rows: Row[] = []
+    let flatIdx = 0
+    for (const cat of PALETTE_CATEGORY_ORDER) {
+      const list = grouped[cat]
+      if (!list || list.length === 0) continue
+      rows.push({ kind: 'cat', label: cat })
+      for (const c of list) {
+        // Find the matching index in paletteCommands so the keyboard
+        // cursor (which advances through visiblePaletteCommands, which
+        // equals paletteCommands when unfiltered) lines up with the
+        // rendered cmd row.
+        rows.push({ kind: 'cmd', cmd: c, flatIdx })
+        flatIdx += 1
+      }
+    }
+    return rows
+  }, [paletteCommands, paletteQuery])
+
   // Keep the highlighted item index in range as the filter narrows.
   useEffect(() => {
     if (paletteIndex >= visiblePaletteCommands.length) setPaletteIndex(0)
@@ -5280,6 +5330,18 @@ export default function Workstation() {
       fontStyle: 'italic' as const,
       fontSize: 12,
       textAlign: 'center' as const,
+    },
+    // Category heading rendered between groups when the palette is
+    // showing the unfiltered list. Disappears as soon as the user starts
+    // typing so the flat fuzzy results stay tight.
+    paletteCategory: {
+      padding: '10px 12px 4px 12px',
+      fontSize: 9.5,
+      fontFamily: "'JetBrains Mono', monospace",
+      fontWeight: 600,
+      letterSpacing: 1.2,
+      textTransform: 'uppercase' as const,
+      color: 'var(--color-text-muted)',
     },
     // Calm footer strip for the palette / symbol nav surfaces. Shows
     // keyboard hints so first-time users discover the shortcuts after
@@ -7674,22 +7736,42 @@ export default function Workstation() {
               {visiblePaletteCommands.length === 0 && (
                 <div style={styles.paletteEmpty}>No commands match "{paletteQuery}".</div>
               )}
-              {visiblePaletteCommands.map((cmd, i) => {
-                const active = i === paletteIndex
-                return (
-                  <div
-                    key={cmd.id}
-                    role="option"
-                    aria-selected={active}
-                    style={active ? { ...styles.paletteItem, ...styles.paletteItemActive } : styles.paletteItem}
-                    onMouseEnter={() => setPaletteIndex(i)}
-                    onMouseDown={e => { e.preventDefault(); closePalette(); cmd.run() }}
-                  >
-                    <span>{cmd.title}</span>
-                    {cmd.hint && <span style={styles.paletteHint}>{cmd.hint}</span>}
-                  </div>
-                )
-              })}
+              {groupedPaletteRows
+                ? groupedPaletteRows.map((row) => {
+                    if (row.kind === 'cat') {
+                      return <div key={`cat-${row.label}`} style={styles.paletteCategory}>{row.label}</div>
+                    }
+                    const active = row.flatIdx === paletteIndex
+                    return (
+                      <div
+                        key={row.cmd.id}
+                        role="option"
+                        aria-selected={active}
+                        style={active ? { ...styles.paletteItem, ...styles.paletteItemActive } : styles.paletteItem}
+                        onMouseEnter={() => setPaletteIndex(row.flatIdx)}
+                        onMouseDown={e => { e.preventDefault(); closePalette(); row.cmd.run() }}
+                      >
+                        <span>{row.cmd.title}</span>
+                        {row.cmd.hint && <span style={styles.paletteHint}>{row.cmd.hint}</span>}
+                      </div>
+                    )
+                  })
+                : visiblePaletteCommands.map((cmd, i) => {
+                    const active = i === paletteIndex
+                    return (
+                      <div
+                        key={cmd.id}
+                        role="option"
+                        aria-selected={active}
+                        style={active ? { ...styles.paletteItem, ...styles.paletteItemActive } : styles.paletteItem}
+                        onMouseEnter={() => setPaletteIndex(i)}
+                        onMouseDown={e => { e.preventDefault(); closePalette(); cmd.run() }}
+                      >
+                        <span>{cmd.title}</span>
+                        {cmd.hint && <span style={styles.paletteHint}>{cmd.hint}</span>}
+                      </div>
+                    )
+                  })}
             </div>
             <div style={styles.paletteFooter}>
               <span>
