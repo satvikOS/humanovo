@@ -713,6 +713,22 @@ export default function Workstation() {
   const [libFilter, setLibFilter] = useState('')
   const [libMode, setLibMode] = useState<'templates' | 'functions'>('templates')
   const [activeTemplate, setActiveTemplate] = useState<string | null>(null)
+  // Keyboard cursor inside the library overlay. Indexes into the flat
+  // visible-items list for the active mode (templates or functions),
+  // not the grouped/category structure. Resets to 0 whenever the mode
+  // or the search filter changes so the user always lands on the first
+  // result after a search.
+  const [libCursor, setLibCursor] = useState(0)
+  useEffect(() => { setLibCursor(0) }, [libFilter, libMode, library])
+  // Smoothly scroll the highlighted item into view whenever the cursor
+  // moves. Uses a data attribute on each item card to keep this side
+  // effect cheap (no refs map). Only fires while the library overlay
+  // is open.
+  useEffect(() => {
+    if (library !== 'open') return
+    const el = document.querySelector(`[data-lib-idx="${libCursor}"]`)
+    if (el) (el as HTMLElement).scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }, [library, libCursor, libMode, libFilter])
   const [cursor, setCursor] = useState<{ line: number; col: number }>({ line: 1, col: 1 })
   // Live selection size (characters, logical lines and word count) for the
   // status bar. Null when the user isn't selecting any text.
@@ -4696,6 +4712,14 @@ export default function Workstation() {
       borderColor: 'var(--color-border-strong)',
       color: 'var(--color-text)',
     },
+    // Cursor highlight for the keyboard-navigated item in the library
+    // overlay. A subtle inset accent so the item reads as "selected by
+    // arrows" without flashing or shouting.
+    libraryItemCardCursor: {
+      borderColor: 'var(--color-text)',
+      boxShadow: 'inset 2px 0 0 var(--color-text)',
+      color: 'var(--color-text)',
+    },
     libraryItemTitle: {
       color: 'var(--color-text)',
       fontWeight: 500,
@@ -6134,6 +6158,46 @@ export default function Workstation() {
         const groups = isTpl ? groupedTemplates : groupedBuiltins
         const total = isTpl ? filteredTemplates.length : filteredBuiltins.length
         const visibleCats = cats.filter(c => (groups[c]?.length ?? 0) > 0)
+        // Flat ordered list mirroring exactly what the grid renders, in
+        // category-then-item order. The library overlay's keyboard
+        // navigation (arrows / Home / End / Enter) walks this list and
+        // each item card is tagged with data-lib-idx so the
+        // scroll-into-view effect can find the active card by index.
+        const flatItems: Array<
+          | { kind: 'tpl'; t: WorkstationTemplate }
+          | { kind: 'fn'; d: BuiltinDoc }
+        > = isTpl
+          ? visibleCats.flatMap(c => (groupedTemplates[c] ?? []).map(t => ({ kind: 'tpl' as const, t })))
+          : visibleCats.flatMap(c => (groupedBuiltins[c] ?? []).map(d => ({ kind: 'fn' as const, d })))
+        const cursorClamped = flatItems.length === 0 ? -1 : Math.max(0, Math.min(libCursor, flatItems.length - 1))
+        const onLibSearchKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+          if (e.key === 'ArrowDown') {
+            e.preventDefault()
+            if (flatItems.length > 0) setLibCursor(c => Math.min(flatItems.length - 1, (c < 0 ? 0 : c + 1)))
+          } else if (e.key === 'ArrowUp') {
+            e.preventDefault()
+            if (flatItems.length > 0) setLibCursor(c => Math.max(0, (c < 0 ? 0 : c - 1)))
+          } else if (e.key === 'Home') {
+            e.preventDefault()
+            if (flatItems.length > 0) setLibCursor(0)
+          } else if (e.key === 'End') {
+            e.preventDefault()
+            if (flatItems.length > 0) setLibCursor(flatItems.length - 1)
+          } else if (e.key === 'Enter') {
+            e.preventDefault()
+            const sel = cursorClamped >= 0 ? flatItems[cursorClamped] : null
+            if (sel) {
+              if (sel.kind === 'tpl') loadTemplate(sel.t)
+              else insertBuiltin(sel.d)
+            }
+          } else if (e.key === 'Tab') {
+            // Tab toggles between Templates and Functions so the
+            // user can flip modes without leaving the search input.
+            e.preventDefault()
+            setLibMode(m => m === 'templates' ? 'functions' : 'templates')
+          }
+        }
+        let runningIdx = 0
         return (
           <div
             data-library-overlay
@@ -6178,9 +6242,10 @@ export default function Workstation() {
                       maxWidth: 380,
                       background: 'var(--glass-bg-hover)',
                     }}
-                    placeholder={isTpl ? 'Search templates…' : 'Search functions…'}
+                    placeholder={isTpl ? 'Search templates…  ↑↓ Enter' : 'Search functions…  ↑↓ Enter'}
                     value={libFilter}
                     onChange={e => setLibFilter(e.target.value)}
+                    onKeyDown={onLibSearchKey}
                     aria-label="Filter library"
                     spellCheck={false}
                   />
@@ -6235,27 +6300,36 @@ export default function Workstation() {
                         return (
                           <div key={cat} id={`lib-cat-${cat.replace(/\s+/g, '-')}`}>
                             <div style={styles.panelHeader}>{cat}</div>
-                            {items.map(t => (
-                              <button
-                                key={t.id}
-                                type="button"
-                                style={{
-                                  ...styles.libraryItemCard,
-                                  ...(activeTemplate === t.id ? styles.libraryItemCardActive : null),
-                                }}
-                                onClick={() => loadTemplate(t)}
-                                title={t.description}
-                                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--color-border-strong)' }}
-                                onMouseLeave={(e) => {
-                                  if (activeTemplate !== t.id) {
-                                    (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--glass-border)'
-                                  }
-                                }}
-                              >
-                                <div style={styles.libraryItemTitle}>{t.name}</div>
-                                <div style={styles.libraryItemSubtle}>{t.description}</div>
-                              </button>
-                            ))}
+                            {items.map(t => {
+                              const myIdx = runningIdx++
+                              const cursorActive = myIdx === cursorClamped
+                              return (
+                                <button
+                                  key={t.id}
+                                  type="button"
+                                  data-lib-idx={myIdx}
+                                  style={{
+                                    ...styles.libraryItemCard,
+                                    ...(activeTemplate === t.id ? styles.libraryItemCardActive : null),
+                                    ...(cursorActive ? styles.libraryItemCardCursor : null),
+                                  }}
+                                  onClick={() => loadTemplate(t)}
+                                  onMouseEnter={(e) => {
+                                    setLibCursor(myIdx);
+                                    (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--color-border-strong)'
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    if (activeTemplate !== t.id && !cursorActive) {
+                                      (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--glass-border)'
+                                    }
+                                  }}
+                                  title={t.description}
+                                >
+                                  <div style={styles.libraryItemTitle}>{t.name}</div>
+                                  <div style={styles.libraryItemSubtle}>{t.description}</div>
+                                </button>
+                              )
+                            })}
                           </div>
                         )
                       })}
@@ -6273,20 +6347,35 @@ export default function Workstation() {
                         return (
                           <div key={cat} id={`lib-cat-${cat.replace(/\s+/g, '-')}`}>
                             <div style={styles.panelHeader}>{cat}</div>
-                            {items.map(d => (
-                              <button
-                                key={d.name}
-                                type="button"
-                                style={styles.libraryItemCard}
-                                onClick={() => insertBuiltin(d)}
-                                title={`${d.signature} — ${d.description}`}
-                                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--color-border-strong)' }}
-                                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--glass-border)' }}
-                              >
-                                <div style={styles.libraryItemTitleMono}>{d.signature}</div>
-                                <div style={styles.libraryItemSubtle}>{d.description}</div>
-                              </button>
-                            ))}
+                            {items.map(d => {
+                              const myIdx = runningIdx++
+                              const cursorActive = myIdx === cursorClamped
+                              return (
+                                <button
+                                  key={d.name}
+                                  type="button"
+                                  data-lib-idx={myIdx}
+                                  style={{
+                                    ...styles.libraryItemCard,
+                                    ...(cursorActive ? styles.libraryItemCardCursor : null),
+                                  }}
+                                  onClick={() => insertBuiltin(d)}
+                                  title={`${d.signature} — ${d.description}`}
+                                  onMouseEnter={(e) => {
+                                    setLibCursor(myIdx);
+                                    (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--color-border-strong)'
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    if (!cursorActive) {
+                                      (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--glass-border)'
+                                    }
+                                  }}
+                                >
+                                  <div style={styles.libraryItemTitleMono}>{d.signature}</div>
+                                  <div style={styles.libraryItemSubtle}>{d.description}</div>
+                                </button>
+                              )
+                            })}
                           </div>
                         )
                       })}
