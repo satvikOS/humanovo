@@ -7,7 +7,7 @@ import {
   FiPlay, FiActivity, FiBarChart2, FiCopy, FiDownload,
   FiLoader, FiCheck, FiTarget, FiHeart, FiZap, FiDatabase,
 } from 'react-icons/fi';
-import clsx from 'clsx';
+
 
 /* ------------------------------------------------------------------ */
 /*  Random number utilities                                           */
@@ -50,7 +50,13 @@ type SimulationType =
   | 'survival_analysis'
   | 'epidemiological'
   | 'pathway_dynamics'
-  | 'drug_interaction';
+  | 'drug_interaction'
+  | 'bootstrap'
+  | 'pk_variability'
+  | 'random_walk'
+  | 'pi_estimation'
+  | 'bayesian_coin'
+  | 'protein_folding';
 
 interface ParamDef {
   key: string;
@@ -147,6 +153,76 @@ const SIMULATIONS: SimDef[] = [
       { key: 'drugB_effect', label: 'Drug B Effect', min: 0.05, max: 0.95, step: 0.01, default: 0.3 },
     ],
   },
+  {
+    id: 'bootstrap',
+    name: 'Bootstrap Resampling',
+    description: 'Estimate confidence intervals via non-parametric bootstrap',
+    icon: <FiActivity />,
+    params: [
+      { key: 'sampleSize', label: 'Sample Size', min: 10, max: 500, step: 5, default: 50 },
+      { key: 'trueMean', label: 'True Mean', min: 0, max: 200, step: 1, default: 100 },
+      { key: 'trueSD', label: 'True SD', min: 1, max: 50, step: 1, default: 15 },
+    ],
+  },
+  {
+    id: 'pk_variability',
+    name: 'PK Population Variability',
+    description: 'Simulate inter-individual variability in drug concentration profiles',
+    icon: <FiHeart />,
+    params: [
+      { key: 'dose', label: 'Dose (mg)', min: 10, max: 1000, step: 10, default: 200 },
+      { key: 'clMean', label: 'Mean CL (L/h)', min: 1, max: 100, step: 1, default: 20 },
+      { key: 'clCV', label: 'CL %CV', min: 5, max: 100, step: 5, default: 30 },
+      { key: 'vMean', label: 'Mean Vd (L)', min: 10, max: 500, step: 10, default: 100 },
+    ],
+  },
+  {
+    id: 'random_walk',
+    name: 'Random Walk (Brownian Motion)',
+    description: 'Simulate 1D Brownian motion — models diffusion, stock prices, molecular motion',
+    icon: <FiZap />,
+    params: [
+      { key: 'steps', label: 'Steps', min: 50, max: 5000, step: 50, default: 500 },
+      { key: 'stepSD', label: 'Step Size SD', min: 0.1, max: 5, step: 0.1, default: 1 },
+    ],
+  },
+  {
+    id: 'pi_estimation',
+    name: 'Pi Estimation',
+    description: 'Estimate pi using random points in a unit square (classic MC demo)',
+    icon: <FiTarget />,
+    params: [
+      { key: 'dummy', label: 'Points per trial', min: 100, max: 100000, step: 100, default: 10000 },
+    ],
+  },
+  {
+    id: 'bayesian_coin',
+    name: 'Bayesian Inference (Coin Flip)',
+    description: 'Update prior belief about coin fairness via Bayesian updating',
+    icon: <FiDatabase />,
+    params: [
+      { key: 'trueBias', label: 'True P(Heads)', min: 0.05, max: 0.95, step: 0.05, default: 0.6 },
+      { key: 'nFlips', label: 'Flips per trial', min: 5, max: 500, step: 5, default: 50 },
+    ],
+  },
+  {
+    id: 'protein_folding',
+    name: 'Protein Folding (Energy Landscape)',
+    description: 'Simulate folding on a simplified energy landscape with thermal fluctuations',
+    icon: <FiActivity />,
+    params: [
+      { key: 'temperature', label: 'Temperature (kT)', min: 0.1, max: 5, step: 0.1, default: 1 },
+      { key: 'nSteps', label: 'Steps', min: 100, max: 10000, step: 100, default: 1000 },
+    ],
+  },
+];
+
+/* Simulation categories for the overlay library */
+const SIM_CATEGORIES: { name: string; ids: SimulationType[] }[] = [
+  { name: 'Clinical & PK', ids: ['clinical_outcome', 'dose_response', 'survival_analysis', 'drug_interaction', 'pk_variability'] },
+  { name: 'Epidemiology & Population', ids: ['epidemiological', 'bootstrap', 'bayesian_coin'] },
+  { name: 'Molecular & Cellular', ids: ['pathway_dynamics', 'protein_folding'] },
+  { name: 'General Probability', ids: ['random_walk', 'pi_estimation'] },
 ];
 
 /* ------------------------------------------------------------------ */
@@ -293,6 +369,82 @@ function runDrugInteraction(p: Record<string, number>, iters: number): number[] 
   return results;
 }
 
+function runBootstrap(p: Record<string, number>, iters: number): number[] {
+  // Generate one sample, then bootstrap its mean
+  const sample: number[] = [];
+  for (let i = 0; i < p.sampleSize; i++) sample.push(randNorm(p.trueMean, p.trueSD));
+  const results: number[] = [];
+  for (let i = 0; i < iters; i++) {
+    let sum = 0;
+    for (let j = 0; j < sample.length; j++) sum += sample[Math.floor(Math.random() * sample.length)];
+    results.push(sum / sample.length);
+  }
+  return results;
+}
+
+function runPKVariability(p: Record<string, number>, iters: number): number[] {
+  const results: number[] = [];
+  for (let i = 0; i < iters; i++) {
+    const cl = Math.max(0.1, randNorm(p.clMean, p.clMean * p.clCV / 100));
+    const ke = cl / p.vMean;
+    const c0 = p.dose / p.vMean;
+    // AUC = C0 / ke
+    results.push(c0 / ke);
+  }
+  return results;
+}
+
+function runRandomWalk(p: Record<string, number>, iters: number): number[] {
+  const results: number[] = [];
+  for (let i = 0; i < iters; i++) {
+    let pos = 0;
+    for (let s = 0; s < p.steps; s++) pos += randNorm(0, p.stepSD);
+    results.push(pos);
+  }
+  return results;
+}
+
+function runPiEstimation(p: Record<string, number>, iters: number): number[] {
+  const results: number[] = [];
+  for (let i = 0; i < iters; i++) {
+    let inside = 0;
+    for (let j = 0; j < p.dummy; j++) {
+      const x = Math.random(), y = Math.random();
+      if (x * x + y * y <= 1) inside++;
+    }
+    results.push(4 * inside / p.dummy);
+  }
+  return results;
+}
+
+function runBayesianCoin(p: Record<string, number>, iters: number): number[] {
+  const results: number[] = [];
+  for (let i = 0; i < iters; i++) {
+    let heads = 0;
+    for (let j = 0; j < p.nFlips; j++) if (Math.random() < p.trueBias) heads++;
+    // Posterior mean with uniform prior: (heads+1)/(nFlips+2)
+    results.push((heads + 1) / (p.nFlips + 2));
+  }
+  return results;
+}
+
+function runProteinFolding(p: Record<string, number>, iters: number): number[] {
+  // Simple 1D energy landscape: E(x) = x^4 - 2*x^2 (two minima at +-1)
+  const results: number[] = [];
+  for (let i = 0; i < iters; i++) {
+    let x = randNorm(0, 2);
+    for (let s = 0; s < p.nSteps; s++) {
+      const xNew = x + randNorm(0, 0.3);
+      const eOld = Math.pow(x, 4) - 2 * Math.pow(x, 2);
+      const eNew = Math.pow(xNew, 4) - 2 * Math.pow(xNew, 2);
+      const dE = eNew - eOld;
+      if (dE < 0 || Math.random() < Math.exp(-dE / p.temperature)) x = xNew;
+    }
+    results.push(x);
+  }
+  return results;
+}
+
 const RESULT_LABELS: Record<SimulationType, string> = {
   clinical_outcome: 'Risk Difference',
   dose_response: 'Estimated EC50',
@@ -300,6 +452,12 @@ const RESULT_LABELS: Record<SimulationType, string> = {
   epidemiological: 'Peak Infected Count',
   pathway_dynamics: 'Steady-State Protein Level',
   drug_interaction: 'Combination Index',
+  bootstrap: 'Bootstrap Mean Estimate',
+  pk_variability: 'AUC (mg·h/L)',
+  random_walk: 'Final Position',
+  pi_estimation: 'Pi Estimate',
+  bayesian_coin: 'Posterior P(Heads)',
+  protein_folding: 'Final Conformation (x)',
 };
 
 function runSimulation(
@@ -326,6 +484,24 @@ function runSimulation(
       break;
     case 'drug_interaction':
       values = runDrugInteraction(params, iterations);
+      break;
+    case 'bootstrap':
+      values = runBootstrap(params, iterations);
+      break;
+    case 'pk_variability':
+      values = runPKVariability(params, iterations);
+      break;
+    case 'random_walk':
+      values = runRandomWalk(params, iterations);
+      break;
+    case 'pi_estimation':
+      values = runPiEstimation(params, iterations);
+      break;
+    case 'bayesian_coin':
+      values = runBayesianCoin(params, iterations);
+      break;
+    case 'protein_folding':
+      values = runProteinFolding(params, iterations);
       break;
   }
 
@@ -473,18 +649,17 @@ const styles: Record<string, React.CSSProperties> = {
   runBtn: {
     display: 'flex',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    padding: '9px 0',
+    gap: 6,
+    padding: '5px 14px',
     borderRadius: 6,
     border: '1px solid var(--color-border-strong)',
     background: 'var(--glass-bg-hover)',
     color: 'var(--color-text)',
     fontWeight: 600,
-    fontSize: 12,
+    fontSize: 11,
     cursor: 'pointer',
-    marginTop: 'auto',
     transition: 'background 0.15s, border-color 0.15s',
+    whiteSpace: 'nowrap' as const,
   },
   statsTable: {
     width: '100%',
@@ -503,15 +678,24 @@ const styles: Record<string, React.CSSProperties> = {
   exportBtn: {
     display: 'flex',
     alignItems: 'center',
-    gap: 6,
-    padding: '7px 12px',
-    borderRadius: 6,
+    gap: 4,
+    padding: '5px 8px',
+    borderRadius: 5,
+    border: '1px solid var(--glass-border)',
+    background: 'var(--glass-bg)',
+    color: 'var(--color-text-secondary)',
+    fontSize: 10,
+    cursor: 'pointer',
+    fontWeight: 500,
+  },
+  plotChip: {
+    padding: '4px 10px',
+    borderRadius: 5,
     border: '1px solid var(--glass-border)',
     background: 'var(--glass-bg)',
     color: 'var(--color-text-secondary)',
     fontSize: 11,
     cursor: 'pointer',
-    fontWeight: 500,
   },
 };
 
@@ -522,6 +706,7 @@ const styles: Record<string, React.CSSProperties> = {
 export default function MonteCarloPanel() {
   const [selectedType, setSelectedType] = useState<SimulationType>('clinical_outcome');
   const [iterations, setIterations] = useState(5000);
+  const [showLibrary, setShowLibrary] = useState(false);
   const [paramValues, setParamValues] = useState<Record<string, Record<string, number>>>(() => {
     const init: Record<string, Record<string, number>> = {};
     for (const sim of SIMULATIONS) {
@@ -625,212 +810,186 @@ export default function MonteCarloPanel() {
 
   return (
     <div style={styles.container}>
-      {/* Header */}
-      <div>
-        <h2 style={styles.heading}>Monte Carlo Simulations</h2>
-        <p style={styles.subtitle}>
-          Select a model, configure parameters, and inspect the output distribution.
-        </p>
+      {/* ── Top toolbar ──────────────────────────────────────────── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <button
+          style={{ ...styles.plotChip, fontWeight: 600 }}
+          onClick={() => setShowLibrary(true)}
+        >Library</button>
+        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text)' }}>
+          {activeSim.name}
+        </span>
+        <span style={{ fontSize: 11, color: 'var(--color-text-muted)', flex: 1 }}>
+          {activeSim.description}
+        </span>
+        <button style={styles.runBtn} onClick={handleRun} disabled={running}>
+          {running ? <FiLoader style={{ animation: 'spin 1s linear infinite' }} /> : <FiPlay />}
+          {running ? 'Running...' : 'Run'}
+        </button>
       </div>
 
-      {/* Simulation selector */}
-      <div style={styles.grid3x2}>
-        {SIMULATIONS.map((sim) => (
-          <div
-            key={sim.id}
-            style={{
-              ...styles.card,
-              ...(selectedType === sim.id ? styles.cardSelected : {}),
-            }}
-            className={clsx(selectedType === sim.id && 'selected')}
-            onClick={() => setSelectedType(sim.id)}
-          >
-            <div style={styles.cardName}>
-              {sim.icon}
-              {sim.name}
-            </div>
-            <div style={styles.cardDesc}>{sim.description}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Two-column layout: params | results */}
-      <div style={styles.columns}>
-        {/* Left column: parameters */}
-        <div style={styles.panel}>
-          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Parameters</h3>
-
-          {activeSim.params.map((p) => (
-            <div key={p.key}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <label style={styles.label}>{p.label}</label>
-                <input
-                  type="number"
-                  style={styles.input}
-                  value={currentParams[p.key]}
-                  min={p.min}
-                  max={p.max}
-                  step={p.step}
-                  onChange={(e) => {
-                    const v = parseFloat(e.target.value);
-                    if (!isNaN(v)) setParam(p.key, Math.max(p.min, Math.min(p.max, v)));
-                  }}
-                />
-              </div>
-              <input
-                type="range"
-                style={styles.slider}
-                min={p.min}
-                max={p.max}
-                step={p.step}
-                value={currentParams[p.key]}
-                onChange={(e) => setParam(p.key, parseFloat(e.target.value))}
-              />
-            </div>
-          ))}
-
-          {/* Iterations */}
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <label style={styles.label}>Iterations</label>
-              <input
-                type="number"
-                style={styles.input}
-                value={iterations}
-                min={100}
-                max={50000}
-                step={100}
-                onChange={(e) => {
-                  const v = parseInt(e.target.value, 10);
-                  if (!isNaN(v)) setIterations(Math.max(100, Math.min(50000, v)));
-                }}
-              />
-            </div>
+      {/* ── Compact parameters row ───────────────────────────────── */}
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+        {activeSim.params.map((p) => (
+          <div key={p.key} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <label style={{ fontSize: 11, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>{p.label}</label>
             <input
-              type="range"
-              style={styles.slider}
-              min={100}
-              max={50000}
-              step={100}
-              value={iterations}
-              onChange={(e) => setIterations(parseInt(e.target.value, 10))}
+              type="number"
+              style={styles.input}
+              value={currentParams[p.key]}
+              min={p.min}
+              max={p.max}
+              step={p.step}
+              onChange={(e) => {
+                const v = parseFloat(e.target.value);
+                if (!isNaN(v)) setParam(p.key, Math.max(p.min, Math.min(p.max, v)));
+              }}
             />
           </div>
-
-          {/* Run button */}
-          <button style={styles.runBtn} onClick={handleRun} disabled={running}>
-            {running ? <FiLoader style={{ animation: 'spin 1s linear infinite' }} /> : <FiPlay />}
-            {running ? 'Running...' : 'Run Simulation'}
-          </button>
-        </div>
-
-        {/* Right column: results */}
-        <div style={styles.panel}>
-          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Results</h3>
-
-          {!results && (
-            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-muted)', fontSize: 12, minHeight: 180 }}>
-              Configure parameters and run a simulation to see results.
-            </div>
-          )}
-
-          {results && stats && (
-            <>
-              {/* Summary stats table */}
-              <table style={styles.statsTable}>
-                <tbody>
-                  <tr>
-                    <td style={{ ...styles.td, fontWeight: 600 }}>Metric</td>
-                    <td style={{ ...styles.td, fontWeight: 600 }}>{results.label}</td>
-                  </tr>
-                  <tr>
-                    <td style={styles.td}>Mean</td>
-                    <td style={styles.td}>{fmt(stats.mean)}</td>
-                  </tr>
-                  <tr>
-                    <td style={styles.td}>Median</td>
-                    <td style={styles.td}>{fmt(stats.median)}</td>
-                  </tr>
-                  <tr>
-                    <td style={styles.td}>Std Dev</td>
-                    <td style={styles.td}>{fmt(stats.std)}</td>
-                  </tr>
-                  <tr>
-                    <td style={styles.td}>95% CI</td>
-                    <td style={styles.td}>
-                      [{fmt(stats.ci95Low)}, {fmt(stats.ci95High)}]
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-
-              {/* Histogram */}
-              <div>
-                <div style={{ ...styles.label, marginBottom: 8 }}>Distribution Histogram</div>
-                <ResponsiveContainer width="100%" height={180}>
-                  <BarChart data={histogram}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" />
-                    <XAxis dataKey="bin" tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} interval="preserveStartEnd" stroke="var(--glass-border)" />
-                    <YAxis tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" />
-                    <Tooltip
-                      contentStyle={{
-                        background: 'var(--color-bg-elevated)',
-                        border: '1px solid var(--glass-border)',
-                        borderRadius: 6,
-                        fontSize: 11,
-                        color: 'var(--color-text)',
-                      }}
-                    />
-                    <Bar dataKey="count" fill="var(--color-text)" fillOpacity={0.85} radius={[3, 3, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-
-              {/* Convergence plot */}
-              <div>
-                <div style={{ ...styles.label, marginBottom: 8 }}>Convergence (Running Mean)</div>
-                <ResponsiveContainer width="100%" height={160}>
-                  <LineChart data={results.convergence}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" />
-                    <XAxis dataKey="iteration" tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" />
-                    <YAxis tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" />
-                    <Tooltip
-                      contentStyle={{
-                        background: 'var(--color-bg-elevated)',
-                        border: '1px solid var(--glass-border)',
-                        borderRadius: 6,
-                        fontSize: 11,
-                        color: 'var(--color-text)',
-                      }}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="runningMean"
-                      stroke="var(--color-text)"
-                      strokeWidth={2}
-                      dot={false}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            </>
-          )}
+        ))}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <label style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Iterations</label>
+          <input
+            type="number"
+            style={styles.input}
+            value={iterations}
+            min={100}
+            max={50000}
+            step={100}
+            onChange={(e) => {
+              const v = parseInt(e.target.value, 10);
+              if (!isNaN(v)) setIterations(Math.max(100, Math.min(50000, v)));
+            }}
+          />
         </div>
       </div>
 
-      {/* Bottom: export buttons */}
-      {results && (
-        <div style={styles.exportRow}>
-          <button style={styles.exportBtn} onClick={handleExportJSON}>
-            <FiDownload /> Export JSON
-          </button>
-          <button style={styles.exportBtn} onClick={handleExportCSV}>
-            <FiDownload /> Export CSV
-          </button>
-          <button style={styles.exportBtn} onClick={handleCopy}>
-            {copied ? <FiCheck /> : <FiCopy />}
-            {copied ? 'Copied!' : 'Copy Results'}
-          </button>
+      {/* ── Results ──────────────────────────────────────────────── */}
+      {!results && (
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-muted)', fontSize: 12, minHeight: 200 }}>
+          Select a simulation from the Library, configure parameters, and click Run.
+        </div>
+      )}
+
+      {results && stats && (
+        <div style={{ display: 'flex', gap: 16, flex: 1, minHeight: 0 }}>
+          {/* Left: stats + export */}
+          <div style={{ ...styles.panel, width: 220, flexShrink: 0 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text)', marginBottom: 6 }}>{results.label}</div>
+            <table style={styles.statsTable}>
+              <tbody>
+                {[
+                  ['Mean', fmt(stats.mean)],
+                  ['Median', fmt(stats.median)],
+                  ['Std Dev', fmt(stats.std)],
+                  ['95% CI', `[${fmt(stats.ci95Low)}, ${fmt(stats.ci95High)}]`],
+                ].map(([k, v]) => (
+                  <tr key={k}>
+                    <td style={{ ...styles.td, fontSize: 11 }}>{k}</td>
+                    <td style={{ ...styles.td, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>{v}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div style={{ ...styles.exportRow, marginTop: 8 }}>
+              <button style={styles.exportBtn} onClick={handleExportJSON}><FiDownload /> JSON</button>
+              <button style={styles.exportBtn} onClick={handleExportCSV}><FiDownload /> CSV</button>
+              <button style={styles.exportBtn} onClick={handleCopy}>
+                {copied ? <FiCheck /> : <FiCopy />} {copied ? 'Copied' : 'Copy'}
+              </button>
+            </div>
+          </div>
+
+          {/* Right: charts */}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 4 }}>Distribution</div>
+              <ResponsiveContainer width="100%" height={140}>
+                <BarChart data={histogram}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" strokeOpacity={0.5} />
+                  <XAxis dataKey="bin" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} interval="preserveStartEnd" stroke="var(--glass-border)" />
+                  <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" />
+                  <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} />
+                  <Bar dataKey="count" fill="var(--color-text)" fillOpacity={0.35} radius={[2, 2, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 4 }}>Convergence</div>
+              <ResponsiveContainer width="100%" height={120}>
+                <LineChart data={results.convergence}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" strokeOpacity={0.5} />
+                  <XAxis dataKey="iteration" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" />
+                  <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" />
+                  <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} />
+                  <Line type="monotone" dataKey="runningMean" stroke="var(--color-text)" strokeWidth={1.5} strokeOpacity={0.55} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Library overlay ──────────────────────────────────────── */}
+      {showLibrary && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 9999,
+            background: 'rgba(0,0,0,0.5)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowLibrary(false) }}
+        >
+          <div style={{
+            background: 'var(--color-bg-elevated)',
+            border: '1px solid var(--glass-border)',
+            borderRadius: 10,
+            width: 560, maxWidth: '90vw', maxHeight: '80vh',
+            overflow: 'auto',
+            padding: '20px 24px',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: 'var(--color-text)' }}>
+                Simulation Library
+              </h2>
+              <button
+                style={{ ...styles.plotChip, fontSize: 11 }}
+                onClick={() => setShowLibrary(false)}
+              >Close</button>
+            </div>
+            {SIM_CATEGORIES.map(cat => (
+              <div key={cat.name} style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--color-text-muted)', marginBottom: 6 }}>
+                  {cat.name}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 6 }}>
+                  {cat.ids.map(id => {
+                    const sim = SIMULATIONS.find(s => s.id === id)!;
+                    const isActive = selectedType === id;
+                    return (
+                      <div
+                        key={id}
+                        style={{
+                          ...styles.card,
+                          ...(isActive ? styles.cardSelected : {}),
+                          padding: '8px 10px',
+                        }}
+                        onClick={() => { setSelectedType(id); setShowLibrary(false); setResults(null); }}
+                      >
+                        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                          {sim.icon} {sim.name}
+                        </div>
+                        <div style={{ fontSize: 10, color: 'var(--color-text-muted)', lineHeight: 1.35, marginTop: 2 }}>
+                          {sim.description}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>
