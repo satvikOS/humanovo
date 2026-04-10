@@ -4616,7 +4616,13 @@ export default function Workstation() {
     plotBody: {
       flex: 1,
       minHeight: 0,
-      padding: 14,
+      padding: 18,
+      // Solid surface so the chart's axes have a guaranteed background
+      // to contrast against. The Results overlay scrim is dark enough
+      // that the previous transparent body let the axes melt into the
+      // dimmed page; verified live with screenshots.
+      background: 'var(--color-bg-elevated)',
+      borderTop: '1px solid var(--color-border-strong)',
     },
     varPanel: {
       display: 'flex',
@@ -5062,7 +5068,11 @@ export default function Workstation() {
     resultsOverlay: {
       position: 'fixed' as const,
       inset: 0,
-      background: 'rgba(0, 0, 0, 0.78)',
+      // Slightly lighter scrim than before — the previous 0.78 black was
+      // crushing the editor underneath into pure shadow, which felt
+      // heavy and modal. 0.55 keeps the focus on Results without making
+      // the user feel trapped.
+      background: 'rgba(0, 0, 0, 0.55)',
       backdropFilter: 'blur(10px)',
       zIndex: 950,
       display: 'flex',
@@ -7933,7 +7943,21 @@ export default function Workstation() {
 // Monochrome palette — matches the rest of the Humanovo platform. Shades
 // step down so multiple series remain distinguishable without introducing
 // category colors.
-const SERIES_COLORS = ['#ededed', '#a1a1a1', '#d4d4d4', '#737373', '#8a8a8a', '#bfbfbf', '#525252', '#e5e5e5']
+// Series palette uses Humanovo theme accent CSS vars so the colours
+// stay legible in both light and dark mode. The previous monochrome
+// grey palette (#ededed → #525252) was tuned for the dark theme and
+// became invisible on the Results overlay's white plot card under
+// light mode. Six distinct accents cover most multi-series biomedical
+// plots; deeper indices loop. Recharts forwards stroke/fill straight
+// into the SVG attribute so CSS vars resolve at render time.
+const SERIES_COLORS = [
+  'var(--color-accent-blue)',
+  'var(--color-accent-orange)',
+  'var(--color-accent-green)',
+  'var(--color-accent-purple)',
+  'var(--color-accent-pink)',
+  'var(--color-accent-cyan)',
+]
 
 // Per-figure render options surfaced through the figure-panel chips.
 interface PlotOpts {
@@ -8013,31 +8037,36 @@ function PlotView({ plot, opts = DEFAULT_PLOT_OPTS }: { plot: PlotSpec | null; o
   const yDomain = opts.logY ? ['auto', 'auto'] as [string, string] : undefined
   const showLegend = opts.legend === 'on' || (opts.legend === 'auto' && plot.series.length > 1)
 
+  // Axes use --color-border-strong (10% on the foreground) instead of
+  // --glass-border (6%) so the gridlines and axis lines stay legible on
+  // both the regular workstation surface AND the Results overlay's
+  // dimmed scrim. Without this bump the chart effectively dissolves into
+  // its container under the overlay — verified live in-browser.
   const common = (
     <>
-      {opts.grid && <CartesianGrid stroke="var(--glass-border)" strokeDasharray="3 3" />}
+      {opts.grid && <CartesianGrid stroke="var(--color-border-strong)" strokeDasharray="3 3" />}
       <XAxis
         dataKey="x"
         type="number"
         scale={xScale}
         domain={xDomain}
         allowDataOverflow={opts.logX}
-        stroke="var(--glass-border)"
-        tick={{ fontSize: 11, fill: 'var(--color-text-muted)' }}
-        label={plot.xLabel ? { value: plot.xLabel, position: 'insideBottom', offset: -2, fill: 'var(--color-text-muted)', fontSize: 11 } : undefined}
+        stroke="var(--color-border-strong)"
+        tick={{ fontSize: 11, fill: 'var(--color-text-secondary)' }}
+        label={plot.xLabel ? { value: plot.xLabel, position: 'insideBottom', offset: -2, fill: 'var(--color-text-secondary)', fontSize: 11 } : undefined}
       />
       <YAxis
         scale={yScale}
         domain={yDomain}
         allowDataOverflow={opts.logY}
-        stroke="var(--glass-border)"
-        tick={{ fontSize: 11, fill: 'var(--color-text-muted)' }}
-        label={plot.yLabel ? { value: plot.yLabel, angle: -90, position: 'insideLeft', fill: 'var(--color-text-muted)', fontSize: 11 } : undefined}
+        stroke="var(--color-border-strong)"
+        tick={{ fontSize: 11, fill: 'var(--color-text-secondary)' }}
+        label={plot.yLabel ? { value: plot.yLabel, angle: -90, position: 'insideLeft', fill: 'var(--color-text-secondary)', fontSize: 11 } : undefined}
       />
       <Tooltip
         contentStyle={{
           background: 'var(--color-bg-elevated)',
-          border: '1px solid var(--glass-border)',
+          border: '1px solid var(--color-border-strong)',
           borderRadius: 6,
           fontSize: 11,
           color: 'var(--color-text)',
