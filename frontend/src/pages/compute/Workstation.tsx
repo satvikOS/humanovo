@@ -718,6 +718,19 @@ export default function Workstation() {
   // status bar. Null when the user isn't selecting any text.
   const [selectionInfo, setSelectionInfo] = useState<{ chars: number; lines: number; words: number } | null>(null)
   const [lastRunMs, setLastRunMs] = useState<number | null>(null)
+  // Calm "run pulse" feedback chip surfaced in the toolbar after every
+  // run finishes. It shows ✓ on success or ⚠ on error, plus a one-line
+  // summary, and fades out automatically after a few seconds. Designed
+  // so users get a visible confirmation without ever having to peek at
+  // the status bar.
+  const [runPulse, setRunPulse] = useState<{ kind: 'ok' | 'err'; label: string; key: number } | null>(null)
+  useEffect(() => {
+    if (!runPulse) return
+    const id = window.setTimeout(() => {
+      setRunPulse(p => (p && p.key === runPulse.key) ? null : p)
+    }, 3500)
+    return () => window.clearTimeout(id)
+  }, [runPulse])
   // Session elapsed time — ticks once per minute so the status bar can
   // show how long this Workstation tab has been open. The ref captures
   // the mount time exactly once; `sessionTick` forces a re-render each
@@ -1359,7 +1372,8 @@ export default function Workstation() {
         setEntries(prev => [...prev, mkEntry({ kind: 'error', text: String(e?.message ?? e) })])
         producedError = true
       } finally {
-        setLastRunMs(performance.now() - t0)
+        const ms = performance.now() - t0
+        setLastRunMs(ms)
         setRunning(false)
         // Pop the results overlay open as soon as the run finishes so the
         // user doesn't have to hunt for output. Pick the most informative
@@ -1368,6 +1382,19 @@ export default function Workstation() {
         // the overlay is up.
         setResultsTab(producedError ? 'console' : producedPlot ? 'figure' : 'console')
         setResultsOverlay(true)
+        // Drop a calm pulse chip in the toolbar so the user gets a
+        // confirmation that registers even if they never glance at the
+        // status bar. The chip auto-dismisses via the runPulse useEffect.
+        const durLabel = ms < 1000 ? `${ms.toFixed(0)} ms` : `${(ms / 1000).toFixed(2)} s`
+        setRunPulse({
+          kind: producedError ? 'err' : 'ok',
+          label: producedError
+            ? 'Error · check console'
+            : producedPlot
+              ? `Done · figure ready · ${durLabel}`
+              : `Done · ${durLabel}`,
+          key: Date.now(),
+        })
       }
     }, 0)
   }, [running, appendOutputs])
@@ -3790,6 +3817,42 @@ export default function Workstation() {
       background: 'transparent',
       border: '1px solid transparent',
     },
+    // Run-pulse chip — small, calm confirmation that a run finished.
+    // Lives in the toolbar next to the Run button and fades out after a
+    // few seconds. Two flavors (ok / err) with subtle borders so the
+    // chip never shouts.
+    runPulse: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 5,
+      padding: '3px 9px',
+      borderRadius: 999,
+      fontSize: 10.5,
+      fontWeight: 500,
+      letterSpacing: 0.1,
+      border: '1px solid var(--glass-border)',
+      background: 'var(--glass-bg)',
+      color: 'var(--color-text-secondary)',
+      whiteSpace: 'nowrap' as const,
+      pointerEvents: 'none' as const,
+      transition: 'opacity 200ms ease',
+    },
+    runPulseOk: {
+      borderColor: 'var(--color-border-strong)',
+      color: 'var(--color-text)',
+    },
+    runPulseErr: {
+      borderColor: 'var(--color-error)',
+      color: 'var(--color-error)',
+    },
+    runPulseDot: {
+      width: 6,
+      height: 6,
+      borderRadius: 999,
+      background: 'currentColor',
+      flex: '0 0 auto',
+      opacity: 0.85,
+    },
     body: {
       display: 'grid',
       // Editor-only body. Library, figures, console and workspace all
@@ -5111,6 +5174,24 @@ export default function Workstation() {
           {running ? <FiSquare /> : <FiPlay />}
           {running ? 'Running…' : 'Run'}
         </button>
+
+        {/* Calm post-run feedback chip — auto-dismisses via the runPulse
+            useEffect. Hidden completely while a run is in flight so the
+            "Running…" button stays the only signal during execution. */}
+        {runPulse && !running && (
+          <span
+            key={runPulse.key}
+            style={{
+              ...styles.runPulse,
+              ...(runPulse.kind === 'ok' ? styles.runPulseOk : styles.runPulseErr),
+            }}
+            role="status"
+            aria-live="polite"
+          >
+            <span style={styles.runPulseDot} />
+            {runPulse.label}
+          </span>
+        )}
 
         {/* Top-level menu trees. Each button toggles its dropdown and
             shows a faint primary highlight while open. The dropdowns
