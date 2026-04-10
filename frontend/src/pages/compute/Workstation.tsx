@@ -592,7 +592,7 @@ export default function Workstation() {
   // Which toolbar dropdown is currently open. The File button is an
   // anchor point for a rect-derived menu position; null means nothing
   // is open and the backdrop is inert.
-  const [toolbarMenu, setToolbarMenu] = useState<null | { kind: 'file'; x: number; y: number }>(null)
+  const [toolbarMenu, setToolbarMenu] = useState<null | { kind: 'file' | 'edit' | 'view' | 'run' | 'help'; x: number; y: number }>(null)
   // Hidden file input refs driven by the File menu items. Kept outside
   // the menu so the pickers survive menu close/reopen.
   const scriptFileInputRef = useRef<HTMLInputElement | null>(null)
@@ -4862,18 +4862,25 @@ export default function Workstation() {
           {running ? 'Running…' : 'Run'}
         </button>
 
-        <button
-          style={{ ...styles.btn, ...styles.btnGhost, ...(toolbarMenu?.kind === 'file' ? styles.btnPrimary : null) }}
-          onClick={(e) => {
-            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-            setToolbarMenu(prev => prev?.kind === 'file' ? null : { kind: 'file', x: rect.left, y: rect.bottom + 4 })
-          }}
-          aria-haspopup="menu"
-          aria-expanded={toolbarMenu?.kind === 'file'}
-          title="File actions"
-        >
-          File ▾
-        </button>
+        {/* Top-level menu trees. Each button toggles its dropdown and
+            shows a faint primary highlight while open. The dropdowns
+            themselves are rendered in a single shared block below the
+            toolbar so the menu styling stays consistent across kinds. */}
+        {(['file', 'edit', 'view', 'run'] as const).map(kind => (
+          <button
+            key={kind}
+            style={{ ...styles.btn, ...styles.btnGhost, ...(toolbarMenu?.kind === kind ? styles.btnPrimary : null) }}
+            onClick={(e) => {
+              const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+              setToolbarMenu(prev => prev?.kind === kind ? null : { kind, x: rect.left, y: rect.bottom + 4 })
+            }}
+            aria-haspopup="menu"
+            aria-expanded={toolbarMenu?.kind === kind}
+            title={`${kind[0].toUpperCase()}${kind.slice(1)} actions`}
+          >
+            {kind[0].toUpperCase()}{kind.slice(1)} ▾
+          </button>
+        ))}
 
         {/* Hidden pickers driven by the File menu. Kept outside the menu
             DOM so unmounting the menu doesn't interrupt the file dialog. */}
@@ -4909,30 +4916,26 @@ export default function Workstation() {
             </button>
           )}
           <button
-            style={{ ...styles.btn, ...styles.btnGhost }}
-            onClick={openPalette}
-            title="Command palette (Ctrl/Cmd + Shift + P)"
+            style={{ ...styles.btn, ...styles.btnGhost, ...(toolbarMenu?.kind === 'help' ? styles.btnPrimary : null) }}
+            onClick={(e) => {
+              const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+              setToolbarMenu(prev => prev?.kind === 'help' ? null : { kind: 'help', x: rect.left, y: rect.bottom + 4 })
+            }}
+            aria-haspopup="menu"
+            aria-expanded={toolbarMenu?.kind === 'help'}
+            title="Help · command palette · keyboard shortcuts"
           >
-            ⌘K
-          </button>
-          <button
-            style={{ ...styles.btn, ...styles.btnGhost }}
-            onClick={() => setHelpOpen(true)}
-            title="Keyboard shortcuts (F1)"
-            aria-label="Keyboard shortcuts"
-          >
-            ?
+            Help ▾
           </button>
         </span>
       </div>
 
-      {/* ─── Toolbar dropdown (File) ─────────────────────────────────── */}
-      {toolbarMenu?.kind === 'file' && (() => {
-        const menuW = 220
-        const menuH = 260
-        const left = Math.min(toolbarMenu.x, window.innerWidth - menuW - 8)
-        const top = Math.min(toolbarMenu.y, window.innerHeight - menuH - 8)
+      {/* ─── Toolbar dropdowns (File / Edit / View / Run / Help) ─────── */}
+      {toolbarMenu && (() => {
         const closeMenu = () => setToolbarMenu(null)
+        // Helper that produces a menu-item button with the same hover /
+        // disabled affordances as the script-tab context menu, so the
+        // whole Workstation reuses one menu vocabulary.
         const item = (label: string, hint: string, enabled: boolean, onClick: () => void) => (
           <button
             key={label}
@@ -4948,6 +4951,107 @@ export default function Workstation() {
             {hint && <span style={{ marginLeft: 18, color: 'var(--color-text-muted)', fontSize: 10 }}>{hint}</span>}
           </button>
         )
+        const sep = (k: string) => <div key={`sep-${k}`} style={styles.tabMenuSep} />
+
+        // The textarea-only commands are gated on the editor existing —
+        // mostly a guard so palette / menu items don't crash when the
+        // user opens a menu before the editor has mounted.
+        const hasEditor = !!editorRef.current
+        const hasSel = !!editorRef.current && editorRef.current.selectionStart !== editorRef.current.selectionEnd
+
+        let label = ''
+        let menuW = 240
+        let items: React.ReactNode[] = []
+
+        switch (toolbarMenu.kind) {
+          case 'file':
+            label = 'File actions'
+            menuW = 240
+            items = [
+              item('New script', '', true, () => newScript()),
+              item('Open .m file…', '', true, () => scriptFileInputRef.current?.click()),
+              item('Save as .m', '', !!activeScript, () => handleDownload()),
+              sep('f1'),
+              item('Import workspace .json…', '', true, () => workspaceFileInputRef.current?.click()),
+              item('Export workspace .json', '', vars.length > 0, () => exportWorkspaceJson()),
+              item('Download console transcript', '', entries.length > 0, () => downloadConsole()),
+              sep('f2'),
+              item('Reset workspace', '', vars.length > 0, () => resetWorkspace()),
+            ]
+            break
+          case 'edit':
+            label = 'Edit actions'
+            menuW = 280
+            items = [
+              item('Find & replace', 'Ctrl+F', true, () => openFind()),
+              item('Go to line', 'Ctrl+G', true, () => openGoto()),
+              item('Go to symbol', 'Ctrl+Shift+O', true, () => openSymbolNav()),
+              sep('e1'),
+              item('Rename identifier at caret', '', hasEditor, () => renameIdentifierAtCaret()),
+              item('Trim trailing whitespace', '', hasEditor, () => trimTrailingWhitespace()),
+              item('Convert tabs to spaces', '', hasEditor, () => convertTabsToSpaces()),
+              item('Join with next line', 'Ctrl+J', hasEditor, () => joinLines()),
+              sep('e2'),
+              item('Sort selected lines', '', hasSel, () => sortSelectedLines()),
+              item('Unique selected lines', '', hasSel, () => uniqueSelectedLines()),
+              item('Reverse selected lines', '', hasSel, () => applySelectionTransform(s => s.split('\n').reverse().join('\n'))),
+              item('Remove blank lines in selection', '', hasSel, () => removeEmptySelectedLines()),
+              item('Uppercase selection', '', hasSel, () => applySelectionTransform(s => s.toUpperCase())),
+              item('Lowercase selection', '', hasSel, () => applySelectionTransform(s => s.toLowerCase())),
+              sep('e3'),
+              item('Toggle bookmark on current line', 'Ctrl+F2', hasEditor, () => toggleBookmarkAtCaret()),
+              item('Next bookmark', 'F2', bookmarkLines.size > 0, () => gotoBookmark(1)),
+              item('Previous bookmark', 'Shift+F2', bookmarkLines.size > 0, () => gotoBookmark(-1)),
+              item('Clear bookmarks in this script', '', bookmarkLines.size > 0, () => clearAllBookmarks()),
+            ]
+            break
+          case 'view':
+            label = 'View actions'
+            menuW = 260
+            items = [
+              item(library === 'open' ? 'Hide library' : 'Show library', '', true, () => setLibrary(l => l === 'open' ? 'closed' : 'open')),
+              item(editorWrapOn ? 'Disable word wrap' : 'Enable word wrap', '', true, () => toggleEditorWrap()),
+              sep('v1'),
+              item('Increase editor font size', 'Ctrl+=', editorFontSize < EDITOR_FONT_MAX, () => bumpEditorFont(1)),
+              item('Decrease editor font size', 'Ctrl+-', editorFontSize > EDITOR_FONT_MIN, () => bumpEditorFont(-1)),
+              item('Reset editor font size', 'Ctrl+0', editorFontSize !== EDITOR_FONT_DEFAULT, () => resetEditorFont()),
+              sep('v2'),
+              item('Open Results overlay', '', plots.length > 0 || vars.length > 0 || entries.length > 0, () => setResultsOverlay(true)),
+              item('Toggle console timestamps', '', true, () => setConsoleShowTimestamps(v => !v)),
+              item('Clear console', 'Ctrl+L', entries.length > 0, () => clearConsole()),
+              item('Clear all figures', '', plots.length > 0, () => { setPlots([]); setActivePlot(0) }),
+            ]
+            break
+          case 'run':
+            label = 'Run actions'
+            menuW = 280
+            items = [
+              item('Run script', 'Ctrl+Enter', !running, () => runScript()),
+              item('Re-run last fragment', 'Ctrl+Shift+R', !running, () => rerunLastFragment()),
+              sep('r1'),
+              item('Run selection', 'F9', !running, () => runSelection()),
+              item('Run current %% section', 'Alt+Ctrl+Enter', !running, () => runSection()),
+              item('Run until cursor line', 'Shift+F9', !running, () => runUntilCursor()),
+            ]
+            break
+          case 'help':
+            label = 'Help actions'
+            menuW = 260
+            items = [
+              item('Command palette', 'Ctrl+Shift+P', true, () => openPalette()),
+              item('Keyboard shortcuts', 'F1', true, () => setHelpOpen(true)),
+            ]
+            break
+        }
+
+        // Approximate height for off-screen clamping. Each item is ~28px,
+        // each separator ~9px; we don't have measurements yet so this is a
+        // best-guess upper bound that keeps menus on-screen near the
+        // viewport edge.
+        const menuH = Math.min(560, items.length * 30 + 20)
+        const left = Math.min(toolbarMenu.x, window.innerWidth - menuW - 8)
+        const top = Math.min(toolbarMenu.y, window.innerHeight - menuH - 8)
+
         return (
           <>
             <div
@@ -4957,18 +5061,11 @@ export default function Workstation() {
             />
             <div
               role="menu"
-              aria-label="File actions"
-              style={{ ...styles.tabMenu, left, top, minWidth: 220 }}
+              aria-label={label}
+              style={{ ...styles.tabMenu, left, top, minWidth: menuW }}
               onClick={(e) => e.stopPropagation()}
             >
-              {item('New script', '', true, () => newScript())}
-              {item('Open .m file…', '', true, () => scriptFileInputRef.current?.click())}
-              {item('Save as .m', '', !!activeScript, () => handleDownload())}
-              <div style={styles.tabMenuSep} />
-              {item('Import workspace .json…', '', true, () => workspaceFileInputRef.current?.click())}
-              {item('Export workspace .json', '', vars.length > 0, () => exportWorkspaceJson())}
-              <div style={styles.tabMenuSep} />
-              {item('Reset workspace', '', vars.length > 0, () => resetWorkspace())}
+              {items}
             </div>
           </>
         )
