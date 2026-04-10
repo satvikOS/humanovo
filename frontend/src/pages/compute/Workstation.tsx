@@ -4663,8 +4663,72 @@ export default function Workstation() {
       flex: 1,
       minHeight: 0,
       display: 'grid',
-      gridTemplateColumns: 'minmax(220px, 280px) minmax(0, 1fr)',
+      // 3-column layout: category rail | item list | snippet preview.
+      // The preview pane lets the user read a template / function
+      // snippet before loading it, which dramatically reduces the
+      // "load → look → undo" loop for first-time clinicians and
+      // PKPD researchers.
+      gridTemplateColumns: 'minmax(200px, 240px) minmax(280px, 1fr) minmax(320px, 1.4fr)',
       overflow: 'hidden' as const,
+    },
+    libraryPreviewPane: {
+      borderLeft: '1px solid var(--glass-border)',
+      display: 'flex',
+      flexDirection: 'column' as const,
+      minHeight: 0,
+      overflow: 'hidden' as const,
+    },
+    libraryPreviewHeader: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 10,
+      padding: '14px 18px 10px 18px',
+      borderBottom: '1px solid var(--glass-border)',
+    },
+    libraryPreviewTitle: {
+      fontSize: 12,
+      fontWeight: 600,
+      color: 'var(--color-text)',
+      letterSpacing: 0.05,
+      whiteSpace: 'nowrap' as const,
+      overflow: 'hidden' as const,
+      textOverflow: 'ellipsis' as const,
+      flex: 1,
+      minWidth: 0,
+    },
+    libraryPreviewDescription: {
+      padding: '10px 18px 0 18px',
+      fontSize: 11.5,
+      lineHeight: 1.5,
+      color: 'var(--color-text-secondary)',
+    },
+    libraryPreviewBody: {
+      flex: 1,
+      minHeight: 0,
+      margin: '12px 18px 18px 18px',
+      padding: '12px 14px',
+      borderRadius: 6,
+      background: 'var(--glass-bg)',
+      border: '1px solid var(--glass-border)',
+      overflow: 'auto' as const,
+      fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+      fontSize: 11.5,
+      lineHeight: 1.55,
+      color: 'var(--color-text)',
+      whiteSpace: 'pre' as const,
+      tabSize: 2,
+    },
+    libraryPreviewEmpty: {
+      flex: 1,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: '24px',
+      color: 'var(--color-text-muted)',
+      fontSize: 12,
+      fontStyle: 'italic' as const,
+      textAlign: 'center' as const,
     },
     libraryCategoryRail: {
       borderRight: '1px solid var(--glass-border)',
@@ -6386,6 +6450,59 @@ export default function Workstation() {
                       )}
                     </>
                   )}
+                </div>
+
+                {/* Snippet preview pane — shows the code for whichever
+                    template or function the keyboard / mouse cursor is
+                    on. Lets clinicians read what a snippet does before
+                    they commit to loading it. */}
+                <div style={styles.libraryPreviewPane} aria-label="Library item preview">
+                  {(() => {
+                    const sel = cursorClamped >= 0 ? flatItems[cursorClamped] : null
+                    if (!sel) {
+                      return (
+                        <div style={styles.libraryPreviewEmpty}>
+                          {flatItems.length === 0
+                            ? (libFilter ? `Nothing matches "${libFilter}".` : 'No items in this category.')
+                            : 'Use ↑ ↓ or hover an item to preview its snippet.'}
+                        </div>
+                      )
+                    }
+                    if (sel.kind === 'tpl') {
+                      const t = sel.t
+                      return (
+                        <>
+                          <div style={styles.libraryPreviewHeader}>
+                            <span style={styles.libraryPreviewTitle}>{t.name}</span>
+                            <button
+                              type="button"
+                              style={{ ...styles.btn, ...styles.btnGhost, padding: '4px 12px' }}
+                              onClick={() => loadTemplate(t)}
+                              title="Load this template into the editor (Enter)"
+                            >Load · ↵</button>
+                          </div>
+                          <div style={styles.libraryPreviewDescription}>{t.description}</div>
+                          <pre style={styles.libraryPreviewBody}>{t.code}</pre>
+                        </>
+                      )
+                    }
+                    const d = sel.d
+                    return (
+                      <>
+                        <div style={styles.libraryPreviewHeader}>
+                          <span style={styles.libraryPreviewTitle} title={d.signature}>{d.signature}</span>
+                          <button
+                            type="button"
+                            style={{ ...styles.btn, ...styles.btnGhost, padding: '4px 12px' }}
+                            onClick={() => insertBuiltin(d)}
+                            title="Insert this snippet at the editor caret (Enter)"
+                          >Insert · ↵</button>
+                        </div>
+                        <div style={styles.libraryPreviewDescription}>{d.description}</div>
+                        <pre style={styles.libraryPreviewBody}>{d.snippet}</pre>
+                      </>
+                    )
+                  })()}
                 </div>
               </div>
             </div>
