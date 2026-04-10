@@ -4185,13 +4185,23 @@ export default function Workstation() {
       flex: 1,
       display: 'flex',
       minHeight: 0,
-      background: 'transparent',
+      // Slight elevation against the workstation chrome so the editor
+      // reads as a clearly defined working surface in both light and
+      // dark modes. In light mode this paints #ffffff over a #fafafa
+      // page; in dark mode #0a0a0a over #000000. Either way the editor
+      // reads as the primary surface without any heavy borders, which
+      // matches the "thinner boundaries / calmer workstation" brief.
+      background: 'var(--color-bg-elevated)',
+      borderTop: '1px solid var(--glass-border)',
     },
     editorGutterClip: {
       flex: '0 0 auto',
       width: 44,
       overflow: 'hidden',
-      background: 'transparent',
+      // Subtle tint so the gutter reads as a distinct strip from the
+      // code surface without needing a hairline border. Pairs with the
+      // elevated editor body background.
+      background: 'var(--glass-bg)',
       position: 'relative' as const,
     },
     editorGutterNumbers: {
