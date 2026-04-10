@@ -5090,6 +5090,37 @@ export default function Workstation() {
       fontSize: 12,
       textAlign: 'center' as const,
     },
+    // Calm footer strip for the palette / symbol nav surfaces. Shows
+    // keyboard hints so first-time users discover the shortcuts after
+    // a single visit instead of having to read the help screen.
+    paletteFooter: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+      padding: '8px 14px',
+      borderTop: '1px solid var(--glass-border)',
+      fontSize: 10.5,
+      color: 'var(--color-text-muted)',
+      fontFamily: "'Inter', sans-serif",
+      background: 'transparent',
+    },
+    paletteFooterKey: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 4,
+    },
+    paletteFooterKbd: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 2,
+      padding: '1px 5px',
+      borderRadius: 3,
+      border: '1px solid var(--glass-border)',
+      fontFamily: "'JetBrains Mono', monospace",
+      fontSize: 9.5,
+      color: 'var(--color-text-secondary)',
+    },
     tabMenu: {
       position: 'fixed' as const,
       minWidth: 180,
@@ -7335,6 +7366,27 @@ export default function Workstation() {
                 )
               })}
             </div>
+            <div style={styles.paletteFooter}>
+              <span>
+                {visiblePaletteCommands.length}
+                {' of '}
+                {paletteCommands.length} command{paletteCommands.length === 1 ? '' : 's'}
+              </span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 12 }}>
+                <span style={styles.paletteFooterKey}>
+                  <span style={styles.paletteFooterKbd}>↑↓</span>
+                  navigate
+                </span>
+                <span style={styles.paletteFooterKey}>
+                  <span style={styles.paletteFooterKbd}>↵</span>
+                  run
+                </span>
+                <span style={styles.paletteFooterKey}>
+                  <span style={styles.paletteFooterKbd}>esc</span>
+                  close
+                </span>
+              </span>
+            </div>
           </div>
         </div>
       )}
@@ -7415,6 +7467,27 @@ export default function Workstation() {
                   </div>
                 )
               })}
+            </div>
+            <div style={styles.paletteFooter}>
+              <span>
+                {visibleScriptSymbols.length}
+                {' of '}
+                {scriptSymbols.length} symbol{scriptSymbols.length === 1 ? '' : 's'}
+              </span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 12 }}>
+                <span style={styles.paletteFooterKey}>
+                  <span style={styles.paletteFooterKbd}>↑↓</span>
+                  navigate
+                </span>
+                <span style={styles.paletteFooterKey}>
+                  <span style={styles.paletteFooterKbd}>↵</span>
+                  jump
+                </span>
+                <span style={styles.paletteFooterKey}>
+                  <span style={styles.paletteFooterKbd}>esc</span>
+                  close
+                </span>
+              </span>
             </div>
           </div>
         </div>
