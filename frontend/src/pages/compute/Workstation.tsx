@@ -138,12 +138,15 @@ function loadScripts(): ScriptStore {
     const first: SavedScript = {
       id: makeScriptId(),
       name: 'main.m',
-      code: legacy ?? STARTER_SCRIPT,
+      // First-time visitors land on an empty main.m — the welcome card
+      // overlay then guides them into templates / functions / starter
+      // demo. Returning users keep their saved scripts.
+      code: legacy ?? '',
     }
     if (legacy) { try { localStorage.removeItem(SCRIPT_KEY) } catch { /* quota */ } }
     return { list: [first], activeId: first.id }
   } catch {
-    const first: SavedScript = { id: makeScriptId(), name: 'main.m', code: STARTER_SCRIPT }
+    const first: SavedScript = { id: makeScriptId(), name: 'main.m', code: '' }
     return { list: [first], activeId: first.id }
   }
 }
@@ -3451,7 +3454,10 @@ export default function Workstation() {
       let n = 1
       while (store.list.some(s => s.name === `${base}${n}.m`)) n++
       return {
-        list: [...store.list, { id, name: `${base}${n}.m`, code: '% New script\n' }],
+        // New tabs start genuinely empty so the welcome card surfaces — that
+        // way clinicians/surgeons hitting "+" land on a guided start screen
+        // instead of a lone "% New script" comment they have to delete.
+        list: [...store.list, { id, name: `${base}${n}.m`, code: '' }],
         activeId: id,
       }
     })
@@ -4115,6 +4121,108 @@ export default function Workstation() {
       overflowWrap: (editorWrapOn ? 'break-word' : 'normal') as 'break-word' | 'normal',
       wordBreak: (editorWrapOn ? 'break-word' : 'normal') as 'break-word' | 'normal',
       overflow: 'auto' as const,
+    },
+    // ─── Welcome card (shown when the active script is empty) ──────────
+    // The overlay itself is pointer-transparent so clicks pass through
+    // to the textarea underneath. Only the inner card and its tiles
+    // intercept clicks. This keeps the editor immediately usable: a
+    // user can click anywhere outside the card and start typing.
+    welcomeOverlay: {
+      position: 'absolute' as const,
+      inset: 0,
+      display: 'flex',
+      alignItems: 'flex-start',
+      justifyContent: 'center',
+      padding: '56px 32px 32px 32px',
+      pointerEvents: 'none' as const,
+      zIndex: 4,
+    },
+    welcomeCard: {
+      pointerEvents: 'auto' as const,
+      maxWidth: 600,
+      width: '100%',
+      display: 'flex',
+      flexDirection: 'column' as const,
+      gap: 18,
+      padding: '28px 30px 24px 30px',
+      borderRadius: 12,
+      background: 'var(--glass-bg)',
+      border: '1px solid var(--glass-border)',
+      boxShadow: '0 18px 48px rgba(0, 0, 0, 0.18)',
+      backdropFilter: 'blur(14px)',
+      WebkitBackdropFilter: 'blur(14px)',
+    },
+    welcomeKicker: {
+      fontSize: 10,
+      fontWeight: 600,
+      letterSpacing: 1.2,
+      textTransform: 'uppercase' as const,
+      color: 'var(--color-text-muted)',
+    },
+    welcomeTitle: {
+      margin: 0,
+      fontSize: 22,
+      fontWeight: 600,
+      color: 'var(--color-text)',
+      letterSpacing: -0.2,
+      lineHeight: 1.25,
+    },
+    welcomeSub: {
+      margin: 0,
+      fontSize: 13,
+      lineHeight: 1.55,
+      color: 'var(--color-text-secondary)',
+    },
+    welcomeGrid: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+      gap: 10,
+      marginTop: 4,
+    },
+    welcomeTile: {
+      display: 'flex',
+      flexDirection: 'column' as const,
+      alignItems: 'flex-start',
+      gap: 5,
+      padding: '13px 14px',
+      borderRadius: 9,
+      border: '1px solid var(--glass-border)',
+      background: 'transparent',
+      color: 'var(--color-text)',
+      cursor: 'pointer',
+      textAlign: 'left' as const,
+      transition: 'background 120ms ease, border-color 120ms ease, transform 80ms ease',
+    },
+    welcomeTileTitle: {
+      fontSize: 12.5,
+      fontWeight: 600,
+      color: 'var(--color-text)',
+      letterSpacing: 0.05,
+    },
+    welcomeTileSub: {
+      fontSize: 11,
+      lineHeight: 1.45,
+      color: 'var(--color-text-muted)',
+    },
+    welcomeHint: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+      paddingTop: 4,
+      fontSize: 10.5,
+      color: 'var(--color-text-muted)',
+    },
+    welcomeHintKbd: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 3,
+      padding: '2px 6px',
+      borderRadius: 4,
+      border: '1px solid var(--glass-border)',
+      fontFamily: "'JetBrains Mono', monospace",
+      fontSize: 10,
+      color: 'var(--color-text-secondary)',
     },
     bracketOverlay: {
       position: 'absolute' as const,
@@ -4905,6 +5013,28 @@ export default function Workstation() {
     setLibrary('closed')
   }, [])
 
+  // Fill the active tab with the built-in starter demo (sin/cos plot + a
+  // couple of summary stats). Used by the welcome card as a "this is what
+  // a working script looks like" entry point for people who don't write
+  // code daily. If the active tab has content we open a new one instead
+  // so the user's in-progress work is never overwritten.
+  const loadStarterDemo = useCallback(() => {
+    setScriptStore(store => {
+      const current = store.list.find(s => s.id === store.activeId)
+      if (current && current.code.trim() === '') {
+        return {
+          ...store,
+          list: store.list.map(s => s.id === store.activeId ? { ...s, code: STARTER_SCRIPT, name: 'starter.m' } : s),
+        }
+      }
+      const id = makeScriptId()
+      return {
+        list: [...store.list, { id, name: 'starter.m', code: STARTER_SCRIPT }],
+        activeId: id,
+      }
+    })
+  }, [])
+
   // Filter and group built-in function docs the same way templates work.
   const filteredBuiltins = useMemo<BuiltinDoc[]>(() => {
     const q = libFilter.trim().toLowerCase()
@@ -5688,6 +5818,103 @@ export default function Workstation() {
                 spellCheck={false}
                 wrap={editorWrapOn ? 'soft' : 'off'}
               />
+              {/* ─── Welcome card ──────────────────────────────────────
+                 Surfaces only when the active script is empty. The
+                 overlay itself is pointer-transparent so clicking
+                 outside the inner card drops focus back into the
+                 textarea. Designed for clinicians, surgeons, and
+                 PKPD researchers who don't open MATLAB daily and
+                 need an obvious set of next steps. */}
+              {script === '' && (
+                <div style={styles.welcomeOverlay} aria-label="Workstation welcome">
+                  <div
+                    style={styles.welcomeCard}
+                    role="region"
+                    aria-label="Get started"
+                  >
+                    <span style={styles.welcomeKicker}>MATLAB · Octave workstation</span>
+                    <h2 style={styles.welcomeTitle}>Start computing</h2>
+                    <p style={styles.welcomeSub}>
+                      Type MATLAB or Octave directly into the editor, or pick a starting
+                      point below. Variables and figures persist across runs — your
+                      workspace is yours to explore.
+                    </p>
+                    <div style={styles.welcomeGrid}>
+                      <button
+                        type="button"
+                        style={styles.welcomeTile}
+                        onClick={() => { setLibMode('templates'); setLibrary('open') }}
+                        onMouseEnter={(e) => {
+                          (e.currentTarget as HTMLButtonElement).style.background = 'var(--glass-bg-hover)'
+                        }}
+                        onMouseLeave={(e) => {
+                          (e.currentTarget as HTMLButtonElement).style.background = 'transparent'
+                        }}
+                      >
+                        <span style={styles.welcomeTileTitle}>Browse templates</span>
+                        <span style={styles.welcomeTileSub}>
+                          Ready-to-run examples for PK/PD, ECG, imaging, signals, and stats.
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        style={styles.welcomeTile}
+                        onClick={() => { setLibMode('functions'); setLibrary('open') }}
+                        onMouseEnter={(e) => {
+                          (e.currentTarget as HTMLButtonElement).style.background = 'var(--glass-bg-hover)'
+                        }}
+                        onMouseLeave={(e) => {
+                          (e.currentTarget as HTMLButtonElement).style.background = 'transparent'
+                        }}
+                      >
+                        <span style={styles.welcomeTileTitle}>Browse functions</span>
+                        <span style={styles.welcomeTileSub}>
+                          Built-in reference with signatures, examples, and copy-ready snippets.
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        style={styles.welcomeTile}
+                        onClick={() => loadStarterDemo()}
+                        onMouseEnter={(e) => {
+                          (e.currentTarget as HTMLButtonElement).style.background = 'var(--glass-bg-hover)'
+                        }}
+                        onMouseLeave={(e) => {
+                          (e.currentTarget as HTMLButtonElement).style.background = 'transparent'
+                        }}
+                      >
+                        <span style={styles.welcomeTileTitle}>Load starter demo</span>
+                        <span style={styles.welcomeTileSub}>
+                          A tiny sin/cos plot with summary stats — verifies everything works.
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        style={styles.welcomeTile}
+                        onClick={() => openPalette()}
+                        onMouseEnter={(e) => {
+                          (e.currentTarget as HTMLButtonElement).style.background = 'var(--glass-bg-hover)'
+                        }}
+                        onMouseLeave={(e) => {
+                          (e.currentTarget as HTMLButtonElement).style.background = 'transparent'
+                        }}
+                      >
+                        <span style={styles.welcomeTileTitle}>Command palette</span>
+                        <span style={styles.welcomeTileSub}>
+                          Find any action — templates, settings, run modes, conversions.
+                        </span>
+                      </button>
+                    </div>
+                    <div style={styles.welcomeHint}>
+                      <span>Drop a .m, .csv, or .json file anywhere to import.</span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                        <span style={styles.welcomeHintKbd}>Ctrl/Cmd ↵</span>
+                        <span>Run</span>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
             {lineCount > 0 && (
               <div
