@@ -1,13 +1,12 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer,
+  ResponsiveContainer, ReferenceLine,
 } from 'recharts'
 import {
   FiPlay, FiPlus, FiDownload, FiCopy, FiLayers,
-  FiTrash2, FiRefreshCw, FiChevronRight,
+  FiTrash2, FiRefreshCw,
 } from 'react-icons/fi'
-import clsx from 'clsx'
 
 // ═══════════════════════════════════════════════════════════════════
 //  Expression Evaluator — self-contained, no external math library
@@ -175,6 +174,35 @@ function evaluate(node: ASTNode, x: number): number {
         case 'pow': return Math.pow(a[0], a[1])
         case 'min': return Math.min(a[0], a[1])
         case 'max': return Math.max(a[0], a[1])
+        case 'asin': return Math.asin(a[0])
+        case 'acos': return Math.acos(a[0])
+        case 'atan': return Math.atan(a[0])
+        case 'atan2': return Math.atan2(a[0], a[1])
+        case 'sinh': return Math.sinh(a[0])
+        case 'cosh': return Math.cosh(a[0])
+        case 'tanh': return Math.tanh(a[0])
+        case 'log10': return a[0] > 0 ? Math.log10(a[0]) : NaN
+        case 'log2': return a[0] > 0 ? Math.log2(a[0]) : NaN
+        case 'sign': return Math.sign(a[0])
+        case 'floor': return Math.floor(a[0])
+        case 'ceil': return Math.ceil(a[0])
+        case 'round': return Math.round(a[0])
+        case 'step': return a[0] >= 0 ? 1 : 0
+        case 'erf': {
+          const t = 1 / (1 + 0.3275911 * Math.abs(a[0]))
+          const p = t * (0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429))))
+          return a[0] >= 0 ? 1 - p * Math.exp(-a[0] * a[0]) : -(1 - p * Math.exp(-a[0] * a[0]))
+        }
+        case 'sigmoid': return 1 / (1 + Math.exp(-a[0]))
+        case 'rect': return Math.abs(a[0]) <= 0.5 ? 1 : 0
+        case 'sinc': return a[0] === 0 ? 1 : Math.sin(Math.PI * a[0]) / (Math.PI * a[0])
+        case 'gamma': {
+          if (a[0] <= 0 && a[0] === Math.floor(a[0])) return NaN
+          const g = 7; const c = [0.99999999999980993,676.5203681218851,-1259.1392167224028,771.32342877765313,-176.61502916214059,12.507343278686905,-0.13857109526572012,9.9843695780195716e-6,1.5056327351493116e-7]
+          let xx = a[0]; if (xx < 0.5) return Math.PI / (Math.sin(Math.PI * xx) * evaluate(node, 1 - xx + 0.0001))
+          xx -= 1; let s = c[0]; for (let i = 1; i < g + 2; i++) s += c[i] / (xx + i)
+          const t2 = xx + g + 0.5; return Math.sqrt(2 * Math.PI) * Math.pow(t2, xx + 0.5) * Math.exp(-t2) * s
+        }
         default: throw new Error(`Unknown function: ${node.name}`)
       }
     }
@@ -215,16 +243,55 @@ interface PredefinedEq {
 }
 
 const PRESETS: PredefinedEq[] = [
-  { id: 'pk-one-compartment', name: 'PK One-Compartment', expr: '100/50 * exp(-0.15*x)', xMin: 0, xMax: 48, category: 'Pharmacokinetics' },
-  { id: 'pk-two-compartment', name: 'PK Two-Compartment', expr: '1.5*exp(-0.4*x) + 0.5*exp(-0.05*x)', xMin: 0, xMax: 72, category: 'Pharmacokinetics' },
-  { id: 'pk-oral-absorption', name: 'PK Oral Absorption', expr: '(100*1.5)/(50*(1.5-0.15))*(exp(-0.15*x)-exp(-1.5*x))', xMin: 0, xMax: 48, category: 'Pharmacokinetics' },
+  // Pharmacokinetics
+  { id: 'pk-one-compartment', name: 'IV Bolus (1-Comp)', expr: '2*exp(-0.15*x)', xMin: 0, xMax: 48, category: 'Pharmacokinetics' },
+  { id: 'pk-two-compartment', name: 'IV Bolus (2-Comp)', expr: '1.5*exp(-0.4*x)+0.5*exp(-0.05*x)', xMin: 0, xMax: 72, category: 'Pharmacokinetics' },
+  { id: 'pk-oral', name: 'Oral Absorption', expr: '(100*1.5)/(50*(1.5-0.15))*(exp(-0.15*x)-exp(-1.5*x))', xMin: 0, xMax: 48, category: 'Pharmacokinetics' },
+  { id: 'pk-biexp', name: 'Biexponential Decay', expr: '80*exp(-0.5*x)+20*exp(-0.02*x)', xMin: 0, xMax: 100, category: 'Pharmacokinetics' },
+  { id: 'pk-infusion', name: 'IV Infusion', expr: '(500/0.15/50)*(1-exp(-0.15*x))', xMin: 0, xMax: 48, category: 'Pharmacokinetics' },
+  { id: 'pk-repeated', name: 'Repeated Dosing SS', expr: '2*exp(-0.1*x)/(1-exp(-0.1*12))', xMin: 0, xMax: 12, category: 'Pharmacokinetics' },
+  // Enzyme Kinetics
   { id: 'michaelis-menten', name: 'Michaelis-Menten', expr: '100*x/(10+x)', xMin: 0, xMax: 100, category: 'Enzyme Kinetics' },
+  { id: 'lineweaver-burk', name: 'Lineweaver-Burk', expr: '10/(100*x)+1/100', xMin: 0.01, xMax: 2, category: 'Enzyme Kinetics' },
+  { id: 'competitive-inhib', name: 'Competitive Inhibition', expr: '100*x/(10*(1+5/3)+x)', xMin: 0, xMax: 100, category: 'Enzyme Kinetics' },
+  { id: 'allosteric', name: 'Allosteric (Hill n=3)', expr: '100*pow(x,3)/(pow(10,3)+pow(x,3))', xMin: 0, xMax: 30, category: 'Enzyme Kinetics' },
+  // Dose-Response
   { id: 'hill-equation', name: 'Hill Equation', expr: '100*pow(x,2)/(pow(10,2)+pow(x,2))', xMin: 0, xMax: 50, category: 'Dose-Response' },
-  { id: 'logistic-growth', name: 'Logistic Growth', expr: '1000/(1+99*exp(-0.1*x))', xMin: 0, xMax: 100, category: 'Systems Biology' },
-  { id: 'gompertz-growth', name: 'Gompertz Growth', expr: '1000*exp(log(10/1000)*exp(-0.05*x))', xMin: 0, xMax: 120, category: 'Systems Biology' },
   { id: 'emax-model', name: 'Emax Model', expr: '5+95*x/(25+x)', xMin: 0, xMax: 200, category: 'Dose-Response' },
-  { id: 'biexponential-decay', name: 'Biexponential Decay', expr: '80*exp(-0.5*x)+20*exp(-0.02*x)', xMin: 0, xMax: 100, category: 'Pharmacokinetics' },
-  { id: 'damped-oscillation', name: 'Damped Oscillation', expr: 'exp(-0.1*x)*sin(x)', xMin: 0, xMax: 40, category: 'Systems Biology' },
+  { id: 'sigmoid-emax', name: 'Sigmoidal Emax', expr: '5+95*pow(x,1.5)/(pow(25,1.5)+pow(x,1.5))', xMin: 0, xMax: 200, category: 'Dose-Response' },
+  { id: 'log-logistic', name: 'Log-Logistic (4PL)', expr: '5+(95-5)/(1+pow(x/25,-2))', xMin: 0.1, xMax: 500, category: 'Dose-Response' },
+  { id: 'biphasic-dose', name: 'Biphasic Response', expr: '100*x*exp(-x/20)/(10+x)', xMin: 0, xMax: 100, category: 'Dose-Response' },
+  // Systems Biology
+  { id: 'logistic-growth', name: 'Logistic Growth', expr: '1000/(1+99*exp(-0.1*x))', xMin: 0, xMax: 100, category: 'Population & Growth' },
+  { id: 'gompertz-growth', name: 'Gompertz Growth', expr: '1000*exp(log(10/1000)*exp(-0.05*x))', xMin: 0, xMax: 120, category: 'Population & Growth' },
+  { id: 'exponential-growth', name: 'Exponential Growth', expr: '10*exp(0.05*x)', xMin: 0, xMax: 80, category: 'Population & Growth' },
+  { id: 'decay-chain', name: 'Radioactive Decay Chain', expr: '100*0.1/(0.1-0.05)*(exp(-0.05*x)-exp(-0.1*x))', xMin: 0, xMax: 60, category: 'Population & Growth' },
+  // Signal & Waveform
+  { id: 'damped-osc', name: 'Damped Oscillation', expr: 'exp(-0.1*x)*sin(x)', xMin: 0, xMax: 40, category: 'Signal & Waveform' },
+  { id: 'beat-freq', name: 'Beat Frequency', expr: 'sin(10*x)*sin(0.5*x)', xMin: 0, xMax: 20, category: 'Signal & Waveform' },
+  { id: 'chirp', name: 'Chirp Signal', expr: 'sin(x*x/10)', xMin: 0, xMax: 25, category: 'Signal & Waveform' },
+  { id: 'gaussian-pulse', name: 'Gaussian Pulse', expr: 'exp(-x*x/2)*cos(5*x)', xMin: -5, xMax: 5, category: 'Signal & Waveform' },
+  { id: 'sinc-fn', name: 'Sinc Function', expr: 'sinc(x)', xMin: -10, xMax: 10, category: 'Signal & Waveform' },
+  // Probability & Statistics
+  { id: 'normal-pdf', name: 'Normal Distribution', expr: 'exp(-x*x/2)/sqrt(2*pi)', xMin: -4, xMax: 4, category: 'Statistics' },
+  { id: 'lognormal', name: 'Log-Normal PDF', expr: 'exp(-pow(log(x),2)/2)/(x*sqrt(2*pi))', xMin: 0.01, xMax: 6, category: 'Statistics' },
+  { id: 'sigmoid-fn', name: 'Sigmoid / Logistic', expr: 'sigmoid(x)', xMin: -8, xMax: 8, category: 'Statistics' },
+  { id: 'erf-fn', name: 'Error Function', expr: 'erf(x)', xMin: -3, xMax: 3, category: 'Statistics' },
+  // Mathematical
+  { id: 'gamma-fn', name: 'Gamma Function', expr: 'gamma(x)', xMin: 0.1, xMax: 5, category: 'Mathematical' },
+  { id: 'tanh-fn', name: 'Hyperbolic Tangent', expr: 'tanh(x)', xMin: -5, xMax: 5, category: 'Mathematical' },
+  { id: 'bessel-approx', name: 'Bessel J0 Approx', expr: 'cos(x-pi/4)/sqrt(x)*sqrt(2/pi)', xMin: 1, xMax: 30, category: 'Mathematical' },
+  { id: 'heaviside-step', name: 'Heaviside Step', expr: 'step(x)', xMin: -5, xMax: 5, category: 'Mathematical' },
+]
+
+const PRESET_CATEGORIES = [
+  { name: 'Pharmacokinetics', ids: ['pk-one-compartment','pk-two-compartment','pk-oral','pk-biexp','pk-infusion','pk-repeated'] },
+  { name: 'Enzyme Kinetics', ids: ['michaelis-menten','lineweaver-burk','competitive-inhib','allosteric'] },
+  { name: 'Dose-Response', ids: ['hill-equation','emax-model','sigmoid-emax','log-logistic','biphasic-dose'] },
+  { name: 'Population & Growth', ids: ['logistic-growth','gompertz-growth','exponential-growth','decay-chain'] },
+  { name: 'Signal & Waveform', ids: ['damped-osc','beat-freq','chirp','gaussian-pulse','sinc-fn'] },
+  { name: 'Statistics', ids: ['normal-pdf','lognormal','sigmoid-fn','erf-fn'] },
+  { name: 'Mathematical', ids: ['gamma-fn','tanh-fn','bessel-approx','heaviside-step'] },
 ]
 
 // Monochrome overlay palette — distinguishable shades without category color.
@@ -259,9 +326,11 @@ export default function EquationPlotter() {
   const [overlays, setOverlays] = useState<SavedOverlay[]>([])
   const [showOverlays, setShowOverlays] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [showLibrary, setShowLibrary] = useState(false)
+  const [copied, setCopied] = useState(false)
 
   const inputRef = useRef<HTMLInputElement>(null)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // ── Persistence ────────────────────────────────────────────────
   useEffect(() => { localStorage.setItem('eq-plotter-expr', expr) }, [expr])
@@ -390,318 +459,180 @@ export default function EquationPlotter() {
     setXMax(10)
   }, [])
 
+  const copyStats = useCallback(() => {
+    if (!stats) return
+    const lines = [`Expression: ${expr}`, `Range: [${xMin}, ${xMax}]`, `Min: ${stats.min}`, `Max: ${stats.max}`, `Mean: ${stats.mean}`, `Points: ${stats.points}`]
+    navigator.clipboard.writeText(lines.join('\n')).catch(() => {})
+    setCopied(true)
+    if (timerRef.current) clearTimeout(timerRef.current)
+    timerRef.current = setTimeout(() => setCopied(false), 2000)
+  }, [stats, expr, xMin, xMax])
+
   // ── Render helpers ─────────────────────────────────────────────
   const fmt = (n: number) => {
     if (Math.abs(n) >= 1e6 || (Math.abs(n) < 0.001 && n !== 0)) return n.toExponential(3)
     return n.toFixed(4).replace(/\.?0+$/, '')
   }
 
-  const glassCard = {
-    background: 'var(--glass-bg)',
-    borderColor: 'var(--glass-border)',
-  }
+  // ── 4-quadrant detection ───────────────────────────────────────
+  const quadrantInfo = useMemo(() => {
+    let xMn = Infinity, xMx = -Infinity, yMn = Infinity, yMx = -Infinity
+    for (const p of mainData) {
+      if (isFinite(p.y)) { if (p.y < yMn) yMn = p.y; if (p.y > yMx) yMx = p.y }
+      if (isFinite(p.x)) { if (p.x < xMn) xMn = p.x; if (p.x > xMx) xMx = p.x }
+    }
+    const hasNegX = xMn < 0, hasPosX = xMx > 0, hasNegY = yMn < 0, hasPosY = yMx > 0
+    const showXRef = hasNegY && hasPosY
+    const showYRef = hasNegX && hasPosX
+    return { xMn, xMx, yMn, yMx, showXRef, showYRef }
+  }, [mainData])
 
-  // ── Grouped presets by category ────────────────────────────────
-  const presetCategories = useMemo(() => {
-    const map = new Map<string, PredefinedEq[]>()
-    PRESETS.forEach(p => {
-      const arr = map.get(p.category) || []
-      arr.push(p)
-      map.set(p.category, arr)
-    })
-    return Array.from(map.entries())
-  }, [])
-
-  // ══════════════════════════════════════════════════════════════
-  //  JSX
-  // ══════════════════════════════════════════════════════════════
+  // ── Inline styles (MC-matching) ─────────────────────────────
+  const chip: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 10px', borderRadius: 5, fontSize: 11, fontWeight: 600, background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', color: 'var(--color-text)', cursor: 'pointer', whiteSpace: 'nowrap' }
+  const inp: React.CSSProperties = { width: 64, padding: '3px 6px', borderRadius: 4, fontSize: 11, fontFamily: 'monospace', background: 'transparent', border: '1px solid var(--glass-border)', color: 'var(--color-text)', outline: 'none' }
+  const card: React.CSSProperties = { padding: '8px 10px', borderRadius: 6, cursor: 'pointer', border: '1px solid var(--glass-border)', background: 'var(--glass-bg)', transition: 'border-color 0.15s' }
 
   return (
-    <div className="flex h-full min-h-0 gap-3">
-      {/* ── LEFT SIDEBAR ─────────────────────────────────────── */}
-      <div
-        className={clsx(
-          'flex flex-col border rounded-lg transition-all duration-200 overflow-hidden shrink-0',
-          sidebarOpen ? 'w-64' : 'w-8',
-        )}
-        style={glassCard}
-      >
-        {/* Toggle */}
-        <button
-          onClick={() => setSidebarOpen(p => !p)}
-          className="flex items-center justify-center h-8 hover:bg-white/5 transition-colors"
-          style={{ color: 'var(--color-text-muted)' }}
-        >
-          <FiChevronRight className={clsx('transition-transform', sidebarOpen && 'rotate-180')} />
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, height: '100%', minHeight: 0 }}>
+      {/* ── Top toolbar ──────────────────────────────────────────── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <button style={{ ...chip, fontWeight: 600 }} onClick={() => setShowLibrary(true)}>Library</button>
+        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text)', fontFamily: 'monospace' }}>f(x) =</span>
+        <input ref={inputRef} type="text" value={expr} onChange={e => setExpr(e.target.value)} onKeyDown={e => e.key === 'Enter' && handlePlot()} style={{ ...inp, flex: 1, minWidth: 120 }} placeholder="sin(x)*exp(-0.1*x)" spellCheck={false} />
+        <button style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600, background: 'var(--color-text)', color: 'var(--color-bg)', border: 'none', cursor: 'pointer' }} onClick={handlePlot}>
+          <FiPlay size={12} /> Plot
         </button>
+      </div>
 
-        {sidebarOpen && (
-          <div className="flex flex-col flex-1 overflow-y-auto px-2 pb-2 gap-3">
-            {/* Presets */}
-            <div>
-              <h3 className="text-xs font-semibold mb-2"
-                style={{ color: 'var(--color-text)' }}>Equations</h3>
-              {presetCategories.map(([cat, items]) => (
-                <div key={cat} className="mb-3">
-                  <span className="text-[11px] font-medium block mb-0.5"
-                    style={{ color: 'var(--color-text-muted)' }}>{cat}</span>
-                  {items.map(p => (
-                    <button
-                      key={p.id}
-                      onClick={() => loadPreset(p)}
-                      className="block w-full text-left text-xs px-2 py-1 rounded hover:bg-white/[0.04] transition-colors truncate"
-                      style={{ color: 'var(--color-text-secondary)' }}
-                      title={p.expr}
-                    >
-                      {p.name}
-                    </button>
-                  ))}
-                </div>
-              ))}
-            </div>
+      {/* ── Parameters row ───────────────────────────────────────── */}
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <label style={{ fontSize: 11, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>x min</label>
+          <input type="number" style={inp} value={xMin} onChange={e => setXMin(parseFloat(e.target.value) || 0)} />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <label style={{ fontSize: 11, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>x max</label>
+          <input type="number" style={inp} value={xMax} onChange={e => setXMax(parseFloat(e.target.value) || 0)} />
+        </div>
+        <button onClick={resetRange} style={{ ...chip, fontWeight: 400 }}><FiRefreshCw size={11} /> Reset</button>
+        <div style={{ flex: 1 }} />
+        <button onClick={() => setShowOverlays(p => !p)} style={{ ...chip, fontWeight: 400 }}>
+          <FiLayers size={11} /> Overlays ({overlays.filter(o => o.enabled).length}/3)
+        </button>
+        <button onClick={addOverlay} disabled={overlays.length >= 3} style={{ ...chip, fontWeight: 400, opacity: overlays.length >= 3 ? 0.3 : 1 }}>
+          <FiPlus size={11} /> Save Overlay
+        </button>
+      </div>
 
-            {/* History */}
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <h3 className="text-xs font-semibold"
-                  style={{ color: 'var(--color-text)' }}>History</h3>
-                {history.length > 0 && (
-                  <button onClick={clearHistory}
-                    className="p-0.5 hover:bg-white/[0.06] rounded transition-colors"
-                    style={{ color: 'var(--color-text-muted)' }} title="Clear history">
-                    <FiTrash2 size={11} />
-                  </button>
-                )}
-              </div>
-              {history.length === 0 && (
-                <p className="text-[11px] italic" style={{ color: 'var(--color-text-muted)' }}>
-                  No history yet
-                </p>
-              )}
-              {history.slice(0, 15).map((h, i) => (
-                <button
-                  key={i}
-                  onClick={() => restoreHistory(h)}
-                  className="block w-full text-left text-xs px-2 py-1 rounded hover:bg-white/[0.04] transition-colors truncate font-mono"
-                  style={{ color: 'var(--color-text-secondary)' }}
-                  title={`${h.expr}  [${h.xMin}, ${h.xMax}]`}
-                >
-                  {h.expr}
-                </button>
-              ))}
+      {/* ── Overlay chips ────────────────────────────────────────── */}
+      {showOverlays && overlays.length > 0 && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {overlays.map((o, idx) => (
+            <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 8px', borderRadius: 5, border: `1px solid ${OVERLAY_COLORS[idx]}`, background: 'var(--glass-bg)', fontSize: 11 }}>
+              <input type="checkbox" checked={o.enabled} onChange={() => toggleOverlay(idx)} />
+              <span style={{ fontFamily: 'monospace', color: OVERLAY_COLORS[idx], maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.expr}</span>
+              <button onClick={() => removeOverlay(idx)} style={{ color: 'var(--color-text-muted)', cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}><FiTrash2 size={11} /></button>
             </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── Error ────────────────────────────────────────────────── */}
+      {error && (
+        <div style={{ fontSize: 11, padding: '5px 10px', borderRadius: 5, border: '1px solid rgba(239,68,68,0.25)', background: 'rgba(239,68,68,0.08)', color: '#ef4444' }}>
+          Parse error: {error}
+        </div>
+      )}
+
+      {/* ── Chart ────────────────────────────────────────────────── */}
+      <div style={{ flex: 1, minHeight: 0, border: '1px solid var(--glass-border)', borderRadius: 8, padding: 10, background: 'var(--glass-bg)' }}>
+        {chartData.length > 0 ? (
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={chartData} margin={{ top: 8, right: 16, bottom: 8, left: 8 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" strokeOpacity={0.5} />
+              <XAxis dataKey="x" tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} tickFormatter={v => typeof v === 'number' ? (Math.abs(v) >= 1000 ? v.toExponential(0) : String(Math.round(v * 100) / 100)) : v} stroke="var(--glass-border)" />
+              <YAxis tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} tickFormatter={v => typeof v === 'number' ? (Math.abs(v) >= 1000 ? v.toExponential(0) : String(Math.round(v * 100) / 100)) : v} stroke="var(--glass-border)" width={56} />
+              <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} labelStyle={{ color: 'var(--color-text-muted)' }} formatter={(value: unknown) => { const n = typeof value === 'number' ? value : Number(value); return [isFinite(n) ? n.toFixed(4) : 'NaN', ''] }} labelFormatter={(label: unknown) => `x = ${label}`} />
+              {quadrantInfo.showXRef && <ReferenceLine y={0} stroke="var(--color-text-muted)" strokeDasharray="4 4" strokeOpacity={0.4} />}
+              {quadrantInfo.showYRef && <ReferenceLine x={0} stroke="var(--color-text-muted)" strokeDasharray="4 4" strokeOpacity={0.4} />}
+              <Line type="monotone" dataKey="y" stroke="var(--color-text)" strokeWidth={1.8} strokeOpacity={0.7} dot={false} name={expr} isAnimationActive={false} />
+              {overlays.map((o, idx) => o.enabled ? (
+                <Line key={idx} type="monotone" dataKey={`o${idx}`} stroke={OVERLAY_COLORS[idx]} strokeWidth={1.5} strokeDasharray="6 3" strokeOpacity={0.6} dot={false} name={o.expr} isAnimationActive={false} connectNulls={false} />
+              ) : null)}
+            </LineChart>
+          </ResponsiveContainer>
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 12, color: 'var(--color-text-muted)' }}>
+            Enter an expression above to plot, or browse the Library
           </div>
         )}
       </div>
 
-      {/* ── MAIN PANEL ───────────────────────────────────────── */}
-      <div className="flex flex-col flex-1 min-w-0 gap-3">
-        {/* Expression input bar */}
-        <div className="flex items-center gap-2 border rounded-lg px-3 py-2" style={glassCard}>
-          <span className="text-sm font-mono font-semibold shrink-0"
-            style={{ color: 'var(--color-text-muted)' }}>f(x) =</span>
-          <input
-            ref={inputRef}
-            type="text"
-            value={expr}
-            onChange={e => setExpr(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handlePlot()}
-            className="flex-1 bg-transparent outline-none font-mono text-sm"
-            style={{ color: 'var(--color-text)' }}
-            placeholder="Enter expression, e.g. sin(x)*exp(-0.1*x)"
-            spellCheck={false}
-          />
-          <button onClick={handlePlot}
-            className="flex items-center gap-1 px-3 py-1 rounded text-xs font-medium transition-colors hover:bg-white/[0.06]"
-            style={{ background: 'var(--glass-bg-hover)', color: 'var(--color-text)', border: '1px solid var(--color-border-strong)' }}>
-            <FiPlay size={12} /> Plot
-          </button>
-        </div>
-
-        {/* Range controls + overlay toggle */}
-        <div className="flex items-center gap-3 flex-wrap">
-          <div className="flex items-center gap-1.5">
-            <label className="text-xs" style={{ color: 'var(--color-text-muted)' }}>x min</label>
-            <input
-              type="number"
-              value={xMin}
-              onChange={e => setXMin(parseFloat(e.target.value) || 0)}
-              className="w-20 bg-transparent border rounded px-2 py-1 text-xs font-mono outline-none"
-              style={{ color: 'var(--color-text)', borderColor: 'var(--glass-border)' }}
-            />
+      {/* ── Stats + export ───────────────────────────────────────── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        {stats && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 11, padding: '4px 10px', borderRadius: 5, border: '1px solid var(--glass-border)', background: 'var(--glass-bg)' }}>
+            <span style={{ color: 'var(--color-text-muted)' }}>Min: <strong style={{ color: 'var(--color-text)' }}>{fmt(stats.min)}</strong></span>
+            <span style={{ color: 'var(--color-text-muted)' }}>Max: <strong style={{ color: 'var(--color-text)' }}>{fmt(stats.max)}</strong></span>
+            <span style={{ color: 'var(--color-text-muted)' }}>Mean: <strong style={{ color: 'var(--color-text)' }}>{fmt(stats.mean)}</strong></span>
+            <span style={{ color: 'var(--color-text-muted)' }}>Pts: <strong style={{ color: 'var(--color-text)' }}>{stats.points}</strong></span>
           </div>
-          <div className="flex items-center gap-1.5">
-            <label className="text-xs" style={{ color: 'var(--color-text-muted)' }}>x max</label>
-            <input
-              type="number"
-              value={xMax}
-              onChange={e => setXMax(parseFloat(e.target.value) || 0)}
-              className="w-20 bg-transparent border rounded px-2 py-1 text-xs font-mono outline-none"
-              style={{ color: 'var(--color-text)', borderColor: 'var(--glass-border)' }}
-            />
-          </div>
-          <button onClick={resetRange}
-            className="flex items-center gap-1 text-xs px-2 py-1 rounded hover:bg-white/5 transition-colors"
-            style={{ color: 'var(--color-text-muted)' }}>
-            <FiRefreshCw size={11} /> Reset Range
-          </button>
-          <div className="flex-1" />
-          <button
-            onClick={() => setShowOverlays(p => !p)}
-            className={clsx(
-              'flex items-center gap-1 text-xs px-2 py-1 rounded transition-colors',
-              showOverlays ? 'bg-white/[0.06]' : 'hover:bg-white/[0.04]',
-            )}
-            style={{ color: overlays.length > 0 ? 'var(--color-text)' : 'var(--color-text-muted)' }}
-          >
-            <FiLayers size={12} /> Overlays ({overlays.filter(o => o.enabled).length}/3)
-          </button>
-          <button onClick={addOverlay}
-            disabled={overlays.length >= 3}
-            className="flex items-center gap-1 text-xs px-2 py-1 rounded hover:bg-white/5 transition-colors disabled:opacity-30"
-            style={{ color: 'var(--color-text-muted)' }}
-            title="Save current equation as overlay">
-            <FiPlus size={12} /> Save Overlay
-          </button>
-        </div>
+        )}
+        {history.length > 0 && <button onClick={clearHistory} style={{ ...chip, fontWeight: 400, fontSize: 10 }}><FiTrash2 size={10} /> Clear History</button>}
+        <div style={{ flex: 1 }} />
+        <button onClick={copyStats} disabled={!stats} style={{ ...chip, fontWeight: 400, opacity: stats ? 1 : 0.3 }}>
+          {copied ? 'Copied!' : <><FiCopy size={11} /> Copy Stats</>}
+        </button>
+        <button onClick={copyChartData} disabled={mainData.length === 0} style={{ ...chip, fontWeight: 400, opacity: mainData.length > 0 ? 1 : 0.3 }}>
+          <FiCopy size={11} /> Copy Data
+        </button>
+        <button onClick={exportCSV} disabled={mainData.length === 0} style={{ ...chip, fontWeight: 400, opacity: mainData.length > 0 ? 1 : 0.3 }}>
+          <FiDownload size={11} /> CSV
+        </button>
+      </div>
 
-        {/* Overlay management */}
-        {showOverlays && overlays.length > 0 && (
-          <div className="flex flex-wrap gap-2 px-1">
-            {overlays.map((o, idx) => (
-              <div key={idx}
-                className="flex items-center gap-2 border rounded px-2 py-1 text-xs"
-                style={{ ...glassCard, borderColor: OVERLAY_COLORS[idx] }}>
-                <input
-                  type="checkbox"
-                  checked={o.enabled}
-                  onChange={() => toggleOverlay(idx)}
-                  className="accent-white"
-                />
-                <span className="font-mono truncate max-w-[180px]"
-                  style={{ color: OVERLAY_COLORS[idx] }}>
-                  {o.expr}
-                </span>
-                <button onClick={() => removeOverlay(idx)}
-                  className="hover:opacity-70 transition-colors"
-                  style={{ color: 'var(--color-text-muted)' }}>
-                  <FiTrash2 size={11} />
-                </button>
+      {/* ── Library overlay ──────────────────────────────────────── */}
+      {showLibrary && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={e => { if (e.target === e.currentTarget) setShowLibrary(false) }}>
+          <div style={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 10, width: 620, maxWidth: '90vw', maxHeight: '80vh', overflow: 'auto', padding: '20px 24px', boxShadow: '0 8px 32px rgba(0,0,0,0.2)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: 'var(--color-text)' }}>Equation Library</h2>
+              <button style={chip} onClick={() => setShowLibrary(false)}>Close</button>
+            </div>
+            {PRESET_CATEGORIES.map(cat => (
+              <div key={cat.name} style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--color-text-muted)', marginBottom: 6 }}>{cat.name}</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(175px, 1fr))', gap: 6 }}>
+                  {cat.ids.map(id => {
+                    const p = PRESETS.find(q => q.id === id)
+                    if (!p) return null
+                    const isActive = expr === p.expr
+                    return (
+                      <div key={id} style={{ ...card, ...(isActive ? { borderColor: 'var(--color-text)' } : {}) }} onClick={() => { loadPreset(p); setShowLibrary(false) }}>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text)' }}>{p.name}</div>
+                        <div style={{ fontSize: 10, color: 'var(--color-text-muted)', fontFamily: 'monospace', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.expr}</div>
+                      </div>
+                    )
+                  })}
+                </div>
               </div>
             ))}
+            {history.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--color-text-muted)', marginBottom: 6 }}>Recent History</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(175px, 1fr))', gap: 6 }}>
+                  {history.slice(0, 8).map((h, i) => (
+                    <div key={i} style={card} onClick={() => { restoreHistory(h); setShowLibrary(false) }}>
+                      <div style={{ fontSize: 10, color: 'var(--color-text)', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{h.expr}</div>
+                      <div style={{ fontSize: 9, color: 'var(--color-text-muted)', marginTop: 2 }}>[{h.xMin}, {h.xMax}]</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
-        )}
-
-        {/* Error banner */}
-        {error && (
-          <div className="text-xs px-3 py-1.5 rounded border"
-            style={{ color: 'var(--color-error)', borderColor: 'rgba(239, 68, 68, 0.25)', background: 'rgba(239, 68, 68, 0.08)' }}>
-            Parse error: {error}
-          </div>
-        )}
-
-        {/* Chart */}
-        <div className="flex-1 min-h-0 border rounded-lg p-3" style={glassCard}>
-          {chartData.length > 0 ? (
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData} margin={{ top: 8, right: 16, bottom: 8, left: 8 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" />
-                <XAxis
-                  dataKey="x"
-                  tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }}
-                  tickFormatter={v => typeof v === 'number' ? (Math.abs(v) >= 1000 ? v.toExponential(0) : String(Math.round(v * 100) / 100)) : v}
-                  stroke="var(--glass-border)"
-                />
-                <YAxis
-                  tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }}
-                  tickFormatter={v => typeof v === 'number' ? (Math.abs(v) >= 1000 ? v.toExponential(0) : String(Math.round(v * 100) / 100)) : v}
-                  stroke="var(--glass-border)"
-                  width={56}
-                />
-                <Tooltip
-                  contentStyle={{
-                    background: 'var(--glass-bg)',
-                    border: '1px solid var(--glass-border)',
-                    borderRadius: 6,
-                    fontSize: 11,
-                  }}
-                  labelStyle={{ color: 'var(--color-text-muted)' }}
-                  formatter={(value: unknown) => {
-                    const n = typeof value === 'number' ? value : Number(value)
-                    return [isFinite(n) ? n.toFixed(4) : 'NaN', '']
-                  }}
-                  labelFormatter={(label: unknown) => `x = ${label}`}
-                />
-                {/* Main curve */}
-                <Line
-                  type="monotone"
-                  dataKey="y"
-                  stroke="var(--color-text)"
-                  strokeWidth={2}
-                  dot={false}
-                  name={expr}
-                  isAnimationActive={false}
-                />
-                {/* Overlay curves */}
-                {overlays.map((o, idx) =>
-                  o.enabled ? (
-                    <Line
-                      key={idx}
-                      type="monotone"
-                      dataKey={`o${idx}`}
-                      stroke={OVERLAY_COLORS[idx]}
-                      strokeWidth={1.5}
-                      strokeDasharray="6 3"
-                      dot={false}
-                      name={o.expr}
-                      isAnimationActive={false}
-                      connectNulls={false}
-                    />
-                  ) : null,
-                )}
-              </LineChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="flex items-center justify-center h-full text-sm"
-              style={{ color: 'var(--color-text-muted)' }}>
-              Enter an expression above to plot
-            </div>
-          )}
         </div>
-
-        {/* Stats + export row */}
-        <div className="flex items-center gap-3 flex-wrap">
-          {stats && (
-            <div className="flex items-center gap-4 text-xs border rounded-lg px-3 py-2" style={glassCard}>
-              <span style={{ color: 'var(--color-text-muted)' }}>
-                Min: <strong style={{ color: 'var(--color-text)' }}>{fmt(stats.min)}</strong>
-              </span>
-              <span style={{ color: 'var(--color-text-muted)' }}>
-                Max: <strong style={{ color: 'var(--color-text)' }}>{fmt(stats.max)}</strong>
-              </span>
-              <span style={{ color: 'var(--color-text-muted)' }}>
-                Mean: <strong style={{ color: 'var(--color-text)' }}>{fmt(stats.mean)}</strong>
-              </span>
-              <span style={{ color: 'var(--color-text-muted)' }}>
-                Points: <strong style={{ color: 'var(--color-text)' }}>{stats.points}</strong>
-              </span>
-            </div>
-          )}
-          <div className="flex-1" />
-          <button onClick={copyChartData}
-            disabled={mainData.length === 0}
-            className="flex items-center gap-1 text-xs px-3 py-1.5 rounded border hover:bg-white/5 transition-colors disabled:opacity-30"
-            style={{ color: 'var(--color-text-muted)', borderColor: 'var(--glass-border)' }}>
-            <FiCopy size={12} /> Copy Data
-          </button>
-          <button onClick={exportCSV}
-            disabled={mainData.length === 0}
-            className="flex items-center gap-1 text-xs px-3 py-1.5 rounded border hover:bg-white/5 transition-colors disabled:opacity-30"
-            style={{ color: 'var(--color-text-muted)', borderColor: 'var(--glass-border)' }}>
-            <FiDownload size={12} /> Export CSV
-          </button>
-        </div>
-      </div>
+      )}
     </div>
   )
 }
