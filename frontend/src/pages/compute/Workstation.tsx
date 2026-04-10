@@ -734,6 +734,12 @@ export default function Workstation() {
   // status bar. Null when the user isn't selecting any text.
   const [selectionInfo, setSelectionInfo] = useState<{ chars: number; lines: number; words: number } | null>(null)
   const [lastRunMs, setLastRunMs] = useState<number | null>(null)
+  // Persistent state for the status bar's last-run pill: null until the
+  // user runs anything for the first time, then true if the most recent
+  // run finished cleanly or false if it surfaced an error. Distinct from
+  // the toolbar `runPulse` (which auto-fades after a few seconds) so the
+  // status bar can keep colour-coding the dot until the next run.
+  const [lastRunOk, setLastRunOk] = useState<boolean | null>(null)
   // Calm "run pulse" feedback chip surfaced in the toolbar after every
   // run finishes. It shows ✓ on success or ⚠ on error, plus a one-line
   // summary, and fades out automatically after a few seconds. Designed
@@ -1390,6 +1396,7 @@ export default function Workstation() {
       } finally {
         const ms = performance.now() - t0
         setLastRunMs(ms)
+        setLastRunOk(!producedError)
         setRunning(false)
         // Pop the results overlay open as soon as the run finishes so the
         // user doesn't have to hunt for output. Pick the most informative
@@ -4394,6 +4401,55 @@ export default function Workstation() {
       fontSize: 11,
       color: 'var(--color-text-muted)',
     },
+    // Tiny coloured pill that lives at the right edge of the status bar
+    // and reflects the most recent run state. Calm by default, accented
+    // green or red depending on whether the last run finished cleanly.
+    statusRunPill: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 6,
+      padding: '2px 8px 2px 7px',
+      borderRadius: 999,
+      border: '1px solid var(--glass-border)',
+      background: 'var(--glass-bg)',
+      color: 'var(--color-text-secondary)',
+      fontFamily: "'JetBrains Mono', monospace",
+      fontSize: 10.5,
+      lineHeight: 1,
+      whiteSpace: 'nowrap' as const,
+    },
+    statusRunPillOk: {
+      borderColor: 'rgba(34, 197, 94, 0.3)',
+      background: 'rgba(34, 197, 94, 0.08)',
+      color: 'var(--color-text)',
+    },
+    statusRunPillErr: {
+      borderColor: 'rgba(220, 38, 38, 0.35)',
+      background: 'rgba(220, 38, 38, 0.08)',
+      color: 'var(--color-text)',
+    },
+    statusRunPillRunning: {
+      borderColor: 'rgba(96, 165, 250, 0.35)',
+      background: 'rgba(96, 165, 250, 0.08)',
+      color: 'var(--color-text)',
+    },
+    statusRunDot: {
+      width: 6,
+      height: 6,
+      borderRadius: '50%',
+      background: 'var(--color-text-muted)',
+      flex: '0 0 auto',
+    },
+    statusRunDotOk: {
+      background: '#22c55e',
+    },
+    statusRunDotErr: {
+      background: 'var(--color-error)',
+    },
+    statusRunDotRunning: {
+      background: '#60a5fa',
+      animation: 'workstationStatusPulse 1.1s ease-in-out infinite',
+    },
     rightRail: {
       display: 'flex',
       flexDirection: 'column' as const,
@@ -5350,6 +5406,15 @@ export default function Workstation() {
       onDragLeave={onWsDragLeave}
       onDrop={onWsDrop}
     >
+      {/* Tiny stylesheet for the keyframes used by the running-state dot
+          in the status bar. Scoped via a unique class so it never leaks
+          into other compute pages. */}
+      <style>{`
+        @keyframes workstationStatusPulse {
+          0%, 100% { opacity: 0.4; transform: scale(0.85); }
+          50% { opacity: 1; transform: scale(1.15); }
+        }
+      `}</style>
       {dropHover && (
         <div style={styles.dropOverlay} aria-hidden="true">
           <div style={styles.dropOverlayInner}>
@@ -7121,11 +7186,46 @@ export default function Workstation() {
           {sessionElapsedLabel}
         </span>
         <span>·</span>
-        <span>
-          {lastRunMs !== null
-            ? `last run ${lastRunMs < 1000 ? lastRunMs.toFixed(1) + ' ms' : (lastRunMs / 1000).toFixed(2) + ' s'}`
-            : 'ready'}
-        </span>
+        {(() => {
+          const pillStyle = {
+            ...styles.statusRunPill,
+            ...(running
+              ? styles.statusRunPillRunning
+              : lastRunOk === true
+                ? styles.statusRunPillOk
+                : lastRunOk === false
+                  ? styles.statusRunPillErr
+                  : null),
+          }
+          const dotStyle = {
+            ...styles.statusRunDot,
+            ...(running
+              ? styles.statusRunDotRunning
+              : lastRunOk === true
+                ? styles.statusRunDotOk
+                : lastRunOk === false
+                  ? styles.statusRunDotErr
+                  : null),
+          }
+          const label = running
+            ? 'running…'
+            : lastRunMs !== null
+              ? `last run ${lastRunMs < 1000 ? lastRunMs.toFixed(1) + ' ms' : (lastRunMs / 1000).toFixed(2) + ' s'}`
+              : 'ready'
+          const title = running
+            ? 'A script or fragment is currently running'
+            : lastRunOk === true
+              ? 'Most recent run finished cleanly'
+              : lastRunOk === false
+                ? 'Most recent run surfaced an error — open the console tab to inspect'
+                : 'No script has been run yet in this session'
+          return (
+            <span style={pillStyle} title={title}>
+              <span style={dotStyle} aria-hidden="true" />
+              {label}
+            </span>
+          )
+        })()}
       </div>
 
       {/* ─── Command line ────────────────────────────────────────────── */}
