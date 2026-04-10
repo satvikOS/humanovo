@@ -4566,9 +4566,33 @@ export default function Workstation() {
       lineHeight: 1.6,
       background: 'transparent',
     },
-    entryInput: { color: 'var(--color-text)', fontWeight: 500 },
-    entryOutput: { color: 'var(--color-text-secondary)', whiteSpace: 'pre-wrap' },
-    entryError: { color: 'var(--color-error)', whiteSpace: 'pre-wrap' },
+    // Each entry is rendered as a row with a small leading kind column
+    // (>, ↳, or ⚠) so users can scan the console without re-reading
+    // every line. Errors get a subtle red left stripe so a stack trace
+    // doesn't disappear into a wall of grey output.
+    entryInput: {
+      color: 'var(--color-text)',
+      fontWeight: 500,
+      padding: '1px 0 1px 4px',
+      borderLeft: '2px solid transparent',
+      marginTop: 6,
+    },
+    entryOutput: {
+      color: 'var(--color-text-secondary)',
+      whiteSpace: 'pre-wrap' as const,
+      padding: '0 0 0 14px',
+      borderLeft: '2px solid transparent',
+    },
+    entryError: {
+      color: 'var(--color-error)',
+      whiteSpace: 'pre-wrap' as const,
+      padding: '2px 6px 2px 8px',
+      borderLeft: '2px solid var(--color-error)',
+      background: 'rgba(220, 38, 38, 0.06)',
+      borderRadius: '0 3px 3px 0',
+      marginTop: 4,
+      marginBottom: 2,
+    },
     cmdBar: {
       display: 'flex',
       alignItems: 'center',
