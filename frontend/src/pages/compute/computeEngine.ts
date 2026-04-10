@@ -3008,6 +3008,334 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
     return mstr('[' + rows.join(';') + ']')
   })
 
+  // ═══════════════════════════════════════════════════════════════════
+  //  Image Processing Builtins
+  //  All images are represented as matrices (grayscale: MxN, RGB: Mx3N)
+  // ═══════════════════════════════════════════════════════════════════
+
+  // rgb2gray: convert RGB (Mx3N) to grayscale (MxN)
+  def('rgb2gray', 1, args => {
+    const m = toMat(args[0])
+    if (m.cols % 3 !== 0) throw new RuntimeError('rgb2gray: cols must be multiple of 3')
+    const w = m.cols / 3
+    const out = new Float64Array(m.rows * w)
+    for (let i = 0; i < m.rows; i++) {
+      for (let j = 0; j < w; j++) {
+        const r = m.data[i * m.cols + j]
+        const g = m.data[i * m.cols + w + j]
+        const b = m.data[i * m.cols + 2 * w + j]
+        out[i * w + j] = 0.2989 * r + 0.5870 * g + 0.1140 * b
+      }
+    }
+    return mmat(m.rows, w, out)
+  })
+
+  // imadjust: normalize image to [0,1] range (or custom [low,high])
+  def('imadjust', -1, args => {
+    need(args, 1, 'imadjust')
+    const m = toMat(args[0])
+    const lo = args[1] ? toNumber(args[1]) : 0
+    const hi = args[2] ? toNumber(args[2]) : 1
+    let mn = Infinity, mx = -Infinity
+    for (let i = 0; i < m.data.length; i++) { if (m.data[i] < mn) mn = m.data[i]; if (m.data[i] > mx) mx = m.data[i] }
+    const range = mx - mn || 1
+    const out = new Float64Array(m.data.length)
+    for (let i = 0; i < m.data.length; i++) out[i] = lo + ((m.data[i] - mn) / range) * (hi - lo)
+    return mmat(m.rows, m.cols, out)
+  })
+
+  // imthreshold: binary threshold (Otsu-like when no threshold given)
+  def('imthreshold', -1, args => {
+    need(args, 1, 'imthreshold')
+    const m = toMat(args[0])
+    let thresh: number
+    if (args[1]) {
+      thresh = toNumber(args[1])
+    } else {
+      // Simple Otsu: find threshold that minimizes within-class variance
+      const bins = 256; const hist = new Float64Array(bins)
+      let mn = Infinity, mx = -Infinity
+      for (let i = 0; i < m.data.length; i++) { if (m.data[i] < mn) mn = m.data[i]; if (m.data[i] > mx) mx = m.data[i] }
+      const range = mx - mn || 1
+      for (let i = 0; i < m.data.length; i++) {
+        const idx = Math.min(bins - 1, Math.floor(((m.data[i] - mn) / range) * (bins - 1)))
+        hist[idx]++
+      }
+      let bestT = 0, bestVar = -1
+      const total = m.data.length
+      for (let t = 0; t < bins; t++) {
+        let w0 = 0, w1 = 0, s0 = 0, s1 = 0
+        for (let i = 0; i <= t; i++) { w0 += hist[i]; s0 += i * hist[i] }
+        for (let i = t + 1; i < bins; i++) { w1 += hist[i]; s1 += i * hist[i] }
+        if (w0 === 0 || w1 === 0) continue
+        const m0 = s0 / w0, m1 = s1 / w1
+        const v = w0 * w1 * (m0 - m1) * (m0 - m1) / (total * total)
+        if (v > bestVar) { bestVar = v; bestT = t }
+      }
+      thresh = mn + (bestT / (bins - 1)) * range
+    }
+    const out = new Float64Array(m.data.length)
+    for (let i = 0; i < m.data.length; i++) out[i] = m.data[i] >= thresh ? 1 : 0
+    return mmat(m.rows, m.cols, out)
+  })
+
+  // imfilter: convolve image with kernel (e.g., 3x3 averaging)
+  def('imfilter', 2, args => {
+    const img = toMat(args[0]), kernel = toMat(args[1])
+    const kr = kernel.rows, kc = kernel.cols
+    const hr = Math.floor(kr / 2), hc = Math.floor(kc / 2)
+    const out = new Float64Array(img.rows * img.cols)
+    for (let i = 0; i < img.rows; i++) {
+      for (let j = 0; j < img.cols; j++) {
+        let sum = 0
+        for (let ki = 0; ki < kr; ki++) {
+          for (let kj = 0; kj < kc; kj++) {
+            const ii = Math.min(img.rows - 1, Math.max(0, i + ki - hr))
+            const jj = Math.min(img.cols - 1, Math.max(0, j + kj - hc))
+            sum += img.data[ii * img.cols + jj] * kernel.data[ki * kc + kj]
+          }
+        }
+        out[i * img.cols + j] = sum
+      }
+    }
+    return mmat(img.rows, img.cols, out)
+  })
+
+  // fspecial: create standard filter kernels
+  def('fspecial', -1, args => {
+    need(args, 1, 'fspecial')
+    const type = args[0].kind === 'str' ? args[0].v : String(toNumber(args[0]))
+    const sz = args[1] ? Math.round(toNumber(args[1])) : 3
+    if (type === 'average') {
+      const d = new Float64Array(sz * sz).fill(1 / (sz * sz))
+      return mmat(sz, sz, d)
+    }
+    if (type === 'gaussian') {
+      const sigma = args[2] ? toNumber(args[2]) : 0.5
+      const h = Math.floor(sz / 2); const d = new Float64Array(sz * sz); let sum = 0
+      for (let i = 0; i < sz; i++) for (let j = 0; j < sz; j++) {
+        const v = Math.exp(-((i - h) ** 2 + (j - h) ** 2) / (2 * sigma * sigma))
+        d[i * sz + j] = v; sum += v
+      }
+      for (let i = 0; i < d.length; i++) d[i] /= sum
+      return mmat(sz, sz, d)
+    }
+    if (type === 'sobel') {
+      return mmat(3, 3, new Float64Array([-1, 0, 1, -2, 0, 2, -1, 0, 1]))
+    }
+    if (type === 'laplacian') {
+      return mmat(3, 3, new Float64Array([0, 1, 0, 1, -4, 1, 0, 1, 0]))
+    }
+    if (type === 'prewitt') {
+      return mmat(3, 3, new Float64Array([-1, 0, 1, -1, 0, 1, -1, 0, 1]))
+    }
+    throw new RuntimeError(`fspecial: unknown type '${type}'`)
+  })
+
+  // edge: edge detection (Sobel gradient magnitude)
+  def('edge', -1, args => {
+    need(args, 1, 'edge')
+    const img = toMat(args[0])
+    const sx = [-1, 0, 1, -2, 0, 2, -1, 0, 1]
+    const sy = [-1, -2, -1, 0, 0, 0, 1, 2, 1]
+    const out = new Float64Array(img.rows * img.cols)
+    for (let i = 1; i < img.rows - 1; i++) {
+      for (let j = 1; j < img.cols - 1; j++) {
+        let gx = 0, gy = 0, k = 0
+        for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) {
+          const v = img.data[(i + di) * img.cols + (j + dj)]
+          gx += v * sx[k]; gy += v * sy[k]; k++
+        }
+        out[i * img.cols + j] = Math.sqrt(gx * gx + gy * gy)
+      }
+    }
+    return mmat(img.rows, img.cols, out)
+  })
+
+  // imresize: resize image using bilinear interpolation
+  def('imresize', -1, args => {
+    need(args, 2, 'imresize')
+    const img = toMat(args[0])
+    let newR: number, newC: number
+    if (args[1].kind === 'mat' && args[1].data.length === 2) {
+      newR = Math.round(args[1].data[0]); newC = Math.round(args[1].data[1])
+    } else {
+      const scale = toNumber(args[1])
+      newR = Math.round(img.rows * scale); newC = Math.round(img.cols * scale)
+    }
+    const out = new Float64Array(newR * newC)
+    for (let i = 0; i < newR; i++) {
+      for (let j = 0; j < newC; j++) {
+        const srcI = i * (img.rows - 1) / (newR - 1)
+        const srcJ = j * (img.cols - 1) / (newC - 1)
+        const i0 = Math.floor(srcI), j0 = Math.floor(srcJ)
+        const i1 = Math.min(i0 + 1, img.rows - 1), j1 = Math.min(j0 + 1, img.cols - 1)
+        const di = srcI - i0, dj = srcJ - j0
+        out[i * newC + j] =
+          (1 - di) * (1 - dj) * img.data[i0 * img.cols + j0] +
+          (1 - di) * dj * img.data[i0 * img.cols + j1] +
+          di * (1 - dj) * img.data[i1 * img.cols + j0] +
+          di * dj * img.data[i1 * img.cols + j1]
+      }
+    }
+    return mmat(newR, newC, out)
+  })
+
+  // imrotate: rotate image by degrees (nearest neighbor)
+  def('imrotate', 2, args => {
+    const img = toMat(args[0])
+    const angle = toNumber(args[1]) * Math.PI / 180
+    const cos = Math.cos(angle), sin = Math.sin(angle)
+    const cx = (img.cols - 1) / 2, cy = (img.rows - 1) / 2
+    const out = new Float64Array(img.rows * img.cols)
+    for (let i = 0; i < img.rows; i++) {
+      for (let j = 0; j < img.cols; j++) {
+        const dx = j - cx, dy = i - cy
+        const srcJ = Math.round(cos * dx + sin * dy + cx)
+        const srcI = Math.round(-sin * dx + cos * dy + cy)
+        if (srcI >= 0 && srcI < img.rows && srcJ >= 0 && srcJ < img.cols) {
+          out[i * img.cols + j] = img.data[srcI * img.cols + srcJ]
+        }
+      }
+    }
+    return mmat(img.rows, img.cols, out)
+  })
+
+  // imhist: compute histogram of image (default 256 bins)
+  def('imhist', -1, args => {
+    need(args, 1, 'imhist')
+    const m = toMat(args[0])
+    const bins = args[1] ? Math.round(toNumber(args[1])) : 256
+    let mn = Infinity, mx = -Infinity
+    for (let i = 0; i < m.data.length; i++) { if (m.data[i] < mn) mn = m.data[i]; if (m.data[i] > mx) mx = m.data[i] }
+    const range = mx - mn || 1
+    const hist = new Float64Array(bins)
+    for (let i = 0; i < m.data.length; i++) {
+      const idx = Math.min(bins - 1, Math.floor(((m.data[i] - mn) / range) * (bins - 1)))
+      hist[idx]++
+    }
+    return mmat(1, bins, hist)
+  })
+
+  // morphological operations on binary images
+  def('imdilate', -1, args => {
+    need(args, 1, 'imdilate')
+    const img = toMat(args[0])
+    const se = args[1] ? toMat(args[1]) : mmat(3, 3, new Float64Array(9).fill(1))
+    const seM = toMat(se), hr = Math.floor(seM.rows / 2), hc = Math.floor(seM.cols / 2)
+    const out = new Float64Array(img.rows * img.cols)
+    for (let i = 0; i < img.rows; i++) for (let j = 0; j < img.cols; j++) {
+      let mx = 0
+      for (let ki = 0; ki < seM.rows; ki++) for (let kj = 0; kj < seM.cols; kj++) {
+        if (seM.data[ki * seM.cols + kj] === 0) continue
+        const ii = i + ki - hr, jj = j + kj - hc
+        if (ii >= 0 && ii < img.rows && jj >= 0 && jj < img.cols)
+          mx = Math.max(mx, img.data[ii * img.cols + jj])
+      }
+      out[i * img.cols + j] = mx
+    }
+    return mmat(img.rows, img.cols, out)
+  })
+
+  def('imerode', -1, args => {
+    need(args, 1, 'imerode')
+    const img = toMat(args[0])
+    const se = args[1] ? toMat(args[1]) : mmat(3, 3, new Float64Array(9).fill(1))
+    const seM = toMat(se), hr = Math.floor(seM.rows / 2), hc = Math.floor(seM.cols / 2)
+    const out = new Float64Array(img.rows * img.cols)
+    for (let i = 0; i < img.rows; i++) for (let j = 0; j < img.cols; j++) {
+      let mn = Infinity
+      for (let ki = 0; ki < seM.rows; ki++) for (let kj = 0; kj < seM.cols; kj++) {
+        if (seM.data[ki * seM.cols + kj] === 0) continue
+        const ii = i + ki - hr, jj = j + kj - hc
+        if (ii >= 0 && ii < img.rows && jj >= 0 && jj < img.cols)
+          mn = Math.min(mn, img.data[ii * img.cols + jj])
+      }
+      out[i * img.cols + j] = mn === Infinity ? 0 : mn
+    }
+    return mmat(img.rows, img.cols, out)
+  })
+
+  // medfilt2: 2D median filter
+  def('medfilt2', -1, args => {
+    need(args, 1, 'medfilt2')
+    const img = toMat(args[0])
+    const sz = args[1] ? Math.round(toNumber(args[1])) : 3
+    const h = Math.floor(sz / 2)
+    const out = new Float64Array(img.rows * img.cols)
+    for (let i = 0; i < img.rows; i++) for (let j = 0; j < img.cols; j++) {
+      const window: number[] = []
+      for (let di = -h; di <= h; di++) for (let dj = -h; dj <= h; dj++) {
+        const ii = Math.min(img.rows - 1, Math.max(0, i + di))
+        const jj = Math.min(img.cols - 1, Math.max(0, j + dj))
+        window.push(img.data[ii * img.cols + jj])
+      }
+      window.sort((a, b) => a - b)
+      out[i * img.cols + j] = window[Math.floor(window.length / 2)]
+    }
+    return mmat(img.rows, img.cols, out)
+  })
+
+  // histeq: histogram equalization
+  def('histeq', -1, args => {
+    need(args, 1, 'histeq')
+    const m = toMat(args[0])
+    const bins = 256
+    let mn = Infinity, mx = -Infinity
+    for (let i = 0; i < m.data.length; i++) { if (m.data[i] < mn) mn = m.data[i]; if (m.data[i] > mx) mx = m.data[i] }
+    const range = mx - mn || 1
+    const hist = new Float64Array(bins)
+    for (let i = 0; i < m.data.length; i++) {
+      const idx = Math.min(bins - 1, Math.floor(((m.data[i] - mn) / range) * (bins - 1)))
+      hist[idx]++
+    }
+    // Cumulative distribution
+    const cdf = new Float64Array(bins)
+    cdf[0] = hist[0]
+    for (let i = 1; i < bins; i++) cdf[i] = cdf[i - 1] + hist[i]
+    const total = m.data.length
+    const out = new Float64Array(m.data.length)
+    for (let i = 0; i < m.data.length; i++) {
+      const idx = Math.min(bins - 1, Math.floor(((m.data[i] - mn) / range) * (bins - 1)))
+      out[i] = cdf[idx] / total
+    }
+    return mmat(m.rows, m.cols, out)
+  })
+
+  // regionprops: label connected components and compute properties
+  def('regionprops', 1, args => {
+    const img = toMat(args[0])
+    // Simple connected component labeling (4-connectivity)
+    const labels = new Int32Array(img.rows * img.cols)
+    let nextLabel = 1
+    const parent = [0]
+    const find = (x: number): number => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x] } return x }
+    const union = (a: number, b: number) => { const ra = find(a), rb = find(b); if (ra !== rb) parent[ra] = rb }
+    for (let i = 0; i < img.rows; i++) for (let j = 0; j < img.cols; j++) {
+      if (img.data[i * img.cols + j] === 0) continue
+      const up = i > 0 ? labels[(i - 1) * img.cols + j] : 0
+      const left = j > 0 ? labels[i * img.cols + j - 1] : 0
+      if (up === 0 && left === 0) { labels[i * img.cols + j] = nextLabel; parent.push(nextLabel); nextLabel++ }
+      else if (up !== 0 && left === 0) labels[i * img.cols + j] = up
+      else if (up === 0 && left !== 0) labels[i * img.cols + j] = left
+      else { labels[i * img.cols + j] = up; if (up !== left) union(up, left) }
+    }
+    // Resolve labels and count regions
+    const regions = new Map<number, { area: number; sumI: number; sumJ: number }>()
+    for (let i = 0; i < labels.length; i++) {
+      if (labels[i] === 0) continue
+      const root = find(labels[i])
+      labels[i] = root
+      const r = regions.get(root) || { area: 0, sumI: 0, sumJ: 0 }
+      r.area++; r.sumI += Math.floor(i / img.cols); r.sumJ += i % img.cols
+      regions.set(root, r)
+    }
+    // Return [area, centroidRow, centroidCol] per region
+    const data: number[] = []
+    regions.forEach(r => { data.push(r.area, r.sumI / r.area, r.sumJ / r.area) })
+    return data.length > 0 ? mmat(regions.size, 3, new Float64Array(data)) : mmat(0, 3, new Float64Array(0))
+  })
+
   return B
 }
 
