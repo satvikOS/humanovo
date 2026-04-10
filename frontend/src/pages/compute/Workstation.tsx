@@ -5633,15 +5633,51 @@ export default function Workstation() {
           Library ▸
         </button>
 
-        <button
-          style={{ ...styles.btn, ...styles.btnPrimary }}
-          onClick={runScript}
-          disabled={running}
-          title="Run script (Ctrl/Cmd + Enter) · F9 runs selection · Alt+Enter runs %% section"
-        >
-          {running ? <FiSquare /> : <FiPlay />}
-          {running ? 'Running…' : 'Run'}
-        </button>
+        {/* Split-button: primary "Run" action on the left, run-options
+            caret on the right. The two halves share a border seam so they
+            read as a single unified control rather than as two adjacent
+            buttons. The caret button is the only entry point into the run
+            options menu — there is no separate "Run ▾" top-level menu in
+            the toolbar anymore (it would have been a duplicate label). */}
+        <div style={{ display: 'inline-flex', alignItems: 'stretch' }}>
+          <button
+            style={{
+              ...styles.btn,
+              ...styles.btnPrimary,
+              borderTopRightRadius: 0,
+              borderBottomRightRadius: 0,
+            }}
+            onClick={runScript}
+            disabled={running}
+            title="Run script (Ctrl/Cmd + Enter) · F9 runs selection · Alt+Enter runs %% section"
+          >
+            {running ? <FiSquare /> : <FiPlay />}
+            {running ? 'Running…' : 'Run'}
+          </button>
+          <button
+            style={{
+              ...styles.btn,
+              ...styles.btnPrimary,
+              ...(toolbarMenu?.kind === 'run' ? { background: 'var(--color-bg-elevated)' } : null),
+              borderTopLeftRadius: 0,
+              borderBottomLeftRadius: 0,
+              borderLeft: 0,
+              padding: '4px 6px',
+              fontSize: 9,
+            }}
+            onClick={(e) => {
+              const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+              setToolbarMenu(prev => prev?.kind === 'run' ? null : { kind: 'run', x: rect.left, y: rect.bottom + 4 })
+            }}
+            disabled={running}
+            aria-haspopup="menu"
+            aria-expanded={toolbarMenu?.kind === 'run'}
+            aria-label="Run options"
+            title="Run options · Re-run last fragment · Run selection · Run %% section"
+          >
+            ▾
+          </button>
+        </div>
 
         {/* Calm post-run feedback chip — auto-dismisses via the runPulse
             useEffect. Hidden completely while a run is in flight so the
@@ -5674,8 +5710,11 @@ export default function Workstation() {
         {/* Top-level menu trees. Each button toggles its dropdown and
             shows a faint primary highlight while open. The dropdowns
             themselves are rendered in a single shared block below the
-            toolbar so the menu styling stays consistent across kinds. */}
-        {(['file', 'edit', 'view', 'run'] as const).map(kind => (
+            toolbar so the menu styling stays consistent across kinds.
+            Note: 'run' is intentionally absent — the run options menu
+            is reached via the caret half of the Run split-button above
+            so we don't render two "Run" labels in the toolbar. */}
+        {(['file', 'edit', 'view'] as const).map(kind => (
           <button
             key={kind}
             style={{ ...styles.btn, ...styles.btnGhost, ...(toolbarMenu?.kind === kind ? styles.btnPrimary : null) }}
