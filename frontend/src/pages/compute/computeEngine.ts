@@ -2163,6 +2163,280 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
     return mmat(1, 4, [r.slope, r.intercept, r.r2, r.pValue])
   })
 
+  // ---- Wire existing mathLib functions as builtins ---------------------
+  def('psd', -1, args => {
+    const sig = toArray(args[0])
+    const fs = args[1] ? toNumber(args[1]) : 1
+    const r = ML.welchPSD(sig, fs)
+    return mmat(1, r.power.length, r.power)
+  })
+  def('bandpass', -1, args => {
+    need(args, 4, 'bandpass')
+    const out = ML.bandpassFilter(toArray(args[0]), toNumber(args[1]), toNumber(args[2]), toNumber(args[3]))
+    return mmat(1, out.length, out)
+  })
+  def('samplesize', -1, args => {
+    need(args, 3, 'samplesize')
+    const r = ML.sampleSizeCalc(toNumber(args[0]), args[1] ? toNumber(args[1]) : 0.05, args[2] ? toNumber(args[2]) : 0.8, 'two-sample')
+    return mmat(1, 2, [r.n, r.nPerGroup])
+  })
+
+  // ---- Biomedical & epidemiological functions ---------------------------
+
+  // Spearman rank correlation
+  const assignRanks = (a: number[]): number[] => {
+    const indexed = a.map((v, i) => ({ v, i })).sort((x, y) => x.v - y.v)
+    const ranks = new Array<number>(a.length)
+    let i = 0
+    while (i < indexed.length) {
+      let j = i
+      while (j < indexed.length && indexed[j].v === indexed[i].v) j++
+      const avg = (i + 1 + j) / 2
+      for (let k = i; k < j; k++) ranks[indexed[k].i] = avg
+      i = j
+    }
+    return ranks
+  }
+
+  def('spearman', 2, args => {
+    const x = toArray(args[0]), y = toArray(args[1])
+    if (x.length !== y.length) throw new RuntimeError('spearman: length mismatch')
+    const rx = assignRanks(x), ry = assignRanks(y)
+    const r = ML.pearsonR(rx, ry)
+    return mmat(1, 2, [r.r, r.p])
+  })
+
+  // Odds ratio & relative risk (from 2x2 table values)
+  def('oddsratio', 4, args => {
+    const a = toNumber(args[0]), b = toNumber(args[1])
+    const c = toNumber(args[2]), d = toNumber(args[3])
+    const or = (a * d) / (b * c)
+    const se = Math.sqrt(1/a + 1/b + 1/c + 1/d)
+    const ci_lo = Math.exp(Math.log(or) - 1.96 * se)
+    const ci_hi = Math.exp(Math.log(or) + 1.96 * se)
+    return mmat(1, 3, [or, ci_lo, ci_hi])
+  })
+
+  def('riskratio', 4, args => {
+    const a = toNumber(args[0]), b = toNumber(args[1])
+    const c = toNumber(args[2]), d = toNumber(args[3])
+    const rr = (a / (a + b)) / (c / (c + d))
+    const se = Math.sqrt(1/a - 1/(a+b) + 1/c - 1/(c+d))
+    const ci_lo = Math.exp(Math.log(rr) - 1.96 * se)
+    const ci_hi = Math.exp(Math.log(rr) + 1.96 * se)
+    return mmat(1, 3, [rr, ci_lo, ci_hi])
+  })
+
+  // Number Needed to Treat
+  def('nnt', 2, args => {
+    const riskControl = toNumber(args[0]), riskTreatment = toNumber(args[1])
+    const ard = Math.abs(riskControl - riskTreatment)
+    return mnum(ard > 0 ? Math.ceil(1 / ard) : Infinity)
+  })
+
+  // Diagnostic test: sensitivity, specificity, PPV, NPV, accuracy
+  def('diagnostic', 4, args => {
+    const tp = toNumber(args[0]), fp = toNumber(args[1])
+    const fn = toNumber(args[2]), tn = toNumber(args[3])
+    const sens = tp / (tp + fn)
+    const spec = tn / (tn + fp)
+    const ppv = tp / (tp + fp)
+    const npv = tn / (tn + fn)
+    const acc = (tp + tn) / (tp + fp + fn + tn)
+    const lrp = sens / (1 - spec)
+    const lrn = (1 - sens) / spec
+    return mmat(1, 7, [sens, spec, ppv, npv, acc, lrp, lrn])
+  })
+
+  // Cohen's kappa (inter-rater agreement)
+  def('kappa', 2, args => {
+    const rater1 = toArray(args[0]), rater2 = toArray(args[1])
+    if (rater1.length !== rater2.length) throw new RuntimeError('kappa: length mismatch')
+    const n = rater1.length
+    const cats = Array.from(new Set([...rater1, ...rater2])).sort()
+    let po = 0
+    for (let i = 0; i < n; i++) if (rater1[i] === rater2[i]) po++
+    po /= n
+    let pe = 0
+    for (const c of cats) {
+      const p1 = rater1.filter(v => v === c).length / n
+      const p2 = rater2.filter(v => v === c).length / n
+      pe += p1 * p2
+    }
+    const k = pe < 1 ? (po - pe) / (1 - pe) : 1
+    return mnum(k)
+  })
+
+  // Z-score normalization
+  def('zscore', 1, args => {
+    const a = toArray(args[0])
+    const m = ML.mean(a), s = ML.std(a)
+    if (s === 0) return mmat(1, a.length, new Float64Array(a.length))
+    const out = a.map(v => (v - m) / s)
+    return mmat(1, out.length, out)
+  })
+
+  // Min-max normalization to [0, 1]
+  def('rescale', 1, args => {
+    const a = toArray(args[0])
+    const mn = Math.min(...a), mx = Math.max(...a)
+    const r = mx - mn
+    if (r === 0) return mmat(1, a.length, new Float64Array(a.length).fill(0.5))
+    const out = a.map(v => (v - mn) / r)
+    return mmat(1, out.length, out)
+  })
+
+  // Winsorize: clip to [q, 1-q] percentiles
+  def('winsorize', -1, args => {
+    need(args, 1, 'winsorize')
+    const a = toArray(args[0])
+    const q = args[1] ? toNumber(args[1]) : 0.05
+    const lo = ML.quantile(a, q), hi = ML.quantile(a, 1 - q)
+    const out = a.map(v => Math.max(lo, Math.min(hi, v)))
+    return mmat(1, out.length, out)
+  })
+
+  // Outlier detection (IQR fence) — returns logical mask (1=outlier)
+  def('isoutlier', -1, args => {
+    const a = toArray(args[0])
+    const k = args[1] ? toNumber(args[1]) : 1.5
+    const q1 = ML.quantile(a, 0.25), q3 = ML.quantile(a, 0.75)
+    const iqrVal = q3 - q1
+    const lo = q1 - k * iqrVal, hi = q3 + k * iqrVal
+    const out = a.map(v => (v < lo || v > hi) ? 1 : 0)
+    return mmat(1, out.length, out)
+  })
+
+  // Bland-Altman analysis: returns [mean_diff, sd_diff, lower_loa, upper_loa]
+  def('blandaltman', 2, args => {
+    const a = toArray(args[0]), b = toArray(args[1])
+    if (a.length !== b.length) throw new RuntimeError('blandaltman: length mismatch')
+    const diffs = a.map((v, i) => v - b[i])
+    const md = ML.mean(diffs), sd = ML.std(diffs)
+    return mmat(1, 4, [md, sd, md - 1.96 * sd, md + 1.96 * sd])
+  })
+
+  // Bonferroni correction: adjusts p-values
+  def('bonferroni', 1, args => {
+    const p = toArray(args[0])
+    const n = p.length
+    const out = p.map(v => Math.min(1, v * n))
+    return mmat(1, out.length, out)
+  })
+
+  // Bootstrap confidence interval (percentile method)
+  def('bootci', -1, args => {
+    need(args, 1, 'bootci')
+    const data = toArray(args[0])
+    const nBoot = args[1] ? Math.round(toNumber(args[1])) : 1000
+    const alpha = args[2] ? toNumber(args[2]) : 0.05
+    const n = data.length
+    const means: number[] = []
+    for (let b = 0; b < nBoot; b++) {
+      let s = 0
+      for (let i = 0; i < n; i++) s += data[Math.floor(Math.random() * n)]
+      means.push(s / n)
+    }
+    means.sort((a, b) => a - b)
+    const lo = means[Math.floor(nBoot * alpha / 2)]
+    const hi = means[Math.floor(nBoot * (1 - alpha / 2))]
+    return mmat(1, 3, [ML.mean(means), lo, hi])
+  })
+
+  // Signal-to-noise ratio
+  def('snr', 1, args => {
+    const a = toArray(args[0])
+    const m = ML.mean(a), s = ML.std(a)
+    return mnum(s > 0 ? 20 * Math.log10(Math.abs(m) / s) : Infinity)
+  })
+
+  // Zero-crossing rate
+  def('zcr', 1, args => {
+    const a = toArray(args[0])
+    let count = 0
+    for (let i = 1; i < a.length; i++) {
+      if ((a[i] >= 0 && a[i-1] < 0) || (a[i] < 0 && a[i-1] >= 0)) count++
+    }
+    return mnum(count / (a.length - 1))
+  })
+
+  // Savitzky-Golay smoothing (polynomial order 2, window must be odd)
+  def('sgolay', -1, args => {
+    need(args, 1, 'sgolay')
+    const data = toArray(args[0])
+    let win = args[1] ? Math.round(toNumber(args[1])) : 5
+    if (win % 2 === 0) win++
+    const half = Math.floor(win / 2)
+    const n = data.length
+    const out = new Float64Array(n)
+    for (let i = 0; i < n; i++) {
+      // Local quadratic fit using least squares
+      let sx = 0, sx2 = 0, sx3 = 0, sx4 = 0, sy = 0, sxy = 0, sx2y = 0, cnt = 0
+      for (let j = -half; j <= half; j++) {
+        const idx = i + j
+        if (idx < 0 || idx >= n) continue
+        const xj = j
+        sx += xj; sx2 += xj*xj; sx3 += xj*xj*xj; sx4 += xj*xj*xj*xj
+        sy += data[idx]; sxy += xj*data[idx]; sx2y += xj*xj*data[idx]
+        cnt++
+      }
+      // Fit: y = a0 + a1*x + a2*x^2 -> evaluate at x=0 gives a0
+      // Use normal equations for degree 2
+      const D = cnt * (sx2 * sx4 - sx3 * sx3) - sx * (sx * sx4 - sx2 * sx3) + sx2 * (sx * sx3 - sx2 * sx2)
+      if (Math.abs(D) < 1e-15) { out[i] = data[i]; continue }
+      const a0 = (sy * (sx2 * sx4 - sx3 * sx3) - sxy * (sx * sx4 - sx2 * sx3) + sx2y * (sx * sx3 - sx2 * sx2)) / D
+      out[i] = a0
+    }
+    return mmat(1, n, out)
+  })
+
+  // Simpson's rule integration
+  def('simpson', -1, args => {
+    need(args, 1, 'simpson')
+    let xs: number[] | null = null
+    let ys: number[]
+    if (args.length === 1) { ys = toArray(args[0]) }
+    else { xs = toArray(args[0]); ys = toArray(args[1]) }
+    const n = ys.length
+    if (n < 3) {
+      // Fall back to trapezoidal
+      let acc = 0
+      for (let i = 1; i < n; i++) {
+        const dx = xs ? (xs[i] - xs[i-1]) : 1
+        acc += 0.5 * dx * (ys[i] + ys[i-1])
+      }
+      return mnum(acc)
+    }
+    let acc = 0
+    for (let i = 0; i < n - 2; i += 2) {
+      const h = xs ? (xs[i+1] - xs[i]) : 1
+      acc += h / 3 * (ys[i] + 4*ys[i+1] + ys[i+2])
+    }
+    if (n % 2 === 0) {
+      const h = xs ? (xs[n-1] - xs[n-2]) : 1
+      acc += 0.5 * h * (ys[n-1] + ys[n-2])
+    }
+    return mnum(acc)
+  })
+
+  // Root finding: bisection method
+  def('fzero', -1, args => {
+    need(args, 3, 'fzero')
+    const fn = args[0]
+    if (fn.kind !== 'fn') throw new RuntimeError('fzero: first argument must be a function')
+    let a = toNumber(args[1]), b = toNumber(args[2])
+    const tol = args[3] ? toNumber(args[3]) : 1e-10
+    let fa = toNumber(callFn(fn, [mnum(a)], ctx))
+    for (let iter = 0; iter < 100; iter++) {
+      const mid = (a + b) / 2
+      const fm = toNumber(callFn(fn, [mnum(mid)], ctx))
+      if (Math.abs(fm) < tol || (b - a) / 2 < tol) return mnum(mid)
+      if (fa * fm < 0) { b = mid }
+      else { a = mid; fa = fm }
+    }
+    return mnum((a + b) / 2)
+  })
+
   // ---- Extra scalar math / element-wise --------------------------------
   // Abramowitz & Stegun 7.1.26 approximation for erf
   const erfScalar = (x: number): number => {
