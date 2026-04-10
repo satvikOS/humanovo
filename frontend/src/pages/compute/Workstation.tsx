@@ -1285,6 +1285,15 @@ export default function Workstation() {
     return word.length >= 2 ? word : ''
   }, [script, caretOffset])
 
+  // Look up the builtin doc that matches the identifier under the caret,
+  // if any. Drives the calm "docs strip" beneath the editor so a clinician
+  // who lands on `mean(` or `linspace` immediately sees the signature
+  // without ever opening the library overlay.
+  const docAtCaret = useMemo<BuiltinDoc | null>(() => {
+    if (!wordAtCaret) return null
+    return BUILTIN_DOCS.find(d => d.name === wordAtCaret) ?? null
+  }, [wordAtCaret])
+
   // Whole-word occurrence offsets for wordAtCaret. Short-circuits when
   // nothing is selected or the find bar is open (their highlights would
   // clash). Returns empty when the word has only one occurrence since
@@ -4401,6 +4410,47 @@ export default function Workstation() {
       fontSize: 11,
       color: 'var(--color-text-muted)',
     },
+    // Inline docs strip — sits between the editor body and the status bar
+    // and surfaces the signature + one-line description of the builtin
+    // under the caret. Quiet by default; auto-hides when no builtin is
+    // matched so it never adds visual noise to plain script editing.
+    docsStrip: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 12,
+      padding: '5px 20px',
+      borderTop: '1px solid var(--glass-border)',
+      background: 'transparent',
+      fontFamily: "'JetBrains Mono', monospace",
+      fontSize: 11,
+      color: 'var(--color-text-muted)',
+      minHeight: 26,
+      whiteSpace: 'nowrap' as const,
+      overflow: 'hidden',
+    },
+    docsStripSig: {
+      color: 'var(--color-text)',
+      fontWeight: 500,
+      flex: '0 0 auto',
+    },
+    docsStripDesc: {
+      color: 'var(--color-text-secondary)',
+      flex: '1 1 auto',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+    },
+    docsStripOpen: {
+      flex: '0 0 auto',
+      padding: '2px 8px',
+      borderRadius: 3,
+      border: '1px solid var(--glass-border)',
+      background: 'transparent',
+      color: 'var(--color-text-secondary)',
+      fontFamily: "'JetBrains Mono', monospace",
+      fontSize: 10,
+      cursor: 'pointer',
+      transition: 'background 0.12s, color 0.12s',
+    },
     // Status bar segments that double as quick actions (caret position →
     // Go to line, var count → workspace tab, figure count → figure tab).
     // Calm by default; the hover wash makes the affordance discoverable
@@ -6368,6 +6418,26 @@ export default function Workstation() {
               </div>
             )}
           </div>
+          {/* ─── Inline docs strip ────────────────────────────────────
+             Pops in beneath the editor body whenever the caret lands on
+             a recognised builtin. Stays out of the layout entirely
+             otherwise so plain editing never gains an empty bar. */}
+          {docAtCaret && (
+            <div style={styles.docsStrip} role="status" aria-live="polite">
+              <span style={styles.docsStripSig}>{docAtCaret.signature}</span>
+              <span style={styles.docsStripDesc} title={docAtCaret.description}>
+                — {docAtCaret.description}
+              </span>
+              <button
+                type="button"
+                style={styles.docsStripOpen}
+                onClick={() => { setLibrary('open'); setLibMode('functions'); setLibFilter(docAtCaret.name) }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--glass-bg-hover)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--color-text)' }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--color-text-secondary)' }}
+                title={`Open the library overlay focused on ${docAtCaret.name}`}
+              >open in library →</button>
+            </div>
+          )}
         </div>
       </div>
 
