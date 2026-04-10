@@ -11,7 +11,6 @@ import type { ComputeMode } from './types'
 
 const tabs: { id: ComputeMode; label: string; icon: typeof FiGrid; desc: string }[] = [
   { id: 'workstation', label: 'Workstation', icon: FiTerminal, desc: 'In-browser numeric compute workstation' },
-  { id: 'presets', label: 'Presets', icon: FiGrid, desc: '73+ one-click analyses organized by toolbox' },
   { id: 'montecarlo', label: 'Monte Carlo', icon: FiActivity, desc: 'Stochastic simulations & convergence' },
   { id: 'equations', label: 'Equation Plotter', icon: FiTrendingUp, desc: 'Plot, overlay & compare equations' },
 ]

@@ -24,6 +24,8 @@ import {
   type WorkstationTemplate,
 } from './workstationTemplates'
 import { BUILTIN_CATEGORIES, BUILTIN_DOCS, type BuiltinDoc } from './builtinDocs'
+import { ALL_PRESETS, TOOLBOX_CATEGORIES } from './presets'
+import type { Preset } from './types'
 
 /* ── Persistence keys ────────────────────────────────────────────────── */
 const SCRIPT_KEY = 'compute-workstation-script'          // legacy single-script key
@@ -711,7 +713,7 @@ export default function Workstation() {
   // a clean editor instead of a sidebar full of stuff to read.
   const [library, setLibrary] = useState<'open' | 'closed'>('closed')
   const [libFilter, setLibFilter] = useState('')
-  const [libMode, setLibMode] = useState<'templates' | 'functions'>('templates')
+  const [libMode, setLibMode] = useState<'templates' | 'functions' | 'presets'>('templates')
   const [activeTemplate, setActiveTemplate] = useState<string | null>(null)
   // Keyboard cursor inside the library overlay. Indexes into the flat
   // visible-items list for the active mode (templates or functions),
@@ -5573,6 +5575,63 @@ export default function Workstation() {
     return groups
   }, [filteredBuiltins])
 
+  // ── Preset filtering / grouping for Library "Presets" tab ──────────
+  const PRESET_CATEGORIES = useMemo(() => TOOLBOX_CATEGORIES.map(c => c.name), [])
+
+  const filteredPresets = useMemo<Preset[]>(() => {
+    const q = libFilter.trim().toLowerCase()
+    if (!q) return ALL_PRESETS
+    return ALL_PRESETS.filter(p =>
+      p.name.toLowerCase().includes(q) ||
+      p.description.toLowerCase().includes(q) ||
+      p.toolbox.toLowerCase().includes(q) ||
+      p.referenceFn.toLowerCase().includes(q)
+    )
+  }, [libFilter])
+
+  const presetToolboxName = useMemo(() => {
+    const m: Record<string, string> = {}
+    for (const c of TOOLBOX_CATEGORIES) m[c.id] = c.name
+    return m
+  }, [])
+
+  const groupedPresets = useMemo(() => {
+    const groups: Record<string, Preset[]> = {}
+    for (const c of TOOLBOX_CATEGORIES) groups[c.name] = []
+    for (const p of filteredPresets) {
+      const cat = presetToolboxName[p.toolbox] ?? p.toolbox
+      if (!groups[cat]) groups[cat] = []
+      groups[cat].push(p)
+    }
+    return groups
+  }, [filteredPresets, presetToolboxName])
+
+  const loadPreset = useCallback((p: Preset) => {
+    // Build a runnable script from the preset's reference code and
+    // sample data so the user can edit and re-run in the editor.
+    const header = `% ${p.name}\n% ${p.description}\n\n`
+    const dataLines = Object.entries(p.sampleData)
+      .map(([k, v]) => {
+        if (Array.isArray(v)) return `${k} = [${v.join(', ')}];`
+        if (typeof v === 'number') return `${k} = ${v};`
+        if (typeof v === 'string') return `${k} = "${v}";`
+        return `% ${k} = ... (set your data here)`
+      })
+      .join('\n')
+    const code = header + (dataLines ? dataLines + '\n\n' : '') + p.referenceCode + '\n'
+    setScriptStore(store => {
+      const current = store.list.find(s => s.id === store.activeId)
+      const inPlace = !current || current.code.trim() === ''
+      if (inPlace && current) {
+        return { ...store, list: store.list.map(s => s.id === store.activeId ? { ...s, code, name: `${p.id}.m` } : s) }
+      }
+      const id = crypto.randomUUID()
+      return { activeId: id, list: [...store.list, { id, name: `${p.id}.m`, code }] }
+    })
+    setScript(code)
+    setLibrary('closed')
+  }, [setScript])
+
   // Insert a builtin's snippet at the editor cursor (or replace selection).
   const insertBuiltin = useCallback((doc: BuiltinDoc) => {
     const ta = editorRef.current
@@ -6636,14 +6695,15 @@ export default function Workstation() {
         </div>
       </div>
 
-      {/* ─── Library overlay (Templates / Functions) ─────────────────── */}
+      {/* ─── Library overlay (Templates / Functions / Presets) ────────── */}
       {library === 'open' && (() => {
         // Build the active list and category headings up front so the
         // grid can render the rail and the items section consistently.
         const isTpl = libMode === 'templates'
-        const cats = isTpl ? WORKSTATION_CATEGORIES : BUILTIN_CATEGORIES
-        const groups = isTpl ? groupedTemplates : groupedBuiltins
-        const total = isTpl ? filteredTemplates.length : filteredBuiltins.length
+        const isPre = libMode === 'presets'
+        const cats = isPre ? PRESET_CATEGORIES : isTpl ? WORKSTATION_CATEGORIES : BUILTIN_CATEGORIES
+        const groups = isPre ? groupedPresets : isTpl ? groupedTemplates : groupedBuiltins
+        const total = isPre ? filteredPresets.length : isTpl ? filteredTemplates.length : filteredBuiltins.length
         const visibleCats = cats.filter(c => (groups[c]?.length ?? 0) > 0)
         // Flat ordered list mirroring exactly what the grid renders, in
         // category-then-item order. The library overlay's keyboard
@@ -6653,9 +6713,12 @@ export default function Workstation() {
         const flatItems: Array<
           | { kind: 'tpl'; t: WorkstationTemplate }
           | { kind: 'fn'; d: BuiltinDoc }
-        > = isTpl
-          ? visibleCats.flatMap(c => (groupedTemplates[c] ?? []).map(t => ({ kind: 'tpl' as const, t })))
-          : visibleCats.flatMap(c => (groupedBuiltins[c] ?? []).map(d => ({ kind: 'fn' as const, d })))
+          | { kind: 'pre'; p: Preset }
+        > = isPre
+          ? visibleCats.flatMap(c => (groupedPresets[c] ?? []).map(p => ({ kind: 'pre' as const, p })))
+          : isTpl
+            ? visibleCats.flatMap(c => (groupedTemplates[c] ?? []).map(t => ({ kind: 'tpl' as const, t })))
+            : visibleCats.flatMap(c => (groupedBuiltins[c] ?? []).map(d => ({ kind: 'fn' as const, d })))
         const cursorClamped = flatItems.length === 0 ? -1 : Math.max(0, Math.min(libCursor, flatItems.length - 1))
         const onLibSearchKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
           if (e.key === 'ArrowDown') {
@@ -6675,13 +6738,14 @@ export default function Workstation() {
             const sel = cursorClamped >= 0 ? flatItems[cursorClamped] : null
             if (sel) {
               if (sel.kind === 'tpl') loadTemplate(sel.t)
+              else if (sel.kind === 'pre') loadPreset(sel.p)
               else insertBuiltin(sel.d)
             }
           } else if (e.key === 'Tab') {
-            // Tab toggles between Templates and Functions so the
-            // user can flip modes without leaving the search input.
+            // Tab cycles through Templates → Functions → Presets so
+            // the user can flip modes without leaving the search input.
             e.preventDefault()
-            setLibMode(m => m === 'templates' ? 'functions' : 'templates')
+            setLibMode(m => m === 'templates' ? 'functions' : m === 'functions' ? 'presets' : 'templates')
           }
         }
         let runningIdx = 0
@@ -6699,9 +6763,10 @@ export default function Workstation() {
                 <span style={styles.resultsTitle}>Library</span>
                 <div style={styles.resultsTabBar} role="tablist" aria-label="Library mode">
                   {([
-                    { id: 'templates', label: 'Templates', count: filteredTemplates.length },
-                    { id: 'functions', label: 'Functions', count: filteredBuiltins.length },
-                  ] as const).map(t => {
+                    { id: 'templates' as const, label: 'Templates', count: filteredTemplates.length },
+                    { id: 'functions' as const, label: 'Functions', count: filteredBuiltins.length },
+                    { id: 'presets' as const, label: 'Presets', count: filteredPresets.length },
+                  ]).map(t => {
                     const active = libMode === t.id
                     return (
                       <button
@@ -6729,7 +6794,7 @@ export default function Workstation() {
                       maxWidth: 380,
                       background: 'var(--glass-bg-hover)',
                     }}
-                    placeholder={isTpl ? 'Search templates…  ↑↓ Enter' : 'Search functions…  ↑↓ Enter'}
+                    placeholder={isPre ? 'Search presets…  ↑↓ Enter' : isTpl ? 'Search templates…  ↑↓ Enter' : 'Search functions…  ↑↓ Enter'}
                     value={libFilter}
                     onChange={e => setLibFilter(e.target.value)}
                     onKeyDown={onLibSearchKey}
@@ -6826,6 +6891,52 @@ export default function Workstation() {
                         </div>
                       )}
                     </>
+                  ) : isPre ? (
+                    <>
+                      {visibleCats.map(cat => {
+                        const items = groupedPresets[cat] ?? []
+                        if (items.length === 0) return null
+                        return (
+                          <div key={cat} id={`lib-cat-${cat.replace(/\s+/g, '-')}`}>
+                            <div style={styles.panelHeader}>{cat}</div>
+                            {items.map(p => {
+                              const myIdx = runningIdx++
+                              const cursorActive = myIdx === cursorClamped
+                              return (
+                                <button
+                                  key={p.id}
+                                  type="button"
+                                  data-lib-idx={myIdx}
+                                  style={{
+                                    ...styles.libraryItemCard,
+                                    ...(cursorActive ? styles.libraryItemCardCursor : null),
+                                  }}
+                                  onClick={() => loadPreset(p)}
+                                  title={`${p.name} — ${p.description}`}
+                                  onMouseEnter={(e) => {
+                                    setLibCursor(myIdx);
+                                    (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--color-border-strong)'
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    if (!cursorActive) {
+                                      (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--glass-border)'
+                                    }
+                                  }}
+                                >
+                                  <div style={styles.libraryItemTitle}>{p.name}</div>
+                                  <div style={styles.libraryItemSubtle}>{p.description}</div>
+                                </button>
+                              )
+                            })}
+                          </div>
+                        )
+                      })}
+                      {filteredPresets.length === 0 && (
+                        <div style={{ padding: '12px 4px', color: 'var(--color-text-muted)', fontStyle: 'italic', fontSize: 12 }}>
+                          No presets match "{libFilter}".
+                        </div>
+                      )}
+                    </>
                   ) : (
                     <>
                       {visibleCats.map(cat => {
@@ -6906,6 +7017,25 @@ export default function Workstation() {
                           </div>
                           <div style={styles.libraryPreviewDescription}>{t.description}</div>
                           <pre style={styles.libraryPreviewBody}>{t.code}</pre>
+                        </>
+                      )
+                    }
+                    if (sel.kind === 'pre') {
+                      const p = sel.p
+                      return (
+                        <>
+                          <div style={styles.libraryPreviewHeader}>
+                            <span style={styles.libraryPreviewTitle}>{p.name}</span>
+                            <button
+                              type="button"
+                              style={{ ...styles.btn, ...styles.btnGhost, padding: '4px 12px' }}
+                              onClick={() => loadPreset(p)}
+                              title="Load this preset into the editor with sample data (Enter)"
+                            >Load · ↵</button>
+                          </div>
+                          <div style={styles.libraryPreviewDescription}>{p.description}</div>
+                          <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginBottom: 4, fontWeight: 600, letterSpacing: 0.5, textTransform: 'uppercase' as const }}>Reference code</div>
+                          <pre style={styles.libraryPreviewBody}>{p.referenceCode}</pre>
                         </>
                       )
                     }
