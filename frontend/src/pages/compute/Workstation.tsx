@@ -1294,6 +1294,15 @@ export default function Workstation() {
     return BUILTIN_DOCS.find(d => d.name === wordAtCaret) ?? null
   }, [wordAtCaret])
 
+  // Same idea, but for live workspace variables. When the caret sits on
+  // an identifier that already exists in the workspace, the docs strip
+  // shows its kind/shape/summary so users get an at-a-glance reminder of
+  // what they're about to feed into a function.
+  const varAtCaret = useMemo<VarSnapshot | null>(() => {
+    if (!wordAtCaret) return null
+    return vars.find(v => v.name === wordAtCaret) ?? null
+  }, [wordAtCaret, vars])
+
   // Whole-word occurrence offsets for wordAtCaret. Short-circuits when
   // nothing is selected or the find bar is open (their highlights would
   // clash). Returns empty when the word has only one occurrence since
@@ -6420,22 +6429,49 @@ export default function Workstation() {
           </div>
           {/* ─── Inline docs strip ────────────────────────────────────
              Pops in beneath the editor body whenever the caret lands on
-             a recognised builtin. Stays out of the layout entirely
-             otherwise so plain editing never gains an empty bar. */}
-          {docAtCaret && (
+             a recognised builtin or live workspace variable. Stays out
+             of the layout entirely otherwise so plain editing never
+             gains an empty bar. Builtins win when both match (a builtin
+             function shadowed by a workspace variable still resolves to
+             the function in MATLAB). */}
+          {(docAtCaret || varAtCaret) && (
             <div style={styles.docsStrip} role="status" aria-live="polite">
-              <span style={styles.docsStripSig}>{docAtCaret.signature}</span>
-              <span style={styles.docsStripDesc} title={docAtCaret.description}>
-                — {docAtCaret.description}
-              </span>
-              <button
-                type="button"
-                style={styles.docsStripOpen}
-                onClick={() => { setLibrary('open'); setLibMode('functions'); setLibFilter(docAtCaret.name) }}
-                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--glass-bg-hover)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--color-text)' }}
-                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--color-text-secondary)' }}
-                title={`Open the library overlay focused on ${docAtCaret.name}`}
-              >open in library →</button>
+              {docAtCaret ? (
+                <>
+                  <span style={styles.docsStripSig}>{docAtCaret.signature}</span>
+                  <span style={styles.docsStripDesc} title={docAtCaret.description}>
+                    — {docAtCaret.description}
+                  </span>
+                  <button
+                    type="button"
+                    style={styles.docsStripOpen}
+                    onClick={() => { setLibrary('open'); setLibMode('functions'); setLibFilter(docAtCaret.name) }}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--glass-bg-hover)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--color-text)' }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--color-text-secondary)' }}
+                    title={`Open the library overlay focused on ${docAtCaret.name}`}
+                  >open in library →</button>
+                </>
+              ) : varAtCaret && (
+                <>
+                  <span style={styles.docsStripSig}>
+                    {varAtCaret.name}
+                    <span style={{ color: 'var(--color-text-muted)', fontWeight: 400, marginLeft: 6 }}>
+                      {VAR_KIND_TITLE[varAtCaret.kind]} · {varAtCaret.shape}
+                    </span>
+                  </span>
+                  <span style={styles.docsStripDesc} title={varAtCaret.summary}>
+                    — {varAtCaret.summary}
+                  </span>
+                  <button
+                    type="button"
+                    style={styles.docsStripOpen}
+                    onClick={() => { setResultsTab('workspace'); setResultsOverlay(true); setExpandedVar(varAtCaret.name) }}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--glass-bg-hover)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--color-text)' }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--color-text-secondary)' }}
+                    title={`Open ${varAtCaret.name} in the workspace inspector`}
+                  >inspect →</button>
+                </>
+              )}
             </div>
           )}
         </div>
