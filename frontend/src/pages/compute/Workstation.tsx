@@ -659,6 +659,15 @@ export default function Workstation() {
   const [plotFullscreen, setPlotFullscreen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
   const [dropHover, setDropHover] = useState(false)
+  // Results overlay — full-screen workspace for figures, console output and
+  // variables. The default editor view is intentionally kept clean (just
+  // editor + collapsible library + status bar) so non-programmer users —
+  // clinicians, surgeons, PKPD researchers — aren't overwhelmed by panels
+  // before they've even pressed Run. The overlay opens automatically as soon
+  // as a script (or fragment) finishes executing, and can be reopened from
+  // the toolbar's "Results" entry without re-running.
+  const [resultsOverlay, setResultsOverlay] = useState(false)
+  const [resultsTab, setResultsTab] = useState<'figure' | 'console' | 'workspace'>('figure')
   // Per-figure rendering options. Toggled by the small chip buttons in the
   // figure header (grid / log-x / log-y / legend) and applied to PlotView.
   const [plotOpts, setPlotOpts] = useState<PlotOpts>({
@@ -952,6 +961,23 @@ export default function Workstation() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [inspectVar])
+
+  // Esc closes the results overlay. Only attaches when the overlay is up
+  // so it doesn't compete with other modals (find bar, palette, etc.).
+  useEffect(() => {
+    if (!resultsOverlay) return
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key !== 'Escape') return
+      // Don't fight modals layered on top — they install their own Esc.
+      if (plotFullscreen || inspectVar || helpOpen) return
+      const tgt = ev.target as HTMLElement | null
+      // Don't swallow Esc when the user is closing an inline editor input.
+      if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA')) return
+      setResultsOverlay(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [resultsOverlay, plotFullscreen, inspectVar, helpOpen])
 
   // F1 anywhere in the Workstation toggles the keyboard-shortcut help
   // modal. Esc closes it. Ctrl+L clears the console (bash convention).
@@ -1288,16 +1314,28 @@ export default function Workstation() {
     setEntries(prev => [...prev, mkEntry({ kind: 'input', text: label })])
     setTimeout(() => {
       const t0 = performance.now()
+      let producedPlot = false
+      let producedError = false
       try {
         const res = runOctave(src, workspaceRef.current)
         appendOutputs(res.outputs)
+        producedPlot = res.outputs.some(o => o.kind === 'plot')
         const firstErr = res.outputs.find(o => o.kind === 'error' && typeof o.line === 'number')
         if (firstErr?.line) setErrorLine(firstErr.line)
+        producedError = res.outputs.some(o => o.kind === 'error')
       } catch (e: any) {
         setEntries(prev => [...prev, mkEntry({ kind: 'error', text: String(e?.message ?? e) })])
+        producedError = true
       } finally {
         setLastRunMs(performance.now() - t0)
         setRunning(false)
+        // Pop the results overlay open as soon as the run finishes so the
+        // user doesn't have to hunt for output. Pick the most informative
+        // default tab: errors take priority, then a fresh figure, then
+        // console output by default. The user can switch tabs freely once
+        // the overlay is up.
+        setResultsTab(producedError ? 'console' : producedPlot ? 'figure' : 'console')
+        setResultsOverlay(true)
       }
     }, 0)
   }, [running, appendOutputs])
@@ -3599,6 +3637,10 @@ export default function Workstation() {
     { id: 'goto-sym',     title: 'Go to symbol in script',       hint: 'Ctrl+Shift+O',     run: () => openSymbolNav() },
     { id: 'next-err',     title: 'Jump to next error',           hint: 'F8',               run: () => gotoNextError(1) },
     { id: 'prev-err',     title: 'Jump to previous error',       hint: 'Shift+F8',         run: () => gotoNextError(-1) },
+    { id: 'res-show',     title: 'Show Results overlay',         hint: '',                 run: () => setResultsOverlay(true) },
+    { id: 'res-fig',      title: 'Show figure in Results',       hint: '',                 run: () => { setResultsTab('figure'); setResultsOverlay(true) } },
+    { id: 'res-con',      title: 'Show console in Results',      hint: '',                 run: () => { setResultsTab('console'); setResultsOverlay(true) } },
+    { id: 'res-ws',       title: 'Show workspace in Results',    hint: '',                 run: () => { setResultsTab('workspace'); setResultsOverlay(true) } },
     { id: 'help',         title: 'Show keyboard shortcuts',      hint: 'F1',               run: () => setHelpOpen(true) },
   ], [runScript, runSelection, runSection, runUntilCursor, rerunLastFragment, openFind, openGoto, openSymbolNav, gotoNextError, newScript, duplicateScript, closeScript, closeOtherScripts, closeScriptsToRight, reopenLastClosedScript, renameScript, scriptStore.activeId, toggleEditorWrap, bumpEditorFont, resetEditorFont, copyConsole, downloadConsole, clearConsoleErrors, exportWorkspaceJson, exportPlotSVG, exportPlotPNG, exportPlotCSV, toggleBookmarkAtCaret, gotoBookmark, clearAllBookmarks, insertSnippet, renameIdentifierAtCaret, gotoMatchingBracket, trimTrailingWhitespace, convertTabsToSpaces, applySelectionTransform, sortSelectedLines, uniqueSelectedLines, removeEmptySelectedLines, joinLines])
 
@@ -3715,10 +3757,13 @@ export default function Workstation() {
     },
     body: {
       display: 'grid',
+      // Editor-first layout: just library + editor. Figure / console /
+      // workspace live in the Results overlay so the default surface stays
+      // calm enough for clinicians and surgeons who don't write code daily.
       gridTemplateColumns: library === 'open'
-        ? '240px minmax(0, 1.3fr) minmax(320px, 1fr)'
-        : 'minmax(0, 1.3fr) minmax(320px, 1fr)',
-      gridTemplateRows: 'minmax(0, 1.5fr) minmax(0, 1fr)',
+        ? '260px minmax(0, 1fr)'
+        : 'minmax(0, 1fr)',
+      gridTemplateRows: 'minmax(0, 1fr)',
       minHeight: 0,
       transition: 'grid-template-columns 180ms ease',
     },
@@ -4141,17 +4186,17 @@ export default function Workstation() {
       color: 'var(--color-text-muted)',
     },
     rightRail: {
-      display: 'grid',
-      gridTemplateRows: 'minmax(0, 1fr) auto',
+      display: 'flex',
+      flexDirection: 'column' as const,
       minHeight: 0,
-      borderBottom: '1px solid var(--glass-border)',
+      flex: 1,
       background: 'transparent',
     },
     plotPanel: {
       display: 'flex',
       flexDirection: 'column',
       minHeight: 0,
-      borderBottom: '1px solid var(--glass-border)',
+      flex: 1,
     },
     plotBody: {
       flex: 1,
@@ -4161,8 +4206,8 @@ export default function Workstation() {
     varPanel: {
       display: 'flex',
       flexDirection: 'column',
-      maxHeight: '40%',
-      minHeight: 120,
+      minHeight: 0,
+      flex: 1,
     },
     varList: {
       overflowY: 'auto',
@@ -4251,8 +4296,7 @@ export default function Workstation() {
       display: 'flex',
       flexDirection: 'column' as const,
       minHeight: 0,
-      gridColumn: library === 'open' ? '2 / -1' : '1 / -1',
-      borderTop: '1px solid var(--glass-border)',
+      flex: 1,
       background: 'transparent',
       position: 'relative' as const,
     },
@@ -4382,6 +4426,93 @@ export default function Workstation() {
       display: 'flex',
       flexDirection: 'column',
       padding: 20,
+    },
+    /* ── Results overlay (Figure / Console / Workspace) ─────────────── */
+    resultsOverlay: {
+      position: 'fixed' as const,
+      inset: 0,
+      background: 'rgba(0, 0, 0, 0.78)',
+      backdropFilter: 'blur(10px)',
+      zIndex: 950,
+      display: 'flex',
+      flexDirection: 'column' as const,
+      padding: '24px 28px 20px 28px',
+    },
+    resultsCard: {
+      flex: 1,
+      minHeight: 0,
+      display: 'flex',
+      flexDirection: 'column' as const,
+      background: 'var(--glass-bg)',
+      border: '1px solid var(--glass-border)',
+      borderRadius: 10,
+      overflow: 'hidden' as const,
+      boxShadow: '0 18px 60px rgba(0, 0, 0, 0.55)',
+    },
+    resultsHeader: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 14,
+      padding: '14px 20px',
+      borderBottom: '1px solid var(--glass-border)',
+      background: 'var(--glass-bg-hover)',
+    },
+    resultsTitle: {
+      fontSize: 13,
+      fontWeight: 600,
+      color: 'var(--color-text)',
+      whiteSpace: 'nowrap' as const,
+      letterSpacing: 0.2,
+    },
+    resultsTabBar: {
+      display: 'flex',
+      gap: 4,
+      marginLeft: 18,
+    },
+    resultsTab: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 8,
+      padding: '7px 14px',
+      fontSize: 12,
+      fontWeight: 500,
+      color: 'var(--color-text-muted)',
+      background: 'transparent',
+      border: '1px solid transparent',
+      borderRadius: 6,
+      cursor: 'pointer',
+      transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+    },
+    resultsTabActive: {
+      color: 'var(--color-text)',
+      background: 'var(--glass-bg)',
+      border: '1px solid var(--glass-border)',
+    },
+    resultsTabBadge: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      minWidth: 18,
+      height: 16,
+      padding: '0 5px',
+      fontSize: 10,
+      fontWeight: 600,
+      color: 'var(--color-text-muted)',
+      background: 'var(--glass-bg)',
+      border: '1px solid var(--glass-border)',
+      borderRadius: 8,
+    },
+    resultsTabBadgeActive: {
+      color: 'var(--color-text)',
+      background: 'var(--color-bg-elevated)',
+      borderColor: 'var(--color-border-strong)',
+    },
+    resultsBody: {
+      flex: 1,
+      minHeight: 0,
+      display: 'flex',
+      flexDirection: 'column' as const,
+      overflow: 'hidden' as const,
     },
     dropOverlay: {
       position: 'absolute' as const,
@@ -4767,6 +4898,16 @@ export default function Workstation() {
         />
 
         <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+          {(plots.length > 0 || vars.length > 0 || entries.length > 0) && (
+            <button
+              style={{ ...styles.btn, ...styles.btnGhost }}
+              onClick={() => setResultsOverlay(true)}
+              title="Open Results overlay (figures, console, workspace)"
+              aria-label="Open results overlay"
+            >
+              Results ▸
+            </button>
+          )}
           <button
             style={{ ...styles.btn, ...styles.btnGhost }}
             onClick={openPalette}
@@ -5496,7 +5637,59 @@ export default function Workstation() {
             )}
           </div>
         </div>
+      </div>
 
+      {/* ─── Results overlay (Figure / Console / Workspace) ─────────── */}
+      {resultsOverlay && (
+        <div
+          style={styles.resultsOverlay}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Results"
+          onClick={e => { if (e.target === e.currentTarget) setResultsOverlay(false) }}
+        >
+          <div style={styles.resultsCard}>
+            <div style={styles.resultsHeader}>
+              <span style={styles.resultsTitle}>Results</span>
+              <div style={styles.resultsTabBar} role="tablist" aria-label="Result panels">
+                {([
+                  { id: 'figure', label: 'Figure', count: plots.length },
+                  { id: 'console', label: 'Console', count: entries.length },
+                  { id: 'workspace', label: 'Workspace', count: vars.length },
+                ] as const).map(t => {
+                  const active = resultsTab === t.id
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={active}
+                      style={{ ...styles.resultsTab, ...(active ? styles.resultsTabActive : null) }}
+                      onClick={() => setResultsTab(t.id)}
+                      title={`Show ${t.label.toLowerCase()}`}
+                    >
+                      {t.label}
+                      <span style={{ ...styles.resultsTabBadge, ...(active ? styles.resultsTabBadgeActive : null) }}>
+                        {t.count}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+              <span style={{ flex: 1 }} />
+              <button
+                type="button"
+                style={{ ...styles.btn, ...styles.btnGhost, padding: '6px 12px' }}
+                onClick={() => setResultsOverlay(false)}
+                title="Close (Esc) — your output is preserved"
+                aria-label="Close results overlay"
+              >
+                Close · Esc
+              </button>
+            </div>
+            <div style={styles.resultsBody}>
+
+        {resultsTab === 'figure' && (
         <div style={styles.rightRail}>
           <div style={styles.plotPanel}>
             <div style={styles.panelHeader}>
@@ -5598,7 +5791,11 @@ export default function Workstation() {
               <PlotView plot={currentPlot} opts={plotOpts} />
             </div>
           </div>
+        </div>
+        )}
 
+        {resultsTab === 'workspace' && (
+        <div style={styles.rightRail}>
           <div style={styles.varPanel}>
             <div style={styles.panelHeader}>
               <span>Workspace</span>
@@ -5766,7 +5963,9 @@ export default function Workstation() {
             </div>
           </div>
         </div>
+        )}
 
+        {resultsTab === 'console' && (
         <div style={styles.consoleWrap}>
           <div style={styles.consoleHeader}>
             <span>Console</span>
@@ -5891,7 +6090,12 @@ export default function Workstation() {
             >↓ live</button>
           )}
         </div>
-      </div>
+        )}
+
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ─── Status bar ──────────────────────────────────────────────── */}
       <div style={styles.statusBar}>
