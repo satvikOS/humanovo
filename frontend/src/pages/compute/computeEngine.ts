@@ -1,4 +1,4 @@
-// Humanovo in-browser Octave/MATLAB-compatible interpreter.
+// Humanovo in-browser numeric compute interpreter.
 // Batch 3a: core types + tokenizer.
 // This file is being built incrementally. The parser and evaluator live
 // beside these types and will be filled in over subsequent commits.
@@ -10,14 +10,14 @@
 /** Runtime value tag. */
 export type MKind = 'num' | 'mat' | 'str' | 'bool' | 'fn' | 'void'
 
-/** A scalar number. In MATLAB-land scalars are technically 1x1 matrices,
+/** A scalar number. Internally scalars are technically 1x1 matrices,
  *  but we keep a fast path to avoid allocation churn. */
 export interface MNum { kind: 'num'; v: number }
 
 /** Row-major real matrix. `data.length === rows * cols`. */
 export interface MMat { kind: 'mat'; rows: number; cols: number; data: Float64Array }
 
-/** Character row vector (Octave strings are rows of chars). */
+/** Character row vector (strings are rows of chars). */
 export interface MStr { kind: 'str'; v: string }
 
 /** Logical scalar. Logical matrices are represented as MMat with 0/1. */
@@ -107,7 +107,7 @@ export class TokenizeError extends Error {
   }
 }
 
-/** Tokenize Octave/MATLAB source. Produces a stream ending in an 'eof' token.
+/** Tokenize source code. Produces a stream ending in an 'eof' token.
  *  Newlines are surfaced as their own token because they terminate statements. */
 export function tokenize(src: string): Token[] {
   const out: Token[] = []
@@ -511,7 +511,7 @@ class Parser {
     }
     this.skipTerms()
     const body = this.parseBlock('end', 'endfunction')
-    this.match('end', 'endfunction') // optional in Octave scripts
+    this.match('end', 'endfunction') // optional end keyword
     return { type: 'function', name, params, outputs, body }
   }
 
@@ -651,7 +651,7 @@ class Parser {
     const t = this.peek().type
     if (t === '^' || t === '.^') {
       this.i++
-      const exp = this.parseUnary() // right-assoc, allows -2^3 = -(2^3) per MATLAB
+      const exp = this.parseUnary() // right-assoc, allows -2^3 = -(2^3)
       return { type: 'bin', op: t, l: base, r: exp }
     }
     return base
@@ -1003,7 +1003,7 @@ function matPow(a: MMat, p: number): MMat {
 // ---- Binary op dispatch ----------------------------------------------------
 
 function applyBinOp(op: string, l: MValue, r: MValue): MValue {
-  // String concat with +  (Octave has [a,b]; we keep '+' as numeric only and use str+str only when both strings)
+  // String concat with + ('+' is numeric only; str+str concatenates when both operands are strings)
   if (l.kind === 'str' && r.kind === 'str' && (op === '+' || op === '.+')) {
     return { kind: 'str', v: l.v + r.v }
   }
@@ -1073,7 +1073,7 @@ function applyUnaryOp(op: string, v: MValue): MValue {
 function rangeToMat(startN: number, stepN: number, stopN: number): MMat {
   const vals: number[] = []
   const step = stepN === 0 ? 1 : stepN
-  // Octave semantics: 1:5 -> 1..5; 5:-1:1 -> 5..1
+  // Range semantics: 1:5 -> 1..5; 5:-1:1 -> 5..1
   if (step > 0) {
     for (let v = startN; v <= stopN + 1e-12; v += step) vals.push(v)
   } else {
@@ -1165,7 +1165,7 @@ function getIndexed(target: MValue, args: (MValue | 'colon')[]): MValue {
     // Linear indexing
     const idx = resolveIndices(args[0], m.rows * m.cols)
     const out = new Float64Array(idx.length)
-    // Octave/MATLAB linear index is column-major. But our data is row-major —
+    // Linear index is column-major. But our data is row-major —
     // translate: element (r,c) -> data[r*cols+c]; linear index k -> c=floor(k/rows), r=k%rows
     for (let i = 0; i < idx.length; i++) {
       const k = idx[i]
@@ -1314,7 +1314,7 @@ function evalExpr(e: Expr, ctx: EvalContext): MValue {
     case 'anon': {
       const params = e.params
       const body = e.body
-      // Capture snapshot of workspace vars (by reference — Octave-ish)
+      // Capture snapshot of workspace vars (by reference)
       const captured = new Map(ctx.ws.vars)
       const fn: MFn = {
         kind: 'fn',
@@ -1431,7 +1431,7 @@ function evalStmt(s: Stmt, ctx: EvalContext): void {
     case 'for': {
       const it = evalExpr(s.iter, ctx)
       const m = toMat(it)
-      // MATLAB iterates over columns
+      // Iterate over columns
       for (let c = 0; c < m.cols; c++) {
         let col: MValue
         if (m.rows === 1) col = mnum(m.data[c])
@@ -1702,7 +1702,7 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
   def('isnumeric', 1, args => mbool(args[0].kind === 'num' || args[0].kind === 'mat'))
 
   // ---- Reductions ------------------------------------------------------
-  // MATLAB-style reductions: vector -> scalar, matrix -> row vector of
+  // Reductions: vector -> scalar, matrix -> row vector of
   // per-column reductions (dim=1). We fall back to flattening for 1-D input.
   const reduceVecOrMat = (v: MValue, fn: (a: number[]) => number): MValue => {
     const m = toMat(v)
@@ -1924,7 +1924,7 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
     }
     return mmat(R, C, out)
   })
-  // Common window functions, returned as column vectors to match MATLAB.
+  // Common window functions, returned as column vectors.
   def('hann', 1, args => {
     const n = Math.round(toNumber(args[0]))
     if (n <= 0) return mmat(0, 1, new Float64Array(0))
@@ -2473,7 +2473,7 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
     need(args, 1, 'diff')
     const m = toMat(args[0])
     const k = args[1] ? Math.max(1, Math.round(toNumber(args[1]))) : 1
-    // MATLAB semantics: vectors diff along length; matrices diff along rows.
+    // Vectors diff along length; matrices diff along rows.
     if (m.rows === 1 || m.cols === 1) {
       let cur = Array.from(m.data)
       for (let it = 0; it < k; it++) {
@@ -2542,7 +2542,7 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
     if (xs.length !== ys.length || xs.length < 2) {
       throw new RuntimeError('interp1: xs and ys must be same length (>= 2)')
     }
-    // Assume xs is monotonically increasing (standard MATLAB requirement).
+    // Assume xs is monotonically increasing (standard requirement).
     const out = new Float64Array(xq.length)
     for (let k = 0; k < xq.length; k++) {
       const x = xq[k]

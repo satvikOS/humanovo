@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════════
 // Compute Lab — Numeric Compute Workstation
-// Batch 4a: editor + command window backed by the octaveEngine.
+// Batch 4a: editor + command window backed by the compute engine.
 // Batch 4b: adds variable inspector and plot panel on the right rail.
 // Later batches add the preset library sidebar and polish.
 // ═══════════════════════════════════════════════════════════════════════
@@ -11,13 +11,13 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from 'recharts'
 import {
-  run as runOctave,
+  run as runEngine,
   createWorkspace,
   type Workspace,
   type RunOutput,
   type PlotSpec,
   type MValue,
-} from './octaveEngine'
+} from './computeEngine'
 import {
   WORKSTATION_CATEGORIES,
   WORKSTATION_TEMPLATES,
@@ -128,7 +128,7 @@ function loadScripts(): ScriptStore {
         return {
           list: parsed.list.map((s: any) => ({
             id: String(s.id ?? makeScriptId()),
-            name: String(s.name ?? 'untitled.m'),
+            name: String(s.name ?? 'untitled.hm'),
             code: String(s.code ?? ''),
           })),
           activeId: String(parsed.activeId ?? parsed.list[0].id),
@@ -139,8 +139,8 @@ function loadScripts(): ScriptStore {
     const legacy = localStorage.getItem(SCRIPT_KEY)
     const first: SavedScript = {
       id: makeScriptId(),
-      name: 'main.m',
-      // First-time visitors land on an empty main.m — the welcome card
+      name: 'main.hm',
+      // First-time visitors land on an empty main.hm — the welcome card
       // overlay then guides them into templates / functions / starter
       // demo. Returning users keep their saved scripts.
       code: legacy ?? '',
@@ -148,7 +148,7 @@ function loadScripts(): ScriptStore {
     if (legacy) { try { localStorage.removeItem(SCRIPT_KEY) } catch { /* quota */ } }
     return { list: [first], activeId: first.id }
   } catch {
-    const first: SavedScript = { id: makeScriptId(), name: 'main.m', code: '' }
+    const first: SavedScript = { id: makeScriptId(), name: 'main.hm', code: '' }
     return { list: [first], activeId: first.id }
   }
 }
@@ -309,7 +309,7 @@ function formatScalar(n: number): string {
   return n.toPrecision(5).replace(/\.?0+$/, '')
 }
 
-/* ── MATLAB syntax highlighter ───────────────────────────────────────── */
+/* ── Syntax highlighter ─────────────────────────────────────────────── */
 // Produces a flat token list for an overlay <pre> that sits behind the
 // textarea. Keeps the tokenizer intentionally tolerant: anything it can't
 // classify falls through as 'text' so the whole source is always rendered
@@ -317,7 +317,7 @@ function formatScalar(n: number): string {
 type HTokenKind = 'comment' | 'string' | 'number' | 'keyword' | 'variable' | 'text'
 interface HToken { kind: HTokenKind; text: string }
 
-const MATLAB_KEYWORDS = new Set([
+const LANGUAGE_KEYWORDS = new Set([
   'if', 'else', 'elseif', 'end', 'endif', 'endfor', 'endwhile', 'endfunction',
   'for', 'while', 'do', 'until', 'break', 'continue',
   'function', 'return', 'switch', 'case', 'otherwise',
@@ -325,7 +325,7 @@ const MATLAB_KEYWORDS = new Set([
   'true', 'false',
 ])
 
-function highlightMatlab(src: string, varNames?: Set<string>): HToken[] {
+function highlightSyntax(src: string, varNames?: Set<string>): HToken[] {
   const out: HToken[] = []
   let buf = ''
   const flush = () => { if (buf) { out.push({ kind: 'text', text: buf }); buf = '' } }
@@ -352,7 +352,7 @@ function highlightMatlab(src: string, varNames?: Set<string>): HToken[] {
       continue
     }
 
-    // Line comment % ... or # ... (Octave accepts both)
+    // Line comment % ... or # ... (both accepted)
     if (c === '%' || c === '#') {
       flush()
       let j = i
@@ -362,7 +362,7 @@ function highlightMatlab(src: string, varNames?: Set<string>): HToken[] {
       continue
     }
 
-    // Double-quoted string (Octave + MATLAB R2017+)
+    // Double-quoted string
     if (c === '"') {
       flush()
       let j = i + 1
@@ -432,7 +432,7 @@ function highlightMatlab(src: string, varNames?: Set<string>): HToken[] {
         else break
       }
       const word = src.slice(i, j)
-      if (MATLAB_KEYWORDS.has(word)) {
+      if (LANGUAGE_KEYWORDS.has(word)) {
         flush()
         out.push({ kind: 'keyword', text: word })
       } else if (varNames && varNames.has(word)) {
@@ -478,7 +478,7 @@ const HL_COLORS: Record<HTokenKind, React.CSSProperties> = {
   text:     { color: 'var(--color-text)' },
 }
 
-// Build a per-character mask of positions that fall inside a MATLAB
+// Build a per-character mask of positions that fall inside a line
 // comment (%…\n) or a string literal so bracket-matching can skip them.
 // The transpose heuristic mirrors the syntax-highlighter so `a'` is read
 // as transpose, not as an unterminated string.
@@ -702,7 +702,7 @@ export default function Workstation() {
   const [varSort, setVarSort] = useState<'name' | 'size' | 'type'>('name')
   // Target format used by the ⧉ copy button on each workspace row.
   // Cycled through via a small chip in the panel header so users can
-  // paste the same matrix into MATLAB, Python, LaTeX, JSON, or CSV
+  // paste the same matrix into Python, LaTeX, JSON, or CSV
   // without retyping anything.
   const [copyFormat, setCopyFormat] = useState<CopyFormat>('native')
   const [expandedVar, setExpandedVar] = useState<string | null>(null)
@@ -919,7 +919,7 @@ export default function Workstation() {
   // Memoized token stream for the syntax-highlighting overlay. Recomputes
   // on every keystroke; the tokenizer is O(n) and cheap enough for scripts
   // up to a few thousand lines.
-  const highlightTokens = useMemo(() => highlightMatlab(script, varNameSet), [script, varNameSet])
+  const highlightTokens = useMemo(() => highlightSyntax(script, varNameSet), [script, varNameSet])
 
   // Piggyback on the tokenizer to count how many times each workspace
   // variable is used in the current script. Free since we already emit
@@ -1411,7 +1411,7 @@ export default function Workstation() {
       let producedPlot = false
       let producedError = false
       try {
-        const res = runOctave(src, workspaceRef.current)
+        const res = runEngine(src, workspaceRef.current)
         appendOutputs(res.outputs)
         producedPlot = res.outputs.some(o => o.kind === 'plot')
         const firstErr = res.outputs.find(o => o.kind === 'error' && typeof o.line === 'number')
@@ -1459,7 +1459,7 @@ export default function Workstation() {
   }, [script, runFragment])
 
   // Run the current textarea selection, or the caret's line if nothing
-  // is selected. Standard MATLAB F9 behaviour.
+  // is selected. Standard F9 behaviour.
   const runSelection = useCallback(() => {
     const ta = editorRef.current
     if (!ta) return
@@ -1478,7 +1478,7 @@ export default function Workstation() {
   }, [runFragment])
 
   // Run the %%-delimited section containing the caret. Sections are
-  // MATLAB's standard script partitioning: a block starting at either
+  // Standard script partitioning (%% sections): a block starting at either
   // the file head or a `%% name` marker line and running to the next
   // such marker (or end-of-file). Useful for long scripts where you
   // want to re-run one stage without touching the rest of the workspace.
@@ -1527,7 +1527,7 @@ export default function Workstation() {
     const h = [...history, line]
     setHistory(h); saveHistory(h); setHistIdx(null)
     try {
-      const res = runOctave(line, workspaceRef.current)
+      const res = runEngine(line, workspaceRef.current)
       appendOutputs(res.outputs)
     } catch (e: any) {
       setEntries(prev => [...prev, mkEntry({ kind: 'error', text: String(e?.message ?? e) })])
@@ -1543,7 +1543,7 @@ export default function Workstation() {
 
   const onCmdKey = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
     // Tab — autocomplete the partial identifier under the caret against
-    // workspace variables, MATLAB builtins, and keywords. A second Tab
+    // workspace variables, builtins, and keywords. A second Tab
     // without editing cycles to the next candidate; any other keystroke
     // drops the cycle so the user can keep typing naturally.
     if (e.key === 'Tab') {
@@ -1583,7 +1583,7 @@ export default function Workstation() {
           items.push(d.name); seen.add(d.name)
         }
       }
-      for (const k of MATLAB_KEYWORDS) {
+      for (const k of LANGUAGE_KEYWORDS) {
         if (k.toLowerCase().startsWith(lower) && !seen.has(k)) {
           items.push(k); seen.add(k)
         }
@@ -1754,7 +1754,7 @@ export default function Workstation() {
     const pad = (n: number) => String(n).padStart(2, '0')
     const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
     const scriptName = scriptStore.list.find(s => s.id === scriptStore.activeId)?.name ?? 'session'
-    const base = scriptName.replace(/\.m$/i, '').replace(/[^A-Za-z0-9._-]+/g, '_') || 'session'
+    const base = scriptName.replace(/\.hm$/i, '').replace(/[^A-Za-z0-9._-]+/g, '_') || 'session'
     const filename = `workstation-${base}-${stamp}.txt`
     const header = `% Humanovo Workstation console transcript\n% script: ${scriptName}\n% saved: ${now.toISOString()}\n\n`
     const blob = new Blob([header + text + '\n'], { type: 'text/plain;charset=utf-8' })
@@ -1936,12 +1936,9 @@ export default function Workstation() {
     setInspectVar(prev => prev === name ? null : prev)
   }, [])
 
-  // Copy a variable's contents as a literal MATLAB expression, so users
-  // can paste a matrix straight into a script. Scalars and booleans use
-  // their natural literal form.
   // Render a workspace value in the chosen target language. Formats are
   // picked via the small chip in the workspace panel header so users can
-  // move matrices into MATLAB, Python/numpy, LaTeX, JSON, or plain CSV
+  // move matrices into Python/numpy, LaTeX, JSON, or plain CSV
   // without hand-rewriting them.
   const formatVariableAs = useCallback((v: MValue, fmt: CopyFormat): string => {
     const num = (x: number) => String(x)
@@ -2039,7 +2036,7 @@ export default function Workstation() {
     const next = prompt(`Rename "${old}" to:`, old)
     if (!next || next === old) return
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(next)) {
-      alert(`"${next}" is not a valid MATLAB identifier.`)
+      alert(`"${next}" is not a valid identifier.`)
       return
     }
     const esc = old.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -2088,7 +2085,7 @@ export default function Workstation() {
   // indentation of the line the caret is on. Any `$0` token in the
   // snippet is removed and becomes the final caret position; otherwise
   // the caret lands at the end of the inserted block. Used by the
-  // palette commands below to stamp out common MATLAB skeletons.
+  // palette commands below to stamp out common code skeletons.
   // Apply an in-place text transform to the current selection, or to the
   // current line when nothing is selected. Returns early if the result
   // would be identical (avoids clobbering undo history with no-ops).
@@ -2428,7 +2425,7 @@ export default function Workstation() {
 
   // Scan the current script for symbols — %% section headers and top-level
   // `function` definitions. Captured greedily (no scope analysis) because
-  // MATLAB allows multiple local functions per file and nested functions.
+  // The language allows multiple local functions per file and nested functions.
   type ScriptSymbol = { kind: 'section' | 'fn'; name: string; line: number }
   const scriptSymbols = useMemo<ScriptSymbol[]>(() => {
     const out: ScriptSymbol[] = []
@@ -2570,7 +2567,7 @@ export default function Workstation() {
   //   Cmd/Ctrl+Enter        — run script
   //   Shift+Cmd/Ctrl+Enter  — run selection (or current line)
   //   Alt+Cmd/Ctrl+Enter    — run current %% section
-  //   F9                     — run selection (MATLAB convention)
+  //   F9                     — run selection
   //   Cmd/Ctrl+F            — find / replace panel
   //   Ctrl+/                — toggle line comment (%)
   //   Tab / Shift+Tab — indent / outdent current selection (2 spaces)
@@ -2777,7 +2774,7 @@ export default function Workstation() {
       return
     }
 
-    // Ctrl+/ — toggle MATLAB line comment (%)
+    // Ctrl+/ — toggle line comment (%)
     if ((e.metaKey || e.ctrlKey) && e.key === '/') {
       e.preventDefault()
       const lineStart = value.lastIndexOf('\n', s - 1) + 1
@@ -2956,7 +2953,7 @@ export default function Workstation() {
             seen.add(d.name)
           }
         }
-        for (const k of MATLAB_KEYWORDS) {
+        for (const k of LANGUAGE_KEYWORDS) {
           if (k.toLowerCase().startsWith(lower) && k !== prefix && !seen.has(k)) {
             items.push({ name: k, kind: 'kw' })
             seen.add(k)
@@ -3047,7 +3044,7 @@ export default function Workstation() {
     }
 
     if (QUOTE_PAIRS[e.key]) {
-      // Don't auto-pair single-quote after an identifier (transpose in MATLAB)
+      // Don't auto-pair single-quote after an identifier (transpose operator)
       if (e.key === "'" && /[A-Za-z0-9_\)\]\.]/.test(value[s - 1] ?? '')) {
         return // let default handle it
       }
@@ -3123,7 +3120,7 @@ export default function Workstation() {
     if (e.key === 'Enter' && !e.shiftKey) {
       // Copy leading whitespace of the current line to the new one, and add
       // one extra indent step if the previous line opens a block. Mirrors
-      // the feel of a standard MATLAB editor — `if cond⏎` lands the caret
+      // the feel of a standard editor — `if cond⏎` lands the caret
       // two spaces deeper than `cond` itself.
       const lineStart = value.lastIndexOf('\n', s - 1) + 1
       const currentLine = value.slice(lineStart, s)
@@ -3421,7 +3418,7 @@ export default function Workstation() {
     list.forEach((f, idx) => {
       const r = new FileReader()
       r.onload = () => {
-        loaded[idx] = { name: f.name || `upload-${idx + 1}.m`, code: String(r.result ?? '') }
+        loaded[idx] = { name: f.name || `upload-${idx + 1}.hm`, code: String(r.result ?? '') }
         completed++
         if (completed === list.length) {
           setScriptStore(store => {
@@ -3479,7 +3476,7 @@ export default function Workstation() {
   }, [])
 
   // Top-level drag/drop on the whole Workstation: .csv files become
-  // workspace variables, .m/.txt files become new script tabs.
+  // workspace variables, .hm/.txt files become new script tabs.
   const onWsDragOver = useCallback((ev: React.DragEvent<HTMLDivElement>) => {
     if (ev.dataTransfer.types.includes('Files')) {
       ev.preventDefault()
@@ -3522,7 +3519,7 @@ export default function Workstation() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = activeScript?.name || 'script.m'
+    a.download = activeScript?.name || 'script.hm'
     a.click()
     URL.revokeObjectURL(url)
   }, [script, activeScript])
@@ -3534,12 +3531,12 @@ export default function Workstation() {
       // Pick a unique default name.
       const base = 'untitled'
       let n = 1
-      while (store.list.some(s => s.name === `${base}${n}.m`)) n++
+      while (store.list.some(s => s.name === `${base}${n}.hm`)) n++
       return {
         // New tabs start genuinely empty so the welcome card surfaces — that
         // way clinicians/surgeons hitting "+" land on a guided start screen
         // instead of a lone "% New script" comment they have to delete.
-        list: [...store.list, { id, name: `${base}${n}.m`, code: '' }],
+        list: [...store.list, { id, name: `${base}${n}.hm`, code: '' }],
         activeId: id,
       }
     })
@@ -3644,8 +3641,8 @@ export default function Workstation() {
     setScriptStore(store => {
       const src = store.list.find(s => s.id === id)
       if (!src) return store
-      // Build a non-colliding name: "foo.m" → "foo (copy).m",
-      // "foo (copy).m" → "foo (copy 2).m", and so on.
+      // Build a non-colliding name: "foo.hm" → "foo (copy).hm",
+      // "foo (copy).hm" → "foo (copy 2).hm", and so on.
       const dotIdx = src.name.lastIndexOf('.')
       const base = dotIdx > 0 ? src.name.slice(0, dotIdx) : src.name
       const ext  = dotIdx > 0 ? src.name.slice(dotIdx) : ''
@@ -4875,7 +4872,9 @@ export default function Workstation() {
     prompt: {
       fontFamily: "'JetBrains Mono', monospace",
       fontSize: 12,
-      color: 'var(--color-text-muted)',
+      fontWeight: 600,
+      color: 'var(--color-accent-blue)',
+      opacity: 0.7,
     },
     cmd: {
       flex: 1,
@@ -5093,6 +5092,9 @@ export default function Workstation() {
       padding: '14px 20px',
       borderBottom: '1px solid var(--glass-border)',
       background: 'var(--glass-bg-hover)',
+      position: 'relative' as const,
+      zIndex: 2,
+      flexShrink: 0,
     },
     resultsTitle: {
       fontSize: 13,
@@ -5517,12 +5519,12 @@ export default function Workstation() {
       if (inPlace && current) {
         return {
           ...store,
-          list: store.list.map(s => s.id === store.activeId ? { ...s, code: t.code, name: `${t.id}.m` } : s),
+          list: store.list.map(s => s.id === store.activeId ? { ...s, code: t.code, name: `${t.id}.hm` } : s),
         }
       }
       const id = makeScriptId()
       return {
-        list: [...store.list, { id, name: `${t.id}.m`, code: t.code }],
+        list: [...store.list, { id, name: `${t.id}.hm`, code: t.code }],
         activeId: id,
       }
     })
@@ -5542,12 +5544,12 @@ export default function Workstation() {
       if (current && current.code.trim() === '') {
         return {
           ...store,
-          list: store.list.map(s => s.id === store.activeId ? { ...s, code: STARTER_SCRIPT, name: 'starter.m' } : s),
+          list: store.list.map(s => s.id === store.activeId ? { ...s, code: STARTER_SCRIPT, name: 'starter.hm' } : s),
         }
       }
       const id = makeScriptId()
       return {
-        list: [...store.list, { id, name: 'starter.m', code: STARTER_SCRIPT }],
+        list: [...store.list, { id, name: 'starter.hm', code: STARTER_SCRIPT }],
         activeId: id,
       }
     })
@@ -5623,10 +5625,10 @@ export default function Workstation() {
       const current = store.list.find(s => s.id === store.activeId)
       const inPlace = !current || current.code.trim() === ''
       if (inPlace && current) {
-        return { ...store, list: store.list.map(s => s.id === store.activeId ? { ...s, code, name: `${p.id}.m` } : s) }
+        return { ...store, list: store.list.map(s => s.id === store.activeId ? { ...s, code, name: `${p.id}.hm` } : s) }
       }
       const id = crypto.randomUUID()
-      return { activeId: id, list: [...store.list, { id, name: `${p.id}.m`, code }] }
+      return { activeId: id, list: [...store.list, { id, name: `${p.id}.hm`, code }] }
     })
     setScript(code)
     setLibrary('closed')
@@ -5670,7 +5672,7 @@ export default function Workstation() {
       {dropHover && (
         <div style={styles.dropOverlay} aria-hidden="true">
           <div style={styles.dropOverlayInner}>
-            Drop .csv data · .json workspace · .m or .txt script to import
+            Drop .csv data · .json workspace · .hm or .txt script to import
           </div>
         </div>
       )}
@@ -5788,7 +5790,7 @@ export default function Workstation() {
         <input
           ref={scriptFileInputRef}
           type="file"
-          accept=".m,.txt"
+          accept=".hm,.m,.txt"
           multiple
           style={{ display: 'none' }}
           onChange={handleUpload}
@@ -5870,8 +5872,8 @@ export default function Workstation() {
             menuW = 240
             items = [
               item('New script', '', true, () => newScript()),
-              item('Open .m file…', '', true, () => scriptFileInputRef.current?.click()),
-              item('Save as .m', '', !!activeScript, () => handleDownload()),
+              item('Open script file…', '', true, () => scriptFileInputRef.current?.click()),
+              item('Save as .hm', '', !!activeScript, () => handleDownload()),
               sep('f1'),
               item('Import workspace .json…', '', true, () => workspaceFileInputRef.current?.click()),
               item('Export workspace .json', '', vars.length > 0, () => exportWorkspaceJson()),
@@ -6571,7 +6573,7 @@ export default function Workstation() {
                       </button>
                     </div>
                     <div style={styles.welcomeHint}>
-                      <span>Drop a .m, .csv, or .json file anywhere to import.</span>
+                      <span>Drop a .hm, .csv, or .json file anywhere to import.</span>
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                         <span style={styles.welcomeHintKbd}>Ctrl/Cmd ↵</span>
                         <span>Run</span>
@@ -6651,7 +6653,7 @@ export default function Workstation() {
              of the layout entirely otherwise so plain editing never
              gains an empty bar. Builtins win when both match (a builtin
              function shadowed by a workspace variable still resolves to
-             the function in MATLAB). */}
+             the function over the variable). */}
           {(docAtCaret || varAtCaret) && (
             <div style={styles.docsStrip} role="status" aria-live="polite">
               {docAtCaret ? (
@@ -8356,7 +8358,7 @@ function VarExpandView({ value }: { value: MValue }) {
       const cols = Math.min(value.cols, VAR_MAX_COLS)
       const rowTrunc = value.rows > VAR_MAX_ROWS
       const colTrunc = value.cols > VAR_MAX_COLS
-      // MATLAB stores matrices column-major, but our engine uses a flat
+      // The engine uses a flat
       // row-major Float64Array (see mathLib). Access via data[r*cols + c].
       const data = value.data
       const full = value.cols
