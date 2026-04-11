@@ -43,7 +43,7 @@ type ChartType =
   | 'scatter' | 'bubble'
   | 'radar'
   | 'funnel' | 'treemap'
-  | 'histogram' | 'box_plot'
+  | 'histogram' | 'box_plot' | 'violin' | 'density'
   | 'waterfall' | 'error_bar' | 'candlestick'
   | 'heatmap' | 'stem' | 'band'
   | 'polar_area'
@@ -232,6 +232,8 @@ const CHART_TYPES: { value: ChartType; label: string; group: string }[] = [
   // Statistical
   { value: 'histogram', label: 'Histogram', group: 'Statistical' },
   { value: 'box_plot', label: 'Box Plot', group: 'Statistical' },
+  { value: 'violin', label: 'Violin Plot', group: 'Statistical' },
+  { value: 'density', label: 'Density / KDE', group: 'Statistical' },
   { value: 'error_bar', label: 'Error Bars', group: 'Statistical' },
   { value: 'candlestick', label: 'Candlestick', group: 'Statistical' },
   // Other
@@ -267,6 +269,8 @@ const SAMPLE_DATA: Record<string, { data: string; title: string; columns: string
   bubble: { title: 'Clinical Trial Landscape', columns: 'label, value, value2, size', data: 'Phase I, 25, 80, 15\nPhase II, 50, 65, 30\nPhase III, 75, 45, 50\nPhase IV, 90, 30, 20' },
   histogram: { title: 'Patient Age Distribution', columns: 'label, value', data: '18, 5\n22, 12\n28, 18\n32, 25\n38, 30\n42, 28\n48, 22\n52, 18\n58, 15\n62, 10\n68, 8\n72, 5' },
   box_plot: { title: 'Biomarker Variability', columns: 'label, value, category', data: 'CRP, 2.1, Control\nCRP, 3.5, Control\nCRP, 1.8, Control\nCRP, 5.2, Treatment\nCRP, 4.8, Treatment\nCRP, 6.1, Treatment' },
+  violin: { title: 'Gene Expression Distribution', columns: 'label, value, category', data: 'TP53, 2.1, Normal\nTP53, 2.5, Normal\nTP53, 2.3, Normal\nTP53, 3.0, Normal\nTP53, 2.8, Normal\nTP53, 5.2, Tumor\nTP53, 6.1, Tumor\nTP53, 4.8, Tumor\nTP53, 5.5, Tumor\nTP53, 7.0, Tumor' },
+  density: { title: 'Patient BMI Distribution', columns: 'label, value', data: '18.5, 2\n20, 5\n21.5, 12\n23, 22\n24.5, 35\n26, 40\n27.5, 32\n29, 20\n30.5, 12\n32, 6\n33.5, 3\n35, 1' },
   error_bar: { title: 'Treatment Response', columns: 'label, value, errorPlus, errorMinus', data: 'Placebo, 20, 5, 5\nLow Dose, 35, 8, 6\nMed Dose, 55, 10, 8\nHigh Dose, 72, 12, 7' },
   candlestick: { title: 'Blood Glucose', columns: 'label, open, high, low, close', data: 'Mon, 95, 140, 80, 110\nTue, 110, 135, 90, 105\nWed, 105, 150, 85, 120\nThu, 120, 160, 95, 100\nFri, 100, 130, 75, 115' },
   heatmap: { title: 'Gene Co-expression', columns: 'label, value, category', data: 'TP53-BRCA1, 0.85, High\nTP53-EGFR, 0.42, Med\nBRCA1-EGFR, 0.68, Med\nTP53-MYC, 0.91, High\nBRCA1-MYC, 0.35, Low' },
@@ -1190,6 +1194,96 @@ export default function DataVisualization() {
               <Line type="linear" dataKey="q3" stroke={colors[0]} dot={{ r: 5, fill: colors[0] }} strokeWidth={0} />
               <ReferenceLine y={0} stroke="var(--color-border)" />
             </ComposedChart>
+          </ResponsiveContainer>
+        )
+      }
+
+      case 'violin': {
+        // Group data by category, compute kernel density for each
+        const vGroups: Record<string, number[]> = {}
+        data.forEach(d => {
+          const grp = d.category || d.label || 'All'
+          if (!vGroups[grp]) vGroups[grp] = []
+          vGroups[grp].push(d.value)
+        })
+        const vEntries = Object.entries(vGroups)
+        const allVals = data.map(d => d.value)
+        const vMin = Math.min(...allVals), vMax = Math.max(...allVals)
+        const vRange = vMax - vMin || 1
+        const vPad = vRange * 0.1
+        const ySteps = 40
+        const groupW = Math.min(120, (600 / Math.max(vEntries.length, 1)))
+        const svgW = vEntries.length * groupW + 80
+        return (
+          <div style={{ overflowX: 'auto', height }}>
+            <svg width={svgW} height={height} style={{ fontFamily: 'var(--font-mono, monospace)' }}>
+              {/* Y axis */}
+              {Array.from({ length: 5 }, (_, i) => {
+                const val = vMin - vPad + (vRange + 2 * vPad) * (i / 4)
+                const y = height - 30 - ((i / 4) * (height - 50))
+                return <g key={i}><line x1={55} x2={svgW} y1={y} y2={y} stroke="var(--color-border)" strokeDasharray="2,2" /><text x={50} y={y + 4} textAnchor="end" fill="var(--color-text-muted)" fontSize={10}>{val.toFixed(1)}</text></g>
+              })}
+              {vEntries.map(([name, vals], gi) => {
+                const sorted = [...vals].sort((a, b) => a - b)
+                const cx = 65 + gi * groupW + groupW / 2
+                const bw = (vals.length > 1 ? Math.sqrt(vals.length) : 1) * 0.4
+                // KDE estimation
+                const kde: { y: number; density: number }[] = []
+                let maxD = 0
+                for (let i = 0; i <= ySteps; i++) {
+                  const v = (vMin - vPad) + (vRange + 2 * vPad) * (i / ySteps)
+                  let d = 0
+                  for (const sv of sorted) d += Math.exp(-0.5 * ((v - sv) / bw) ** 2) / (bw * 2.507)
+                  d /= sorted.length
+                  if (d > maxD) maxD = d
+                  kde.push({ y: v, density: d })
+                }
+                const halfW = groupW * 0.4
+                const toY = (v: number) => height - 30 - ((v - vMin + vPad) / (vRange + 2 * vPad)) * (height - 50)
+                const pathR = kde.map(k => `${cx + (k.density / maxD) * halfW},${toY(k.y)}`).join(' ')
+                const pathL = kde.map(k => `${cx - (k.density / maxD) * halfW},${toY(k.y)}`).reverse().join(' ')
+                const stats = computeBoxStats(vals)
+                return (
+                  <g key={name}>
+                    <polygon points={`${pathR} ${pathL}`} fill={colors[gi % colors.length]} opacity={0.3} stroke={colors[gi % colors.length]} strokeWidth={1.5} />
+                    {/* Median + quartile lines */}
+                    <line x1={cx - halfW * 0.5} x2={cx + halfW * 0.5} y1={toY(stats.median)} y2={toY(stats.median)} stroke={colors[gi % colors.length]} strokeWidth={2} />
+                    <line x1={cx - halfW * 0.3} x2={cx + halfW * 0.3} y1={toY(stats.q1)} y2={toY(stats.q1)} stroke={colors[gi % colors.length]} strokeWidth={1} opacity={0.6} />
+                    <line x1={cx - halfW * 0.3} x2={cx + halfW * 0.3} y1={toY(stats.q3)} y2={toY(stats.q3)} stroke={colors[gi % colors.length]} strokeWidth={1} opacity={0.6} />
+                    <text x={cx} y={height - 10} textAnchor="middle" fill="var(--color-text-muted)" fontSize={11}>{name}</text>
+                  </g>
+                )
+              })}
+            </svg>
+          </div>
+        )
+      }
+
+      case 'density': {
+        // Kernel Density Estimation rendered as smooth AreaChart
+        const vals = data.map(d => d.value).sort((a, b) => a - b)
+        const dMin = vals[0], dMax = vals[vals.length - 1]
+        const dRange = dMax - dMin || 1
+        const bw = dRange / Math.max(Math.sqrt(vals.length), 2)
+        const steps = 60
+        const kdeData: { x: number; density: number }[] = []
+        for (let i = 0; i <= steps; i++) {
+          const x = dMin - dRange * 0.1 + (dRange * 1.2) * (i / steps)
+          let d = 0
+          for (const v of vals) d += Math.exp(-0.5 * ((x - v) / bw) ** 2) / (bw * 2.507)
+          d /= vals.length
+          kdeData.push({ x: parseFloat(x.toFixed(2)), density: parseFloat(d.toFixed(6)) })
+        }
+        return (
+          <ResponsiveContainer width="100%" height={height}>
+            <AreaChart data={kdeData}>
+              {gridEl}
+              <XAxis dataKey="x" tick={AXIS_TICK} />
+              <YAxis tick={AXIS_TICK} />
+              {tooltipEl}
+              <Area type="monotone" dataKey="density" stroke={colors[0]} fill={colors[0]} fillOpacity={0.2} strokeWidth={2} dot={false} />
+              {annotationEls}
+            </AreaChart>
           </ResponsiveContainer>
         )
       }
