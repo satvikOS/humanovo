@@ -17,6 +17,7 @@ export type BuiltinCategory =
   | 'Plotting'
   | 'I/O'
   | 'Logic'
+  | 'Image Processing'
 
 export interface BuiltinDoc {
   name: string
@@ -28,7 +29,7 @@ export interface BuiltinDoc {
 
 export const BUILTIN_CATEGORIES: BuiltinCategory[] = [
   'Math', 'Matrix', 'Statistics', 'Linear algebra', 'Calculus',
-  'Signal', 'Sets', 'Logic', 'Plotting', 'I/O',
+  'Signal', 'Sets', 'Logic', 'Plotting', 'Image Processing', 'I/O',
 ]
 
 export const BUILTIN_DOCS: BuiltinDoc[] = [
@@ -209,4 +210,20 @@ export const BUILTIN_DOCS: BuiltinDoc[] = [
   { name: 'mat2str', category: 'I/O', signature: 'mat2str(M)', description: 'Matrix to compact string', snippet: 'mat2str(M)' },
   { name: 'tic', category: 'I/O', signature: 'tic()', description: 'Start stopwatch', snippet: 'tic()' },
   { name: 'toc', category: 'I/O', signature: 'toc()', description: 'Elapsed time since tic', snippet: 'toc()' },
+
+  // ─── Image Processing ───────────────────────────────────────────────
+  { name: 'rgb2gray', category: 'Image Processing', signature: 'rgb2gray(img)', description: 'Convert RGB to grayscale (ITU-R BT.601)', snippet: 'G = rgb2gray(img)' },
+  { name: 'imadjust', category: 'Image Processing', signature: 'imadjust(img, lo, hi)', description: 'Intensity adjustment to [lo, hi]', snippet: 'A = imadjust(img, 0, 255)' },
+  { name: 'imthreshold', category: 'Image Processing', signature: 'imthreshold(img, t?)', description: 'Binary threshold (auto Otsu if t omitted)', snippet: 'B = imthreshold(img)' },
+  { name: 'imfilter', category: 'Image Processing', signature: 'imfilter(img, kernel)', description: '2D convolution with kernel', snippet: 'F = imfilter(img, K)' },
+  { name: 'fspecial', category: 'Image Processing', signature: "fspecial(type, size?)", description: "Generate kernel: 'average', 'gaussian', 'sobel', 'laplacian', 'prewitt'", snippet: "K = fspecial('gaussian', 5)" },
+  { name: 'edge', category: 'Image Processing', signature: 'edge(img)', description: 'Sobel edge detection', snippet: 'E = edge(img)' },
+  { name: 'imresize', category: 'Image Processing', signature: 'imresize(img, rows, cols)', description: 'Bilinear interpolation resize', snippet: 'R = imresize(img, 128, 128)' },
+  { name: 'imrotate', category: 'Image Processing', signature: 'imrotate(img, deg)', description: 'Rotate image by degrees', snippet: 'R = imrotate(img, 45)' },
+  { name: 'imhist', category: 'Image Processing', signature: 'imhist(img, bins?)', description: 'Compute histogram', snippet: 'H = imhist(img, 256)' },
+  { name: 'imdilate', category: 'Image Processing', signature: 'imdilate(img, se)', description: 'Morphological dilation', snippet: 'D = imdilate(img, ones(3,3))' },
+  { name: 'imerode', category: 'Image Processing', signature: 'imerode(img, se)', description: 'Morphological erosion', snippet: 'E = imerode(img, ones(3,3))' },
+  { name: 'medfilt2', category: 'Image Processing', signature: 'medfilt2(img, size?)', description: '2D median filter', snippet: 'M = medfilt2(img, 3)' },
+  { name: 'histeq', category: 'Image Processing', signature: 'histeq(img)', description: 'Histogram equalization', snippet: 'H = histeq(img)' },
+  { name: 'regionprops', category: 'Image Processing', signature: 'regionprops(bw)', description: 'Connected component analysis [area, centroidR, centroidC]', snippet: 'R = regionprops(bw)' },
 ]
