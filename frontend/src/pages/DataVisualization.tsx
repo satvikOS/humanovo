@@ -32,6 +32,7 @@ interface DataPoint {
   errorPlus?: number   // error bar upper
   errorMinus?: number  // error bar lower
   size?: number        // bubble size
+  trend?: number       // trend line value
 }
 
 type ChartType =
@@ -83,6 +84,7 @@ interface ChartOptions {
   smooth: boolean
   showBrush: boolean
   showCrosshair: boolean
+  trendLine: 'none' | 'linear' | 'movingAvg'
 }
 
 function smartDownsample(data: DataPoint[], maxPoints: number = 100): DataPoint[] {
@@ -155,6 +157,7 @@ const defaultOptions: ChartOptions = {
   fillOpacity: 0.15, showValues: false, animate: true,
   barGap: 4, innerRadius: 60, startAngle: 90, smooth: true,
   showBrush: false, showCrosshair: true,
+  trendLine: 'none',
 }
 
 // ─── Palettes ───────────────────────────────────────────────────
@@ -365,6 +368,53 @@ function computeHistogram(values: number[], bins = 15): { label: string; count: 
     if (idx >= 0) buckets[idx].count++
   })
   return buckets.map(b => ({ label: b.label, count: b.count }))
+}
+
+// ─── Trend Line Helpers ─────────────────────────────────────────
+function computeLinearRegression(data: DataPoint[]): { slope: number; intercept: number; r2: number } {
+  const n = data.length
+  if (n < 2) return { slope: 0, intercept: 0, r2: 0 }
+  let sx = 0, sy = 0, sxx = 0, sxy = 0, syy = 0
+  data.forEach((d, i) => {
+    const x = i; const y = d.value
+    sx += x; sy += y; sxx += x * x; sxy += x * y; syy += y * y
+  })
+  const denom = n * sxx - sx * sx
+  if (denom === 0) return { slope: 0, intercept: sy / n, r2: 0 }
+  const slope = (n * sxy - sx * sy) / denom
+  const intercept = (sy - slope * sx) / n
+  const yMean = sy / n
+  let ssRes = 0, ssTot = 0
+  data.forEach((d, i) => {
+    const predicted = slope * i + intercept
+    ssRes += (d.value - predicted) ** 2
+    ssTot += (d.value - yMean) ** 2
+  })
+  const r2 = ssTot === 0 ? 1 : 1 - ssRes / ssTot
+  return { slope, intercept, r2 }
+}
+
+function computeMovingAverage(data: DataPoint[], window = 3): number[] {
+  return data.map((_, i) => {
+    const start = Math.max(0, i - Math.floor(window / 2))
+    const end = Math.min(data.length, i + Math.ceil(window / 2))
+    const slice = data.slice(start, end)
+    return slice.reduce((s, d) => s + d.value, 0) / slice.length
+  })
+}
+
+function addTrendData(data: DataPoint[], trendType: string): DataPoint[] {
+  if (trendType === 'none' || data.length < 2) return data
+  if (trendType === 'linear') {
+    const { slope, intercept } = computeLinearRegression(data)
+    return data.map((d, i) => ({ ...d, trend: Math.round((slope * i + intercept) * 1000) / 1000 }))
+  }
+  if (trendType === 'movingAvg') {
+    const window = Math.max(3, Math.round(data.length / 5))
+    const ma = computeMovingAverage(data, window)
+    return data.map((d, i) => ({ ...d, trend: Math.round(ma[i] * 1000) / 1000 }))
+  }
+  return data
 }
 
 // ─── Glassmorphic Select ────────────────────────────────────────
@@ -629,7 +679,8 @@ export default function DataVisualization() {
     const maxPoints = type === 'scatter' ? 500 : 100
     const displayData = smartDownsample(chart.data, maxPoints)
     const wasDownsampled = displayData.length < chart.data.length
-    const data = displayData
+    const data = o.trendLine !== 'none' ? addTrendData(displayData, o.trendLine) : displayData
+    const hasTrend = o.trendLine !== 'none' && data.some(d => d.trend !== undefined)
     const colors = getPalette(o.colorPalette)
     const gridEl = o.showGrid ? <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" /> : null
     const cursorStyle = o.showCrosshair ? { stroke: 'var(--color-text-muted)', strokeWidth: 1, strokeDasharray: '4 4' } : undefined
@@ -646,12 +697,22 @@ export default function DataVisualization() {
       case 'bar':
         return (
           <ResponsiveContainer width="100%" height={height}>
-            <BarChart data={data} barGap={o.barGap}>
-              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}
-              <Bar dataKey="value" fill={colors[0]} radius={[4, 4, 0, 0]} animationDuration={o.animate ? 400 : 0} hide={hidden.has('value')}>
-                {o.showValues && <LabelList dataKey="value" position="top" style={{ fontSize: 10, fill: 'var(--color-text-muted)' }} />}
-              </Bar>
-            </BarChart>
+            {hasTrend ? (
+              <ComposedChart data={data} barGap={o.barGap}>
+                {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}
+                <Bar dataKey="value" fill={colors[0]} radius={[4, 4, 0, 0]} animationDuration={o.animate ? 400 : 0} hide={hidden.has('value')}>
+                  {o.showValues && <LabelList dataKey="value" position="top" style={{ fontSize: 10, fill: 'var(--color-text-muted)' }} />}
+                </Bar>
+                <Line type="monotone" dataKey="trend" name={o.trendLine === 'linear' ? 'Linear Trend' : 'Moving Avg'} stroke="#f59e0b" strokeWidth={2} strokeDasharray="6 3" dot={false} />
+              </ComposedChart>
+            ) : (
+              <BarChart data={data} barGap={o.barGap}>
+                {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}
+                <Bar dataKey="value" fill={colors[0]} radius={[4, 4, 0, 0]} animationDuration={o.animate ? 400 : 0} hide={hidden.has('value')}>
+                  {o.showValues && <LabelList dataKey="value" position="top" style={{ fontSize: 10, fill: 'var(--color-text-muted)' }} />}
+                </Bar>
+              </BarChart>
+            )}
           </ResponsiveContainer>
         )
 
@@ -767,6 +828,7 @@ export default function DataVisualization() {
             <LineChart data={data}>
               {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}
               <Line type={o.smooth ? 'monotone' : 'linear'} dataKey="value" stroke={colors[0]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize, fill: colors[0] }} animationDuration={o.animate ? 400 : 0} hide={hidden.has('value')} />
+              {hasTrend && <Line type="monotone" dataKey="trend" name={o.trendLine === 'linear' ? 'Linear Trend' : 'Moving Avg'} stroke="#f59e0b" strokeWidth={2} strokeDasharray="6 3" dot={false} />}
             </LineChart>
           </ResponsiveContainer>
         )
@@ -819,10 +881,18 @@ export default function DataVisualization() {
       case 'area':
         return (
           <ResponsiveContainer width="100%" height={height}>
-            <AreaChart data={data}>
-              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}
-              <Area type="monotone" dataKey="value" stroke={colors[0]} fill={colors[0]} fillOpacity={o.fillOpacity} strokeWidth={o.lineWidth} hide={hidden.has('value')} />
-            </AreaChart>
+            {hasTrend ? (
+              <ComposedChart data={data}>
+                {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}
+                <Area type="monotone" dataKey="value" stroke={colors[0]} fill={colors[0]} fillOpacity={o.fillOpacity} strokeWidth={o.lineWidth} hide={hidden.has('value')} />
+                <Line type="monotone" dataKey="trend" name={o.trendLine === 'linear' ? 'Linear Trend' : 'Moving Avg'} stroke="#f59e0b" strokeWidth={2} strokeDasharray="6 3" dot={false} />
+              </ComposedChart>
+            ) : (
+              <AreaChart data={data}>
+                {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}
+                <Area type="monotone" dataKey="value" stroke={colors[0]} fill={colors[0]} fillOpacity={o.fillOpacity} strokeWidth={o.lineWidth} hide={hidden.has('value')} />
+              </AreaChart>
+            )}
           </ResponsiveContainer>
         )
 
@@ -1274,6 +1344,19 @@ export default function DataVisualization() {
           <input type="checkbox" checked={chart.options.showBrush} onChange={e => updateChartOptions(chart.id, { showBrush: e.target.checked })} />
           <FiZoomIn className="w-3 h-3" /> Brush
         </label>
+        <span className="flex items-center gap-1.5 text-xs" title="Trend line overlay">
+          Trend:
+          <select
+            value={chart.options.trendLine}
+            onChange={e => updateChartOptions(chart.id, { trendLine: e.target.value as any })}
+            className="text-xs rounded px-1 py-0.5"
+            style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)', color: 'var(--color-text)' }}
+          >
+            <option value="none">None</option>
+            <option value="linear">Linear</option>
+            <option value="movingAvg">Moving Avg</option>
+          </select>
+        </span>
         <label className="flex items-center gap-1.5 cursor-pointer" title="Show crosshair cursor on hover">
           <input type="checkbox" checked={chart.options.showCrosshair} onChange={e => updateChartOptions(chart.id, { showCrosshair: e.target.checked })} />
           <FiCrosshair className="w-3 h-3" /> Crosshair
@@ -1566,6 +1649,10 @@ export default function DataVisualization() {
                   <span>{chart.data.length} pts</span>
                   <span>{chart.options.colorPalette}</span>
                   <span>{formatDate(chart.createdAt)}</span>
+                  {chart.options.trendLine === 'linear' && chart.data.length >= 2 && (() => {
+                    const { r2 } = computeLinearRegression(chart.data)
+                    return <span style={{ color: '#f59e0b' }}>R²={r2.toFixed(3)}</span>
+                  })()}
                   {chart.options.showLegend && <span style={{ opacity: 0.5 }}>click legend to toggle series</span>}
                 </div>
 
