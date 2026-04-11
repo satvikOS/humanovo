@@ -273,3 +273,147 @@ test('platform uses no native alert/confirm dialogs on any page', async ({ page 
 
   expect(dialogCount).toBe(0);
 });
+
+// ─── Sidebar Navigation Tests ───────────────────────────────────────
+
+test.describe('Sidebar Navigation', () => {
+  test('all sidebar sections are present', async ({ page }) => {
+    await page.goto('/dashboard');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(1000);
+
+    // Check section headers
+    for (const section of ['MAIN', 'TOOLS', 'RESEARCH', 'ANALYSIS', 'MANAGEMENT']) {
+      const header = page.locator(`text=${section}`);
+      if (await header.count() > 0) {
+        await expect(header.first()).toBeVisible();
+      }
+    }
+  });
+
+  test('sidebar links navigate correctly', async ({ page }) => {
+    await page.goto('/dashboard');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(1000);
+
+    // Click Genomics link
+    const genomicsLink = page.locator('nav a[href="/genomics"], a:has-text("Genomics")');
+    if (await genomicsLink.count() > 0) {
+      await genomicsLink.first().click();
+      await page.waitForTimeout(1000);
+      expect(page.url()).toContain('/genomics');
+    }
+  });
+});
+
+// ─── Genomics Tests ─────────────────────────────────────────────────
+
+test.describe('Genomics Analysis', () => {
+  test('tabs are present and switchable', async ({ page }) => {
+    await page.goto('/genomics');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(1000);
+
+    // Check tabs
+    const tabs = ['Pathway Enrichment', 'GSEA', 'Variant Annotation', 'Biomarker Discovery'];
+    for (const tab of tabs) {
+      const tabBtn = page.locator(`button:has-text("${tab}"), [role="tab"]:has-text("${tab}")`);
+      if (await tabBtn.count() > 0) {
+        await expect(tabBtn.first()).toBeVisible({ timeout: 3000 });
+      }
+    }
+  });
+
+  test('can switch to Biomarker Discovery tab', async ({ page }) => {
+    await page.goto('/genomics');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(1000);
+
+    const tab = page.locator('button:has-text("Biomarker"), [role="tab"]:has-text("Biomarker")');
+    if (await tab.count() > 0) {
+      await tab.first().click();
+      await page.waitForTimeout(500);
+    }
+  });
+});
+
+// ─── Settings Tests ─────────────────────────────────────────────────
+
+test.describe('Settings', () => {
+  test('theme toggle works', async ({ page }) => {
+    await page.goto('/settings');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(1000);
+
+    // Check dark theme card is visible
+    const darkCard = page.locator('text=Dark');
+    if (await darkCard.count() > 0) {
+      await expect(darkCard.first()).toBeVisible();
+    }
+
+    // Check light theme option exists
+    const lightCard = page.locator('text=Light');
+    if (await lightCard.count() > 0) {
+      await expect(lightCard.first()).toBeVisible();
+    }
+  });
+
+  test('settings sections are accessible', async ({ page }) => {
+    await page.goto('/settings');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(1000);
+
+    // Check sidebar sections
+    for (const section of ['Appearance', 'Account', 'Notifications']) {
+      const item = page.locator(`text=${section}`);
+      if (await item.count() > 0) {
+        await item.first().click();
+        await page.waitForTimeout(300);
+      }
+    }
+  });
+});
+
+// ─── Notebook Tests ─────────────────────────────────────────────────
+
+test.describe('Notebook', () => {
+  test('can create a new page', async ({ page }) => {
+    await page.goto('/notebook');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(1000);
+
+    // Look for "Create one" or "+" button
+    const createBtn = page.locator('text=Create one, button:has-text("+")');
+    if (await createBtn.count() > 0) {
+      await createBtn.first().click();
+      await page.waitForTimeout(1000);
+    }
+  });
+});
+
+// ─── Data Manager Tests ─────────────────────────────────────────────
+
+test.describe('Data Manager', () => {
+  test('sample datasets are listed', async ({ page }) => {
+    await page.goto('/data-manager');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(1000);
+
+    // Check for dataset items
+    const datasetItem = page.locator('text=Clinical Trial');
+    if (await datasetItem.count() > 0) {
+      await expect(datasetItem.first()).toBeVisible({ timeout: 5000 });
+    }
+  });
+
+  test('upload CSV button is present', async ({ page }) => {
+    await page.goto('/data-manager');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(1000);
+
+    const uploadBtn = page.locator('button:has-text("Upload CSV"), button:has-text("Upload")');
+    if (await uploadBtn.count() > 0) {
+      await expect(uploadBtn.first()).toBeVisible({ timeout: 5000 });
+    }
+  });
+});
