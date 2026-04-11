@@ -18,6 +18,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
 import clsx from 'clsx'
+import * as XLSX from 'xlsx'
 
 type ColumnType = 'number' | 'string' | 'date' | 'boolean'
 
@@ -453,6 +454,14 @@ export default function DataManager() {
     URL.revokeObjectURL(url)
   }
 
+  const exportXLSX = () => {
+    if (!transformed) return
+    const ws = XLSX.utils.json_to_sheet(transformed.rows)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Data')
+    XLSX.writeFile(wb, `${transformed.name}.xlsx`)
+  }
+
   const saveTransformed = () => {
     if (!transformed || !selected || ops.length === 0) return
     const newDs: Dataset = {
@@ -603,6 +612,9 @@ export default function DataManager() {
                 )}
                 <button onClick={exportCSV} className="p-1.5 rounded hover:bg-white/5" title="Export CSV">
                   <FiDownload className="text-xs" />
+                </button>
+                <button onClick={exportXLSX} className="p-1.5 rounded hover:bg-white/5" title="Export XLSX" style={{ color: 'var(--color-accent-green)' }}>
+                  <FiGrid className="text-xs" />
                 </button>
                 <button onClick={exportJSON} className="p-1.5 rounded hover:bg-white/5" title="Export JSON">
                   <FiCopy className="text-xs" />
@@ -845,11 +857,49 @@ function OverviewView({ ds, profiles, setView }: { ds: Dataset; profiles: Column
 }
 
 function TableView({ ds, previewRows, setPreviewRows }: { ds: Dataset; previewRows: number; setPreviewRows: (n: number) => void }) {
-  const visible = ds.rows.slice(0, previewRows)
+  const [sortCol, setSortCol] = useState<string | null>(null)
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const [colFilters, setColFilters] = useState<Record<string, string>>({})
+  const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set())
+
+  const handleSort = (col: string) => {
+    if (sortCol === col) { setSortDir(d => d === 'asc' ? 'desc' : 'asc') }
+    else { setSortCol(col); setSortDir('asc') }
+  }
+
+  const filtered = useMemo(() => {
+    let rows = ds.rows
+    // Apply column filters
+    const active = Object.entries(colFilters).filter(([, v]) => v.trim())
+    if (active.length > 0) {
+      rows = rows.filter(r => active.every(([col, filter]) => {
+        const v = r[col]
+        if (v == null) return false
+        return String(v).toLowerCase().includes(filter.toLowerCase())
+      }))
+    }
+    // Apply sort
+    if (sortCol) {
+      const col = ds.columns.find(c => c.name === sortCol)
+      rows = [...rows].sort((a, b) => {
+        const va = a[sortCol], vb = b[sortCol]
+        if (va == null) return 1
+        if (vb == null) return -1
+        if (col?.type === 'number') return sortDir === 'asc' ? Number(va) - Number(vb) : Number(vb) - Number(va)
+        return sortDir === 'asc' ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va))
+      })
+    }
+    return rows
+  }, [ds.rows, ds.columns, colFilters, sortCol, sortDir])
+
+  const visible = filtered.slice(0, previewRows)
+  const hasFilter = Object.values(colFilters).some(v => v.trim())
+  const allSelected = selectedRows.size === visible.length && visible.length > 0
+
   return (
     <div className="p-3">
       <div className="flex items-center mb-2 text-xs" style={{ color: 'var(--color-text-muted)' }}>
-        <span>Showing {visible.length} of {ds.rows.length} rows</span>
+        <span>Showing {visible.length} of {filtered.length}{hasFilter ? ` (filtered from ${ds.rows.length})` : ''} rows</span>
         <select
           value={previewRows}
           onChange={e => setPreviewRows(parseInt(e.target.value))}
@@ -861,31 +911,74 @@ function TableView({ ds, previewRows, setPreviewRows }: { ds: Dataset; previewRo
           <option value={500}>500</option>
           <option value={5000}>All</option>
         </select>
+        {selectedRows.size > 0 && (
+          <span className="ml-3" style={{ color: 'var(--color-accent-blue)' }}>{selectedRows.size} selected</span>
+        )}
+        {hasFilter && (
+          <button onClick={() => setColFilters({})} className="ml-3 px-2 py-0.5 rounded hover:bg-white/10 text-xxs" style={{ color: 'var(--color-accent-orange)' }}>Clear filters</button>
+        )}
       </div>
-      <div className="overflow-auto rounded" style={{ border: '1px solid var(--glass-border)' }}>
+      <div className="overflow-auto rounded" style={{ border: '1px solid var(--glass-border)', maxHeight: 480 }}>
         <table className="w-full text-xs">
-          <thead style={{ background: 'var(--glass-bg)', position: 'sticky', top: 0 }}>
+          <thead style={{ background: 'var(--glass-bg)', position: 'sticky', top: 0, zIndex: 1 }}>
             <tr>
+              <th className="px-2 py-1.5 text-left text-[10px] w-8">
+                <input type="checkbox" checked={allSelected} onChange={() => {
+                  if (allSelected) setSelectedRows(new Set())
+                  else setSelectedRows(new Set(visible.map((_, i) => i)))
+                }} />
+              </th>
               <th className="px-2 py-1.5 text-left text-[10px] uppercase font-semibold" style={{ color: 'var(--color-text-muted)' }}>#</th>
               {ds.columns.map(c => (
-                <th key={c.name} className="px-2 py-1.5 text-left text-[10px] uppercase font-semibold" style={{ color: 'var(--color-text-muted)' }}>
-                  {c.name}
+                <th key={c.name} className="px-2 py-1.5 text-left text-[10px] uppercase font-semibold cursor-pointer select-none hover:bg-white/5"
+                  style={{ color: 'var(--color-text-muted)' }} onClick={() => handleSort(c.name)}>
+                  <div className="flex items-center gap-1">
+                    {c.name}
+                    {sortCol === c.name && <span style={{ color: 'var(--color-accent-blue)', fontSize: 8 }}>{sortDir === 'asc' ? '▲' : '▼'}</span>}
+                  </div>
                   <div className="text-[8px] normal-case" style={{ color: c.type === 'number' ? '#3b82f6' : c.type === 'date' ? '#f59e0b' : c.type === 'boolean' ? '#10b981' : '#8b5cf6' }}>
                     {c.type}
                   </div>
                 </th>
               ))}
             </tr>
+            {/* Filter row */}
+            <tr style={{ borderTop: '1px solid var(--glass-border)' }}>
+              <td colSpan={2} className="px-2 py-1">
+                <FiSearch className="text-[10px]" style={{ color: 'var(--color-text-muted)' }} />
+              </td>
+              {ds.columns.map(c => (
+                <td key={c.name} className="px-1 py-1">
+                  <input
+                    className="w-full px-1 py-0.5 text-xxs rounded outline-none"
+                    style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)', color: 'var(--color-text)' }}
+                    placeholder="Filter..."
+                    value={colFilters[c.name] || ''}
+                    onChange={e => setColFilters(f => ({ ...f, [c.name]: e.target.value }))}
+                  />
+                </td>
+              ))}
+            </tr>
           </thead>
           <tbody>
             {visible.map((row, i) => (
-              <tr key={i} style={{ borderTop: '1px solid var(--glass-border)' }}>
+              <tr key={i} style={{ borderTop: '1px solid var(--glass-border)', background: selectedRows.has(i) ? 'rgba(59,130,246,0.08)' : undefined }}>
+                <td className="px-2 py-1">
+                  <input type="checkbox" checked={selectedRows.has(i)} onChange={() => {
+                    const next = new Set(selectedRows)
+                    if (next.has(i)) next.delete(i); else next.add(i)
+                    setSelectedRows(next)
+                  }} />
+                </td>
                 <td className="px-2 py-1 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>{i + 1}</td>
                 {ds.columns.map(c => {
                   const v = row[c.name]
                   return (
                     <td key={c.name} className="px-2 py-1">
-                      {v == null ? <span style={{ color: 'var(--color-text-muted)' }}>—</span> : String(v)}
+                      {v == null ? <span style={{ color: 'var(--color-text-muted)' }}>—</span>
+                        : c.type === 'boolean' ? <span style={{ color: v ? '#22c55e' : '#ef4444' }}>{v ? 'true' : 'false'}</span>
+                        : c.type === 'number' ? <span style={{ fontVariantNumeric: 'tabular-nums' }}>{typeof v === 'number' ? v.toLocaleString() : v}</span>
+                        : String(v)}
                     </td>
                   )
                 })}
