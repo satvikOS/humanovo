@@ -13,6 +13,7 @@ import {
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import { parseMedicalFile, parsedToDataURL } from '../utils/medicalImaging'
+import VolumeViewer3D from '../components/VolumeViewer3D'
 
 type Modality = 'CT' | 'MRI' | 'X-Ray' | 'Ultrasound' | 'PET' | 'Microscopy' | 'Fundus' | 'OCT' | 'Mammography' | 'Endoscopy'
 type Tool = 'pan' | 'window' | 'rect' | 'circle' | 'line' | 'point' | 'polygon' | 'measure' | 'ruler' | 'brush' | 'eraser'
@@ -1171,22 +1172,15 @@ export default function ResearchImaging() {
                     <span style={{ color: '#fff8', fontSize: 9, marginLeft: 4 }}>X:{slicePos.sagittal}%</span>
                   </div>
                 </div>
-                {/* Bottom-right: 3D Overview / Info */}
-                <div style={{ position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#0a0a0f' }}>
-                  <div style={{ color: '#fff6', fontSize: 10, textAlign: 'center', padding: 16 }}>
-                    <FiLayers style={{ fontSize: 28, margin: '0 auto 8px', opacity: 0.3 }} />
-                    <div style={{ fontWeight: 700, fontSize: 11, color: '#fff', marginBottom: 4 }}>Volume Info</div>
-                    <div>Size: {selected.width} x {selected.height}</div>
-                    <div>Modality: {selected.modality}</div>
-                    <div>W/L: {selected.windowCenter}/{selected.windowWidth}</div>
-                    <div>Filter: {selected.filter}</div>
-                    {selected.pixelSpacing && <div>Spacing: {selected.pixelSpacing} mm/px</div>}
-                    <div style={{ marginTop: 8, display: 'flex', gap: 12, justifyContent: 'center', fontSize: 10 }}>
-                      <span style={{ color: '#3b82f6' }}>&#9632; Axial</span>
-                      <span style={{ color: '#22c55e' }}>&#9632; Coronal</span>
-                      <span style={{ color: '#ef4444' }}>&#9632; Sagittal</span>
-                    </div>
-                  </div>
+                {/* Bottom-right: 3D Volume Viewer */}
+                <div style={{ position: 'relative', overflow: 'hidden', background: '#06060a' }}>
+                  <VolumeViewer3D
+                    imageData={selected.imageData}
+                    width={selected.width}
+                    height={selected.height}
+                    slicePos={slicePos}
+                    modality={selected.modality}
+                  />
                 </div>
               </div>
             ) : (
