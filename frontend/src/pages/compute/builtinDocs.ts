@@ -190,6 +190,14 @@ export const BUILTIN_DOCS: BuiltinDoc[] = [
   { name: 'legend', category: 'Plotting', signature: 'legend(...)', description: 'Legend labels', snippet: "legend('a', 'b')" },
   { name: 'figure', category: 'Plotting', signature: 'figure()', description: 'New figure', snippet: 'figure()' },
   { name: 'clf', category: 'Plotting', signature: 'clf()', description: 'Clear current figure', snippet: 'clf()' },
+  { name: 'surface', category: 'Plotting', signature: 'surface(Z, x, y)', description: '3D surface plot', snippet: 'surface(Z, x, y)' },
+  { name: 'wireframe', category: 'Plotting', signature: 'wireframe(Z, x, y)', description: '3D wireframe mesh', snippet: 'wireframe(Z, x, y)' },
+  { name: 'contour', category: 'Plotting', signature: 'contour(Z, x, y)', description: '3D contour surface', snippet: 'contour(Z, x, y)' },
+  { name: 'heatmap', category: 'Plotting', signature: 'heatmap(Z, x, y)', description: '2D heatmap', snippet: 'heatmap(Z, x, y)' },
+  { name: 'scatter3d', category: 'Plotting', signature: 'scatter3d(x, y, z)', description: '3D scatter plot', snippet: 'scatter3d(x, y, z)' },
+  { name: 'zlabel', category: 'Plotting', signature: 'zlabel(s)', description: 'Z-axis label', snippet: "zlabel('...')" },
+  { name: 'colorscale', category: 'Plotting', signature: "colorscale(s)", description: 'Set colorscale (Viridis, Plasma, etc.)', snippet: "colorscale('Plasma')" },
+  { name: 'meshgrid', category: 'Plotting', signature: 'meshgrid(x, y)', description: 'Generate X,Y grid matrices', snippet: 'X = meshgrid(x, y)' },
 
   // ─── I/O ─────────────────────────────────────────────────────────────
   { name: 'disp', category: 'I/O', signature: 'disp(x)', description: 'Display value', snippet: 'disp(x)' },

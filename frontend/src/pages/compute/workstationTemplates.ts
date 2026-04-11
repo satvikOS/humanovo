@@ -22,6 +22,7 @@ export const WORKSTATION_CATEGORIES = [
   'Simulation',
   'Differential Equations',
   'Plotting',
+  '3D Visualization',
 ]
 
 export const WORKSTATION_TEMPLATES: WorkstationTemplate[] = [
@@ -463,5 +464,116 @@ plot(t, noisy, 'noisy');
 plot(t, smooth, 'smooth');
 title('Moving-average smoothing (window = 15)');
 xlabel('t (s)'); ylabel('amplitude');`,
+  },
+
+  // ── 3D Visualization ─────────────────────────────────────────────────
+  {
+    id: '3d-gaussian',
+    name: '3D Gaussian surface',
+    category: '3D Visualization',
+    description: 'Classic 2D Gaussian bell rendered as an interactive 3D surface.',
+    code: `% 3D Gaussian surface
+n = 40;
+x = linspace(-3, 3, n);
+y = linspace(-3, 3, n);
+Z = zeros(n, n);
+for i = 1:n
+  for j = 1:n
+    Z(i,j) = exp(-(x(j)^2 + y(i)^2) / 2);
+  end
+end
+title('Gaussian Surface');
+xlabel('x'); ylabel('y'); zlabel('z');
+surface(Z, x, y);`,
+  },
+  {
+    id: '3d-sinc',
+    name: 'Sinc ripple',
+    category: '3D Visualization',
+    description: 'The sinc function sin(r)/r creates a circular ripple pattern.',
+    code: `% Sinc ripple surface
+n = 50;
+x = linspace(-10, 10, n);
+y = linspace(-10, 10, n);
+Z = zeros(n, n);
+for i = 1:n
+  for j = 1:n
+    r = sqrt(x(j)^2 + y(i)^2) + 0.001;
+    Z(i,j) = sin(r) / r;
+  end
+end
+title('sinc(r) = sin(r)/r');
+surface(Z, x, y);`,
+  },
+  {
+    id: '3d-heatmap-dose',
+    name: 'Radiation dose heatmap',
+    category: '3D Visualization',
+    description: 'Dual-beam radiation dose distribution as a heatmap.',
+    code: `% Radiation dose distribution — heatmap
+n = 50;
+x = linspace(-3, 3, n);
+y = linspace(-3, 3, n);
+D = zeros(n, n);
+for i = 1:n
+  for j = 1:n
+    D(i,j) = 100*exp(-((x(j)-0.5)^2+(y(i)-0.3)^2)/0.8) ...
+           +  40*exp(-((x(j)+0.5)^2+(y(i)+0.5)^2)/1.2);
+  end
+end
+title('Radiation Dose Distribution (Gy)');
+xlabel('x (cm)'); ylabel('y (cm)');
+heatmap(D, x, y);`,
+  },
+  {
+    id: '3d-wireframe-saddle',
+    name: 'Saddle wireframe',
+    category: '3D Visualization',
+    description: 'Hyperbolic paraboloid x²−y² as a wireframe mesh.',
+    code: `% Saddle point wireframe
+n = 30;
+x = linspace(-2, 2, n);
+y = linspace(-2, 2, n);
+Z = zeros(n, n);
+for i = 1:n
+  for j = 1:n
+    Z(i,j) = x(j)^2 - y(i)^2;
+  end
+end
+title('Saddle Point: x^2 - y^2');
+wireframe(Z, x, y);`,
+  },
+  {
+    id: '3d-scatter-cloud',
+    name: '3D scatter cloud',
+    category: '3D Visualization',
+    description: 'Random point cloud colored by z-height.',
+    code: `% 3D scatter point cloud
+n = 300;
+x = randn(n, 1);
+y = randn(n, 1);
+z = sin(x).*cos(y) + 0.2*randn(n, 1);
+title('3D Point Cloud');
+scatter3d(x, y, z);`,
+  },
+  {
+    id: '3d-contour-wave',
+    name: 'Contour: wave interference',
+    category: '3D Visualization',
+    description: 'Two-source wave interference viewed as a contour surface.',
+    code: `% Wave interference contour
+n = 50;
+x = linspace(-6, 6, n);
+y = linspace(-6, 6, n);
+Z = zeros(n, n);
+for i = 1:n
+  for j = 1:n
+    r1 = sqrt((x(j)-2)^2 + y(i)^2);
+    r2 = sqrt((x(j)+2)^2 + y(i)^2);
+    Z(i,j) = sin(3*r1) + sin(3*r2);
+  end
+end
+title('Two-Source Wave Interference');
+contour(Z, x, y);`,
   },
 ]
