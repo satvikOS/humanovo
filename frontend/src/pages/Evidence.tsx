@@ -434,7 +434,7 @@ export default function Evidence() {
     try {
       const { blobDelete } = await import('../utils/persistence')
       await blobDelete(realId)
-    } catch {}
+    } catch { /* blob not found */ }
     const docs = persistGet<any[]>('project-documents', [])
     persistSet('project-documents', docs.filter(d => d.id !== realId))
     setDeleteDocConfirmId(null)

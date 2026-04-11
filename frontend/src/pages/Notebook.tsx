@@ -445,8 +445,8 @@ function EditorToolbar({ editor }: { editor: Editor | null }) {
       {btn(editor.isActive({ textAlign: 'right' }), () => editor.chain().focus().setTextAlign('right').run(), '⫸', 'Align Right')}
       {sep}
       {btn(editor.isActive('highlight'), () => editor.chain().focus().toggleHighlight().run(), '🖍', 'Highlight')}
-      {btn(false, () => editor.chain().focus().undo().run(), '↶', 'Undo')}
-      {btn(false, () => editor.chain().focus().redo().run(), '↷', 'Redo')}
+      {btn(editor.can().undo(), () => editor.chain().focus().undo().run(), '↶', 'Undo')}
+      {btn(editor.can().redo(), () => editor.chain().focus().redo().run(), '↷', 'Redo')}
     </div>
   )
 }
@@ -497,12 +497,46 @@ function exportDocx(title: string, html: string) {
   URL.revokeObjectURL(url)
 }
 
+function exportMarkdown(title: string, html: string) {
+  // Lightweight HTML→Markdown conversion for research note portability
+  let md = html
+    .replace(/<h1[^>]*>(.*?)<\/h1>/gi, '# $1\n\n')
+    .replace(/<h2[^>]*>(.*?)<\/h2>/gi, '## $1\n\n')
+    .replace(/<h3[^>]*>(.*?)<\/h3>/gi, '### $1\n\n')
+    .replace(/<h4[^>]*>(.*?)<\/h4>/gi, '#### $1\n\n')
+    .replace(/<strong>(.*?)<\/strong>/gi, '**$1**')
+    .replace(/<b>(.*?)<\/b>/gi, '**$1**')
+    .replace(/<em>(.*?)<\/em>/gi, '*$1*')
+    .replace(/<i>(.*?)<\/i>/gi, '*$1*')
+    .replace(/<code>(.*?)<\/code>/gi, '`$1`')
+    .replace(/<pre[^>]*><code[^>]*>([\s\S]*?)<\/code><\/pre>/gi, '```\n$1\n```\n\n')
+    .replace(/<blockquote[^>]*>([\s\S]*?)<\/blockquote>/gi, (_, content) =>
+      content.replace(/<p[^>]*>(.*?)<\/p>/gi, '> $1\n').replace(/<[^>]+>/g, '')
+    )
+    .replace(/<a[^>]*href="([^"]*)"[^>]*>(.*?)<\/a>/gi, '[$2]($1)')
+    .replace(/<li[^>]*>(.*?)<\/li>/gi, '- $1\n')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<p[^>]*>(.*?)<\/p>/gi, '$1\n\n')
+    .replace(/<hr\s*\/?>/gi, '---\n\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+  if (title) md = `# ${title}\n\n${md}`
+  const blob = new Blob([md], { type: 'text/markdown' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = `${title || 'notebook'}.md`
+  a.click()
+  URL.revokeObjectURL(a.href)
+}
+
 // ═══════════════════════════════════════════════════════════════
 // Main Notebook Component
 // ═══════════════════════════════════════════════════════════════
 
 export default function Notebook() {
-  const [initError, setInitError] = useState<string | null>(null)
+  // initError state removed — graceful fallback to empty state on API failure
 
   // Page index (metadata only — content loaded on demand from API)
   const [pageIndex, setPageIndex] = useState<PageMeta[]>([])
@@ -534,7 +568,8 @@ export default function Notebook() {
         }
       } catch (err) {
         console.error('Failed to load notebook pages:', err)
-        setInitError('Failed to load notebook pages from server')
+        // Graceful fallback: start with empty local state instead of blocking
+        setPageIndex([])
       }
     }
     loadPages()
@@ -851,10 +886,6 @@ export default function Notebook() {
   }, [])
 
   // ─── Render ──────────────────────────────────────────────
-  if (initError) {
-    return <div className="p-8 text-[var(--color-text-muted)]"><h2 className="text-lg font-bold mb-2">Notebook Error</h2><pre className="text-sm">{initError}</pre></div>
-  }
-
   return (
     <>
       <div className="flex w-full" style={{ height: 'calc(100vh - 3.5rem)' }}>
@@ -1031,6 +1062,9 @@ export default function Notebook() {
                   placeholder="Page title..."
                 />
                 <div className="flex items-center gap-1">
+                  <button onClick={() => exportMarkdown(editTitle, editor?.getHTML() || '')} className="px-2 py-1 rounded hover:bg-white/5 text-[var(--color-text-muted)] hover:text-white text-xxs" title="Export Markdown">
+                    .md
+                  </button>
                   <button onClick={() => exportDocx(editTitle, editor?.getHTML() || '')} className="px-2 py-1 rounded hover:bg-white/5 text-[var(--color-text-muted)] hover:text-white text-xxs" title="Export Word">
                     .doc
                   </button>

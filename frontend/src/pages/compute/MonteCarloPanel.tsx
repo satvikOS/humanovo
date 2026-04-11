@@ -1,13 +1,15 @@
-import React, { useState, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer,
+  ReferenceLine, AreaChart, Area, Brush, Legend,
 } from 'recharts';
 import {
   FiPlay, FiActivity, FiBarChart2, FiCopy, FiDownload,
   FiLoader, FiCheck, FiTarget, FiHeart, FiZap, FiDatabase,
+  FiRefreshCw, FiTrendingUp, FiPercent, FiSliders,
 } from 'react-icons/fi';
-import clsx from 'clsx';
+
 
 /* ------------------------------------------------------------------ */
 /*  Random number utilities                                           */
@@ -50,7 +52,13 @@ type SimulationType =
   | 'survival_analysis'
   | 'epidemiological'
   | 'pathway_dynamics'
-  | 'drug_interaction';
+  | 'drug_interaction'
+  | 'bootstrap'
+  | 'pk_variability'
+  | 'random_walk'
+  | 'pi_estimation'
+  | 'bayesian_coin'
+  | 'protein_folding';
 
 interface ParamDef {
   key: string;
@@ -147,6 +155,76 @@ const SIMULATIONS: SimDef[] = [
       { key: 'drugB_effect', label: 'Drug B Effect', min: 0.05, max: 0.95, step: 0.01, default: 0.3 },
     ],
   },
+  {
+    id: 'bootstrap',
+    name: 'Bootstrap Resampling',
+    description: 'Estimate confidence intervals via non-parametric bootstrap',
+    icon: <FiActivity />,
+    params: [
+      { key: 'sampleSize', label: 'Sample Size', min: 10, max: 500, step: 5, default: 50 },
+      { key: 'trueMean', label: 'True Mean', min: 0, max: 200, step: 1, default: 100 },
+      { key: 'trueSD', label: 'True SD', min: 1, max: 50, step: 1, default: 15 },
+    ],
+  },
+  {
+    id: 'pk_variability',
+    name: 'PK Population Variability',
+    description: 'Simulate inter-individual variability in drug concentration profiles',
+    icon: <FiHeart />,
+    params: [
+      { key: 'dose', label: 'Dose (mg)', min: 10, max: 1000, step: 10, default: 200 },
+      { key: 'clMean', label: 'Mean CL (L/h)', min: 1, max: 100, step: 1, default: 20 },
+      { key: 'clCV', label: 'CL %CV', min: 5, max: 100, step: 5, default: 30 },
+      { key: 'vMean', label: 'Mean Vd (L)', min: 10, max: 500, step: 10, default: 100 },
+    ],
+  },
+  {
+    id: 'random_walk',
+    name: 'Random Walk (Brownian Motion)',
+    description: 'Simulate 1D Brownian motion — models diffusion, stock prices, molecular motion',
+    icon: <FiZap />,
+    params: [
+      { key: 'steps', label: 'Steps', min: 50, max: 5000, step: 50, default: 500 },
+      { key: 'stepSD', label: 'Step Size SD', min: 0.1, max: 5, step: 0.1, default: 1 },
+    ],
+  },
+  {
+    id: 'pi_estimation',
+    name: 'Pi Estimation',
+    description: 'Estimate pi using random points in a unit square (classic MC demo)',
+    icon: <FiTarget />,
+    params: [
+      { key: 'dummy', label: 'Points per trial', min: 100, max: 100000, step: 100, default: 10000 },
+    ],
+  },
+  {
+    id: 'bayesian_coin',
+    name: 'Bayesian Inference (Coin Flip)',
+    description: 'Update prior belief about coin fairness via Bayesian updating',
+    icon: <FiDatabase />,
+    params: [
+      { key: 'trueBias', label: 'True P(Heads)', min: 0.05, max: 0.95, step: 0.05, default: 0.6 },
+      { key: 'nFlips', label: 'Flips per trial', min: 5, max: 500, step: 5, default: 50 },
+    ],
+  },
+  {
+    id: 'protein_folding',
+    name: 'Protein Folding (Energy Landscape)',
+    description: 'Simulate folding on a simplified energy landscape with thermal fluctuations',
+    icon: <FiActivity />,
+    params: [
+      { key: 'temperature', label: 'Temperature (kT)', min: 0.1, max: 5, step: 0.1, default: 1 },
+      { key: 'nSteps', label: 'Steps', min: 100, max: 10000, step: 100, default: 1000 },
+    ],
+  },
+];
+
+/* Simulation categories for the overlay library */
+const SIM_CATEGORIES: { name: string; ids: SimulationType[] }[] = [
+  { name: 'Clinical & PK', ids: ['clinical_outcome', 'dose_response', 'survival_analysis', 'drug_interaction', 'pk_variability'] },
+  { name: 'Epidemiology & Population', ids: ['epidemiological', 'bootstrap', 'bayesian_coin'] },
+  { name: 'Molecular & Cellular', ids: ['pathway_dynamics', 'protein_folding'] },
+  { name: 'General Probability', ids: ['random_walk', 'pi_estimation'] },
 ];
 
 /* ------------------------------------------------------------------ */
@@ -293,6 +371,82 @@ function runDrugInteraction(p: Record<string, number>, iters: number): number[] 
   return results;
 }
 
+function runBootstrap(p: Record<string, number>, iters: number): number[] {
+  // Generate one sample, then bootstrap its mean
+  const sample: number[] = [];
+  for (let i = 0; i < p.sampleSize; i++) sample.push(randNorm(p.trueMean, p.trueSD));
+  const results: number[] = [];
+  for (let i = 0; i < iters; i++) {
+    let sum = 0;
+    for (let j = 0; j < sample.length; j++) sum += sample[Math.floor(Math.random() * sample.length)];
+    results.push(sum / sample.length);
+  }
+  return results;
+}
+
+function runPKVariability(p: Record<string, number>, iters: number): number[] {
+  const results: number[] = [];
+  for (let i = 0; i < iters; i++) {
+    const cl = Math.max(0.1, randNorm(p.clMean, p.clMean * p.clCV / 100));
+    const ke = cl / p.vMean;
+    const c0 = p.dose / p.vMean;
+    // AUC = C0 / ke
+    results.push(c0 / ke);
+  }
+  return results;
+}
+
+function runRandomWalk(p: Record<string, number>, iters: number): number[] {
+  const results: number[] = [];
+  for (let i = 0; i < iters; i++) {
+    let pos = 0;
+    for (let s = 0; s < p.steps; s++) pos += randNorm(0, p.stepSD);
+    results.push(pos);
+  }
+  return results;
+}
+
+function runPiEstimation(p: Record<string, number>, iters: number): number[] {
+  const results: number[] = [];
+  for (let i = 0; i < iters; i++) {
+    let inside = 0;
+    for (let j = 0; j < p.dummy; j++) {
+      const x = Math.random(), y = Math.random();
+      if (x * x + y * y <= 1) inside++;
+    }
+    results.push(4 * inside / p.dummy);
+  }
+  return results;
+}
+
+function runBayesianCoin(p: Record<string, number>, iters: number): number[] {
+  const results: number[] = [];
+  for (let i = 0; i < iters; i++) {
+    let heads = 0;
+    for (let j = 0; j < p.nFlips; j++) if (Math.random() < p.trueBias) heads++;
+    // Posterior mean with uniform prior: (heads+1)/(nFlips+2)
+    results.push((heads + 1) / (p.nFlips + 2));
+  }
+  return results;
+}
+
+function runProteinFolding(p: Record<string, number>, iters: number): number[] {
+  // Simple 1D energy landscape: E(x) = x^4 - 2*x^2 (two minima at +-1)
+  const results: number[] = [];
+  for (let i = 0; i < iters; i++) {
+    let x = randNorm(0, 2);
+    for (let s = 0; s < p.nSteps; s++) {
+      const xNew = x + randNorm(0, 0.3);
+      const eOld = Math.pow(x, 4) - 2 * Math.pow(x, 2);
+      const eNew = Math.pow(xNew, 4) - 2 * Math.pow(xNew, 2);
+      const dE = eNew - eOld;
+      if (dE < 0 || Math.random() < Math.exp(-dE / p.temperature)) x = xNew;
+    }
+    results.push(x);
+  }
+  return results;
+}
+
 const RESULT_LABELS: Record<SimulationType, string> = {
   clinical_outcome: 'Risk Difference',
   dose_response: 'Estimated EC50',
@@ -300,6 +454,12 @@ const RESULT_LABELS: Record<SimulationType, string> = {
   epidemiological: 'Peak Infected Count',
   pathway_dynamics: 'Steady-State Protein Level',
   drug_interaction: 'Combination Index',
+  bootstrap: 'Bootstrap Mean Estimate',
+  pk_variability: 'AUC (mg·h/L)',
+  random_walk: 'Final Position',
+  pi_estimation: 'Pi Estimate',
+  bayesian_coin: 'Posterior P(Heads)',
+  protein_folding: 'Final Conformation (x)',
 };
 
 function runSimulation(
@@ -326,6 +486,24 @@ function runSimulation(
       break;
     case 'drug_interaction':
       values = runDrugInteraction(params, iterations);
+      break;
+    case 'bootstrap':
+      values = runBootstrap(params, iterations);
+      break;
+    case 'pk_variability':
+      values = runPKVariability(params, iterations);
+      break;
+    case 'random_walk':
+      values = runRandomWalk(params, iterations);
+      break;
+    case 'pi_estimation':
+      values = runPiEstimation(params, iterations);
+      break;
+    case 'bayesian_coin':
+      values = runBayesianCoin(params, iterations);
+      break;
+    case 'protein_folding':
+      values = runProteinFolding(params, iterations);
       break;
   }
 
@@ -361,21 +539,7 @@ function computeStats(values: number[]) {
   return { mean, median, std, ci95Low, ci95High };
 }
 
-function buildHistogram(values: number[], bins = 20) {
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = max - min || 1;
-  const binWidth = range / bins;
-  const counts = new Array(bins).fill(0);
-  for (const v of values) {
-    const idx = Math.min(bins - 1, Math.floor((v - min) / binWidth));
-    counts[idx]++;
-  }
-  return counts.map((count, i) => ({
-    bin: (min + (i + 0.5) * binWidth).toPrecision(4),
-    count,
-  }));
-}
+// buildHistogram is now inline in histogramEnriched useMemo
 
 /* ------------------------------------------------------------------ */
 /*  Styles                                                            */
@@ -385,124 +549,141 @@ const styles: Record<string, React.CSSProperties> = {
   container: {
     display: 'flex',
     flexDirection: 'column',
-    gap: 24,
-    padding: 24,
+    gap: 20,
+    padding: '20px 24px 32px',
     color: 'var(--color-text)',
+    height: '100%',
+    overflowY: 'auto',
+    boxSizing: 'border-box',
   },
   heading: {
-    fontSize: 22,
-    fontWeight: 700,
+    fontSize: 16,
+    fontWeight: 600,
     margin: 0,
+    letterSpacing: '-0.01em',
   },
   subtitle: {
-    fontSize: 13,
+    fontSize: 12,
     color: 'var(--color-text-muted)',
-    margin: 0,
+    margin: '2px 0 0',
   },
   grid3x2: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(3, 1fr)',
-    gap: 12,
+    gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
+    gap: 8,
   },
   card: {
     background: 'var(--glass-bg)',
     border: '1px solid var(--glass-border)',
-    borderRadius: 10,
-    padding: '14px 16px',
+    borderRadius: 8,
+    padding: '10px 12px',
     cursor: 'pointer',
-    transition: 'border-color 0.2s, box-shadow 0.2s',
+    transition: 'border-color 0.15s, background 0.15s',
   },
   cardSelected: {
-    borderColor: 'var(--color-accent-blue)',
-    boxShadow: '0 0 0 2px var(--color-accent-blue)',
+    borderColor: 'var(--color-border-strong)',
+    background: 'var(--glass-bg-hover)',
   },
   cardName: {
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: 600,
     display: 'flex',
     alignItems: 'center',
-    gap: 8,
-    marginBottom: 4,
+    gap: 6,
+    marginBottom: 2,
+    color: 'var(--color-text)',
   },
   cardDesc: {
-    fontSize: 12,
+    fontSize: 11,
     color: 'var(--color-text-muted)',
-    lineHeight: 1.4,
+    lineHeight: 1.35,
   },
   columns: {
     display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
-    gap: 24,
+    gridTemplateColumns: 'minmax(280px, 1fr) minmax(320px, 1.4fr)',
+    gap: 16,
   },
   panel: {
     background: 'var(--glass-bg)',
     border: '1px solid var(--glass-border)',
-    borderRadius: 10,
-    padding: 20,
+    borderRadius: 8,
+    padding: 16,
     display: 'flex',
     flexDirection: 'column' as const,
-    gap: 16,
+    gap: 14,
+    minWidth: 0,
   },
   label: {
-    fontSize: 12,
-    fontWeight: 600,
+    fontSize: 11,
+    fontWeight: 500,
     color: 'var(--color-text-muted)',
     marginBottom: 4,
   },
   slider: {
     width: '100%',
-    accentColor: 'var(--color-accent-blue)',
+    accentColor: 'var(--color-text)',
   },
   input: {
-    width: 72,
+    width: 80,
     padding: '4px 8px',
     borderRadius: 6,
     border: '1px solid var(--glass-border)',
-    background: 'var(--glass-bg)',
+    background: 'var(--color-bg)',
     color: 'var(--color-text)',
-    fontSize: 13,
+    fontSize: 12,
     textAlign: 'right' as const,
+    outline: 'none',
   },
   runBtn: {
     display: 'flex',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    padding: '10px 0',
-    borderRadius: 8,
-    border: 'none',
-    background: 'var(--color-accent-blue)',
-    color: '#fff',
+    gap: 6,
+    padding: '5px 14px',
+    borderRadius: 6,
+    border: '1px solid var(--color-border-strong)',
+    background: 'var(--glass-bg-hover)',
+    color: 'var(--color-text)',
     fontWeight: 600,
-    fontSize: 14,
+    fontSize: 11,
     cursor: 'pointer',
+    transition: 'background 0.15s, border-color 0.15s',
+    whiteSpace: 'nowrap' as const,
   },
   statsTable: {
     width: '100%',
-    fontSize: 13,
+    fontSize: 12,
     borderCollapse: 'collapse' as const,
   },
   td: {
-    padding: '6px 10px',
+    padding: '6px 8px',
     borderBottom: '1px solid var(--glass-border)',
   },
   exportRow: {
     display: 'flex',
-    gap: 10,
+    gap: 8,
     flexWrap: 'wrap' as const,
   },
   exportBtn: {
     display: 'flex',
     alignItems: 'center',
-    gap: 6,
-    padding: '8px 14px',
-    borderRadius: 8,
+    gap: 4,
+    padding: '5px 8px',
+    borderRadius: 5,
     border: '1px solid var(--glass-border)',
     background: 'var(--glass-bg)',
-    color: 'var(--color-text)',
-    fontSize: 13,
+    color: 'var(--color-text-secondary)',
+    fontSize: 10,
     cursor: 'pointer',
     fontWeight: 500,
+  },
+  plotChip: {
+    padding: '4px 10px',
+    borderRadius: 5,
+    border: '1px solid var(--glass-border)',
+    background: 'var(--glass-bg)',
+    color: 'var(--color-text-secondary)',
+    fontSize: 11,
+    cursor: 'pointer',
   },
 };
 
@@ -513,6 +694,9 @@ const styles: Record<string, React.CSSProperties> = {
 export default function MonteCarloPanel() {
   const [selectedType, setSelectedType] = useState<SimulationType>('clinical_outcome');
   const [iterations, setIterations] = useState(5000);
+  const [showLibrary, setShowLibrary] = useState(false);
+  const [autoRun, setAutoRun] = useState(true);
+  const [activeChart, setActiveChart] = useState<'histogram' | 'convergence' | 'cdf'>('histogram');
   const [paramValues, setParamValues] = useState<Record<string, Record<string, number>>>(() => {
     const init: Record<string, Record<string, number>> = {};
     for (const sim of SIMULATIONS) {
@@ -526,7 +710,9 @@ export default function MonteCarloPanel() {
   const [results, setResults] = useState<SimResults | null>(null);
   const [running, setRunning] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [_runHistory, setRunHistory] = useState<{ type: SimulationType; params: Record<string, number>; mean: number; std: number; timestamp: number }[]>([]);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoRunRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const activeSim = useMemo(
     () => SIMULATIONS.find((s) => s.id === selectedType)!,
@@ -552,17 +738,38 @@ export default function MonteCarloPanel() {
       const res = runSimulation(selectedType, currentParams, iterations);
       setResults(res);
       setRunning(false);
+      // Record in history
+      const s = computeStats(res.values);
+      setRunHistory(prev => [...prev.slice(-19), { type: selectedType, params: { ...currentParams }, mean: s.mean, std: s.std, timestamp: Date.now() }]);
     }, 20);
   }, [selectedType, currentParams, iterations]);
+
+  // Auto-run on parameter/iteration change with debounce
+  useEffect(() => {
+    if (!autoRun) return;
+    if (autoRunRef.current) clearTimeout(autoRunRef.current);
+    autoRunRef.current = setTimeout(() => {
+      handleRun();
+    }, 350);
+    return () => { if (autoRunRef.current) clearTimeout(autoRunRef.current); };
+  }, [autoRun, selectedType, currentParams, iterations]); // eslint-disable-line
+
+  // CDF data
+  const cdfData = useMemo(() => {
+    if (!results) return [];
+    const sorted = [...results.values].sort((a, b) => a - b);
+    const n = sorted.length;
+    const step = Math.max(1, Math.floor(n / 200));
+    const data: { value: number; percentile: number }[] = [];
+    for (let i = 0; i < n; i += step) {
+      data.push({ value: sorted[i], percentile: ((i + 1) / n) * 100 });
+    }
+    return data;
+  }, [results]);
 
   const stats = useMemo(() => {
     if (!results) return null;
     return computeStats(results.values);
-  }, [results]);
-
-  const histogram = useMemo(() => {
-    if (!results) return [];
-    return buildHistogram(results.values, 20);
   }, [results]);
 
   const fmt = (v: number) => {
@@ -614,79 +821,132 @@ export default function MonteCarloPanel() {
     URL.revokeObjectURL(url);
   }, [results, selectedType]);
 
+  const chartTabs: { id: 'histogram' | 'convergence' | 'cdf'; label: string; icon: React.ReactNode }[] = [
+    { id: 'histogram', label: 'Distribution', icon: <FiBarChart2 style={{ fontSize: 10 }} /> },
+    { id: 'convergence', label: 'Convergence', icon: <FiTrendingUp style={{ fontSize: 10 }} /> },
+    { id: 'cdf', label: 'CDF', icon: <FiPercent style={{ fontSize: 10 }} /> },
+  ];
+
+  // Histogram with enriched bins (storing numeric midpoint for reference lines)
+  const histogramEnriched = useMemo(() => {
+    if (!results) return [];
+    const vals = results.values;
+    const min = Math.min(...vals);
+    const max = Math.max(...vals);
+    const range = max - min || 1;
+    const bins = 30;
+    const binWidth = range / bins;
+    const counts = new Array(bins).fill(0);
+    for (const v of vals) {
+      const idx = Math.min(bins - 1, Math.floor((v - min) / binWidth));
+      counts[idx]++;
+    }
+    return counts.map((count, i) => ({
+      bin: (min + (i + 0.5) * binWidth).toPrecision(4),
+      binMid: min + (i + 0.5) * binWidth,
+      count,
+      density: count / (vals.length * binWidth),
+    }));
+  }, [results]);
+
   return (
     <div style={styles.container}>
-      {/* Header */}
-      <div>
-        <h2 style={styles.heading}>Monte Carlo Simulations</h2>
-        <p style={styles.subtitle}>
-          Select a stochastic simulation, configure parameters, and explore the output distribution.
-        </p>
+      {/* ── Top toolbar ──────────────────────────────────────────── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <button
+          style={{ ...styles.plotChip, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}
+          onClick={() => setShowLibrary(true)}
+        ><FiSliders style={{ fontSize: 10 }} /> Library</button>
+        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text)' }}>
+          {activeSim.name}
+        </span>
+        <span style={{ fontSize: 11, color: 'var(--color-text-muted)', flex: 1 }}>
+          {activeSim.description}
+        </span>
+
+        {/* Auto-run toggle */}
+        <button
+          style={{
+            ...styles.plotChip,
+            display: 'flex', alignItems: 'center', gap: 4,
+            borderColor: autoRun ? 'var(--color-border-strong)' : 'var(--glass-border)',
+            background: autoRun ? 'var(--glass-bg-hover)' : 'var(--glass-bg)',
+          }}
+          onClick={() => setAutoRun(!autoRun)}
+          title={autoRun ? 'Auto-run enabled — simulation re-runs on parameter changes' : 'Auto-run disabled — click Run manually'}
+        >
+          <FiRefreshCw style={{ fontSize: 10 }} />
+          <span style={{ fontSize: 10 }}>Auto</span>
+        </button>
+
+        <button style={styles.runBtn} onClick={handleRun} disabled={running}>
+          {running ? <FiLoader style={{ animation: 'spin 1s linear infinite' }} /> : <FiPlay />}
+          {running ? 'Running...' : 'Run'}
+        </button>
       </div>
 
-      {/* Simulation selector - 3x2 grid */}
-      <div style={styles.grid3x2}>
-        {SIMULATIONS.map((sim) => (
-          <div
-            key={sim.id}
-            style={{
-              ...styles.card,
-              ...(selectedType === sim.id ? styles.cardSelected : {}),
-            }}
-            className={clsx(selectedType === sim.id && 'selected')}
-            onClick={() => setSelectedType(sim.id)}
-          >
-            <div style={styles.cardName}>
-              {sim.icon}
-              {sim.name}
-            </div>
-            <div style={styles.cardDesc}>{sim.description}</div>
+      {/* ── Main content: left parameters + right results ─────────── */}
+      <div style={{ display: 'flex', gap: 16, flex: 1, minHeight: 0, overflow: 'hidden' }}>
+
+        {/* ── Left panel: reactive sliders ─────────────────────────── */}
+        <div style={{ ...styles.panel, width: 280, flexShrink: 0, overflowY: 'auto' }}>
+          <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--color-text-muted)', marginBottom: 2 }}>
+            Parameters
           </div>
-        ))}
-      </div>
 
-      {/* Two-column layout: params | results */}
-      <div style={styles.columns}>
-        {/* Left column: parameters */}
-        <div style={styles.panel}>
-          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Parameters</h3>
-
-          {activeSim.params.map((p) => (
-            <div key={p.key}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <label style={styles.label}>{p.label}</label>
-                <input
-                  type="number"
-                  style={styles.input}
-                  value={currentParams[p.key]}
-                  min={p.min}
-                  max={p.max}
-                  step={p.step}
-                  onChange={(e) => {
-                    const v = parseFloat(e.target.value);
-                    if (!isNaN(v)) setParam(p.key, Math.max(p.min, Math.min(p.max, v)));
-                  }}
-                />
+          {activeSim.params.map((p) => {
+            const val = currentParams[p.key];
+            const pct = ((val - p.min) / (p.max - p.min)) * 100;
+            return (
+              <div key={p.key} style={{ marginBottom: 4 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
+                  <label style={{ fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 500 }}>{p.label}</label>
+                  <input
+                    type="number"
+                    style={{ ...styles.input, width: 72, fontSize: 11 }}
+                    value={val}
+                    min={p.min}
+                    max={p.max}
+                    step={p.step}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
+                      if (!isNaN(v)) setParam(p.key, Math.max(p.min, Math.min(p.max, v)));
+                    }}
+                  />
+                </div>
+                <div style={{ position: 'relative', height: 20, display: 'flex', alignItems: 'center' }}>
+                  <input
+                    type="range"
+                    min={p.min}
+                    max={p.max}
+                    step={p.step}
+                    value={val}
+                    onChange={(e) => setParam(p.key, parseFloat(e.target.value))}
+                    style={{ ...styles.slider, margin: 0 }}
+                  />
+                  {/* Progress fill indicator */}
+                  <div style={{
+                    position: 'absolute', top: '50%', left: 0, height: 3,
+                    width: `${pct}%`, borderRadius: 2,
+                    background: 'var(--color-text)', opacity: 0.15,
+                    pointerEvents: 'none', transform: 'translateY(-50%)',
+                  }} />
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 1 }}>
+                  <span style={{ fontSize: 9, color: 'var(--color-text-muted)', opacity: 0.6 }}>{p.min}</span>
+                  <span style={{ fontSize: 9, color: 'var(--color-text-muted)', opacity: 0.6 }}>{p.max}</span>
+                </div>
               </div>
-              <input
-                type="range"
-                style={styles.slider}
-                min={p.min}
-                max={p.max}
-                step={p.step}
-                value={currentParams[p.key]}
-                onChange={(e) => setParam(p.key, parseFloat(e.target.value))}
-              />
-            </div>
-          ))}
+            );
+          })}
 
-          {/* Iterations */}
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <label style={styles.label}>Iterations</label>
+          {/* Iterations slider */}
+          <div style={{ borderTop: '1px solid var(--glass-border)', paddingTop: 10, marginTop: 4 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
+              <label style={{ fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 500 }}>Iterations</label>
               <input
                 type="number"
-                style={styles.input}
+                style={{ ...styles.input, width: 72, fontSize: 11 }}
                 value={iterations}
                 min={100}
                 max={50000}
@@ -699,127 +959,215 @@ export default function MonteCarloPanel() {
             </div>
             <input
               type="range"
-              style={styles.slider}
               min={100}
               max={50000}
               step={100}
               value={iterations}
               onChange={(e) => setIterations(parseInt(e.target.value, 10))}
+              style={styles.slider}
             />
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 9, color: 'var(--color-text-muted)', opacity: 0.6 }}>100</span>
+              <span style={{ fontSize: 9, color: 'var(--color-text-muted)', opacity: 0.6 }}>50,000</span>
+            </div>
           </div>
-
-          {/* Run button */}
-          <button style={styles.runBtn} onClick={handleRun} disabled={running}>
-            {running ? <FiLoader style={{ animation: 'spin 1s linear infinite' }} /> : <FiPlay />}
-            {running ? 'Running...' : 'Run Simulation'}
-          </button>
         </div>
 
-        {/* Right column: results */}
-        <div style={styles.panel}>
-          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Results</h3>
+        {/* ── Right panel: results ─────────────────────────────────── */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0, overflow: 'hidden' }}>
 
-          {!results && (
-            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-muted)', fontSize: 14 }}>
-              Configure parameters and run a simulation to see results.
-            </div>
-          )}
-
-          {results && stats && (
+          {/* Stats cards row */}
+          {results && stats ? (
             <>
-              {/* Summary stats table */}
-              <table style={styles.statsTable}>
-                <tbody>
-                  <tr>
-                    <td style={{ ...styles.td, fontWeight: 600 }}>Metric</td>
-                    <td style={{ ...styles.td, fontWeight: 600 }}>{results.label}</td>
-                  </tr>
-                  <tr>
-                    <td style={styles.td}>Mean</td>
-                    <td style={styles.td}>{fmt(stats.mean)}</td>
-                  </tr>
-                  <tr>
-                    <td style={styles.td}>Median</td>
-                    <td style={styles.td}>{fmt(stats.median)}</td>
-                  </tr>
-                  <tr>
-                    <td style={styles.td}>Std Dev</td>
-                    <td style={styles.td}>{fmt(stats.std)}</td>
-                  </tr>
-                  <tr>
-                    <td style={styles.td}>95% CI</td>
-                    <td style={styles.td}>
-                      [{fmt(stats.ci95Low)}, {fmt(stats.ci95High)}]
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-
-              {/* Histogram */}
-              <div>
-                <div style={{ ...styles.label, marginBottom: 8 }}>Distribution Histogram</div>
-                <ResponsiveContainer width="100%" height={180}>
-                  <BarChart data={histogram}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" />
-                    <XAxis dataKey="bin" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
-                    <YAxis tick={{ fontSize: 10 }} />
-                    <Tooltip
-                      contentStyle={{
-                        background: 'var(--glass-bg)',
-                        border: '1px solid var(--glass-border)',
-                        borderRadius: 6,
-                        fontSize: 12,
-                      }}
-                    />
-                    <Bar dataKey="count" fill="var(--color-accent-blue)" radius={[3, 3, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+                {[
+                  { label: 'Mean', value: fmt(stats.mean), color: '#3b82f6' },
+                  { label: 'Median', value: fmt(stats.median), color: '#8b5cf6' },
+                  { label: 'Std Dev', value: fmt(stats.std), color: '#f59e0b' },
+                  { label: '95% CI', value: `${fmt(stats.ci95Low)} — ${fmt(stats.ci95High)}`, color: '#10b981' },
+                ].map((s) => (
+                  <div key={s.label} style={{
+                    background: 'var(--glass-bg)',
+                    border: '1px solid var(--glass-border)',
+                    borderRadius: 8,
+                    padding: '10px 12px',
+                    borderLeft: `3px solid ${s.color}`,
+                  }}>
+                    <div style={{ fontSize: 9, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.8, color: 'var(--color-text-muted)', marginBottom: 4 }}>
+                      {s.label}
+                    </div>
+                    <div style={{ fontSize: 14, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", color: 'var(--color-text)', lineHeight: 1.2 }}>
+                      {s.value}
+                    </div>
+                  </div>
+                ))}
               </div>
 
-              {/* Convergence plot */}
-              <div>
-                <div style={{ ...styles.label, marginBottom: 8 }}>Convergence (Running Mean)</div>
-                <ResponsiveContainer width="100%" height={160}>
-                  <LineChart data={results.convergence}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" />
-                    <XAxis dataKey="iteration" tick={{ fontSize: 10 }} />
-                    <YAxis tick={{ fontSize: 10 }} />
-                    <Tooltip
-                      contentStyle={{
-                        background: 'var(--glass-bg)',
-                        border: '1px solid var(--glass-border)',
-                        borderRadius: 6,
-                        fontSize: 12,
+              {/* Chart tabs + chart */}
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 2, marginBottom: 6 }}>
+                  {chartTabs.map(tab => (
+                    <button
+                      key={tab.id}
+                      onClick={() => setActiveChart(tab.id)}
+                      style={{
+                        ...styles.plotChip,
+                        display: 'flex', alignItems: 'center', gap: 3,
+                        borderColor: activeChart === tab.id ? 'var(--color-border-strong)' : 'var(--glass-border)',
+                        background: activeChart === tab.id ? 'var(--glass-bg-hover)' : 'transparent',
+                        fontWeight: activeChart === tab.id ? 600 : 400,
+                        fontSize: 10,
                       }}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="runningMean"
-                      stroke="var(--color-accent-blue)"
-                      strokeWidth={2}
-                      dot={false}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
+                    >
+                      {tab.icon} {tab.label}
+                    </button>
+                  ))}
+                  <span style={{ fontSize: 10, color: 'var(--color-text-muted)', marginLeft: 'auto' }}>
+                    {results.label} &middot; {results.values.length.toLocaleString()} iterations
+                  </span>
+                  <div style={{ display: 'flex', gap: 4, marginLeft: 8 }}>
+                    <button style={styles.exportBtn} onClick={handleExportJSON}><FiDownload style={{ fontSize: 9 }} /> JSON</button>
+                    <button style={styles.exportBtn} onClick={handleExportCSV}><FiDownload style={{ fontSize: 9 }} /> CSV</button>
+                    <button style={styles.exportBtn} onClick={handleCopy}>
+                      {copied ? <FiCheck style={{ fontSize: 9 }} /> : <FiCopy style={{ fontSize: 9 }} />} {copied ? 'Copied' : 'Copy'}
+                    </button>
+                  </div>
+                </div>
+
+                <div style={{ flex: 1, minHeight: 0 }}>
+                  {activeChart === 'histogram' && (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={histogramEnriched} margin={{ top: 8, right: 16, bottom: 30, left: 8 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" strokeOpacity={0.4} />
+                        <XAxis dataKey="bin" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} interval="preserveStartEnd" stroke="var(--glass-border)" label={{ value: results.label, position: 'insideBottom', offset: -12, fontSize: 10, fill: 'var(--color-text-muted)' }} />
+                        <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" label={{ value: 'Count', angle: -90, position: 'insideLeft', fontSize: 10, fill: 'var(--color-text-muted)' }} />
+                        <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} cursor={{ stroke: 'var(--color-text-muted)', strokeDasharray: '4 4' }} />
+                        <ReferenceLine x={(() => { const m = stats.mean; let closest = histogramEnriched[0]?.bin; let minD = Infinity; for (const h of histogramEnriched) { const d = Math.abs(h.binMid - m); if (d < minD) { minD = d; closest = h.bin; } } return closest; })()} stroke="#3b82f6" strokeWidth={2} strokeDasharray="4 3" label={{ value: 'Mean', position: 'top', fontSize: 9, fill: '#3b82f6' }} />
+                        <Bar dataKey="count" fill="#3b82f6" fillOpacity={0.35} radius={[2, 2, 0, 0]} />
+                        {histogramEnriched.length > 8 && <Brush dataKey="bin" height={16} stroke="#3b82f6" fill="var(--glass-bg)" travellerWidth={6} />}
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
+
+                  {activeChart === 'convergence' && (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={results.convergence} margin={{ top: 8, right: 16, bottom: 30, left: 8 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" strokeOpacity={0.4} />
+                        <XAxis dataKey="iteration" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" label={{ value: 'Iteration', position: 'insideBottom', offset: -12, fontSize: 10, fill: 'var(--color-text-muted)' }} />
+                        <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" label={{ value: 'Running Mean', angle: -90, position: 'insideLeft', fontSize: 10, fill: 'var(--color-text-muted)' }} />
+                        <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} cursor={{ stroke: 'var(--color-text-muted)', strokeDasharray: '4 4' }} />
+                        <Legend wrapperStyle={{ fontSize: 10 }} />
+                        <ReferenceLine y={stats.mean} stroke="#3b82f6" strokeDasharray="4 3" strokeWidth={1} label={{ value: `Final: ${fmt(stats.mean)}`, position: 'right', fontSize: 9, fill: '#3b82f6' }} />
+                        <Line type="monotone" dataKey="runningMean" name="Running Mean" stroke="#8b5cf6" strokeWidth={2} dot={false} />
+                        {results.convergence.length > 10 && <Brush dataKey="iteration" height={16} stroke="#8b5cf6" fill="var(--glass-bg)" travellerWidth={6} />}
+                      </LineChart>
+                    </ResponsiveContainer>
+                  )}
+
+                  {activeChart === 'cdf' && (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={cdfData} margin={{ top: 8, right: 16, bottom: 30, left: 8 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" strokeOpacity={0.4} />
+                        <XAxis dataKey="value" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" type="number" label={{ value: results.label, position: 'insideBottom', offset: -12, fontSize: 10, fill: 'var(--color-text-muted)' }} />
+                        <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" domain={[0, 100]} label={{ value: 'Percentile (%)', angle: -90, position: 'insideLeft', fontSize: 10, fill: 'var(--color-text-muted)' }} />
+                        <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} cursor={{ stroke: 'var(--color-text-muted)', strokeDasharray: '4 4' }} formatter={(v: any) => `${Number(v).toFixed(1)}%`} />
+                        <ReferenceLine y={50} stroke="#f59e0b" strokeDasharray="4 3" strokeWidth={1} label={{ value: 'Median', position: 'right', fontSize: 9, fill: '#f59e0b' }} />
+                        <Area type="monotone" dataKey="percentile" stroke="#10b981" fill="#10b981" fillOpacity={0.15} strokeWidth={2} dot={false} />
+                        {cdfData.length > 10 && <Brush dataKey="value" height={16} stroke="#10b981" fill="var(--glass-bg)" travellerWidth={6} />}
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
               </div>
             </>
+          ) : (
+            <div style={{
+              flex: 1, display: 'flex', flexDirection: 'column',
+              alignItems: 'center', justifyContent: 'center',
+              color: 'var(--color-text-muted)', gap: 8,
+            }}>
+              <FiActivity style={{ fontSize: 28, opacity: 0.3 }} />
+              <div style={{ fontSize: 12 }}>
+                {autoRun ? 'Adjust sliders to run simulation automatically' : 'Configure parameters and click Run'}
+              </div>
+              <div style={{ fontSize: 10, opacity: 0.6 }}>
+                Choose from {SIMULATIONS.length} biomedical simulations in the Library
+              </div>
+            </div>
           )}
         </div>
       </div>
 
-      {/* Bottom: export buttons */}
-      {results && (
-        <div style={styles.exportRow}>
-          <button style={styles.exportBtn} onClick={handleExportJSON}>
-            <FiDownload /> Export JSON
-          </button>
-          <button style={styles.exportBtn} onClick={handleExportCSV}>
-            <FiDownload /> Export CSV
-          </button>
-          <button style={styles.exportBtn} onClick={handleCopy}>
-            {copied ? <FiCheck /> : <FiCopy />}
-            {copied ? 'Copied!' : 'Copy Results'}
-          </button>
+      {/* ── Library overlay ──────────────────────────────────────── */}
+      {showLibrary && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 9999,
+            background: 'rgba(0,0,0,0.55)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            backdropFilter: 'blur(4px)',
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowLibrary(false) }}
+        >
+          <div style={{
+            background: 'var(--color-bg-elevated)',
+            border: '1px solid var(--glass-border)',
+            borderRadius: 12,
+            width: 620, maxWidth: '92vw', maxHeight: '80vh',
+            overflow: 'auto',
+            padding: '24px 28px',
+            boxShadow: '0 12px 48px rgba(0,0,0,0.3)',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--color-text)' }}>
+                  Simulation Library
+                </h2>
+                <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--color-text-muted)' }}>
+                  {SIMULATIONS.length} biomedical Monte Carlo simulations
+                </p>
+              </div>
+              <button
+                style={{ ...styles.plotChip, fontSize: 11, padding: '5px 12px' }}
+                onClick={() => setShowLibrary(false)}
+              >Close</button>
+            </div>
+            {SIM_CATEGORIES.map(cat => (
+              <div key={cat.name} style={{ marginBottom: 18 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1.2, color: 'var(--color-text-muted)', marginBottom: 8 }}>
+                  {cat.name} &middot; {cat.ids.length}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 8 }}>
+                  {cat.ids.map(id => {
+                    const sim = SIMULATIONS.find(s => s.id === id)!;
+                    const isActive = selectedType === id;
+                    return (
+                      <div
+                        key={id}
+                        style={{
+                          ...styles.card,
+                          ...(isActive ? styles.cardSelected : {}),
+                          padding: '10px 12px',
+                          display: 'flex', flexDirection: 'column', gap: 3,
+                        }}
+                        onClick={() => { setSelectedType(id); setShowLibrary(false); setResults(null); }}
+                      >
+                        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                          {sim.icon} {sim.name}
+                        </div>
+                        <div style={{ fontSize: 10, color: 'var(--color-text-muted)', lineHeight: 1.4 }}>
+                          {sim.description}
+                        </div>
+                        <div style={{ fontSize: 9, color: 'var(--color-text-muted)', opacity: 0.6 }}>
+                          {sim.params.length} parameter{sim.params.length > 1 ? 's' : ''}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>

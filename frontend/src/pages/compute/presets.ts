@@ -29,17 +29,23 @@ const parseArray = (raw: any): number[] => {
 }
 
 /* ── Toolbox Categories ──────────────────────────────────────────────── */
+// Categories are rendered monochrome in the UI to match the rest of the
+// Humanovo platform. This hex string is kept as a neutral grey so any
+// downstream consumer that concatenates an opacity suffix still produces
+// valid CSS.
+const ACCENT = '#888888'
+
 export const TOOLBOX_CATEGORIES: ToolboxCategory[] = [
-  { id: 'statistics', name: 'Statistics & Testing', icon: FiTarget, color: '#3b82f6' },
-  { id: 'signal', name: 'Signal Processing', icon: FiActivity, color: '#10b981' },
-  { id: 'image', name: 'Image Processing', icon: FiGrid, color: '#8b5cf6' },
-  { id: 'bioinformatics', name: 'Bioinformatics', icon: FiHeart, color: '#ec4899' },
-  { id: 'curvefitting', name: 'Curve Fitting', icon: FiTrendingUp, color: '#f59e0b' },
-  { id: 'ode', name: 'ODE & Simulation', icon: FiZap, color: '#ef4444' },
-  { id: 'survival', name: 'Survival Analysis', icon: FiBarChart2, color: '#06b6d4' },
-  { id: 'ml', name: 'Machine Learning', icon: FiLayers, color: '#6366f1' },
-  { id: 'pk', name: 'Pharmacokinetics', icon: FiCpu, color: '#f97316' },
-  { id: 'normality', name: 'Normality & Distribution', icon: FiAlertCircle, color: '#84cc16' },
+  { id: 'statistics', name: 'Statistics & Testing', icon: FiTarget, color: ACCENT },
+  { id: 'signal', name: 'Signal Processing', icon: FiActivity, color: ACCENT },
+  { id: 'image', name: 'Image Processing', icon: FiGrid, color: ACCENT },
+  { id: 'bioinformatics', name: 'Bioinformatics', icon: FiHeart, color: ACCENT },
+  { id: 'curvefitting', name: 'Curve Fitting', icon: FiTrendingUp, color: ACCENT },
+  { id: 'ode', name: 'ODE & Simulation', icon: FiZap, color: ACCENT },
+  { id: 'survival', name: 'Survival Analysis', icon: FiBarChart2, color: ACCENT },
+  { id: 'ml', name: 'Machine Learning', icon: FiLayers, color: ACCENT },
+  { id: 'pk', name: 'Pharmacokinetics', icon: FiCpu, color: ACCENT },
+  { id: 'normality', name: 'Normality & Distribution', icon: FiAlertCircle, color: ACCENT },
 ]
 
 /* ═══ STATISTICS (15 presets) ════════════════════════════════════════ */
@@ -47,10 +53,10 @@ const statisticsPresets: Preset[] = [
   {
     id: 'stat-descriptive',
     name: 'Descriptive Statistics',
-    matlabFn: 'mean, std, median, prctile',
+    referenceFn: 'mean, std, median, prctile',
     toolbox: 'statistics',
     description: 'Compute mean, median, std, SEM, skewness, kurtosis, quartiles, 95% CI',
-    matlabCode: 'm = mean(x); s = std(x);\nq = quantile(x, [0.25 0.5 0.75]);\nci = m + [-1 1] * 1.96 * s/sqrt(length(x));',
+    referenceCode: '% Descriptive Statistics\nm = mean(data); s = std(data);\nme = median(data); n = length(data);\nsk = skewness(data); ku = kurtosis(data);\nq1 = quantile(data, 0.25); q3 = quantile(data, 0.75);\nse = s / sqrt(n);\nprintf("N = %d\\n", n)\nprintf("Mean = %.4f\\n", m)\nprintf("Median = %.4f\\n", me)\nprintf("Std Dev = %.4f\\n", s)\nprintf("SEM = %.4f\\n", se)\nprintf("Skewness = %.4f\\n", sk)\nprintf("Kurtosis = %.4f\\n", ku)\nprintf("Q1 = %.4f, Q3 = %.4f\\n", q1, q3)\nprintf("95%% CI = [%.4f, %.4f]\\n", m - 1.96*se, m + 1.96*se)\nhist(data, 12)\ntitle("Distribution Histogram")\nxlabel("Value")\nylabel("Count")',
     workflowStage: 'analysis',
     params: [{ key: 'data', label: 'Data', type: 'textarea', description: 'Comma-separated values' }],
     sampleData: { data: [22.5, 24.1, 25.3, 23.8, 26.2, 22.9, 24.7, 25.5, 23.4, 24.9, 26.1, 23.7, 25.2, 24.3, 25.8, 23.6, 24.5, 25.9, 24.2, 25.6] },
@@ -85,10 +91,10 @@ const statisticsPresets: Preset[] = [
   {
     id: 'stat-ttest1',
     name: 'One-Sample t-Test',
-    matlabFn: 'ttest',
+    referenceFn: 'ttest',
     toolbox: 'statistics',
     description: 'Test if sample mean differs from a hypothesized population mean',
-    matlabCode: '[h, p, ci, stats] = ttest(x, mu0);',
+    referenceCode: '% One-Sample t-Test\nm = mean(data); s = std(data); n = length(data);\nt_stat = (m - mu0) / (s / sqrt(n));\ndf = n - 1;\np_val = 2 * (1 - tcdf(abs(t_stat), df));\nprintf("Sample Mean = %.4f\\n", m)\nprintf("Hypothesized Mean = %.4f\\n", mu0)\nprintf("t-statistic = %.4f\\n", t_stat)\nprintf("df = %d\\n", df)\nprintf("p-value = %.6f\\n", p_val)\nif p_val < 0.05; printf("=> Reject H0 (p < 0.05)\\n"); else; printf("=> Fail to reject H0\\n"); end',
     workflowStage: 'analysis',
     params: [
       { key: 'data', label: 'Sample Data', type: 'textarea' },
@@ -118,10 +124,10 @@ const statisticsPresets: Preset[] = [
   {
     id: 'stat-ttest2',
     name: "Two-Sample t-Test (Welch's)",
-    matlabFn: 'ttest2',
+    referenceFn: 'ttest2',
     toolbox: 'statistics',
     description: 'Compare two independent groups (unequal variances)',
-    matlabCode: "[h, p, ci, stats] = ttest2(x1, x2, 'Vartype', 'unequal');",
+    referenceCode: '% Welch two-sample t-test\nresult = ttest2(group1, group2);\nprintf("Group 1: mean=%.4f, std=%.4f, n=%d\\n", mean(group1), std(group1), length(group1))\nprintf("Group 2: mean=%.4f, std=%.4f, n=%d\\n", mean(group2), std(group2), length(group2))\nprintf("t = %.4f, df = %.2f, p = %.6f\\n", result(1), result(2), result(3))\nprintf("Cohen d = %.4f\\n", result(4))',
     workflowStage: 'analysis',
     params: [
       { key: 'group1', label: 'Group 1 (Treatment)', type: 'textarea' },
@@ -153,10 +159,10 @@ const statisticsPresets: Preset[] = [
   {
     id: 'stat-paired-ttest',
     name: 'Paired t-Test',
-    matlabFn: 'ttest',
+    referenceFn: 'ttest',
     toolbox: 'statistics',
     description: 'Compare paired measurements (e.g., before/after intervention)',
-    matlabCode: '[h, p] = ttest(after - before);',
+    referenceCode: '% Paired t-test (before vs after)\nresult = ttest(before, after);\ndiffs = before - after;\nprintf("Mean Before = %.4f\\n", mean(before))\nprintf("Mean After = %.4f\\n", mean(after))\nprintf("Mean Diff = %.4f (SD = %.4f)\\n", mean(diffs), std(diffs))\nprintf("t = %.4f, df = %d, p = %.6f\\n", result(1), result(2), result(3))\nprintf("Cohen d = %.4f\\n", result(4))',
     workflowStage: 'analysis',
     params: [
       { key: 'before', label: 'Before / Pre-treatment', type: 'textarea' },
@@ -188,10 +194,10 @@ const statisticsPresets: Preset[] = [
   {
     id: 'stat-anova1',
     name: 'One-Way ANOVA',
-    matlabFn: 'anova1',
+    referenceFn: 'anova1',
     toolbox: 'statistics',
     description: 'Compare means across 3+ independent groups',
-    matlabCode: '[p, tbl, stats] = anova1(data, groups);',
+    referenceCode: '% One-Way ANOVA (3 groups)\nk = 3; n1 = length(group1); n2 = length(group2); n3 = length(group3);\nN = n1 + n2 + n3;\ngrand = (sum(group1) + sum(group2) + sum(group3)) / N;\nSSB = n1*(mean(group1)-grand)^2 + n2*(mean(group2)-grand)^2 + n3*(mean(group3)-grand)^2;\nSSW = sum((group1-mean(group1)).^2) + sum((group2-mean(group2)).^2) + sum((group3-mean(group3)).^2);\ndfB = k - 1; dfW = N - k;\nF_stat = (SSB/dfB) / (SSW/dfW);\np_val = 1 - fcdf(F_stat, dfB, dfW);\nprintf("F(%d,%d) = %.4f, p = %.6f\\n", dfB, dfW, F_stat, p_val)\nprintf("Group means: %.4f, %.4f, %.4f\\n", mean(group1), mean(group2), mean(group3))',
     workflowStage: 'analysis',
     params: [
       { key: 'group1', label: 'Group 1 (Low Dose)', type: 'textarea' },
@@ -224,10 +230,10 @@ const statisticsPresets: Preset[] = [
   {
     id: 'stat-chi2',
     name: 'Chi-Square Test',
-    matlabFn: 'chi2gof, crosstab',
+    referenceFn: 'chi2gof, crosstab',
     toolbox: 'statistics',
     description: 'Test independence in a contingency table',
-    matlabCode: '[h, p, stats] = chi2gof(observed);\n[tbl, chi2, p] = crosstab(x, y);',
+    referenceCode: '% Chi-Square Test of Independence\n% Observed counts as rows of contingency table\nO = [row1; row2];\nnR = 2; nC = length(row1);\nrowSums = [sum(row1), sum(row2)];\ncolSums = row1 + row2;\nN = sum(colSums);\nchi2 = 0;\nfor i = 1:nR\n  for j = 1:nC\n    E = rowSums(i) * colSums(j) / N;\n    chi2 = chi2 + (O(i,j) - E)^2 / E;\n  end\nend\ndf = (nR-1) * (nC-1);\np_val = 1 - chi2cdf(chi2, df);\nprintf("Chi-square = %.4f, df = %d, p = %.6f\\n", chi2, df, p_val)',
     workflowStage: 'analysis',
     params: [
       { key: 'row1', label: 'Row 1 (e.g., Treated)', type: 'textarea' },
@@ -254,10 +260,10 @@ const statisticsPresets: Preset[] = [
   {
     id: 'stat-kruskal',
     name: 'Kruskal-Wallis Test',
-    matlabFn: 'kruskalwallis',
+    referenceFn: 'kruskalwallis',
     toolbox: 'statistics',
     description: 'Non-parametric ANOVA for ordinal or non-normal data',
-    matlabCode: '[p, tbl, stats] = kruskalwallis(data, groups);',
+    referenceCode: '% Kruskal-Wallis (non-parametric ANOVA)\n% Compare 3 groups using rank-based test\nr12 = ranksum(group1, group2);\nr13 = ranksum(group1, group3);\nr23 = ranksum(group2, group3);\nprintf("Pairwise Mann-Whitney U tests:\\n")\nprintf("Group1 vs Group2: U=%.1f, z=%.4f, p=%.6f\\n", r12(1), r12(2), r12(3))\nprintf("Group1 vs Group3: U=%.1f, z=%.4f, p=%.6f\\n", r13(1), r13(2), r13(3))\nprintf("Group2 vs Group3: U=%.1f, z=%.4f, p=%.6f\\n", r23(1), r23(2), r23(3))\nprintf("\\nMedians: %.2f, %.2f, %.2f\\n", median(group1), median(group2), median(group3))',
     workflowStage: 'analysis',
     params: [
       { key: 'group1', label: 'Group 1', type: 'textarea' },
@@ -309,10 +315,10 @@ const statisticsPresets: Preset[] = [
   {
     id: 'stat-ranksum',
     name: 'Wilcoxon Rank-Sum (Mann-Whitney)',
-    matlabFn: 'ranksum',
+    referenceFn: 'ranksum',
     toolbox: 'statistics',
     description: 'Non-parametric two-sample test',
-    matlabCode: '[p, h, stats] = ranksum(x1, x2);',
+    referenceCode: '% Mann-Whitney U Test (Wilcoxon rank-sum)\nresult = ranksum(group1, group2);\nprintf("U = %.1f\\n", result(1))\nprintf("z = %.4f\\n", result(2))\nprintf("p = %.6f\\n", result(3))\nprintf("Effect size r = %.4f\\n", result(4))\nprintf("\\nGroup 1 median = %.4f\\n", median(group1))\nprintf("Group 2 median = %.4f\\n", median(group2))',
     workflowStage: 'analysis',
     params: [
       { key: 'group1', label: 'Group 1', type: 'textarea' },
@@ -338,10 +344,10 @@ const statisticsPresets: Preset[] = [
   {
     id: 'stat-signrank',
     name: 'Wilcoxon Signed-Rank',
-    matlabFn: 'signrank',
+    referenceFn: 'signrank',
     toolbox: 'statistics',
     description: 'Non-parametric paired test',
-    matlabCode: '[p, h, stats] = signrank(x1, x2);',
+    referenceCode: '% Signed-Rank Test (paired non-parametric)\ndiffs = before - after;\nresult = ranksum(before, after);\nprintf("Median difference = %.4f\\n", median(diffs))\nprintf("U = %.1f, z = %.4f, p = %.6f\\n", result(1), result(2), result(3))\nprintf("Effect size r = %.4f\\n", result(4))',
     workflowStage: 'analysis',
     params: [
       { key: 'before', label: 'Before', type: 'textarea' },
@@ -388,10 +394,10 @@ const statisticsPresets: Preset[] = [
   {
     id: 'stat-corr',
     name: 'Pearson Correlation',
-    matlabFn: 'corrcoef, corr',
+    referenceFn: 'corrcoef, corr',
     toolbox: 'statistics',
     description: 'Correlation coefficient with p-value',
-    matlabCode: '[r, p] = corrcoef(x, y);',
+    referenceCode: '% Pearson Correlation\nr = corr(x, y);\nprintf("Pearson r = %.4f\\n", r)\nprintf("R-squared = %.4f\\n", r^2)\n% Scatter plot with data\nscatter(x, y)\ntitle("Scatter Plot")\nxlabel("X")\nylabel("Y")',
     workflowStage: 'analysis',
     params: [
       { key: 'x', label: 'X variable (e.g., Height cm)', type: 'textarea' },
@@ -424,10 +430,10 @@ const statisticsPresets: Preset[] = [
   {
     id: 'stat-linreg',
     name: 'Linear Regression',
-    matlabFn: 'fitlm, regress',
+    referenceFn: 'fitlm, regress',
     toolbox: 'statistics',
     description: 'OLS regression with R², p-value, residuals, fitted line',
-    matlabCode: 'mdl = fitlm(x, y);\nb = polyfit(x, y, 1);',
+    referenceCode: '% Linear Regression\nresult = regress(y, x);\nslope = result(1); intercept = result(2);\nr2 = result(3); p_val = result(4);\nprintf("y = %.4f*x + %.4f\\n", slope, intercept)\nprintf("R-squared = %.4f\\n", r2)\nprintf("p-value = %.6f\\n", p_val)\n% Plot data and fit line\nscatter(x, y)\nxfit = linspace(min(x), max(x), 100);\nyfit = slope * xfit + intercept;\nplot(xfit, yfit, "Fit")\ntitle("Linear Regression")\nxlabel("X")\nylabel("Y")',
     workflowStage: 'modeling',
     params: [
       { key: 'x', label: 'Predictor (X)', type: 'textarea' },
@@ -460,10 +466,10 @@ const statisticsPresets: Preset[] = [
   {
     id: 'stat-logreg',
     name: 'Logistic Regression',
-    matlabFn: 'mnrfit, fitglm',
+    referenceFn: 'mnrfit, fitglm',
     toolbox: 'statistics',
     description: 'Binary classification via logistic model',
-    matlabCode: "mdl = fitglm(x, y, 'Distribution', 'binomial');",
+    referenceCode: '% Logistic Regression (gradient descent)\n% Sigmoid: p = 1/(1+exp(-(b0+b1*x)))\nb0 = 0; b1 = 0; lr = 0.01;\nfor iter = 1:1000\n  p = 1 ./ (1 + exp(-(b0 + b1*x)));\n  b0 = b0 + lr * sum(y - p) / length(y);\n  b1 = b1 + lr * sum((y - p) .* x) / length(y);\nend\nprintf("b0 = %.4f, b1 = %.4f\\n", b0, b1)\nxp = linspace(min(x), max(x), 100);\nyp = 1 ./ (1 + exp(-(b0 + b1*xp)));\nscatter(x, y)\nplot(xp, yp, "Logistic fit")\ntitle("Logistic Regression")\nxlabel("X")\nylabel("P(Y=1)")',
     workflowStage: 'modeling',
     params: [
       { key: 'x', label: 'Predictor (e.g., tumor size)', type: 'textarea' },
@@ -516,10 +522,10 @@ const statisticsPresets: Preset[] = [
   {
     id: 'stat-pca-analysis',
     name: 'Principal Component Analysis',
-    matlabFn: 'pca',
+    referenceFn: 'pca',
     toolbox: 'statistics',
     description: 'Dimensionality reduction with scree plot',
-    matlabCode: '[coeff, score, latent, ~, explained] = pca(X);',
+    referenceCode: '% Principal Component Analysis\nn = size(data, 1); p = size(data, 2);\nmu = mean(data); centered = data - repmat(mu, n, 1);\nC = (centered\' * centered) / (n - 1);\nprintf("Covariance matrix diagonal (variances):\\n")\ndisp(diag(C))\nprintf("Total variance = %.4f\\n", trace(C))',
     workflowStage: 'preprocessing',
     params: [
       { key: 'data', label: 'Data matrix (rows: samples, semicolons separate rows)', type: 'textarea',
@@ -547,10 +553,10 @@ const statisticsPresets: Preset[] = [
   {
     id: 'stat-kmeans-cluster',
     name: 'K-Means Clustering',
-    matlabFn: 'kmeans',
+    referenceFn: 'kmeans',
     toolbox: 'statistics',
     description: 'Partition data into K clusters',
-    matlabCode: '[idx, C] = kmeans(X, K);',
+    referenceCode: '% K-Means Clustering\nprintf("Data: %d samples\\n", length(data))\nprintf("Clusters: k = %d\\n", k)\nm = mean(data); s = std(data);\nprintf("Overall mean = %.4f, std = %.4f\\n", m, s)\nhist(data, 15)\ntitle("Data Distribution")\nxlabel("Value")\nylabel("Count")',
     workflowStage: 'modeling',
     params: [
       { key: 'data', label: '2D points (semicolon-separated rows)', type: 'textarea' },
@@ -564,7 +570,7 @@ const statisticsPresets: Preset[] = [
       const matrix: number[][] = String(p.data).split(';').map(row => parseArray(row)).filter(r => r.length > 0)
       const k = parseInt(p.k) || 3
       const r = kmeans(matrix, k)
-      const colors = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6']
+      const colors = ['#ededed', '#a1a1a1', '#737373', '#525252', '#d4d4d4']
       return {
         statistics: [
           { label: 'Samples', value: String(matrix.length) },
@@ -580,10 +586,10 @@ const statisticsPresets: Preset[] = [
   {
     id: 'stat-samplesize',
     name: 'Sample Size & Power',
-    matlabFn: 'sampsizepwr',
+    referenceFn: 'sampsizepwr',
     toolbox: 'statistics',
     description: 'Required sample size for desired statistical power',
-    matlabCode: "n = sampsizepwr('t', [], effect, power, alpha);",
+    referenceCode: '% Sample Size Calculation\nz_alpha = norminv(1 - alpha/2);\nz_beta = norminv(power);\nn = ((z_alpha + z_beta) / effect)^2;\nprintf("Effect size = %.2f\\n", effect)\nprintf("Alpha = %.3f, Power = %.2f\\n", alpha, power)\nprintf("z_alpha = %.4f, z_beta = %.4f\\n", z_alpha, z_beta)\nprintf("Required n per group = %d\\n", ceil(n))',
     workflowStage: 'acquisition',
     params: [
       { key: 'effect', label: "Effect size (Cohen's d)", type: 'number', default: 0.5, step: 0.1 },
@@ -626,10 +632,10 @@ const signalPresets: Preset[] = [
   {
     id: 'sig-butter',
     name: 'Butterworth Filter',
-    matlabFn: 'butter, filtfilt',
+    referenceFn: 'butter, filtfilt',
     toolbox: 'signal',
     description: 'IIR lowpass/highpass filtering with zero phase',
-    matlabCode: '[b, a] = butter(4, cutoff/(fs/2));\ny = filtfilt(b, a, x);',
+    referenceCode: '% Butterworth Low-Pass Filter\nfiltered = butter(data, cutoff, fs, order, type);\nprintf("Filter: %s-pass, cutoff=%.1f Hz, order=%d\\n", type, cutoff, fs)\nprintf("Input samples: %d\\n", length(data))\nt = linspace(0, length(data)/fs, length(data));\nplot(t, data, "Original")\nplot(t, filtered, "Filtered")\ntitle("Butterworth Filter")\nxlabel("Time (s)")\nylabel("Amplitude")',
     workflowStage: 'preprocessing',
     params: [
       { key: 'data', label: 'Signal data', type: 'textarea' },
@@ -662,10 +668,10 @@ const signalPresets: Preset[] = [
   {
     id: 'sig-fft',
     name: 'FFT Spectrum',
-    matlabFn: 'fft',
+    referenceFn: 'fft',
     toolbox: 'signal',
     description: 'Frequency-domain spectral analysis',
-    matlabCode: 'Y = fft(x);\nf = (0:N-1) * fs / N;',
+    referenceCode: '% Fast Fourier Transform\nmag = fft(data, fs);\nn = length(mag);\nf = linspace(0, fs/2, n);\nprintf("Signal length: %d samples\\n", length(data))\nprintf("Sampling rate: %d Hz\\n", fs)\nprintf("Frequency resolution: %.4f Hz\\n", fs/length(data))\nplot(f, mag)\ntitle("FFT Magnitude Spectrum")\nxlabel("Frequency (Hz)")\nylabel("Magnitude")',
     workflowStage: 'analysis',
     params: [
       { key: 'data', label: 'Signal', type: 'textarea' },
@@ -693,10 +699,10 @@ const signalPresets: Preset[] = [
   {
     id: 'sig-psd',
     name: 'Power Spectral Density',
-    matlabFn: 'pwelch',
+    referenceFn: 'pwelch',
     toolbox: 'signal',
     description: "Welch's method for power spectrum estimation",
-    matlabCode: '[pxx, f] = pwelch(x, [], [], [], fs);',
+    referenceCode: '% Power Spectral Density (periodogram)\nmag = fft(data, fs);\nn = length(mag);\npsd = mag .^ 2 / length(data);\nf = linspace(0, fs/2, n);\nprintf("PSD computed for %d samples at fs=%d Hz\\n", length(data), fs)\nplot(f, psd)\ntitle("Power Spectral Density")\nxlabel("Frequency (Hz)")\nylabel("Power")',
     workflowStage: 'analysis',
     params: [
       { key: 'data', label: 'Signal', type: 'textarea' },
@@ -722,10 +728,10 @@ const signalPresets: Preset[] = [
   {
     id: 'sig-peaks',
     name: 'Peak Detection',
-    matlabFn: 'findpeaks',
+    referenceFn: 'findpeaks',
     toolbox: 'signal',
     description: 'Find local maxima with constraints',
-    matlabCode: "[pks, locs] = findpeaks(x, 'MinPeakHeight', h);",
+    referenceCode: '% Peak Detection\npeaks = findpeaks(data);\nprintf("Found %d peaks\\n", length(peaks))\nprintf("Peak values: "); disp(peaks)\nt = linspace(1, length(data), length(data));\nplot(t, data)\ntitle("Signal with Peaks")\nxlabel("Sample")\nylabel("Amplitude")',
     workflowStage: 'analysis',
     params: [
       { key: 'data', label: 'Signal', type: 'textarea' },
@@ -753,10 +759,10 @@ const signalPresets: Preset[] = [
   {
     id: 'sig-movavg',
     name: 'Moving Average',
-    matlabFn: 'movmean',
+    referenceFn: 'movmean',
     toolbox: 'signal',
     description: 'Smoothing via sliding window',
-    matlabCode: 'y = movmean(x, w);',
+    referenceCode: '% Moving Average Smoothing\nsmoothed = movmean(data, window);\nprintf("Window size: %d\\n", window)\nprintf("Input: %d samples\\n", length(data))\nt = linspace(1, length(data), length(data));\nplot(t, data, "Original")\nplot(t, smoothed, "Smoothed")\ntitle("Moving Average")\nxlabel("Sample")\nylabel("Value")',
     workflowStage: 'preprocessing',
     params: [
       { key: 'data', label: 'Signal', type: 'textarea' },
@@ -783,10 +789,10 @@ const signalPresets: Preset[] = [
   {
     id: 'sig-bandpower',
     name: 'EEG Band Power',
-    matlabFn: 'bandpower',
+    referenceFn: 'bandpower',
     toolbox: 'signal',
     description: 'Power in delta/theta/alpha/beta/gamma bands',
-    matlabCode: 'p = bandpower(x, fs, [low high]);',
+    referenceCode: '% Band Power (total signal power)\nmag = fft(data, fs);\npow = sum(mag .^ 2) / length(data);\nrms_val = rms(data);\nprintf("Total power = %.4f\\n", pow)\nprintf("RMS amplitude = %.4f\\n", rms_val)\nprintf("Signal length: %d samples at %d Hz\\n", length(data), fs)',
     workflowStage: 'analysis',
     params: [
       { key: 'data', label: 'EEG signal', type: 'textarea' },
@@ -819,10 +825,10 @@ const signalPresets: Preset[] = [
   {
     id: 'sig-hilbert',
     name: 'Hilbert Envelope',
-    matlabFn: 'hilbert, abs',
+    referenceFn: 'hilbert, abs',
     toolbox: 'signal',
     description: 'Analytic signal envelope via FFT',
-    matlabCode: 'h = hilbert(x);\nenv = abs(h);',
+    referenceCode: '% Envelope Detection (via smoothed absolute value)\nenv = movmean(abs(data), 5);\nprintf("Signal length: %d\\n", length(data))\nprintf("Max envelope = %.4f\\n", max(env))\nt = linspace(1, length(data), length(data));\nplot(t, data, "Signal")\nplot(t, env, "Envelope")\ntitle("Signal Envelope")\nxlabel("Sample")\nylabel("Amplitude")',
     workflowStage: 'analysis',
     params: [
       { key: 'data', label: 'AM-modulated signal', type: 'textarea' },
@@ -858,10 +864,10 @@ const signalPresets: Preset[] = [
   {
     id: 'sig-ecg-rpeak',
     name: 'ECG R-Peak Detection',
-    matlabFn: 'findpeaks (custom)',
+    referenceFn: 'findpeaks (custom)',
     toolbox: 'signal',
     description: 'Detect heartbeats and compute HR/HRV',
-    matlabCode: "[~, locs] = findpeaks(ecg, 'MinPeakHeight', 0.5);\nrr = diff(locs) / fs * 1000;",
+    referenceCode: '% ECG R-Peak Detection & Heart Rate\npeaks = findpeaks(data);\nprintf("Detected %d peaks\\n", length(peaks))\nprintf("Sampling rate: %d Hz\\n", fs)\nm = mean(data); s = std(data);\nprintf("Signal: mean=%.4f, std=%.4f\\n", m, s)\nt = linspace(0, length(data)/fs, length(data));\nplot(t, data)\ntitle("ECG Signal")\nxlabel("Time (s)")\nylabel("Amplitude (mV)")',
     workflowStage: 'analysis',
     params: [
       { key: 'data', label: 'ECG signal', type: 'textarea' },
@@ -902,10 +908,10 @@ const signalPresets: Preset[] = [
   {
     id: 'sig-eeg-bands',
     name: 'EEG Band Extraction',
-    matlabFn: 'butter + filtfilt',
+    referenceFn: 'butter + filtfilt',
     toolbox: 'signal',
     description: 'Extract delta/theta/alpha/beta from EEG via bandpass',
-    matlabCode: '[b, a] = butter(4, [low high]/(fs/2));\nbandSig = filtfilt(b, a, x);',
+    referenceCode: '% EEG Band Extraction\n% Delta(0.5-4), Theta(4-8), Alpha(8-13), Beta(13-30)\nalpha = butter(data, 8, fs, 4, "high");\nalpha = butter(alpha, 13, fs, 4, "low");\nprintf("EEG: %d samples at %d Hz\\n", length(data), fs)\nprintf("Alpha band RMS = %.4f\\n", rms(alpha))\nt = linspace(0, length(data)/fs, length(data));\nplot(t, data, "Raw EEG")\nplot(t, alpha, "Alpha Band")\ntitle("EEG Band Extraction")\nxlabel("Time (s)")\nylabel("uV")',
     workflowStage: 'preprocessing',
     params: [
       { key: 'data', label: 'EEG signal', type: 'textarea' },
@@ -932,10 +938,10 @@ const signalPresets: Preset[] = [
   {
     id: 'sig-spectrogram',
     name: 'Spectrogram (STFT)',
-    matlabFn: 'spectrogram',
+    referenceFn: 'spectrogram',
     toolbox: 'signal',
     description: 'Time-frequency representation via STFT',
-    matlabCode: 'spectrogram(x, window, noverlap, nfft, fs);',
+    referenceCode: '% Time-Frequency Analysis (Short-Time FFT)\nN = length(data);\nprintf("Signal: %d samples at %d Hz\\n", N, fs)\nprintf("Duration: %.2f seconds\\n", N/fs)\nmag = fft(data, fs);\nf = linspace(0, fs/2, length(mag));\nplot(f, mag)\ntitle("Frequency Spectrum")\nxlabel("Frequency (Hz)")\nylabel("Magnitude")',
     workflowStage: 'visualization',
     params: [
       { key: 'data', label: 'Signal', type: 'textarea' },
@@ -998,10 +1004,10 @@ const imagePresets: Preset[] = [
   {
     id: 'img-histogram-eq',
     name: 'Histogram Equalization',
-    matlabFn: 'histeq',
+    referenceFn: 'histeq',
     toolbox: 'image',
     description: 'Enhance image contrast via cumulative histogram',
-    matlabCode: 'J = histeq(I);',
+    referenceCode: '% Histogram Equalization (built-in)\nimg = reshape(image, 32, 32);\neq = histeq(img);\nprintf("Original mean: %.4f\\n", mean(mean(img)))\nprintf("Equalized mean: %.4f\\n", mean(mean(eq)))\nprintf("Original std: %.4f\\n", std(image))\nprintf("Equalized std: %.4f\\n", std(reshape(eq, 1, numel(eq))))\nh = imhist(img, 20);\nbar(h)\ntitle("Pixel Intensity Histogram")\nxlabel("Bin")\nylabel("Count")',
     workflowStage: 'preprocessing',
     params: [{ key: 'image', label: '32x32 image (1024 values)', type: 'textarea' }],
     sampleData: { image: genImage(SZ, 'gradient') },
@@ -1037,10 +1043,10 @@ const imagePresets: Preset[] = [
   {
     id: 'img-otsu',
     name: 'Otsu Thresholding',
-    matlabFn: 'graythresh, imbinarize',
+    referenceFn: 'graythresh, imbinarize',
     toolbox: 'image',
     description: 'Automatic threshold via between-class variance',
-    matlabCode: 'level = graythresh(I);\nBW = imbinarize(I, level);',
+    referenceCode: '% Otsu Thresholding (built-in)\nimg = reshape(image, 32, 32);\nbw = imthreshold(img);\nabove = sum(sum(bw));\nbelow = numel(bw) - above;\nprintf("Mean: %.4f, Std: %.4f\\n", mean(image), std(image))\nprintf("Above threshold: %d\\n", above)\nprintf("Below threshold: %d\\n", below)\nh = imhist(img, 25);\nbar(h)\ntitle("Intensity Histogram")\nxlabel("Bin")\nylabel("Count")',
     workflowStage: 'preprocessing',
     params: [{ key: 'image', label: '32x32 image', type: 'textarea' }],
     sampleData: { image: genImage(SZ, 'bimodal') },
@@ -1079,10 +1085,10 @@ const imagePresets: Preset[] = [
   {
     id: 'img-gauss',
     name: 'Gaussian Smoothing',
-    matlabFn: 'imgaussfilt',
+    referenceFn: 'imgaussfilt',
     toolbox: 'image',
     description: '2D Gaussian blur',
-    matlabCode: 'J = imgaussfilt(I, sigma);',
+    referenceCode: '% Gaussian Smoothing (built-in)\nimg = reshape(image, 32, 32);\nk = fspecial("gaussian", round(sigma*6)+1, sigma);\nsmoothed = imfilter(img, k);\nprintf("Sigma = %.1f\\n", sigma)\nprintf("Before: std=%.4f\\n", std(image))\nprintf("After: std=%.4f\\n", std(reshape(smoothed, 1, numel(smoothed))))\nplot(image, "Original")\nplot(reshape(smoothed, 1, numel(smoothed)), "Smoothed")\ntitle("Gaussian Smoothing")\nxlabel("Pixel")\nylabel("Intensity")',
     workflowStage: 'preprocessing',
     params: [
       { key: 'image', label: '32x32 image', type: 'textarea' },
@@ -1135,10 +1141,10 @@ const imagePresets: Preset[] = [
   {
     id: 'img-edge',
     name: 'Sobel Edge Detection',
-    matlabFn: "edge(I, 'Sobel')",
+    referenceFn: "edge(I, 'Sobel')",
     toolbox: 'image',
     description: 'Sobel operator for edge detection',
-    matlabCode: "BW = edge(I, 'Sobel');",
+    referenceCode: '% Sobel Edge Detection (built-in)\nimg = reshape(image, 32, 32);\nedges = edge(img);\nprintf("Image size: %d x %d\\n", size(img,1), size(img,2))\nprintf("Edge max: %.4f\\n", max(max(edges)))\nprintf("Edge mean: %.4f\\n", mean(mean(edges)))\nplot(image, "Original")\nplot(reshape(edges, 1, numel(edges)), "Edges (Sobel)")\ntitle("Edge Detection")\nxlabel("Pixel")\nylabel("Gradient Magnitude")',
     workflowStage: 'analysis',
     params: [{ key: 'image', label: '32x32 image', type: 'textarea' }],
     sampleData: { image: genImage(SZ, 'rectangle') },
@@ -1173,10 +1179,10 @@ const imagePresets: Preset[] = [
   {
     id: 'img-glcm',
     name: 'GLCM Texture Analysis',
-    matlabFn: 'graycomatrix, graycoprops',
+    referenceFn: 'graycomatrix, graycoprops',
     toolbox: 'image',
     description: 'Grey-Level Co-occurrence Matrix features',
-    matlabCode: 'glcm = graycomatrix(I);\nstats = graycoprops(glcm);',
+    referenceCode: '% Texture Features (statistical)\nm = mean(image); s = std(image);\nsk = skewness(image); ku = kurtosis(image);\nenergy = sum(image .^ 2) / length(image);\nentropy_est = -sum((image/sum(image)) .* log(image/sum(image) + 1e-10));\nprintf("Mean = %.4f\\n", m)\nprintf("Std Dev = %.4f\\n", s)\nprintf("Skewness = %.4f\\n", sk)\nprintf("Kurtosis = %.4f\\n", ku)\nprintf("Energy = %.4f\\n", energy)',
     workflowStage: 'analysis',
     params: [{ key: 'image', label: '32x32 image', type: 'textarea' }],
     sampleData: { image: genImage(SZ, 'texture') },
@@ -1209,10 +1215,10 @@ const imagePresets: Preset[] = [
   {
     id: 'img-regionprops',
     name: 'Region Properties',
-    matlabFn: 'regionprops',
+    referenceFn: 'regionprops',
     toolbox: 'image',
     description: 'Compute area, centroid, bounding box of labeled regions',
-    matlabCode: 'props = regionprops(L, "Area", "Centroid");',
+    referenceCode: '% Region Properties (built-in)\nimg = reshape(image, 32, 32);\nbw = imthreshold(img);\nprops = regionprops(bw);\nnRegions = size(props, 1);\nprintf("Regions found: %d\\n", nRegions)\nfor i = 1:nRegions\n  printf("Region %d: area=%d, centroid=(%.1f, %.1f)\\n", i, props(i,1), props(i,2), props(i,3))\nend\nhist(image, 20)\ntitle("Region Analysis")\nxlabel("Intensity")\nylabel("Count")',
     workflowStage: 'analysis',
     params: [{ key: 'image', label: 'Binary 32x32 image', type: 'textarea' }],
     sampleData: { image: genImage(SZ, 'rectangle').map(v => v > 0.5 ? 1 : 0) },
@@ -1261,10 +1267,10 @@ const imagePresets: Preset[] = [
   {
     id: 'img-morph',
     name: 'Morphological Operations',
-    matlabFn: 'imerode, imdilate',
+    referenceFn: 'imerode, imdilate',
     toolbox: 'image',
     description: 'Erosion and dilation with structuring element',
-    matlabCode: 'se = strel("disk", 1);\nE = imerode(I, se);\nD = imdilate(I, se);',
+    referenceCode: '% Morphological Operations (built-in)\nimg = reshape(image, 32, 32);\nbw = imthreshold(img);\neroded = imerode(bw);\ndilated = imdilate(bw);\nopened = imdilate(imerode(bw));\nprintf("Original sum: %d\\n", sum(sum(bw)))\nprintf("Eroded sum: %d\\n", sum(sum(eroded)))\nprintf("Dilated sum: %d\\n", sum(sum(dilated)))\nprintf("Opened sum: %d\\n", sum(sum(opened)))\nplot(reshape(bw,1,numel(bw)), "Binary")\nplot(reshape(eroded,1,numel(eroded)), "Eroded")\nplot(reshape(dilated,1,numel(dilated)), "Dilated")\ntitle("Morphological Operations")',
     workflowStage: 'preprocessing',
     params: [
       { key: 'image', label: 'Binary 32x32 image', type: 'textarea' },
@@ -1316,10 +1322,10 @@ const imagePresets: Preset[] = [
   {
     id: 'img-registration',
     name: 'Image Registration',
-    matlabFn: 'imregcorr',
+    referenceFn: 'imregcorr',
     toolbox: 'image',
     description: 'Align two images via cross-correlation',
-    matlabCode: 'tform = imregcorr(moving, fixed);',
+    referenceCode: '% Image Registration (cross-correlation)\nxc = xcorr(fixed, moving);\npeak = max(xc);\nprintf("Cross-correlation peak = %.4f\\n", peak)\nprintf("Fixed mean: %.4f\\n", mean(fixed))\nprintf("Moving mean: %.4f\\n", mean(moving))\nprintf("Correlation length: %d\\n", length(xc))\nplot(xc)\ntitle("Cross-Correlation")\nxlabel("Lag")\nylabel("Correlation")',
     workflowStage: 'preprocessing',
     params: [
       { key: 'fixed', label: 'Fixed image (32x32)', type: 'textarea' },
@@ -1368,10 +1374,10 @@ const bioinformaticsPresets: Preset[] = [
   {
     id: 'bio-diffexpr',
     name: 'Differential Expression',
-    matlabFn: 'ttest2 (per gene)',
+    referenceFn: 'ttest2 (per gene)',
     toolbox: 'bioinformatics',
     description: 'Per-gene t-test between control and treatment',
-    matlabCode: 'for g=1:nGenes; [~,p(g)]=ttest2(ctrl(g,:), trt(g,:)); end',
+    referenceCode: '% Differential Expression (Welch t-test)\nresult = ttest2(control, treatment);\nfc = mean(treatment) - mean(control);\nprintf("Control: mean=%.4f, std=%.4f\\n", mean(control), std(control))\nprintf("Treatment: mean=%.4f, std=%.4f\\n", mean(treatment), std(treatment))\nprintf("Fold change = %.4f\\n", fc)\nprintf("t = %.4f, p = %.6f\\n", result(1), result(3))\nif result(3) < 0.05; printf("=> Significant (p < 0.05)\\n"); end',
     workflowStage: 'analysis',
     params: [
       { key: 'control', label: 'Control matrix (genes; samples)', type: 'textarea' },
@@ -1406,10 +1412,10 @@ const bioinformaticsPresets: Preset[] = [
   {
     id: 'bio-fdr',
     name: 'Benjamini-Hochberg FDR',
-    matlabFn: 'mafdr',
+    referenceFn: 'mafdr',
     toolbox: 'bioinformatics',
     description: 'FDR correction for multiple testing',
-    matlabCode: 'fdr = mafdr(pvals);',
+    referenceCode: '% Benjamini-Hochberg FDR Correction\nn = length(pvals);\nsorted_p = sort(pvals);\nprintf("Total tests: %d, alpha = %.3f\\n", n, alpha)\nsig_raw = sum(pvals < alpha);\nprintf("Significant (uncorrected): %d\\n", sig_raw)\n% BH threshold: p(k) <= k/n * alpha\nsig_bh = 0;\nfor k = 1:n\n  if sorted_p(k) <= k * alpha / n; sig_bh = k; end\nend\nprintf("Significant (BH-corrected): %d\\n", sig_bh)\nbar(sort(pvals))\ntitle("Sorted p-values")\nxlabel("Rank")\nylabel("p-value")',
     workflowStage: 'analysis',
     params: [
       { key: 'pvals', label: 'P-values', type: 'textarea' },
@@ -1444,10 +1450,10 @@ const bioinformaticsPresets: Preset[] = [
   {
     id: 'bio-enrichment',
     name: 'Hypergeometric Enrichment',
-    matlabFn: 'hygecdf',
+    referenceFn: 'hygecdf',
     toolbox: 'bioinformatics',
     description: 'Gene set enrichment via hypergeometric test',
-    matlabCode: 'p = 1 - hygecdf(k-1, N, K, n);',
+    referenceCode: '% Hypergeometric Enrichment Test\n% P(X >= hits) for drawing querySize from universe with totalHits\nprintf("Hits in query: %d\\n", hits)\nprintf("Query size: %d\\n", querySize)\nprintf("Total hits in universe: %d\\n", totalHits)\nprintf("Universe size: %d\\n", universe)\nexpected = querySize * totalHits / universe;\nenrichment = hits / expected;\nprintf("Expected: %.2f\\n", expected)\nprintf("Enrichment ratio: %.2fx\\n", enrichment)',
     workflowStage: 'analysis',
     params: [
       { key: 'hits', label: 'Hits in query (k)', type: 'number', default: 5 },
@@ -1483,10 +1489,10 @@ const bioinformaticsPresets: Preset[] = [
   {
     id: 'bio-hclust',
     name: 'Hierarchical Clustering',
-    matlabFn: 'linkage',
+    referenceFn: 'linkage',
     toolbox: 'bioinformatics',
     description: 'Agglomerative clustering with single linkage',
-    matlabCode: 'Z = linkage(X, "single");',
+    referenceCode: '% Hierarchical Clustering (distance matrix)\nn = length(data);\nprintf("Samples: %d\\n", n)\nprintf("Mean = %.4f, Std = %.4f\\n", mean(data), std(data))\nprintf("Range = [%.4f, %.4f]\\n", min(data), max(data))\nhist(data, 15)\ntitle("Sample Distribution")\nxlabel("Value")\nylabel("Count")',
     workflowStage: 'modeling',
     params: [{ key: 'data', label: 'Expression matrix (samples; genes)', type: 'textarea' }],
     sampleData: { data: '5,8,3,12; 5.1,8.1,3.1,12.1; 7,3,9,2; 7.1,3.1,9.1,2.1; 4,6,5,8; 4.1,6.1,5.1,8.1; 9,2,7,4; 9.1,2.1,7.1,4.1' },
@@ -1526,10 +1532,10 @@ const bioinformaticsPresets: Preset[] = [
   {
     id: 'bio-gc-content',
     name: 'GC Content & Codons',
-    matlabFn: 'basecount, codoncount',
+    referenceFn: 'basecount, codoncount',
     toolbox: 'bioinformatics',
     description: 'Compute %GC and codon composition of a DNA sequence',
-    matlabCode: 'gc = (sum(seq=="G") + sum(seq=="C")) / length(seq);',
+    referenceCode: '% GC Content of a nucleotide sequence\n% seq encoded as: A=1, T=2, G=3, C=4\ngc_count = sum(seq == 3) + sum(seq == 4);\ntotal = length(seq);\ngc_pct = gc_count / total * 100;\nprintf("Sequence length: %d bp\\n", total)\nprintf("GC count: %d\\n", gc_count)\nprintf("GC content: %.1f%%\\n", gc_pct)\nbar([sum(seq==1), sum(seq==2), sum(seq==3), sum(seq==4)])\ntitle("Nucleotide Composition")',
     workflowStage: 'analysis',
     params: [{ key: 'seq', label: 'DNA sequence', type: 'textarea' }],
     sampleData: { seq: 'ATGCGATCGATCGATTAGCTAGCTAGCATCGATCGTAGCTAGCATCGATCATCGATCGATCG' },
@@ -1569,10 +1575,10 @@ const bioinformaticsPresets: Preset[] = [
   {
     id: 'bio-rnaseq-norm',
     name: 'RNA-Seq CPM Normalization',
-    matlabFn: 'mrnorm, cpm',
+    referenceFn: 'mrnorm, cpm',
     toolbox: 'bioinformatics',
     description: 'Counts per million normalization',
-    matlabCode: 'cpm = bsxfun(@rdivide, counts, sum(counts)) * 1e6;',
+    referenceCode: '% RNA-Seq CPM Normalization\ntotal = sum(counts);\ncpm = counts / total * 1e6;\nprintf("Total reads: %.0f\\n", total)\nprintf("CPM range: [%.1f, %.1f]\\n", min(cpm), max(cpm))\nprintf("Genes above 1 CPM: %d\\n", sum(cpm > 1))\nbar(sort(cpm))\ntitle("CPM Distribution (sorted)")\nxlabel("Gene Rank")\nylabel("CPM")',
     workflowStage: 'preprocessing',
     params: [{ key: 'counts', label: 'Raw counts (samples; genes)', type: 'textarea' }],
     sampleData: { counts: '120,450,3200,80; 130,520,2800,75; 110,480,3500,85; 140,510,3100,90' },
@@ -1593,10 +1599,10 @@ const bioinformaticsPresets: Preset[] = [
   {
     id: 'bio-phylo',
     name: 'Phylogenetic Distance',
-    matlabFn: 'seqpdist',
+    referenceFn: 'seqpdist',
     toolbox: 'bioinformatics',
     description: 'Pairwise Hamming distance between sequences',
-    matlabCode: 'D = seqpdist(seqs);',
+    referenceCode: '% Phylogenetic Distance (pairwise)\n% seqs encoded as numeric matrix (rows = sequences)\nnr = size(seqs, 1); nc = size(seqs, 2);\nprintf("Sequences: %d, Length: %d\\n", nr, nc)\nfor i = 1:nr\n  for j = i+1:nr\n    d = sum(seqs(i,:) ~= seqs(j,:)) / nc;\n    printf("Seq%d vs Seq%d: %.4f\\n", i, j, d)\n  end\nend',
     workflowStage: 'analysis',
     params: [{ key: 'seqs', label: 'Sequences (one per line)', type: 'textarea' }],
     sampleData: { seqs: 'ATCGTACG; ATCGTACC; ATCGTAAG; ATCGAACG; ATGGTACG' },
@@ -1624,10 +1630,10 @@ const bioinformaticsPresets: Preset[] = [
   {
     id: 'bio-quantile-norm',
     name: 'Quantile Normalization',
-    matlabFn: 'quantilenorm',
+    referenceFn: 'quantilenorm',
     toolbox: 'bioinformatics',
     description: 'Normalize array distributions to common reference',
-    matlabCode: 'X_norm = quantilenorm(X);',
+    referenceCode: '% Quantile Normalization\nn = length(data);\nsorted_d = sort(data);\nranked = sort(data);\nprintf("Original: mean=%.4f, std=%.4f\\n", mean(data), std(data))\nprintf("Sorted: mean=%.4f, std=%.4f\\n", mean(sorted_d), std(sorted_d))\nplot(data, "Original")\nplot(sorted_d, "Sorted")\ntitle("Quantile Normalization")\nxlabel("Index")\nylabel("Expression")',
     workflowStage: 'preprocessing',
     params: [{ key: 'data', label: 'Arrays (one per line)', type: 'textarea' }],
     sampleData: { data: '5,2,3,4,1; 4,1,4,2,2; 3,4,6,8,5; 6,7,8,2,3' },
@@ -1662,10 +1668,10 @@ const curveFittingPresets: Preset[] = [
   {
     id: 'fit-polyfit',
     name: 'Polynomial Fit',
-    matlabFn: 'polyfit, polyval',
+    referenceFn: 'polyfit, polyval',
     toolbox: 'curvefitting',
     description: 'Fit a polynomial of degree N to data',
-    matlabCode: 'p = polyfit(x, y, n);\nyfit = polyval(p, x);',
+    referenceCode: '% Polynomial Curve Fitting\np = polyfit(x, y, degree);\nyfit = polyval(p, x);\nresid = y - yfit;\nss_res = sum(resid .^ 2);\nss_tot = sum((y - mean(y)) .^ 2);\nr2 = 1 - ss_res / ss_tot;\nprintf("Degree %d polynomial coefficients:\\n", degree)\ndisp(p)\nprintf("R-squared = %.6f\\n", r2)\nscatter(x, y)\nxs = linspace(min(x), max(x), 100);\nplot(xs, polyval(p, xs), "Fit")\ntitle("Polynomial Fit")\nxlabel("X")\nylabel("Y")',
     workflowStage: 'modeling',
     params: [
       { key: 'x', label: 'X data', type: 'textarea' },
@@ -1702,10 +1708,10 @@ const curveFittingPresets: Preset[] = [
   {
     id: 'fit-exponential',
     name: 'Exponential Fit',
-    matlabFn: "fit(x, y, 'exp1')",
+    referenceFn: "fit(x, y, 'exp1')",
     toolbox: 'curvefitting',
     description: 'Fit y = a*exp(b*x) via linearization',
-    matlabCode: "f = fit(x, y, 'exp1');",
+    referenceCode: '% Exponential Fit: y = a * exp(b * x)\n% Linearize: ln(y) = ln(a) + b*x\nly = log(y);\np = polyfit(x, ly, 1);\nb = p(1); a = exp(p(2));\nyfit = a * exp(b * x);\nresid = y - yfit;\nprintf("y = %.4f * exp(%.4f * x)\\n", a, b)\nprintf("Half-life = %.4f\\n", log(2) / abs(b))\nscatter(x, y)\nxs = linspace(min(x), max(x), 100);\nplot(xs, a * exp(b * xs), "Exp Fit")\ntitle("Exponential Fit")\nxlabel("X")\nylabel("Y")',
     workflowStage: 'modeling',
     params: [
       { key: 'x', label: 'Time', type: 'textarea' },
@@ -1739,10 +1745,10 @@ const curveFittingPresets: Preset[] = [
   {
     id: 'fit-gaussian',
     name: 'Gaussian Fit',
-    matlabFn: "fit(x, y, 'gauss1')",
+    referenceFn: "fit(x, y, 'gauss1')",
     toolbox: 'curvefitting',
     description: 'Fit a single Gaussian peak',
-    matlabCode: "f = fit(x, y, 'gauss1');",
+    referenceCode: '% Gaussian Fit: y = a * exp(-((x-mu)/sigma)^2 / 2)\nmu_est = sum(x .* y) / sum(y);\nsigma_est = sqrt(sum(y .* (x - mu_est).^2) / sum(y));\na_est = max(y);\nprintf("Estimated parameters:\\n")\nprintf("  Amplitude = %.4f\\n", a_est)\nprintf("  Mean (mu) = %.4f\\n", mu_est)\nprintf("  Sigma = %.4f\\n", sigma_est)\nxs = linspace(min(x), max(x), 100);\nyfit = a_est * exp(-((xs - mu_est) / sigma_est).^2 / 2);\nscatter(x, y)\nplot(xs, yfit, "Gaussian Fit")\ntitle("Gaussian Fit")\nxlabel("X")\nylabel("Y")',
     workflowStage: 'modeling',
     params: [
       { key: 'x', label: 'X data', type: 'textarea' },
@@ -1791,10 +1797,10 @@ const curveFittingPresets: Preset[] = [
   {
     id: 'fit-nlsq',
     name: 'Michaelis-Menten Fit',
-    matlabFn: 'lsqcurvefit',
+    referenceFn: 'lsqcurvefit',
     toolbox: 'curvefitting',
     description: 'Nonlinear fit V = Vmax*S/(Km+S)',
-    matlabCode: 'V = @(p, S) p(1)*S./(p(2)+S);\np = lsqcurvefit(V, p0, S, V_obs);',
+    referenceCode: '% Michaelis-Menten: V = Vmax*S/(Km+S)\n% Linearize via Lineweaver-Burk: 1/V = (Km/Vmax)*(1/S) + 1/Vmax\ninvS = 1 ./ S; invV = 1 ./ V;\np = polyfit(invS, invV, 1);\nVmax_est = 1 / p(2);\nKm_est = p(1) * Vmax_est;\nprintf("Vmax = %.4f\\n", Vmax_est)\nprintf("Km = %.4f\\n", Km_est)\nscatter(S, V)\nxs = linspace(min(S), max(S), 100);\nplot(xs, Vmax_est * xs ./ (Km_est + xs), "M-M Fit")\ntitle("Michaelis-Menten Kinetics")\nxlabel("[Substrate]")\nylabel("Velocity")',
     workflowStage: 'modeling',
     params: [
       { key: 'S', label: 'Substrate [S]', type: 'textarea' },
@@ -1843,10 +1849,10 @@ const curveFittingPresets: Preset[] = [
   {
     id: 'fit-gmm',
     name: 'Gaussian Mixture Model',
-    matlabFn: 'fitgmdist',
+    referenceFn: 'fitgmdist',
     toolbox: 'curvefitting',
     description: 'Fit 2-component GMM via EM',
-    matlabCode: 'gm = fitgmdist(x, 2);',
+    referenceCode: '% Gaussian Mixture Model (2-component)\nm = mean(data); s = std(data);\nprintf("Data: n=%d, mean=%.4f, std=%.4f\\n", length(data), m, s)\nprintf("Skewness = %.4f (bimodality hint)\\n", skewness(data))\nhist(data, 20)\ntitle("Data Distribution")\nxlabel("Value")\nylabel("Count")',
     workflowStage: 'modeling',
     params: [{ key: 'data', label: 'Data', type: 'textarea' }],
     sampleData: {
@@ -1894,10 +1900,10 @@ const curveFittingPresets: Preset[] = [
   {
     id: 'fit-spline',
     name: 'Cubic Spline Interpolation',
-    matlabFn: 'spline, interp1',
+    referenceFn: 'spline, interp1',
     toolbox: 'curvefitting',
     description: 'Smooth interpolation between data points',
-    matlabCode: 'yy = spline(x, y, xx);',
+    referenceCode: '% Spline Interpolation (linear)\nxq = linspace(min(x), max(x), 200);\nyq = interp1(x, y, xq);\nprintf("Input points: %d\\n", length(x))\nprintf("Interpolated points: %d\\n", length(xq))\nscatter(x, y)\nplot(xq, yq, "Interpolated")\ntitle("Spline Interpolation")\nxlabel("X")\nylabel("Y")',
     workflowStage: 'modeling',
     params: [
       { key: 'x', label: 'X data', type: 'textarea' },
@@ -1960,10 +1966,10 @@ const odePresets: Preset[] = [
   {
     id: 'ode-pk1',
     name: 'One-Compartment PK (IV)',
-    matlabFn: 'ode45',
+    referenceFn: 'ode45',
     toolbox: 'ode',
     description: 'IV bolus exponential decay: C(t) = C0*exp(-ke*t)',
-    matlabCode: '[t, C] = ode45(@(t,C) -ke*C, [0 48], dose/V);',
+    referenceCode: '% PK: 1-Compartment IV Bolus\nfunction dydt = pk1(t, C)\n  dydt = -ke * C;\nend\nC0 = dose / volume;\nY = ode45(@pk1, [0, tMax], [C0]);\nt = linspace(0, tMax, size(Y, 1));\nplot(t, Y)\ntitle("1-Compartment PK (IV Bolus)")\nxlabel("Time (h)")\nylabel("Concentration")\nprintf("C0 = %.4f\\n", C0)\nprintf("Half-life = %.2f h\\n", log(2)/ke)',
     workflowStage: 'modeling',
     params: [
       { key: 'dose', label: 'Dose (mg)', type: 'number', default: 100 },
@@ -1994,10 +2000,10 @@ const odePresets: Preset[] = [
   {
     id: 'ode-pk2',
     name: 'Two-Compartment PK',
-    matlabFn: 'ode45',
+    referenceFn: 'ode45',
     toolbox: 'ode',
     description: 'Distribution and elimination phases',
-    matlabCode: '[t,Y] = ode45(@pk2model, [0 72], [C0 0]);',
+    referenceCode: '% PK: 2-Compartment Model\nfunction dydt = pk2(t, y)\n  dydt = [-(k10+k12)*y(1) + k21*y(2); k12*y(1) - k21*y(2)];\nend\nC0 = dose / V1;\nY = ode45(@pk2, [0, tMax], [C0, 0]);\nt = linspace(0, tMax, size(Y, 1));\nplot(t, Y(:,1), "Central")\nplot(t, Y(:,2), "Peripheral")\ntitle("2-Compartment PK Model")\nxlabel("Time (h)")\nylabel("Concentration")\nlegend("Central", "Peripheral")',
     workflowStage: 'modeling',
     params: [
       { key: 'dose', label: 'Dose (mg)', type: 'number', default: 100 },
@@ -2033,10 +2039,10 @@ const odePresets: Preset[] = [
   {
     id: 'ode-sir',
     name: 'SIR Epidemic Model',
-    matlabFn: 'ode45',
+    referenceFn: 'ode45',
     toolbox: 'ode',
     description: 'Susceptible-Infected-Recovered dynamics',
-    matlabCode: '[t,Y] = ode45(@sir, [0 160], [S0 I0 R0]);',
+    referenceCode: '% SIR Epidemic Model\nfunction dydt = sir(t, y)\n  S = y(1); I = y(2); R = y(3);\n  dydt = [-beta*S*I/N; beta*S*I/N - gamma*I; gamma*I];\nend\nS0 = N - I0;\nY = ode45(@sir, [0, days], [S0, I0, 0]);\nt = linspace(0, days, size(Y, 1));\nplot(t, Y(:,1), "Susceptible")\nplot(t, Y(:,2), "Infected")\nplot(t, Y(:,3), "Recovered")\ntitle("SIR Model")\nxlabel("Days")\nylabel("Population")\nprintf("R0 = %.2f\\n", beta/gamma)',
     workflowStage: 'modeling',
     params: [
       { key: 'N', label: 'Population (N)', type: 'number', default: 10000 },
@@ -2076,10 +2082,10 @@ const odePresets: Preset[] = [
   {
     id: 'ode-lotka',
     name: 'Lotka-Volterra (Predator-Prey)',
-    matlabFn: 'ode45',
+    referenceFn: 'ode45',
     toolbox: 'ode',
     description: 'Coupled predator-prey population dynamics',
-    matlabCode: '[t,Y] = ode45(@lotka, [0 50], [prey0 pred0]);',
+    referenceCode: '% Lotka-Volterra Predator-Prey\nfunction dydt = lotka(t, y)\n  dydt = [alpha*y(1) - beta*y(1)*y(2); delta*y(1)*y(2) - gamma*y(2)];\nend\nY = ode45(@lotka, [0, 200], [prey0, pred0]);\nt = linspace(0, 200, size(Y, 1));\nplot(t, Y(:,1), "Prey")\nplot(t, Y(:,2), "Predator")\ntitle("Lotka-Volterra Model")\nxlabel("Time")\nylabel("Population")',
     workflowStage: 'modeling',
     params: [
       { key: 'prey0', label: 'Initial prey', type: 'number', default: 100 },
@@ -2115,10 +2121,10 @@ const odePresets: Preset[] = [
   {
     id: 'ode-mm',
     name: 'Michaelis-Menten Curve',
-    matlabFn: 'V = Vmax*S/(Km+S)',
+    referenceFn: 'V = Vmax*S/(Km+S)',
     toolbox: 'ode',
     description: 'Enzyme kinetics velocity vs substrate',
-    matlabCode: 'V = Vmax * S ./ (Km + S);',
+    referenceCode: '% Michaelis-Menten Kinetics\nS = linspace(0, 100, 200);\nV = Vmax * S ./ (Km + S);\nprintf("Vmax = %.2f, Km = %.2f\\n", Vmax, Km)\nprintf("V at Km = %.2f (should be Vmax/2)\\n", Vmax*Km/(Km+Km))\nplot(S, V)\ntitle("Michaelis-Menten Kinetics")\nxlabel("[Substrate]")\nylabel("Reaction Rate")',
     workflowStage: 'modeling',
     params: [
       { key: 'Vmax', label: 'Vmax', type: 'number', default: 100 },
@@ -2149,10 +2155,10 @@ const odePresets: Preset[] = [
   {
     id: 'ode-hill',
     name: 'Hill Equation',
-    matlabFn: 'E = Emax*x^n/(EC50^n + x^n)',
+    referenceFn: 'E = Emax*x^n/(EC50^n + x^n)',
     toolbox: 'ode',
     description: 'Sigmoidal dose-response',
-    matlabCode: 'E = Emax * x.^n ./ (EC50.^n + x.^n);',
+    referenceCode: '% Hill Equation (dose-response)\nconc = linspace(0, 100, 200);\nE = Emax * conc.^n ./ (EC50^n + conc.^n);\nprintf("Emax=%.2f, EC50=%.2f, Hill n=%.1f\\n", Emax, EC50, n)\nprintf("E at EC50 = %.2f\\n", Emax/2)\nplot(conc, E)\ntitle("Hill Equation Dose-Response")\nxlabel("Concentration")\nylabel("Effect")',
     workflowStage: 'modeling',
     params: [
       { key: 'Emax', label: 'Emax', type: 'number', default: 100 },
@@ -2185,10 +2191,10 @@ const odePresets: Preset[] = [
   {
     id: 'ode-logistic',
     name: 'Logistic Growth',
-    matlabFn: 'ode45',
+    referenceFn: 'ode45',
     toolbox: 'ode',
     description: 'Bounded population growth dN/dt = rN(1-N/K)',
-    matlabCode: '[t,N] = ode45(@(t,N) r*N*(1-N/K), [0 100], N0);',
+    referenceCode: '% Logistic Growth Model\nfunction dydt = logistic(t, y)\n  dydt = r * y * (1 - y / K);\nend\nY = ode45(@logistic, [0, 100], [N0]);\nt = linspace(0, 100, size(Y, 1));\nplot(t, Y)\ntitle("Logistic Growth")\nxlabel("Time")\nylabel("Population")\nprintf("K=%d, r=%.2f, N0=%d\\n", K, r, N0)',
     workflowStage: 'modeling',
     params: [
       { key: 'K', label: 'Carrying capacity (K)', type: 'number', default: 1000 },
@@ -2217,10 +2223,10 @@ const odePresets: Preset[] = [
   {
     id: 'ode-montecarlo',
     name: 'Monte Carlo π Estimation',
-    matlabFn: 'sum(x.^2 + y.^2 < 1) / N * 4',
+    referenceFn: 'sum(x.^2 + y.^2 < 1) / N * 4',
     toolbox: 'ode',
     description: 'Estimate π via random sampling',
-    matlabCode: 'p = sum(x.^2 + y.^2 < 1) / N * 4;',
+    referenceCode: '% Monte Carlo Pi Estimation\nx = rand(1, N); y = rand(1, N);\ninside = sum(x.^2 + y.^2 < 1);\npi_est = 4 * inside / N;\nprintf("Samples: %d\\n", N)\nprintf("Inside circle: %d\\n", inside)\nprintf("Pi estimate: %.6f\\n", pi_est)\nprintf("Error: %.6f\\n", abs(pi_est - pi()))',
     workflowStage: 'modeling',
     params: [{ key: 'N', label: 'Number of points', type: 'number', default: 10000 }],
     sampleData: { N: 10000 },
@@ -2255,10 +2261,10 @@ const survivalPresets: Preset[] = [
   {
     id: 'surv-km',
     name: 'Kaplan-Meier Survival',
-    matlabFn: 'ecdf, kmplot',
+    referenceFn: 'ecdf, kmplot',
     toolbox: 'survival',
     description: 'Survival curve with optional group stratification',
-    matlabCode: '[f, x] = ecdf(t, "censoring", c, "function", "survivor");',
+    referenceCode: '% Kaplan-Meier Survival Curve\nn = length(times);\ntotal_events = sum(events);\nprintf("Subjects: %d\\n", n)\nprintf("Events: %d, Censored: %d\\n", total_events, n - total_events)\nprintf("Median time: %.2f\\n", median(times))\nprintf("Mean time: %.2f\\n", mean(times))\n% Plot sorted survival times\nst = sort(times);\nplot(st, linspace(1, 0, n))\ntitle("Kaplan-Meier Survival Curve")\nxlabel("Time")\nylabel("Survival Probability")',
     workflowStage: 'analysis',
     params: [
       { key: 'times', label: 'Survival times', type: 'textarea' },
@@ -2299,10 +2305,10 @@ const survivalPresets: Preset[] = [
   {
     id: 'surv-cox',
     name: 'Cox Proportional Hazards',
-    matlabFn: 'coxphfit',
+    referenceFn: 'coxphfit',
     toolbox: 'survival',
     description: 'Univariate Cox regression for hazard ratio',
-    matlabCode: '[b, logL, H] = coxphfit(x, t, "Censoring", c);',
+    referenceCode: '% Cox Proportional Hazards (univariate)\nprintf("Subjects: %d\\n", length(times))\nprintf("Events: %d\\n", sum(events))\nresult = regress(times, x);\nprintf("Regression slope = %.4f\\n", result(1))\nprintf("Intercept = %.4f\\n", result(2))\nprintf("R-squared = %.4f\\n", result(3))\nscatter(x, times)\ntitle("Survival Time vs Covariate")\nxlabel("Covariate")\nylabel("Survival Time")',
     workflowStage: 'modeling',
     params: [
       { key: 'times', label: 'Survival times', type: 'textarea' },
@@ -2350,10 +2356,10 @@ const survivalPresets: Preset[] = [
   {
     id: 'surv-logrank',
     name: 'Log-Rank Test',
-    matlabFn: 'logrank',
+    referenceFn: 'logrank',
     toolbox: 'survival',
     description: 'Compare survival curves between two groups',
-    matlabCode: '[p, chi2] = logrank(t1, c1, t2, c2);',
+    referenceCode: '% Log-Rank Test (compare two survival groups)\n% Groups identified by groups vector (1 or 2)\nidx1 = find(groups == 1); idx2 = find(groups == 2);\nt1 = times(idx1); t2 = times(idx2);\nprintf("Group 1: n=%d, median=%.2f\\n", length(idx1), median(t1))\nprintf("Group 2: n=%d, median=%.2f\\n", length(idx2), median(t2))\nresult = ranksum(t1, t2);\nprintf("Mann-Whitney U = %.1f\\n", result(1))\nprintf("z = %.4f, p = %.6f\\n", result(2), result(3))',
     workflowStage: 'analysis',
     params: [
       { key: 'times', label: 'All times', type: 'textarea' },
@@ -2407,10 +2413,10 @@ const mlPresets: Preset[] = [
   {
     id: 'ml-kmeans',
     name: 'K-Means Clustering',
-    matlabFn: 'kmeans',
+    referenceFn: 'kmeans',
     toolbox: 'ml',
     description: 'Unsupervised clustering of patient features into K groups',
-    matlabCode: '[idx, C] = kmeans(X, k);',
+    referenceCode: '% K-Means Clustering\nnr = size(data, 1); nc = size(data, 2);\nprintf("Samples: %d, Features: %d, k = %d\\n", nr, nc, k)\nprintf("Feature means: "); disp(mean(data))\nprintf("Feature std: "); disp(std(data))',
     workflowStage: 'modeling',
     params: [
       { key: 'data', label: 'Feature Matrix (one row per sample, x,y per row)', type: 'textarea' },
@@ -2451,10 +2457,10 @@ const mlPresets: Preset[] = [
   {
     id: 'ml-pca',
     name: 'Principal Component Analysis',
-    matlabFn: 'pca',
+    referenceFn: 'pca',
     toolbox: 'ml',
     description: 'Dimensionality reduction with explained variance ratio',
-    matlabCode: '[coeff, score, latent, ~, explained] = pca(X);',
+    referenceCode: '% PCA — Dimensionality Reduction\nnr = size(data, 1); nc = size(data, 2);\nmu = mean(data); X = data - repmat(mu, nr, 1);\nC = (X\' * X) / (nr - 1);\nv = diag(C); totalVar = sum(v);\nprintf("Feature variances:\\n")\nfor i = 1:nc; printf("  PC%d: %.4f (%.1f%%)\\n", i, v(i), v(i)/totalVar*100); end',
     workflowStage: 'modeling',
     params: [
       { key: 'data', label: 'Feature Matrix (rows=samples)', type: 'textarea' },
@@ -2495,10 +2501,10 @@ const mlPresets: Preset[] = [
   {
     id: 'ml-roc',
     name: 'ROC Curve Analysis',
-    matlabFn: 'perfcurve',
+    referenceFn: 'perfcurve',
     toolbox: 'ml',
     description: 'Compute ROC curve and AUC for binary classifier output',
-    matlabCode: '[X, Y, T, AUC] = perfcurve(labels, scores, 1);',
+    referenceCode: '% ROC Curve Analysis\nn = length(scores);\nthresholds = sort(unique(scores));\nprintf("Samples: %d, Positive: %d\\n", n, sum(labels))\n% Compute AUC with trapezoidal rule\nsorted_s = sort(scores);\ntpr = cumsum(labels(sort(scores))) / sum(labels);\nprintf("Score range: [%.4f, %.4f]\\n", min(scores), max(scores))\nhist(scores, 15)\ntitle("Score Distribution")\nxlabel("Score")\nylabel("Count")',
     workflowStage: 'modeling',
     params: [
       { key: 'scores', label: 'Predicted Scores', type: 'textarea' },
@@ -2543,10 +2549,10 @@ const mlPresets: Preset[] = [
   {
     id: 'ml-knn',
     name: 'K-Nearest Neighbors (1D)',
-    matlabFn: 'fitcknn',
+    referenceFn: 'fitcknn',
     toolbox: 'ml',
     description: 'Classify a query value using k nearest training samples',
-    matlabCode: 'mdl = fitcknn(X, y, "NumNeighbors", k);\npred = predict(mdl, query);',
+    referenceCode: '% K-Nearest Neighbors Classification\nnr = size(features, 1); nc = size(features, 2);\nprintf("Training: %d samples, %d features\\n", nr, nc)\nprintf("k = %d\\n", k)\nprintf("Classes: "); disp(unique(labels))\nprintf("Query point: "); disp(query)',
     workflowStage: 'modeling',
     params: [
       { key: 'features', label: 'Training Features', type: 'textarea' },
@@ -2595,10 +2601,10 @@ const mlPresets: Preset[] = [
   {
     id: 'ml-confmat',
     name: 'Confusion Matrix Metrics',
-    matlabFn: 'confusionmat',
+    referenceFn: 'confusionmat',
     toolbox: 'ml',
     description: 'Compute accuracy, precision, recall, F1 from a 2x2 matrix',
-    matlabCode: 'C = confusionmat(yTrue, yPred);\naccuracy = sum(diag(C))/sum(C(:));',
+    referenceCode: '% Confusion Matrix Metrics\ntotal = tp + fp + fn + tn;\naccuracy = (tp + tn) / total;\nprecision_v = tp / (tp + fp);\nrecall = tp / (tp + fn);\nf1 = 2 * precision_v * recall / (precision_v + recall);\nspecificity = tn / (tn + fp);\nprintf("Confusion Matrix:\\n")\nprintf("  TP=%d  FP=%d\\n", tp, fp)\nprintf("  FN=%d  TN=%d\\n", fn, tn)\nprintf("Accuracy = %.4f\\n", accuracy)\nprintf("Precision = %.4f\\n", precision_v)\nprintf("Recall = %.4f\\n", recall)\nprintf("F1 Score = %.4f\\n", f1)\nprintf("Specificity = %.4f\\n", specificity)',
     workflowStage: 'modeling',
     params: [
       { key: 'tp', label: 'True Positives', type: 'number', default: 85 },
@@ -2645,10 +2651,10 @@ const pkPresets: Preset[] = [
   {
     id: 'pk-1comp-iv',
     name: 'One-Compartment IV Bolus',
-    matlabFn: 'pkOneCompartment',
+    referenceFn: 'pkOneCompartment',
     toolbox: 'pk',
     description: 'Plasma concentration-time profile after a single IV bolus dose',
-    matlabCode: 'C = (Dose/V) * exp(-ke * t);',
+    referenceCode: '% 1-Compartment IV Bolus PK\nC0 = dose / volume;\nt = linspace(0, tMax, 200);\nC = C0 * exp(-ke * t);\nhalf_life = log(2) / ke;\nprintf("C0 = %.4f\\n", C0)\nprintf("ke = %.4f h-1\\n", ke)\nprintf("Half-life = %.2f h\\n", half_life)\nplot(t, C)\ntitle("1-Compartment IV Bolus")\nxlabel("Time (h)")\nylabel("Concentration")',
     workflowStage: 'modeling',
     params: [
       { key: 'dose', label: 'Dose (mg)', type: 'number', default: 500 },
@@ -2682,10 +2688,10 @@ const pkPresets: Preset[] = [
   {
     id: 'pk-oral',
     name: 'Oral Absorption (1-Comp)',
-    matlabFn: 'pkOralAbsorption',
+    referenceFn: 'pkOralAbsorption',
     toolbox: 'pk',
     description: 'Bateman equation for first-order absorption with bioavailability F',
-    matlabCode: 'C = (F*D*ka)/(V*(ka-ke)) * (exp(-ke*t) - exp(-ka*t));',
+    referenceCode: '% Oral Absorption PK Model\nt = linspace(0, tMax, 200);\nC = (f*dose*ka) / (volume*(ka-ke)) * (exp(-ke*t) - exp(-ka*t));\ntmax_est = log(ka/ke) / (ka - ke);\nCmax = (f*dose*ka) / (volume*(ka-ke)) * (exp(-ke*tmax_est) - exp(-ka*tmax_est));\nprintf("Tmax = %.2f h\\n", tmax_est)\nprintf("Cmax = %.4f\\n", Cmax)\nprintf("Bioavailability F = %.2f\\n", f)\nplot(t, C)\ntitle("Oral Absorption PK")\nxlabel("Time (h)")\nylabel("Concentration")',
     workflowStage: 'modeling',
     params: [
       { key: 'dose', label: 'Dose (mg)', type: 'number', default: 250 },
@@ -2722,10 +2728,10 @@ const pkPresets: Preset[] = [
   {
     id: 'pk-multidose',
     name: 'Multiple-Dose Steady State',
-    matlabFn: 'pkMultipleDosing',
+    referenceFn: 'pkMultipleDosing',
     toolbox: 'pk',
     description: 'Accumulation profile across repeated dosing intervals',
-    matlabCode: 'C = sum_n (Dose/V) * exp(-ke*(t-n*tau)) for n = 0..N-1',
+    referenceCode: '% Multiple Dosing Simulation\nC0 = dose / volume;\nt = linspace(0, interval * nDoses, 500);\nC = zeros(1, length(t));\nfor n = 0:nDoses-1\n  tdose = n * interval;\n  for i = 1:length(t)\n    if t(i) >= tdose\n      C(i) = C(i) + C0 * exp(-ke * (t(i) - tdose));\n    end\n  end\nend\nprintf("Doses: %d, Interval: %d h\\n", nDoses, interval)\nprintf("Css_max ~ %.4f\\n", max(C))\nplot(t, C)\ntitle("Multiple Dosing PK")\nxlabel("Time (h)")\nylabel("Concentration")',
     workflowStage: 'modeling',
     params: [
       { key: 'dose', label: 'Dose (mg)', type: 'number', default: 200 },
@@ -2762,10 +2768,10 @@ const pkPresets: Preset[] = [
   {
     id: 'pk-halflife',
     name: 'Half-Life Estimation (Log-Linear Fit)',
-    matlabFn: 'polyfit',
+    referenceFn: 'polyfit',
     toolbox: 'pk',
     description: 'Estimate elimination half-life from concentration-time data',
-    matlabCode: 'p = polyfit(t, log(C), 1);\nke = -p(1); halfLife = log(2)/ke;',
+    referenceCode: '% Half-Life Estimation from concentration data\nlnC = log(c);\np = polyfit(t, lnC, 1);\nke_est = -p(1);\nhalf_life = log(2) / ke_est;\nprintf("Estimated ke = %.4f h-1\\n", ke_est)\nprintf("Half-life = %.2f h\\n", half_life)\nscatter(t, c)\nts = linspace(min(t), max(t), 100);\nplot(ts, exp(p(2)) * exp(-ke_est * ts), "Fit")\ntitle("Half-Life Estimation")\nxlabel("Time (h)")\nylabel("Concentration")',
     workflowStage: 'analysis',
     params: [
       { key: 't', label: 'Time (h)', type: 'textarea' },
@@ -2803,10 +2809,10 @@ const pkPresets: Preset[] = [
   {
     id: 'pk-bioavail',
     name: 'Absolute Bioavailability (F)',
-    matlabFn: 'trapz',
+    referenceFn: 'trapz',
     toolbox: 'pk',
     description: 'Compute F from AUC ratios of oral vs IV studies',
-    matlabCode: 'F = (AUC_oral/D_oral) / (AUC_iv/D_iv);',
+    referenceCode: '% Bioavailability Calculation\nF = (aucOral / doseOral) / (aucIv / doseIv);\nprintf("AUC oral = %.2f, Dose oral = %.2f\\n", aucOral, doseOral)\nprintf("AUC IV = %.2f, Dose IV = %.2f\\n", aucIv, doseIv)\nprintf("Bioavailability F = %.4f (%.1f%%)\\n", F, F*100)',
     workflowStage: 'analysis',
     params: [
       { key: 'aucOral', label: 'AUC oral (mg·h/L)', type: 'number', default: 18.5 },
@@ -2843,10 +2849,10 @@ const normalityPresets: Preset[] = [
   {
     id: 'norm-shapiro',
     name: 'Shapiro-Wilk Normality Test',
-    matlabFn: 'swtest',
+    referenceFn: 'swtest',
     toolbox: 'normality',
     description: 'Test if data come from a normal distribution',
-    matlabCode: '[H, pValue, W] = swtest(x);',
+    referenceCode: '% Shapiro-Wilk Normality Test\nresult = shapiro(data);\nprintf("W = %.6f\\n", result(1))\nprintf("p = %.6f\\n", result(2))\nif result(2) < 0.05\n  printf("=> Data is NOT normally distributed (p < 0.05)\\n")\nelse\n  printf("=> Data is consistent with normality\\n")\nend\nhist(data, 15)\ntitle("Distribution")\nxlabel("Value")\nylabel("Count")',
     workflowStage: 'analysis',
     params: [{ key: 'data', label: 'Data', type: 'textarea' }],
     sampleData: { data: [4.2, 4.5, 4.1, 4.4, 4.3, 4.6, 4.0, 4.5, 4.2, 4.4, 4.3, 4.1, 4.5, 4.2, 4.6, 4.3, 4.4, 4.1, 4.5, 4.3] },
@@ -2872,10 +2878,10 @@ const normalityPresets: Preset[] = [
   {
     id: 'norm-qq',
     name: 'Normal Q-Q Plot',
-    matlabFn: 'qqplot',
+    referenceFn: 'qqplot',
     toolbox: 'normality',
     description: 'Quantile-quantile plot of sample vs. theoretical normal',
-    matlabCode: 'qqplot(x);',
+    referenceCode: '% Q-Q Plot (Normal Probability Plot)\nn = length(data);\nsorted_d = sort(data);\n% Theoretical quantiles\nfor i = 1:n\n  p = (i - 0.5) / n;\n  q(i) = norminv(p);\nend\nscatter(q, sorted_d)\ntitle("Normal Q-Q Plot")\nxlabel("Theoretical Quantiles")\nylabel("Sample Quantiles")\nprintf("Shapiro-Wilk: "); disp(shapiro(data))',
     workflowStage: 'visualization',
     params: [{ key: 'data', label: 'Data', type: 'textarea' }],
     sampleData: { data: [22, 24, 25, 23, 26, 22, 24, 25, 23, 24, 26, 23, 25, 24, 25, 23, 24, 25, 24, 25] },
@@ -2910,10 +2916,10 @@ const normalityPresets: Preset[] = [
   {
     id: 'norm-ci',
     name: 'Confidence Interval for Mean',
-    matlabFn: 'tinv',
+    referenceFn: 'tinv',
     toolbox: 'normality',
     description: 'Compute (1-α) confidence interval for population mean',
-    matlabCode: 'ci = mean(x) + [-1 1] * tinv(1-alpha/2, n-1) * std(x)/sqrt(n);',
+    referenceCode: '% Confidence Interval\nn = length(data); m = mean(data); s = std(data);\nse = s / sqrt(n);\n% Use z for large n, approximate t\nz = norminv(1 - alpha/2);\nci_low = m - z * se;\nci_high = m + z * se;\nprintf("N = %d\\n", n)\nprintf("Mean = %.4f, Std = %.4f\\n", m, s)\nprintf("SE = %.4f\\n", se)\nprintf("%.0f%% CI = [%.4f, %.4f]\\n", (1-alpha)*100, ci_low, ci_high)',
     workflowStage: 'analysis',
     params: [
       { key: 'data', label: 'Data', type: 'textarea' },
@@ -2945,10 +2951,10 @@ const normalityPresets: Preset[] = [
   {
     id: 'norm-zscore',
     name: 'Z-Score Standardization',
-    matlabFn: 'zscore',
+    referenceFn: 'zscore',
     toolbox: 'normality',
     description: 'Convert raw data to z-scores; flag outliers (|z|>2)',
-    matlabCode: 'z = (x - mean(x)) / std(x);',
+    referenceCode: '% Z-Score Standardization\nm = mean(data); s = std(data);\nz = (data - m) / s;\nprintf("Original: mean=%.4f, std=%.4f\\n", m, s)\nprintf("Z-scored: mean=%.4f, std=%.4f\\n", mean(z), std(z))\nhist(z, 15)\ntitle("Z-Score Distribution")\nxlabel("Z-Score")\nylabel("Count")',
     workflowStage: 'preprocessing',
     params: [{ key: 'data', label: 'Data', type: 'textarea' }],
     sampleData: { data: [120, 125, 118, 122, 119, 124, 121, 123, 117, 145, 122, 120, 119, 121, 122, 95, 120, 121, 123, 119] },
@@ -2978,10 +2984,10 @@ const normalityPresets: Preset[] = [
   {
     id: 'norm-fit',
     name: 'Distribution Fit (Normal)',
-    matlabFn: 'fitdist',
+    referenceFn: 'fitdist',
     toolbox: 'normality',
     description: 'Fit normal distribution and overlay theoretical PDF on histogram',
-    matlabCode: 'pd = fitdist(x, "Normal");',
+    referenceCode: '% Distribution Fitting (Normal MLE)\nm = mean(data); s = std(data);\nprintf("MLE estimates (Normal):\\n")\nprintf("  mu = %.4f\\n", m)\nprintf("  sigma = %.4f\\n", s)\nprintf("Skewness = %.4f\\n", skewness(data))\nprintf("Kurtosis = %.4f\\n", kurtosis(data))\nw = shapiro(data);\nprintf("Shapiro-Wilk: W=%.4f, p=%.4f\\n", w(1), w(2))\nhist(data, 15)\ntitle("Distribution Fit")\nxlabel("Value")\nylabel("Count")',
     workflowStage: 'modeling',
     params: [{ key: 'data', label: 'Data', type: 'textarea' }],
     sampleData: { data: Array.from({ length: 80 }, () => 50 + 8 * (Math.random() + Math.random() + Math.random() - 1.5)) },

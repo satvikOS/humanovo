@@ -223,12 +223,20 @@ function AppearanceSettings() {
 }
 
 function NotificationSettings() {
-  const [emailNotifs, setEmailNotifs] = useState(true)
-  const [pushNotifs, setPushNotifs] = useState(true)
-  const [soundEnabled, setSoundEnabled] = useState(false)
-  const [notifyOnEvidence, setNotifyOnEvidence] = useState(true)
-  const [notifyOnSimulation, setNotifyOnSimulation] = useState(true)
-  const [notifyOnMention, setNotifyOnMention] = useState(true)
+  const [prefs, setPrefs] = useState(() => {
+    try {
+      const stored = localStorage.getItem('humanovo-notification-settings')
+      return stored ? JSON.parse(stored) : { email: true, push: true, sound: false, evidence: true, simulation: true, mention: true }
+    } catch { return { email: true, push: true, sound: false, evidence: true, simulation: true, mention: true } }
+  })
+
+  const update = (key: string, value: boolean) => {
+    setPrefs((p: any) => {
+      const next = { ...p, [key]: value }
+      localStorage.setItem('humanovo-notification-settings', JSON.stringify(next))
+      return next
+    })
+  }
 
   return (
     <div className="space-y-6">
@@ -236,13 +244,13 @@ function NotificationSettings() {
         <h3 className="text-base font-medium mb-4">Notification Channels</h3>
         <div className="glass-card">
           <SettingRow title="Email Notifications" description="Receive notifications via email">
-            <Toggle enabled={emailNotifs} onChange={setEmailNotifs} />
+            <Toggle enabled={prefs.email} onChange={v => update('email', v)} />
           </SettingRow>
           <SettingRow title="Push Notifications" description="Receive browser push notifications">
-            <Toggle enabled={pushNotifs} onChange={setPushNotifs} />
+            <Toggle enabled={prefs.push} onChange={v => update('push', v)} />
           </SettingRow>
           <SettingRow title="Sound" description="Play a sound for notifications">
-            <Toggle enabled={soundEnabled} onChange={setSoundEnabled} />
+            <Toggle enabled={prefs.sound} onChange={v => update('sound', v)} />
           </SettingRow>
         </div>
       </div>
@@ -251,13 +259,13 @@ function NotificationSettings() {
         <h3 className="text-base font-medium mb-4">Notification Types</h3>
         <div className="glass-card">
           <SettingRow title="New Evidence" description="When new evidence is ingested into your projects">
-            <Toggle enabled={notifyOnEvidence} onChange={setNotifyOnEvidence} />
+            <Toggle enabled={prefs.evidence} onChange={v => update('evidence', v)} />
           </SettingRow>
           <SettingRow title="Simulation Complete" description="When a simulation finishes running">
-            <Toggle enabled={notifyOnSimulation} onChange={setNotifyOnSimulation} />
+            <Toggle enabled={prefs.simulation} onChange={v => update('simulation', v)} />
           </SettingRow>
           <SettingRow title="Mentions" description="When someone mentions you in a comment">
-            <Toggle enabled={notifyOnMention} onChange={setNotifyOnMention} />
+            <Toggle enabled={prefs.mention} onChange={v => update('mention', v)} />
           </SettingRow>
         </div>
       </div>
@@ -266,6 +274,31 @@ function NotificationSettings() {
 }
 
 function DataSettings() {
+  const [storageInfo, setStorageInfo] = useState({ total: 0, keys: [] as { key: string; size: number }[] })
+  const [confirmClear, setConfirmClear] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+
+  useEffect(() => {
+    let total = 0
+    const keys: { key: string; size: number }[] = []
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      if (!key) continue
+      const val = localStorage.getItem(key) || ''
+      const size = new Blob([val]).size
+      total += size
+      keys.push({ key, size })
+    }
+    keys.sort((a, b) => b.size - a.size)
+    setStorageInfo({ total, keys })
+  }, [])
+
+  const formatSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
+  }
+
   return (
     <div className="space-y-6">
       <div>
@@ -273,27 +306,24 @@ function DataSettings() {
         <div className="glass-card">
           <div className="mb-4">
             <div className="flex items-center justify-between text-sm mb-2">
-              <span>Storage Used</span>
-              <span className="text-[var(--color-text-muted)]">2.4 GB / 10 GB</span>
+              <span>Local Storage Used</span>
+              <span className="text-[var(--color-text-muted)]">{formatSize(storageInfo.total)} / 10 MB</span>
             </div>
             <div className="h-2 bg-white/5 rounded-full overflow-hidden">
-              <div className="h-full w-[24%] bg-accent-blue rounded-full" />
+              <div className="h-full bg-accent-blue rounded-full" style={{ width: `${Math.min(100, (storageInfo.total / (10 * 1024 * 1024)) * 100)}%` }} />
             </div>
           </div>
 
           <div className="space-y-2 text-xs">
-            <div className="flex items-center justify-between">
-              <span className="text-[var(--color-text-muted)]">Evidence Documents</span>
-              <span>1.8 GB</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-[var(--color-text-muted)]">Simulation Data</span>
-              <span>420 MB</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-[var(--color-text-muted)]">Notebook Attachments</span>
-              <span>180 MB</span>
-            </div>
+            {storageInfo.keys.slice(0, 6).map(({ key, size }) => (
+              <div key={key} className="flex items-center justify-between">
+                <span className="text-[var(--color-text-muted)] truncate max-w-[200px]">{key}</span>
+                <span>{formatSize(size)}</span>
+              </div>
+            ))}
+            {storageInfo.keys.length > 6 && (
+              <div className="text-[var(--color-text-muted)]">+{storageInfo.keys.length - 6} more keys</div>
+            )}
           </div>
         </div>
       </div>
@@ -301,15 +331,195 @@ function DataSettings() {
       <div>
         <h3 className="text-base font-medium mb-4">Data Management</h3>
         <div className="glass-card">
-          <SettingRow title="Export All Data" description="Download all your projects, hypotheses, and evidence">
-            <button className="btn text-[var(--color-text-secondary)] hover:bg-white/5 text-xs">Export</button>
+          <SettingRow title="Export All Data" description="Download all your projects, hypotheses, and evidence as JSON">
+            <button
+              className="btn text-[var(--color-text-secondary)] hover:bg-white/5 text-xs"
+              onClick={() => {
+                const data: Record<string, any> = {}
+                for (let i = 0; i < localStorage.length; i++) {
+                  const key = localStorage.key(i)
+                  if (!key) continue
+                  try { data[key] = JSON.parse(localStorage.getItem(key) || '') } catch { data[key] = localStorage.getItem(key) }
+                }
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+                const a = document.createElement('a')
+                a.href = URL.createObjectURL(blob)
+                a.download = `humanovo-export-${new Date().toISOString().slice(0, 10)}.json`
+                a.click()
+                URL.revokeObjectURL(a.href)
+              }}
+            >Export</button>
           </SettingRow>
           <SettingRow title="Clear Cache" description="Remove cached data to free up space">
-            <button className="btn text-[var(--color-text-secondary)] hover:bg-white/5 text-xs">Clear</button>
+            {confirmClear ? (
+              <div className="flex items-center gap-2">
+                <button onClick={() => { localStorage.clear(); window.location.reload() }} className="btn text-xs text-red-400 hover:bg-red-400/10">Confirm</button>
+                <button onClick={() => setConfirmClear(false)} className="btn text-xs text-[var(--color-text-muted)]">Cancel</button>
+              </div>
+            ) : (
+              <button className="btn text-[var(--color-text-secondary)] hover:bg-white/5 text-xs" onClick={() => setConfirmClear(true)}>Clear</button>
+            )}
           </SettingRow>
           <SettingRow title="Delete All Data" description="Permanently delete all your data. This cannot be undone.">
-            <button className="btn text-[var(--color-text-muted)] hover:text-red-400 hover:bg-red-400/10 text-xs">Delete</button>
+            {confirmDelete ? (
+              <div className="flex items-center gap-2">
+                <button onClick={() => { localStorage.clear(); window.location.reload() }} className="btn text-xs text-red-400 hover:bg-red-400/10">Yes, Delete</button>
+                <button onClick={() => setConfirmDelete(false)} className="btn text-xs text-[var(--color-text-muted)]">Cancel</button>
+              </div>
+            ) : (
+              <button className="btn text-[var(--color-text-muted)] hover:text-red-400 hover:bg-red-400/10 text-xs" onClick={() => setConfirmDelete(true)}>Delete</button>
+            )}
           </SettingRow>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function AccountSettings() {
+  const [profile, setProfile] = useState(() => {
+    try {
+      const stored = localStorage.getItem('humanovo-user-profile')
+      return stored ? JSON.parse(stored) : { name: 'Researcher', email: 'researcher@institution.edu', institution: '', role: 'Principal Investigator' }
+    } catch { return { name: 'Researcher', email: 'researcher@institution.edu', institution: '', role: 'Principal Investigator' } }
+  })
+  const [saved, setSaved] = useState(false)
+
+  const saveProfile = () => {
+    localStorage.setItem('humanovo-user-profile', JSON.stringify(profile))
+    setSaved(true)
+    setTimeout(() => setSaved(false), 2000)
+  }
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h3 className="text-base font-medium mb-4">Profile</h3>
+        <div className="glass-card space-y-4 p-4">
+          <div>
+            <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Full Name</label>
+            <input type="text" value={profile.name} onChange={e => setProfile((p: any) => ({ ...p, name: e.target.value }))} className="input w-full text-sm" />
+          </div>
+          <div>
+            <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Email</label>
+            <input type="email" value={profile.email} onChange={e => setProfile((p: any) => ({ ...p, email: e.target.value }))} className="input w-full text-sm" />
+          </div>
+          <div>
+            <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Institution</label>
+            <input type="text" value={profile.institution} onChange={e => setProfile((p: any) => ({ ...p, institution: e.target.value }))} className="input w-full text-sm" placeholder="University or organization" />
+          </div>
+          <div>
+            <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Role</label>
+            <select value={profile.role} onChange={e => setProfile((p: any) => ({ ...p, role: e.target.value }))} className="input w-full text-sm">
+              <option>Principal Investigator</option>
+              <option>Postdoctoral Researcher</option>
+              <option>PhD Student</option>
+              <option>Research Associate</option>
+              <option>Lab Manager</option>
+              <option>Data Scientist</option>
+              <option>Bioinformatician</option>
+              <option>Clinical Researcher</option>
+            </select>
+          </div>
+          <button onClick={saveProfile} className="btn text-sm px-4 py-2" style={{ color: saved ? 'var(--color-success)' : 'var(--color-text-secondary)' }}>
+            {saved ? 'Saved!' : 'Save Profile'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function PrivacySettings() {
+  const [prefs, setPrefs] = useState(() => {
+    try {
+      const stored = localStorage.getItem('humanovo-privacy-settings')
+      return stored ? JSON.parse(stored) : { analytics: false, crashReports: true, shareUsage: false, autoLock: 30 }
+    } catch { return { analytics: false, crashReports: true, shareUsage: false, autoLock: 30 } }
+  })
+
+  const update = (key: string, value: any) => {
+    setPrefs((p: any) => {
+      const next = { ...p, [key]: value }
+      localStorage.setItem('humanovo-privacy-settings', JSON.stringify(next))
+      return next
+    })
+  }
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h3 className="text-base font-medium mb-4">Privacy</h3>
+        <div className="glass-card">
+          <SettingRow title="Analytics" description="Help improve Humanovo by sharing anonymized usage data">
+            <Toggle enabled={prefs.analytics} onChange={v => update('analytics', v)} />
+          </SettingRow>
+          <SettingRow title="Crash Reports" description="Automatically send crash reports to help fix bugs">
+            <Toggle enabled={prefs.crashReports} onChange={v => update('crashReports', v)} />
+          </SettingRow>
+          <SettingRow title="Share Usage Statistics" description="Share feature usage stats with your team admins">
+            <Toggle enabled={prefs.shareUsage} onChange={v => update('shareUsage', v)} />
+          </SettingRow>
+        </div>
+      </div>
+
+      <div>
+        <h3 className="text-base font-medium mb-4">Security</h3>
+        <div className="glass-card">
+          <SettingRow title="Auto-Lock Timeout" description="Automatically lock the session after inactivity">
+            <select value={prefs.autoLock} onChange={e => update('autoLock', Number(e.target.value))} className="input text-xs">
+              <option value={5}>5 minutes</option>
+              <option value={15}>15 minutes</option>
+              <option value={30}>30 minutes</option>
+              <option value={60}>1 hour</option>
+              <option value={0}>Never</option>
+            </select>
+          </SettingRow>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function IntegrationSettings() {
+  const [integrations, setIntegrations] = useState(() => {
+    try {
+      const stored = localStorage.getItem('humanovo-integrations')
+      return stored ? JSON.parse(stored) : { github: false, slack: false, pubmed: true, orcid: false, zenodo: false }
+    } catch { return { github: false, slack: false, pubmed: true, orcid: false, zenodo: false } }
+  })
+
+  const toggle = (key: string) => {
+    setIntegrations((p: any) => {
+      const next = { ...p, [key]: !p[key] }
+      localStorage.setItem('humanovo-integrations', JSON.stringify(next))
+      return next
+    })
+  }
+
+  const items = [
+    { key: 'pubmed', name: 'PubMed', description: 'Search and import publications from NCBI PubMed' },
+    { key: 'github', name: 'GitHub', description: 'Sync notebooks and analysis scripts with GitHub repos' },
+    { key: 'orcid', name: 'ORCID', description: 'Link your ORCID profile for publication management' },
+    { key: 'slack', name: 'Slack', description: 'Receive notifications in your Slack workspace' },
+    { key: 'zenodo', name: 'Zenodo', description: 'Publish datasets and get DOIs for your research outputs' },
+  ]
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h3 className="text-base font-medium mb-4">Connected Services</h3>
+        <div className="glass-card">
+          {items.map(item => (
+            <SettingRow key={item.key} title={item.name} description={item.description}>
+              <div className="flex items-center gap-3">
+                <span className="text-xs" style={{ color: integrations[item.key] ? 'var(--color-success)' : 'var(--color-text-muted)' }}>
+                  {integrations[item.key] ? 'Connected' : 'Disconnected'}
+                </span>
+                <Toggle enabled={integrations[item.key]} onChange={() => toggle(item.key)} />
+              </div>
+            </SettingRow>
+          ))}
         </div>
       </div>
     </div>
@@ -334,16 +544,18 @@ export default function Settings() {
     switch (activeSection) {
       case 'appearance':
         return <AppearanceSettings />
+      case 'account':
+        return <AccountSettings />
       case 'notifications':
         return <NotificationSettings />
+      case 'privacy':
+        return <PrivacySettings />
       case 'data':
         return <DataSettings />
+      case 'integrations':
+        return <IntegrationSettings />
       default:
-        return (
-          <div className="flex items-center justify-center h-64 text-[var(--color-text-muted)]">
-            <span className="text-sm">Coming soon</span>
-          </div>
-        )
+        return <AppearanceSettings />
     }
   }
 

@@ -29,7 +29,7 @@ export default function ManuscriptManager() {
   const [newAuthor, setNewAuthor] = useState({ name: '', affiliation: '', email: '', role: 'Co-Author' })
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
-  const load = async () => { try { const r = await fetch(API); if (r.ok) setManuscripts((await r.json()).items || []) } catch {} }
+  const load = async () => { try { const r = await fetch(API); if (r.ok) setManuscripts((await r.json()).items || []) } catch { /* network error */ } }
   useEffect(() => { load() }, [])
 
   const selectMs = async (id: string) => {

@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import {
   FiBookOpen,
   FiSearch,
@@ -10,9 +10,12 @@ import {
   FiEdit3,
   FiCalendar,
   FiFileText,
+  FiDownload,
 } from 'react-icons/fi'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 import { logActivity } from '../utils/persistence'
+
+const LIT_REVIEW_KEY = 'humanovo-literature-papers'
 
 interface Paper {
   id: string
@@ -36,7 +39,12 @@ const RELEVANCE_COLORS = {
 }
 
 export default function LiteratureReview() {
-  const [papers, setPapers] = useState<Paper[]>([])
+  const [papers, setPapers] = useState<Paper[]>(() => {
+    try {
+      const stored = localStorage.getItem(LIT_REVIEW_KEY)
+      return stored ? JSON.parse(stored) : []
+    } catch { return [] }
+  })
   const [searchQuery, setSearchQuery] = useState('')
   const [showAddForm, setShowAddForm] = useState(false)
   const [selectedPaper, setSelectedPaper] = useState<Paper | null>(null)
@@ -51,6 +59,11 @@ export default function LiteratureReview() {
     title: '', authors: '', journal: '', year: new Date().getFullYear(),
     doi: '', abstract: '', tags: '', relevance: 'medium' as Paper['relevance'],
   })
+
+  // Persist papers to localStorage
+  useEffect(() => {
+    try { localStorage.setItem(LIT_REVIEW_KEY, JSON.stringify(papers)) } catch { /* quota */ }
+  }, [papers])
 
   const savePapers = useCallback((updated: Paper[]) => {
     setPapers(updated)
@@ -227,8 +240,27 @@ export default function LiteratureReview() {
           )}
         </div>
 
-        <div className="p-3 border-t border-[var(--color-border)] text-xxs text-[var(--color-text-muted)]">
-          {papers.length} papers &middot; {papers.filter(p => p.starred).length} starred
+        <div className="p-3 border-t border-[var(--color-border)] text-xxs text-[var(--color-text-muted)] flex items-center justify-between">
+          <span>{papers.length} papers &middot; {papers.filter(p => p.starred).length} starred</span>
+          {papers.length > 0 && (
+            <button
+              onClick={() => {
+                const bib = papers.map(p =>
+                  `${p.authors.join(', ')} (${p.year}). ${p.title}.${p.journal ? ` ${p.journal}.` : ''}${p.doi ? ` doi:${p.doi}` : ''}`
+                ).join('\n\n')
+                const blob = new Blob([bib], { type: 'text/plain' })
+                const a = document.createElement('a')
+                a.href = URL.createObjectURL(blob)
+                a.download = 'literature-review.txt'
+                a.click()
+                URL.revokeObjectURL(a.href)
+              }}
+              className="flex items-center gap-1 hover:text-[var(--color-text-secondary)] transition-colors"
+              title="Export bibliography"
+            >
+              <FiDownload className="w-3 h-3" /> Export
+            </button>
+          )}
         </div>
       </div>
 

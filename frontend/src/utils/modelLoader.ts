@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * 3D Model Loader Utilities
  *

@@ -71,9 +71,21 @@ export default function Search() {
   const [isSearching, setIsSearching] = useState(false)
   const [showFilters, setShowFilters] = useState(true)
   const [totalResults, setTotalResults] = useState(0)
-  const [recentSearches, setRecentSearches] = useState<string[]>([])
-  const [savedSearches, setSavedSearches] = useState<string[]>([])
+  const [recentSearches, setRecentSearches] = useState<string[]>(() => {
+    try { const s = localStorage.getItem('humanovo-recent-searches'); return s ? JSON.parse(s) : [] } catch { return [] }
+  })
+  const [savedSearches, setSavedSearches] = useState<string[]>(() => {
+    try { const s = localStorage.getItem('humanovo-saved-searches'); return s ? JSON.parse(s) : [] } catch { return [] }
+  })
   const didAutoSearch = useRef(false)
+
+  // Persist searches to localStorage
+  useEffect(() => {
+    try { localStorage.setItem('humanovo-recent-searches', JSON.stringify(recentSearches)) } catch { /* quota */ }
+  }, [recentSearches])
+  useEffect(() => {
+    try { localStorage.setItem('humanovo-saved-searches', JSON.stringify(savedSearches)) } catch { /* quota */ }
+  }, [savedSearches])
 
   // Search local data as fallback when API is unavailable
   const searchLocalData = useCallback((q: string): SearchResult[] => {

@@ -3,7 +3,6 @@
  * All user data persists across sessions — projects, evidence, notebooks, workspace.
  * Syncs to backend API for cross-device consistency with ID-based array merging.
  */
-// @ts-ignore — types provided by @types/react at install time
 import { useState, useCallback, useEffect, useRef } from 'react'
 
 const PREFIX = 'humanovo-'

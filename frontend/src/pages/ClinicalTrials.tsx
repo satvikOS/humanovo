@@ -29,7 +29,7 @@ export default function ClinicalTrials() {
   const [form, setForm] = useState({ protocol_number: '', title: '', phase: 'Phase I', pi: '', target_enrollment: 0 })
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
-  const load = async () => { try { const r = await fetch(API); if (r.ok) setTrials((await r.json()).items || []) } catch {} }
+  const load = async () => { try { const r = await fetch(API); if (r.ok) setTrials((await r.json()).items || []) } catch { /* network error */ } }
   useEffect(() => { load() }, [])
 
   const selectTrial = async (t: Trial) => {

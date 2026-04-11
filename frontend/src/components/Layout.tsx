@@ -38,6 +38,7 @@ import {
   FiUpload,
   FiPaperclip,
   FiCpu,
+  FiBookOpen,
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import { useTheme } from '../contexts/ThemeContext'
@@ -59,7 +60,8 @@ const secondaryNavItems = [
 ]
 
 const researchNavItems = [
-{ to: '/citation-manager', icon: FiList, label: 'Citations' },
+  { to: '/literature-review', icon: FiBookOpen, label: 'Literature' },
+  { to: '/citation-manager', icon: FiList, label: 'Citations' },
   { to: '/experiment-tracker', icon: FiClipboard, label: 'Experiments' },
   { to: '/data-visualization', icon: FiBarChart2, label: 'Visualization' },
 ]
@@ -67,16 +69,16 @@ const researchNavItems = [
 const analysisNavItems = [
   { to: '/compute-lab', icon: FiCpu, label: 'Compute Lab' },
   { to: '/genomics', icon: FiHeart, label: 'Genomics' },
-  { to: '/imaging', icon: FiImage, label: 'Imaging' },
 ]
 
 const managementNavItems = [
   { to: '/data-manager', icon: FiDatabase, label: 'Data Manager' },
-  { to: '/clinical-trials', icon: FiClipboard, label: 'Clinical Trials', comingSoon: true },
-  { to: '/manuscripts', icon: FiFileText, label: 'Manuscripts', comingSoon: true },
-  { to: '/biobank', icon: FiPackage, label: 'Biobank', comingSoon: true },
-  { to: '/collaboration', icon: FiGrid, label: 'Collaboration', comingSoon: true },
-  { to: '/regulatory', icon: FiShield, label: 'Regulatory', comingSoon: true },
+  { to: '/imaging', icon: FiImage, label: 'Imaging' },
+  { to: '/clinical-trials', icon: FiClipboard, label: 'Clinical Trials' },
+  { to: '/manuscripts', icon: FiFileText, label: 'Manuscripts' },
+  { to: '/biobank', icon: FiPackage, label: 'Biobank' },
+  { to: '/collaboration', icon: FiGrid, label: 'Collaboration' },
+  { to: '/regulatory', icon: FiShield, label: 'Regulatory' },
 ]
 
 function TabIcon({ type }: { type: WorkspaceTab['type'] }) {
@@ -161,6 +163,13 @@ function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
     { label: 'Go to Notebook', icon: FiBook, category: 'Navigation', action: () => { navigate('/notebook'); onClose() } },
     { label: 'Go to Search', icon: FiSearch, category: 'Navigation', action: () => { navigate('/search'); onClose() } },
     { label: 'Go to Timeline', icon: FiClock, category: 'Navigation', action: () => { navigate('/timeline'); onClose() } },
+    { label: 'Go to Data Manager', icon: FiDatabase, category: 'Navigation', action: () => { navigate('/data-manager'); onClose() } },
+    { label: 'Go to Visualization', icon: FiBarChart2, category: 'Navigation', action: () => { navigate('/data-visualization'); onClose() } },
+    { label: 'Go to Imaging', icon: FiImage, category: 'Navigation', action: () => { navigate('/imaging'); onClose() } },
+    { label: 'Go to Literature', icon: FiBookOpen, category: 'Navigation', action: () => { navigate('/literature-review'); onClose() } },
+    { label: 'Go to Citations', icon: FiList, category: 'Navigation', action: () => { navigate('/citation-manager'); onClose() } },
+    { label: 'Go to Experiments', icon: FiClipboard, category: 'Navigation', action: () => { navigate('/experiment-tracker'); onClose() } },
+    { label: 'Go to Genomics', icon: FiHeart, category: 'Navigation', action: () => { navigate('/genomics'); onClose() } },
     { label: 'New Project', icon: FiPlus, description: 'Create a new research project', category: 'Actions', action: () => { navigate('/projects?new=1'); onClose() } },
     { label: 'Start Discovery', icon: FiZap, description: 'Launch AI discovery pipeline', category: 'Actions', action: () => { navigate('/agents?start=1'); onClose() } },
     { label: 'Global Search', icon: FiGlobe, description: 'Search across all data', category: 'Actions', action: () => { navigate('/search'); onClose() } },
@@ -547,7 +556,7 @@ function ConstantChat() {
           project_id: d.project_id,
         })).filter((d: any) => d.title),
       }
-    } catch { return {} }
+    } catch { /* parse error */ return {} }
   }
 
   useEffect(() => {
@@ -839,7 +848,7 @@ function ConstantChat() {
         } else {
           fullResponse = generateSmartFallbackResponse(userMsg)
         }
-      } catch {
+      } catch { /* API unavailable — use local fallback */
         fullResponse = generateSmartFallbackResponse(userMsg)
       }
     }
@@ -1047,7 +1056,7 @@ export default function Layout() {
     localStorage.setItem('humanovo-notifs-read', new Date().toISOString())
   }
 
-  // Keyboard shortcut for command palette
+  // Keyboard shortcut for command palette + number shortcuts
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
       e.preventDefault()
@@ -1058,7 +1067,15 @@ export default function Layout() {
       setIsUserMenuOpen(false)
       setIsNotificationsOpen(false)
     }
-  }, [])
+    // Number shortcuts 1-6 for main nav (only when no input focused)
+    const tag = (e.target as HTMLElement)?.tagName
+    if (!e.metaKey && !e.ctrlKey && !e.altKey && tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') {
+      const idx = parseInt(e.key) - 1
+      if (idx >= 0 && idx < mainNavItems.length) {
+        navigate(mainNavItems[idx].to)
+      }
+    }
+  }, [navigate])
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown)
@@ -1208,10 +1225,7 @@ if (path === '/clinical-trials') return 'Clinical Trials'
               }
             >
               <item.icon className="w-4 h-4" />
-              <span className="font-medium flex-1">{item.label}</span>
-              {item.comingSoon && (
-                <span className="text-[9px] px-1.5 py-0.5 rounded bg-[var(--glass-bg)] text-[var(--color-text-muted)] border border-[var(--color-border)] whitespace-nowrap">Soon</span>
-              )}
+              <span className="font-medium">{item.label}</span>
             </NavLink>
           ))}
         </nav>
@@ -1394,12 +1408,6 @@ if (path === '/clinical-trials') return 'Clinical Trials'
 
         {/* Main content */}
         <main className="flex-1 min-h-0 overflow-auto bg-[var(--color-bg)]">
-          {['/data-manager', '/clinical-trials', '/manuscripts', '/biobank', '/collaboration', '/regulatory', '/imaging'].includes(location.pathname) && (
-            <div className="mx-6 mt-4 px-4 py-2.5 rounded-lg border border-[var(--color-border)] bg-[var(--glass-bg)] flex items-center gap-2">
-              <span className="text-xs font-medium px-2 py-0.5 rounded bg-[var(--color-accent-blue)] text-white" style={{ background: 'var(--color-accent-blue)' }}>Coming Soon</span>
-              <span className="text-xs text-[var(--color-text-muted)]">This feature is under active development and will be available in a future release.</span>
-            </div>
-          )}
           <Outlet />
         </main>
       </div>

@@ -1333,13 +1333,21 @@ interface GraphState {
   edges: GraphEdge[]
 }
 
-// Graph state is ephemeral (kept in component state only, no localStorage)
+const GRAPH_STATE_KEY = 'humanovo-workbench-graph'
+
 function loadGraphState(): GraphState {
+  try {
+    const stored = localStorage.getItem(GRAPH_STATE_KEY)
+    if (stored) {
+      const parsed = JSON.parse(stored)
+      if (parsed.nodes && parsed.edges) return parsed
+    }
+  } catch { /* corrupt data — start fresh */ }
   return { nodes: [], edges: [] }
 }
 
-function saveGraphState(_state: GraphState) {
-  // No-op: graph state is ephemeral per session
+function saveGraphState(state: GraphState) {
+  try { localStorage.setItem(GRAPH_STATE_KEY, JSON.stringify(state)) } catch { /* quota exceeded */ }
 }
 
 // ==================== NODE SHAPE HELPER ====================
@@ -3119,7 +3127,7 @@ IMPORTANT: If the user asks you to connect nodes, suggest connections, or explai
       } else {
         setConstantMessages(prev => [...prev, { role: 'assistant', text: generateWorkbenchFallback(userMsg) }])
       }
-    } catch {
+    } catch { /* API unavailable — use local fallback */
       setConstantMessages(prev => [...prev, { role: 'assistant', text: generateWorkbenchFallback(userMsg) }])
     } finally {
       setConstantLoading(false)

@@ -484,25 +484,32 @@ export default function Dashboard() {
       return sum + (p.hypothesis_count || 0)
     }, 0)
   }, [projects])
-  // Count evidence: API evidence + project documents from localStorage
-  const totalPapers = useMemo(() => {
-    const apiEvidence = projects.reduce((sum, p) => sum + (p.evidence_count || 0), 0)
-    const docs = persistGet<Array<{ id: string }>>('project-documents', [])
-    return apiEvidence + docs.length
-  }, [projects])
+  // Additional counts from localStorage
+  const datasetCount = useMemo(() => {
+    try { return JSON.parse(localStorage.getItem('data-manager-datasets') || '[]').length } catch { return 0 }
+  }, [])
+  const chartCount = useMemo(() => {
+    try { return JSON.parse(localStorage.getItem('humanovo-charts') || '[]').length } catch { return 0 }
+  }, [])
+  const imagingCount = useMemo(() => {
+    try { return JSON.parse(localStorage.getItem('research-imaging-studies') || '[]').length } catch { return 0 }
+  }, [])
 
   const stats: StatData[] = [
     { label: 'Active Projects', value: totalProjects, icon: FiFolder, accentColor: '#a1a1a1', href: '/projects' },
+    { label: 'Simulations', value: simulationCount, icon: FiActivity, accentColor: '#3b82f6', href: '/compute-lab' },
+    { label: 'Datasets', value: datasetCount, icon: FiCpu, accentColor: '#06b6d4', href: '/data-manager' },
+    { label: 'Visualizations', value: chartCount, icon: FiTrendingUp, accentColor: '#22c55e', href: '/data-visualization' },
+    { label: 'Imaging Studies', value: imagingCount, icon: FiSearch, accentColor: '#f59e0b', href: '/imaging' },
     { label: 'Hypotheses', value: totalHypotheses, icon: FiZap, accentColor: '#a855f7', href: '/agents' },
-    { label: 'Evidence', value: totalPapers, icon: FiFileText, accentColor: '#22c55e', href: '/evidence' },
-    { label: 'Simulations', value: simulationCount, icon: FiActivity, accentColor: '#3b82f6', href: '/simulations?tab=history' },
   ]
 
   const quickActions = [
     { label: 'New Project', icon: FiFolder, action: () => navigate('/projects?new=1'), color: 'var(--color-text)' },
-    { label: 'Start Discovery', icon: FiZap, action: () => navigate('/agents?start=1'), color: 'var(--color-text-secondary)' },
-    { label: 'Search', icon: FiSearch, action: () => navigate('/search'), color: 'var(--color-text-secondary)' },
+    { label: 'Compute Lab', icon: FiCpu, action: () => navigate('/compute-lab'), color: 'var(--color-text-secondary)' },
+    { label: 'Visualize', icon: FiTrendingUp, action: () => navigate('/data-visualization'), color: 'var(--color-text-secondary)' },
     { label: 'Notebook', icon: FiBook, action: () => navigate('/notebook'), color: 'var(--color-text-secondary)' },
+    { label: 'Search', icon: FiSearch, action: () => navigate('/search'), color: 'var(--color-text-secondary)' },
   ]
 
   return (
@@ -529,7 +536,7 @@ export default function Dashboard() {
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-6 gap-3">
         {stats.map((stat) => (
           <StatCard key={stat.label} stat={stat} />
         ))}

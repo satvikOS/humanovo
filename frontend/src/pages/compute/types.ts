@@ -29,10 +29,10 @@ export interface PresetParam {
 export interface Preset {
   id: string
   name: string
-  matlabFn: string
+  referenceFn: string
   toolbox: string
   description: string
-  matlabCode: string
+  referenceCode: string
   params: PresetParam[]
   sampleData: Record<string, any>
   compute: (params: Record<string, any>) => ComputeResult
@@ -85,4 +85,4 @@ export interface CodeTemplate {
   code: string
 }
 
-export type ComputeMode = 'presets' | 'montecarlo' | 'equations' | 'codelab'
+export type ComputeMode = 'workstation' | 'presets' | 'montecarlo' | 'equations'

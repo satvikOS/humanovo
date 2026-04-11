@@ -104,3 +104,4 @@ chroma/
 .terraform.lock.hcl
 *.tfplan
 tfplan
+test-results/

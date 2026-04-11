@@ -4,6 +4,7 @@ import {
   FiDownload, FiUpload, FiSettings, FiX,
   FiMaximize2, FiMinimize2, FiEdit3, FiCopy, FiDroplet,
   FiClipboard, FiCheck, FiChevronDown,
+  FiZoomIn, FiCrosshair,
 } from 'react-icons/fi'
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
@@ -13,6 +14,7 @@ import {
   FunnelChart, Funnel, LabelList,
   Treemap, ComposedChart, ErrorBar, ReferenceLine, ZAxis,
   RadialBarChart, RadialBar,
+  Brush,
 } from 'recharts'
 import html2canvas from 'html2canvas'
 import * as XLSX from 'xlsx'
@@ -30,6 +32,7 @@ interface DataPoint {
   errorPlus?: number   // error bar upper
   errorMinus?: number  // error bar lower
   size?: number        // bubble size
+  trend?: number       // trend line value
 }
 
 type ChartType =
@@ -40,7 +43,7 @@ type ChartType =
   | 'scatter' | 'bubble'
   | 'radar'
   | 'funnel' | 'treemap'
-  | 'histogram' | 'box_plot'
+  | 'histogram' | 'box_plot' | 'violin' | 'density'
   | 'waterfall' | 'error_bar' | 'candlestick'
   | 'heatmap' | 'stem' | 'band'
   | 'polar_area'
@@ -49,12 +52,22 @@ type ChartType =
   | 'quiver_3d' | 'isosurface_3d' | 'voxel_3d' | 'streamline_3d'
   | 'slice_3d' | 'stem_3d' | 'waterfall_3d' | 'ribbon_3d' | 'pie_3d'
 
+interface ChartAnnotation {
+  id: string
+  axis: 'x' | 'y'
+  value: number
+  label: string
+  color: string
+  style: 'solid' | 'dashed' | 'dotted'
+}
+
 interface ChartConfig {
   id: string
   title: string
   type: ChartType
   data: DataPoint[]
   options: ChartOptions
+  annotations: ChartAnnotation[]
   createdAt: string
 }
 
@@ -79,6 +92,10 @@ interface ChartOptions {
   innerRadius: number  // donut
   startAngle: number
   smooth: boolean
+  showBrush: boolean
+  showCrosshair: boolean
+  trendLine: 'none' | 'linear' | 'movingAvg'
+  showStats: boolean
 }
 
 function smartDownsample(data: DataPoint[], maxPoints: number = 100): DataPoint[] {
@@ -150,6 +167,9 @@ const defaultOptions: ChartOptions = {
   lineWidth: 2, markerSize: 4, markerShape: 'circle',
   fillOpacity: 0.15, showValues: false, animate: true,
   barGap: 4, innerRadius: 60, startAngle: 90, smooth: true,
+  showBrush: false, showCrosshair: true,
+  trendLine: 'none',
+  showStats: false,
 }
 
 // ─── Palettes ───────────────────────────────────────────────────
@@ -192,26 +212,28 @@ const CHART_TYPES: { value: ChartType; label: string; group: string }[] = [
   // Scatter
   { value: 'scatter', label: 'Scatter', group: 'Scatter / Bubble' },
   { value: 'bubble', label: 'Bubble', group: 'Scatter / Bubble' },
-  { value: 'scatter_3d' as ChartType, label: '3D Scatter', group: '3D Charts' },
-  { value: 'bubble_3d' as ChartType, label: '3D Bubble', group: '3D Charts' },
-  { value: 'line_3d' as ChartType, label: '3D Line', group: '3D Charts' },
-  { value: 'bar_3d' as ChartType, label: '3D Bar', group: '3D Charts' },
-  { value: 'surface_3d' as ChartType, label: '3D Surface', group: '3D Charts' },
-  { value: 'wireframe_3d' as ChartType, label: '3D Wireframe', group: '3D Charts' },
-  { value: 'contour_3d' as ChartType, label: '3D Contour', group: '3D Charts' },
-  { value: 'trisurf_3d' as ChartType, label: '3D Tri-Surface', group: '3D Charts' },
-  { value: 'quiver_3d' as ChartType, label: '3D Quiver (Vectors)', group: '3D Charts' },
-  { value: 'isosurface_3d' as ChartType, label: '3D Isosurface', group: '3D Charts' },
-  { value: 'voxel_3d' as ChartType, label: '3D Voxel', group: '3D Charts' },
-  { value: 'streamline_3d' as ChartType, label: '3D Streamline', group: '3D Charts' },
-  { value: 'slice_3d' as ChartType, label: '3D Slice', group: '3D Charts' },
-  { value: 'stem_3d' as ChartType, label: '3D Stem', group: '3D Charts' },
-  { value: 'waterfall_3d' as ChartType, label: '3D Waterfall', group: '3D Charts' },
-  { value: 'ribbon_3d' as ChartType, label: '3D Ribbon', group: '3D Charts' },
-  { value: 'pie_3d' as ChartType, label: '3D Pie', group: '3D Charts' },
+  { value: 'scatter_3d', label: '3D Scatter', group: '3D Charts' },
+  { value: 'bubble_3d', label: '3D Bubble', group: '3D Charts' },
+  { value: 'line_3d', label: '3D Line', group: '3D Charts' },
+  { value: 'bar_3d', label: '3D Bar', group: '3D Charts' },
+  { value: 'surface_3d', label: '3D Surface', group: '3D Charts' },
+  { value: 'wireframe_3d', label: '3D Wireframe', group: '3D Charts' },
+  { value: 'contour_3d', label: '3D Contour', group: '3D Charts' },
+  { value: 'trisurf_3d', label: '3D Tri-Surface', group: '3D Charts' },
+  { value: 'quiver_3d', label: '3D Quiver (Vectors)', group: '3D Charts' },
+  { value: 'isosurface_3d', label: '3D Isosurface', group: '3D Charts' },
+  { value: 'voxel_3d', label: '3D Voxel', group: '3D Charts' },
+  { value: 'streamline_3d', label: '3D Streamline', group: '3D Charts' },
+  { value: 'slice_3d', label: '3D Slice', group: '3D Charts' },
+  { value: 'stem_3d', label: '3D Stem', group: '3D Charts' },
+  { value: 'waterfall_3d', label: '3D Waterfall', group: '3D Charts' },
+  { value: 'ribbon_3d', label: '3D Ribbon', group: '3D Charts' },
+  { value: 'pie_3d', label: '3D Pie', group: '3D Charts' },
   // Statistical
   { value: 'histogram', label: 'Histogram', group: 'Statistical' },
   { value: 'box_plot', label: 'Box Plot', group: 'Statistical' },
+  { value: 'violin', label: 'Violin Plot', group: 'Statistical' },
+  { value: 'density', label: 'Density / KDE', group: 'Statistical' },
   { value: 'error_bar', label: 'Error Bars', group: 'Statistical' },
   { value: 'candlestick', label: 'Candlestick', group: 'Statistical' },
   // Other
@@ -247,6 +269,8 @@ const SAMPLE_DATA: Record<string, { data: string; title: string; columns: string
   bubble: { title: 'Clinical Trial Landscape', columns: 'label, value, value2, size', data: 'Phase I, 25, 80, 15\nPhase II, 50, 65, 30\nPhase III, 75, 45, 50\nPhase IV, 90, 30, 20' },
   histogram: { title: 'Patient Age Distribution', columns: 'label, value', data: '18, 5\n22, 12\n28, 18\n32, 25\n38, 30\n42, 28\n48, 22\n52, 18\n58, 15\n62, 10\n68, 8\n72, 5' },
   box_plot: { title: 'Biomarker Variability', columns: 'label, value, category', data: 'CRP, 2.1, Control\nCRP, 3.5, Control\nCRP, 1.8, Control\nCRP, 5.2, Treatment\nCRP, 4.8, Treatment\nCRP, 6.1, Treatment' },
+  violin: { title: 'Gene Expression Distribution', columns: 'label, value, category', data: 'TP53, 2.1, Normal\nTP53, 2.5, Normal\nTP53, 2.3, Normal\nTP53, 3.0, Normal\nTP53, 2.8, Normal\nTP53, 5.2, Tumor\nTP53, 6.1, Tumor\nTP53, 4.8, Tumor\nTP53, 5.5, Tumor\nTP53, 7.0, Tumor' },
+  density: { title: 'Patient BMI Distribution', columns: 'label, value', data: '18.5, 2\n20, 5\n21.5, 12\n23, 22\n24.5, 35\n26, 40\n27.5, 32\n29, 20\n30.5, 12\n32, 6\n33.5, 3\n35, 1' },
   error_bar: { title: 'Treatment Response', columns: 'label, value, errorPlus, errorMinus', data: 'Placebo, 20, 5, 5\nLow Dose, 35, 8, 6\nMed Dose, 55, 10, 8\nHigh Dose, 72, 12, 7' },
   candlestick: { title: 'Blood Glucose', columns: 'label, open, high, low, close', data: 'Mon, 95, 140, 80, 110\nTue, 110, 135, 90, 105\nWed, 105, 150, 85, 120\nThu, 120, 160, 95, 100\nFri, 100, 130, 75, 115' },
   heatmap: { title: 'Gene Co-expression', columns: 'label, value, category', data: 'TP53-BRCA1, 0.85, High\nTP53-EGFR, 0.42, Med\nBRCA1-EGFR, 0.68, Med\nTP53-MYC, 0.91, High\nBRCA1-MYC, 0.35, Low' },
@@ -362,6 +386,53 @@ function computeHistogram(values: number[], bins = 15): { label: string; count: 
   return buckets.map(b => ({ label: b.label, count: b.count }))
 }
 
+// ─── Trend Line Helpers ─────────────────────────────────────────
+function computeLinearRegression(data: DataPoint[]): { slope: number; intercept: number; r2: number } {
+  const n = data.length
+  if (n < 2) return { slope: 0, intercept: 0, r2: 0 }
+  let sx = 0, sy = 0, sxx = 0, sxy = 0, syy = 0
+  data.forEach((d, i) => {
+    const x = i; const y = d.value
+    sx += x; sy += y; sxx += x * x; sxy += x * y; syy += y * y
+  })
+  const denom = n * sxx - sx * sx
+  if (denom === 0) return { slope: 0, intercept: sy / n, r2: 0 }
+  const slope = (n * sxy - sx * sy) / denom
+  const intercept = (sy - slope * sx) / n
+  const yMean = sy / n
+  let ssRes = 0, ssTot = 0
+  data.forEach((d, i) => {
+    const predicted = slope * i + intercept
+    ssRes += (d.value - predicted) ** 2
+    ssTot += (d.value - yMean) ** 2
+  })
+  const r2 = ssTot === 0 ? 1 : 1 - ssRes / ssTot
+  return { slope, intercept, r2 }
+}
+
+function computeMovingAverage(data: DataPoint[], window = 3): number[] {
+  return data.map((_, i) => {
+    const start = Math.max(0, i - Math.floor(window / 2))
+    const end = Math.min(data.length, i + Math.ceil(window / 2))
+    const slice = data.slice(start, end)
+    return slice.reduce((s, d) => s + d.value, 0) / slice.length
+  })
+}
+
+function addTrendData(data: DataPoint[], trendType: string): DataPoint[] {
+  if (trendType === 'none' || data.length < 2) return data
+  if (trendType === 'linear') {
+    const { slope, intercept } = computeLinearRegression(data)
+    return data.map((d, i) => ({ ...d, trend: Math.round((slope * i + intercept) * 1000) / 1000 }))
+  }
+  if (trendType === 'movingAvg') {
+    const window = Math.max(3, Math.round(data.length / 5))
+    const ma = computeMovingAverage(data, window)
+    return data.map((d, i) => ({ ...d, trend: Math.round(ma[i] * 1000) / 1000 }))
+  }
+  return data
+}
+
 // ─── Glassmorphic Select ────────────────────────────────────────
 interface GlassSelectOption { value: string; label: string; group?: string; preview?: React.ReactNode }
 
@@ -441,6 +512,7 @@ export default function DataVisualization() {
     // Migrate old charts that lack the `options` field
     return raw.map((c: any) => ({
       ...c,
+      annotations: c.annotations || [],
       options: c.options ? { ...defaultOptions, ...c.options } : { ...defaultOptions, color: c.color || defaultOptions.color },
     }))
   })
@@ -449,6 +521,18 @@ export default function DataVisualization() {
   const [expandedChart, setExpandedChart] = useState<string | null>(null)
   const chartRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // ─── Interactivity state ────────────────────────────────────
+  const [hiddenSeries, setHiddenSeries] = useState<Record<string, Set<string>>>({})
+  const toggleSeries = useCallback((chartId: string, seriesKey: string) => {
+    setHiddenSeries(prev => {
+      const next = { ...prev }
+      const set = new Set(prev[chartId] || [])
+      if (set.has(seriesKey)) set.delete(seriesKey); else set.add(seriesKey)
+      next[chartId] = set
+      return next
+    })
+  }, [])
 
   // ─── Form state ─────────────────────────────────────────────
   const [form, setForm] = useState({
@@ -469,6 +553,7 @@ export default function DataVisualization() {
       type: form.type,
       data: parseCSV(form.dataText),
       options: { ...form.options },
+      annotations: [],
       createdAt: new Date().toISOString(),
     }
     saveCharts([chart, ...charts])
@@ -480,8 +565,34 @@ export default function DataVisualization() {
   const deleteChart = (id: string) => setDeleteConfirmId(id)
   const confirmDeleteChart = () => { if (deleteConfirmId) { const deletedChart = charts.find(c => c.id === deleteConfirmId); saveCharts(charts.filter(c => c.id !== deleteConfirmId)); logActivity({ type: 'discovery', action: 'deleted', title: `Deleted chart: ${deletedChart?.title || deleteConfirmId}` }); setDeleteConfirmId(null) } }
   const duplicateChart = (c: ChartConfig) => {
-    const dup = { ...c, id: `chart-${Date.now()}`, title: c.title + ' (copy)', createdAt: new Date().toISOString() }
+    const dup = { ...c, id: `chart-${Date.now()}`, title: c.title + ' (copy)', annotations: [...(c.annotations || [])], createdAt: new Date().toISOString() }
     saveCharts([dup, ...charts])
+  }
+  const addAnnotation = (chartId: string) => {
+    const chart = charts.find(c => c.id === chartId)
+    if (!chart) return
+    const values = chart.data.map(d => d.value)
+    const mean = values.reduce((s, v) => s + v, 0) / values.length
+    const ann: ChartAnnotation = { id: `ann-${Date.now()}`, axis: 'y', value: Math.round(mean * 100) / 100, label: 'Reference', color: '#f59e0b', style: 'dashed' }
+    saveCharts(charts.map(c => c.id === chartId ? { ...c, annotations: [...(c.annotations || []), ann] } : c))
+  }
+  const updateAnnotation = (chartId: string, annId: string, updates: Partial<ChartAnnotation>) => {
+    saveCharts(charts.map(c => c.id === chartId ? { ...c, annotations: (c.annotations || []).map(a => a.id === annId ? { ...a, ...updates } : a) } : c))
+  }
+  const removeAnnotation = (chartId: string, annId: string) => {
+    saveCharts(charts.map(c => c.id === chartId ? { ...c, annotations: (c.annotations || []).filter(a => a.id !== annId) } : c))
+  }
+  const addStatsAnnotations = (chartId: string) => {
+    const chart = charts.find(c => c.id === chartId)
+    if (!chart || chart.data.length < 2) return
+    const vals = chart.data.map(d => d.value).sort((a, b) => a - b)
+    const mean = vals.reduce((s, v) => s + v, 0) / vals.length
+    const median = vals.length % 2 === 0 ? (vals[vals.length / 2 - 1] + vals[vals.length / 2]) / 2 : vals[Math.floor(vals.length / 2)]
+    const anns: ChartAnnotation[] = [
+      { id: `ann-mean-${Date.now()}`, axis: 'y', value: Math.round(mean * 100) / 100, label: `Mean: ${mean.toFixed(2)}`, color: '#3b82f6', style: 'dashed' },
+      { id: `ann-median-${Date.now()}`, axis: 'y', value: Math.round(median * 100) / 100, label: `Median: ${median.toFixed(2)}`, color: '#22c55e', style: 'dotted' },
+    ]
+    saveCharts(charts.map(c => c.id === chartId ? { ...c, annotations: [...(c.annotations || []), ...anns] } : c))
   }
   const updateChartOptions = (id: string, opts: Partial<ChartOptions>) => {
     saveCharts(charts.map(c => c.id === id ? { ...c, options: { ...c.options, ...opts } } : c))
@@ -580,6 +691,35 @@ export default function DataVisualization() {
     a.href = URL.createObjectURL(blob); a.click(); URL.revokeObjectURL(a.href)
   }, [])
 
+  const exportXlsx = useCallback((chart: ChartConfig) => {
+    const hasCat = chart.data.some(d => d.category)
+    const hasV2 = chart.data.some(d => d.value2 !== undefined)
+    const rows = chart.data.map(d => {
+      const row: Record<string, string | number> = { label: d.label, value: d.value }
+      if (hasCat) row.category = d.category || ''
+      if (hasV2) row.value2 = d.value2 ?? ''
+      return row
+    })
+    const ws = XLSX.utils.json_to_sheet(rows)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Data')
+    XLSX.writeFile(wb, `${chart.title.replace(/\s+/g, '-').toLowerCase()}.xlsx`)
+  }, [])
+
+  const computeStats = (data: DataPoint[]) => {
+    const vals = data.map(d => d.value).sort((a, b) => a - b)
+    const n = vals.length
+    if (n === 0) return null
+    const sum = vals.reduce((s, v) => s + v, 0)
+    const mean = sum / n
+    const median = n % 2 === 0 ? (vals[n / 2 - 1] + vals[n / 2]) / 2 : vals[Math.floor(n / 2)]
+    const variance = vals.reduce((s, v) => s + (v - mean) ** 2, 0) / n
+    const std = Math.sqrt(variance)
+    const q1 = vals[Math.floor(n * 0.25)]
+    const q3 = vals[Math.floor(n * 0.75)]
+    return { n, mean, median, std, min: vals[0], max: vals[n - 1], sum, q1, q3, iqr: q3 - q1 }
+  }
+
   // ─── Copy chart to clipboard as image ──────────────────────
   const [copiedChart, setCopiedChart] = useState<string | null>(null)
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
@@ -612,25 +752,45 @@ export default function DataVisualization() {
     const maxPoints = type === 'scatter' ? 500 : 100
     const displayData = smartDownsample(chart.data, maxPoints)
     const wasDownsampled = displayData.length < chart.data.length
-    const data = displayData
+    const data = o.trendLine !== 'none' ? addTrendData(displayData, o.trendLine) : displayData
+    const hasTrend = o.trendLine !== 'none' && data.some(d => d.trend !== undefined)
     const colors = getPalette(o.colorPalette)
     const gridEl = o.showGrid ? <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" /> : null
-    const tooltipEl = <Tooltip contentStyle={TOOLTIP_STYLE} />
-    const legendEl = o.showLegend ? <Legend wrapperStyle={{ fontSize: 11 }} /> : null
+    const cursorStyle = o.showCrosshair ? { stroke: 'var(--color-text-muted)', strokeWidth: 1, strokeDasharray: '4 4' } : undefined
+    const tooltipEl = <Tooltip contentStyle={TOOLTIP_STYLE} cursor={cursorStyle} />
+    const hidden = hiddenSeries[chart.id] || new Set<string>()
+    const handleLegendClick = (e: any) => { if (e?.dataKey) toggleSeries(chart.id, e.dataKey) }
+    const legendEl = o.showLegend ? <Legend wrapperStyle={{ fontSize: 11, cursor: 'pointer' }} onClick={handleLegendClick} formatter={(value: string) => <span style={{ opacity: hidden.has(value) ? 0.3 : 1, textDecoration: hidden.has(value) ? 'line-through' : 'none' }}>{value}</span>} /> : null
+    const brushEl = o.showBrush && data.length > 5 ? <Brush dataKey="label" height={20} stroke="var(--color-accent-blue)" fill="var(--glass-bg)" travellerWidth={8} /> : null
     const xAxisEl = <XAxis dataKey="label" tick={AXIS_TICK} label={o.xLabel ? { value: o.xLabel, position: 'insideBottom', offset: -5, style: { fontSize: 11, fill: 'var(--color-text-muted)' } } : undefined} scale={o.logScaleX ? 'log' : 'auto'} />
     const yAxisEl = <YAxis tick={AXIS_TICK} label={o.yLabel ? { value: o.yLabel, angle: -90, position: 'insideLeft', style: { fontSize: 11, fill: 'var(--color-text-muted)' } } : undefined} scale={o.logScaleY ? 'log' : 'auto'} domain={o.logScaleY ? ['auto', 'auto'] : undefined} />
+    const annotationEls = (chart.annotations || []).map(ann => (
+      <ReferenceLine key={ann.id} y={ann.axis === 'y' ? ann.value : undefined} x={ann.axis === 'x' ? ann.value : undefined}
+        stroke={ann.color} strokeDasharray={ann.style === 'dashed' ? '8 4' : ann.style === 'dotted' ? '2 4' : undefined}
+        strokeWidth={1.5} label={{ value: ann.label, position: 'insideTopRight', style: { fontSize: 10, fill: ann.color, fontWeight: 600 } }} />
+    ))
 
     const renderChartSwitch = (): React.ReactNode => { switch (type) {
       // ── BAR CHARTS ──────────────────────────────────────────
       case 'bar':
         return (
           <ResponsiveContainer width="100%" height={height}>
-            <BarChart data={data} barGap={o.barGap}>
-              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}
-              <Bar dataKey="value" fill={colors[0]} radius={[4, 4, 0, 0]} animationDuration={o.animate ? 400 : 0}>
-                {o.showValues && <LabelList dataKey="value" position="top" style={{ fontSize: 10, fill: 'var(--color-text-muted)' }} />}
-              </Bar>
-            </BarChart>
+            {hasTrend ? (
+              <ComposedChart data={data} barGap={o.barGap}>
+                {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{annotationEls}
+                <Bar dataKey="value" fill={colors[0]} radius={[4, 4, 0, 0]} animationDuration={o.animate ? 400 : 0} hide={hidden.has('value')}>
+                  {o.showValues && <LabelList dataKey="value" position="top" style={{ fontSize: 10, fill: 'var(--color-text-muted)' }} />}
+                </Bar>
+                <Line type="monotone" dataKey="trend" name={o.trendLine === 'linear' ? 'Linear Trend' : 'Moving Avg'} stroke="#f59e0b" strokeWidth={2} strokeDasharray="6 3" dot={false} />
+              </ComposedChart>
+            ) : (
+              <BarChart data={data} barGap={o.barGap}>
+                {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{annotationEls}
+                <Bar dataKey="value" fill={colors[0]} radius={[4, 4, 0, 0]} animationDuration={o.animate ? 400 : 0} hide={hidden.has('value')}>
+                  {o.showValues && <LabelList dataKey="value" position="top" style={{ fontSize: 10, fill: 'var(--color-text-muted)' }} />}
+                </Bar>
+              </BarChart>
+            )}
           </ResponsiveContainer>
         )
 
@@ -654,7 +814,7 @@ export default function DataVisualization() {
           return (
             <ResponsiveContainer width="100%" height={height}>
               <BarChart data={data} barGap={o.barGap}>
-                {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}
+                {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{annotationEls}
                 <Bar dataKey="value" name="Series 1" fill={colors[0]} radius={[4, 4, 0, 0]} />
                 {data.some(d => d.value2 !== undefined) && <Bar dataKey="value2" name="Series 2" fill={colors[1]} radius={[4, 4, 0, 0]} />}
                 {data.some(d => d.value3 !== undefined) && <Bar dataKey="value3" name="Series 3" fill={colors[2]} radius={[4, 4, 0, 0]} />}
@@ -671,7 +831,7 @@ export default function DataVisualization() {
         return (
           <ResponsiveContainer width="100%" height={height}>
             <BarChart data={pivoted} barGap={o.barGap}>
-              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}
+              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{annotationEls}
               {cats.map((cat, i) => <Bar key={cat} dataKey={cat!} fill={colors[i % colors.length]} radius={[4, 4, 0, 0]} />)}
             </BarChart>
           </ResponsiveContainer>
@@ -685,7 +845,7 @@ export default function DataVisualization() {
           return (
             <ResponsiveContainer width="100%" height={height}>
               <BarChart data={data}>
-                {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}
+                {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{annotationEls}
                 <Bar dataKey="value" stackId="a" fill={colors[0]} />
                 {data.some(d => d.value2 !== undefined) && <Bar dataKey="value2" stackId="a" fill={colors[1]} />}
               </BarChart>
@@ -709,7 +869,7 @@ export default function DataVisualization() {
         return (
           <ResponsiveContainer width="100%" height={height}>
             <BarChart data={pivoted}>
-              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}
+              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{annotationEls}
               {cats.map((cat, i) => <Bar key={cat} dataKey={cat!} stackId="a" fill={colors[i % colors.length]} />)}
             </BarChart>
           </ResponsiveContainer>
@@ -744,8 +904,9 @@ export default function DataVisualization() {
         return (
           <ResponsiveContainer width="100%" height={height}>
             <LineChart data={data}>
-              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}
-              <Line type={o.smooth ? 'monotone' : 'linear'} dataKey="value" stroke={colors[0]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize, fill: colors[0] }} animationDuration={o.animate ? 400 : 0} />
+              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{annotationEls}
+              <Line type={o.smooth ? 'monotone' : 'linear'} dataKey="value" stroke={colors[0]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize, fill: colors[0] }} animationDuration={o.animate ? 400 : 0} hide={hidden.has('value')} />
+              {hasTrend && <Line type="monotone" dataKey="trend" name={o.trendLine === 'linear' ? 'Linear Trend' : 'Moving Avg'} stroke="#f59e0b" strokeWidth={2} strokeDasharray="6 3" dot={false} />}
             </LineChart>
           </ResponsiveContainer>
         )
@@ -754,10 +915,10 @@ export default function DataVisualization() {
         return (
           <ResponsiveContainer width="100%" height={height}>
             <LineChart data={data}>
-              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}
-              <Line type="monotone" dataKey="value" name="Series 1" stroke={colors[0]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize }} />
-              {data.some(d => d.value2 !== undefined) && <Line type="monotone" dataKey="value2" name="Series 2" stroke={colors[1]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize }} />}
-              {data.some(d => d.value3 !== undefined) && <Line type="monotone" dataKey="value3" name="Series 3" stroke={colors[2]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize }} />}
+              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{annotationEls}
+              <Line type="monotone" dataKey="value" name="Series 1" stroke={colors[0]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize }} hide={hidden.has('value')} />
+              {data.some(d => d.value2 !== undefined) && <Line type="monotone" dataKey="value2" name="Series 2" stroke={colors[1]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize }} hide={hidden.has('value2')} />}
+              {data.some(d => d.value3 !== undefined) && <Line type="monotone" dataKey="value3" name="Series 3" stroke={colors[2]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize }} hide={hidden.has('value3')} />}
             </LineChart>
           </ResponsiveContainer>
         )
@@ -766,8 +927,8 @@ export default function DataVisualization() {
         return (
           <ResponsiveContainer width="100%" height={height}>
             <LineChart data={data}>
-              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}
-              <Line type="stepAfter" dataKey="value" stroke={colors[0]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize, fill: colors[0] }} />
+              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{annotationEls}
+              <Line type="stepAfter" dataKey="value" stroke={colors[0]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize, fill: colors[0] }} hide={hidden.has('value')} />
             </LineChart>
           </ResponsiveContainer>
         )
@@ -776,8 +937,8 @@ export default function DataVisualization() {
         return (
           <ResponsiveContainer width="100%" height={height}>
             <LineChart data={data}>
-              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}
-              <Line type="natural" dataKey="value" stroke={colors[0]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize, fill: colors[0] }} />
+              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{annotationEls}
+              <Line type="natural" dataKey="value" stroke={colors[0]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize, fill: colors[0] }} hide={hidden.has('value')} />
             </LineChart>
           </ResponsiveContainer>
         )
@@ -798,10 +959,18 @@ export default function DataVisualization() {
       case 'area':
         return (
           <ResponsiveContainer width="100%" height={height}>
-            <AreaChart data={data}>
-              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}
-              <Area type="monotone" dataKey="value" stroke={colors[0]} fill={colors[0]} fillOpacity={o.fillOpacity} strokeWidth={o.lineWidth} />
-            </AreaChart>
+            {hasTrend ? (
+              <ComposedChart data={data}>
+                {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{annotationEls}
+                <Area type="monotone" dataKey="value" stroke={colors[0]} fill={colors[0]} fillOpacity={o.fillOpacity} strokeWidth={o.lineWidth} hide={hidden.has('value')} />
+                <Line type="monotone" dataKey="trend" name={o.trendLine === 'linear' ? 'Linear Trend' : 'Moving Avg'} stroke="#f59e0b" strokeWidth={2} strokeDasharray="6 3" dot={false} />
+              </ComposedChart>
+            ) : (
+              <AreaChart data={data}>
+                {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{annotationEls}
+                <Area type="monotone" dataKey="value" stroke={colors[0]} fill={colors[0]} fillOpacity={o.fillOpacity} strokeWidth={o.lineWidth} hide={hidden.has('value')} />
+              </AreaChart>
+            )}
           </ResponsiveContainer>
         )
 
@@ -809,10 +978,10 @@ export default function DataVisualization() {
         return (
           <ResponsiveContainer width="100%" height={height}>
             <AreaChart data={data}>
-              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}
-              <Area type="monotone" dataKey="value" stackId="1" name="Series 1" stroke={colors[0]} fill={colors[0]} fillOpacity={o.fillOpacity} />
-              {data.some(d => d.value2 !== undefined) && <Area type="monotone" dataKey="value2" stackId="1" name="Series 2" stroke={colors[1]} fill={colors[1]} fillOpacity={o.fillOpacity} />}
-              {data.some(d => d.value3 !== undefined) && <Area type="monotone" dataKey="value3" stackId="1" name="Series 3" stroke={colors[2]} fill={colors[2]} fillOpacity={o.fillOpacity} />}
+              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{annotationEls}
+              <Area type="monotone" dataKey="value" stackId="1" name="Series 1" stroke={colors[0]} fill={colors[0]} fillOpacity={o.fillOpacity} hide={hidden.has('value')} />
+              {data.some(d => d.value2 !== undefined) && <Area type="monotone" dataKey="value2" stackId="1" name="Series 2" stroke={colors[1]} fill={colors[1]} fillOpacity={o.fillOpacity} hide={hidden.has('value2')} />}
+              {data.some(d => d.value3 !== undefined) && <Area type="monotone" dataKey="value3" stackId="1" name="Series 3" stroke={colors[2]} fill={colors[2]} fillOpacity={o.fillOpacity} hide={hidden.has('value3')} />}
             </AreaChart>
           </ResponsiveContainer>
         )
@@ -821,7 +990,7 @@ export default function DataVisualization() {
         return (
           <ResponsiveContainer width="100%" height={height}>
             <AreaChart data={data} stackOffset="silhouette">
-              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}
+              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{annotationEls}
               <Area type="monotone" dataKey="value" stackId="1" stroke={colors[0]} fill={colors[0]} fillOpacity={0.6} />
               {data.some(d => d.value2 !== undefined) && <Area type="monotone" dataKey="value2" stackId="1" stroke={colors[1]} fill={colors[1]} fillOpacity={0.6} />}
               {data.some(d => d.value3 !== undefined) && <Area type="monotone" dataKey="value3" stackId="1" stroke={colors[2]} fill={colors[2]} fillOpacity={0.6} />}
@@ -834,7 +1003,7 @@ export default function DataVisualization() {
         return (
           <ResponsiveContainer width="100%" height={height}>
             <AreaChart data={data}>
-              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}
+              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{annotationEls}
               <Area type="monotone" dataKey="value2" stroke="none" fill={colors[0]} fillOpacity={o.fillOpacity} name="Upper" />
               <Area type="monotone" dataKey="value" stroke="none" fill="var(--color-bg)" fillOpacity={1} name="Lower" />
               <Line type="monotone" dataKey="value" stroke={colors[0]} strokeWidth={o.lineWidth} dot={false} />
@@ -986,6 +1155,7 @@ export default function DataVisualization() {
               <XAxis dataKey="label" tick={AXIS_TICK} />
               <YAxis tick={AXIS_TICK} />
               {tooltipEl}
+              {brushEl}
               <Bar dataKey="count" fill={colors[0]} radius={[2, 2, 0, 0]}>
                 {hist.map((_, i) => <Cell key={i} fill={colors[0]} opacity={0.8} />)}
               </Bar>
@@ -1024,6 +1194,96 @@ export default function DataVisualization() {
               <Line type="linear" dataKey="q3" stroke={colors[0]} dot={{ r: 5, fill: colors[0] }} strokeWidth={0} />
               <ReferenceLine y={0} stroke="var(--color-border)" />
             </ComposedChart>
+          </ResponsiveContainer>
+        )
+      }
+
+      case 'violin': {
+        // Group data by category, compute kernel density for each
+        const vGroups: Record<string, number[]> = {}
+        data.forEach(d => {
+          const grp = d.category || d.label || 'All'
+          if (!vGroups[grp]) vGroups[grp] = []
+          vGroups[grp].push(d.value)
+        })
+        const vEntries = Object.entries(vGroups)
+        const allVals = data.map(d => d.value)
+        const vMin = Math.min(...allVals), vMax = Math.max(...allVals)
+        const vRange = vMax - vMin || 1
+        const vPad = vRange * 0.1
+        const ySteps = 40
+        const groupW = Math.min(120, (600 / Math.max(vEntries.length, 1)))
+        const svgW = vEntries.length * groupW + 80
+        return (
+          <div style={{ overflowX: 'auto', height }}>
+            <svg width={svgW} height={height} style={{ fontFamily: 'var(--font-mono, monospace)' }}>
+              {/* Y axis */}
+              {Array.from({ length: 5 }, (_, i) => {
+                const val = vMin - vPad + (vRange + 2 * vPad) * (i / 4)
+                const y = height - 30 - ((i / 4) * (height - 50))
+                return <g key={i}><line x1={55} x2={svgW} y1={y} y2={y} stroke="var(--color-border)" strokeDasharray="2,2" /><text x={50} y={y + 4} textAnchor="end" fill="var(--color-text-muted)" fontSize={10}>{val.toFixed(1)}</text></g>
+              })}
+              {vEntries.map(([name, vals], gi) => {
+                const sorted = [...vals].sort((a, b) => a - b)
+                const cx = 65 + gi * groupW + groupW / 2
+                const bw = (vals.length > 1 ? Math.sqrt(vals.length) : 1) * 0.4
+                // KDE estimation
+                const kde: { y: number; density: number }[] = []
+                let maxD = 0
+                for (let i = 0; i <= ySteps; i++) {
+                  const v = (vMin - vPad) + (vRange + 2 * vPad) * (i / ySteps)
+                  let d = 0
+                  for (const sv of sorted) d += Math.exp(-0.5 * ((v - sv) / bw) ** 2) / (bw * 2.507)
+                  d /= sorted.length
+                  if (d > maxD) maxD = d
+                  kde.push({ y: v, density: d })
+                }
+                const halfW = groupW * 0.4
+                const toY = (v: number) => height - 30 - ((v - vMin + vPad) / (vRange + 2 * vPad)) * (height - 50)
+                const pathR = kde.map(k => `${cx + (k.density / maxD) * halfW},${toY(k.y)}`).join(' ')
+                const pathL = kde.map(k => `${cx - (k.density / maxD) * halfW},${toY(k.y)}`).reverse().join(' ')
+                const stats = computeBoxStats(vals)
+                return (
+                  <g key={name}>
+                    <polygon points={`${pathR} ${pathL}`} fill={colors[gi % colors.length]} opacity={0.3} stroke={colors[gi % colors.length]} strokeWidth={1.5} />
+                    {/* Median + quartile lines */}
+                    <line x1={cx - halfW * 0.5} x2={cx + halfW * 0.5} y1={toY(stats.median)} y2={toY(stats.median)} stroke={colors[gi % colors.length]} strokeWidth={2} />
+                    <line x1={cx - halfW * 0.3} x2={cx + halfW * 0.3} y1={toY(stats.q1)} y2={toY(stats.q1)} stroke={colors[gi % colors.length]} strokeWidth={1} opacity={0.6} />
+                    <line x1={cx - halfW * 0.3} x2={cx + halfW * 0.3} y1={toY(stats.q3)} y2={toY(stats.q3)} stroke={colors[gi % colors.length]} strokeWidth={1} opacity={0.6} />
+                    <text x={cx} y={height - 10} textAnchor="middle" fill="var(--color-text-muted)" fontSize={11}>{name}</text>
+                  </g>
+                )
+              })}
+            </svg>
+          </div>
+        )
+      }
+
+      case 'density': {
+        // Kernel Density Estimation rendered as smooth AreaChart
+        const vals = data.map(d => d.value).sort((a, b) => a - b)
+        const dMin = vals[0], dMax = vals[vals.length - 1]
+        const dRange = dMax - dMin || 1
+        const bw = dRange / Math.max(Math.sqrt(vals.length), 2)
+        const steps = 60
+        const kdeData: { x: number; density: number }[] = []
+        for (let i = 0; i <= steps; i++) {
+          const x = dMin - dRange * 0.1 + (dRange * 1.2) * (i / steps)
+          let d = 0
+          for (const v of vals) d += Math.exp(-0.5 * ((x - v) / bw) ** 2) / (bw * 2.507)
+          d /= vals.length
+          kdeData.push({ x: parseFloat(x.toFixed(2)), density: parseFloat(d.toFixed(6)) })
+        }
+        return (
+          <ResponsiveContainer width="100%" height={height}>
+            <AreaChart data={kdeData}>
+              {gridEl}
+              <XAxis dataKey="x" tick={AXIS_TICK} />
+              <YAxis tick={AXIS_TICK} />
+              {tooltipEl}
+              <Area type="monotone" dataKey="density" stroke={colors[0]} fill={colors[0]} fillOpacity={0.2} strokeWidth={2} dot={false} />
+              {annotationEls}
+            </AreaChart>
           </ResponsiveContainer>
         )
       }
@@ -1248,6 +1508,58 @@ export default function DataVisualization() {
           <input type="checkbox" checked={chart.options.smooth} onChange={e => updateChartOptions(chart.id, { smooth: e.target.checked })} />
           Smooth
         </label>
+        <label className="flex items-center gap-1.5 cursor-pointer" title="Show range brush below chart for zooming">
+          <input type="checkbox" checked={chart.options.showBrush} onChange={e => updateChartOptions(chart.id, { showBrush: e.target.checked })} />
+          <FiZoomIn className="w-3 h-3" /> Brush
+        </label>
+        <span className="flex items-center gap-1.5 text-xs" title="Trend line overlay">
+          Trend:
+          <select
+            value={chart.options.trendLine}
+            onChange={e => updateChartOptions(chart.id, { trendLine: e.target.value as any })}
+            className="text-xs rounded px-1 py-0.5"
+            style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)', color: 'var(--color-text)' }}
+          >
+            <option value="none">None</option>
+            <option value="linear">Linear</option>
+            <option value="movingAvg">Moving Avg</option>
+          </select>
+        </span>
+        <label className="flex items-center gap-1.5 cursor-pointer" title="Show crosshair cursor on hover">
+          <input type="checkbox" checked={chart.options.showCrosshair} onChange={e => updateChartOptions(chart.id, { showCrosshair: e.target.checked })} />
+          <FiCrosshair className="w-3 h-3" /> Crosshair
+        </label>
+      </div>
+      {/* Stats toggle */}
+      <label className="flex items-center gap-1.5 cursor-pointer text-xs">
+        <input type="checkbox" checked={chart.options.showStats} onChange={e => updateChartOptions(chart.id, { showStats: e.target.checked })} />
+        Show Statistics
+      </label>
+      {/* Annotations */}
+      <div>
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-xxs text-[var(--color-text-muted)] font-medium">Annotations</span>
+          <div className="flex gap-1">
+            <button onClick={() => addStatsAnnotations(chart.id)} className="text-xxs px-1.5 py-0.5 rounded hover:bg-white/10" style={{ color: 'var(--color-accent-green)' }}>+ Mean/Median</button>
+            <button onClick={() => addAnnotation(chart.id)} className="text-xxs px-1.5 py-0.5 rounded hover:bg-white/10" style={{ color: 'var(--color-accent-blue)' }}>+ Line</button>
+          </div>
+        </div>
+        {(chart.annotations || []).map(ann => (
+          <div key={ann.id} className="flex items-center gap-2 mb-1">
+            <input className="input text-xxs w-16" value={ann.label} onChange={e => updateAnnotation(chart.id, ann.id, { label: e.target.value })} />
+            <input type="number" className="input text-xxs w-16" value={ann.value} onChange={e => updateAnnotation(chart.id, ann.id, { value: parseFloat(e.target.value) || 0 })} step="any" />
+            <select value={ann.axis} onChange={e => updateAnnotation(chart.id, ann.id, { axis: e.target.value as 'x' | 'y' })}
+              className="text-xxs rounded px-1 py-0.5" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)', color: 'var(--color-text)' }}>
+              <option value="y">Y</option><option value="x">X</option>
+            </select>
+            <input type="color" value={ann.color} onChange={e => updateAnnotation(chart.id, ann.id, { color: e.target.value })} className="w-5 h-5 rounded cursor-pointer" style={{ padding: 0, border: 'none' }} />
+            <select value={ann.style} onChange={e => updateAnnotation(chart.id, ann.id, { style: e.target.value as 'solid' | 'dashed' | 'dotted' })}
+              className="text-xxs rounded px-1 py-0.5" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)', color: 'var(--color-text)' }}>
+              <option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option>
+            </select>
+            <button onClick={() => removeAnnotation(chart.id, ann.id)} className="text-xxs p-0.5 rounded hover:bg-white/10" style={{ color: '#ef4444' }}><FiX className="w-3 h-3" /></button>
+          </div>
+        ))}
       </div>
       {/* Palette preview */}
       <div className="flex items-center gap-1">
@@ -1268,7 +1580,7 @@ export default function DataVisualization() {
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Data Visualization</h1>
             <p className="text-sm text-[var(--color-text-muted)] mt-1">
-              {charts.length} chart{charts.length !== 1 ? 's' : ''} — {CHART_TYPES.length} chart types (2D + 3D), CSV/XLSX import, full customization, PNG/SVG/CSV export
+              {charts.length} chart{charts.length !== 1 ? 's' : ''} — {CHART_TYPES.length} types (2D + 3D), CSV/XLSX import &amp; export, annotations, trend lines, statistics
             </p>
           </div>
           <input ref={fileInputRef} type="file" accept=".csv,.tsv,.txt,.xlsx,.xls" onChange={handleFileUpload} className="hidden" />
@@ -1432,6 +1744,12 @@ export default function DataVisualization() {
                   <label className="flex items-center gap-2 text-xs text-[var(--color-text-secondary)] cursor-pointer">
                     <input type="checkbox" checked={form.options.animate} onChange={e => setForm(f => ({ ...f, options: { ...f.options, animate: e.target.checked } }))} className="rounded" /> Animate
                   </label>
+                  <label className="flex items-center gap-2 text-xs text-[var(--color-text-secondary)] cursor-pointer">
+                    <input type="checkbox" checked={form.options.showBrush} onChange={e => setForm(f => ({ ...f, options: { ...f.options, showBrush: e.target.checked } }))} className="rounded" /> Brush Zoom
+                  </label>
+                  <label className="flex items-center gap-2 text-xs text-[var(--color-text-secondary)] cursor-pointer">
+                    <input type="checkbox" checked={form.options.showCrosshair} onChange={e => setForm(f => ({ ...f, options: { ...f.options, showCrosshair: e.target.checked } }))} className="rounded" /> Crosshair
+                  </label>
                 </div>
               </details>
             </div>
@@ -1476,6 +1794,14 @@ export default function DataVisualization() {
                     </span>
                   </div>
                   <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={() => updateChartOptions(chart.id, { showBrush: !chart.options.showBrush })}
+                      className={`p-1.5 rounded hover:bg-[var(--glass-bg)] transition-colors ${chart.options.showBrush ? 'text-[var(--color-accent-blue)]' : 'text-[var(--color-text-muted)]'}`} title="Toggle brush zoom">
+                      <FiZoomIn className="w-3.5 h-3.5" />
+                    </button>
+                    <button onClick={() => updateChartOptions(chart.id, { showCrosshair: !chart.options.showCrosshair })}
+                      className={`p-1.5 rounded hover:bg-[var(--glass-bg)] transition-colors ${chart.options.showCrosshair ? 'text-[var(--color-accent-cyan)]' : 'text-[var(--color-text-muted)]'}`} title="Toggle crosshair">
+                      <FiCrosshair className="w-3.5 h-3.5" />
+                    </button>
                     <button onClick={() => setShowSettings(showSettings === chart.id ? null : chart.id)}
                       className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-accent-purple)]" title="Settings">
                       <FiSettings className="w-3.5 h-3.5" />
@@ -1496,6 +1822,10 @@ export default function DataVisualization() {
                     <button onClick={() => exportCsv(chart)}
                       className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-accent-orange)]" title="CSV">
                       <FiCopy className="w-3.5 h-3.5" />
+                    </button>
+                    <button onClick={() => exportXlsx(chart)}
+                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-accent-purple)]" title="XLSX">
+                      <FiUpload className="w-3.5 h-3.5" />
                     </button>
                     <button onClick={() => copyChartToClipboard(chart.id)}
                       className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-accent-cyan)]" title="Copy to clipboard">
@@ -1518,10 +1848,25 @@ export default function DataVisualization() {
                 </div>
 
                 {/* Footer */}
-                <div className="px-4 pb-3 flex items-center gap-3 text-xxs text-[var(--color-text-muted)]">
+                <div className="px-4 pb-3 flex flex-wrap items-center gap-3 text-xxs text-[var(--color-text-muted)]">
                   <span>{chart.data.length} pts</span>
                   <span>{chart.options.colorPalette}</span>
                   <span>{formatDate(chart.createdAt)}</span>
+                  {chart.options.trendLine === 'linear' && chart.data.length >= 2 && (() => {
+                    const { r2 } = computeLinearRegression(chart.data)
+                    return <span style={{ color: '#f59e0b' }}>R²={r2.toFixed(3)}</span>
+                  })()}
+                  {(chart.annotations || []).length > 0 && <span>{chart.annotations.length} annotation{chart.annotations.length !== 1 ? 's' : ''}</span>}
+                  {chart.options.showStats && chart.data.length >= 2 && (() => {
+                    const s = computeStats(chart.data)
+                    if (!s) return null
+                    return (
+                      <span className="flex items-center gap-2" style={{ color: 'var(--color-accent-cyan)' }}>
+                        μ={s.mean.toFixed(2)} · σ={s.std.toFixed(2)} · med={s.median.toFixed(2)} · [{s.min.toFixed(1)}, {s.max.toFixed(1)}]
+                      </span>
+                    )
+                  })()}
+                  {chart.options.showLegend && <span style={{ opacity: 0.5 }}>click legend to toggle series</span>}
                 </div>
 
                 {/* Settings panel */}
