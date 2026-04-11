@@ -502,7 +502,7 @@ function exportDocx(title: string, html: string) {
 // ═══════════════════════════════════════════════════════════════
 
 export default function Notebook() {
-  const [initError, setInitError] = useState<string | null>(null)
+  // initError state removed — graceful fallback to empty state on API failure
 
   // Page index (metadata only — content loaded on demand from API)
   const [pageIndex, setPageIndex] = useState<PageMeta[]>([])
@@ -534,7 +534,8 @@ export default function Notebook() {
         }
       } catch (err) {
         console.error('Failed to load notebook pages:', err)
-        setInitError('Failed to load notebook pages from server')
+        // Graceful fallback: start with empty local state instead of blocking
+        setPageIndex([])
       }
     }
     loadPages()
@@ -851,10 +852,6 @@ export default function Notebook() {
   }, [])
 
   // ─── Render ──────────────────────────────────────────────
-  if (initError) {
-    return <div className="p-8 text-[var(--color-text-muted)]"><h2 className="text-lg font-bold mb-2">Notebook Error</h2><pre className="text-sm">{initError}</pre></div>
-  }
-
   return (
     <>
       <div className="flex w-full" style={{ height: 'calc(100vh - 3.5rem)' }}>
