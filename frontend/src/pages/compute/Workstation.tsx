@@ -3667,16 +3667,16 @@ export default function Workstation() {
     })
   }, [])
 
-  const renameScript = useCallback((id: string) => {
+  const renameScript = useCallback(async (id: string) => {
     const current = scriptStore.list.find(s => s.id === id)
     if (!current) return
-    const next = prompt('Rename script', current.name)
+    const next = await showPrompt('Enter new name:', 'Rename Script', current.name)
     if (!next) return
     setScriptStore(store => ({
       ...store,
       list: store.list.map(s => s.id === id ? { ...s, name: next } : s),
     }))
-  }, [scriptStore])
+  }, [scriptStore, showPrompt])
 
   // Duplicate a script tab — creates an exact copy of the given script's
   // code under a derived name (` (copy)`, ` (copy 2)`, …) immediately

@@ -12,7 +12,7 @@ interface Sample {
 interface Inventory { total_samples: number; by_type: Record<string, number>; by_status: Record<string, number>; by_project: Record<string, number>; alerts: any[]; storage_utilization: any[] }
 
 const API = '/api/v1/biobank'
-const PIE_COLORS = ['#3b82f6', '#8b5cf6', '#22c55e', '#f97316', '#06b6d4', '#ef4444']
+const PIE_COLORS = ['#5B8DB8', '#8B7EAF', '#6BA594', '#C4956A', '#7BA7B8', '#B07E8B']
 const STATUS_COLORS: Record<string, string> = { available: 'text-[var(--color-text-secondary)] bg-[var(--glass-bg)]', checked_out: 'text-[var(--color-text-muted)] bg-[var(--glass-bg)]', depleted: 'text-[var(--color-text-muted)] bg-[var(--glass-bg)]', reserved: 'text-[var(--color-text-secondary)] bg-[var(--glass-bg)]' }
 
 export default function BiobankManager() {

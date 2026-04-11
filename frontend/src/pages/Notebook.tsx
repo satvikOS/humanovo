@@ -24,6 +24,7 @@ import Color from '@tiptap/extension-color'
 import { TextStyle } from '@tiptap/extension-text-style'
 import HorizontalRule from '@tiptap/extension-horizontal-rule'
 import { logActivity } from '../utils/persistence'
+import { useAlertDialog } from '../components/AlertDialog'
 import api from '../services/api'
 
 // ═══════════════════════════════════════════════════════════════
@@ -381,7 +382,7 @@ const TEMPLATES: PageTemplate[] = [
 // TipTap Toolbar
 // ═══════════════════════════════════════════════════════════════
 
-function EditorToolbar({ editor }: { editor: Editor | null }) {
+function EditorToolbar({ editor, onInsertLink }: { editor: Editor | null; onInsertLink: () => void }) {
   if (!editor) return null
 
   const btn = (active: boolean, onClick: () => void, label: string, title: string) => (
@@ -435,10 +436,7 @@ function EditorToolbar({ editor }: { editor: Editor | null }) {
       {btn(false, () => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(), '⊞ Table', 'Insert Table')}
       {btn(false, () => editor.chain().focus().setHorizontalRule().run(), '— HR', 'Horizontal Rule')}
       {btn(false, addImage, '🖼 Image', 'Insert Image')}
-      {btn(false, () => {
-        const url = prompt('Enter URL:')
-        if (url) editor.chain().focus().setLink({ href: url }).run()
-      }, '🔗 Link', 'Insert Link')}
+      {btn(false, onInsertLink, '🔗 Link', 'Insert Link')}
       {sep}
       {btn(editor.isActive({ textAlign: 'left' }), () => editor.chain().focus().setTextAlign('left').run(), '⫷', 'Align Left')}
       {btn(editor.isActive({ textAlign: 'center' }), () => editor.chain().focus().setTextAlign('center').run(), '⫿', 'Align Center')}
@@ -537,6 +535,8 @@ function exportMarkdown(title: string, html: string) {
 
 export default function Notebook() {
   // initError state removed — graceful fallback to empty state on API failure
+
+  const { showPrompt, AlertDialog } = useAlertDialog()
 
   // Page index (metadata only — content loaded on demand from API)
   const [pageIndex, setPageIndex] = useState<PageMeta[]>([])
@@ -888,6 +888,7 @@ export default function Notebook() {
   // ─── Render ──────────────────────────────────────────────
   return (
     <>
+      <AlertDialog />
       <div className="flex w-full" style={{ height: 'calc(100vh - 3.5rem)' }}>
 
           {/* ── Sidebar ── */}
@@ -1110,7 +1111,10 @@ export default function Notebook() {
               </div>
 
               {/* TipTap formatting toolbar */}
-              <EditorToolbar editor={editor} />
+              <EditorToolbar editor={editor} onInsertLink={async () => {
+                const url = await showPrompt('Enter URL:', 'Insert Link')
+                if (url && editor) editor.chain().focus().setLink({ href: url }).run()
+              }} />
 
               {/* Editor area */}
               <div className="flex-1 overflow-y-auto notebook-editor-area">
