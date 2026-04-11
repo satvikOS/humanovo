@@ -293,7 +293,7 @@ function describeVar(name: string, v: MValue): VarSnapshot {
       return { name, kind: 'str', shape: `1x${v.v.length}`, summary: JSON.stringify(v.v.slice(0, 40)), value: v }
     case 'mat': {
       const shape = `${v.rows}x${v.cols}`
-      if (v.rows === 1 && v.cols === 1) return { name, kind: 'mat', shape, summary: formatScalar(v.data[0]), value: v }
+      if (v.rows === 1 && v.cols === 1) return { name, kind: 'mat', shape: 'scalar', summary: formatScalar(v.data[0]), value: v }
       const n = Math.min(4, v.data.length)
       const preview = Array.from(v.data.slice(0, n)).map(formatScalar).join(', ')
       const suffix = v.data.length > n ? ', …' : ''
@@ -309,9 +309,9 @@ function describeVar(name: string, v: MValue): VarSnapshot {
 function formatScalar(n: number): string {
   if (!Number.isFinite(n)) return String(n)
   const abs = Math.abs(n)
-  if (abs !== 0 && (abs >= 1e5 || abs < 1e-4)) return n.toExponential(3)
-  if (Number.isInteger(n)) return String(n)
-  return n.toPrecision(5).replace(/\.?0+$/, '')
+  if (abs !== 0 && (abs >= 1e8 || abs < 1e-4)) return n.toExponential(4)
+  if (Number.isInteger(n) && abs < 1e15) return String(n)
+  return n.toPrecision(6).replace(/\.?0+$/, '')
 }
 
 /* ── Syntax highlighter ─────────────────────────────────────────────── */

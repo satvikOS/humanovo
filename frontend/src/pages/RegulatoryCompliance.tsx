@@ -24,7 +24,7 @@ export default function RegulatoryCompliance() {
       else if (t === 'agreements') { const r = await fetch(`${API}/agreements`); if (r.ok) setAgreements((await r.json()).items || []) }
       else if (t === 'consent') { const r = await fetch(`${API}/consent-forms`); if (r.ok) setConsents((await r.json()).items || []) }
       else if (t === 'checklists') { const r = await fetch(`${API}/checklists`); if (r.ok) setChecklists((await r.json()).items || []) }
-    } catch {}
+    } catch { /* network error — keep stale state */ }
   }
   useEffect(() => { loadTab(tab) }, [tab])
 

@@ -445,8 +445,8 @@ function EditorToolbar({ editor }: { editor: Editor | null }) {
       {btn(editor.isActive({ textAlign: 'right' }), () => editor.chain().focus().setTextAlign('right').run(), '⫸', 'Align Right')}
       {sep}
       {btn(editor.isActive('highlight'), () => editor.chain().focus().toggleHighlight().run(), '🖍', 'Highlight')}
-      {btn(false, () => editor.chain().focus().undo().run(), '↶', 'Undo')}
-      {btn(false, () => editor.chain().focus().redo().run(), '↷', 'Redo')}
+      {btn(editor.can().undo(), () => editor.chain().focus().undo().run(), '↶', 'Undo')}
+      {btn(editor.can().redo(), () => editor.chain().focus().redo().run(), '↷', 'Redo')}
     </div>
   )
 }

@@ -38,6 +38,7 @@ import {
   FiUpload,
   FiPaperclip,
   FiCpu,
+  FiBookOpen,
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import { useTheme } from '../contexts/ThemeContext'
@@ -59,7 +60,8 @@ const secondaryNavItems = [
 ]
 
 const researchNavItems = [
-{ to: '/citation-manager', icon: FiList, label: 'Citations' },
+  { to: '/literature-review', icon: FiBookOpen, label: 'Literature' },
+  { to: '/citation-manager', icon: FiList, label: 'Citations' },
   { to: '/experiment-tracker', icon: FiClipboard, label: 'Experiments' },
   { to: '/data-visualization', icon: FiBarChart2, label: 'Visualization' },
 ]
@@ -72,11 +74,11 @@ const analysisNavItems = [
 const managementNavItems = [
   { to: '/data-manager', icon: FiDatabase, label: 'Data Manager' },
   { to: '/imaging', icon: FiImage, label: 'Imaging' },
-  { to: '/clinical-trials', icon: FiClipboard, label: 'Clinical Trials', comingSoon: true },
-  { to: '/manuscripts', icon: FiFileText, label: 'Manuscripts', comingSoon: true },
-  { to: '/biobank', icon: FiPackage, label: 'Biobank', comingSoon: true },
-  { to: '/collaboration', icon: FiGrid, label: 'Collaboration', comingSoon: true },
-  { to: '/regulatory', icon: FiShield, label: 'Regulatory', comingSoon: true },
+  { to: '/clinical-trials', icon: FiClipboard, label: 'Clinical Trials' },
+  { to: '/manuscripts', icon: FiFileText, label: 'Manuscripts' },
+  { to: '/biobank', icon: FiPackage, label: 'Biobank' },
+  { to: '/collaboration', icon: FiGrid, label: 'Collaboration' },
+  { to: '/regulatory', icon: FiShield, label: 'Regulatory' },
 ]
 
 function TabIcon({ type }: { type: WorkspaceTab['type'] }) {
@@ -1047,7 +1049,7 @@ export default function Layout() {
     localStorage.setItem('humanovo-notifs-read', new Date().toISOString())
   }
 
-  // Keyboard shortcut for command palette
+  // Keyboard shortcut for command palette + number shortcuts
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
       e.preventDefault()
@@ -1058,7 +1060,15 @@ export default function Layout() {
       setIsUserMenuOpen(false)
       setIsNotificationsOpen(false)
     }
-  }, [])
+    // Number shortcuts 1-6 for main nav (only when no input focused)
+    const tag = (e.target as HTMLElement)?.tagName
+    if (!e.metaKey && !e.ctrlKey && !e.altKey && tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') {
+      const idx = parseInt(e.key) - 1
+      if (idx >= 0 && idx < mainNavItems.length) {
+        navigate(mainNavItems[idx].to)
+      }
+    }
+  }, [navigate])
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown)
@@ -1208,10 +1218,7 @@ if (path === '/clinical-trials') return 'Clinical Trials'
               }
             >
               <item.icon className="w-4 h-4" />
-              <span className="font-medium flex-1">{item.label}</span>
-              {item.comingSoon && (
-                <span className="text-[9px] px-1.5 py-0.5 rounded bg-[var(--glass-bg)] text-[var(--color-text-muted)] border border-[var(--color-border)] whitespace-nowrap">Soon</span>
-              )}
+              <span className="font-medium">{item.label}</span>
             </NavLink>
           ))}
         </nav>
