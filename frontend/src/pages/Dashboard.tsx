@@ -190,7 +190,18 @@ function RecentSimulationsWidget() {
         <div className="text-center py-4 text-[var(--color-text-muted)]">
           <FiActivity className="w-5 h-5 mx-auto mb-1.5 opacity-40" />
           <p className="text-xs">No simulations yet</p>
-          <button onClick={() => navigate('/simulations')} className="text-xs mt-1 text-[var(--color-text)] hover:text-[var(--color-text-secondary)] transition-colors">
+          <button
+            onClick={() => navigate('/simulations')}
+            className="text-xs mt-1 rounded-lg active:scale-95"
+            style={{
+              background: 'rgba(91, 141, 184, 0.25)',
+              border: '1px solid rgba(91, 141, 184, 0.35)',
+              color: '#fff',
+              borderRadius: 10,
+              padding: '4px 10px',
+              transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+            }}
+          >
             Run a simulation
           </button>
         </div>
@@ -203,7 +214,13 @@ function RecentSimulationsWidget() {
               <button
                 key={sim.id}
                 onClick={() => navigate('/simulations?tab=history')}
-                className="w-full text-left flex items-center gap-2.5 py-2.5 border-b border-[var(--color-border)] last:border-0 hover:bg-[var(--glass-bg)] rounded-lg px-2 transition-all"
+                className="w-full text-left flex items-center gap-2.5 py-2.5 border-b border-[var(--color-border)] last:border-0 rounded-lg px-2 active:scale-95"
+                style={{
+                  background: 'var(--glass-bg)',
+                  border: '1px solid var(--glass-border)',
+                  borderRadius: 10,
+                  transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+                }}
               >
                 <IconComp className="w-3.5 h-3.5 flex-shrink-0" style={{ color }} />
                 <div className="flex-1 min-w-0">
@@ -283,7 +300,18 @@ function RecentNotebooksWidget() {
         <div className="text-center py-4 text-[var(--color-text-muted)]">
           <FiBook className="w-5 h-5 mx-auto mb-1.5 opacity-40" />
           <p className="text-xs">No notebooks yet</p>
-          <button onClick={() => navigate('/notebook')} className="text-xs mt-1 text-[var(--color-text)] hover:text-[var(--color-text-secondary)] transition-colors">
+          <button
+            onClick={() => navigate('/notebook')}
+            className="text-xs mt-1 rounded-lg active:scale-95"
+            style={{
+              background: 'rgba(91, 141, 184, 0.25)',
+              border: '1px solid rgba(91, 141, 184, 0.35)',
+              color: '#fff',
+              borderRadius: 10,
+              padding: '4px 10px',
+              transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+            }}
+          >
             Create a notebook
           </button>
         </div>
@@ -293,7 +321,13 @@ function RecentNotebooksWidget() {
             <button
               key={nb.id}
               onClick={() => navigate('/notebook')}
-              className="w-full text-left flex items-center gap-2.5 py-2.5 border-b border-[var(--color-border)] last:border-0 hover:bg-[var(--glass-bg)] rounded-lg px-2 transition-all"
+              className="w-full text-left flex items-center gap-2.5 py-2.5 border-b border-[var(--color-border)] last:border-0 rounded-lg px-2 active:scale-95"
+              style={{
+                background: 'var(--glass-bg)',
+                border: '1px solid var(--glass-border)',
+                borderRadius: 10,
+                transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+              }}
             >
               <div className="p-1 rounded-md flex-shrink-0" style={{ background: 'rgba(249, 115, 22, 0.08)' }}>
                 <FiBook className="w-3 h-3" style={{ color: 'var(--color-text-secondary)' }} />
@@ -525,8 +559,14 @@ export default function Dashboard() {
             <button
               key={action.label}
               onClick={action.action}
-              className="btn text-sm"
-              style={{ color: action.color }}
+              className="btn text-sm rounded-lg active:scale-95"
+              style={{
+                background: 'rgba(91, 141, 184, 0.25)',
+                border: '1px solid rgba(91, 141, 184, 0.35)',
+                color: '#fff',
+                borderRadius: 10,
+                transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+              }}
             >
               <action.icon className="w-4 h-4" />
               {action.label}
@@ -574,7 +614,15 @@ export default function Dashboard() {
             <p className="text-sm">No projects yet</p>
             <button
               onClick={() => navigate('/projects?new=1')}
-              className="text-sm mt-2 text-[var(--color-text)] hover:text-[var(--color-text-secondary)] transition-colors"
+              className="text-sm mt-2 rounded-lg active:scale-95"
+              style={{
+                background: 'rgba(91, 141, 184, 0.25)',
+                border: '1px solid rgba(91, 141, 184, 0.35)',
+                color: '#fff',
+                borderRadius: 10,
+                padding: '6px 14px',
+                transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+              }}
             >
               Create your first project
             </button>

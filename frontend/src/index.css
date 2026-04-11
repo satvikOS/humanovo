@@ -205,7 +205,7 @@ a:focus-visible,
     backdrop-filter: blur(var(--glass-blur));
     -webkit-backdrop-filter: blur(var(--glass-blur));
     border: 1px solid var(--glass-border);
-    border-radius: 12px;
+    border-radius: 16px;
     transition: background 0.2s ease, border-color 0.2s ease;
   }
 
@@ -217,9 +217,9 @@ a:focus-visible,
   .glass-card-static {
     background: var(--glass-bg);
     backdrop-filter: blur(var(--glass-blur));
-    -webkit-backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-border));
     border: 1px solid var(--glass-border);
-    border-radius: 12px;
+    border-radius: 16px;
   }
 
   /* Legacy card support */
@@ -232,36 +232,55 @@ a:focus-visible,
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
     border: 1px solid var(--glass-border);
-    border-radius: 12px;
+    border-radius: 16px;
     box-shadow: var(--glass-shadow);
   }
 
-  /* Ghost Buttons - colored text, no background */
+  /* ─── Glassmorphic iOS-grade Buttons ─── */
   .btn {
-    @apply px-3 py-1.5 rounded-lg font-medium text-sm transition-all duration-200 inline-flex items-center justify-center gap-1.5;
-    background: transparent;
+    @apply px-3.5 py-2 font-medium text-sm inline-flex items-center justify-center gap-1.5;
+    background: var(--glass-bg);
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+    border: 1px solid var(--glass-border);
+    border-radius: 14px;
     color: var(--color-text-secondary);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    cursor: pointer;
+    user-select: none;
   }
 
   .btn:hover {
     color: var(--color-text);
     background: var(--glass-bg-hover);
+    border-color: var(--color-border-strong);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  }
+
+  .btn:active {
+    transform: scale(0.97);
+    box-shadow: 0 0 2px rgba(0, 0, 0, 0.1);
+    transition-duration: 0.1s;
   }
 
   .btn-primary {
-    color: var(--color-text);
-    background: transparent;
+    color: #fff;
+    background: rgba(91, 141, 184, 0.25);
+    border-color: rgba(91, 141, 184, 0.3);
     font-weight: 500;
   }
 
   .btn-primary:hover {
-    background: var(--glass-bg-hover);
+    background: rgba(91, 141, 184, 0.35);
+    border-color: rgba(91, 141, 184, 0.45);
+    box-shadow: 0 2px 12px rgba(91, 141, 184, 0.2);
   }
 
   .btn-secondary {
     color: var(--color-text-secondary);
+    background: var(--glass-bg);
     border: 1px solid var(--color-border);
-    background: transparent;
   }
 
   .btn-secondary:hover {
@@ -271,66 +290,94 @@ a:focus-visible,
   }
 
   .btn-ghost {
-    @apply bg-transparent;
+    background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border-color: transparent;
+    box-shadow: none;
     color: var(--color-text-muted);
   }
 
   .btn-ghost:hover {
     color: var(--color-text);
     background: var(--glass-bg-hover);
+    border-color: var(--glass-border);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   }
 
   .btn-danger {
-    color: var(--color-error);
-    background: transparent;
+    color: #B07E8B;
+    background: rgba(176, 126, 139, 0.1);
+    border-color: rgba(176, 126, 139, 0.15);
   }
 
   .btn-danger:hover {
-    background: rgba(239, 68, 68, 0.08);
+    background: rgba(176, 126, 139, 0.2);
+    border-color: rgba(176, 126, 139, 0.3);
+    box-shadow: 0 2px 8px rgba(176, 126, 139, 0.15);
   }
 
   .btn-accent-blue {
-    color: var(--color-accent-blue);
+    color: #5B8DB8;
+    background: rgba(91, 141, 184, 0.1);
+    border-color: rgba(91, 141, 184, 0.15);
   }
   .btn-accent-blue:hover {
-    background: rgba(59, 130, 246, 0.08);
+    background: rgba(91, 141, 184, 0.2);
+    border-color: rgba(91, 141, 184, 0.3);
   }
 
   .btn-accent-green {
-    color: var(--color-accent-green);
+    color: #6BA594;
+    background: rgba(107, 165, 148, 0.1);
+    border-color: rgba(107, 165, 148, 0.15);
   }
   .btn-accent-green:hover {
-    background: rgba(34, 197, 94, 0.08);
+    background: rgba(107, 165, 148, 0.2);
+    border-color: rgba(107, 165, 148, 0.3);
   }
 
   .btn-accent-purple {
-    color: var(--color-accent-purple);
+    color: #8B7EAF;
+    background: rgba(139, 126, 175, 0.1);
+    border-color: rgba(139, 126, 175, 0.15);
   }
   .btn-accent-purple:hover {
-    background: rgba(168, 85, 247, 0.08);
+    background: rgba(139, 126, 175, 0.2);
+    border-color: rgba(139, 126, 175, 0.3);
   }
 
   .btn-sm {
-    @apply px-2 py-1 text-xs;
+    @apply px-2.5 py-1 text-xs;
+    border-radius: 10px;
   }
 
   .btn-lg {
     @apply px-5 py-2.5 text-base;
+    border-radius: 16px;
   }
 
   .btn-icon {
-    @apply p-1.5 rounded-lg;
+    @apply p-1.5;
+    border-radius: 10px;
+    box-shadow: none;
   }
 
-  /* Inputs */
+  .btn-icon:hover {
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+  }
+
+  /* Glassmorphic Inputs */
   .input {
-    @apply px-3 py-2 text-sm transition-all duration-200;
+    @apply px-3 py-2 text-sm;
     background: var(--glass-bg);
     border: 1px solid var(--glass-border);
-    border-radius: 12px;
+    border-radius: 14px;
     color: var(--color-text);
     backdrop-filter: blur(var(--glass-blur));
     -webkit-backdrop-filter: blur(var(--glass-blur));
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.06);
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   .input::placeholder {
@@ -339,14 +386,15 @@ a:focus-visible,
 
   .input:focus {
     outline: none;
-    border-color: var(--color-border-strong);
+    border-color: rgba(91, 141, 184, 0.4);
     background: var(--glass-bg-hover);
-    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.03);
+    box-shadow: 0 0 0 3px rgba(91, 141, 184, 0.08), inset 0 1px 2px rgba(0, 0, 0, 0.06);
   }
 
   /* Badges - minimal, text-only feel */
   .badge {
-    @apply inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium;
+    @apply inline-flex items-center px-2.5 py-0.5 text-xs font-medium;
+    border-radius: 10px;
   }
 
   .badge-success {
@@ -374,20 +422,30 @@ a:focus-visible,
     background: var(--glass-bg);
   }
 
-  /* Tabs */
+  /* Glassmorphic Tabs */
   .tab {
-    @apply px-3 py-1.5 text-sm font-medium transition-all duration-200;
+    @apply px-3 py-1.5 text-sm font-medium;
     color: var(--color-text-muted);
-    border-bottom: 2px solid transparent;
+    border-radius: 12px;
+    border: 1px solid transparent;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   .tab:hover {
     color: var(--color-text-secondary);
+    background: var(--glass-bg);
+    border-color: var(--glass-border);
+  }
+
+  .tab:active {
+    transform: scale(0.97);
   }
 
   .tab-active {
     color: var(--color-text);
-    border-bottom-color: var(--color-text);
+    background: var(--glass-bg-hover);
+    border-color: var(--color-border-strong);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.04);
   }
 
   /* Tooltips */

@@ -464,7 +464,6 @@ export default function ResearchImaging() {
   const [isPainting, setIsPainting] = useState(false)
   const [aiAnalysis, setAiAnalysis] = useState<string | null>(null)
   const [aiLoading, setAiLoading] = useState(false)
-  const [aiApiKey, setAiApiKey] = useState(() => localStorage.getItem('humanovo-anthropic-key') || '')
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const coronalRef = useRef<HTMLCanvasElement>(null)
@@ -512,7 +511,8 @@ export default function ResearchImaging() {
     // Get processed image data
     const off = document.createElement('canvas')
     off.width = img.width; off.height = img.height
-    const offCtx = off.getContext('2d')!
+    const offCtx = off.getContext('2d')
+    if (!offCtx) return
     offCtx.drawImage(img, 0, 0)
     let srcData = offCtx.getImageData(0, 0, img.width, img.height)
     srcData = applyWindow(srcData, selected.windowCenter, selected.windowWidth)
@@ -528,7 +528,8 @@ export default function ResearchImaging() {
       const cW = coronalCanvas.parentElement?.clientWidth || 300
       const cH = coronalCanvas.parentElement?.clientHeight || 300
       coronalCanvas.width = cW; coronalCanvas.height = cH
-      const cCtx = coronalCanvas.getContext('2d')!
+      const cCtx = coronalCanvas.getContext('2d')
+      if (!cCtx) return
       cCtx.fillStyle = '#000'; cCtx.fillRect(0, 0, cW, cH)
 
       // Build a "depth" image: for each column, stack rows vertically
@@ -573,7 +574,8 @@ export default function ResearchImaging() {
       const sW = sagittalCanvas.parentElement?.clientWidth || 300
       const sH = sagittalCanvas.parentElement?.clientHeight || 300
       sagittalCanvas.width = sW; sagittalCanvas.height = sH
-      const sCtx = sagittalCanvas.getContext('2d')!
+      const sCtx = sagittalCanvas.getContext('2d')
+      if (!sCtx) return
       sCtx.fillStyle = '#000'; sCtx.fillRect(0, 0, sW, sH)
 
       // Transpose image: columns become rows (sagittal rotation)
@@ -631,7 +633,8 @@ export default function ResearchImaging() {
     const off = document.createElement('canvas')
     off.width = img.width
     off.height = img.height
-    const offCtx = off.getContext('2d')!
+    const offCtx = off.getContext('2d')
+    if (!offCtx) return
     offCtx.drawImage(img, 0, 0)
     let data = offCtx.getImageData(0, 0, img.width, img.height)
     data = applyWindow(data, selected.windowCenter, selected.windowWidth)
@@ -694,7 +697,8 @@ export default function ResearchImaging() {
       const maskCanvas = document.createElement('canvas')
       maskCanvas.width = img.width
       maskCanvas.height = img.height
-      const mCtx = maskCanvas.getContext('2d')!
+      const mCtx = maskCanvas.getContext('2d')
+      if (!mCtx) return
       const mData = mCtx.createImageData(img.width, img.height)
       for (let i = 0; i < segMask.length; i++) {
         const labelIdx = segMask[i]
@@ -735,32 +739,44 @@ export default function ResearchImaging() {
       ctx.setLineDash([])
     }
 
-    // Draw registration overlay
+    // Draw registration overlay — use a synchronous approach to avoid
+    // stale canvas context from async image loads.
     if (regShowOverlay && regRefId) {
       const refStudy = studies.find(s => s.id === regRefId)
       if (refStudy) {
-        const refImg = new Image()
-        refImg.onload = () => {
-          ctx.save()
-          ctx.globalAlpha = regOverlayOpacity
-          // Apply transform relative to center
-          const cx = dispW / 2
-          const cy = dispH / 2
-          ctx.translate(cx + regTransform.tx * scale, cy + regTransform.ty * scale)
-          ctx.rotate((regTransform.rotation * Math.PI) / 180)
-          ctx.scale(regTransform.scale, regTransform.scale)
-          const refScale = Math.min(dispW / refImg.width, dispH / refImg.height) * zoom
-          const rw = refImg.width * refScale
-          const rh = refImg.height * refScale
-          // Tint the overlay with a color to distinguish it
-          ctx.drawImage(refImg, -rw / 2, -rh / 2, rw, rh)
-          ctx.restore()
-          // Label
-          ctx.fillStyle = '#f59e0b'
-          ctx.font = 'bold 10px sans-serif'
-          ctx.fillText(`REF: ${refStudy.title}`, 8, dispH - 8)
+        try {
+          // Re-use a pre-decoded image via an offscreen canvas to avoid
+          // the async Image.onload problem that causes stale ctx usage.
+          const refOff = document.createElement('canvas')
+          const refTmpImg = new Image()
+          refTmpImg.src = refStudy.imageData
+          // Only draw if the image is already cached/decoded (width > 0)
+          if (refTmpImg.complete && refTmpImg.naturalWidth > 0) {
+            refOff.width = refTmpImg.naturalWidth
+            refOff.height = refTmpImg.naturalHeight
+            const rOffCtx = refOff.getContext('2d')
+            if (rOffCtx) {
+              rOffCtx.drawImage(refTmpImg, 0, 0)
+              ctx.save()
+              ctx.globalAlpha = regOverlayOpacity
+              const cx = dispW / 2
+              const cy = dispH / 2
+              ctx.translate(cx + regTransform.tx * scale, cy + regTransform.ty * scale)
+              ctx.rotate((regTransform.rotation * Math.PI) / 180)
+              ctx.scale(regTransform.scale, regTransform.scale)
+              const refScale = Math.min(dispW / refTmpImg.naturalWidth, dispH / refTmpImg.naturalHeight) * zoom
+              const rw = refTmpImg.naturalWidth * refScale
+              const rh = refTmpImg.naturalHeight * refScale
+              ctx.drawImage(refOff, -rw / 2, -rh / 2, rw, rh)
+              ctx.restore()
+              ctx.fillStyle = '#f59e0b'
+              ctx.font = 'bold 10px sans-serif'
+              ctx.fillText(`REF: ${refStudy.title}`, 8, dispH - 8)
+            }
+          }
+        } catch (e) {
+          // Silently ignore registration overlay errors
         }
-        refImg.src = refStudy.imageData
       }
     }
   }, [selected, zoom, pan, drawing, tool, annotColor, regShowOverlay, regRefId, regTransform, regOverlayOpacity, studies, segMask])
@@ -806,9 +822,26 @@ export default function ResearchImaging() {
     setSegMask(new Uint8Array(mask))
   }, [selected, segMask, brushSize, tool, annotLabel])
 
+  // ── Cursor position overlay for pixel info ───────────────────
+  const [cursorInfo, setCursorInfo] = useState<{ x: number; y: number; intensity: number } | null>(null)
+
+  // ── Drag state for pan and window/level ──────────────────────
+  const dragStartRef = useRef<{ x: number; y: number; panX: number; panY: number; wc: number; ww: number; button: number } | null>(null)
+
   const handleMouseDown = (e: React.MouseEvent) => {
     if (!selected) return
-    if (tool === 'pan') return
+    // Right-button drag → window/level adjustment (standard DICOM interaction)
+    if (e.button === 2) {
+      e.preventDefault()
+      dragStartRef.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y, wc: selected.windowCenter, ww: selected.windowWidth, button: 2 }
+      return
+    }
+    // Middle-button or pan tool → drag to pan
+    if (e.button === 1 || tool === 'pan') {
+      e.preventDefault()
+      dragStartRef.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y, wc: 0, ww: 0, button: 0 }
+      return
+    }
     const p = screenToImage(e)
     if (!p) return
     if (tool === 'brush' || tool === 'eraser') {
@@ -825,6 +858,46 @@ export default function ResearchImaging() {
   }
 
   const handleMouseMove = (e: React.MouseEvent) => {
+    // Update cursor pixel info
+    const imgP = screenToImage(e)
+    if (imgP && selected) {
+      const img = imgCacheRef.current
+      if (img) {
+        const px = Math.floor(imgP.x), py = Math.floor(imgP.y)
+        if (px >= 0 && px < img.width && py >= 0 && py < img.height) {
+          try {
+            const off = document.createElement('canvas')
+            off.width = img.width; off.height = img.height
+            const ctx = off.getContext('2d')
+            if (ctx) {
+              ctx.drawImage(img, 0, 0)
+              const pixel = ctx.getImageData(px, py, 1, 1).data
+              setCursorInfo({ x: px, y: py, intensity: Math.round((pixel[0] + pixel[1] + pixel[2]) / 3) })
+            }
+          } catch { setCursorInfo(null) }
+        } else {
+          setCursorInfo(null)
+        }
+      }
+    } else {
+      setCursorInfo(null)
+    }
+
+    // Handle drag operations
+    if (dragStartRef.current) {
+      const ds = dragStartRef.current
+      if (ds.button === 2 && selected) {
+        // Right-drag: window/level (horizontal = width, vertical = center)
+        const dx = e.clientX - ds.x
+        const dy = e.clientY - ds.y
+        updateStudy({ ...selected, windowWidth: Math.max(1, ds.ww + dx), windowCenter: ds.wc - dy })
+      } else {
+        // Pan drag
+        setPan({ x: ds.panX + (e.clientX - ds.x), y: ds.panY + (e.clientY - ds.y) })
+      }
+      return
+    }
+
     if (isPainting && (tool === 'brush' || tool === 'eraser')) {
       const p = screenToImage(e)
       if (p) paintAt(p.x, p.y)
@@ -837,6 +910,7 @@ export default function ResearchImaging() {
   }
 
   const handleMouseUp = () => {
+    dragStartRef.current = null
     if (isPainting) { setIsPainting(false); return }
     if (!drawing || !selected) return
     const { start, current } = drawing
@@ -868,6 +942,13 @@ export default function ResearchImaging() {
     }
     setDrawing(null)
   }
+
+  // ── Mouse wheel zoom (centered on cursor) ───────────────────
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault()
+    const delta = e.deltaY > 0 ? -0.15 : 0.15
+    setZoom(z => Math.max(0.1, Math.min(10, z + delta * z)))
+  }, [])
 
   const updateStudy = (s: Study) => {
     setStudies(prev => prev.map(x => x.id === s.id ? s : x))
@@ -1005,7 +1086,8 @@ export default function ResearchImaging() {
     const off = document.createElement('canvas')
     off.width = img.width
     off.height = img.height
-    const ctx = off.getContext('2d')!
+    const ctx = off.getContext('2d')
+    if (!ctx) return null
     ctx.drawImage(img, 0, 0)
     const imgData = ctx.getImageData(0, 0, img.width, img.height)
     return computeImageStats(imgData.data)
@@ -1033,7 +1115,7 @@ export default function ResearchImaging() {
   }
 
   const runAiAnalysis = async () => {
-    if (!selected || !aiApiKey.trim()) return
+    if (!selected) return
     setAiLoading(true)
     setAiAnalysis(null)
     try {
@@ -1043,45 +1125,29 @@ export default function ResearchImaging() {
       const dataUrl = canvas.toDataURL('image/png')
       const base64 = dataUrl.split(',')[1]
 
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
+      const response = await fetch('/api/v1/imaging/analyze', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': aiApiKey,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-6',
-          max_tokens: 1024,
-          messages: [{
-            role: 'user',
-            content: [
-              {
-                type: 'image',
-                source: { type: 'base64', media_type: 'image/png', data: base64 },
-              },
-              {
-                type: 'text',
-                text: `You are analyzing a ${selected.modality} medical image${selected.bodyPart ? ` of the ${selected.bodyPart}` : ''}. Image dimensions: ${selected.width}x${selected.height}px. Current windowing: center=${selected.windowCenter}, width=${selected.windowWidth}. Filter applied: ${selected.filter}.
-
-Provide a concise clinical analysis:
-1. **Modality Confirmation**: Confirm or suggest the correct imaging modality
-2. **Key Observations**: Notable anatomical structures, any abnormalities or areas of interest
-3. **Image Quality**: Assessment of contrast, noise, artifacts
-4. **Recommendations**: Suggested filters, windowing adjustments, or additional analysis
-
-Keep response under 300 words. Be precise and clinically relevant.`,
-              },
-            ],
-          }],
+          image_base64: base64,
+          modality: selected.modality,
+          body_part: selected.bodyPart,
+          width: selected.width,
+          height: selected.height,
+          window_center: selected.windowCenter,
+          window_width: selected.windowWidth,
+          filter_applied: selected.filter,
         }),
       })
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({ detail: response.statusText }))
+        throw new Error(errData.detail || `Server error ${response.status}`)
+      }
       const data = await response.json()
-      if (data.content?.[0]?.text) {
-        setAiAnalysis(data.content[0].text)
-      } else if (data.error) {
-        setAiAnalysis(`Error: ${data.error.message || 'Unknown error'}`)
+      if (data.analysis) {
+        setAiAnalysis(data.analysis)
+      } else {
+        setAiAnalysis('No analysis returned. Please try again.')
       }
     } catch (err: any) {
       setAiAnalysis(`Analysis failed: ${err?.message || 'Unknown error'}`)
@@ -1222,24 +1288,29 @@ Keep response under 300 words. Be precise and clinically relevant.`,
       {/* ── Center: Viewer ── */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Toolbar */}
-        <div className="flex items-center gap-2 px-3 py-2 border-b flex-shrink-0" style={{ borderColor: 'var(--glass-border)', background: 'var(--glass-bg)' }}>
+        <div className="flex items-center gap-2 px-3 py-2 border-b flex-shrink-0" style={{ borderColor: 'var(--glass-border)', background: 'var(--glass-bg)', backdropFilter: 'blur(12px)' }}>
           {selected ? (
             <>
               <div className="text-xs font-semibold truncate max-w-[200px]">{selected.title}</div>
-              <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'var(--color-bg)', color: 'var(--color-text-muted)' }}>
+              <span className="text-[10px] px-1.5 py-0.5 rounded-md" style={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', color: 'var(--color-text-muted)' }}>
                 {selected.width}×{selected.height}
               </span>
-              <div className="flex gap-0.5 ml-2">
+              <div className="flex gap-1 ml-2">
                 {tools.map(t => {
                   const Icon = t.icon
+                  const active = tool === t.id
                   return (
                     <button
                       key={t.id}
                       onClick={() => setTool(t.id)}
-                      className={clsx('p-1.5 rounded transition-all', tool === t.id ? 'shadow' : 'hover:bg-white/5')}
+                      className="transition-all active:scale-95"
                       style={{
-                        background: tool === t.id ? 'var(--color-accent-blue)' : 'transparent',
-                        color: tool === t.id ? '#fff' : 'var(--color-text-muted)',
+                        padding: '5px 7px',
+                        borderRadius: 12,
+                        background: active ? 'rgba(91, 141, 184, 0.25)' : 'var(--glass-bg)',
+                        border: `1px solid ${active ? 'rgba(91, 141, 184, 0.35)' : 'var(--glass-border)'}`,
+                        color: active ? '#fff' : 'var(--color-text-muted)',
+                        boxShadow: active ? '0 1px 4px rgba(91, 141, 184, 0.2)' : 'none',
                       }}
                       title={t.label}
                     >
@@ -1249,21 +1320,27 @@ Keep response under 300 words. Be precise and clinically relevant.`,
                 })}
               </div>
               <div className="ml-auto flex items-center gap-1">
-                <button onClick={() => setZoom(z => Math.max(0.2, z - 0.2))} className="p-1.5 rounded hover:bg-white/5"><FiZoomOut className="text-xs" /></button>
-                <span className="text-xs px-1" style={{ color: 'var(--color-text-muted)' }}>{(zoom * 100).toFixed(0)}%</span>
-                <button onClick={() => setZoom(z => Math.min(8, z + 0.2))} className="p-1.5 rounded hover:bg-white/5"><FiZoomIn className="text-xs" /></button>
-                <button onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }} className="p-1.5 rounded hover:bg-white/5" title="Reset"><FiRotateCw className="text-xs" /></button>
+                <button onClick={() => setZoom(z => Math.max(0.2, z - 0.2))} className="btn-icon btn-ghost p-1.5 transition-all active:scale-95" style={{ borderRadius: 8 }}><FiZoomOut className="text-xs" /></button>
+                <span className="text-[10px] px-1.5 font-mono" style={{ color: 'var(--color-text-muted)' }}>{(zoom * 100).toFixed(0)}%</span>
+                <button onClick={() => setZoom(z => Math.min(8, z + 0.2))} className="btn-icon btn-ghost p-1.5 transition-all active:scale-95" style={{ borderRadius: 8 }}><FiZoomIn className="text-xs" /></button>
+                <button onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }} className="btn-icon btn-ghost p-1.5 transition-all active:scale-95" title="Reset" style={{ borderRadius: 8 }}><FiRotateCw className="text-xs" /></button>
+                <div style={{ width: 1, height: 16, background: 'var(--glass-border)', margin: '0 2px' }} />
                 <button
                   onClick={() => setViewLayout(v => v === 'single' ? 'quad' : 'single')}
-                  className="p-1.5 rounded hover:bg-white/5"
-                  style={{ color: viewLayout === 'quad' ? '#3b82f6' : undefined }}
+                  className="transition-all active:scale-95"
+                  style={{
+                    padding: '5px 7px', borderRadius: 12,
+                    background: viewLayout === 'quad' ? 'rgba(91, 141, 184, 0.15)' : 'var(--glass-bg)',
+                    border: `1px solid ${viewLayout === 'quad' ? 'rgba(91, 141, 184, 0.25)' : 'var(--glass-border)'}`,
+                    color: viewLayout === 'quad' ? '#5B8DB8' : 'var(--color-text-muted)',
+                  }}
                   title={viewLayout === 'quad' ? 'Single view' : 'Multi-view (Axial/Coronal/Sagittal)'}
                 >
                   <FiMaximize2 className="text-xs" />
                 </button>
-                <button onClick={exportImage} className="p-1.5 rounded hover:bg-white/5" title="Export PNG"><FiDownload className="text-xs" /></button>
-                <button onClick={exportStudy} className="p-1.5 rounded hover:bg-white/5" title="Export study JSON"><FiSave className="text-xs" /></button>
-                <button onClick={() => deleteStudy(selected.id)} className="p-1.5 rounded hover:bg-white/5" style={{ color: '#ef4444' }} title="Delete"><FiTrash2 className="text-xs" /></button>
+                <button onClick={exportImage} className="btn-icon btn-ghost p-1.5 transition-all active:scale-95" title="Export PNG" style={{ borderRadius: 8 }}><FiDownload className="text-xs" /></button>
+                <button onClick={exportStudy} className="btn-icon btn-ghost p-1.5 transition-all active:scale-95" title="Export study JSON" style={{ borderRadius: 8 }}><FiSave className="text-xs" /></button>
+                <button onClick={() => deleteStudy(selected.id)} className="transition-all active:scale-95" style={{ padding: '5px 7px', borderRadius: 12, background: 'rgba(176, 126, 139, 0.1)', border: '1px solid rgba(176, 126, 139, 0.15)', color: '#B07E8B' }} title="Delete"><FiTrash2 className="text-xs" /></button>
               </div>
             </>
           ) : (
@@ -1284,7 +1361,9 @@ Keep response under 300 words. Be precise and clinically relevant.`,
                     onMouseDown={handleMouseDown}
                     onMouseMove={handleMouseMove}
                     onMouseUp={handleMouseUp}
-                    onMouseLeave={() => setDrawing(null)}
+                    onMouseLeave={() => { setDrawing(null); setCursorInfo(null); dragStartRef.current = null }}
+                    onWheel={handleWheel}
+                    onContextMenu={e => e.preventDefault()}
                     style={{ width: '100%', height: '100%', cursor: tool === 'pan' ? 'grab' : 'crosshair' }}
                   />
                   <div style={{ position: 'absolute', top: 6, left: 8, color: '#3b82f6', fontSize: 11, fontWeight: 700, textShadow: '0 1px 3px #000' }}>AXIAL</div>
@@ -1325,28 +1404,75 @@ Keep response under 300 words. Be precise and clinically relevant.`,
               </div>
             ) : (
               /* ── Single View ── */
-              <canvas
-                ref={canvasRef}
-                onMouseDown={handleMouseDown}
-                onMouseMove={handleMouseMove}
-                onMouseUp={handleMouseUp}
-                onMouseLeave={() => setDrawing(null)}
-                style={{ width: '100%', height: '100%', cursor: tool === 'pan' ? 'grab' : 'crosshair' }}
-              />
+              <>
+                <canvas
+                  ref={canvasRef}
+                  onMouseDown={handleMouseDown}
+                  onMouseMove={handleMouseMove}
+                  onMouseUp={handleMouseUp}
+                  onMouseLeave={() => { setDrawing(null); setCursorInfo(null); dragStartRef.current = null }}
+                  onWheel={handleWheel}
+                  onContextMenu={e => e.preventDefault()}
+                  style={{ width: '100%', height: '100%', cursor: tool === 'pan' ? 'grab' : 'crosshair' }}
+                />
+                {/* Pixel info overlay (bottom-left) */}
+                {cursorInfo && (
+                  <div style={{
+                    position: 'absolute', bottom: 6, left: 8, pointerEvents: 'none',
+                    background: 'rgba(0,0,0,0.7)', borderRadius: 8, padding: '3px 8px',
+                    fontSize: 10, fontFamily: "'JetBrains Mono', monospace", color: '#ffffffcc',
+                  }}>
+                    ({cursorInfo.x}, {cursorInfo.y}) &nbsp; I={cursorInfo.intensity}
+                  </div>
+                )}
+                {/* Window/level info overlay (bottom-right) */}
+                {selected && (
+                  <div style={{
+                    position: 'absolute', bottom: 6, right: 8, pointerEvents: 'none',
+                    background: 'rgba(0,0,0,0.7)', borderRadius: 8, padding: '3px 8px',
+                    fontSize: 10, fontFamily: "'JetBrains Mono', monospace", color: '#ffffffcc',
+                  }}>
+                    W:{selected.windowWidth} C:{selected.windowCenter} &nbsp; {(zoom * 100).toFixed(0)}%
+                  </div>
+                )}
+              </>
             )
           ) : (
             <div className="absolute inset-0 flex items-center justify-center">
-              <div className="text-center">
-                <FiImage className="text-6xl mx-auto mb-4 opacity-20" style={{ color: 'var(--color-text-muted)' }} />
-                <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Upload a study to begin</p>
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="mt-4 px-4 py-2 rounded-md text-xs font-medium text-white"
-                  style={{ background: 'var(--color-accent-blue)' }}
-                >
-                  <FiUpload className="inline mr-1.5" />
-                  Upload Image
-                </button>
+              <div className="text-center max-w-md mx-auto">
+                <FiImage className="text-6xl mx-auto mb-4 opacity-15" style={{ color: 'var(--color-text-muted)' }} />
+                <p className="text-sm font-medium mb-1" style={{ color: 'var(--color-text)' }}>Research Imaging Workstation</p>
+                <p className="text-xs mb-4" style={{ color: 'var(--color-text-muted)', lineHeight: 1.6 }}>
+                  Upload medical images for analysis with windowing, filters, annotations,
+                  segmentation, and AI-powered diagnostics via Claude Sonnet 4.6.
+                </p>
+                <div className="flex flex-col items-center gap-2">
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="px-5 py-2.5 rounded-md text-xs font-medium text-white transition-all hover:opacity-90"
+                    style={{ background: '#5B8DB8' }}
+                  >
+                    <FiUpload className="inline mr-1.5" />
+                    Upload Image
+                  </button>
+                  <p className="text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+                    Supports DICOM, NIfTI, TIFF, JPEG, PNG, WebP, BMP, SVG
+                  </p>
+                </div>
+                <div className="mt-6 grid grid-cols-3 gap-3 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+                  <div className="p-2 rounded" style={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)' }}>
+                    <FiSliders className="mx-auto mb-1 text-sm" />
+                    <div>15 filters &amp; windowing presets</div>
+                  </div>
+                  <div className="p-2 rounded" style={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)' }}>
+                    <FiCpu className="mx-auto mb-1 text-sm" />
+                    <div>AI analysis via AWS Bedrock</div>
+                  </div>
+                  <div className="p-2 rounded" style={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)' }}>
+                    <FiLayers className="mx-auto mb-1 text-sm" />
+                    <div>Multi-view &amp; 3D volume</div>
+                  </div>
+                </div>
               </div>
             </div>
           )}
@@ -1357,7 +1483,7 @@ Keep response under 300 words. Be precise and clinically relevant.`,
       {selected && (
         <div className="w-72 flex flex-col border-l flex-shrink-0" style={{ borderColor: 'var(--glass-border)', background: 'var(--glass-bg)' }}>
           {/* Panel tabs */}
-          <div className="flex border-b" style={{ borderColor: 'var(--glass-border)' }}>
+          <div className="flex gap-1 p-1.5" style={{ borderBottom: '1px solid var(--glass-border)' }}>
             {([
               { id: 'tools' as const, label: 'Tools', icon: FiSliders },
               { id: 'analysis' as const, label: 'Analysis', icon: FiBarChart2 },
@@ -1366,17 +1492,22 @@ Keep response under 300 words. Be precise and clinically relevant.`,
               { id: 'annotations' as const, label: 'Marks', icon: FiTarget },
             ]).map(t => {
               const Icon = t.icon
+              const active = showPanel === t.id
               return (
                 <button
                   key={t.id}
                   onClick={() => setShowPanel(t.id)}
-                  className={clsx('flex-1 flex items-center justify-center gap-1 px-2 py-2 text-[10px] font-medium transition-all', showPanel === t.id ? 'border-b-2' : 'hover:bg-white/5')}
+                  className="flex-1 flex items-center justify-center gap-1 text-[10px] font-medium transition-all active:scale-95"
                   style={{
-                    color: showPanel === t.id ? 'var(--color-accent-blue)' : 'var(--color-text-muted)',
-                    borderColor: showPanel === t.id ? 'var(--color-accent-blue)' : 'transparent',
+                    padding: '5px 4px',
+                    borderRadius: 10,
+                    background: active ? 'rgba(91, 141, 184, 0.2)' : 'transparent',
+                    border: `1px solid ${active ? 'rgba(91, 141, 184, 0.3)' : 'transparent'}`,
+                    color: active ? '#5B8DB8' : 'var(--color-text-muted)',
+                    boxShadow: active ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
                   }}
                 >
-                  <Icon className="text-xs" />
+                  <Icon className="text-[10px]" />
                   {t.label}
                 </button>
               )
@@ -1443,22 +1574,24 @@ Keep response under 300 words. Be precise and clinically relevant.`,
                   <div className="flex flex-wrap gap-1">
                     {WINDOW_PRESETS
                       .filter(p => p.modalities.length === 0 || p.modalities.includes(selected.modality))
-                      .map(p => (
-                        <button
-                          key={p.label}
-                          onClick={() => updateStudy({ ...selected, windowCenter: p.center, windowWidth: p.width })}
-                          className="px-1.5 py-0.5 text-[9px] rounded transition-all"
-                          style={{
-                            background: selected.windowCenter === p.center && selected.windowWidth === p.width
-                              ? 'var(--color-accent-blue)' : 'transparent',
-                            color: selected.windowCenter === p.center && selected.windowWidth === p.width
-                              ? '#fff' : 'var(--color-text-muted)',
-                            border: '1px solid var(--glass-border)',
-                          }}
-                        >
-                          {p.label}
-                        </button>
-                      ))}
+                      .map(p => {
+                        const active = selected.windowCenter === p.center && selected.windowWidth === p.width
+                        return (
+                          <button
+                            key={p.label}
+                            onClick={() => updateStudy({ ...selected, windowCenter: p.center, windowWidth: p.width })}
+                            className="px-2 py-1 text-[9px] rounded-lg transition-all active:scale-95"
+                            style={{
+                              background: active ? 'rgba(91, 141, 184, 0.25)' : 'var(--glass-bg)',
+                              color: active ? '#fff' : 'var(--color-text-muted)',
+                              border: `1px solid ${active ? 'rgba(91, 141, 184, 0.35)' : 'var(--glass-border)'}`,
+                              boxShadow: active ? '0 1px 3px rgba(91, 141, 184, 0.15)' : 'none',
+                            }}
+                          >
+                            {p.label}
+                          </button>
+                        )
+                      })}
                   </div>
                 </div>
 
@@ -1474,20 +1607,24 @@ Keep response under 300 words. Be precise and clinically relevant.`,
                       <div key={group} style={{ marginBottom: 6 }}>
                         <div className="text-[9px] font-medium mb-1" style={{ color: 'var(--color-text-muted)', opacity: 0.7 }}>{group}</div>
                         <div className="grid grid-cols-2 gap-1">
-                          {FILTERS.filter(f => f.group === group).map(f => (
-                            <button
-                              key={f.id}
-                              onClick={() => updateStudy({ ...selected, filter: f.id })}
-                              className="px-2 py-1 text-[10px] rounded transition-all"
-                              style={{
-                                background: selected.filter === f.id ? 'var(--color-accent-blue)' : 'transparent',
-                                color: selected.filter === f.id ? '#fff' : 'var(--color-text-muted)',
-                                border: '1px solid var(--glass-border)',
-                              }}
-                            >
-                              {f.label}
-                            </button>
-                          ))}
+                          {FILTERS.filter(f => f.group === group).map(f => {
+                            const active = selected.filter === f.id
+                            return (
+                              <button
+                                key={f.id}
+                                onClick={() => updateStudy({ ...selected, filter: f.id })}
+                                className="px-2 py-1 text-[10px] rounded-lg transition-all active:scale-95"
+                                style={{
+                                  background: active ? 'rgba(91, 141, 184, 0.25)' : 'var(--glass-bg)',
+                                  color: active ? '#fff' : 'var(--color-text-muted)',
+                                  border: `1px solid ${active ? 'rgba(91, 141, 184, 0.35)' : 'var(--glass-border)'}`,
+                                  boxShadow: active ? '0 1px 3px rgba(91, 141, 184, 0.15)' : 'none',
+                                }}
+                              >
+                                {f.label}
+                              </button>
+                            )
+                          })}
                         </div>
                       </div>
                     ))
@@ -1640,7 +1777,8 @@ Keep response under 300 words. Be precise and clinically relevant.`,
                         if (!img) return null
                         const off = document.createElement('canvas')
                         off.width = img.width; off.height = img.height
-                        const ctx = off.getContext('2d')!
+                        const ctx = off.getContext('2d')
+                        if (!ctx) return null
                         ctx.drawImage(img, 0, 0)
                         const x1 = Math.max(0, Math.floor(a.x)), y1 = Math.max(0, Math.floor(a.y))
                         const w = Math.min(img.width - x1, Math.floor(a.w!)), h = Math.min(img.height - y1, Math.floor(a.h!))
@@ -1667,58 +1805,37 @@ Keep response under 300 words. Be precise and clinically relevant.`,
                   </div>
                 )}
 
-                {/* AI Analysis via Claude */}
+                {/* AI Analysis via AWS Bedrock Claude Sonnet 4.6 */}
                 <div>
                   <div className="text-[10px] uppercase font-semibold mb-1.5" style={{ color: 'var(--color-text-muted)' }}>
                     <FiCpu className="inline mr-1" />
-                    AI Analysis (Claude Sonnet 4.6)
+                    AI Analysis — Claude Sonnet 4.6
                   </div>
-                  {!aiApiKey.trim() ? (
-                    <div className="space-y-2">
-                      <p className="text-[10px]" style={{ color: 'var(--color-text-muted)', lineHeight: 1.4 }}>
-                        Enter your Anthropic API key to enable AI-powered image analysis.
-                      </p>
-                      <input
-                        type="password"
-                        value={aiApiKey}
-                        onChange={e => {
-                          setAiApiKey(e.target.value)
-                          localStorage.setItem('humanovo-anthropic-key', e.target.value)
-                        }}
-                        placeholder="sk-ant-..."
-                        className="w-full px-2 py-1.5 text-xs rounded outline-none"
-                        style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)', color: 'var(--color-text)' }}
-                      />
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <button
-                        onClick={runAiAnalysis}
-                        disabled={aiLoading}
-                        className="w-full px-3 py-2 rounded text-[11px] font-medium transition-all"
-                        style={{
-                          background: aiLoading ? 'var(--glass-bg)' : '#5B8DB8',
-                          color: aiLoading ? 'var(--color-text-muted)' : '#fff',
-                          border: '1px solid transparent',
-                          opacity: aiLoading ? 0.6 : 1,
-                        }}
-                      >
-                        {aiLoading ? 'Analyzing...' : 'Run AI Analysis'}
-                      </button>
-                      <button
-                        onClick={() => { setAiApiKey(''); localStorage.removeItem('humanovo-anthropic-key') }}
-                        className="text-[9px] px-1.5 py-0.5 rounded transition-all hover:bg-white/5"
-                        style={{ color: 'var(--color-text-muted)', border: '1px solid var(--glass-border)' }}
-                      >
-                        Change API Key
-                      </button>
-                      {aiAnalysis && (
-                        <div className="p-2 rounded text-[10px] leading-relaxed whitespace-pre-wrap" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)', color: 'var(--color-text-secondary)' }}>
-                          {aiAnalysis}
-                        </div>
-                      )}
-                    </div>
-                  )}
+                  <p className="text-[9px] mb-2" style={{ color: 'var(--color-text-muted)', lineHeight: 1.4 }}>
+                    Vision-based clinical analysis powered by Claude Sonnet 4.6 via AWS Bedrock.
+                    Analyzes the current view including windowing and filters.
+                  </p>
+                  <div className="space-y-2">
+                    <button
+                      onClick={runAiAnalysis}
+                      disabled={aiLoading}
+                      className="w-full px-3 py-2 rounded text-[11px] font-medium transition-all flex items-center justify-center gap-2"
+                      style={{
+                        background: aiLoading ? 'var(--glass-bg)' : '#5B8DB8',
+                        color: aiLoading ? 'var(--color-text-muted)' : '#fff',
+                        border: '1px solid transparent',
+                        opacity: aiLoading ? 0.6 : 1,
+                      }}
+                    >
+                      <FiCpu className="text-xs" />
+                      {aiLoading ? 'Analyzing with Claude...' : 'Run AI Analysis'}
+                    </button>
+                    {aiAnalysis && (
+                      <div className="p-2.5 rounded text-[10px] leading-relaxed whitespace-pre-wrap" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)', color: 'var(--color-text-secondary)' }}>
+                        {aiAnalysis}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </>
             )}
@@ -1932,7 +2049,8 @@ Keep response under 300 words. Be precise and clinically relevant.`,
                       if (!img) return
                       const off = document.createElement('canvas')
                       off.width = img.width; off.height = img.height
-                      const ctx = off.getContext('2d')!
+                      const ctx = off.getContext('2d')
+                      if (!ctx) return
                       ctx.fillStyle = '#000'
                       ctx.fillRect(0, 0, off.width, off.height)
                       const cx = img.width / 2, cy = img.height / 2

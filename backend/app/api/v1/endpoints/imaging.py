@@ -1,19 +1,25 @@
 """
 Research Imaging API Endpoints
 
-Image study management, annotations, and AI-assisted analysis.
+Image study management, annotations, and AI-assisted analysis
+via AWS Bedrock Claude Sonnet 4.6 for vision-based diagnostics.
 """
 
+import base64
+import json
 import logging
 from datetime import datetime
 from typing import Optional
 from uuid import uuid4
 
+import boto3
+from botocore.config import Config as BotoConfig
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.models.platform_entities import ImagingStudy
 
@@ -128,3 +134,91 @@ async def get_ai_analysis(study_id: str, db: AsyncSession = Depends(get_db)):
     if not study:
         raise HTTPException(status_code=404, detail="Study not found")
     return {"study_id": study_id, "ai_analysis": study.ai_analysis}
+
+
+# ─── AI Image Analysis via AWS Bedrock Claude Sonnet 4.6 ────────────────
+
+class ImageAnalysisRequest(BaseModel):
+    image_base64: str  # PNG base64 (no data: prefix)
+    modality: str = "CT"
+    body_part: str = ""
+    width: int = 0
+    height: int = 0
+    window_center: int = 128
+    window_width: int = 256
+    filter_applied: str = "none"
+
+
+def _get_bedrock_client():
+    """Build a Bedrock runtime client from app settings."""
+    kwargs = {"region_name": settings.AWS_REGION}
+    if settings.AWS_ACCESS_KEY_ID and settings.AWS_SECRET_ACCESS_KEY:
+        kwargs["aws_access_key_id"] = settings.AWS_ACCESS_KEY_ID.get_secret_value()
+        kwargs["aws_secret_access_key"] = settings.AWS_SECRET_ACCESS_KEY.get_secret_value()
+    return boto3.client(
+        "bedrock-runtime",
+        config=BotoConfig(
+            retries={"max_attempts": 3, "mode": "adaptive"},
+            read_timeout=120,
+        ),
+        **kwargs,
+    )
+
+
+@router.post("/analyze")
+async def analyze_image(data: ImageAnalysisRequest):
+    """Run AI-powered clinical image analysis using Claude Sonnet 4.6 via AWS Bedrock."""
+    try:
+        client = _get_bedrock_client()
+
+        prompt = (
+            f"You are analyzing a {data.modality} medical image"
+            f"{f' of the {data.body_part}' if data.body_part else ''}. "
+            f"Image dimensions: {data.width}x{data.height}px. "
+            f"Current windowing: center={data.window_center}, width={data.window_width}. "
+            f"Filter applied: {data.filter_applied}.\n\n"
+            "Provide a concise clinical analysis:\n"
+            "1. **Modality Confirmation**: Confirm or suggest the correct imaging modality\n"
+            "2. **Key Observations**: Notable anatomical structures, any abnormalities or areas of interest\n"
+            "3. **Image Quality**: Assessment of contrast, noise, artifacts\n"
+            "4. **Quantitative Assessment**: Density/intensity distribution observations\n"
+            "5. **Recommendations**: Suggested filters, windowing adjustments, or additional analysis\n\n"
+            "Keep response under 400 words. Be precise and clinically relevant."
+        )
+
+        body = {
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": 1024,
+            "temperature": 0.3,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/png",
+                                "data": data.image_base64,
+                            },
+                        },
+                        {"type": "text", "text": prompt},
+                    ],
+                }
+            ],
+        }
+
+        response = client.invoke_model(
+            modelId=settings.BEDROCK_MODEL_CLAUDE_SONNET,
+            contentType="application/json",
+            accept="application/json",
+            body=json.dumps(body),
+        )
+
+        result = json.loads(response["body"].read())
+        text = result.get("content", [{}])[0].get("text", "")
+        return {"analysis": text, "model": settings.BEDROCK_MODEL_CLAUDE_SONNET}
+
+    except Exception as e:
+        logger.exception("Imaging AI analysis failed")
+        raise HTTPException(status_code=500, detail=f"AI analysis failed: {str(e)}")
