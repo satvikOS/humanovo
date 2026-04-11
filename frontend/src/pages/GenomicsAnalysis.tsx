@@ -445,7 +445,7 @@ export default function GenomicsAnalysis() {
                               <Tooltip contentStyle={{ background: 'var(--color-surface-solid)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '11px', color: 'var(--color-text)' }}
                                 formatter={(v: any) => [Number(v).toFixed(4), 'ES']} />
                               <ReferenceLine y={0} stroke="var(--color-text-muted)" strokeDasharray="4 4" />
-                              <Area type="monotone" dataKey="running_es" stroke="#22c55e" fill="rgba(34,197,94,0.1)" strokeWidth={2} dot={false} />
+                              <Area type="monotone" dataKey="running_es" stroke="#6BA594" fill="rgba(107,165,148,0.1)" strokeWidth={2} dot={false} />
                             </AreaChart>
                           </ResponsiveContainer>
                         </div>
@@ -521,22 +521,22 @@ export default function GenomicsAnalysis() {
                                 formatter={(value: any, name: any) => [Number(value).toFixed(3), name === 'x' ? 'log₂FC' : '-log₁₀(p)']}
                                 labelFormatter={(_, payload) => payload?.[0]?.payload?.gene || ''} />
                               {/* Significance thresholds */}
-                              <ReferenceLine y={-Math.log10(0.05)} stroke="#f59e0b" strokeDasharray="6 3" strokeWidth={1}
-                                label={{ value: 'p=0.05', position: 'insideTopRight', style: { fontSize: 9, fill: '#f59e0b' } }} />
+                              <ReferenceLine y={-Math.log10(0.05)} stroke="#C4956A" strokeDasharray="6 3" strokeWidth={1}
+                                label={{ value: 'p=0.05', position: 'insideTopRight', style: { fontSize: 9, fill: '#C4956A' } }} />
                               <ReferenceLine x={-1} stroke="#666" strokeDasharray="4 4" strokeWidth={0.5} />
                               <ReferenceLine x={1} stroke="#666" strokeDasharray="4 4" strokeWidth={0.5} />
                               <Scatter data={scatterData} fill="var(--color-accent-blue)">
                                 {scatterData.map((d: any, i: number) => (
-                                  <Cell key={i} fill={d.significant ? (d.x > 0 ? '#ef4444' : '#3b82f6') : 'rgba(107,114,128,0.4)'} r={d.significant ? 5 : 3} />
+                                  <Cell key={i} fill={d.significant ? (d.x > 0 ? '#B07E8B' : '#5B8DB8') : 'rgba(107,114,128,0.4)'} r={d.significant ? 5 : 3} />
                                 ))}
                               </Scatter>
                             </ScatterChart>
                           </ResponsiveContainer>
                           <div className="flex items-center justify-center gap-4 text-xxs text-[var(--color-text-muted)] mt-1">
-                            <span><span style={{ color: '#ef4444' }}>●</span> Upregulated</span>
-                            <span><span style={{ color: '#3b82f6' }}>●</span> Downregulated</span>
+                            <span><span style={{ color: '#B07E8B' }}>●</span> Upregulated</span>
+                            <span><span style={{ color: '#5B8DB8' }}>●</span> Downregulated</span>
                             <span><span style={{ color: 'rgba(107,114,128,0.4)' }}>●</span> Non-significant</span>
-                            <span><span style={{ color: '#f59e0b' }}>---</span> p=0.05 threshold</span>
+                            <span><span style={{ color: '#C4956A' }}>---</span> p=0.05 threshold</span>
                           </div>
                         </div>
                       )}
