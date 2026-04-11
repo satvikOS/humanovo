@@ -48,7 +48,7 @@ const mainNavItems = [
   { to: '/dashboard', icon: FiHome, label: 'Dashboard', shortcut: '1' },
   { to: '/projects', icon: FiFolder, label: 'Projects', shortcut: '2' },
   { to: '/evidence', icon: FiDatabase, label: 'Evidence', shortcut: '3' },
-  { to: '/agents', icon: FiActivity, label: 'Discovery', shortcut: '4' },
+  { to: '/agents', icon: FiZap, label: 'Discovery', shortcut: '4' },
   { to: '/workbench', icon: FiBox, label: 'Workbench', shortcut: '5' },
   { to: '/anatomy', icon: FiUser, label: '3D Anatomy', shortcut: '6' },
 ]
@@ -62,22 +62,22 @@ const secondaryNavItems = [
 const researchNavItems = [
   { to: '/literature-review', icon: FiBookOpen, label: 'Literature' },
   { to: '/citation-manager', icon: FiList, label: 'Citations' },
-  { to: '/experiment-tracker', icon: FiClipboard, label: 'Experiments' },
+  { to: '/experiment-tracker', icon: FiTrendingUp, label: 'Experiments' },
   { to: '/data-visualization', icon: FiBarChart2, label: 'Visualization' },
 ]
 
 const analysisNavItems = [
   { to: '/compute-lab', icon: FiCpu, label: 'Compute Lab' },
-  { to: '/genomics', icon: FiHeart, label: 'Genomics' },
+  { to: '/genomics', icon: FiGrid, label: 'Genomics' },
 ]
 
 const managementNavItems = [
   { to: '/data-manager', icon: FiDatabase, label: 'Data Manager' },
   { to: '/imaging', icon: FiImage, label: 'Imaging' },
-  { to: '/clinical-trials', icon: FiClipboard, label: 'Clinical Trials' },
+  { to: '/clinical-trials', icon: FiActivity, label: 'Clinical Trials' },
   { to: '/manuscripts', icon: FiFileText, label: 'Manuscripts' },
   { to: '/biobank', icon: FiPackage, label: 'Biobank' },
-  { to: '/collaboration', icon: FiGrid, label: 'Collaboration' },
+  { to: '/collaboration', icon: FiMessageCircle, label: 'Collaboration' },
   { to: '/regulatory', icon: FiShield, label: 'Regulatory' },
 ]
 

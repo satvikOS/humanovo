@@ -462,6 +462,9 @@ export default function ResearchImaging() {
   const [brushSize, setBrushSize] = useState(8)
   const [segMask, setSegMask] = useState<Uint8Array | null>(null) // per-pixel label mask
   const [isPainting, setIsPainting] = useState(false)
+  const [aiAnalysis, setAiAnalysis] = useState<string | null>(null)
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiApiKey, setAiApiKey] = useState(() => localStorage.getItem('humanovo-anthropic-key') || '')
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const coronalRef = useRef<HTMLCanvasElement>(null)
@@ -1023,6 +1026,63 @@ export default function ResearchImaging() {
     a.download = `${selected.title}.json`
     a.click()
     URL.revokeObjectURL(url)
+  }
+
+  const runAiAnalysis = async () => {
+    if (!selected || !aiApiKey.trim()) return
+    setAiLoading(true)
+    setAiAnalysis(null)
+    try {
+      // Get the canvas as a base64 image (with current windowing/filter applied)
+      const canvas = canvasRef.current
+      if (!canvas) throw new Error('No canvas available')
+      const dataUrl = canvas.toDataURL('image/png')
+      const base64 = dataUrl.split(',')[1]
+
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': aiApiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-6',
+          max_tokens: 1024,
+          messages: [{
+            role: 'user',
+            content: [
+              {
+                type: 'image',
+                source: { type: 'base64', media_type: 'image/png', data: base64 },
+              },
+              {
+                type: 'text',
+                text: `You are analyzing a ${selected.modality} medical image${selected.bodyPart ? ` of the ${selected.bodyPart}` : ''}. Image dimensions: ${selected.width}x${selected.height}px. Current windowing: center=${selected.windowCenter}, width=${selected.windowWidth}. Filter applied: ${selected.filter}.
+
+Provide a concise clinical analysis:
+1. **Modality Confirmation**: Confirm or suggest the correct imaging modality
+2. **Key Observations**: Notable anatomical structures, any abnormalities or areas of interest
+3. **Image Quality**: Assessment of contrast, noise, artifacts
+4. **Recommendations**: Suggested filters, windowing adjustments, or additional analysis
+
+Keep response under 300 words. Be precise and clinically relevant.`,
+              },
+            ],
+          }],
+        }),
+      })
+      const data = await response.json()
+      if (data.content?.[0]?.text) {
+        setAiAnalysis(data.content[0].text)
+      } else if (data.error) {
+        setAiAnalysis(`Error: ${data.error.message || 'Unknown error'}`)
+      }
+    } catch (err: any) {
+      setAiAnalysis(`Analysis failed: ${err?.message || 'Unknown error'}`)
+    }
+    setAiLoading(false)
   }
 
   const tools: { id: Tool; icon: typeof FiSquare; label: string }[] = [
@@ -1602,6 +1662,60 @@ export default function ResearchImaging() {
                     </div>
                   </div>
                 )}
+
+                {/* AI Analysis via Claude */}
+                <div>
+                  <div className="text-[10px] uppercase font-semibold mb-1.5" style={{ color: 'var(--color-text-muted)' }}>
+                    <FiCpu className="inline mr-1" />
+                    AI Analysis (Claude Sonnet 4.6)
+                  </div>
+                  {!aiApiKey.trim() ? (
+                    <div className="space-y-2">
+                      <p className="text-[10px]" style={{ color: 'var(--color-text-muted)', lineHeight: 1.4 }}>
+                        Enter your Anthropic API key to enable AI-powered image analysis.
+                      </p>
+                      <input
+                        type="password"
+                        value={aiApiKey}
+                        onChange={e => {
+                          setAiApiKey(e.target.value)
+                          localStorage.setItem('humanovo-anthropic-key', e.target.value)
+                        }}
+                        placeholder="sk-ant-..."
+                        className="w-full px-2 py-1.5 text-xs rounded outline-none"
+                        style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)', color: 'var(--color-text)' }}
+                      />
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <button
+                        onClick={runAiAnalysis}
+                        disabled={aiLoading}
+                        className="w-full px-3 py-2 rounded text-[11px] font-medium transition-all"
+                        style={{
+                          background: aiLoading ? 'var(--glass-bg)' : '#5B8DB8',
+                          color: aiLoading ? 'var(--color-text-muted)' : '#fff',
+                          border: '1px solid transparent',
+                          opacity: aiLoading ? 0.6 : 1,
+                        }}
+                      >
+                        {aiLoading ? 'Analyzing...' : 'Run AI Analysis'}
+                      </button>
+                      <button
+                        onClick={() => { setAiApiKey(''); localStorage.removeItem('humanovo-anthropic-key') }}
+                        className="text-[9px] px-1.5 py-0.5 rounded transition-all hover:bg-white/5"
+                        style={{ color: 'var(--color-text-muted)', border: '1px solid var(--glass-border)' }}
+                      >
+                        Change API Key
+                      </button>
+                      {aiAnalysis && (
+                        <div className="p-2 rounded text-[10px] leading-relaxed whitespace-pre-wrap" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)', color: 'var(--color-text-secondary)' }}>
+                          {aiAnalysis}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </>
             )}
 
