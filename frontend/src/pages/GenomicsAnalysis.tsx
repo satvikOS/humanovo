@@ -4,7 +4,8 @@ import {
 } from 'react-icons/fi'
 import {
   ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, Cell,
+  ResponsiveContainer, Cell, ReferenceLine,
+  AreaChart, Area,
 } from 'recharts'
 
 import { logActivity } from '../utils/persistence'
@@ -433,15 +434,19 @@ export default function GenomicsAnalysis() {
                       </div>
                       {result.enrichment_plot && result.enrichment_plot.length > 0 && (
                         <div>
-                          <p className="text-xs text-[var(--color-text-muted)] mb-2">Enrichment Plot</p>
-                          <ResponsiveContainer width="100%" height={150}>
-                            <ScatterChart>
+                          <p className="text-xs text-[var(--color-text-muted)] mb-2">Running Enrichment Score</p>
+                          <ResponsiveContainer width="100%" height={180}>
+                            <AreaChart data={result.enrichment_plot}>
                               <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                              <XAxis dataKey="rank" name="Rank" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
-                              <YAxis dataKey="running_es" name="Running ES" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
-                              <Tooltip contentStyle={{ background: 'var(--color-surface-solid)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '11px', color: 'var(--color-text)' }} />
-                              <Scatter data={result.enrichment_plot} fill="var(--color-accent-blue)" />
-                            </ScatterChart>
+                              <XAxis dataKey="rank" name="Rank" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }}
+                                label={{ value: 'Gene Rank', position: 'insideBottom', offset: -5, style: { fontSize: 10, fill: 'var(--color-text-muted)' } }} />
+                              <YAxis dataKey="running_es" name="Running ES" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }}
+                                label={{ value: 'ES', angle: -90, position: 'insideLeft', style: { fontSize: 10, fill: 'var(--color-text-muted)' } }} />
+                              <Tooltip contentStyle={{ background: 'var(--color-surface-solid)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '11px', color: 'var(--color-text)' }}
+                                formatter={(v: any) => [Number(v).toFixed(4), 'ES']} />
+                              <ReferenceLine y={0} stroke="var(--color-text-muted)" strokeDasharray="4 4" />
+                              <Area type="monotone" dataKey="running_es" stroke="#22c55e" fill="rgba(34,197,94,0.1)" strokeWidth={2} dot={false} />
+                            </AreaChart>
                           </ResponsiveContainer>
                         </div>
                       )}
@@ -504,18 +509,35 @@ export default function GenomicsAnalysis() {
                       <div className="text-xs text-[var(--color-text-muted)]">{nSig} significant from {nTotal} genes</div>
                       {scatterData.length > 0 && (
                         <div>
-                          <p className="text-xs text-[var(--color-text-muted)] mb-2">Volcano Plot</p>
-                          <ResponsiveContainer width="100%" height={200}>
-                            <ScatterChart>
+                          <p className="text-xs text-[var(--color-text-muted)] mb-2">Volcano Plot — <span style={{ color: '#ef4444' }}>significant</span> vs <span style={{ color: 'var(--color-accent-blue)' }}>non-significant</span></p>
+                          <ResponsiveContainer width="100%" height={280}>
+                            <ScatterChart margin={{ top: 10, right: 20, bottom: 10, left: 10 }}>
                               <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                              <XAxis dataKey="x" name="log2FC" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
-                              <YAxis dataKey="y" name="-log10(p)" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
-                              <Tooltip contentStyle={{ background: 'var(--color-surface-solid)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '11px', color: 'var(--color-text)' }} />
+                              <XAxis dataKey="x" name="log2FC" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }}
+                                label={{ value: 'log₂ Fold Change', position: 'insideBottom', offset: -5, style: { fontSize: 10, fill: 'var(--color-text-muted)' } }} />
+                              <YAxis dataKey="y" name="-log10(p)" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }}
+                                label={{ value: '-log₁₀(p-value)', angle: -90, position: 'insideLeft', style: { fontSize: 10, fill: 'var(--color-text-muted)' } }} />
+                              <Tooltip contentStyle={{ background: 'var(--color-surface-solid)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '11px', color: 'var(--color-text)' }}
+                                formatter={(value: any, name: any) => [Number(value).toFixed(3), name === 'x' ? 'log₂FC' : '-log₁₀(p)']}
+                                labelFormatter={(_, payload) => payload?.[0]?.payload?.gene || ''} />
+                              {/* Significance thresholds */}
+                              <ReferenceLine y={-Math.log10(0.05)} stroke="#f59e0b" strokeDasharray="6 3" strokeWidth={1}
+                                label={{ value: 'p=0.05', position: 'insideTopRight', style: { fontSize: 9, fill: '#f59e0b' } }} />
+                              <ReferenceLine x={-1} stroke="#666" strokeDasharray="4 4" strokeWidth={0.5} />
+                              <ReferenceLine x={1} stroke="#666" strokeDasharray="4 4" strokeWidth={0.5} />
                               <Scatter data={scatterData} fill="var(--color-accent-blue)">
-                                {scatterData.map((d: any, i: number) => <Cell key={i} fill={d.significant ? '#ef4444' : 'var(--color-accent-blue)'} />)}
+                                {scatterData.map((d: any, i: number) => (
+                                  <Cell key={i} fill={d.significant ? (d.x > 0 ? '#ef4444' : '#3b82f6') : 'rgba(107,114,128,0.4)'} r={d.significant ? 5 : 3} />
+                                ))}
                               </Scatter>
                             </ScatterChart>
                           </ResponsiveContainer>
+                          <div className="flex items-center justify-center gap-4 text-xxs text-[var(--color-text-muted)] mt-1">
+                            <span><span style={{ color: '#ef4444' }}>●</span> Upregulated</span>
+                            <span><span style={{ color: '#3b82f6' }}>●</span> Downregulated</span>
+                            <span><span style={{ color: 'rgba(107,114,128,0.4)' }}>●</span> Non-significant</span>
+                            <span><span style={{ color: '#f59e0b' }}>---</span> p=0.05 threshold</span>
+                          </div>
                         </div>
                       )}
                       {/* Show top significant genes */}
