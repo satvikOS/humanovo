@@ -478,6 +478,8 @@ export default function EquationPlotter() {
   })
   const [odeResult, setOdeResult] = useState<{ t: number[]; y: number[][] } | null>(null)
   const [showOdeLibrary, setShowOdeLibrary] = useState(false)
+  const [odeAutoSolve, setOdeAutoSolve] = useState(true)
+  const [showDerivative, setShowDerivative] = useState(false)
 
   const inputRef = useRef<HTMLInputElement>(null)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -665,6 +667,35 @@ export default function EquationPlotter() {
     })
   }, [odeResult, activeODE])
 
+  // Auto-solve ODE when parameters change
+  const odeAutoRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    if (!odeAutoSolve || mode !== 'ode') return
+    if (odeAutoRef.current) clearTimeout(odeAutoRef.current)
+    odeAutoRef.current = setTimeout(() => { runODE() }, 200)
+    return () => { if (odeAutoRef.current) clearTimeout(odeAutoRef.current) }
+  }, [odeAutoSolve, odeParams, odeTemplate, mode]) // eslint-disable-line
+
+  // Numerical derivative of main equation
+  const derivativeData = useMemo(() => {
+    if (!showDerivative || mainData.length < 3) return []
+    const h = (xMax - xMin) / 300
+    return mainData.map((p, i) => {
+      if (i === 0 || i === mainData.length - 1) return { x: p.x, dy: NaN }
+      const dy = (mainData[i + 1].y - mainData[i - 1].y) / (2 * h)
+      return { x: p.x, dy: isFinite(dy) ? dy : NaN }
+    })
+  }, [showDerivative, mainData, xMin, xMax])
+
+  // Merge derivative into chart data
+  const chartDataWithDerivative = useMemo(() => {
+    if (!showDerivative || derivativeData.length === 0) return chartData
+    return chartData.map((row, i) => ({
+      ...row,
+      dy: derivativeData[i]?.dy ?? NaN,
+    }))
+  }, [chartData, derivativeData, showDerivative])
+
   const exportOdeCSV = useCallback(() => {
     if (!odeResult) return
     const header = ['t', ...activeODE.vars].join(',') + '\n'
@@ -706,12 +737,17 @@ export default function EquationPlotter() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <label style={{ fontSize: 11, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>x min</label>
           <input type="number" style={inp} value={xMin} onChange={e => setXMin(parseFloat(e.target.value) || 0)} />
+          <input type="range" min={-100} max={0} step={0.5} value={xMin} onChange={e => setXMin(parseFloat(e.target.value))} style={{ width: 60, accentColor: 'var(--color-text)' }} />
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <label style={{ fontSize: 11, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>x max</label>
           <input type="number" style={inp} value={xMax} onChange={e => setXMax(parseFloat(e.target.value) || 0)} />
+          <input type="range" min={0} max={100} step={0.5} value={xMax} onChange={e => setXMax(parseFloat(e.target.value))} style={{ width: 60, accentColor: 'var(--color-text)' }} />
         </div>
         <button onClick={resetRange} style={{ ...chip, fontWeight: 400 }}><FiRefreshCw size={11} /> Reset</button>
+        <button onClick={() => setShowDerivative(d => !d)} style={{ ...chip, fontWeight: showDerivative ? 600 : 400, borderColor: showDerivative ? 'var(--color-text)' : undefined }}>
+          dy/dx
+        </button>
         <div style={{ flex: 1 }} />
         <button onClick={() => setShowOverlays(p => !p)} style={{ ...chip, fontWeight: 400 }}>
           <FiLayers size={11} /> Overlays ({overlays.filter(o => o.enabled).length}/3)
@@ -745,14 +781,15 @@ export default function EquationPlotter() {
       <div style={{ flex: 1, minHeight: 0, border: '1px solid var(--glass-border)', borderRadius: 8, padding: 10, background: 'var(--glass-bg)' }}>
         {chartData.length > 0 ? (
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={chartData} margin={{ top: 8, right: 16, bottom: 8, left: 8 }}>
+            <LineChart data={chartDataWithDerivative} margin={{ top: 8, right: 16, bottom: 8, left: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" strokeOpacity={0.5} />
               <XAxis dataKey="x" tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} tickFormatter={v => typeof v === 'number' ? (Math.abs(v) >= 1000 ? v.toExponential(0) : String(Math.round(v * 100) / 100)) : v} stroke="var(--glass-border)" />
               <YAxis tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} tickFormatter={v => typeof v === 'number' ? (Math.abs(v) >= 1000 ? v.toExponential(0) : String(Math.round(v * 100) / 100)) : v} stroke="var(--glass-border)" width={56} />
-              <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} labelStyle={{ color: 'var(--color-text-muted)' }} formatter={(value: unknown) => { const n = typeof value === 'number' ? value : Number(value); return [isFinite(n) ? n.toFixed(4) : 'NaN', ''] }} labelFormatter={(label: unknown) => `x = ${label}`} />
+              <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} labelStyle={{ color: 'var(--color-text-muted)' }} formatter={(value: unknown, name: unknown) => { const n = typeof value === 'number' ? value : Number(value); return [isFinite(n) ? n.toFixed(4) : 'NaN', name === 'dy' ? "f'(x)" : ''] }} labelFormatter={(label: unknown) => `x = ${label}`} />
               {quadrantInfo.showXRef && <ReferenceLine y={0} stroke="var(--color-text-muted)" strokeDasharray="4 4" strokeOpacity={0.4} />}
               {quadrantInfo.showYRef && <ReferenceLine x={0} stroke="var(--color-text-muted)" strokeDasharray="4 4" strokeOpacity={0.4} />}
               <Line type="monotone" dataKey="y" stroke="var(--color-text)" strokeWidth={1.8} strokeOpacity={0.7} dot={false} name={expr} isAnimationActive={false} />
+              {showDerivative && <Line type="monotone" dataKey="dy" stroke="#f59e0b" strokeWidth={1.2} strokeDasharray="4 2" strokeOpacity={0.6} dot={false} name="f'(x)" isAnimationActive={false} connectNulls={false} />}
               {overlays.map((o, idx) => o.enabled ? (
                 <Line key={idx} type="monotone" dataKey={`o${idx}`} stroke={OVERLAY_COLORS[idx]} strokeWidth={1.5} strokeDasharray="6 3" strokeOpacity={0.6} dot={false} name={o.expr} isAnimationActive={false} connectNulls={false} />
               ) : null)}
@@ -847,18 +884,35 @@ export default function EquationPlotter() {
         </button>
       </div>
 
-      {/* ODE parameters */}
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-        {activeODE.params.map(p => (
-          <div key={p.key} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <label style={{ fontSize: 11, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>{p.label}</label>
-            <input type="number" style={inp} value={odeParams[p.key] ?? p.value} min={p.min} max={p.max} step={p.step}
-              onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) setOdeParams(prev => ({ ...prev, [p.key]: v })) }} />
-          </div>
-        ))}
-        <span style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>
-          t: [{activeODE.tSpan[0]}, {activeODE.tSpan[1]}] | y0: [{activeODE.y0.join(', ')}]
-        </span>
+      {/* ODE parameters — reactive sliders */}
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+        {activeODE.params.map(p => {
+          const val = odeParams[p.key] ?? p.value
+          return (
+            <div key={p.key} style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 130 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <label style={{ fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 500 }}>{p.label}</label>
+                <input type="number" style={{ ...inp, width: 56, fontSize: 10 }} value={val} min={p.min} max={p.max} step={p.step}
+                  onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) setOdeParams(prev => ({ ...prev, [p.key]: v })) }} />
+              </div>
+              <input type="range" min={p.min} max={p.max} step={p.step} value={val}
+                onChange={e => setOdeParams(prev => ({ ...prev, [p.key]: parseFloat(e.target.value) }))}
+                style={{ width: '100%', accentColor: 'var(--color-text)' }} />
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: 8, color: 'var(--color-text-muted)', opacity: 0.5 }}>{p.min}</span>
+                <span style={{ fontSize: 8, color: 'var(--color-text-muted)', opacity: 0.5 }}>{p.max}</span>
+              </div>
+            </div>
+          )
+        })}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginLeft: 'auto' }}>
+          <button onClick={() => setOdeAutoSolve(a => !a)} style={{ ...chip, fontWeight: odeAutoSolve ? 600 : 400, borderColor: odeAutoSolve ? 'var(--color-text)' : undefined, fontSize: 10 }}>
+            <FiRefreshCw size={10} /> Auto
+          </button>
+          <span style={{ fontSize: 9, color: 'var(--color-text-muted)', textAlign: 'center' }}>
+            t: [{activeODE.tSpan[0]}, {activeODE.tSpan[1]}]
+          </span>
+        </div>
       </div>
 
       {/* ODE Chart */}
