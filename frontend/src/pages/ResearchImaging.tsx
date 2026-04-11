@@ -456,6 +456,9 @@ export default function ResearchImaging() {
   const [drawing, setDrawing] = useState<{ start: { x: number; y: number }; current: { x: number; y: number } } | null>(null)
   const [viewLayout, setViewLayout] = useState<'single' | 'quad'>('single')
   const [slicePos, setSlicePos] = useState({ axial: 50, coronal: 50, sagittal: 50 })
+  const [brushSize, setBrushSize] = useState(8)
+  const [segMask, setSegMask] = useState<Uint8Array | null>(null) // per-pixel label mask
+  const [isPainting, setIsPainting] = useState(false)
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const coronalRef = useRef<HTMLCanvasElement>(null)
@@ -679,6 +682,28 @@ export default function ResearchImaging() {
       }
     })
 
+    // Draw segmentation mask overlay
+    if (segMask && selected) {
+      const labels = selected.labels || []
+      const maskCanvas = document.createElement('canvas')
+      maskCanvas.width = img.width
+      maskCanvas.height = img.height
+      const mCtx = maskCanvas.getContext('2d')!
+      const mData = mCtx.createImageData(img.width, img.height)
+      for (let i = 0; i < segMask.length; i++) {
+        const labelIdx = segMask[i]
+        if (labelIdx === 0) continue
+        const label = labels[labelIdx - 1]
+        if (label && !label.visible) continue
+        const hex = label?.color || annotColor
+        const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16)
+        const pi = i * 4
+        mData.data[pi] = r; mData.data[pi + 1] = g; mData.data[pi + 2] = b; mData.data[pi + 3] = 100
+      }
+      mCtx.putImageData(mData, 0, 0)
+      ctx.drawImage(maskCanvas, offsetX, offsetY, drawW, drawH)
+    }
+
     // Draw current drawing
     if (drawing) {
       ctx.strokeStyle = annotColor
@@ -732,7 +757,7 @@ export default function ResearchImaging() {
         refImg.src = refStudy.imageData
       }
     }
-  }, [selected, zoom, pan, drawing, tool, annotColor, regShowOverlay, regRefId, regTransform, regOverlayOpacity, studies])
+  }, [selected, zoom, pan, drawing, tool, annotColor, regShowOverlay, regRefId, regTransform, regOverlayOpacity, studies, segMask])
 
   const screenToImage = useCallback((e: React.MouseEvent): { x: number; y: number } | null => {
     const canvas = canvasRef.current
@@ -752,11 +777,35 @@ export default function ResearchImaging() {
     return { x, y }
   }, [zoom, pan])
 
+  // ── Brush / Eraser painting ──────────────────────────────────
+  const paintAt = useCallback((px: number, py: number) => {
+    if (!selected) return
+    const w = selected.width, h = selected.height
+    const mask = segMask || new Uint8Array(w * h)
+    const radius = brushSize
+    const isBrush = tool === 'brush'
+    const labelIdx = isBrush ? ((selected.labels || []).findIndex(l => l.name === annotLabel) + 1) || 1 : 0
+    for (let dy = -radius; dy <= radius; dy++) {
+      for (let dx = -radius; dx <= radius; dx++) {
+        if (dx * dx + dy * dy > radius * radius) continue
+        const ix = Math.round(px + dx), iy = Math.round(py + dy)
+        if (ix < 0 || ix >= w || iy < 0 || iy >= h) continue
+        mask[iy * w + ix] = labelIdx
+      }
+    }
+    setSegMask(new Uint8Array(mask))
+  }, [selected, segMask, brushSize, tool, annotLabel])
+
   const handleMouseDown = (e: React.MouseEvent) => {
     if (!selected) return
     if (tool === 'pan') return
     const p = screenToImage(e)
     if (!p) return
+    if (tool === 'brush' || tool === 'eraser') {
+      setIsPainting(true)
+      paintAt(p.x, p.y)
+      return
+    }
     if (tool === 'point') {
       const ann: Annotation = { id: crypto.randomUUID(), type: 'point', x: p.x, y: p.y, label: annotLabel, color: annotColor }
       updateStudy({ ...selected, annotations: [...selected.annotations, ann] })
@@ -766,6 +815,11 @@ export default function ResearchImaging() {
   }
 
   const handleMouseMove = (e: React.MouseEvent) => {
+    if (isPainting && (tool === 'brush' || tool === 'eraser')) {
+      const p = screenToImage(e)
+      if (p) paintAt(p.x, p.y)
+      return
+    }
     if (!drawing) return
     const p = screenToImage(e)
     if (!p) return
@@ -773,6 +827,7 @@ export default function ResearchImaging() {
   }
 
   const handleMouseUp = () => {
+    if (isPainting) { setIsPainting(false); return }
     if (!drawing || !selected) return
     const { start, current } = drawing
     let ann: Annotation | null = null
@@ -1377,6 +1432,35 @@ export default function ResearchImaging() {
                       />
                     ))}
                   </div>
+                </div>
+
+                {/* Brush / Eraser */}
+                <div>
+                  <div className="text-[10px] uppercase font-semibold mb-1.5" style={{ color: 'var(--color-text-muted)' }}>
+                    Brush Segmentation
+                  </div>
+                  <div className="flex gap-1 mb-2">
+                    <button
+                      onClick={() => setTool('brush')}
+                      className="flex-1 px-2 py-1.5 text-[10px] rounded"
+                      style={{ background: tool === 'brush' ? 'var(--color-accent-blue)' : 'transparent', color: tool === 'brush' ? '#fff' : 'var(--color-text-muted)', border: '1px solid var(--glass-border)' }}
+                    >Paint</button>
+                    <button
+                      onClick={() => setTool('eraser')}
+                      className="flex-1 px-2 py-1.5 text-[10px] rounded"
+                      style={{ background: tool === 'eraser' ? '#ef4444' : 'transparent', color: tool === 'eraser' ? '#fff' : 'var(--color-text-muted)', border: '1px solid var(--glass-border)' }}
+                    >Erase</button>
+                  </div>
+                  <label className="text-[10px] block mb-1" style={{ color: 'var(--color-text-muted)' }}>
+                    Brush size: {brushSize}px
+                  </label>
+                  <input type="range" min={1} max={30} value={brushSize} onChange={e => setBrushSize(parseInt(e.target.value))} className="w-full" />
+                  {segMask && (
+                    <div className="flex gap-1 mt-2">
+                      <span className="text-[10px]" style={{ color: 'var(--color-text-muted)' }}>{segMask.filter(v => v > 0).length} pixels labeled</span>
+                      <button onClick={() => setSegMask(null)} className="ml-auto text-[10px] px-1.5 py-0.5 rounded" style={{ color: '#ef4444', border: '1px solid var(--glass-border)' }}>Clear mask</button>
+                    </div>
+                  )}
                 </div>
 
                 {/* Pixel spacing */}
