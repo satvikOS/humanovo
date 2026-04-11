@@ -7691,7 +7691,33 @@ export default function Workstation() {
           </>
         )}
         <span
-          style={{ marginLeft: 'auto', color: 'var(--color-text-muted)' }}
+          style={{ ...styles.statusBarAction, marginLeft: 'auto' }}
+          onClick={() => setHelpOpen(true)}
+          onMouseEnter={e => { (e.currentTarget as HTMLSpanElement).style.background = 'var(--glass-bg-hover)'; (e.currentTarget as HTMLSpanElement).style.color = 'var(--color-text)' }}
+          onMouseLeave={e => { (e.currentTarget as HTMLSpanElement).style.background = 'transparent'; (e.currentTarget as HTMLSpanElement).style.color = '' }}
+          title="Keyboard shortcuts (F1)"
+          role="button"
+        >
+          F1 shortcuts
+        </span>
+        <span>·</span>
+        <span
+          style={styles.statusBarAction}
+          onClick={() => {
+            const next = { ...editorPrefs, wrap: !editorPrefs.wrap }
+            setEditorPrefs(next)
+            saveEditorPrefs(next)
+          }}
+          onMouseEnter={e => { (e.currentTarget as HTMLSpanElement).style.background = 'var(--glass-bg-hover)'; (e.currentTarget as HTMLSpanElement).style.color = 'var(--color-text)' }}
+          onMouseLeave={e => { (e.currentTarget as HTMLSpanElement).style.background = 'transparent'; (e.currentTarget as HTMLSpanElement).style.color = '' }}
+          title={`Word wrap: ${editorPrefs.wrap ? 'ON' : 'OFF'} — click to toggle`}
+          role="button"
+        >
+          {editorPrefs.fontSize}px {editorPrefs.wrap ? 'wrap' : 'nowrap'}
+        </span>
+        <span>·</span>
+        <span
+          style={{ color: 'var(--color-text-muted)' }}
           title={`Workstation session opened at ${new Date(sessionStartedAtRef.current).toLocaleTimeString()}`}
         >
           {sessionElapsedLabel}
