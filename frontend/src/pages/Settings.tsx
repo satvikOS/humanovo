@@ -223,12 +223,20 @@ function AppearanceSettings() {
 }
 
 function NotificationSettings() {
-  const [emailNotifs, setEmailNotifs] = useState(true)
-  const [pushNotifs, setPushNotifs] = useState(true)
-  const [soundEnabled, setSoundEnabled] = useState(false)
-  const [notifyOnEvidence, setNotifyOnEvidence] = useState(true)
-  const [notifyOnSimulation, setNotifyOnSimulation] = useState(true)
-  const [notifyOnMention, setNotifyOnMention] = useState(true)
+  const [prefs, setPrefs] = useState(() => {
+    try {
+      const stored = localStorage.getItem('humanovo-notification-settings')
+      return stored ? JSON.parse(stored) : { email: true, push: true, sound: false, evidence: true, simulation: true, mention: true }
+    } catch { return { email: true, push: true, sound: false, evidence: true, simulation: true, mention: true } }
+  })
+
+  const update = (key: string, value: boolean) => {
+    setPrefs((p: any) => {
+      const next = { ...p, [key]: value }
+      localStorage.setItem('humanovo-notification-settings', JSON.stringify(next))
+      return next
+    })
+  }
 
   return (
     <div className="space-y-6">
@@ -236,13 +244,13 @@ function NotificationSettings() {
         <h3 className="text-base font-medium mb-4">Notification Channels</h3>
         <div className="glass-card">
           <SettingRow title="Email Notifications" description="Receive notifications via email">
-            <Toggle enabled={emailNotifs} onChange={setEmailNotifs} />
+            <Toggle enabled={prefs.email} onChange={v => update('email', v)} />
           </SettingRow>
           <SettingRow title="Push Notifications" description="Receive browser push notifications">
-            <Toggle enabled={pushNotifs} onChange={setPushNotifs} />
+            <Toggle enabled={prefs.push} onChange={v => update('push', v)} />
           </SettingRow>
           <SettingRow title="Sound" description="Play a sound for notifications">
-            <Toggle enabled={soundEnabled} onChange={setSoundEnabled} />
+            <Toggle enabled={prefs.sound} onChange={v => update('sound', v)} />
           </SettingRow>
         </div>
       </div>
@@ -251,13 +259,13 @@ function NotificationSettings() {
         <h3 className="text-base font-medium mb-4">Notification Types</h3>
         <div className="glass-card">
           <SettingRow title="New Evidence" description="When new evidence is ingested into your projects">
-            <Toggle enabled={notifyOnEvidence} onChange={setNotifyOnEvidence} />
+            <Toggle enabled={prefs.evidence} onChange={v => update('evidence', v)} />
           </SettingRow>
           <SettingRow title="Simulation Complete" description="When a simulation finishes running">
-            <Toggle enabled={notifyOnSimulation} onChange={setNotifyOnSimulation} />
+            <Toggle enabled={prefs.simulation} onChange={v => update('simulation', v)} />
           </SettingRow>
           <SettingRow title="Mentions" description="When someone mentions you in a comment">
-            <Toggle enabled={notifyOnMention} onChange={setNotifyOnMention} />
+            <Toggle enabled={prefs.mention} onChange={v => update('mention', v)} />
           </SettingRow>
         </div>
       </div>
