@@ -444,7 +444,12 @@ export default function ResearchImaging() {
   const [tool, setTool] = useState<Tool>('pan')
   const [zoom, setZoom] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
-  const [showPanel, setShowPanel] = useState<'tools' | 'analysis' | 'annotations' | 'labels'>('tools')
+  const [showPanel, setShowPanel] = useState<'tools' | 'analysis' | 'annotations' | 'labels' | 'register'>('tools')
+  const [regRefId, setRegRefId] = useState<string | null>(null)
+  const [regTransform, setRegTransform] = useState({ tx: 0, ty: 0, rotation: 0, scale: 1 })
+  const [regMode, setRegMode] = useState<'translation' | 'rigid' | 'similarity' | 'affine'>('rigid')
+  const [regOverlayOpacity, setRegOverlayOpacity] = useState(0.5)
+  const [regShowOverlay, setRegShowOverlay] = useState(false)
   const [annotLabel, setAnnotLabel] = useState('Region')
   const [annotColor, setAnnotColor] = useState('#ef4444')
   const [drawing, setDrawing] = useState<{ start: { x: number; y: number }; current: { x: number; y: number } } | null>(null)
@@ -697,7 +702,36 @@ export default function ResearchImaging() {
       }
       ctx.setLineDash([])
     }
-  }, [selected, zoom, pan, drawing, tool, annotColor])
+
+    // Draw registration overlay
+    if (regShowOverlay && regRefId) {
+      const refStudy = studies.find(s => s.id === regRefId)
+      if (refStudy) {
+        const refImg = new Image()
+        refImg.onload = () => {
+          ctx.save()
+          ctx.globalAlpha = regOverlayOpacity
+          // Apply transform relative to center
+          const cx = dispW / 2
+          const cy = dispH / 2
+          ctx.translate(cx + regTransform.tx * scale, cy + regTransform.ty * scale)
+          ctx.rotate((regTransform.rotation * Math.PI) / 180)
+          ctx.scale(regTransform.scale, regTransform.scale)
+          const refScale = Math.min(dispW / refImg.width, dispH / refImg.height) * zoom
+          const rw = refImg.width * refScale
+          const rh = refImg.height * refScale
+          // Tint the overlay with a color to distinguish it
+          ctx.drawImage(refImg, -rw / 2, -rh / 2, rw, rh)
+          ctx.restore()
+          // Label
+          ctx.fillStyle = '#f59e0b'
+          ctx.font = 'bold 10px sans-serif'
+          ctx.fillText(`REF: ${refStudy.title}`, 8, dispH - 8)
+        }
+        refImg.src = refStudy.imageData
+      }
+    }
+  }, [selected, zoom, pan, drawing, tool, annotColor, regShowOverlay, regRefId, regTransform, regOverlayOpacity, studies])
 
   const screenToImage = useCallback((e: React.MouseEvent): { x: number; y: number } | null => {
     const canvas = canvasRef.current
@@ -1193,6 +1227,7 @@ export default function ResearchImaging() {
             {([
               { id: 'tools' as const, label: 'Tools', icon: FiSliders },
               { id: 'analysis' as const, label: 'Analysis', icon: FiBarChart2 },
+              { id: 'register' as const, label: 'Register', icon: FiCpu },
               { id: 'labels' as const, label: 'Labels', icon: FiLayers },
               { id: 'annotations' as const, label: 'Marks', icon: FiTarget },
             ]).map(t => {
@@ -1551,6 +1586,162 @@ export default function ResearchImaging() {
                   3. Use Rectangle/Circle tools to mark regions<br />
                   4. Apply Otsu Threshold or Canny for edge-based segmentation<br />
                   5. Use morphological filters (Open/Close) to clean up
+                </div>
+              </div>
+            )}
+
+            {showPanel === 'register' && (
+              <div className="space-y-3">
+                <div className="text-[10px] uppercase font-semibold mb-1.5" style={{ color: 'var(--color-text-muted)' }}>
+                  <FiCpu className="inline mr-1" />
+                  Image Registration
+                </div>
+
+                {/* Registration mode */}
+                <div>
+                  <div className="text-[10px] mb-1" style={{ color: 'var(--color-text-muted)' }}>Transform Type</div>
+                  <div className="grid grid-cols-2 gap-1">
+                    {(['translation', 'rigid', 'similarity', 'affine'] as const).map(mode => (
+                      <button
+                        key={mode}
+                        onClick={() => setRegMode(mode)}
+                        className="px-2 py-1.5 text-[10px] rounded capitalize"
+                        style={{
+                          background: regMode === mode ? 'var(--color-accent-blue)22' : 'var(--color-bg)',
+                          border: `1px solid ${regMode === mode ? 'var(--color-accent-blue)' : 'var(--glass-border)'}`,
+                          color: regMode === mode ? 'var(--color-accent-blue)' : 'var(--color-text-muted)',
+                        }}
+                      >
+                        {mode}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="text-[9px] mt-1" style={{ color: 'var(--color-text-muted)' }}>
+                    {regMode === 'translation' && 'X/Y shift only (2 DOF)'}
+                    {regMode === 'rigid' && 'Translation + rotation (3 DOF)'}
+                    {regMode === 'similarity' && 'Translation + rotation + uniform scale (4 DOF)'}
+                    {regMode === 'affine' && 'Full affine: translation + rotation + scale + shear (6 DOF)'}
+                  </div>
+                </div>
+
+                {/* Reference image selection */}
+                <div>
+                  <div className="text-[10px] mb-1" style={{ color: 'var(--color-text-muted)' }}>Reference (Fixed) Image</div>
+                  <select
+                    value={regRefId || ''}
+                    onChange={e => setRegRefId(e.target.value || null)}
+                    className="w-full px-2 py-1.5 text-xs rounded outline-none"
+                    style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)', color: 'var(--color-text)' }}
+                  >
+                    <option value="">Select reference...</option>
+                    {studies.filter(s => s.id !== selected.id).map(s => (
+                      <option key={s.id} value={s.id}>{s.title}</option>
+                    ))}
+                  </select>
+                  <div className="text-[9px] mt-0.5" style={{ color: 'var(--color-text-muted)' }}>
+                    Current image = moving, reference = fixed target
+                  </div>
+                </div>
+
+                {/* Transform controls */}
+                <div>
+                  <div className="text-[10px] uppercase font-semibold mb-1.5" style={{ color: 'var(--color-text-muted)' }}>Transform Parameters</div>
+
+                  <label className="text-[10px] block mb-0.5" style={{ color: 'var(--color-text-muted)' }}>
+                    Translate X: {regTransform.tx.toFixed(1)} px
+                  </label>
+                  <input type="range" min={-200} max={200} step={1} value={regTransform.tx}
+                    onChange={e => setRegTransform(t => ({ ...t, tx: Number(e.target.value) }))} className="w-full" />
+
+                  <label className="text-[10px] block mb-0.5 mt-1.5" style={{ color: 'var(--color-text-muted)' }}>
+                    Translate Y: {regTransform.ty.toFixed(1)} px
+                  </label>
+                  <input type="range" min={-200} max={200} step={1} value={regTransform.ty}
+                    onChange={e => setRegTransform(t => ({ ...t, ty: Number(e.target.value) }))} className="w-full" />
+
+                  {(regMode !== 'translation') && (
+                    <>
+                      <label className="text-[10px] block mb-0.5 mt-1.5" style={{ color: 'var(--color-text-muted)' }}>
+                        Rotation: {regTransform.rotation.toFixed(1)}°
+                      </label>
+                      <input type="range" min={-180} max={180} step={0.5} value={regTransform.rotation}
+                        onChange={e => setRegTransform(t => ({ ...t, rotation: Number(e.target.value) }))} className="w-full" />
+                    </>
+                  )}
+
+                  {(regMode === 'similarity' || regMode === 'affine') && (
+                    <>
+                      <label className="text-[10px] block mb-0.5 mt-1.5" style={{ color: 'var(--color-text-muted)' }}>
+                        Scale: {regTransform.scale.toFixed(2)}x
+                      </label>
+                      <input type="range" min={0.25} max={4} step={0.01} value={regTransform.scale}
+                        onChange={e => setRegTransform(t => ({ ...t, scale: Number(e.target.value) }))} className="w-full" />
+                    </>
+                  )}
+                </div>
+
+                {/* Overlay controls */}
+                <div>
+                  <div className="text-[10px] uppercase font-semibold mb-1.5" style={{ color: 'var(--color-text-muted)' }}>Overlay</div>
+                  <label className="flex items-center gap-2 text-[10px] cursor-pointer mb-1" style={{ color: 'var(--color-text-muted)' }}>
+                    <input type="checkbox" checked={regShowOverlay} onChange={e => setRegShowOverlay(e.target.checked)} className="rounded" />
+                    Show reference overlay
+                  </label>
+                  {regShowOverlay && (
+                    <>
+                      <label className="text-[10px] block mb-0.5" style={{ color: 'var(--color-text-muted)' }}>
+                        Opacity: {(regOverlayOpacity * 100).toFixed(0)}%
+                      </label>
+                      <input type="range" min={0} max={1} step={0.05} value={regOverlayOpacity}
+                        onChange={e => setRegOverlayOpacity(Number(e.target.value))} className="w-full" />
+                    </>
+                  )}
+                </div>
+
+                {/* Action buttons */}
+                <div className="flex gap-2 pt-1">
+                  <button
+                    onClick={() => setRegTransform({ tx: 0, ty: 0, rotation: 0, scale: 1 })}
+                    className="flex-1 px-2 py-1.5 text-[10px] rounded"
+                    style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)', color: 'var(--color-text-muted)' }}
+                  >
+                    Reset
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (!selected) return
+                      // Apply transform: re-render the image with the current transform baked in
+                      const img = imgCacheRef.current
+                      if (!img) return
+                      const off = document.createElement('canvas')
+                      off.width = img.width; off.height = img.height
+                      const ctx = off.getContext('2d')!
+                      ctx.fillStyle = '#000'
+                      ctx.fillRect(0, 0, off.width, off.height)
+                      const cx = img.width / 2, cy = img.height / 2
+                      ctx.translate(cx + regTransform.tx, cy + regTransform.ty)
+                      ctx.rotate((regTransform.rotation * Math.PI) / 180)
+                      ctx.scale(regTransform.scale, regTransform.scale)
+                      ctx.drawImage(img, -cx, -cy)
+                      const dataUrl = off.toDataURL('image/png')
+                      updateStudy({ ...selected, imageData: dataUrl })
+                      setRegTransform({ tx: 0, ty: 0, rotation: 0, scale: 1 })
+                    }}
+                    className="flex-1 px-2 py-1.5 text-[10px] rounded font-medium"
+                    style={{ background: 'var(--color-accent-blue)', color: '#fff' }}
+                  >
+                    Apply Transform
+                  </button>
+                </div>
+
+                {/* Info */}
+                <div className="text-[9px] p-2 rounded" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)', color: 'var(--color-text-muted)' }}>
+                  <strong>Registration workflow:</strong><br />
+                  1. Select a reference (fixed) image from another study<br />
+                  2. Choose transform type (translation/rigid/similarity/affine)<br />
+                  3. Adjust transform parameters using sliders<br />
+                  4. Toggle overlay to compare alignment visually<br />
+                  5. Click "Apply Transform" to bake the transform into the image
                 </div>
               </div>
             )}
