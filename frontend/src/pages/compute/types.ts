@@ -85,4 +85,4 @@ export interface CodeTemplate {
   code: string
 }
 
-export type ComputeMode = 'workstation' | 'presets' | 'montecarlo' | 'equations'
+export type ComputeMode = 'workstation' | 'presets' | 'montecarlo' | 'equations' | '3d'

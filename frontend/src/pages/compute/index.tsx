@@ -1,18 +1,20 @@
 import { useState } from 'react'
 import {
-  FiCpu, FiTerminal, FiGrid, FiActivity, FiTrendingUp,
+  FiCpu, FiTerminal, FiGrid, FiActivity, FiTrendingUp, FiBox,
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import Workstation from './Workstation'
 import PresetRunner from './PresetRunner'
 import MonteCarloPanel from './MonteCarloPanel'
 import EquationPlotter from './EquationPlotter'
+import Visualizer3D from './Visualizer3D'
 import type { ComputeMode } from './types'
 
 const tabs: { id: ComputeMode; label: string; icon: typeof FiGrid; desc: string }[] = [
   { id: 'workstation', label: 'Workstation', icon: FiTerminal, desc: 'In-browser numeric compute workstation' },
   { id: 'montecarlo', label: 'Monte Carlo', icon: FiActivity, desc: 'Stochastic simulations & convergence' },
   { id: 'equations', label: 'Equation Plotter', icon: FiTrendingUp, desc: 'Plot, overlay & compare equations' },
+  { id: '3d', label: '3D Visualizer', icon: FiBox, desc: 'Interactive 3D surface, wireframe & contour plots' },
 ]
 
 export default function ComputeLab() {
@@ -64,6 +66,7 @@ export default function ComputeLab() {
         {mode === 'presets' && <PresetRunner />}
         {mode === 'montecarlo' && <MonteCarloPanel />}
         {mode === 'equations' && <EquationPlotter />}
+        {mode === '3d' && <Visualizer3D />}
       </div>
     </div>
   )
