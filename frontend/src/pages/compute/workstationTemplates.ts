@@ -23,6 +23,7 @@ export const WORKSTATION_CATEGORIES = [
   'Differential Equations',
   'Plotting',
   '3D Visualization',
+  'Image Processing',
 ]
 
 export const WORKSTATION_TEMPLATES: WorkstationTemplate[] = [
@@ -575,5 +576,136 @@ for i = 1:n
 end
 title('Two-Source Wave Interference');
 contour(Z, x, y);`,
+  },
+
+  // ── Image Processing ─────────────────────────────────────────────────
+  {
+    id: 'img-edge-detect',
+    name: 'Edge detection pipeline',
+    category: 'Image Processing',
+    description: 'Create a synthetic image and run Sobel edge detection.',
+    code: `% Edge detection on a synthetic image
+n = 64;
+img = zeros(n, n);
+
+% Draw a bright rectangle
+for i = 15:45
+  for j = 20:50
+    img(i, j) = 200;
+  end
+end
+
+% Add a circle
+for i = 1:n
+  for j = 1:n
+    if (i-32)^2 + (j-32)^2 < 100
+      img(i, j) = 180;
+    end
+  end
+end
+
+E = edge(img);
+
+printf('Original: %d x %d\\n', n, n);
+printf('Edge pixels: %d\\n', sum(sum(E > 0)));
+
+% Visualize as heatmaps
+title('Original Image');
+heatmap(img);`,
+  },
+  {
+    id: 'img-filter-demo',
+    name: 'Gaussian & Laplacian filters',
+    category: 'Image Processing',
+    description: 'Apply Gaussian smoothing then Laplacian sharpening.',
+    code: `% Gaussian + Laplacian filtering demo
+n = 50;
+img = zeros(n, n);
+
+% Create gradient + noise pattern
+for i = 1:n
+  for j = 1:n
+    img(i,j) = 128 + 50*sin(2*pi*i/n) + 20*cos(4*pi*j/n) + 10*randn(1,1);
+  end
+end
+
+% Gaussian smoothing
+K_gauss = fspecial('gaussian', 5);
+smooth = imfilter(img, K_gauss);
+
+% Laplacian edge enhancement
+K_lap = fspecial('laplacian');
+edges = imfilter(smooth, K_lap);
+
+printf('Original range: [%.1f, %.1f]\\n', min(min(img)), max(max(img)));
+printf('Smoothed range: [%.1f, %.1f]\\n', min(min(smooth)), max(max(smooth)));
+
+title('Gaussian Smoothed');
+heatmap(smooth);`,
+  },
+  {
+    id: 'img-threshold',
+    name: 'Otsu thresholding',
+    category: 'Image Processing',
+    description: 'Automatic Otsu threshold on a bimodal synthetic image.',
+    code: `% Otsu automatic thresholding
+n = 60;
+img = zeros(n, n);
+
+% Create bimodal intensity — dark background, bright foreground
+for i = 1:n
+  for j = 1:n
+    r2 = (i-30)^2 + (j-30)^2;
+    if r2 < 200
+      img(i,j) = 180 + 20*randn(1,1);   % bright object
+    else
+      img(i,j) = 40 + 15*randn(1,1);    % dark background
+    end
+  end
+end
+
+% Otsu threshold (auto)
+bw = imthreshold(img);
+printf('Foreground pixels: %d / %d\\n', sum(sum(bw > 0)), n*n);
+
+% Histogram
+H = imhist(img, 64);
+bar(1:64, H);
+title('Intensity Histogram');
+xlabel('Bin'); ylabel('Count');`,
+  },
+  {
+    id: 'img-morphology',
+    name: 'Morphological operations',
+    category: 'Image Processing',
+    description: 'Erosion and dilation on a binary image.',
+    code: `% Morphological erosion & dilation
+n = 50;
+img = zeros(n, n);
+
+% Draw a cross shape
+for i = 20:30
+  for j = 10:40
+    img(i, j) = 255;
+  end
+end
+for i = 10:40
+  for j = 20:30
+    img(i, j) = 255;
+  end
+end
+
+% 3x3 structuring element
+se = ones(3, 3);
+
+eroded  = imerode(img, se);
+dilated = imdilate(img, se);
+
+printf('Original white pixels: %d\\n', sum(sum(img > 0)));
+printf('Eroded white pixels:   %d\\n', sum(sum(eroded > 0)));
+printf('Dilated white pixels:  %d\\n', sum(sum(dilated > 0)));
+
+title('Dilated Cross');
+heatmap(dilated);`,
   },
 ]
