@@ -15,8 +15,8 @@ import clsx from 'clsx'
 import { parseMedicalFile, parsedToDataURL } from '../utils/medicalImaging'
 
 type Modality = 'CT' | 'MRI' | 'X-Ray' | 'Ultrasound' | 'PET' | 'Microscopy' | 'Fundus' | 'OCT' | 'Mammography' | 'Endoscopy'
-type Tool = 'pan' | 'window' | 'rect' | 'circle' | 'line' | 'point' | 'polygon' | 'measure' | 'ruler'
-type Filter = 'none' | 'invert' | 'sobel' | 'gaussian' | 'sharpen' | 'threshold' | 'histeq' | 'edge'
+type Tool = 'pan' | 'window' | 'rect' | 'circle' | 'line' | 'point' | 'polygon' | 'measure' | 'ruler' | 'brush' | 'eraser'
+type Filter = 'none' | 'invert' | 'sobel' | 'gaussian' | 'sharpen' | 'threshold' | 'histeq' | 'edge' | 'median' | 'bilateral' | 'speckle' | 'unsharp' | 'morphOpen' | 'morphClose' | 'canny'
 
 interface Annotation {
   id: string
@@ -27,6 +27,13 @@ interface Annotation {
   label: string
   color: string
   notes?: string
+}
+
+interface LabelDef {
+  id: string
+  name: string
+  color: string
+  visible: boolean
 }
 
 interface Study {
@@ -45,6 +52,7 @@ interface Study {
   annotations: Annotation[]
   notes: string
   pixelSpacing?: number  // mm/px for measurements
+  labels?: LabelDef[]
 }
 
 const STORAGE_KEY = 'research-imaging-studies'
@@ -62,15 +70,37 @@ const MODALITIES: { id: Modality; color: string; icon: typeof FiImage; descripti
   { id: 'Endoscopy', color: '#84cc16', icon: FiCrosshair, description: 'Endoscopic Imaging' },
 ]
 
-const FILTERS: { id: Filter; label: string }[] = [
-  { id: 'none', label: 'Original' },
-  { id: 'invert', label: 'Invert' },
-  { id: 'sobel', label: 'Sobel Edge' },
-  { id: 'gaussian', label: 'Gaussian Blur' },
-  { id: 'sharpen', label: 'Sharpen' },
-  { id: 'threshold', label: 'Otsu Threshold' },
-  { id: 'histeq', label: 'Hist. Equalization' },
-  { id: 'edge', label: 'Laplacian Edge' },
+const FILTERS: { id: Filter; label: string; group: string }[] = [
+  { id: 'none', label: 'Original', group: 'Basic' },
+  { id: 'invert', label: 'Invert', group: 'Basic' },
+  { id: 'gaussian', label: 'Gaussian Blur', group: 'Smoothing' },
+  { id: 'median', label: 'Median Filter', group: 'Smoothing' },
+  { id: 'bilateral', label: 'Bilateral', group: 'Smoothing' },
+  { id: 'speckle', label: 'Lee Speckle', group: 'Smoothing' },
+  { id: 'sharpen', label: 'Sharpen', group: 'Enhancement' },
+  { id: 'unsharp', label: 'Unsharp Mask', group: 'Enhancement' },
+  { id: 'histeq', label: 'Hist. Equalize', group: 'Enhancement' },
+  { id: 'threshold', label: 'Otsu Threshold', group: 'Segmentation' },
+  { id: 'sobel', label: 'Sobel Edge', group: 'Edge Detection' },
+  { id: 'edge', label: 'Laplacian', group: 'Edge Detection' },
+  { id: 'canny', label: 'Canny Edge', group: 'Edge Detection' },
+  { id: 'morphOpen', label: 'Morph. Open', group: 'Morphology' },
+  { id: 'morphClose', label: 'Morph. Close', group: 'Morphology' },
+]
+
+const WINDOW_PRESETS: { label: string; center: number; width: number; modalities: Modality[] }[] = [
+  { label: 'Default', center: 128, width: 256, modalities: [] },
+  { label: 'CT Bone', center: 300, width: 1500, modalities: ['CT'] },
+  { label: 'CT Lung', center: -500, width: 1500, modalities: ['CT'] },
+  { label: 'CT Brain', center: 40, width: 80, modalities: ['CT'] },
+  { label: 'CT Abdomen', center: 40, width: 400, modalities: ['CT'] },
+  { label: 'CT Soft Tissue', center: 50, width: 350, modalities: ['CT'] },
+  { label: 'MRI Brain', center: 600, width: 1200, modalities: ['MRI'] },
+  { label: 'MRI T1', center: 500, width: 1000, modalities: ['MRI'] },
+  { label: 'Mammography', center: 2048, width: 4096, modalities: ['Mammography'] },
+  { label: 'High Contrast', center: 128, width: 128, modalities: [] },
+  { label: 'Low Contrast', center: 128, width: 512, modalities: [] },
+  { label: 'Full Range', center: 128, width: 256, modalities: [] },
 ]
 
 function loadStudies(): Study[] {
@@ -218,6 +248,156 @@ function applyFilter(imageData: ImageData, filter: Filter): ImageData {
         out.data[o + 3] = 255
       }
     }
+  } else if (filter === 'median') {
+    // 3x3 median filter — great for speckle/salt-and-pepper noise
+    for (let y = 1; y < height - 1; y++) {
+      for (let x = 1; x < width - 1; x++) {
+        const rArr: number[] = [], gArr: number[] = [], bArr: number[] = []
+        for (let ky = -1; ky <= 1; ky++) {
+          for (let kx = -1; kx <= 1; kx++) {
+            const idx = ((y + ky) * width + (x + kx)) * 4
+            rArr.push(data[idx]); gArr.push(data[idx + 1]); bArr.push(data[idx + 2])
+          }
+        }
+        rArr.sort((a, b) => a - b); gArr.sort((a, b) => a - b); bArr.sort((a, b) => a - b)
+        const o = (y * width + x) * 4
+        out.data[o] = rArr[4]; out.data[o + 1] = gArr[4]; out.data[o + 2] = bArr[4]; out.data[o + 3] = 255
+      }
+    }
+  } else if (filter === 'bilateral') {
+    // Bilateral filter — edge-preserving smoothing (simplified 5x5)
+    const sigmaS = 2, sigmaI = 30
+    const r = 2
+    for (let y = r; y < height - r; y++) {
+      for (let x = r; x < width - r; x++) {
+        const ci = (y * width + x) * 4
+        const cLum = (data[ci] + data[ci + 1] + data[ci + 2]) / 3
+        let wSum = 0, rSum = 0, gSum = 0, bSum = 0
+        for (let ky = -r; ky <= r; ky++) {
+          for (let kx = -r; kx <= r; kx++) {
+            const idx = ((y + ky) * width + (x + kx)) * 4
+            const lum = (data[idx] + data[idx + 1] + data[idx + 2]) / 3
+            const spatial = Math.exp(-(ky * ky + kx * kx) / (2 * sigmaS * sigmaS))
+            const intensity = Math.exp(-((lum - cLum) ** 2) / (2 * sigmaI * sigmaI))
+            const w = spatial * intensity
+            rSum += data[idx] * w; gSum += data[idx + 1] * w; bSum += data[idx + 2] * w
+            wSum += w
+          }
+        }
+        const o = (y * width + x) * 4
+        out.data[o] = rSum / wSum; out.data[o + 1] = gSum / wSum; out.data[o + 2] = bSum / wSum; out.data[o + 3] = 255
+      }
+    }
+  } else if (filter === 'speckle') {
+    // Lee speckle filter — adaptive local statistics filter for ultrasound
+    const r = 2
+    for (let y = r; y < height - r; y++) {
+      for (let x = r; x < width - r; x++) {
+        for (let c = 0; c < 3; c++) {
+          let sum = 0, sumSq = 0, n = 0
+          for (let ky = -r; ky <= r; ky++) {
+            for (let kx = -r; kx <= r; kx++) {
+              const v = data[((y + ky) * width + (x + kx)) * 4 + c]
+              sum += v; sumSq += v * v; n++
+            }
+          }
+          const mean = sum / n
+          const variance = Math.max(0, sumSq / n - mean * mean)
+          const noiseVar = variance * 0.25 // assume noise variance ~ 25% of local variance
+          const w = Math.max(0, Math.min(1, (variance - noiseVar) / Math.max(variance, 1e-6)))
+          out.data[(y * width + x) * 4 + c] = Math.round(mean + w * (data[(y * width + x) * 4 + c] - mean))
+        }
+        out.data[(y * width + x) * 4 + 3] = 255
+      }
+    }
+  } else if (filter === 'unsharp') {
+    // Unsharp mask: original + alpha*(original - blurred)
+    const alpha = 1.5
+    const k = [[1, 2, 1], [2, 4, 2], [1, 2, 1]]
+    const div = 16
+    for (let y = 1; y < height - 1; y++) {
+      for (let x = 1; x < width - 1; x++) {
+        for (let c = 0; c < 3; c++) {
+          let blurred = 0
+          for (let ky = -1; ky <= 1; ky++) {
+            for (let kx = -1; kx <= 1; kx++) {
+              blurred += data[((y + ky) * width + (x + kx)) * 4 + c] * k[ky + 1][kx + 1]
+            }
+          }
+          blurred /= div
+          const orig = data[(y * width + x) * 4 + c]
+          out.data[(y * width + x) * 4 + c] = Math.max(0, Math.min(255, orig + alpha * (orig - blurred)))
+        }
+        out.data[(y * width + x) * 4 + 3] = 255
+      }
+    }
+  } else if (filter === 'morphOpen' || filter === 'morphClose') {
+    // Morphological open (erode then dilate) or close (dilate then erode)
+    const getLum = (d: Uint8ClampedArray, x: number, y: number) => (d[(y * width + x) * 4] + d[(y * width + x) * 4 + 1] + d[(y * width + x) * 4 + 2]) / 3
+    const setLum = (d: Uint8ClampedArray, x: number, y: number, v: number) => { d[(y * width + x) * 4] = d[(y * width + x) * 4 + 1] = d[(y * width + x) * 4 + 2] = v; d[(y * width + x) * 4 + 3] = 255 }
+    const tmp = new Uint8ClampedArray(data.length)
+    tmp.set(data)
+    const r = 1
+    const ops = filter === 'morphOpen' ? ['erode', 'dilate'] : ['dilate', 'erode']
+    let src = tmp, dst = out.data
+    for (const op of ops) {
+      for (let y = r; y < height - r; y++) {
+        for (let x = r; x < width - r; x++) {
+          let val = op === 'erode' ? 255 : 0
+          for (let ky = -r; ky <= r; ky++) {
+            for (let kx = -r; kx <= r; kx++) {
+              const l = getLum(src, x + kx, y + ky)
+              val = op === 'erode' ? Math.min(val, l) : Math.max(val, l)
+            }
+          }
+          setLum(dst, x, y, val)
+        }
+      }
+      if (op === ops[0]) { src = new Uint8ClampedArray(dst); dst = out.data }
+    }
+  } else if (filter === 'canny') {
+    // Simplified Canny: Gaussian blur -> Sobel gradient -> non-max suppression -> hysteresis
+    // Step 1: Gaussian blur
+    const blurred = new Float64Array(width * height)
+    const gk = [[1, 2, 1], [2, 4, 2], [1, 2, 1]]
+    for (let y = 1; y < height - 1; y++) {
+      for (let x = 1; x < width - 1; x++) {
+        let s = 0
+        for (let ky = -1; ky <= 1; ky++) for (let kx = -1; kx <= 1; kx++) {
+          s += ((data[((y + ky) * width + (x + kx)) * 4] + data[((y + ky) * width + (x + kx)) * 4 + 1] + data[((y + ky) * width + (x + kx)) * 4 + 2]) / 3) * gk[ky + 1][kx + 1]
+        }
+        blurred[y * width + x] = s / 16
+      }
+    }
+    // Step 2: Sobel gradient
+    const mag = new Float64Array(width * height)
+    const dir = new Float64Array(width * height)
+    for (let y = 1; y < height - 1; y++) {
+      for (let x = 1; x < width - 1; x++) {
+        const gx = -blurred[(y - 1) * width + x - 1] + blurred[(y - 1) * width + x + 1] - 2 * blurred[y * width + x - 1] + 2 * blurred[y * width + x + 1] - blurred[(y + 1) * width + x - 1] + blurred[(y + 1) * width + x + 1]
+        const gy = -blurred[(y - 1) * width + x - 1] - 2 * blurred[(y - 1) * width + x] - blurred[(y - 1) * width + x + 1] + blurred[(y + 1) * width + x - 1] + 2 * blurred[(y + 1) * width + x] + blurred[(y + 1) * width + x + 1]
+        mag[y * width + x] = Math.sqrt(gx * gx + gy * gy)
+        dir[y * width + x] = Math.atan2(gy, gx)
+      }
+    }
+    // Step 3: Non-max suppression + double threshold
+    const maxMag = Math.max(...Array.from(mag).filter(v => isFinite(v)))
+    const hiT = maxMag * 0.15, loT = maxMag * 0.05
+    for (let y = 1; y < height - 1; y++) {
+      for (let x = 1; x < width - 1; x++) {
+        const m = mag[y * width + x]
+        const angle = ((dir[y * width + x] * 180 / Math.PI) + 180) % 180
+        let n1 = 0, n2 = 0
+        if (angle < 22.5 || angle >= 157.5) { n1 = mag[y * width + x - 1]; n2 = mag[y * width + x + 1] }
+        else if (angle < 67.5) { n1 = mag[(y - 1) * width + x + 1]; n2 = mag[(y + 1) * width + x - 1] }
+        else if (angle < 112.5) { n1 = mag[(y - 1) * width + x]; n2 = mag[(y + 1) * width + x] }
+        else { n1 = mag[(y - 1) * width + x - 1]; n2 = mag[(y + 1) * width + x + 1] }
+        const v = (m >= n1 && m >= n2 && m > loT) ? (m > hiT ? 255 : 128) : 0
+        const o = (y * width + x) * 4
+        out.data[o] = out.data[o + 1] = out.data[o + 2] = v
+        out.data[o + 3] = 255
+      }
+    }
   }
   return out
 }
@@ -264,7 +444,7 @@ export default function ResearchImaging() {
   const [tool, setTool] = useState<Tool>('pan')
   const [zoom, setZoom] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
-  const [showPanel, setShowPanel] = useState<'tools' | 'analysis' | 'annotations'>('tools')
+  const [showPanel, setShowPanel] = useState<'tools' | 'analysis' | 'annotations' | 'labels'>('tools')
   const [annotLabel, setAnnotLabel] = useState('Region')
   const [annotColor, setAnnotColor] = useState('#ef4444')
   const [drawing, setDrawing] = useState<{ start: { x: number; y: number }; current: { x: number; y: number } } | null>(null)
@@ -654,7 +834,7 @@ export default function ResearchImaging() {
             <input
               ref={fileInputRef}
               type="file"
-              accept=".jpg,.jpeg,.png,.webp,.bmp,.gif,.svg,.tif,.tiff,.dcm,.dicom,.nii,image/jpeg,image/png,image/webp,image/bmp,image/gif,image/svg+xml,image/tiff,application/dicom"
+              accept=".jpg,.jpeg,.png,.webp,.bmp,.gif,.svg,.tif,.tiff,.dcm,.dicom,.nii,.nii.gz,.nrrd,.hdr,.img,image/jpeg,image/png,image/webp,image/bmp,image/gif,image/svg+xml,image/tiff,application/dicom"
               multiple
               onChange={handleFileUpload}
               style={{ display: 'none' }}
@@ -704,7 +884,7 @@ export default function ResearchImaging() {
           )}
 
           <div className="mt-2 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
-            Supported: JPEG, PNG, WebP, BMP, GIF, SVG, TIFF, DICOM (.dcm), NIfTI (.nii)
+            DICOM, NIfTI (.nii/.nii.gz), NRRD, Analyze (.hdr/.img), TIFF, JPEG, PNG, WebP, BMP, GIF, SVG
           </div>
         </div>
 
@@ -832,10 +1012,11 @@ export default function ResearchImaging() {
           {/* Panel tabs */}
           <div className="flex border-b" style={{ borderColor: 'var(--glass-border)' }}>
             {([
-              { id: 'tools', label: 'Tools', icon: FiSliders },
-              { id: 'analysis', label: 'Analysis', icon: FiBarChart2 },
-              { id: 'annotations', label: 'Marks', icon: FiTarget },
-            ] as const).map(t => {
+              { id: 'tools' as const, label: 'Tools', icon: FiSliders },
+              { id: 'analysis' as const, label: 'Analysis', icon: FiBarChart2 },
+              { id: 'labels' as const, label: 'Labels', icon: FiLayers },
+              { id: 'annotations' as const, label: 'Marks', icon: FiTarget },
+            ]).map(t => {
               const Icon = t.icon
               return (
                 <button
@@ -910,37 +1091,59 @@ export default function ResearchImaging() {
                     onChange={e => updateStudy({ ...selected, windowWidth: parseInt(e.target.value) })}
                     className="w-full"
                   />
-                  <button
-                    onClick={() => updateStudy({ ...selected, windowCenter: 128, windowWidth: 256 })}
-                    className="w-full mt-2 px-2 py-1 text-[10px] rounded"
-                    style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)', color: 'var(--color-text-muted)' }}
-                  >
-                    Reset
-                  </button>
+                  <div className="text-[9px] font-medium mt-2 mb-1" style={{ color: 'var(--color-text-muted)', opacity: 0.7 }}>Presets</div>
+                  <div className="flex flex-wrap gap-1">
+                    {WINDOW_PRESETS
+                      .filter(p => p.modalities.length === 0 || p.modalities.includes(selected.modality))
+                      .map(p => (
+                        <button
+                          key={p.label}
+                          onClick={() => updateStudy({ ...selected, windowCenter: p.center, windowWidth: p.width })}
+                          className="px-1.5 py-0.5 text-[9px] rounded transition-all"
+                          style={{
+                            background: selected.windowCenter === p.center && selected.windowWidth === p.width
+                              ? 'var(--color-accent-blue)' : 'transparent',
+                            color: selected.windowCenter === p.center && selected.windowWidth === p.width
+                              ? '#fff' : 'var(--color-text-muted)',
+                            border: '1px solid var(--glass-border)',
+                          }}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                  </div>
                 </div>
 
-                {/* Filters */}
+                {/* Filters - grouped */}
                 <div>
                   <div className="text-[10px] uppercase font-semibold mb-1.5" style={{ color: 'var(--color-text-muted)' }}>
                     <FiFilter className="inline mr-1" />
-                    Filter
+                    Preprocessing & Filters
                   </div>
-                  <div className="grid grid-cols-2 gap-1">
-                    {FILTERS.map(f => (
-                      <button
-                        key={f.id}
-                        onClick={() => updateStudy({ ...selected, filter: f.id })}
-                        className="px-2 py-1 text-[10px] rounded transition-all"
-                        style={{
-                          background: selected.filter === f.id ? 'var(--color-accent-blue)' : 'transparent',
-                          color: selected.filter === f.id ? '#fff' : 'var(--color-text-muted)',
-                          border: '1px solid var(--glass-border)',
-                        }}
-                      >
-                        {f.label}
-                      </button>
-                    ))}
-                  </div>
+                  {(() => {
+                    const groups = [...new Set(FILTERS.map(f => f.group))]
+                    return groups.map(group => (
+                      <div key={group} style={{ marginBottom: 6 }}>
+                        <div className="text-[9px] font-medium mb-1" style={{ color: 'var(--color-text-muted)', opacity: 0.7 }}>{group}</div>
+                        <div className="grid grid-cols-2 gap-1">
+                          {FILTERS.filter(f => f.group === group).map(f => (
+                            <button
+                              key={f.id}
+                              onClick={() => updateStudy({ ...selected, filter: f.id })}
+                              className="px-2 py-1 text-[10px] rounded transition-all"
+                              style={{
+                                background: selected.filter === f.id ? 'var(--color-accent-blue)' : 'transparent',
+                                color: selected.filter === f.id ? '#fff' : 'var(--color-text-muted)',
+                                border: '1px solid var(--glass-border)',
+                              }}
+                            >
+                              {f.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ))
+                  })()}
                 </div>
 
                 {/* Annotation styling */}
@@ -1032,10 +1235,145 @@ export default function ResearchImaging() {
                   <div className="space-y-1 text-xs">
                     <div className="flex justify-between"><span style={{ color: 'var(--color-text-muted)' }}>Contrast</span><span>{analysisStats.std > 60 ? 'High' : analysisStats.std > 30 ? 'Medium' : 'Low'}</span></div>
                     <div className="flex justify-between"><span style={{ color: 'var(--color-text-muted)' }}>Exposure</span><span>{analysisStats.mean > 200 ? 'Over' : analysisStats.mean < 50 ? 'Under' : 'Normal'}</span></div>
+                    <div className="flex justify-between"><span style={{ color: 'var(--color-text-muted)' }}>SNR est.</span><span>{(analysisStats.mean / Math.max(analysisStats.std, 0.1)).toFixed(1)} dB</span></div>
+                    <div className="flex justify-between"><span style={{ color: 'var(--color-text-muted)' }}>Entropy</span><span>{(() => {
+                      const total = analysisStats.histogram.reduce((a, b) => a + b, 0)
+                      let entropy = 0
+                      for (const h of analysisStats.histogram) { if (h > 0) { const p = h / total; entropy -= p * Math.log2(p) } }
+                      return entropy.toFixed(2)
+                    })()} bits</span></div>
                     <div className="flex justify-between"><span style={{ color: 'var(--color-text-muted)' }}>Annotated regions</span><span>{selected.annotations.length}</span></div>
+                    <div className="flex justify-between"><span style={{ color: 'var(--color-text-muted)' }}>Dimensions</span><span>{selected.width} x {selected.height}</span></div>
+                    {selected.pixelSpacing && (
+                      <div className="flex justify-between"><span style={{ color: 'var(--color-text-muted)' }}>Physical size</span><span>{(selected.width * selected.pixelSpacing).toFixed(1)} x {(selected.height * selected.pixelSpacing).toFixed(1)} mm</span></div>
+                    )}
                   </div>
                 </div>
+
+                {/* ROI analysis for annotated rectangles */}
+                {selected.annotations.filter(a => a.type === 'rect' && a.w && a.h).length > 0 && (
+                  <div>
+                    <div className="text-[10px] uppercase font-semibold mb-1.5" style={{ color: 'var(--color-text-muted)' }}>
+                      <FiTarget className="inline mr-1" />
+                      ROI Analysis
+                    </div>
+                    <div className="space-y-2">
+                      {selected.annotations.filter(a => a.type === 'rect' && a.w && a.h).map(a => {
+                        const img = imgCacheRef.current
+                        if (!img) return null
+                        const off = document.createElement('canvas')
+                        off.width = img.width; off.height = img.height
+                        const ctx = off.getContext('2d')!
+                        ctx.drawImage(img, 0, 0)
+                        const x1 = Math.max(0, Math.floor(a.x)), y1 = Math.max(0, Math.floor(a.y))
+                        const w = Math.min(img.width - x1, Math.floor(a.w!)), h = Math.min(img.height - y1, Math.floor(a.h!))
+                        if (w <= 0 || h <= 0) return null
+                        const roiData = ctx.getImageData(x1, y1, w, h)
+                        const roiStats = computeImageStats(roiData.data)
+                        return (
+                          <div key={a.id} className="p-1.5 rounded text-[10px]" style={{ background: 'var(--color-bg)', border: `1px solid ${a.color}40` }}>
+                            <div className="flex items-center gap-1.5 mb-1">
+                              <div className="w-2 h-2 rounded-sm" style={{ background: a.color }} />
+                              <span className="font-medium">{a.label}</span>
+                              <span style={{ color: 'var(--color-text-muted)' }}>{w}x{h} px</span>
+                            </div>
+                            <div className="grid grid-cols-2 gap-x-2 text-[9px]" style={{ color: 'var(--color-text-muted)' }}>
+                              <span>Mean: {roiStats.mean.toFixed(1)}</span>
+                              <span>Std: {roiStats.std.toFixed(1)}</span>
+                              <span>Min: {roiStats.min.toFixed(0)}</span>
+                              <span>Max: {roiStats.max.toFixed(0)}</span>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
               </>
+            )}
+
+            {showPanel === 'labels' && (
+              <div>
+                <div className="text-[10px] uppercase font-semibold mb-2" style={{ color: 'var(--color-text-muted)' }}>
+                  <FiLayers className="inline mr-1" />
+                  Label Definitions
+                </div>
+                <p className="text-[10px] mb-3" style={{ color: 'var(--color-text-muted)', lineHeight: 1.4 }}>
+                  Define semantic labels for regions of interest. Labels appear as colored overlays during annotation.
+                </p>
+
+                {/* Existing labels */}
+                <div className="space-y-1 mb-3">
+                  {(selected.labels || []).map(label => (
+                    <div key={label.id} className="flex items-center gap-2 p-1.5 rounded" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }}>
+                      <div className="w-3 h-3 rounded-sm flex-shrink-0" style={{ background: label.color }} />
+                      <span className="text-[11px] flex-1 truncate">{label.name}</span>
+                      <button
+                        onClick={() => {
+                          const labels = (selected.labels || []).map(l => l.id === label.id ? { ...l, visible: !l.visible } : l)
+                          updateStudy({ ...selected, labels })
+                        }}
+                        className="p-0.5"
+                        title={label.visible ? 'Hide' : 'Show'}
+                        style={{ color: label.visible ? 'var(--color-text)' : 'var(--color-text-muted)', opacity: label.visible ? 1 : 0.4 }}
+                      >
+                        <FiEye className="text-[10px]" />
+                      </button>
+                      <button
+                        onClick={() => {
+                          // Use label color for annotations
+                          setAnnotColor(label.color)
+                          setAnnotLabel(label.name)
+                        }}
+                        className="p-0.5"
+                        title="Use for annotation"
+                        style={{ color: 'var(--color-text-muted)' }}
+                      >
+                        <FiCrosshair className="text-[10px]" />
+                      </button>
+                      <button
+                        onClick={() => {
+                          const labels = (selected.labels || []).filter(l => l.id !== label.id)
+                          updateStudy({ ...selected, labels })
+                        }}
+                        className="p-0.5 hover:text-red-500"
+                        style={{ color: 'var(--color-text-muted)' }}
+                      >
+                        <FiX className="text-[10px]" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Create label */}
+                <button
+                  onClick={() => {
+                    const defaultColors = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16']
+                    const existing = (selected.labels || []).length
+                    const newLabel: LabelDef = {
+                      id: crypto.randomUUID(),
+                      name: `Label ${existing + 1}`,
+                      color: defaultColors[existing % defaultColors.length],
+                      visible: true,
+                    }
+                    updateStudy({ ...selected, labels: [...(selected.labels || []), newLabel] })
+                  }}
+                  className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 text-[10px] rounded transition-all"
+                  style={{ background: 'transparent', border: '1px dashed var(--glass-border)', color: 'var(--color-text-muted)' }}
+                >
+                  <FiPlus className="text-[10px]" /> Create Label Definition
+                </button>
+
+                {/* Segmentation info */}
+                <div className="mt-4 p-2 rounded text-[10px]" style={{ background: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.15)', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+                  <strong style={{ color: 'var(--color-text)' }}>Segmentation Workflow:</strong><br />
+                  1. Create labels for each region (e.g., Right_Lung, Left_Lung)<br />
+                  2. Click the crosshair icon to activate a label<br />
+                  3. Use Rectangle/Circle tools to mark regions<br />
+                  4. Apply Otsu Threshold or Canny for edge-based segmentation<br />
+                  5. Use morphological filters (Open/Close) to clean up
+                </div>
+              </div>
             )}
 
             {showPanel === 'annotations' && (
