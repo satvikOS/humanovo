@@ -567,6 +567,7 @@ export default function DataManager() {
               )}
               <div className="flex gap-0.5 ml-3">
                 {([
+                  { id: 'overview', label: 'Overview', icon: FiDatabase },
                   { id: 'table', label: 'Table', icon: FiGrid },
                   { id: 'variables', label: 'Variables', icon: FiList },
                   { id: 'profile', label: 'Profile', icon: FiBarChart2 },
@@ -635,6 +636,8 @@ export default function DataManager() {
                 </button>
               </div>
             </div>
+          ) : view === 'overview' ? (
+            <OverviewView ds={transformed} profiles={profiles} setView={setView} />
           ) : view === 'table' ? (
             <TableView ds={transformed} previewRows={previewRows} setPreviewRows={setPreviewRows} />
           ) : view === 'variables' ? (
@@ -683,6 +686,164 @@ export default function DataManager() {
 }
 
 /* ─── Sub-views ──────────────────────────────────────────────────────── */
+
+function OverviewView({ ds, profiles, setView }: { ds: Dataset; profiles: ColumnProfile[]; setView: (v: ViewMode) => void }) {
+  const numCols = ds.columns.filter(c => c.type === 'number')
+  const numProfiles = profiles.filter(p => p.type === 'number')
+  const totalNulls = profiles.reduce((sum, p) => sum + p.nullCount, 0)
+  const totalCells = ds.rows.length * ds.columns.length
+  const overallCompleteness = totalCells > 0 ? ((totalCells - totalNulls) / totalCells) * 100 : 100
+  const memEstimate = JSON.stringify(ds.rows).length
+
+  // Quick correlation between first two numeric columns
+  const correlationPairs = useMemo(() => {
+    if (numCols.length < 2) return []
+    const pairs: { col1: string; col2: string; corr: number }[] = []
+    for (let i = 0; i < Math.min(numCols.length, 5); i++) {
+      for (let j = i + 1; j < Math.min(numCols.length, 5); j++) {
+        const c1 = numCols[i].name, c2 = numCols[j].name
+        const vs = ds.rows.filter(r => r[c1] != null && r[c2] != null)
+        if (vs.length < 3) continue
+        const x = vs.map(r => r[c1]), y = vs.map(r => r[c2])
+        const mx = x.reduce((a, b) => a + b, 0) / x.length
+        const my = y.reduce((a, b) => a + b, 0) / y.length
+        const cov = x.reduce((s, xi, k) => s + (xi - mx) * (y[k] - my), 0) / x.length
+        const sx = Math.sqrt(x.reduce((s, xi) => s + (xi - mx) ** 2, 0) / x.length)
+        const sy = Math.sqrt(y.reduce((s, yi) => s + (yi - my) ** 2, 0) / y.length)
+        const corr = sx * sy > 0 ? cov / (sx * sy) : 0
+        pairs.push({ col1: c1, col2: c2, corr: Math.round(corr * 1000) / 1000 })
+      }
+    }
+    return pairs.sort((a, b) => Math.abs(b.corr) - Math.abs(a.corr)).slice(0, 6)
+  }, [ds, numCols])
+
+  return (
+    <div className="p-4 space-y-4">
+      {/* Summary cards */}
+      <div className="grid grid-cols-4 gap-3">
+        {[
+          { label: 'Rows', value: ds.rows.length.toLocaleString(), color: '#3b82f6' },
+          { label: 'Columns', value: ds.columns.length.toString(), color: '#8b5cf6' },
+          { label: 'Completeness', value: `${overallCompleteness.toFixed(1)}%`, color: overallCompleteness > 95 ? '#10b981' : overallCompleteness > 80 ? '#f59e0b' : '#ef4444' },
+          { label: 'Memory', value: memEstimate > 1e6 ? `${(memEstimate / 1e6).toFixed(1)} MB` : `${(memEstimate / 1024).toFixed(1)} KB`, color: '#06b6d4' },
+        ].map(s => (
+          <div key={s.label} className="p-3 rounded-lg" style={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', borderLeft: `3px solid ${s.color}` }}>
+            <div className="text-[9px] font-semibold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>{s.label}</div>
+            <div className="text-lg font-bold mt-1" style={{ fontFamily: "'JetBrains Mono', monospace" }}>{s.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Column type breakdown */}
+      <div className="p-3 rounded-lg" style={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)' }}>
+        <div className="text-[10px] font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--color-text-muted)' }}>Column Types</div>
+        <div className="flex gap-4 text-xs">
+          {[
+            { type: 'number', color: '#3b82f6', count: ds.columns.filter(c => c.type === 'number').length },
+            { type: 'string', color: '#8b5cf6', count: ds.columns.filter(c => c.type === 'string').length },
+            { type: 'boolean', color: '#10b981', count: ds.columns.filter(c => c.type === 'boolean').length },
+            { type: 'date', color: '#f59e0b', count: ds.columns.filter(c => c.type === 'date').length },
+          ].filter(t => t.count > 0).map(t => (
+            <div key={t.type} className="flex items-center gap-1.5">
+              <div className="w-2 h-2 rounded-sm" style={{ background: t.color }} />
+              <span>{t.count} {t.type}</span>
+            </div>
+          ))}
+        </div>
+        {/* Column completeness bars */}
+        <div className="mt-3 space-y-1">
+          {profiles.slice(0, 10).map(p => (
+            <div key={p.name} className="flex items-center gap-2 text-[10px]">
+              <span className="w-28 truncate" style={{ color: 'var(--color-text-muted)' }}>{p.name}</span>
+              <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: 'var(--color-bg)' }}>
+                <div className="h-full rounded-full transition-all" style={{
+                  width: `${p.completeness * 100}%`,
+                  background: p.completeness > 0.95 ? '#10b981' : p.completeness > 0.8 ? '#f59e0b' : '#ef4444',
+                  opacity: 0.7,
+                }} />
+              </div>
+              <span className="w-10 text-right" style={{ fontFamily: 'monospace' }}>{(p.completeness * 100).toFixed(0)}%</span>
+            </div>
+          ))}
+          {profiles.length > 10 && (
+            <button onClick={() => setView('variables')} className="text-[10px] mt-1" style={{ color: 'var(--color-accent-blue)' }}>
+              + {profiles.length - 10} more columns...
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Quick numeric stats */}
+      {numProfiles.length > 0 && (
+        <div className="p-3 rounded-lg" style={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)' }}>
+          <div className="text-[10px] font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--color-text-muted)' }}>Numeric Summary</div>
+          <div className="overflow-auto">
+            <table className="w-full text-[10px]">
+              <thead>
+                <tr style={{ color: 'var(--color-text-muted)' }}>
+                  <th className="text-left p-1.5">Column</th>
+                  <th className="text-right p-1.5">Min</th>
+                  <th className="text-right p-1.5">Mean</th>
+                  <th className="text-right p-1.5">Median</th>
+                  <th className="text-right p-1.5">Max</th>
+                  <th className="text-right p-1.5">Std</th>
+                </tr>
+              </thead>
+              <tbody>
+                {numProfiles.slice(0, 8).map(p => (
+                  <tr key={p.name} style={{ borderTop: '1px solid var(--glass-border)' }}>
+                    <td className="p-1.5 font-medium">{p.name}</td>
+                    <td className="p-1.5 text-right" style={{ fontFamily: 'monospace' }}>{p.min?.toFixed(2)}</td>
+                    <td className="p-1.5 text-right" style={{ fontFamily: 'monospace' }}>{p.mean?.toFixed(2)}</td>
+                    <td className="p-1.5 text-right" style={{ fontFamily: 'monospace' }}>{p.median?.toFixed(2)}</td>
+                    <td className="p-1.5 text-right" style={{ fontFamily: 'monospace' }}>{p.max?.toFixed(2)}</td>
+                    <td className="p-1.5 text-right" style={{ fontFamily: 'monospace' }}>{p.std?.toFixed(2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Correlation highlights */}
+      {correlationPairs.length > 0 && (
+        <div className="p-3 rounded-lg" style={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)' }}>
+          <div className="text-[10px] font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--color-text-muted)' }}>Top Correlations</div>
+          <div className="space-y-1">
+            {correlationPairs.map((p, i) => {
+              const absCorr = Math.abs(p.corr)
+              const color = absCorr > 0.7 ? (p.corr > 0 ? '#10b981' : '#ef4444') : '#f59e0b'
+              return (
+                <div key={i} className="flex items-center gap-2 text-[10px]">
+                  <span className="flex-1 truncate">{p.col1} — {p.col2}</span>
+                  <div className="w-24 h-2 rounded-full overflow-hidden" style={{ background: 'var(--color-bg)' }}>
+                    <div className="h-full rounded-full" style={{ width: `${absCorr * 100}%`, background: color, opacity: 0.7 }} />
+                  </div>
+                  <span className="w-12 text-right font-mono" style={{ color }}>{p.corr > 0 ? '+' : ''}{p.corr.toFixed(3)}</span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Quick actions */}
+      <div className="flex gap-2">
+        <button onClick={() => setView('table')} className="px-3 py-1.5 text-[10px] rounded" style={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', color: 'var(--color-text-muted)' }}>
+          <FiGrid className="inline mr-1" /> View Table
+        </button>
+        <button onClick={() => setView('profile')} className="px-3 py-1.5 text-[10px] rounded" style={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', color: 'var(--color-text-muted)' }}>
+          <FiBarChart2 className="inline mr-1" /> Full Profile
+        </button>
+        <button onClick={() => setView('etl')} className="px-3 py-1.5 text-[10px] rounded" style={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', color: 'var(--color-text-muted)' }}>
+          <FiSliders className="inline mr-1" /> Transform
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function TableView({ ds, previewRows, setPreviewRows }: { ds: Dataset; previewRows: number; setPreviewRows: (n: number) => void }) {
   const visible = ds.rows.slice(0, previewRows)
   return (
