@@ -27,13 +27,13 @@ const CHART_TOOLTIP_STYLE = {
   boxShadow: '0 4px 12px rgba(0, 0, 0, 0.4)',
 }
 
-const CHART_COLORS = ['#10b981', '#6366f1', '#f59e0b', '#3b82f6', '#ec4899', '#8b5cf6', '#06b6d4', '#f97316']
+const CHART_COLORS = ['#6BA594', '#8B7EAF', '#C4956A', '#5B8DB8', '#B07E8B', '#7BA7B8', '#A89B6E', '#8598AD']
 const STAGE_COLORS: Record<string, string> = {
-  'hypothesis-generation': '#6366f1',
-  'evidence-grounding': '#10b981',
-  'synthesis': '#f59e0b',
-  'literature-review': '#3b82f6',
-  'ranking': '#ec4899',
+  'hypothesis-generation': '#8B7EAF',
+  'evidence-grounding': '#6BA594',
+  'synthesis': '#C4956A',
+  'literature-review': '#5B8DB8',
+  'ranking': '#B07E8B',
 }
 
 // ── Types ────────────────────────────────────────────────────
@@ -213,10 +213,10 @@ function CostsTab({
     <div className="space-y-6">
       {/* Summary cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatCard label="Current Month" value={formatUSD(summary?.current_month_spend_cents ?? 0)} icon={FiDollarSign} color="#10b981" />
-        <StatCard label="Budget Remaining" value={formatUSD(Math.max(0, (summary?.budget_cents ?? 0) - (summary?.current_month_spend_cents ?? 0)))} icon={FiTarget} color="#3b82f6" />
-        <StatCard label="Projected EOM" value={formatUSD(summary?.projected_spend_cents ?? 0)} icon={FiTrendingUp} color="#f59e0b" />
-        <StatCard label="Total Requests" value={(summary?.total_requests ?? 0).toLocaleString()} icon={FiActivity} color="#8b5cf6" />
+        <StatCard label="Current Month" value={formatUSD(summary?.current_month_spend_cents ?? 0)} icon={FiDollarSign} color="#6BA594" />
+        <StatCard label="Budget Remaining" value={formatUSD(Math.max(0, (summary?.budget_cents ?? 0) - (summary?.current_month_spend_cents ?? 0)))} icon={FiTarget} color="#5B8DB8" />
+        <StatCard label="Projected EOM" value={formatUSD(summary?.projected_spend_cents ?? 0)} icon={FiTrendingUp} color="#C4956A" />
+        <StatCard label="Total Requests" value={(summary?.total_requests ?? 0).toLocaleString()} icon={FiActivity} color="#8B7EAF" />
       </div>
 
       {/* Daily spend bar chart */}

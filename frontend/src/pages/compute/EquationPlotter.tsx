@@ -366,7 +366,7 @@ const ODE_CATEGORIES = [
   { name: 'Neuroscience', ids: ['hodgkin-huxley-simple'] },
 ]
 
-const ODE_COLORS = ['#8b8b8b', '#b0b0b0', '#666666', '#d4d4d4']
+const ODE_COLORS = ['#5B8DB8', '#8B7EAF', '#6BA594', '#C4956A']
 
 // ═══════════════════════════════════════════════════════════════════
 //  Predefined Scientific Equations
@@ -434,7 +434,7 @@ const PRESET_CATEGORIES = [
 ]
 
 // Monochrome overlay palette — distinguishable shades without category color.
-const OVERLAY_COLORS = ['#a1a1a1', '#d4d4d4', '#737373']
+const OVERLAY_COLORS = ['#7BA7B8', '#A89B6E', '#8598AD']
 
 interface SavedOverlay {
   expr: string
@@ -707,9 +707,9 @@ export default function EquationPlotter() {
   }, [odeResult, activeODE, odeTemplate])
 
   // ── Inline styles (MC-matching) ─────────────────────────────
-  const chip: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 10px', borderRadius: 5, fontSize: 11, fontWeight: 600, background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', color: 'var(--color-text)', cursor: 'pointer', whiteSpace: 'nowrap' }
-  const inp: React.CSSProperties = { width: 64, padding: '3px 6px', borderRadius: 4, fontSize: 11, fontFamily: 'monospace', background: 'transparent', border: '1px solid var(--glass-border)', color: 'var(--color-text)', outline: 'none' }
-  const card: React.CSSProperties = { padding: '8px 10px', borderRadius: 6, cursor: 'pointer', border: '1px solid var(--glass-border)', background: 'var(--glass-bg)', transition: 'border-color 0.15s' }
+  const chip: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 600, background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', color: 'var(--color-text)', cursor: 'pointer', whiteSpace: 'nowrap', transition: 'border-color 0.15s, background 0.15s' }
+  const inp: React.CSSProperties = { width: 64, padding: '3px 6px', borderRadius: 6, fontSize: 11, fontFamily: 'monospace', background: 'transparent', border: '1px solid var(--glass-border)', color: 'var(--color-text)', outline: 'none', transition: 'border-color 0.15s' }
+  const card: React.CSSProperties = { padding: '8px 10px', borderRadius: 8, cursor: 'pointer', border: '1px solid var(--glass-border)', background: 'var(--glass-bg)', transition: 'border-color 0.15s, background 0.15s' }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10, height: '100%', minHeight: 0 }}>
@@ -790,7 +790,7 @@ export default function EquationPlotter() {
               {quadrantInfo.showXRef && <ReferenceLine y={0} stroke="var(--color-text-muted)" strokeDasharray="4 4" strokeOpacity={0.4} />}
               {quadrantInfo.showYRef && <ReferenceLine x={0} stroke="var(--color-text-muted)" strokeDasharray="4 4" strokeOpacity={0.4} />}
               <Line type="monotone" dataKey="y" stroke="var(--color-text)" strokeWidth={1.8} strokeOpacity={0.7} dot={false} name={expr} isAnimationActive={false} />
-              {showDerivative && <Line type="monotone" dataKey="dy" stroke="#f59e0b" strokeWidth={1.2} strokeDasharray="4 2" strokeOpacity={0.6} dot={false} name="f'(x)" isAnimationActive={false} connectNulls={false} />}
+              {showDerivative && <Line type="monotone" dataKey="dy" stroke="#C4956A" strokeWidth={1.2} strokeDasharray="4 2" strokeOpacity={0.6} dot={false} name="f'(x)" isAnimationActive={false} connectNulls={false} />}
               {overlays.map((o, idx) => o.enabled ? (
                 <Line key={idx} type="monotone" dataKey={`o${idx}`} stroke={OVERLAY_COLORS[idx]} strokeWidth={1.5} strokeDasharray="6 3" strokeOpacity={0.6} dot={false} name={o.expr} isAnimationActive={false} connectNulls={false} />
               ) : null)}
@@ -829,7 +829,7 @@ export default function EquationPlotter() {
 
       {/* ── Library overlay ──────────────────────────────────────── */}
       {showLibrary && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={e => { if (e.target === e.currentTarget) setShowLibrary(false) }}>
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={e => { if (e.target === e.currentTarget) setShowLibrary(false) }}>
           <div style={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 10, width: 620, maxWidth: '90vw', maxHeight: '80vh', overflow: 'auto', padding: '20px 24px', boxShadow: '0 8px 32px rgba(0,0,0,0.2)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: 'var(--color-text)' }}>Equation Library</h2>
@@ -961,7 +961,7 @@ export default function EquationPlotter() {
 
       {/* ODE Library overlay */}
       {showOdeLibrary && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={e => { if (e.target === e.currentTarget) setShowOdeLibrary(false) }}>
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={e => { if (e.target === e.currentTarget) setShowOdeLibrary(false) }}>
           <div style={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 10, width: 520, maxWidth: '90vw', maxHeight: '80vh', overflow: 'auto', padding: '20px 24px', boxShadow: '0 8px 32px rgba(0,0,0,0.2)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: 'var(--color-text)' }}>ODE Systems Library</h2>

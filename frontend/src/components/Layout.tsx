@@ -32,13 +32,18 @@ import {
   FiSend,
   FiImage,
   FiShield,
-  FiPackage,
   FiHeart,
   FiGrid,
   FiUpload,
   FiPaperclip,
   FiCpu,
   FiBookOpen,
+  FiLayers,
+  FiUsers,
+  FiEdit3,
+  FiAperture,
+  FiTerminal,
+  FiArchive,
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import { useTheme } from '../contexts/ThemeContext'
@@ -47,14 +52,14 @@ import { useWorkspace, WorkspaceTab } from '../contexts/WorkspaceContext'
 const mainNavItems = [
   { to: '/dashboard', icon: FiHome, label: 'Dashboard', shortcut: '1' },
   { to: '/projects', icon: FiFolder, label: 'Projects', shortcut: '2' },
-  { to: '/evidence', icon: FiDatabase, label: 'Evidence', shortcut: '3' },
+  { to: '/evidence', icon: FiLayers, label: 'Evidence', shortcut: '3' },
   { to: '/agents', icon: FiZap, label: 'Discovery', shortcut: '4' },
-  { to: '/workbench', icon: FiBox, label: 'Workbench', shortcut: '5' },
-  { to: '/anatomy', icon: FiUser, label: '3D Anatomy', shortcut: '6' },
+  { to: '/workbench', icon: FiTerminal, label: 'Workbench', shortcut: '5' },
+  { to: '/anatomy', icon: FiAperture, label: '3D Anatomy', shortcut: '6' },
 ]
 
 const secondaryNavItems = [
-  { to: '/notebook', icon: FiBook, label: 'Notebook' },
+  { to: '/notebook', icon: FiEdit3, label: 'Notebook' },
   { to: '/timeline', icon: FiClock, label: 'Timeline' },
   { to: '/search', icon: FiSearch, label: 'Search' },
 ]
@@ -76,8 +81,8 @@ const managementNavItems = [
   { to: '/imaging', icon: FiImage, label: 'Imaging' },
   { to: '/clinical-trials', icon: FiActivity, label: 'Clinical Trials' },
   { to: '/manuscripts', icon: FiFileText, label: 'Manuscripts' },
-  { to: '/biobank', icon: FiPackage, label: 'Biobank' },
-  { to: '/collaboration', icon: FiMessageCircle, label: 'Collaboration' },
+  { to: '/biobank', icon: FiArchive, label: 'Biobank' },
+  { to: '/collaboration', icon: FiUsers, label: 'Collaboration' },
   { to: '/regulatory', icon: FiShield, label: 'Regulatory' },
 ]
 

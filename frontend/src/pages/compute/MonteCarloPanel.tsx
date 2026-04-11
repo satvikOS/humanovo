@@ -981,10 +981,10 @@ export default function MonteCarloPanel() {
             <>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
                 {[
-                  { label: 'Mean', value: fmt(stats.mean), color: '#3b82f6' },
-                  { label: 'Median', value: fmt(stats.median), color: '#8b5cf6' },
-                  { label: 'Std Dev', value: fmt(stats.std), color: '#f59e0b' },
-                  { label: '95% CI', value: `${fmt(stats.ci95Low)} — ${fmt(stats.ci95High)}`, color: '#10b981' },
+                  { label: 'Mean', value: fmt(stats.mean), color: '#5B8DB8' },
+                  { label: 'Median', value: fmt(stats.median), color: '#8B7EAF' },
+                  { label: 'Std Dev', value: fmt(stats.std), color: '#C4956A' },
+                  { label: '95% CI', value: `${fmt(stats.ci95Low)} — ${fmt(stats.ci95High)}`, color: '#6BA594' },
                 ].map((s) => (
                   <div key={s.label} style={{
                     background: 'var(--glass-bg)',
@@ -1042,9 +1042,9 @@ export default function MonteCarloPanel() {
                         <XAxis dataKey="bin" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} interval="preserveStartEnd" stroke="var(--glass-border)" label={{ value: results.label, position: 'insideBottom', offset: -12, fontSize: 10, fill: 'var(--color-text-muted)' }} />
                         <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" label={{ value: 'Count', angle: -90, position: 'insideLeft', fontSize: 10, fill: 'var(--color-text-muted)' }} />
                         <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} cursor={{ stroke: 'var(--color-text-muted)', strokeDasharray: '4 4' }} />
-                        <ReferenceLine x={(() => { const m = stats.mean; let closest = histogramEnriched[0]?.bin; let minD = Infinity; for (const h of histogramEnriched) { const d = Math.abs(h.binMid - m); if (d < minD) { minD = d; closest = h.bin; } } return closest; })()} stroke="#3b82f6" strokeWidth={2} strokeDasharray="4 3" label={{ value: 'Mean', position: 'top', fontSize: 9, fill: '#3b82f6' }} />
-                        <Bar dataKey="count" fill="#3b82f6" fillOpacity={0.35} radius={[2, 2, 0, 0]} />
-                        {histogramEnriched.length > 8 && <Brush dataKey="bin" height={16} stroke="#3b82f6" fill="var(--glass-bg)" travellerWidth={6} />}
+                        <ReferenceLine x={(() => { const m = stats.mean; let closest = histogramEnriched[0]?.bin; let minD = Infinity; for (const h of histogramEnriched) { const d = Math.abs(h.binMid - m); if (d < minD) { minD = d; closest = h.bin; } } return closest; })()} stroke="#5B8DB8" strokeWidth={2} strokeDasharray="4 3" label={{ value: 'Mean', position: 'top', fontSize: 9, fill: '#5B8DB8' }} />
+                        <Bar dataKey="count" fill="#5B8DB8" fillOpacity={0.35} radius={[2, 2, 0, 0]} />
+                        {histogramEnriched.length > 8 && <Brush dataKey="bin" height={16} stroke="#5B8DB8" fill="var(--glass-bg)" travellerWidth={6} />}
                       </BarChart>
                     </ResponsiveContainer>
                   )}
@@ -1057,9 +1057,9 @@ export default function MonteCarloPanel() {
                         <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" label={{ value: 'Running Mean', angle: -90, position: 'insideLeft', fontSize: 10, fill: 'var(--color-text-muted)' }} />
                         <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} cursor={{ stroke: 'var(--color-text-muted)', strokeDasharray: '4 4' }} />
                         <Legend wrapperStyle={{ fontSize: 10 }} />
-                        <ReferenceLine y={stats.mean} stroke="#3b82f6" strokeDasharray="4 3" strokeWidth={1} label={{ value: `Final: ${fmt(stats.mean)}`, position: 'right', fontSize: 9, fill: '#3b82f6' }} />
-                        <Line type="monotone" dataKey="runningMean" name="Running Mean" stroke="#8b5cf6" strokeWidth={2} dot={false} />
-                        {results.convergence.length > 10 && <Brush dataKey="iteration" height={16} stroke="#8b5cf6" fill="var(--glass-bg)" travellerWidth={6} />}
+                        <ReferenceLine y={stats.mean} stroke="#5B8DB8" strokeDasharray="4 3" strokeWidth={1} label={{ value: `Final: ${fmt(stats.mean)}`, position: 'right', fontSize: 9, fill: '#5B8DB8' }} />
+                        <Line type="monotone" dataKey="runningMean" name="Running Mean" stroke="#8B7EAF" strokeWidth={2} dot={false} />
+                        {results.convergence.length > 10 && <Brush dataKey="iteration" height={16} stroke="#8B7EAF" fill="var(--glass-bg)" travellerWidth={6} />}
                       </LineChart>
                     </ResponsiveContainer>
                   )}
@@ -1071,9 +1071,9 @@ export default function MonteCarloPanel() {
                         <XAxis dataKey="value" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" type="number" label={{ value: results.label, position: 'insideBottom', offset: -12, fontSize: 10, fill: 'var(--color-text-muted)' }} />
                         <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" domain={[0, 100]} label={{ value: 'Percentile (%)', angle: -90, position: 'insideLeft', fontSize: 10, fill: 'var(--color-text-muted)' }} />
                         <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} cursor={{ stroke: 'var(--color-text-muted)', strokeDasharray: '4 4' }} formatter={(v: any) => `${Number(v).toFixed(1)}%`} />
-                        <ReferenceLine y={50} stroke="#f59e0b" strokeDasharray="4 3" strokeWidth={1} label={{ value: 'Median', position: 'right', fontSize: 9, fill: '#f59e0b' }} />
-                        <Area type="monotone" dataKey="percentile" stroke="#10b981" fill="#10b981" fillOpacity={0.15} strokeWidth={2} dot={false} />
-                        {cdfData.length > 10 && <Brush dataKey="value" height={16} stroke="#10b981" fill="var(--glass-bg)" travellerWidth={6} />}
+                        <ReferenceLine y={50} stroke="#C4956A" strokeDasharray="4 3" strokeWidth={1} label={{ value: 'Median', position: 'right', fontSize: 9, fill: '#C4956A' }} />
+                        <Area type="monotone" dataKey="percentile" stroke="#6BA594" fill="#6BA594" fillOpacity={0.15} strokeWidth={2} dot={false} />
+                        {cdfData.length > 10 && <Brush dataKey="value" height={16} stroke="#6BA594" fill="var(--glass-bg)" travellerWidth={6} />}
                       </AreaChart>
                     </ResponsiveContainer>
                   )}

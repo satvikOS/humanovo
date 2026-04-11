@@ -496,12 +496,12 @@ export default function Dashboard() {
   }, [])
 
   const stats: StatData[] = [
-    { label: 'Active Projects', value: totalProjects, icon: FiFolder, accentColor: '#a1a1a1', href: '/projects' },
-    { label: 'Simulations', value: simulationCount, icon: FiActivity, accentColor: '#3b82f6', href: '/compute-lab' },
-    { label: 'Datasets', value: datasetCount, icon: FiCpu, accentColor: '#06b6d4', href: '/data-manager' },
-    { label: 'Visualizations', value: chartCount, icon: FiTrendingUp, accentColor: '#22c55e', href: '/data-visualization' },
-    { label: 'Imaging Studies', value: imagingCount, icon: FiSearch, accentColor: '#f59e0b', href: '/imaging' },
-    { label: 'Hypotheses', value: totalHypotheses, icon: FiZap, accentColor: '#a855f7', href: '/agents' },
+    { label: 'Active Projects', value: totalProjects, icon: FiFolder, accentColor: '#8598AD', href: '/projects' },
+    { label: 'Simulations', value: simulationCount, icon: FiActivity, accentColor: '#5B8DB8', href: '/compute-lab' },
+    { label: 'Datasets', value: datasetCount, icon: FiCpu, accentColor: '#7BA7B8', href: '/data-manager' },
+    { label: 'Visualizations', value: chartCount, icon: FiTrendingUp, accentColor: '#6BA594', href: '/data-visualization' },
+    { label: 'Imaging Studies', value: imagingCount, icon: FiSearch, accentColor: '#C4956A', href: '/imaging' },
+    { label: 'Hypotheses', value: totalHypotheses, icon: FiZap, accentColor: '#8B7EAF', href: '/agents' },
   ]
 
   const quickActions = [

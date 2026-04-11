@@ -10,8 +10,8 @@ interface GNode { id: string; name: string; type: string; description: string; c
 interface GEdge { id: string; source: string; target: string; source_name: string; target_name: string; relationship: string; strength: number; evidence: string }
 
 const TYPE_COLORS: Record<string, string> = {
-  gene: '#3b82f6', protein: '#22c55e', pathway: '#8b5cf6',
-  disease: '#ef4444', drug: '#f97316',
+  gene: '#5B8DB8', protein: '#6BA594', pathway: '#8B7EAF',
+  disease: '#B07E8B', drug: '#C4956A',
 }
 
 const API = '/api/v1/knowledge-graph'
