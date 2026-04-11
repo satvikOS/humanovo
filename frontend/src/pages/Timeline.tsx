@@ -96,7 +96,7 @@ export default function Timeline() {
           metadata: a.metadata,
         }))
         setAllActivities(mapped)
-      } catch {
+      } catch { /* API unavailable — show empty state */
         setAllActivities([])
       }
     }
