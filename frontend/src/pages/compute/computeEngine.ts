@@ -328,6 +328,16 @@ export interface PlotSpec {
   xLabel?: string
   yLabel?: string
   series: { name: string; x: number[]; y: number[]; type: 'line' | 'scatter' | 'bar' }[]
+  /** 3D plot support — when mode3d is set, Workstation renders via Plotly */
+  mode3d?: 'surface' | 'wireframe' | 'contour' | 'scatter3d' | 'heatmap'
+  zLabel?: string
+  surfaceX?: number[]
+  surfaceY?: number[]
+  surfaceZ?: number[][]
+  colorscale?: string
+  scatter3dX?: number[]
+  scatter3dY?: number[]
+  scatter3dZ?: number[]
 }
 
 export interface RunResult {
@@ -2133,6 +2143,114 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
       ctx.currentPlot = { series: [] }
     }
     return MVOID
+  })
+
+  // ---- 3D Plotting -------------------------------------------------------
+  /** Helper: extract 2D grid from a matrix (rows × cols → number[][]) */
+  const matToGrid = (m: MValue): number[][] => {
+    if (m.kind !== 'mat') throw new Error('Expected matrix for 3D plot')
+    const grid: number[][] = []
+    for (let r = 0; r < m.rows; r++) {
+      const row: number[] = []
+      for (let c = 0; c < m.cols; c++) row.push(m.data[r * m.cols + c])
+      grid.push(row)
+    }
+    return grid
+  }
+  /** Flush current 3D plot into outputs */
+  const flush3d = () => {
+    if (ctx.currentPlot && ctx.currentPlot.mode3d) {
+      ctx.outputs.push({ kind: 'plot', plot: ctx.currentPlot })
+      ctx.currentPlot = { series: [] }
+    }
+  }
+
+  def('surface', -1, args => {
+    need(args, 1, 'surface')
+    const Z = matToGrid(args[0])
+    const p = ensurePlot()
+    p.mode3d = 'surface'
+    p.surfaceZ = Z
+    if (args.length >= 3) {
+      p.surfaceX = toArray(args[1])
+      p.surfaceY = toArray(args[2])
+    } else {
+      p.surfaceX = Array.from({ length: Z[0]?.length || 0 }, (_, i) => i)
+      p.surfaceY = Array.from({ length: Z.length }, (_, i) => i)
+    }
+    if (args.length >= 4 && args[3].kind === 'str') p.colorscale = (args[3] as MStr).v
+    flush3d()
+    return MVOID
+  })
+
+  def('wireframe', -1, args => {
+    need(args, 1, 'wireframe')
+    const Z = matToGrid(args[0])
+    const p = ensurePlot()
+    p.mode3d = 'wireframe'
+    p.surfaceZ = Z
+    if (args.length >= 3) { p.surfaceX = toArray(args[1]); p.surfaceY = toArray(args[2]) }
+    else { p.surfaceX = Array.from({ length: Z[0]?.length || 0 }, (_, i) => i); p.surfaceY = Array.from({ length: Z.length }, (_, i) => i) }
+    flush3d()
+    return MVOID
+  })
+
+  def('contour', -1, args => {
+    need(args, 1, 'contour')
+    const Z = matToGrid(args[0])
+    const p = ensurePlot()
+    p.mode3d = 'contour'
+    p.surfaceZ = Z
+    if (args.length >= 3) { p.surfaceX = toArray(args[1]); p.surfaceY = toArray(args[2]) }
+    else { p.surfaceX = Array.from({ length: Z[0]?.length || 0 }, (_, i) => i); p.surfaceY = Array.from({ length: Z.length }, (_, i) => i) }
+    flush3d()
+    return MVOID
+  })
+
+  def('heatmap', -1, args => {
+    need(args, 1, 'heatmap')
+    const Z = matToGrid(args[0])
+    const p = ensurePlot()
+    p.mode3d = 'heatmap'
+    p.surfaceZ = Z
+    if (args.length >= 3) { p.surfaceX = toArray(args[1]); p.surfaceY = toArray(args[2]) }
+    else { p.surfaceX = Array.from({ length: Z[0]?.length || 0 }, (_, i) => i); p.surfaceY = Array.from({ length: Z.length }, (_, i) => i) }
+    if (args.length >= 4 && args[3].kind === 'str') p.colorscale = (args[3] as MStr).v
+    flush3d()
+    return MVOID
+  })
+
+  def('scatter3d', -1, args => {
+    need(args, 3, 'scatter3d')
+    const p = ensurePlot()
+    p.mode3d = 'scatter3d'
+    p.scatter3dX = toArray(args[0])
+    p.scatter3dY = toArray(args[1])
+    p.scatter3dZ = toArray(args[2])
+    if (args.length >= 4 && args[3].kind === 'str') p.colorscale = (args[3] as MStr).v
+    flush3d()
+    return MVOID
+  })
+
+  def('zlabel', 1, args => { ensurePlot().zLabel = args[0].kind === 'str' ? args[0].v : ''; return MVOID })
+
+  def('colorscale', 1, args => { ensurePlot().colorscale = args[0].kind === 'str' ? args[0].v : 'Viridis'; return MVOID })
+
+  // Convenience: meshgrid(x, y) → generates two matrices X, Y
+  def('meshgrid', 2, args => {
+    const x = toArray(args[0]), y = toArray(args[1])
+    const X = new Float64Array(y.length * x.length)
+    const Y = new Float64Array(y.length * x.length)
+    for (let r = 0; r < y.length; r++) {
+      for (let c = 0; c < x.length; c++) {
+        X[r * x.length + c] = x[c]
+        Y[r * x.length + c] = y[r]
+      }
+    }
+    // Return X (first out) — user calls meshgrid twice or uses [X,Y]=meshgrid(x,y)
+    // For simplicity, store Y in workspace as __meshY__ for next call
+    ctx.ws.vars.set('__meshY__', mmat(y.length, x.length, Y))
+    return mmat(y.length, x.length, X)
   })
 
   // ---- Statistical tests -----------------------------------------------

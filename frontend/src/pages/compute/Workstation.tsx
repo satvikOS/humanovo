@@ -11,6 +11,10 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
   ReferenceLine,
 } from 'recharts'
+import createPlotlyComponent from 'react-plotly.js/factory'
+import Plotly from 'plotly.js-dist-min'
+
+const PlotlyChart = createPlotlyComponent(Plotly)
 import {
   run as runEngine,
   createWorkspace,
@@ -1175,10 +1179,12 @@ export default function Workstation() {
         newEntries.push(mkEntry({ kind: 'error', text: o.text ?? 'error', line: o.line }))
       } else if (o.kind === 'plot' && o.plot) {
         newPlots.push(o.plot)
-        const n = o.plot.series.length
+        const figLabel = o.plot.mode3d
+          ? `[figure] 3D ${o.plot.mode3d}${o.plot.title ? ' — ' + o.plot.title : ''}`
+          : `[figure] ${o.plot.series.length} series${o.plot.title ? ' — ' + o.plot.title : ''}`
         newEntries.push(mkEntry({
           kind: 'output',
-          text: `[figure] ${n} series${o.plot.title ? ' — ' + o.plot.title : ''}`,
+          text: figLabel,
         }))
       }
     }
@@ -1890,7 +1896,8 @@ export default function Workstation() {
   /** Export the underlying series data of the current figure as CSV. */
   const exportPlotCSV = useCallback(() => {
     const plot = plots[activePlot]
-    if (!plot || plot.series.length === 0) return
+    if (!plot || (plot.series.length === 0 && !plot.mode3d)) return
+    if (plot.mode3d) return // 3D CSV export not supported yet
     const xSet = new Set<number>()
     for (const s of plot.series) for (const x of s.x) xSet.add(x)
     const xs = Array.from(xSet).sort((a, b) => a - b)
@@ -7235,7 +7242,7 @@ export default function Workstation() {
                       type="button"
                       style={active ? { ...styles.plotChip, ...styles.plotChipActive } : styles.plotChip}
                       onClick={() => setActivePlot(idx)}
-                      title={`${label} (${p.series.length} series)`}
+                      title={`${label} (${p.mode3d ? '3D ' + p.mode3d : p.series.length + ' series'})`}
                       aria-label={`Switch to figure ${idx + 1}`}
                       aria-current={active ? 'true' : undefined}
                     >
@@ -8186,6 +8193,54 @@ interface PlotOpts {
 const DEFAULT_PLOT_OPTS: PlotOpts = { grid: true, logX: false, logY: false, legend: 'auto' }
 
 function PlotView({ plot, opts = DEFAULT_PLOT_OPTS }: { plot: PlotSpec | null; opts?: PlotOpts }) {
+  // 3D plot rendering via Plotly
+  if (plot?.mode3d) {
+    const cs = plot.colorscale || 'Viridis'
+    let traces: any[] = []
+    const mode = plot.mode3d
+    if (mode === 'surface' || mode === 'wireframe' || mode === 'contour') {
+      const base: any = {
+        type: 'surface', x: plot.surfaceX, y: plot.surfaceY, z: plot.surfaceZ,
+        colorscale: cs, opacity: mode === 'wireframe' ? 0.4 : 0.92,
+      }
+      if (mode === 'wireframe') {
+        base.hidesurface = true
+        base.contours = { x: { show: true, color: '#888', width: 1 }, y: { show: true, color: '#888', width: 1 }, z: { show: false } }
+      }
+      if (mode === 'contour') {
+        base.contours = { z: { show: true, usecolormap: true, highlightcolor: '#fff', project: { z: true } } }
+      }
+      traces = [base]
+    } else if (mode === 'scatter3d') {
+      traces = [{ type: 'scatter3d', mode: 'markers', x: plot.scatter3dX, y: plot.scatter3dY, z: plot.scatter3dZ, marker: { size: 3, color: plot.scatter3dZ, colorscale: cs, opacity: 0.85 } }]
+    } else if (mode === 'heatmap') {
+      traces = [{ type: 'heatmap', x: plot.surfaceX, y: plot.surfaceY, z: plot.surfaceZ, colorscale: cs }]
+    }
+    const is2D = mode === 'heatmap'
+    const layout: any = {
+      paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
+      font: { color: '#a1a1aa', size: 11 }, margin: { l: 10, r: 10, t: plot.title ? 30 : 10, b: 10 },
+      showlegend: false, autosize: true,
+      title: plot.title ? { text: plot.title, font: { color: '#e5e5e5', size: 13 } } : undefined,
+    }
+    if (!is2D) {
+      layout.scene = {
+        xaxis: { title: plot.xLabel || 'x', color: '#a1a1aa', gridcolor: 'rgba(255,255,255,0.06)', backgroundcolor: 'rgba(0,0,0,0)' },
+        yaxis: { title: plot.yLabel || 'y', color: '#a1a1aa', gridcolor: 'rgba(255,255,255,0.06)', backgroundcolor: 'rgba(0,0,0,0)' },
+        zaxis: { title: plot.zLabel || 'z', color: '#a1a1aa', gridcolor: 'rgba(255,255,255,0.06)', backgroundcolor: 'rgba(0,0,0,0)' },
+        bgcolor: 'rgba(0,0,0,0)', camera: { eye: { x: 1.5, y: 1.5, z: 1.2 } },
+      }
+    } else {
+      layout.xaxis = { title: plot.xLabel || 'x', color: '#a1a1aa', gridcolor: 'rgba(255,255,255,0.06)' }
+      layout.yaxis = { title: plot.yLabel || 'y', color: '#a1a1aa', gridcolor: 'rgba(255,255,255,0.06)' }
+    }
+    return (
+      <div style={{ width: '100%', height: '100%', minHeight: 180 }}>
+        <PlotlyChart data={traces} layout={layout} config={{ responsive: true, displayModeBar: 'hover', displaylogo: false }} style={{ width: '100%', height: '100%' }} useResizeHandler />
+      </div>
+    )
+  }
+
   if (!plot || plot.series.length === 0) {
     return (
       <div style={{
