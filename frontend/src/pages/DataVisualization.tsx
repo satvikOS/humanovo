@@ -174,14 +174,14 @@ const defaultOptions: ChartOptions = {
 
 // ─── Palettes ───────────────────────────────────────────────────
 const PALETTES: Record<string, string[]> = {
-  default: ['#3b82f6', '#8b5cf6', '#22c55e', '#f97316', '#06b6d4', '#ef4444', '#eab308', '#ec4899', '#14b8a6', '#a855f7'],
-  nature: ['#2d6a4f', '#40916c', '#52b788', '#74c69d', '#95d5b2', '#b7e4c7', '#d8f3dc', '#1b4332', '#081c15', '#344e41'],
-  ocean: ['#03045e', '#023e8a', '#0077b6', '#0096c7', '#00b4d8', '#48cae4', '#90e0ef', '#ade8f4', '#caf0f8', '#264653'],
-  warm: ['#d00000', '#dc2f02', '#e85d04', '#f48c06', '#faa307', '#ffba08', '#ffd60a', '#9d0208', '#6a040f', '#370617'],
-  pastel: ['#ffd6ff', '#e7c6ff', '#c8b6ff', '#b8c0ff', '#bbd0ff', '#caffbf', '#fdffb6', '#ffd6a5', '#ffadad', '#a0c4ff'],
-  scientific: ['#264653', '#2a9d8f', '#e9c46a', '#f4a261', '#e76f51', '#606c38', '#283618', '#dda15e', '#bc6c25', '#001219'],
-  diverging: ['#d73027', '#f46d43', '#fdae61', '#fee08b', '#ffffbf', '#d9ef8b', '#a6d96a', '#66bd63', '#1a9850', '#006837'],
-  monochrome: ['#0d1b2a', '#1b2838', '#2b3a4a', '#3c4d5e', '#4d6072', '#5e7388', '#70869e', '#8299b4', '#94acca', '#a6bfe0'],
+  default: ['#5B8DB8', '#8B7EAF', '#6BA594', '#C4956A', '#7BA7B8', '#B07E8B', '#A89B6E', '#8598AD', '#7E9B8A', '#9B8EAD'],
+  nature: ['#4A7C6F', '#5D9178', '#6FA583', '#81B792', '#94C7A2', '#749C76', '#5E8860', '#8CB186', '#6D9969', '#527E56'],
+  ocean: ['#3D5A80', '#4D6D94', '#5E80A8', '#6E93BB', '#7FA6CE', '#8FB9E1', '#6997B8', '#5784A5', '#457192', '#335E7F'],
+  warm: ['#B57170', '#C48A6F', '#CFA277', '#D4B481', '#DABD8B', '#C19068', '#B87E5E', '#CF9E72', '#D5AA7D', '#C2886A'],
+  pastel: ['#B8C4D8', '#C2B8D6', '#BDC8CA', '#D1C4B8', '#C8BDC8', '#B8CDB8', '#D3D1B8', '#C8BAB8', '#B8BFD6', '#C4C8C2'],
+  scientific: ['#4A6670', '#5C8A82', '#8FA96C', '#C4A05C', '#B87A5C', '#6C7C4A', '#4A5C3C', '#9C8258', '#7C5C3C', '#2A4048'],
+  diverging: ['#B85450', '#C87A5E', '#D8A870', '#E8D088', '#F0F0B8', '#B8D890', '#88C070', '#58A858', '#389038', '#207828'],
+  monochrome: ['#2A3544', '#354252', '#404F60', '#4B5C6E', '#56697C', '#61768A', '#6C8398', '#7790A6', '#829DB4', '#8DAAC2'],
 }
 
 const CHART_TYPES: { value: ChartType; label: string; group: string }[] = [
@@ -328,14 +328,18 @@ const COLUMN_MAPS: Record<string, { required: string[]; optional: string[]; desc
 }
 
 const TOOLTIP_STYLE = {
-  background: 'var(--color-surface-solid)',
-  border: '1px solid var(--color-border)',
-  borderRadius: '8px',
-  fontSize: '12px',
+  background: 'var(--color-surface-solid, rgba(10, 10, 10, 0.95))',
+  border: '1px solid rgba(255,255,255,0.08)',
+  borderRadius: '6px',
+  fontSize: '11px',
   color: 'var(--color-text)',
+  boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
+  padding: '8px 12px',
+  backdropFilter: 'blur(12px)',
+  fontFamily: "'Inter', system-ui, sans-serif",
 }
 
-const AXIS_TICK = { fontSize: 11, fill: 'var(--color-text-muted)' }
+const AXIS_TICK = { fontSize: 10, fill: 'var(--color-text-muted)', fontFamily: "'Inter', system-ui, sans-serif" }
 
 // ─── Helpers ────────────────────────────────────────────────────
 function parseCSV(text: string): DataPoint[] {

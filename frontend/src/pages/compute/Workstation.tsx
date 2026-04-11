@@ -6,6 +6,7 @@
 // ═══════════════════════════════════════════════════════════════════════
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FiPlay, FiSquare } from 'react-icons/fi'
+import { useAlertDialog } from '../../components/AlertDialog'
 import {
   LineChart, Line, ScatterChart, Scatter, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
@@ -590,6 +591,7 @@ function caretViewportAnchor(ta: HTMLTextAreaElement, fontSize: number): { top: 
 
 /* ── Component ───────────────────────────────────────────────────────── */
 export default function Workstation() {
+  const { showAlert, showPrompt, AlertDialog } = useAlertDialog()
   const [scriptStore, setScriptStore] = useState<ScriptStore>(loadScripts)
   // Drag-and-drop tab reordering. Ref holds the source id during the drag;
   // state drives the visual drop indicator. We clear both on drop / dragend.
@@ -2061,7 +2063,7 @@ export default function Workstation() {
   // to a user-supplied replacement. The replace pass is anchored with
   // word boundaries so we don't mangle substring matches inside other
   // names. Returns the number of replacements for the caller to surface.
-  const renameIdentifierAtCaret = useCallback(() => {
+  const renameIdentifierAtCaret = useCallback(async () => {
     const ta = editorRef.current
     if (!ta) return
     const s = ta.selectionStart
@@ -2076,10 +2078,10 @@ export default function Workstation() {
     }
     const old = value.slice(wStart, wEnd)
     if (!old || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(old)) return
-    const next = prompt(`Rename "${old}" to:`, old)
+    const next = await showPrompt(`Rename "${old}" to:`, 'Rename Variable', old)
     if (!next || next === old) return
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(next)) {
-      alert(`"${next}" is not a valid identifier.`)
+      showAlert(`"${next}" is not a valid identifier.`, 'Invalid Name')
       return
     }
     const esc = old.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -2099,7 +2101,7 @@ export default function Workstation() {
         ta2.setSelectionRange(firstIdx, firstIdx + next.length)
       }
     })
-  }, [setScript])
+  }, [setScript, showPrompt, showAlert])
 
   // Jump the caret to the bracket that matches the one at the current
   // caret. Pass `extend=true` to grow the selection across the pair,
@@ -3936,7 +3938,6 @@ export default function Workstation() {
       alignItems: 'center',
       gap: 6,
       padding: '8px 14px',
-      borderBottom: '1px solid var(--glass-border)',
       background: 'transparent',
     },
     btn: {
@@ -4221,7 +4222,6 @@ export default function Workstation() {
       // reads as the primary surface without any heavy borders, which
       // matches the "thinner boundaries / calmer workstation" brief.
       background: 'var(--color-bg-elevated)',
-      borderTop: '1px solid var(--glass-border)',
     },
     editorGutterClip: {
       flex: '0 0 auto',
@@ -5705,6 +5705,7 @@ export default function Workstation() {
       onDragLeave={onWsDragLeave}
       onDrop={onWsDrop}
     >
+      <AlertDialog />
       {/* Tiny stylesheet for the keyframes used by the running-state dot
           in the status bar. Scoped via a unique class so it never leaks
           into other compute pages. */}

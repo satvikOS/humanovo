@@ -34,8 +34,8 @@ export interface PlotlyPlot3DProps {
 }
 
 const CATEGORY_COLORS = [
-  '#8b5cf6', '#3b82f6', '#22c55e', '#f59e0b', '#ef4444',
-  '#ec4899', '#06b6d4', '#f97316', '#6366f1', '#14b8a6',
+  '#5B8DB8', '#8B7EAF', '#6BA594', '#C4956A', '#B07E8B',
+  '#7BA7B8', '#A89B6E', '#8598AD', '#7E9B8A', '#9B8EAD',
 ]
 
 const PLOTLY_COLORSCALE: Record<string, string> = {
@@ -47,7 +47,7 @@ const PLOTLY_COLORSCALE: Record<string, string> = {
 
 function generateSurfaceData(
   fn: (x: number, y: number) => number,
-  resolution = 30
+  resolution = 50
 ): { x: number[][]; y: number[][]; z: number[][] } {
   const range = Array.from({ length: resolution }, (_, i) => -3 + (6 * i) / (resolution - 1))
   const x: number[][] = []
@@ -174,15 +174,23 @@ export default function PlotlyPlot3D({
               opacity: 0.9,
             }]
           }
-          // Auto-generate surface from scattered points
-          const res = 20
+          // Auto-generate surface from scattered points using IDW interpolation
+          const res = 40
           const xMin = Math.min(...xs), xMax = Math.max(...xs)
           const yMin = Math.min(...ys), yMax = Math.max(...ys)
           const xRange = Array.from({ length: res }, (_, i) => xMin + (xMax - xMin) * i / (res - 1))
           const yRange = Array.from({ length: res }, (_, i) => yMin + (yMax - yMin) * i / (res - 1))
+          // Inverse-distance-weighted interpolation for accurate surface
           const zGrid = yRange.map(yi => xRange.map(xi => {
-            const nearby = data.filter(d => Math.abs(d.x - xi) < (xMax - xMin) / res * 2 && Math.abs(d.y - yi) < (yMax - yMin) / res * 2)
-            return nearby.length > 0 ? nearby.reduce((s, d) => s + d.z, 0) / nearby.length : 0
+            let wSum = 0, zSum = 0
+            for (const d of data) {
+              const dist = Math.sqrt((d.x - xi) ** 2 + (d.y - yi) ** 2)
+              if (dist < 1e-10) return d.z
+              const w = 1 / (dist * dist)
+              wSum += w
+              zSum += w * d.z
+            }
+            return wSum > 0 ? zSum / wSum : 0
           }))
           return [{
             type: 'surface' as const,
@@ -286,26 +294,46 @@ export default function PlotlyPlot3D({
 
     const is2D = chartType === 'pie_3d'
     const baseLayout: Record<string, any> = {
-      title: title ? { text: title, font: { color: '#e5e5e5', size: 14 } } : undefined,
+      title: title ? { text: title, font: { color: '#c8c8cc', size: 13, family: "'Inter', system-ui, sans-serif" } } : undefined,
       paper_bgcolor: 'rgba(0,0,0,0)',
       plot_bgcolor: 'rgba(0,0,0,0)',
-      font: { color: '#a1a1aa', size: 11 },
-      margin: { l: 20, r: 10, t: title ? 35 : 10, b: 20 },
+      font: { color: '#8a8a92', size: 10, family: "'Inter', system-ui, sans-serif" },
+      margin: { l: 10, r: 10, t: title ? 30 : 5, b: 10 },
       height,
       showlegend: hasCats || chartType === 'pie_3d',
-      legend: { font: { color: '#a1a1aa' }, bgcolor: 'rgba(0,0,0,0)' },
+      legend: { font: { color: '#8a8a92', size: 10 }, bgcolor: 'rgba(0,0,0,0)', orientation: 'h' as const, y: -0.05 },
+    }
+
+    // Apply thin, curved colorbar to all traces with colorbars
+    const applyColorbarStyle = (trace: any) => {
+      if (trace.marker?.colorbar) {
+        trace.marker.colorbar = {
+          ...trace.marker.colorbar,
+          thickness: 10,
+          len: 0.6,
+          outlinewidth: 0,
+          borderwidth: 0,
+          tickfont: { size: 9, color: '#8a8a92' },
+          titlefont: { size: 10, color: '#8a8a92' },
+        }
+      }
+      return trace
     }
 
     if (!is2D) {
       (baseLayout as any).scene = {
-        xaxis: { title: xLabel, color: '#a1a1aa', gridcolor: 'rgba(255,255,255,0.06)', zerolinecolor: 'rgba(255,255,255,0.1)' },
-        yaxis: { title: yLabel, color: '#a1a1aa', gridcolor: 'rgba(255,255,255,0.06)', zerolinecolor: 'rgba(255,255,255,0.1)' },
-        zaxis: { title: zLabel, color: '#a1a1aa', gridcolor: 'rgba(255,255,255,0.06)', zerolinecolor: 'rgba(255,255,255,0.1)' },
+        xaxis: { title: { text: xLabel, font: { size: 10, color: '#8a8a92' } }, color: '#8a8a92', gridcolor: 'rgba(255,255,255,0.04)', zerolinecolor: 'rgba(255,255,255,0.06)', showbackground: true, backgroundcolor: 'rgba(0,0,0,0)' },
+        yaxis: { title: { text: yLabel, font: { size: 10, color: '#8a8a92' } }, color: '#8a8a92', gridcolor: 'rgba(255,255,255,0.04)', zerolinecolor: 'rgba(255,255,255,0.06)', showbackground: true, backgroundcolor: 'rgba(0,0,0,0)' },
+        zaxis: { title: { text: zLabel, font: { size: 10, color: '#8a8a92' } }, color: '#8a8a92', gridcolor: 'rgba(255,255,255,0.04)', zerolinecolor: 'rgba(255,255,255,0.06)', showbackground: true, backgroundcolor: 'rgba(0,0,0,0)' },
         bgcolor: 'rgba(0,0,0,0)',
+        camera: { eye: { x: 1.5, y: 1.5, z: 1.2 } },
       }
     }
 
-    return { traces: buildTraces(), layout: baseLayout }
+    // Style colorbar on all traces
+    const styledTraces = buildTraces().map(applyColorbarStyle)
+
+    return { traces: styledTraces, layout: baseLayout }
   }, [data, chartType, title, xLabel, yLabel, zLabel, pointSize, colorScheme, height, surfaceFunction])
 
   return (
@@ -331,24 +359,15 @@ export default function PlotlyPlot3D({
           layout={layout as any}
           config={{
             responsive: true,
-            displayModeBar: 'hover',
-            modeBarButtonsToRemove: [
-              'resetCameraLastSave3d',
-              'hoverClosest3d',
-              'tableRotation',
-              'orbitRotation',
-              'pan3d',
-              'sendDataToCloud',
-              'toggleSpikelines',
-              'resetViewMapbox',
-            ],
+            displayModeBar: false,
             toImageButtonOptions: {
               format: 'svg',
               filename: title || '3d-visualization',
-              width: 1200,
-              height: 800,
+              width: 3840,
+              height: 2160,
             },
             displaylogo: false,
+            scrollZoom: true,
           }}
           style={{ width: '100%', height: '100%' }}
           useResizeHandler

@@ -19,6 +19,7 @@ import {
 } from 'recharts'
 import clsx from 'clsx'
 import * as XLSX from 'xlsx'
+import { useAlertDialog } from '../components/AlertDialog'
 
 type ColumnType = 'number' | 'string' | 'date' | 'boolean'
 
@@ -310,6 +311,7 @@ const SAMPLE_DATASETS: Omit<Dataset, 'id' | 'createdAt' | 'updatedAt'>[] = [
 
 /* ═══ Main Component ═══════════════════════════════════════════════════ */
 export default function DataManager() {
+  const { showError, showConfirm, AlertDialog } = useAlertDialog()
   const [datasets, setDatasets] = useState<Dataset[]>(() => {
     const stored = loadDatasets()
     if (stored.length === 0) {
@@ -390,7 +392,7 @@ export default function DataManager() {
         setSelectedId(ds.id)
         setView('table')
       } catch (err) {
-        alert(`Failed to parse file: ${err}`)
+        showError(`Failed to parse file: ${err}`, 'Import Error')
       }
     }
     reader.readAsText(file)
@@ -416,8 +418,9 @@ export default function DataManager() {
     setShowAddModal(false)
   }
 
-  const deleteDataset = (id: string) => {
-    if (!confirm('Delete this dataset?')) return
+  const deleteDataset = async (id: string) => {
+    const ok = await showConfirm('Delete this dataset? This action cannot be undone.', 'Delete Dataset', 'Delete', 'Cancel')
+    if (!ok) return
     setDatasets(prev => prev.filter(d => d.id !== id))
     if (selectedId === id) { setSelectedId(null); setView('overview') }
   }
@@ -482,6 +485,7 @@ export default function DataManager() {
 
   return (
     <div className="flex h-full" style={{ color: 'var(--color-text)' }}>
+      <AlertDialog />
       {/* ── Left: Dataset List ── */}
       <div className="w-64 flex flex-col border-r flex-shrink-0" style={{ borderColor: 'var(--glass-border)', background: 'var(--glass-bg)' }}>
         <div className="p-3 border-b" style={{ borderColor: 'var(--glass-border)' }}>

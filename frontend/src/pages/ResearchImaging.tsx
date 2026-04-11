@@ -14,6 +14,7 @@ import {
 import clsx from 'clsx'
 import { parseMedicalFile, parsedToDataURL } from '../utils/medicalImaging'
 import VolumeViewer3D from '../components/VolumeViewer3D'
+import { useAlertDialog } from '../components/AlertDialog'
 
 type Modality = 'CT' | 'MRI' | 'X-Ray' | 'Ultrasound' | 'PET' | 'Microscopy' | 'Fundus' | 'OCT' | 'Mammography' | 'Endoscopy'
 type Tool = 'pan' | 'window' | 'rect' | 'circle' | 'line' | 'point' | 'polygon' | 'measure' | 'ruler' | 'brush' | 'eraser'
@@ -382,7 +383,8 @@ function applyFilter(imageData: ImageData, filter: Filter): ImageData {
       }
     }
     // Step 3: Non-max suppression + double threshold
-    const maxMag = Math.max(...Array.from(mag).filter(v => isFinite(v)))
+    let maxMag = 0
+    for (let i = 0; i < mag.length; i++) { if (isFinite(mag[i]) && mag[i] > maxMag) maxMag = mag[i] }
     const hiT = maxMag * 0.15, loT = maxMag * 0.05
     for (let y = 1; y < height - 1; y++) {
       for (let x = 1; x < width - 1; x++) {
@@ -438,6 +440,7 @@ function computeImageStats(data: Uint8ClampedArray): { mean: number; std: number
 
 /* ═══ Main Component ═══════════════════════════════════════════════════ */
 export default function ResearchImaging() {
+  const { showConfirm, AlertDialog } = useAlertDialog()
   const [studies, setStudies] = useState<Study[]>(() => loadStudies())
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
@@ -495,7 +498,7 @@ export default function ResearchImaging() {
   }, [selectedId])
 
   // Re-render when zoom/pan/window/filter/annotations change
-  useEffect(() => { renderCanvas() })
+  useEffect(() => { renderCanvas() }, [renderCanvas])
 
   // Render orthogonal views (coronal / sagittal) in quad mode
   useEffect(() => {
@@ -603,7 +606,7 @@ export default function ResearchImaging() {
       sCtx.fillStyle = '#ffffff88'; sCtx.font = '10px sans-serif'
       sCtx.fillText(`Slice ${sliceX}/${W}`, 8, 30)
     }
-  })
+  }, [viewLayout, selected, slicePos])
 
   const renderCanvas = useCallback(() => {
     const canvas = canvasRef.current
@@ -863,8 +866,9 @@ export default function ResearchImaging() {
     setStudies(prev => prev.map(x => x.id === s.id ? s : x))
   }
 
-  const deleteStudy = (id: string) => {
-    if (!confirm('Delete this study? This cannot be undone.')) return
+  const deleteStudy = async (id: string) => {
+    const ok = await showConfirm('Delete this study? This cannot be undone.', 'Delete Study', 'Delete Permanently', 'Cancel')
+    if (!ok) return
     setStudies(prev => prev.filter(s => s.id !== id))
     if (selectedId === id) setSelectedId(null)
   }
@@ -876,19 +880,35 @@ export default function ResearchImaging() {
 
   const [uploadError, setUploadError] = useState<string | null>(null)
 
-  const inferModality = (filename: string): Modality => {
+  const inferModality = (filename: string, width?: number, height?: number, mimeType?: string): Modality => {
     const n = filename.toLowerCase()
-    if (n.includes('ct')) return 'CT'
-    if (n.includes('mr') || n.includes('mri')) return 'MRI'
-    if (n.includes('xray') || n.includes('x-ray') || n.includes('cr_')) return 'X-Ray'
-    if (n.includes('us') || n.includes('ultra')) return 'Ultrasound'
-    if (n.includes('pet')) return 'PET'
-    if (n.includes('mam')) return 'Mammography'
-    if (n.includes('oct')) return 'OCT'
-    if (n.includes('fundus') || n.includes('retin')) return 'Fundus'
-    if (n.includes('micro') || n.includes('histo')) return 'Microscopy'
-    if (n.includes('endo')) return 'Endoscopy'
-    return 'CT'
+    // Check filename patterns first
+    if (n.includes('ct') || n.includes('scan')) return 'CT'
+    if (n.includes('mr') || n.includes('mri') || n.includes('t1w') || n.includes('t2w') || n.includes('flair')) return 'MRI'
+    if (n.includes('xray') || n.includes('x-ray') || n.includes('cr_') || n.includes('radiograph')) return 'X-Ray'
+    if (n.includes('us') || n.includes('ultra') || n.includes('echo') || n.includes('sonogram')) return 'Ultrasound'
+    if (n.includes('pet') || n.includes('fdg') || n.includes('spect')) return 'PET'
+    if (n.includes('mam') || n.includes('breast') || n.includes('tomo')) return 'Mammography'
+    if (n.includes('oct') || n.includes('optical_coherence')) return 'OCT'
+    if (n.includes('fundus') || n.includes('retin') || n.includes('optic_disc')) return 'Fundus'
+    if (n.includes('micro') || n.includes('histo') || n.includes('pathol') || n.includes('slide') || n.includes('biopsy')) return 'Microscopy'
+    if (n.includes('endo') || n.includes('colon') || n.includes('gastro')) return 'Endoscopy'
+    // Check file extension patterns
+    if (n.endsWith('.dcm') || n.endsWith('.dicom')) return 'CT'
+    if (n.endsWith('.nii') || n.endsWith('.nii.gz')) return 'MRI'
+    // Check MIME type for DICOM
+    if (mimeType === 'application/dicom') return 'CT'
+    // Infer from image dimensions (heuristics)
+    if (width && height) {
+      const aspect = width / height
+      // Mammography tends to be tall/narrow
+      if (aspect < 0.6 && width > 1500) return 'Mammography'
+      // Fundus images tend to be roughly square and high-res
+      if (aspect > 0.9 && aspect < 1.1 && width > 2000) return 'Fundus'
+      // Microscopy slides tend to be very high resolution
+      if (width > 4000 || height > 4000) return 'Microscopy'
+    }
+    return 'X-Ray' // Default to X-Ray for generic images rather than CT
   }
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -905,7 +925,7 @@ export default function ResearchImaging() {
           const modality = parsed.meta.modality
             ? (parsed.meta.modality as Modality)
             : inferModality(file.name)
-          const validModality: Modality = (MODALITIES.find(m => m.id === modality)?.id) || inferModality(file.name)
+          const validModality: Modality = (MODALITIES.find(m => m.id === modality)?.id) || inferModality(file.name, parsed.width, parsed.height, file.type)
           const study: Study = {
             id: crypto.randomUUID(),
             title: file.name.replace(/\.[^.]+$/, ''),
@@ -947,7 +967,7 @@ export default function ResearchImaging() {
         const study: Study = {
           id: crypto.randomUUID(),
           title: file.name.replace(/\.[^.]+$/, ''),
-          modality: inferModality(file.name),
+          modality: inferModality(file.name, img.width, img.height, file.type),
           bodyPart: '',
           patientId: '',
           acquiredAt: new Date().toISOString(),
@@ -1019,6 +1039,7 @@ export default function ResearchImaging() {
 
   return (
     <div className="flex h-full" style={{ color: 'var(--color-text)' }}>
+      <AlertDialog />
       {/* ── Left: Study Browser ── */}
       <div className="w-64 flex flex-col border-r flex-shrink-0" style={{ borderColor: 'var(--glass-border)', background: 'var(--glass-bg)' }}>
         <div className="p-3 border-b" style={{ borderColor: 'var(--glass-border)' }}>
