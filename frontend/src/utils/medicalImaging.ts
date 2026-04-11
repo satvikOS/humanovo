@@ -253,7 +253,7 @@ export function parseNIfTI(buffer: ArrayBuffer): ParsedImage | null {
   const view = new DataView(buffer)
 
   // Determine endianness from sizeof_hdr (should be 348 for NIfTI-1)
-  let littleEndian = view.getInt32(0, true) === 348
+  const littleEndian = view.getInt32(0, true) === 348
   if (!littleEndian && view.getInt32(0, false) !== 348) return null
 
   // Magic at offset 344: 'ni1' or 'n+1'

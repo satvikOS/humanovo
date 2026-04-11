@@ -28,8 +28,8 @@ export default function BiobankManager() {
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
   const load = async () => {
-    try { const r = await fetch(`${API}/samples`); if (r.ok) setSamples((await r.json()).items || []) } catch {}
-    try { const r = await fetch(`${API}/inventory`); if (r.ok) setInventory(await r.json()) } catch {}
+    try { const r = await fetch(`${API}/samples`); if (r.ok) setSamples((await r.json()).items || []) } catch { /* network error — keep stale state */ }
+    try { const r = await fetch(`${API}/inventory`); if (r.ok) setInventory(await r.json()) } catch { /* network error — keep stale state */ }
   }
   useEffect(() => { load() }, [])
 
