@@ -1,11 +1,13 @@
-import React, { useState, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer,
+  ReferenceLine, AreaChart, Area,
 } from 'recharts';
 import {
   FiPlay, FiActivity, FiBarChart2, FiCopy, FiDownload,
   FiLoader, FiCheck, FiTarget, FiHeart, FiZap, FiDatabase,
+  FiRefreshCw, FiTrendingUp, FiPercent, FiSliders,
 } from 'react-icons/fi';
 
 
@@ -537,21 +539,7 @@ function computeStats(values: number[]) {
   return { mean, median, std, ci95Low, ci95High };
 }
 
-function buildHistogram(values: number[], bins = 20) {
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = max - min || 1;
-  const binWidth = range / bins;
-  const counts = new Array(bins).fill(0);
-  for (const v of values) {
-    const idx = Math.min(bins - 1, Math.floor((v - min) / binWidth));
-    counts[idx]++;
-  }
-  return counts.map((count, i) => ({
-    bin: (min + (i + 0.5) * binWidth).toPrecision(4),
-    count,
-  }));
-}
+// buildHistogram is now inline in histogramEnriched useMemo
 
 /* ------------------------------------------------------------------ */
 /*  Styles                                                            */
@@ -707,6 +695,8 @@ export default function MonteCarloPanel() {
   const [selectedType, setSelectedType] = useState<SimulationType>('clinical_outcome');
   const [iterations, setIterations] = useState(5000);
   const [showLibrary, setShowLibrary] = useState(false);
+  const [autoRun, setAutoRun] = useState(true);
+  const [activeChart, setActiveChart] = useState<'histogram' | 'convergence' | 'cdf'>('histogram');
   const [paramValues, setParamValues] = useState<Record<string, Record<string, number>>>(() => {
     const init: Record<string, Record<string, number>> = {};
     for (const sim of SIMULATIONS) {
@@ -720,7 +710,9 @@ export default function MonteCarloPanel() {
   const [results, setResults] = useState<SimResults | null>(null);
   const [running, setRunning] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [_runHistory, setRunHistory] = useState<{ type: SimulationType; params: Record<string, number>; mean: number; std: number; timestamp: number }[]>([]);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoRunRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const activeSim = useMemo(
     () => SIMULATIONS.find((s) => s.id === selectedType)!,
@@ -746,17 +738,38 @@ export default function MonteCarloPanel() {
       const res = runSimulation(selectedType, currentParams, iterations);
       setResults(res);
       setRunning(false);
+      // Record in history
+      const s = computeStats(res.values);
+      setRunHistory(prev => [...prev.slice(-19), { type: selectedType, params: { ...currentParams }, mean: s.mean, std: s.std, timestamp: Date.now() }]);
     }, 20);
   }, [selectedType, currentParams, iterations]);
+
+  // Auto-run on parameter/iteration change with debounce
+  useEffect(() => {
+    if (!autoRun) return;
+    if (autoRunRef.current) clearTimeout(autoRunRef.current);
+    autoRunRef.current = setTimeout(() => {
+      handleRun();
+    }, 350);
+    return () => { if (autoRunRef.current) clearTimeout(autoRunRef.current); };
+  }, [autoRun, selectedType, currentParams, iterations]); // eslint-disable-line
+
+  // CDF data
+  const cdfData = useMemo(() => {
+    if (!results) return [];
+    const sorted = [...results.values].sort((a, b) => a - b);
+    const n = sorted.length;
+    const step = Math.max(1, Math.floor(n / 200));
+    const data: { value: number; percentile: number }[] = [];
+    for (let i = 0; i < n; i += step) {
+      data.push({ value: sorted[i], percentile: ((i + 1) / n) * 100 });
+    }
+    return data;
+  }, [results]);
 
   const stats = useMemo(() => {
     if (!results) return null;
     return computeStats(results.values);
-  }, [results]);
-
-  const histogram = useMemo(() => {
-    if (!results) return [];
-    return buildHistogram(results.values, 20);
   }, [results]);
 
   const fmt = (v: number) => {
@@ -808,162 +821,319 @@ export default function MonteCarloPanel() {
     URL.revokeObjectURL(url);
   }, [results, selectedType]);
 
+  const chartTabs: { id: 'histogram' | 'convergence' | 'cdf'; label: string; icon: React.ReactNode }[] = [
+    { id: 'histogram', label: 'Distribution', icon: <FiBarChart2 style={{ fontSize: 10 }} /> },
+    { id: 'convergence', label: 'Convergence', icon: <FiTrendingUp style={{ fontSize: 10 }} /> },
+    { id: 'cdf', label: 'CDF', icon: <FiPercent style={{ fontSize: 10 }} /> },
+  ];
+
+  // Histogram with enriched bins (storing numeric midpoint for reference lines)
+  const histogramEnriched = useMemo(() => {
+    if (!results) return [];
+    const vals = results.values;
+    const min = Math.min(...vals);
+    const max = Math.max(...vals);
+    const range = max - min || 1;
+    const bins = 30;
+    const binWidth = range / bins;
+    const counts = new Array(bins).fill(0);
+    for (const v of vals) {
+      const idx = Math.min(bins - 1, Math.floor((v - min) / binWidth));
+      counts[idx]++;
+    }
+    return counts.map((count, i) => ({
+      bin: (min + (i + 0.5) * binWidth).toPrecision(4),
+      binMid: min + (i + 0.5) * binWidth,
+      count,
+      density: count / (vals.length * binWidth),
+    }));
+  }, [results]);
+
   return (
     <div style={styles.container}>
       {/* ── Top toolbar ──────────────────────────────────────────── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <button
-          style={{ ...styles.plotChip, fontWeight: 600 }}
+          style={{ ...styles.plotChip, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}
           onClick={() => setShowLibrary(true)}
-        >Library</button>
-        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text)' }}>
+        ><FiSliders style={{ fontSize: 10 }} /> Library</button>
+        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text)' }}>
           {activeSim.name}
         </span>
         <span style={{ fontSize: 11, color: 'var(--color-text-muted)', flex: 1 }}>
           {activeSim.description}
         </span>
+
+        {/* Auto-run toggle */}
+        <button
+          style={{
+            ...styles.plotChip,
+            display: 'flex', alignItems: 'center', gap: 4,
+            borderColor: autoRun ? 'var(--color-border-strong)' : 'var(--glass-border)',
+            background: autoRun ? 'var(--glass-bg-hover)' : 'var(--glass-bg)',
+          }}
+          onClick={() => setAutoRun(!autoRun)}
+          title={autoRun ? 'Auto-run enabled — simulation re-runs on parameter changes' : 'Auto-run disabled — click Run manually'}
+        >
+          <FiRefreshCw style={{ fontSize: 10 }} />
+          <span style={{ fontSize: 10 }}>Auto</span>
+        </button>
+
         <button style={styles.runBtn} onClick={handleRun} disabled={running}>
           {running ? <FiLoader style={{ animation: 'spin 1s linear infinite' }} /> : <FiPlay />}
           {running ? 'Running...' : 'Run'}
         </button>
       </div>
 
-      {/* ── Compact parameters row ───────────────────────────────── */}
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-        {activeSim.params.map((p) => (
-          <div key={p.key} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <label style={{ fontSize: 11, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>{p.label}</label>
-            <input
-              type="number"
-              style={styles.input}
-              value={currentParams[p.key]}
-              min={p.min}
-              max={p.max}
-              step={p.step}
-              onChange={(e) => {
-                const v = parseFloat(e.target.value);
-                if (!isNaN(v)) setParam(p.key, Math.max(p.min, Math.min(p.max, v)));
-              }}
-            />
+      {/* ── Main content: left parameters + right results ─────────── */}
+      <div style={{ display: 'flex', gap: 16, flex: 1, minHeight: 0, overflow: 'hidden' }}>
+
+        {/* ── Left panel: reactive sliders ─────────────────────────── */}
+        <div style={{ ...styles.panel, width: 280, flexShrink: 0, overflowY: 'auto' }}>
+          <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--color-text-muted)', marginBottom: 2 }}>
+            Parameters
           </div>
-        ))}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <label style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>Iterations</label>
-          <input
-            type="number"
-            style={styles.input}
-            value={iterations}
-            min={100}
-            max={50000}
-            step={100}
-            onChange={(e) => {
-              const v = parseInt(e.target.value, 10);
-              if (!isNaN(v)) setIterations(Math.max(100, Math.min(50000, v)));
-            }}
-          />
+
+          {activeSim.params.map((p) => {
+            const val = currentParams[p.key];
+            const pct = ((val - p.min) / (p.max - p.min)) * 100;
+            return (
+              <div key={p.key} style={{ marginBottom: 4 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
+                  <label style={{ fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 500 }}>{p.label}</label>
+                  <input
+                    type="number"
+                    style={{ ...styles.input, width: 72, fontSize: 11 }}
+                    value={val}
+                    min={p.min}
+                    max={p.max}
+                    step={p.step}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
+                      if (!isNaN(v)) setParam(p.key, Math.max(p.min, Math.min(p.max, v)));
+                    }}
+                  />
+                </div>
+                <div style={{ position: 'relative', height: 20, display: 'flex', alignItems: 'center' }}>
+                  <input
+                    type="range"
+                    min={p.min}
+                    max={p.max}
+                    step={p.step}
+                    value={val}
+                    onChange={(e) => setParam(p.key, parseFloat(e.target.value))}
+                    style={{ ...styles.slider, margin: 0 }}
+                  />
+                  {/* Progress fill indicator */}
+                  <div style={{
+                    position: 'absolute', top: '50%', left: 0, height: 3,
+                    width: `${pct}%`, borderRadius: 2,
+                    background: 'var(--color-text)', opacity: 0.15,
+                    pointerEvents: 'none', transform: 'translateY(-50%)',
+                  }} />
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 1 }}>
+                  <span style={{ fontSize: 9, color: 'var(--color-text-muted)', opacity: 0.6 }}>{p.min}</span>
+                  <span style={{ fontSize: 9, color: 'var(--color-text-muted)', opacity: 0.6 }}>{p.max}</span>
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Iterations slider */}
+          <div style={{ borderTop: '1px solid var(--glass-border)', paddingTop: 10, marginTop: 4 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
+              <label style={{ fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 500 }}>Iterations</label>
+              <input
+                type="number"
+                style={{ ...styles.input, width: 72, fontSize: 11 }}
+                value={iterations}
+                min={100}
+                max={50000}
+                step={100}
+                onChange={(e) => {
+                  const v = parseInt(e.target.value, 10);
+                  if (!isNaN(v)) setIterations(Math.max(100, Math.min(50000, v)));
+                }}
+              />
+            </div>
+            <input
+              type="range"
+              min={100}
+              max={50000}
+              step={100}
+              value={iterations}
+              onChange={(e) => setIterations(parseInt(e.target.value, 10))}
+              style={styles.slider}
+            />
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 9, color: 'var(--color-text-muted)', opacity: 0.6 }}>100</span>
+              <span style={{ fontSize: 9, color: 'var(--color-text-muted)', opacity: 0.6 }}>50,000</span>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Right panel: results ─────────────────────────────────── */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0, overflow: 'hidden' }}>
+
+          {/* Stats cards row */}
+          {results && stats ? (
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+                {[
+                  { label: 'Mean', value: fmt(stats.mean), color: '#3b82f6' },
+                  { label: 'Median', value: fmt(stats.median), color: '#8b5cf6' },
+                  { label: 'Std Dev', value: fmt(stats.std), color: '#f59e0b' },
+                  { label: '95% CI', value: `${fmt(stats.ci95Low)} — ${fmt(stats.ci95High)}`, color: '#10b981' },
+                ].map((s) => (
+                  <div key={s.label} style={{
+                    background: 'var(--glass-bg)',
+                    border: '1px solid var(--glass-border)',
+                    borderRadius: 8,
+                    padding: '10px 12px',
+                    borderLeft: `3px solid ${s.color}`,
+                  }}>
+                    <div style={{ fontSize: 9, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.8, color: 'var(--color-text-muted)', marginBottom: 4 }}>
+                      {s.label}
+                    </div>
+                    <div style={{ fontSize: 14, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", color: 'var(--color-text)', lineHeight: 1.2 }}>
+                      {s.value}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Chart tabs + chart */}
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 2, marginBottom: 6 }}>
+                  {chartTabs.map(tab => (
+                    <button
+                      key={tab.id}
+                      onClick={() => setActiveChart(tab.id)}
+                      style={{
+                        ...styles.plotChip,
+                        display: 'flex', alignItems: 'center', gap: 3,
+                        borderColor: activeChart === tab.id ? 'var(--color-border-strong)' : 'var(--glass-border)',
+                        background: activeChart === tab.id ? 'var(--glass-bg-hover)' : 'transparent',
+                        fontWeight: activeChart === tab.id ? 600 : 400,
+                        fontSize: 10,
+                      }}
+                    >
+                      {tab.icon} {tab.label}
+                    </button>
+                  ))}
+                  <span style={{ fontSize: 10, color: 'var(--color-text-muted)', marginLeft: 'auto' }}>
+                    {results.label} &middot; {results.values.length.toLocaleString()} iterations
+                  </span>
+                  <div style={{ display: 'flex', gap: 4, marginLeft: 8 }}>
+                    <button style={styles.exportBtn} onClick={handleExportJSON}><FiDownload style={{ fontSize: 9 }} /> JSON</button>
+                    <button style={styles.exportBtn} onClick={handleExportCSV}><FiDownload style={{ fontSize: 9 }} /> CSV</button>
+                    <button style={styles.exportBtn} onClick={handleCopy}>
+                      {copied ? <FiCheck style={{ fontSize: 9 }} /> : <FiCopy style={{ fontSize: 9 }} />} {copied ? 'Copied' : 'Copy'}
+                    </button>
+                  </div>
+                </div>
+
+                <div style={{ flex: 1, minHeight: 0 }}>
+                  {activeChart === 'histogram' && (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={histogramEnriched} margin={{ top: 8, right: 16, bottom: 20, left: 8 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" strokeOpacity={0.4} />
+                        <XAxis dataKey="bin" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} interval="preserveStartEnd" stroke="var(--glass-border)" label={{ value: results.label, position: 'insideBottom', offset: -12, fontSize: 10, fill: 'var(--color-text-muted)' }} />
+                        <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" label={{ value: 'Count', angle: -90, position: 'insideLeft', fontSize: 10, fill: 'var(--color-text-muted)' }} />
+                        <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} />
+                        <ReferenceLine x={(() => { const m = stats.mean; let closest = histogramEnriched[0]?.bin; let minD = Infinity; for (const h of histogramEnriched) { const d = Math.abs(h.binMid - m); if (d < minD) { minD = d; closest = h.bin; } } return closest; })()} stroke="#3b82f6" strokeWidth={2} strokeDasharray="4 3" label={{ value: 'Mean', position: 'top', fontSize: 9, fill: '#3b82f6' }} />
+                        <Bar dataKey="count" fill="#3b82f6" fillOpacity={0.35} radius={[2, 2, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
+
+                  {activeChart === 'convergence' && (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={results.convergence} margin={{ top: 8, right: 16, bottom: 20, left: 8 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" strokeOpacity={0.4} />
+                        <XAxis dataKey="iteration" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" label={{ value: 'Iteration', position: 'insideBottom', offset: -12, fontSize: 10, fill: 'var(--color-text-muted)' }} />
+                        <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" label={{ value: 'Running Mean', angle: -90, position: 'insideLeft', fontSize: 10, fill: 'var(--color-text-muted)' }} />
+                        <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} />
+                        <ReferenceLine y={stats.mean} stroke="#3b82f6" strokeDasharray="4 3" strokeWidth={1} label={{ value: `Final: ${fmt(stats.mean)}`, position: 'right', fontSize: 9, fill: '#3b82f6' }} />
+                        <Line type="monotone" dataKey="runningMean" stroke="#8b5cf6" strokeWidth={2} dot={false} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  )}
+
+                  {activeChart === 'cdf' && (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={cdfData} margin={{ top: 8, right: 16, bottom: 20, left: 8 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" strokeOpacity={0.4} />
+                        <XAxis dataKey="value" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" type="number" label={{ value: results.label, position: 'insideBottom', offset: -12, fontSize: 10, fill: 'var(--color-text-muted)' }} />
+                        <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" domain={[0, 100]} label={{ value: 'Percentile (%)', angle: -90, position: 'insideLeft', fontSize: 10, fill: 'var(--color-text-muted)' }} />
+                        <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} formatter={(v: any) => `${Number(v).toFixed(1)}%`} />
+                        <ReferenceLine y={50} stroke="#f59e0b" strokeDasharray="4 3" strokeWidth={1} label={{ value: 'Median', position: 'right', fontSize: 9, fill: '#f59e0b' }} />
+                        <Area type="monotone" dataKey="percentile" stroke="#10b981" fill="#10b981" fillOpacity={0.15} strokeWidth={2} dot={false} />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
+              </div>
+            </>
+          ) : (
+            <div style={{
+              flex: 1, display: 'flex', flexDirection: 'column',
+              alignItems: 'center', justifyContent: 'center',
+              color: 'var(--color-text-muted)', gap: 8,
+            }}>
+              <FiActivity style={{ fontSize: 28, opacity: 0.3 }} />
+              <div style={{ fontSize: 12 }}>
+                {autoRun ? 'Adjust sliders to run simulation automatically' : 'Configure parameters and click Run'}
+              </div>
+              <div style={{ fontSize: 10, opacity: 0.6 }}>
+                Choose from {SIMULATIONS.length} biomedical simulations in the Library
+              </div>
+            </div>
+          )}
         </div>
       </div>
-
-      {/* ── Results ──────────────────────────────────────────────── */}
-      {!results && (
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-muted)', fontSize: 12, minHeight: 200 }}>
-          Select a simulation from the Library, configure parameters, and click Run.
-        </div>
-      )}
-
-      {results && stats && (
-        <div style={{ display: 'flex', gap: 16, flex: 1, minHeight: 0 }}>
-          {/* Left: stats + export */}
-          <div style={{ ...styles.panel, width: 220, flexShrink: 0 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text)', marginBottom: 6 }}>{results.label}</div>
-            <table style={styles.statsTable}>
-              <tbody>
-                {[
-                  ['Mean', fmt(stats.mean)],
-                  ['Median', fmt(stats.median)],
-                  ['Std Dev', fmt(stats.std)],
-                  ['95% CI', `[${fmt(stats.ci95Low)}, ${fmt(stats.ci95High)}]`],
-                ].map(([k, v]) => (
-                  <tr key={k}>
-                    <td style={{ ...styles.td, fontSize: 11 }}>{k}</td>
-                    <td style={{ ...styles.td, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>{v}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <div style={{ ...styles.exportRow, marginTop: 8 }}>
-              <button style={styles.exportBtn} onClick={handleExportJSON}><FiDownload /> JSON</button>
-              <button style={styles.exportBtn} onClick={handleExportCSV}><FiDownload /> CSV</button>
-              <button style={styles.exportBtn} onClick={handleCopy}>
-                {copied ? <FiCheck /> : <FiCopy />} {copied ? 'Copied' : 'Copy'}
-              </button>
-            </div>
-          </div>
-
-          {/* Right: charts */}
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
-            <div>
-              <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 4 }}>Distribution</div>
-              <ResponsiveContainer width="100%" height={140}>
-                <BarChart data={histogram}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" strokeOpacity={0.5} />
-                  <XAxis dataKey="bin" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} interval="preserveStartEnd" stroke="var(--glass-border)" />
-                  <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" />
-                  <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} />
-                  <Bar dataKey="count" fill="var(--color-text)" fillOpacity={0.35} radius={[2, 2, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-            <div>
-              <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 4 }}>Convergence</div>
-              <ResponsiveContainer width="100%" height={120}>
-                <LineChart data={results.convergence}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" strokeOpacity={0.5} />
-                  <XAxis dataKey="iteration" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" />
-                  <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" />
-                  <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} />
-                  <Line type="monotone" dataKey="runningMean" stroke="var(--color-text)" strokeWidth={1.5} strokeOpacity={0.55} dot={false} />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ── Library overlay ──────────────────────────────────────── */}
       {showLibrary && (
         <div
           style={{
             position: 'fixed', inset: 0, zIndex: 9999,
-            background: 'rgba(0,0,0,0.5)',
+            background: 'rgba(0,0,0,0.55)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
+            backdropFilter: 'blur(4px)',
           }}
           onClick={(e) => { if (e.target === e.currentTarget) setShowLibrary(false) }}
         >
           <div style={{
             background: 'var(--color-bg-elevated)',
             border: '1px solid var(--glass-border)',
-            borderRadius: 10,
-            width: 560, maxWidth: '90vw', maxHeight: '80vh',
+            borderRadius: 12,
+            width: 620, maxWidth: '92vw', maxHeight: '80vh',
             overflow: 'auto',
-            padding: '20px 24px',
-            boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+            padding: '24px 28px',
+            boxShadow: '0 12px 48px rgba(0,0,0,0.3)',
           }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: 'var(--color-text)' }}>
-                Simulation Library
-              </h2>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--color-text)' }}>
+                  Simulation Library
+                </h2>
+                <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--color-text-muted)' }}>
+                  {SIMULATIONS.length} biomedical Monte Carlo simulations
+                </p>
+              </div>
               <button
-                style={{ ...styles.plotChip, fontSize: 11 }}
+                style={{ ...styles.plotChip, fontSize: 11, padding: '5px 12px' }}
                 onClick={() => setShowLibrary(false)}
               >Close</button>
             </div>
             {SIM_CATEGORIES.map(cat => (
-              <div key={cat.name} style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--color-text-muted)', marginBottom: 6 }}>
-                  {cat.name}
+              <div key={cat.name} style={{ marginBottom: 18 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1.2, color: 'var(--color-text-muted)', marginBottom: 8 }}>
+                  {cat.name} &middot; {cat.ids.length}
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 6 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 8 }}>
                   {cat.ids.map(id => {
                     const sim = SIMULATIONS.find(s => s.id === id)!;
                     const isActive = selectedType === id;
@@ -973,15 +1143,19 @@ export default function MonteCarloPanel() {
                         style={{
                           ...styles.card,
                           ...(isActive ? styles.cardSelected : {}),
-                          padding: '8px 10px',
+                          padding: '10px 12px',
+                          display: 'flex', flexDirection: 'column', gap: 3,
                         }}
                         onClick={() => { setSelectedType(id); setShowLibrary(false); setResults(null); }}
                       >
-                        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text)', display: 'flex', alignItems: 'center', gap: 6 }}>
                           {sim.icon} {sim.name}
                         </div>
-                        <div style={{ fontSize: 10, color: 'var(--color-text-muted)', lineHeight: 1.35, marginTop: 2 }}>
+                        <div style={{ fontSize: 10, color: 'var(--color-text-muted)', lineHeight: 1.4 }}>
                           {sim.description}
+                        </div>
+                        <div style={{ fontSize: 9, color: 'var(--color-text-muted)', opacity: 0.6 }}>
+                          {sim.params.length} parameter{sim.params.length > 1 ? 's' : ''}
                         </div>
                       </div>
                     );
