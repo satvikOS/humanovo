@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, ReferenceLine,
+  ResponsiveContainer, ReferenceLine, Brush, Legend,
 } from 'recharts'
 import {
   FiPlay, FiPlus, FiDownload, FiCopy, FiLayers,
@@ -781,11 +781,12 @@ export default function EquationPlotter() {
       <div style={{ flex: 1, minHeight: 0, border: '1px solid var(--glass-border)', borderRadius: 8, padding: 10, background: 'var(--glass-bg)' }}>
         {chartData.length > 0 ? (
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={chartDataWithDerivative} margin={{ top: 8, right: 16, bottom: 8, left: 8 }}>
+            <LineChart data={chartDataWithDerivative} margin={{ top: 8, right: 16, bottom: 24, left: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" strokeOpacity={0.5} />
               <XAxis dataKey="x" tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} tickFormatter={v => typeof v === 'number' ? (Math.abs(v) >= 1000 ? v.toExponential(0) : String(Math.round(v * 100) / 100)) : v} stroke="var(--glass-border)" />
               <YAxis tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} tickFormatter={v => typeof v === 'number' ? (Math.abs(v) >= 1000 ? v.toExponential(0) : String(Math.round(v * 100) / 100)) : v} stroke="var(--glass-border)" width={56} />
-              <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} labelStyle={{ color: 'var(--color-text-muted)' }} formatter={(value: unknown, name: unknown) => { const n = typeof value === 'number' ? value : Number(value); return [isFinite(n) ? n.toFixed(4) : 'NaN', name === 'dy' ? "f'(x)" : ''] }} labelFormatter={(label: unknown) => `x = ${label}`} />
+              <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} cursor={{ stroke: 'var(--color-text-muted)', strokeDasharray: '4 4' }} labelStyle={{ color: 'var(--color-text-muted)' }} formatter={(value: unknown, name: unknown) => { const n = typeof value === 'number' ? value : Number(value); return [isFinite(n) ? n.toFixed(4) : 'NaN', name === 'dy' ? "f'(x)" : ''] }} labelFormatter={(label: unknown) => `x = ${label}`} />
+              <Legend wrapperStyle={{ fontSize: 10 }} />
               {quadrantInfo.showXRef && <ReferenceLine y={0} stroke="var(--color-text-muted)" strokeDasharray="4 4" strokeOpacity={0.4} />}
               {quadrantInfo.showYRef && <ReferenceLine x={0} stroke="var(--color-text-muted)" strokeDasharray="4 4" strokeOpacity={0.4} />}
               <Line type="monotone" dataKey="y" stroke="var(--color-text)" strokeWidth={1.8} strokeOpacity={0.7} dot={false} name={expr} isAnimationActive={false} />
@@ -793,6 +794,7 @@ export default function EquationPlotter() {
               {overlays.map((o, idx) => o.enabled ? (
                 <Line key={idx} type="monotone" dataKey={`o${idx}`} stroke={OVERLAY_COLORS[idx]} strokeWidth={1.5} strokeDasharray="6 3" strokeOpacity={0.6} dot={false} name={o.expr} isAnimationActive={false} connectNulls={false} />
               ) : null)}
+              <Brush dataKey="x" height={14} stroke="var(--color-text-muted)" fill="var(--glass-bg)" travellerWidth={6} />
             </LineChart>
           </ResponsiveContainer>
         ) : (
@@ -919,14 +921,16 @@ export default function EquationPlotter() {
       <div style={{ flex: 1, minHeight: 0, border: '1px solid var(--glass-border)', borderRadius: 8, padding: 10, background: 'var(--glass-bg)' }}>
         {odeChartData.length > 0 ? (
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={odeChartData} margin={{ top: 8, right: 16, bottom: 8, left: 8 }}>
+            <LineChart data={odeChartData} margin={{ top: 8, right: 16, bottom: 24, left: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" strokeOpacity={0.5} />
               <XAxis dataKey="t" tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" label={{ value: 'Time', position: 'insideBottom', offset: -2, fontSize: 10, fill: 'var(--color-text-muted)' }} />
               <YAxis tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" width={56} />
-              <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} />
+              <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} cursor={{ stroke: 'var(--color-text-muted)', strokeDasharray: '4 4' }} />
+              <Legend wrapperStyle={{ fontSize: 10 }} />
               {activeODE.vars.map((v, i) => (
                 <Line key={v} type="monotone" dataKey={v} stroke={ODE_COLORS[i % ODE_COLORS.length]} strokeWidth={1.5} strokeOpacity={0.7} dot={false} name={v} isAnimationActive={false} />
               ))}
+              <Brush dataKey="t" height={14} stroke="var(--color-text-muted)" fill="var(--glass-bg)" travellerWidth={6} />
             </LineChart>
           </ResponsiveContainer>
         ) : (

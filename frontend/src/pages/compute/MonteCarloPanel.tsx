@@ -2,7 +2,7 @@ import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react'
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer,
-  ReferenceLine, AreaChart, Area,
+  ReferenceLine, AreaChart, Area, Brush, Legend,
 } from 'recharts';
 import {
   FiPlay, FiActivity, FiBarChart2, FiCopy, FiDownload,
@@ -1037,39 +1037,43 @@ export default function MonteCarloPanel() {
                 <div style={{ flex: 1, minHeight: 0 }}>
                   {activeChart === 'histogram' && (
                     <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={histogramEnriched} margin={{ top: 8, right: 16, bottom: 20, left: 8 }}>
+                      <BarChart data={histogramEnriched} margin={{ top: 8, right: 16, bottom: 30, left: 8 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" strokeOpacity={0.4} />
                         <XAxis dataKey="bin" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} interval="preserveStartEnd" stroke="var(--glass-border)" label={{ value: results.label, position: 'insideBottom', offset: -12, fontSize: 10, fill: 'var(--color-text-muted)' }} />
                         <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" label={{ value: 'Count', angle: -90, position: 'insideLeft', fontSize: 10, fill: 'var(--color-text-muted)' }} />
-                        <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} />
+                        <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} cursor={{ stroke: 'var(--color-text-muted)', strokeDasharray: '4 4' }} />
                         <ReferenceLine x={(() => { const m = stats.mean; let closest = histogramEnriched[0]?.bin; let minD = Infinity; for (const h of histogramEnriched) { const d = Math.abs(h.binMid - m); if (d < minD) { minD = d; closest = h.bin; } } return closest; })()} stroke="#3b82f6" strokeWidth={2} strokeDasharray="4 3" label={{ value: 'Mean', position: 'top', fontSize: 9, fill: '#3b82f6' }} />
                         <Bar dataKey="count" fill="#3b82f6" fillOpacity={0.35} radius={[2, 2, 0, 0]} />
+                        {histogramEnriched.length > 8 && <Brush dataKey="bin" height={16} stroke="#3b82f6" fill="var(--glass-bg)" travellerWidth={6} />}
                       </BarChart>
                     </ResponsiveContainer>
                   )}
 
                   {activeChart === 'convergence' && (
                     <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={results.convergence} margin={{ top: 8, right: 16, bottom: 20, left: 8 }}>
+                      <LineChart data={results.convergence} margin={{ top: 8, right: 16, bottom: 30, left: 8 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" strokeOpacity={0.4} />
                         <XAxis dataKey="iteration" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" label={{ value: 'Iteration', position: 'insideBottom', offset: -12, fontSize: 10, fill: 'var(--color-text-muted)' }} />
                         <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" label={{ value: 'Running Mean', angle: -90, position: 'insideLeft', fontSize: 10, fill: 'var(--color-text-muted)' }} />
-                        <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} />
+                        <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} cursor={{ stroke: 'var(--color-text-muted)', strokeDasharray: '4 4' }} />
+                        <Legend wrapperStyle={{ fontSize: 10 }} />
                         <ReferenceLine y={stats.mean} stroke="#3b82f6" strokeDasharray="4 3" strokeWidth={1} label={{ value: `Final: ${fmt(stats.mean)}`, position: 'right', fontSize: 9, fill: '#3b82f6' }} />
-                        <Line type="monotone" dataKey="runningMean" stroke="#8b5cf6" strokeWidth={2} dot={false} />
+                        <Line type="monotone" dataKey="runningMean" name="Running Mean" stroke="#8b5cf6" strokeWidth={2} dot={false} />
+                        {results.convergence.length > 10 && <Brush dataKey="iteration" height={16} stroke="#8b5cf6" fill="var(--glass-bg)" travellerWidth={6} />}
                       </LineChart>
                     </ResponsiveContainer>
                   )}
 
                   {activeChart === 'cdf' && (
                     <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={cdfData} margin={{ top: 8, right: 16, bottom: 20, left: 8 }}>
+                      <AreaChart data={cdfData} margin={{ top: 8, right: 16, bottom: 30, left: 8 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" strokeOpacity={0.4} />
                         <XAxis dataKey="value" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" type="number" label={{ value: results.label, position: 'insideBottom', offset: -12, fontSize: 10, fill: 'var(--color-text-muted)' }} />
                         <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" domain={[0, 100]} label={{ value: 'Percentile (%)', angle: -90, position: 'insideLeft', fontSize: 10, fill: 'var(--color-text-muted)' }} />
-                        <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} formatter={(v: any) => `${Number(v).toFixed(1)}%`} />
+                        <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} cursor={{ stroke: 'var(--color-text-muted)', strokeDasharray: '4 4' }} formatter={(v: any) => `${Number(v).toFixed(1)}%`} />
                         <ReferenceLine y={50} stroke="#f59e0b" strokeDasharray="4 3" strokeWidth={1} label={{ value: 'Median', position: 'right', fontSize: 9, fill: '#f59e0b' }} />
                         <Area type="monotone" dataKey="percentile" stroke="#10b981" fill="#10b981" fillOpacity={0.15} strokeWidth={2} dot={false} />
+                        {cdfData.length > 10 && <Brush dataKey="value" height={16} stroke="#10b981" fill="var(--glass-bg)" travellerWidth={6} />}
                       </AreaChart>
                     </ResponsiveContainer>
                   )}
