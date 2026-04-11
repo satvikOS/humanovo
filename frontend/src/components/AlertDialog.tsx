@@ -2,7 +2,7 @@
  * AlertDialog — Platform-wide replacement for native window.alert/confirm/prompt.
  * Provides a polished, themed overlay dialog consistent with the Humanovo design system.
  */
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import { FiAlertTriangle, FiInfo, FiCheckCircle, FiAlertCircle } from 'react-icons/fi'
 
 type DialogVariant = 'info' | 'warning' | 'error' | 'success' | 'confirm' | 'prompt'

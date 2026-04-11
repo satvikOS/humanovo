@@ -490,18 +490,18 @@ export default function ResearchImaging() {
   // Persist studies
   useEffect(() => { saveStudies(studies) }, [studies])
 
+  // Track image-loaded generation to trigger re-render after img.onload
+  const [imgGeneration, setImgGeneration] = useState(0)
+
   // Load image when selection changes
   useEffect(() => {
     if (!selected) { imgCacheRef.current = null; return }
     const img = new Image()
-    img.onload = () => { imgCacheRef.current = img; renderCanvas() }
+    img.onload = () => { imgCacheRef.current = img; setImgGeneration(g => g + 1) }
     img.src = selected.imageData
     setZoom(1); setPan({ x: 0, y: 0 })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId])
-
-  // Re-render when zoom/pan/window/filter/annotations change
-  useEffect(() => { renderCanvas() }, [renderCanvas])
 
   // Render orthogonal views (coronal / sagittal) in quad mode
   useEffect(() => {
@@ -764,6 +764,10 @@ export default function ResearchImaging() {
       }
     }
   }, [selected, zoom, pan, drawing, tool, annotColor, regShowOverlay, regRefId, regTransform, regOverlayOpacity, studies, segMask])
+
+  // Re-render when zoom/pan/window/filter/annotations or image load changes
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { renderCanvas() }, [renderCanvas, imgGeneration])
 
   const screenToImage = useCallback((e: React.MouseEvent): { x: number; y: number } | null => {
     const canvas = canvasRef.current
