@@ -556,7 +556,7 @@ function ConstantChat() {
           project_id: d.project_id,
         })).filter((d: any) => d.title),
       }
-    } catch { return {} }
+    } catch { /* parse error */ return {} }
   }
 
   useEffect(() => {
@@ -848,7 +848,7 @@ function ConstantChat() {
         } else {
           fullResponse = generateSmartFallbackResponse(userMsg)
         }
-      } catch {
+      } catch { /* API unavailable — use local fallback */
         fullResponse = generateSmartFallbackResponse(userMsg)
       }
     }

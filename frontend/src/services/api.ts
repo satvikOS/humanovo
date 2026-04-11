@@ -623,7 +623,7 @@ export const api = {
     try {
       const { data } = await apiClient.get('/knowledge/stats')
       return data
-    } catch {
+    } catch { /* API unavailable — return empty stats */
       return { total_entities: 0, total_relations: 0, entity_counts: {}, relation_counts: {}, last_updated: '' }
     }
   },
