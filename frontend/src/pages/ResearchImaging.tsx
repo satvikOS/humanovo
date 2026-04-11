@@ -108,7 +108,7 @@ function loadStudies(): Study[] {
   try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]') } catch { return [] }
 }
 function saveStudies(s: Study[]) {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)) } catch {}
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)) } catch { /* quota exceeded */ }
 }
 
 /* ── Image Processing Helpers ───────────────────────────────────────── */

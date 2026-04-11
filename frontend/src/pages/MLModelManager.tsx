@@ -24,7 +24,7 @@ export default function MLModelManager() {
   const [prediction, setPrediction] = useState<any>(null)
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
-  const load = async () => { try { const r = await fetch(API); if (r.ok) setModels((await r.json()).items || []) } catch {} }
+  const load = async () => { try { const r = await fetch(API); if (r.ok) setModels((await r.json()).items || []) } catch { /* network error */ } }
   useEffect(() => { load() }, [])
 
   const selectModel = async (m: MLModel) => {

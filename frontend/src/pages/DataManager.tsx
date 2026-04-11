@@ -49,7 +49,7 @@ function loadDatasets(): Dataset[] {
   try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]') } catch { return [] }
 }
 function saveDatasets(d: Dataset[]) {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(d)) } catch {}
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(d)) } catch { /* quota exceeded */ }
 }
 
 /* ── CSV / TSV Parser ───────────────────────────────────────────────── */
