@@ -497,6 +497,40 @@ function exportDocx(title: string, html: string) {
   URL.revokeObjectURL(url)
 }
 
+function exportMarkdown(title: string, html: string) {
+  // Lightweight HTML→Markdown conversion for research note portability
+  let md = html
+    .replace(/<h1[^>]*>(.*?)<\/h1>/gi, '# $1\n\n')
+    .replace(/<h2[^>]*>(.*?)<\/h2>/gi, '## $1\n\n')
+    .replace(/<h3[^>]*>(.*?)<\/h3>/gi, '### $1\n\n')
+    .replace(/<h4[^>]*>(.*?)<\/h4>/gi, '#### $1\n\n')
+    .replace(/<strong>(.*?)<\/strong>/gi, '**$1**')
+    .replace(/<b>(.*?)<\/b>/gi, '**$1**')
+    .replace(/<em>(.*?)<\/em>/gi, '*$1*')
+    .replace(/<i>(.*?)<\/i>/gi, '*$1*')
+    .replace(/<code>(.*?)<\/code>/gi, '`$1`')
+    .replace(/<pre[^>]*><code[^>]*>([\s\S]*?)<\/code><\/pre>/gi, '```\n$1\n```\n\n')
+    .replace(/<blockquote[^>]*>([\s\S]*?)<\/blockquote>/gi, (_, content) =>
+      content.replace(/<p[^>]*>(.*?)<\/p>/gi, '> $1\n').replace(/<[^>]+>/g, '')
+    )
+    .replace(/<a[^>]*href="([^"]*)"[^>]*>(.*?)<\/a>/gi, '[$2]($1)')
+    .replace(/<li[^>]*>(.*?)<\/li>/gi, '- $1\n')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<p[^>]*>(.*?)<\/p>/gi, '$1\n\n')
+    .replace(/<hr\s*\/?>/gi, '---\n\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+  if (title) md = `# ${title}\n\n${md}`
+  const blob = new Blob([md], { type: 'text/markdown' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = `${title || 'notebook'}.md`
+  a.click()
+  URL.revokeObjectURL(a.href)
+}
+
 // ═══════════════════════════════════════════════════════════════
 // Main Notebook Component
 // ═══════════════════════════════════════════════════════════════
@@ -1028,6 +1062,9 @@ export default function Notebook() {
                   placeholder="Page title..."
                 />
                 <div className="flex items-center gap-1">
+                  <button onClick={() => exportMarkdown(editTitle, editor?.getHTML() || '')} className="px-2 py-1 rounded hover:bg-white/5 text-[var(--color-text-muted)] hover:text-white text-xxs" title="Export Markdown">
+                    .md
+                  </button>
                   <button onClick={() => exportDocx(editTitle, editor?.getHTML() || '')} className="px-2 py-1 rounded hover:bg-white/5 text-[var(--color-text-muted)] hover:text-white text-xxs" title="Export Word">
                     .doc
                   </button>
