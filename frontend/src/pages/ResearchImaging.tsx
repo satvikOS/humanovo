@@ -448,8 +448,12 @@ export default function ResearchImaging() {
   const [annotLabel, setAnnotLabel] = useState('Region')
   const [annotColor, setAnnotColor] = useState('#ef4444')
   const [drawing, setDrawing] = useState<{ start: { x: number; y: number }; current: { x: number; y: number } } | null>(null)
+  const [viewLayout, setViewLayout] = useState<'single' | 'quad'>('single')
+  const [slicePos, setSlicePos] = useState({ axial: 50, coronal: 50, sagittal: 50 })
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const coronalRef = useRef<HTMLCanvasElement>(null)
+  const sagittalRef = useRef<HTMLCanvasElement>(null)
   const imgCacheRef = useRef<HTMLImageElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -483,6 +487,114 @@ export default function ResearchImaging() {
 
   // Re-render when zoom/pan/window/filter/annotations change
   useEffect(() => { renderCanvas() })
+
+  // Render orthogonal views (coronal / sagittal) in quad mode
+  useEffect(() => {
+    if (viewLayout !== 'quad') return
+    const img = imgCacheRef.current
+    if (!img || !selected) return
+
+    // Get processed image data
+    const off = document.createElement('canvas')
+    off.width = img.width; off.height = img.height
+    const offCtx = off.getContext('2d')!
+    offCtx.drawImage(img, 0, 0)
+    let srcData = offCtx.getImageData(0, 0, img.width, img.height)
+    srcData = applyWindow(srcData, selected.windowCenter, selected.windowWidth)
+    if (selected.filter !== 'none') srcData = applyFilter(srcData, selected.filter)
+
+    const W = img.width, H = img.height
+    const sliceY = Math.round((slicePos.coronal / 100) * (H - 1))
+    const sliceX = Math.round((slicePos.sagittal / 100) * (W - 1))
+
+    // Coronal view: extract horizontal line at sliceY, simulate depth by stretching
+    const coronalCanvas = coronalRef.current
+    if (coronalCanvas) {
+      const cW = coronalCanvas.parentElement?.clientWidth || 300
+      const cH = coronalCanvas.parentElement?.clientHeight || 300
+      coronalCanvas.width = cW; coronalCanvas.height = cH
+      const cCtx = coronalCanvas.getContext('2d')!
+      cCtx.fillStyle = '#000'; cCtx.fillRect(0, 0, cW, cH)
+
+      // Build a "depth" image: for each column, stack rows vertically
+      const depthH = H
+      const scaleX = cW / W, scaleY = cH / depthH
+      const sc = Math.min(scaleX, scaleY)
+      const offX = (cW - W * sc) / 2, offY = (cH - depthH * sc) / 2
+      const coronalImg = cCtx.createImageData(Math.ceil(W * sc), Math.ceil(depthH * sc))
+      for (let dy = 0; dy < Math.ceil(depthH * sc); dy++) {
+        const srcRow = Math.min(Math.floor(dy / sc), H - 1)
+        for (let dx = 0; dx < Math.ceil(W * sc); dx++) {
+          const srcCol = Math.min(Math.floor(dx / sc), W - 1)
+          const si = (srcRow * W + srcCol) * 4
+          const di = (dy * coronalImg.width + dx) * 4
+          coronalImg.data[di] = srcData.data[si]
+          coronalImg.data[di + 1] = srcData.data[si + 1]
+          coronalImg.data[di + 2] = srcData.data[si + 2]
+          coronalImg.data[di + 3] = 255
+        }
+      }
+      cCtx.putImageData(coronalImg, Math.round(offX), Math.round(offY))
+
+      // Draw crosshair lines
+      const crossY = offY + sliceY * sc
+      const crossX = offX + sliceX * sc
+      cCtx.strokeStyle = '#22c55e'; cCtx.lineWidth = 1; cCtx.setLineDash([4, 4])
+      cCtx.beginPath(); cCtx.moveTo(0, crossY); cCtx.lineTo(cW, crossY); cCtx.stroke()
+      cCtx.strokeStyle = '#3b82f6'
+      cCtx.beginPath(); cCtx.moveTo(crossX, 0); cCtx.lineTo(crossX, cH); cCtx.stroke()
+      cCtx.setLineDash([])
+
+      // Label
+      cCtx.fillStyle = '#22c55e'; cCtx.font = 'bold 11px sans-serif'
+      cCtx.fillText('CORONAL', 8, 16)
+      cCtx.fillStyle = '#ffffff88'; cCtx.font = '10px sans-serif'
+      cCtx.fillText(`Slice ${sliceY}/${H}`, 8, 30)
+    }
+
+    // Sagittal view: extract vertical column at sliceX, simulate depth
+    const sagittalCanvas = sagittalRef.current
+    if (sagittalCanvas) {
+      const sW = sagittalCanvas.parentElement?.clientWidth || 300
+      const sH = sagittalCanvas.parentElement?.clientHeight || 300
+      sagittalCanvas.width = sW; sagittalCanvas.height = sH
+      const sCtx = sagittalCanvas.getContext('2d')!
+      sCtx.fillStyle = '#000'; sCtx.fillRect(0, 0, sW, sH)
+
+      // Transpose image: columns become rows (sagittal rotation)
+      const scaleXS = sW / H, scaleYS = sH / W
+      const sc = Math.min(scaleXS, scaleYS)
+      const offXS = (sW - H * sc) / 2, offYS = (sH - W * sc) / 2
+      const sagImg = sCtx.createImageData(Math.ceil(H * sc), Math.ceil(W * sc))
+      for (let dy = 0; dy < Math.ceil(W * sc); dy++) {
+        const srcCol = Math.min(Math.floor(dy / sc), W - 1)
+        for (let dx = 0; dx < Math.ceil(H * sc); dx++) {
+          const srcRow = Math.min(Math.floor(dx / sc), H - 1)
+          const si = (srcRow * W + srcCol) * 4
+          const di = (dy * sagImg.width + dx) * 4
+          sagImg.data[di] = srcData.data[si]
+          sagImg.data[di + 1] = srcData.data[si + 1]
+          sagImg.data[di + 2] = srcData.data[si + 2]
+          sagImg.data[di + 3] = 255
+        }
+      }
+      sCtx.putImageData(sagImg, Math.round(offXS), Math.round(offYS))
+
+      // Draw crosshair lines
+      const crossY = offYS + sliceX * sc
+      const crossX = offXS + sliceY * sc
+      sCtx.strokeStyle = '#ef4444'; sCtx.lineWidth = 1; sCtx.setLineDash([4, 4])
+      sCtx.beginPath(); sCtx.moveTo(0, crossY); sCtx.lineTo(sW, crossY); sCtx.stroke()
+      sCtx.strokeStyle = '#3b82f6'
+      sCtx.beginPath(); sCtx.moveTo(crossX, 0); sCtx.lineTo(crossX, sH); sCtx.stroke()
+      sCtx.setLineDash([])
+
+      sCtx.fillStyle = '#ef4444'; sCtx.font = 'bold 11px sans-serif'
+      sCtx.fillText('SAGITTAL', 8, 16)
+      sCtx.fillStyle = '#ffffff88'; sCtx.font = '10px sans-serif'
+      sCtx.fillText(`Slice ${sliceX}/${W}`, 8, 30)
+    }
+  })
 
   const renderCanvas = useCallback(() => {
     const canvas = canvasRef.current
@@ -966,6 +1078,14 @@ export default function ResearchImaging() {
                 <span className="text-xs px-1" style={{ color: 'var(--color-text-muted)' }}>{(zoom * 100).toFixed(0)}%</span>
                 <button onClick={() => setZoom(z => Math.min(8, z + 0.2))} className="p-1.5 rounded hover:bg-white/5"><FiZoomIn className="text-xs" /></button>
                 <button onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }} className="p-1.5 rounded hover:bg-white/5" title="Reset"><FiRotateCw className="text-xs" /></button>
+                <button
+                  onClick={() => setViewLayout(v => v === 'single' ? 'quad' : 'single')}
+                  className="p-1.5 rounded hover:bg-white/5"
+                  style={{ color: viewLayout === 'quad' ? '#3b82f6' : undefined }}
+                  title={viewLayout === 'quad' ? 'Single view' : 'Multi-view (Axial/Coronal/Sagittal)'}
+                >
+                  <FiMaximize2 className="text-xs" />
+                </button>
                 <button onClick={exportImage} className="p-1.5 rounded hover:bg-white/5" title="Export PNG"><FiDownload className="text-xs" /></button>
                 <button onClick={exportStudy} className="p-1.5 rounded hover:bg-white/5" title="Export study JSON"><FiSave className="text-xs" /></button>
                 <button onClick={() => deleteStudy(selected.id)} className="p-1.5 rounded hover:bg-white/5" style={{ color: '#ef4444' }} title="Delete"><FiTrash2 className="text-xs" /></button>
@@ -976,17 +1096,76 @@ export default function ResearchImaging() {
           )}
         </div>
 
-        {/* Canvas */}
+        {/* Canvas / Multi-view */}
         <div className="flex-1 relative overflow-hidden" style={{ background: '#000' }}>
           {selected ? (
-            <canvas
-              ref={canvasRef}
-              onMouseDown={handleMouseDown}
-              onMouseMove={handleMouseMove}
-              onMouseUp={handleMouseUp}
-              onMouseLeave={() => setDrawing(null)}
-              style={{ width: '100%', height: '100%', cursor: tool === 'pan' ? 'grab' : 'crosshair' }}
-            />
+            viewLayout === 'quad' ? (
+              /* ── Quad View: Axial + Coronal + Sagittal + Info ── */
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr', width: '100%', height: '100%', gap: 2 }}>
+                {/* Top-left: Axial (main) */}
+                <div style={{ position: 'relative', overflow: 'hidden', borderRight: '1px solid #333', borderBottom: '1px solid #333' }}>
+                  <canvas
+                    ref={canvasRef}
+                    onMouseDown={handleMouseDown}
+                    onMouseMove={handleMouseMove}
+                    onMouseUp={handleMouseUp}
+                    onMouseLeave={() => setDrawing(null)}
+                    style={{ width: '100%', height: '100%', cursor: tool === 'pan' ? 'grab' : 'crosshair' }}
+                  />
+                  <div style={{ position: 'absolute', top: 6, left: 8, color: '#3b82f6', fontSize: 11, fontWeight: 700, textShadow: '0 1px 3px #000' }}>AXIAL</div>
+                  <div style={{ position: 'absolute', bottom: 6, left: 8 }}>
+                    <input type="range" min={0} max={100} value={slicePos.axial} onChange={e => setSlicePos(p => ({ ...p, axial: Number(e.target.value) }))}
+                      style={{ width: 80, accentColor: '#3b82f6' }} title="Axial slice" />
+                    <span style={{ color: '#fff8', fontSize: 9, marginLeft: 4 }}>Z:{slicePos.axial}%</span>
+                  </div>
+                </div>
+                {/* Top-right: Coronal */}
+                <div style={{ position: 'relative', overflow: 'hidden', borderBottom: '1px solid #333' }}>
+                  <canvas ref={coronalRef} style={{ width: '100%', height: '100%' }} />
+                  <div style={{ position: 'absolute', bottom: 6, left: 8 }}>
+                    <input type="range" min={0} max={100} value={slicePos.coronal} onChange={e => setSlicePos(p => ({ ...p, coronal: Number(e.target.value) }))}
+                      style={{ width: 80, accentColor: '#22c55e' }} title="Coronal slice" />
+                    <span style={{ color: '#fff8', fontSize: 9, marginLeft: 4 }}>Y:{slicePos.coronal}%</span>
+                  </div>
+                </div>
+                {/* Bottom-left: Sagittal */}
+                <div style={{ position: 'relative', overflow: 'hidden', borderRight: '1px solid #333' }}>
+                  <canvas ref={sagittalRef} style={{ width: '100%', height: '100%' }} />
+                  <div style={{ position: 'absolute', bottom: 6, left: 8 }}>
+                    <input type="range" min={0} max={100} value={slicePos.sagittal} onChange={e => setSlicePos(p => ({ ...p, sagittal: Number(e.target.value) }))}
+                      style={{ width: 80, accentColor: '#ef4444' }} title="Sagittal slice" />
+                    <span style={{ color: '#fff8', fontSize: 9, marginLeft: 4 }}>X:{slicePos.sagittal}%</span>
+                  </div>
+                </div>
+                {/* Bottom-right: 3D Overview / Info */}
+                <div style={{ position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#0a0a0f' }}>
+                  <div style={{ color: '#fff6', fontSize: 10, textAlign: 'center', padding: 16 }}>
+                    <FiLayers style={{ fontSize: 28, margin: '0 auto 8px', opacity: 0.3 }} />
+                    <div style={{ fontWeight: 700, fontSize: 11, color: '#fff', marginBottom: 4 }}>Volume Info</div>
+                    <div>Size: {selected.width} x {selected.height}</div>
+                    <div>Modality: {selected.modality}</div>
+                    <div>W/L: {selected.windowCenter}/{selected.windowWidth}</div>
+                    <div>Filter: {selected.filter}</div>
+                    {selected.pixelSpacing && <div>Spacing: {selected.pixelSpacing} mm/px</div>}
+                    <div style={{ marginTop: 8, display: 'flex', gap: 12, justifyContent: 'center', fontSize: 10 }}>
+                      <span style={{ color: '#3b82f6' }}>&#9632; Axial</span>
+                      <span style={{ color: '#22c55e' }}>&#9632; Coronal</span>
+                      <span style={{ color: '#ef4444' }}>&#9632; Sagittal</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              /* ── Single View ── */
+              <canvas
+                ref={canvasRef}
+                onMouseDown={handleMouseDown}
+                onMouseMove={handleMouseMove}
+                onMouseUp={handleMouseUp}
+                onMouseLeave={() => setDrawing(null)}
+                style={{ width: '100%', height: '100%', cursor: tool === 'pan' ? 'grab' : 'crosshair' }}
+              />
+            )
           ) : (
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="text-center">
