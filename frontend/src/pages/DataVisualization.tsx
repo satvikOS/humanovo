@@ -4,6 +4,7 @@ import {
   FiDownload, FiUpload, FiSettings, FiX,
   FiMaximize2, FiMinimize2, FiEdit3, FiCopy, FiDroplet,
   FiClipboard, FiCheck, FiChevronDown,
+  FiZoomIn, FiCrosshair,
 } from 'react-icons/fi'
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
@@ -13,6 +14,7 @@ import {
   FunnelChart, Funnel, LabelList,
   Treemap, ComposedChart, ErrorBar, ReferenceLine, ZAxis,
   RadialBarChart, RadialBar,
+  Brush,
 } from 'recharts'
 import html2canvas from 'html2canvas'
 import * as XLSX from 'xlsx'
@@ -79,6 +81,8 @@ interface ChartOptions {
   innerRadius: number  // donut
   startAngle: number
   smooth: boolean
+  showBrush: boolean
+  showCrosshair: boolean
 }
 
 function smartDownsample(data: DataPoint[], maxPoints: number = 100): DataPoint[] {
@@ -150,6 +154,7 @@ const defaultOptions: ChartOptions = {
   lineWidth: 2, markerSize: 4, markerShape: 'circle',
   fillOpacity: 0.15, showValues: false, animate: true,
   barGap: 4, innerRadius: 60, startAngle: 90, smooth: true,
+  showBrush: false, showCrosshair: true,
 }
 
 // ─── Palettes ───────────────────────────────────────────────────
@@ -450,6 +455,18 @@ export default function DataVisualization() {
   const chartRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  // ─── Interactivity state ────────────────────────────────────
+  const [hiddenSeries, setHiddenSeries] = useState<Record<string, Set<string>>>({})
+  const toggleSeries = useCallback((chartId: string, seriesKey: string) => {
+    setHiddenSeries(prev => {
+      const next = { ...prev }
+      const set = new Set(prev[chartId] || [])
+      if (set.has(seriesKey)) set.delete(seriesKey); else set.add(seriesKey)
+      next[chartId] = set
+      return next
+    })
+  }, [])
+
   // ─── Form state ─────────────────────────────────────────────
   const [form, setForm] = useState({
     title: '', type: 'bar' as ChartType, dataText: '',
@@ -615,8 +632,12 @@ export default function DataVisualization() {
     const data = displayData
     const colors = getPalette(o.colorPalette)
     const gridEl = o.showGrid ? <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" /> : null
-    const tooltipEl = <Tooltip contentStyle={TOOLTIP_STYLE} />
-    const legendEl = o.showLegend ? <Legend wrapperStyle={{ fontSize: 11 }} /> : null
+    const cursorStyle = o.showCrosshair ? { stroke: 'var(--color-text-muted)', strokeWidth: 1, strokeDasharray: '4 4' } : undefined
+    const tooltipEl = <Tooltip contentStyle={TOOLTIP_STYLE} cursor={cursorStyle} />
+    const hidden = hiddenSeries[chart.id] || new Set<string>()
+    const handleLegendClick = (e: any) => { if (e?.dataKey) toggleSeries(chart.id, e.dataKey) }
+    const legendEl = o.showLegend ? <Legend wrapperStyle={{ fontSize: 11, cursor: 'pointer' }} onClick={handleLegendClick} formatter={(value: string) => <span style={{ opacity: hidden.has(value) ? 0.3 : 1, textDecoration: hidden.has(value) ? 'line-through' : 'none' }}>{value}</span>} /> : null
+    const brushEl = o.showBrush && data.length > 5 ? <Brush dataKey="label" height={20} stroke="var(--color-accent-blue)" fill="var(--glass-bg)" travellerWidth={8} /> : null
     const xAxisEl = <XAxis dataKey="label" tick={AXIS_TICK} label={o.xLabel ? { value: o.xLabel, position: 'insideBottom', offset: -5, style: { fontSize: 11, fill: 'var(--color-text-muted)' } } : undefined} scale={o.logScaleX ? 'log' : 'auto'} />
     const yAxisEl = <YAxis tick={AXIS_TICK} label={o.yLabel ? { value: o.yLabel, angle: -90, position: 'insideLeft', style: { fontSize: 11, fill: 'var(--color-text-muted)' } } : undefined} scale={o.logScaleY ? 'log' : 'auto'} domain={o.logScaleY ? ['auto', 'auto'] : undefined} />
 
@@ -626,8 +647,8 @@ export default function DataVisualization() {
         return (
           <ResponsiveContainer width="100%" height={height}>
             <BarChart data={data} barGap={o.barGap}>
-              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}
-              <Bar dataKey="value" fill={colors[0]} radius={[4, 4, 0, 0]} animationDuration={o.animate ? 400 : 0}>
+              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}
+              <Bar dataKey="value" fill={colors[0]} radius={[4, 4, 0, 0]} animationDuration={o.animate ? 400 : 0} hide={hidden.has('value')}>
                 {o.showValues && <LabelList dataKey="value" position="top" style={{ fontSize: 10, fill: 'var(--color-text-muted)' }} />}
               </Bar>
             </BarChart>
@@ -744,8 +765,8 @@ export default function DataVisualization() {
         return (
           <ResponsiveContainer width="100%" height={height}>
             <LineChart data={data}>
-              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}
-              <Line type={o.smooth ? 'monotone' : 'linear'} dataKey="value" stroke={colors[0]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize, fill: colors[0] }} animationDuration={o.animate ? 400 : 0} />
+              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}
+              <Line type={o.smooth ? 'monotone' : 'linear'} dataKey="value" stroke={colors[0]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize, fill: colors[0] }} animationDuration={o.animate ? 400 : 0} hide={hidden.has('value')} />
             </LineChart>
           </ResponsiveContainer>
         )
@@ -754,10 +775,10 @@ export default function DataVisualization() {
         return (
           <ResponsiveContainer width="100%" height={height}>
             <LineChart data={data}>
-              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}
-              <Line type="monotone" dataKey="value" name="Series 1" stroke={colors[0]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize }} />
-              {data.some(d => d.value2 !== undefined) && <Line type="monotone" dataKey="value2" name="Series 2" stroke={colors[1]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize }} />}
-              {data.some(d => d.value3 !== undefined) && <Line type="monotone" dataKey="value3" name="Series 3" stroke={colors[2]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize }} />}
+              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}
+              <Line type="monotone" dataKey="value" name="Series 1" stroke={colors[0]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize }} hide={hidden.has('value')} />
+              {data.some(d => d.value2 !== undefined) && <Line type="monotone" dataKey="value2" name="Series 2" stroke={colors[1]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize }} hide={hidden.has('value2')} />}
+              {data.some(d => d.value3 !== undefined) && <Line type="monotone" dataKey="value3" name="Series 3" stroke={colors[2]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize }} hide={hidden.has('value3')} />}
             </LineChart>
           </ResponsiveContainer>
         )
@@ -766,8 +787,8 @@ export default function DataVisualization() {
         return (
           <ResponsiveContainer width="100%" height={height}>
             <LineChart data={data}>
-              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}
-              <Line type="stepAfter" dataKey="value" stroke={colors[0]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize, fill: colors[0] }} />
+              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}
+              <Line type="stepAfter" dataKey="value" stroke={colors[0]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize, fill: colors[0] }} hide={hidden.has('value')} />
             </LineChart>
           </ResponsiveContainer>
         )
@@ -776,8 +797,8 @@ export default function DataVisualization() {
         return (
           <ResponsiveContainer width="100%" height={height}>
             <LineChart data={data}>
-              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}
-              <Line type="natural" dataKey="value" stroke={colors[0]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize, fill: colors[0] }} />
+              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}
+              <Line type="natural" dataKey="value" stroke={colors[0]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize, fill: colors[0] }} hide={hidden.has('value')} />
             </LineChart>
           </ResponsiveContainer>
         )
@@ -799,8 +820,8 @@ export default function DataVisualization() {
         return (
           <ResponsiveContainer width="100%" height={height}>
             <AreaChart data={data}>
-              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}
-              <Area type="monotone" dataKey="value" stroke={colors[0]} fill={colors[0]} fillOpacity={o.fillOpacity} strokeWidth={o.lineWidth} />
+              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}
+              <Area type="monotone" dataKey="value" stroke={colors[0]} fill={colors[0]} fillOpacity={o.fillOpacity} strokeWidth={o.lineWidth} hide={hidden.has('value')} />
             </AreaChart>
           </ResponsiveContainer>
         )
@@ -809,10 +830,10 @@ export default function DataVisualization() {
         return (
           <ResponsiveContainer width="100%" height={height}>
             <AreaChart data={data}>
-              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}
-              <Area type="monotone" dataKey="value" stackId="1" name="Series 1" stroke={colors[0]} fill={colors[0]} fillOpacity={o.fillOpacity} />
-              {data.some(d => d.value2 !== undefined) && <Area type="monotone" dataKey="value2" stackId="1" name="Series 2" stroke={colors[1]} fill={colors[1]} fillOpacity={o.fillOpacity} />}
-              {data.some(d => d.value3 !== undefined) && <Area type="monotone" dataKey="value3" stackId="1" name="Series 3" stroke={colors[2]} fill={colors[2]} fillOpacity={o.fillOpacity} />}
+              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}
+              <Area type="monotone" dataKey="value" stackId="1" name="Series 1" stroke={colors[0]} fill={colors[0]} fillOpacity={o.fillOpacity} hide={hidden.has('value')} />
+              {data.some(d => d.value2 !== undefined) && <Area type="monotone" dataKey="value2" stackId="1" name="Series 2" stroke={colors[1]} fill={colors[1]} fillOpacity={o.fillOpacity} hide={hidden.has('value2')} />}
+              {data.some(d => d.value3 !== undefined) && <Area type="monotone" dataKey="value3" stackId="1" name="Series 3" stroke={colors[2]} fill={colors[2]} fillOpacity={o.fillOpacity} hide={hidden.has('value3')} />}
             </AreaChart>
           </ResponsiveContainer>
         )
@@ -986,6 +1007,7 @@ export default function DataVisualization() {
               <XAxis dataKey="label" tick={AXIS_TICK} />
               <YAxis tick={AXIS_TICK} />
               {tooltipEl}
+              {brushEl}
               <Bar dataKey="count" fill={colors[0]} radius={[2, 2, 0, 0]}>
                 {hist.map((_, i) => <Cell key={i} fill={colors[0]} opacity={0.8} />)}
               </Bar>
@@ -1248,6 +1270,14 @@ export default function DataVisualization() {
           <input type="checkbox" checked={chart.options.smooth} onChange={e => updateChartOptions(chart.id, { smooth: e.target.checked })} />
           Smooth
         </label>
+        <label className="flex items-center gap-1.5 cursor-pointer" title="Show range brush below chart for zooming">
+          <input type="checkbox" checked={chart.options.showBrush} onChange={e => updateChartOptions(chart.id, { showBrush: e.target.checked })} />
+          <FiZoomIn className="w-3 h-3" /> Brush
+        </label>
+        <label className="flex items-center gap-1.5 cursor-pointer" title="Show crosshair cursor on hover">
+          <input type="checkbox" checked={chart.options.showCrosshair} onChange={e => updateChartOptions(chart.id, { showCrosshair: e.target.checked })} />
+          <FiCrosshair className="w-3 h-3" /> Crosshair
+        </label>
       </div>
       {/* Palette preview */}
       <div className="flex items-center gap-1">
@@ -1432,6 +1462,12 @@ export default function DataVisualization() {
                   <label className="flex items-center gap-2 text-xs text-[var(--color-text-secondary)] cursor-pointer">
                     <input type="checkbox" checked={form.options.animate} onChange={e => setForm(f => ({ ...f, options: { ...f.options, animate: e.target.checked } }))} className="rounded" /> Animate
                   </label>
+                  <label className="flex items-center gap-2 text-xs text-[var(--color-text-secondary)] cursor-pointer">
+                    <input type="checkbox" checked={form.options.showBrush} onChange={e => setForm(f => ({ ...f, options: { ...f.options, showBrush: e.target.checked } }))} className="rounded" /> Brush Zoom
+                  </label>
+                  <label className="flex items-center gap-2 text-xs text-[var(--color-text-secondary)] cursor-pointer">
+                    <input type="checkbox" checked={form.options.showCrosshair} onChange={e => setForm(f => ({ ...f, options: { ...f.options, showCrosshair: e.target.checked } }))} className="rounded" /> Crosshair
+                  </label>
                 </div>
               </details>
             </div>
@@ -1476,6 +1512,14 @@ export default function DataVisualization() {
                     </span>
                   </div>
                   <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={() => updateChartOptions(chart.id, { showBrush: !chart.options.showBrush })}
+                      className={`p-1.5 rounded hover:bg-[var(--glass-bg)] transition-colors ${chart.options.showBrush ? 'text-[var(--color-accent-blue)]' : 'text-[var(--color-text-muted)]'}`} title="Toggle brush zoom">
+                      <FiZoomIn className="w-3.5 h-3.5" />
+                    </button>
+                    <button onClick={() => updateChartOptions(chart.id, { showCrosshair: !chart.options.showCrosshair })}
+                      className={`p-1.5 rounded hover:bg-[var(--glass-bg)] transition-colors ${chart.options.showCrosshair ? 'text-[var(--color-accent-cyan)]' : 'text-[var(--color-text-muted)]'}`} title="Toggle crosshair">
+                      <FiCrosshair className="w-3.5 h-3.5" />
+                    </button>
                     <button onClick={() => setShowSettings(showSettings === chart.id ? null : chart.id)}
                       className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-accent-purple)]" title="Settings">
                       <FiSettings className="w-3.5 h-3.5" />
@@ -1522,6 +1566,7 @@ export default function DataVisualization() {
                   <span>{chart.data.length} pts</span>
                   <span>{chart.options.colorPalette}</span>
                   <span>{formatDate(chart.createdAt)}</span>
+                  {chart.options.showLegend && <span style={{ opacity: 0.5 }}>click legend to toggle series</span>}
                 </div>
 
                 {/* Settings panel */}
