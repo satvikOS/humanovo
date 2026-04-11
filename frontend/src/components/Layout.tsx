@@ -1401,12 +1401,6 @@ if (path === '/clinical-trials') return 'Clinical Trials'
 
         {/* Main content */}
         <main className="flex-1 min-h-0 overflow-auto bg-[var(--color-bg)]">
-          {['/clinical-trials', '/manuscripts', '/biobank', '/collaboration', '/regulatory'].includes(location.pathname) && (
-            <div className="mx-6 mt-4 px-4 py-2.5 rounded-lg border border-[var(--color-border)] bg-[var(--glass-bg)] flex items-center gap-2">
-              <span className="text-xs font-medium px-2 py-0.5 rounded bg-[var(--color-accent-blue)] text-white" style={{ background: 'var(--color-accent-blue)' }}>Coming Soon</span>
-              <span className="text-xs text-[var(--color-text-muted)]">This feature is under active development and will be available in a future release.</span>
-            </div>
-          )}
           <Outlet />
         </main>
       </div>
