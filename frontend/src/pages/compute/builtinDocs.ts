@@ -134,6 +134,9 @@ export const BUILTIN_DOCS: BuiltinDoc[] = [
   { name: 'transpose', category: 'Linear algebra', signature: 'transpose(A)', description: 'Transpose', snippet: 'transpose(A)' },
   { name: 'dot', category: 'Linear algebra', signature: 'dot(a, b)', description: 'Dot product', snippet: 'dot(a, b)' },
   { name: 'cross', category: 'Linear algebra', signature: 'cross(a, b)', description: 'Cross product (3-vectors)', snippet: 'cross(a, b)' },
+  { name: 'eig', category: 'Linear algebra', signature: 'eig(A)', description: 'Eigenvalues of square matrix', snippet: 'eig(A)' },
+  { name: 'svd', category: 'Linear algebra', signature: 'svd(A)', description: 'Singular values', snippet: 'svd(A)' },
+  { name: 'pinv', category: 'Linear algebra', signature: 'pinv(A)', description: 'Moore-Penrose pseudoinverse', snippet: 'pinv(A)' },
 
   // ─── Calculus ────────────────────────────────────────────────────────
   { name: 'diff', category: 'Calculus', signature: 'diff(v)', description: 'Successive differences', snippet: 'diff(v)' },
@@ -141,6 +144,7 @@ export const BUILTIN_DOCS: BuiltinDoc[] = [
   { name: 'trapz', category: 'Calculus', signature: 'trapz(x, y)', description: 'Trapezoidal integration', snippet: 'trapz(x, y)' },
   { name: 'cumtrapz', category: 'Calculus', signature: 'cumtrapz(x, y)', description: 'Cumulative trapezoidal integral', snippet: 'cumtrapz(x, y)' },
   { name: 'interp1', category: 'Calculus', signature: 'interp1(x, y, xq)', description: '1-D linear interpolation', snippet: 'interp1(x, y, xq)' },
+  { name: 'spline', category: 'Calculus', signature: 'spline(x, y, xq)', description: 'Cubic spline interpolation', snippet: 'spline(x, y, xq)' },
   { name: 'ode45', category: 'Calculus', signature: 'ode45(f, tspan, y0)', description: 'Non-stiff ODE solver', snippet: 'ode45(@(t,y) f, [0 1], y0)' },
   { name: 'cumsum', category: 'Calculus', signature: 'cumsum(v)', description: 'Cumulative sum', snippet: 'cumsum(v)' },
   { name: 'cumprod', category: 'Calculus', signature: 'cumprod(v)', description: 'Cumulative product', snippet: 'cumprod(v)' },
@@ -160,6 +164,13 @@ export const BUILTIN_DOCS: BuiltinDoc[] = [
   { name: 'hanning', category: 'Signal', signature: 'hanning(n)', description: 'Periodic Hanning window', snippet: 'hanning(64)' },
   { name: 'hamming', category: 'Signal', signature: 'hamming(n)', description: 'Hamming window of length n', snippet: 'hamming(64)' },
   { name: 'blackman', category: 'Signal', signature: 'blackman(n)', description: 'Blackman window of length n', snippet: 'blackman(64)' },
+  { name: 'ifft', category: 'Signal', signature: 'ifft(mag, phase?)', description: 'Inverse FFT reconstruction', snippet: 'ifft(mag, phase)' },
+  { name: 'pwelch', category: 'Signal', signature: 'pwelch(x, fs?)', description: 'Welch power spectral density', snippet: 'P = pwelch(x, 1000)' },
+
+  // ─── Statistics (ML) ────────────────────────────────────────────────
+  { name: 'pca', category: 'Statistics', signature: 'pca(X, nComp?)', description: 'Principal component analysis — returns scores', snippet: 'scores = pca(X, 2)' },
+  { name: 'kmeans', category: 'Statistics', signature: 'kmeans(X, k)', description: 'k-means clustering — returns labels', snippet: 'labels = kmeans(X, 3)' },
+  { name: 'fminsearch', category: 'Statistics', signature: 'fminsearch(y, x?)', description: 'Find minimum via parabolic interpolation', snippet: 'fminsearch(y, x)' },
 
   // ─── Sets ────────────────────────────────────────────────────────────
   { name: 'unique', category: 'Sets', signature: 'unique(v)', description: 'Unique sorted elements', snippet: 'unique(v)' },

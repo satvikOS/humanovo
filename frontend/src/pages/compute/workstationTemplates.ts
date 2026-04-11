@@ -16,6 +16,7 @@ export interface WorkstationTemplate {
 export const WORKSTATION_CATEGORIES = [
   'Getting Started',
   'Statistics',
+  'Machine Learning',
   'Signal Processing',
   'Linear Algebra',
   'Curve Fitting',
@@ -119,6 +120,89 @@ printf('Pearson r = %.4f\\n', r);
 scatter(x, y);
 title('Scatter with linear trend');
 xlabel('x'); ylabel('y');`,
+  },
+
+  // ── Machine Learning ───────────────────────────────────────────────
+  {
+    id: 'ml-pca',
+    name: 'PCA dimensionality reduction',
+    category: 'Machine Learning',
+    description: 'Reduce 5D random data to 2 principal components and scatter plot.',
+    code: `% PCA — principal component analysis
+n = 80;
+X = randn(n, 5);           % 80 observations × 5 features
+X(:,2) = X(:,1) + 0.5*randn(n, 1);  % correlated features
+
+scores = pca(X, 2);        % project to 2 PCs
+ev = __pca_explained__;     % variance explained per PC
+
+printf('Variance explained:');
+disp(ev);
+
+scatter(scores(:,1), scores(:,2));
+title('PCA: first two principal components');
+xlabel('PC1'); ylabel('PC2');`,
+  },
+  {
+    id: 'ml-kmeans',
+    name: 'k-means clustering',
+    category: 'Machine Learning',
+    description: 'Cluster 2D Gaussian blobs with k-means and visualize.',
+    code: `% k-means clustering on synthetic blobs
+n = 40;
+X = [randn(n,2) + [2 2]; randn(n,2) + [-2 -2]; randn(n,2) + [2 -2]];
+
+labels = kmeans(X, 3);
+centroids = __kmeans_centroids__;
+
+printf('Cluster sizes: ');
+for k = 1:3
+  printf('%d ', sum(labels == k));
+end
+printf('\\n');
+
+% Plot all points
+scatter(X(:,1), X(:,2));
+title('k-means: 3 clusters');
+xlabel('x1'); ylabel('x2');`,
+  },
+  {
+    id: 'ml-interp',
+    name: 'Interpolation comparison',
+    category: 'Machine Learning',
+    description: 'Compare linear vs cubic spline interpolation on sparse data.',
+    code: `% Interpolation: linear vs cubic spline
+xp = [0 1 2 3 4 5 6 7 8];
+yp = [0 0.8 1 0.5 -0.3 -0.8 -0.2 0.6 1];
+xq = linspace(0, 8, 100);
+
+yl = interp1(xp, yp, xq);
+ys = spline(xp, yp, xq);
+
+scatter(xp, yp);
+plot(xq, yl, 'linear');
+plot(xq, ys, 'spline');
+title('Linear vs Cubic Spline Interpolation');
+xlabel('x'); ylabel('y');
+legend('data', 'linear', 'spline');`,
+  },
+  {
+    id: 'ml-spectral',
+    name: 'FFT spectral analysis',
+    category: 'Machine Learning',
+    description: 'Find dominant frequencies in a multi-tone signal.',
+    code: `% FFT spectral analysis
+fs = 500;                  % sample rate (Hz)
+t = 0:1/fs:1-1/fs;        % 1 second
+x = sin(2*pi*50*t) + 0.5*sin(2*pi*120*t) + 0.3*randn(1, length(t));
+
+[mag, freq] = fft(x, fs);
+
+% Plot single-sided spectrum
+N = floor(length(mag)/2);
+bar(freq(1:N), mag(1:N));
+title('FFT Spectrum — 50 Hz + 120 Hz');
+xlabel('Frequency (Hz)'); ylabel('|X(f)|');`,
   },
 
   // ── Signal Processing ──────────────────────────────────────────────
