@@ -96,10 +96,14 @@ body {
   letter-spacing: -0.011em;
 }
 
-/* Custom scrollbar - dark themed */
+/* Hair-thin platform scrollbar — matches the Monte Carlo panel's
+   brush-style bar. 4px is the sweet spot: still discoverable on
+   hover, but disappears into the chrome otherwise so figures
+   (especially the narrow rail lists on Imaging + Discovery) don't
+   read as "walled off" by a fat track. */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 4px;
+  height: 4px;
 }
 
 ::-webkit-scrollbar-track {
@@ -107,30 +111,37 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
-  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.10);
+  border-radius: 2px;
+  transition: background 120ms ease;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.22);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 .light ::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.15);
+  background: rgba(0, 0, 0, 0.12);
 }
 
 .light ::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.25);
+  background: rgba(0, 0, 0, 0.24);
 }
 
-/* Firefox scrollbar */
+/* Firefox scrollbar — `thin` is the smallest preset the spec exposes;
+   the platform renders it ~6px, which is the closest we can get to
+   the 4px webkit track without custom rendering. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+  scrollbar-color: rgba(255, 255, 255, 0.10) transparent;
 }
 
 .light * {
-  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
+  scrollbar-color: rgba(0, 0, 0, 0.12) transparent;
 }
 
 /* Frosted glass selects — matches glass-card aesthetic */

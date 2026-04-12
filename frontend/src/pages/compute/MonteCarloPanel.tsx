@@ -1,8 +1,9 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import {
-  BarChart, Bar, LineChart, Line, XAxis, YAxis,
+  BarChart, Bar, Line, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer,
   ReferenceLine, AreaChart, Area, Brush, Legend,
+  ComposedChart,
 } from 'recharts';
 import {
   FiPlay, FiActivity, FiBarChart2, FiCopy, FiDownload,
@@ -80,7 +81,7 @@ interface SimDef {
 
 interface SimResults {
   values: number[];
-  convergence: { iteration: number; runningMean: number }[];
+  convergence: { iteration: number; runningMean: number; ciLow: number; ciHigh: number }[];
   label: string;
 }
 
@@ -508,14 +509,34 @@ function runSimulation(
       break;
   }
 
-  // Build convergence series
-  const convergence: { iteration: number; runningMean: number }[] = [];
+  // Build convergence series with a running ±1.96·SEM band so the
+  // convergence chart shows the uncertainty shrinking as more samples
+  // land — a flat "Running Mean" line alone reads as uninformative
+  // once the mean settles (user feedback: "looks too straight"). The
+  // band collapses visually at exactly the rate √n predicts, which
+  // is the point of the plot.
+  const convergence: { iteration: number; runningMean: number; ciLow: number; ciHigh: number }[] = [];
   let sum = 0;
+  let sumSq = 0;
   const step = Math.max(1, Math.floor(iterations / 200));
   for (let i = 0; i < values.length; i++) {
-    sum += values[i];
+    const v = values[i];
+    sum += v;
+    sumSq += v * v;
     if (i % step === 0 || i === values.length - 1) {
-      convergence.push({ iteration: i + 1, runningMean: sum / (i + 1) });
+      const n = i + 1;
+      const mean = sum / n;
+      // Welford is more stable but sum-of-squares is fine for the
+      // scale of n we see here (≤1e5 draws on bounded domains).
+      const variance = n > 1 ? Math.max(0, (sumSq - (sum * sum) / n) / (n - 1)) : 0;
+      const sem = Math.sqrt(variance / n);
+      const half = 1.96 * sem;
+      convergence.push({
+        iteration: n,
+        runningMean: mean,
+        ciLow: mean - half,
+        ciHigh: mean + half,
+      });
     }
   }
 
@@ -1094,7 +1115,12 @@ export default function MonteCarloPanel() {
                     const ciHiBin = snap(stats.ci95High)
                     return (
                       <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={histogramEnriched} margin={{ top: 8, right: 16, bottom: 30, left: 8 }}>
+                        {/* Generous margins so ReferenceLine labels
+                            ("Mean", "Median", "2.5%", "97.5%") and the
+                            axis labels don't get clipped by the chart
+                            viewport — was 8/16/30/8 which cut off the
+                            top labels and the y-axis title on the left. */}
+                        <BarChart data={histogramEnriched} margin={{ top: 28, right: 36, bottom: 38, left: 36 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" strokeOpacity={0.4} />
                           <XAxis dataKey="bin" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} interval="preserveStartEnd" stroke="var(--glass-border)" label={{ value: results.label, position: 'insideBottom', offset: -12, fontSize: 10, fill: 'var(--color-text-muted)' }} />
                           <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" label={{ value: 'Count', angle: -90, position: 'insideLeft', fontSize: 10, fill: 'var(--color-text-muted)' }} />
@@ -1112,22 +1138,39 @@ export default function MonteCarloPanel() {
 
                   {activeChart === 'convergence' && (
                     <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={results.convergence} margin={{ top: 8, right: 16, bottom: 30, left: 8 }}>
+                      {/* ComposedChart so the ±1.96·SEM band renders
+                          behind the running-mean line. The band tapers
+                          as n grows, which is the "convergence" story
+                          — a flat running mean alone was too straight
+                          to be readable (user feedback). Generous
+                          margins keep the "Final: N.NN" right-side
+                          label and all axis titles on-screen. */}
+                      <ComposedChart data={results.convergence} margin={{ top: 28, right: 64, bottom: 38, left: 36 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" strokeOpacity={0.4} />
                         <XAxis dataKey="iteration" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" label={{ value: 'Iteration', position: 'insideBottom', offset: -12, fontSize: 10, fill: 'var(--color-text-muted)' }} />
-                        <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" label={{ value: 'Running Mean', angle: -90, position: 'insideLeft', fontSize: 10, fill: 'var(--color-text-muted)' }} />
+                        <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" label={{ value: 'Running Mean', angle: -90, position: 'insideLeft', fontSize: 10, fill: 'var(--color-text-muted)' }} domain={['auto', 'auto']} />
                         <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} cursor={{ stroke: 'var(--color-text-muted)', strokeDasharray: '4 4' }} />
                         <Legend wrapperStyle={{ fontSize: 10 }} />
                         <ReferenceLine y={stats.mean} stroke="#5B8DB8" strokeDasharray="4 3" strokeWidth={1} label={{ value: `Final: ${fmt(stats.mean)}`, position: 'right', fontSize: 9, fill: '#5B8DB8' }} />
+                        {/* 95% CI band — two stacked Areas. Recharts
+                            doesn't have a native range area, so we paint
+                            the high line with fillOpacity and mask the
+                            low line behind it with the same fill that
+                            matches the plot background. */}
+                        <Area type="monotone" dataKey="ciHigh" name="95% CI (upper)" stroke="none" fill="#8B7EAF" fillOpacity={0.18} activeDot={false} isAnimationActive={false} />
+                        <Area type="monotone" dataKey="ciLow"  name="95% CI (lower)" stroke="none" fill="var(--color-bg)" fillOpacity={1} activeDot={false} isAnimationActive={false} legendType="none" />
                         <Line type="monotone" dataKey="runningMean" name="Running Mean" stroke="#8B7EAF" strokeWidth={2} dot={false} />
                         {results.convergence.length > 10 && <Brush dataKey="iteration" height={16} stroke="#8B7EAF" fill="var(--glass-bg)" travellerWidth={6} />}
-                      </LineChart>
+                      </ComposedChart>
                     </ResponsiveContainer>
                   )}
 
                   {activeChart === 'cdf' && (
                     <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={cdfData} margin={{ top: 8, right: 16, bottom: 30, left: 8 }}>
+                      {/* Same generous margins as the histogram/convergence
+                          charts; the "Median" ReferenceLine label lives on
+                          the right side so we need ~60px there. */}
+                      <AreaChart data={cdfData} margin={{ top: 28, right: 64, bottom: 38, left: 36 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" strokeOpacity={0.4} />
                         <XAxis dataKey="value" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" type="number" label={{ value: results.label, position: 'insideBottom', offset: -12, fontSize: 10, fill: 'var(--color-text-muted)' }} />
                         <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" domain={[0, 100]} label={{ value: 'Percentile (%)', angle: -90, position: 'insideLeft', fontSize: 10, fill: 'var(--color-text-muted)' }} />
