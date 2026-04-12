@@ -266,4 +266,8 @@ export const BUILTIN_DOCS: BuiltinDoc[] = [
   { name: 'imaging_info', category: 'Imaging', signature: 'imaging_info(i?)', description: 'Describe the i-th study (omit for most-recent)', snippet: 'imaging_info()' },
   { name: 'imaging_select', category: 'Imaging', signature: 'imaging_select(i)', description: 'Open study [i] in the Compute Lab Imaging panel; returns study id', snippet: 'imaging_select(0)' },
   { name: 'imaging_window', category: 'Imaging', signature: 'imaging_window(center, width)', description: 'Update window/level of the current study; live-refreshes the panel', snippet: 'imaging_window(40, 400)' },
+  { name: 'imaging_annotate', category: 'Imaging', signature: 'imaging_annotate(type, x, y, [w, h, [label]])', description: 'Add annotation ("rect"/"circle"/"point"/"line"/"measure"/"ruler") at (x,y); returns annotation id', snippet: 'imaging_annotate("rect", 100, 120, 80, 60, "lesion")' },
+  { name: 'imaging_annotations', category: 'Imaging', signature: 'imaging_annotations([i])', description: 'Print and return annotation count on study [i] (defaults to last)', snippet: 'imaging_annotations()' },
+  { name: 'imaging_clear_annotations', category: 'Imaging', signature: 'imaging_clear_annotations([i])', description: 'Remove every annotation on study [i]; returns how many were removed', snippet: 'imaging_clear_annotations()' },
+  { name: 'imaging_filter', category: 'Imaging', signature: 'imaging_filter(name, [i])', description: 'Apply a filter preset (invert, gaussian, median, sharpen, sobel, canny, threshold, otsu, laplacian, histeq)', snippet: 'imaging_filter("sobel")' },
 ]

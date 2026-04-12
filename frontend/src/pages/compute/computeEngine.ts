@@ -2100,8 +2100,11 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
   // windowCenter/Width from a script immediately updates the viewer.
   const IMG_KEY = 'research-imaging-studies'
   const IMG_EVENT = 'compute-imaging-update'
+  interface ImgAnnotation { id: string; type: string; x: number; y: number;
+    w?: number; h?: number; x2?: number; y2?: number; label: string; color: string; notes?: string }
   interface ImgStudy { id: string; title: string; modality: string; bodyPart: string;
-    width: number; height: number; windowCenter: number; windowWidth: number }
+    width: number; height: number; windowCenter: number; windowWidth: number;
+    filter?: string; annotations?: ImgAnnotation[] }
   const loadImgStudies = (): ImgStudy[] => {
     try { return JSON.parse(localStorage.getItem(IMG_KEY) || '[]') as ImgStudy[] } catch { return [] }
   }
@@ -2156,6 +2159,84 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
     saveImgStudies(next)
     fireImg(next[idx].id)
     return MVOID
+  })
+  // imaging_annotate(type, x, y, [w, h, [label]]) — add an annotation to the
+  // most-recent study. `type` ∈ { "rect", "circle", "point", "line",
+  // "measure", "ruler" }. For "line"/"measure"/"ruler" w/h are dx/dy.
+  def('imaging_annotate', -1, args => {
+    if (args.length < 3) throw new RuntimeError('imaging_annotate: expected (type, x, y, [w, h, [label]])')
+    const list = loadImgStudies()
+    if (list.length === 0) throw new RuntimeError('imaging_annotate: no studies available')
+    const type = args[0].kind === 'str' ? (args[0] as MStr).v : 'point'
+    const x = toNumber(args[1])
+    const y = toNumber(args[2])
+    const w = args[3] ? toNumber(args[3]) : undefined
+    const h = args[4] ? toNumber(args[4]) : undefined
+    const label = (args[5] && args[5].kind === 'str') ? (args[5] as MStr).v : `annotation ${Date.now()}`
+    const ann: ImgAnnotation = {
+      id: `ann-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      type, x, y, label, color: '#ffffff',
+    }
+    if (type === 'line' || type === 'measure' || type === 'ruler') {
+      if (w !== undefined) ann.x2 = x + w
+      if (h !== undefined) ann.y2 = y + h
+    } else if (w !== undefined || h !== undefined) {
+      ann.w = w
+      ann.h = h
+    }
+    const idx = list.length - 1
+    const next = list.map((s, i) => i === idx
+      ? { ...s, annotations: [...(s.annotations || []), ann] }
+      : s)
+    saveImgStudies(next)
+    fireImg(next[idx].id)
+    return mstr(ann.id)
+  })
+  // imaging_annotations([idx]) — print and return count of annotations on
+  // the given study (defaults to the most-recent study).
+  def('imaging_annotations', -1, args => {
+    const list = loadImgStudies()
+    if (list.length === 0) throw new RuntimeError('imaging_annotations: no studies available')
+    const idx = args[0] ? Math.max(0, Math.min(list.length - 1, Math.round(toNumber(args[0])))) : list.length - 1
+    const anns = list[idx].annotations || []
+    if (anns.length === 0) {
+      ctx.outputs.push({ kind: 'text', text: `(study [${idx}] has no annotations)` })
+    } else {
+      const lines = anns.map((a, i) => {
+        const extra = a.type === 'rect' || a.type === 'circle'
+          ? ` ${a.w?.toFixed?.(0) ?? '–'}×${a.h?.toFixed?.(0) ?? '–'}`
+          : (a.x2 !== undefined ? ` → (${a.x2.toFixed(0)}, ${a.y2?.toFixed(0) ?? '–'})` : '')
+        return `  [${i}] ${a.type} @ (${a.x.toFixed(0)}, ${a.y.toFixed(0)})${extra} — ${a.label}`
+      })
+      ctx.outputs.push({ kind: 'text', text: `Study [${idx}] annotations (${anns.length}):\n${lines.join('\n')}` })
+    }
+    return mnum(anns.length)
+  })
+  // imaging_clear_annotations([idx]) — remove every annotation from the
+  // given study (default: last study).
+  def('imaging_clear_annotations', -1, args => {
+    const list = loadImgStudies()
+    if (list.length === 0) throw new RuntimeError('imaging_clear_annotations: no studies available')
+    const idx = args[0] ? Math.max(0, Math.min(list.length - 1, Math.round(toNumber(args[0])))) : list.length - 1
+    const removed = (list[idx].annotations || []).length
+    const next = list.map((s, i) => i === idx ? { ...s, annotations: [] } : s)
+    saveImgStudies(next)
+    fireImg(next[idx].id)
+    return mnum(removed)
+  })
+  // imaging_filter(name, [idx]) — apply a named filter preset to the study.
+  // Valid names: none, invert, gaussian, median, sharpen, sobel, canny,
+  // threshold, otsu, laplacian, histeq.
+  def('imaging_filter', -1, args => {
+    if (args.length < 1) throw new RuntimeError('imaging_filter: expected (name, [idx])')
+    const list = loadImgStudies()
+    if (list.length === 0) throw new RuntimeError('imaging_filter: no studies available')
+    const name = args[0].kind === 'str' ? (args[0] as MStr).v : 'none'
+    const idx = args[1] ? Math.max(0, Math.min(list.length - 1, Math.round(toNumber(args[1])))) : list.length - 1
+    const next = list.map((s, i) => i === idx ? { ...s, filter: name } : s)
+    saveImgStudies(next)
+    fireImg(next[idx].id)
+    return mstr(name)
   })
   // End Imaging bridge
   def('scatter', -1, args => {
