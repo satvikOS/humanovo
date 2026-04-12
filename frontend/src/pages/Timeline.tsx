@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   FiFolder,
   FiZap,
@@ -66,9 +67,36 @@ function formatMilestoneTime(dateStr: string): string {
 
 const MILESTONE_ACTIONS = new Set(['created', 'completed', 'validated', 'started', 'rejected'])
 
+// Valid params for deep-link filter/range. Kept inline with `filterOptions`
+// and `TimeRange` so a stale query param silently falls back to the default
+// instead of picking a bogus filter state.
+const VALID_FILTER_TYPES = new Set<FilterType>(['', 'project', 'hypothesis', 'evidence', 'simulation', 'notebook', 'discovery'])
+const VALID_TIME_RANGES = new Set<TimeRange>(['today', 'week', 'month', 'all'])
+
 export default function Timeline() {
-  const [filterType, setFilterType] = useState<FilterType>('')
-  const [timeRange, setTimeRange] = useState<TimeRange>('all')
+  // Deep-link support: `?type=hypothesis&range=week` lets Dashboard cards
+  // and external links jump into a pre-filtered view. Invalid params fall
+  // back to defaults; the query is cleaned off the URL on mount so a soft
+  // reload doesn't overwrite user-driven filter changes.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const qType = searchParams.get('type') || ''
+  const qRange = searchParams.get('range') || ''
+  const initialFilter: FilterType = VALID_FILTER_TYPES.has(qType as FilterType) ? (qType as FilterType) : ''
+  const initialRange: TimeRange = VALID_TIME_RANGES.has(qRange as TimeRange) ? (qRange as TimeRange) : 'all'
+
+  const [filterType, setFilterType] = useState<FilterType>(initialFilter)
+  const [timeRange, setTimeRange] = useState<TimeRange>(initialRange)
+
+  // Clean the deep-link params off the URL after the initial mount.
+  useEffect(() => {
+    if (searchParams.has('type') || searchParams.has('range')) {
+      const next = new URLSearchParams(searchParams)
+      next.delete('type')
+      next.delete('range')
+      setSearchParams(next, { replace: true })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [refreshKey, setRefreshKey] = useState(0)
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
   const [allActivities, setAllActivities] = useState<ActivityEntry[]>([])
