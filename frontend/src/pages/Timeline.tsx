@@ -72,9 +72,15 @@ export default function Timeline() {
   const [refreshKey, setRefreshKey] = useState(0)
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
   const [allActivities, setAllActivities] = useState<ActivityEntry[]>([])
+  // Track load status so the empty state can distinguish "nothing
+  // logged yet" from "couldn't reach the activity API" — two
+  // completely different user actions (write something vs. check
+  // connectivity).
+  const [loadState, setLoadState] = useState<'loading' | 'ok' | 'error'>('loading')
 
   useEffect(() => {
     const load = async () => {
+      setLoadState('loading')
       try {
         const dateFrom = timeRange === 'today'
           ? new Date(new Date().setHours(0, 0, 0, 0)).toISOString()
@@ -98,8 +104,10 @@ export default function Timeline() {
           metadata: a.metadata,
         }))
         setAllActivities(mapped)
-      } catch { /* API unavailable — show empty state */
+        setLoadState('ok')
+      } catch {
         setAllActivities([])
+        setLoadState('error')
       }
     }
     load()
@@ -179,8 +187,22 @@ export default function Timeline() {
           {Object.entries(grouped).length === 0 ? (
             <div className="text-center py-16">
               <FiClock className="w-10 h-10 mx-auto mb-3 text-[var(--color-text-muted)] opacity-30" />
-              <p className="text-sm text-[var(--color-text-muted)]">No activity found</p>
-              <p className="text-xs text-[var(--color-text-muted)] mt-1">Start a discovery or create a project to see activity here</p>
+              {loadState === 'loading' ? (
+                <>
+                  <p className="text-sm text-[var(--color-text-muted)]">Loading activity…</p>
+                  <p className="text-xs text-[var(--color-text-muted)] mt-1">Fetching from the activity log</p>
+                </>
+              ) : loadState === 'error' ? (
+                <>
+                  <p className="text-sm text-[var(--color-error)]">Couldn't reach the activity service</p>
+                  <p className="text-xs text-[var(--color-text-muted)] mt-1">Check your connection or the API and try Refresh above.</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm text-[var(--color-text-muted)]">No activity found</p>
+                  <p className="text-xs text-[var(--color-text-muted)] mt-1">Start a discovery or create a project to see activity here</p>
+                </>
+              )}
             </div>
           ) : (
             Object.entries(grouped).map(([dateKey, dayActivities]) => (
