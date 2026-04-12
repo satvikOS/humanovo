@@ -712,27 +712,64 @@ async def upload_document(
     background_tasks: BackgroundTasks = None,
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Upload a custom document for ingestion."""
+    """Upload a custom document for ingestion.
+
+    Accepts a generous whitelist of research-document formats. We check
+    both MIME type and filename extension because browsers are wildly
+    inconsistent at labelling less-common formats (Safari tends to send
+    `application/octet-stream` for .md / .rtf / .xml; Firefox will
+    sometimes use `application/x-download` for .docx). Before this
+    double-check, clinicians would hit a 400 "Unsupported file type"
+    when dragging in perfectly valid research files.
+    """
     logger.info("Document upload received", filename=file.filename)
 
-    # Validate file type
+    # Canonical MIME allow-list. Extensions below cover the same set
+    # plus the octet-stream edge cases browsers serve up.
     allowed_types = {
         "application/pdf",
         "text/plain",
         "text/csv",
         "text/tab-separated-values",
         "text/markdown",
+        "text/x-markdown",
+        "text/html",
+        "text/xml",
+        "application/xml",
         "application/json",
+        "application/rtf",
+        "text/rtf",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/msword",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "application/vnd.ms-powerpoint",
+        "application/vnd.oasis.opendocument.text",
+        "application/vnd.oasis.opendocument.spreadsheet",
+        "application/vnd.oasis.opendocument.presentation",
+    }
+    allowed_extensions = {
+        ".pdf", ".txt", ".csv", ".tsv", ".md", ".markdown", ".mdx",
+        ".json", ".jsonl", ".ndjson", ".xml", ".html", ".htm",
+        ".rtf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+        ".odt", ".ods", ".odp", ".log", ".bib",
     }
 
-    if file.content_type not in allowed_types:
+    filename = file.filename or ""
+    ext = filename.lower().rsplit(".", 1)
+    ext = f".{ext[1]}" if len(ext) == 2 else ""
+    mime_ok = file.content_type in allowed_types
+    ext_ok = ext in allowed_extensions
+    if not (mime_ok or ext_ok):
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported file type: {file.content_type}",
+            detail=(
+                f"Unsupported file type: {file.content_type or 'unknown'}"
+                f" (extension '{ext or '<none>'}'). Supported formats: "
+                f"PDF, TXT, CSV, TSV, MD, JSON, XML, HTML, RTF, DOC/DOCX,"
+                f" XLS/XLSX, PPT/PPTX, ODT/ODS/ODP."
+            ),
         )
 
     # Read file content

@@ -1007,7 +1007,7 @@ function ConstantChat() {
             ref={fileInputRef}
             type="file"
             multiple
-            accept=".pdf,.txt,.csv,.json,.docx,.xlsx,.md,.tsv"
+            accept=".pdf,.txt,.csv,.tsv,.md,.markdown,.mdx,.json,.jsonl,.ndjson,.xml,.html,.htm,.rtf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.odp,.log,.bib"
             onChange={handleFileSelect}
             className="hidden"
           />

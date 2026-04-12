@@ -269,14 +269,25 @@ export default function DiscoveryRunner() {
               {/* Supporting docs */}
               <div className="rounded-lg p-4" style={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)' }}>
                 <div className="text-[10px] uppercase font-semibold mb-3" style={{ color: 'var(--color-text-muted)' }}>Supporting Documents</div>
-                <input ref={fileInputRef} type="file" multiple accept=".pdf,.txt,.csv,.json,.docx,.xlsx,.md,.tsv" onChange={handleDocUpload} className="hidden" />
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  // Widened to match the backend's extension whitelist so
+                  // clinicians can drop RTF / HTML / XML / PPTX / ODF
+                  // research docs without hitting the browser picker's
+                  // "all files are hidden" trap.
+                  accept=".pdf,.txt,.csv,.tsv,.md,.markdown,.mdx,.json,.jsonl,.ndjson,.xml,.html,.htm,.rtf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.odp,.log,.bib"
+                  onChange={handleDocUpload}
+                  className="hidden"
+                />
                 <button onClick={() => fileInputRef.current?.click()} disabled={uploading}
                   className="w-full flex items-center justify-center gap-2 px-3 py-3 rounded-lg text-xs transition-colors hover:bg-white/[0.03]"
                   style={{ border: '1px dashed var(--glass-border)', color: 'var(--color-text-muted)', opacity: uploading ? 0.5 : 1 }}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
                   </svg>
-                  {uploading ? 'Uploading...' : 'Upload research documents (PDF, TXT, CSV, DOCX)'}
+                  {uploading ? 'Uploading...' : 'Upload research documents (PDF, DOC/DOCX, XLS/XLSX, PPT/PPTX, TXT, CSV, MD, JSON, XML, RTF, HTML, ODF)'}
                 </button>
                 {uploadedDocs.length > 0 && (
                   <div className="mt-2 space-y-1">
