@@ -26,7 +26,7 @@ import {
   FiThumbsUp,
   FiMessageSquare,
 } from 'react-icons/fi'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { BarChart, Bar, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import api from '../services/api'
 import type { OrchestratorStatus, DiscoveryConfig } from '../services/api'
@@ -149,7 +149,23 @@ function confidenceColor(c: number) {
   return '#991b1b'
 }
 
+// Valid discovery_type values — kept in sync with the `discoveryTypes` list
+// above. Used to filter the `?type=` query param so only real enum values
+// make it into config state.
+const VALID_DISCOVERY_TYPES = new Set(['treatment', 'prevention', 'biomarker', 'drug_repurposing', 'combination_therapy'])
+
 export default function Agents() {
+  // Deep-link support: the Discovery Engine accepts `?disease=…`,
+  // `?type=…`, and `?guidance=…` query params so dashboard quick-links and
+  // external handoffs can drop users into a pre-configured run. The query
+  // is consumed once on mount and then cleaned off the URL so a soft
+  // reload doesn't keep overwriting edits.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const qDisease = (searchParams.get('disease') || '').trim()
+  const qTypeRaw = (searchParams.get('type') || '').trim().toLowerCase()
+  const qType = VALID_DISCOVERY_TYPES.has(qTypeRaw) ? qTypeRaw : ''
+  const qGuidance = (searchParams.get('guidance') || '').trim()
+
   // State
   const [state, setState] = useState<string>('idle')
   const [stats, setStats] = useState<OrchestratorStatus | null>(null)
@@ -164,14 +180,15 @@ export default function Agents() {
   const [sortBy, setSortBy] = useState<'confidence' | 'novelty' | 'date'>('confidence')
   const [filterConfidence, setFilterConfidence] = useState(0)
 
-  // Config
+  // Config — seeded from query params (see `qDisease`/`qType`/`qGuidance`
+  // above). Invalid / missing params fall back to the defaults.
   const [config, setConfig] = useState<DiscoveryConfig>({
-    disease: '',
-    discovery_type: 'treatment',
+    disease: qDisease,
+    discovery_type: (qType || 'treatment') as DiscoveryConfig['discovery_type'],
     focus_entities: [],
     max_results: 50,
     min_confidence: 0.3,
-    research_guidance: '',
+    research_guidance: qGuidance,
   })
   const [focusInput, setFocusInput] = useState('')
   const [factors, setFactors] = useState<ExternalFactor[]>([])
@@ -209,6 +226,20 @@ export default function Agents() {
   useEffect(() => {
     try { localStorage.setItem('agents-left-collapsed', leftCollapsed ? '1' : '0') } catch { /* noop */ }
   }, [leftCollapsed])
+
+  // Strip the deep-link params after the initial mount so a soft reload
+  // doesn't stomp on user edits to the Discovery config.
+  useEffect(() => {
+    const hasDeepLink = searchParams.has('disease') || searchParams.has('type') || searchParams.has('guidance')
+    if (hasDeepLink) {
+      const next = new URLSearchParams(searchParams)
+      next.delete('disease')
+      next.delete('type')
+      next.delete('guidance')
+      setSearchParams(next, { replace: true })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const pollRef = useRef<number | null>(null)
   const failRef = useRef(0)
