@@ -5147,19 +5147,24 @@ export default function Workstation() {
       overflow: 'hidden' as const,
       boxShadow: '0 18px 60px rgba(0, 0, 0, 0.55)',
     },
+    // Compact overlay chrome — the library/results top bar was taking
+    // up too much vertical space, pushing content below the fold on
+    // short screens. Padding trimmed and tab pills tightened so the
+    // bar reads like a macOS/VS Code segmented control, not a banner.
     resultsHeader: {
       display: 'flex',
       alignItems: 'center',
-      gap: 14,
-      padding: '14px 20px',
+      gap: 12,
+      padding: '8px 14px',
       borderBottom: '1px solid var(--glass-border)',
       background: 'var(--glass-bg-hover)',
       position: 'relative' as const,
       zIndex: 2,
       flexShrink: 0,
+      minHeight: 40,
     },
     resultsTitle: {
-      fontSize: 13,
+      fontSize: 12,
       fontWeight: 600,
       color: 'var(--color-text)',
       whiteSpace: 'nowrap' as const,
@@ -5167,15 +5172,15 @@ export default function Workstation() {
     },
     resultsTabBar: {
       display: 'flex',
-      gap: 4,
-      marginLeft: 18,
+      gap: 2,
+      marginLeft: 10,
     },
     resultsTab: {
       display: 'inline-flex',
       alignItems: 'center',
-      gap: 8,
-      padding: '7px 14px',
-      fontSize: 12,
+      gap: 6,
+      padding: '4px 10px',
+      fontSize: 11,
       fontWeight: 500,
       color: 'var(--color-text-muted)',
       background: 'transparent',

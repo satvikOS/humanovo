@@ -30,13 +30,16 @@ interface StatData {
 }
 
 function StatCard({ stat }: { stat: StatData }) {
+  // Monochrome stat card — the click affordance is the border/hover
+  // surface, not the icon. Accent colours were deliberately stripped so
+  // every tile reads uniformly across the dashboard.
   return (
     <Link
       to={stat.href}
       className="glass-card p-5 text-left transition-all duration-300 hover:bg-[var(--glass-bg-hover)] group block"
     >
       <div className="mb-3">
-        <stat.icon className="w-5 h-5" style={{ color: stat.accentColor }} />
+        <stat.icon className="w-5 h-5" style={{ color: 'var(--color-text-muted)' }} />
       </div>
       <div className="text-3xl font-semibold tracking-tight mb-1">{stat.value}</div>
       <div className="text-sm text-[var(--color-text-muted)]">{stat.label}</div>
@@ -70,15 +73,18 @@ const SIM_TYPE_LABELS: Record<string, string> = {
   computational: 'Computational Lab',
 }
 
+// Monochrome palette — colour coding stripped so every sim type reads
+// uniformly. The row's clickable border is the affordance, not the
+// colour of the badge.
 const SIM_TYPE_COLORS: Record<string, string> = {
-  clinical_outcome: 'var(--color-accent-green)',
-  epidemiological: 'var(--color-accent-blue)',
-  dose_response: 'var(--color-accent-purple)',
-  pathway_dynamics: 'var(--color-accent-orange)',
-  drug_interaction: 'var(--color-accent-cyan)',
-  survival_analysis: '#ef4444',
-  equation: 'var(--color-accent-green)',
-  computational: 'var(--color-accent-purple)',
+  clinical_outcome: 'var(--color-text-muted)',
+  epidemiological: 'var(--color-text-muted)',
+  dose_response: 'var(--color-text-muted)',
+  pathway_dynamics: 'var(--color-text-muted)',
+  drug_interaction: 'var(--color-text-muted)',
+  survival_analysis: 'var(--color-text-muted)',
+  equation: 'var(--color-text-muted)',
+  computational: 'var(--color-text-muted)',
 }
 
 const SIM_KIND_ICONS: Record<string, typeof FiActivity> = {
@@ -181,7 +187,7 @@ function RecentSimulationsWidget() {
           <FiActivity className="w-3.5 h-3.5 text-[var(--color-text-muted)]" />
           <h3 className="text-sm font-medium">Recent Simulations</h3>
         </div>
-        <Link to="/simulations?tab=history" className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] flex items-center gap-1 transition-colors">
+        <Link to="/simulations?tab=history" className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] flex items-center gap-1 transition-colors px-2.5 py-1 rounded-full border border-[var(--glass-border)] hover:border-[var(--color-border-strong)]">
           All <FiArrowRight className="w-3 h-3" />
         </Link>
       </div>
@@ -291,7 +297,7 @@ function RecentNotebooksWidget() {
           <FiBook className="w-3.5 h-3.5 text-[var(--color-text-muted)]" />
           <h3 className="text-sm font-medium">Recent Notebooks</h3>
         </div>
-        <Link to="/notebook" className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] flex items-center gap-1 transition-colors">
+        <Link to="/notebook" className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] flex items-center gap-1 transition-colors px-2.5 py-1 rounded-full border border-[var(--glass-border)] hover:border-[var(--color-border-strong)]">
           All <FiArrowRight className="w-3 h-3" />
         </Link>
       </div>
@@ -387,24 +393,30 @@ function ActivityFeed() {
     discovery: FiCpu,
   }
 
+  // Monochrome dashboard — activity type/action accent colours were
+  // stripped per the design brief. Every icon and action label now
+  // inherits the muted neutral so clickable rows read as outlined
+  // cards, not coloured tags. Severity (completed/rejected/etc.)
+  // remains meaningful but distinguished by weight/italics instead
+  // of hue to keep the palette uniform.
   const typeColors: Record<string, string> = {
-    hypothesis: 'var(--color-accent-purple)',
-    simulation: 'var(--color-accent-green)',
-    evidence: 'var(--color-accent-blue)',
-    project: 'var(--color-text-secondary)',
-    notebook: 'var(--color-accent-orange)',
-    discovery: 'var(--color-accent-cyan)',
+    hypothesis: 'var(--color-text-muted)',
+    simulation: 'var(--color-text-muted)',
+    evidence: 'var(--color-text-muted)',
+    project: 'var(--color-text-muted)',
+    notebook: 'var(--color-text-muted)',
+    discovery: 'var(--color-text-muted)',
   }
 
   const actionColors: Record<string, string> = {
-    created: 'var(--color-accent-blue)',
+    created: 'var(--color-text-muted)',
     updated: 'var(--color-text-muted)',
-    completed: 'var(--color-success)',
-    validated: 'var(--color-success)',
-    rejected: 'var(--color-error)',
-    started: 'var(--color-warning)',
-    imported: 'var(--color-accent-cyan)',
-    deleted: 'var(--color-error)',
+    completed: 'var(--color-text)',
+    validated: 'var(--color-text)',
+    rejected: 'var(--color-text-muted)',
+    started: 'var(--color-text-muted)',
+    imported: 'var(--color-text-muted)',
+    deleted: 'var(--color-text-muted)',
   }
 
   const formatTime = (ts: string) => {
@@ -421,7 +433,7 @@ function ActivityFeed() {
     <div className="glass-card p-5 h-full flex flex-col">
       <div className="flex items-center justify-between mb-4 shrink-0">
         <h3 className="text-sm font-medium">Recent Activity</h3>
-        <Link to="/timeline" className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] flex items-center gap-1 transition-colors">
+        <Link to="/timeline" className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] flex items-center gap-1 transition-colors px-2.5 py-1 rounded-full border border-[var(--glass-border)] hover:border-[var(--color-border-strong)]">
           <FiClock className="w-3 h-3" />
           Timeline
         </Link>
@@ -604,7 +616,7 @@ export default function Dashboard() {
       <div className="glass-card p-5">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-medium">Recent Projects</h3>
-          <Link to="/projects" className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] flex items-center gap-1 transition-colors">
+          <Link to="/projects" className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] flex items-center gap-1 transition-colors px-2.5 py-1 rounded-full border border-[var(--glass-border)] hover:border-[var(--color-border-strong)]">
             View All <FiArrowRight className="w-3 h-3" />
           </Link>
         </div>
