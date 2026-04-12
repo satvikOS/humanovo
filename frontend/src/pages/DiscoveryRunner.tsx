@@ -411,7 +411,7 @@ export default function DiscoveryRunner() {
             {hypotheses.map((h, i) => (
               <div key={i} className="flex items-center gap-2 text-sm p-2 rounded"
                 style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
-                <span className="text-xs font-mono px-1.5 py-0.5 rounded" style={{ background: 'var(--color-accent-blue)', color: '#fff' }}>
+                <span className="text-xs font-mono px-1.5 py-0.5 rounded" style={{ background: 'rgba(255,255,255,0.15)', color: 'var(--color-text)' }}>
                   R{h.round}
                 </span>
                 <span className="flex-1 truncate" style={{ color: 'var(--color-text)' }}>{h.title}</span>

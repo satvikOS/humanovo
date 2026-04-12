@@ -4170,7 +4170,7 @@ export default function Workstation() {
     tabActive: {
       color: 'var(--color-text)',
       background: 'transparent',
-      borderBottom: '2px solid var(--color-accent-blue)',
+      borderBottom: '2px solid var(--color-text)',
     },
     tabCloseBtn: {
       display: 'inline-flex',
@@ -4954,7 +4954,7 @@ export default function Workstation() {
       fontFamily: "'JetBrains Mono', monospace",
       fontSize: 12,
       fontWeight: 600,
-      color: 'var(--color-accent-blue)',
+      color: 'var(--color-text)',
       opacity: 0.7,
     },
     cmd: {

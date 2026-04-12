@@ -923,12 +923,12 @@ export default function Notebook() {
                 />
                 <button
                   onClick={() => setShowFilters(v => !v)}
-                  className={clsx('absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded transition-colors', showFilters || activeFilterCount > 0 ? 'text-[var(--color-accent-blue)]' : 'text-[var(--color-text-muted)] hover:text-white')}
+                  className={clsx('absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded transition-colors', showFilters || activeFilterCount > 0 ? 'text-[var(--color-text)]' : 'text-[var(--color-text-muted)] hover:text-white')}
                   title="Filters"
                 >
                   <FiFilter className="w-3 h-3" />
                   {activeFilterCount > 0 && (
-                    <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-[var(--color-accent-blue)] text-white text-[8px] flex items-center justify-center font-bold">{activeFilterCount}</span>
+                    <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-white/20 text-white text-[8px] flex items-center justify-center font-bold">{activeFilterCount}</span>
                   )}
                 </button>
               </div>
@@ -971,7 +971,7 @@ export default function Notebook() {
                   </div>
                   {/* Clear filters */}
                   {activeFilterCount > 0 && (
-                    <button onClick={() => { setFilterCategory('all'); setFilterImportance('all') }} className="text-xxs text-[var(--color-accent-blue)] hover:underline">
+                    <button onClick={() => { setFilterCategory('all'); setFilterImportance('all') }} className="text-xxs text-[var(--color-text-muted)] hover:underline hover:text-[var(--color-text)]">
                       Clear filters
                     </button>
                   )}

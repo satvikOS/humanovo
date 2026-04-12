@@ -785,7 +785,7 @@ export default function Agents() {
                         <XAxis dataKey="name" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
                         <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
                         <Tooltip contentStyle={{ background: 'var(--color-surface-solid)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '11px', color: 'var(--color-text)' }} />
-                        <Bar dataKey="count" fill="var(--color-accent-blue)" radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="count" fill="var(--color-text)" radius={[4, 4, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
@@ -960,7 +960,7 @@ export default function Agents() {
                         {h.round_number && <span>Round {h.round_number}</span>}
                         <button
                           onClick={e => { e.stopPropagation(); setCompareHypothesis(h); setShowCompare(true) }}
-                          className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 text-[var(--color-accent-blue)] transition-opacity"
+                          className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 text-[var(--color-text)] transition-opacity"
                           title="Compare"
                         >
                           <FiColumns className="w-3 h-3" /> Compare
@@ -1258,8 +1258,8 @@ function HypothesisDetail({ hypothesis: h, onClose, onExport }: { hypothesis: Hy
                       onClick={() => setFeedbackScore(n)}
                       className="w-8 h-8 rounded-lg text-xs font-medium transition-all"
                       style={{
-                        background: n <= feedbackScore ? 'var(--color-accent-blue)' : 'var(--glass-bg)',
-                        color: n <= feedbackScore ? '#fff' : 'var(--color-text-muted)',
+                        background: n <= feedbackScore ? 'rgba(255,255,255,0.18)' : 'var(--glass-bg)',
+                        color: n <= feedbackScore ? 'var(--color-text)' : 'var(--color-text-muted)',
                       }}
                     >
                       {n}

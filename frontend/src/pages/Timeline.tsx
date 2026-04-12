@@ -32,16 +32,18 @@ const typeIcons: Record<string, typeof FiZap> = {
   simulation: FiActivity, notebook: FiFileText, discovery: FiTrendingUp,
 }
 
+// Monochrome — icon shape + type label convey the category; status icons
+// still use error/success/warning tokens for accessibility.
 const typeColors: Record<string, string> = {
-  project: 'var(--color-text-secondary)', hypothesis: 'var(--color-accent-purple)',
-  evidence: 'var(--color-accent-blue)', simulation: 'var(--color-accent-green)',
-  notebook: 'var(--color-accent-orange)', discovery: 'var(--color-accent-cyan)',
+  project: 'var(--color-text-secondary)', hypothesis: 'var(--color-text)',
+  evidence: 'var(--color-text)', simulation: 'var(--color-text-secondary)',
+  notebook: 'var(--color-text-muted)', discovery: 'var(--color-text)',
 }
 
 const actionColors: Record<string, string> = {
-  created: 'var(--color-accent-blue)', updated: 'var(--color-text-muted)',
+  created: 'var(--color-text)', updated: 'var(--color-text-muted)',
   completed: 'var(--color-success)', validated: 'var(--color-success)',
-  rejected: 'var(--color-error)', imported: 'var(--color-accent-cyan)',
+  rejected: 'var(--color-error)', imported: 'var(--color-text-secondary)',
   started: 'var(--color-warning)', deleted: 'var(--color-error)',
 }
 

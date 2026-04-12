@@ -291,7 +291,7 @@ export default function Search() {
     const regex = new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi')
     const parts = text.split(regex)
     return parts.map((part, i) =>
-      regex.test(part) ? <mark key={i} className="bg-[var(--color-accent-yellow)] bg-opacity-20 text-[var(--color-text)] rounded px-0.5">{part}</mark> : part
+      regex.test(part) ? <mark key={i} className="bg-white/20 text-[var(--color-text)] rounded px-0.5">{part}</mark> : part
     )
   }
 
@@ -339,7 +339,7 @@ export default function Search() {
 
           {/* Smart Search indicator */}
           <div className="flex items-center gap-2 mt-3">
-            <FiZap className="w-3.5 h-3.5 text-[var(--color-accent-purple)]" />
+            <FiZap className="w-3.5 h-3.5 text-[var(--color-text-muted)]" />
             <span className="text-xs text-[var(--color-text-muted)]">Smart search — combines semantic + keyword matching across all platform data</span>
           </div>
         </div>
