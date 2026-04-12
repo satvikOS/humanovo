@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   FiFileText, FiPlus, FiTrash2, FiEdit3, FiUsers, FiSend,
   FiDownload, FiSave,
@@ -21,11 +22,16 @@ const STATUS_COLORS: Record<string, string> = { draft: 'var(--color-text-muted)'
 const SECTIONS = ['abstract', 'introduction', 'methods', 'results', 'discussion', 'references']
 
 export default function ManuscriptManager() {
+  // Deep-link support: `?add=1` opens the new-manuscript dialog, and
+  // `?id=<manuscriptId>` auto-selects that manuscript once the list
+  // resolves from the backend. Params are stripped on mount so shared
+  // links stay canonical.
+  const [searchParams] = useSearchParams()
   const [manuscripts, setManuscripts] = useState<Manuscript[]>([])
   const [selected, setSelected] = useState<Manuscript | null>(null)
   const [editSection, setEditSection] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
-  const [showAdd, setShowAdd] = useState(false)
+  const [showAdd, setShowAdd] = useState(() => searchParams.get('add') === '1')
   const [newTitle, setNewTitle] = useState('')
   const [newJournal, setNewJournal] = useState('')
   const [showAuthorAdd, setShowAuthorAdd] = useState(false)
@@ -34,6 +40,36 @@ export default function ManuscriptManager() {
 
   const load = async () => { try { const r = await fetch(API); if (r.ok) setManuscripts((await r.json()).items || []) } catch { /* network error */ } }
   useEffect(() => { load() }, [])
+
+  // Consume & strip `add` + `id` from the URL on mount and kick off
+  // the selectMs fetch for the deep-linked id once it's known.
+  const [pendingId] = useState(() => searchParams.get('id') || '')
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search)
+    let dirty = false
+    if (sp.has('add')) { sp.delete('add'); dirty = true }
+    if (sp.has('id')) { sp.delete('id'); dirty = true }
+    if (dirty) {
+      const qs = sp.toString()
+      const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash
+      window.history.replaceState(window.history.state, '', newUrl)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  useEffect(() => {
+    if (!pendingId || selected) return
+    const match = manuscripts.find(m => m.id === pendingId)
+    if (match) {
+      // Use selectMs to hydrate full manuscript details (authors,
+      // sections) from the detail endpoint.
+      ;(async () => {
+        try {
+          const r = await fetch(`${API}/${pendingId}`)
+          if (r.ok) { const ms = await r.json(); setSelected(ms) }
+        } catch { /* ignore */ }
+      })()
+    }
+  }, [manuscripts, pendingId, selected])
 
   const selectMs = async (id: string) => {
     const r = await fetch(`${API}/${id}`)

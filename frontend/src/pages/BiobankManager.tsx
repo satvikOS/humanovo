@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { FiSearch, FiPlus, FiTrash2, FiAlertTriangle, FiLogOut, FiLogIn } from 'react-icons/fi'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
@@ -15,15 +16,37 @@ const API = '/api/v1/biobank'
 const PIE_COLORS = ['#5B8DB8', '#8B7EAF', '#6BA594', '#C4956A', '#7BA7B8', '#B07E8B']
 const STATUS_COLORS: Record<string, string> = { available: 'text-[var(--color-text-secondary)] bg-[var(--glass-bg)]', checked_out: 'text-[var(--color-text-muted)] bg-[var(--glass-bg)]', depleted: 'text-[var(--color-text-muted)] bg-[var(--glass-bg)]', reserved: 'text-[var(--color-text-secondary)] bg-[var(--glass-bg)]' }
 
+// Enum-guarded view & filter sets keep bogus `?view=` / `?status=` /
+// `?type=` values from polluting component state. Sample types and
+// statuses here match the backend `/api/v1/biobank` enums.
+const VALID_VIEWS = new Set(['list', 'inventory'])
+const VALID_BIOBANK_STATUSES = new Set(['', 'available', 'checked_out', 'depleted', 'reserved'])
+const VALID_BIOBANK_TYPES = new Set(['', 'tissue', 'blood', 'dna', 'rna', 'plasma', 'serum', 'saliva', 'urine', 'cell_line'])
+
 export default function BiobankManager() {
+  // Deep-link support: `?add=1` opens the add-sample dialog,
+  // `?view=list|inventory` seeds the tab selector, `?q=<term>` seeds
+  // the search input, `?status=`/`?type=` seed the two filters, and
+  // `?id=<sampleId>` selects that sample once the list loads. All
+  // params are stripped on mount for shareable canonical URLs.
+  const [searchParams] = useSearchParams()
   const [samples, setSamples] = useState<Sample[]>([])
   const [selected, setSelected] = useState<Sample | null>(null)
   const [inventory, setInventory] = useState<Inventory | null>(null)
-  const [view, setView] = useState<'list' | 'inventory'>('list')
-  const [search, setSearch] = useState('')
-  const [typeFilter, setTypeFilter] = useState('')
-  const [statusFilter, setStatusFilter] = useState('')
-  const [showAdd, setShowAdd] = useState(false)
+  const [view, setView] = useState<'list' | 'inventory'>(() => {
+    const qv = searchParams.get('view') || ''
+    return VALID_VIEWS.has(qv) ? (qv as 'list' | 'inventory') : 'list'
+  })
+  const [search, setSearch] = useState(() => searchParams.get('q') || '')
+  const [typeFilter, setTypeFilter] = useState(() => {
+    const qt = searchParams.get('type') || ''
+    return VALID_BIOBANK_TYPES.has(qt) ? qt : ''
+  })
+  const [statusFilter, setStatusFilter] = useState(() => {
+    const qs = searchParams.get('status') || ''
+    return VALID_BIOBANK_STATUSES.has(qs) ? qs : ''
+  })
+  const [showAdd, setShowAdd] = useState(() => searchParams.get('add') === '1')
   const [form, setForm] = useState({ barcode: '', sample_type: 'tissue', tissue_type: '', project: '', patient_id: '', quantity: '' })
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
   // Checkout dialog — replaces the old hard-coded {researcher: 'Current
@@ -42,6 +65,29 @@ export default function BiobankManager() {
     try { const r = await fetch(`${API}/inventory`); if (r.ok) setInventory(await r.json()) } catch { /* network error — keep stale state */ }
   }
   useEffect(() => { load() }, [])
+
+  // Consume & strip known query-string params after mount so shared
+  // links remain canonical. `?id=` is also applied to `selected` once
+  // the backend list finishes loading (see below).
+  const [pendingId] = useState(() => searchParams.get('id') || '')
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search)
+    let dirty = false
+    for (const k of ['add', 'view', 'q', 'type', 'status', 'id']) {
+      if (sp.has(k)) { sp.delete(k); dirty = true }
+    }
+    if (dirty) {
+      const qs = sp.toString()
+      const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash
+      window.history.replaceState(window.history.state, '', newUrl)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  useEffect(() => {
+    if (!pendingId || selected) return
+    const match = samples.find(s => s.id === pendingId)
+    if (match) setSelected(match)
+  }, [samples, pendingId, selected])
 
   const createSample = async () => {
     const r = await fetch(`${API}/samples`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) })

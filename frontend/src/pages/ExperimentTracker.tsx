@@ -1,4 +1,5 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 import { formatDate, formatDateTime, usePersistentState, logActivity } from '../utils/persistence'
 import {
@@ -39,11 +40,49 @@ const STATUS_CONFIG = {
   paused: { label: 'Paused', color: 'var(--color-warning)', icon: FiPause },
 }
 
+// Enum-guarded status filter values so `?status=bogus` falls back to
+// "all" without crashing or polluting the select control.
+const VALID_STATUS_FILTERS = new Set(['', 'planned', 'in_progress', 'completed', 'failed', 'paused'])
+
 export default function ExperimentTracker() {
   const [experiments, setExperiments] = usePersistentState<Experiment[]>('experiments', [])
-  const [selected, setSelected] = useState<Experiment | null>(null)
-  const [showAdd, setShowAdd] = useState(false)
-  const [filterStatus, setFilterStatus] = useState('')
+  // Deep-link support: `?add=1` auto-opens the new-experiment dialog;
+  // `?status=<planned|in_progress|...>` seeds the status filter;
+  // `?id=<experimentId>` selects that experiment once it loads.
+  // All three are stripped from the URL on mount so shared links
+  // stay canonical.
+  const [searchParams] = useSearchParams()
+  const [selected, setSelected] = useState<Experiment | null>(() => {
+    const qId = searchParams.get('id')
+    if (!qId) return null
+    // experiments list is still initializing from persistence; a
+    // second effect below will reconcile `selected` once the array
+    // is ready if it wasn't available during initial render.
+    return null
+  })
+  const [showAdd, setShowAdd] = useState(() => searchParams.get('add') === '1')
+  const [filterStatus, setFilterStatus] = useState(() => {
+    const qs = searchParams.get('status') || ''
+    return VALID_STATUS_FILTERS.has(qs) ? qs : ''
+  })
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search)
+    let dirty = false
+    if (sp.has('add')) { sp.delete('add'); dirty = true }
+    if (sp.has('status')) { sp.delete('status'); dirty = true }
+    const qId = sp.get('id')
+    if (qId) { sp.delete('id'); dirty = true }
+    if (dirty) {
+      const qs = sp.toString()
+      const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash
+      window.history.replaceState(window.history.state, '', newUrl)
+    }
+    if (qId) {
+      const match = experiments.find(e => e.id === qId)
+      if (match) setSelected(match)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [editing, setEditing] = useState(false)
   const [editData, setEditData] = useState<Partial<Experiment>>({})
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
