@@ -17,7 +17,11 @@ interface Document { id: string; document_type: string; name: string; status: st
 
 type ViewTab = 'overview' | 'subjects' | 'visits' | 'documents' | 'budget'
 const API = '/api/v1/clinical-trials'
-const STATUS_COLORS: Record<string, string> = { planning: 'var(--color-text-muted)', recruiting: 'var(--color-accent-blue)', active: 'var(--color-success)', completed: 'var(--color-accent-purple)', suspended: 'var(--color-error)' }
+// active/suspended keep semantic colour (green = live trial, red = stopped)
+// so PIs see operational state at a glance; completed also stays green
+// because it's a positive terminal state; recruiting/planning are
+// monochrome since they're all "pre-active" intermediate states.
+const STATUS_COLORS: Record<string, string> = { planning: 'var(--color-text-muted)', recruiting: 'var(--color-text)', active: 'var(--color-success)', completed: 'var(--color-success)', suspended: 'var(--color-error)' }
 
 export default function ClinicalTrials() {
   const [trials, setTrials] = useState<Trial[]>([])
@@ -200,8 +204,8 @@ export default function ClinicalTrials() {
                           <XAxis dataKey="name" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
                           <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} tickFormatter={v => `$${(v/1000).toFixed(0)}k`} />
                           <Tooltip contentStyle={{ background: 'var(--color-surface-solid)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '11px', color: 'var(--color-text)' }} />
-                          <Bar dataKey="budgeted" fill="var(--color-accent-blue)" radius={[2, 2, 0, 0]} name="Budgeted" />
-                          <Bar dataKey="spent" fill="var(--color-accent-purple)" radius={[2, 2, 0, 0]} name="Spent" />
+                          <Bar dataKey="budgeted" fill="var(--color-text-muted)" radius={[2, 2, 0, 0]} name="Budgeted" />
+                          <Bar dataKey="spent" fill="var(--color-text)" radius={[2, 2, 0, 0]} name="Spent" />
                         </BarChart>
                       </ResponsiveContainer>
                     </div>

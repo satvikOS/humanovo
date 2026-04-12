@@ -49,7 +49,7 @@ function HypothesisCard({ hypothesis }: { hypothesis: Hypothesis }) {
   const statusConfig = {
     draft: { icon: FiClock, color: 'text-secondary-400', bg: 'bg-secondary-600/20' },
     generating: { icon: FiClock, color: 'text-[var(--color-text-muted)]', bg: 'bg-yellow-600/20' },
-    active: { icon: FiZap, color: 'text-[var(--color-text-secondary)]', bg: 'bg-blue-600/20' },
+    active: { icon: FiZap, color: 'text-[var(--color-text)]', bg: 'bg-[var(--color-surface-raised)]' },
     validated: { icon: FiCheck, color: 'text-[var(--color-text-secondary)]', bg: 'bg-green-600/20' },
     rejected: { icon: FiAlertTriangle, color: 'text-[var(--color-text-muted)]', bg: 'bg-red-600/20' },
     archived: { icon: FiClock, color: 'text-secondary-400', bg: 'bg-secondary-600/20' },

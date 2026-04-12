@@ -530,7 +530,7 @@ export default function KnowledgeGraph() {
           <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] w-4 h-4" />
           <input
             type="text"
-            className="w-full bg-[var(--glass-bg)] border border-[var(--color-border)] rounded-lg py-2 pl-10 pr-4 text-[var(--color-text)] text-sm placeholder-secondary-500 focus:outline-none focus:border-blue-500"
+            className="w-full bg-[var(--glass-bg)] border border-[var(--color-border)] rounded-lg py-2 pl-10 pr-4 text-[var(--color-text)] text-sm placeholder-secondary-500 focus:outline-none focus:border-[var(--color-border-strong)]"
             placeholder="Search genes, proteins, diseases, drugs, pathways..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
@@ -993,7 +993,7 @@ export default function KnowledgeGraph() {
               <select
                 value={connectRelation}
                 onChange={e => setConnectRelation(e.target.value)}
-                className="w-full bg-[var(--glass-bg)] border border-[var(--color-border)] rounded-lg py-2 px-3 text-sm text-[var(--color-text)] focus:outline-none focus:border-blue-500 mb-4"
+                className="w-full bg-[var(--glass-bg)] border border-[var(--color-border)] rounded-lg py-2 px-3 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-border-strong)] mb-4"
               >
                 {Object.entries(RELATION_TYPES).map(([key, config]) => (
                   <option key={key} value={key}>{config.label}</option>

@@ -458,7 +458,7 @@ export default function ProjectKnowledgeGraph() {
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               placeholder="Search by name or type..."
-              className="w-full bg-[var(--glass-bg)] border border-[var(--color-border)] rounded-lg py-2 pl-10 pr-9 text-sm text-[var(--color-text)] placeholder-[var(--color-text-muted)] focus:outline-none focus:border-blue-500"
+              className="w-full bg-[var(--glass-bg)] border border-[var(--color-border)] rounded-lg py-2 pl-10 pr-9 text-sm text-[var(--color-text)] placeholder-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-border-strong)]"
             />
             {searchQuery && (
               <button

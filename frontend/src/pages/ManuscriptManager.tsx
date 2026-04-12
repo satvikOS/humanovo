@@ -14,7 +14,10 @@ interface Manuscript {
 interface Author { id: string; name: string; affiliation: string; email: string; role: string; order: number }
 
 const API = '/api/v1/manuscripts'
-const STATUS_COLORS: Record<string, string> = { draft: 'var(--color-text-muted)', review: 'var(--color-accent-blue)', submitted: 'var(--color-accent-purple)', accepted: 'var(--color-success)', published: 'var(--color-accent-green)', rejected: 'var(--color-error)' }
+// accepted/published stay green (terminal success states) and rejected
+// stays red so reviewers can spot final outcomes instantly; in-progress
+// states (draft/review/submitted) are monochrome to match the shell.
+const STATUS_COLORS: Record<string, string> = { draft: 'var(--color-text-muted)', review: 'var(--color-text)', submitted: 'var(--color-text)', accepted: 'var(--color-success)', published: 'var(--color-success)', rejected: 'var(--color-error)' }
 const SECTIONS = ['abstract', 'introduction', 'methods', 'results', 'discussion', 'references']
 
 export default function ManuscriptManager() {
