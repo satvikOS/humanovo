@@ -32,19 +32,20 @@ import type { Evidence as EvidenceType, Hypothesis, Entity } from '../services/a
 import { logActivity, persistGet, persistSet } from '../utils/persistence'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 
+// Monochrome: source type is indicated by the label text itself; no colored badges.
 const sourceTypeColors: Record<string, string> = {
-  pubmed: 'var(--color-accent-blue)',
-  clinical_trial: 'var(--color-accent-green)',
-  preprint: 'var(--color-accent-purple)',
-  omics: 'var(--color-accent-orange)',
-  drug_database: 'var(--color-accent-cyan)',
-  pathway_database: 'var(--color-accent-pink)',
+  pubmed: 'var(--color-text)',
+  clinical_trial: 'var(--color-text)',
+  preprint: 'var(--color-text-secondary)',
+  omics: 'var(--color-text-secondary)',
+  drug_database: 'var(--color-text-secondary)',
+  pathway_database: 'var(--color-text-secondary)',
   web_search: 'var(--color-text-muted)',
-  user_upload: 'var(--color-text-secondary)',
-  patent: 'var(--color-accent-yellow)',
-  paper: 'var(--color-accent-blue)',
-  trial: 'var(--color-accent-green)',
-  dataset: 'var(--color-accent-orange)',
+  user_upload: 'var(--color-text-muted)',
+  patent: 'var(--color-text-secondary)',
+  paper: 'var(--color-text)',
+  trial: 'var(--color-text)',
+  dataset: 'var(--color-text-secondary)',
 }
 
 const statusConfig: Record<string, { icon: typeof FiCheckCircle; color: string; label: string }> = {
@@ -70,7 +71,7 @@ function KnowledgeBaseStatus({ stats }: { stats: { total_entities: number; total
     <div className="mx-6 mt-4 glass-card p-4">
       <button onClick={() => setExpanded(!expanded)} className="flex items-center justify-between w-full text-left">
         <div className="flex items-center gap-2">
-          <FiGlobe className="w-4 h-4 text-[var(--color-accent-blue)]" />
+          <FiGlobe className="w-4 h-4 text-[var(--color-text)]" />
           <span className="text-sm font-medium">Knowledge Base</span>
           <span className="text-xs text-[var(--color-text-muted)]">
             {(stats.total_entities ?? 0).toLocaleString()} entities &middot; {(stats.total_relations ?? 0).toLocaleString()} relations

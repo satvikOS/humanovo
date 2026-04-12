@@ -490,7 +490,7 @@ export default function DataManager() {
       <div className="w-64 flex flex-col border-r flex-shrink-0" style={{ borderColor: 'var(--glass-border)', background: 'var(--glass-bg)' }}>
         <div className="p-3 border-b" style={{ borderColor: 'var(--glass-border)' }}>
           <div className="flex items-center gap-2 mb-3">
-            <FiDatabase className="text-lg" style={{ color: 'var(--color-accent-blue)' }} />
+            <FiDatabase className="text-lg" style={{ color: 'var(--color-text)' }} />
             <h2 className="text-sm font-semibold">Datasets</h2>
             <button
               onClick={() => fileInputRef.current?.click()}
@@ -543,8 +543,8 @@ export default function DataManager() {
                 onClick={() => { setSelectedId(d.id); setView('table'); setOps([]) }}
                 className={clsx('w-full text-left p-2 rounded transition-all', active ? 'shadow' : 'hover:bg-white/5')}
                 style={{
-                  background: active ? 'var(--color-accent-blue)22' : 'transparent',
-                  border: `1px solid ${active ? 'var(--color-accent-blue)' : 'var(--glass-border)'}`,
+                  background: active ? 'rgba(255,255,255,0.08)' : 'transparent',
+                  border: `1px solid ${active ? 'var(--color-border-strong, rgba(255,255,255,0.2))' : 'var(--glass-border)'}`,
                 }}
               >
                 <div className="text-xs font-semibold truncate">{d.name}</div>
@@ -593,8 +593,8 @@ export default function DataManager() {
                       onClick={() => setView(t.id)}
                       className={clsx('flex items-center gap-1 px-2 py-1 rounded text-xs', view === t.id ? 'shadow' : 'hover:bg-white/5')}
                       style={{
-                        background: view === t.id ? 'var(--color-accent-blue)' : 'transparent',
-                        color: view === t.id ? '#fff' : 'var(--color-text-muted)',
+                        background: view === t.id ? 'rgba(255,255,255,0.12)' : 'transparent',
+                        color: view === t.id ? 'var(--color-text)' : 'var(--color-text-muted)',
                       }}
                     >
                       <Icon className="text-xs" />
@@ -617,7 +617,7 @@ export default function DataManager() {
                 <button onClick={exportCSV} className="p-1.5 rounded hover:bg-white/5" title="Export CSV">
                   <FiDownload className="text-xs" />
                 </button>
-                <button onClick={exportXLSX} className="p-1.5 rounded hover:bg-white/5" title="Export XLSX" style={{ color: 'var(--color-accent-green)' }}>
+                <button onClick={exportXLSX} className="p-1.5 rounded hover:bg-white/5" title="Export XLSX" style={{ color: 'var(--color-text)' }}>
                   <FiGrid className="text-xs" />
                 </button>
                 <button onClick={exportJSON} className="p-1.5 rounded hover:bg-white/5" title="Export JSON">
@@ -645,7 +645,7 @@ export default function DataManager() {
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   className="mt-4 px-4 py-2 rounded text-xs font-medium text-white"
-                  style={{ background: 'var(--color-accent-blue)' }}
+                  style={{ background: 'rgba(255,255,255,0.12)', color: 'var(--color-text)' }}
                 >
                   <FiUpload className="inline mr-1.5" />
                   Upload CSV
@@ -692,7 +692,7 @@ export default function DataManager() {
             />
             <div className="flex justify-end gap-2">
               <button onClick={() => setShowAddModal(false)} className="px-3 py-1.5 text-xs rounded" style={{ border: '1px solid var(--glass-border)', color: 'var(--color-text-muted)' }}>Cancel</button>
-              <button onClick={createBlank} className="px-3 py-1.5 text-xs rounded text-white" style={{ background: 'var(--color-accent-blue)' }}>Create</button>
+              <button onClick={createBlank} className="px-3 py-1.5 text-xs rounded" style={{ background: 'rgba(255,255,255,0.12)', color: 'var(--color-text)' }}>Create</button>
             </div>
           </div>
         </div>
@@ -782,7 +782,7 @@ function OverviewView({ ds, profiles, setView }: { ds: Dataset; profiles: Column
             </div>
           ))}
           {profiles.length > 10 && (
-            <button onClick={() => setView('variables')} className="text-[10px] mt-1" style={{ color: 'var(--color-accent-blue)' }}>
+            <button onClick={() => setView('variables')} className="text-[10px] mt-1 underline" style={{ color: 'var(--color-text-muted)' }}>
               + {profiles.length - 10} more columns...
             </button>
           )}
@@ -916,10 +916,10 @@ function TableView({ ds, previewRows, setPreviewRows }: { ds: Dataset; previewRo
           <option value={5000}>All</option>
         </select>
         {selectedRows.size > 0 && (
-          <span className="ml-3" style={{ color: 'var(--color-accent-blue)' }}>{selectedRows.size} selected</span>
+          <span className="ml-3" style={{ color: 'var(--color-text)' }}>{selectedRows.size} selected</span>
         )}
         {hasFilter && (
-          <button onClick={() => setColFilters({})} className="ml-3 px-2 py-0.5 rounded hover:bg-white/10 text-xxs" style={{ color: 'var(--color-accent-orange)' }}>Clear filters</button>
+          <button onClick={() => setColFilters({})} className="ml-3 px-2 py-0.5 rounded hover:bg-white/10 text-xxs" style={{ color: 'var(--color-text-muted)' }}>Clear filters</button>
         )}
       </div>
       <div className="overflow-auto rounded" style={{ border: '1px solid var(--glass-border)', maxHeight: 480 }}>
@@ -938,7 +938,7 @@ function TableView({ ds, previewRows, setPreviewRows }: { ds: Dataset; previewRo
                   style={{ color: 'var(--color-text-muted)' }} onClick={() => handleSort(c.name)}>
                   <div className="flex items-center gap-1">
                     {c.name}
-                    {sortCol === c.name && <span style={{ color: 'var(--color-accent-blue)', fontSize: 8 }}>{sortDir === 'asc' ? '▲' : '▼'}</span>}
+                    {sortCol === c.name && <span style={{ color: 'var(--color-text)', fontSize: 8 }}>{sortDir === 'asc' ? '▲' : '▼'}</span>}
                   </div>
                   <div className="text-[8px] normal-case" style={{ color: c.type === 'number' ? '#3b82f6' : c.type === 'date' ? '#f59e0b' : c.type === 'boolean' ? '#10b981' : '#8b5cf6' }}>
                     {c.type}
@@ -1073,7 +1073,7 @@ function ProfileView({ profiles, totalRows }: { profiles: ColumnProfile[]; total
               <XAxis dataKey="bin" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
               <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
               <Tooltip contentStyle={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)', fontSize: 11 }} />
-              <Bar dataKey="count" fill="var(--color-accent-blue)" />
+              <Bar dataKey="count" fill="var(--color-text)" />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -1183,7 +1183,7 @@ function EtlView({ ds, ops, addOp, removeOp }: { ds: Dataset; ops: Op[]; addOp: 
           </div>
         )}
 
-        <button onClick={submit} className="w-full mt-3 px-3 py-1.5 rounded text-xs text-white" style={{ background: 'var(--color-accent-blue)' }}>
+        <button onClick={submit} className="w-full mt-3 px-3 py-1.5 rounded text-xs" style={{ background: 'rgba(255,255,255,0.12)', color: 'var(--color-text)' }}>
           <FiPlay className="inline mr-1.5 text-xs" />
           Add to pipeline
         </button>
@@ -1201,7 +1201,7 @@ function EtlView({ ds, ops, addOp, removeOp }: { ds: Dataset; ops: Op[]; addOp: 
         <div className="space-y-1">
           {ops.map((op, i) => (
             <div key={op.id} className="flex items-center gap-2 p-2 rounded text-xs" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }}>
-              <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'var(--color-accent-blue)22', color: 'var(--color-accent-blue)' }}>{i + 1}</span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(255,255,255,0.1)', color: 'var(--color-text)' }}>{i + 1}</span>
               <span className="font-semibold">{op.type}</span>
               <span style={{ color: 'var(--color-text-muted)' }}>{JSON.stringify(op.config).slice(0, 60)}</span>
               <button onClick={() => removeOp(op.id)} className="ml-auto p-1 hover:text-red-500"><FiX className="text-xs" /></button>

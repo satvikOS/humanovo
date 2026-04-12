@@ -487,12 +487,12 @@ export default function KnowledgeGraph() {
             {stats && (
               <div className="flex space-x-4 text-sm mr-4">
                 <div className="flex items-center space-x-1">
-                  <div className="w-2 h-2 bg-[var(--color-accent-blue)] rounded-full"></div>
+                  <div className="w-2 h-2 bg-white/15 rounded-full"></div>
                   <span className="text-[var(--color-text-muted)]">Entities:</span>
                   <span className="text-[var(--color-text)] font-medium">{stats.total_entities?.toLocaleString() || filteredGraph.nodes.length}</span>
                 </div>
                 <div className="flex items-center space-x-1">
-                  <div className="w-2 h-2 bg-[var(--color-accent-green)] rounded-full"></div>
+                  <div className="w-2 h-2 bg-white/15 rounded-full"></div>
                   <span className="text-[var(--color-text-muted)]">Relations:</span>
                   <span className="text-[var(--color-text)] font-medium">{stats.total_relations?.toLocaleString() || filteredGraph.edges.length}</span>
                 </div>
@@ -504,7 +504,7 @@ export default function KnowledgeGraph() {
                 setConnectSource(null)
                 setShowConnectDialog(null)
               }}
-              className={`p-2 rounded-lg transition-colors flex items-center gap-1.5 text-sm ${connectMode ? 'bg-[var(--color-accent-green)] text-white' : 'bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]'}`}
+              className={`p-2 rounded-lg transition-colors flex items-center gap-1.5 text-sm ${connectMode ? 'bg-white/15 text-white' : 'bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]'}`}
               title="Connect two nodes"
             >
               <FiLink className="w-5 h-5" />
@@ -512,7 +512,7 @@ export default function KnowledgeGraph() {
             </button>
             <button
               onClick={() => setShowFilters(!showFilters)}
-              className={`p-2 rounded-lg transition-colors ${showFilters ? 'bg-[var(--color-accent-blue)] text-[var(--color-text)]' : 'bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]'}`}
+              className={`p-2 rounded-lg transition-colors ${showFilters ? 'bg-white/15 text-[var(--color-text)]' : 'bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]'}`}
             >
               <FiFilter className="w-5 h-5" />
             </button>
@@ -603,7 +603,7 @@ export default function KnowledgeGraph() {
                           type="checkbox"
                           checked={filters.entityTypes.includes(type)}
                           onChange={() => toggleEntityType(type)}
-                          className="rounded border-[var(--color-border-strong)] text-[var(--color-accent-blue)] focus:ring-blue-500"
+                          className="rounded border-[var(--color-border-strong)] text-[var(--color-text)] focus:ring-blue-500"
                         />
                         <div
                           className="w-3 h-3 rounded-full"
@@ -635,7 +635,7 @@ export default function KnowledgeGraph() {
                           type="checkbox"
                           checked={filters.relationTypes.includes(type)}
                           onChange={() => toggleRelationType(type)}
-                          className="rounded border-[var(--color-border-strong)] text-[var(--color-accent-blue)] focus:ring-blue-500"
+                          className="rounded border-[var(--color-border-strong)] text-[var(--color-text)] focus:ring-blue-500"
                         />
                         <div
                           className="w-3 h-0.5 rounded"
@@ -667,7 +667,7 @@ export default function KnowledgeGraph() {
                           type="checkbox"
                           checked={filters.contexts.includes(ctx.id)}
                           onChange={() => toggleContext(ctx.id)}
-                          className="rounded border-[var(--color-border-strong)] text-[var(--color-accent-blue)] focus:ring-blue-500"
+                          className="rounded border-[var(--color-border-strong)] text-[var(--color-text)] focus:ring-blue-500"
                         />
                         <div
                           className="w-3 h-3 rounded"
@@ -703,7 +703,7 @@ export default function KnowledgeGraph() {
                     />
                     <div className="flex justify-between text-xs text-[var(--color-text-muted)] mt-1">
                       <span>0%</span>
-                      <span className="text-[var(--color-accent-blue)]">{(filters.minConfidence * 100).toFixed(0)}%</span>
+                      <span className="text-[var(--color-text)]">{(filters.minConfidence * 100).toFixed(0)}%</span>
                       <span>100%</span>
                     </div>
                     <div className="mt-2 space-y-1">
@@ -840,15 +840,15 @@ export default function KnowledgeGraph() {
                     <div>
                       <label className="text-[var(--color-text-muted)] text-xs font-medium">External Links</label>
                       <div className="flex flex-wrap gap-2 mt-1">
-                        <a href="#" className="flex items-center space-x-1 text-xs text-[var(--color-accent-blue)] hover:text-[var(--color-accent-blue)]">
+                        <a href="#" className="flex items-center space-x-1 text-xs text-[var(--color-text)] hover:text-white">
                           <FiExternalLink className="w-3 h-3" />
                           <span>PubMed</span>
                         </a>
-                        <a href="#" className="flex items-center space-x-1 text-xs text-[var(--color-accent-blue)] hover:text-[var(--color-accent-blue)]">
+                        <a href="#" className="flex items-center space-x-1 text-xs text-[var(--color-text)] hover:text-white">
                           <FiExternalLink className="w-3 h-3" />
                           <span>UniProt</span>
                         </a>
-                        <a href="#" className="flex items-center space-x-1 text-xs text-[var(--color-accent-blue)] hover:text-[var(--color-accent-blue)]">
+                        <a href="#" className="flex items-center space-x-1 text-xs text-[var(--color-text)] hover:text-white">
                           <FiExternalLink className="w-3 h-3" />
                           <span>DrugBank</span>
                         </a>
@@ -864,9 +864,9 @@ export default function KnowledgeGraph() {
                           {neighborhood.relations.slice(0, 10).map((rel, i) => (
                             <div key={i} className="p-2 bg-[var(--glass-bg)] rounded text-xs">
                               <div className="flex items-center justify-between">
-                                <span className="text-[var(--color-accent-blue)]">{rel.source_name}</span>
+                                <span className="text-[var(--color-text)]">{rel.source_name}</span>
                                 <span className="text-[var(--color-text-muted)] mx-1">→</span>
-                                <span className="text-[var(--color-accent-blue)]">{rel.target_name}</span>
+                                <span className="text-[var(--color-text)]">{rel.target_name}</span>
                               </div>
                               <div className="flex items-center justify-between mt-1">
                                 <span className="text-[var(--color-text-muted)]">{rel.relation_type}</span>
@@ -895,7 +895,7 @@ export default function KnowledgeGraph() {
 
                   <div className="bg-[var(--glass-bg)] rounded-lg p-3 mb-4">
                     <div className="flex items-center justify-center space-x-2 text-sm">
-                      <span className="text-[var(--color-accent-blue)] font-medium">
+                      <span className="text-[var(--color-text)] font-medium">
                         {positionedNodes.find(n => n.id === selectedEdge.source)?.label}
                       </span>
                       <div className="flex items-center space-x-1">
@@ -911,7 +911,7 @@ export default function KnowledgeGraph() {
                           style={{ backgroundColor: RELATION_TYPES[selectedEdge.relation as keyof typeof RELATION_TYPES]?.color }}
                         />
                       </div>
-                      <span className="text-[var(--color-accent-blue)] font-medium">
+                      <span className="text-[var(--color-text)] font-medium">
                         {positionedNodes.find(n => n.id === selectedEdge.target)?.label}
                       </span>
                     </div>
@@ -939,7 +939,7 @@ export default function KnowledgeGraph() {
                           <div key={i} className="bg-[var(--glass-bg)] rounded-lg p-3">
                             <p className="text-[var(--color-text-secondary)] text-sm mb-2">"{ev.text}"</p>
                             <div className="flex items-center justify-between">
-                              <span className="text-[var(--color-accent-blue)] text-xs">{ev.source}</span>
+                              <span className="text-[var(--color-text)] text-xs">{ev.source}</span>
                               {getConfidenceBadge(ev.confidence)}
                             </div>
                           </div>
@@ -948,7 +948,7 @@ export default function KnowledgeGraph() {
                         <div className="bg-[var(--glass-bg)] rounded-lg p-3 text-center">
                           <FiInfo className="w-5 h-5 text-[var(--color-text-muted)] mx-auto mb-1" />
                           <p className="text-[var(--color-text-muted)] text-xs">Evidence details not loaded</p>
-                          <button className="text-[var(--color-accent-blue)] text-xs mt-1 hover:underline">
+                          <button className="text-[var(--color-text)] text-xs mt-1 hover:underline">
                             Load evidence
                           </button>
                         </div>
@@ -1007,7 +1007,7 @@ export default function KnowledgeGraph() {
                     setConnectSource(null)
                     setConnectMode(false)
                   }}
-                  className="flex-1 py-2 px-3 bg-[var(--color-accent-blue)] text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity flex items-center justify-center gap-1.5"
+                  className="flex-1 py-2 px-3 bg-white/15 text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity flex items-center justify-center gap-1.5"
                 >
                   <FiCheck className="w-4 h-4" /> Create Connection
                 </button>

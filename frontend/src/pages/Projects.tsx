@@ -110,8 +110,8 @@ function CreateProjectModal({ onClose, onCreate }: { onClose: () => void; onCrea
       <div className="glass-card w-full max-w-lg mx-4 p-0 animate-in fade-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between p-5 border-b border-[var(--color-border)]">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-[var(--color-accent-blue)]/10 rounded-lg">
-              <FiPlus className="w-4 h-4 text-[var(--color-accent-blue)]" />
+            <div className="p-2 bg-white/5 rounded-lg">
+              <FiPlus className="w-4 h-4 text-[var(--color-text)]" />
             </div>
             <h2 className="text-lg font-semibold">New Research Project</h2>
           </div>
@@ -214,7 +214,7 @@ function CreateProjectModal({ onClose, onCreate }: { onClose: () => void; onCrea
             <button type="button" onClick={onClose} className="btn text-[var(--color-text-secondary)] hover:text-white px-4 py-2" disabled={creating}>
               Cancel
             </button>
-            <button type="submit" className="btn text-[var(--color-accent-blue)] hover:bg-[var(--color-accent-blue)]/10 px-4 py-2 font-medium" disabled={creating || !formData.name.trim()}>
+            <button type="submit" className="btn text-[var(--color-text)] hover:bg-white/5 px-4 py-2 font-medium" disabled={creating || !formData.name.trim()}>
               {creating ? (
                 <span className="flex items-center gap-2">
                   <span className="w-3.5 h-3.5 border-2 border-current/30 border-t-current rounded-full animate-spin" />
@@ -242,11 +242,11 @@ function ProjectCardGrid({ project, onDelete }: { project: Project; onDelete: (i
       <Link to={`/projects/${project.id}`} className="block p-5">
         <div className="flex items-start justify-between mb-3">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="p-2.5 bg-white/5 rounded-lg flex-shrink-0 group-hover:bg-[var(--color-accent-blue)]/10 transition-colors">
-              <FiFolder className="w-5 h-5 text-[var(--color-text-muted)] group-hover:text-[var(--color-accent-blue)] transition-colors" />
+            <div className="p-2.5 bg-white/5 rounded-lg flex-shrink-0 group-hover:bg-white/10 transition-colors">
+              <FiFolder className="w-5 h-5 text-[var(--color-text-muted)] group-hover:text-[var(--color-text)] transition-colors" />
             </div>
             <div className="min-w-0">
-              <h3 className="font-semibold text-white group-hover:text-[var(--color-accent-blue)] transition-colors truncate">
+              <h3 className="font-semibold text-white group-hover:text-white/90 transition-colors truncate">
                 {project.name}
               </h3>
               {project.disease_focus && (
@@ -324,13 +324,13 @@ function ProjectCardList({ project, onDelete }: { project: Project; onDelete: (i
   return (
     <div className="glass-card hover:border-white/10 transition-all group">
       <Link to={`/projects/${project.id}`} className="flex items-center gap-4 p-4">
-        <div className="p-2.5 bg-white/5 rounded-lg flex-shrink-0 group-hover:bg-[var(--color-accent-blue)]/10 transition-colors">
-          <FiFolder className="w-5 h-5 text-[var(--color-text-muted)] group-hover:text-[var(--color-accent-blue)] transition-colors" />
+        <div className="p-2.5 bg-white/5 rounded-lg flex-shrink-0 group-hover:bg-white/10 transition-colors">
+          <FiFolder className="w-5 h-5 text-[var(--color-text-muted)] group-hover:text-[var(--color-text)] transition-colors" />
         </div>
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-3 mb-0.5">
-            <h3 className="font-semibold text-white group-hover:text-[var(--color-accent-blue)] transition-colors truncate">
+            <h3 className="font-semibold text-white group-hover:text-white/90 transition-colors truncate">
               {project.name}
             </h3>
           </div>
@@ -554,7 +554,7 @@ export default function Projects() {
         </div>
         <button
           onClick={() => setShowCreateModal(true)}
-          className="btn text-[var(--color-accent-blue)] hover:bg-[var(--color-accent-blue)]/10 flex items-center gap-2 font-medium"
+          className="btn text-[var(--color-text)] hover:bg-white/5 flex items-center gap-2 font-medium"
         >
           <FiPlus className="w-4 h-4" />
           <span>New Project</span>
@@ -591,13 +591,13 @@ export default function Projects() {
             onClick={() => setShowFilters(!showFilters)}
             className={clsx(
               'btn flex items-center gap-2 px-3 py-2 text-sm',
-              activeFilterCount > 0 ? 'text-[var(--color-accent-blue)]' : 'text-[var(--color-text-muted)]'
+              activeFilterCount > 0 ? 'text-[var(--color-text)]' : 'text-[var(--color-text-muted)]'
             )}
           >
             <FiFilter className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Filters</span>
             {activeFilterCount > 0 && (
-              <span className="ml-0.5 px-1.5 py-0.5 text-[10px] font-bold bg-[var(--color-accent-blue)]/20 text-[var(--color-accent-blue)] rounded-full">{activeFilterCount}</span>
+              <span className="ml-0.5 px-1.5 py-0.5 text-[10px] font-bold bg-white/10 text-[var(--color-text)] rounded-full">{activeFilterCount}</span>
             )}
           </button>
 
@@ -710,7 +710,7 @@ export default function Projects() {
             {activeFilterCount > 0 && (
               <button
                 onClick={() => { setStatusFilter('all'); setDiseaseFocusFilter(''); setTagFilter(''); setDateRange('all') }}
-                className="btn text-xs text-[var(--color-accent-blue)] hover:bg-[var(--color-accent-blue)]/10 px-3 py-1.5"
+                className="btn text-xs text-[var(--color-text)] hover:bg-white/5 px-3 py-1.5"
               >
                 <FiX className="w-3 h-3 mr-1 inline" />
                 Clear All
@@ -724,7 +724,7 @@ export default function Projects() {
       {loading ? (
         <div className="flex items-center justify-center py-20">
           <div className="flex flex-col items-center gap-3">
-            <div className="w-8 h-8 border-2 border-white/20 border-t-[var(--color-accent-blue)] rounded-full animate-spin" />
+            <div className="w-8 h-8 border-2 border-white/20 border-t-white/80 rounded-full animate-spin" />
             <span className="text-sm text-[var(--color-text-muted)]">Loading projects...</span>
           </div>
         </div>
@@ -752,7 +752,7 @@ export default function Projects() {
           </p>
           <button
             onClick={() => { setSearchQuery(''); setStatusFilter('all'); setDiseaseFocusFilter(''); setTagFilter(''); setDateRange('all') }}
-            className="btn text-[var(--color-accent-blue)] hover:bg-[var(--color-accent-blue)]/10 text-sm"
+            className="btn text-[var(--color-text)] hover:bg-white/5 text-sm"
           >
             Clear Filters
           </button>
@@ -769,7 +769,7 @@ export default function Projects() {
           </p>
           <button
             onClick={() => setShowCreateModal(true)}
-            className="btn text-[var(--color-accent-blue)] hover:bg-[var(--color-accent-blue)]/10 flex items-center gap-2 mx-auto font-medium"
+            className="btn text-[var(--color-text)] hover:bg-white/5 flex items-center gap-2 mx-auto font-medium"
           >
             <FiPlus className="w-4 h-4" />
             Create Your First Project
