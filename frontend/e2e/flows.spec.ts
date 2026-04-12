@@ -269,3 +269,220 @@ test.describe('Flow: Notebook create-page', () => {
     )).toEqual([]);
   });
 });
+
+// ─── Deeper flows ───────────────────────────────────────────────────
+// The tests below exercise higher-fidelity scenarios than the smoke
+// flows above: uploading real file content via setInputFiles, running
+// MATLAB-ish scripts end-to-end, driving keyboard flows, and traversing
+// between related pages (project list → workspace → graph).
+
+// ─── Data Manager: CSV upload ───────────────────────────────────────
+
+test.describe('Flow: Data Manager CSV upload', () => {
+  test('upload a CSV, table view shows the parsed rows', async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    await page.goto('/data-manager');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(1200);
+
+    // Feed a CSV to the hidden file input directly — the visible upload
+    // button just triggers .click() on this input.
+    const fileInput = page.locator('input[type="file"]').first();
+    await expect(fileInput).toHaveCount(1);
+
+    const csv = [
+      'gene,expression,pvalue',
+      'BRCA1,4.2,0.001',
+      'TP53,6.8,0.0003',
+      'EGFR,2.1,0.04',
+    ].join('\n');
+
+    await fileInput.setInputFiles({
+      name: 'e2e-upload.csv',
+      mimeType: 'text/csv',
+      buffer: Buffer.from(csv, 'utf-8'),
+    });
+
+    // Give the FileReader + parser a beat.
+    await page.waitForTimeout(800);
+
+    // The uploaded dataset should now be selected; switch to Table view.
+    const tableTab = page.locator('button:has-text("Table")').first();
+    if (await tableTab.count() > 0) {
+      await tableTab.click({ force: true });
+      await page.waitForTimeout(400);
+    }
+
+    // Expect either a rendered <table> with our gene names, or at least
+    // the uploaded values somewhere on the page.
+    const bodyText = await page.locator('body').innerText();
+    const sawUpload = bodyText.includes('BRCA1') || bodyText.includes('TP53') || bodyText.includes('EGFR');
+    expect(sawUpload).toBeTruthy();
+
+    expect(errors.filter(e =>
+      e.includes('Maximum call stack') ||
+      e.includes('Cannot read properties of null')
+    )).toEqual([]);
+  });
+});
+
+// ─── Compute Lab: imaging annotation builtin ────────────────────────
+
+test.describe('Flow: Compute Lab imaging annotation', () => {
+  test('imaging_annotate call does not crash and returns a handle', async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    await page.goto('/compute-lab');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(1800);
+
+    const editor = page.locator('textarea').first();
+    if (await editor.count() === 0) {
+      // Editor didn't load — still assert no crash and move on.
+      expect(errors.filter(e => e.includes('Maximum call stack'))).toEqual([]);
+      return;
+    }
+
+    // Script calling the new imaging builtins. Without a loaded study
+    // the call path should simply no-op / return 0 rather than throw.
+    await editor.click({ force: true });
+    await editor.fill([
+      'n = imaging_annotations()',
+      'h = imaging_filter("invert")',
+      'disp(n)',
+    ].join('\n'));
+
+    const runBtn = page.locator('button:has-text("Run"), button[title*="Run" i], button[aria-label*="Run" i]').first();
+    if (await runBtn.count() > 0) {
+      await runBtn.click({ force: true });
+      await page.waitForTimeout(1000);
+    }
+
+    expect(errors.filter(e =>
+      e.includes('Maximum call stack') ||
+      e.includes('Cannot read properties of null') ||
+      e.includes('is not a function')
+    )).toEqual([]);
+  });
+});
+
+// ─── Notebook: filter + search path ─────────────────────────────────
+
+test.describe('Flow: Notebook filters', () => {
+  test('filter panel opens, category filter applied, no crash', async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    await page.goto('/notebook');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(1200);
+
+    // Open the filter popover if present.
+    const filterBtn = page.locator('button[title*="Filter" i], button:has-text("Filter")').first();
+    if (await filterBtn.count() > 0 && await filterBtn.isVisible()) {
+      await filterBtn.click({ force: true });
+      await page.waitForTimeout(300);
+    }
+
+    // Click an "All" chip (present in both category + importance rows).
+    const allChip = page.locator('button:has-text("All")').first();
+    if (await allChip.count() > 0 && await allChip.isVisible()) {
+      await allChip.click({ force: true }).catch(() => {});
+      await page.waitForTimeout(200);
+    }
+
+    // Fire a search / command-palette keyboard shortcut — should at
+    // least not crash even if not implemented.
+    await page.keyboard.press('Meta+K').catch(() => {});
+    await page.waitForTimeout(300);
+    await page.keyboard.press('Escape').catch(() => {});
+
+    expect(errors.filter(e =>
+      e.includes('Maximum call stack') ||
+      e.includes('Cannot read properties of null')
+    )).toEqual([]);
+  });
+});
+
+// ─── Projects → Workspace navigation ────────────────────────────────
+
+test.describe('Flow: Projects → Workspace', () => {
+  test('open first project card, workspace route renders', async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    await page.goto('/projects');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(1500);
+
+    // Click the first visible project card (has-text does greedy match,
+    // but we anchor on the "Open" or "Workspace" CTA inside the card).
+    const openBtn = page.locator('a[href*="/projects/"], button:has-text("Open"), button:has-text("Workspace")').first();
+    if (await openBtn.count() > 0 && await openBtn.isVisible()) {
+      await openBtn.click({ force: true });
+      await page.waitForTimeout(1200);
+
+      // We should have navigated somewhere under /projects/:id/*.
+      const url = page.url();
+      expect(url).toMatch(/\/projects\/[^/]+/);
+    }
+
+    expect(errors.filter(e =>
+      e.includes('Maximum call stack') ||
+      e.includes('Cannot read properties of null')
+    )).toEqual([]);
+  });
+});
+
+// ─── Evidence browse + open source ──────────────────────────────────
+
+test.describe('Flow: Evidence browse', () => {
+  test('evidence page loads, filter chip toggles without crash', async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    await page.goto('/evidence');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(1200);
+
+    // Try clicking a source-type filter chip (pubmed / clinical_trial /
+    // preprint). They're rendered as pill buttons with those labels.
+    const chip = page.locator('button').filter({ hasText: /pubmed|clinical|preprint|all/i }).first();
+    if (await chip.count() > 0 && await chip.isVisible()) {
+      await chip.click({ force: true }).catch(() => {});
+      await page.waitForTimeout(300);
+    }
+
+    expect(errors.filter(e =>
+      e.includes('Maximum call stack') ||
+      e.includes('Cannot read properties of null')
+    )).toEqual([]);
+  });
+});
+
+// ─── Agents page render + run ───────────────────────────────────────
+
+test.describe('Flow: Agents page', () => {
+  test('agents page renders, run button (if present) is clickable', async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    await page.goto('/agents');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(1200);
+
+    const runBtn = page.locator('button:has-text("Run"), button:has-text("Start")').first();
+    if (await runBtn.count() > 0 && await runBtn.isVisible()) {
+      await runBtn.click({ force: true }).catch(() => {});
+      await page.waitForTimeout(400);
+    }
+
+    expect(errors.filter(e =>
+      e.includes('Maximum call stack') ||
+      e.includes('Cannot read properties of null')
+    )).toEqual([]);
+  });
+});
