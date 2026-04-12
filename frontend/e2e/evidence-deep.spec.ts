@@ -81,6 +81,34 @@ test.describe('Evidence — Add Evidence dialog form', () => {
   })
 })
 
+test.describe('Evidence — extended deep-link params', () => {
+  test('/evidence?q=xyz seeds the search input and cleans the URL', async ({ page }) => {
+    await page.goto('/evidence?q=nonexistent-evidence-seed')
+    await page.waitForLoadState('domcontentloaded')
+    await page.waitForFunction(() => !window.location.search.includes('q='), null, { timeout: 5000 })
+    expect(page.url()).not.toMatch(/q=/)
+    const search = page.locator('input[placeholder*="Search" i]').first()
+    await expect(search).toHaveValue('nonexistent-evidence-seed', { timeout: 3000 })
+  })
+
+  test('/evidence?type=pubmed seeds the source-type filter and cleans the URL', async ({ page }) => {
+    await page.goto('/evidence?type=pubmed')
+    await page.waitForLoadState('domcontentloaded')
+    await page.waitForFunction(() => !window.location.search.includes('type='), null, { timeout: 5000 })
+    expect(page.url()).not.toMatch(/type=/)
+  })
+
+  test('/evidence?type=totally-bogus falls back silently (no crash, cleaned)', async ({ page }) => {
+    const errs: string[] = []; attachErrorCapture(page, errs)
+    await page.goto('/evidence?type=totally-bogus-xyz')
+    await page.waitForLoadState('domcontentloaded')
+    await page.waitForFunction(() => !window.location.search.includes('type='), null, { timeout: 5000 })
+    const boundary = await page.locator('text=/Something went wrong/i').count()
+    expect(boundary).toBe(0)
+    expect(errs.filter(e => e.includes('Maximum call stack') || e.includes('is not a function'))).toEqual([])
+  })
+})
+
 test.describe('Evidence — search input', () => {
   test('search input exists and accepts typing without crashing', async ({ page }) => {
     const errs: string[] = []; attachErrorCapture(page, errs)

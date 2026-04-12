@@ -183,16 +183,22 @@ export default function Evidence() {
     const qId = new URLSearchParams(window.location.search).get('id')
     return qId || null
   })
-  const [searchQuery, setSearchQuery] = useState('')
-  const [filterType, setFilterType] = useState('all')
+  // Deep-link support: `?add=1` (or `?new=1`) auto-opens the Add Evidence
+  // dialog so dashboard/quick-action links can drop users straight into the
+  // upload flow. `?q=` seeds the search input and `?type=` seeds the
+  // source-type filter so cross-page links preserve user intent. All
+  // params are consume-and-cleaned on mount so a soft re-render doesn't
+  // keep re-opening the modal after the user cancels.
+  const [searchParams] = useSearchParams()
+  const [searchQuery, setSearchQuery] = useState(() => searchParams.get('q') || '')
+  const [filterType, setFilterType] = useState(() => {
+    const raw = (searchParams.get('type') || '').toLowerCase()
+    const VALID = new Set(['all', 'pubmed', 'clinical_trial', 'preprint', 'patent', 'user_upload'])
+    return VALID.has(raw) ? raw : 'all'
+  })
   const [page, setPage] = useState(1)
   const [totalItems, setTotalItems] = useState(0)
   const [loading, setLoading] = useState(true)
-  // Deep-link support: `?add=1` (or `?new=1`) auto-opens the Add Evidence
-  // dialog so dashboard/quick-action links can drop users straight into the
-  // upload flow. We consume the query string on mount so a soft re-render
-  // doesn't keep re-opening the modal after the user cancels.
-  const [searchParams, setSearchParams] = useSearchParams()
   const [showAddModal, setShowAddModal] = useState(() => {
     const q = searchParams.get('add') || searchParams.get('new')
     return q === '1'
@@ -244,19 +250,19 @@ export default function Evidence() {
 
   useEffect(() => { fetchEvidence() }, [fetchEvidence])
 
-  // Clean deep-link query params (`add`/`new`/`id`) off the URL after
-  // the initial mount so a soft reload doesn't re-open the dialog or
-  // stomp user-driven selection changes.
+  // Clean deep-link query params (`add`/`new`/`id`/`q`/`type`) off the
+  // URL after the initial mount so a soft reload doesn't re-open the
+  // dialog or stomp user-driven selection changes.
   useEffect(() => {
-    const hasDeep = searchParams.get('add') === '1'
-      || searchParams.get('new') === '1'
-      || searchParams.has('id')
-    if (hasDeep) {
-      const next = new URLSearchParams(searchParams)
-      next.delete('add')
-      next.delete('new')
-      next.delete('id')
-      setSearchParams(next, { replace: true })
+    const sp = new URLSearchParams(window.location.search)
+    let changed = false
+    for (const k of ['add', 'new', 'id', 'q', 'type']) {
+      if (sp.has(k)) { sp.delete(k); changed = true }
+    }
+    if (changed) {
+      const qs = sp.toString()
+      const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash
+      window.history.replaceState(window.history.state, '', newUrl)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
