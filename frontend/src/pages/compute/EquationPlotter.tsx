@@ -5,8 +5,9 @@ import {
 } from 'recharts'
 import {
   FiPlay, FiPlus, FiDownload, FiCopy, FiLayers,
-  FiTrash2, FiRefreshCw,
+  FiTrash2, FiRefreshCw, FiImage, FiCheck,
 } from 'react-icons/fi'
+import { copyPlotToClipboard as copyPlotBlob, downloadPlotPng } from '../../utils/plotExport'
 
 // ═══════════════════════════════════════════════════════════════════
 //  Expression Evaluator — self-contained, no external math library
@@ -467,6 +468,9 @@ export default function EquationPlotter() {
   const [error, setError] = useState<string | null>(null)
   const [showLibrary, setShowLibrary] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [chartCopied, setChartCopied] = useState(false)
+  // Chart host ref — passed to plotExport for clipboard-as-image + PNG export.
+  const chartHostRef = useRef<HTMLDivElement | null>(null)
 
   // ODE mode
   const [mode, setMode] = useState<'equation' | 'ode'>('equation')
@@ -619,6 +623,19 @@ export default function EquationPlotter() {
     if (timerRef.current) clearTimeout(timerRef.current)
     timerRef.current = setTimeout(() => setCopied(false), 2000)
   }, [stats, expr, xMin, xMax])
+
+  const copyChartImage = useCallback(async () => {
+    const ok = await copyPlotBlob(chartHostRef.current)
+    if (ok) {
+      setChartCopied(true)
+      setTimeout(() => setChartCopied(false), 2000)
+    }
+  }, [])
+
+  const downloadChartImage = useCallback(async () => {
+    const label = expr.replace(/[^\w.-]+/g, '_').slice(0, 40) || 'equation_plot'
+    await downloadPlotPng(chartHostRef.current, label)
+  }, [expr])
 
   // ── Render helpers ─────────────────────────────────────────────
   const fmt = (n: number) => {
@@ -778,7 +795,7 @@ export default function EquationPlotter() {
       )}
 
       {/* ── Chart ────────────────────────────────────────────────── */}
-      <div style={{ flex: 1, minHeight: 0, border: '1px solid var(--glass-border)', borderRadius: 8, padding: 10, background: 'var(--glass-bg)' }}>
+      <div ref={chartHostRef} style={{ flex: 1, minHeight: 0, border: '1px solid var(--glass-border)', borderRadius: 8, padding: 10, background: 'var(--glass-bg)' }}>
         {chartData.length > 0 ? (
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={chartDataWithDerivative} margin={{ top: 8, right: 16, bottom: 24, left: 8 }}>
@@ -821,6 +838,12 @@ export default function EquationPlotter() {
         </button>
         <button onClick={copyChartData} disabled={mainData.length === 0} style={{ ...chip, fontWeight: 400, opacity: mainData.length > 0 ? 1 : 0.3 }}>
           <FiCopy size={11} /> Copy Data
+        </button>
+        <button onClick={copyChartImage} disabled={mainData.length === 0} style={{ ...chip, fontWeight: 400, opacity: mainData.length > 0 ? 1 : 0.3 }} title="Copy chart as image to clipboard">
+          {chartCopied ? <><FiCheck size={11} /> Copied</> : <><FiImage size={11} /> Copy Plot</>}
+        </button>
+        <button onClick={downloadChartImage} disabled={mainData.length === 0} style={{ ...chip, fontWeight: 400, opacity: mainData.length > 0 ? 1 : 0.3 }} title="Download chart as PNG">
+          <FiImage size={11} /> PNG
         </button>
         <button onClick={exportCSV} disabled={mainData.length === 0} style={{ ...chip, fontWeight: 400, opacity: mainData.length > 0 ? 1 : 0.3 }}>
           <FiDownload size={11} /> CSV
@@ -918,7 +941,7 @@ export default function EquationPlotter() {
       </div>
 
       {/* ODE Chart */}
-      <div style={{ flex: 1, minHeight: 0, border: '1px solid var(--glass-border)', borderRadius: 8, padding: 10, background: 'var(--glass-bg)' }}>
+      <div ref={chartHostRef} style={{ flex: 1, minHeight: 0, border: '1px solid var(--glass-border)', borderRadius: 8, padding: 10, background: 'var(--glass-bg)' }}>
         {odeChartData.length > 0 ? (
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={odeChartData} margin={{ top: 8, right: 16, bottom: 24, left: 8 }}>
