@@ -113,6 +113,12 @@ export const BUILTIN_DOCS: BuiltinDoc[] = [
   { name: 'skewness', category: 'Statistics', signature: 'skewness(v)', description: 'Sample skewness', snippet: 'skewness(v)' },
   { name: 'kurtosis', category: 'Statistics', signature: 'kurtosis(v)', description: 'Sample kurtosis', snippet: 'kurtosis(v)' },
   { name: 'sem', category: 'Statistics', signature: 'sem(v)', description: 'Standard error of the mean', snippet: 'sem(v)' },
+  { name: 'geomean', category: 'Statistics', signature: 'geomean(v)', description: 'Geometric mean (NaN if any element ≤ 0)', snippet: 'geomean(v)' },
+  { name: 'harmmean', category: 'Statistics', signature: 'harmmean(v)', description: 'Harmonic mean', snippet: 'harmmean(v)' },
+  { name: 'trimmean', category: 'Statistics', signature: 'trimmean(v, pct)', description: 'Mean with pct% of values trimmed (symmetric)', snippet: 'trimmean(v, 10)' },
+  { name: 'mad', category: 'Statistics', signature: 'mad(v[, flag])', description: 'Mean absolute deviation (flag=1 → median absolute)', snippet: 'mad(v)' },
+  { name: 'gcd', category: 'Statistics', signature: 'gcd(a, b)', description: 'Greatest common divisor', snippet: 'gcd(12, 18)' },
+  { name: 'lcm', category: 'Statistics', signature: 'lcm(a, b)', description: 'Least common multiple', snippet: 'lcm(4, 6)' },
   { name: 'cov', category: 'Statistics', signature: 'cov(x, y)', description: 'Covariance', snippet: 'cov(x, y)' },
   { name: 'corr', category: 'Statistics', signature: 'corr(x, y)', description: 'Pearson correlation', snippet: 'corr(x, y)' },
   { name: 'normcdf', category: 'Statistics', signature: 'normcdf(x)', description: 'Standard normal CDF', snippet: 'normcdf(x)' },
@@ -156,6 +162,8 @@ export const BUILTIN_DOCS: BuiltinDoc[] = [
   { name: 'ode45', category: 'Calculus', signature: 'ode45(f, tspan, y0)', description: 'Non-stiff ODE solver', snippet: 'ode45(@(t,y) f, [0 1], y0)' },
   { name: 'cumsum', category: 'Calculus', signature: 'cumsum(v)', description: 'Cumulative sum', snippet: 'cumsum(v)' },
   { name: 'cumprod', category: 'Calculus', signature: 'cumprod(v)', description: 'Cumulative product', snippet: 'cumprod(v)' },
+  { name: 'cummax', category: 'Calculus', signature: 'cummax(v)', description: 'Running maximum of prefix', snippet: 'cummax(v)' },
+  { name: 'cummin', category: 'Calculus', signature: 'cummin(v)', description: 'Running minimum of prefix', snippet: 'cummin(v)' },
 
   // ─── Signal ──────────────────────────────────────────────────────────
   { name: 'fft', category: 'Signal', signature: 'fft(x)', description: 'Fast Fourier transform (magnitude)', snippet: 'fft(x)' },

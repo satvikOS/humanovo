@@ -145,6 +145,15 @@ test.describe('Flow: Compute Lab script', () => {
       's = randsample(v, 3)',     // without-replacement
       'disp(length(s))',          // → 3
       'disp(length(shuffle(v)))', // → 8
+      'disp(cummax([1, 3, 2, 5, 4]))',  // → [1 3 3 5 5]
+      'disp(cummin([5, 3, 4, 1, 2]))',  // → [5 3 3 1 1]
+      'disp(geomean([2, 8]))',          // → 4
+      'disp(harmmean([1, 2, 4]))',      // → 12/7 ≈ 1.714
+      'disp(trimmean([1, 2, 3, 4, 100], 20))', // drop extremes, → 3
+      'disp(mad([1, 2, 3, 4, 5]))',     // mean |x - mean| = 1.2
+      'disp(mad([1, 2, 3, 4, 5], 1))',  // median |x - median| = 1
+      'disp(gcd(12, 18))',              // → 6
+      'disp(lcm(4, 6))',                // → 12
     ].join('\n'));
     await page.waitForTimeout(200);
 
@@ -157,7 +166,7 @@ test.describe('Flow: Compute Lab script', () => {
     // Engine-level errors surface as on-screen text starting with "Error".
     // If any of the new builtins is broken, the panel will include one.
     const panelText = await page.locator('body').innerText();
-    expect(panelText).not.toMatch(/RuntimeError:.*(argmax|argmin|clip|sigmoid|softmax|randsample|shuffle)/);
+    expect(panelText).not.toMatch(/RuntimeError:.*(argmax|argmin|clip|sigmoid|softmax|randsample|shuffle|cummax|cummin|geomean|harmmean|trimmean|mad|gcd|lcm)/);
     expect(errors.filter(e =>
       e.includes('Maximum call stack') ||
       e.includes('Cannot read properties of null') ||

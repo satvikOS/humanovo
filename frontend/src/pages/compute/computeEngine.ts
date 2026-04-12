@@ -1761,6 +1761,95 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
     let s = 1; for (let i = 0; i < a.length; i++) { s *= a[i]; out[i] = s }
     return mmat(1, a.length, out)
   })
+  // Running min/max — each index holds the extreme of the prefix so far.
+  // Useful for drawdown-style analyses and envelope detection.
+  def('cummax', 1, args => {
+    const a = toArray(args[0]); const out = new Float64Array(a.length)
+    let m = -Infinity
+    for (let i = 0; i < a.length; i++) { if (a[i] > m) m = a[i]; out[i] = m }
+    return mmat(1, a.length, out)
+  })
+  def('cummin', 1, args => {
+    const a = toArray(args[0]); const out = new Float64Array(a.length)
+    let m = Infinity
+    for (let i = 0; i < a.length; i++) { if (a[i] < m) m = a[i]; out[i] = m }
+    return mmat(1, a.length, out)
+  })
+  // Robust / alternative means (pharmacokinetics, gait analysis).
+  def('geomean', 1, args => {
+    const a = toArray(args[0])
+    if (a.length === 0) return mnum(NaN)
+    // log-space product keeps us numerically safe on large vectors.
+    let s = 0
+    for (let i = 0; i < a.length; i++) {
+      if (a[i] <= 0) return mnum(NaN)
+      s += Math.log(a[i])
+    }
+    return mnum(Math.exp(s / a.length))
+  })
+  def('harmmean', 1, args => {
+    const a = toArray(args[0])
+    if (a.length === 0) return mnum(NaN)
+    let s = 0
+    for (let i = 0; i < a.length; i++) {
+      if (a[i] === 0) return mnum(0)
+      s += 1 / a[i]
+    }
+    return mnum(a.length / s)
+  })
+  // Trimmed mean — drops the top & bottom `pct`% of values before
+  // averaging. MATLAB's trimmean takes pct as a percentage (0..100).
+  def('trimmean', 2, args => {
+    const a = toArray(args[0]).slice().sort((x, y) => x - y)
+    const pct = toNumber(args[1])
+    if (a.length === 0 || pct < 0 || pct >= 100) return mnum(NaN)
+    const drop = Math.floor((pct / 100 / 2) * a.length)
+    const kept = a.slice(drop, a.length - drop)
+    if (kept.length === 0) return mnum(NaN)
+    let s = 0
+    for (const x of kept) s += x
+    return mnum(s / kept.length)
+  })
+  // Median absolute deviation — robust scale estimate, common in
+  // outlier-screening routines.
+  def('mad', -1, args => {
+    const a = toArray(args[0])
+    if (a.length === 0) return mnum(NaN)
+    // 2nd arg: 0 (default) → mean absolute deviation, 1 → median absolute.
+    const flag = args.length > 1 ? toNumber(args[1]) : 0
+    if (flag === 1) {
+      const sorted = a.slice().sort((x, y) => x - y)
+      const m = sorted.length % 2
+        ? sorted[(sorted.length - 1) / 2]
+        : 0.5 * (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2])
+      const devs = a.map(x => Math.abs(x - m)).sort((x, y) => x - y)
+      return mnum(devs.length % 2
+        ? devs[(devs.length - 1) / 2]
+        : 0.5 * (devs[devs.length / 2 - 1] + devs[devs.length / 2]))
+    }
+    let mean = 0
+    for (const x of a) mean += x
+    mean /= a.length
+    let s = 0
+    for (const x of a) s += Math.abs(x - mean)
+    return mnum(s / a.length)
+  })
+  // Number theory — useful for grid/lattice problems and when normalizing
+  // sample rates between heterogeneous recordings.
+  def('gcd', 2, args => {
+    let a = Math.abs(Math.round(toNumber(args[0])))
+    let b = Math.abs(Math.round(toNumber(args[1])))
+    while (b) { [a, b] = [b, a % b] }
+    return mnum(a)
+  })
+  def('lcm', 2, args => {
+    const a = Math.abs(Math.round(toNumber(args[0])))
+    const b = Math.abs(Math.round(toNumber(args[1])))
+    if (a === 0 || b === 0) return mnum(0)
+    let x = a, y = b
+    while (y) { [x, y] = [y, x % y] }
+    return mnum((a * b) / x)
+  })
   def('skewness', 1, args => mnum(ML.skewness(toArray(args[0]))))
   def('kurtosis', 1, args => mnum(ML.kurtosis(toArray(args[0]))))
   def('sem', 1, args => mnum(ML.sem(toArray(args[0]))))
