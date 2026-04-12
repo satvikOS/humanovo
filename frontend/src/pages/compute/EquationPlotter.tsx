@@ -535,10 +535,18 @@ export default function EquationPlotter() {
   const stats = useMemo(() => {
     const ys = mainData.map(p => p.y).filter(v => isFinite(v))
     if (ys.length === 0) return null
-    const s = ys.reduce((a, b) => a + b, 0)
+    // Single-pass min/max/sum — spreading ys into Math.min/max could overflow
+    // the argument-list stack when high-resolution plots exceed ~10k samples.
+    let mn = Infinity, mx = -Infinity, s = 0
+    for (let i = 0; i < ys.length; i++) {
+      const v = ys[i]
+      if (v < mn) mn = v
+      if (v > mx) mx = v
+      s += v
+    }
     return {
-      min: Math.min(...ys),
-      max: Math.max(...ys),
+      min: mn,
+      max: mx,
       mean: s / ys.length,
       points: ys.length,
     }
@@ -970,8 +978,14 @@ export default function EquationPlotter() {
             <span style={{ color: 'var(--color-text-muted)' }}>Steps: <strong style={{ color: 'var(--color-text)' }}>{odeResult.t.length}</strong></span>
             <span style={{ color: 'var(--color-text-muted)' }}>dt: <strong style={{ color: 'var(--color-text)' }}>{((activeODE.tSpan[1] - activeODE.tSpan[0]) / 500).toFixed(4)}</strong></span>
             {activeODE.vars.map((v, j) => {
-              const vals = odeResult.y.map(row => row[j])
-              const mx = Math.max(...vals)
+              // Single-pass max (ODE results can hit 10k+ steps — spreading
+              // would overflow the argument-list call stack).
+              let mx = -Infinity
+              for (let k = 0; k < odeResult.y.length; k++) {
+                const rv = odeResult.y[k][j]
+                if (rv > mx) mx = rv
+              }
+              if (!Number.isFinite(mx)) mx = 0
               return <span key={v} style={{ color: 'var(--color-text-muted)' }}>{v} max: <strong style={{ color: 'var(--color-text)' }}>{mx.toFixed(1)}</strong></span>
             })}
           </div>

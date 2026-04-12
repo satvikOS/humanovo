@@ -176,8 +176,16 @@ export default function PlotlyPlot3D({
           }
           // Auto-generate surface from scattered points using IDW interpolation
           const res = 40
-          const xMin = Math.min(...xs), xMax = Math.max(...xs)
-          const yMin = Math.min(...ys), yMax = Math.max(...ys)
+          // Single-pass min/max (large xs/ys arrays would overflow spread call stack)
+          let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity
+          for (let i = 0; i < xs.length; i++) {
+            const xv = xs[i]; if (xv < xMin) xMin = xv; if (xv > xMax) xMax = xv
+          }
+          for (let i = 0; i < ys.length; i++) {
+            const yv = ys[i]; if (yv < yMin) yMin = yv; if (yv > yMax) yMax = yv
+          }
+          if (!Number.isFinite(xMin)) { xMin = 0; xMax = 1 }
+          if (!Number.isFinite(yMin)) { yMin = 0; yMax = 1 }
           const xRange = Array.from({ length: res }, (_, i) => xMin + (xMax - xMin) * i / (res - 1))
           const yRange = Array.from({ length: res }, (_, i) => yMin + (yMax - yMin) * i / (res - 1))
           // Inverse-distance-weighted interpolation for accurate surface

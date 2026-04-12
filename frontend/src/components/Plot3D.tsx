@@ -70,7 +70,19 @@ function getColorForScheme(scheme: string, t: number, category?: string, categor
 // ── Data Normalization ──────────────────────────────────────
 function normalizeData(data: DataPoint3D[], scale = 4) {
   if (data.length === 0) return { normalized: [] as (DataPoint3D & { nx: number; ny: number; nz: number })[], ranges: { x: { min: 0, max: 1 }, y: { min: 0, max: 1 }, z: { min: 0, max: 1 } } }
-  const range = (vals: number[]) => { const mn = Math.min(...vals), mx = Math.max(...vals); return { min: mn, max: mx, span: mx - mn || 1 } }
+  // Single-pass min/max — spreading large arrays via Math.min(...vals) overflows
+  // the JS argument-list stack (~10k elements on some engines).
+  const range = (vals: number[]) => {
+    let mn = Infinity, mx = -Infinity
+    for (let i = 0; i < vals.length; i++) {
+      const v = vals[i]
+      if (v < mn) mn = v
+      if (v > mx) mx = v
+    }
+    if (!Number.isFinite(mn)) mn = 0
+    if (!Number.isFinite(mx)) mx = 1
+    return { min: mn, max: mx, span: mx - mn || 1 }
+  }
   const xr = range(data.map(d => d.x)), yr = range(data.map(d => d.y)), zr = range(data.map(d => d.z))
   const maxSpan = Math.max(xr.span, yr.span, zr.span)
   const normalized = data.map(d => ({
@@ -256,9 +268,20 @@ function SurfaceChart3D({ data, colorScheme, surfaceFunction }: { data: DataPoin
       }
     } else if (data.length > 0) {
       const gridSize = Math.ceil(Math.sqrt(data.length))
+      // Precompute z-range ONCE (was recomputed per-vertex inside a tight loop,
+      // O(n²) plus argument-list stack overflow from Math.min(...arr) spread).
+      let dMinZ = Infinity, dMaxZ = -Infinity
+      for (let j = 0; j < data.length; j++) {
+        const dz = data[j].z
+        if (dz < dMinZ) dMinZ = dz
+        if (dz > dMaxZ) dMaxZ = dz
+      }
+      if (!Number.isFinite(dMinZ)) dMinZ = 0
+      if (!Number.isFinite(dMaxZ)) dMaxZ = 1
+      const dSpan = (dMaxZ - dMinZ) || 1
       for (let i = 0; i < pos.count; i++) {
         const di = Math.min(i, data.length - 1)
-        const z = ((data[di].z - Math.min(...data.map(d => d.z))) / (Math.max(...data.map(d => d.z)) - Math.min(...data.map(d => d.z)) || 1) - 0.5) * 2
+        const z = ((data[di].z - dMinZ) / dSpan - 0.5) * 2
         pos.setZ(i, z)
         if (z < minZ) minZ = z; if (z > maxZ) maxZ = z
       }

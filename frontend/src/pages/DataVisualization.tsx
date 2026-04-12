@@ -1394,7 +1394,12 @@ export default function DataVisualization() {
       case 'heatmap': {
         const cats = [...new Set(data.map(d => d.category).filter(Boolean))]
         const labels = [...new Set(data.map(d => d.label))]
-        const maxVal = Math.max(...data.map(d => Math.abs(d.value)), 1)
+        // Single-pass max (spread blows arg-list stack on >10k datapoints)
+        let maxVal = 1
+        for (let i = 0; i < data.length; i++) {
+          const av = Math.abs(data[i].value)
+          if (av > maxVal) maxVal = av
+        }
         const cellH = Math.max(20, Math.min(40, (height - 40) / Math.max(labels.length, 1)))
         const cellW = Math.max(40, 500 / Math.max(cats.length || 1, 1))
         return (
