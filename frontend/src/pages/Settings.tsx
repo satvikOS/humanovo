@@ -533,11 +533,22 @@ export default function Settings() {
     tabParam && settingsSections.some(s => s.id === tabParam) ? tabParam : 'appearance'
   )
 
+  // Consume-and-clean the `?tab=` query so a soft reload after the user
+  // clicks a different tab doesn't snap them back to the URL-seeded one.
+  // Bogus values (e.g. /settings?tab=totally-bogus) silently fall back
+  // to the 'appearance' default — the guard in `useState` above keeps
+  // the render safe, we only need to strip the stray param from the
+  // URL here.
   useEffect(() => {
-    if (tabParam && settingsSections.some(s => s.id === tabParam)) {
-      setActiveSection(tabParam)
+    const sp = new URLSearchParams(window.location.search)
+    if (sp.has('tab')) {
+      sp.delete('tab')
+      const qs = sp.toString()
+      const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash
+      window.history.replaceState(window.history.state, '', newUrl)
     }
-  }, [tabParam])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const renderContent = () => {
     switch (activeSection) {
