@@ -1075,11 +1075,15 @@ export default function Layout() {
       setIsNotificationsOpen(false)
     }
     // "?" (Shift+/) opens the keyboard-shortcuts cheatsheet, but only
-    // when the user isn't typing into a field.
+    // when the user isn't typing into a field. Accept both e.key === '?'
+    // (produced on US keyboards) and the literal '/' + shiftKey combo
+    // that some test-runners / layouts send.
     const tag = (e.target as HTMLElement)?.tagName
     const typingIn = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' ||
       (e.target as HTMLElement)?.isContentEditable
-    if (e.key === '?' && !typingIn && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    const wantsShortcutHelp = !typingIn && !e.metaKey && !e.ctrlKey && !e.altKey &&
+      (e.key === '?' || (e.key === '/' && e.shiftKey))
+    if (wantsShortcutHelp) {
       e.preventDefault()
       setIsShortcutsOpen(prev => !prev)
     }

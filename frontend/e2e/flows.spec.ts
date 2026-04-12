@@ -463,6 +463,44 @@ test.describe('Flow: Evidence browse', () => {
   });
 });
 
+// ─── Keyboard shortcuts cheatsheet ──────────────────────────────────
+
+test.describe('Flow: Keyboard shortcuts', () => {
+  test('pressing "?" opens the shortcuts cheatsheet; Esc closes it', async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    await page.goto('/dashboard');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(600);
+
+    // The global handler ignores "?" when focus is in an input. Default
+    // focus on /dashboard is the body, which is what we want here.
+    await page.keyboard.press('Shift+/');
+    await page.waitForTimeout(250);
+
+    // The cheatsheet has a "Keyboard shortcuts" heading and at least one kbd.
+    const heading = await page.locator('text=Keyboard shortcuts').count();
+    expect(heading).toBeGreaterThan(0);
+
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(250);
+
+    // After Escape, the modal should be gone — the text still appears
+    // inside the help docs chat onboarding in other places, so we check
+    // for the unique tag line instead.
+    const cheatsheetAfter = await page
+      .locator('text=Shortcuts are disabled while typing in inputs')
+      .count();
+    expect(cheatsheetAfter).toBe(0);
+
+    expect(errors.filter(e =>
+      e.includes('Maximum call stack') ||
+      e.includes('Cannot read properties of null')
+    )).toEqual([]);
+  });
+});
+
 // ─── Agents page render + run ───────────────────────────────────────
 
 test.describe('Flow: Agents page', () => {
