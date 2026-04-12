@@ -2,7 +2,7 @@
  * AlertDialog — Platform-wide replacement for native window.alert/confirm/prompt.
  * Provides a polished, themed overlay dialog consistent with the Humanovo design system.
  */
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import { FiAlertTriangle, FiInfo, FiCheckCircle, FiAlertCircle } from 'react-icons/fi'
 
 type DialogVariant = 'info' | 'warning' | 'error' | 'success' | 'confirm' | 'prompt'
@@ -83,6 +83,24 @@ export function useAlertDialog() {
     setState(initial)
   }, [state])
 
+  // Global Escape handler — runs whenever a dialog is mounted so users
+  // can always abort without reaching for the mouse. Prompt variants
+  // already intercept Escape on the input; the capture-phase listener
+  // here covers the cancel/confirm/info/warning surfaces too.
+  useEffect(() => {
+    if (!state.open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        const isPrompt = state.variant === 'prompt'
+        const hasCancel = state.variant === 'confirm' || isPrompt
+        close(hasCancel ? (isPrompt ? null : false) : true)
+      }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [state.open, state.variant, close])
+
   const DialogComponent = useCallback(() => {
     if (!state.open) return null
     const Icon = ICONS[state.variant]
@@ -92,10 +110,35 @@ export function useAlertDialog() {
       <div
         className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in"
         onClick={() => close(hasCancel ? (isPrompt ? null : false) : true)}
+        role="presentation"
       >
         <div
           className="glass-card p-6 max-w-sm w-full mx-4 animate-in slide-in-from-bottom-4"
           onClick={e => e.stopPropagation()}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="alert-dialog-title"
+          aria-describedby="alert-dialog-message"
+          onKeyDown={e => {
+            // Focus trap: keep Tab within this dialog so the user can't
+            // drift into background controls while a modal is open.
+            if (e.key !== 'Tab') return
+            const root = e.currentTarget as HTMLElement
+            const focusables = root.querySelectorAll<HTMLElement>(
+              'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+            )
+            if (focusables.length === 0) return
+            const first = focusables[0]
+            const last = focusables[focusables.length - 1]
+            const active = document.activeElement as HTMLElement | null
+            if (e.shiftKey && active === first) {
+              e.preventDefault()
+              last.focus()
+            } else if (!e.shiftKey && active === last) {
+              e.preventDefault()
+              first.focus()
+            }
+          }}
           style={{
             background: 'var(--color-surface-solid, var(--glass-bg))',
             border: '1px solid var(--glass-border)',
@@ -111,10 +154,10 @@ export function useAlertDialog() {
               <Icon className="w-5 h-5" style={{ color: ICON_COLORS[state.variant] }} />
             </div>
             <div className="flex-1 min-w-0">
-              <h3 className="text-sm font-semibold mb-1" style={{ color: 'var(--color-text)' }}>
+              <h3 id="alert-dialog-title" className="text-sm font-semibold mb-1" style={{ color: 'var(--color-text)' }}>
                 {state.title}
               </h3>
-              <p className="text-xs leading-relaxed" style={{ color: 'var(--color-text-muted)' }}>
+              <p id="alert-dialog-message" className="text-xs leading-relaxed" style={{ color: 'var(--color-text-muted)' }}>
                 {state.message}
               </p>
               {isPrompt && (
