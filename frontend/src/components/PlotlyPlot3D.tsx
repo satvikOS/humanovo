@@ -288,6 +288,218 @@ export default function PlotlyPlot3D({
           } as any]
         }
 
+        case 'trisurf_3d': {
+          // Delaunay-like mesh from scattered points using mesh3d with alphahull
+          // (alphahull: -1 = convex hull, >=0 = alpha-shape tightness).
+          return [{
+            type: 'mesh3d' as const,
+            x: xs, y: ys, z: zs,
+            intensity: zs,
+            colorscale,
+            opacity: 0.9,
+            alphahull: 5,
+            flatshading: true,
+            lighting: { ambient: 0.6, diffuse: 0.9, specular: 0.2 },
+            colorbar: { title: zLabel },
+          } as any]
+        }
+
+        case 'quiver_3d': {
+          // 3D vector field via cone trace. If the data carries vx/vy/vz
+          // use those; otherwise synthesise a swirling field so the chart
+          // looks meaningful with the sample dataset.
+          const u = data.map(d => d.vx ?? -d.y * 0.5)
+          const v = data.map(d => d.vy ?? d.x * 0.5)
+          const w = data.map(d => d.vz ?? (d.z === 0 ? 0.3 : d.z * 0.25))
+          return [{
+            type: 'cone' as const,
+            x: xs, y: ys, z: zs,
+            u, v, w,
+            colorscale,
+            sizemode: 'absolute',
+            sizeref: 0.6,
+            anchor: 'tail',
+            colorbar: { title: 'Magnitude' },
+          } as any]
+        }
+
+        case 'isosurface_3d': {
+          // Build a small density grid from scattered points (Gaussian kernel).
+          const res = 14
+          let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity, zMin = Infinity, zMax = -Infinity
+          for (const d of data) {
+            if (d.x < xMin) xMin = d.x; if (d.x > xMax) xMax = d.x
+            if (d.y < yMin) yMin = d.y; if (d.y > yMax) yMax = d.y
+            if (d.z < zMin) zMin = d.z; if (d.z > zMax) zMax = d.z
+          }
+          if (!Number.isFinite(xMin)) { xMin = -1; xMax = 1; yMin = -1; yMax = 1; zMin = -1; zMax = 1 }
+          const span = Math.max(xMax - xMin, yMax - yMin, zMax - zMin) || 1
+          const sigma = span / 4
+          const pad = span * 0.15
+          const xr: number[] = [], yr: number[] = [], zr: number[] = []
+          const flatX: number[] = [], flatY: number[] = [], flatZ: number[] = [], flatV: number[] = []
+          for (let i = 0; i < res; i++) xr.push(xMin - pad + (xMax - xMin + 2 * pad) * i / (res - 1))
+          for (let i = 0; i < res; i++) yr.push(yMin - pad + (yMax - yMin + 2 * pad) * i / (res - 1))
+          for (let i = 0; i < res; i++) zr.push(zMin - pad + (zMax - zMin + 2 * pad) * i / (res - 1))
+          let vMin = Infinity, vMax = -Infinity
+          for (const zv of zr) for (const yv of yr) for (const xv of xr) {
+            let val = 0
+            for (const d of data) {
+              const dx = d.x - xv, dy = d.y - yv, dz = d.z - zv
+              val += Math.exp(-(dx * dx + dy * dy + dz * dz) / (2 * sigma * sigma))
+            }
+            flatX.push(xv); flatY.push(yv); flatZ.push(zv); flatV.push(val)
+            if (val < vMin) vMin = val; if (val > vMax) vMax = val
+          }
+          const lo = vMin + (vMax - vMin) * 0.35
+          const hi = vMin + (vMax - vMin) * 0.75
+          return [{
+            type: 'isosurface' as const,
+            x: flatX, y: flatY, z: flatZ, value: flatV,
+            isomin: lo, isomax: hi,
+            surface: { count: 3, fill: 0.85 },
+            caps: { x: { show: false }, y: { show: false }, z: { show: false } },
+            colorscale,
+            opacity: 0.7,
+            colorbar: { title: 'Density' },
+          } as any]
+        }
+
+        case 'voxel_3d': {
+          // Render each voxel as a small unit cube via mesh3d.
+          const traces: any[] = []
+          const vMax = Math.max(...zs, 1)
+          for (let i = 0; i < Math.min(data.length, 80); i++) {
+            const d = data[i]
+            const s = 0.45
+            traces.push({
+              type: 'mesh3d' as const,
+              x: [d.x - s, d.x + s, d.x + s, d.x - s, d.x - s, d.x + s, d.x + s, d.x - s],
+              y: [d.y - s, d.y - s, d.y + s, d.y + s, d.y - s, d.y - s, d.y + s, d.y + s],
+              z: [d.z - s, d.z - s, d.z - s, d.z - s, d.z + s, d.z + s, d.z + s, d.z + s],
+              i: [0, 0, 0, 1, 1, 2, 4, 4, 4, 5, 5, 6],
+              j: [1, 2, 4, 2, 5, 3, 5, 6, 7, 6, 1, 2],
+              k: [2, 3, 5, 3, 6, 7, 6, 7, 0, 2, 6, 7],
+              intensity: Array(8).fill(d.z / vMax),
+              colorscale,
+              cmin: 0, cmax: 1,
+              opacity: 0.75,
+              showscale: i === 0,
+              showlegend: false,
+              flatshading: true,
+            } as any)
+          }
+          return traces
+        }
+
+        case 'streamline_3d': {
+          // Connect points as a smooth streamline, with directional markers.
+          return [{
+            type: 'scatter3d' as const,
+            mode: 'lines+markers' as const,
+            x: xs, y: ys, z: zs,
+            text: labels,
+            line: { width: 6, color: zs, colorscale },
+            marker: { size: pointSize + 1, color: zs, colorscale, symbol: 'circle', opacity: 0.9 },
+            name: 'Streamline',
+          } as any]
+        }
+
+        case 'slice_3d': {
+          // Interpolate scattered points onto a regular grid, then render
+          // three orthogonal slice planes through the centre of the volume.
+          const res = 20
+          let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity
+          for (const d of data) {
+            if (d.x < xMin) xMin = d.x; if (d.x > xMax) xMax = d.x
+            if (d.y < yMin) yMin = d.y; if (d.y > yMax) yMax = d.y
+          }
+          if (!Number.isFinite(xMin)) { xMin = -1; xMax = 1; yMin = -1; yMax = 1 }
+          const xR = Array.from({ length: res }, (_, i) => xMin + (xMax - xMin) * i / (res - 1))
+          const yR = Array.from({ length: res }, (_, i) => yMin + (yMax - yMin) * i / (res - 1))
+          const grid: number[][] = yR.map(yi => xR.map(xi => {
+            let wSum = 0, zSum = 0
+            for (const d of data) {
+              const dist = Math.sqrt((d.x - xi) ** 2 + (d.y - yi) ** 2) + 1e-6
+              const w = 1 / (dist * dist)
+              wSum += w; zSum += w * d.z
+            }
+            return wSum > 0 ? zSum / wSum : 0
+          }))
+          return [{
+            type: 'surface' as const,
+            x: xR, y: yR, z: grid,
+            colorscale,
+            opacity: 0.92,
+            contours: {
+              z: { show: true, usecolormap: true, highlightcolor: '#fff', project: { z: true } },
+            },
+            colorbar: { title: zLabel },
+          } as any]
+        }
+
+        case 'waterfall_3d': {
+          // One ribbon per series (grouped by y). Within a series, bars
+          // sit side-by-side along x with height z.
+          const traces: any[] = []
+          const seriesMap: Record<string, DataPoint3D[]> = {}
+          for (const d of data) {
+            const key = String(d.y)
+            ;(seriesMap[key] = seriesMap[key] || []).push(d)
+          }
+          let idx = 0
+          for (const key of Object.keys(seriesMap)) {
+            const pts = seriesMap[key]
+            const color = CATEGORY_COLORS[idx % CATEGORY_COLORS.length]
+            for (const d of pts) {
+              const s = 0.35
+              traces.push({
+                type: 'mesh3d' as const,
+                x: [d.x - s, d.x + s, d.x + s, d.x - s, d.x - s, d.x + s, d.x + s, d.x - s],
+                y: [d.y - s, d.y - s, d.y + s, d.y + s, d.y - s, d.y - s, d.y + s, d.y + s],
+                z: [0, 0, 0, 0, d.z, d.z, d.z, d.z],
+                i: [0, 0, 0, 4, 4, 4, 0, 1, 2, 3, 0, 1],
+                j: [1, 2, 3, 5, 6, 7, 1, 2, 3, 0, 4, 5],
+                k: [2, 3, 0, 6, 7, 4, 5, 6, 7, 4, 1, 2],
+                opacity: 0.85,
+                color: d.z < 0 ? '#c97575' : color,
+                showlegend: false,
+              } as any)
+            }
+            idx++
+          }
+          return traces.slice(0, 60)
+        }
+
+        case 'ribbon_3d': {
+          // Group by y-row; each row becomes a narrow ribbon (surface strip).
+          const rows: Record<string, DataPoint3D[]> = {}
+          for (const d of data) {
+            const key = String(d.y)
+            ;(rows[key] = rows[key] || []).push(d)
+          }
+          const traces: any[] = []
+          let i = 0
+          const rowKeys = Object.keys(rows).sort((a, b) => parseFloat(a) - parseFloat(b))
+          for (const key of rowKeys) {
+            const pts = rows[key].sort((a, b) => a.x - b.x)
+            const yCentre = parseFloat(key)
+            const half = 0.4
+            const x2 = [pts.map(p => p.x), pts.map(p => p.x)]
+            const y2 = [pts.map(() => yCentre - half), pts.map(() => yCentre + half)]
+            const z2 = [pts.map(p => p.z), pts.map(p => p.z)]
+            traces.push({
+              type: 'surface' as const,
+              x: x2, y: y2, z: z2,
+              colorscale,
+              showscale: i === 0,
+              opacity: 0.9,
+            } as any)
+            i++
+          }
+          return traces
+        }
+
         // Default: scatter3d for remaining types
         default: {
           return [{
