@@ -9,6 +9,7 @@
 //   • Persistence via localStorage
 // ═══════════════════════════════════════════════════════════════════════
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   FiDatabase, FiUpload, FiDownload, FiSearch, FiTrash2, FiPlus,
   FiBarChart2, FiList, FiGrid, FiX, FiPlay,
@@ -43,6 +44,7 @@ interface Dataset {
 }
 
 type ViewMode = 'overview' | 'table' | 'variables' | 'profile' | 'etl'
+const VALID_VIEW_MODES = new Set<ViewMode>(['overview', 'table', 'variables', 'profile', 'etl'])
 
 const STORAGE_KEY = 'data-manager-datasets'
 
@@ -312,6 +314,14 @@ const SAMPLE_DATASETS: Omit<Dataset, 'id' | 'createdAt' | 'updatedAt'>[] = [
 /* ═══ Main Component ═══════════════════════════════════════════════════ */
 export default function DataManager() {
   const { showError, showConfirm, AlertDialog } = useAlertDialog()
+  // Deep-link support: `?id=…` preselects a dataset and `?view=…`
+  // preselects a view-mode tab. Invalid values silently fall back to
+  // the defaults; the query is cleaned off the URL after mount so a
+  // soft reload doesn't stomp navigation.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const qDatasetId = searchParams.get('id') || ''
+  const qViewRaw = (searchParams.get('view') || '').trim().toLowerCase() as ViewMode
+  const initialView: ViewMode = VALID_VIEW_MODES.has(qViewRaw) ? qViewRaw : 'overview'
   const [datasets, setDatasets] = useState<Dataset[]>(() => {
     const stored = loadDatasets()
     if (stored.length === 0) {
@@ -327,8 +337,19 @@ export default function DataManager() {
     }
     return stored
   })
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [view, setView] = useState<ViewMode>('overview')
+  const [selectedId, setSelectedId] = useState<string | null>(qDatasetId || null)
+  const [view, setView] = useState<ViewMode>(initialView)
+
+  // Strip deep-link query params after the initial mount.
+  useEffect(() => {
+    if (searchParams.has('id') || searchParams.has('view')) {
+      const next = new URLSearchParams(searchParams)
+      next.delete('id')
+      next.delete('view')
+      setSearchParams(next, { replace: true })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [search, setSearch] = useState('')
   const [showAddModal, setShowAddModal] = useState(false)
   const [newName, setNewName] = useState('')
