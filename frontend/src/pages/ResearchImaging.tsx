@@ -474,6 +474,12 @@ export default function ResearchImaging() {
   const studiesRef = useRef<Study[]>(studies)
   const segMaskRef = useRef<Uint8Array | null>(segMask)
   const renderingRef = useRef(false)
+  // When a render is already running and new props arrive (e.g. the user
+  // clicked another filter), flag the render as stale so we re-run exactly
+  // once afterwards instead of dropping the update or stacking N renders.
+  const renderDirtyRef = useRef(false)
+  const renderRafRef = useRef<number | null>(null)
+  const [filterBusy, setFilterBusy] = useState(false)
 
   const selected = useMemo(() => studies.find(s => s.id === selectedId) || null, [studies, selectedId])
 
@@ -677,9 +683,10 @@ export default function ResearchImaging() {
 
   const renderCanvas = useCallback(() => {
     // Re-entrancy guard: if a previous render is still in flight (e.g. a
-    // synchronous state update triggered during canvas draw) bail out so
-    // we don't recurse the call stack.
-    if (renderingRef.current) return
+    // synchronous state update triggered during canvas draw) mark the
+    // render as dirty so we re-run exactly once when the current pass
+    // finishes, rather than dropping the update or stacking N renders.
+    if (renderingRef.current) { renderDirtyRef.current = true; return }
     const canvas = canvasRef.current
     const img = imgCacheRef.current
     if (!canvas || !img || !selected) return
@@ -857,8 +864,25 @@ export default function ResearchImaging() {
       console.warn('[ResearchImaging] renderCanvas failed:', err)
     } finally {
       renderingRef.current = false
+      // If state changed during the render (e.g. user clicked another filter
+      // while Bilateral was crunching), schedule one follow-up pass on the
+      // next animation frame so the browser can paint the intermediate UI.
+      if (renderDirtyRef.current) {
+        renderDirtyRef.current = false
+        if (renderRafRef.current != null) cancelAnimationFrame(renderRafRef.current)
+        renderRafRef.current = requestAnimationFrame(() => {
+          renderRafRef.current = null
+          renderCanvas()
+        })
+      }
     }
   }, [selected, zoom, pan, drawing, tool, annotColor, regShowOverlay, regRefId, regTransform, regOverlayOpacity])
+
+  // Cancel any pending re-render when the component unmounts so we never
+  // schedule work against a torn-down canvas.
+  useEffect(() => () => {
+    if (renderRafRef.current != null) cancelAnimationFrame(renderRafRef.current)
+  }, [])
 
   // Re-render when zoom/pan/window/filter/annotations or image load changes.
   // Also re-render on segMask generation so brush strokes paint live. The
@@ -1212,7 +1236,7 @@ export default function ResearchImaging() {
       const dataUrl = canvas.toDataURL('image/png')
       const base64 = dataUrl.split(',')[1]
 
-      const response = await fetch('/api/v1/imaging/analyze', {
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || ''}/api/v1/imaging/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1571,8 +1595,10 @@ export default function ResearchImaging() {
       {/* ── Right: Tool Panel ── */}
       {selected && (
         <div className="w-72 flex flex-col border-l flex-shrink-0" style={{ borderColor: 'var(--glass-border)', background: 'var(--glass-bg)' }}>
-          {/* Panel tabs */}
-          <div className="flex gap-1 p-1.5" style={{ borderBottom: '1px solid var(--glass-border)' }}>
+          {/* Panel tabs — 5 tabs × 288px sidebar is tight; use min-w:0 + overflow
+              so the last tab can't push beyond the container and create the
+              horizontal scrollbar users were seeing on the 'Marks' tab. */}
+          <div className="flex gap-0.5 p-1 overflow-hidden" style={{ borderBottom: '1px solid var(--glass-border)' }}>
             {([
               { id: 'tools' as const, label: 'Tools', icon: FiSliders },
               { id: 'analysis' as const, label: 'Analysis', icon: FiBarChart2 },
@@ -1586,18 +1612,21 @@ export default function ResearchImaging() {
                 <button
                   key={t.id}
                   onClick={() => setShowPanel(t.id)}
-                  className="flex-1 flex items-center justify-center gap-1 text-[10px] font-medium transition-all active:scale-95"
+                  title={t.label}
+                  className="flex items-center justify-center gap-1 text-[10px] font-medium transition-all active:scale-95"
                   style={{
-                    padding: '5px 4px',
-                    borderRadius: 10,
+                    flex: '1 1 0',
+                    minWidth: 0,
+                    padding: '5px 2px',
+                    borderRadius: 8,
                     background: active ? 'rgba(91, 141, 184, 0.2)' : 'transparent',
                     border: `1px solid ${active ? 'rgba(91, 141, 184, 0.3)' : 'transparent'}`,
                     color: active ? '#5B8DB8' : 'var(--color-text-muted)',
                     boxShadow: active ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
                   }}
                 >
-                  <Icon className="text-[10px]" />
-                  {t.label}
+                  <Icon className="text-[10px] flex-shrink-0" />
+                  <span className="truncate">{t.label}</span>
                 </button>
               )
             })}
@@ -1701,13 +1730,30 @@ export default function ResearchImaging() {
                             return (
                               <button
                                 key={f.id}
-                                onClick={() => updateStudy({ ...selected, filter: f.id })}
+                                onClick={() => {
+                                  // Defer the (potentially expensive) filter
+                                  // apply to the next frame so the click
+                                  // animation paints immediately — without
+                                  // this, rapid clicks make the sidebar feel
+                                  // completely frozen.
+                                  if (active || filterBusy) return
+                                  setFilterBusy(true)
+                                  requestAnimationFrame(() => {
+                                    updateStudy({ ...selected, filter: f.id })
+                                    // Release the click lock after the render
+                                    // pipeline has had a chance to start.
+                                    setTimeout(() => setFilterBusy(false), 120)
+                                  })
+                                }}
+                                disabled={filterBusy && !active}
                                 className="px-2 py-1 text-[10px] rounded-lg transition-all active:scale-95"
                                 style={{
                                   background: active ? 'rgba(91, 141, 184, 0.25)' : 'var(--glass-bg)',
                                   color: active ? '#fff' : 'var(--color-text-muted)',
                                   border: `1px solid ${active ? 'rgba(91, 141, 184, 0.35)' : 'var(--glass-border)'}`,
                                   boxShadow: active ? '0 1px 3px rgba(91, 141, 184, 0.15)' : 'none',
+                                  cursor: (filterBusy && !active) ? 'wait' : 'pointer',
+                                  opacity: (filterBusy && !active) ? 0.65 : 1,
                                 }}
                               >
                                 {f.label}
