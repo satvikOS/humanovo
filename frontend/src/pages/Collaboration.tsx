@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   FiUsers, FiMessageSquare, FiShare2, FiBell, FiShield,
   FiSend, FiCheckCircle,
@@ -15,8 +16,30 @@ interface AuditEntry { id: string; action: string; entity_type: string; user_nam
 
 const API = '/api/v1/collaboration'
 
+// Enum-guard so `?tab=bogus` quietly falls back to "team" instead of
+// pushing invalid state into the TabId-typed selector.
+const VALID_COLLAB_TABS = new Set<TabId>(['team', 'comments', 'shares', 'notifications', 'audit'])
+
 export default function Collaboration() {
-  const [tab, setTab] = useState<TabId>('team')
+  // Deep-link `?tab=<team|comments|shares|notifications|audit>` so the
+  // dashboard / in-app notifications can jump straight to the
+  // relevant tab. The param is consumed on mount so the URL stays
+  // canonical for sharing.
+  const [searchParams] = useSearchParams()
+  const [tab, setTab] = useState<TabId>(() => {
+    const qt = (searchParams.get('tab') || '') as TabId
+    return VALID_COLLAB_TABS.has(qt) ? qt : 'team'
+  })
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search)
+    if (sp.has('tab')) {
+      sp.delete('tab')
+      const qs = sp.toString()
+      const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash
+      window.history.replaceState(window.history.state, '', newUrl)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [team, setTeam] = useState<TeamMember[]>([])
   const [comments, setComments] = useState<Comment[]>([])
   const [shares, setShares] = useState<Share[]>([])

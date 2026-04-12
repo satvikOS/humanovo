@@ -5,6 +5,7 @@
 // All processing client-side via Canvas API — no backend required.
 // ═══════════════════════════════════════════════════════════════════════
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   FiImage, FiUpload, FiDownload, FiTrash2, FiPlus, FiZoomIn, FiZoomOut,
   FiSquare, FiCircle, FiMaximize2, FiCpu, FiSliders, FiFilter,
@@ -440,12 +441,43 @@ function computeImageStats(data: Uint8ClampedArray): { mean: number; std: number
 }
 
 /* ═══ Main Component ═══════════════════════════════════════════════════ */
+// Enum-guard set matches the `Modality` type so `?modality=bogus`
+// silently falls back to "all".
+const VALID_MODALITIES_ANY = new Set<string>(['all', 'CT', 'MRI', 'X-Ray', 'Ultrasound', 'PET', 'Microscopy', 'Fundus', 'OCT', 'Mammography', 'Endoscopy'])
+
 export default function ResearchImaging() {
   const { showConfirm, AlertDialog } = useAlertDialog()
+  // Deep-link support: `?id=<studyId>` selects a study on mount,
+  // `?q=<term>` seeds the search input, and `?modality=` seeds the
+  // modality filter (enum-guarded). All three are stripped from the
+  // URL after mount so shared links stay canonical.
+  const [searchParams] = useSearchParams()
   const [studies, setStudies] = useState<Study[]>(() => loadStudies())
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [search, setSearch] = useState('')
-  const [filterModality, setFilterModality] = useState<Modality | 'all'>('all')
+  const [selectedId, setSelectedId] = useState<string | null>(() => {
+    const qId = searchParams.get('id')
+    if (!qId) return null
+    // Only apply if the study actually exists locally.
+    const local = loadStudies()
+    return local.find(s => s.id === qId) ? qId : null
+  })
+  const [search, setSearch] = useState(() => searchParams.get('q') || '')
+  const [filterModality, setFilterModality] = useState<Modality | 'all'>(() => {
+    const qm = searchParams.get('modality') || 'all'
+    return VALID_MODALITIES_ANY.has(qm) ? (qm as Modality | 'all') : 'all'
+  })
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search)
+    let dirty = false
+    for (const k of ['id', 'q', 'modality']) {
+      if (sp.has(k)) { sp.delete(k); dirty = true }
+    }
+    if (dirty) {
+      const qs = sp.toString()
+      const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash
+      window.history.replaceState(window.history.state, '', newUrl)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [tool, setTool] = useState<Tool>('pan')
   const [zoom, setZoom] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })

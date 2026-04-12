@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { FiShield, FiFileText, FiCheckSquare, FiInbox } from 'react-icons/fi'
 
 type TabId = 'irb' | 'agreements' | 'consent' | 'checklists'
@@ -10,8 +11,29 @@ interface Checklist { id: string; framework: string; items: { name: string; comp
 
 const API = '/api/v1/regulatory'
 
+// Enum-guard so `?tab=bogus` silently falls back to "irb" instead of
+// contaminating TabId-typed state.
+const VALID_REG_TABS = new Set<TabId>(['irb', 'agreements', 'consent', 'checklists'])
+
 export default function RegulatoryCompliance() {
-  const [tab, setTab] = useState<TabId>('irb')
+  // Deep-link `?tab=<irb|agreements|consent|checklists>` so outside
+  // pages can link straight into the relevant compliance view. The
+  // param is consumed on mount for canonical shareable URLs.
+  const [searchParams] = useSearchParams()
+  const [tab, setTab] = useState<TabId>(() => {
+    const qt = (searchParams.get('tab') || '') as TabId
+    return VALID_REG_TABS.has(qt) ? qt : 'irb'
+  })
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search)
+    if (sp.has('tab')) {
+      sp.delete('tab')
+      const qs = sp.toString()
+      const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash
+      window.history.replaceState(window.history.state, '', newUrl)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [irbs, setIrbs] = useState<IRBSubmission[]>([])
   const [agreements, setAgreements] = useState<Agreement[]>([])
   const [consents, setConsents] = useState<ConsentForm[]>([])

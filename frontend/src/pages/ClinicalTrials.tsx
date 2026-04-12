@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   FiClipboard, FiUsers, FiFileText, FiDollarSign,
   FiPlus, FiTrash2,
@@ -23,18 +24,67 @@ const API = '/api/v1/clinical-trials'
 // monochrome since they're all "pre-active" intermediate states.
 const STATUS_COLORS: Record<string, string> = { planning: 'var(--color-text-muted)', recruiting: 'var(--color-text)', active: 'var(--color-success)', completed: 'var(--color-success)', suspended: 'var(--color-error)' }
 
+// Enum-guard so `?view=bogus` silently falls back to "overview"
+// instead of contaminating ViewTab-typed state.
+const VALID_TRIAL_VIEWS = new Set<ViewTab>(['overview', 'subjects', 'visits', 'documents', 'budget'])
+
 export default function ClinicalTrials() {
+  // Deep-link support: `?add=1` opens the new-trial dialog,
+  // `?view=<overview|subjects|visits|documents|budget>` seeds the
+  // detail-pane sub-tab, and `?id=<trialId>` auto-selects (and
+  // fetches subject/document detail for) that trial once the list
+  // resolves from the backend. All params are stripped on mount.
+  const [searchParams] = useSearchParams()
   const [trials, setTrials] = useState<Trial[]>([])
   const [selected, setSelected] = useState<Trial | null>(null)
   const [subjects, setSubjects] = useState<Subject[]>([])
   const [documents, setDocuments] = useState<Document[]>([])
-  const [viewTab, setViewTab] = useState<ViewTab>('overview')
-  const [showAdd, setShowAdd] = useState(false)
+  const [viewTab, setViewTab] = useState<ViewTab>(() => {
+    const qv = (searchParams.get('view') || '') as ViewTab
+    return VALID_TRIAL_VIEWS.has(qv) ? qv : 'overview'
+  })
+  const [showAdd, setShowAdd] = useState(() => searchParams.get('add') === '1')
   const [form, setForm] = useState({ protocol_number: '', title: '', phase: 'Phase I', pi: '', target_enrollment: 0 })
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
   const load = async () => { try { const r = await fetch(API); if (r.ok) setTrials((await r.json()).items || []) } catch { /* network error */ } }
   useEffect(() => { load() }, [])
+
+  // Consume & strip known deep-link params after first mount; defer
+  // the `id` selection to a separate effect that fires once `trials`
+  // resolves.
+  const [pendingTrialId] = useState(() => searchParams.get('id') || '')
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search)
+    let dirty = false
+    for (const k of ['add', 'view', 'id']) {
+      if (sp.has(k)) { sp.delete(k); dirty = true }
+    }
+    if (dirty) {
+      const qs = sp.toString()
+      const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash
+      window.history.replaceState(window.history.state, '', newUrl)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  useEffect(() => {
+    if (!pendingTrialId || selected) return
+    const match = trials.find(t => t.id === pendingTrialId)
+    if (match) {
+      // Mirror selectTrial but preserve the deep-linked viewTab.
+      setSelected(match)
+      ;(async () => {
+        try {
+          const [sR, dR] = await Promise.all([
+            fetch(`${API}/${match.id}/subjects`),
+            fetch(`${API}/${match.id}/documents`),
+          ])
+          if (sR.ok) setSubjects((await sR.json()).items || [])
+          if (dR.ok) setDocuments((await dR.json()).items || [])
+        } catch { /* ignore */ }
+      })()
+    }
+  }, [trials, pendingTrialId, selected])
 
   const selectTrial = async (t: Trial) => {
     setSelected(t); setViewTab('overview')
