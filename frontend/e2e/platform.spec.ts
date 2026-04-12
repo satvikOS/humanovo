@@ -182,6 +182,29 @@ test.describe('Research Imaging', () => {
     await page.waitForTimeout(1000);
     expect(nativeDialogCalled).toBe(false);
   });
+
+  test('keyboard shortcuts swap tools without crash', async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    await page.goto('/imaging');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(1200);
+
+    // Cycle through the primary viewer shortcuts. We don't require a
+    // loaded study — we just want to make sure the keydown handler
+    // tolerates an empty state and never throws.
+    for (const key of ['p', 'r', 'c', 'l', 'm', 'u', '+', '-', '0', 'f']) {
+      await page.keyboard.press(key);
+      await page.waitForTimeout(30);
+    }
+
+    expect(errors.filter(e =>
+      e.includes('Maximum call stack') ||
+      e.includes('Cannot read properties of null') ||
+      e.includes('is not a function')
+    )).toEqual([]);
+  });
 });
 
 // ─── Data Visualization Tests ────────────────────────────────────────

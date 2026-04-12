@@ -509,6 +509,53 @@ export default function ResearchImaging() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId])
 
+  // Viewer keyboard shortcuts — radiologist-style single-key tool swap
+  // plus zoom / reset / study-nav. Swallowed while the user is typing
+  // into a text input so it never fights with search / annotation labels.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName
+      const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' ||
+        (e.target as HTMLElement | null)?.isContentEditable
+      if (typing || e.metaKey || e.ctrlKey || e.altKey) return
+
+      const key = e.key
+      // Tool swap
+      const toolMap: Record<string, Tool> = {
+        p: 'pan', r: 'rect', c: 'circle', l: 'line',
+        '.': 'point', m: 'measure', u: 'ruler',
+        b: 'brush', x: 'eraser', w: 'window',
+      }
+      if (toolMap[key]) { e.preventDefault(); setTool(toolMap[key]); return }
+
+      // Zoom / reset
+      if (key === '+' || key === '=') { e.preventDefault(); setZoom(z => Math.min(8, z * 1.2)); return }
+      if (key === '-' || key === '_') { e.preventDefault(); setZoom(z => Math.max(0.1, z / 1.2)); return }
+      if (key === '0') { e.preventDefault(); setZoom(1); setPan({ x: 0, y: 0 }); return }
+
+      // Layout toggle
+      if (key === 'f' || key === 'F') {
+        e.preventDefault()
+        setViewLayout(v => v === 'single' ? 'quad' : 'single')
+        return
+      }
+
+      // Study navigation within the filtered list
+      if (key === '[' || key === ']') {
+        if (filteredStudies.length === 0) return
+        e.preventDefault()
+        const curIdx = filteredStudies.findIndex(s => s.id === selectedId)
+        const delta = key === ']' ? 1 : -1
+        const nextIdx = curIdx < 0
+          ? 0
+          : (curIdx + delta + filteredStudies.length) % filteredStudies.length
+        setSelectedId(filteredStudies[nextIdx].id)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [filteredStudies, selectedId])
+
   // Render orthogonal views (coronal / sagittal) in quad mode
   useEffect(() => {
     if (viewLayout !== 'quad') return
@@ -1176,14 +1223,16 @@ export default function ResearchImaging() {
     setAiLoading(false)
   }
 
-  const tools: { id: Tool; icon: typeof FiSquare; label: string }[] = [
-    { id: 'pan', icon: FiMaximize2, label: 'Pan' },
-    { id: 'rect', icon: FiSquare, label: 'Rectangle' },
-    { id: 'circle', icon: FiCircle, label: 'Circle' },
-    { id: 'line', icon: FiCrosshair, label: 'Line' },
-    { id: 'point', icon: FiTarget, label: 'Point' },
-    { id: 'measure', icon: FiActivity, label: 'Measure' },
-    { id: 'ruler', icon: FiSliders, label: 'Ruler' },
+  // `key` surfaces the single-key shortcut in the button title so users
+  // discover it without hunting through a help dialog.
+  const tools: { id: Tool; icon: typeof FiSquare; label: string; key: string }[] = [
+    { id: 'pan', icon: FiMaximize2, label: 'Pan', key: 'P' },
+    { id: 'rect', icon: FiSquare, label: 'Rectangle', key: 'R' },
+    { id: 'circle', icon: FiCircle, label: 'Circle', key: 'C' },
+    { id: 'line', icon: FiCrosshair, label: 'Line', key: 'L' },
+    { id: 'point', icon: FiTarget, label: 'Point', key: '.' },
+    { id: 'measure', icon: FiActivity, label: 'Measure', key: 'M' },
+    { id: 'ruler', icon: FiSliders, label: 'Ruler', key: 'U' },
   ]
 
   const colors = ['#ef4444', '#f59e0b', '#10b981', '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899']
@@ -1196,7 +1245,7 @@ export default function ResearchImaging() {
         <div className="p-3 border-b" style={{ borderColor: 'var(--glass-border)' }}>
           <div className="flex items-center gap-2 mb-3">
             <FiImage className="text-lg" style={{ color: 'var(--color-text)' }} />
-            <h2 className="text-sm font-semibold">Studies</h2>
+            <h2 className="text-sm font-semibold" title="Use [ and ] to step between studies">Studies</h2>
             <button
               onClick={() => fileInputRef.current?.click()}
               className="ml-auto p-1.5 rounded hover:bg-white/5 transition-all"
@@ -1333,7 +1382,7 @@ export default function ResearchImaging() {
                         color: active ? '#fff' : 'var(--color-text-muted)',
                         boxShadow: active ? '0 1px 4px rgba(91, 141, 184, 0.2)' : 'none',
                       }}
-                      title={t.label}
+                      title={`${t.label} (${t.key})`}
                     >
                       <Icon className="text-xs" />
                     </button>
@@ -1341,10 +1390,10 @@ export default function ResearchImaging() {
                 })}
               </div>
               <div className="ml-auto flex items-center gap-1">
-                <button onClick={() => setZoom(z => Math.max(0.2, z - 0.2))} className="btn-icon btn-ghost p-1.5 transition-all active:scale-95" style={{ borderRadius: 8 }}><FiZoomOut className="text-xs" /></button>
+                <button onClick={() => setZoom(z => Math.max(0.2, z - 0.2))} className="btn-icon btn-ghost p-1.5 transition-all active:scale-95" title="Zoom out (-)" style={{ borderRadius: 8 }}><FiZoomOut className="text-xs" /></button>
                 <span className="text-[10px] px-1.5 font-mono" style={{ color: 'var(--color-text-muted)' }}>{(zoom * 100).toFixed(0)}%</span>
-                <button onClick={() => setZoom(z => Math.min(8, z + 0.2))} className="btn-icon btn-ghost p-1.5 transition-all active:scale-95" style={{ borderRadius: 8 }}><FiZoomIn className="text-xs" /></button>
-                <button onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }} className="btn-icon btn-ghost p-1.5 transition-all active:scale-95" title="Reset" style={{ borderRadius: 8 }}><FiRotateCw className="text-xs" /></button>
+                <button onClick={() => setZoom(z => Math.min(8, z + 0.2))} className="btn-icon btn-ghost p-1.5 transition-all active:scale-95" title="Zoom in (+)" style={{ borderRadius: 8 }}><FiZoomIn className="text-xs" /></button>
+                <button onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }} className="btn-icon btn-ghost p-1.5 transition-all active:scale-95" title="Reset view (0)" style={{ borderRadius: 8 }}><FiRotateCw className="text-xs" /></button>
                 <div style={{ width: 1, height: 16, background: 'var(--glass-border)', margin: '0 2px' }} />
                 <button
                   onClick={() => setViewLayout(v => v === 'single' ? 'quad' : 'single')}
@@ -1355,7 +1404,7 @@ export default function ResearchImaging() {
                     border: `1px solid ${viewLayout === 'quad' ? 'rgba(91, 141, 184, 0.25)' : 'var(--glass-border)'}`,
                     color: viewLayout === 'quad' ? '#5B8DB8' : 'var(--color-text-muted)',
                   }}
-                  title={viewLayout === 'quad' ? 'Single view' : 'Multi-view (Axial/Coronal/Sagittal)'}
+                  title={viewLayout === 'quad' ? 'Single view (F)' : 'Multi-view — Axial/Coronal/Sagittal (F)'}
                 >
                   <FiMaximize2 className="text-xs" />
                 </button>

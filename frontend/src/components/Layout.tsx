@@ -1542,6 +1542,23 @@ function KeyboardShortcutsHelp({ isOpen, onClose }: { isOpen: boolean; onClose: 
         { keys: ['↑', '↓'], label: 'Navigate history in the REPL' },
       ],
     },
+    {
+      title: 'Research Imaging',
+      rows: [
+        { keys: ['P'], label: 'Pan' },
+        { keys: ['R'], label: 'Rectangle' },
+        { keys: ['C'], label: 'Circle' },
+        { keys: ['L'], label: 'Line' },
+        { keys: ['M'], label: 'Measure' },
+        { keys: ['U'], label: 'Ruler' },
+        { keys: ['B'], label: 'Brush (segmentation)' },
+        { keys: ['X'], label: 'Eraser' },
+        { keys: ['+', '-'], label: 'Zoom in / out' },
+        { keys: ['0'], label: 'Reset zoom & pan' },
+        { keys: ['F'], label: 'Toggle multi-planar view' },
+        { keys: ['[', ']'], label: 'Previous / next study' },
+      ],
+    },
   ]
   return (
     <div
