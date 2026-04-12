@@ -1,4 +1,5 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   FiActivity, FiPlay, FiUpload,
 } from 'react-icons/fi'
@@ -208,8 +209,29 @@ export function _computeBiomarkerDiscovery(data: { gene: string; group1_values: 
   }
 }
 
+// Enum-guard so `?tab=bogus` quietly falls back to "pathway" instead
+// of contaminating TabId-typed state.
+const VALID_GENOMICS_TABS = new Set<TabId>(['pathway', 'gsea', 'variants', 'biomarkers'])
+
 export default function GenomicsAnalysis() {
-  const [tab, setTab] = useState<TabId>('pathway')
+  // Deep-link `?tab=<pathway|gsea|variants|biomarkers>` so dashboards
+  // can jump straight into an analysis. The param is consumed on
+  // mount so the URL stays canonical.
+  const [searchParams] = useSearchParams()
+  const [tab, setTab] = useState<TabId>(() => {
+    const qt = (searchParams.get('tab') || '') as TabId
+    return VALID_GENOMICS_TABS.has(qt) ? qt : 'pathway'
+  })
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search)
+    if (sp.has('tab')) {
+      sp.delete('tab')
+      const qs = sp.toString()
+      const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash
+      window.history.replaceState(window.history.state, '', newUrl)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<any>(null)
   const [error, setError] = useState('')
