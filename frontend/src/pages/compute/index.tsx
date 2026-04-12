@@ -40,13 +40,17 @@ export default function ComputeLab() {
 
   // Keep the URL query in sync so the selected tab is shareable and
   // survives reload without hijacking the user's back/forward stack.
+  // We compare what's *literally* in the URL against what the current
+  // mode wants — this normalizes aliases (?tab=mc → ?tab=montecarlo)
+  // and strips ?tab=workstation (workstation is the default, so no
+  // param should be visible) on initial mount.
   useEffect(() => {
-    const current = (searchParams.get('tab') || '').toLowerCase()
-    const normalized = TAB_ALIASES[current] ?? ''
-    if (normalized !== mode) {
+    const currentRaw = (searchParams.get('tab') || '').toLowerCase()
+    const want = mode === 'workstation' ? '' : mode
+    if (currentRaw !== want) {
       const next = new URLSearchParams(searchParams)
-      if (mode === 'workstation') next.delete('tab')
-      else next.set('tab', mode)
+      if (want) next.set('tab', want)
+      else next.delete('tab')
       setSearchParams(next, { replace: true })
     }
   }, [mode]) // eslint-disable-line react-hooks/exhaustive-deps
