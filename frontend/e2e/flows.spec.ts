@@ -110,6 +110,61 @@ test.describe('Flow: Compute Lab script', () => {
     )).toEqual([]);
   });
 
+  test('new builtins (argmax, clip, softmax, randsample) run without error', async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    await page.goto('/compute-lab');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(1800);
+
+    const skipBtn = page.locator('button:has-text("Skip"), button:has-text("Dismiss"), button:has-text("Start")').first();
+    if (await skipBtn.count() > 0 && await skipBtn.isVisible()) {
+      await skipBtn.click().catch(() => {});
+      await page.waitForTimeout(300);
+    }
+
+    const editor = page.locator('textarea').first();
+    if (await editor.count() === 0) {
+      // No editor → just assert no runtime crash and bail.
+      expect(errors.filter(e => e.includes('Maximum call stack'))).toEqual([]);
+      return;
+    }
+
+    // Exercise every new builtin in one script so a regression in any of
+    // them surfaces as a RuntimeError / exception, caught below.
+    await editor.click({ force: true });
+    await editor.fill([
+      'v = [3, 1, 4, 1, 5, 9, 2, 6]',
+      'disp(argmax(v))',          // → 6 (1-based index of the 9)
+      'disp(argmin(v))',          // → 2 (first occurrence of 1)
+      'disp(clip(v, 2, 5))',      // → [3 2 4 2 5 5 2 5]
+      'disp(sigmoid(0))',         // → 0.5
+      'p = softmax([1, 1, 1])',   // → uniform [1/3 1/3 1/3]
+      'disp(sum(p))',             // → 1
+      's = randsample(v, 3)',     // without-replacement
+      'disp(length(s))',          // → 3
+      'disp(length(shuffle(v)))', // → 8
+    ].join('\n'));
+    await page.waitForTimeout(200);
+
+    const runBtn = page.locator('button:has-text("Run"), button[title*="Run" i], button[aria-label*="Run" i]').first();
+    if (await runBtn.count() > 0) {
+      await runBtn.click({ force: true });
+      await page.waitForTimeout(1500);
+    }
+
+    // Engine-level errors surface as on-screen text starting with "Error".
+    // If any of the new builtins is broken, the panel will include one.
+    const panelText = await page.locator('body').innerText();
+    expect(panelText).not.toMatch(/RuntimeError:.*(argmax|argmin|clip|sigmoid|softmax|randsample|shuffle)/);
+    expect(errors.filter(e =>
+      e.includes('Maximum call stack') ||
+      e.includes('Cannot read properties of null') ||
+      e.includes('is not a function')
+    )).toEqual([]);
+  });
+
   test('imaging tab renders without crash', async ({ page }) => {
     const errors: string[] = [];
     page.on('pageerror', err => errors.push(err.message));
