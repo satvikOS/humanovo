@@ -33,6 +33,7 @@ import { BUILTIN_CATEGORIES, BUILTIN_DOCS, type BuiltinDoc } from './builtinDocs
 import { ALL_PRESETS, TOOLBOX_CATEGORIES } from './presets'
 import type { Preset } from './types'
 import ImagingPanel, { IMAGING_EVENT } from './ImagingPanel'
+import { getPlotBlob } from '../../utils/plotExport'
 
 /* ── Persistence keys ────────────────────────────────────────────────── */
 const SCRIPT_KEY = 'compute-workstation-script'          // legacy single-script key
@@ -1805,116 +1806,16 @@ export default function Workstation() {
     setEntries(prev => [...prev, mkEntry({ kind: 'output', text: '— workspace cleared —' })])
   }
 
-  // Resolve the currently displayed plot into a raster image. Supports
-  // both Recharts / inline SVG plots and Plotly plots (which may render
-  // WebGL or canvas — a plain svg.cloneNode serialization captures only
-  // the colorbar strip for those, leaving the main plot area black).
+  // Resolve the currently displayed plot into a raster image via the
+  // shared `plotExport` utility, which handles both Recharts / inline
+  // SVG plots and Plotly (WebGL / canvas) plots uniformly.
   //
-  // Returns a Blob when successful, or null if no plot is on screen.
-  // `format` is 'png' or 'svg'; for Plotly we defer to Plotly.toImage,
-  // which can export either faithfully.
+  // Exports default to a **fully transparent** background so figures
+  // drop into papers and slide decks without the app chrome bleeding
+  // through. Pass `transparent: false` (via the util directly) if a
+  // solid bg is ever needed here.
   const getCurrentPlotBlob = useCallback(async (format: 'png' | 'svg'): Promise<Blob | null> => {
-    const host = plotBodyRef.current
-    if (!host) return null
-    const isDark = document.documentElement.classList.contains('dark')
-    const bgColor = isDark ? '#0a0a0a' : '#ffffff'
-
-    // ── Plotly (3D surface, wireframe, contour, scatter3d, heatmap) ──
-    // The Plotly React wrapper adds the `.js-plotly-plot` class on its
-    // root div and Plotly.toImage operates on that element. It internally
-    // reads from the WebGL/canvas layers so we get a complete render
-    // (not just the SVG overlay with axes + colorbar).
-    const plotlyNode = host.querySelector<HTMLDivElement>('.js-plotly-plot')
-    if (plotlyNode) {
-      const rect = plotlyNode.getBoundingClientRect()
-      const w = Math.max(200, Math.round(rect.width))
-      const h = Math.max(150, Math.round(rect.height))
-      try {
-        const dataUrl = await Plotly.toImage(plotlyNode as any, {
-          format, width: w, height: h,
-          // Plotly honours its own paper_bgcolor — we patched it to
-          // transparent for the dark shell, so composite onto bgColor
-          // afterwards for PNG. SVG we return as-is since the background
-          // layer is easy to override in vector tools.
-        } as any)
-        if (format === 'svg') {
-          // data URL is `data:image/svg+xml,...`; extract the URL-encoded
-          // body, decode, and wrap.
-          const commaIdx = dataUrl.indexOf(',')
-          const body = commaIdx >= 0 ? decodeURIComponent(dataUrl.slice(commaIdx + 1)) : ''
-          return new Blob([body], { type: 'image/svg+xml' })
-        }
-        // PNG path — composite onto an opaque background canvas so the
-        // exported image isn't transparent-on-transparent when pasted
-        // into a slide deck or document.
-        const img = new Image()
-        img.src = dataUrl
-        await new Promise<void>((resolve, reject) => {
-          img.onload = () => resolve()
-          img.onerror = () => reject(new Error('plotly png load failed'))
-        })
-        const canvas = document.createElement('canvas')
-        canvas.width = w
-        canvas.height = h
-        const ctx = canvas.getContext('2d')
-        if (!ctx) return null
-        ctx.fillStyle = bgColor
-        ctx.fillRect(0, 0, w, h)
-        ctx.drawImage(img, 0, 0, w, h)
-        return await new Promise<Blob | null>(resolve =>
-          canvas.toBlob(b => resolve(b), 'image/png')
-        )
-      } catch {
-        // Fall through to SVG path if Plotly.toImage blew up.
-      }
-    }
-
-    // ── Recharts / inline SVG path ──
-    const svg = host.querySelector('svg')
-    if (!svg) return null
-    const clone = svg.cloneNode(true) as SVGSVGElement
-    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
-    const rect = svg.getBoundingClientRect()
-    if (!clone.getAttribute('width')) clone.setAttribute('width', String(rect.width))
-    if (!clone.getAttribute('height')) clone.setAttribute('height', String(rect.height))
-    const bgRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
-    bgRect.setAttribute('width', '100%')
-    bgRect.setAttribute('height', '100%')
-    bgRect.setAttribute('fill', bgColor)
-    clone.insertBefore(bgRect, clone.firstChild)
-    const xml = new XMLSerializer().serializeToString(clone)
-
-    if (format === 'svg') {
-      return new Blob([xml], { type: 'image/svg+xml' })
-    }
-
-    // Rasterize the SVG at 2× for crisp output.
-    const svgBlob = new Blob([xml], { type: 'image/svg+xml;charset=utf-8' })
-    const svgUrl = URL.createObjectURL(svgBlob)
-    try {
-      const img = new Image()
-      img.src = svgUrl
-      await new Promise<void>((resolve, reject) => {
-        img.onload = () => resolve()
-        img.onerror = () => reject(new Error('svg load failed'))
-      })
-      const w = Number(clone.getAttribute('width')) || img.width || 800
-      const h = Number(clone.getAttribute('height')) || img.height || 480
-      const scale = 2
-      const canvas = document.createElement('canvas')
-      canvas.width = Math.round(w * scale)
-      canvas.height = Math.round(h * scale)
-      const ctx = canvas.getContext('2d')
-      if (!ctx) return null
-      ctx.fillStyle = bgColor
-      ctx.fillRect(0, 0, canvas.width, canvas.height)
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-      return await new Promise<Blob | null>(resolve =>
-        canvas.toBlob(b => resolve(b), 'image/png')
-      )
-    } finally {
-      URL.revokeObjectURL(svgUrl)
-    }
+    return getPlotBlob(plotBodyRef.current, format)
   }, [])
 
   /** Copy the current figure to clipboard as PNG with solid adaptive background. */

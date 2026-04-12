@@ -684,8 +684,10 @@ export default function DataVisualization() {
           return
         }
       }
+      // Transparent background so the exported PNG drops cleanly into
+      // slides / papers without the dark app shell bleeding through.
       const canvas = await html2canvas(el, {
-        backgroundColor: '#0f0f14',
+        backgroundColor: null,
         scale: 2,
         useCORS: true,
         logging: false,
@@ -766,7 +768,10 @@ export default function DataVisualization() {
   const copyChartToClipboard = useCallback(async (id: string, targetTheme?: 'dark' | 'light') => {
     const el = chartRefs.current[id]
     if (!el) return
-    const effective = targetTheme ?? chartBgTheme[id] ?? 'dark'
+    // `targetTheme` used to gate a pre-snapshot bg swap so html2canvas
+    // captured the intended solid color; with transparent exports the
+    // effective theme no longer affects the image, but the surface
+    // toggle itself (light/dark preview) still runs.
     const needsSwap = targetTheme !== undefined && chartBgTheme[id] !== targetTheme
     // 3D charts: bypass html2canvas and use Plotly's native rasterizer
     // so the WebGL scene actually comes through on the clipboard image.
@@ -787,8 +792,11 @@ export default function DataVisualization() {
       // Give Recharts a frame to repaint against the new bg before snapshotting.
       await new Promise(r => requestAnimationFrame(() => r(null)))
       await new Promise(r => requestAnimationFrame(() => r(null)))
+      // Transparent clipboard copy: chart drops onto whatever surface
+      // the user pastes into (paper, slide deck, whiteboard) without
+      // dragging the app's dark chrome with it.
       const canvas = await html2canvas(el, {
-        backgroundColor: effective === 'light' ? '#ffffff' : '#0f0f14',
+        backgroundColor: null,
         scale: 2,
         useCORS: true,
         logging: false,
