@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   FiBook, FiPlus, FiCopy, FiDownload, FiTrash2, FiSearch,
   FiCheck, FiUpload, FiFolder, FiEdit3, FiExternalLink,
@@ -264,9 +265,23 @@ async function fetchFromPMID(pmid: string): Promise<Partial<Citation> | null> {
 
 export default function CitationManager() {
   const [citations, setCitations] = usePersistentState<Citation[]>('citations', [])
-  const [searchQuery, setSearchQuery] = useState('')
-  const [showAddForm, setShowAddForm] = useState(false)
-  const [showImport, setShowImport] = useState(false)
+  // Deep-link support: `?q=` seeds the search filter, `?add=1` opens the
+  // Add citation form, `?import=1` opens the import-by-DOI/PMID flow.
+  // Consumed-and-cleaned pattern matches Evidence/Projects/Agents.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [searchQuery, setSearchQuery] = useState(() => searchParams.get('q') || '')
+  const [showAddForm, setShowAddForm] = useState(() => searchParams.get('add') === '1')
+  const [showImport, setShowImport] = useState(() => searchParams.get('import') === '1')
+  useEffect(() => {
+    if (searchParams.has('q') || searchParams.has('add') || searchParams.has('import')) {
+      const next = new URLSearchParams(searchParams)
+      next.delete('q')
+      next.delete('add')
+      next.delete('import')
+      setSearchParams(next, { replace: true })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [citationStyle, setCitationStyle] = useState<CitationStyle>('apa')
   const [copied, setCopied] = useState<string | null>(null)
   const [filterType, setFilterType] = useState<string>('')

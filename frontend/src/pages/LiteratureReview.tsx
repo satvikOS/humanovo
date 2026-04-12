@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   FiBookOpen,
   FiSearch,
@@ -45,8 +46,21 @@ export default function LiteratureReview() {
       return stored ? JSON.parse(stored) : []
     } catch { return [] }
   })
-  const [searchQuery, setSearchQuery] = useState('')
-  const [showAddForm, setShowAddForm] = useState(false)
+  // Deep-link support: `?q=` seeds the search query and `?add=1` auto-
+  // opens the Add Paper form. Query is consumed on mount and cleaned
+  // off the URL so a soft reload doesn't re-apply stale values.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [searchQuery, setSearchQuery] = useState(() => searchParams.get('q') || '')
+  const [showAddForm, setShowAddForm] = useState(() => searchParams.get('add') === '1')
+  useEffect(() => {
+    if (searchParams.has('q') || searchParams.get('add') === '1') {
+      const next = new URLSearchParams(searchParams)
+      next.delete('q')
+      next.delete('add')
+      setSearchParams(next, { replace: true })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [selectedPaper, setSelectedPaper] = useState<Paper | null>(null)
   const [filterRelevance, setFilterRelevance] = useState<string>('')
   const [filterTag, setFilterTag] = useState('')

@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   FiBarChart2, FiPlus, FiTrash2,
   FiDownload, FiUpload, FiSettings, FiX,
@@ -549,7 +550,21 @@ export default function DataVisualization() {
       options: c.options ? { ...defaultOptions, ...c.options } : { ...defaultOptions, color: c.color || defaultOptions.color },
     }))
   })
-  const [showAdd, setShowAdd] = useState(false)
+  // Deep-link `?add=1` auto-opens the Add Chart dialog so dashboard
+  // and cross-page links can drop users straight into the creation
+  // flow. The query is consumed on mount and cleaned off the URL.
+  const [searchParams] = useSearchParams()
+  const [showAdd, setShowAdd] = useState(() => searchParams.get('add') === '1')
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search)
+    if (sp.has('add')) {
+      sp.delete('add')
+      const qs = sp.toString()
+      const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash
+      window.history.replaceState(window.history.state, '', newUrl)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [showSettings, setShowSettings] = useState<string | null>(null)
   const [expandedChart, setExpandedChart] = useState<string | null>(null)
   const chartRefs = useRef<Record<string, HTMLDivElement | null>>({})
