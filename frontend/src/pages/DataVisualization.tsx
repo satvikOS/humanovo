@@ -18,6 +18,7 @@ import {
 } from 'recharts'
 import html2canvas from 'html2canvas'
 import * as XLSX from 'xlsx'
+import { getPlotBlob } from '../utils/plotExport'
 import { persistGet, persistSet, formatDate, logActivity } from '../utils/persistence'
 import PlotlyPlot3D, { type Chart3DType } from '../components/PlotlyPlot3D'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
@@ -664,7 +665,25 @@ export default function DataVisualization() {
   const exportPng = useCallback(async (id: string, title: string) => {
     const el = chartRefs.current[id]
     if (!el) return
+    // 3D charts render via Plotly (WebGL + SVG overlay). html2canvas
+    // captures only the overlay — the main scene ends up blank. Route
+    // those through plotExport which calls Plotly.toImage for a complete
+    // raster. Recharts (2D) still uses html2canvas so we keep legend
+    // click-states, custom tooltips, and any DOM decorators.
+    const isPlotly = !!el.querySelector('.js-plotly-plot')
     try {
+      if (isPlotly) {
+        const blob = await getPlotBlob(el, 'png')
+        if (blob) {
+          const url = URL.createObjectURL(blob)
+          const a = document.createElement('a')
+          a.download = `${title.replace(/\s+/g, '-').toLowerCase()}.png`
+          a.href = url
+          a.click()
+          URL.revokeObjectURL(url)
+          return
+        }
+      }
       const canvas = await html2canvas(el, {
         backgroundColor: '#0f0f14',
         scale: 2,
@@ -749,6 +768,20 @@ export default function DataVisualization() {
     if (!el) return
     const effective = targetTheme ?? chartBgTheme[id] ?? 'dark'
     const needsSwap = targetTheme !== undefined && chartBgTheme[id] !== targetTheme
+    // 3D charts: bypass html2canvas and use Plotly's native rasterizer
+    // so the WebGL scene actually comes through on the clipboard image.
+    const isPlotly = !!el.querySelector('.js-plotly-plot')
+    if (isPlotly) {
+      try {
+        const blob = await getPlotBlob(el, 'png')
+        if (blob) {
+          await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+          setCopiedChart(id)
+          setTimeout(() => setCopiedChart(null), 2000)
+          return
+        }
+      } catch { /* fall through to html2canvas */ }
+    }
     try {
       if (needsSwap && targetTheme) setChartBg(id, targetTheme)
       // Give Recharts a frame to repaint against the new bg before snapshotting.
