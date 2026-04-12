@@ -176,7 +176,7 @@ class CodeInterpreterPDFGenerator:
             subtitle_style,
         ))
         elements.append(Paragraph(
-            "Claude Opus &bull; Claude Sonnet &bull; GPT-4.1 &bull; o3-mini &bull; Cohere &bull; Grok &bull; Mistral",
+            "Constant AI &bull; GPT-4.1 &bull; o3-mini &bull; Cohere &bull; Grok &bull; Mistral",
             ParagraphStyle('Models', parent=subtitle_style, fontSize=9, textColor=colors.HexColor('#888888')),
         ))
         elements.append(Spacer(1, 0.3 * inch))
@@ -198,7 +198,7 @@ class CodeInterpreterPDFGenerator:
             ['Total Agents', f'{num_agents:,}'],
             ['Pipeline Architecture', '11-Stage Sequential (all models per hypothesis)'],
             ['Target Confidence', f'{target_confidence * 100:.0f}%'],
-            ['Models', '7 (Claude Opus 4.6, Claude Sonnet 4.6, GPT-4.1, o3-mini, Cohere Command A, Grok-4-1-fast, Mistral-Large-3)'],
+            ['Models', '7 (Constant AI Explorer, Constant AI Synthesizer, GPT-4.1, o3-mini, Cohere Command A, Grok-4-1-fast, Mistral-Large-3)'],
             ['Hypotheses Generated', str(len(hypotheses))],
         ]
         config_table = Table(config_data, colWidths=[2.5 * inch, 3.5 * inch])
@@ -245,7 +245,7 @@ class CodeInterpreterPDFGenerator:
         abstract_text = (
             f"This research paper presents the results of an AI-driven {discovery_type.replace('_', ' ')} "
             f"discovery investigation for <b>{disease}</b>, conducted using Humanovo's 11-stage sequential "
-            f"hypothesis pipeline. Seven distinct AI models — Claude Opus 4.6, Claude Sonnet 4.6, "
+            f"hypothesis pipeline. Seven distinct AI models — Constant AI Explorer, Constant AI Synthesizer, "
             f"GPT-4.1, o3-mini, Cohere Command A, Grok-4-1-fast, and Mistral-Large-3 "
             f"— work sequentially on each hypothesis through specialized stages: Seed, Expand, "
             f"Evidence, Counter, Revise, Mechanism, Validate, Ground, Score, Refine, Translate, and Finalize. The system generated "
@@ -288,18 +288,18 @@ class CodeInterpreterPDFGenerator:
         elements.append(Spacer(1, 0.15 * inch))
         model_data = [
             ['Stage', 'Model', 'Role', 'Function'],
-            ['1. Seed', 'Claude Opus 4.6 (Bedrock)', 'Explorer', 'Generate initial hypothesis seed'],
-            ['2. Expand', 'Claude Sonnet 4.6 (Bedrock)', 'Expander', 'Broaden mechanisms and pathways'],
+            ['1. Seed', 'Constant AI Explorer', 'Explorer', 'Generate initial hypothesis seed'],
+            ['2. Expand', 'Constant AI Synthesizer', 'Expander', 'Broaden mechanisms and pathways'],
             ['3. Evidence', 'GPT-4.1 (Azure OpenAI)', 'Literature RAG', 'Retrieve supporting evidence'],
             ['4. Counter', 'GPT-4.1 (Azure OpenAI)', 'Critic', 'Counter-argument generation'],
             ['4.5 Revise', 'o3-mini (Azure OpenAI)', 'Reviser', 'Revise based on counter-arguments'],
-            ['5. Mechanism', 'Claude Opus 4.6 (Bedrock)', 'Mechanistic', 'Deep mechanistic analysis'],
-            ['6. Validate', 'Claude Sonnet 4.6 (Bedrock)', 'Validator', 'Cross-validation'],
-            ['7. Ground', 'Claude Opus 4.6 (Bedrock)', 'Grounder', 'Scientific grounding (60+ APIs)'],
+            ['5. Mechanism', 'Constant AI Explorer', 'Mechanistic', 'Deep mechanistic analysis'],
+            ['6. Validate', 'Constant AI Synthesizer', 'Validator', 'Cross-validation'],
+            ['7. Ground', 'Constant AI Explorer', 'Grounder', 'Scientific grounding (60+ APIs)'],
             ['8. Score', 'GPT-4.1 (Azure OpenAI)', 'Scorer', 'Multi-dimensional scoring'],
-            ['9. Refine', 'Claude Opus 4.6 (Bedrock)', 'Refiner', 'Final refinement'],
-            ['10. Translate', 'Claude Sonnet 4.6 (Bedrock)', 'Translator', 'Translational roadmap (T0-T5)'],
-            ['11. Finalize', 'Claude Sonnet 4.6 (Bedrock)', 'Finalizer', 'Final synthesis + formatting'],
+            ['9. Refine', 'Constant AI Explorer', 'Refiner', 'Final refinement'],
+            ['10. Translate', 'Constant AI Synthesizer', 'Translator', 'Translational roadmap (T0-T5)'],
+            ['11. Finalize', 'Constant AI Synthesizer', 'Finalizer', 'Final synthesis + formatting'],
         ]
         model_table = Table(model_data, colWidths=[1.2 * inch, 2 * inch, 1.2 * inch, 1.6 * inch])
         model_table.setStyle(TableStyle([
@@ -457,11 +457,11 @@ class CodeInterpreterPDFGenerator:
             f"The 11-stage sequential pipeline yielded a diverse set of rigorously validated hypotheses "
             f"for {disease}. Unlike parallel approaches where each model works independently, the "
             f"sequential architecture ensures every hypothesis benefits from 11 distinct analytical "
-            f"perspectives: Claude Opus seeds novel hypotheses, Claude Sonnet expands mechanisms, "
+            f"perspectives: Constant AI Explorer seeds novel hypotheses, Constant AI Synthesizer expands mechanisms, "
             f"GPT-4.1 retrieves evidence and generates counter-arguments, o3-mini revises hypotheses, "
-            f"Claude Opus analyzes mechanisms and grounds claims against 60+ databases, "
-            f"Claude Sonnet cross-validates, GPT-4.1 scores confidence, Claude Opus refines, "
-            f"Claude Sonnet generates translational roadmaps and finalizes. This produces hypotheses "
+            f"Constant AI Explorer analyzes mechanisms and grounds claims against 60+ databases, "
+            f"Constant AI Synthesizer cross-validates, GPT-4.1 scores confidence, Constant AI Explorer refines, "
+            f"Constant AI Synthesizer generates translational roadmaps and finalizes. This produces hypotheses "
             f"that are maximally strong, evidence-grounded, and non-ambiguous."
         )
         elements.append(Paragraph(discussion_text, body_style))

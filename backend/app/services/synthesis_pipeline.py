@@ -2,11 +2,11 @@
 Backward/Synthesis Pipeline — 5-stage evidence synthesis per Project Jamison v2 Spec Section 3.
 
 Stages:
-  1. DECOMPOSE (Claude Opus) — Break hypothesis into component claims
+  1. DECOMPOSE (Constant AI Explorer) — Break hypothesis into component claims
   2. RETRIEVE  (Cohere Command A) — Search literature for each claim
-  3. SYNTHESIZE (Claude Opus) — Synthesize findings into coherent narrative
+  3. SYNTHESIZE (Constant AI Explorer) — Synthesize findings into coherent narrative
   4. GAP_ANALYZE (GPT-4.1) — Identify knowledge gaps
-  5. FORMAT (Claude Sonnet) — Format output per requested format/verbosity
+  5. FORMAT (Constant AI Synthesizer) — Format output per requested format/verbosity
 
 Grant-aware formatting: nih_r01, nih_r21, nsf, dod, private_foundation
 """

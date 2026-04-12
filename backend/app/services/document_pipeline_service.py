@@ -861,7 +861,7 @@ class DocumentPipelineService:
             best_confidence=stats.get("current_best_confidence", 0.0),
             runtime_seconds=stats.get("runtime_seconds", 0.0),
             models_used=stats.get("models_active", []) or [
-                "Claude Opus 4.6", "Amazon Nova Premier", "Mistral-Large-3",
+                "Constant AI Explorer", "Amazon Nova Premier", "Mistral-Large-3",
                 "GPT-4o", "Cohere Command A", "Grok-4.1",
                 "o3-mini", "GPT-4.1",
             ],
@@ -996,7 +996,7 @@ class DocumentPipelineService:
         token_stats = stats.get("token_pool_stats", {})
         model_rows = []
         for model_name, display in [
-            ("claude_opus", "Claude Opus 4.6"),
+            ("constant_ai_explorer", "Constant AI Explorer"),
 
             ("mistral_large_3", "Mistral-Large-3"),
             ("gpt_4o_azure", "GPT-4o"),
