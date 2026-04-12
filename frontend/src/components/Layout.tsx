@@ -58,6 +58,30 @@ const mainNavItems = [
   { to: '/anatomy', icon: FiAperture, label: '3D Anatomy', shortcut: '6' },
 ]
 
+// Map activity-log entry `type` to a destination route. Keep aligned with
+// Dashboard.ActivityFeed's ACTIVITY_ROUTES so a notification in the bell
+// dropdown and a row in the dashboard feed land on the same index page.
+const NOTIFICATION_ROUTES: Record<string, string> = {
+  project: '/projects',
+  hypothesis: '/agents',
+  evidence: '/evidence',
+  simulation: '/compute-lab?tab=montecarlo',
+  notebook: '/notebook',
+  discovery: '/agents',
+  experiment: '/experiment-tracker',
+  manuscript: '/manuscripts',
+  citation: '/citation-manager',
+  literature: '/literature-review',
+  trial: '/clinical-trials',
+  imaging: '/imaging',
+  biobank: '/biobank',
+  genomics: '/genomics',
+  collaboration: '/collaboration',
+  regulatory: '/regulatory',
+  data: '/data-manager',
+  visualization: '/data-visualization',
+}
+
 const secondaryNavItems = [
   { to: '/notebook', icon: FiEdit3, label: 'Notebook' },
   { to: '/timeline', icon: FiClock, label: 'Timeline' },
@@ -1092,7 +1116,7 @@ export default function Layout() {
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false)
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false)
-  const [notifications, setNotifications] = useState<Array<{ id: string; title: string; description: string; time: string; timestamp: string }>>([])
+  const [notifications, setNotifications] = useState<Array<{ id: string; title: string; description: string; time: string; timestamp: string; type?: string }>>([])
   const [hasUnread, setHasUnread] = useState(false)
   const location = useLocation()
   const navigate = useNavigate()
@@ -1110,6 +1134,7 @@ export default function Layout() {
           description: a.project || '',
           time: formatDateTime(a.timestamp),
           timestamp: a.timestamp || '',
+          type: a.type,
         })))
         const newestTime = recent[0]?.timestamp || ''
         setHasUnread(newestTime > lastRead)
@@ -1372,6 +1397,8 @@ if (path === '/clinical-trials') return 'Clinical Trials'
             <div className="relative">
               <button
                 onClick={() => { setIsNotificationsOpen(!isNotificationsOpen); setIsUserMenuOpen(false) }}
+                aria-label="Notifications"
+                title="Notifications"
                 className="p-2 text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)] rounded-lg transition-all relative"
               >
                 <FiBell className="w-4 h-4" />
@@ -1397,22 +1424,42 @@ if (path === '/clinical-trials') return 'Clinical Trials'
                     </div>
                     {notifications.length > 0 ? (
                       <div className="max-h-64 overflow-y-auto">
-                        {notifications.map(n => (
-                          <div key={n.id} className="px-3 py-2 hover:bg-[var(--glass-bg)] transition-all flex gap-2">
-                            <div className="flex-shrink-0 mt-1.5">
-                              {n.timestamp > (localStorage.getItem('humanovo-notifs-read') || '0') ? (
-                                <span className="block w-2 h-2 rounded-full bg-[var(--color-text)]" />
-                              ) : (
-                                <span className="block w-2 h-2" />
+                        {notifications.map(n => {
+                          const dest = n.type ? NOTIFICATION_ROUTES[n.type] : undefined
+                          return (
+                            <button
+                              key={n.id}
+                              type="button"
+                              onClick={() => {
+                                if (dest) {
+                                  navigate(dest)
+                                  setIsNotificationsOpen(false)
+                                }
+                              }}
+                              disabled={!dest}
+                              className={clsx(
+                                'w-full text-left px-3 py-2 transition-all flex gap-2',
+                                dest
+                                  ? 'hover:bg-[var(--glass-bg)] cursor-pointer'
+                                  : 'cursor-default opacity-90'
                               )}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="text-xs font-medium text-[var(--color-text-secondary)] capitalize">{n.title}</div>
-                              <div className="text-xxs text-[var(--color-text-muted)] mt-0.5 truncate">{n.description}</div>
-                              <div className="text-xxs text-[var(--color-text-muted)] mt-0.5">{n.time}</div>
-                            </div>
-                          </div>
-                        ))}
+                              title={dest ? `Open ${dest}` : undefined}
+                            >
+                              <div className="flex-shrink-0 mt-1.5">
+                                {n.timestamp > (localStorage.getItem('humanovo-notifs-read') || '0') ? (
+                                  <span className="block w-2 h-2 rounded-full bg-[var(--color-text)]" />
+                                ) : (
+                                  <span className="block w-2 h-2" />
+                                )}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="text-xs font-medium text-[var(--color-text-secondary)] capitalize">{n.title}</div>
+                                <div className="text-xxs text-[var(--color-text-muted)] mt-0.5 truncate">{n.description}</div>
+                                <div className="text-xxs text-[var(--color-text-muted)] mt-0.5">{n.time}</div>
+                              </div>
+                            </button>
+                          )
+                        })}
                       </div>
                     ) : (
                       <div className="px-3 py-6 text-center text-xs text-[var(--color-text-muted)]">
