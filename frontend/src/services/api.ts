@@ -1218,48 +1218,6 @@ export const api = {
     return data
   },
 
-  // ── Billing ──────────────────────────────────────────────────
-
-  async getBillingSummary(projectId?: string): Promise<any> {
-    const { data } = await apiClient.get('/billing/summary', { params: projectId ? { project_id: projectId } : undefined })
-    return data
-  },
-
-  async getBillingDaily(params?: { start_date?: string; end_date?: string; project_id?: string; group_by?: string }): Promise<any[]> {
-    const { data } = await apiClient.get('/billing/daily', { params })
-    return data
-  },
-
-  async getBillingBreakdown(params?: { period?: string; group_by?: string }): Promise<any> {
-    const { data } = await apiClient.get('/billing/breakdown', { params })
-    return data
-  },
-
-  async getBillingProjects(period?: string): Promise<any[]> {
-    const { data } = await apiClient.get('/billing/projects', { params: period ? { period } : undefined })
-    return data
-  },
-
-  async listBudgets(): Promise<any[]> {
-    const { data } = await apiClient.get('/billing/budgets')
-    return data
-  },
-
-  async createBudget(budget: { scope: string; project_id?: string; monthly_budget_cents: number; alert_threshold_pct?: number; hard_limit?: boolean }): Promise<any> {
-    const { data } = await apiClient.post('/billing/budgets', budget)
-    return data
-  },
-
-  async updateBudget(budgetId: string, budget: any): Promise<any> {
-    const { data } = await apiClient.put(`/billing/budgets/${budgetId}`, budget)
-    return data
-  },
-
-  async deleteBudget(budgetId: string): Promise<any> {
-    const { data } = await apiClient.delete(`/billing/budgets/${budgetId}`)
-    return data
-  },
-
   // ── pgvector Management ──────────────────────────────────────
 
   async getPgvectorStats(): Promise<any> {

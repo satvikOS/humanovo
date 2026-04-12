@@ -54,7 +54,6 @@ const settingsSections = [
   { id: 'privacy', label: 'Privacy & Security', icon: FiShield },
   { id: 'data', label: 'Data & Storage', icon: FiDatabase },
   { id: 'integrations', label: 'Integrations', icon: FiGlobe },
-  { id: 'billing', label: 'Usage & Billing', icon: FiDatabase, link: '/settings/billing' },
 ]
 
 function Toggle({ enabled, onChange }: { enabled: boolean; onChange: (v: boolean) => void }) {

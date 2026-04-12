@@ -36,7 +36,6 @@ const ProjectKnowledgeGraph = lazy(() => import('./pages/ProjectKnowledgeGraph')
 // Pipeline Intelligence removed per user request
 // const PipelineIntelligence = lazy(() => import('./pages/PipelineIntelligence'))
 const PgvectorManager = lazy(() => import('./pages/PgvectorManager'))
-const BillingDashboard = lazy(() => import('./pages/BillingDashboard'))
 
 // Error boundary to prevent blank pages on runtime errors
 class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; error: string }> {
@@ -134,10 +133,8 @@ function App() {
         <Route path="imaging" element={<PageWrapper><ResearchImaging /></PageWrapper>} />
         <Route path="biobank" element={<PageWrapper><BiobankManager /></PageWrapper>} />
         {/* Project Jamison — platform-level pages */}
-        {/* Pipeline Intelligence removed */}
+        {/* Pipeline Intelligence and Billing removed */}
         <Route path="dev/pgvector" element={<LazyPageWrapper><PgvectorManager /></LazyPageWrapper>} />
-        {/* Billing/usage is within settings tree */}
-        <Route path="settings/billing" element={<LazyPageWrapper><BillingDashboard /></LazyPageWrapper>} />
       </Route>
     </Routes>
   )
