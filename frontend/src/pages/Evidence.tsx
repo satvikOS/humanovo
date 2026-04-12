@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   FiDatabase,
   FiSearch,
@@ -228,29 +228,45 @@ export default function Evidence() {
 
   useEffect(() => { fetchEvidence() }, [fetchEvidence])
 
-  // Merge project documents into evidence list
-  const allProjectDocs = persistGet<Array<{ id: string; project_id: string; title: string; doc_type: string; authors: string; date: string; description: string; tags: string[]; filename: string; file_size: number; mime_type: string; uploaded_at: string }>>('project-documents', [])
-  const docEvidence: EvidenceType[] = allProjectDocs.map(d => ({
-    id: `doc-ev-${d.id}`,
-    title: d.title,
-    abstract: d.description,
-    source_type: 'user_upload',
-    source_url: '',
-    authors: d.authors ? [d.authors] : [],
-    publication_date: d.date,
-    status: 'verified',
-    relevance_score: 1.0,
-    tags: [...d.tags, d.doc_type],
-    entities: [],
-    notes: '',
-    created_at: d.uploaded_at,
-    updated_at: d.uploaded_at,
-    citation_count: 0,
-    metadata: { filename: d.filename, file_size: d.file_size, mime_type: d.mime_type, project_id: d.project_id },
-  }))
-  const mergedEvidence = filterType === 'user_upload' || filterType === 'all'
-    ? [...docEvidence.filter(d => !searchQuery || d.title.toLowerCase().includes(searchQuery.toLowerCase())), ...evidence]
-    : evidence
+  // Merge project documents into evidence list. Both intermediate lists
+  // are memoized so long lists don't re-map + re-filter on every
+  // unrelated render (selection, form edits, etc.).
+  type ProjectDoc = {
+    id: string; project_id: string; title: string; doc_type: string; authors: string;
+    date: string; description: string; tags: string[]; filename: string;
+    file_size: number; mime_type: string; uploaded_at: string
+  }
+  const allProjectDocs = useMemo<ProjectDoc[]>(
+    () => persistGet<ProjectDoc[]>('project-documents', []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [evidence], // refresh when evidence set changes (post-upload/edit)
+  )
+  const mergedEvidence = useMemo<EvidenceType[]>(() => {
+    const docEvidence: EvidenceType[] = allProjectDocs.map(d => ({
+      id: `doc-ev-${d.id}`,
+      title: d.title,
+      abstract: d.description,
+      source_type: 'user_upload',
+      source_url: '',
+      authors: d.authors ? [d.authors] : [],
+      publication_date: d.date,
+      status: 'verified',
+      relevance_score: 1.0,
+      tags: [...d.tags, d.doc_type],
+      entities: [],
+      notes: '',
+      created_at: d.uploaded_at,
+      updated_at: d.uploaded_at,
+      citation_count: 0,
+      metadata: { filename: d.filename, file_size: d.file_size, mime_type: d.mime_type, project_id: d.project_id },
+    }))
+    if (filterType === 'user_upload' || filterType === 'all') {
+      const q = searchQuery.toLowerCase()
+      const matchedDocs = q ? docEvidence.filter(d => d.title.toLowerCase().includes(q)) : docEvidence
+      return [...matchedDocs, ...evidence]
+    }
+    return evidence
+  }, [filterType, searchQuery, evidence, allProjectDocs])
 
   // Fetch knowledge base stats on mount
   useEffect(() => {
