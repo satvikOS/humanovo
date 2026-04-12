@@ -19,14 +19,16 @@ export default function ComputeLab() {
 
   return (
     <div className="flex flex-col h-full" style={{ color: 'var(--color-text)' }}>
-      {/* ── Header ── */}
+      {/* ── Header ──
+          The sidebar + top-nav both already render the page title
+          "Compute Lab", so we drop the inline <h1> that used to sit
+          left of the tab row — it was pure visual duplication that
+          ate horizontal space. Keep the FiCpu icon as a compact
+          anchor so users still get a visual cue. */}
       <div className="flex items-center gap-5 px-5 py-3 border-b flex-shrink-0" style={{ borderColor: 'var(--glass-border)' }}>
-        <div className="flex items-center gap-2">
-          <FiCpu className="text-base" style={{ color: 'var(--color-text-muted)' }} />
-          <h1 className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>Compute Lab</h1>
-        </div>
+        <FiCpu className="text-base flex-shrink-0" style={{ color: 'var(--color-text-muted)' }} aria-hidden="true" />
 
-        <div className="flex gap-1 ml-2">
+        <div className="flex gap-1">
           {tabs.map(tab => {
             const active = mode === tab.id
             const Icon = tab.icon

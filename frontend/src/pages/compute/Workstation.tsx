@@ -596,6 +596,11 @@ function caretViewportAnchor(ta: HTMLTextAreaElement, fontSize: number): { top: 
 export default function Workstation() {
   const { showAlert, showPrompt, AlertDialog } = useAlertDialog()
   const [scriptStore, setScriptStore] = useState<ScriptStore>(loadScripts)
+  // Which script IDs have had their welcome overlay explicitly dismissed
+  // ("Start with a blank script" or the × close button). Kept as a Set so
+  // the overlay re-surfaces for new tabs but stays hidden for the one the
+  // user asked to drop focus into.
+  const [welcomeDismissed, setWelcomeDismissed] = useState<Set<string>>(() => new Set())
   // Drag-and-drop tab reordering. Ref holds the source id during the drag;
   // state drives the visual drop indicator. We clear both on drop / dragend.
   const draggedTabIdRef = useRef<string | null>(null)
@@ -3560,18 +3565,15 @@ export default function Workstation() {
       closedScriptsRef.current.push({ script: closed, index: idx })
       // Cap the ring so we don't grow without bound.
       if (closedScriptsRef.current.length > 12) closedScriptsRef.current.shift()
-      // If we're closing the last tab, spawn a fresh blank script so the
-      // user always has an editor surface to work in — matches the VS Code
-      // / browser-tab convention of collapsing to an empty new tab.
-      if (store.list.length <= 1) {
-        const fresh: SavedScript = {
-          id: crypto.randomUUID(),
-          name: 'untitled.py',
-          code: '',
-        }
-        return { list: [fresh], activeId: fresh.id }
-      }
+      // Allow closing every tab — users asked for the ability to land on
+      // a clean empty-state ("+ New Script" centered) rather than being
+      // force-fed an auto-spawned `untitled.py` every time they close the
+      // last tab. The body of the editor surface renders the empty-state
+      // when `scriptStore.list.length === 0`.
       const list = store.list.filter(s => s.id !== id)
+      if (list.length === 0) {
+        return { list: [], activeId: '' }
+      }
       const activeId = store.activeId === id
         ? (list[idx] ?? list[idx - 1] ?? list[0]).id
         : store.activeId
@@ -6130,7 +6132,10 @@ export default function Workstation() {
             const pivotIdx = scriptStore.list.findIndex(s => s.id === tabMenu.id)
             const canCloseOthers = scriptStore.list.length > 1
             const canCloseRight = pivotIdx >= 0 && pivotIdx < scriptStore.list.length - 1
-            const canClose = scriptStore.list.length > 1
+            // Allow closing the last tab — when the list empties out the
+            // editor surface shows an empty-state with a big "+ New Script"
+            // CTA, which is the behaviour the user asked for.
+            const canClose = scriptStore.list.length >= 1
             const closeMenu = () => setTabMenu(null)
             const item = (label: string, enabled: boolean, onClick: () => void) => (
               <button
@@ -6315,6 +6320,93 @@ export default function Workstation() {
               >×</button>
             </div>
           )}
+          {scriptStore.list.length === 0 ? (
+            // Empty-state: the user closed every tab. Instead of auto-spawning
+            // a scratch file we surface a big, centered "+ New Script" CTA
+            // (per user feedback: "show + New Script button for empty state")
+            // with secondary affordances so there's always a well-lit next step.
+            <div
+              style={{
+                flex: 1,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: 24,
+              }}
+              role="region"
+              aria-label="No scripts open"
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: 14,
+                  maxWidth: 440,
+                  textAlign: 'center',
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 12,
+                    letterSpacing: 1.1,
+                    textTransform: 'uppercase',
+                    color: 'var(--color-text-muted)',
+                  }}
+                >
+                  Compute Lab
+                </div>
+                <div
+                  style={{
+                    fontSize: 18,
+                    fontWeight: 600,
+                    color: 'var(--color-text)',
+                  }}
+                >
+                  No scripts open
+                </div>
+                <p
+                  style={{
+                    fontSize: 12,
+                    lineHeight: 1.5,
+                    color: 'var(--color-text-muted)',
+                    margin: 0,
+                  }}
+                >
+                  You closed every tab. Start a fresh script, load one from the
+                  template library, or drop a <code>.hm</code> / <code>.csv</code>
+                  file anywhere to import.
+                </p>
+                <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                  <button
+                    type="button"
+                    onClick={newScript}
+                    style={{
+                      ...styles.btn,
+                      padding: '10px 20px',
+                      fontSize: 13,
+                      fontWeight: 600,
+                    }}
+                    autoFocus
+                  >
+                    + New Script
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setLibMode('templates'); setLibrary('open') }}
+                    style={{
+                      ...styles.btn,
+                      ...styles.btnGhost,
+                      padding: '10px 16px',
+                      fontSize: 13,
+                    }}
+                  >
+                    Browse templates
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : (<>
           <div style={styles.editorBody}>
             <div style={styles.editorGutterClip}>
               <div ref={gutterRef} style={styles.editorGutterNumbers}>
@@ -6511,19 +6603,79 @@ export default function Workstation() {
                 wrap={editorWrapOn ? 'soft' : 'off'}
               />
               {/* ─── Welcome card ──────────────────────────────────────
-                 Surfaces only when the active script is empty. The
-                 overlay itself is pointer-transparent so clicking
-                 outside the inner card drops focus back into the
-                 textarea. Designed for clinicians, surgeons, and
-                 PKPD researchers who don't compute daily and
-                 need an obvious set of next steps. */}
-              {script === '' && (
-                <div style={styles.welcomeOverlay} aria-label="Workstation welcome">
+                 Surfaces when the active script is empty AND the user
+                 hasn't explicitly dismissed the overlay for this script.
+                 The backdrop-blur layer blocks clicks on the editor and
+                 its surrounding tools while the welcome is up, giving
+                 the CTA tiles an unambiguous focus. Users can dismiss
+                 either via × or the "Start with a blank script" tile,
+                 both of which drop focus back into the textarea. */}
+              {script === '' && activeScript && !welcomeDismissed.has(activeScript.id) && (
+                <div
+                  style={styles.welcomeOverlay}
+                  aria-label="Workstation welcome"
+                  role="dialog"
+                  aria-modal="true"
+                  tabIndex={-1}
+                  onKeyDown={(e) => {
+                    // Esc dismisses the overlay so keyboard-first users can
+                    // get into the editor without a mouse click.
+                    if (e.key === 'Escape' && activeScript) {
+                      e.preventDefault()
+                      setWelcomeDismissed(prev => {
+                        if (prev.has(activeScript.id)) return prev
+                        const next = new Set(prev)
+                        next.add(activeScript.id)
+                        return next
+                      })
+                      requestAnimationFrame(() => editorRef.current?.focus())
+                    }
+                  }}
+                >
                   <div
-                    style={styles.welcomeCard}
+                    style={{ ...styles.welcomeCard, position: 'relative' }}
                     role="region"
                     aria-label="Get started"
                   >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!activeScript) return
+                        setWelcomeDismissed(prev => {
+                          if (prev.has(activeScript.id)) return prev
+                          const next = new Set(prev)
+                          next.add(activeScript.id)
+                          return next
+                        })
+                        // Drop focus straight into the editor so the user
+                        // can start typing without another click.
+                        requestAnimationFrame(() => editorRef.current?.focus())
+                      }}
+                      title="Dismiss (Esc) — start with a blank editor"
+                      aria-label="Dismiss welcome"
+                      style={{
+                        position: 'absolute',
+                        top: 10,
+                        right: 10,
+                        width: 26,
+                        height: 26,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderRadius: 6,
+                        background: 'transparent',
+                        border: 'none',
+                        color: 'var(--color-text-muted)',
+                        fontSize: 16,
+                        cursor: 'pointer',
+                      }}
+                      onMouseEnter={(e) => {
+                        (e.currentTarget as HTMLButtonElement).style.background = 'var(--glass-bg-hover)'
+                      }}
+                      onMouseLeave={(e) => {
+                        (e.currentTarget as HTMLButtonElement).style.background = 'transparent'
+                      }}
+                    >×</button>
                     <span style={styles.welcomeKicker}>Numeric Compute Workstation</span>
                     <h2 style={styles.welcomeTitle}>Start computing</h2>
                     <p style={styles.welcomeSub}>
@@ -6594,6 +6746,34 @@ export default function Workstation() {
                         <span style={styles.welcomeTileTitle}>Command palette</span>
                         <span style={styles.welcomeTileSub}>
                           Find any action — templates, settings, run modes, conversions.
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        style={{ ...styles.welcomeTile, gridColumn: '1 / -1' }}
+                        onClick={() => {
+                          if (!activeScript) return
+                          // User chose to write their own script from scratch:
+                          // dismiss the welcome and focus the editor so typing
+                          // immediately replaces the empty textarea.
+                          setWelcomeDismissed(prev => {
+                            if (prev.has(activeScript.id)) return prev
+                            const next = new Set(prev)
+                            next.add(activeScript.id)
+                            return next
+                          })
+                          requestAnimationFrame(() => editorRef.current?.focus())
+                        }}
+                        onMouseEnter={(e) => {
+                          (e.currentTarget as HTMLButtonElement).style.background = 'var(--glass-bg-hover)'
+                        }}
+                        onMouseLeave={(e) => {
+                          (e.currentTarget as HTMLButtonElement).style.background = 'transparent'
+                        }}
+                      >
+                        <span style={styles.welcomeTileTitle}>Start with a blank script</span>
+                        <span style={styles.welcomeTileSub}>
+                          Dismiss this panel and write your own from scratch.
                         </span>
                       </button>
                     </div>
@@ -6718,6 +6898,8 @@ export default function Workstation() {
                 </>
               )}
             </div>
+          )}
+          </>
           )}
         </div>
       </div>
