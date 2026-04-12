@@ -470,6 +470,9 @@ export default function ResearchImaging() {
   const sagittalRef = useRef<HTMLCanvasElement>(null)
   const imgCacheRef = useRef<HTMLImageElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const studiesRef = useRef<Study[]>(studies)
+  const segMaskRef = useRef<Uint8Array | null>(segMask)
+  const renderingRef = useRef(false)
 
   const selected = useMemo(() => studies.find(s => s.id === selectedId) || null, [studies, selectedId])
 
@@ -486,8 +489,12 @@ export default function ResearchImaging() {
     })
   }, [studies, search, filterModality])
 
-  // Persist studies
-  useEffect(() => { saveStudies(studies) }, [studies])
+  // Persist studies + keep refs in sync (refs used inside renderCanvas to
+  // avoid creating a new callback identity on every study mutation, which
+  // combined with the render-canvas effect caused a render cascade that
+  // could exhaust the JS stack during rapid interactions like a W/L drag).
+  useEffect(() => { studiesRef.current = studies; saveStudies(studies) }, [studies])
+  useEffect(() => { segMaskRef.current = segMask }, [segMask])
 
   // Track image-loaded generation to trigger re-render after img.onload
   const [imgGeneration, setImgGeneration] = useState(0)
@@ -614,11 +621,17 @@ export default function ResearchImaging() {
   }, [viewLayout, selected, slicePos])
 
   const renderCanvas = useCallback(() => {
+    // Re-entrancy guard: if a previous render is still in flight (e.g. a
+    // synchronous state update triggered during canvas draw) bail out so
+    // we don't recurse the call stack.
+    if (renderingRef.current) return
     const canvas = canvasRef.current
     const img = imgCacheRef.current
     if (!canvas || !img || !selected) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
+    renderingRef.current = true
+    try {
 
     // Fit canvas to display size, draw at zoom
     const dispW = canvas.parentElement?.clientWidth || 800
@@ -634,7 +647,7 @@ export default function ResearchImaging() {
     off.width = img.width
     off.height = img.height
     const offCtx = off.getContext('2d')
-    if (!offCtx) return
+    if (!offCtx) { renderingRef.current = false; return }
     offCtx.drawImage(img, 0, 0)
     let data = offCtx.getImageData(0, 0, img.width, img.height)
     data = applyWindow(data, selected.windowCenter, selected.windowWidth)
@@ -691,17 +704,19 @@ export default function ResearchImaging() {
       }
     })
 
-    // Draw segmentation mask overlay
-    if (segMask && selected) {
+    // Draw segmentation mask overlay (read from ref to avoid triggering
+    // renderCanvas recreation on every brush stroke)
+    const segMaskLocal = segMaskRef.current
+    if (segMaskLocal && selected) {
       const labels = selected.labels || []
       const maskCanvas = document.createElement('canvas')
       maskCanvas.width = img.width
       maskCanvas.height = img.height
       const mCtx = maskCanvas.getContext('2d')
-      if (!mCtx) return
+      if (!mCtx) { renderingRef.current = false; return }
       const mData = mCtx.createImageData(img.width, img.height)
-      for (let i = 0; i < segMask.length; i++) {
-        const labelIdx = segMask[i]
+      for (let i = 0; i < segMaskLocal.length; i++) {
+        const labelIdx = segMaskLocal[i]
         if (labelIdx === 0) continue
         const label = labels[labelIdx - 1]
         if (label && !label.visible) continue
@@ -742,7 +757,7 @@ export default function ResearchImaging() {
     // Draw registration overlay — use a synchronous approach to avoid
     // stale canvas context from async image loads.
     if (regShowOverlay && regRefId) {
-      const refStudy = studies.find(s => s.id === regRefId)
+      const refStudy = studiesRef.current.find(s => s.id === regRefId)
       if (refStudy) {
         try {
           // Re-use a pre-decoded image via an offscreen canvas to avoid
@@ -779,11 +794,17 @@ export default function ResearchImaging() {
         }
       }
     }
-  }, [selected, zoom, pan, drawing, tool, annotColor, regShowOverlay, regRefId, regTransform, regOverlayOpacity, studies, segMask])
+    } finally {
+      renderingRef.current = false
+    }
+  }, [selected, zoom, pan, drawing, tool, annotColor, regShowOverlay, regRefId, regTransform, regOverlayOpacity])
 
-  // Re-render when zoom/pan/window/filter/annotations or image load changes
+  // Re-render when zoom/pan/window/filter/annotations or image load changes.
+  // Also re-render on segMask generation so brush strokes paint live. The
+  // segMask itself is read via ref inside renderCanvas to keep the callback
+  // identity stable.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { renderCanvas() }, [renderCanvas, imgGeneration])
+  useEffect(() => { renderCanvas() }, [renderCanvas, imgGeneration, segMask])
 
   const screenToImage = useCallback((e: React.MouseEvent): { x: number; y: number } | null => {
     const canvas = canvasRef.current
@@ -1444,7 +1465,7 @@ export default function ResearchImaging() {
                 <p className="text-sm font-medium mb-1" style={{ color: 'var(--color-text)' }}>Research Imaging Workstation</p>
                 <p className="text-xs mb-4" style={{ color: 'var(--color-text-muted)', lineHeight: 1.6 }}>
                   Upload medical images for analysis with windowing, filters, annotations,
-                  segmentation, and AI-powered diagnostics via Claude Sonnet 4.6.
+                  segmentation, and AI-powered diagnostics via Constant AI.
                 </p>
                 <div className="flex flex-col items-center gap-2">
                   <button
@@ -1466,7 +1487,7 @@ export default function ResearchImaging() {
                   </div>
                   <div className="p-2 rounded" style={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)' }}>
                     <FiCpu className="mx-auto mb-1 text-sm" />
-                    <div>AI analysis via AWS Bedrock</div>
+                    <div>AI analysis via Constant AI</div>
                   </div>
                   <div className="p-2 rounded" style={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)' }}>
                     <FiLayers className="mx-auto mb-1 text-sm" />
@@ -1805,14 +1826,14 @@ export default function ResearchImaging() {
                   </div>
                 )}
 
-                {/* AI Analysis via AWS Bedrock Claude Sonnet 4.6 */}
+                {/* AI Analysis powered by Constant AI */}
                 <div>
                   <div className="text-[10px] uppercase font-semibold mb-1.5" style={{ color: 'var(--color-text-muted)' }}>
                     <FiCpu className="inline mr-1" />
-                    AI Analysis — Claude Sonnet 4.6
+                    AI Analysis — Constant AI
                   </div>
                   <p className="text-[9px] mb-2" style={{ color: 'var(--color-text-muted)', lineHeight: 1.4 }}>
-                    Vision-based clinical analysis powered by Claude Sonnet 4.6 via AWS Bedrock.
+                    Vision-based clinical analysis powered by Constant AI.
                     Analyzes the current view including windowing and filters.
                   </p>
                   <div className="space-y-2">
@@ -1828,7 +1849,7 @@ export default function ResearchImaging() {
                       }}
                     >
                       <FiCpu className="text-xs" />
-                      {aiLoading ? 'Analyzing with Claude...' : 'Run AI Analysis'}
+                      {aiLoading ? 'Analyzing with Constant AI…' : 'Run AI Analysis'}
                     </button>
                     {aiAnalysis && (
                       <div className="p-2.5 rounded text-[10px] leading-relaxed whitespace-pre-wrap" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)', color: 'var(--color-text-secondary)' }}>

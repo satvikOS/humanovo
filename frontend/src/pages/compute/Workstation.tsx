@@ -3593,7 +3593,6 @@ export default function Workstation() {
 
   const closeScript = useCallback((id: string) => {
     setScriptStore(store => {
-      if (store.list.length <= 1) return store // never close the last one
       const idx = store.list.findIndex(s => s.id === id)
       if (idx < 0) return store
       // Remember the closed script (plus its original position) so
@@ -3602,6 +3601,17 @@ export default function Workstation() {
       closedScriptsRef.current.push({ script: closed, index: idx })
       // Cap the ring so we don't grow without bound.
       if (closedScriptsRef.current.length > 12) closedScriptsRef.current.shift()
+      // If we're closing the last tab, spawn a fresh blank script so the
+      // user always has an editor surface to work in — matches the VS Code
+      // / browser-tab convention of collapsing to an empty new tab.
+      if (store.list.length <= 1) {
+        const fresh: SavedScript = {
+          id: crypto.randomUUID(),
+          name: 'untitled.py',
+          code: '',
+        }
+        return { list: [fresh], activeId: fresh.id }
+      }
       const list = store.list.filter(s => s.id !== id)
       const activeId = store.activeId === id
         ? (list[idx] ?? list[idx - 1] ?? list[0]).id
@@ -4347,9 +4357,12 @@ export default function Workstation() {
       alignItems: 'flex-start',
       justifyContent: 'center',
       padding: '32px 32px 24px 32px',
-      // Opaque backdrop so gutter line numbers and editor chrome
-      // don't bleed through — keeps the card crisp on both themes.
-      background: 'var(--color-bg)',
+      // Frosted-glass blur over the editor so the card reads as a floating
+      // coach mark rather than a sheet. Keeps the workstation context just
+      // visible in the background — iOS-style layered depth.
+      background: 'rgba(0, 0, 0, 0.35)',
+      backdropFilter: 'blur(18px) saturate(140%)',
+      WebkitBackdropFilter: 'blur(18px) saturate(140%)',
       zIndex: 4,
     },
     welcomeCard: {
@@ -4537,7 +4550,6 @@ export default function Workstation() {
       alignItems: 'center',
       gap: 14,
       padding: '6px 20px',
-      borderTop: '1px solid var(--glass-border)',
       background: 'transparent',
       fontFamily: "'JetBrains Mono', monospace",
       fontSize: 11,
@@ -4552,7 +4564,6 @@ export default function Workstation() {
       alignItems: 'center',
       gap: 12,
       padding: '5px 20px',
-      borderTop: '1px solid var(--glass-border)',
       background: 'transparent',
       fontFamily: "'JetBrains Mono', monospace",
       fontSize: 11,
@@ -6049,7 +6060,7 @@ export default function Workstation() {
                     // Middle-click closes the tab (browser-tab convention).
                     // Only fires when more than one script is open so we
                     // never end up with an empty tab bar.
-                    if (e.button === 1 && scriptStore.list.length > 1) {
+                    if (e.button === 1) {
                       e.preventDefault()
                       e.stopPropagation()
                       closeScript(s.id)
@@ -6095,14 +6106,12 @@ export default function Workstation() {
                   title={`${s.name} — drag to reorder, double-click to rename, middle-click to close`}
                 >
                   <span>{s.name}</span>
-                  {scriptStore.list.length > 1 && (
-                    <span
-                      style={styles.tabCloseBtn}
-                      onClick={e => { e.stopPropagation(); closeScript(s.id) }}
-                      role="button"
-                      aria-label={`Close ${s.name}`}
-                    >×</span>
-                  )}
+                  <span
+                    style={styles.tabCloseBtn}
+                    onClick={e => { e.stopPropagation(); closeScript(s.id) }}
+                    role="button"
+                    aria-label={`Close ${s.name}`}
+                  >×</span>
                 </button>
               )
             })}

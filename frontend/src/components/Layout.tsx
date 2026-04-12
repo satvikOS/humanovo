@@ -832,7 +832,7 @@ function ConstantChat() {
     } else if (isOutOfScope(userMsg.toLowerCase().trim())) {
       fullResponse = generateSmartFallbackResponse(userMsg)
     } else {
-      // Call the backend AI endpoint (routes to API Gateway → Lambda → Bedrock Claude)
+      // Call the backend AI endpoint (powered by Constant AI)
       try {
         const platformContext = getLocalContext()
         const _apiBase = import.meta.env.VITE_API_BASE_URL || ''
