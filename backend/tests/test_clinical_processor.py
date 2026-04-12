@@ -188,6 +188,59 @@ async def test_panss_remission_andreasen_criteria(proc: ClinicalProcessor) -> No
     assert result2.results["remission_andreasen"] is False
 
 
+async def test_gcs_severity_bands_and_coma_flag(proc: ClinicalProcessor) -> None:
+    # Teasdale & Jennett cutoffs: ≤8 = severe/coma, 9-12 = moderate, ≥13 = mild.
+    r = await proc.execute(_req("clinical_scales", scale="GCS", eye=1, verbal=1, motor=4))
+    assert r.results["total"] == pytest.approx(6.0)
+    assert r.results["severity"] == "Severe"
+    assert r.results["coma"] is True
+
+    r2 = await proc.execute(_req("clinical_scales", scale="GCS", eye=4, verbal=5, motor=6))
+    assert r2.results["total"] == pytest.approx(15.0)
+    assert r2.results["severity"] == "Mild"
+    assert r2.results["coma"] is False
+
+
+async def test_gcs_clamps_out_of_range_components(proc: ClinicalProcessor) -> None:
+    # Upstream data can send garbage values (99 for "not tested"); we floor
+    # to the valid subscale range so total stays in [3, 15].
+    r = await proc.execute(_req("clinical_scales", scale="GCS", eye=99, verbal=0, motor=-3))
+    assert 3 <= r.results["total"] <= 15
+
+
+async def test_nihss_severity_and_lvo_flag(proc: ClinicalProcessor) -> None:
+    # Item total of 18 is moderate-to-severe and should flip the LVO flag.
+    items = [2, 1, 2, 1, 2, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1]  # sums to 19
+    r = await proc.execute(_req("clinical_scales", scale="NIHSS", items=items))
+    assert r.results["total"] == pytest.approx(19.0)
+    assert r.results["severity"] == "Moderate to severe stroke"
+    assert r.results["large_vessel_likely"] is True
+
+
+async def test_nihss_improvement_flags_from_baseline(proc: ClinicalProcessor) -> None:
+    # Post-thrombolysis: baseline 15, current 6 → 9-point drop → ≥8-point
+    # early neurological improvement.
+    items = [1] * 6 + [0] * 9  # total = 6
+    r = await proc.execute(_req("clinical_scales", scale="NIHSS", items=items, baseline_total=15))
+    assert r.results["improvement_8pt"] is True
+    assert r.results["improvement_4pt"] is True
+
+
+async def test_moca_education_bonus(proc: ClinicalProcessor) -> None:
+    # Raw total 25, 10 years of education → +1 bonus → adjusted 26 = Normal.
+    items = [1] * 25 + [0] * 5
+    r = await proc.execute(_req("clinical_scales", scale="MoCA", items=items, education_years=10))
+    assert r.results["raw_total"] == pytest.approx(25.0)
+    assert r.results["education_bonus"] == 1
+    assert r.results["total"] == pytest.approx(26.0)
+    assert r.results["cognitive_impairment"] is False
+
+    # Without the bonus (13 years of education), stays impaired.
+    r2 = await proc.execute(_req("clinical_scales", scale="MoCA", items=items, education_years=16))
+    assert r2.results["education_bonus"] == 0
+    assert r2.results["cognitive_impairment"] is True
+
+
 async def test_panss_marder_factor_decomposition(proc: ClinicalProcessor) -> None:
     # Putting distinguishable values into each Marder factor lets us verify
     # the 5 sub-scores are summing the right indices (anti-regression against
