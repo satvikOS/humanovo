@@ -433,6 +433,7 @@ function computeImageStats(data: Uint8ClampedArray): { mean: number; std: number
     hist[Math.round(lum)]++
     n++
   }
+  if (n === 0) return { mean: 0, std: 0, min: 0, max: 0, histogram: hist }
   const mean = sum / n
   const variance = sumSq / n - mean * mean
   return { mean, std: Math.sqrt(Math.max(0, variance)), min: mn, max: mx, histogram: hist }
@@ -561,6 +562,9 @@ export default function ResearchImaging() {
     if (viewLayout !== 'quad') return
     const img = imgCacheRef.current
     if (!img || !selected) return
+    if (img.width <= 0 || img.height <= 0) return
+
+    try {
 
     // Get processed image data
     const off = document.createElement('canvas')
@@ -665,7 +669,11 @@ export default function ResearchImaging() {
       sCtx.fillStyle = '#ffffff88'; sCtx.font = '10px sans-serif'
       sCtx.fillText(`Slice ${sliceX}/${W}`, 8, 30)
     }
-  }, [viewLayout, selected, slicePos])
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[ResearchImaging] orthogonal view render failed:', err)
+    }
+  }, [viewLayout, selected, slicePos, imgGeneration])
 
   const renderCanvas = useCallback(() => {
     // Re-entrancy guard: if a previous render is still in flight (e.g. a
@@ -841,6 +849,12 @@ export default function ResearchImaging() {
         }
       }
     }
+    } catch (err) {
+      // Swallow canvas render errors (e.g. getImageData OOM on huge images,
+      // tainted canvas from external data URLs) so a malformed study does
+      // not crash the entire imaging page.
+      // eslint-disable-next-line no-console
+      console.warn('[ResearchImaging] renderCanvas failed:', err)
     } finally {
       renderingRef.current = false
     }
@@ -1156,11 +1170,16 @@ export default function ResearchImaging() {
     off.height = img.height
     const ctx = off.getContext('2d')
     if (!ctx) return null
-    ctx.drawImage(img, 0, 0)
-    const imgData = ctx.getImageData(0, 0, img.width, img.height)
-    return computeImageStats(imgData.data)
+    try {
+      ctx.drawImage(img, 0, 0)
+      const imgData = ctx.getImageData(0, 0, img.width, img.height)
+      return computeImageStats(imgData.data)
+    } catch {
+      // Tainted canvas, zero-size image, or out-of-memory - fall back to null
+      return null
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId, selected?.annotations.length])
+  }, [selectedId, selected?.annotations.length, imgGeneration])
 
   const exportImage = () => {
     const canvas = canvasRef.current
@@ -1798,11 +1817,13 @@ export default function ResearchImaging() {
                         for (let i = 0; i < groupSize; i++) s += analysisStats.histogram[g * groupSize + i] || 0
                         grouped.push(s)
                       }
-                      const max = Math.max(...grouped)
+                      let max = 0
+                      for (const v of grouped) if (v > max) max = v
+                      const safeMax = max > 0 ? max : 1
                       return grouped.map((c, i) => (
                         <div key={i} style={{
                           flex: 1,
-                          height: `${(c / max) * 100}%`,
+                          height: `${(c / safeMax) * 100}%`,
                           background: 'var(--color-text)',
                           opacity: 0.8,
                           minHeight: 1,
@@ -1822,6 +1843,7 @@ export default function ResearchImaging() {
                     <div className="flex justify-between"><span style={{ color: 'var(--color-text-muted)' }}>SNR est.</span><span>{(analysisStats.mean / Math.max(analysisStats.std, 0.1)).toFixed(1)} dB</span></div>
                     <div className="flex justify-between"><span style={{ color: 'var(--color-text-muted)' }}>Entropy</span><span>{(() => {
                       const total = analysisStats.histogram.reduce((a, b) => a + b, 0)
+                      if (total <= 0) return '0.00'
                       let entropy = 0
                       for (const h of analysisStats.histogram) { if (h > 0) { const p = h / total; entropy -= p * Math.log2(p) } }
                       return entropy.toFixed(2)
