@@ -4,7 +4,6 @@ import {
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import Workstation from './Workstation'
-import PresetRunner from './PresetRunner'
 import MonteCarloPanel from './MonteCarloPanel'
 import EquationPlotter from './EquationPlotter'
 import type { ComputeMode } from './types'
@@ -61,7 +60,6 @@ export default function ComputeLab() {
       {/* ── Content ── */}
       <div className="flex-1 overflow-hidden">
         {mode === 'workstation' && <Workstation />}
-        {mode === 'presets' && <PresetRunner />}
         {mode === 'montecarlo' && <MonteCarloPanel />}
         {mode === 'equations' && <EquationPlotter />}
       </div>
