@@ -34,6 +34,7 @@ import { ALL_PRESETS, TOOLBOX_CATEGORIES } from './presets'
 import type { Preset } from './types'
 import ImagingPanel, { IMAGING_EVENT } from './ImagingPanel'
 import { getPlotBlob } from '../../utils/plotExport'
+import { plotlyConfig } from '../../utils/plotlyConfig'
 
 /* ── Persistence keys ────────────────────────────────────────────────── */
 const SCRIPT_KEY = 'compute-workstation-script'          // legacy single-script key
@@ -8248,7 +8249,7 @@ function PlotView({ plot, opts = DEFAULT_PLOT_OPTS }: { plot: PlotSpec | null; o
     }
     return (
       <div style={{ width: '100%', height: '100%', minHeight: 180 }}>
-        <PlotlyChart data={traces} layout={layout} config={{ responsive: true, displayModeBar: 'hover', displaylogo: false }} style={{ width: '100%', height: '100%' }} useResizeHandler />
+        <PlotlyChart data={traces} layout={layout} config={plotlyConfig()} style={{ width: '100%', height: '100%' }} useResizeHandler />
       </div>
     )
   }

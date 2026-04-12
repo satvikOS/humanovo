@@ -7,6 +7,7 @@
 import { useMemo } from 'react'
 import createPlotlyComponent from 'react-plotly.js/factory'
 import Plotly from 'plotly.js-dist-min'
+import { plotlyConfig } from '../utils/plotlyConfig'
 
 const Plot = createPlotlyComponent(Plotly)
 
@@ -366,15 +367,13 @@ export default function PlotlyPlot3D({
           data={traces}
           layout={layout as any}
           config={{
-            responsive: true,
-            displayModeBar: false,
+            ...plotlyConfig({ hide: true }),
             toImageButtonOptions: {
               format: 'svg',
               filename: title || '3d-visualization',
               width: 3840,
               height: 2160,
             },
-            displaylogo: false,
             scrollZoom: true,
           }}
           style={{ width: '100%', height: '100%' }}
