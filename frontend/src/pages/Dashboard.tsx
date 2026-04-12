@@ -216,10 +216,18 @@ function RecentSimulationsWidget() {
           {simulations.map(sim => {
             const color = SIM_TYPE_COLORS[sim.simulationType] || 'var(--color-text-muted)'
             const IconComp = SIM_KIND_ICONS[sim.kind] || FiActivity
+            // Route to the correct Compute Lab tab by simulation kind.
+            // Previously every row jumped to Monte Carlo regardless of
+            // its origin (equation plotter / code workstation), which
+            // was confusing when the user had mixed history.
+            const destTab = sim.kind === 'equation' ? 'equations'
+              : sim.kind === 'computational' ? 'workstation'
+              : 'montecarlo'
+            const destPath = destTab === 'workstation' ? '/compute-lab' : `/compute-lab?tab=${destTab}`
             return (
               <button
                 key={sim.id}
-                onClick={() => navigate('/compute-lab?tab=montecarlo')}
+                onClick={() => navigate(destPath)}
                 className="w-full text-left flex items-center gap-2.5 py-2.5 border-b border-[var(--color-border)] last:border-0 rounded-lg px-2 active:scale-95"
                 style={{
                   background: 'var(--glass-bg)',
@@ -359,7 +367,22 @@ function RecentNotebooksWidget() {
 
 // ── Activity Feed ──────────────────────────────────────────────
 
+// Map an activity entry's type onto the sidebar page that lists
+// that kind of entity, so a row click from Dashboard lands on a
+// sensible follow-up surface. Activities don't carry entity ids
+// yet (see utils/persistence.ts ActivityEntry), so we route to the
+// index rather than a specific record — still beats a dead row.
+const ACTIVITY_ROUTES: Record<string, string> = {
+  project: '/projects',
+  hypothesis: '/agents',
+  evidence: '/evidence',
+  simulation: '/compute-lab?tab=montecarlo',
+  notebook: '/notebook',
+  discovery: '/agents',
+}
+
 function ActivityFeed() {
+  const navigate = useNavigate()
   const [activities, setActivities] = useState<ActivityEntry[]>([])
 
   useEffect(() => {
@@ -449,8 +472,15 @@ function ActivityFeed() {
           {activities.map((activity) => {
             const Icon = typeIcons[activity.type] || FiActivity
             const color = typeColors[activity.type] || 'var(--color-text-muted)'
+            const dest = ACTIVITY_ROUTES[activity.type]
             return (
-              <div key={activity.id} className="flex items-start gap-3 py-3 border-b border-[var(--color-border)] last:border-0 group">
+              <button
+                key={activity.id}
+                type="button"
+                onClick={() => { if (dest) navigate(dest) }}
+                disabled={!dest}
+                className="w-full text-left flex items-start gap-3 py-3 border-b border-[var(--color-border)] last:border-0 group hover:bg-[var(--glass-bg-hover)] transition-colors disabled:cursor-default"
+              >
                 <Icon className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" style={{ color }} />
                 <div className="flex-1 min-w-0">
                   <div className="text-sm truncate">{activity.title}</div>
@@ -467,7 +497,7 @@ function ActivityFeed() {
                 >
                   {activity.action}
                 </span>
-              </div>
+              </button>
             )
           })}
         </div>
