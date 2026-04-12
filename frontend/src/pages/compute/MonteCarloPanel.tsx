@@ -832,7 +832,12 @@ export default function MonteCarloPanel() {
   // limit at the higher iteration counts (the slider allows up to 50 000).
   const histogramEnriched = useMemo(() => {
     if (!results) return [];
-    const vals = results.values;
+    // Drop NaN/Infinity so the binner doesn't anchor to bogus extrema —
+    // a single rogue value makes min=-Infinity / max=Infinity and the
+    // whole range collapses into one bin with 'NaN' labels that Recharts
+    // can't coerce to a numeric axis.
+    const vals = results.values.filter(v => Number.isFinite(v));
+    if (vals.length === 0) return [];
     let min = Infinity, max = -Infinity;
     for (let i = 0; i < vals.length; i++) {
       const v = vals[i]
@@ -1044,10 +1049,16 @@ export default function MonteCarloPanel() {
                   {activeChart === 'histogram' && (() => {
                     // Recharts ReferenceLine on a category axis needs an exact
                     // bin label, so we snap each stat to its nearest bin midpoint.
-                    const snap = (v: number): string | undefined => {
-                      let closest = histogramEnriched[0]?.bin
+                    // Guard: if the histogram is empty (no results, or all-NaN
+                    // values collapsing bins), return null so the reference
+                    // line is omitted entirely instead of rendering with
+                    // `x={undefined}` which crashes Recharts.
+                    const snap = (v: number): string | null => {
+                      if (!histogramEnriched.length || !Number.isFinite(v)) return null
+                      let closest: string | null = null
                       let minD = Infinity
                       for (const h of histogramEnriched) {
+                        if (!Number.isFinite(h.binMid)) continue
                         const d = Math.abs(h.binMid - v)
                         if (d < minD) { minD = d; closest = h.bin }
                       }
@@ -1064,10 +1075,10 @@ export default function MonteCarloPanel() {
                           <XAxis dataKey="bin" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} interval="preserveStartEnd" stroke="var(--glass-border)" label={{ value: results.label, position: 'insideBottom', offset: -12, fontSize: 10, fill: 'var(--color-text-muted)' }} />
                           <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" label={{ value: 'Count', angle: -90, position: 'insideLeft', fontSize: 10, fill: 'var(--color-text-muted)' }} />
                           <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} cursor={{ stroke: 'var(--color-text-muted)', strokeDasharray: '4 4' }} />
-                          <ReferenceLine x={ciLoBin} stroke="#6BA594" strokeWidth={1} strokeDasharray="2 3" label={{ value: '2.5%', position: 'top', fontSize: 8, fill: '#6BA594' }} />
-                          <ReferenceLine x={ciHiBin} stroke="#6BA594" strokeWidth={1} strokeDasharray="2 3" label={{ value: '97.5%', position: 'top', fontSize: 8, fill: '#6BA594' }} />
-                          <ReferenceLine x={medianBin} stroke="#8B7EAF" strokeWidth={1.5} strokeDasharray="3 3" label={{ value: 'Median', position: 'top', fontSize: 9, fill: '#8B7EAF' }} />
-                          <ReferenceLine x={meanBin} stroke="#5B8DB8" strokeWidth={2} strokeDasharray="4 3" label={{ value: 'Mean', position: 'top', fontSize: 9, fill: '#5B8DB8' }} />
+                          {ciLoBin && <ReferenceLine x={ciLoBin} stroke="#6BA594" strokeWidth={1} strokeDasharray="2 3" label={{ value: '2.5%', position: 'top', fontSize: 8, fill: '#6BA594' }} />}
+                          {ciHiBin && <ReferenceLine x={ciHiBin} stroke="#6BA594" strokeWidth={1} strokeDasharray="2 3" label={{ value: '97.5%', position: 'top', fontSize: 8, fill: '#6BA594' }} />}
+                          {medianBin && <ReferenceLine x={medianBin} stroke="#8B7EAF" strokeWidth={1.5} strokeDasharray="3 3" label={{ value: 'Median', position: 'top', fontSize: 9, fill: '#8B7EAF' }} />}
+                          {meanBin && <ReferenceLine x={meanBin} stroke="#5B8DB8" strokeWidth={2} strokeDasharray="4 3" label={{ value: 'Mean', position: 'top', fontSize: 9, fill: '#5B8DB8' }} />}
                           <Bar dataKey="count" fill="#5B8DB8" fillOpacity={0.35} radius={[2, 2, 0, 0]} />
                           {histogramEnriched.length > 8 && <Brush dataKey="bin" height={16} stroke="#5B8DB8" fill="var(--glass-bg)" travellerWidth={6} />}
                         </BarChart>

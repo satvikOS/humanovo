@@ -1805,41 +1805,99 @@ export default function Workstation() {
     setEntries(prev => [...prev, mkEntry({ kind: 'output', text: '— workspace cleared —' })])
   }
 
-  // Clone the currently displayed chart SVG with a solid dark background
-  // baked in. Shared between the SVG and PNG exporters so both produce
-  // the same image.
-  const cloneCurrentPlotSvg = useCallback((): SVGSVGElement | null => {
+  // Resolve the currently displayed plot into a raster image. Supports
+  // both Recharts / inline SVG plots and Plotly plots (which may render
+  // WebGL or canvas — a plain svg.cloneNode serialization captures only
+  // the colorbar strip for those, leaving the main plot area black).
+  //
+  // Returns a Blob when successful, or null if no plot is on screen.
+  // `format` is 'png' or 'svg'; for Plotly we defer to Plotly.toImage,
+  // which can export either faithfully.
+  const getCurrentPlotBlob = useCallback(async (format: 'png' | 'svg'): Promise<Blob | null> => {
     const host = plotBodyRef.current
     if (!host) return null
+    const isDark = document.documentElement.classList.contains('dark')
+    const bgColor = isDark ? '#0a0a0a' : '#ffffff'
+
+    // ── Plotly (3D surface, wireframe, contour, scatter3d, heatmap) ──
+    // The Plotly React wrapper adds the `.js-plotly-plot` class on its
+    // root div and Plotly.toImage operates on that element. It internally
+    // reads from the WebGL/canvas layers so we get a complete render
+    // (not just the SVG overlay with axes + colorbar).
+    const plotlyNode = host.querySelector<HTMLDivElement>('.js-plotly-plot')
+    if (plotlyNode) {
+      const rect = plotlyNode.getBoundingClientRect()
+      const w = Math.max(200, Math.round(rect.width))
+      const h = Math.max(150, Math.round(rect.height))
+      try {
+        const dataUrl = await Plotly.toImage(plotlyNode as any, {
+          format, width: w, height: h,
+          // Plotly honours its own paper_bgcolor — we patched it to
+          // transparent for the dark shell, so composite onto bgColor
+          // afterwards for PNG. SVG we return as-is since the background
+          // layer is easy to override in vector tools.
+        } as any)
+        if (format === 'svg') {
+          // data URL is `data:image/svg+xml,...`; extract the URL-encoded
+          // body, decode, and wrap.
+          const commaIdx = dataUrl.indexOf(',')
+          const body = commaIdx >= 0 ? decodeURIComponent(dataUrl.slice(commaIdx + 1)) : ''
+          return new Blob([body], { type: 'image/svg+xml' })
+        }
+        // PNG path — composite onto an opaque background canvas so the
+        // exported image isn't transparent-on-transparent when pasted
+        // into a slide deck or document.
+        const img = new Image()
+        img.src = dataUrl
+        await new Promise<void>((resolve, reject) => {
+          img.onload = () => resolve()
+          img.onerror = () => reject(new Error('plotly png load failed'))
+        })
+        const canvas = document.createElement('canvas')
+        canvas.width = w
+        canvas.height = h
+        const ctx = canvas.getContext('2d')
+        if (!ctx) return null
+        ctx.fillStyle = bgColor
+        ctx.fillRect(0, 0, w, h)
+        ctx.drawImage(img, 0, 0, w, h)
+        return await new Promise<Blob | null>(resolve =>
+          canvas.toBlob(b => resolve(b), 'image/png')
+        )
+      } catch {
+        // Fall through to SVG path if Plotly.toImage blew up.
+      }
+    }
+
+    // ── Recharts / inline SVG path ──
     const svg = host.querySelector('svg')
     if (!svg) return null
     const clone = svg.cloneNode(true) as SVGSVGElement
     clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
-    // Preserve the original width/height as attributes so <img> can render
-    // it without additional hints when we rasterize.
     const rect = svg.getBoundingClientRect()
     if (!clone.getAttribute('width')) clone.setAttribute('width', String(rect.width))
     if (!clone.getAttribute('height')) clone.setAttribute('height', String(rect.height))
-    // Adaptive solid background: white in light mode, dark in dark mode
-    const isDark = document.documentElement.classList.contains('dark')
-    const bgColor = isDark ? '#0a0a0a' : '#ffffff'
     const bgRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
     bgRect.setAttribute('width', '100%')
     bgRect.setAttribute('height', '100%')
     bgRect.setAttribute('fill', bgColor)
     clone.insertBefore(bgRect, clone.firstChild)
-    return clone
-  }, [])
-
-  /** Copy the current figure to clipboard as PNG with solid adaptive background. */
-  const copyPlotToClipboard = useCallback(async () => {
-    const clone = cloneCurrentPlotSvg()
-    if (!clone) return
     const xml = new XMLSerializer().serializeToString(clone)
+
+    if (format === 'svg') {
+      return new Blob([xml], { type: 'image/svg+xml' })
+    }
+
+    // Rasterize the SVG at 2× for crisp output.
     const svgBlob = new Blob([xml], { type: 'image/svg+xml;charset=utf-8' })
     const svgUrl = URL.createObjectURL(svgBlob)
-    const img = new Image()
-    img.onload = async () => {
+    try {
+      const img = new Image()
+      img.src = svgUrl
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve()
+        img.onerror = () => reject(new Error('svg load failed'))
+      })
       const w = Number(clone.getAttribute('width')) || img.width || 800
       const h = Number(clone.getAttribute('height')) || img.height || 480
       const scale = 2
@@ -1847,27 +1905,31 @@ export default function Workstation() {
       canvas.width = Math.round(w * scale)
       canvas.height = Math.round(h * scale)
       const ctx = canvas.getContext('2d')
-      if (!ctx) { URL.revokeObjectURL(svgUrl); return }
-      const isDark = document.documentElement.classList.contains('dark')
-      ctx.fillStyle = isDark ? '#0a0a0a' : '#ffffff'
+      if (!ctx) return null
+      ctx.fillStyle = bgColor
       ctx.fillRect(0, 0, canvas.width, canvas.height)
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+      return await new Promise<Blob | null>(resolve =>
+        canvas.toBlob(b => resolve(b), 'image/png')
+      )
+    } finally {
       URL.revokeObjectURL(svgUrl)
-      try {
-        const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
-        if (blob) await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
-      } catch { /* clipboard write may fail in some browsers */ }
     }
-    img.onerror = () => { URL.revokeObjectURL(svgUrl) }
-    img.src = svgUrl
-  }, [cloneCurrentPlotSvg])
+  }, [])
+
+  /** Copy the current figure to clipboard as PNG with solid adaptive background. */
+  const copyPlotToClipboard = useCallback(async () => {
+    try {
+      const blob = await getCurrentPlotBlob('png')
+      if (!blob) return
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+    } catch { /* clipboard write may fail in restricted contexts */ }
+  }, [getCurrentPlotBlob])
 
   /** Export the currently rendered figure as SVG. */
-  const exportPlotSVG = useCallback(() => {
-    const clone = cloneCurrentPlotSvg()
-    if (!clone) return
-    const xml = new XMLSerializer().serializeToString(clone)
-    const blob = new Blob([xml], { type: 'image/svg+xml' })
+  const exportPlotSVG = useCallback(async () => {
+    const blob = await getCurrentPlotBlob('svg')
+    if (!blob) return
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     const title = plots[activePlot]?.title?.replace(/[^\w-]+/g, '_') || `figure-${activePlot + 1}`
@@ -1875,44 +1937,20 @@ export default function Workstation() {
     a.download = `${title}.svg`
     a.click()
     URL.revokeObjectURL(url)
-  }, [plots, activePlot, cloneCurrentPlotSvg])
+  }, [plots, activePlot, getCurrentPlotBlob])
 
   /** Export the currently rendered figure as PNG (rasterized at 2× DPR). */
-  const exportPlotPNG = useCallback(() => {
-    const clone = cloneCurrentPlotSvg()
-    if (!clone) return
-    const xml = new XMLSerializer().serializeToString(clone)
-    const svgBlob = new Blob([xml], { type: 'image/svg+xml;charset=utf-8' })
-    const svgUrl = URL.createObjectURL(svgBlob)
-    const img = new Image()
-    img.onload = () => {
-      const widthAttr = Number(clone.getAttribute('width')) || img.width || 800
-      const heightAttr = Number(clone.getAttribute('height')) || img.height || 480
-      const scale = 2 // produce crisp, retina-ready output
-      const canvas = document.createElement('canvas')
-      canvas.width = Math.round(widthAttr * scale)
-      canvas.height = Math.round(heightAttr * scale)
-      const ctx = canvas.getContext('2d')
-      if (!ctx) { URL.revokeObjectURL(svgUrl); return }
-      const isDark = document.documentElement.classList.contains('dark')
-      ctx.fillStyle = isDark ? '#0a0a0a' : '#ffffff'
-      ctx.fillRect(0, 0, canvas.width, canvas.height)
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-      URL.revokeObjectURL(svgUrl)
-      canvas.toBlob(blob => {
-        if (!blob) return
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        const title = plots[activePlot]?.title?.replace(/[^\w-]+/g, '_') || `figure-${activePlot + 1}`
-        a.href = url
-        a.download = `${title}.png`
-        a.click()
-        URL.revokeObjectURL(url)
-      }, 'image/png')
-    }
-    img.onerror = () => { URL.revokeObjectURL(svgUrl) }
-    img.src = svgUrl
-  }, [plots, activePlot, cloneCurrentPlotSvg])
+  const exportPlotPNG = useCallback(async () => {
+    const blob = await getCurrentPlotBlob('png')
+    if (!blob) return
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    const title = plots[activePlot]?.title?.replace(/[^\w-]+/g, '_') || `figure-${activePlot + 1}`
+    a.href = url
+    a.download = `${title}.png`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [plots, activePlot, getCurrentPlotBlob])
 
   /** Export the underlying series data of the current figure as CSV. */
   const exportPlotCSV = useCallback(() => {
