@@ -580,8 +580,17 @@ OPERATION_SCHEMAS["clinical/clinical_scales"] = {
     "params": [
         P("scale", "Scale", "select", required=True,
           options=_sel([("hamd17", "HAM-D-17"), ("panss", "PANSS"), ("phq9", "PHQ-9"),
-                        ("gad7", "GAD-7"), ("madrs", "MADRS"), ("ymrs", "YMRS"), ("cgi", "CGI")])),
-        P("items", "Item Scores", "array", required=True, description="Individual item scores"),
+                        ("gad7", "GAD-7"), ("madrs", "MADRS"), ("ymrs", "YMRS"), ("cgi", "CGI"),
+                        ("gcs", "Glasgow Coma Scale"), ("nihss", "NIH Stroke Scale"),
+                        ("moca", "Montreal Cognitive Assessment")])),
+        P("items", "Item Scores", "array",
+          description="Item scores. Required for most scales. For GCS, you can use eye/verbal/motor fields instead."),
+        P("eye", "GCS Eye Response (1-4)", "integer", min=1, max=4, description="GCS only", group="GCS"),
+        P("verbal", "GCS Verbal Response (1-5)", "integer", min=1, max=5, description="GCS only", group="GCS"),
+        P("motor", "GCS Motor Response (1-6)", "integer", min=1, max=6, description="GCS only", group="GCS"),
+        P("education_years", "Years of Education", "integer", default=13, min=0, max=30,
+          description="MoCA +1 bonus if ≤12 years", group="MoCA"),
+        P("baseline_nihss", "Baseline NIHSS", "number", description="Used to flag ≥4-point improvement", group="NIHSS"),
     ],
 }
 
