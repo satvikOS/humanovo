@@ -1720,7 +1720,26 @@ export default function DataVisualization() {
                   <label className="block text-xs font-medium mb-1.5 text-[var(--color-text-secondary)]">Chart Type</label>
                   <GlassSelect
                     value={form.type}
-                    onChange={val => setForm(f => ({ ...f, type: val as ChartType }))}
+                    onChange={val => setForm(f => {
+                      const newType = val as ChartType
+                      // Auto-swap sample data when the user changes chart
+                      // type IF the dataText is empty or still matches the
+                      // previous type's sample (i.e. they haven't edited it).
+                      // This gives an immediate preview without asking them
+                      // to click Load Sample again for every type.
+                      const prevSample = SAMPLE_DATA[f.type]?.data
+                      const nextSample = SAMPLE_DATA[newType]
+                      const untouched = !f.dataText.trim() || (prevSample && f.dataText.trim() === prevSample.trim())
+                      if (untouched && nextSample) {
+                        return {
+                          ...f,
+                          type: newType,
+                          title: f.title || nextSample.title,
+                          dataText: nextSample.data,
+                        }
+                      }
+                      return { ...f, type: newType }
+                    })}
                     options={CHART_TYPES.map(ct => ({ value: ct.value, label: ct.label, group: ct.group }))}
                   />
                 </div>
