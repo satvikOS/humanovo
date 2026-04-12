@@ -197,7 +197,7 @@ function RecentSimulationsWidget() {
           <FiActivity className="w-5 h-5 mx-auto mb-1.5 opacity-40" />
           <p className="text-xs">No simulations yet</p>
           <button
-            onClick={() => navigate('/simulations')}
+            onClick={() => navigate('/compute-lab?tab=montecarlo')}
             className="text-xs mt-1 rounded-lg active:scale-95"
             style={{
               background: 'rgba(91, 141, 184, 0.25)',
@@ -326,7 +326,7 @@ function RecentNotebooksWidget() {
           {notebooks.map(nb => (
             <button
               key={nb.id}
-              onClick={() => navigate('/notebook')}
+              onClick={() => navigate(`/notebook?id=${encodeURIComponent(nb.id)}`)}
               className="w-full text-left flex items-center gap-2.5 py-2.5 border-b border-[var(--color-border)] last:border-0 rounded-lg px-2 active:scale-95"
               style={{
                 background: 'var(--glass-bg)',

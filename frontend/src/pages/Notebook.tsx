@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   FiPlus, FiTrash2, FiSave, FiSearch,
   FiFileText, FiX, FiGrid, FiList, FiPrinter,
@@ -538,6 +539,13 @@ export default function Notebook() {
 
   const { showPrompt, AlertDialog } = useAlertDialog()
 
+  // Deep-link support: `?id=…` pre-selects a specific notebook page
+  // so Dashboard → Recent Notebooks and external links can jump straight
+  // to a page. We consume the query once on mount after pages load, then
+  // clean it off the URL.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const deepLinkId = searchParams.get('id')
+
   // Page index (metadata only — content loaded on demand from API)
   const [pageIndex, setPageIndex] = useState<PageMeta[]>([])
   const [activePageId, setActivePageId] = useState<string | null>(null)
@@ -560,8 +568,11 @@ export default function Notebook() {
         }))
         if (pages.length > 0) {
           setPageIndex(pages)
-          setActivePageId(pages[0].id)
-          // Pre-cache content of first page
+          // Honour `?id=` if the requested page exists; otherwise fall
+          // back to the most-recent (first) page.
+          const requested = deepLinkId && pages.find(p => p.id === deepLinkId) ? deepLinkId : pages[0].id
+          setActivePageId(requested)
+          // Pre-cache content of the first page from the list response.
           if (res.items[0]?.content) {
             pageContentCache.current[pages[0].id] = res.items[0].content
           }
@@ -571,8 +582,16 @@ export default function Notebook() {
         // Graceful fallback: start with empty local state instead of blocking
         setPageIndex([])
       }
+      // Clean the deep-link off the URL so a soft reload doesn't
+      // re-anchor the selection to a stale target.
+      if (deepLinkId) {
+        const next = new URLSearchParams(searchParams)
+        next.delete('id')
+        setSearchParams(next, { replace: true })
+      }
     }
     loadPages()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const [searchQuery, setSearchQuery] = useState('')
