@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   FiDatabase,
   FiSearch,
@@ -179,7 +180,15 @@ export default function Evidence() {
   const [page, setPage] = useState(1)
   const [totalItems, setTotalItems] = useState(0)
   const [loading, setLoading] = useState(true)
-  const [showAddModal, setShowAddModal] = useState(false)
+  // Deep-link support: `?add=1` (or `?new=1`) auto-opens the Add Evidence
+  // dialog so dashboard/quick-action links can drop users straight into the
+  // upload flow. We consume the query string on mount so a soft re-render
+  // doesn't keep re-opening the modal after the user cancels.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [showAddModal, setShowAddModal] = useState(() => {
+    const q = searchParams.get('add') || searchParams.get('new')
+    return q === '1'
+  })
   const [editField, setEditField] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
   const [noteText, setNoteText] = useState('')
@@ -226,6 +235,18 @@ export default function Evidence() {
   }, [searchQuery, filterType, page])
 
   useEffect(() => { fetchEvidence() }, [fetchEvidence])
+
+  // Clean the `?add=1` / `?new=1` deep-link query off the URL after the
+  // initial mount so the dialog doesn't re-open on every soft reload.
+  useEffect(() => {
+    if (searchParams.get('add') === '1' || searchParams.get('new') === '1') {
+      const next = new URLSearchParams(searchParams)
+      next.delete('add')
+      next.delete('new')
+      setSearchParams(next, { replace: true })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Merge project documents into evidence list. Both intermediate lists
   // are memoized so long lists don't re-map + re-filter on every
