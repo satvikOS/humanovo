@@ -18,6 +18,7 @@ export type BuiltinCategory =
   | 'I/O'
   | 'Logic'
   | 'Image Processing'
+  | 'Imaging'
 
 export interface BuiltinDoc {
   name: string
@@ -29,7 +30,7 @@ export interface BuiltinDoc {
 
 export const BUILTIN_CATEGORIES: BuiltinCategory[] = [
   'Math', 'Matrix', 'Statistics', 'Linear algebra', 'Calculus',
-  'Signal', 'Sets', 'Logic', 'Plotting', 'Image Processing', 'I/O',
+  'Signal', 'Sets', 'Logic', 'Plotting', 'Image Processing', 'Imaging', 'I/O',
 ]
 
 export const BUILTIN_DOCS: BuiltinDoc[] = [
@@ -258,4 +259,11 @@ export const BUILTIN_DOCS: BuiltinDoc[] = [
   { name: 'imclose', category: 'Image Processing', signature: 'imclose(img, se)', description: 'Morphological closing', snippet: 'C = imclose(img, ones(3,3))' },
   { name: 'bwlabel', category: 'Image Processing', signature: 'bwlabel(bw)', description: 'Label connected components', snippet: 'L = bwlabel(bw)' },
   { name: 'imcrop', category: 'Image Processing', signature: 'imcrop(img, [r c h w])', description: 'Crop image region', snippet: 'C = imcrop(img, [10 10 50 50])' },
+
+  // ─── Imaging (Research Imaging bridge) ──────────────────────────────
+  { name: 'imaging_count', category: 'Imaging', signature: 'imaging_count()', description: 'Number of studies available in the shared imaging store', snippet: 'n = imaging_count()' },
+  { name: 'imaging_list', category: 'Imaging', signature: 'imaging_list()', description: 'Print all studies (title, modality, size); returns count', snippet: 'imaging_list()' },
+  { name: 'imaging_info', category: 'Imaging', signature: 'imaging_info(i?)', description: 'Describe the i-th study (omit for most-recent)', snippet: 'imaging_info()' },
+  { name: 'imaging_select', category: 'Imaging', signature: 'imaging_select(i)', description: 'Open study [i] in the Compute Lab Imaging panel; returns study id', snippet: 'imaging_select(0)' },
+  { name: 'imaging_window', category: 'Imaging', signature: 'imaging_window(center, width)', description: 'Update window/level of the current study; live-refreshes the panel', snippet: 'imaging_window(40, 400)' },
 ]

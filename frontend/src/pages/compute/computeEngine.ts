@@ -2092,6 +2092,72 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
     pushSeries(lbl || `y${ensurePlot().series.length + 1}`, x, y, 'line')
     return MVOID
   })
+
+  // ─── Imaging bridge ────────────────────────────────────────────────
+  // Lightweight script-side handles on the Research Imaging studies kept
+  // in localStorage. The Compute Lab Imaging panel listens on
+  // `compute-imaging-update` and re-renders when we fire it, so mutating
+  // windowCenter/Width from a script immediately updates the viewer.
+  const IMG_KEY = 'research-imaging-studies'
+  const IMG_EVENT = 'compute-imaging-update'
+  interface ImgStudy { id: string; title: string; modality: string; bodyPart: string;
+    width: number; height: number; windowCenter: number; windowWidth: number }
+  const loadImgStudies = (): ImgStudy[] => {
+    try { return JSON.parse(localStorage.getItem(IMG_KEY) || '[]') as ImgStudy[] } catch { return [] }
+  }
+  const saveImgStudies = (list: ImgStudy[]) => {
+    try { localStorage.setItem(IMG_KEY, JSON.stringify(list)) } catch { /* quota */ }
+  }
+  const fireImg = (selectId?: string) => {
+    try {
+      const evt = new CustomEvent(IMG_EVENT, { detail: selectId ? { selectId } : {} })
+      window.dispatchEvent(evt)
+    } catch { /* non-browser */ }
+  }
+  def('imaging_count', 0, () => mnum(loadImgStudies().length))
+  def('imaging_list', 0, () => {
+    const list = loadImgStudies()
+    const lines = list.length === 0
+      ? ['(no imaging studies — upload on /imaging)']
+      : list.map((s, i) => `[${i}] ${s.title || s.modality} — ${s.modality} · ${s.bodyPart || '–'} (${s.width}×${s.height})`)
+    ctx.outputs.push({ kind: 'text', text: lines.join('\n') })
+    return mnum(list.length)
+  })
+  def('imaging_info', -1, args => {
+    const list = loadImgStudies()
+    if (list.length === 0) throw new RuntimeError('imaging_info: no studies available')
+    const i = args[0] ? Math.max(0, Math.min(list.length - 1, Math.round(toNumber(args[0])))) : list.length - 1
+    const s = list[i]
+    ctx.outputs.push({ kind: 'text', text:
+      `Study [${i}] — ${s.title || s.modality}\n` +
+      `  modality: ${s.modality}\n` +
+      `  region:   ${s.bodyPart || '–'}\n` +
+      `  size:     ${s.width} × ${s.height}\n` +
+      `  window:   C ${s.windowCenter} / W ${s.windowWidth}`,
+    })
+    return MVOID
+  })
+  def('imaging_select', 1, args => {
+    need(args, 1, 'imaging_select')
+    const list = loadImgStudies()
+    if (list.length === 0) throw new RuntimeError('imaging_select: no studies available')
+    const i = Math.max(0, Math.min(list.length - 1, Math.round(toNumber(args[0]))))
+    fireImg(list[i].id)
+    return mstr(list[i].id)
+  })
+  def('imaging_window', 2, args => {
+    need(args, 2, 'imaging_window')
+    const list = loadImgStudies()
+    if (list.length === 0) throw new RuntimeError('imaging_window: no studies available')
+    const wc = toNumber(args[0])
+    const ww = toNumber(args[1])
+    const idx = list.length - 1
+    const next = list.map((s, i) => i === idx ? { ...s, windowCenter: wc, windowWidth: Math.max(1, ww) } : s)
+    saveImgStudies(next)
+    fireImg(next[idx].id)
+    return MVOID
+  })
+  // End Imaging bridge
   def('scatter', -1, args => {
     need(args, 2, 'scatter')
     pushSeries('scatter', toArray(args[0]), toArray(args[1]), 'scatter')

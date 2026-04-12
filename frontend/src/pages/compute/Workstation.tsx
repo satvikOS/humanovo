@@ -32,6 +32,7 @@ import {
 import { BUILTIN_CATEGORIES, BUILTIN_DOCS, type BuiltinDoc } from './builtinDocs'
 import { ALL_PRESETS, TOOLBOX_CATEGORIES } from './presets'
 import type { Preset } from './types'
+import ImagingPanel, { IMAGING_EVENT } from './ImagingPanel'
 
 /* ── Persistence keys ────────────────────────────────────────────────── */
 const SCRIPT_KEY = 'compute-workstation-script'          // legacy single-script key
@@ -679,7 +680,25 @@ export default function Workstation() {
   // as a script (or fragment) finishes executing, and can be reopened from
   // the toolbar's "Results" entry without re-running.
   const [resultsOverlay, setResultsOverlay] = useState(false)
-  const [resultsTab, setResultsTab] = useState<'figure' | 'console' | 'workspace'>('figure')
+  const [resultsTab, setResultsTab] = useState<'figure' | 'console' | 'workspace' | 'imaging'>('figure')
+  // Quick-read count of studies for the Imaging tab badge. Refreshed whenever
+  // the overlay opens or the shared IMAGING_EVENT fires (script mutations).
+  const [imagingStudyCount, setImagingStudyCount] = useState<number>(() => {
+    try { return (JSON.parse(localStorage.getItem('research-imaging-studies') || '[]') as unknown[]).length } catch { return 0 }
+  })
+  useEffect(() => {
+    const refresh = () => {
+      try { setImagingStudyCount((JSON.parse(localStorage.getItem('research-imaging-studies') || '[]') as unknown[]).length) } catch { /* noop */ }
+    }
+    window.addEventListener('focus', refresh)
+    window.addEventListener('storage', refresh)
+    window.addEventListener(IMAGING_EVENT, refresh)
+    return () => {
+      window.removeEventListener('focus', refresh)
+      window.removeEventListener('storage', refresh)
+      window.removeEventListener(IMAGING_EVENT, refresh)
+    }
+  }, [])
   // Per-figure rendering options. Toggled by the small chip buttons in the
   // figure header (grid / log-x / log-y / legend) and applied to PlotView.
   const [plotOpts, setPlotOpts] = useState<PlotOpts>({
@@ -7148,6 +7167,7 @@ export default function Workstation() {
                   { id: 'figure', label: 'Figure', count: plots.length },
                   { id: 'console', label: 'Console', count: entries.length },
                   { id: 'workspace', label: 'Workspace', count: vars.length },
+                  { id: 'imaging', label: 'Imaging', count: imagingStudyCount },
                 ] as const).map(t => {
                   const active = resultsTab === t.id
                   return (
@@ -7482,6 +7502,12 @@ export default function Workstation() {
             </div>
           </div>
         </div>
+        )}
+
+        {resultsTab === 'imaging' && (
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+            <ImagingPanel visible />
+          </div>
         )}
 
         {resultsTab === 'console' && (
