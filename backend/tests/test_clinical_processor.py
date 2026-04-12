@@ -171,6 +171,38 @@ async def test_unknown_scale_returns_failed(proc: ClinicalProcessor) -> None:
     assert "Unknown scale" in (result.error or "")
 
 
+async def test_panss_remission_andreasen_criteria(proc: ClinicalProcessor) -> None:
+    # Andreasen (2005) 8-item criterion: P1,P2,P3,N1,N4,N6,G5,G9 all ≤ 3.
+    # Build a 30-item vector where exactly those 8 indices are 3 (pass),
+    # everything else is 4 (would fail if indexed wrong).
+    items = [4] * 30
+    for i in [0, 1, 2, 7, 10, 12, 18, 22]:
+        items[i] = 3
+    result = await proc.execute(_req("clinical_scales", scale="PANSS", items=items))
+    assert result.status is ComputeStatus.COMPLETED
+    assert result.results["remission_andreasen"] is True
+
+    # Flipping P1 (index 0) above 3 must break remission.
+    items[0] = 4
+    result2 = await proc.execute(_req("clinical_scales", scale="PANSS", items=items))
+    assert result2.results["remission_andreasen"] is False
+
+
+async def test_panss_marder_factor_decomposition(proc: ClinicalProcessor) -> None:
+    # Putting distinguishable values into each Marder factor lets us verify
+    # the 5 sub-scores are summing the right indices (anti-regression against
+    # the earlier buggy index list).
+    items = [0] * 30
+    # Positive factor: P1=0, P3=2, P5=4, P6=5, G9=22 → sum = 5.
+    for i in [0, 2, 4, 5, 22]:
+        items[i] = 1
+    result = await proc.execute(_req("clinical_scales", scale="PANSS", items=items))
+    assert result.results["marder_factors"]["positive"] == pytest.approx(5.0)
+    # Nothing else should have been assigned, so other factors are 0.
+    assert result.results["marder_factors"]["depressed"] == pytest.approx(0.0)
+    assert result.results["marder_factors"]["excited"] == pytest.approx(0.0)
+
+
 # ── Power Analysis ─────────────────────────────────────────────────────
 
 

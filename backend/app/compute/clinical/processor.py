@@ -256,16 +256,22 @@ class ClinicalProcessor:
             negative = float(np.sum(items[7:14]))  # N1-N7
             general = float(np.sum(items[14:30]))  # G1-G16
             total = positive + negative + general
-            # Marder factor model (5 factors)
+            # Marder (1997) 5-factor model — canonical indices
+            # P1-P7 = 0-6, N1-N7 = 7-13, G1-G16 = 14-29
             marder = {
-                "positive": float(np.sum(items[[0, 2, 4, 5, 14]])),  # P1,P3,P5,P6,G1 (approx)
-                "negative": float(np.sum(items[[7, 8, 9, 10, 11, 12, 20]])),  # N1-N6,G7
-                "disorganized": float(np.sum(items[[1, 3, 6, 13, 19]])),  # P2,P4,P7,N7,G5 (approx)
-                "excited": float(np.sum(items[[16, 17, 21]])),  # G4,G8,G14 (approx)
-                "depressed": float(np.sum(items[[15, 18, 19]])),  # G2,G3,G6 (approx)
+                # Positive: P1,P3,P5,P6,G9
+                "positive": float(np.sum(items[[0, 2, 4, 5, 22]])),
+                # Negative: N1,N2,N3,N4,N6,G7,G16
+                "negative": float(np.sum(items[[7, 8, 9, 10, 12, 20, 29]])),
+                # Disorganized: P2,N5,N7,G5,G10,G11,G13,G15
+                "disorganized": float(np.sum(items[[1, 11, 13, 18, 23, 24, 26, 28]])),
+                # Excited/hostility: P4,P7,G4,G8,G14
+                "excited": float(np.sum(items[[3, 6, 17, 21, 27]])),
+                # Anxiety/depression: G1,G2,G3,G6
+                "depressed": float(np.sum(items[[14, 15, 16, 19]])),
             }
-            # Andreasen remission criteria (PANSS-8 items all <= 3)
-            panss8_items = [items[i] for i in [0, 2, 6, 7, 8, 9, 14, 21]]  # P1,P3,P7,N1,N2,N3,G5,G9 (approx)
+            # Andreasen et al. (2005) 8-item remission: P1,P2,P3,N1,N4,N6,G5,G9 all <= 3
+            panss8_items = [items[i] for i in [0, 1, 2, 7, 10, 12, 18, 22]]
             remission = all(item <= 3 for item in panss8_items)
             
             result = {
