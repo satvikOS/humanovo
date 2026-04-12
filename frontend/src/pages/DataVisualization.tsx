@@ -493,7 +493,7 @@ function GlassSelect({ value, options, onChange, placeholder }: {
                   onClick={() => { onChange(opt.value); setOpen(false) }}
                   className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 transition-colors ${
                     opt.value === value
-                      ? 'bg-[var(--color-accent-blue)]/10 text-[var(--color-accent-blue)]'
+                      ? 'bg-white/10 text-[var(--color-text)]'
                       : 'text-[var(--color-text-secondary)] hover:bg-[var(--glass-bg-hover)] hover:text-[var(--color-text)]'
                   }`}
                 >
@@ -779,7 +779,7 @@ export default function DataVisualization() {
     const hidden = hiddenSeries[chart.id] || new Set<string>()
     const handleLegendClick = (e: any) => { if (e?.dataKey) toggleSeries(chart.id, e.dataKey) }
     const legendEl = o.showLegend ? <Legend wrapperStyle={{ fontSize: 11, cursor: 'pointer' }} onClick={handleLegendClick} formatter={(value: string) => <span style={{ opacity: hidden.has(value) ? 0.3 : 1, textDecoration: hidden.has(value) ? 'line-through' : 'none' }}>{value}</span>} /> : null
-    const brushEl = o.showBrush && data.length > 5 ? <Brush dataKey="label" height={20} stroke="var(--color-accent-blue)" fill="var(--glass-bg)" travellerWidth={8} /> : null
+    const brushEl = o.showBrush && data.length > 5 ? <Brush dataKey="label" height={20} stroke="var(--color-text)" fill="var(--glass-bg)" travellerWidth={8} /> : null
     const xAxisEl = <XAxis dataKey="label" tick={AXIS_TICK} label={o.xLabel ? { value: o.xLabel, position: 'insideBottom', offset: -5, style: { fontSize: 11, fill: 'var(--color-text-muted)' } } : undefined} scale={o.logScaleX ? 'log' : 'auto'} />
     const yAxisEl = <YAxis tick={AXIS_TICK} label={o.yLabel ? { value: o.yLabel, angle: -90, position: 'insideLeft', style: { fontSize: 11, fill: 'var(--color-text-muted)' } } : undefined} scale={o.logScaleY ? 'log' : 'auto'} domain={o.logScaleY ? ['auto', 'auto'] : undefined} />
     const annotationEls = (chart.annotations || []).map(ann => (
@@ -1558,8 +1558,8 @@ export default function DataVisualization() {
         <div className="flex items-center justify-between mb-1">
           <span className="text-xxs text-[var(--color-text-muted)] font-medium">Annotations</span>
           <div className="flex gap-1">
-            <button onClick={() => addStatsAnnotations(chart.id)} className="text-xxs px-1.5 py-0.5 rounded hover:bg-white/10" style={{ color: 'var(--color-accent-green)' }}>+ Mean/Median</button>
-            <button onClick={() => addAnnotation(chart.id)} className="text-xxs px-1.5 py-0.5 rounded hover:bg-white/10" style={{ color: 'var(--color-accent-blue)' }}>+ Line</button>
+            <button onClick={() => addStatsAnnotations(chart.id)} className="text-xxs px-1.5 py-0.5 rounded hover:bg-white/10" style={{ color: 'var(--color-text)' }}>+ Mean/Median</button>
+            <button onClick={() => addAnnotation(chart.id)} className="text-xxs px-1.5 py-0.5 rounded hover:bg-white/10" style={{ color: 'var(--color-text)' }}>+ Line</button>
           </div>
         </div>
         {(chart.annotations || []).map(ann => (
@@ -1776,7 +1776,7 @@ export default function DataVisualization() {
                 Cancel
               </button>
               <button onClick={addChart} disabled={!form.title.trim() || !form.dataText.trim()}
-                className="btn-primary px-4 py-2 text-sm disabled:opacity-30 flex items-center gap-1.5" style={{ color: !form.title.trim() || !form.dataText.trim() ? undefined : 'var(--color-accent-blue)' }}>
+                className="btn-primary px-4 py-2 text-sm disabled:opacity-30 flex items-center gap-1.5" style={{ color: !form.title.trim() || !form.dataText.trim() ? undefined : 'var(--color-text)' }}>
                 <FiBarChart2 className="w-3.5 h-3.5" /> Create Visualization
               </button>
             </div>
@@ -1813,11 +1813,11 @@ export default function DataVisualization() {
                   </div>
                   <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button onClick={() => updateChartOptions(chart.id, { showBrush: !chart.options.showBrush })}
-                      className={`p-1.5 rounded hover:bg-[var(--glass-bg)] transition-colors ${chart.options.showBrush ? 'text-[var(--color-accent-blue)]' : 'text-[var(--color-text-muted)]'}`} title="Toggle brush zoom">
+                      className={`p-1.5 rounded hover:bg-[var(--glass-bg)] transition-colors ${chart.options.showBrush ? 'text-[var(--color-text)]' : 'text-[var(--color-text-muted)]'}`} title="Toggle brush zoom">
                       <FiZoomIn className="w-3.5 h-3.5" />
                     </button>
                     <button onClick={() => updateChartOptions(chart.id, { showCrosshair: !chart.options.showCrosshair })}
-                      className={`p-1.5 rounded hover:bg-[var(--glass-bg)] transition-colors ${chart.options.showCrosshair ? 'text-[var(--color-accent-cyan)]' : 'text-[var(--color-text-muted)]'}`} title="Toggle crosshair">
+                      className={`p-1.5 rounded hover:bg-[var(--glass-bg)] transition-colors ${chart.options.showCrosshair ? 'text-[var(--color-text)]' : 'text-[var(--color-text-muted)]'}`} title="Toggle crosshair">
                       <FiCrosshair className="w-3.5 h-3.5" />
                     </button>
                     <button onClick={() => setShowSettings(showSettings === chart.id ? null : chart.id)}
@@ -1896,7 +1896,7 @@ export default function DataVisualization() {
                     const s = computeStats(chart.data)
                     if (!s) return null
                     return (
-                      <span className="flex items-center gap-2" style={{ color: 'var(--color-accent-cyan)' }}>
+                      <span className="flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
                         μ={s.mean.toFixed(2)} · σ={s.std.toFixed(2)} · med={s.median.toFixed(2)} · [{s.min.toFixed(1)}, {s.max.toFixed(1)}]
                       </span>
                     )

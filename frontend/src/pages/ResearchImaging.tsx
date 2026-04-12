@@ -1195,7 +1195,7 @@ export default function ResearchImaging() {
       <div className="w-64 flex flex-col border-r flex-shrink-0" style={{ borderColor: 'var(--glass-border)', background: 'var(--glass-bg)' }}>
         <div className="p-3 border-b" style={{ borderColor: 'var(--glass-border)' }}>
           <div className="flex items-center gap-2 mb-3">
-            <FiImage className="text-lg" style={{ color: 'var(--color-accent-blue)' }} />
+            <FiImage className="text-lg" style={{ color: 'var(--color-text)' }} />
             <h2 className="text-sm font-semibold">Studies</h2>
             <button
               onClick={() => fileInputRef.current?.click()}
@@ -1686,7 +1686,7 @@ export default function ResearchImaging() {
                     <button
                       onClick={() => setTool('brush')}
                       className="flex-1 px-2 py-1.5 text-[10px] rounded"
-                      style={{ background: tool === 'brush' ? 'var(--color-accent-blue)' : 'transparent', color: tool === 'brush' ? '#fff' : 'var(--color-text-muted)', border: '1px solid var(--glass-border)' }}
+                      style={{ background: tool === 'brush' ? 'rgba(255,255,255,0.15)' : 'transparent', color: tool === 'brush' ? '#fff' : 'var(--color-text-muted)', border: '1px solid var(--glass-border)' }}
                     >Paint</button>
                     <button
                       onClick={() => setTool('eraser')}
@@ -1754,7 +1754,7 @@ export default function ResearchImaging() {
                         <div key={i} style={{
                           flex: 1,
                           height: `${(c / max) * 100}%`,
-                          background: 'var(--color-accent-blue)',
+                          background: 'var(--color-text)',
                           opacity: 0.8,
                           minHeight: 1,
                         }} />
@@ -1962,9 +1962,9 @@ export default function ResearchImaging() {
                         onClick={() => setRegMode(mode)}
                         className="px-2 py-1.5 text-[10px] rounded capitalize"
                         style={{
-                          background: regMode === mode ? 'var(--color-accent-blue)22' : 'var(--color-bg)',
-                          border: `1px solid ${regMode === mode ? 'var(--color-accent-blue)' : 'var(--glass-border)'}`,
-                          color: regMode === mode ? 'var(--color-accent-blue)' : 'var(--color-text-muted)',
+                          background: regMode === mode ? 'rgba(255,255,255,0.12)' : 'var(--color-bg)',
+                          border: `1px solid ${regMode === mode ? 'var(--color-text)' : 'var(--glass-border)'}`,
+                          color: regMode === mode ? 'var(--color-text)' : 'var(--color-text-muted)',
                         }}
                       >
                         {mode}
@@ -2084,7 +2084,7 @@ export default function ResearchImaging() {
                       setRegTransform({ tx: 0, ty: 0, rotation: 0, scale: 1 })
                     }}
                     className="flex-1 px-2 py-1.5 text-[10px] rounded font-medium"
-                    style={{ background: 'var(--color-accent-blue)', color: '#fff' }}
+                    style={{ background: 'rgba(255,255,255,0.15)', color: '#fff' }}
                   >
                     Apply Transform
                   </button>

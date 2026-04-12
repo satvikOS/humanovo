@@ -146,7 +146,7 @@ export default function RegulatoryCompliance() {
                     <h3 className="text-sm font-medium">{cl.framework} Compliance</h3>
                     <div className="flex items-center gap-2">
                       <div className="w-20 h-2 rounded-full bg-[var(--glass-bg)] overflow-hidden">
-                        <div className="h-full rounded-full" style={{ width: `${cl.completion_pct}%`, background: cl.completion_pct === 100 ? 'var(--color-success)' : 'var(--color-accent-blue)' }} />
+                        <div className="h-full rounded-full" style={{ width: `${cl.completion_pct}%`, background: cl.completion_pct === 100 ? 'var(--color-success)' : 'var(--color-text)' }} />
                       </div>
                       <span className="text-xxs text-[var(--color-text-muted)]">{cl.completion_pct}%</span>
                     </div>

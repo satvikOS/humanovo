@@ -509,7 +509,7 @@ export default function GenomicsAnalysis() {
                       <div className="text-xs text-[var(--color-text-muted)]">{nSig} significant from {nTotal} genes</div>
                       {scatterData.length > 0 && (
                         <div>
-                          <p className="text-xs text-[var(--color-text-muted)] mb-2">Volcano Plot — <span style={{ color: '#ef4444' }}>significant</span> vs <span style={{ color: 'var(--color-accent-blue)' }}>non-significant</span></p>
+                          <p className="text-xs text-[var(--color-text-muted)] mb-2">Volcano Plot — <span style={{ color: '#ef4444' }}>significant</span> vs <span style={{ color: 'var(--color-text)' }}>non-significant</span></p>
                           <ResponsiveContainer width="100%" height={280}>
                             <ScatterChart margin={{ top: 10, right: 20, bottom: 10, left: 10 }}>
                               <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
@@ -525,7 +525,7 @@ export default function GenomicsAnalysis() {
                                 label={{ value: 'p=0.05', position: 'insideTopRight', style: { fontSize: 9, fill: '#C4956A' } }} />
                               <ReferenceLine x={-1} stroke="#666" strokeDasharray="4 4" strokeWidth={0.5} />
                               <ReferenceLine x={1} stroke="#666" strokeDasharray="4 4" strokeWidth={0.5} />
-                              <Scatter data={scatterData} fill="var(--color-accent-blue)">
+                              <Scatter data={scatterData} fill="var(--color-text)">
                                 {scatterData.map((d: any, i: number) => (
                                   <Cell key={i} fill={d.significant ? (d.x > 0 ? '#B07E8B' : '#5B8DB8') : 'rgba(107,114,128,0.4)'} r={d.significant ? 5 : 3} />
                                 ))}

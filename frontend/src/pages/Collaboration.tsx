@@ -175,7 +175,7 @@ export default function Collaboration() {
               {notifications.length === 0 ? (
                 <p className="text-xs text-[var(--color-text-muted)] text-center py-8">No notifications</p>
               ) : notifications.map(n => (
-                <div key={n.id} className={`glass-card p-3 ${!n.read ? 'border-l-2 border-l-[var(--color-accent-blue)]' : ''}`}>
+                <div key={n.id} className={`glass-card p-3 ${!n.read ? 'border-l-2 border-l-[var(--color-text)]' : ''}`}>
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-medium">{n.title}</span>
                     <span className="text-xxs text-[var(--color-text-muted)]">{formatDateTime(n.created_at)}</span>

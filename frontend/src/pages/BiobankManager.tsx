@@ -140,7 +140,7 @@ export default function BiobankManager() {
                     <XAxis dataKey="name" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
                     <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
                     <Tooltip contentStyle={{ background: 'var(--color-surface-solid)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '11px', color: 'var(--color-text)' }} />
-                    <Bar dataKey="utilization_pct" fill="var(--color-accent-blue)" radius={[2, 2, 0, 0]} name="Utilization %" />
+                    <Bar dataKey="utilization_pct" fill="var(--color-text)" radius={[2, 2, 0, 0]} name="Utilization %" />
                   </BarChart>
                 </ResponsiveContainer>
               </div>

@@ -270,4 +270,7 @@ export const BUILTIN_DOCS: BuiltinDoc[] = [
   { name: 'imaging_annotations', category: 'Imaging', signature: 'imaging_annotations([i])', description: 'Print and return annotation count on study [i] (defaults to last)', snippet: 'imaging_annotations()' },
   { name: 'imaging_clear_annotations', category: 'Imaging', signature: 'imaging_clear_annotations([i])', description: 'Remove every annotation on study [i]; returns how many were removed', snippet: 'imaging_clear_annotations()' },
   { name: 'imaging_filter', category: 'Imaging', signature: 'imaging_filter(name, [i])', description: 'Apply a filter preset (invert, gaussian, median, sharpen, sobel, canny, threshold, otsu, laplacian, histeq)', snippet: 'imaging_filter("sobel")' },
+  { name: 'imaging_window', category: 'Imaging', signature: 'imaging_window(center, width, [i])', description: 'Set window center & width (level/contrast) on study [i]', snippet: 'imaging_window(128, 256)' },
+  { name: 'imaging_roi_stats', category: 'Imaging', signature: 'imaging_roi_stats([i])', description: 'Print area/perimeter/centroid for every ROI on study [i]; returns ROI count', snippet: 'imaging_roi_stats()' },
+  { name: 'imaging_measure', category: 'Imaging', signature: 'imaging_measure(x1, y1, x2, y2)', description: 'Euclidean pixel distance between two points (no annotation placed)', snippet: 'imaging_measure(10, 10, 100, 50)' },
 ]

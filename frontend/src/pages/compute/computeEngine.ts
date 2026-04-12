@@ -2238,6 +2238,69 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
     fireImg(next[idx].id)
     return mstr(name)
   })
+  // imaging_window(center, width, [idx]) — adjust window/level from script
+  // without touching the UI. Useful for batch normalization across studies.
+  def('imaging_window', -1, args => {
+    if (args.length < 2) throw new RuntimeError('imaging_window: expected (center, width, [idx])')
+    const list = loadImgStudies()
+    if (list.length === 0) throw new RuntimeError('imaging_window: no studies available')
+    const center = Math.round(toNumber(args[0]))
+    const width = Math.max(1, Math.round(toNumber(args[1])))
+    const idx = args[2] ? Math.max(0, Math.min(list.length - 1, Math.round(toNumber(args[2])))) : list.length - 1
+    const next = list.map((s, i) => i === idx ? { ...s, windowCenter: center, windowWidth: width } : s)
+    saveImgStudies(next)
+    fireImg(next[idx].id)
+    return mnum(center)
+  })
+  // imaging_roi_stats([idx]) — print geometric stats (area in px², perimeter,
+  // centroid) for each annotation on the study; returns the annotation count.
+  def('imaging_roi_stats', -1, args => {
+    const list = loadImgStudies()
+    if (list.length === 0) throw new RuntimeError('imaging_roi_stats: no studies available')
+    const idx = args[0] ? Math.max(0, Math.min(list.length - 1, Math.round(toNumber(args[0])))) : list.length - 1
+    const anns = list[idx].annotations || []
+    if (anns.length === 0) {
+      ctx.outputs.push({ kind: 'text', text: '(no ROIs on this study — add some with imaging_annotate)' })
+      return mnum(0)
+    }
+    const lines: string[] = []
+    lines.push(`ROIs on study [${idx}] — ${anns.length} total`)
+    lines.push('  idx  type      label                 area(px²)   perim(px)   centroid')
+    for (let i = 0; i < anns.length; i++) {
+      const a = anns[i]
+      let area = 0, perim = 0, cx = a.x, cy = a.y
+      if (a.type === 'rect' && a.w && a.h) {
+        area = Math.abs(a.w * a.h)
+        perim = 2 * (Math.abs(a.w) + Math.abs(a.h))
+        cx = a.x + a.w / 2; cy = a.y + a.h / 2
+      } else if (a.type === 'circle' && a.w) {
+        const r = Math.abs(a.w) / 2
+        area = Math.PI * r * r
+        perim = 2 * Math.PI * r
+      } else if ((a.type === 'line' || a.type === 'measure' || a.type === 'ruler') &&
+                 typeof a.x2 === 'number' && typeof a.y2 === 'number') {
+        const dx = a.x2 - a.x, dy = a.y2 - a.y
+        perim = Math.sqrt(dx * dx + dy * dy)
+        cx = (a.x + a.x2) / 2; cy = (a.y + a.y2) / 2
+      }
+      const pad = (s: string, n: number) => (s.length >= n ? s : s + ' '.repeat(n - s.length))
+      lines.push(
+        `  ${pad(String(i), 4)} ${pad(a.type, 9)} ${pad((a.label || '').slice(0, 20), 22)}` +
+        ` ${pad(area.toFixed(1), 11)} ${pad(perim.toFixed(1), 11)} (${cx.toFixed(0)}, ${cy.toFixed(0)})`,
+      )
+    }
+    ctx.outputs.push({ kind: 'text', text: lines.join('\n') })
+    return mnum(anns.length)
+  })
+  // imaging_measure(x1, y1, x2, y2) — Euclidean pixel distance between two
+  // points. Convenience helper so scripts can compute lengths without
+  // placing an actual ruler annotation.
+  def('imaging_measure', 4, args => {
+    const x1 = toNumber(args[0]), y1 = toNumber(args[1])
+    const x2 = toNumber(args[2]), y2 = toNumber(args[3])
+    const dx = x2 - x1, dy = y2 - y1
+    return mnum(Math.sqrt(dx * dx + dy * dy))
+  })
   // End Imaging bridge
   def('scatter', -1, args => {
     need(args, 2, 'scatter')
