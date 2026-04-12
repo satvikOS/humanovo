@@ -114,6 +114,13 @@ export default function ManuscriptManager() {
 
       <div className="flex-1 flex overflow-hidden">
         <div className="w-72 border-r border-[var(--color-border)] overflow-y-auto p-3 space-y-1">
+          {manuscripts.length === 0 && (
+            <div className="text-center py-8 px-3">
+              <FiFileText className="w-8 h-8 mx-auto mb-2 text-[var(--color-text-muted)] opacity-40" />
+              <p className="text-xs text-[var(--color-text-muted)]">No manuscripts yet</p>
+              <p className="text-xxs text-[var(--color-text-muted)] mt-1">Use "New" above to draft one.</p>
+            </div>
+          )}
           {manuscripts.map(m => (
             <div key={m.id} onClick={() => selectMs(m.id)}
               className={`p-3 rounded-lg cursor-pointer group transition-colors ${selected?.id === m.id ? 'bg-[var(--glass-bg)] border border-[var(--color-border)]' : 'hover:bg-[var(--glass-bg)]'}`}>
