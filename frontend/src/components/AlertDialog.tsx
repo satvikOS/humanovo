@@ -27,22 +27,25 @@ const ICONS: Record<DialogVariant, typeof FiInfo> = {
   prompt: FiInfo,
 }
 
+// Severity is kept chromatic (warning/error/success) so users can identify
+// it at a glance even on color-accented workflows. Info / prompt fall back
+// to the neutral foreground so they blend with the monochrome shell.
 const ICON_COLORS: Record<DialogVariant, string> = {
-  info: 'var(--color-accent-blue)',
+  info: 'var(--color-text)',
   warning: '#f59e0b',
   error: '#ef4444',
   success: '#22c55e',
   confirm: '#f59e0b',
-  prompt: 'var(--color-accent-blue)',
+  prompt: 'var(--color-text)',
 }
 
 const ICON_BG: Record<DialogVariant, string> = {
-  info: 'rgba(59, 130, 246, 0.1)',
+  info: 'var(--color-surface-raised)',
   warning: 'rgba(245, 158, 11, 0.1)',
   error: 'rgba(239, 68, 68, 0.1)',
   success: 'rgba(34, 197, 94, 0.1)',
   confirm: 'rgba(245, 158, 11, 0.1)',
-  prompt: 'rgba(59, 130, 246, 0.1)',
+  prompt: 'var(--color-surface-raised)',
 }
 
 const initial: DialogState = { open: false, variant: 'info', title: '', message: '' }
@@ -151,8 +154,9 @@ export function useAlertDialog() {
               autoFocus={!isPrompt}
               className="px-4 py-1.5 text-xs rounded-lg font-medium transition-colors"
               style={{
-                background: state.variant === 'error' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(59, 130, 246, 0.15)',
-                color: state.variant === 'error' ? '#ef4444' : 'var(--color-accent-blue)',
+                background: state.variant === 'error' ? 'rgba(239, 68, 68, 0.15)' : 'var(--color-surface-raised)',
+                color: state.variant === 'error' ? '#ef4444' : 'var(--color-text)',
+                border: state.variant === 'error' ? undefined : '1px solid var(--color-border)',
               }}
             >
               {state.confirmLabel || 'OK'}

@@ -58,19 +58,37 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boole
 
   render() {
     if (this.state.hasError) {
+      // Soft retry: re-render this subtree only. Falls back to a full
+      // reload if the user hits the secondary action.
+      const softReset = () => this.setState({ hasError: false, error: '' })
+      const hardReload = () => { softReset(); window.location.reload() }
+      const copyError = () => {
+        try { navigator.clipboard?.writeText(this.state.error) } catch { /* noop */ }
+      }
       return (
         <div className="flex items-center justify-center h-full p-8">
           <div className="text-center max-w-md">
             <div className="text-4xl mb-4 opacity-20">⚠</div>
             <h2 className="text-lg font-semibold mb-2" style={{ color: 'var(--color-text)' }}>Something went wrong</h2>
-            <p className="text-sm mb-4" style={{ color: 'var(--color-text-muted)' }}>{this.state.error}</p>
-            <button
-              onClick={() => { this.setState({ hasError: false, error: '' }); window.location.reload() }}
-              className="btn text-sm"
-              style={{ color: 'var(--color-accent-blue)' }}
-            >
-              Reload Page
-            </button>
+            <pre
+              className="text-xs mb-4 px-3 py-2 text-left overflow-auto max-h-32 rounded"
+              style={{
+                color: 'var(--color-text-muted)',
+                background: 'var(--color-surface-raised)',
+                fontFamily: 'var(--font-mono, ui-monospace, monospace)',
+              }}
+            >{this.state.error || 'Unknown error'}</pre>
+            <div className="flex items-center justify-center gap-2">
+              <button onClick={softReset} className="btn text-sm" style={{ color: 'var(--color-text)' }}>
+                Try again
+              </button>
+              <button onClick={copyError} className="btn text-sm" style={{ color: 'var(--color-text-muted)' }}>
+                Copy details
+              </button>
+              <button onClick={hardReload} className="btn text-sm" style={{ color: 'var(--color-text-muted)' }}>
+                Reload page
+              </button>
+            </div>
           </div>
         </div>
       )

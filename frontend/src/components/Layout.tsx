@@ -1312,7 +1312,7 @@ if (path === '/clinical-trials') return 'Clinical Trials'
               >
                 <FiBell className="w-4 h-4" />
                 {hasUnread && (
-                  <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-[var(--color-accent-blue)] rounded-full" />
+                  <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-[var(--color-text)] rounded-full" />
                 )}
               </button>
 
@@ -1325,7 +1325,7 @@ if (path === '/clinical-trials') return 'Clinical Trials'
                       {hasUnread && (
                         <button
                           onClick={markAllRead}
-                          className="text-xxs text-[var(--color-accent-blue)] hover:underline"
+                          className="text-xxs text-[var(--color-text-secondary)] hover:text-[var(--color-text)] hover:underline"
                         >
                           Mark all read
                         </button>
@@ -1337,7 +1337,7 @@ if (path === '/clinical-trials') return 'Clinical Trials'
                           <div key={n.id} className="px-3 py-2 hover:bg-[var(--glass-bg)] transition-all flex gap-2">
                             <div className="flex-shrink-0 mt-1.5">
                               {n.timestamp > (localStorage.getItem('humanovo-notifs-read') || '0') ? (
-                                <span className="block w-2 h-2 rounded-full bg-[var(--color-accent-blue)]" />
+                                <span className="block w-2 h-2 rounded-full bg-[var(--color-text)]" />
                               ) : (
                                 <span className="block w-2 h-2" />
                               )}
@@ -1358,7 +1358,7 @@ if (path === '/clinical-trials') return 'Clinical Trials'
                     <div className="border-t border-[var(--color-border)] px-3 py-2">
                       <button
                         onClick={() => { navigate('/timeline'); setIsNotificationsOpen(false) }}
-                        className="text-xs text-[var(--color-accent-blue)] hover:underline w-full text-center"
+                        className="text-xs text-[var(--color-text-secondary)] hover:text-[var(--color-text)] hover:underline w-full text-center"
                       >
                         View all activity
                       </button>
