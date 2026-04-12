@@ -62,7 +62,10 @@ test.describe('Data Viz — create then delete a chart', () => {
   test('chart lifecycle end to end', async ({ page }) => {
     await page.goto('/data-visualization')
     await page.waitForLoadState('domcontentloaded')
-    await page.evaluate(() => { try { localStorage.removeItem('charts') } catch {} })
+    await page.evaluate(() => {
+      try { localStorage.removeItem('humanovo-charts') } catch {}
+      try { localStorage.removeItem('charts') } catch {}
+    })
     await page.reload()
     await page.waitForLoadState('domcontentloaded')
     await page.waitForTimeout(400)

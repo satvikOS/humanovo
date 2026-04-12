@@ -91,7 +91,10 @@ test.describe('Data Visualization — persistence + delete', () => {
   test('create a bar chart, reload, chart persists', async ({ page }) => {
     await page.goto('/data-visualization')
     await page.waitForLoadState('domcontentloaded')
-    await page.evaluate(() => { try { localStorage.removeItem('charts') } catch {} })
+    await page.evaluate(() => {
+      try { localStorage.removeItem('humanovo-charts') } catch {}
+      try { localStorage.removeItem('charts') } catch {}
+    })
     await page.reload()
     await page.waitForLoadState('domcontentloaded')
     await page.waitForTimeout(300)

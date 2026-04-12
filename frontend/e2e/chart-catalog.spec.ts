@@ -39,6 +39,10 @@ const CHART_LABELS: string[] = [
 
 async function clearCharts(page: Page) {
   await page.evaluate(() => {
+    // persistSet stores under the "humanovo-" prefix; clear both the
+    // prefixed key we actually use and the unprefixed spelling in case
+    // some legacy test build wrote there.
+    try { localStorage.removeItem('humanovo-charts') } catch {}
     try { localStorage.removeItem('charts') } catch {}
   })
 }
