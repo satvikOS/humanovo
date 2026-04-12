@@ -131,6 +131,22 @@ test.describe('Projects — new-project dialog', () => {
   })
 })
 
+test.describe('Projects — deep-link with ?new=1', () => {
+  test('navigating to /projects?new=1 auto-opens the create dialog', async ({ page }) => {
+    await page.goto('/projects?new=1')
+    await page.waitForLoadState('domcontentloaded')
+    await page.waitForTimeout(500)
+    // The dialog's "Project Name" input should be visible on arrival,
+    // without needing a second click.
+    const name = page.locator('input[placeholder*="BRCA1" i]').first()
+    await expect(name).toBeVisible({ timeout: 4000 })
+    // The query string should have been consumed (cleaned out of URL)
+    // so a soft reload doesn't re-open the dialog on every re-render.
+    const url = page.url()
+    expect(url).not.toMatch(/new=1/)
+  })
+})
+
 test.describe('Projects — search + filter controls mount', () => {
   test('project search input exists and accepts typing', async ({ page }) => {
     await page.goto('/projects')

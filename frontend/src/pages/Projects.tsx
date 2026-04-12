@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import {
   FiPlus, FiFolder, FiX, FiTrash2, FiSearch, FiRefreshCw,
   FiGrid, FiList, FiFilter, FiChevronDown,
@@ -372,7 +372,19 @@ function ProjectCardList({ project, onDelete }: { project: Project; onDelete: (i
 /* ─── Main Projects Page ───────────────────────────────────────────── */
 
 export default function Projects() {
-  const [showCreateModal, setShowCreateModal] = useState(false)
+  const [searchParams, setSearchParams] = useSearchParams()
+  // Auto-open the Create modal when we arrive via /projects?new=1. This
+  // is the target of every "New Project" shortcut on the dashboard and
+  // in empty states; without this the button navigated here but then
+  // forced the user to click "New Project" a second time.
+  const [showCreateModal, setShowCreateModal] = useState(() => searchParams.get('new') === '1')
+  useEffect(() => {
+    if (searchParams.get('new') === '1') {
+      const next = new URLSearchParams(searchParams)
+      next.delete('new')
+      setSearchParams(next, { replace: true })
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
