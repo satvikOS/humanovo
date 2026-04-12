@@ -371,28 +371,46 @@ function ProjectCardList({ project, onDelete }: { project: Project; onDelete: (i
 
 /* ─── Main Projects Page ───────────────────────────────────────────── */
 
+// Enum-guard helpers so bogus deep-link values silently fall back to
+// sensible defaults instead of blank-screening the filter UI.
+const VALID_STATUS_FILTERS: ReadonlySet<StatusFilter> = new Set(['all', 'active', 'paused', 'completed', 'archived'])
+const VALID_VIEW_MODES: ReadonlySet<ViewMode> = new Set(['grid', 'list'])
+
 export default function Projects() {
-  const [searchParams, setSearchParams] = useSearchParams()
+  const [searchParams] = useSearchParams()
   // Auto-open the Create modal when we arrive via /projects?new=1. This
   // is the target of every "New Project" shortcut on the dashboard and
   // in empty states; without this the button navigated here but then
   // forced the user to click "New Project" a second time.
   const [showCreateModal, setShowCreateModal] = useState(() => searchParams.get('new') === '1')
+  // Seed search, view, and status filters from ?q=, ?view=, ?status=
+  // so that cross-page links (e.g. from Dashboard or Search) preserve
+  // user intent on arrival. All params are consume-and-cleaned below.
+  const initialQuery = searchParams.get('q') || ''
+  const initialViewRaw = (searchParams.get('view') || '').toLowerCase() as ViewMode
+  const initialStatusRaw = (searchParams.get('status') || '').toLowerCase() as StatusFilter
+  const initialView: ViewMode = VALID_VIEW_MODES.has(initialViewRaw)
+    ? initialViewRaw
+    : ((localStorage.getItem('humanovo-projects-view') as ViewMode) || 'grid')
+  const initialStatus: StatusFilter = VALID_STATUS_FILTERS.has(initialStatusRaw) ? initialStatusRaw : 'all'
   useEffect(() => {
-    if (searchParams.get('new') === '1') {
-      const next = new URLSearchParams(searchParams)
-      next.delete('new')
-      setSearchParams(next, { replace: true })
+    const sp = new URLSearchParams(window.location.search)
+    let changed = false
+    for (const key of ['new', 'q', 'view', 'status']) {
+      if (sp.has(key)) { sp.delete(key); changed = true }
+    }
+    if (changed) {
+      const qs = sp.toString()
+      const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash
+      window.history.replaceState(window.history.state, '', newUrl)
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [viewMode, setViewMode] = useState<ViewMode>(() =>
-    (localStorage.getItem('humanovo-projects-view') as ViewMode) || 'grid'
-  )
+  const [searchQuery, setSearchQuery] = useState(initialQuery)
+  const [viewMode, setViewMode] = useState<ViewMode>(initialView)
   const [sortBy, setSortBy] = useState<SortOption>('recent')
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(initialStatus)
   const [showFilters, setShowFilters] = useState(false)
   const [diseaseFocusFilter, setDiseaseFocusFilter] = useState('')
   const [tagFilter, setTagFilter] = useState('')

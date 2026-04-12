@@ -147,6 +147,41 @@ test.describe('Projects — deep-link with ?new=1', () => {
   })
 })
 
+test.describe('Projects — extended deep-link params', () => {
+  test('/projects?q=foo seeds the search input and cleans the URL', async ({ page }) => {
+    await page.goto('/projects?q=zzz-nonexistent-seeded')
+    await page.waitForLoadState('domcontentloaded')
+    await page.waitForFunction(() => !window.location.search.includes('q='), null, { timeout: 5000 })
+    expect(page.url()).not.toMatch(/q=/)
+    const search = page.locator('input[placeholder*="Search projects" i]').first()
+    await expect(search).toHaveValue('zzz-nonexistent-seeded', { timeout: 3000 })
+  })
+
+  test('/projects?view=list seeds the view toggle and cleans the URL', async ({ page }) => {
+    await page.goto('/projects?view=list')
+    await page.waitForLoadState('domcontentloaded')
+    await page.waitForFunction(() => !window.location.search.includes('view='), null, { timeout: 5000 })
+    expect(page.url()).not.toMatch(/view=/)
+  })
+
+  test('/projects?status=archived cleans the URL (bogus status is ignored)', async ({ page }) => {
+    await page.goto('/projects?status=archived')
+    await page.waitForLoadState('domcontentloaded')
+    await page.waitForFunction(() => !window.location.search.includes('status='), null, { timeout: 5000 })
+    expect(page.url()).not.toMatch(/status=/)
+  })
+
+  test('/projects?status=totally-bogus falls back (no crash, param cleaned)', async ({ page }) => {
+    const errs: string[] = []; attachErrorCapture(page, errs)
+    await page.goto('/projects?status=totally-bogus-xyz')
+    await page.waitForLoadState('domcontentloaded')
+    await page.waitForFunction(() => !window.location.search.includes('status='), null, { timeout: 5000 })
+    const boundary = await page.locator('text=/Something went wrong/i').count()
+    expect(boundary).toBe(0)
+    expect(errs.filter(e => e.includes('Maximum call stack') || e.includes('is not a function'))).toEqual([])
+  })
+})
+
 test.describe('Projects — search + filter controls mount', () => {
   test('project search input exists and accepts typing', async ({ page }) => {
     await page.goto('/projects')
