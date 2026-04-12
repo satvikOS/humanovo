@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   FiCpu, FiTerminal, FiGrid, FiActivity, FiTrendingUp,
 } from 'react-icons/fi'
@@ -14,8 +15,41 @@ const tabs: { id: ComputeMode; label: string; icon: typeof FiGrid; desc: string 
   { id: 'equations', label: 'Equation Plotter', icon: FiTrendingUp, desc: 'Plot, overlay & compare equations' },
 ]
 
+// Accept legacy aliases so existing dashboard links that still point at
+// "history" or "simulation" names don't 404 into the default workstation
+// tab. Map each known alias onto a real ComputeMode.
+const TAB_ALIASES: Record<string, ComputeMode> = {
+  workstation: 'workstation',
+  montecarlo: 'montecarlo',
+  'monte-carlo': 'montecarlo',
+  mc: 'montecarlo',
+  history: 'montecarlo', // legacy: simulations history = Monte Carlo panel
+  simulations: 'montecarlo',
+  equations: 'equations',
+  equation: 'equations',
+  plotter: 'equations',
+}
+
 export default function ComputeLab() {
-  const [mode, setMode] = useState<ComputeMode>('workstation')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const initialMode: ComputeMode = (() => {
+    const raw = (searchParams.get('tab') || '').toLowerCase()
+    return TAB_ALIASES[raw] ?? 'workstation'
+  })()
+  const [mode, setMode] = useState<ComputeMode>(initialMode)
+
+  // Keep the URL query in sync so the selected tab is shareable and
+  // survives reload without hijacking the user's back/forward stack.
+  useEffect(() => {
+    const current = (searchParams.get('tab') || '').toLowerCase()
+    const normalized = TAB_ALIASES[current] ?? ''
+    if (normalized !== mode) {
+      const next = new URLSearchParams(searchParams)
+      if (mode === 'workstation') next.delete('tab')
+      else next.set('tab', mode)
+      setSearchParams(next, { replace: true })
+    }
+  }, [mode]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="flex flex-col h-full" style={{ color: 'var(--color-text)' }}>

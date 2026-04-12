@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react'
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { Component, type ReactNode } from 'react'
 import Layout from './components/Layout'
 import Dashboard from './pages/Dashboard'
@@ -101,6 +101,14 @@ function PageWrapper({ children }: { children: ReactNode }) {
   return <ErrorBoundary>{children}</ErrorBoundary>
 }
 
+// Legacy /simulations etc. redirects. We want to preserve the ?tab=…
+// query so that existing bookmarks like "/simulations?tab=montecarlo"
+// land on the correct Compute Lab tab instead of the default.
+function LegacyComputeRedirect() {
+  const { search } = useLocation()
+  return <Navigate to={`/compute-lab${search}`} replace />
+}
+
 function LazyPageWrapper({ children }: { children: ReactNode }) {
   return (
     <ErrorBoundary>
@@ -131,10 +139,10 @@ function App() {
         <Route path="evidence" element={<PageWrapper><Evidence /></PageWrapper>} />
         <Route path="compute-lab" element={<LazyPageWrapper><ComputeLab /></LazyPageWrapper>} />
         {/* Legacy redirects → unified Compute Lab */}
-        <Route path="simulations" element={<Navigate to="/compute-lab" replace />} />
-        <Route path="statistical-analysis" element={<Navigate to="/compute-lab" replace />} />
-        <Route path="numeric-compute" element={<Navigate to="/compute-lab" replace />} />
-        <Route path="matlab-compute" element={<Navigate to="/compute-lab" replace />} />
+        <Route path="simulations" element={<LegacyComputeRedirect />} />
+        <Route path="statistical-analysis" element={<LegacyComputeRedirect />} />
+        <Route path="numeric-compute" element={<LegacyComputeRedirect />} />
+        <Route path="matlab-compute" element={<LegacyComputeRedirect />} />
         <Route path="workbench" element={<LazyPageWrapper><Workbench /></LazyPageWrapper>} />
         <Route path="anatomy" element={<LazyPageWrapper><HumanAnatomy /></LazyPageWrapper>} />
         <Route path="notebook" element={<PageWrapper><Notebook /></PageWrapper>} />

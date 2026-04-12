@@ -187,7 +187,7 @@ function RecentSimulationsWidget() {
           <FiActivity className="w-3.5 h-3.5 text-[var(--color-text-muted)]" />
           <h3 className="text-sm font-medium">Recent Simulations</h3>
         </div>
-        <Link to="/simulations?tab=history" className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] flex items-center gap-1 transition-colors px-2.5 py-1 rounded-full border border-[var(--glass-border)] hover:border-[var(--color-border-strong)]">
+        <Link to="/compute-lab?tab=montecarlo" className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] flex items-center gap-1 transition-colors px-2.5 py-1 rounded-full border border-[var(--glass-border)] hover:border-[var(--color-border-strong)]">
           All <FiArrowRight className="w-3 h-3" />
         </Link>
       </div>
@@ -219,7 +219,7 @@ function RecentSimulationsWidget() {
             return (
               <button
                 key={sim.id}
-                onClick={() => navigate('/simulations?tab=history')}
+                onClick={() => navigate('/compute-lab?tab=montecarlo')}
                 className="w-full text-left flex items-center gap-2.5 py-2.5 border-b border-[var(--color-border)] last:border-0 rounded-lg px-2 active:scale-95"
                 style={{
                   background: 'var(--glass-bg)',
