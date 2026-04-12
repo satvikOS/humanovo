@@ -827,12 +827,18 @@ export default function MonteCarloPanel() {
     { id: 'cdf', label: 'CDF', icon: <FiPercent style={{ fontSize: 10 }} /> },
   ];
 
-  // Histogram with enriched bins (storing numeric midpoint for reference lines)
+  // Histogram with enriched bins (storing numeric midpoint for reference lines).
+  // Single-pass min/max loop — Math.min(...vals) would blow the argument
+  // limit at the higher iteration counts (the slider allows up to 50 000).
   const histogramEnriched = useMemo(() => {
     if (!results) return [];
     const vals = results.values;
-    const min = Math.min(...vals);
-    const max = Math.max(...vals);
+    let min = Infinity, max = -Infinity;
+    for (let i = 0; i < vals.length; i++) {
+      const v = vals[i]
+      if (v < min) min = v
+      if (v > max) max = v
+    }
     const range = max - min || 1;
     const bins = 30;
     const binWidth = range / bins;
@@ -1035,19 +1041,39 @@ export default function MonteCarloPanel() {
                 </div>
 
                 <div style={{ flex: 1, minHeight: 0 }}>
-                  {activeChart === 'histogram' && (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={histogramEnriched} margin={{ top: 8, right: 16, bottom: 30, left: 8 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" strokeOpacity={0.4} />
-                        <XAxis dataKey="bin" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} interval="preserveStartEnd" stroke="var(--glass-border)" label={{ value: results.label, position: 'insideBottom', offset: -12, fontSize: 10, fill: 'var(--color-text-muted)' }} />
-                        <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" label={{ value: 'Count', angle: -90, position: 'insideLeft', fontSize: 10, fill: 'var(--color-text-muted)' }} />
-                        <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} cursor={{ stroke: 'var(--color-text-muted)', strokeDasharray: '4 4' }} />
-                        <ReferenceLine x={(() => { const m = stats.mean; let closest = histogramEnriched[0]?.bin; let minD = Infinity; for (const h of histogramEnriched) { const d = Math.abs(h.binMid - m); if (d < minD) { minD = d; closest = h.bin; } } return closest; })()} stroke="#5B8DB8" strokeWidth={2} strokeDasharray="4 3" label={{ value: 'Mean', position: 'top', fontSize: 9, fill: '#5B8DB8' }} />
-                        <Bar dataKey="count" fill="#5B8DB8" fillOpacity={0.35} radius={[2, 2, 0, 0]} />
-                        {histogramEnriched.length > 8 && <Brush dataKey="bin" height={16} stroke="#5B8DB8" fill="var(--glass-bg)" travellerWidth={6} />}
-                      </BarChart>
-                    </ResponsiveContainer>
-                  )}
+                  {activeChart === 'histogram' && (() => {
+                    // Recharts ReferenceLine on a category axis needs an exact
+                    // bin label, so we snap each stat to its nearest bin midpoint.
+                    const snap = (v: number): string | undefined => {
+                      let closest = histogramEnriched[0]?.bin
+                      let minD = Infinity
+                      for (const h of histogramEnriched) {
+                        const d = Math.abs(h.binMid - v)
+                        if (d < minD) { minD = d; closest = h.bin }
+                      }
+                      return closest
+                    }
+                    const meanBin = snap(stats.mean)
+                    const medianBin = snap(stats.median)
+                    const ciLoBin = snap(stats.ci95Low)
+                    const ciHiBin = snap(stats.ci95High)
+                    return (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={histogramEnriched} margin={{ top: 8, right: 16, bottom: 30, left: 8 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" strokeOpacity={0.4} />
+                          <XAxis dataKey="bin" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} interval="preserveStartEnd" stroke="var(--glass-border)" label={{ value: results.label, position: 'insideBottom', offset: -12, fontSize: 10, fill: 'var(--color-text-muted)' }} />
+                          <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" label={{ value: 'Count', angle: -90, position: 'insideLeft', fontSize: 10, fill: 'var(--color-text-muted)' }} />
+                          <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} cursor={{ stroke: 'var(--color-text-muted)', strokeDasharray: '4 4' }} />
+                          <ReferenceLine x={ciLoBin} stroke="#6BA594" strokeWidth={1} strokeDasharray="2 3" label={{ value: '2.5%', position: 'top', fontSize: 8, fill: '#6BA594' }} />
+                          <ReferenceLine x={ciHiBin} stroke="#6BA594" strokeWidth={1} strokeDasharray="2 3" label={{ value: '97.5%', position: 'top', fontSize: 8, fill: '#6BA594' }} />
+                          <ReferenceLine x={medianBin} stroke="#8B7EAF" strokeWidth={1.5} strokeDasharray="3 3" label={{ value: 'Median', position: 'top', fontSize: 9, fill: '#8B7EAF' }} />
+                          <ReferenceLine x={meanBin} stroke="#5B8DB8" strokeWidth={2} strokeDasharray="4 3" label={{ value: 'Mean', position: 'top', fontSize: 9, fill: '#5B8DB8' }} />
+                          <Bar dataKey="count" fill="#5B8DB8" fillOpacity={0.35} radius={[2, 2, 0, 0]} />
+                          {histogramEnriched.length > 8 && <Brush dataKey="bin" height={16} stroke="#5B8DB8" fill="var(--glass-bg)" travellerWidth={6} />}
+                        </BarChart>
+                      </ResponsiveContainer>
+                    )
+                  })()}
 
                   {activeChart === 'convergence' && (
                     <ResponsiveContainer width="100%" height="100%">
