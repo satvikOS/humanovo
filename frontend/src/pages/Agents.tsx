@@ -156,15 +156,17 @@ const VALID_DISCOVERY_TYPES = new Set(['treatment', 'prevention', 'biomarker', '
 
 export default function Agents() {
   // Deep-link support: the Discovery Engine accepts `?disease=…`,
-  // `?type=…`, and `?guidance=…` query params so dashboard quick-links and
-  // external handoffs can drop users into a pre-configured run. The query
-  // is consumed once on mount and then cleaned off the URL so a soft
-  // reload doesn't keep overwriting edits.
+  // `?type=…`, `?guidance=…`, and `?hypothesis=…` query params so
+  // dashboard quick-links and external handoffs can drop users into a
+  // pre-configured run or directly onto a specific hypothesis card. The
+  // query is consumed once on mount and then cleaned off the URL so a
+  // soft reload doesn't keep overwriting edits.
   const [searchParams, setSearchParams] = useSearchParams()
   const qDisease = (searchParams.get('disease') || '').trim()
   const qTypeRaw = (searchParams.get('type') || '').trim().toLowerCase()
   const qType = VALID_DISCOVERY_TYPES.has(qTypeRaw) ? qTypeRaw : ''
   const qGuidance = (searchParams.get('guidance') || '').trim()
+  const qHypothesisId = (searchParams.get('hypothesis') || '').trim()
 
   // State
   const [state, setState] = useState<string>('idle')
@@ -230,16 +232,34 @@ export default function Agents() {
   // Strip the deep-link params after the initial mount so a soft reload
   // doesn't stomp on user edits to the Discovery config.
   useEffect(() => {
-    const hasDeepLink = searchParams.has('disease') || searchParams.has('type') || searchParams.has('guidance')
+    const hasDeepLink = searchParams.has('disease')
+      || searchParams.has('type')
+      || searchParams.has('guidance')
+      || searchParams.has('hypothesis')
     if (hasDeepLink) {
       const next = new URLSearchParams(searchParams)
       next.delete('disease')
       next.delete('type')
       next.delete('guidance')
+      next.delete('hypothesis')
       setSearchParams(next, { replace: true })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // When the hypothesis list fills in (from API poll), honour the
+  // `?hypothesis=…` deep-link by selecting the matching card once. We
+  // key off a ref so the effect doesn't re-fire after the user clicks
+  // around to a different hypothesis.
+  const hypothesisDeepLinkApplied = useRef(false)
+  useEffect(() => {
+    if (hypothesisDeepLinkApplied.current || !qHypothesisId) return
+    const match = hypotheses.find(h => h.id === qHypothesisId)
+    if (match) {
+      setSelectedHypothesis(match)
+      hypothesisDeepLinkApplied.current = true
+    }
+  }, [hypotheses, qHypothesisId])
 
   const pollRef = useRef<number | null>(null)
   const failRef = useRef(0)

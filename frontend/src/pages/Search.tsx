@@ -58,12 +58,18 @@ const FILTER_TYPES = [
   { value: 'entity', label: 'Entities', icon: FiGlobe },
 ]
 
+const VALID_SEARCH_FILTERS = new Set(['', 'evidence', 'hypothesis', 'project', 'entity'])
+
 export default function Search() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const initialQuery = searchParams.get('q') || ''
+  // `?type=` deep-link: pre-select a Type filter (evidence / hypothesis /
+  // project / entity). Invalid values silently fall back to "All Types".
+  const qTypeRaw = (searchParams.get('type') || '').trim().toLowerCase()
+  const initialFilter = VALID_SEARCH_FILTERS.has(qTypeRaw) ? qTypeRaw : ''
   const [query, setQuery] = useState(initialQuery)
-  const [filterType, setFilterType] = useState('')
+  const [filterType, setFilterType] = useState(initialFilter)
   const [dateRange, setDateRange] = useState({ from: '', to: '' })
   const [minRelevance, setMinRelevance] = useState(0)
   const [sortBy, setSortBy] = useState<SortBy>('relevance')

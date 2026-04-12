@@ -174,7 +174,15 @@ function getEvidenceSearchUrl(item: EvidenceType): string {
 
 export default function Evidence() {
   const [evidence, setEvidence] = useState<EvidenceType[]>([])
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  // `?id=…` deep-link: pre-select a specific evidence row on mount so
+  // Search result navigation can land users on the correct item. The
+  // id is held even if the evidence list hasn't loaded yet; the list's
+  // `.find(e => e.id === selectedId)` will resolve once the fetch
+  // completes.
+  const [selectedId, setSelectedId] = useState<string | null>(() => {
+    const qId = new URLSearchParams(window.location.search).get('id')
+    return qId || null
+  })
   const [searchQuery, setSearchQuery] = useState('')
   const [filterType, setFilterType] = useState('all')
   const [page, setPage] = useState(1)
@@ -236,13 +244,18 @@ export default function Evidence() {
 
   useEffect(() => { fetchEvidence() }, [fetchEvidence])
 
-  // Clean the `?add=1` / `?new=1` deep-link query off the URL after the
-  // initial mount so the dialog doesn't re-open on every soft reload.
+  // Clean deep-link query params (`add`/`new`/`id`) off the URL after
+  // the initial mount so a soft reload doesn't re-open the dialog or
+  // stomp user-driven selection changes.
   useEffect(() => {
-    if (searchParams.get('add') === '1' || searchParams.get('new') === '1') {
+    const hasDeep = searchParams.get('add') === '1'
+      || searchParams.get('new') === '1'
+      || searchParams.has('id')
+    if (hasDeep) {
       const next = new URLSearchParams(searchParams)
       next.delete('add')
       next.delete('new')
+      next.delete('id')
       setSearchParams(next, { replace: true })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
