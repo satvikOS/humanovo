@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { FiShield, FiFileText, FiCheckSquare } from 'react-icons/fi'
+import { FiShield, FiFileText, FiCheckSquare, FiInbox } from 'react-icons/fi'
 
 type TabId = 'irb' | 'agreements' | 'consent' | 'checklists'
 
@@ -43,6 +43,14 @@ export default function RegulatoryCompliance() {
 
   const statusColor = (s: string) => s === 'approved' || s === 'active' ? 'text-[var(--color-text-secondary)] bg-[var(--glass-bg)]' : s === 'pending' || s === 'draft' ? 'text-[var(--color-text-muted)] bg-[var(--glass-bg)]' : 'text-[var(--color-text-muted)] bg-[var(--glass-bg)]'
 
+  const EmptyState = ({ title, hint }: { title: string; hint: string }) => (
+    <div className="glass-card p-10 text-center">
+      <FiInbox className="mx-auto mb-3 w-8 h-8 text-[var(--color-text-muted)]" />
+      <div className="text-sm font-medium mb-1">{title}</div>
+      <div className="text-xxs text-[var(--color-text-muted)]">{hint}</div>
+    </div>
+  )
+
   return (
     <div className="h-full flex flex-col overflow-hidden">
       <div className="p-6 border-b border-[var(--color-border)]">
@@ -63,6 +71,7 @@ export default function RegulatoryCompliance() {
           {/* IRB */}
           {tab === 'irb' && (
             <div className="space-y-3">
+              {irbs.length === 0 && <EmptyState title="No IRB submissions yet" hint="IRB protocols you submit will appear here with approval status and review history." />}
               {irbs.map(irb => (
                 <div key={irb.id} className="glass-card p-4 cursor-pointer" onClick={() => setSelectedIrb(selectedIrb?.id === irb.id ? null : irb)}>
                   <div className="flex items-center justify-between">
@@ -98,6 +107,7 @@ export default function RegulatoryCompliance() {
           {/* Agreements */}
           {tab === 'agreements' && (
             <div className="space-y-3">
+              {agreements.length === 0 && <EmptyState title="No agreements on file" hint="DUAs, MTAs, and data-use agreements you track will appear here." />}
               {agreements.map(a => (
                 <div key={a.id} className="glass-card p-4">
                   <div className="flex items-center justify-between">
@@ -116,6 +126,7 @@ export default function RegulatoryCompliance() {
           {/* Consent Forms */}
           {tab === 'consent' && (
             <div className="space-y-3">
+              {consents.length === 0 && <EmptyState title="No consent forms yet" hint="Versioned informed-consent documents and translations live here once uploaded." />}
               {consents.map(c => (
                 <div key={c.id} className="glass-card p-4">
                   <div className="flex items-center justify-between">
@@ -140,6 +151,7 @@ export default function RegulatoryCompliance() {
           {/* Checklists */}
           {tab === 'checklists' && (
             <div className="space-y-4">
+              {checklists.length === 0 && <EmptyState title="No compliance checklists" hint="Track HIPAA, 21 CFR Part 11, GDPR, and custom frameworks from here." />}
               {checklists.map(cl => (
                 <div key={cl.id} className="glass-card p-4">
                   <div className="flex items-center justify-between mb-3">

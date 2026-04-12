@@ -26,6 +26,16 @@ export default function BiobankManager() {
   const [showAdd, setShowAdd] = useState(false)
   const [form, setForm] = useState({ barcode: '', sample_type: 'tissue', tissue_type: '', project: '', patient_id: '', quantity: '' })
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+  // Checkout dialog — replaces the old hard-coded {researcher: 'Current
+  // Researcher', purpose: 'Analysis'} payload. Remembers the last
+  // researcher name in localStorage so repeated checkouts stay quick.
+  const [checkoutSampleId, setCheckoutSampleId] = useState<string | null>(null)
+  const [checkoutForm, setCheckoutForm] = useState(() => {
+    try {
+      const cached = localStorage.getItem('biobank.lastResearcher') || ''
+      return { researcher: cached, purpose: '' }
+    } catch { return { researcher: '', purpose: '' } }
+  })
 
   const load = async () => {
     try { const r = await fetch(`${API}/samples`); if (r.ok) setSamples((await r.json()).items || []) } catch { /* network error — keep stale state */ }
@@ -51,9 +61,22 @@ export default function BiobankManager() {
     logActivity({ type: 'discovery', action: 'deleted', title: `Deleted biobank sample: ${deletedSample?.barcode || deleteConfirmId}` })
   }
 
-  const checkout = async (id: string) => {
-    const r = await fetch(`${API}/samples/${id}/checkout`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ researcher: 'Current Researcher', purpose: 'Analysis' }) })
-    if (r.ok) { const s = await r.json(); setSelected(s); load(); logActivity({ type: 'discovery', action: 'updated', title: `Checked out sample: ${s.barcode || id}` }) }
+  const checkout = (id: string) => {
+    setCheckoutSampleId(id)
+  }
+
+  const confirmCheckout = async () => {
+    if (!checkoutSampleId) return
+    const researcher = checkoutForm.researcher.trim() || 'Unassigned'
+    const purpose = checkoutForm.purpose.trim() || 'Analysis'
+    const r = await fetch(`${API}/samples/${checkoutSampleId}/checkout`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ researcher, purpose }) })
+    if (r.ok) {
+      const s = await r.json()
+      setSelected(s); load()
+      try { localStorage.setItem('biobank.lastResearcher', researcher) } catch {}
+      logActivity({ type: 'discovery', action: 'updated', title: `Checked out sample: ${s.barcode || checkoutSampleId}` })
+    }
+    setCheckoutSampleId(null)
   }
 
   const checkin = async (id: string) => {
@@ -177,6 +200,15 @@ export default function BiobankManager() {
                     <th className="text-left p-3 text-[var(--color-text-muted)]"></th>
                   </tr></thead>
                   <tbody>
+                    {filtered.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="p-8 text-center text-xs text-[var(--color-text-muted)]">
+                          {samples.length === 0
+                            ? 'No samples registered yet — use "New Sample" to add your first biospecimen.'
+                            : 'No samples match the current filters.'}
+                        </td>
+                      </tr>
+                    )}
                     {filtered.map(s => (
                       <tr key={s.id} onClick={() => setSelected(s)} className={`border-b border-[var(--color-border)]/30 cursor-pointer hover:bg-[var(--glass-bg)] ${selected?.id === s.id ? 'bg-[var(--glass-bg)]' : ''}`}>
                         <td className="p-3 font-mono font-medium">{s.barcode}</td>
@@ -238,6 +270,40 @@ export default function BiobankManager() {
         onConfirm={confirmDelete}
         onCancel={() => setDeleteConfirmId(null)}
       />
+
+      {checkoutSampleId !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+             style={{ background: 'rgba(0,0,0,0.55)' }}
+             onClick={() => setCheckoutSampleId(null)}>
+          <div className="glass-card p-5 w-full max-w-sm" onClick={e => e.stopPropagation()}>
+            <h3 className="text-sm font-medium mb-3">Check out sample</h3>
+            <p className="text-xxs text-[var(--color-text-muted)] mb-3">
+              Attribute this checkout so the chain-of-custody log reflects the
+              actual requester and intended use.
+            </p>
+            <div className="space-y-2">
+              <div>
+                <label className="text-xxs text-[var(--color-text-muted)]">Researcher</label>
+                <input value={checkoutForm.researcher}
+                       onChange={e => setCheckoutForm(f => ({ ...f, researcher: e.target.value }))}
+                       placeholder="e.g. Dr. Sato"
+                       className="input w-full text-xs mt-0.5" autoFocus />
+              </div>
+              <div>
+                <label className="text-xxs text-[var(--color-text-muted)]">Purpose</label>
+                <input value={checkoutForm.purpose}
+                       onChange={e => setCheckoutForm(f => ({ ...f, purpose: e.target.value }))}
+                       placeholder="e.g. Bulk RNA-seq"
+                       className="input w-full text-xs mt-0.5" />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-4 justify-end">
+              <button onClick={() => setCheckoutSampleId(null)} className="btn text-xs text-[var(--color-text-muted)]">Cancel</button>
+              <button onClick={confirmCheckout} className="btn text-xs" style={{ color: 'var(--color-text-secondary)' }}>Check Out</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
