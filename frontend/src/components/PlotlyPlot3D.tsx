@@ -367,8 +367,11 @@ export default function PlotlyPlot3D({
 
         case 'voxel_3d': {
           // Render each voxel as a small unit cube via mesh3d.
+          // Single-pass max — spreading a large zs array into Math.max
+          // can overflow the call stack on real-world datasets.
           const traces: any[] = []
-          const vMax = Math.max(...zs, 1)
+          let vMax = 1
+          for (let i = 0; i < zs.length; i++) if (zs[i] > vMax) vMax = zs[i]
           for (let i = 0; i < Math.min(data.length, 80); i++) {
             const d = data[i]
             const s = 0.45
