@@ -727,13 +727,27 @@ export default function DataVisualization() {
   // ─── Copy chart to clipboard as image ──────────────────────
   const [copiedChart, setCopiedChart] = useState<string | null>(null)
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+  // Per-chart background theme for the chart surface — lets the user
+  // flip a single card from dark to paper-white without affecting the
+  // rest of the platform (publication-grade parity with Plot3D).
+  const [chartBgTheme, setChartBgTheme] = useState<Record<string, 'dark' | 'light'>>({})
 
-  const copyChartToClipboard = useCallback(async (id: string) => {
+  const setChartBg = useCallback((id: string, theme: 'dark' | 'light') => {
+    setChartBgTheme(prev => ({ ...prev, [id]: theme }))
+  }, [])
+
+  const copyChartToClipboard = useCallback(async (id: string, targetTheme?: 'dark' | 'light') => {
     const el = chartRefs.current[id]
     if (!el) return
+    const effective = targetTheme ?? chartBgTheme[id] ?? 'dark'
+    const needsSwap = targetTheme !== undefined && chartBgTheme[id] !== targetTheme
     try {
+      if (needsSwap && targetTheme) setChartBg(id, targetTheme)
+      // Give Recharts a frame to repaint against the new bg before snapshotting.
+      await new Promise(r => requestAnimationFrame(() => r(null)))
+      await new Promise(r => requestAnimationFrame(() => r(null)))
       const canvas = await html2canvas(el, {
-        backgroundColor: '#0f0f14',
+        backgroundColor: effective === 'light' ? '#ffffff' : '#0f0f14',
         scale: 2,
         useCORS: true,
         logging: false,
@@ -748,7 +762,7 @@ export default function DataVisualization() {
       setCopiedChart(id)
       setTimeout(() => setCopiedChart(null), 2000)
     }
-  }, [])
+  }, [chartBgTheme, setChartBg])
 
   // ─── Render any chart ───────────────────────────────────────
   const renderChart = (chart: ChartConfig, height = 300) => {
@@ -1807,33 +1821,42 @@ export default function DataVisualization() {
                       <FiCrosshair className="w-3.5 h-3.5" />
                     </button>
                     <button onClick={() => setShowSettings(showSettings === chart.id ? null : chart.id)}
-                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-accent-purple)]" title="Settings">
+                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="Settings">
                       <FiSettings className="w-3.5 h-3.5" />
                     </button>
                     <button onClick={() => setExpandedChart(expandedChart === chart.id ? null : chart.id)}
-                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-accent-cyan)]"
+                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
                       title={expandedChart ? 'Collapse' : 'Expand'}>
                       {expandedChart === chart.id ? <FiMinimize2 className="w-3.5 h-3.5" /> : <FiMaximize2 className="w-3.5 h-3.5" />}
                     </button>
                     <button onClick={() => exportPng(chart.id, chart.title)}
-                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-accent-blue)]" title="PNG">
+                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="PNG">
                       <FiDownload className="w-3.5 h-3.5" />
                     </button>
                     <button onClick={() => exportSvg(chart.id, chart.title)}
-                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-accent-green)]" title="SVG">
+                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="SVG">
                       <FiDroplet className="w-3.5 h-3.5" />
                     </button>
                     <button onClick={() => exportCsv(chart)}
-                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-accent-orange)]" title="CSV">
+                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="CSV">
                       <FiCopy className="w-3.5 h-3.5" />
                     </button>
                     <button onClick={() => exportXlsx(chart)}
-                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-accent-purple)]" title="XLSX">
+                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="XLSX">
                       <FiUpload className="w-3.5 h-3.5" />
                     </button>
+                    <button onClick={() => setChartBg(chart.id, (chartBgTheme[chart.id] ?? 'dark') === 'dark' ? 'light' : 'dark')}
+                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                      title={`Chart bg: ${chartBgTheme[chart.id] ?? 'dark'} — click to flip`}>
+                      <span className="text-xxs font-mono">{(chartBgTheme[chart.id] ?? 'dark') === 'dark' ? '◐' : '◑'}</span>
+                    </button>
                     <button onClick={() => copyChartToClipboard(chart.id)}
-                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-accent-cyan)]" title="Copy to clipboard">
+                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="Copy to clipboard (current bg)">
                       {copiedChart === chart.id ? <FiCheck className="w-3.5 h-3.5 text-[var(--color-success)]" /> : <FiClipboard className="w-3.5 h-3.5" />}
+                    </button>
+                    <button onClick={() => copyChartToClipboard(chart.id, (chartBgTheme[chart.id] ?? 'dark') === 'dark' ? 'light' : 'dark')}
+                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="Copy with inverted bg">
+                      <FiClipboard className="w-3.5 h-3.5 opacity-60" />
                     </button>
                     <button onClick={() => duplicateChart(chart)}
                       className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="Duplicate">
@@ -1847,7 +1870,15 @@ export default function DataVisualization() {
                 </div>
 
                 {/* Chart body */}
-                <div className="p-4" ref={el => { chartRefs.current[chart.id] = el }}>
+                <div
+                  className="p-4 transition-colors"
+                  ref={el => { chartRefs.current[chart.id] = el }}
+                  style={{
+                    background: (chartBgTheme[chart.id] ?? 'dark') === 'light' ? '#ffffff' : 'transparent',
+                    color: (chartBgTheme[chart.id] ?? 'dark') === 'light' ? '#0a0a0f' : undefined,
+                    borderRadius: 10,
+                  }}
+                >
                   {renderChart(chart, expandedChart === chart.id ? 500 : 280)}
                 </div>
 
