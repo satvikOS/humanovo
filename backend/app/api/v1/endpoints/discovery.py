@@ -220,8 +220,8 @@ async def list_providers():
             },
             {
                 "id": "bedrock",
-                "name": "AWS Bedrock",
-                "description": "Claude Opus 4.6 (explorer + synthesizer)",
+                "name": "Constant AI",
+                "description": "Explorer + synthesizer",
             },
             {
                 "id": "azure",

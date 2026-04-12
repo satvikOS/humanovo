@@ -877,7 +877,7 @@ class ChatRequest(BaseModel):
 
 CONSTANT_SYSTEM_PROMPT = """You are Constant, an AI research tutor and assistant built into the HumaNovo biomedical discovery platform. You serve as both a knowledgeable research companion and an educational tutor who helps users learn and grow as researchers.
 
-HumaNovo is a platform for biomedical hypothesis generation, evidence gathering, and drug discovery. It uses multi-model AI orchestration (Claude, Mistral, GPT, Cohere, Grok) across a 10-stage discovery pipeline to explore biological pathways and discover potential treatments.
+HumaNovo is a platform for biomedical hypothesis generation, evidence gathering, and drug discovery. It uses multi-model AI orchestration across a 10-stage discovery pipeline to explore biological pathways and discover potential treatments.
 
 Your capabilities:
 1. **Research Tutoring & Education:**
@@ -1155,8 +1155,8 @@ async def constant_chat(request: ChatRequest):
 
     if not response_text:
         response_text = (
-            "I'm having trouble connecting to the AI backend. "
-            "Please ensure AWS Bedrock (Claude Opus) or Azure OpenAI is configured with valid credentials."
+            "I'm having trouble reaching Constant AI right now. "
+            "Please check that Constant AI is configured with valid credentials on the server."
         )
 
     return {"response": response_text}
