@@ -7,8 +7,9 @@ import {
 import {
   FiPlay, FiActivity, FiBarChart2, FiCopy, FiDownload,
   FiLoader, FiCheck, FiTarget, FiHeart, FiZap, FiDatabase,
-  FiRefreshCw, FiTrendingUp, FiPercent, FiSliders,
+  FiRefreshCw, FiTrendingUp, FiPercent, FiSliders, FiImage,
 } from 'react-icons/fi';
+import { copyPlotToClipboard as copyPlotBlob, downloadPlotPng } from '../../utils/plotExport';
 
 
 /* ------------------------------------------------------------------ */
@@ -713,6 +714,11 @@ export default function MonteCarloPanel() {
   const [_runHistory, setRunHistory] = useState<{ type: SimulationType; params: Record<string, number>; mean: number; std: number; timestamp: number }[]>([]);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoRunRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Chart host ref — passed to plotExport so users can copy/save the
+  // currently visible visualization (histogram / convergence / CDF) as an
+  // image, not just the stats text.
+  const chartHostRef = useRef<HTMLDivElement | null>(null);
+  const [imageCopied, setImageCopied] = useState(false);
 
   const activeSim = useMemo(
     () => SIMULATIONS.find((s) => s.id === selectedType)!,
@@ -793,6 +799,20 @@ export default function MonteCarloPanel() {
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => setCopied(false), 2000);
   }, [results, stats, activeSim]);
+
+  // Copy the currently visible chart to the clipboard as PNG.
+  const handleCopyChartImage = useCallback(async () => {
+    const ok = await copyPlotBlob(chartHostRef.current)
+    if (ok) {
+      setImageCopied(true)
+      setTimeout(() => setImageCopied(false), 2000)
+    }
+  }, []);
+
+  // Save the currently visible chart as a PNG file.
+  const handleDownloadChartImage = useCallback(async () => {
+    await downloadPlotPng(chartHostRef.current, `monte_carlo_${selectedType}_${activeChart}`)
+  }, [selectedType, activeChart]);
 
   const handleExportJSON = useCallback(() => {
     if (!results || !stats) return;
@@ -1039,13 +1059,17 @@ export default function MonteCarloPanel() {
                   <div style={{ display: 'flex', gap: 4, marginLeft: 8 }}>
                     <button style={styles.exportBtn} onClick={handleExportJSON}><FiDownload style={{ fontSize: 9 }} /> JSON</button>
                     <button style={styles.exportBtn} onClick={handleExportCSV}><FiDownload style={{ fontSize: 9 }} /> CSV</button>
-                    <button style={styles.exportBtn} onClick={handleCopy}>
-                      {copied ? <FiCheck style={{ fontSize: 9 }} /> : <FiCopy style={{ fontSize: 9 }} />} {copied ? 'Copied' : 'Copy'}
+                    <button style={styles.exportBtn} onClick={handleDownloadChartImage} title="Download current chart as PNG"><FiImage style={{ fontSize: 9 }} /> PNG</button>
+                    <button style={styles.exportBtn} onClick={handleCopyChartImage} title="Copy current chart to clipboard as image">
+                      {imageCopied ? <FiCheck style={{ fontSize: 9 }} /> : <FiImage style={{ fontSize: 9 }} />} {imageCopied ? 'Copied' : 'Copy plot'}
+                    </button>
+                    <button style={styles.exportBtn} onClick={handleCopy} title="Copy summary stats as text">
+                      {copied ? <FiCheck style={{ fontSize: 9 }} /> : <FiCopy style={{ fontSize: 9 }} />} {copied ? 'Copied' : 'Stats'}
                     </button>
                   </div>
                 </div>
 
-                <div style={{ flex: 1, minHeight: 0 }}>
+                <div ref={chartHostRef} style={{ flex: 1, minHeight: 0 }}>
                   {activeChart === 'histogram' && (() => {
                     // Recharts ReferenceLine on a category axis needs an exact
                     // bin label, so we snap each stat to its nearest bin midpoint.
