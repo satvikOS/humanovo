@@ -7,6 +7,8 @@ import {
   FiSettings,
   FiChevronDown,
   FiChevronUp,
+  FiChevronLeft,
+  FiChevronRight,
   FiAward,
   FiPlus,
   FiX,
@@ -188,6 +190,17 @@ export default function Agents() {
   const [uploadedDocs, setUploadedDocs] = useState<Array<{ name: string; id: string; status: string; error?: string }>>([])
   const [uploading, setUploading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Split-panel layout: lets the user collapse the config rail to
+  // reclaim horizontal space for the hypothesis list. Persisted so a
+  // once-set preference survives a reload — nothing worse than
+  // watching the panel snap back every time you come back to Discovery.
+  const [leftCollapsed, setLeftCollapsed] = useState<boolean>(() => {
+    try { return localStorage.getItem('agents-left-collapsed') === '1' } catch { return false }
+  })
+  useEffect(() => {
+    try { localStorage.setItem('agents-left-collapsed', leftCollapsed ? '1' : '0') } catch { /* noop */ }
+  }, [leftCollapsed])
 
   const pollRef = useRef<number | null>(null)
   const failRef = useRef(0)
@@ -490,8 +503,24 @@ export default function Agents() {
 
   return (
     <div className="flex h-full overflow-hidden">
+      {/* Collapsed left rail — a thin icon column keeps the engine and
+          connection state visible without eating horizontal space. */}
+      {leftCollapsed && (
+        <div className="w-12 flex flex-col items-center border-r border-[var(--color-border)] py-4 gap-3">
+          <button
+            onClick={() => setLeftCollapsed(false)}
+            className="p-2 rounded-lg hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)]"
+            title="Expand configuration panel"
+            aria-label="Expand configuration panel"
+          >
+            <FiChevronRight className="w-4 h-4" />
+          </button>
+          <FiCpu className="w-4 h-4 text-[var(--color-text-muted)]" title="Discovery Engine" />
+          <span className="w-2 h-2 rounded-full" style={{ background: connected ? 'var(--color-success)' : connected === false ? 'var(--color-error)' : 'var(--color-warning)' }} title={connected ? 'Live' : connected === false ? 'Offline' : 'Connecting'} />
+        </div>
+      )}
       {/* Left Panel - Config & Stats */}
-      <div className="w-80 flex flex-col border-r border-[var(--color-border)] overflow-hidden">
+      <div className={`${leftCollapsed ? 'hidden' : 'w-80'} flex flex-col border-r border-[var(--color-border)] overflow-hidden`}>
         <div className="p-5 border-b border-[var(--color-border)]">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
@@ -501,6 +530,14 @@ export default function Agents() {
             <div className="flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full" style={{ background: connected ? 'var(--color-success)' : connected === false ? 'var(--color-error)' : 'var(--color-warning)' }} />
               <span className="text-xs text-[var(--color-text-muted)]">{connected ? 'Live' : connected === false ? 'Offline' : '...'}</span>
+              <button
+                onClick={() => setLeftCollapsed(true)}
+                className="ml-1 p-1 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)]"
+                title="Collapse configuration panel"
+                aria-label="Collapse configuration panel"
+              >
+                <FiChevronLeft className="w-3.5 h-3.5" />
+              </button>
             </div>
           </div>
 
