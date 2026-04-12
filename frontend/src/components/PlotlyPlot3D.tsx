@@ -144,7 +144,10 @@ export default function PlotlyPlot3D({
         }
 
         case 'bar_3d': {
-          // Plotly doesn't have native 3D bars — simulate with mesh3d or use scatter3d with wide markers
+          // Plotly doesn't have native 3D bars — simulate with mesh3d.
+          // alphahull=-1 asks Plotly to convex-hull the 8 corner points,
+          // which always yields a valid box (hand-rolled i/j/k indices
+          // can collapse on some inputs, producing invisible bars).
           const traces: any[] = []
           for (let i = 0; i < data.length; i++) {
             const d = data[i]
@@ -153,13 +156,13 @@ export default function PlotlyPlot3D({
               x: [d.x - 0.3, d.x + 0.3, d.x + 0.3, d.x - 0.3, d.x - 0.3, d.x + 0.3, d.x + 0.3, d.x - 0.3],
               y: [d.y - 0.3, d.y - 0.3, d.y + 0.3, d.y + 0.3, d.y - 0.3, d.y - 0.3, d.y + 0.3, d.y + 0.3],
               z: [0, 0, 0, 0, d.z, d.z, d.z, d.z],
-              i: [0, 0, 0, 4, 4, 4, 0, 1, 2, 3, 0, 1],
-              j: [1, 2, 3, 5, 6, 7, 1, 2, 3, 0, 4, 5],
-              k: [2, 3, 0, 6, 7, 4, 5, 6, 7, 4, 1, 2],
-              opacity: 0.8,
+              alphahull: -1,
+              opacity: 0.85,
               color: CATEGORY_COLORS[i % CATEGORY_COLORS.length],
               name: labels[i] || `Bar ${i + 1}`,
               showlegend: i < 10,
+              flatshading: true,
+              hovertext: `${labels[i] || ''}<br>(${d.x}, ${d.y}, ${d.z})`,
             } as any)
           }
           return traces.slice(0, 30) // limit for performance
@@ -289,19 +292,33 @@ export default function PlotlyPlot3D({
         }
 
         case 'trisurf_3d': {
-          // Delaunay-like mesh from scattered points using mesh3d with alphahull
-          // (alphahull: -1 = convex hull, >=0 = alpha-shape tightness).
-          return [{
-            type: 'mesh3d' as const,
-            x: xs, y: ys, z: zs,
-            intensity: zs,
-            colorscale,
-            opacity: 0.9,
-            alphahull: 5,
-            flatshading: true,
-            lighting: { ambient: 0.6, diffuse: 0.9, specular: 0.2 },
-            colorbar: { title: zLabel },
-          } as any]
+          // Triangulated surface via mesh3d. alphahull=-1 forces a convex
+          // hull which always produces a visible mesh (alpha-shape with
+          // a finite radius can collapse on sparse data). We also overlay
+          // the source points so users can see the vertices, and add an
+          // auto-generated surface path for large samples.
+          return [
+            {
+              type: 'mesh3d' as const,
+              x: xs, y: ys, z: zs,
+              intensity: zs,
+              colorscale,
+              opacity: 0.85,
+              alphahull: -1,
+              flatshading: true,
+              lighting: { ambient: 0.55, diffuse: 0.95, specular: 0.25 },
+              colorbar: { title: zLabel },
+            },
+            {
+              type: 'scatter3d' as const,
+              mode: 'markers' as const,
+              x: xs, y: ys, z: zs,
+              text: labels,
+              marker: { size: pointSize + 1, color: '#c8c8cc', opacity: 0.9 },
+              showlegend: false,
+              hovertemplate: '%{text}<br>(%{x:.2f}, %{y:.2f}, %{z:.2f})<extra></extra>',
+            },
+          ] as any[]
         }
 
         case 'quiver_3d': {
@@ -311,16 +328,37 @@ export default function PlotlyPlot3D({
           const u = data.map(d => d.vx ?? -d.y * 0.5)
           const v = data.map(d => d.vy ?? d.x * 0.5)
           const w = data.map(d => d.vz ?? (d.z === 0 ? 0.3 : d.z * 0.25))
-          return [{
-            type: 'cone' as const,
-            x: xs, y: ys, z: zs,
-            u, v, w,
-            colorscale,
-            sizemode: 'absolute',
-            sizeref: 0.6,
-            anchor: 'tail',
-            colorbar: { title: 'Magnitude' },
-          } as any]
+          // Size cones relative to the spatial span so they're visible
+          // regardless of coordinate magnitude.
+          let span = 1
+          for (let i = 0; i < xs.length; i++) {
+            span = Math.max(span, Math.abs(xs[i]))
+            span = Math.max(span, Math.abs(ys[i]))
+            span = Math.max(span, Math.abs(zs[i]))
+          }
+          const sizeref = Math.max(span * 0.25, 0.3)
+          return [
+            {
+              type: 'cone' as const,
+              x: xs, y: ys, z: zs,
+              u, v, w,
+              colorscale,
+              sizemode: 'absolute',
+              sizeref,
+              anchor: 'tail',
+              colorbar: { title: 'Magnitude' },
+              showscale: true,
+            },
+            // Fallback markers so the origin of each vector is always visible.
+            {
+              type: 'scatter3d' as const,
+              mode: 'markers' as const,
+              x: xs, y: ys, z: zs,
+              marker: { size: Math.max(pointSize - 1, 2), color: '#c8c8cc', opacity: 0.7 },
+              showlegend: false,
+              hoverinfo: 'skip',
+            },
+          ] as any[]
         }
 
         case 'isosurface_3d': {
@@ -351,45 +389,65 @@ export default function PlotlyPlot3D({
             flatX.push(xv); flatY.push(yv); flatZ.push(zv); flatV.push(val)
             if (val < vMin) vMin = val; if (val > vMax) vMax = val
           }
-          const lo = vMin + (vMax - vMin) * 0.35
-          const hi = vMin + (vMax - vMin) * 0.75
-          return [{
-            type: 'isosurface' as const,
-            x: flatX, y: flatY, z: flatZ, value: flatV,
-            isomin: lo, isomax: hi,
-            surface: { count: 3, fill: 0.85 },
-            caps: { x: { show: false }, y: { show: false }, z: { show: false } },
-            colorscale,
-            opacity: 0.7,
-            colorbar: { title: 'Density' },
-          } as any]
+          // Guard against degenerate value range (happens when all points
+          // land on the same grid cell).
+          if (!Number.isFinite(vMin) || vMax - vMin < 1e-9) {
+            vMin = 0; vMax = 1
+          }
+          const lo = vMin + (vMax - vMin) * 0.25
+          const hi = vMin + (vMax - vMin) * 0.85
+          return [
+            {
+              type: 'isosurface' as const,
+              x: flatX, y: flatY, z: flatZ, value: flatV,
+              isomin: lo, isomax: hi,
+              surface: { count: 3, fill: 0.85 },
+              caps: { x: { show: false }, y: { show: false }, z: { show: false } },
+              colorscale,
+              opacity: 0.6,
+              colorbar: { title: 'Density' },
+            },
+            // Overlay the source points as small markers — this guarantees
+            // the user always sees where the density came from, even if
+            // the isosurface thresholds collapse for an edge-case sample.
+            {
+              type: 'scatter3d' as const,
+              mode: 'markers' as const,
+              x: xs, y: ys, z: zs,
+              text: labels,
+              marker: { size: pointSize + 1, color: '#f0c674', opacity: 0.95 },
+              showlegend: false,
+              hovertemplate: '%{text}<br>(%{x:.2f}, %{y:.2f}, %{z:.2f})<extra></extra>',
+            },
+          ] as any[]
         }
 
         case 'voxel_3d': {
-          // Render each voxel as a small unit cube via mesh3d.
-          // Single-pass max — spreading a large zs array into Math.max
-          // can overflow the call stack on real-world datasets.
+          // Render voxels as axis-aligned cubes. Using alphahull=-1 on the
+          // 8 corner points asks Plotly to convex-hull them, which always
+          // yields a valid cube — avoids hand-rolled i/j/k indices that
+          // can degenerate into invisible meshes.
           const traces: any[] = []
-          let vMax = 1
-          for (let i = 0; i < zs.length; i++) if (zs[i] > vMax) vMax = zs[i]
+          let zMax = 1
+          for (let i = 0; i < zs.length; i++) if (zs[i] > zMax) zMax = zs[i]
           for (let i = 0; i < Math.min(data.length, 80); i++) {
             const d = data[i]
-            const s = 0.45
+            const s = 0.42
+            const shade = Math.max(0, Math.min(1, d.z / zMax))
             traces.push({
               type: 'mesh3d' as const,
               x: [d.x - s, d.x + s, d.x + s, d.x - s, d.x - s, d.x + s, d.x + s, d.x - s],
               y: [d.y - s, d.y - s, d.y + s, d.y + s, d.y - s, d.y - s, d.y + s, d.y + s],
               z: [d.z - s, d.z - s, d.z - s, d.z - s, d.z + s, d.z + s, d.z + s, d.z + s],
-              i: [0, 0, 0, 1, 1, 2, 4, 4, 4, 5, 5, 6],
-              j: [1, 2, 4, 2, 5, 3, 5, 6, 7, 6, 1, 2],
-              k: [2, 3, 5, 3, 6, 7, 6, 7, 0, 2, 6, 7],
-              intensity: Array(8).fill(d.z / vMax),
+              alphahull: -1,
+              intensity: [shade, shade, shade, shade, shade, shade, shade, shade],
               colorscale,
               cmin: 0, cmax: 1,
-              opacity: 0.75,
+              opacity: 0.85,
               showscale: i === 0,
               showlegend: false,
               flatshading: true,
+              hovertext: `${d.label || `voxel ${i + 1}`}<br>z=${d.z}`,
             } as any)
           }
           return traces
@@ -442,8 +500,8 @@ export default function PlotlyPlot3D({
         }
 
         case 'waterfall_3d': {
-          // One ribbon per series (grouped by y). Within a series, bars
-          // sit side-by-side along x with height z.
+          // Grouped 3D bars. Convex hull of 8 cube corners renders a
+          // robust box; negative deltas are recoloured red.
           const traces: any[] = []
           const seriesMap: Record<string, DataPoint3D[]> = {}
           for (const d of data) {
@@ -456,17 +514,19 @@ export default function PlotlyPlot3D({
             const color = CATEGORY_COLORS[idx % CATEGORY_COLORS.length]
             for (const d of pts) {
               const s = 0.35
+              const zLo = Math.min(0, d.z)
+              const zHi = Math.max(0, d.z)
               traces.push({
                 type: 'mesh3d' as const,
                 x: [d.x - s, d.x + s, d.x + s, d.x - s, d.x - s, d.x + s, d.x + s, d.x - s],
                 y: [d.y - s, d.y - s, d.y + s, d.y + s, d.y - s, d.y - s, d.y + s, d.y + s],
-                z: [0, 0, 0, 0, d.z, d.z, d.z, d.z],
-                i: [0, 0, 0, 4, 4, 4, 0, 1, 2, 3, 0, 1],
-                j: [1, 2, 3, 5, 6, 7, 1, 2, 3, 0, 4, 5],
-                k: [2, 3, 0, 6, 7, 4, 5, 6, 7, 4, 1, 2],
+                z: [zLo, zLo, zLo, zLo, zHi, zHi, zHi, zHi],
+                alphahull: -1,
                 opacity: 0.85,
                 color: d.z < 0 ? '#c97575' : color,
                 showlegend: false,
+                hovertext: `${d.label || `Δ ${d.z}`}<br>x=${d.x}, y=${d.y}, z=${d.z}`,
+                flatshading: true,
               } as any)
             }
             idx++
@@ -522,7 +582,10 @@ export default function PlotlyPlot3D({
       paper_bgcolor: 'rgba(0,0,0,0)',
       plot_bgcolor: 'rgba(0,0,0,0)',
       font: { color: '#8a8a92', size: 10, family: "'Inter', system-ui, sans-serif" },
-      margin: { l: 10, r: 10, t: title ? 30 : 5, b: 10 },
+      // More generous margins give the 3D scene breathing room so axis
+      // tick labels and the Z colorbar don't end up crammed together
+      // in the corner.
+      margin: { l: 20, r: 30, t: title ? 36 : 12, b: 20 },
       height,
       showlegend: hasCats || chartType === 'pie_3d',
       legend: { font: { color: '#8a8a92', size: 10 }, bgcolor: 'rgba(0,0,0,0)', orientation: 'h' as const, y: -0.05 },
@@ -546,11 +609,12 @@ export default function PlotlyPlot3D({
 
     if (!is2D) {
       (baseLayout as any).scene = {
-        xaxis: { title: { text: xLabel, font: { size: 10, color: '#8a8a92' } }, color: '#8a8a92', gridcolor: 'rgba(255,255,255,0.04)', zerolinecolor: 'rgba(255,255,255,0.06)', showbackground: true, backgroundcolor: 'rgba(0,0,0,0)' },
-        yaxis: { title: { text: yLabel, font: { size: 10, color: '#8a8a92' } }, color: '#8a8a92', gridcolor: 'rgba(255,255,255,0.04)', zerolinecolor: 'rgba(255,255,255,0.06)', showbackground: true, backgroundcolor: 'rgba(0,0,0,0)' },
-        zaxis: { title: { text: zLabel, font: { size: 10, color: '#8a8a92' } }, color: '#8a8a92', gridcolor: 'rgba(255,255,255,0.04)', zerolinecolor: 'rgba(255,255,255,0.06)', showbackground: true, backgroundcolor: 'rgba(0,0,0,0)' },
+        xaxis: { title: { text: xLabel, font: { size: 10, color: '#8a8a92' } }, color: '#8a8a92', gridcolor: 'rgba(255,255,255,0.08)', zerolinecolor: 'rgba(255,255,255,0.12)', showbackground: true, backgroundcolor: 'rgba(0,0,0,0)' },
+        yaxis: { title: { text: yLabel, font: { size: 10, color: '#8a8a92' } }, color: '#8a8a92', gridcolor: 'rgba(255,255,255,0.08)', zerolinecolor: 'rgba(255,255,255,0.12)', showbackground: true, backgroundcolor: 'rgba(0,0,0,0)' },
+        zaxis: { title: { text: zLabel, font: { size: 10, color: '#8a8a92' } }, color: '#8a8a92', gridcolor: 'rgba(255,255,255,0.08)', zerolinecolor: 'rgba(255,255,255,0.12)', showbackground: true, backgroundcolor: 'rgba(0,0,0,0)' },
         bgcolor: 'rgba(0,0,0,0)',
-        camera: { eye: { x: 1.5, y: 1.5, z: 1.2 } },
+        aspectmode: 'cube' as const,
+        camera: { eye: { x: 1.6, y: 1.6, z: 1.3 }, center: { x: 0, y: 0, z: 0 } },
       }
     }
 

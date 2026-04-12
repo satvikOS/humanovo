@@ -1320,7 +1320,22 @@ export default function DataVisualization() {
               {vEntries.map(([name, vals], gi) => {
                 const sorted = [...vals].sort((a, b) => a - b)
                 const cx = 65 + gi * groupW + groupW / 2
-                const bw = (vals.length > 1 ? Math.sqrt(vals.length) : 1) * 0.4
+                // Silverman's rule of thumb: h = 1.06 * sigma * n^(-1/5).
+                // The previous bw grew with sample size, which over-smooths
+                // the violin until it looks like a blob. Silverman narrows
+                // bandwidth as data accumulates, preserving modes.
+                const nV = vals.length
+                let mean = 0
+                for (const v of sorted) mean += v
+                mean /= nV || 1
+                let variance = 0
+                for (const v of sorted) variance += (v - mean) ** 2
+                const sigma = Math.sqrt(variance / Math.max(nV - 1, 1))
+                const fallbackScale = (vMax - vMin) || 1
+                const bw = Math.max(
+                  (sigma > 0 ? 1.06 * sigma * Math.pow(nV, -1 / 5) : fallbackScale * 0.08),
+                  fallbackScale * 0.02,
+                )
                 // KDE estimation
                 const kde: { y: number; density: number }[] = []
                 let maxD = 0
@@ -1337,13 +1352,17 @@ export default function DataVisualization() {
                 const pathR = kde.map(k => `${cx + (k.density / maxD) * halfW},${toY(k.y)}`).join(' ')
                 const pathL = kde.map(k => `${cx - (k.density / maxD) * halfW},${toY(k.y)}`).reverse().join(' ')
                 const stats = computeBoxStats(vals)
+                const col = colors[gi % colors.length]
                 return (
                   <g key={name}>
-                    <polygon points={`${pathR} ${pathL}`} fill={colors[gi % colors.length]} opacity={0.3} stroke={colors[gi % colors.length]} strokeWidth={1.5} />
-                    {/* Median + quartile lines */}
-                    <line x1={cx - halfW * 0.5} x2={cx + halfW * 0.5} y1={toY(stats.median)} y2={toY(stats.median)} stroke={colors[gi % colors.length]} strokeWidth={2} />
-                    <line x1={cx - halfW * 0.3} x2={cx + halfW * 0.3} y1={toY(stats.q1)} y2={toY(stats.q1)} stroke={colors[gi % colors.length]} strokeWidth={1} opacity={0.6} />
-                    <line x1={cx - halfW * 0.3} x2={cx + halfW * 0.3} y1={toY(stats.q3)} y2={toY(stats.q3)} stroke={colors[gi % colors.length]} strokeWidth={1} opacity={0.6} />
+                    <polygon points={`${pathR} ${pathL}`} fill={col} opacity={0.28} stroke={col} strokeWidth={1.5} />
+                    {/* IQR mini-box spanning q1..q3 */}
+                    <rect x={cx - 3} y={toY(stats.q3)} width={6} height={toY(stats.q1) - toY(stats.q3)}
+                      fill={col} opacity={0.55} rx={1.5} />
+                    {/* Whisker line min..max */}
+                    <line x1={cx} x2={cx} y1={toY(stats.max)} y2={toY(stats.min)} stroke={col} strokeWidth={1} opacity={0.7} />
+                    {/* Median dot */}
+                    <circle cx={cx} cy={toY(stats.median)} r={3} fill="#fff" stroke={col} strokeWidth={1.5} />
                     <text x={cx} y={height - 10} textAnchor="middle" fill="var(--color-text-muted)" fontSize={11}>{name}</text>
                   </g>
                 )
@@ -1354,12 +1373,26 @@ export default function DataVisualization() {
       }
 
       case 'density': {
-        // Kernel Density Estimation rendered as smooth AreaChart
+        // Kernel Density Estimation rendered as smooth AreaChart.
+        // Silverman's rule: h = 1.06 * sigma * n^(-1/5). Previous rule
+        // scaled bandwidth with sqrt(n) which oversmoothed for large
+        // samples. This version preserves modes while still being
+        // robust on small samples by clamping to 2 % of range.
         const vals = data.map(d => d.value).sort((a, b) => a - b)
         const dMin = vals[0], dMax = vals[vals.length - 1]
         const dRange = dMax - dMin || 1
-        const bw = dRange / Math.max(Math.sqrt(vals.length), 2)
-        const steps = 60
+        const nD = vals.length
+        let meanD = 0
+        for (const v of vals) meanD += v
+        meanD /= nD || 1
+        let varD = 0
+        for (const v of vals) varD += (v - meanD) ** 2
+        const sigmaD = Math.sqrt(varD / Math.max(nD - 1, 1))
+        const bw = Math.max(
+          sigmaD > 0 ? 1.06 * sigmaD * Math.pow(nD, -1 / 5) : dRange * 0.08,
+          dRange * 0.02,
+        )
+        const steps = 80
         const kdeData: { x: number; density: number }[] = []
         for (let i = 0; i <= steps; i++) {
           const x = dMin - dRange * 0.1 + (dRange * 1.2) * (i / steps)
@@ -1460,6 +1493,28 @@ export default function DataVisualization() {
                 <text key={ci} x={90 + ci * cellW + cellW / 2} y={12} textAnchor="middle"
                   fill="var(--color-text-muted)" fontSize={10}>{cat}</text>
               ))}
+              {/* Intensity legend (vertical gradient bar on the right) */}
+              {(() => {
+                const gx = 90 + (cats.length || 1) * cellW + 12
+                const gy = 20
+                const gh = Math.min(120, labels.length * cellH)
+                const gw = 10
+                return (
+                  <g>
+                    <defs>
+                      <linearGradient id="heatmap-legend" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="rgba(59,130,246,0.9)" />
+                        <stop offset="50%" stopColor="rgba(180,180,180,0.15)" />
+                        <stop offset="100%" stopColor="rgba(239,68,68,0.9)" />
+                      </linearGradient>
+                    </defs>
+                    <rect x={gx} y={gy} width={gw} height={gh} fill="url(#heatmap-legend)" rx={2} />
+                    <text x={gx + gw + 4} y={gy + 4} fill="var(--color-text-muted)" fontSize={9}>+{maxVal.toFixed(1)}</text>
+                    <text x={gx + gw + 4} y={gy + gh / 2 + 3} fill="var(--color-text-muted)" fontSize={9}>0</text>
+                    <text x={gx + gw + 4} y={gy + gh} fill="var(--color-text-muted)" fontSize={9}>−{maxVal.toFixed(1)}</text>
+                  </g>
+                )
+              })()}
             </svg>
           </div>
         )
