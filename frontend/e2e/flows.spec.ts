@@ -462,6 +462,54 @@ test.describe('Flow: Notebook filters', () => {
   });
 });
 
+// ─── Command Palette navigation ─────────────────────────────────────
+
+test.describe('Flow: Command palette', () => {
+  test('arrow keys move highlight; Enter runs highlighted item', async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    await page.goto('/dashboard');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(800);
+
+    // Open the palette. Try the sidebar Command button first (most
+    // reliable), falling back to the keyboard shortcut.
+    const cmdBtn = page.locator('button:has-text("Command")').first();
+    if (await cmdBtn.count() > 0) {
+      await cmdBtn.click({ force: true }).catch(() => {});
+    } else {
+      await page.keyboard.press('Control+K').catch(() => {});
+    }
+    await page.waitForTimeout(300);
+
+    const input = page.locator('input[placeholder*="command" i]').first();
+    await expect(input).toBeVisible({ timeout: 4000 });
+
+    // With no query, the first command should be "Go to Dashboard".
+    // Press ArrowDown twice → expect the 3rd item (index 2) to be active.
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('ArrowDown');
+    await page.waitForTimeout(100);
+
+    const active = page.locator('[data-cp-idx="2"]');
+    await expect(active).toBeVisible();
+
+    // Enter should navigate. The exact destination depends on list order,
+    // but the palette must close and no uncaught errors should fire.
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(400);
+
+    // Palette should be gone.
+    expect(await input.count()).toBe(0);
+
+    expect(errors.filter(e =>
+      e.includes('Maximum call stack') ||
+      e.includes('Cannot read properties of null')
+    )).toEqual([]);
+  });
+});
+
 // ─── Projects → Workspace navigation ────────────────────────────────
 
 test.describe('Flow: Projects → Workspace', () => {

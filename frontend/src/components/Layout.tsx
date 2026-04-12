@@ -157,6 +157,8 @@ interface CommandAction {
 
 function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
   const [query, setQuery] = useState('')
+  const [activeIndex, setActiveIndex] = useState(0)
+  const listRef = useRef<HTMLDivElement>(null)
   const navigate = useNavigate()
 
   const actions: CommandAction[] = [
@@ -272,14 +274,56 @@ function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
   // If query is long enough and no data results, offer to do a full search
   const showFullSearchOption = query.length >= 2
 
+  // Flat list used for arrow-key navigation: full-search row first (if shown)
+  // then every command in the order the categories render them.
+  const triggerFullSearch = useCallback(() => {
+    navigate(`/search?q=${encodeURIComponent(query.trim())}`)
+    onClose()
+  }, [navigate, query, onClose])
+
+  const flatItems = useMemo(() => {
+    const items: Array<{ run: () => void }> = []
+    if (showFullSearchOption) items.push({ run: triggerFullSearch })
+    for (const cat of categories) {
+      for (const it of allItems.filter(a => a.category === cat)) {
+        items.push({ run: it.action })
+      }
+    }
+    return items
+  }, [showFullSearchOption, triggerFullSearch, categories, allItems])
+
   useEffect(() => {
-    if (isOpen) setQuery('')
+    if (isOpen) {
+      setQuery('')
+      setActiveIndex(0)
+    }
   }, [isOpen])
 
+  // Reset selection when the result set changes so the highlight never
+  // points past the end of the list.
+  useEffect(() => {
+    setActiveIndex(0)
+  }, [query])
+
+  // Keep the highlighted row in view while the user arrows through results.
+  useEffect(() => {
+    if (!listRef.current) return
+    const el = listRef.current.querySelector<HTMLElement>(`[data-cp-idx="${activeIndex}"]`)
+    el?.scrollIntoView({ block: 'nearest' })
+  }, [activeIndex])
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && query.trim().length >= 2) {
-      navigate(`/search?q=${encodeURIComponent(query.trim())}`)
-      onClose()
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      if (flatItems.length) setActiveIndex(i => (i + 1) % flatItems.length)
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      if (flatItems.length) setActiveIndex(i => (i - 1 + flatItems.length) % flatItems.length)
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      const item = flatItems[activeIndex]
+      if (item) item.run()
+      else if (query.trim().length >= 2) triggerFullSearch()
     }
   }
 
@@ -302,41 +346,61 @@ function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
           />
           <kbd className="px-1.5 py-0.5 text-xxs text-[var(--color-text-muted)] bg-[var(--glass-bg)] rounded border border-[var(--color-border)]">ESC</kbd>
         </div>
-        <div className="max-h-[60vh] overflow-y-auto p-3">
-          {showFullSearchOption && (
-            <button
-              onClick={() => { navigate(`/search?q=${encodeURIComponent(query.trim())}`); onClose() }}
-              className="flex items-center gap-3 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--glass-bg-hover)] transition-all group mb-1"
-            >
-              <FiSearch className="w-4 h-4 text-[var(--color-accent-purple)] group-hover:text-[var(--color-text)]" />
-              <div className="flex-1 text-left">
-                <span className="text-[var(--color-text-secondary)] group-hover:text-[var(--color-text)]">Search for "{query}"</span>
-                <span className="block text-xs text-[var(--color-text-muted)]">Full search across all platform data</span>
-              </div>
-              <span className="text-xxs text-[var(--color-text-muted)]">Enter</span>
-            </button>
-          )}
-          {categories.map(cat => (
-            <div key={cat}>
-              <div className="text-xxs text-[var(--color-text-muted)] px-2 py-1.5 uppercase tracking-wider font-medium">{cat}</div>
-              {allItems.filter(a => a.category === cat).map((item, idx) => (
+        <div className="max-h-[60vh] overflow-y-auto p-3" ref={listRef}>
+          {(() => {
+            // Index-aware renderer: we walk flatItems once so the
+            // highlighted row lines up with the arrow-key position.
+            let cursor = 0
+            const rows: React.ReactNode[] = []
+            if (showFullSearchOption) {
+              const myIdx = cursor++
+              const active = activeIndex === myIdx
+              rows.push(
                 <button
-                  key={`${item.label}-${idx}`}
-                  onClick={item.action}
-                  className="flex items-center gap-3 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--glass-bg-hover)] transition-all group"
+                  key="full-search"
+                  data-cp-idx={myIdx}
+                  onClick={triggerFullSearch}
+                  onMouseEnter={() => setActiveIndex(myIdx)}
+                  className={`flex items-center gap-3 w-full px-3 py-2 text-sm rounded-lg transition-all group mb-1 ${active ? 'bg-[var(--glass-bg-hover)]' : ''}`}
                 >
-                  <item.icon className="w-4 h-4 text-[var(--color-text-muted)] group-hover:text-[var(--color-text)]" />
+                  <FiSearch className={`w-4 h-4 ${active ? 'text-[var(--color-text)]' : 'text-[var(--color-text-muted)]'}`} />
                   <div className="flex-1 text-left">
-                    <span className="text-[var(--color-text-secondary)] group-hover:text-[var(--color-text)]">{item.label}</span>
-                    {item.description && (
-                      <span className="block text-xs text-[var(--color-text-muted)]">{item.description}</span>
-                    )}
+                    <span className={active ? 'text-[var(--color-text)]' : 'text-[var(--color-text-secondary)]'}>Search for "{query}"</span>
+                    <span className="block text-xs text-[var(--color-text-muted)]">Full search across all platform data</span>
                   </div>
-                  <FiArrowRight className="w-3 h-3 text-[var(--color-text-muted)] opacity-0 group-hover:opacity-100 transition-opacity" />
+                  <span className="text-xxs text-[var(--color-text-muted)]">Enter</span>
                 </button>
-              ))}
-            </div>
-          ))}
+              )
+            }
+            for (const cat of categories) {
+              rows.push(
+                <div key={`cat-${cat}`} className="text-xxs text-[var(--color-text-muted)] px-2 py-1.5 uppercase tracking-wider font-medium">{cat}</div>
+              )
+              for (const item of allItems.filter(a => a.category === cat)) {
+                const myIdx = cursor++
+                const active = activeIndex === myIdx
+                rows.push(
+                  <button
+                    key={`${item.label}-${myIdx}`}
+                    data-cp-idx={myIdx}
+                    onClick={item.action}
+                    onMouseEnter={() => setActiveIndex(myIdx)}
+                    className={`flex items-center gap-3 w-full px-3 py-2 text-sm rounded-lg transition-all group ${active ? 'bg-[var(--glass-bg-hover)]' : ''}`}
+                  >
+                    <item.icon className={`w-4 h-4 ${active ? 'text-[var(--color-text)]' : 'text-[var(--color-text-muted)]'}`} />
+                    <div className="flex-1 text-left">
+                      <span className={active ? 'text-[var(--color-text)]' : 'text-[var(--color-text-secondary)]'}>{item.label}</span>
+                      {item.description && (
+                        <span className="block text-xs text-[var(--color-text-muted)]">{item.description}</span>
+                      )}
+                    </div>
+                    <FiArrowRight className={`w-3 h-3 text-[var(--color-text-muted)] transition-opacity ${active ? 'opacity-100' : 'opacity-0'}`} />
+                  </button>
+                )
+              }
+            }
+            return rows
+          })()}
           {allItems.length === 0 && !showFullSearchOption && (
             <div className="text-center py-8 text-sm text-[var(--color-text-muted)]">No results found</div>
           )}
@@ -1449,6 +1513,14 @@ function KeyboardShortcutsHelp({ isOpen, onClose }: { isOpen: boolean; onClose: 
         { keys: ['⌘', 'K'], label: 'Open command palette / global search' },
         { keys: ['?'], label: 'Show this keyboard cheatsheet' },
         { keys: ['Esc'], label: 'Close dialogs & menus' },
+      ],
+    },
+    {
+      title: 'Command palette',
+      rows: [
+        { keys: ['↑', '↓'], label: 'Move highlight between results' },
+        { keys: ['Enter'], label: 'Run highlighted action' },
+        { keys: ['Esc'], label: 'Dismiss palette' },
       ],
     },
     {
