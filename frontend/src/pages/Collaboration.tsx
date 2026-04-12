@@ -95,6 +95,12 @@ export default function Collaboration() {
           {/* Team */}
           {tab === 'team' && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {team.length === 0 && (
+                <div className="col-span-full glass-card p-8 text-center">
+                  <p className="text-sm font-medium mb-1">No teammates yet</p>
+                  <p className="text-xxs text-[var(--color-text-muted)]">Invite collaborators from project settings — they'll appear here with their role and share controls.</p>
+                </div>
+              )}
               {team.map(m => (
                 <div key={m.id} className="glass-card p-4 flex items-center gap-4">
                   <div className="w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-medium" style={{ background: m.avatar_color }}>
