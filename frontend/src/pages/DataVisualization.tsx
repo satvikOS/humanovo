@@ -375,7 +375,15 @@ function computeBoxStats(values: number[]): { min: number; q1: number; median: n
 
 function computeHistogram(values: number[], bins = 15): { label: string; count: number }[] {
   if (!values.length) return []
-  const mn = Math.min(...values), mx = Math.max(...values)
+  // Single-pass min/max so datasets with >100k points don't blow the JS
+  // argument-list stack via Math.min(...values).
+  let mn = Infinity, mx = -Infinity
+  for (const v of values) {
+    if (!Number.isFinite(v)) continue
+    if (v < mn) mn = v
+    if (v > mx) mx = v
+  }
+  if (!Number.isFinite(mn) || !Number.isFinite(mx)) return []
   const w = (mx - mn) / bins || 1
   const buckets = Array.from({ length: bins }, (_, i) => ({
     label: `${(mn + i * w).toFixed(1)}`,
@@ -1225,8 +1233,15 @@ export default function DataVisualization() {
           vGroups[grp].push(d.value)
         })
         const vEntries = Object.entries(vGroups)
-        const allVals = data.map(d => d.value)
-        const vMin = Math.min(...allVals), vMax = Math.max(...allVals)
+        // Single-pass — spread can overflow the argument list for large series.
+        let vMin = Infinity, vMax = -Infinity
+        for (const d of data) {
+          const v = d.value
+          if (!Number.isFinite(v)) continue
+          if (v < vMin) vMin = v
+          if (v > vMax) vMax = v
+        }
+        if (!Number.isFinite(vMin)) { vMin = 0; vMax = 1 }
         const vRange = vMax - vMin || 1
         const vPad = vRange * 0.1
         const ySteps = 40

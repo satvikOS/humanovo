@@ -1733,15 +1733,21 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
   def('median', 1, args => reduceVecOrMat(args[0], ML.median))
   def('std', 1, args => reduceVecOrMat(args[0], ML.std))
   def('var', 1, args => reduceVecOrMat(args[0], ML.variance))
+  // Single-pass min/max over arrays — Math.min/max.apply/spread blows the
+  // argument-list stack for vectors with >~100k elements, which shows up
+  // as mystery "Maximum call stack size exceeded" when users run the
+  // compute engine against real dataset exports.
+  const arrMin = (a: number[]): number => { let m = Infinity; for (const v of a) if (v < m) m = v; return m }
+  const arrMax = (a: number[]): number => { let m = -Infinity; for (const v of a) if (v > m) m = v; return m }
   def('min', -1, args => {
     if (args.length === 2) return elemBinary(toMat(args[0]), toMat(args[1]), Math.min, 'min')
-    return reduceVecOrMat(args[0], a => Math.min(...a))
+    return reduceVecOrMat(args[0], arrMin)
   })
   def('max', -1, args => {
     if (args.length === 2) return elemBinary(toMat(args[0]), toMat(args[1]), Math.max, 'max')
-    return reduceVecOrMat(args[0], a => Math.max(...a))
+    return reduceVecOrMat(args[0], arrMax)
   })
-  def('range', 1, args => { const a = toArray(args[0]); return mnum(Math.max(...a) - Math.min(...a)) })
+  def('range', 1, args => { const a = toArray(args[0]); return mnum(arrMax(a) - arrMin(a)) })
   def('quantile', 2, args => mnum(ML.quantile(toArray(args[0]), toNumber(args[1]))))
   def('sort', 1, args => {
     const a = [...toArray(args[0])].sort((x, y) => x - y)
@@ -2684,7 +2690,7 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
   // Min-max normalization to [0, 1]
   def('rescale', 1, args => {
     const a = toArray(args[0])
-    const mn = Math.min(...a), mx = Math.max(...a)
+    const mn = arrMin(a), mx = arrMax(a)
     const r = mx - mn
     if (r === 0) return mmat(1, a.length, new Float64Array(a.length).fill(0.5))
     const out = a.map(v => (v - mn) / r)
@@ -2975,7 +2981,7 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
   def('softmax', 1, args => {
     const a = toArray(args[0])
     if (a.length === 0) throw new RuntimeError('softmax: empty input')
-    const mx = Math.max(...a)
+    const mx = arrMax(a)
     const exps = a.map(x => Math.exp(x - mx))
     const s = exps.reduce((p, v) => p + v, 0) || 1
     return mmat(1, a.length, Float64Array.from(exps.map(v => v / s)))
