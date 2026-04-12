@@ -185,7 +185,7 @@ export default function Agents() {
   const [, setProjectName] = useState<string>('')
 
   // Document upload
-  const [uploadedDocs, setUploadedDocs] = useState<Array<{ name: string; id: string; status: string }>>([])
+  const [uploadedDocs, setUploadedDocs] = useState<Array<{ name: string; id: string; status: string; error?: string }>>([])
   const [uploading, setUploading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -441,14 +441,34 @@ export default function Agents() {
     const files = e.target.files
     if (!files || files.length === 0) return
     setUploading(true)
+    // Hard caps + type check up front so users get a clear reason before
+    // the request hits the network.
+    const MAX_BYTES = 25 * 1024 * 1024 // 25 MB
+    const VALID_EXT = /\.(pdf|txt|csv|json|docx?|xlsx?|md)$/i
     for (const file of Array.from(files)) {
+      const tooBig = file.size > MAX_BYTES
+      const badType = !VALID_EXT.test(file.name)
+      if (tooBig || badType) {
+        const reason = tooBig ? `File is ${(file.size / 1024 / 1024).toFixed(1)} MB (max 25)` : 'Unsupported file type'
+        setUploadedDocs(prev => [...prev, { name: file.name, id: '', status: 'failed', error: reason }])
+        continue
+      }
+      // Optimistic row so the user sees progress immediately.
+      setUploadedDocs(prev => [...prev, { name: file.name, id: '', status: 'uploading' }])
       try {
         const result = await api.uploadDocument(file, projectId ? { project_id: projectId } : undefined)
-        setUploadedDocs(prev => [...prev, { name: file.name, id: result.id || result.document_id || '', status: 'uploaded' }])
+        const id = result?.id || result?.document_id || ''
+        if (!id) throw new Error('Upload succeeded but server did not return a document id')
+        setUploadedDocs(prev => prev.map(d =>
+          d.name === file.name && d.status === 'uploading' ? { ...d, id, status: 'uploaded' } : d,
+        ))
         logActivity({ type: 'evidence', action: 'imported', title: `Document uploaded: ${file.name}`, project: config.disease || 'Discovery' })
       } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Upload failed (check backend)'
         console.error('Upload failed:', err)
-        setUploadedDocs(prev => [...prev, { name: file.name, id: '', status: 'failed' }])
+        setUploadedDocs(prev => prev.map(d =>
+          d.name === file.name && d.status === 'uploading' ? { ...d, status: 'failed', error: msg } : d,
+        ))
       }
     }
     setUploading(false)
@@ -656,16 +676,36 @@ export default function Agents() {
                   </button>
                   {uploadedDocs.length > 0 && (
                     <div className="mt-2 space-y-1">
-                      {uploadedDocs.map((doc, i) => (
-                        <div key={i} className="flex items-center gap-2 text-xs p-2 rounded-lg bg-[var(--glass-bg)]">
-                          <FiFile className="w-3 h-3 flex-shrink-0" style={{ color: doc.status === 'uploaded' ? 'var(--color-success)' : 'var(--color-error)' }} />
-                          <span className="flex-1 truncate">{doc.name}</span>
-                          <span className="text-xxs text-[var(--color-text-muted)]">{doc.status}</span>
-                          <button onClick={() => setUploadedDocs(prev => prev.filter((_, j) => j !== i))} className="text-[var(--color-text-muted)] hover:text-[var(--color-error)]">
-                            <FiX className="w-3 h-3" />
-                          </button>
-                        </div>
-                      ))}
+                      {uploadedDocs.map((doc, i) => {
+                        const statusColor = doc.status === 'uploaded'
+                          ? 'var(--color-success)'
+                          : doc.status === 'uploading'
+                            ? 'var(--color-text-muted)'
+                            : 'var(--color-error)'
+                        return (
+                          <div key={i} className="flex flex-col gap-1 text-xs p-2 rounded-lg bg-[var(--glass-bg)]">
+                            <div className="flex items-center gap-2">
+                              <FiFile className="w-3 h-3 flex-shrink-0" style={{ color: statusColor }} />
+                              <span className="flex-1 truncate" title={doc.name}>{doc.name}</span>
+                              <span className="text-xxs text-[var(--color-text-muted)]">
+                                {doc.status === 'uploading' ? 'uploading…' : doc.status}
+                              </span>
+                              <button
+                                onClick={() => setUploadedDocs(prev => prev.filter((_, j) => j !== i))}
+                                className="text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                                aria-label={`Remove ${doc.name}`}
+                              >
+                                <FiX className="w-3 h-3" />
+                              </button>
+                            </div>
+                            {doc.status === 'failed' && doc.error && (
+                              <div className="text-xxs pl-5" style={{ color: 'var(--color-error)' }}>
+                                {doc.error}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
                     </div>
                   )}
                 </div>
