@@ -191,6 +191,14 @@ export default function Agents() {
   const [uploading, setUploading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  // Discovery start: a user without a responsive API would otherwise
+  // see the Start button briefly glitch then do nothing. Track both
+  // the in-flight state (to show a spinner) and the surfaced error
+  // message (so a failed start gives the user something to act on,
+  // rather than a silent console.error).
+  const [starting, setStarting] = useState(false)
+  const [startError, setStartError] = useState<string | null>(null)
+
   // Split-panel layout: lets the user collapse the config rail to
   // reclaim horizontal space for the hypothesis list. Persisted so a
   // once-set preference survives a reload — nothing worse than
@@ -346,6 +354,9 @@ export default function Agents() {
   // Actions
   const startDiscovery = async () => {
     if (!config.disease.trim()) return
+    if (starting) return
+    setStarting(true)
+    setStartError(null)
     try {
       // Include uploaded documents for AI context
       const allDocs = JSON.parse(localStorage.getItem('humanovo-project-documents') || '[]')
@@ -383,6 +394,10 @@ export default function Agents() {
       setDiscoveryHistory(prev => [run, ...prev].slice(0, 50))
     } catch (err) {
       console.error('Failed to start discovery:', err)
+      const msg = err instanceof Error ? err.message : 'Unable to start discovery — check your connection and try again.'
+      setStartError(msg)
+    } finally {
+      setStarting(false)
     }
   }
 
@@ -544,8 +559,22 @@ export default function Agents() {
           {/* Controls */}
           <div className="flex items-center gap-2">
             {isIdle && (
-              <button onClick={startDiscovery} disabled={!config.disease.trim()} className="btn flex-1 text-sm border border-[var(--color-border)] disabled:opacity-30" style={{ color: 'var(--color-success)' }}>
-                <FiPlay className="w-4 h-4" /> Start
+              <button
+                onClick={startDiscovery}
+                disabled={!config.disease.trim() || starting}
+                className="btn flex-1 text-sm border border-[var(--color-border)] disabled:opacity-30"
+                style={{ color: starting ? 'var(--color-text-muted)' : 'var(--color-success)' }}
+                title={!config.disease.trim() ? 'Enter a disease or target above to enable' : undefined}
+              >
+                {starting ? (
+                  <>
+                    <FiClock className="w-4 h-4 animate-spin" /> Starting…
+                  </>
+                ) : (
+                  <>
+                    <FiPlay className="w-4 h-4" /> Start
+                  </>
+                )}
               </button>
             )}
             {isRunning && (
@@ -569,6 +598,14 @@ export default function Agents() {
               </>
             )}
           </div>
+          {startError && (
+            <div className="mt-2 px-3 py-2 rounded text-xxs flex items-start gap-2"
+                 style={{ background: 'rgba(239,68,68,0.08)', color: 'var(--color-error)', border: '1px solid rgba(239,68,68,0.25)' }}>
+              <FiAlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+              <div className="flex-1">{startError}</div>
+              <button onClick={() => setStartError(null)} className="opacity-60 hover:opacity-100"><FiX className="w-3 h-3" /></button>
+            </div>
+          )}
         </div>
 
         <div className="flex-1 overflow-y-auto">

@@ -162,6 +162,9 @@ export default function ClinicalTrials() {
                       <th className="text-left p-3 text-[var(--color-text-muted)]">Status</th><th className="text-left p-3 text-[var(--color-text-muted)]">Enrolled</th>
                     </tr></thead>
                     <tbody>
+                      {subjects.length === 0 && (
+                        <tr><td colSpan={6} className="p-8 text-center text-xs text-[var(--color-text-muted)]">No subjects enrolled yet — enrollment events will appear here as they're recorded.</td></tr>
+                      )}
                       {subjects.map(s => (
                         <tr key={s.id} className="border-b border-[var(--color-border)]/30">
                           <td className="p-3 font-mono">{s.subject_number}</td><td className="p-3">{s.age}</td><td className="p-3">{s.sex}</td>
@@ -177,6 +180,11 @@ export default function ClinicalTrials() {
 
               {viewTab === 'documents' && (
                 <div className="space-y-2">
+                  {documents.length === 0 && (
+                    <div className="glass-card p-8 text-center text-xs text-[var(--color-text-muted)]">
+                      No documents attached to this trial yet.
+                    </div>
+                  )}
                   {documents.map(d => (
                     <div key={d.id} className="glass-card p-3 flex items-center justify-between">
                       <div className="flex items-center gap-3">

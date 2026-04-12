@@ -355,6 +355,7 @@ export default function DiscoveryRunner() {
           </div>
 
           <button onClick={startDiscovery} disabled={!disease.trim()}
+            title={!disease.trim() ? 'Enter a disease or target above to enable' : undefined}
             className="w-full mt-5 px-4 py-3 rounded-lg text-sm font-medium transition-all"
             style={{
               background: disease.trim() ? '#5B8DB8' : 'var(--glass-bg)',
@@ -364,6 +365,11 @@ export default function DiscoveryRunner() {
             }}>
             Start Discovery
           </button>
+          {!disease.trim() && (
+            <p className="text-xxs text-[var(--color-text-muted)] text-center mt-2">
+              Enter a disease or molecular target above to enable discovery.
+            </p>
+          )}
         </div>
       </div>
     )
