@@ -6,35 +6,39 @@ import Dashboard from './pages/Dashboard'
 import Projects from './pages/Projects'
 import ProjectDetail from './pages/ProjectDetail'
 
+// Eagerly-loaded pages: landing surfaces users hit on cold-start. Keeping
+// them in the main bundle avoids a network round-trip on first paint.
 import Evidence from './pages/Evidence'
-import Workbench from './pages/Workbench'
-import HumanAnatomy from './pages/HumanAnatomy'
 import Settings from './pages/Settings'
 import Notebook from './pages/Notebook'
 import Search from './pages/Search'
 import Timeline from './pages/Timeline'
 import Agents from './pages/Agents'
-import LiteratureReview from './pages/LiteratureReview'
-import CitationManager from './pages/CitationManager'
-import ExperimentTracker from './pages/ExperimentTracker'
-import DataVisualization from './pages/DataVisualization'
 import DataManager from './pages/DataManager'
-import Collaboration from './pages/Collaboration'
-import ClinicalTrials from './pages/ClinicalTrials'
-import GenomicsAnalysis from './pages/GenomicsAnalysis'
-import ManuscriptManager from './pages/ManuscriptManager'
-import RegulatoryCompliance from './pages/RegulatoryCompliance'
-import ResearchImaging from './pages/ResearchImaging'
-import BiobankManager from './pages/BiobankManager'
-import ComputeLab from './pages/compute'
 
-// Project Jamison — new pages (lazy-loaded for code splitting)
+// Lazy-loaded pages: heavy (recharts, canvas, MATLAB interpreter, 3D),
+// or rarely the entry point. Split into their own chunks so we don't
+// block initial paint on code that the user may never reach.
+const Workbench = lazy(() => import('./pages/Workbench'))
+const HumanAnatomy = lazy(() => import('./pages/HumanAnatomy'))
+const LiteratureReview = lazy(() => import('./pages/LiteratureReview'))
+const CitationManager = lazy(() => import('./pages/CitationManager'))
+const ExperimentTracker = lazy(() => import('./pages/ExperimentTracker'))
+const DataVisualization = lazy(() => import('./pages/DataVisualization'))
+const Collaboration = lazy(() => import('./pages/Collaboration'))
+const ClinicalTrials = lazy(() => import('./pages/ClinicalTrials'))
+const GenomicsAnalysis = lazy(() => import('./pages/GenomicsAnalysis'))
+const ManuscriptManager = lazy(() => import('./pages/ManuscriptManager'))
+const RegulatoryCompliance = lazy(() => import('./pages/RegulatoryCompliance'))
+const ResearchImaging = lazy(() => import('./pages/ResearchImaging'))
+const BiobankManager = lazy(() => import('./pages/BiobankManager'))
+const ComputeLab = lazy(() => import('./pages/compute'))
+
+// Project Jamison — integrated project workspace routes.
 const ProjectWorkspace = lazy(() => import('./pages/ProjectWorkspace'))
 const DiscoveryRunner = lazy(() => import('./pages/DiscoveryRunner'))
 const HypothesisReview = lazy(() => import('./pages/HypothesisReview'))
 const ProjectKnowledgeGraph = lazy(() => import('./pages/ProjectKnowledgeGraph'))
-// Pipeline Intelligence removed per user request
-// const PipelineIntelligence = lazy(() => import('./pages/PipelineIntelligence'))
 const PgvectorManager = lazy(() => import('./pages/PgvectorManager'))
 
 // Error boundary to prevent blank pages on runtime errors
@@ -107,31 +111,31 @@ function App() {
         <Route path="projects/:projectId/hypotheses/:hypothesisId" element={<LazyPageWrapper><HypothesisReview /></LazyPageWrapper>} />
         <Route path="projects/:projectId/graph" element={<LazyPageWrapper><ProjectKnowledgeGraph /></LazyPageWrapper>} />
         <Route path="evidence" element={<PageWrapper><Evidence /></PageWrapper>} />
-        <Route path="compute-lab" element={<PageWrapper><ComputeLab /></PageWrapper>} />
+        <Route path="compute-lab" element={<LazyPageWrapper><ComputeLab /></LazyPageWrapper>} />
         {/* Legacy redirects → unified Compute Lab */}
         <Route path="simulations" element={<Navigate to="/compute-lab" replace />} />
         <Route path="statistical-analysis" element={<Navigate to="/compute-lab" replace />} />
         <Route path="numeric-compute" element={<Navigate to="/compute-lab" replace />} />
         <Route path="matlab-compute" element={<Navigate to="/compute-lab" replace />} />
-        <Route path="workbench" element={<PageWrapper><Workbench /></PageWrapper>} />
-        <Route path="anatomy" element={<PageWrapper><HumanAnatomy /></PageWrapper>} />
+        <Route path="workbench" element={<LazyPageWrapper><Workbench /></LazyPageWrapper>} />
+        <Route path="anatomy" element={<LazyPageWrapper><HumanAnatomy /></LazyPageWrapper>} />
         <Route path="notebook" element={<PageWrapper><Notebook /></PageWrapper>} />
         <Route path="agents" element={<PageWrapper><Agents /></PageWrapper>} />
         <Route path="timeline" element={<PageWrapper><Timeline /></PageWrapper>} />
         <Route path="search" element={<PageWrapper><Search /></PageWrapper>} />
         <Route path="settings" element={<PageWrapper><Settings /></PageWrapper>} />
-        <Route path="literature-review" element={<PageWrapper><LiteratureReview /></PageWrapper>} />
-        <Route path="citation-manager" element={<PageWrapper><CitationManager /></PageWrapper>} />
-        <Route path="experiment-tracker" element={<PageWrapper><ExperimentTracker /></PageWrapper>} />
-        <Route path="data-visualization" element={<PageWrapper><DataVisualization /></PageWrapper>} />
+        <Route path="literature-review" element={<LazyPageWrapper><LiteratureReview /></LazyPageWrapper>} />
+        <Route path="citation-manager" element={<LazyPageWrapper><CitationManager /></LazyPageWrapper>} />
+        <Route path="experiment-tracker" element={<LazyPageWrapper><ExperimentTracker /></LazyPageWrapper>} />
+        <Route path="data-visualization" element={<LazyPageWrapper><DataVisualization /></LazyPageWrapper>} />
         <Route path="data-manager" element={<PageWrapper><DataManager /></PageWrapper>} />
-        <Route path="collaboration" element={<PageWrapper><Collaboration /></PageWrapper>} />
-        <Route path="clinical-trials" element={<PageWrapper><ClinicalTrials /></PageWrapper>} />
-        <Route path="genomics" element={<PageWrapper><GenomicsAnalysis /></PageWrapper>} />
-        <Route path="manuscripts" element={<PageWrapper><ManuscriptManager /></PageWrapper>} />
-        <Route path="regulatory" element={<PageWrapper><RegulatoryCompliance /></PageWrapper>} />
-        <Route path="imaging" element={<PageWrapper><ResearchImaging /></PageWrapper>} />
-        <Route path="biobank" element={<PageWrapper><BiobankManager /></PageWrapper>} />
+        <Route path="collaboration" element={<LazyPageWrapper><Collaboration /></LazyPageWrapper>} />
+        <Route path="clinical-trials" element={<LazyPageWrapper><ClinicalTrials /></LazyPageWrapper>} />
+        <Route path="genomics" element={<LazyPageWrapper><GenomicsAnalysis /></LazyPageWrapper>} />
+        <Route path="manuscripts" element={<LazyPageWrapper><ManuscriptManager /></LazyPageWrapper>} />
+        <Route path="regulatory" element={<LazyPageWrapper><RegulatoryCompliance /></LazyPageWrapper>} />
+        <Route path="imaging" element={<LazyPageWrapper><ResearchImaging /></LazyPageWrapper>} />
+        <Route path="biobank" element={<LazyPageWrapper><BiobankManager /></LazyPageWrapper>} />
         {/* Project Jamison — platform-level pages */}
         {/* Pipeline Intelligence and Billing removed */}
         <Route path="dev/pgvector" element={<LazyPageWrapper><PgvectorManager /></LazyPageWrapper>} />

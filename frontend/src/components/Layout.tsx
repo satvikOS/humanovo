@@ -1025,6 +1025,7 @@ function ConstantChat() {
 export default function Layout() {
   const { theme, toggleTheme } = useTheme()
   const [isCommandOpen, setIsCommandOpen] = useState(false)
+  const [isShortcutsOpen, setIsShortcutsOpen] = useState(false)
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false)
   const [notifications, setNotifications] = useState<Array<{ id: string; title: string; description: string; time: string; timestamp: string }>>([])
@@ -1069,12 +1070,21 @@ export default function Layout() {
     }
     if (e.key === 'Escape') {
       setIsCommandOpen(false)
+      setIsShortcutsOpen(false)
       setIsUserMenuOpen(false)
       setIsNotificationsOpen(false)
     }
-    // Number shortcuts 1-6 for main nav (only when no input focused)
+    // "?" (Shift+/) opens the keyboard-shortcuts cheatsheet, but only
+    // when the user isn't typing into a field.
     const tag = (e.target as HTMLElement)?.tagName
-    if (!e.metaKey && !e.ctrlKey && !e.altKey && tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') {
+    const typingIn = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' ||
+      (e.target as HTMLElement)?.isContentEditable
+    if (e.key === '?' && !typingIn && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      e.preventDefault()
+      setIsShortcutsOpen(prev => !prev)
+    }
+    // Number shortcuts 1-6 for main nav (only when no input focused)
+    if (!e.metaKey && !e.ctrlKey && !e.altKey && !typingIn) {
       const idx = parseInt(e.key) - 1
       if (idx >= 0 && idx < mainNavItems.length) {
         navigate(mainNavItems[idx].to)
@@ -1419,6 +1429,112 @@ if (path === '/clinical-trials') return 'Clinical Trials'
 
       {/* Command palette */}
       <CommandPalette isOpen={isCommandOpen} onClose={() => setIsCommandOpen(false)} />
+
+      {/* Keyboard shortcuts cheatsheet */}
+      <KeyboardShortcutsHelp isOpen={isShortcutsOpen} onClose={() => setIsShortcutsOpen(false)} />
+    </div>
+  )
+}
+
+function KeyboardShortcutsHelp({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+  if (!isOpen) return null
+  const groups: { title: string; rows: { keys: string[]; label: string }[] }[] = [
+    {
+      title: 'Global',
+      rows: [
+        { keys: ['⌘', 'K'], label: 'Open command palette / global search' },
+        { keys: ['?'], label: 'Show this keyboard cheatsheet' },
+        { keys: ['Esc'], label: 'Close dialogs & menus' },
+      ],
+    },
+    {
+      title: 'Navigation',
+      rows: [
+        { keys: ['1'], label: 'Go to Dashboard' },
+        { keys: ['2'], label: 'Go to Projects' },
+        { keys: ['3'], label: 'Go to Evidence' },
+        { keys: ['4'], label: 'Go to Compute Lab' },
+        { keys: ['5'], label: 'Go to Notebook' },
+        { keys: ['6'], label: 'Go to Agents' },
+      ],
+    },
+    {
+      title: 'Compute Lab',
+      rows: [
+        { keys: ['⌘', 'Enter'], label: 'Run current expression / script' },
+        { keys: ['⌘', 'S'], label: 'Save to history' },
+        { keys: ['↑', '↓'], label: 'Navigate history in the REPL' },
+      ],
+    },
+  ]
+  return (
+    <div
+      className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="glass-card max-w-xl w-full mx-4 p-6"
+        onClick={e => e.stopPropagation()}
+        style={{ background: 'var(--color-surface-solid)', border: '1px solid var(--glass-border)' }}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
+            Keyboard shortcuts
+          </h2>
+          <button
+            onClick={onClose}
+            className="p-1 rounded hover:bg-[var(--glass-bg-hover)]"
+            style={{ color: 'var(--color-text-muted)' }}
+            aria-label="Close"
+          >
+            <FiX className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="space-y-5">
+          {groups.map(g => (
+            <div key={g.title}>
+              <div
+                className="text-xxs uppercase tracking-wider mb-2"
+                style={{ color: 'var(--color-text-muted)' }}
+              >
+                {g.title}
+              </div>
+              <div className="space-y-1.5">
+                {g.rows.map(r => (
+                  <div key={r.label} className="flex items-center justify-between text-xs">
+                    <span style={{ color: 'var(--color-text-secondary)' }}>{r.label}</span>
+                    <span className="flex items-center gap-1">
+                      {r.keys.map((k, i) => (
+                        <kbd
+                          key={i}
+                          className="px-1.5 py-0.5 rounded text-xxs font-mono"
+                          style={{
+                            background: 'rgba(255,255,255,0.08)',
+                            border: '1px solid var(--glass-border)',
+                            color: 'var(--color-text)',
+                            minWidth: '1.5rem',
+                            textAlign: 'center',
+                          }}
+                        >
+                          {k}
+                        </kbd>
+                      ))}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div
+          className="mt-5 pt-4 text-xxs"
+          style={{ color: 'var(--color-text-muted)', borderTop: '1px solid var(--glass-border)' }}
+        >
+          Shortcuts are disabled while typing in inputs or the editor.
+        </div>
+      </div>
     </div>
   )
 }
