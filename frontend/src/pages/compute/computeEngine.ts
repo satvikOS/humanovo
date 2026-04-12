@@ -2148,18 +2148,6 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
     fireImg(list[i].id)
     return mstr(list[i].id)
   })
-  def('imaging_window', 2, args => {
-    need(args, 2, 'imaging_window')
-    const list = loadImgStudies()
-    if (list.length === 0) throw new RuntimeError('imaging_window: no studies available')
-    const wc = toNumber(args[0])
-    const ww = toNumber(args[1])
-    const idx = list.length - 1
-    const next = list.map((s, i) => i === idx ? { ...s, windowCenter: wc, windowWidth: Math.max(1, ww) } : s)
-    saveImgStudies(next)
-    fireImg(next[idx].id)
-    return MVOID
-  })
   // imaging_annotate(type, x, y, [w, h, [label]]) — add an annotation to the
   // most-recent study. `type` ∈ { "rect", "circle", "point", "line",
   // "measure", "ruler" }. For "line"/"measure"/"ruler" w/h are dx/dy.
@@ -2833,6 +2821,75 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
     const d = new Float64Array(rr * cc)
     for (let i = 0; i < d.length; i++) d[i] = Math.floor(Math.random() * imax) + 1
     return mmat(rr, cc, d)
+  })
+  // randsample(v, k, [replace]) — Fisher-Yates sample `k` elements from vector
+  // `v`. Defaults to without-replacement; pass `true` for with-replacement.
+  def('randsample', -1, args => {
+    if (args.length < 2) throw new RuntimeError('randsample: expected (v, k, [replace])')
+    const src = toArray(args[0])
+    const k = Math.round(toNumber(args[1]))
+    const replace = args[2] ? !!(args[2].kind === 'bool' ? (args[2] as MBool).v : toNumber(args[2])) : false
+    if (k < 0) throw new RuntimeError('randsample: k must be non-negative')
+    if (!replace && k > src.length) throw new RuntimeError('randsample: k exceeds population size')
+    const out = new Float64Array(k)
+    if (replace) {
+      for (let i = 0; i < k; i++) out[i] = src[Math.floor(Math.random() * src.length)]
+    } else {
+      const pool = src.slice()
+      for (let i = 0; i < k; i++) {
+        const j = i + Math.floor(Math.random() * (pool.length - i))
+        ;[pool[i], pool[j]] = [pool[j], pool[i]]
+        out[i] = pool[i]
+      }
+    }
+    return mmat(1, k, out)
+  })
+  // shuffle(v) — return a random permutation of the input vector.
+  def('shuffle', 1, args => {
+    const src = toArray(args[0]).slice()
+    for (let i = src.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      ;[src[i], src[j]] = [src[j], src[i]]
+    }
+    return mmat(1, src.length, Float64Array.from(src))
+  })
+
+  // ---- Argmin / argmax / clip -----------------------------------------
+  // 1-indexed (MATLAB convention) for consistency with other ops in this
+  // engine. Ties break to the lowest index.
+  def('argmin', 1, args => {
+    const a = toArray(args[0])
+    if (a.length === 0) throw new RuntimeError('argmin: empty input')
+    let best = 0
+    for (let i = 1; i < a.length; i++) if (a[i] < a[best]) best = i
+    return mnum(best + 1)
+  })
+  def('argmax', 1, args => {
+    const a = toArray(args[0])
+    if (a.length === 0) throw new RuntimeError('argmax: empty input')
+    let best = 0
+    for (let i = 1; i < a.length; i++) if (a[i] > a[best]) best = i
+    return mnum(best + 1)
+  })
+  // clip(x, lo, hi) — element-wise clamp onto [lo, hi]. Accepts scalars or
+  // matrices for x; lo/hi must be scalar.
+  def('clip', 3, args => {
+    const lo = toNumber(args[1])
+    const hi = toNumber(args[2])
+    if (lo > hi) throw new RuntimeError('clip: lo must be ≤ hi')
+    return elemMap(args[0], x => Math.min(hi, Math.max(lo, x)))
+  })
+  // sigmoid(x) — logistic function, element-wise.
+  def('sigmoid', 1, args => elemMap(args[0], x => 1 / (1 + Math.exp(-x))))
+  // softmax(v) — numerically-stable softmax over the flattened vector; returns
+  // probabilities that sum to 1.
+  def('softmax', 1, args => {
+    const a = toArray(args[0])
+    if (a.length === 0) throw new RuntimeError('softmax: empty input')
+    const mx = Math.max(...a)
+    const exps = a.map(x => Math.exp(x - mx))
+    const s = exps.reduce((p, v) => p + v, 0) || 1
+    return mmat(1, a.length, Float64Array.from(exps.map(v => v / s)))
   })
 
   // ---- Linear algebra --------------------------------------------------
