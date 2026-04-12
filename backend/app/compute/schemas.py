@@ -590,7 +590,7 @@ OPERATION_SCHEMAS["clinical/clinical_scales"] = {
         P("motor", "GCS Motor Response (1-6)", "integer", min=1, max=6, description="GCS only", group="GCS"),
         P("education_years", "Years of Education", "integer", default=13, min=0, max=30,
           description="MoCA +1 bonus if ≤12 years", group="MoCA"),
-        P("baseline_nihss", "Baseline NIHSS", "number", description="Used to flag ≥4-point improvement", group="NIHSS"),
+        P("baseline_total", "Baseline Total (NIHSS)", "number", description="Prior total to flag ≥4/≥8-point improvement", group="NIHSS"),
     ],
 }
 
