@@ -5,8 +5,9 @@ import {
 } from 'recharts'
 import {
   FiPlay, FiPlus, FiDownload, FiCopy, FiLayers,
-  FiTrash2, FiRefreshCw,
+  FiTrash2, FiRefreshCw, FiImage, FiCheck,
 } from 'react-icons/fi'
+import { copyPlotToClipboard as copyPlotBlob, downloadPlotPng } from '../../utils/plotExport'
 
 // ═══════════════════════════════════════════════════════════════════
 //  Expression Evaluator — self-contained, no external math library
@@ -366,7 +367,7 @@ const ODE_CATEGORIES = [
   { name: 'Neuroscience', ids: ['hodgkin-huxley-simple'] },
 ]
 
-const ODE_COLORS = ['#8b8b8b', '#b0b0b0', '#666666', '#d4d4d4']
+const ODE_COLORS = ['#5B8DB8', '#8B7EAF', '#6BA594', '#C4956A']
 
 // ═══════════════════════════════════════════════════════════════════
 //  Predefined Scientific Equations
@@ -434,7 +435,7 @@ const PRESET_CATEGORIES = [
 ]
 
 // Monochrome overlay palette — distinguishable shades without category color.
-const OVERLAY_COLORS = ['#a1a1a1', '#d4d4d4', '#737373']
+const OVERLAY_COLORS = ['#7BA7B8', '#A89B6E', '#8598AD']
 
 interface SavedOverlay {
   expr: string
@@ -467,6 +468,9 @@ export default function EquationPlotter() {
   const [error, setError] = useState<string | null>(null)
   const [showLibrary, setShowLibrary] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [chartCopied, setChartCopied] = useState(false)
+  // Chart host ref — passed to plotExport for clipboard-as-image + PNG export.
+  const chartHostRef = useRef<HTMLDivElement | null>(null)
 
   // ODE mode
   const [mode, setMode] = useState<'equation' | 'ode'>('equation')
@@ -531,10 +535,18 @@ export default function EquationPlotter() {
   const stats = useMemo(() => {
     const ys = mainData.map(p => p.y).filter(v => isFinite(v))
     if (ys.length === 0) return null
-    const s = ys.reduce((a, b) => a + b, 0)
+    // Single-pass min/max/sum — spreading ys into Math.min/max could overflow
+    // the argument-list stack when high-resolution plots exceed ~10k samples.
+    let mn = Infinity, mx = -Infinity, s = 0
+    for (let i = 0; i < ys.length; i++) {
+      const v = ys[i]
+      if (v < mn) mn = v
+      if (v > mx) mx = v
+      s += v
+    }
     return {
-      min: Math.min(...ys),
-      max: Math.max(...ys),
+      min: mn,
+      max: mx,
       mean: s / ys.length,
       points: ys.length,
     }
@@ -619,6 +631,19 @@ export default function EquationPlotter() {
     if (timerRef.current) clearTimeout(timerRef.current)
     timerRef.current = setTimeout(() => setCopied(false), 2000)
   }, [stats, expr, xMin, xMax])
+
+  const copyChartImage = useCallback(async () => {
+    const ok = await copyPlotBlob(chartHostRef.current)
+    if (ok) {
+      setChartCopied(true)
+      setTimeout(() => setChartCopied(false), 2000)
+    }
+  }, [])
+
+  const downloadChartImage = useCallback(async () => {
+    const label = expr.replace(/[^\w.-]+/g, '_').slice(0, 40) || 'equation_plot'
+    await downloadPlotPng(chartHostRef.current, label)
+  }, [expr])
 
   // ── Render helpers ─────────────────────────────────────────────
   const fmt = (n: number) => {
@@ -707,9 +732,9 @@ export default function EquationPlotter() {
   }, [odeResult, activeODE, odeTemplate])
 
   // ── Inline styles (MC-matching) ─────────────────────────────
-  const chip: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 10px', borderRadius: 5, fontSize: 11, fontWeight: 600, background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', color: 'var(--color-text)', cursor: 'pointer', whiteSpace: 'nowrap' }
-  const inp: React.CSSProperties = { width: 64, padding: '3px 6px', borderRadius: 4, fontSize: 11, fontFamily: 'monospace', background: 'transparent', border: '1px solid var(--glass-border)', color: 'var(--color-text)', outline: 'none' }
-  const card: React.CSSProperties = { padding: '8px 10px', borderRadius: 6, cursor: 'pointer', border: '1px solid var(--glass-border)', background: 'var(--glass-bg)', transition: 'border-color 0.15s' }
+  const chip: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 600, background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', color: 'var(--color-text)', cursor: 'pointer', whiteSpace: 'nowrap', transition: 'border-color 0.15s, background 0.15s' }
+  const inp: React.CSSProperties = { width: 64, padding: '3px 6px', borderRadius: 6, fontSize: 11, fontFamily: 'monospace', background: 'transparent', border: '1px solid var(--glass-border)', color: 'var(--color-text)', outline: 'none', transition: 'border-color 0.15s' }
+  const card: React.CSSProperties = { padding: '8px 10px', borderRadius: 8, cursor: 'pointer', border: '1px solid var(--glass-border)', background: 'var(--glass-bg)', transition: 'border-color 0.15s, background 0.15s' }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10, height: '100%', minHeight: 0 }}>
@@ -778,7 +803,7 @@ export default function EquationPlotter() {
       )}
 
       {/* ── Chart ────────────────────────────────────────────────── */}
-      <div style={{ flex: 1, minHeight: 0, border: '1px solid var(--glass-border)', borderRadius: 8, padding: 10, background: 'var(--glass-bg)' }}>
+      <div ref={chartHostRef} style={{ flex: 1, minHeight: 0, border: '1px solid var(--glass-border)', borderRadius: 8, padding: 10, background: 'var(--glass-bg)' }}>
         {chartData.length > 0 ? (
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={chartDataWithDerivative} margin={{ top: 8, right: 16, bottom: 24, left: 8 }}>
@@ -790,7 +815,7 @@ export default function EquationPlotter() {
               {quadrantInfo.showXRef && <ReferenceLine y={0} stroke="var(--color-text-muted)" strokeDasharray="4 4" strokeOpacity={0.4} />}
               {quadrantInfo.showYRef && <ReferenceLine x={0} stroke="var(--color-text-muted)" strokeDasharray="4 4" strokeOpacity={0.4} />}
               <Line type="monotone" dataKey="y" stroke="var(--color-text)" strokeWidth={1.8} strokeOpacity={0.7} dot={false} name={expr} isAnimationActive={false} />
-              {showDerivative && <Line type="monotone" dataKey="dy" stroke="#f59e0b" strokeWidth={1.2} strokeDasharray="4 2" strokeOpacity={0.6} dot={false} name="f'(x)" isAnimationActive={false} connectNulls={false} />}
+              {showDerivative && <Line type="monotone" dataKey="dy" stroke="#C4956A" strokeWidth={1.2} strokeDasharray="4 2" strokeOpacity={0.6} dot={false} name="f'(x)" isAnimationActive={false} connectNulls={false} />}
               {overlays.map((o, idx) => o.enabled ? (
                 <Line key={idx} type="monotone" dataKey={`o${idx}`} stroke={OVERLAY_COLORS[idx]} strokeWidth={1.5} strokeDasharray="6 3" strokeOpacity={0.6} dot={false} name={o.expr} isAnimationActive={false} connectNulls={false} />
               ) : null)}
@@ -822,6 +847,12 @@ export default function EquationPlotter() {
         <button onClick={copyChartData} disabled={mainData.length === 0} style={{ ...chip, fontWeight: 400, opacity: mainData.length > 0 ? 1 : 0.3 }}>
           <FiCopy size={11} /> Copy Data
         </button>
+        <button onClick={copyChartImage} disabled={mainData.length === 0} style={{ ...chip, fontWeight: 400, opacity: mainData.length > 0 ? 1 : 0.3 }} title="Copy chart as image to clipboard">
+          {chartCopied ? <><FiCheck size={11} /> Copied</> : <><FiImage size={11} /> Copy Plot</>}
+        </button>
+        <button onClick={downloadChartImage} disabled={mainData.length === 0} style={{ ...chip, fontWeight: 400, opacity: mainData.length > 0 ? 1 : 0.3 }} title="Download chart as PNG">
+          <FiImage size={11} /> PNG
+        </button>
         <button onClick={exportCSV} disabled={mainData.length === 0} style={{ ...chip, fontWeight: 400, opacity: mainData.length > 0 ? 1 : 0.3 }}>
           <FiDownload size={11} /> CSV
         </button>
@@ -829,7 +860,7 @@ export default function EquationPlotter() {
 
       {/* ── Library overlay ──────────────────────────────────────── */}
       {showLibrary && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={e => { if (e.target === e.currentTarget) setShowLibrary(false) }}>
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={e => { if (e.target === e.currentTarget) setShowLibrary(false) }}>
           <div style={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 10, width: 620, maxWidth: '90vw', maxHeight: '80vh', overflow: 'auto', padding: '20px 24px', boxShadow: '0 8px 32px rgba(0,0,0,0.2)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: 'var(--color-text)' }}>Equation Library</h2>
@@ -918,7 +949,7 @@ export default function EquationPlotter() {
       </div>
 
       {/* ODE Chart */}
-      <div style={{ flex: 1, minHeight: 0, border: '1px solid var(--glass-border)', borderRadius: 8, padding: 10, background: 'var(--glass-bg)' }}>
+      <div ref={chartHostRef} style={{ flex: 1, minHeight: 0, border: '1px solid var(--glass-border)', borderRadius: 8, padding: 10, background: 'var(--glass-bg)' }}>
         {odeChartData.length > 0 ? (
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={odeChartData} margin={{ top: 8, right: 16, bottom: 24, left: 8 }}>
@@ -947,8 +978,14 @@ export default function EquationPlotter() {
             <span style={{ color: 'var(--color-text-muted)' }}>Steps: <strong style={{ color: 'var(--color-text)' }}>{odeResult.t.length}</strong></span>
             <span style={{ color: 'var(--color-text-muted)' }}>dt: <strong style={{ color: 'var(--color-text)' }}>{((activeODE.tSpan[1] - activeODE.tSpan[0]) / 500).toFixed(4)}</strong></span>
             {activeODE.vars.map((v, j) => {
-              const vals = odeResult.y.map(row => row[j])
-              const mx = Math.max(...vals)
+              // Single-pass max (ODE results can hit 10k+ steps — spreading
+              // would overflow the argument-list call stack).
+              let mx = -Infinity
+              for (let k = 0; k < odeResult.y.length; k++) {
+                const rv = odeResult.y[k][j]
+                if (rv > mx) mx = rv
+              }
+              if (!Number.isFinite(mx)) mx = 0
               return <span key={v} style={{ color: 'var(--color-text-muted)' }}>{v} max: <strong style={{ color: 'var(--color-text)' }}>{mx.toFixed(1)}</strong></span>
             })}
           </div>
@@ -961,7 +998,7 @@ export default function EquationPlotter() {
 
       {/* ODE Library overlay */}
       {showOdeLibrary && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={e => { if (e.target === e.currentTarget) setShowOdeLibrary(false) }}>
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={e => { if (e.target === e.currentTarget) setShowOdeLibrary(false) }}>
           <div style={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 10, width: 520, maxWidth: '90vw', maxHeight: '80vh', overflow: 'auto', padding: '20px 24px', boxShadow: '0 8px 32px rgba(0,0,0,0.2)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: 'var(--color-text)' }}>ODE Systems Library</h2>

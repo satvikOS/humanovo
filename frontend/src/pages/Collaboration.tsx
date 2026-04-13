@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   FiUsers, FiMessageSquare, FiShare2, FiBell, FiShield,
   FiSend, FiCheckCircle,
@@ -15,8 +16,30 @@ interface AuditEntry { id: string; action: string; entity_type: string; user_nam
 
 const API = '/api/v1/collaboration'
 
+// Enum-guard so `?tab=bogus` quietly falls back to "team" instead of
+// pushing invalid state into the TabId-typed selector.
+const VALID_COLLAB_TABS = new Set<TabId>(['team', 'comments', 'shares', 'notifications', 'audit'])
+
 export default function Collaboration() {
-  const [tab, setTab] = useState<TabId>('team')
+  // Deep-link `?tab=<team|comments|shares|notifications|audit>` so the
+  // dashboard / in-app notifications can jump straight to the
+  // relevant tab. The param is consumed on mount so the URL stays
+  // canonical for sharing.
+  const [searchParams] = useSearchParams()
+  const [tab, setTab] = useState<TabId>(() => {
+    const qt = (searchParams.get('tab') || '') as TabId
+    return VALID_COLLAB_TABS.has(qt) ? qt : 'team'
+  })
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search)
+    if (sp.has('tab')) {
+      sp.delete('tab')
+      const qs = sp.toString()
+      const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash
+      window.history.replaceState(window.history.state, '', newUrl)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [team, setTeam] = useState<TeamMember[]>([])
   const [comments, setComments] = useState<Comment[]>([])
   const [shares, setShares] = useState<Share[]>([])
@@ -95,6 +118,12 @@ export default function Collaboration() {
           {/* Team */}
           {tab === 'team' && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {team.length === 0 && (
+                <div className="col-span-full glass-card p-8 text-center">
+                  <p className="text-sm font-medium mb-1">No teammates yet</p>
+                  <p className="text-xxs text-[var(--color-text-muted)]">Invite collaborators from project settings — they'll appear here with their role and share controls.</p>
+                </div>
+              )}
               {team.map(m => (
                 <div key={m.id} className="glass-card p-4 flex items-center gap-4">
                   <div className="w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-medium" style={{ background: m.avatar_color }}>
@@ -175,7 +204,7 @@ export default function Collaboration() {
               {notifications.length === 0 ? (
                 <p className="text-xs text-[var(--color-text-muted)] text-center py-8">No notifications</p>
               ) : notifications.map(n => (
-                <div key={n.id} className={`glass-card p-3 ${!n.read ? 'border-l-2 border-l-[var(--color-accent-blue)]' : ''}`}>
+                <div key={n.id} className={`glass-card p-3 ${!n.read ? 'border-l-2 border-l-[var(--color-text)]' : ''}`}>
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-medium">{n.title}</span>
                     <span className="text-xxs text-[var(--color-text-muted)]">{formatDateTime(n.created_at)}</span>

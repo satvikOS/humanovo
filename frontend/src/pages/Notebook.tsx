@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   FiPlus, FiTrash2, FiSave, FiSearch,
   FiFileText, FiX, FiGrid, FiList, FiPrinter,
@@ -24,6 +25,7 @@ import Color from '@tiptap/extension-color'
 import { TextStyle } from '@tiptap/extension-text-style'
 import HorizontalRule from '@tiptap/extension-horizontal-rule'
 import { logActivity } from '../utils/persistence'
+import { useAlertDialog } from '../components/AlertDialog'
 import api from '../services/api'
 
 // ═══════════════════════════════════════════════════════════════
@@ -381,7 +383,7 @@ const TEMPLATES: PageTemplate[] = [
 // TipTap Toolbar
 // ═══════════════════════════════════════════════════════════════
 
-function EditorToolbar({ editor }: { editor: Editor | null }) {
+function EditorToolbar({ editor, onInsertLink }: { editor: Editor | null; onInsertLink: () => void }) {
   if (!editor) return null
 
   const btn = (active: boolean, onClick: () => void, label: string, title: string) => (
@@ -435,10 +437,7 @@ function EditorToolbar({ editor }: { editor: Editor | null }) {
       {btn(false, () => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(), '⊞ Table', 'Insert Table')}
       {btn(false, () => editor.chain().focus().setHorizontalRule().run(), '— HR', 'Horizontal Rule')}
       {btn(false, addImage, '🖼 Image', 'Insert Image')}
-      {btn(false, () => {
-        const url = prompt('Enter URL:')
-        if (url) editor.chain().focus().setLink({ href: url }).run()
-      }, '🔗 Link', 'Insert Link')}
+      {btn(false, onInsertLink, '🔗 Link', 'Insert Link')}
       {sep}
       {btn(editor.isActive({ textAlign: 'left' }), () => editor.chain().focus().setTextAlign('left').run(), '⫷', 'Align Left')}
       {btn(editor.isActive({ textAlign: 'center' }), () => editor.chain().focus().setTextAlign('center').run(), '⫿', 'Align Center')}
@@ -538,6 +537,15 @@ function exportMarkdown(title: string, html: string) {
 export default function Notebook() {
   // initError state removed — graceful fallback to empty state on API failure
 
+  const { showPrompt, AlertDialog } = useAlertDialog()
+
+  // Deep-link support: `?id=…` pre-selects a specific notebook page
+  // so Dashboard → Recent Notebooks and external links can jump straight
+  // to a page. We consume the query once on mount after pages load, then
+  // clean it off the URL.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const deepLinkId = searchParams.get('id')
+
   // Page index (metadata only — content loaded on demand from API)
   const [pageIndex, setPageIndex] = useState<PageMeta[]>([])
   const [activePageId, setActivePageId] = useState<string | null>(null)
@@ -560,8 +568,11 @@ export default function Notebook() {
         }))
         if (pages.length > 0) {
           setPageIndex(pages)
-          setActivePageId(pages[0].id)
-          // Pre-cache content of first page
+          // Honour `?id=` if the requested page exists; otherwise fall
+          // back to the most-recent (first) page.
+          const requested = deepLinkId && pages.find(p => p.id === deepLinkId) ? deepLinkId : pages[0].id
+          setActivePageId(requested)
+          // Pre-cache content of the first page from the list response.
           if (res.items[0]?.content) {
             pageContentCache.current[pages[0].id] = res.items[0].content
           }
@@ -571,8 +582,16 @@ export default function Notebook() {
         // Graceful fallback: start with empty local state instead of blocking
         setPageIndex([])
       }
+      // Clean the deep-link off the URL so a soft reload doesn't
+      // re-anchor the selection to a stale target.
+      if (deepLinkId) {
+        const next = new URLSearchParams(searchParams)
+        next.delete('id')
+        setSearchParams(next, { replace: true })
+      }
     }
     loadPages()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const [searchQuery, setSearchQuery] = useState('')
@@ -888,6 +907,7 @@ export default function Notebook() {
   // ─── Render ──────────────────────────────────────────────
   return (
     <>
+      <AlertDialog />
       <div className="flex w-full" style={{ height: 'calc(100vh - 3.5rem)' }}>
 
           {/* ── Sidebar ── */}
@@ -922,12 +942,12 @@ export default function Notebook() {
                 />
                 <button
                   onClick={() => setShowFilters(v => !v)}
-                  className={clsx('absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded transition-colors', showFilters || activeFilterCount > 0 ? 'text-[var(--color-accent-blue)]' : 'text-[var(--color-text-muted)] hover:text-white')}
+                  className={clsx('absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded transition-colors', showFilters || activeFilterCount > 0 ? 'text-[var(--color-text)]' : 'text-[var(--color-text-muted)] hover:text-white')}
                   title="Filters"
                 >
                   <FiFilter className="w-3 h-3" />
                   {activeFilterCount > 0 && (
-                    <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-[var(--color-accent-blue)] text-white text-[8px] flex items-center justify-center font-bold">{activeFilterCount}</span>
+                    <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-white/20 text-white text-[8px] flex items-center justify-center font-bold">{activeFilterCount}</span>
                   )}
                 </button>
               </div>
@@ -970,7 +990,7 @@ export default function Notebook() {
                   </div>
                   {/* Clear filters */}
                   {activeFilterCount > 0 && (
-                    <button onClick={() => { setFilterCategory('all'); setFilterImportance('all') }} className="text-xxs text-[var(--color-accent-blue)] hover:underline">
+                    <button onClick={() => { setFilterCategory('all'); setFilterImportance('all') }} className="text-xxs text-[var(--color-text-muted)] hover:underline hover:text-[var(--color-text)]">
                       Clear filters
                     </button>
                   )}
@@ -1110,7 +1130,10 @@ export default function Notebook() {
               </div>
 
               {/* TipTap formatting toolbar */}
-              <EditorToolbar editor={editor} />
+              <EditorToolbar editor={editor} onInsertLink={async () => {
+                const url = await showPrompt('Enter URL:', 'Insert Link')
+                if (url && editor) editor.chain().focus().setLink({ href: url }).run()
+              }} />
 
               {/* Editor area */}
               <div className="flex-1 overflow-y-auto notebook-editor-area">

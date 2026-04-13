@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   FiDatabase,
   FiSearch,
@@ -32,19 +33,20 @@ import type { Evidence as EvidenceType, Hypothesis, Entity } from '../services/a
 import { logActivity, persistGet, persistSet } from '../utils/persistence'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 
+// Monochrome: source type is indicated by the label text itself; no colored badges.
 const sourceTypeColors: Record<string, string> = {
-  pubmed: 'var(--color-accent-blue)',
-  clinical_trial: 'var(--color-accent-green)',
-  preprint: 'var(--color-accent-purple)',
-  omics: 'var(--color-accent-orange)',
-  drug_database: 'var(--color-accent-cyan)',
-  pathway_database: 'var(--color-accent-pink)',
+  pubmed: 'var(--color-text)',
+  clinical_trial: 'var(--color-text)',
+  preprint: 'var(--color-text-secondary)',
+  omics: 'var(--color-text-secondary)',
+  drug_database: 'var(--color-text-secondary)',
+  pathway_database: 'var(--color-text-secondary)',
   web_search: 'var(--color-text-muted)',
-  user_upload: 'var(--color-text-secondary)',
-  patent: 'var(--color-accent-yellow)',
-  paper: 'var(--color-accent-blue)',
-  trial: 'var(--color-accent-green)',
-  dataset: 'var(--color-accent-orange)',
+  user_upload: 'var(--color-text-muted)',
+  patent: 'var(--color-text-secondary)',
+  paper: 'var(--color-text)',
+  trial: 'var(--color-text)',
+  dataset: 'var(--color-text-secondary)',
 }
 
 const statusConfig: Record<string, { icon: typeof FiCheckCircle; color: string; label: string }> = {
@@ -70,7 +72,7 @@ function KnowledgeBaseStatus({ stats }: { stats: { total_entities: number; total
     <div className="mx-6 mt-4 glass-card p-4">
       <button onClick={() => setExpanded(!expanded)} className="flex items-center justify-between w-full text-left">
         <div className="flex items-center gap-2">
-          <FiGlobe className="w-4 h-4 text-[var(--color-accent-blue)]" />
+          <FiGlobe className="w-4 h-4 text-[var(--color-text)]" />
           <span className="text-sm font-medium">Knowledge Base</span>
           <span className="text-xs text-[var(--color-text-muted)]">
             {(stats.total_entities ?? 0).toLocaleString()} entities &middot; {(stats.total_relations ?? 0).toLocaleString()} relations
@@ -172,14 +174,35 @@ function getEvidenceSearchUrl(item: EvidenceType): string {
 
 export default function Evidence() {
   const [evidence, setEvidence] = useState<EvidenceType[]>([])
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [filterType, setFilterType] = useState('all')
-  const [_filterStatus] = useState('all')
+  // `?id=…` deep-link: pre-select a specific evidence row on mount so
+  // Search result navigation can land users on the correct item. The
+  // id is held even if the evidence list hasn't loaded yet; the list's
+  // `.find(e => e.id === selectedId)` will resolve once the fetch
+  // completes.
+  const [selectedId, setSelectedId] = useState<string | null>(() => {
+    const qId = new URLSearchParams(window.location.search).get('id')
+    return qId || null
+  })
+  // Deep-link support: `?add=1` (or `?new=1`) auto-opens the Add Evidence
+  // dialog so dashboard/quick-action links can drop users straight into the
+  // upload flow. `?q=` seeds the search input and `?type=` seeds the
+  // source-type filter so cross-page links preserve user intent. All
+  // params are consume-and-cleaned on mount so a soft re-render doesn't
+  // keep re-opening the modal after the user cancels.
+  const [searchParams] = useSearchParams()
+  const [searchQuery, setSearchQuery] = useState(() => searchParams.get('q') || '')
+  const [filterType, setFilterType] = useState(() => {
+    const raw = (searchParams.get('type') || '').toLowerCase()
+    const VALID = new Set(['all', 'pubmed', 'clinical_trial', 'preprint', 'patent', 'user_upload'])
+    return VALID.has(raw) ? raw : 'all'
+  })
   const [page, setPage] = useState(1)
   const [totalItems, setTotalItems] = useState(0)
   const [loading, setLoading] = useState(true)
-  const [showAddModal, setShowAddModal] = useState(false)
+  const [showAddModal, setShowAddModal] = useState(() => {
+    const q = searchParams.get('add') || searchParams.get('new')
+    return q === '1'
+  })
   const [editField, setEditField] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
   const [noteText, setNoteText] = useState('')
@@ -227,29 +250,62 @@ export default function Evidence() {
 
   useEffect(() => { fetchEvidence() }, [fetchEvidence])
 
-  // Merge project documents into evidence list
-  const allProjectDocs = persistGet<Array<{ id: string; project_id: string; title: string; doc_type: string; authors: string; date: string; description: string; tags: string[]; filename: string; file_size: number; mime_type: string; uploaded_at: string }>>('project-documents', [])
-  const docEvidence: EvidenceType[] = allProjectDocs.map(d => ({
-    id: `doc-ev-${d.id}`,
-    title: d.title,
-    abstract: d.description,
-    source_type: 'user_upload',
-    source_url: '',
-    authors: d.authors ? [d.authors] : [],
-    publication_date: d.date,
-    status: 'verified',
-    relevance_score: 1.0,
-    tags: [...d.tags, d.doc_type],
-    entities: [],
-    notes: '',
-    created_at: d.uploaded_at,
-    updated_at: d.uploaded_at,
-    citation_count: 0,
-    metadata: { filename: d.filename, file_size: d.file_size, mime_type: d.mime_type, project_id: d.project_id },
-  }))
-  const mergedEvidence = filterType === 'user_upload' || filterType === 'all'
-    ? [...docEvidence.filter(d => !searchQuery || d.title.toLowerCase().includes(searchQuery.toLowerCase())), ...evidence]
-    : evidence
+  // Clean deep-link query params (`add`/`new`/`id`/`q`/`type`) off the
+  // URL after the initial mount so a soft reload doesn't re-open the
+  // dialog or stomp user-driven selection changes.
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search)
+    let changed = false
+    for (const k of ['add', 'new', 'id', 'q', 'type']) {
+      if (sp.has(k)) { sp.delete(k); changed = true }
+    }
+    if (changed) {
+      const qs = sp.toString()
+      const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash
+      window.history.replaceState(window.history.state, '', newUrl)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Merge project documents into evidence list. Both intermediate lists
+  // are memoized so long lists don't re-map + re-filter on every
+  // unrelated render (selection, form edits, etc.).
+  type ProjectDoc = {
+    id: string; project_id: string; title: string; doc_type: string; authors: string;
+    date: string; description: string; tags: string[]; filename: string;
+    file_size: number; mime_type: string; uploaded_at: string
+  }
+  const allProjectDocs = useMemo<ProjectDoc[]>(
+    () => persistGet<ProjectDoc[]>('project-documents', []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [evidence], // refresh when evidence set changes (post-upload/edit)
+  )
+  const mergedEvidence = useMemo<EvidenceType[]>(() => {
+    const docEvidence: EvidenceType[] = allProjectDocs.map(d => ({
+      id: `doc-ev-${d.id}`,
+      title: d.title,
+      abstract: d.description,
+      source_type: 'user_upload',
+      source_url: '',
+      authors: d.authors ? [d.authors] : [],
+      publication_date: d.date,
+      status: 'verified',
+      relevance_score: 1.0,
+      tags: [...d.tags, d.doc_type],
+      entities: [],
+      notes: '',
+      created_at: d.uploaded_at,
+      updated_at: d.uploaded_at,
+      citation_count: 0,
+      metadata: { filename: d.filename, file_size: d.file_size, mime_type: d.mime_type, project_id: d.project_id },
+    }))
+    if (filterType === 'user_upload' || filterType === 'all') {
+      const q = searchQuery.toLowerCase()
+      const matchedDocs = q ? docEvidence.filter(d => d.title.toLowerCase().includes(q)) : docEvidence
+      return [...matchedDocs, ...evidence]
+    }
+    return evidence
+  }, [filterType, searchQuery, evidence, allProjectDocs])
 
   // Fetch knowledge base stats on mount
   useEffect(() => {

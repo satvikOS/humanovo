@@ -21,6 +21,15 @@ Full MATLAB-equivalent capabilities across eight biomedical domains:
 8. Visualization (server-side publication-ready figure generation)
 """
 
+# ── numpy 2.x compatibility shim ───────────────────────────────────────
+# `np.trapz` was removed in NumPy 2.0 in favor of `np.trapezoid`. Many
+# compute processors were written against the older API, so we alias it
+# back at import time to avoid scattering try/except across the codebase.
+import numpy as _np
+
+if not hasattr(_np, "trapz") and hasattr(_np, "trapezoid"):
+    _np.trapz = _np.trapezoid  # type: ignore[attr-defined]
+
 from app.compute.engine import ComputeEngine
 from app.compute.types import (
     ComputeDomain,

@@ -1,14 +1,16 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import {
-  BarChart, Bar, LineChart, Line, XAxis, YAxis,
+  BarChart, Bar, Line, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer,
   ReferenceLine, AreaChart, Area, Brush, Legend,
+  ComposedChart,
 } from 'recharts';
 import {
   FiPlay, FiActivity, FiBarChart2, FiCopy, FiDownload,
   FiLoader, FiCheck, FiTarget, FiHeart, FiZap, FiDatabase,
-  FiRefreshCw, FiTrendingUp, FiPercent, FiSliders,
+  FiRefreshCw, FiTrendingUp, FiPercent, FiSliders, FiImage,
 } from 'react-icons/fi';
+import { copyPlotToClipboard as copyPlotBlob, downloadPlotPng } from '../../utils/plotExport';
 
 
 /* ------------------------------------------------------------------ */
@@ -79,7 +81,7 @@ interface SimDef {
 
 interface SimResults {
   values: number[];
-  convergence: { iteration: number; runningMean: number }[];
+  convergence: { iteration: number; runningMean: number; ciLow: number; ciHigh: number }[];
   label: string;
 }
 
@@ -507,14 +509,34 @@ function runSimulation(
       break;
   }
 
-  // Build convergence series
-  const convergence: { iteration: number; runningMean: number }[] = [];
+  // Build convergence series with a running ±1.96·SEM band so the
+  // convergence chart shows the uncertainty shrinking as more samples
+  // land — a flat "Running Mean" line alone reads as uninformative
+  // once the mean settles (user feedback: "looks too straight"). The
+  // band collapses visually at exactly the rate √n predicts, which
+  // is the point of the plot.
+  const convergence: { iteration: number; runningMean: number; ciLow: number; ciHigh: number }[] = [];
   let sum = 0;
+  let sumSq = 0;
   const step = Math.max(1, Math.floor(iterations / 200));
   for (let i = 0; i < values.length; i++) {
-    sum += values[i];
+    const v = values[i];
+    sum += v;
+    sumSq += v * v;
     if (i % step === 0 || i === values.length - 1) {
-      convergence.push({ iteration: i + 1, runningMean: sum / (i + 1) });
+      const n = i + 1;
+      const mean = sum / n;
+      // Welford is more stable but sum-of-squares is fine for the
+      // scale of n we see here (≤1e5 draws on bounded domains).
+      const variance = n > 1 ? Math.max(0, (sumSq - (sum * sum) / n) / (n - 1)) : 0;
+      const sem = Math.sqrt(variance / n);
+      const half = 1.96 * sem;
+      convergence.push({
+        iteration: n,
+        runningMean: mean,
+        ciLow: mean - half,
+        ciHigh: mean + half,
+      });
     }
   }
 
@@ -713,6 +735,11 @@ export default function MonteCarloPanel() {
   const [_runHistory, setRunHistory] = useState<{ type: SimulationType; params: Record<string, number>; mean: number; std: number; timestamp: number }[]>([]);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoRunRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Chart host ref — passed to plotExport so users can copy/save the
+  // currently visible visualization (histogram / convergence / CDF) as an
+  // image, not just the stats text.
+  const chartHostRef = useRef<HTMLDivElement | null>(null);
+  const [imageCopied, setImageCopied] = useState(false);
 
   const activeSim = useMemo(
     () => SIMULATIONS.find((s) => s.id === selectedType)!,
@@ -794,6 +821,20 @@ export default function MonteCarloPanel() {
     timerRef.current = setTimeout(() => setCopied(false), 2000);
   }, [results, stats, activeSim]);
 
+  // Copy the currently visible chart to the clipboard as PNG.
+  const handleCopyChartImage = useCallback(async () => {
+    const ok = await copyPlotBlob(chartHostRef.current)
+    if (ok) {
+      setImageCopied(true)
+      setTimeout(() => setImageCopied(false), 2000)
+    }
+  }, []);
+
+  // Save the currently visible chart as a PNG file.
+  const handleDownloadChartImage = useCallback(async () => {
+    await downloadPlotPng(chartHostRef.current, `monte_carlo_${selectedType}_${activeChart}`)
+  }, [selectedType, activeChart]);
+
   const handleExportJSON = useCallback(() => {
     if (!results || !stats) return;
     const blob = new Blob(
@@ -827,12 +868,23 @@ export default function MonteCarloPanel() {
     { id: 'cdf', label: 'CDF', icon: <FiPercent style={{ fontSize: 10 }} /> },
   ];
 
-  // Histogram with enriched bins (storing numeric midpoint for reference lines)
+  // Histogram with enriched bins (storing numeric midpoint for reference lines).
+  // Single-pass min/max loop — Math.min(...vals) would blow the argument
+  // limit at the higher iteration counts (the slider allows up to 50 000).
   const histogramEnriched = useMemo(() => {
     if (!results) return [];
-    const vals = results.values;
-    const min = Math.min(...vals);
-    const max = Math.max(...vals);
+    // Drop NaN/Infinity so the binner doesn't anchor to bogus extrema —
+    // a single rogue value makes min=-Infinity / max=Infinity and the
+    // whole range collapses into one bin with 'NaN' labels that Recharts
+    // can't coerce to a numeric axis.
+    const vals = results.values.filter(v => Number.isFinite(v));
+    if (vals.length === 0) return [];
+    let min = Infinity, max = -Infinity;
+    for (let i = 0; i < vals.length; i++) {
+      const v = vals[i]
+      if (v < min) min = v
+      if (v > max) max = v
+    }
     const range = max - min || 1;
     const bins = 30;
     const binWidth = range / bins;
@@ -981,10 +1033,10 @@ export default function MonteCarloPanel() {
             <>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
                 {[
-                  { label: 'Mean', value: fmt(stats.mean), color: '#3b82f6' },
-                  { label: 'Median', value: fmt(stats.median), color: '#8b5cf6' },
-                  { label: 'Std Dev', value: fmt(stats.std), color: '#f59e0b' },
-                  { label: '95% CI', value: `${fmt(stats.ci95Low)} — ${fmt(stats.ci95High)}`, color: '#10b981' },
+                  { label: 'Mean', value: fmt(stats.mean), color: '#5B8DB8' },
+                  { label: 'Median', value: fmt(stats.median), color: '#8B7EAF' },
+                  { label: 'Std Dev', value: fmt(stats.std), color: '#C4956A' },
+                  { label: '95% CI', value: `${fmt(stats.ci95Low)} — ${fmt(stats.ci95High)}`, color: '#6BA594' },
                 ].map((s) => (
                   <div key={s.label} style={{
                     background: 'var(--glass-bg)',
@@ -1028,52 +1080,104 @@ export default function MonteCarloPanel() {
                   <div style={{ display: 'flex', gap: 4, marginLeft: 8 }}>
                     <button style={styles.exportBtn} onClick={handleExportJSON}><FiDownload style={{ fontSize: 9 }} /> JSON</button>
                     <button style={styles.exportBtn} onClick={handleExportCSV}><FiDownload style={{ fontSize: 9 }} /> CSV</button>
-                    <button style={styles.exportBtn} onClick={handleCopy}>
-                      {copied ? <FiCheck style={{ fontSize: 9 }} /> : <FiCopy style={{ fontSize: 9 }} />} {copied ? 'Copied' : 'Copy'}
+                    <button style={styles.exportBtn} onClick={handleDownloadChartImage} title="Download current chart as PNG"><FiImage style={{ fontSize: 9 }} /> PNG</button>
+                    <button style={styles.exportBtn} onClick={handleCopyChartImage} title="Copy current chart to clipboard as image">
+                      {imageCopied ? <FiCheck style={{ fontSize: 9 }} /> : <FiImage style={{ fontSize: 9 }} />} {imageCopied ? 'Copied' : 'Copy plot'}
+                    </button>
+                    <button style={styles.exportBtn} onClick={handleCopy} title="Copy summary stats as text">
+                      {copied ? <FiCheck style={{ fontSize: 9 }} /> : <FiCopy style={{ fontSize: 9 }} />} {copied ? 'Copied' : 'Stats'}
                     </button>
                   </div>
                 </div>
 
-                <div style={{ flex: 1, minHeight: 0 }}>
-                  {activeChart === 'histogram' && (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={histogramEnriched} margin={{ top: 8, right: 16, bottom: 30, left: 8 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" strokeOpacity={0.4} />
-                        <XAxis dataKey="bin" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} interval="preserveStartEnd" stroke="var(--glass-border)" label={{ value: results.label, position: 'insideBottom', offset: -12, fontSize: 10, fill: 'var(--color-text-muted)' }} />
-                        <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" label={{ value: 'Count', angle: -90, position: 'insideLeft', fontSize: 10, fill: 'var(--color-text-muted)' }} />
-                        <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} cursor={{ stroke: 'var(--color-text-muted)', strokeDasharray: '4 4' }} />
-                        <ReferenceLine x={(() => { const m = stats.mean; let closest = histogramEnriched[0]?.bin; let minD = Infinity; for (const h of histogramEnriched) { const d = Math.abs(h.binMid - m); if (d < minD) { minD = d; closest = h.bin; } } return closest; })()} stroke="#3b82f6" strokeWidth={2} strokeDasharray="4 3" label={{ value: 'Mean', position: 'top', fontSize: 9, fill: '#3b82f6' }} />
-                        <Bar dataKey="count" fill="#3b82f6" fillOpacity={0.35} radius={[2, 2, 0, 0]} />
-                        {histogramEnriched.length > 8 && <Brush dataKey="bin" height={16} stroke="#3b82f6" fill="var(--glass-bg)" travellerWidth={6} />}
-                      </BarChart>
-                    </ResponsiveContainer>
-                  )}
+                <div ref={chartHostRef} style={{ flex: 1, minHeight: 0 }}>
+                  {activeChart === 'histogram' && (() => {
+                    // Recharts ReferenceLine on a category axis needs an exact
+                    // bin label, so we snap each stat to its nearest bin midpoint.
+                    // Guard: if the histogram is empty (no results, or all-NaN
+                    // values collapsing bins), return null so the reference
+                    // line is omitted entirely instead of rendering with
+                    // `x={undefined}` which crashes Recharts.
+                    const snap = (v: number): string | null => {
+                      if (!histogramEnriched.length || !Number.isFinite(v)) return null
+                      let closest: string | null = null
+                      let minD = Infinity
+                      for (const h of histogramEnriched) {
+                        if (!Number.isFinite(h.binMid)) continue
+                        const d = Math.abs(h.binMid - v)
+                        if (d < minD) { minD = d; closest = h.bin }
+                      }
+                      return closest
+                    }
+                    const meanBin = snap(stats.mean)
+                    const medianBin = snap(stats.median)
+                    const ciLoBin = snap(stats.ci95Low)
+                    const ciHiBin = snap(stats.ci95High)
+                    return (
+                      <ResponsiveContainer width="100%" height="100%">
+                        {/* Generous margins so ReferenceLine labels
+                            ("Mean", "Median", "2.5%", "97.5%") and the
+                            axis labels don't get clipped by the chart
+                            viewport — was 8/16/30/8 which cut off the
+                            top labels and the y-axis title on the left. */}
+                        <BarChart data={histogramEnriched} margin={{ top: 28, right: 36, bottom: 38, left: 36 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" strokeOpacity={0.4} />
+                          <XAxis dataKey="bin" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} interval="preserveStartEnd" stroke="var(--glass-border)" label={{ value: results.label, position: 'insideBottom', offset: -12, fontSize: 10, fill: 'var(--color-text-muted)' }} />
+                          <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" label={{ value: 'Count', angle: -90, position: 'insideLeft', fontSize: 10, fill: 'var(--color-text-muted)' }} />
+                          <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} cursor={{ stroke: 'var(--color-text-muted)', strokeDasharray: '4 4' }} />
+                          {ciLoBin && <ReferenceLine x={ciLoBin} stroke="#6BA594" strokeWidth={1} strokeDasharray="2 3" label={{ value: '2.5%', position: 'top', fontSize: 8, fill: '#6BA594' }} />}
+                          {ciHiBin && <ReferenceLine x={ciHiBin} stroke="#6BA594" strokeWidth={1} strokeDasharray="2 3" label={{ value: '97.5%', position: 'top', fontSize: 8, fill: '#6BA594' }} />}
+                          {medianBin && <ReferenceLine x={medianBin} stroke="#8B7EAF" strokeWidth={1.5} strokeDasharray="3 3" label={{ value: 'Median', position: 'top', fontSize: 9, fill: '#8B7EAF' }} />}
+                          {meanBin && <ReferenceLine x={meanBin} stroke="#5B8DB8" strokeWidth={2} strokeDasharray="4 3" label={{ value: 'Mean', position: 'top', fontSize: 9, fill: '#5B8DB8' }} />}
+                          <Bar dataKey="count" fill="#5B8DB8" fillOpacity={0.35} radius={[2, 2, 0, 0]} />
+                          {histogramEnriched.length > 8 && <Brush dataKey="bin" height={16} stroke="#5B8DB8" fill="var(--glass-bg)" travellerWidth={6} />}
+                        </BarChart>
+                      </ResponsiveContainer>
+                    )
+                  })()}
 
                   {activeChart === 'convergence' && (
                     <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={results.convergence} margin={{ top: 8, right: 16, bottom: 30, left: 8 }}>
+                      {/* ComposedChart so the ±1.96·SEM band renders
+                          behind the running-mean line. The band tapers
+                          as n grows, which is the "convergence" story
+                          — a flat running mean alone was too straight
+                          to be readable (user feedback). Generous
+                          margins keep the "Final: N.NN" right-side
+                          label and all axis titles on-screen. */}
+                      <ComposedChart data={results.convergence} margin={{ top: 28, right: 64, bottom: 38, left: 36 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" strokeOpacity={0.4} />
                         <XAxis dataKey="iteration" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" label={{ value: 'Iteration', position: 'insideBottom', offset: -12, fontSize: 10, fill: 'var(--color-text-muted)' }} />
-                        <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" label={{ value: 'Running Mean', angle: -90, position: 'insideLeft', fontSize: 10, fill: 'var(--color-text-muted)' }} />
+                        <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" label={{ value: 'Running Mean', angle: -90, position: 'insideLeft', fontSize: 10, fill: 'var(--color-text-muted)' }} domain={['auto', 'auto']} />
                         <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} cursor={{ stroke: 'var(--color-text-muted)', strokeDasharray: '4 4' }} />
                         <Legend wrapperStyle={{ fontSize: 10 }} />
-                        <ReferenceLine y={stats.mean} stroke="#3b82f6" strokeDasharray="4 3" strokeWidth={1} label={{ value: `Final: ${fmt(stats.mean)}`, position: 'right', fontSize: 9, fill: '#3b82f6' }} />
-                        <Line type="monotone" dataKey="runningMean" name="Running Mean" stroke="#8b5cf6" strokeWidth={2} dot={false} />
-                        {results.convergence.length > 10 && <Brush dataKey="iteration" height={16} stroke="#8b5cf6" fill="var(--glass-bg)" travellerWidth={6} />}
-                      </LineChart>
+                        <ReferenceLine y={stats.mean} stroke="#5B8DB8" strokeDasharray="4 3" strokeWidth={1} label={{ value: `Final: ${fmt(stats.mean)}`, position: 'right', fontSize: 9, fill: '#5B8DB8' }} />
+                        {/* 95% CI band — two stacked Areas. Recharts
+                            doesn't have a native range area, so we paint
+                            the high line with fillOpacity and mask the
+                            low line behind it with the same fill that
+                            matches the plot background. */}
+                        <Area type="monotone" dataKey="ciHigh" name="95% CI (upper)" stroke="none" fill="#8B7EAF" fillOpacity={0.18} activeDot={false} isAnimationActive={false} />
+                        <Area type="monotone" dataKey="ciLow"  name="95% CI (lower)" stroke="none" fill="var(--color-bg)" fillOpacity={1} activeDot={false} isAnimationActive={false} legendType="none" />
+                        <Line type="monotone" dataKey="runningMean" name="Running Mean" stroke="#8B7EAF" strokeWidth={2} dot={false} />
+                        {results.convergence.length > 10 && <Brush dataKey="iteration" height={16} stroke="#8B7EAF" fill="var(--glass-bg)" travellerWidth={6} />}
+                      </ComposedChart>
                     </ResponsiveContainer>
                   )}
 
                   {activeChart === 'cdf' && (
                     <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={cdfData} margin={{ top: 8, right: 16, bottom: 30, left: 8 }}>
+                      {/* Same generous margins as the histogram/convergence
+                          charts; the "Median" ReferenceLine label lives on
+                          the right side so we need ~60px there. */}
+                      <AreaChart data={cdfData} margin={{ top: 28, right: 64, bottom: 38, left: 36 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" strokeOpacity={0.4} />
                         <XAxis dataKey="value" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" type="number" label={{ value: results.label, position: 'insideBottom', offset: -12, fontSize: 10, fill: 'var(--color-text-muted)' }} />
                         <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" domain={[0, 100]} label={{ value: 'Percentile (%)', angle: -90, position: 'insideLeft', fontSize: 10, fill: 'var(--color-text-muted)' }} />
                         <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} cursor={{ stroke: 'var(--color-text-muted)', strokeDasharray: '4 4' }} formatter={(v: any) => `${Number(v).toFixed(1)}%`} />
-                        <ReferenceLine y={50} stroke="#f59e0b" strokeDasharray="4 3" strokeWidth={1} label={{ value: 'Median', position: 'right', fontSize: 9, fill: '#f59e0b' }} />
-                        <Area type="monotone" dataKey="percentile" stroke="#10b981" fill="#10b981" fillOpacity={0.15} strokeWidth={2} dot={false} />
-                        {cdfData.length > 10 && <Brush dataKey="value" height={16} stroke="#10b981" fill="var(--glass-bg)" travellerWidth={6} />}
+                        <ReferenceLine y={50} stroke="#C4956A" strokeDasharray="4 3" strokeWidth={1} label={{ value: 'Median', position: 'right', fontSize: 9, fill: '#C4956A' }} />
+                        <Area type="monotone" dataKey="percentile" stroke="#6BA594" fill="#6BA594" fillOpacity={0.15} strokeWidth={2} dot={false} />
+                        {cdfData.length > 10 && <Brush dataKey="value" height={16} stroke="#6BA594" fill="var(--glass-bg)" travellerWidth={6} />}
                       </AreaChart>
                     </ResponsiveContainer>
                   )}

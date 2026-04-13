@@ -6,6 +6,7 @@
 // ═══════════════════════════════════════════════════════════════════════
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FiPlay, FiSquare } from 'react-icons/fi'
+import { useAlertDialog } from '../../components/AlertDialog'
 import {
   LineChart, Line, ScatterChart, Scatter, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
@@ -31,6 +32,9 @@ import {
 import { BUILTIN_CATEGORIES, BUILTIN_DOCS, type BuiltinDoc } from './builtinDocs'
 import { ALL_PRESETS, TOOLBOX_CATEGORIES } from './presets'
 import type { Preset } from './types'
+import ImagingPanel, { IMAGING_EVENT } from './ImagingPanel'
+import { getPlotBlob } from '../../utils/plotExport'
+import { plotlyConfig } from '../../utils/plotlyConfig'
 
 /* ── Persistence keys ────────────────────────────────────────────────── */
 const SCRIPT_KEY = 'compute-workstation-script'          // legacy single-script key
@@ -590,7 +594,13 @@ function caretViewportAnchor(ta: HTMLTextAreaElement, fontSize: number): { top: 
 
 /* ── Component ───────────────────────────────────────────────────────── */
 export default function Workstation() {
+  const { showAlert, showPrompt, AlertDialog } = useAlertDialog()
   const [scriptStore, setScriptStore] = useState<ScriptStore>(loadScripts)
+  // Which script IDs have had their welcome overlay explicitly dismissed
+  // ("Start with a blank script" or the × close button). Kept as a Set so
+  // the overlay re-surfaces for new tabs but stays hidden for the one the
+  // user asked to drop focus into.
+  const [welcomeDismissed, setWelcomeDismissed] = useState<Set<string>>(() => new Set())
   // Drag-and-drop tab reordering. Ref holds the source id during the drag;
   // state drives the visual drop indicator. We clear both on drop / dragend.
   const draggedTabIdRef = useRef<string | null>(null)
@@ -677,7 +687,25 @@ export default function Workstation() {
   // as a script (or fragment) finishes executing, and can be reopened from
   // the toolbar's "Results" entry without re-running.
   const [resultsOverlay, setResultsOverlay] = useState(false)
-  const [resultsTab, setResultsTab] = useState<'figure' | 'console' | 'workspace'>('figure')
+  const [resultsTab, setResultsTab] = useState<'figure' | 'console' | 'workspace' | 'imaging'>('figure')
+  // Quick-read count of studies for the Imaging tab badge. Refreshed whenever
+  // the overlay opens or the shared IMAGING_EVENT fires (script mutations).
+  const [imagingStudyCount, setImagingStudyCount] = useState<number>(() => {
+    try { return (JSON.parse(localStorage.getItem('research-imaging-studies') || '[]') as unknown[]).length } catch { return 0 }
+  })
+  useEffect(() => {
+    const refresh = () => {
+      try { setImagingStudyCount((JSON.parse(localStorage.getItem('research-imaging-studies') || '[]') as unknown[]).length) } catch { /* noop */ }
+    }
+    window.addEventListener('focus', refresh)
+    window.addEventListener('storage', refresh)
+    window.addEventListener(IMAGING_EVENT, refresh)
+    return () => {
+      window.removeEventListener('focus', refresh)
+      window.removeEventListener('storage', refresh)
+      window.removeEventListener(IMAGING_EVENT, refresh)
+    }
+  }, [])
   // Per-figure rendering options. Toggled by the small chip buttons in the
   // figure header (grid / log-x / log-y / legend) and applied to PlotView.
   const [plotOpts, setPlotOpts] = useState<PlotOpts>({
@@ -1784,69 +1812,31 @@ export default function Workstation() {
     setEntries(prev => [...prev, mkEntry({ kind: 'output', text: '— workspace cleared —' })])
   }
 
-  // Clone the currently displayed chart SVG with a solid dark background
-  // baked in. Shared between the SVG and PNG exporters so both produce
-  // the same image.
-  const cloneCurrentPlotSvg = useCallback((): SVGSVGElement | null => {
-    const host = plotBodyRef.current
-    if (!host) return null
-    const svg = host.querySelector('svg')
-    if (!svg) return null
-    const clone = svg.cloneNode(true) as SVGSVGElement
-    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
-    // Preserve the original width/height as attributes so <img> can render
-    // it without additional hints when we rasterize.
-    const rect = svg.getBoundingClientRect()
-    if (!clone.getAttribute('width')) clone.setAttribute('width', String(rect.width))
-    if (!clone.getAttribute('height')) clone.setAttribute('height', String(rect.height))
-    // Adaptive solid background: white in light mode, dark in dark mode
-    const isDark = document.documentElement.classList.contains('dark')
-    const bgColor = isDark ? '#0a0a0a' : '#ffffff'
-    const bgRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
-    bgRect.setAttribute('width', '100%')
-    bgRect.setAttribute('height', '100%')
-    bgRect.setAttribute('fill', bgColor)
-    clone.insertBefore(bgRect, clone.firstChild)
-    return clone
+  // Resolve the currently displayed plot into a raster image via the
+  // shared `plotExport` utility, which handles both Recharts / inline
+  // SVG plots and Plotly (WebGL / canvas) plots uniformly.
+  //
+  // Exports default to a **fully transparent** background so figures
+  // drop into papers and slide decks without the app chrome bleeding
+  // through. Pass `transparent: false` (via the util directly) if a
+  // solid bg is ever needed here.
+  const getCurrentPlotBlob = useCallback(async (format: 'png' | 'svg'): Promise<Blob | null> => {
+    return getPlotBlob(plotBodyRef.current, format)
   }, [])
 
   /** Copy the current figure to clipboard as PNG with solid adaptive background. */
   const copyPlotToClipboard = useCallback(async () => {
-    const clone = cloneCurrentPlotSvg()
-    if (!clone) return
-    const xml = new XMLSerializer().serializeToString(clone)
-    const svgBlob = new Blob([xml], { type: 'image/svg+xml;charset=utf-8' })
-    const svgUrl = URL.createObjectURL(svgBlob)
-    const img = new Image()
-    img.onload = async () => {
-      const w = Number(clone.getAttribute('width')) || img.width || 800
-      const h = Number(clone.getAttribute('height')) || img.height || 480
-      const scale = 2
-      const canvas = document.createElement('canvas')
-      canvas.width = Math.round(w * scale)
-      canvas.height = Math.round(h * scale)
-      const ctx = canvas.getContext('2d')
-      if (!ctx) { URL.revokeObjectURL(svgUrl); return }
-      const isDark = document.documentElement.classList.contains('dark')
-      ctx.fillStyle = isDark ? '#0a0a0a' : '#ffffff'
-      ctx.fillRect(0, 0, canvas.width, canvas.height)
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-      URL.revokeObjectURL(svgUrl)
-      try {
-        const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
-        if (blob) await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
-      } catch { /* clipboard write may fail in some browsers */ }
-    }
-    img.onerror = () => { URL.revokeObjectURL(svgUrl) }
-    img.src = svgUrl
-  }, [cloneCurrentPlotSvg])
+    try {
+      const blob = await getCurrentPlotBlob('png')
+      if (!blob) return
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+    } catch { /* clipboard write may fail in restricted contexts */ }
+  }, [getCurrentPlotBlob])
 
   /** Export the currently rendered figure as SVG. */
-  const exportPlotSVG = useCallback(() => {
-    const clone = cloneCurrentPlotSvg()
-    if (!clone) return
-    const xml = new XMLSerializer().serializeToString(clone)
-    const blob = new Blob([xml], { type: 'image/svg+xml' })
+  const exportPlotSVG = useCallback(async () => {
+    const blob = await getCurrentPlotBlob('svg')
+    if (!blob) return
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     const title = plots[activePlot]?.title?.replace(/[^\w-]+/g, '_') || `figure-${activePlot + 1}`
@@ -1854,44 +1844,20 @@ export default function Workstation() {
     a.download = `${title}.svg`
     a.click()
     URL.revokeObjectURL(url)
-  }, [plots, activePlot, cloneCurrentPlotSvg])
+  }, [plots, activePlot, getCurrentPlotBlob])
 
   /** Export the currently rendered figure as PNG (rasterized at 2× DPR). */
-  const exportPlotPNG = useCallback(() => {
-    const clone = cloneCurrentPlotSvg()
-    if (!clone) return
-    const xml = new XMLSerializer().serializeToString(clone)
-    const svgBlob = new Blob([xml], { type: 'image/svg+xml;charset=utf-8' })
-    const svgUrl = URL.createObjectURL(svgBlob)
-    const img = new Image()
-    img.onload = () => {
-      const widthAttr = Number(clone.getAttribute('width')) || img.width || 800
-      const heightAttr = Number(clone.getAttribute('height')) || img.height || 480
-      const scale = 2 // produce crisp, retina-ready output
-      const canvas = document.createElement('canvas')
-      canvas.width = Math.round(widthAttr * scale)
-      canvas.height = Math.round(heightAttr * scale)
-      const ctx = canvas.getContext('2d')
-      if (!ctx) { URL.revokeObjectURL(svgUrl); return }
-      const isDark = document.documentElement.classList.contains('dark')
-      ctx.fillStyle = isDark ? '#0a0a0a' : '#ffffff'
-      ctx.fillRect(0, 0, canvas.width, canvas.height)
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-      URL.revokeObjectURL(svgUrl)
-      canvas.toBlob(blob => {
-        if (!blob) return
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        const title = plots[activePlot]?.title?.replace(/[^\w-]+/g, '_') || `figure-${activePlot + 1}`
-        a.href = url
-        a.download = `${title}.png`
-        a.click()
-        URL.revokeObjectURL(url)
-      }, 'image/png')
-    }
-    img.onerror = () => { URL.revokeObjectURL(svgUrl) }
-    img.src = svgUrl
-  }, [plots, activePlot, cloneCurrentPlotSvg])
+  const exportPlotPNG = useCallback(async () => {
+    const blob = await getCurrentPlotBlob('png')
+    if (!blob) return
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    const title = plots[activePlot]?.title?.replace(/[^\w-]+/g, '_') || `figure-${activePlot + 1}`
+    a.href = url
+    a.download = `${title}.png`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [plots, activePlot, getCurrentPlotBlob])
 
   /** Export the underlying series data of the current figure as CSV. */
   const exportPlotCSV = useCallback(() => {
@@ -2061,7 +2027,7 @@ export default function Workstation() {
   // to a user-supplied replacement. The replace pass is anchored with
   // word boundaries so we don't mangle substring matches inside other
   // names. Returns the number of replacements for the caller to surface.
-  const renameIdentifierAtCaret = useCallback(() => {
+  const renameIdentifierAtCaret = useCallback(async () => {
     const ta = editorRef.current
     if (!ta) return
     const s = ta.selectionStart
@@ -2076,10 +2042,10 @@ export default function Workstation() {
     }
     const old = value.slice(wStart, wEnd)
     if (!old || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(old)) return
-    const next = prompt(`Rename "${old}" to:`, old)
+    const next = await showPrompt(`Rename "${old}" to:`, 'Rename Variable', old)
     if (!next || next === old) return
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(next)) {
-      alert(`"${next}" is not a valid identifier.`)
+      showAlert(`"${next}" is not a valid identifier.`, 'Invalid Name')
       return
     }
     const esc = old.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -2099,7 +2065,7 @@ export default function Workstation() {
         ta2.setSelectionRange(firstIdx, firstIdx + next.length)
       }
     })
-  }, [setScript])
+  }, [setScript, showPrompt, showAlert])
 
   // Jump the caret to the bracket that matches the one at the current
   // caret. Pass `extend=true` to grow the selection across the pair,
@@ -3591,7 +3557,6 @@ export default function Workstation() {
 
   const closeScript = useCallback((id: string) => {
     setScriptStore(store => {
-      if (store.list.length <= 1) return store // never close the last one
       const idx = store.list.findIndex(s => s.id === id)
       if (idx < 0) return store
       // Remember the closed script (plus its original position) so
@@ -3600,7 +3565,15 @@ export default function Workstation() {
       closedScriptsRef.current.push({ script: closed, index: idx })
       // Cap the ring so we don't grow without bound.
       if (closedScriptsRef.current.length > 12) closedScriptsRef.current.shift()
+      // Allow closing every tab — users asked for the ability to land on
+      // a clean empty-state ("+ New Script" centered) rather than being
+      // force-fed an auto-spawned `untitled.py` every time they close the
+      // last tab. The body of the editor surface renders the empty-state
+      // when `scriptStore.list.length === 0`.
       const list = store.list.filter(s => s.id !== id)
+      if (list.length === 0) {
+        return { list: [], activeId: '' }
+      }
       const activeId = store.activeId === id
         ? (list[idx] ?? list[idx - 1] ?? list[0]).id
         : store.activeId
@@ -3665,16 +3638,16 @@ export default function Workstation() {
     })
   }, [])
 
-  const renameScript = useCallback((id: string) => {
+  const renameScript = useCallback(async (id: string) => {
     const current = scriptStore.list.find(s => s.id === id)
     if (!current) return
-    const next = prompt('Rename script', current.name)
+    const next = await showPrompt('Enter new name:', 'Rename Script', current.name)
     if (!next) return
     setScriptStore(store => ({
       ...store,
       list: store.list.map(s => s.id === id ? { ...s, name: next } : s),
     }))
-  }, [scriptStore])
+  }, [scriptStore, showPrompt])
 
   // Duplicate a script tab — creates an exact copy of the given script's
   // code under a derived name (` (copy)`, ` (copy 2)`, …) immediately
@@ -3936,31 +3909,33 @@ export default function Workstation() {
       alignItems: 'center',
       gap: 6,
       padding: '8px 14px',
-      borderBottom: '1px solid var(--glass-border)',
       background: 'transparent',
     },
     btn: {
       display: 'inline-flex',
       alignItems: 'center',
       gap: 5,
-      padding: '4px 10px',
+      padding: '5px 12px',
       fontSize: 11,
       fontWeight: 500,
       color: 'var(--color-text-secondary)',
-      background: 'transparent',
+      background: 'var(--glass-bg)',
       border: '1px solid var(--glass-border)',
-      borderRadius: 5,
+      borderRadius: 14,
       cursor: 'pointer',
-      transition: 'background 0.15s, border-color 0.15s, color 0.15s',
+      transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+      backdropFilter: 'blur(12px)',
+      boxShadow: '0 1px 3px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.04)',
     },
     btnPrimary: {
-      color: 'var(--color-text)',
-      background: 'var(--glass-bg-hover)',
-      borderColor: 'var(--color-border-strong)',
+      color: '#fff',
+      background: 'rgba(91, 141, 184, 0.25)',
+      borderColor: 'rgba(91, 141, 184, 0.35)',
     },
     btnGhost: {
       background: 'transparent',
       border: '1px solid transparent',
+      backdropFilter: 'none',
     },
     // Run-pulse chip — small, calm confirmation that a run finished.
     // Lives in the toolbar next to the Run button and fades out after a
@@ -4064,7 +4039,7 @@ export default function Workstation() {
       width: '100%',
       background: 'var(--glass-bg)',
       border: '1px solid var(--glass-border)',
-      borderRadius: 6,
+      borderRadius: 10,
       padding: '6px 10px',
       color: 'var(--color-text)',
       fontSize: 12,
@@ -4137,7 +4112,7 @@ export default function Workstation() {
     tabActive: {
       color: 'var(--color-text)',
       background: 'transparent',
-      borderBottom: '2px solid var(--color-accent-blue)',
+      borderBottom: '2px solid var(--color-text)',
     },
     tabCloseBtn: {
       display: 'inline-flex',
@@ -4145,14 +4120,16 @@ export default function Workstation() {
       justifyContent: 'center',
       width: 14,
       height: 14,
-      background: 'transparent',
-      border: 'none',
+      background: 'var(--glass-bg)',
+      border: '1px solid var(--glass-border)',
       color: 'var(--color-text-muted)',
       cursor: 'pointer',
       fontSize: 12,
       lineHeight: 1,
-      borderRadius: 3,
+      borderRadius: 14,
       padding: 0,
+      backdropFilter: 'blur(12px)',
+      boxShadow: '0 1px 3px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.04)',
     },
     tabAddBtn: {
       display: 'inline-flex',
@@ -4161,9 +4138,12 @@ export default function Workstation() {
       padding: '0 12px',
       fontSize: 14,
       color: 'var(--color-text-muted)',
-      background: 'transparent',
-      border: 'none',
+      background: 'var(--glass-bg)',
+      border: '1px solid var(--glass-border)',
+      borderRadius: 14,
       cursor: 'pointer',
+      backdropFilter: 'blur(12px)',
+      boxShadow: '0 1px 3px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.04)',
     },
     sectionStrip: {
       display: 'flex',
@@ -4214,23 +4194,18 @@ export default function Workstation() {
       flex: 1,
       display: 'flex',
       minHeight: 0,
-      // Slight elevation against the workstation chrome so the editor
-      // reads as a clearly defined working surface in both light and
-      // dark modes. In light mode this paints #ffffff over a #fafafa
-      // page; in dark mode #0a0a0a over #000000. Either way the editor
-      // reads as the primary surface without any heavy borders, which
-      // matches the "thinner boundaries / calmer workstation" brief.
-      background: 'var(--color-bg-elevated)',
-      borderTop: '1px solid var(--glass-border)',
+      // Seamless — no background elevation so the editor blends with the
+      // surrounding workstation chrome without any visible rectangular
+      // boundary around the code area.
+      background: 'transparent',
     },
     editorGutterClip: {
       flex: '0 0 auto',
       width: 44,
       overflow: 'hidden',
-      // Subtle tint so the gutter reads as a distinct strip from the
-      // code surface without needing a hairline border. Pairs with the
-      // elevated editor body background.
-      background: 'var(--glass-bg)',
+      // Transparent so gutter blends with the editor — no visible
+      // boundary between gutter and code surface.
+      background: 'transparent',
       position: 'relative' as const,
     },
     editorGutterNumbers: {
@@ -4255,7 +4230,7 @@ export default function Workstation() {
     findInput: {
       background: 'var(--glass-bg-hover)',
       border: '1px solid var(--glass-border)',
-      borderRadius: 4,
+      borderRadius: 8,
       padding: '4px 8px',
       color: 'var(--color-text)',
       fontFamily: "'JetBrains Mono', monospace",
@@ -4281,8 +4256,8 @@ export default function Workstation() {
       flex: '0 0 auto',
       width: 10,
       position: 'relative' as const,
-      borderLeft: '1px solid var(--glass-border)',
-      background: 'var(--glass-bg)',
+      // No border or tinted background — seamless with the editor.
+      background: 'transparent',
       cursor: 'pointer',
     },
     overviewMark: {
@@ -4343,9 +4318,12 @@ export default function Workstation() {
       alignItems: 'flex-start',
       justifyContent: 'center',
       padding: '32px 32px 24px 32px',
-      // Opaque backdrop so gutter line numbers and editor chrome
-      // don't bleed through — keeps the card crisp on both themes.
-      background: 'var(--color-bg-elevated)',
+      // Frosted-glass blur over the editor so the card reads as a floating
+      // coach mark rather than a sheet. Keeps the workstation context just
+      // visible in the background — iOS-style layered depth.
+      background: 'rgba(0, 0, 0, 0.35)',
+      backdropFilter: 'blur(18px) saturate(140%)',
+      WebkitBackdropFilter: 'blur(18px) saturate(140%)',
       zIndex: 4,
     },
     welcomeCard: {
@@ -4355,7 +4333,7 @@ export default function Workstation() {
       flexDirection: 'column' as const,
       gap: 12,
       padding: '20px 24px 18px 24px',
-      borderRadius: 10,
+      borderRadius: 14,
       background: 'var(--color-bg-elevated)',
       // No border — rely on shadow to float the card. Thinner
       // boundaries per the design brief.
@@ -4393,7 +4371,7 @@ export default function Workstation() {
       alignItems: 'flex-start',
       gap: 4,
       padding: '10px 12px',
-      borderRadius: 8,
+      borderRadius: 12,
       border: '1px solid var(--glass-border)',
       background: 'var(--glass-bg)',
       color: 'var(--color-text)',
@@ -4425,12 +4403,14 @@ export default function Workstation() {
       display: 'inline-flex',
       alignItems: 'center',
       gap: 3,
-      padding: '2px 6px',
-      borderRadius: 4,
+      padding: '2px 8px',
+      borderRadius: 8,
       border: '1px solid var(--glass-border)',
+      background: 'var(--glass-bg)',
       fontFamily: "'JetBrains Mono', monospace",
       fontSize: 10,
       color: 'var(--color-text-secondary)',
+      boxShadow: '0 1px 2px rgba(0, 0, 0, 0.1)',
     },
     bracketOverlay: {
       position: 'absolute' as const,
@@ -4531,7 +4511,6 @@ export default function Workstation() {
       alignItems: 'center',
       gap: 14,
       padding: '6px 20px',
-      borderTop: '1px solid var(--glass-border)',
       background: 'transparent',
       fontFamily: "'JetBrains Mono', monospace",
       fontSize: 11,
@@ -4546,7 +4525,6 @@ export default function Workstation() {
       alignItems: 'center',
       gap: 12,
       padding: '5px 20px',
-      borderTop: '1px solid var(--glass-border)',
       background: 'transparent',
       fontFamily: "'JetBrains Mono', monospace",
       fontSize: 11,
@@ -4585,7 +4563,7 @@ export default function Workstation() {
     statusBarAction: {
       cursor: 'pointer',
       padding: '2px 6px',
-      borderRadius: 4,
+      borderRadius: 8,
       margin: '-2px -6px',
       transition: 'background 0.12s, color 0.12s',
     },
@@ -4682,7 +4660,7 @@ export default function Workstation() {
       color: 'var(--color-text)',
       padding: '5px 10px',
       fontSize: 12,
-      borderRadius: 4,
+      borderRadius: 8,
       outline: 'none',
       fontFamily: "'Inter', sans-serif",
     },
@@ -4691,7 +4669,7 @@ export default function Workstation() {
       gridTemplateColumns: 'minmax(0, 1fr) auto minmax(0, 1.2fr)',
       gap: 10,
       padding: '5px 6px',
-      borderRadius: 4,
+      borderRadius: 8,
     },
     varKindBadge: {
       display: 'inline-flex',
@@ -4730,7 +4708,7 @@ export default function Workstation() {
       padding: '8px 10px',
       background: 'var(--glass-bg)',
       border: '1px solid var(--glass-border)',
-      borderRadius: 4,
+      borderRadius: 8,
       maxHeight: 220,
       overflow: 'auto',
       fontFamily: "'JetBrains Mono', monospace",
@@ -4795,7 +4773,7 @@ export default function Workstation() {
       color: 'var(--color-text)',
       padding: '5px 10px',
       fontSize: 12,
-      borderRadius: 4,
+      borderRadius: 8,
       outline: 'none',
       fontFamily: "'Inter', sans-serif",
     },
@@ -4918,7 +4896,7 @@ export default function Workstation() {
       fontFamily: "'JetBrains Mono', monospace",
       fontSize: 12,
       fontWeight: 600,
-      color: 'var(--color-accent-blue)',
+      color: 'var(--color-text)',
       opacity: 0.7,
     },
     cmd: {
@@ -4958,7 +4936,7 @@ export default function Workstation() {
       flexDirection: 'column' as const,
       background: 'var(--glass-bg)',
       border: '1px solid var(--glass-border)',
-      borderRadius: 10,
+      borderRadius: 14,
       overflow: 'hidden' as const,
       boxShadow: '0 18px 60px rgba(0, 0, 0, 0.55)',
     },
@@ -5011,7 +4989,7 @@ export default function Workstation() {
       minHeight: 0,
       margin: '12px 18px 18px 18px',
       padding: '12px 14px',
-      borderRadius: 6,
+      borderRadius: 10,
       background: 'var(--glass-bg)',
       border: '1px solid var(--glass-border)',
       overflow: 'auto' as const,
@@ -5071,7 +5049,7 @@ export default function Workstation() {
       color: 'var(--color-text-secondary)',
       fontSize: 12,
       cursor: 'pointer',
-      borderRadius: 6,
+      borderRadius: 10,
       transition: 'background 0.12s, border-color 0.12s, color 0.12s',
     },
     libraryItemCardActive: {
@@ -5126,23 +5104,28 @@ export default function Workstation() {
       flexDirection: 'column' as const,
       background: 'var(--glass-bg)',
       border: '1px solid var(--glass-border)',
-      borderRadius: 10,
+      borderRadius: 14,
       overflow: 'hidden' as const,
       boxShadow: '0 18px 60px rgba(0, 0, 0, 0.55)',
     },
+    // Compact overlay chrome — the library/results top bar was taking
+    // up too much vertical space, pushing content below the fold on
+    // short screens. Padding trimmed and tab pills tightened so the
+    // bar reads like a macOS/VS Code segmented control, not a banner.
     resultsHeader: {
       display: 'flex',
       alignItems: 'center',
-      gap: 14,
-      padding: '14px 20px',
+      gap: 12,
+      padding: '8px 14px',
       borderBottom: '1px solid var(--glass-border)',
       background: 'var(--glass-bg-hover)',
       position: 'relative' as const,
       zIndex: 2,
       flexShrink: 0,
+      minHeight: 40,
     },
     resultsTitle: {
-      fontSize: 13,
+      fontSize: 12,
       fontWeight: 600,
       color: 'var(--color-text)',
       whiteSpace: 'nowrap' as const,
@@ -5150,20 +5133,20 @@ export default function Workstation() {
     },
     resultsTabBar: {
       display: 'flex',
-      gap: 4,
-      marginLeft: 18,
+      gap: 2,
+      marginLeft: 10,
     },
     resultsTab: {
       display: 'inline-flex',
       alignItems: 'center',
-      gap: 8,
-      padding: '7px 14px',
-      fontSize: 12,
+      gap: 6,
+      padding: '4px 10px',
+      fontSize: 11,
       fontWeight: 500,
       color: 'var(--color-text-muted)',
       background: 'transparent',
       border: '1px solid transparent',
-      borderRadius: 6,
+      borderRadius: 10,
       cursor: 'pointer',
       transition: 'background 0.15s, color 0.15s, border-color 0.15s',
     },
@@ -5184,7 +5167,7 @@ export default function Workstation() {
       color: 'var(--color-text-muted)',
       background: 'var(--glass-bg)',
       border: '1px solid var(--glass-border)',
-      borderRadius: 8,
+      borderRadius: 12,
     },
     resultsTabBadgeActive: {
       color: 'var(--color-text)',
@@ -5250,7 +5233,7 @@ export default function Workstation() {
       alignItems: 'center',
       gap: 5,
       padding: '5px 12px',
-      borderRadius: 5,
+      borderRadius: 10,
       border: '1px solid var(--glass-border)',
       background: 'transparent',
       color: 'var(--color-text-secondary)',
@@ -5264,7 +5247,7 @@ export default function Workstation() {
       inset: 0,
       background: 'rgba(0, 0, 0, 0.55)',
       border: '2px dashed var(--color-border-strong)',
-      borderRadius: 8,
+      borderRadius: 12,
       zIndex: 900,
       pointerEvents: 'none' as const,
       display: 'flex',
@@ -5279,7 +5262,7 @@ export default function Workstation() {
       padding: '14px 22px',
       background: 'var(--color-bg-elevated)',
       border: '1px solid var(--glass-border)',
-      borderRadius: 6,
+      borderRadius: 10,
     },
     fullscreenHeader: {
       display: 'flex',
@@ -5295,14 +5278,14 @@ export default function Workstation() {
       minHeight: 0,
       background: 'var(--glass-bg)',
       border: '1px solid var(--glass-border)',
-      borderRadius: 8,
+      borderRadius: 12,
       padding: 24,
     },
     acPopup: {
       position: 'fixed' as const,
       background: 'var(--color-bg-elevated)',
       border: '1px solid var(--color-border-strong)',
-      borderRadius: 4,
+      borderRadius: 8,
       padding: 4,
       fontFamily: "'JetBrains Mono', monospace",
       fontSize: 11,
@@ -5317,7 +5300,7 @@ export default function Workstation() {
       position: 'fixed' as const,
       background: 'var(--color-bg-elevated)',
       border: '1px solid var(--color-border-strong)',
-      borderRadius: 4,
+      borderRadius: 8,
       padding: '6px 10px',
       zIndex: 200,
       maxWidth: 520,
@@ -5351,7 +5334,7 @@ export default function Workstation() {
       maxHeight: '70vh',
       background: 'var(--color-bg-elevated)',
       border: '1px solid var(--color-border-strong)',
-      borderRadius: 8,
+      borderRadius: 12,
       boxShadow: '0 20px 60px rgba(0, 0, 0, 0.5)',
       display: 'flex',
       flexDirection: 'column',
@@ -5378,7 +5361,7 @@ export default function Workstation() {
       alignItems: 'center',
       justifyContent: 'space-between',
       padding: '8px 12px',
-      borderRadius: 4,
+      borderRadius: 8,
       cursor: 'pointer',
       color: 'var(--color-text-secondary)',
       fontFamily: "'Inter', sans-serif",
@@ -5448,7 +5431,7 @@ export default function Workstation() {
       minWidth: 180,
       background: 'var(--color-bg-elevated)',
       border: '1px solid var(--color-border-strong)',
-      borderRadius: 6,
+      borderRadius: 10,
       boxShadow: '0 16px 40px rgba(0, 0, 0, 0.55)',
       padding: 4,
       zIndex: 1120,
@@ -5463,7 +5446,7 @@ export default function Workstation() {
       alignItems: 'center',
       justifyContent: 'space-between',
       padding: '6px 10px',
-      borderRadius: 4,
+      borderRadius: 8,
       border: 'none',
       background: 'transparent',
       color: 'var(--color-text-secondary)',
@@ -5519,7 +5502,7 @@ export default function Workstation() {
       color: 'var(--color-text-muted)',
       background: 'transparent',
       border: '1px solid var(--glass-border)',
-      borderRadius: 4,
+      borderRadius: 8,
       cursor: 'pointer',
       lineHeight: 1.4,
       transition: 'background 0.12s, color 0.12s, border-color 0.12s',
@@ -5705,6 +5688,7 @@ export default function Workstation() {
       onDragLeave={onWsDragLeave}
       onDrop={onWsDrop}
     >
+      <AlertDialog />
       {/* Tiny stylesheet for the keyframes used by the running-state dot
           in the status bar. Scoped via a unique class so it never leaks
           into other compute pages. */}
@@ -6042,7 +6026,7 @@ export default function Workstation() {
                     // Middle-click closes the tab (browser-tab convention).
                     // Only fires when more than one script is open so we
                     // never end up with an empty tab bar.
-                    if (e.button === 1 && scriptStore.list.length > 1) {
+                    if (e.button === 1) {
                       e.preventDefault()
                       e.stopPropagation()
                       closeScript(s.id)
@@ -6088,14 +6072,12 @@ export default function Workstation() {
                   title={`${s.name} — drag to reorder, double-click to rename, middle-click to close`}
                 >
                   <span>{s.name}</span>
-                  {scriptStore.list.length > 1 && (
-                    <span
-                      style={styles.tabCloseBtn}
-                      onClick={e => { e.stopPropagation(); closeScript(s.id) }}
-                      role="button"
-                      aria-label={`Close ${s.name}`}
-                    >×</span>
-                  )}
+                  <span
+                    style={styles.tabCloseBtn}
+                    onClick={e => { e.stopPropagation(); closeScript(s.id) }}
+                    role="button"
+                    aria-label={`Close ${s.name}`}
+                  >×</span>
                 </button>
               )
             })}
@@ -6150,7 +6132,10 @@ export default function Workstation() {
             const pivotIdx = scriptStore.list.findIndex(s => s.id === tabMenu.id)
             const canCloseOthers = scriptStore.list.length > 1
             const canCloseRight = pivotIdx >= 0 && pivotIdx < scriptStore.list.length - 1
-            const canClose = scriptStore.list.length > 1
+            // Allow closing the last tab — when the list empties out the
+            // editor surface shows an empty-state with a big "+ New Script"
+            // CTA, which is the behaviour the user asked for.
+            const canClose = scriptStore.list.length >= 1
             const closeMenu = () => setTabMenu(null)
             const item = (label: string, enabled: boolean, onClick: () => void) => (
               <button
@@ -6335,6 +6320,93 @@ export default function Workstation() {
               >×</button>
             </div>
           )}
+          {scriptStore.list.length === 0 ? (
+            // Empty-state: the user closed every tab. Instead of auto-spawning
+            // a scratch file we surface a big, centered "+ New Script" CTA
+            // (per user feedback: "show + New Script button for empty state")
+            // with secondary affordances so there's always a well-lit next step.
+            <div
+              style={{
+                flex: 1,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: 24,
+              }}
+              role="region"
+              aria-label="No scripts open"
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: 14,
+                  maxWidth: 440,
+                  textAlign: 'center',
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 12,
+                    letterSpacing: 1.1,
+                    textTransform: 'uppercase',
+                    color: 'var(--color-text-muted)',
+                  }}
+                >
+                  Compute Lab
+                </div>
+                <div
+                  style={{
+                    fontSize: 18,
+                    fontWeight: 600,
+                    color: 'var(--color-text)',
+                  }}
+                >
+                  No scripts open
+                </div>
+                <p
+                  style={{
+                    fontSize: 12,
+                    lineHeight: 1.5,
+                    color: 'var(--color-text-muted)',
+                    margin: 0,
+                  }}
+                >
+                  You closed every tab. Start a fresh script, load one from the
+                  template library, or drop a <code>.hm</code> / <code>.csv</code>
+                  file anywhere to import.
+                </p>
+                <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                  <button
+                    type="button"
+                    onClick={newScript}
+                    style={{
+                      ...styles.btn,
+                      padding: '10px 20px',
+                      fontSize: 13,
+                      fontWeight: 600,
+                    }}
+                    autoFocus
+                  >
+                    + New Script
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setLibMode('templates'); setLibrary('open') }}
+                    style={{
+                      ...styles.btn,
+                      ...styles.btnGhost,
+                      padding: '10px 16px',
+                      fontSize: 13,
+                    }}
+                  >
+                    Browse templates
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : (<>
           <div style={styles.editorBody}>
             <div style={styles.editorGutterClip}>
               <div ref={gutterRef} style={styles.editorGutterNumbers}>
@@ -6531,19 +6603,79 @@ export default function Workstation() {
                 wrap={editorWrapOn ? 'soft' : 'off'}
               />
               {/* ─── Welcome card ──────────────────────────────────────
-                 Surfaces only when the active script is empty. The
-                 overlay itself is pointer-transparent so clicking
-                 outside the inner card drops focus back into the
-                 textarea. Designed for clinicians, surgeons, and
-                 PKPD researchers who don't compute daily and
-                 need an obvious set of next steps. */}
-              {script === '' && (
-                <div style={styles.welcomeOverlay} aria-label="Workstation welcome">
+                 Surfaces when the active script is empty AND the user
+                 hasn't explicitly dismissed the overlay for this script.
+                 The backdrop-blur layer blocks clicks on the editor and
+                 its surrounding tools while the welcome is up, giving
+                 the CTA tiles an unambiguous focus. Users can dismiss
+                 either via × or the "Start with a blank script" tile,
+                 both of which drop focus back into the textarea. */}
+              {script === '' && activeScript && !welcomeDismissed.has(activeScript.id) && (
+                <div
+                  style={styles.welcomeOverlay}
+                  aria-label="Workstation welcome"
+                  role="dialog"
+                  aria-modal="true"
+                  tabIndex={-1}
+                  onKeyDown={(e) => {
+                    // Esc dismisses the overlay so keyboard-first users can
+                    // get into the editor without a mouse click.
+                    if (e.key === 'Escape' && activeScript) {
+                      e.preventDefault()
+                      setWelcomeDismissed(prev => {
+                        if (prev.has(activeScript.id)) return prev
+                        const next = new Set(prev)
+                        next.add(activeScript.id)
+                        return next
+                      })
+                      requestAnimationFrame(() => editorRef.current?.focus())
+                    }
+                  }}
+                >
                   <div
-                    style={styles.welcomeCard}
+                    style={{ ...styles.welcomeCard, position: 'relative' }}
                     role="region"
                     aria-label="Get started"
                   >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!activeScript) return
+                        setWelcomeDismissed(prev => {
+                          if (prev.has(activeScript.id)) return prev
+                          const next = new Set(prev)
+                          next.add(activeScript.id)
+                          return next
+                        })
+                        // Drop focus straight into the editor so the user
+                        // can start typing without another click.
+                        requestAnimationFrame(() => editorRef.current?.focus())
+                      }}
+                      title="Dismiss (Esc) — start with a blank editor"
+                      aria-label="Dismiss welcome"
+                      style={{
+                        position: 'absolute',
+                        top: 10,
+                        right: 10,
+                        width: 26,
+                        height: 26,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderRadius: 6,
+                        background: 'transparent',
+                        border: 'none',
+                        color: 'var(--color-text-muted)',
+                        fontSize: 16,
+                        cursor: 'pointer',
+                      }}
+                      onMouseEnter={(e) => {
+                        (e.currentTarget as HTMLButtonElement).style.background = 'var(--glass-bg-hover)'
+                      }}
+                      onMouseLeave={(e) => {
+                        (e.currentTarget as HTMLButtonElement).style.background = 'transparent'
+                      }}
+                    >×</button>
                     <span style={styles.welcomeKicker}>Numeric Compute Workstation</span>
                     <h2 style={styles.welcomeTitle}>Start computing</h2>
                     <p style={styles.welcomeSub}>
@@ -6614,6 +6746,34 @@ export default function Workstation() {
                         <span style={styles.welcomeTileTitle}>Command palette</span>
                         <span style={styles.welcomeTileSub}>
                           Find any action — templates, settings, run modes, conversions.
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        style={{ ...styles.welcomeTile, gridColumn: '1 / -1' }}
+                        onClick={() => {
+                          if (!activeScript) return
+                          // User chose to write their own script from scratch:
+                          // dismiss the welcome and focus the editor so typing
+                          // immediately replaces the empty textarea.
+                          setWelcomeDismissed(prev => {
+                            if (prev.has(activeScript.id)) return prev
+                            const next = new Set(prev)
+                            next.add(activeScript.id)
+                            return next
+                          })
+                          requestAnimationFrame(() => editorRef.current?.focus())
+                        }}
+                        onMouseEnter={(e) => {
+                          (e.currentTarget as HTMLButtonElement).style.background = 'var(--glass-bg-hover)'
+                        }}
+                        onMouseLeave={(e) => {
+                          (e.currentTarget as HTMLButtonElement).style.background = 'transparent'
+                        }}
+                      >
+                        <span style={styles.welcomeTileTitle}>Start with a blank script</span>
+                        <span style={styles.welcomeTileSub}>
+                          Dismiss this panel and write your own from scratch.
                         </span>
                       </button>
                     </div>
@@ -6738,6 +6898,8 @@ export default function Workstation() {
                 </>
               )}
             </div>
+          )}
+          </>
           )}
         </div>
       </div>
@@ -7127,6 +7289,7 @@ export default function Workstation() {
                   { id: 'figure', label: 'Figure', count: plots.length },
                   { id: 'console', label: 'Console', count: entries.length },
                   { id: 'workspace', label: 'Workspace', count: vars.length },
+                  { id: 'imaging', label: 'Imaging', count: imagingStudyCount },
                 ] as const).map(t => {
                   const active = resultsTab === t.id
                   return (
@@ -7461,6 +7624,12 @@ export default function Workstation() {
             </div>
           </div>
         </div>
+        )}
+
+        {resultsTab === 'imaging' && (
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+            <ImagingPanel visible />
+          </div>
         )}
 
         {resultsTab === 'console' && (
@@ -8262,7 +8431,7 @@ function PlotView({ plot, opts = DEFAULT_PLOT_OPTS }: { plot: PlotSpec | null; o
     }
     return (
       <div style={{ width: '100%', height: '100%', minHeight: 180 }}>
-        <PlotlyChart data={traces} layout={layout} config={{ responsive: true, displayModeBar: 'hover', displaylogo: false }} style={{ width: '100%', height: '100%' }} useResizeHandler />
+        <PlotlyChart data={traces} layout={layout} config={plotlyConfig()} style={{ width: '100%', height: '100%' }} useResizeHandler />
       </div>
     )
   }
@@ -8400,7 +8569,7 @@ function PlotView({ plot, opts = DEFAULT_PLOT_OPTS }: { plot: PlotSpec | null; o
         contentStyle={{
           background: 'var(--color-bg-elevated)',
           border: '1px solid var(--color-border-strong)',
-          borderRadius: 6,
+          borderRadius: 10,
           fontSize: 11,
           color: 'var(--color-text)',
         }}

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   FiFileText, FiPlus, FiTrash2, FiEdit3, FiUsers, FiSend,
   FiDownload, FiSave,
@@ -14,15 +15,23 @@ interface Manuscript {
 interface Author { id: string; name: string; affiliation: string; email: string; role: string; order: number }
 
 const API = '/api/v1/manuscripts'
-const STATUS_COLORS: Record<string, string> = { draft: 'var(--color-text-muted)', review: 'var(--color-accent-blue)', submitted: 'var(--color-accent-purple)', accepted: 'var(--color-success)', published: 'var(--color-accent-green)', rejected: 'var(--color-error)' }
+// accepted/published stay green (terminal success states) and rejected
+// stays red so reviewers can spot final outcomes instantly; in-progress
+// states (draft/review/submitted) are monochrome to match the shell.
+const STATUS_COLORS: Record<string, string> = { draft: 'var(--color-text-muted)', review: 'var(--color-text)', submitted: 'var(--color-text)', accepted: 'var(--color-success)', published: 'var(--color-success)', rejected: 'var(--color-error)' }
 const SECTIONS = ['abstract', 'introduction', 'methods', 'results', 'discussion', 'references']
 
 export default function ManuscriptManager() {
+  // Deep-link support: `?add=1` opens the new-manuscript dialog, and
+  // `?id=<manuscriptId>` auto-selects that manuscript once the list
+  // resolves from the backend. Params are stripped on mount so shared
+  // links stay canonical.
+  const [searchParams] = useSearchParams()
   const [manuscripts, setManuscripts] = useState<Manuscript[]>([])
   const [selected, setSelected] = useState<Manuscript | null>(null)
   const [editSection, setEditSection] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
-  const [showAdd, setShowAdd] = useState(false)
+  const [showAdd, setShowAdd] = useState(() => searchParams.get('add') === '1')
   const [newTitle, setNewTitle] = useState('')
   const [newJournal, setNewJournal] = useState('')
   const [showAuthorAdd, setShowAuthorAdd] = useState(false)
@@ -31,6 +40,36 @@ export default function ManuscriptManager() {
 
   const load = async () => { try { const r = await fetch(API); if (r.ok) setManuscripts((await r.json()).items || []) } catch { /* network error */ } }
   useEffect(() => { load() }, [])
+
+  // Consume & strip `add` + `id` from the URL on mount and kick off
+  // the selectMs fetch for the deep-linked id once it's known.
+  const [pendingId] = useState(() => searchParams.get('id') || '')
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search)
+    let dirty = false
+    if (sp.has('add')) { sp.delete('add'); dirty = true }
+    if (sp.has('id')) { sp.delete('id'); dirty = true }
+    if (dirty) {
+      const qs = sp.toString()
+      const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash
+      window.history.replaceState(window.history.state, '', newUrl)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  useEffect(() => {
+    if (!pendingId || selected) return
+    const match = manuscripts.find(m => m.id === pendingId)
+    if (match) {
+      // Use selectMs to hydrate full manuscript details (authors,
+      // sections) from the detail endpoint.
+      ;(async () => {
+        try {
+          const r = await fetch(`${API}/${pendingId}`)
+          if (r.ok) { const ms = await r.json(); setSelected(ms) }
+        } catch { /* ignore */ }
+      })()
+    }
+  }, [manuscripts, pendingId, selected])
 
   const selectMs = async (id: string) => {
     const r = await fetch(`${API}/${id}`)
@@ -111,6 +150,13 @@ export default function ManuscriptManager() {
 
       <div className="flex-1 flex overflow-hidden">
         <div className="w-72 border-r border-[var(--color-border)] overflow-y-auto p-3 space-y-1">
+          {manuscripts.length === 0 && (
+            <div className="text-center py-8 px-3">
+              <FiFileText className="w-8 h-8 mx-auto mb-2 text-[var(--color-text-muted)] opacity-40" />
+              <p className="text-xs text-[var(--color-text-muted)]">No manuscripts yet</p>
+              <p className="text-xxs text-[var(--color-text-muted)] mt-1">Use "New" above to draft one.</p>
+            </div>
+          )}
           {manuscripts.map(m => (
             <div key={m.id} onClick={() => selectMs(m.id)}
               className={`p-3 rounded-lg cursor-pointer group transition-colors ${selected?.id === m.id ? 'bg-[var(--glass-bg)] border border-[var(--color-border)]' : 'hover:bg-[var(--glass-bg)]'}`}>

@@ -12,7 +12,10 @@ interface MLModel {
 }
 
 const API = '/api/v1/ml-models'
-const STATUS_COLORS: Record<string, string> = { draft: 'var(--color-text-muted)', training: 'var(--color-accent-blue)', validated: 'var(--color-accent-purple)', deployed: 'var(--color-success)', retired: 'var(--color-error)' }
+// deployed/retired keep semantic colour (green = live, red = decommissioned)
+// so they're instantly identifiable in a long list; the other three
+// states stay monochrome to match the platform shell.
+const STATUS_COLORS: Record<string, string> = { draft: 'var(--color-text-muted)', training: 'var(--color-text)', validated: 'var(--color-text)', deployed: 'var(--color-success)', retired: 'var(--color-error)' }
 
 export default function MLModelManager() {
   const [models, setModels] = useState<MLModel[]>([])
@@ -138,8 +141,8 @@ export default function MLModelManager() {
                       <XAxis dataKey="epoch" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
                       <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
                       <Tooltip contentStyle={{ background: 'var(--color-surface-solid)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '11px', color: 'var(--color-text)' }} />
-                      <Line type="monotone" dataKey="train_loss" stroke="var(--color-accent-blue)" strokeWidth={2} dot={false} name="Train Loss" />
-                      <Line type="monotone" dataKey="val_loss" stroke="var(--color-accent-purple)" strokeWidth={2} dot={false} name="Val Loss" />
+                      <Line type="monotone" dataKey="train_loss" stroke="var(--color-text)" strokeWidth={2} dot={false} name="Train Loss" />
+                      <Line type="monotone" dataKey="val_loss" stroke="var(--color-text-muted)" strokeWidth={2} strokeDasharray="4 3" dot={false} name="Val Loss" />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
@@ -155,7 +158,7 @@ export default function MLModelManager() {
                       <XAxis type="number" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
                       <YAxis type="category" dataKey="feature" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} width={80} />
                       <Tooltip contentStyle={{ background: 'var(--color-surface-solid)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '11px', color: 'var(--color-text)' }} />
-                      <Bar dataKey="importance" fill="var(--color-accent-blue)" radius={[0, 2, 2, 0]} />
+                      <Bar dataKey="importance" fill="var(--color-text)" radius={[0, 2, 2, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -171,7 +174,7 @@ export default function MLModelManager() {
                       <XAxis dataKey="fpr" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} label={{ value: 'FPR', position: 'insideBottom', offset: -2, fontSize: 10 }} />
                       <YAxis dataKey="tpr" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} label={{ value: 'TPR', angle: -90, position: 'insideLeft', fontSize: 10 }} />
                       <Tooltip contentStyle={{ background: 'var(--color-surface-solid)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '11px', color: 'var(--color-text)' }} />
-                      <Line type="monotone" dataKey="tpr" stroke="var(--color-accent-blue)" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="tpr" stroke="var(--color-text)" strokeWidth={2} dot={false} />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>

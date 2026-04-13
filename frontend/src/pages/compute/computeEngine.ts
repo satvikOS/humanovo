@@ -1733,15 +1733,21 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
   def('median', 1, args => reduceVecOrMat(args[0], ML.median))
   def('std', 1, args => reduceVecOrMat(args[0], ML.std))
   def('var', 1, args => reduceVecOrMat(args[0], ML.variance))
+  // Single-pass min/max over arrays — Math.min/max.apply/spread blows the
+  // argument-list stack for vectors with >~100k elements, which shows up
+  // as mystery "Maximum call stack size exceeded" when users run the
+  // compute engine against real dataset exports.
+  const arrMin = (a: number[]): number => { let m = Infinity; for (const v of a) if (v < m) m = v; return m }
+  const arrMax = (a: number[]): number => { let m = -Infinity; for (const v of a) if (v > m) m = v; return m }
   def('min', -1, args => {
     if (args.length === 2) return elemBinary(toMat(args[0]), toMat(args[1]), Math.min, 'min')
-    return reduceVecOrMat(args[0], a => Math.min(...a))
+    return reduceVecOrMat(args[0], arrMin)
   })
   def('max', -1, args => {
     if (args.length === 2) return elemBinary(toMat(args[0]), toMat(args[1]), Math.max, 'max')
-    return reduceVecOrMat(args[0], a => Math.max(...a))
+    return reduceVecOrMat(args[0], arrMax)
   })
-  def('range', 1, args => { const a = toArray(args[0]); return mnum(Math.max(...a) - Math.min(...a)) })
+  def('range', 1, args => { const a = toArray(args[0]); return mnum(arrMax(a) - arrMin(a)) })
   def('quantile', 2, args => mnum(ML.quantile(toArray(args[0]), toNumber(args[1]))))
   def('sort', 1, args => {
     const a = [...toArray(args[0])].sort((x, y) => x - y)
@@ -1760,6 +1766,95 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
     const a = toArray(args[0]); const out = new Float64Array(a.length)
     let s = 1; for (let i = 0; i < a.length; i++) { s *= a[i]; out[i] = s }
     return mmat(1, a.length, out)
+  })
+  // Running min/max — each index holds the extreme of the prefix so far.
+  // Useful for drawdown-style analyses and envelope detection.
+  def('cummax', 1, args => {
+    const a = toArray(args[0]); const out = new Float64Array(a.length)
+    let m = -Infinity
+    for (let i = 0; i < a.length; i++) { if (a[i] > m) m = a[i]; out[i] = m }
+    return mmat(1, a.length, out)
+  })
+  def('cummin', 1, args => {
+    const a = toArray(args[0]); const out = new Float64Array(a.length)
+    let m = Infinity
+    for (let i = 0; i < a.length; i++) { if (a[i] < m) m = a[i]; out[i] = m }
+    return mmat(1, a.length, out)
+  })
+  // Robust / alternative means (pharmacokinetics, gait analysis).
+  def('geomean', 1, args => {
+    const a = toArray(args[0])
+    if (a.length === 0) return mnum(NaN)
+    // log-space product keeps us numerically safe on large vectors.
+    let s = 0
+    for (let i = 0; i < a.length; i++) {
+      if (a[i] <= 0) return mnum(NaN)
+      s += Math.log(a[i])
+    }
+    return mnum(Math.exp(s / a.length))
+  })
+  def('harmmean', 1, args => {
+    const a = toArray(args[0])
+    if (a.length === 0) return mnum(NaN)
+    let s = 0
+    for (let i = 0; i < a.length; i++) {
+      if (a[i] === 0) return mnum(0)
+      s += 1 / a[i]
+    }
+    return mnum(a.length / s)
+  })
+  // Trimmed mean — drops the top & bottom `pct`% of values before
+  // averaging. MATLAB's trimmean takes pct as a percentage (0..100).
+  def('trimmean', 2, args => {
+    const a = toArray(args[0]).slice().sort((x, y) => x - y)
+    const pct = toNumber(args[1])
+    if (a.length === 0 || pct < 0 || pct >= 100) return mnum(NaN)
+    const drop = Math.floor((pct / 100 / 2) * a.length)
+    const kept = a.slice(drop, a.length - drop)
+    if (kept.length === 0) return mnum(NaN)
+    let s = 0
+    for (const x of kept) s += x
+    return mnum(s / kept.length)
+  })
+  // Median absolute deviation — robust scale estimate, common in
+  // outlier-screening routines.
+  def('mad', -1, args => {
+    const a = toArray(args[0])
+    if (a.length === 0) return mnum(NaN)
+    // 2nd arg: 0 (default) → mean absolute deviation, 1 → median absolute.
+    const flag = args.length > 1 ? toNumber(args[1]) : 0
+    if (flag === 1) {
+      const sorted = a.slice().sort((x, y) => x - y)
+      const m = sorted.length % 2
+        ? sorted[(sorted.length - 1) / 2]
+        : 0.5 * (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2])
+      const devs = a.map(x => Math.abs(x - m)).sort((x, y) => x - y)
+      return mnum(devs.length % 2
+        ? devs[(devs.length - 1) / 2]
+        : 0.5 * (devs[devs.length / 2 - 1] + devs[devs.length / 2]))
+    }
+    let mean = 0
+    for (const x of a) mean += x
+    mean /= a.length
+    let s = 0
+    for (const x of a) s += Math.abs(x - mean)
+    return mnum(s / a.length)
+  })
+  // Number theory — useful for grid/lattice problems and when normalizing
+  // sample rates between heterogeneous recordings.
+  def('gcd', 2, args => {
+    let a = Math.abs(Math.round(toNumber(args[0])))
+    let b = Math.abs(Math.round(toNumber(args[1])))
+    while (b) { [a, b] = [b, a % b] }
+    return mnum(a)
+  })
+  def('lcm', 2, args => {
+    const a = Math.abs(Math.round(toNumber(args[0])))
+    const b = Math.abs(Math.round(toNumber(args[1])))
+    if (a === 0 || b === 0) return mnum(0)
+    let x = a, y = b
+    while (y) { [x, y] = [y, x % y] }
+    return mnum((a * b) / x)
   })
   def('skewness', 1, args => mnum(ML.skewness(toArray(args[0]))))
   def('kurtosis', 1, args => mnum(ML.kurtosis(toArray(args[0]))))
@@ -2092,6 +2187,204 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
     pushSeries(lbl || `y${ensurePlot().series.length + 1}`, x, y, 'line')
     return MVOID
   })
+
+  // ─── Imaging bridge ────────────────────────────────────────────────
+  // Lightweight script-side handles on the Research Imaging studies kept
+  // in localStorage. The Compute Lab Imaging panel listens on
+  // `compute-imaging-update` and re-renders when we fire it, so mutating
+  // windowCenter/Width from a script immediately updates the viewer.
+  const IMG_KEY = 'research-imaging-studies'
+  const IMG_EVENT = 'compute-imaging-update'
+  interface ImgAnnotation { id: string; type: string; x: number; y: number;
+    w?: number; h?: number; x2?: number; y2?: number; label: string; color: string; notes?: string }
+  interface ImgStudy { id: string; title: string; modality: string; bodyPart: string;
+    width: number; height: number; windowCenter: number; windowWidth: number;
+    filter?: string; annotations?: ImgAnnotation[] }
+  const loadImgStudies = (): ImgStudy[] => {
+    try { return JSON.parse(localStorage.getItem(IMG_KEY) || '[]') as ImgStudy[] } catch { return [] }
+  }
+  const saveImgStudies = (list: ImgStudy[]) => {
+    try { localStorage.setItem(IMG_KEY, JSON.stringify(list)) } catch { /* quota */ }
+  }
+  const fireImg = (selectId?: string) => {
+    try {
+      const evt = new CustomEvent(IMG_EVENT, { detail: selectId ? { selectId } : {} })
+      window.dispatchEvent(evt)
+    } catch { /* non-browser */ }
+  }
+  def('imaging_count', 0, () => mnum(loadImgStudies().length))
+  def('imaging_list', 0, () => {
+    const list = loadImgStudies()
+    const lines = list.length === 0
+      ? ['(no imaging studies — upload on /imaging)']
+      : list.map((s, i) => `[${i}] ${s.title || s.modality} — ${s.modality} · ${s.bodyPart || '–'} (${s.width}×${s.height})`)
+    ctx.outputs.push({ kind: 'text', text: lines.join('\n') })
+    return mnum(list.length)
+  })
+  def('imaging_info', -1, args => {
+    const list = loadImgStudies()
+    if (list.length === 0) throw new RuntimeError('imaging_info: no studies available')
+    const i = args[0] ? Math.max(0, Math.min(list.length - 1, Math.round(toNumber(args[0])))) : list.length - 1
+    const s = list[i]
+    ctx.outputs.push({ kind: 'text', text:
+      `Study [${i}] — ${s.title || s.modality}\n` +
+      `  modality: ${s.modality}\n` +
+      `  region:   ${s.bodyPart || '–'}\n` +
+      `  size:     ${s.width} × ${s.height}\n` +
+      `  window:   C ${s.windowCenter} / W ${s.windowWidth}`,
+    })
+    return MVOID
+  })
+  def('imaging_select', 1, args => {
+    need(args, 1, 'imaging_select')
+    const list = loadImgStudies()
+    if (list.length === 0) throw new RuntimeError('imaging_select: no studies available')
+    const i = Math.max(0, Math.min(list.length - 1, Math.round(toNumber(args[0]))))
+    fireImg(list[i].id)
+    return mstr(list[i].id)
+  })
+  // imaging_annotate(type, x, y, [w, h, [label]]) — add an annotation to the
+  // most-recent study. `type` ∈ { "rect", "circle", "point", "line",
+  // "measure", "ruler" }. For "line"/"measure"/"ruler" w/h are dx/dy.
+  def('imaging_annotate', -1, args => {
+    if (args.length < 3) throw new RuntimeError('imaging_annotate: expected (type, x, y, [w, h, [label]])')
+    const list = loadImgStudies()
+    if (list.length === 0) throw new RuntimeError('imaging_annotate: no studies available')
+    const type = args[0].kind === 'str' ? (args[0] as MStr).v : 'point'
+    const x = toNumber(args[1])
+    const y = toNumber(args[2])
+    const w = args[3] ? toNumber(args[3]) : undefined
+    const h = args[4] ? toNumber(args[4]) : undefined
+    const label = (args[5] && args[5].kind === 'str') ? (args[5] as MStr).v : `annotation ${Date.now()}`
+    const ann: ImgAnnotation = {
+      id: `ann-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      type, x, y, label, color: '#ffffff',
+    }
+    if (type === 'line' || type === 'measure' || type === 'ruler') {
+      if (w !== undefined) ann.x2 = x + w
+      if (h !== undefined) ann.y2 = y + h
+    } else if (w !== undefined || h !== undefined) {
+      ann.w = w
+      ann.h = h
+    }
+    const idx = list.length - 1
+    const next = list.map((s, i) => i === idx
+      ? { ...s, annotations: [...(s.annotations || []), ann] }
+      : s)
+    saveImgStudies(next)
+    fireImg(next[idx].id)
+    return mstr(ann.id)
+  })
+  // imaging_annotations([idx]) — print and return count of annotations on
+  // the given study (defaults to the most-recent study).
+  def('imaging_annotations', -1, args => {
+    const list = loadImgStudies()
+    if (list.length === 0) throw new RuntimeError('imaging_annotations: no studies available')
+    const idx = args[0] ? Math.max(0, Math.min(list.length - 1, Math.round(toNumber(args[0])))) : list.length - 1
+    const anns = list[idx].annotations || []
+    if (anns.length === 0) {
+      ctx.outputs.push({ kind: 'text', text: `(study [${idx}] has no annotations)` })
+    } else {
+      const lines = anns.map((a, i) => {
+        const extra = a.type === 'rect' || a.type === 'circle'
+          ? ` ${a.w?.toFixed?.(0) ?? '–'}×${a.h?.toFixed?.(0) ?? '–'}`
+          : (a.x2 !== undefined ? ` → (${a.x2.toFixed(0)}, ${a.y2?.toFixed(0) ?? '–'})` : '')
+        return `  [${i}] ${a.type} @ (${a.x.toFixed(0)}, ${a.y.toFixed(0)})${extra} — ${a.label}`
+      })
+      ctx.outputs.push({ kind: 'text', text: `Study [${idx}] annotations (${anns.length}):\n${lines.join('\n')}` })
+    }
+    return mnum(anns.length)
+  })
+  // imaging_clear_annotations([idx]) — remove every annotation from the
+  // given study (default: last study).
+  def('imaging_clear_annotations', -1, args => {
+    const list = loadImgStudies()
+    if (list.length === 0) throw new RuntimeError('imaging_clear_annotations: no studies available')
+    const idx = args[0] ? Math.max(0, Math.min(list.length - 1, Math.round(toNumber(args[0])))) : list.length - 1
+    const removed = (list[idx].annotations || []).length
+    const next = list.map((s, i) => i === idx ? { ...s, annotations: [] } : s)
+    saveImgStudies(next)
+    fireImg(next[idx].id)
+    return mnum(removed)
+  })
+  // imaging_filter(name, [idx]) — apply a named filter preset to the study.
+  // Valid names: none, invert, gaussian, median, sharpen, sobel, canny,
+  // threshold, otsu, laplacian, histeq.
+  def('imaging_filter', -1, args => {
+    if (args.length < 1) throw new RuntimeError('imaging_filter: expected (name, [idx])')
+    const list = loadImgStudies()
+    if (list.length === 0) throw new RuntimeError('imaging_filter: no studies available')
+    const name = args[0].kind === 'str' ? (args[0] as MStr).v : 'none'
+    const idx = args[1] ? Math.max(0, Math.min(list.length - 1, Math.round(toNumber(args[1])))) : list.length - 1
+    const next = list.map((s, i) => i === idx ? { ...s, filter: name } : s)
+    saveImgStudies(next)
+    fireImg(next[idx].id)
+    return mstr(name)
+  })
+  // imaging_window(center, width, [idx]) — adjust window/level from script
+  // without touching the UI. Useful for batch normalization across studies.
+  def('imaging_window', -1, args => {
+    if (args.length < 2) throw new RuntimeError('imaging_window: expected (center, width, [idx])')
+    const list = loadImgStudies()
+    if (list.length === 0) throw new RuntimeError('imaging_window: no studies available')
+    const center = Math.round(toNumber(args[0]))
+    const width = Math.max(1, Math.round(toNumber(args[1])))
+    const idx = args[2] ? Math.max(0, Math.min(list.length - 1, Math.round(toNumber(args[2])))) : list.length - 1
+    const next = list.map((s, i) => i === idx ? { ...s, windowCenter: center, windowWidth: width } : s)
+    saveImgStudies(next)
+    fireImg(next[idx].id)
+    return mnum(center)
+  })
+  // imaging_roi_stats([idx]) — print geometric stats (area in px², perimeter,
+  // centroid) for each annotation on the study; returns the annotation count.
+  def('imaging_roi_stats', -1, args => {
+    const list = loadImgStudies()
+    if (list.length === 0) throw new RuntimeError('imaging_roi_stats: no studies available')
+    const idx = args[0] ? Math.max(0, Math.min(list.length - 1, Math.round(toNumber(args[0])))) : list.length - 1
+    const anns = list[idx].annotations || []
+    if (anns.length === 0) {
+      ctx.outputs.push({ kind: 'text', text: '(no ROIs on this study — add some with imaging_annotate)' })
+      return mnum(0)
+    }
+    const lines: string[] = []
+    lines.push(`ROIs on study [${idx}] — ${anns.length} total`)
+    lines.push('  idx  type      label                 area(px²)   perim(px)   centroid')
+    for (let i = 0; i < anns.length; i++) {
+      const a = anns[i]
+      let area = 0, perim = 0, cx = a.x, cy = a.y
+      if (a.type === 'rect' && a.w && a.h) {
+        area = Math.abs(a.w * a.h)
+        perim = 2 * (Math.abs(a.w) + Math.abs(a.h))
+        cx = a.x + a.w / 2; cy = a.y + a.h / 2
+      } else if (a.type === 'circle' && a.w) {
+        const r = Math.abs(a.w) / 2
+        area = Math.PI * r * r
+        perim = 2 * Math.PI * r
+      } else if ((a.type === 'line' || a.type === 'measure' || a.type === 'ruler') &&
+                 typeof a.x2 === 'number' && typeof a.y2 === 'number') {
+        const dx = a.x2 - a.x, dy = a.y2 - a.y
+        perim = Math.sqrt(dx * dx + dy * dy)
+        cx = (a.x + a.x2) / 2; cy = (a.y + a.y2) / 2
+      }
+      const pad = (s: string, n: number) => (s.length >= n ? s : s + ' '.repeat(n - s.length))
+      lines.push(
+        `  ${pad(String(i), 4)} ${pad(a.type, 9)} ${pad((a.label || '').slice(0, 20), 22)}` +
+        ` ${pad(area.toFixed(1), 11)} ${pad(perim.toFixed(1), 11)} (${cx.toFixed(0)}, ${cy.toFixed(0)})`,
+      )
+    }
+    ctx.outputs.push({ kind: 'text', text: lines.join('\n') })
+    return mnum(anns.length)
+  })
+  // imaging_measure(x1, y1, x2, y2) — Euclidean pixel distance between two
+  // points. Convenience helper so scripts can compute lengths without
+  // placing an actual ruler annotation.
+  def('imaging_measure', 4, args => {
+    const x1 = toNumber(args[0]), y1 = toNumber(args[1])
+    const x2 = toNumber(args[2]), y2 = toNumber(args[3])
+    const dx = x2 - x1, dy = y2 - y1
+    return mnum(Math.sqrt(dx * dx + dy * dy))
+  })
+  // End Imaging bridge
   def('scatter', -1, args => {
     need(args, 2, 'scatter')
     pushSeries('scatter', toArray(args[0]), toArray(args[1]), 'scatter')
@@ -2397,7 +2690,7 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
   // Min-max normalization to [0, 1]
   def('rescale', 1, args => {
     const a = toArray(args[0])
-    const mn = Math.min(...a), mx = Math.max(...a)
+    const mn = arrMin(a), mx = arrMax(a)
     const r = mx - mn
     if (r === 0) return mmat(1, a.length, new Float64Array(a.length).fill(0.5))
     const out = a.map(v => (v - mn) / r)
@@ -2623,6 +2916,75 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
     const d = new Float64Array(rr * cc)
     for (let i = 0; i < d.length; i++) d[i] = Math.floor(Math.random() * imax) + 1
     return mmat(rr, cc, d)
+  })
+  // randsample(v, k, [replace]) — Fisher-Yates sample `k` elements from vector
+  // `v`. Defaults to without-replacement; pass `true` for with-replacement.
+  def('randsample', -1, args => {
+    if (args.length < 2) throw new RuntimeError('randsample: expected (v, k, [replace])')
+    const src = toArray(args[0])
+    const k = Math.round(toNumber(args[1]))
+    const replace = args[2] ? !!(args[2].kind === 'bool' ? (args[2] as MBool).v : toNumber(args[2])) : false
+    if (k < 0) throw new RuntimeError('randsample: k must be non-negative')
+    if (!replace && k > src.length) throw new RuntimeError('randsample: k exceeds population size')
+    const out = new Float64Array(k)
+    if (replace) {
+      for (let i = 0; i < k; i++) out[i] = src[Math.floor(Math.random() * src.length)]
+    } else {
+      const pool = src.slice()
+      for (let i = 0; i < k; i++) {
+        const j = i + Math.floor(Math.random() * (pool.length - i))
+        ;[pool[i], pool[j]] = [pool[j], pool[i]]
+        out[i] = pool[i]
+      }
+    }
+    return mmat(1, k, out)
+  })
+  // shuffle(v) — return a random permutation of the input vector.
+  def('shuffle', 1, args => {
+    const src = toArray(args[0]).slice()
+    for (let i = src.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      ;[src[i], src[j]] = [src[j], src[i]]
+    }
+    return mmat(1, src.length, Float64Array.from(src))
+  })
+
+  // ---- Argmin / argmax / clip -----------------------------------------
+  // 1-indexed (MATLAB convention) for consistency with other ops in this
+  // engine. Ties break to the lowest index.
+  def('argmin', 1, args => {
+    const a = toArray(args[0])
+    if (a.length === 0) throw new RuntimeError('argmin: empty input')
+    let best = 0
+    for (let i = 1; i < a.length; i++) if (a[i] < a[best]) best = i
+    return mnum(best + 1)
+  })
+  def('argmax', 1, args => {
+    const a = toArray(args[0])
+    if (a.length === 0) throw new RuntimeError('argmax: empty input')
+    let best = 0
+    for (let i = 1; i < a.length; i++) if (a[i] > a[best]) best = i
+    return mnum(best + 1)
+  })
+  // clip(x, lo, hi) — element-wise clamp onto [lo, hi]. Accepts scalars or
+  // matrices for x; lo/hi must be scalar.
+  def('clip', 3, args => {
+    const lo = toNumber(args[1])
+    const hi = toNumber(args[2])
+    if (lo > hi) throw new RuntimeError('clip: lo must be ≤ hi')
+    return elemMap(args[0], x => Math.min(hi, Math.max(lo, x)))
+  })
+  // sigmoid(x) — logistic function, element-wise.
+  def('sigmoid', 1, args => elemMap(args[0], x => 1 / (1 + Math.exp(-x))))
+  // softmax(v) — numerically-stable softmax over the flattened vector; returns
+  // probabilities that sum to 1.
+  def('softmax', 1, args => {
+    const a = toArray(args[0])
+    if (a.length === 0) throw new RuntimeError('softmax: empty input')
+    const mx = arrMax(a)
+    const exps = a.map(x => Math.exp(x - mx))
+    const s = exps.reduce((p, v) => p + v, 0) || 1
+    return mmat(1, a.length, Float64Array.from(exps.map(v => v / s)))
   })
 
   // ---- Linear algebra --------------------------------------------------

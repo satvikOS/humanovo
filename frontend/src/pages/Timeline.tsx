@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   FiFolder,
   FiZap,
@@ -32,16 +33,18 @@ const typeIcons: Record<string, typeof FiZap> = {
   simulation: FiActivity, notebook: FiFileText, discovery: FiTrendingUp,
 }
 
+// Monochrome — icon shape + type label convey the category; status icons
+// still use error/success/warning tokens for accessibility.
 const typeColors: Record<string, string> = {
-  project: 'var(--color-text-secondary)', hypothesis: 'var(--color-accent-purple)',
-  evidence: 'var(--color-accent-blue)', simulation: 'var(--color-accent-green)',
-  notebook: 'var(--color-accent-orange)', discovery: 'var(--color-accent-cyan)',
+  project: 'var(--color-text-secondary)', hypothesis: 'var(--color-text)',
+  evidence: 'var(--color-text)', simulation: 'var(--color-text-secondary)',
+  notebook: 'var(--color-text-muted)', discovery: 'var(--color-text)',
 }
 
 const actionColors: Record<string, string> = {
-  created: 'var(--color-accent-blue)', updated: 'var(--color-text-muted)',
+  created: 'var(--color-text)', updated: 'var(--color-text-muted)',
   completed: 'var(--color-success)', validated: 'var(--color-success)',
-  rejected: 'var(--color-error)', imported: 'var(--color-accent-cyan)',
+  rejected: 'var(--color-error)', imported: 'var(--color-text-secondary)',
   started: 'var(--color-warning)', deleted: 'var(--color-error)',
 }
 
@@ -64,15 +67,48 @@ function formatMilestoneTime(dateStr: string): string {
 
 const MILESTONE_ACTIONS = new Set(['created', 'completed', 'validated', 'started', 'rejected'])
 
+// Valid params for deep-link filter/range. Kept inline with `filterOptions`
+// and `TimeRange` so a stale query param silently falls back to the default
+// instead of picking a bogus filter state.
+const VALID_FILTER_TYPES = new Set<FilterType>(['', 'project', 'hypothesis', 'evidence', 'simulation', 'notebook', 'discovery'])
+const VALID_TIME_RANGES = new Set<TimeRange>(['today', 'week', 'month', 'all'])
+
 export default function Timeline() {
-  const [filterType, setFilterType] = useState<FilterType>('')
-  const [timeRange, setTimeRange] = useState<TimeRange>('all')
+  // Deep-link support: `?type=hypothesis&range=week` lets Dashboard cards
+  // and external links jump into a pre-filtered view. Invalid params fall
+  // back to defaults; the query is cleaned off the URL on mount so a soft
+  // reload doesn't overwrite user-driven filter changes.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const qType = searchParams.get('type') || ''
+  const qRange = searchParams.get('range') || ''
+  const initialFilter: FilterType = VALID_FILTER_TYPES.has(qType as FilterType) ? (qType as FilterType) : ''
+  const initialRange: TimeRange = VALID_TIME_RANGES.has(qRange as TimeRange) ? (qRange as TimeRange) : 'all'
+
+  const [filterType, setFilterType] = useState<FilterType>(initialFilter)
+  const [timeRange, setTimeRange] = useState<TimeRange>(initialRange)
+
+  // Clean the deep-link params off the URL after the initial mount.
+  useEffect(() => {
+    if (searchParams.has('type') || searchParams.has('range')) {
+      const next = new URLSearchParams(searchParams)
+      next.delete('type')
+      next.delete('range')
+      setSearchParams(next, { replace: true })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [refreshKey, setRefreshKey] = useState(0)
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
   const [allActivities, setAllActivities] = useState<ActivityEntry[]>([])
+  // Track load status so the empty state can distinguish "nothing
+  // logged yet" from "couldn't reach the activity API" — two
+  // completely different user actions (write something vs. check
+  // connectivity).
+  const [loadState, setLoadState] = useState<'loading' | 'ok' | 'error'>('loading')
 
   useEffect(() => {
     const load = async () => {
+      setLoadState('loading')
       try {
         const dateFrom = timeRange === 'today'
           ? new Date(new Date().setHours(0, 0, 0, 0)).toISOString()
@@ -96,8 +132,10 @@ export default function Timeline() {
           metadata: a.metadata,
         }))
         setAllActivities(mapped)
-      } catch { /* API unavailable — show empty state */
+        setLoadState('ok')
+      } catch {
         setAllActivities([])
+        setLoadState('error')
       }
     }
     load()
@@ -177,8 +215,22 @@ export default function Timeline() {
           {Object.entries(grouped).length === 0 ? (
             <div className="text-center py-16">
               <FiClock className="w-10 h-10 mx-auto mb-3 text-[var(--color-text-muted)] opacity-30" />
-              <p className="text-sm text-[var(--color-text-muted)]">No activity found</p>
-              <p className="text-xs text-[var(--color-text-muted)] mt-1">Start a discovery or create a project to see activity here</p>
+              {loadState === 'loading' ? (
+                <>
+                  <p className="text-sm text-[var(--color-text-muted)]">Loading activity…</p>
+                  <p className="text-xs text-[var(--color-text-muted)] mt-1">Fetching from the activity log</p>
+                </>
+              ) : loadState === 'error' ? (
+                <>
+                  <p className="text-sm text-[var(--color-error)]">Couldn't reach the activity service</p>
+                  <p className="text-xs text-[var(--color-text-muted)] mt-1">Check your connection or the API and try Refresh above.</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm text-[var(--color-text-muted)]">No activity found</p>
+                  <p className="text-xs text-[var(--color-text-muted)] mt-1">Start a discovery or create a project to see activity here</p>
+                </>
+              )}
             </div>
           ) : (
             Object.entries(grouped).map(([dateKey, dayActivities]) => (

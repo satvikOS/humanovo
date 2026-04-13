@@ -507,18 +507,60 @@ export function parseTIFF(buffer: ArrayBuffer): ParsedImage | null {
 }
 
 // ─── Unified dispatcher ────────────────────────────────────────────────
-// Given a File, detect the format and return a normalized ParsedImage,
-// or null if the file isn't a recognized non-native format (in which
-// case the caller should fall back to the native Image() loader).
+// Given a File, detect the format by inspecting file header bytes (magic
+// numbers) rather than relying solely on file extension. Falls back to
+// extension-based detection if headers are inconclusive.
 export async function parseMedicalFile(file: File): Promise<ParsedImage | null> {
   const name = file.name.toLowerCase()
+  const buffer = await file.arrayBuffer()
+
+  // Detect format by magic bytes (more reliable than extension)
+  if (buffer.byteLength >= 132) {
+    const view = new DataView(buffer)
+    // DICOM: preamble (128 bytes) + 'DICM' magic
+    const magic4 = String.fromCharCode(view.getUint8(128), view.getUint8(129), view.getUint8(130), view.getUint8(131))
+    if (magic4 === 'DICM') {
+      const result = parseDICOM(buffer)
+      if (result) return result
+    }
+  }
+
+  if (buffer.byteLength >= 352) {
+    const view = new DataView(buffer)
+    // NIfTI-1: sizeof_hdr == 348 at offset 0 (little or big endian)
+    const sizeLE = view.getInt32(0, true)
+    const sizeBE = view.getInt32(0, false)
+    if (sizeLE === 348 || sizeBE === 348) {
+      const magicOff = 344
+      if (magicOff + 3 <= buffer.byteLength) {
+        const niftiMagic = String.fromCharCode(view.getUint8(344), view.getUint8(345), view.getUint8(346))
+        if (niftiMagic === 'ni1' || niftiMagic === 'n+1') {
+          const result = parseNIfTI(buffer)
+          if (result) return result
+        }
+      }
+    }
+  }
+
+  if (buffer.byteLength >= 8) {
+    const view = new DataView(buffer)
+    // TIFF: II (0x4949) or MM (0x4D4D) + magic 42
+    const byteOrder = view.getUint16(0, false)
+    if (byteOrder === 0x4949 || byteOrder === 0x4D4D) {
+      const le = byteOrder === 0x4949
+      const tiffMagic = view.getUint16(2, le)
+      if (tiffMagic === 42) {
+        const result = parseTIFF(buffer)
+        if (result) return result
+      }
+    }
+  }
+
+  // Fallback: extension-based detection
   const isDicom = name.endsWith('.dcm') || name.endsWith('.dicom')
   const isNifti = name.endsWith('.nii')
   const isTiff = name.endsWith('.tif') || name.endsWith('.tiff')
 
-  if (!isDicom && !isNifti && !isTiff) return null
-
-  const buffer = await file.arrayBuffer()
   if (isDicom) return parseDICOM(buffer)
   if (isNifti) return parseNIfTI(buffer)
   if (isTiff) return parseTIFF(buffer)

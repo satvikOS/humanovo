@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   FiBook, FiPlus, FiCopy, FiDownload, FiTrash2, FiSearch,
   FiCheck, FiUpload, FiFolder, FiEdit3, FiExternalLink,
@@ -264,9 +265,23 @@ async function fetchFromPMID(pmid: string): Promise<Partial<Citation> | null> {
 
 export default function CitationManager() {
   const [citations, setCitations] = usePersistentState<Citation[]>('citations', [])
-  const [searchQuery, setSearchQuery] = useState('')
-  const [showAddForm, setShowAddForm] = useState(false)
-  const [showImport, setShowImport] = useState(false)
+  // Deep-link support: `?q=` seeds the search filter, `?add=1` opens the
+  // Add citation form, `?import=1` opens the import-by-DOI/PMID flow.
+  // Consumed-and-cleaned pattern matches Evidence/Projects/Agents.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [searchQuery, setSearchQuery] = useState(() => searchParams.get('q') || '')
+  const [showAddForm, setShowAddForm] = useState(() => searchParams.get('add') === '1')
+  const [showImport, setShowImport] = useState(() => searchParams.get('import') === '1')
+  useEffect(() => {
+    if (searchParams.has('q') || searchParams.has('add') || searchParams.has('import')) {
+      const next = new URLSearchParams(searchParams)
+      next.delete('q')
+      next.delete('add')
+      next.delete('import')
+      setSearchParams(next, { replace: true })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [citationStyle, setCitationStyle] = useState<CitationStyle>('apa')
   const [copied, setCopied] = useState<string | null>(null)
   const [filterType, setFilterType] = useState<string>('')
@@ -638,7 +653,7 @@ export default function CitationManager() {
                 <div
                   key={citation.id}
                   onClick={() => setSelectedCitation(citation)}
-                  className={`glass-card p-4 group cursor-pointer transition-all ${selectedCitation?.id === citation.id ? 'border-[var(--color-accent-blue)]/50' : ''}`}
+                  className={`glass-card p-4 group cursor-pointer transition-all ${selectedCitation?.id === citation.id ? 'border-white/30' : ''}`}
                 >
                   <div className="flex items-start gap-3">
                     <span className="text-xs text-[var(--color-text-muted)] font-mono mt-0.5 w-6 text-right flex-shrink-0">[{idx + 1}]</span>
@@ -652,15 +667,15 @@ export default function CitationManager() {
                       <div className="flex items-center gap-2 mt-2 flex-wrap">
                         <span className="text-xxs px-1.5 py-0.5 rounded bg-[var(--glass-bg)] text-[var(--color-text-muted)]">{citation.type}</span>
                         {citation.collection && (
-                          <span className="text-xxs px-1.5 py-0.5 rounded bg-[var(--color-accent-blue)]/10 text-[var(--color-accent-blue)]">
+                          <span className="text-xxs px-1.5 py-0.5 rounded bg-white/5 text-[var(--color-text)]">
                             <FiFolder className="w-2.5 h-2.5 inline mr-0.5" />{citation.collection}
                           </span>
                         )}
                         {citation.tags.slice(0, 3).map(t => (
                           <span key={t} className="text-xxs px-1.5 py-0.5 rounded bg-[var(--glass-bg)] text-[var(--color-text-muted)]">{t}</span>
                         ))}
-                        {citation.doi && <span className="text-xxs text-[var(--color-accent-blue)]">DOI</span>}
-                        {citation.pmid && <span className="text-xxs text-[var(--color-accent-green)]">PubMed</span>}
+                        {citation.doi && <span className="text-xxs text-[var(--color-text)]">DOI</span>}
+                        {citation.pmid && <span className="text-xxs text-[var(--color-text)]">PubMed</span>}
                       </div>
                     </div>
                     <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
@@ -724,19 +739,19 @@ export default function CitationManager() {
               <div className="flex items-center gap-3">
                 {selectedCitation.doi && (
                   <a href={`https://doi.org/${selectedCitation.doi}`} target="_blank" rel="noreferrer"
-                    className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-[var(--color-accent-blue)]/10 text-[var(--color-accent-blue)] hover:bg-[var(--color-accent-blue)]/20 transition-colors">
+                    className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-white/5 text-[var(--color-text)] hover:bg-white/10 transition-colors">
                     <FiExternalLink className="w-3 h-3" /> DOI
                   </a>
                 )}
                 {selectedCitation.pmid && (
                   <a href={`https://pubmed.ncbi.nlm.nih.gov/${selectedCitation.pmid}`} target="_blank" rel="noreferrer"
-                    className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-[var(--color-accent-green)]/10 text-[var(--color-accent-green)] hover:bg-[var(--color-accent-green)]/20 transition-colors">
+                    className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-white/5 text-[var(--color-text)] hover:bg-white/10 transition-colors">
                     <FiBookOpen className="w-3 h-3" /> PubMed
                   </a>
                 )}
                 {selectedCitation.pdfUrl && (
                   <a href={selectedCitation.pdfUrl} target="_blank" rel="noreferrer"
-                    className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-[var(--color-accent-orange)]/10 text-[var(--color-accent-orange)] hover:bg-[var(--color-accent-orange)]/20 transition-colors">
+                    className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-white/5 text-[var(--color-text)] hover:bg-white/10 transition-colors">
                     <FiFile className="w-3 h-3" /> View PDF
                   </a>
                 )}

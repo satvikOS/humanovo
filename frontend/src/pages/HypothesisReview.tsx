@@ -214,7 +214,7 @@ export default function HypothesisReview() {
                 </button>
                 {expandedStage === stage && t.output && (
                   <pre className="px-3 py-2 text-xs whitespace-pre-wrap overflow-auto max-h-60"
-                    style={{ color: 'var(--color-text-muted)', background: 'var(--color-bg-secondary)', borderLeft: '2px solid var(--color-accent-blue)' }}>
+                    style={{ color: 'var(--color-text-muted)', background: 'var(--color-bg-secondary)', borderLeft: '2px solid var(--color-text-muted)' }}>
                     {t.output}
                   </pre>
                 )}
@@ -240,7 +240,7 @@ export default function HypothesisReview() {
               return (
                 <div key={i} className="text-sm p-2 rounded" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
                   <div className="flex items-start gap-2">
-                    <span className="text-xs font-mono shrink-0 px-1.5 py-0.5 rounded" style={{ background: 'var(--color-accent-blue)', color: '#fff' }}>[{c.index}]</span>
+                    <span className="text-xs font-mono shrink-0 px-1.5 py-0.5 rounded" style={{ background: 'rgba(255,255,255,0.15)', color: 'var(--color-text)' }}>[{c.index}]</span>
                     <div>
                       <p className="font-medium" style={{ color: 'var(--color-text)' }}>{c.title}</p>
                       <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-muted)' }}>
@@ -313,8 +313,8 @@ export default function HypothesisReview() {
 
       {/* Section 7: Paper Generation */}
       <Section title="Paper Generation">
-        <button onClick={generatePaper} className="px-4 py-2 rounded-lg text-sm font-medium text-white"
-          style={{ background: 'var(--color-accent-blue)' }}>
+        <button onClick={generatePaper} className="px-4 py-2 rounded-lg text-sm font-medium"
+          style={{ background: 'rgba(255,255,255,0.15)', color: 'var(--color-text)' }}>
           Generate Paper (.docx)
         </button>
       </Section>
@@ -331,7 +331,7 @@ export default function HypothesisReview() {
                 {[1, 2, 3, 4, 5].map(v => (
                   <button key={v} onClick={() => setOverallQuality(v)}
                     className="w-8 h-8 rounded text-sm font-medium"
-                    style={{ background: overallQuality >= v ? 'var(--color-accent-blue)' : 'var(--color-bg-secondary)', color: overallQuality >= v ? '#fff' : 'var(--color-text-muted)', border: '1px solid var(--color-border)' }}>
+                    style={{ background: overallQuality >= v ? 'rgba(255,255,255,0.18)' : 'var(--color-bg-secondary)', color: overallQuality >= v ? 'var(--color-text)' : 'var(--color-text-muted)', border: '1px solid var(--color-border)' }}>
                     {v}
                   </button>
                 ))}
@@ -355,8 +355,8 @@ export default function HypothesisReview() {
             </div>
 
             <button onClick={submitFeedback} disabled={submittingFeedback}
-              className="px-4 py-2 rounded-lg text-sm font-medium text-white"
-              style={{ background: 'var(--color-accent-blue)', opacity: submittingFeedback ? 0.5 : 1 }}>
+              className="px-4 py-2 rounded-lg text-sm font-medium"
+              style={{ background: 'rgba(255,255,255,0.15)', color: 'var(--color-text)', opacity: submittingFeedback ? 0.5 : 1 }}>
               {submittingFeedback ? 'Submitting...' : 'Submit Feedback'}
             </button>
           </div>

@@ -458,7 +458,7 @@ export default function ProjectKnowledgeGraph() {
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               placeholder="Search by name or type..."
-              className="w-full bg-[var(--glass-bg)] border border-[var(--color-border)] rounded-lg py-2 pl-10 pr-9 text-sm text-[var(--color-text)] placeholder-[var(--color-text-muted)] focus:outline-none focus:border-blue-500"
+              className="w-full bg-[var(--glass-bg)] border border-[var(--color-border)] rounded-lg py-2 pl-10 pr-9 text-sm text-[var(--color-text)] placeholder-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-border-strong)]"
             />
             {searchQuery && (
               <button
@@ -669,7 +669,7 @@ export default function ProjectKnowledgeGraph() {
                             style={{ backgroundColor: NODE_COLORS[entity.type] }}
                           />
                           <div className="min-w-0 flex-1">
-                            <p className="text-xs text-[var(--color-text)] truncate group-hover:text-[var(--color-accent-blue)]">
+                            <p className="text-xs text-[var(--color-text)] truncate group-hover:text-white">
                               {entity.label}
                             </p>
                             {edge && (
@@ -708,7 +708,7 @@ export default function ProjectKnowledgeGraph() {
                       className={clsx(
                         'inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs',
                         'bg-[var(--glass-bg)] border border-[var(--color-border)]',
-                        'text-[var(--color-accent-blue)] hover:bg-[var(--glass-bg-hover)] transition-colors',
+                        'text-[var(--color-text)] hover:bg-[var(--glass-bg-hover)] transition-colors',
                       )}
                     >
                       <FiExternalLink className="w-3 h-3" />

@@ -14,7 +14,19 @@ import {
   movingAverage, welchPSD, ode45, polyfit, polyval, kmeans, pca,
   pkOneCompartment, pkOralAbsorption, pkMultipleDosing, kaplanMeier,
   sampleSizeCalc, buildHistogram, normCDF, invNorm, tCDF,
+  arrMin, arrMax,
 } from './mathLib'
+
+// argmax without spreading — spread call of Math.max(...arr) is fine on small
+// arrays but overflows the JS argument-list stack on ~10k+ element signals.
+function argmax(a: ArrayLike<number>): number {
+  let best = -Infinity, idx = 0
+  for (let i = 0; i < a.length; i++) {
+    const v = a[i]
+    if (v > best) { best = v; idx = i }
+  }
+  return idx
+}
 import type { Preset, ToolboxCategory } from './types'
 
 const fmt = (v: number, digits = 4) => {
@@ -73,8 +85,8 @@ const statisticsPresets: Preset[] = [
           { label: 'Std Dev', value: fmt(s) },
           { label: 'SEM', value: fmt(sem(x)) },
           { label: 'Variance', value: fmt(variance(x)) },
-          { label: 'Min', value: fmt(Math.min(...x)) },
-          { label: 'Max', value: fmt(Math.max(...x)) },
+          { label: 'Min', value: fmt(arrMin(x)) },
+          { label: 'Max', value: fmt(arrMax(x)) },
           { label: 'Q1 (25%)', value: fmt(quantile(x, 0.25)) },
           { label: 'Q3 (75%)', value: fmt(quantile(x, 0.75)) },
           { label: 'IQR', value: fmt(quantile(x, 0.75) - quantile(x, 0.25)) },
@@ -497,7 +509,7 @@ const statisticsPresets: Preset[] = [
         b1 -= lr * g1 / n
       }
       const sigmoid = (z: number) => 1 / (1 + Math.exp(-z))
-      const xMin = Math.min(...x), xMax = Math.max(...x)
+      const xMin = arrMin(x), xMax = arrMax(x)
       const curveData = []
       for (let i = 0; i <= 100; i++) {
         const xi = xMin + (xMax - xMin) * (i / 100)
@@ -681,7 +693,7 @@ const signalPresets: Preset[] = [
     compute: (p) => {
       const data = parseArray(p.data)
       const r = fft(data, parseFloat(p.fs))
-      const peakIdx = r.magnitude.indexOf(Math.max(...r.magnitude))
+      const peakIdx = argmax(r.magnitude)
       return {
         statistics: [
           { label: 'N samples', value: String(data.length) },
@@ -746,7 +758,7 @@ const signalPresets: Preset[] = [
         statistics: [
           { label: 'Peaks found', value: String(r.indices.length) },
           { label: 'Mean height', value: fmt(mean(r.heights)) },
-          { label: 'Max height', value: fmt(Math.max(...r.heights, 0)) },
+          { label: 'Max height', value: fmt(r.heights.length ? arrMax(r.heights) : 0) },
           { label: 'Mean spacing', value: fmt(r.indices.length > 1 ? mean(r.indices.slice(1).map((v, i) => v - r.indices[i])) : 0) },
         ],
         chartType: 'line',
@@ -852,7 +864,7 @@ const signalPresets: Preset[] = [
         statistics: [
           { label: 'Samples', value: String(N) },
           { label: 'Mean envelope', value: fmt(mean(env)) },
-          { label: 'Max envelope', value: fmt(Math.max(...env)) },
+          { label: 'Max envelope', value: fmt(arrMax(env)) },
         ],
         chartType: 'multi-line',
         chartTitle: 'Signal & Envelope',
@@ -963,7 +975,7 @@ const signalPresets: Preset[] = [
       for (let start = 0; start + winSize < data.length; start += hop) {
         const seg = data.slice(start, start + winSize)
         const r = fft(seg, fs)
-        const peakIdx = r.magnitude.indexOf(Math.max(...r.magnitude))
+        const peakIdx = argmax(r.magnitude)
         peakFreqs.push(r.frequency[peakIdx])
       }
       return {
@@ -971,8 +983,8 @@ const signalPresets: Preset[] = [
           { label: 'Window size', value: String(winSize) },
           { label: 'Hop size', value: String(hop) },
           { label: 'Time bins', value: String(peakFreqs.length) },
-          { label: 'Min peak freq', value: `${fmt(Math.min(...peakFreqs))} Hz` },
-          { label: 'Max peak freq', value: `${fmt(Math.max(...peakFreqs))} Hz` },
+          { label: 'Min peak freq', value: `${fmt(arrMin(peakFreqs))} Hz` },
+          { label: 'Max peak freq', value: `${fmt(arrMax(peakFreqs))} Hz` },
         ],
         chartType: 'line',
         chartTitle: 'Peak Frequency over Time',
@@ -1171,7 +1183,7 @@ const imagePresets: Preset[] = [
           { label: 'Threshold', value: fmt(threshold) },
           { label: 'Edge pixels', value: String(edgePixels) },
           { label: 'Edge density', value: fmt(100 * edgePixels / edges.length) + '%' },
-          { label: 'Max gradient', value: fmt(Math.max(...edges)) },
+          { label: 'Max gradient', value: fmt(arrMax(edges)) },
         ],
       }
     },
@@ -1438,7 +1450,7 @@ const bioinformaticsPresets: Preset[] = [
           { label: 'Total tests', value: String(m) },
           { label: 'Significant raw', value: String(pvals.filter(p => p < alpha).length) },
           { label: 'Significant FDR', value: String(significant) },
-          { label: 'Min adj p', value: fmt(Math.min(...adjusted), 6) },
+          { label: 'Min adj p', value: fmt(arrMin(adjusted), 6) },
         ],
         chartType: 'scatter',
         chartTitle: 'Adjusted vs Raw p-values',
@@ -1621,7 +1633,7 @@ const bioinformaticsPresets: Preset[] = [
           { label: 'Sequences', value: String(n) },
           { label: 'Pairs', value: String(distances.length) },
           { label: 'Mean distance', value: fmt(mean(distances.map(d => d.d))) },
-          { label: 'Max distance', value: fmt(Math.max(...distances.map(d => d.d))) },
+          { label: 'Max distance', value: fmt(arrMax(distances.map(d => d.d))) },
           ...distances.slice(0, 6).map(d => ({ label: `d(${d.i + 1},${d.j + 1})`, value: fmt(d.d) })),
         ],
       }
@@ -1765,10 +1777,11 @@ const curveFittingPresets: Preset[] = [
       const x = parseArray(p.x), y = parseArray(p.y)
       // Grid search for mu, sigma, amplitude
       let best = { mu: 0, sigma: 1, amp: 1, err: Infinity }
-      const xMin = Math.min(...x), xMax = Math.max(...x)
+      const xMin = arrMin(x), xMax = arrMax(x)
+      const yMax = arrMax(y)
       for (let mu = xMin; mu <= xMax; mu += (xMax - xMin) / 30) {
         for (let sigma = 0.5; sigma <= (xMax - xMin) / 2; sigma += 0.2) {
-          for (let amp = Math.max(...y) * 0.5; amp <= Math.max(...y) * 1.5; amp += 0.2) {
+          for (let amp = yMax * 0.5; amp <= yMax * 1.5; amp += 0.2) {
             let err = 0
             for (let i = 0; i < x.length; i++) {
               const pred = amp * Math.exp(-((x[i] - mu) ** 2) / (2 * sigma * sigma))
@@ -1864,7 +1877,7 @@ const curveFittingPresets: Preset[] = [
     compute: (p) => {
       const data = parseArray(p.data)
       // Simple 2-component EM
-      let mu1 = Math.min(...data), mu2 = Math.max(...data)
+      let mu1 = arrMin(data), mu2 = arrMax(data)
       let sd1 = std(data), sd2 = std(data)
       let w1 = 0.5, w2 = 0.5
       const norm = (x: number, m: number, s: number) => Math.exp(-((x - m) ** 2) / (2 * s * s)) / (s * Math.sqrt(2 * Math.PI))
@@ -2061,7 +2074,7 @@ const odePresets: Preset[] = [
         gamma * y[1],
       ]
       const sol = ode45(f, [0, parseFloat(p.days)], [N - I0, I0, 0], 300)
-      const peakI = Math.max(...sol.y.map(yi => yi[1]))
+      const peakI = arrMax(sol.y.map(yi => yi[1]))
       const peakDay = sol.t[sol.y.findIndex(yi => yi[1] === peakI)]
       const finalR = sol.y[sol.y.length - 1][2]
       return {
@@ -2108,8 +2121,8 @@ const odePresets: Preset[] = [
         statistics: [
           { label: 'Equilibrium prey', value: fmt(g / d) },
           { label: 'Equilibrium predator', value: fmt(a / b) },
-          { label: 'Max prey', value: fmt(Math.max(...sol.y.map(y => y[0]))) },
-          { label: 'Max predator', value: fmt(Math.max(...sol.y.map(y => y[1]))) },
+          { label: 'Max prey', value: fmt(arrMax(sol.y.map(y => y[0]))) },
+          { label: 'Max predator', value: fmt(arrMax(sol.y.map(y => y[1]))) },
         ],
         chartType: 'multi-line',
         chartTitle: 'Lotka-Volterra Cycles',
@@ -2708,7 +2721,7 @@ const pkPresets: Preset[] = [
       const f = parseFloat(p.f), tMax = parseFloat(p.tMax)
       const { t, c } = pkOralAbsorption(dose, V, ka, ke, f, tMax)
       const tmax = Math.log(ka / ke) / (ka - ke)
-      const cmax = Math.max(...c)
+      const cmax = arrMax(c)
       const halfLife = Math.log(2) / ke
       return {
         statistics: [
@@ -2969,8 +2982,8 @@ const normalityPresets: Preset[] = [
           { label: 'N', value: String(x.length) },
           { label: 'Mean (raw)', value: fmt(m) },
           { label: 'Std (raw)', value: fmt(s) },
-          { label: 'Min z', value: fmt(Math.min(...z)) },
-          { label: 'Max z', value: fmt(Math.max(...z)) },
+          { label: 'Min z', value: fmt(arrMin(z)) },
+          { label: 'Max z', value: fmt(arrMax(z)) },
           { label: '|z| > 2 outliers', value: String(outliers) },
         ],
         chartType: 'scatter',
@@ -2996,7 +3009,7 @@ const normalityPresets: Preset[] = [
       if (x.length < 5) return { error: 'Need ≥ 5 values' }
       const m = mean(x), s = std(x)
       const bins = buildHistogram(x, 15)
-      const xMin = Math.min(...x), xMax = Math.max(...x)
+      const xMin = arrMin(x), xMax = arrMax(x)
       const binWidth = (xMax - xMin) / 15 || 1
       const fittedCounts = bins.map(b => {
         const center = parseFloat(b.bin) + binWidth / 2

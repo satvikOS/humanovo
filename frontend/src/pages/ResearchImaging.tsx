@@ -5,6 +5,7 @@
 // All processing client-side via Canvas API — no backend required.
 // ═══════════════════════════════════════════════════════════════════════
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   FiImage, FiUpload, FiDownload, FiTrash2, FiPlus, FiZoomIn, FiZoomOut,
   FiSquare, FiCircle, FiMaximize2, FiCpu, FiSliders, FiFilter,
@@ -14,6 +15,7 @@ import {
 import clsx from 'clsx'
 import { parseMedicalFile, parsedToDataURL } from '../utils/medicalImaging'
 import VolumeViewer3D from '../components/VolumeViewer3D'
+import { useAlertDialog } from '../components/AlertDialog'
 
 type Modality = 'CT' | 'MRI' | 'X-Ray' | 'Ultrasound' | 'PET' | 'Microscopy' | 'Fundus' | 'OCT' | 'Mammography' | 'Endoscopy'
 type Tool = 'pan' | 'window' | 'rect' | 'circle' | 'line' | 'point' | 'polygon' | 'measure' | 'ruler' | 'brush' | 'eraser'
@@ -382,7 +384,8 @@ function applyFilter(imageData: ImageData, filter: Filter): ImageData {
       }
     }
     // Step 3: Non-max suppression + double threshold
-    const maxMag = Math.max(...Array.from(mag).filter(v => isFinite(v)))
+    let maxMag = 0
+    for (let i = 0; i < mag.length; i++) { if (isFinite(mag[i]) && mag[i] > maxMag) maxMag = mag[i] }
     const hiT = maxMag * 0.15, loT = maxMag * 0.05
     for (let y = 1; y < height - 1; y++) {
       for (let x = 1; x < width - 1; x++) {
@@ -431,17 +434,50 @@ function computeImageStats(data: Uint8ClampedArray): { mean: number; std: number
     hist[Math.round(lum)]++
     n++
   }
+  if (n === 0) return { mean: 0, std: 0, min: 0, max: 0, histogram: hist }
   const mean = sum / n
   const variance = sumSq / n - mean * mean
   return { mean, std: Math.sqrt(Math.max(0, variance)), min: mn, max: mx, histogram: hist }
 }
 
 /* ═══ Main Component ═══════════════════════════════════════════════════ */
+// Enum-guard set matches the `Modality` type so `?modality=bogus`
+// silently falls back to "all".
+const VALID_MODALITIES_ANY = new Set<string>(['all', 'CT', 'MRI', 'X-Ray', 'Ultrasound', 'PET', 'Microscopy', 'Fundus', 'OCT', 'Mammography', 'Endoscopy'])
+
 export default function ResearchImaging() {
+  const { showConfirm, AlertDialog } = useAlertDialog()
+  // Deep-link support: `?id=<studyId>` selects a study on mount,
+  // `?q=<term>` seeds the search input, and `?modality=` seeds the
+  // modality filter (enum-guarded). All three are stripped from the
+  // URL after mount so shared links stay canonical.
+  const [searchParams] = useSearchParams()
   const [studies, setStudies] = useState<Study[]>(() => loadStudies())
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [search, setSearch] = useState('')
-  const [filterModality, setFilterModality] = useState<Modality | 'all'>('all')
+  const [selectedId, setSelectedId] = useState<string | null>(() => {
+    const qId = searchParams.get('id')
+    if (!qId) return null
+    // Only apply if the study actually exists locally.
+    const local = loadStudies()
+    return local.find(s => s.id === qId) ? qId : null
+  })
+  const [search, setSearch] = useState(() => searchParams.get('q') || '')
+  const [filterModality, setFilterModality] = useState<Modality | 'all'>(() => {
+    const qm = searchParams.get('modality') || 'all'
+    return VALID_MODALITIES_ANY.has(qm) ? (qm as Modality | 'all') : 'all'
+  })
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search)
+    let dirty = false
+    for (const k of ['id', 'q', 'modality']) {
+      if (sp.has(k)) { sp.delete(k); dirty = true }
+    }
+    if (dirty) {
+      const qs = sp.toString()
+      const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash
+      window.history.replaceState(window.history.state, '', newUrl)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [tool, setTool] = useState<Tool>('pan')
   const [zoom, setZoom] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
@@ -459,12 +495,23 @@ export default function ResearchImaging() {
   const [brushSize, setBrushSize] = useState(8)
   const [segMask, setSegMask] = useState<Uint8Array | null>(null) // per-pixel label mask
   const [isPainting, setIsPainting] = useState(false)
+  const [aiAnalysis, setAiAnalysis] = useState<string | null>(null)
+  const [aiLoading, setAiLoading] = useState(false)
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const coronalRef = useRef<HTMLCanvasElement>(null)
   const sagittalRef = useRef<HTMLCanvasElement>(null)
   const imgCacheRef = useRef<HTMLImageElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const studiesRef = useRef<Study[]>(studies)
+  const segMaskRef = useRef<Uint8Array | null>(segMask)
+  const renderingRef = useRef(false)
+  // When a render is already running and new props arrive (e.g. the user
+  // clicked another filter), flag the render as stale so we re-run exactly
+  // once afterwards instead of dropping the update or stacking N renders.
+  const renderDirtyRef = useRef(false)
+  const renderRafRef = useRef<number | null>(null)
+  const [filterBusy, setFilterBusy] = useState(false)
 
   const selected = useMemo(() => studies.find(s => s.id === selectedId) || null, [studies, selectedId])
 
@@ -481,32 +528,87 @@ export default function ResearchImaging() {
     })
   }, [studies, search, filterModality])
 
-  // Persist studies
-  useEffect(() => { saveStudies(studies) }, [studies])
+  // Persist studies + keep refs in sync (refs used inside renderCanvas to
+  // avoid creating a new callback identity on every study mutation, which
+  // combined with the render-canvas effect caused a render cascade that
+  // could exhaust the JS stack during rapid interactions like a W/L drag).
+  useEffect(() => { studiesRef.current = studies; saveStudies(studies) }, [studies])
+  useEffect(() => { segMaskRef.current = segMask }, [segMask])
+
+  // Track image-loaded generation to trigger re-render after img.onload
+  const [imgGeneration, setImgGeneration] = useState(0)
 
   // Load image when selection changes
   useEffect(() => {
     if (!selected) { imgCacheRef.current = null; return }
     const img = new Image()
-    img.onload = () => { imgCacheRef.current = img; renderCanvas() }
+    img.onload = () => { imgCacheRef.current = img; setImgGeneration(g => g + 1) }
     img.src = selected.imageData
     setZoom(1); setPan({ x: 0, y: 0 })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId])
 
-  // Re-render when zoom/pan/window/filter/annotations change
-  useEffect(() => { renderCanvas() })
+  // Viewer keyboard shortcuts — radiologist-style single-key tool swap
+  // plus zoom / reset / study-nav. Swallowed while the user is typing
+  // into a text input so it never fights with search / annotation labels.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName
+      const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' ||
+        (e.target as HTMLElement | null)?.isContentEditable
+      if (typing || e.metaKey || e.ctrlKey || e.altKey) return
+
+      const key = e.key
+      // Tool swap
+      const toolMap: Record<string, Tool> = {
+        p: 'pan', r: 'rect', c: 'circle', l: 'line',
+        '.': 'point', m: 'measure', u: 'ruler',
+        b: 'brush', x: 'eraser', w: 'window',
+      }
+      if (toolMap[key]) { e.preventDefault(); setTool(toolMap[key]); return }
+
+      // Zoom / reset
+      if (key === '+' || key === '=') { e.preventDefault(); setZoom(z => Math.min(8, z * 1.2)); return }
+      if (key === '-' || key === '_') { e.preventDefault(); setZoom(z => Math.max(0.1, z / 1.2)); return }
+      if (key === '0') { e.preventDefault(); setZoom(1); setPan({ x: 0, y: 0 }); return }
+
+      // Layout toggle
+      if (key === 'f' || key === 'F') {
+        e.preventDefault()
+        setViewLayout(v => v === 'single' ? 'quad' : 'single')
+        return
+      }
+
+      // Study navigation within the filtered list
+      if (key === '[' || key === ']') {
+        if (filteredStudies.length === 0) return
+        e.preventDefault()
+        const curIdx = filteredStudies.findIndex(s => s.id === selectedId)
+        const delta = key === ']' ? 1 : -1
+        const nextIdx = curIdx < 0
+          ? 0
+          : (curIdx + delta + filteredStudies.length) % filteredStudies.length
+        setSelectedId(filteredStudies[nextIdx].id)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [filteredStudies, selectedId])
 
   // Render orthogonal views (coronal / sagittal) in quad mode
   useEffect(() => {
     if (viewLayout !== 'quad') return
     const img = imgCacheRef.current
     if (!img || !selected) return
+    if (img.width <= 0 || img.height <= 0) return
+
+    try {
 
     // Get processed image data
     const off = document.createElement('canvas')
     off.width = img.width; off.height = img.height
-    const offCtx = off.getContext('2d')!
+    const offCtx = off.getContext('2d')
+    if (!offCtx) return
     offCtx.drawImage(img, 0, 0)
     let srcData = offCtx.getImageData(0, 0, img.width, img.height)
     srcData = applyWindow(srcData, selected.windowCenter, selected.windowWidth)
@@ -522,7 +624,8 @@ export default function ResearchImaging() {
       const cW = coronalCanvas.parentElement?.clientWidth || 300
       const cH = coronalCanvas.parentElement?.clientHeight || 300
       coronalCanvas.width = cW; coronalCanvas.height = cH
-      const cCtx = coronalCanvas.getContext('2d')!
+      const cCtx = coronalCanvas.getContext('2d')
+      if (!cCtx) return
       cCtx.fillStyle = '#000'; cCtx.fillRect(0, 0, cW, cH)
 
       // Build a "depth" image: for each column, stack rows vertically
@@ -567,7 +670,8 @@ export default function ResearchImaging() {
       const sW = sagittalCanvas.parentElement?.clientWidth || 300
       const sH = sagittalCanvas.parentElement?.clientHeight || 300
       sagittalCanvas.width = sW; sagittalCanvas.height = sH
-      const sCtx = sagittalCanvas.getContext('2d')!
+      const sCtx = sagittalCanvas.getContext('2d')
+      if (!sCtx) return
       sCtx.fillStyle = '#000'; sCtx.fillRect(0, 0, sW, sH)
 
       // Transpose image: columns become rows (sagittal rotation)
@@ -603,14 +707,25 @@ export default function ResearchImaging() {
       sCtx.fillStyle = '#ffffff88'; sCtx.font = '10px sans-serif'
       sCtx.fillText(`Slice ${sliceX}/${W}`, 8, 30)
     }
-  })
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[ResearchImaging] orthogonal view render failed:', err)
+    }
+  }, [viewLayout, selected, slicePos, imgGeneration])
 
   const renderCanvas = useCallback(() => {
+    // Re-entrancy guard: if a previous render is still in flight (e.g. a
+    // synchronous state update triggered during canvas draw) mark the
+    // render as dirty so we re-run exactly once when the current pass
+    // finishes, rather than dropping the update or stacking N renders.
+    if (renderingRef.current) { renderDirtyRef.current = true; return }
     const canvas = canvasRef.current
     const img = imgCacheRef.current
     if (!canvas || !img || !selected) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
+    renderingRef.current = true
+    try {
 
     // Fit canvas to display size, draw at zoom
     const dispW = canvas.parentElement?.clientWidth || 800
@@ -625,7 +740,8 @@ export default function ResearchImaging() {
     const off = document.createElement('canvas')
     off.width = img.width
     off.height = img.height
-    const offCtx = off.getContext('2d')!
+    const offCtx = off.getContext('2d')
+    if (!offCtx) { renderingRef.current = false; return }
     offCtx.drawImage(img, 0, 0)
     let data = offCtx.getImageData(0, 0, img.width, img.height)
     data = applyWindow(data, selected.windowCenter, selected.windowWidth)
@@ -682,16 +798,19 @@ export default function ResearchImaging() {
       }
     })
 
-    // Draw segmentation mask overlay
-    if (segMask && selected) {
+    // Draw segmentation mask overlay (read from ref to avoid triggering
+    // renderCanvas recreation on every brush stroke)
+    const segMaskLocal = segMaskRef.current
+    if (segMaskLocal && selected) {
       const labels = selected.labels || []
       const maskCanvas = document.createElement('canvas')
       maskCanvas.width = img.width
       maskCanvas.height = img.height
-      const mCtx = maskCanvas.getContext('2d')!
+      const mCtx = maskCanvas.getContext('2d')
+      if (!mCtx) { renderingRef.current = false; return }
       const mData = mCtx.createImageData(img.width, img.height)
-      for (let i = 0; i < segMask.length; i++) {
-        const labelIdx = segMask[i]
+      for (let i = 0; i < segMaskLocal.length; i++) {
+        const labelIdx = segMaskLocal[i]
         if (labelIdx === 0) continue
         const label = labels[labelIdx - 1]
         if (label && !label.visible) continue
@@ -729,35 +848,80 @@ export default function ResearchImaging() {
       ctx.setLineDash([])
     }
 
-    // Draw registration overlay
+    // Draw registration overlay — use a synchronous approach to avoid
+    // stale canvas context from async image loads.
     if (regShowOverlay && regRefId) {
-      const refStudy = studies.find(s => s.id === regRefId)
+      const refStudy = studiesRef.current.find(s => s.id === regRefId)
       if (refStudy) {
-        const refImg = new Image()
-        refImg.onload = () => {
-          ctx.save()
-          ctx.globalAlpha = regOverlayOpacity
-          // Apply transform relative to center
-          const cx = dispW / 2
-          const cy = dispH / 2
-          ctx.translate(cx + regTransform.tx * scale, cy + regTransform.ty * scale)
-          ctx.rotate((regTransform.rotation * Math.PI) / 180)
-          ctx.scale(regTransform.scale, regTransform.scale)
-          const refScale = Math.min(dispW / refImg.width, dispH / refImg.height) * zoom
-          const rw = refImg.width * refScale
-          const rh = refImg.height * refScale
-          // Tint the overlay with a color to distinguish it
-          ctx.drawImage(refImg, -rw / 2, -rh / 2, rw, rh)
-          ctx.restore()
-          // Label
-          ctx.fillStyle = '#f59e0b'
-          ctx.font = 'bold 10px sans-serif'
-          ctx.fillText(`REF: ${refStudy.title}`, 8, dispH - 8)
+        try {
+          // Re-use a pre-decoded image via an offscreen canvas to avoid
+          // the async Image.onload problem that causes stale ctx usage.
+          const refOff = document.createElement('canvas')
+          const refTmpImg = new Image()
+          refTmpImg.src = refStudy.imageData
+          // Only draw if the image is already cached/decoded (width > 0)
+          if (refTmpImg.complete && refTmpImg.naturalWidth > 0) {
+            refOff.width = refTmpImg.naturalWidth
+            refOff.height = refTmpImg.naturalHeight
+            const rOffCtx = refOff.getContext('2d')
+            if (rOffCtx) {
+              rOffCtx.drawImage(refTmpImg, 0, 0)
+              ctx.save()
+              ctx.globalAlpha = regOverlayOpacity
+              const cx = dispW / 2
+              const cy = dispH / 2
+              ctx.translate(cx + regTransform.tx * scale, cy + regTransform.ty * scale)
+              ctx.rotate((regTransform.rotation * Math.PI) / 180)
+              ctx.scale(regTransform.scale, regTransform.scale)
+              const refScale = Math.min(dispW / refTmpImg.naturalWidth, dispH / refTmpImg.naturalHeight) * zoom
+              const rw = refTmpImg.naturalWidth * refScale
+              const rh = refTmpImg.naturalHeight * refScale
+              ctx.drawImage(refOff, -rw / 2, -rh / 2, rw, rh)
+              ctx.restore()
+              ctx.fillStyle = '#f59e0b'
+              ctx.font = 'bold 10px sans-serif'
+              ctx.fillText(`REF: ${refStudy.title}`, 8, dispH - 8)
+            }
+          }
+        } catch (e) {
+          // Silently ignore registration overlay errors
         }
-        refImg.src = refStudy.imageData
       }
     }
-  }, [selected, zoom, pan, drawing, tool, annotColor, regShowOverlay, regRefId, regTransform, regOverlayOpacity, studies, segMask])
+    } catch (err) {
+      // Swallow canvas render errors (e.g. getImageData OOM on huge images,
+      // tainted canvas from external data URLs) so a malformed study does
+      // not crash the entire imaging page.
+      // eslint-disable-next-line no-console
+      console.warn('[ResearchImaging] renderCanvas failed:', err)
+    } finally {
+      renderingRef.current = false
+      // If state changed during the render (e.g. user clicked another filter
+      // while Bilateral was crunching), schedule one follow-up pass on the
+      // next animation frame so the browser can paint the intermediate UI.
+      if (renderDirtyRef.current) {
+        renderDirtyRef.current = false
+        if (renderRafRef.current != null) cancelAnimationFrame(renderRafRef.current)
+        renderRafRef.current = requestAnimationFrame(() => {
+          renderRafRef.current = null
+          renderCanvas()
+        })
+      }
+    }
+  }, [selected, zoom, pan, drawing, tool, annotColor, regShowOverlay, regRefId, regTransform, regOverlayOpacity])
+
+  // Cancel any pending re-render when the component unmounts so we never
+  // schedule work against a torn-down canvas.
+  useEffect(() => () => {
+    if (renderRafRef.current != null) cancelAnimationFrame(renderRafRef.current)
+  }, [])
+
+  // Re-render when zoom/pan/window/filter/annotations or image load changes.
+  // Also re-render on segMask generation so brush strokes paint live. The
+  // segMask itself is read via ref inside renderCanvas to keep the callback
+  // identity stable.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { renderCanvas() }, [renderCanvas, imgGeneration, segMask])
 
   const screenToImage = useCallback((e: React.MouseEvent): { x: number; y: number } | null => {
     const canvas = canvasRef.current
@@ -796,9 +960,26 @@ export default function ResearchImaging() {
     setSegMask(new Uint8Array(mask))
   }, [selected, segMask, brushSize, tool, annotLabel])
 
+  // ── Cursor position overlay for pixel info ───────────────────
+  const [cursorInfo, setCursorInfo] = useState<{ x: number; y: number; intensity: number } | null>(null)
+
+  // ── Drag state for pan and window/level ──────────────────────
+  const dragStartRef = useRef<{ x: number; y: number; panX: number; panY: number; wc: number; ww: number; button: number } | null>(null)
+
   const handleMouseDown = (e: React.MouseEvent) => {
     if (!selected) return
-    if (tool === 'pan') return
+    // Right-button drag → window/level adjustment (standard DICOM interaction)
+    if (e.button === 2) {
+      e.preventDefault()
+      dragStartRef.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y, wc: selected.windowCenter, ww: selected.windowWidth, button: 2 }
+      return
+    }
+    // Middle-button or pan tool → drag to pan
+    if (e.button === 1 || tool === 'pan') {
+      e.preventDefault()
+      dragStartRef.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y, wc: 0, ww: 0, button: 0 }
+      return
+    }
     const p = screenToImage(e)
     if (!p) return
     if (tool === 'brush' || tool === 'eraser') {
@@ -815,6 +996,46 @@ export default function ResearchImaging() {
   }
 
   const handleMouseMove = (e: React.MouseEvent) => {
+    // Update cursor pixel info
+    const imgP = screenToImage(e)
+    if (imgP && selected) {
+      const img = imgCacheRef.current
+      if (img) {
+        const px = Math.floor(imgP.x), py = Math.floor(imgP.y)
+        if (px >= 0 && px < img.width && py >= 0 && py < img.height) {
+          try {
+            const off = document.createElement('canvas')
+            off.width = img.width; off.height = img.height
+            const ctx = off.getContext('2d')
+            if (ctx) {
+              ctx.drawImage(img, 0, 0)
+              const pixel = ctx.getImageData(px, py, 1, 1).data
+              setCursorInfo({ x: px, y: py, intensity: Math.round((pixel[0] + pixel[1] + pixel[2]) / 3) })
+            }
+          } catch { setCursorInfo(null) }
+        } else {
+          setCursorInfo(null)
+        }
+      }
+    } else {
+      setCursorInfo(null)
+    }
+
+    // Handle drag operations
+    if (dragStartRef.current) {
+      const ds = dragStartRef.current
+      if (ds.button === 2 && selected) {
+        // Right-drag: window/level (horizontal = width, vertical = center)
+        const dx = e.clientX - ds.x
+        const dy = e.clientY - ds.y
+        updateStudy({ ...selected, windowWidth: Math.max(1, ds.ww + dx), windowCenter: ds.wc - dy })
+      } else {
+        // Pan drag
+        setPan({ x: ds.panX + (e.clientX - ds.x), y: ds.panY + (e.clientY - ds.y) })
+      }
+      return
+    }
+
     if (isPainting && (tool === 'brush' || tool === 'eraser')) {
       const p = screenToImage(e)
       if (p) paintAt(p.x, p.y)
@@ -827,6 +1048,7 @@ export default function ResearchImaging() {
   }
 
   const handleMouseUp = () => {
+    dragStartRef.current = null
     if (isPainting) { setIsPainting(false); return }
     if (!drawing || !selected) return
     const { start, current } = drawing
@@ -859,12 +1081,20 @@ export default function ResearchImaging() {
     setDrawing(null)
   }
 
+  // ── Mouse wheel zoom (centered on cursor) ───────────────────
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault()
+    const delta = e.deltaY > 0 ? -0.15 : 0.15
+    setZoom(z => Math.max(0.1, Math.min(10, z + delta * z)))
+  }, [])
+
   const updateStudy = (s: Study) => {
     setStudies(prev => prev.map(x => x.id === s.id ? s : x))
   }
 
-  const deleteStudy = (id: string) => {
-    if (!confirm('Delete this study? This cannot be undone.')) return
+  const deleteStudy = async (id: string) => {
+    const ok = await showConfirm('Delete this study? This cannot be undone.', 'Delete Study', 'Delete Permanently', 'Cancel')
+    if (!ok) return
     setStudies(prev => prev.filter(s => s.id !== id))
     if (selectedId === id) setSelectedId(null)
   }
@@ -876,19 +1106,35 @@ export default function ResearchImaging() {
 
   const [uploadError, setUploadError] = useState<string | null>(null)
 
-  const inferModality = (filename: string): Modality => {
+  const inferModality = (filename: string, width?: number, height?: number, mimeType?: string): Modality => {
     const n = filename.toLowerCase()
-    if (n.includes('ct')) return 'CT'
-    if (n.includes('mr') || n.includes('mri')) return 'MRI'
-    if (n.includes('xray') || n.includes('x-ray') || n.includes('cr_')) return 'X-Ray'
-    if (n.includes('us') || n.includes('ultra')) return 'Ultrasound'
-    if (n.includes('pet')) return 'PET'
-    if (n.includes('mam')) return 'Mammography'
-    if (n.includes('oct')) return 'OCT'
-    if (n.includes('fundus') || n.includes('retin')) return 'Fundus'
-    if (n.includes('micro') || n.includes('histo')) return 'Microscopy'
-    if (n.includes('endo')) return 'Endoscopy'
-    return 'CT'
+    // Check filename patterns first
+    if (n.includes('ct') || n.includes('scan')) return 'CT'
+    if (n.includes('mr') || n.includes('mri') || n.includes('t1w') || n.includes('t2w') || n.includes('flair')) return 'MRI'
+    if (n.includes('xray') || n.includes('x-ray') || n.includes('cr_') || n.includes('radiograph')) return 'X-Ray'
+    if (n.includes('us') || n.includes('ultra') || n.includes('echo') || n.includes('sonogram')) return 'Ultrasound'
+    if (n.includes('pet') || n.includes('fdg') || n.includes('spect')) return 'PET'
+    if (n.includes('mam') || n.includes('breast') || n.includes('tomo')) return 'Mammography'
+    if (n.includes('oct') || n.includes('optical_coherence')) return 'OCT'
+    if (n.includes('fundus') || n.includes('retin') || n.includes('optic_disc')) return 'Fundus'
+    if (n.includes('micro') || n.includes('histo') || n.includes('pathol') || n.includes('slide') || n.includes('biopsy')) return 'Microscopy'
+    if (n.includes('endo') || n.includes('colon') || n.includes('gastro')) return 'Endoscopy'
+    // Check file extension patterns
+    if (n.endsWith('.dcm') || n.endsWith('.dicom')) return 'CT'
+    if (n.endsWith('.nii') || n.endsWith('.nii.gz')) return 'MRI'
+    // Check MIME type for DICOM
+    if (mimeType === 'application/dicom') return 'CT'
+    // Infer from image dimensions (heuristics)
+    if (width && height) {
+      const aspect = width / height
+      // Mammography tends to be tall/narrow
+      if (aspect < 0.6 && width > 1500) return 'Mammography'
+      // Fundus images tend to be roughly square and high-res
+      if (aspect > 0.9 && aspect < 1.1 && width > 2000) return 'Fundus'
+      // Microscopy slides tend to be very high resolution
+      if (width > 4000 || height > 4000) return 'Microscopy'
+    }
+    return 'X-Ray' // Default to X-Ray for generic images rather than CT
   }
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -905,7 +1151,7 @@ export default function ResearchImaging() {
           const modality = parsed.meta.modality
             ? (parsed.meta.modality as Modality)
             : inferModality(file.name)
-          const validModality: Modality = (MODALITIES.find(m => m.id === modality)?.id) || inferModality(file.name)
+          const validModality: Modality = (MODALITIES.find(m => m.id === modality)?.id) || inferModality(file.name, parsed.width, parsed.height, file.type)
           const study: Study = {
             id: crypto.randomUUID(),
             title: file.name.replace(/\.[^.]+$/, ''),
@@ -947,7 +1193,7 @@ export default function ResearchImaging() {
         const study: Study = {
           id: crypto.randomUUID(),
           title: file.name.replace(/\.[^.]+$/, ''),
-          modality: inferModality(file.name),
+          modality: inferModality(file.name, img.width, img.height, file.type),
           bodyPart: '',
           patientId: '',
           acquiredAt: new Date().toISOString(),
@@ -978,12 +1224,18 @@ export default function ResearchImaging() {
     const off = document.createElement('canvas')
     off.width = img.width
     off.height = img.height
-    const ctx = off.getContext('2d')!
-    ctx.drawImage(img, 0, 0)
-    const imgData = ctx.getImageData(0, 0, img.width, img.height)
-    return computeImageStats(imgData.data)
+    const ctx = off.getContext('2d')
+    if (!ctx) return null
+    try {
+      ctx.drawImage(img, 0, 0)
+      const imgData = ctx.getImageData(0, 0, img.width, img.height)
+      return computeImageStats(imgData.data)
+    } catch {
+      // Tainted canvas, zero-size image, or out-of-memory - fall back to null
+      return null
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId, selected?.annotations.length])
+  }, [selectedId, selected?.annotations.length, imgGeneration])
 
   const exportImage = () => {
     const canvas = canvasRef.current
@@ -1005,26 +1257,70 @@ export default function ResearchImaging() {
     URL.revokeObjectURL(url)
   }
 
-  const tools: { id: Tool; icon: typeof FiSquare; label: string }[] = [
-    { id: 'pan', icon: FiMaximize2, label: 'Pan' },
-    { id: 'rect', icon: FiSquare, label: 'Rectangle' },
-    { id: 'circle', icon: FiCircle, label: 'Circle' },
-    { id: 'line', icon: FiCrosshair, label: 'Line' },
-    { id: 'point', icon: FiTarget, label: 'Point' },
-    { id: 'measure', icon: FiActivity, label: 'Measure' },
-    { id: 'ruler', icon: FiSliders, label: 'Ruler' },
+  const runAiAnalysis = async () => {
+    if (!selected) return
+    setAiLoading(true)
+    setAiAnalysis(null)
+    try {
+      // Get the canvas as a base64 image (with current windowing/filter applied)
+      const canvas = canvasRef.current
+      if (!canvas) throw new Error('No canvas available')
+      const dataUrl = canvas.toDataURL('image/png')
+      const base64 = dataUrl.split(',')[1]
+
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || ''}/api/v1/imaging/analyze`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image_base64: base64,
+          modality: selected.modality,
+          body_part: selected.bodyPart,
+          width: selected.width,
+          height: selected.height,
+          window_center: selected.windowCenter,
+          window_width: selected.windowWidth,
+          filter_applied: selected.filter,
+        }),
+      })
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({ detail: response.statusText }))
+        throw new Error(errData.detail || `Server error ${response.status}`)
+      }
+      const data = await response.json()
+      if (data.analysis) {
+        setAiAnalysis(data.analysis)
+      } else {
+        setAiAnalysis('No analysis returned. Please try again.')
+      }
+    } catch (err: any) {
+      setAiAnalysis(`Analysis failed: ${err?.message || 'Unknown error'}`)
+    }
+    setAiLoading(false)
+  }
+
+  // `key` surfaces the single-key shortcut in the button title so users
+  // discover it without hunting through a help dialog.
+  const tools: { id: Tool; icon: typeof FiSquare; label: string; key: string }[] = [
+    { id: 'pan', icon: FiMaximize2, label: 'Pan', key: 'P' },
+    { id: 'rect', icon: FiSquare, label: 'Rectangle', key: 'R' },
+    { id: 'circle', icon: FiCircle, label: 'Circle', key: 'C' },
+    { id: 'line', icon: FiCrosshair, label: 'Line', key: 'L' },
+    { id: 'point', icon: FiTarget, label: 'Point', key: '.' },
+    { id: 'measure', icon: FiActivity, label: 'Measure', key: 'M' },
+    { id: 'ruler', icon: FiSliders, label: 'Ruler', key: 'U' },
   ]
 
   const colors = ['#ef4444', '#f59e0b', '#10b981', '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899']
 
   return (
     <div className="flex h-full" style={{ color: 'var(--color-text)' }}>
+      <AlertDialog />
       {/* ── Left: Study Browser ── */}
       <div className="w-64 flex flex-col border-r flex-shrink-0" style={{ borderColor: 'var(--glass-border)', background: 'var(--glass-bg)' }}>
         <div className="p-3 border-b" style={{ borderColor: 'var(--glass-border)' }}>
           <div className="flex items-center gap-2 mb-3">
-            <FiImage className="text-lg" style={{ color: 'var(--color-accent-blue)' }} />
-            <h2 className="text-sm font-semibold">Studies</h2>
+            <FiImage className="text-lg" style={{ color: 'var(--color-text)' }} />
+            <h2 className="text-sm font-semibold" title="Use [ and ] to step between studies">Studies</h2>
             <button
               onClick={() => fileInputRef.current?.click()}
               className="ml-auto p-1.5 rounded hover:bg-white/5 transition-all"
@@ -1137,26 +1433,31 @@ export default function ResearchImaging() {
       {/* ── Center: Viewer ── */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Toolbar */}
-        <div className="flex items-center gap-2 px-3 py-2 border-b flex-shrink-0" style={{ borderColor: 'var(--glass-border)', background: 'var(--glass-bg)' }}>
+        <div className="flex items-center gap-2 px-3 py-2 border-b flex-shrink-0" style={{ borderColor: 'var(--glass-border)', background: 'var(--glass-bg)', backdropFilter: 'blur(12px)' }}>
           {selected ? (
             <>
               <div className="text-xs font-semibold truncate max-w-[200px]">{selected.title}</div>
-              <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'var(--color-bg)', color: 'var(--color-text-muted)' }}>
+              <span className="text-[10px] px-1.5 py-0.5 rounded-md" style={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', color: 'var(--color-text-muted)' }}>
                 {selected.width}×{selected.height}
               </span>
-              <div className="flex gap-0.5 ml-2">
+              <div className="flex gap-1 ml-2">
                 {tools.map(t => {
                   const Icon = t.icon
+                  const active = tool === t.id
                   return (
                     <button
                       key={t.id}
                       onClick={() => setTool(t.id)}
-                      className={clsx('p-1.5 rounded transition-all', tool === t.id ? 'shadow' : 'hover:bg-white/5')}
+                      className="transition-all active:scale-95"
                       style={{
-                        background: tool === t.id ? 'var(--color-accent-blue)' : 'transparent',
-                        color: tool === t.id ? '#fff' : 'var(--color-text-muted)',
+                        padding: '5px 7px',
+                        borderRadius: 12,
+                        background: active ? 'rgba(91, 141, 184, 0.25)' : 'var(--glass-bg)',
+                        border: `1px solid ${active ? 'rgba(91, 141, 184, 0.35)' : 'var(--glass-border)'}`,
+                        color: active ? '#fff' : 'var(--color-text-muted)',
+                        boxShadow: active ? '0 1px 4px rgba(91, 141, 184, 0.2)' : 'none',
                       }}
-                      title={t.label}
+                      title={`${t.label} (${t.key})`}
                     >
                       <Icon className="text-xs" />
                     </button>
@@ -1164,21 +1465,27 @@ export default function ResearchImaging() {
                 })}
               </div>
               <div className="ml-auto flex items-center gap-1">
-                <button onClick={() => setZoom(z => Math.max(0.2, z - 0.2))} className="p-1.5 rounded hover:bg-white/5"><FiZoomOut className="text-xs" /></button>
-                <span className="text-xs px-1" style={{ color: 'var(--color-text-muted)' }}>{(zoom * 100).toFixed(0)}%</span>
-                <button onClick={() => setZoom(z => Math.min(8, z + 0.2))} className="p-1.5 rounded hover:bg-white/5"><FiZoomIn className="text-xs" /></button>
-                <button onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }} className="p-1.5 rounded hover:bg-white/5" title="Reset"><FiRotateCw className="text-xs" /></button>
+                <button onClick={() => setZoom(z => Math.max(0.2, z - 0.2))} className="btn-icon btn-ghost p-1.5 transition-all active:scale-95" title="Zoom out (-)" style={{ borderRadius: 8 }}><FiZoomOut className="text-xs" /></button>
+                <span className="text-[10px] px-1.5 font-mono" style={{ color: 'var(--color-text-muted)' }}>{(zoom * 100).toFixed(0)}%</span>
+                <button onClick={() => setZoom(z => Math.min(8, z + 0.2))} className="btn-icon btn-ghost p-1.5 transition-all active:scale-95" title="Zoom in (+)" style={{ borderRadius: 8 }}><FiZoomIn className="text-xs" /></button>
+                <button onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }} className="btn-icon btn-ghost p-1.5 transition-all active:scale-95" title="Reset view (0)" style={{ borderRadius: 8 }}><FiRotateCw className="text-xs" /></button>
+                <div style={{ width: 1, height: 16, background: 'var(--glass-border)', margin: '0 2px' }} />
                 <button
                   onClick={() => setViewLayout(v => v === 'single' ? 'quad' : 'single')}
-                  className="p-1.5 rounded hover:bg-white/5"
-                  style={{ color: viewLayout === 'quad' ? '#3b82f6' : undefined }}
-                  title={viewLayout === 'quad' ? 'Single view' : 'Multi-view (Axial/Coronal/Sagittal)'}
+                  className="transition-all active:scale-95"
+                  style={{
+                    padding: '5px 7px', borderRadius: 12,
+                    background: viewLayout === 'quad' ? 'rgba(91, 141, 184, 0.15)' : 'var(--glass-bg)',
+                    border: `1px solid ${viewLayout === 'quad' ? 'rgba(91, 141, 184, 0.25)' : 'var(--glass-border)'}`,
+                    color: viewLayout === 'quad' ? '#5B8DB8' : 'var(--color-text-muted)',
+                  }}
+                  title={viewLayout === 'quad' ? 'Single view (F)' : 'Multi-view — Axial/Coronal/Sagittal (F)'}
                 >
                   <FiMaximize2 className="text-xs" />
                 </button>
-                <button onClick={exportImage} className="p-1.5 rounded hover:bg-white/5" title="Export PNG"><FiDownload className="text-xs" /></button>
-                <button onClick={exportStudy} className="p-1.5 rounded hover:bg-white/5" title="Export study JSON"><FiSave className="text-xs" /></button>
-                <button onClick={() => deleteStudy(selected.id)} className="p-1.5 rounded hover:bg-white/5" style={{ color: '#ef4444' }} title="Delete"><FiTrash2 className="text-xs" /></button>
+                <button onClick={exportImage} className="btn-icon btn-ghost p-1.5 transition-all active:scale-95" title="Export PNG" style={{ borderRadius: 8 }}><FiDownload className="text-xs" /></button>
+                <button onClick={exportStudy} className="btn-icon btn-ghost p-1.5 transition-all active:scale-95" title="Export study JSON" style={{ borderRadius: 8 }}><FiSave className="text-xs" /></button>
+                <button onClick={() => deleteStudy(selected.id)} className="transition-all active:scale-95" style={{ padding: '5px 7px', borderRadius: 12, background: 'rgba(176, 126, 139, 0.1)', border: '1px solid rgba(176, 126, 139, 0.15)', color: '#B07E8B' }} title="Delete"><FiTrash2 className="text-xs" /></button>
               </div>
             </>
           ) : (
@@ -1199,7 +1506,9 @@ export default function ResearchImaging() {
                     onMouseDown={handleMouseDown}
                     onMouseMove={handleMouseMove}
                     onMouseUp={handleMouseUp}
-                    onMouseLeave={() => setDrawing(null)}
+                    onMouseLeave={() => { setDrawing(null); setCursorInfo(null); dragStartRef.current = null }}
+                    onWheel={handleWheel}
+                    onContextMenu={e => e.preventDefault()}
                     style={{ width: '100%', height: '100%', cursor: tool === 'pan' ? 'grab' : 'crosshair' }}
                   />
                   <div style={{ position: 'absolute', top: 6, left: 8, color: '#3b82f6', fontSize: 11, fontWeight: 700, textShadow: '0 1px 3px #000' }}>AXIAL</div>
@@ -1240,28 +1549,75 @@ export default function ResearchImaging() {
               </div>
             ) : (
               /* ── Single View ── */
-              <canvas
-                ref={canvasRef}
-                onMouseDown={handleMouseDown}
-                onMouseMove={handleMouseMove}
-                onMouseUp={handleMouseUp}
-                onMouseLeave={() => setDrawing(null)}
-                style={{ width: '100%', height: '100%', cursor: tool === 'pan' ? 'grab' : 'crosshair' }}
-              />
+              <>
+                <canvas
+                  ref={canvasRef}
+                  onMouseDown={handleMouseDown}
+                  onMouseMove={handleMouseMove}
+                  onMouseUp={handleMouseUp}
+                  onMouseLeave={() => { setDrawing(null); setCursorInfo(null); dragStartRef.current = null }}
+                  onWheel={handleWheel}
+                  onContextMenu={e => e.preventDefault()}
+                  style={{ width: '100%', height: '100%', cursor: tool === 'pan' ? 'grab' : 'crosshair' }}
+                />
+                {/* Pixel info overlay (bottom-left) */}
+                {cursorInfo && (
+                  <div style={{
+                    position: 'absolute', bottom: 6, left: 8, pointerEvents: 'none',
+                    background: 'rgba(0,0,0,0.7)', borderRadius: 8, padding: '3px 8px',
+                    fontSize: 10, fontFamily: "'JetBrains Mono', monospace", color: '#ffffffcc',
+                  }}>
+                    ({cursorInfo.x}, {cursorInfo.y}) &nbsp; I={cursorInfo.intensity}
+                  </div>
+                )}
+                {/* Window/level info overlay (bottom-right) */}
+                {selected && (
+                  <div style={{
+                    position: 'absolute', bottom: 6, right: 8, pointerEvents: 'none',
+                    background: 'rgba(0,0,0,0.7)', borderRadius: 8, padding: '3px 8px',
+                    fontSize: 10, fontFamily: "'JetBrains Mono', monospace", color: '#ffffffcc',
+                  }}>
+                    W:{selected.windowWidth} C:{selected.windowCenter} &nbsp; {(zoom * 100).toFixed(0)}%
+                  </div>
+                )}
+              </>
             )
           ) : (
             <div className="absolute inset-0 flex items-center justify-center">
-              <div className="text-center">
-                <FiImage className="text-6xl mx-auto mb-4 opacity-20" style={{ color: 'var(--color-text-muted)' }} />
-                <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Upload a study to begin</p>
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="mt-4 px-4 py-2 rounded-md text-xs font-medium text-white"
-                  style={{ background: 'var(--color-accent-blue)' }}
-                >
-                  <FiUpload className="inline mr-1.5" />
-                  Upload Image
-                </button>
+              <div className="text-center max-w-md mx-auto">
+                <FiImage className="text-6xl mx-auto mb-4 opacity-15" style={{ color: 'var(--color-text-muted)' }} />
+                <p className="text-sm font-medium mb-1" style={{ color: 'var(--color-text)' }}>Research Imaging Workstation</p>
+                <p className="text-xs mb-4" style={{ color: 'var(--color-text-muted)', lineHeight: 1.6 }}>
+                  Upload medical images for analysis with windowing, filters, annotations,
+                  segmentation, and AI-powered diagnostics via Constant AI.
+                </p>
+                <div className="flex flex-col items-center gap-2">
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="px-5 py-2.5 rounded-md text-xs font-medium text-white transition-all hover:opacity-90"
+                    style={{ background: '#5B8DB8' }}
+                  >
+                    <FiUpload className="inline mr-1.5" />
+                    Upload Image
+                  </button>
+                  <p className="text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+                    Supports DICOM, NIfTI, TIFF, JPEG, PNG, WebP, BMP, SVG
+                  </p>
+                </div>
+                <div className="mt-6 grid grid-cols-3 gap-3 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+                  <div className="p-2 rounded" style={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)' }}>
+                    <FiSliders className="mx-auto mb-1 text-sm" />
+                    <div>15 filters &amp; windowing presets</div>
+                  </div>
+                  <div className="p-2 rounded" style={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)' }}>
+                    <FiCpu className="mx-auto mb-1 text-sm" />
+                    <div>AI analysis via Constant AI</div>
+                  </div>
+                  <div className="p-2 rounded" style={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)' }}>
+                    <FiLayers className="mx-auto mb-1 text-sm" />
+                    <div>Multi-view &amp; 3D volume</div>
+                  </div>
+                </div>
               </div>
             </div>
           )}
@@ -1271,8 +1627,10 @@ export default function ResearchImaging() {
       {/* ── Right: Tool Panel ── */}
       {selected && (
         <div className="w-72 flex flex-col border-l flex-shrink-0" style={{ borderColor: 'var(--glass-border)', background: 'var(--glass-bg)' }}>
-          {/* Panel tabs */}
-          <div className="flex border-b" style={{ borderColor: 'var(--glass-border)' }}>
+          {/* Panel tabs — 5 tabs × 288px sidebar is tight; use min-w:0 + overflow
+              so the last tab can't push beyond the container and create the
+              horizontal scrollbar users were seeing on the 'Marks' tab. */}
+          <div className="flex gap-0.5 p-1 overflow-hidden" style={{ borderBottom: '1px solid var(--glass-border)' }}>
             {([
               { id: 'tools' as const, label: 'Tools', icon: FiSliders },
               { id: 'analysis' as const, label: 'Analysis', icon: FiBarChart2 },
@@ -1281,18 +1639,26 @@ export default function ResearchImaging() {
               { id: 'annotations' as const, label: 'Marks', icon: FiTarget },
             ]).map(t => {
               const Icon = t.icon
+              const active = showPanel === t.id
               return (
                 <button
                   key={t.id}
                   onClick={() => setShowPanel(t.id)}
-                  className={clsx('flex-1 flex items-center justify-center gap-1 px-2 py-2 text-[10px] font-medium transition-all', showPanel === t.id ? 'border-b-2' : 'hover:bg-white/5')}
+                  title={t.label}
+                  className="flex items-center justify-center gap-1 text-[10px] font-medium transition-all active:scale-95"
                   style={{
-                    color: showPanel === t.id ? 'var(--color-accent-blue)' : 'var(--color-text-muted)',
-                    borderColor: showPanel === t.id ? 'var(--color-accent-blue)' : 'transparent',
+                    flex: '1 1 0',
+                    minWidth: 0,
+                    padding: '5px 2px',
+                    borderRadius: 8,
+                    background: active ? 'rgba(91, 141, 184, 0.2)' : 'transparent',
+                    border: `1px solid ${active ? 'rgba(91, 141, 184, 0.3)' : 'transparent'}`,
+                    color: active ? '#5B8DB8' : 'var(--color-text-muted)',
+                    boxShadow: active ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
                   }}
                 >
-                  <Icon className="text-xs" />
-                  {t.label}
+                  <Icon className="text-[10px] flex-shrink-0" />
+                  <span className="truncate">{t.label}</span>
                 </button>
               )
             })}
@@ -1358,22 +1724,24 @@ export default function ResearchImaging() {
                   <div className="flex flex-wrap gap-1">
                     {WINDOW_PRESETS
                       .filter(p => p.modalities.length === 0 || p.modalities.includes(selected.modality))
-                      .map(p => (
-                        <button
-                          key={p.label}
-                          onClick={() => updateStudy({ ...selected, windowCenter: p.center, windowWidth: p.width })}
-                          className="px-1.5 py-0.5 text-[9px] rounded transition-all"
-                          style={{
-                            background: selected.windowCenter === p.center && selected.windowWidth === p.width
-                              ? 'var(--color-accent-blue)' : 'transparent',
-                            color: selected.windowCenter === p.center && selected.windowWidth === p.width
-                              ? '#fff' : 'var(--color-text-muted)',
-                            border: '1px solid var(--glass-border)',
-                          }}
-                        >
-                          {p.label}
-                        </button>
-                      ))}
+                      .map(p => {
+                        const active = selected.windowCenter === p.center && selected.windowWidth === p.width
+                        return (
+                          <button
+                            key={p.label}
+                            onClick={() => updateStudy({ ...selected, windowCenter: p.center, windowWidth: p.width })}
+                            className="px-2 py-1 text-[9px] rounded-lg transition-all active:scale-95"
+                            style={{
+                              background: active ? 'rgba(91, 141, 184, 0.25)' : 'var(--glass-bg)',
+                              color: active ? '#fff' : 'var(--color-text-muted)',
+                              border: `1px solid ${active ? 'rgba(91, 141, 184, 0.35)' : 'var(--glass-border)'}`,
+                              boxShadow: active ? '0 1px 3px rgba(91, 141, 184, 0.15)' : 'none',
+                            }}
+                          >
+                            {p.label}
+                          </button>
+                        )
+                      })}
                   </div>
                 </div>
 
@@ -1389,20 +1757,41 @@ export default function ResearchImaging() {
                       <div key={group} style={{ marginBottom: 6 }}>
                         <div className="text-[9px] font-medium mb-1" style={{ color: 'var(--color-text-muted)', opacity: 0.7 }}>{group}</div>
                         <div className="grid grid-cols-2 gap-1">
-                          {FILTERS.filter(f => f.group === group).map(f => (
-                            <button
-                              key={f.id}
-                              onClick={() => updateStudy({ ...selected, filter: f.id })}
-                              className="px-2 py-1 text-[10px] rounded transition-all"
-                              style={{
-                                background: selected.filter === f.id ? 'var(--color-accent-blue)' : 'transparent',
-                                color: selected.filter === f.id ? '#fff' : 'var(--color-text-muted)',
-                                border: '1px solid var(--glass-border)',
-                              }}
-                            >
-                              {f.label}
-                            </button>
-                          ))}
+                          {FILTERS.filter(f => f.group === group).map(f => {
+                            const active = selected.filter === f.id
+                            return (
+                              <button
+                                key={f.id}
+                                onClick={() => {
+                                  // Defer the (potentially expensive) filter
+                                  // apply to the next frame so the click
+                                  // animation paints immediately — without
+                                  // this, rapid clicks make the sidebar feel
+                                  // completely frozen.
+                                  if (active || filterBusy) return
+                                  setFilterBusy(true)
+                                  requestAnimationFrame(() => {
+                                    updateStudy({ ...selected, filter: f.id })
+                                    // Release the click lock after the render
+                                    // pipeline has had a chance to start.
+                                    setTimeout(() => setFilterBusy(false), 120)
+                                  })
+                                }}
+                                disabled={filterBusy && !active}
+                                className="px-2 py-1 text-[10px] rounded-lg transition-all active:scale-95"
+                                style={{
+                                  background: active ? 'rgba(91, 141, 184, 0.25)' : 'var(--glass-bg)',
+                                  color: active ? '#fff' : 'var(--color-text-muted)',
+                                  border: `1px solid ${active ? 'rgba(91, 141, 184, 0.35)' : 'var(--glass-border)'}`,
+                                  boxShadow: active ? '0 1px 3px rgba(91, 141, 184, 0.15)' : 'none',
+                                  cursor: (filterBusy && !active) ? 'wait' : 'pointer',
+                                  opacity: (filterBusy && !active) ? 0.65 : 1,
+                                }}
+                              >
+                                {f.label}
+                              </button>
+                            )
+                          })}
                         </div>
                       </div>
                     ))
@@ -1443,7 +1832,7 @@ export default function ResearchImaging() {
                     <button
                       onClick={() => setTool('brush')}
                       className="flex-1 px-2 py-1.5 text-[10px] rounded"
-                      style={{ background: tool === 'brush' ? 'var(--color-accent-blue)' : 'transparent', color: tool === 'brush' ? '#fff' : 'var(--color-text-muted)', border: '1px solid var(--glass-border)' }}
+                      style={{ background: tool === 'brush' ? 'rgba(255,255,255,0.15)' : 'transparent', color: tool === 'brush' ? '#fff' : 'var(--color-text-muted)', border: '1px solid var(--glass-border)' }}
                     >Paint</button>
                     <button
                       onClick={() => setTool('eraser')}
@@ -1506,12 +1895,14 @@ export default function ResearchImaging() {
                         for (let i = 0; i < groupSize; i++) s += analysisStats.histogram[g * groupSize + i] || 0
                         grouped.push(s)
                       }
-                      const max = Math.max(...grouped)
+                      let max = 0
+                      for (const v of grouped) if (v > max) max = v
+                      const safeMax = max > 0 ? max : 1
                       return grouped.map((c, i) => (
                         <div key={i} style={{
                           flex: 1,
-                          height: `${(c / max) * 100}%`,
-                          background: 'var(--color-accent-blue)',
+                          height: `${(c / safeMax) * 100}%`,
+                          background: 'var(--color-text)',
                           opacity: 0.8,
                           minHeight: 1,
                         }} />
@@ -1530,6 +1921,7 @@ export default function ResearchImaging() {
                     <div className="flex justify-between"><span style={{ color: 'var(--color-text-muted)' }}>SNR est.</span><span>{(analysisStats.mean / Math.max(analysisStats.std, 0.1)).toFixed(1)} dB</span></div>
                     <div className="flex justify-between"><span style={{ color: 'var(--color-text-muted)' }}>Entropy</span><span>{(() => {
                       const total = analysisStats.histogram.reduce((a, b) => a + b, 0)
+                      if (total <= 0) return '0.00'
                       let entropy = 0
                       for (const h of analysisStats.histogram) { if (h > 0) { const p = h / total; entropy -= p * Math.log2(p) } }
                       return entropy.toFixed(2)
@@ -1555,7 +1947,8 @@ export default function ResearchImaging() {
                         if (!img) return null
                         const off = document.createElement('canvas')
                         off.width = img.width; off.height = img.height
-                        const ctx = off.getContext('2d')!
+                        const ctx = off.getContext('2d')
+                        if (!ctx) return null
                         ctx.drawImage(img, 0, 0)
                         const x1 = Math.max(0, Math.floor(a.x)), y1 = Math.max(0, Math.floor(a.y))
                         const w = Math.min(img.width - x1, Math.floor(a.w!)), h = Math.min(img.height - y1, Math.floor(a.h!))
@@ -1581,6 +1974,39 @@ export default function ResearchImaging() {
                     </div>
                   </div>
                 )}
+
+                {/* AI Analysis powered by Constant AI */}
+                <div>
+                  <div className="text-[10px] uppercase font-semibold mb-1.5" style={{ color: 'var(--color-text-muted)' }}>
+                    <FiCpu className="inline mr-1" />
+                    AI Analysis — Constant AI
+                  </div>
+                  <p className="text-[9px] mb-2" style={{ color: 'var(--color-text-muted)', lineHeight: 1.4 }}>
+                    Vision-based clinical analysis powered by Constant AI.
+                    Analyzes the current view including windowing and filters.
+                  </p>
+                  <div className="space-y-2">
+                    <button
+                      onClick={runAiAnalysis}
+                      disabled={aiLoading}
+                      className="w-full px-3 py-2 rounded text-[11px] font-medium transition-all flex items-center justify-center gap-2"
+                      style={{
+                        background: aiLoading ? 'var(--glass-bg)' : '#5B8DB8',
+                        color: aiLoading ? 'var(--color-text-muted)' : '#fff',
+                        border: '1px solid transparent',
+                        opacity: aiLoading ? 0.6 : 1,
+                      }}
+                    >
+                      <FiCpu className="text-xs" />
+                      {aiLoading ? 'Analyzing with Constant AI…' : 'Run AI Analysis'}
+                    </button>
+                    {aiAnalysis && (
+                      <div className="p-2.5 rounded text-[10px] leading-relaxed whitespace-pre-wrap" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)', color: 'var(--color-text-secondary)' }}>
+                        {aiAnalysis}
+                      </div>
+                    )}
+                  </div>
+                </div>
               </>
             )}
 
@@ -1685,9 +2111,9 @@ export default function ResearchImaging() {
                         onClick={() => setRegMode(mode)}
                         className="px-2 py-1.5 text-[10px] rounded capitalize"
                         style={{
-                          background: regMode === mode ? 'var(--color-accent-blue)22' : 'var(--color-bg)',
-                          border: `1px solid ${regMode === mode ? 'var(--color-accent-blue)' : 'var(--glass-border)'}`,
-                          color: regMode === mode ? 'var(--color-accent-blue)' : 'var(--color-text-muted)',
+                          background: regMode === mode ? 'rgba(255,255,255,0.12)' : 'var(--color-bg)',
+                          border: `1px solid ${regMode === mode ? 'var(--color-text)' : 'var(--glass-border)'}`,
+                          color: regMode === mode ? 'var(--color-text)' : 'var(--color-text-muted)',
                         }}
                       >
                         {mode}
@@ -1793,7 +2219,8 @@ export default function ResearchImaging() {
                       if (!img) return
                       const off = document.createElement('canvas')
                       off.width = img.width; off.height = img.height
-                      const ctx = off.getContext('2d')!
+                      const ctx = off.getContext('2d')
+                      if (!ctx) return
                       ctx.fillStyle = '#000'
                       ctx.fillRect(0, 0, off.width, off.height)
                       const cx = img.width / 2, cy = img.height / 2
@@ -1806,7 +2233,7 @@ export default function ResearchImaging() {
                       setRegTransform({ tx: 0, ty: 0, rotation: 0, scale: 1 })
                     }}
                     className="flex-1 px-2 py-1.5 text-[10px] rounded font-medium"
-                    style={{ background: 'var(--color-accent-blue)', color: '#fff' }}
+                    style={{ background: 'rgba(255,255,255,0.15)', color: '#fff' }}
                   >
                     Apply Transform
                   </button>

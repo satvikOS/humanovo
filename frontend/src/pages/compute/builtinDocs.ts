@@ -18,6 +18,7 @@ export type BuiltinCategory =
   | 'I/O'
   | 'Logic'
   | 'Image Processing'
+  | 'Imaging'
 
 export interface BuiltinDoc {
   name: string
@@ -29,7 +30,7 @@ export interface BuiltinDoc {
 
 export const BUILTIN_CATEGORIES: BuiltinCategory[] = [
   'Math', 'Matrix', 'Statistics', 'Linear algebra', 'Calculus',
-  'Signal', 'Sets', 'Logic', 'Plotting', 'Image Processing', 'I/O',
+  'Signal', 'Sets', 'Logic', 'Plotting', 'Image Processing', 'Imaging', 'I/O',
 ]
 
 export const BUILTIN_DOCS: BuiltinDoc[] = [
@@ -73,6 +74,8 @@ export const BUILTIN_DOCS: BuiltinDoc[] = [
   { name: 'rand', category: 'Matrix', signature: 'rand(m, n)', description: 'Uniform random matrix', snippet: 'rand(m, n)' },
   { name: 'randn', category: 'Matrix', signature: 'randn(m, n)', description: 'Standard normal random matrix', snippet: 'randn(m, n)' },
   { name: 'randi', category: 'Matrix', signature: 'randi(imax, m, n)', description: 'Uniform random integers', snippet: 'randi(imax, m, n)' },
+  { name: 'randsample', category: 'Matrix', signature: 'randsample(v, k, [replace])', description: 'Random sample of k elements (default: no replacement)', snippet: 'randsample(v, k)' },
+  { name: 'shuffle', category: 'Matrix', signature: 'shuffle(v)', description: 'Random permutation of a vector', snippet: 'shuffle(v)' },
   { name: 'linspace', category: 'Matrix', signature: 'linspace(a, b, n)', description: 'Linearly spaced vector', snippet: 'linspace(a, b, n)' },
   { name: 'logspace', category: 'Matrix', signature: 'logspace(a, b, n)', description: 'Logarithmically spaced vector', snippet: 'logspace(a, b, n)' },
   { name: 'repmat', category: 'Matrix', signature: 'repmat(M, r, c)', description: 'Tile matrix', snippet: 'repmat(M, r, c)' },
@@ -99,12 +102,23 @@ export const BUILTIN_DOCS: BuiltinDoc[] = [
   { name: 'min', category: 'Statistics', signature: 'min(v)', description: 'Minimum', snippet: 'min(v)' },
   { name: 'max', category: 'Statistics', signature: 'max(v)', description: 'Maximum', snippet: 'max(v)' },
   { name: 'range', category: 'Statistics', signature: 'range(v)', description: 'max − min', snippet: 'range(v)' },
+  { name: 'argmin', category: 'Statistics', signature: 'argmin(v)', description: 'Index of minimum (1-based; ties → lowest)', snippet: 'argmin(v)' },
+  { name: 'argmax', category: 'Statistics', signature: 'argmax(v)', description: 'Index of maximum (1-based; ties → lowest)', snippet: 'argmax(v)' },
+  { name: 'clip', category: 'Statistics', signature: 'clip(x, lo, hi)', description: 'Element-wise clamp onto [lo, hi]', snippet: 'clip(x, lo, hi)' },
+  { name: 'sigmoid', category: 'Statistics', signature: 'sigmoid(x)', description: 'Logistic 1/(1+e^-x), element-wise', snippet: 'sigmoid(x)' },
+  { name: 'softmax', category: 'Statistics', signature: 'softmax(v)', description: 'Stable softmax probabilities', snippet: 'softmax(v)' },
   { name: 'quantile', category: 'Statistics', signature: 'quantile(v, p)', description: 'Quantile at p (0..1)', snippet: 'quantile(v, 0.5)' },
   { name: 'prctile', category: 'Statistics', signature: 'prctile(v, p)', description: 'Percentile (0..100)', snippet: 'prctile(v, 50)' },
   { name: 'iqr', category: 'Statistics', signature: 'iqr(v)', description: 'Interquartile range', snippet: 'iqr(v)' },
   { name: 'skewness', category: 'Statistics', signature: 'skewness(v)', description: 'Sample skewness', snippet: 'skewness(v)' },
   { name: 'kurtosis', category: 'Statistics', signature: 'kurtosis(v)', description: 'Sample kurtosis', snippet: 'kurtosis(v)' },
   { name: 'sem', category: 'Statistics', signature: 'sem(v)', description: 'Standard error of the mean', snippet: 'sem(v)' },
+  { name: 'geomean', category: 'Statistics', signature: 'geomean(v)', description: 'Geometric mean (NaN if any element ≤ 0)', snippet: 'geomean(v)' },
+  { name: 'harmmean', category: 'Statistics', signature: 'harmmean(v)', description: 'Harmonic mean', snippet: 'harmmean(v)' },
+  { name: 'trimmean', category: 'Statistics', signature: 'trimmean(v, pct)', description: 'Mean with pct% of values trimmed (symmetric)', snippet: 'trimmean(v, 10)' },
+  { name: 'mad', category: 'Statistics', signature: 'mad(v[, flag])', description: 'Mean absolute deviation (flag=1 → median absolute)', snippet: 'mad(v)' },
+  { name: 'gcd', category: 'Statistics', signature: 'gcd(a, b)', description: 'Greatest common divisor', snippet: 'gcd(12, 18)' },
+  { name: 'lcm', category: 'Statistics', signature: 'lcm(a, b)', description: 'Least common multiple', snippet: 'lcm(4, 6)' },
   { name: 'cov', category: 'Statistics', signature: 'cov(x, y)', description: 'Covariance', snippet: 'cov(x, y)' },
   { name: 'corr', category: 'Statistics', signature: 'corr(x, y)', description: 'Pearson correlation', snippet: 'corr(x, y)' },
   { name: 'normcdf', category: 'Statistics', signature: 'normcdf(x)', description: 'Standard normal CDF', snippet: 'normcdf(x)' },
@@ -148,6 +162,8 @@ export const BUILTIN_DOCS: BuiltinDoc[] = [
   { name: 'ode45', category: 'Calculus', signature: 'ode45(f, tspan, y0)', description: 'Non-stiff ODE solver', snippet: 'ode45(@(t,y) f, [0 1], y0)' },
   { name: 'cumsum', category: 'Calculus', signature: 'cumsum(v)', description: 'Cumulative sum', snippet: 'cumsum(v)' },
   { name: 'cumprod', category: 'Calculus', signature: 'cumprod(v)', description: 'Cumulative product', snippet: 'cumprod(v)' },
+  { name: 'cummax', category: 'Calculus', signature: 'cummax(v)', description: 'Running maximum of prefix', snippet: 'cummax(v)' },
+  { name: 'cummin', category: 'Calculus', signature: 'cummin(v)', description: 'Running minimum of prefix', snippet: 'cummin(v)' },
 
   // ─── Signal ──────────────────────────────────────────────────────────
   { name: 'fft', category: 'Signal', signature: 'fft(x)', description: 'Fast Fourier transform (magnitude)', snippet: 'fft(x)' },
@@ -258,4 +274,18 @@ export const BUILTIN_DOCS: BuiltinDoc[] = [
   { name: 'imclose', category: 'Image Processing', signature: 'imclose(img, se)', description: 'Morphological closing', snippet: 'C = imclose(img, ones(3,3))' },
   { name: 'bwlabel', category: 'Image Processing', signature: 'bwlabel(bw)', description: 'Label connected components', snippet: 'L = bwlabel(bw)' },
   { name: 'imcrop', category: 'Image Processing', signature: 'imcrop(img, [r c h w])', description: 'Crop image region', snippet: 'C = imcrop(img, [10 10 50 50])' },
+
+  // ─── Imaging (Research Imaging bridge) ──────────────────────────────
+  { name: 'imaging_count', category: 'Imaging', signature: 'imaging_count()', description: 'Number of studies available in the shared imaging store', snippet: 'n = imaging_count()' },
+  { name: 'imaging_list', category: 'Imaging', signature: 'imaging_list()', description: 'Print all studies (title, modality, size); returns count', snippet: 'imaging_list()' },
+  { name: 'imaging_info', category: 'Imaging', signature: 'imaging_info(i?)', description: 'Describe the i-th study (omit for most-recent)', snippet: 'imaging_info()' },
+  { name: 'imaging_select', category: 'Imaging', signature: 'imaging_select(i)', description: 'Open study [i] in the Compute Lab Imaging panel; returns study id', snippet: 'imaging_select(0)' },
+  { name: 'imaging_window', category: 'Imaging', signature: 'imaging_window(center, width)', description: 'Update window/level of the current study; live-refreshes the panel', snippet: 'imaging_window(40, 400)' },
+  { name: 'imaging_annotate', category: 'Imaging', signature: 'imaging_annotate(type, x, y, [w, h, [label]])', description: 'Add annotation ("rect"/"circle"/"point"/"line"/"measure"/"ruler") at (x,y); returns annotation id', snippet: 'imaging_annotate("rect", 100, 120, 80, 60, "lesion")' },
+  { name: 'imaging_annotations', category: 'Imaging', signature: 'imaging_annotations([i])', description: 'Print and return annotation count on study [i] (defaults to last)', snippet: 'imaging_annotations()' },
+  { name: 'imaging_clear_annotations', category: 'Imaging', signature: 'imaging_clear_annotations([i])', description: 'Remove every annotation on study [i]; returns how many were removed', snippet: 'imaging_clear_annotations()' },
+  { name: 'imaging_filter', category: 'Imaging', signature: 'imaging_filter(name, [i])', description: 'Apply a filter preset (invert, gaussian, median, sharpen, sobel, canny, threshold, otsu, laplacian, histeq)', snippet: 'imaging_filter("sobel")' },
+  { name: 'imaging_window', category: 'Imaging', signature: 'imaging_window(center, width, [i])', description: 'Set window center & width (level/contrast) on study [i]', snippet: 'imaging_window(128, 256)' },
+  { name: 'imaging_roi_stats', category: 'Imaging', signature: 'imaging_roi_stats([i])', description: 'Print area/perimeter/centroid for every ROI on study [i]; returns ROI count', snippet: 'imaging_roi_stats()' },
+  { name: 'imaging_measure', category: 'Imaging', signature: 'imaging_measure(x1, y1, x2, y2)', description: 'Euclidean pixel distance between two points (no annotation placed)', snippet: 'imaging_measure(10, 10, 100, 50)' },
 ]

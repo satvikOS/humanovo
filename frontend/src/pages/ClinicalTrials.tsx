@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   FiClipboard, FiUsers, FiFileText, FiDollarSign,
   FiPlus, FiTrash2,
@@ -17,20 +18,73 @@ interface Document { id: string; document_type: string; name: string; status: st
 
 type ViewTab = 'overview' | 'subjects' | 'visits' | 'documents' | 'budget'
 const API = '/api/v1/clinical-trials'
-const STATUS_COLORS: Record<string, string> = { planning: 'var(--color-text-muted)', recruiting: 'var(--color-accent-blue)', active: 'var(--color-success)', completed: 'var(--color-accent-purple)', suspended: 'var(--color-error)' }
+// active/suspended keep semantic colour (green = live trial, red = stopped)
+// so PIs see operational state at a glance; completed also stays green
+// because it's a positive terminal state; recruiting/planning are
+// monochrome since they're all "pre-active" intermediate states.
+const STATUS_COLORS: Record<string, string> = { planning: 'var(--color-text-muted)', recruiting: 'var(--color-text)', active: 'var(--color-success)', completed: 'var(--color-success)', suspended: 'var(--color-error)' }
+
+// Enum-guard so `?view=bogus` silently falls back to "overview"
+// instead of contaminating ViewTab-typed state.
+const VALID_TRIAL_VIEWS = new Set<ViewTab>(['overview', 'subjects', 'visits', 'documents', 'budget'])
 
 export default function ClinicalTrials() {
+  // Deep-link support: `?add=1` opens the new-trial dialog,
+  // `?view=<overview|subjects|visits|documents|budget>` seeds the
+  // detail-pane sub-tab, and `?id=<trialId>` auto-selects (and
+  // fetches subject/document detail for) that trial once the list
+  // resolves from the backend. All params are stripped on mount.
+  const [searchParams] = useSearchParams()
   const [trials, setTrials] = useState<Trial[]>([])
   const [selected, setSelected] = useState<Trial | null>(null)
   const [subjects, setSubjects] = useState<Subject[]>([])
   const [documents, setDocuments] = useState<Document[]>([])
-  const [viewTab, setViewTab] = useState<ViewTab>('overview')
-  const [showAdd, setShowAdd] = useState(false)
+  const [viewTab, setViewTab] = useState<ViewTab>(() => {
+    const qv = (searchParams.get('view') || '') as ViewTab
+    return VALID_TRIAL_VIEWS.has(qv) ? qv : 'overview'
+  })
+  const [showAdd, setShowAdd] = useState(() => searchParams.get('add') === '1')
   const [form, setForm] = useState({ protocol_number: '', title: '', phase: 'Phase I', pi: '', target_enrollment: 0 })
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
   const load = async () => { try { const r = await fetch(API); if (r.ok) setTrials((await r.json()).items || []) } catch { /* network error */ } }
   useEffect(() => { load() }, [])
+
+  // Consume & strip known deep-link params after first mount; defer
+  // the `id` selection to a separate effect that fires once `trials`
+  // resolves.
+  const [pendingTrialId] = useState(() => searchParams.get('id') || '')
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search)
+    let dirty = false
+    for (const k of ['add', 'view', 'id']) {
+      if (sp.has(k)) { sp.delete(k); dirty = true }
+    }
+    if (dirty) {
+      const qs = sp.toString()
+      const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash
+      window.history.replaceState(window.history.state, '', newUrl)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  useEffect(() => {
+    if (!pendingTrialId || selected) return
+    const match = trials.find(t => t.id === pendingTrialId)
+    if (match) {
+      // Mirror selectTrial but preserve the deep-linked viewTab.
+      setSelected(match)
+      ;(async () => {
+        try {
+          const [sR, dR] = await Promise.all([
+            fetch(`${API}/${match.id}/subjects`),
+            fetch(`${API}/${match.id}/documents`),
+          ])
+          if (sR.ok) setSubjects((await sR.json()).items || [])
+          if (dR.ok) setDocuments((await dR.json()).items || [])
+        } catch { /* ignore */ }
+      })()
+    }
+  }, [trials, pendingTrialId, selected])
 
   const selectTrial = async (t: Trial) => {
     setSelected(t); setViewTab('overview')
@@ -158,6 +212,9 @@ export default function ClinicalTrials() {
                       <th className="text-left p-3 text-[var(--color-text-muted)]">Status</th><th className="text-left p-3 text-[var(--color-text-muted)]">Enrolled</th>
                     </tr></thead>
                     <tbody>
+                      {subjects.length === 0 && (
+                        <tr><td colSpan={6} className="p-8 text-center text-xs text-[var(--color-text-muted)]">No subjects enrolled yet — enrollment events will appear here as they're recorded.</td></tr>
+                      )}
                       {subjects.map(s => (
                         <tr key={s.id} className="border-b border-[var(--color-border)]/30">
                           <td className="p-3 font-mono">{s.subject_number}</td><td className="p-3">{s.age}</td><td className="p-3">{s.sex}</td>
@@ -173,6 +230,11 @@ export default function ClinicalTrials() {
 
               {viewTab === 'documents' && (
                 <div className="space-y-2">
+                  {documents.length === 0 && (
+                    <div className="glass-card p-8 text-center text-xs text-[var(--color-text-muted)]">
+                      No documents attached to this trial yet.
+                    </div>
+                  )}
                   {documents.map(d => (
                     <div key={d.id} className="glass-card p-3 flex items-center justify-between">
                       <div className="flex items-center gap-3">
@@ -200,8 +262,8 @@ export default function ClinicalTrials() {
                           <XAxis dataKey="name" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
                           <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} tickFormatter={v => `$${(v/1000).toFixed(0)}k`} />
                           <Tooltip contentStyle={{ background: 'var(--color-surface-solid)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '11px', color: 'var(--color-text)' }} />
-                          <Bar dataKey="budgeted" fill="var(--color-accent-blue)" radius={[2, 2, 0, 0]} name="Budgeted" />
-                          <Bar dataKey="spent" fill="var(--color-accent-purple)" radius={[2, 2, 0, 0]} name="Spent" />
+                          <Bar dataKey="budgeted" fill="var(--color-text-muted)" radius={[2, 2, 0, 0]} name="Budgeted" />
+                          <Bar dataKey="spent" fill="var(--color-text)" radius={[2, 2, 0, 0]} name="Spent" />
                         </BarChart>
                       </ResponsiveContainer>
                     </div>

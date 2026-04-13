@@ -7,6 +7,8 @@ import {
   FiSettings,
   FiChevronDown,
   FiChevronUp,
+  FiChevronLeft,
+  FiChevronRight,
   FiAward,
   FiPlus,
   FiX,
@@ -24,7 +26,7 @@ import {
   FiThumbsUp,
   FiMessageSquare,
 } from 'react-icons/fi'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { BarChart, Bar, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import api from '../services/api'
 import type { OrchestratorStatus, DiscoveryConfig } from '../services/api'
@@ -147,7 +149,25 @@ function confidenceColor(c: number) {
   return '#991b1b'
 }
 
+// Valid discovery_type values — kept in sync with the `discoveryTypes` list
+// above. Used to filter the `?type=` query param so only real enum values
+// make it into config state.
+const VALID_DISCOVERY_TYPES = new Set(['treatment', 'prevention', 'biomarker', 'drug_repurposing', 'combination_therapy'])
+
 export default function Agents() {
+  // Deep-link support: the Discovery Engine accepts `?disease=…`,
+  // `?type=…`, `?guidance=…`, and `?hypothesis=…` query params so
+  // dashboard quick-links and external handoffs can drop users into a
+  // pre-configured run or directly onto a specific hypothesis card. The
+  // query is consumed once on mount and then cleaned off the URL so a
+  // soft reload doesn't keep overwriting edits.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const qDisease = (searchParams.get('disease') || '').trim()
+  const qTypeRaw = (searchParams.get('type') || '').trim().toLowerCase()
+  const qType = VALID_DISCOVERY_TYPES.has(qTypeRaw) ? qTypeRaw : ''
+  const qGuidance = (searchParams.get('guidance') || '').trim()
+  const qHypothesisId = (searchParams.get('hypothesis') || '').trim()
+
   // State
   const [state, setState] = useState<string>('idle')
   const [stats, setStats] = useState<OrchestratorStatus | null>(null)
@@ -162,14 +182,15 @@ export default function Agents() {
   const [sortBy, setSortBy] = useState<'confidence' | 'novelty' | 'date'>('confidence')
   const [filterConfidence, setFilterConfidence] = useState(0)
 
-  // Config
+  // Config — seeded from query params (see `qDisease`/`qType`/`qGuidance`
+  // above). Invalid / missing params fall back to the defaults.
   const [config, setConfig] = useState<DiscoveryConfig>({
-    disease: '',
-    discovery_type: 'treatment',
+    disease: qDisease,
+    discovery_type: (qType || 'treatment') as DiscoveryConfig['discovery_type'],
     focus_entities: [],
     max_results: 50,
     min_confidence: 0.3,
-    research_guidance: '',
+    research_guidance: qGuidance,
   })
   const [focusInput, setFocusInput] = useState('')
   const [factors, setFactors] = useState<ExternalFactor[]>([])
@@ -185,9 +206,60 @@ export default function Agents() {
   const [, setProjectName] = useState<string>('')
 
   // Document upload
-  const [uploadedDocs, setUploadedDocs] = useState<Array<{ name: string; id: string; status: string }>>([])
+  const [uploadedDocs, setUploadedDocs] = useState<Array<{ name: string; id: string; status: string; error?: string }>>([])
   const [uploading, setUploading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Discovery start: a user without a responsive API would otherwise
+  // see the Start button briefly glitch then do nothing. Track both
+  // the in-flight state (to show a spinner) and the surfaced error
+  // message (so a failed start gives the user something to act on,
+  // rather than a silent console.error).
+  const [starting, setStarting] = useState(false)
+  const [startError, setStartError] = useState<string | null>(null)
+
+  // Split-panel layout: lets the user collapse the config rail to
+  // reclaim horizontal space for the hypothesis list. Persisted so a
+  // once-set preference survives a reload — nothing worse than
+  // watching the panel snap back every time you come back to Discovery.
+  const [leftCollapsed, setLeftCollapsed] = useState<boolean>(() => {
+    try { return localStorage.getItem('agents-left-collapsed') === '1' } catch { return false }
+  })
+  useEffect(() => {
+    try { localStorage.setItem('agents-left-collapsed', leftCollapsed ? '1' : '0') } catch { /* noop */ }
+  }, [leftCollapsed])
+
+  // Strip the deep-link params after the initial mount so a soft reload
+  // doesn't stomp on user edits to the Discovery config.
+  useEffect(() => {
+    const hasDeepLink = searchParams.has('disease')
+      || searchParams.has('type')
+      || searchParams.has('guidance')
+      || searchParams.has('hypothesis')
+    if (hasDeepLink) {
+      const next = new URLSearchParams(searchParams)
+      next.delete('disease')
+      next.delete('type')
+      next.delete('guidance')
+      next.delete('hypothesis')
+      setSearchParams(next, { replace: true })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // When the hypothesis list fills in (from API poll), honour the
+  // `?hypothesis=…` deep-link by selecting the matching card once. We
+  // key off a ref so the effect doesn't re-fire after the user clicks
+  // around to a different hypothesis.
+  const hypothesisDeepLinkApplied = useRef(false)
+  useEffect(() => {
+    if (hypothesisDeepLinkApplied.current || !qHypothesisId) return
+    const match = hypotheses.find(h => h.id === qHypothesisId)
+    if (match) {
+      setSelectedHypothesis(match)
+      hypothesisDeepLinkApplied.current = true
+    }
+  }, [hypotheses, qHypothesisId])
 
   const pollRef = useRef<number | null>(null)
   const failRef = useRef(0)
@@ -333,6 +405,9 @@ export default function Agents() {
   // Actions
   const startDiscovery = async () => {
     if (!config.disease.trim()) return
+    if (starting) return
+    setStarting(true)
+    setStartError(null)
     try {
       // Include uploaded documents for AI context
       const allDocs = JSON.parse(localStorage.getItem('humanovo-project-documents') || '[]')
@@ -370,6 +445,10 @@ export default function Agents() {
       setDiscoveryHistory(prev => [run, ...prev].slice(0, 50))
     } catch (err) {
       console.error('Failed to start discovery:', err)
+      const msg = err instanceof Error ? err.message : 'Unable to start discovery — check your connection and try again.'
+      setStartError(msg)
+    } finally {
+      setStarting(false)
     }
   }
 
@@ -441,14 +520,34 @@ export default function Agents() {
     const files = e.target.files
     if (!files || files.length === 0) return
     setUploading(true)
+    // Hard caps + type check up front so users get a clear reason before
+    // the request hits the network.
+    const MAX_BYTES = 25 * 1024 * 1024 // 25 MB
+    const VALID_EXT = /\.(pdf|txt|csv|json|docx?|xlsx?|md)$/i
     for (const file of Array.from(files)) {
+      const tooBig = file.size > MAX_BYTES
+      const badType = !VALID_EXT.test(file.name)
+      if (tooBig || badType) {
+        const reason = tooBig ? `File is ${(file.size / 1024 / 1024).toFixed(1)} MB (max 25)` : 'Unsupported file type'
+        setUploadedDocs(prev => [...prev, { name: file.name, id: '', status: 'failed', error: reason }])
+        continue
+      }
+      // Optimistic row so the user sees progress immediately.
+      setUploadedDocs(prev => [...prev, { name: file.name, id: '', status: 'uploading' }])
       try {
         const result = await api.uploadDocument(file, projectId ? { project_id: projectId } : undefined)
-        setUploadedDocs(prev => [...prev, { name: file.name, id: result.id || result.document_id || '', status: 'uploaded' }])
+        const id = result?.id || result?.document_id || ''
+        if (!id) throw new Error('Upload succeeded but server did not return a document id')
+        setUploadedDocs(prev => prev.map(d =>
+          d.name === file.name && d.status === 'uploading' ? { ...d, id, status: 'uploaded' } : d,
+        ))
         logActivity({ type: 'evidence', action: 'imported', title: `Document uploaded: ${file.name}`, project: config.disease || 'Discovery' })
       } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Upload failed (check backend)'
         console.error('Upload failed:', err)
-        setUploadedDocs(prev => [...prev, { name: file.name, id: '', status: 'failed' }])
+        setUploadedDocs(prev => prev.map(d =>
+          d.name === file.name && d.status === 'uploading' ? { ...d, status: 'failed', error: msg } : d,
+        ))
       }
     }
     setUploading(false)
@@ -470,8 +569,24 @@ export default function Agents() {
 
   return (
     <div className="flex h-full overflow-hidden">
+      {/* Collapsed left rail — a thin icon column keeps the engine and
+          connection state visible without eating horizontal space. */}
+      {leftCollapsed && (
+        <div className="w-12 flex flex-col items-center border-r border-[var(--color-border)] py-4 gap-3">
+          <button
+            onClick={() => setLeftCollapsed(false)}
+            className="p-2 rounded-lg hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)]"
+            title="Expand configuration panel"
+            aria-label="Expand configuration panel"
+          >
+            <FiChevronRight className="w-4 h-4" />
+          </button>
+          <FiCpu className="w-4 h-4 text-[var(--color-text-muted)]" title="Discovery Engine" />
+          <span className="w-2 h-2 rounded-full" style={{ background: connected ? 'var(--color-success)' : connected === false ? 'var(--color-error)' : 'var(--color-warning)' }} title={connected ? 'Live' : connected === false ? 'Offline' : 'Connecting'} />
+        </div>
+      )}
       {/* Left Panel - Config & Stats */}
-      <div className="w-80 flex flex-col border-r border-[var(--color-border)] overflow-hidden">
+      <div className={`${leftCollapsed ? 'hidden' : 'w-80'} flex flex-col border-r border-[var(--color-border)] overflow-hidden`}>
         <div className="p-5 border-b border-[var(--color-border)]">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
@@ -481,14 +596,36 @@ export default function Agents() {
             <div className="flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full" style={{ background: connected ? 'var(--color-success)' : connected === false ? 'var(--color-error)' : 'var(--color-warning)' }} />
               <span className="text-xs text-[var(--color-text-muted)]">{connected ? 'Live' : connected === false ? 'Offline' : '...'}</span>
+              <button
+                onClick={() => setLeftCollapsed(true)}
+                className="ml-1 p-1 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)]"
+                title="Collapse configuration panel"
+                aria-label="Collapse configuration panel"
+              >
+                <FiChevronLeft className="w-3.5 h-3.5" />
+              </button>
             </div>
           </div>
 
           {/* Controls */}
           <div className="flex items-center gap-2">
             {isIdle && (
-              <button onClick={startDiscovery} disabled={!config.disease.trim()} className="btn flex-1 text-sm border border-[var(--color-border)] disabled:opacity-30" style={{ color: 'var(--color-success)' }}>
-                <FiPlay className="w-4 h-4" /> Start
+              <button
+                onClick={startDiscovery}
+                disabled={!config.disease.trim() || starting}
+                className="btn flex-1 text-sm border border-[var(--color-border)] disabled:opacity-30"
+                style={{ color: starting ? 'var(--color-text-muted)' : 'var(--color-success)' }}
+                title={!config.disease.trim() ? 'Enter a disease or target above to enable' : undefined}
+              >
+                {starting ? (
+                  <>
+                    <FiClock className="w-4 h-4 animate-spin" /> Starting…
+                  </>
+                ) : (
+                  <>
+                    <FiPlay className="w-4 h-4" /> Start
+                  </>
+                )}
               </button>
             )}
             {isRunning && (
@@ -512,6 +649,14 @@ export default function Agents() {
               </>
             )}
           </div>
+          {startError && (
+            <div className="mt-2 px-3 py-2 rounded text-xxs flex items-start gap-2"
+                 style={{ background: 'rgba(239,68,68,0.08)', color: 'var(--color-error)', border: '1px solid rgba(239,68,68,0.25)' }}>
+              <FiAlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+              <div className="flex-1">{startError}</div>
+              <button onClick={() => setStartError(null)} className="opacity-60 hover:opacity-100"><FiX className="w-3 h-3" /></button>
+            </div>
+          )}
         </div>
 
         <div className="flex-1 overflow-y-auto">
@@ -642,7 +787,7 @@ export default function Agents() {
                     ref={fileInputRef}
                     type="file"
                     multiple
-                    accept=".pdf,.txt,.csv,.json,.docx,.xlsx,.md"
+                    accept=".pdf,.txt,.csv,.tsv,.md,.markdown,.mdx,.json,.jsonl,.ndjson,.xml,.html,.htm,.rtf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.odp,.log,.bib"
                     onChange={handleDocUpload}
                     className="hidden"
                   />
@@ -656,16 +801,36 @@ export default function Agents() {
                   </button>
                   {uploadedDocs.length > 0 && (
                     <div className="mt-2 space-y-1">
-                      {uploadedDocs.map((doc, i) => (
-                        <div key={i} className="flex items-center gap-2 text-xs p-2 rounded-lg bg-[var(--glass-bg)]">
-                          <FiFile className="w-3 h-3 flex-shrink-0" style={{ color: doc.status === 'uploaded' ? 'var(--color-success)' : 'var(--color-error)' }} />
-                          <span className="flex-1 truncate">{doc.name}</span>
-                          <span className="text-xxs text-[var(--color-text-muted)]">{doc.status}</span>
-                          <button onClick={() => setUploadedDocs(prev => prev.filter((_, j) => j !== i))} className="text-[var(--color-text-muted)] hover:text-[var(--color-error)]">
-                            <FiX className="w-3 h-3" />
-                          </button>
-                        </div>
-                      ))}
+                      {uploadedDocs.map((doc, i) => {
+                        const statusColor = doc.status === 'uploaded'
+                          ? 'var(--color-success)'
+                          : doc.status === 'uploading'
+                            ? 'var(--color-text-muted)'
+                            : 'var(--color-error)'
+                        return (
+                          <div key={i} className="flex flex-col gap-1 text-xs p-2 rounded-lg bg-[var(--glass-bg)]">
+                            <div className="flex items-center gap-2">
+                              <FiFile className="w-3 h-3 flex-shrink-0" style={{ color: statusColor }} />
+                              <span className="flex-1 truncate" title={doc.name}>{doc.name}</span>
+                              <span className="text-xxs text-[var(--color-text-muted)]">
+                                {doc.status === 'uploading' ? 'uploading…' : doc.status}
+                              </span>
+                              <button
+                                onClick={() => setUploadedDocs(prev => prev.filter((_, j) => j !== i))}
+                                className="text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                                aria-label={`Remove ${doc.name}`}
+                              >
+                                <FiX className="w-3 h-3" />
+                              </button>
+                            </div>
+                            {doc.status === 'failed' && doc.error && (
+                              <div className="text-xxs pl-5" style={{ color: 'var(--color-error)' }}>
+                                {doc.error}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
                     </div>
                   )}
                 </div>
@@ -708,7 +873,7 @@ export default function Agents() {
                         <XAxis dataKey="name" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
                         <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
                         <Tooltip contentStyle={{ background: 'var(--color-surface-solid)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '11px', color: 'var(--color-text)' }} />
-                        <Bar dataKey="count" fill="var(--color-accent-blue)" radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="count" fill="var(--color-text)" radius={[4, 4, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
@@ -883,7 +1048,7 @@ export default function Agents() {
                         {h.round_number && <span>Round {h.round_number}</span>}
                         <button
                           onClick={e => { e.stopPropagation(); setCompareHypothesis(h); setShowCompare(true) }}
-                          className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 text-[var(--color-accent-blue)] transition-opacity"
+                          className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 text-[var(--color-text)] transition-opacity"
                           title="Compare"
                         >
                           <FiColumns className="w-3 h-3" /> Compare
@@ -1181,8 +1346,8 @@ function HypothesisDetail({ hypothesis: h, onClose, onExport }: { hypothesis: Hy
                       onClick={() => setFeedbackScore(n)}
                       className="w-8 h-8 rounded-lg text-xs font-medium transition-all"
                       style={{
-                        background: n <= feedbackScore ? 'var(--color-accent-blue)' : 'var(--glass-bg)',
-                        color: n <= feedbackScore ? '#fff' : 'var(--color-text-muted)',
+                        background: n <= feedbackScore ? 'rgba(255,255,255,0.18)' : 'var(--glass-bg)',
+                        color: n <= feedbackScore ? 'var(--color-text)' : 'var(--color-text-muted)',
                       }}
                     >
                       {n}

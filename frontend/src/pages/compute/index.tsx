@@ -1,10 +1,10 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   FiCpu, FiTerminal, FiGrid, FiActivity, FiTrendingUp,
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import Workstation from './Workstation'
-import PresetRunner from './PresetRunner'
 import MonteCarloPanel from './MonteCarloPanel'
 import EquationPlotter from './EquationPlotter'
 import type { ComputeMode } from './types'
@@ -15,19 +15,58 @@ const tabs: { id: ComputeMode; label: string; icon: typeof FiGrid; desc: string 
   { id: 'equations', label: 'Equation Plotter', icon: FiTrendingUp, desc: 'Plot, overlay & compare equations' },
 ]
 
+// Accept legacy aliases so existing dashboard links that still point at
+// "history" or "simulation" names don't 404 into the default workstation
+// tab. Map each known alias onto a real ComputeMode.
+const TAB_ALIASES: Record<string, ComputeMode> = {
+  workstation: 'workstation',
+  montecarlo: 'montecarlo',
+  'monte-carlo': 'montecarlo',
+  mc: 'montecarlo',
+  history: 'montecarlo', // legacy: simulations history = Monte Carlo panel
+  simulations: 'montecarlo',
+  equations: 'equations',
+  equation: 'equations',
+  plotter: 'equations',
+}
+
 export default function ComputeLab() {
-  const [mode, setMode] = useState<ComputeMode>('workstation')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const initialMode: ComputeMode = (() => {
+    const raw = (searchParams.get('tab') || '').toLowerCase()
+    return TAB_ALIASES[raw] ?? 'workstation'
+  })()
+  const [mode, setMode] = useState<ComputeMode>(initialMode)
+
+  // Keep the URL query in sync so the selected tab is shareable and
+  // survives reload without hijacking the user's back/forward stack.
+  // We compare what's *literally* in the URL against what the current
+  // mode wants — this normalizes aliases (?tab=mc → ?tab=montecarlo)
+  // and strips ?tab=workstation (workstation is the default, so no
+  // param should be visible) on initial mount.
+  useEffect(() => {
+    const currentRaw = (searchParams.get('tab') || '').toLowerCase()
+    const want = mode === 'workstation' ? '' : mode
+    if (currentRaw !== want) {
+      const next = new URLSearchParams(searchParams)
+      if (want) next.set('tab', want)
+      else next.delete('tab')
+      setSearchParams(next, { replace: true })
+    }
+  }, [mode]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="flex flex-col h-full" style={{ color: 'var(--color-text)' }}>
-      {/* ── Header ── */}
+      {/* ── Header ──
+          The sidebar + top-nav both already render the page title
+          "Compute Lab", so we drop the inline <h1> that used to sit
+          left of the tab row — it was pure visual duplication that
+          ate horizontal space. Keep the FiCpu icon as a compact
+          anchor so users still get a visual cue. */}
       <div className="flex items-center gap-5 px-5 py-3 border-b flex-shrink-0" style={{ borderColor: 'var(--glass-border)' }}>
-        <div className="flex items-center gap-2">
-          <FiCpu className="text-base" style={{ color: 'var(--color-text-muted)' }} />
-          <h1 className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>Compute Lab</h1>
-        </div>
+        <FiCpu className="text-base flex-shrink-0" style={{ color: 'var(--color-text-muted)' }} aria-hidden="true" />
 
-        <div className="flex gap-1 ml-2">
+        <div className="flex gap-1">
           {tabs.map(tab => {
             const active = mode === tab.id
             const Icon = tab.icon
@@ -61,7 +100,6 @@ export default function ComputeLab() {
       {/* ── Content ── */}
       <div className="flex-1 overflow-hidden">
         {mode === 'workstation' && <Workstation />}
-        {mode === 'presets' && <PresetRunner />}
         {mode === 'montecarlo' && <MonteCarloPanel />}
         {mode === 'equations' && <EquationPlotter />}
       </div>

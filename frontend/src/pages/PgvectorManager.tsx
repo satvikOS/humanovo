@@ -3,6 +3,7 @@
  * Tabs: Cache Overview, Search & Browse, Similarity Testing, Maintenance
  */
 import { useState, useEffect } from 'react'
+import { useAlertDialog } from '../components/AlertDialog'
 
 const API = '/api'
 
@@ -44,6 +45,7 @@ const TABS = ['Cache Overview', 'Search & Browse', 'Similarity Testing', 'Mainte
 type Tab = typeof TABS[number]
 
 export default function PgvectorManager() {
+  const { showConfirm, AlertDialog } = useAlertDialog()
   const [tab, setTab] = useState<Tab>('Cache Overview')
   const [stats, setStats] = useState<CacheStats | null>(null)
   const [loading, setLoading] = useState(true)
@@ -120,6 +122,7 @@ export default function PgvectorManager() {
 
   return (
     <div className="p-6 space-y-6">
+      <AlertDialog />
       <div>
         <h1 className="text-2xl font-bold" style={{ color: 'var(--color-text)' }}>pgvector Manager</h1>
         <p className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>Developer tool — grounding cache management</p>
@@ -177,7 +180,7 @@ export default function PgvectorManager() {
             </select>
             <button onClick={doSearch} disabled={!searchQuery || searching}
               className="px-4 py-2 rounded-lg text-sm font-medium text-white"
-              style={{ background: 'var(--color-accent-blue)', opacity: !searchQuery || searching ? 0.5 : 1 }}>
+              style={{ background: 'rgba(255,255,255,0.15)', opacity: !searchQuery || searching ? 0.5 : 1 }}>
               {searching ? 'Searching...' : 'Search'}
             </button>
           </div>
@@ -215,7 +218,7 @@ export default function PgvectorManager() {
               style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }} />
             <button onClick={doSimilarityTest} disabled={!simQuery || simTesting}
               className="px-4 py-2 rounded-lg text-sm font-medium text-white"
-              style={{ background: 'var(--color-accent-blue)', opacity: !simQuery || simTesting ? 0.5 : 1 }}>
+              style={{ background: 'rgba(255,255,255,0.15)', opacity: !simQuery || simTesting ? 0.5 : 1 }}>
               {simTesting ? 'Testing...' : 'Test'}
             </button>
           </div>
@@ -277,7 +280,7 @@ export default function PgvectorManager() {
                 <p className="text-xs mt-1 mb-3" style={{ color: 'var(--color-text-muted)' }}>{task.desc}</p>
                 <button onClick={() => runMaintenance(task.id)} disabled={runningTask === task.id}
                   className="px-3 py-1.5 rounded text-xs font-medium text-white"
-                  style={{ background: 'var(--color-accent-blue)', opacity: runningTask === task.id ? 0.5 : 1 }}>
+                  style={{ background: 'rgba(255,255,255,0.15)', opacity: runningTask === task.id ? 0.5 : 1 }}>
                   {runningTask === task.id ? 'Running...' : 'Run Now'}
                 </button>
               </div>
@@ -290,9 +293,9 @@ export default function PgvectorManager() {
                 style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>
                 {Object.keys(stats?.source_distribution || {}).map(s => <option key={s} value={s}>{s}</option>)}
               </select>
-              <button onClick={() => {
+              <button onClick={async () => {
                 const sel = (document.getElementById('purge-source') as HTMLSelectElement)?.value
-                if (sel && confirm(`Delete all entries from ${sel}?`)) runMaintenance(`purge-source?source_name=${sel}`)
+                if (sel && await showConfirm(`Delete all entries from "${sel}"? This cannot be undone.`, 'Purge Source', 'Purge', 'Cancel')) runMaintenance(`purge-source?source_name=${sel}`)
               }}
                 className="px-3 py-1.5 rounded text-xs font-medium text-white" style={{ background: '#ef4444' }}>
                 Purge

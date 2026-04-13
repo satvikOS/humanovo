@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   FiBarChart2, FiPlus, FiTrash2,
   FiDownload, FiUpload, FiSettings, FiX,
@@ -18,6 +19,7 @@ import {
 } from 'recharts'
 import html2canvas from 'html2canvas'
 import * as XLSX from 'xlsx'
+import { getPlotBlob } from '../utils/plotExport'
 import { persistGet, persistSet, formatDate, logActivity } from '../utils/persistence'
 import PlotlyPlot3D, { type Chart3DType } from '../components/PlotlyPlot3D'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
@@ -174,14 +176,14 @@ const defaultOptions: ChartOptions = {
 
 // ─── Palettes ───────────────────────────────────────────────────
 const PALETTES: Record<string, string[]> = {
-  default: ['#3b82f6', '#8b5cf6', '#22c55e', '#f97316', '#06b6d4', '#ef4444', '#eab308', '#ec4899', '#14b8a6', '#a855f7'],
-  nature: ['#2d6a4f', '#40916c', '#52b788', '#74c69d', '#95d5b2', '#b7e4c7', '#d8f3dc', '#1b4332', '#081c15', '#344e41'],
-  ocean: ['#03045e', '#023e8a', '#0077b6', '#0096c7', '#00b4d8', '#48cae4', '#90e0ef', '#ade8f4', '#caf0f8', '#264653'],
-  warm: ['#d00000', '#dc2f02', '#e85d04', '#f48c06', '#faa307', '#ffba08', '#ffd60a', '#9d0208', '#6a040f', '#370617'],
-  pastel: ['#ffd6ff', '#e7c6ff', '#c8b6ff', '#b8c0ff', '#bbd0ff', '#caffbf', '#fdffb6', '#ffd6a5', '#ffadad', '#a0c4ff'],
-  scientific: ['#264653', '#2a9d8f', '#e9c46a', '#f4a261', '#e76f51', '#606c38', '#283618', '#dda15e', '#bc6c25', '#001219'],
-  diverging: ['#d73027', '#f46d43', '#fdae61', '#fee08b', '#ffffbf', '#d9ef8b', '#a6d96a', '#66bd63', '#1a9850', '#006837'],
-  monochrome: ['#0d1b2a', '#1b2838', '#2b3a4a', '#3c4d5e', '#4d6072', '#5e7388', '#70869e', '#8299b4', '#94acca', '#a6bfe0'],
+  default: ['#5B8DB8', '#8B7EAF', '#6BA594', '#C4956A', '#7BA7B8', '#B07E8B', '#A89B6E', '#8598AD', '#7E9B8A', '#9B8EAD'],
+  nature: ['#4A7C6F', '#5D9178', '#6FA583', '#81B792', '#94C7A2', '#749C76', '#5E8860', '#8CB186', '#6D9969', '#527E56'],
+  ocean: ['#3D5A80', '#4D6D94', '#5E80A8', '#6E93BB', '#7FA6CE', '#8FB9E1', '#6997B8', '#5784A5', '#457192', '#335E7F'],
+  warm: ['#B57170', '#C48A6F', '#CFA277', '#D4B481', '#DABD8B', '#C19068', '#B87E5E', '#CF9E72', '#D5AA7D', '#C2886A'],
+  pastel: ['#B8C4D8', '#C2B8D6', '#BDC8CA', '#D1C4B8', '#C8BDC8', '#B8CDB8', '#D3D1B8', '#C8BAB8', '#B8BFD6', '#C4C8C2'],
+  scientific: ['#4A6670', '#5C8A82', '#8FA96C', '#C4A05C', '#B87A5C', '#6C7C4A', '#4A5C3C', '#9C8258', '#7C5C3C', '#2A4048'],
+  diverging: ['#B85450', '#C87A5E', '#D8A870', '#E8D088', '#F0F0B8', '#B8D890', '#88C070', '#58A858', '#389038', '#207828'],
+  monochrome: ['#2A3544', '#354252', '#404F60', '#4B5C6E', '#56697C', '#61768A', '#6C8398', '#7790A6', '#829DB4', '#8DAAC2'],
 }
 
 const CHART_TYPES: { value: ChartType; label: string; group: string }[] = [
@@ -283,6 +285,15 @@ const SAMPLE_DATA: Record<string, { data: string; title: string; columns: string
   surface_3d: { title: '3D Dose-Response Surface', columns: 'label, x, y, z', data: 'P1, -2, -2, 0.5\nP2, 0, -2, 1.2\nP3, 2, -2, 0.8\nP4, -2, 0, 1.5\nP5, 0, 0, 3.0\nP6, 2, 0, 1.8\nP7, -2, 2, 0.6\nP8, 0, 2, 1.4\nP9, 2, 2, 0.9' },
   wireframe_3d: { title: '3D Wireframe Model', columns: 'label, x, y, z', data: 'P1, -2, -2, 0.5\nP2, 0, -2, 1.2\nP3, 2, -2, 0.8\nP4, -2, 0, 1.5\nP5, 0, 0, 3.0\nP6, 2, 0, 1.8' },
   contour_3d: { title: '3D Contour Map', columns: 'label, x, y, z', data: 'P1, -2, -2, 0.5\nP2, 0, -2, 1.2\nP3, 2, -2, 0.8\nP4, -2, 0, 1.5\nP5, 0, 0, 3.0\nP6, 2, 0, 1.8' },
+  trisurf_3d: { title: '3D Triangulated Surface', columns: 'label, x, y, z', data: 'V1, 0, 0, 0\nV2, 1, 0, 0.8\nV3, 0.5, 1, 1.2\nV4, 2, 0, 0.4\nV5, 1.5, 1.2, 1.6\nV6, 1, 2, 0.9\nV7, 2.5, 1.8, 1.1\nV8, 0.5, 2.2, 0.7\nV9, 2, 2.5, 1.4' },
+  quiver_3d: { title: '3D Vector Field', columns: 'label, x, y, z', data: 'v1, -1, -1, 0\nv2, 0, -1, 0.5\nv3, 1, -1, 0.2\nv4, -1, 0, 0.8\nv5, 0, 0, 1.0\nv6, 1, 0, 0.6\nv7, -1, 1, 0.3\nv8, 0, 1, 0.9\nv9, 1, 1, 0.4' },
+  isosurface_3d: { title: '3D Isosurface (Density)', columns: 'label, x, y, z', data: 'p1, -2, -2, 0.1\np2, 0, -2, 0.8\np3, 2, -2, 0.3\np4, -2, 0, 0.7\np5, 0, 0, 2.5\np6, 2, 0, 0.9\np7, -2, 2, 0.2\np8, 0, 2, 0.6\np9, 2, 2, 0.4\np10, -1, -1, 1.2\np11, 1, -1, 1.0\np12, -1, 1, 1.5\np13, 1, 1, 1.8' },
+  voxel_3d: { title: '3D Voxel Grid', columns: 'label, x, y, z', data: 'v000, 0, 0, 1\nv100, 1, 0, 2\nv010, 0, 1, 1\nv110, 1, 1, 3\nv001, 0, 0, 2\nv101, 1, 0, 1\nv011, 0, 1, 3\nv111, 1, 1, 2' },
+  streamline_3d: { title: '3D Streamlines', columns: 'label, x, y, z', data: 's1, 0, 0, 0\ns2, 0.5, 0.3, 0.2\ns3, 1.0, 0.7, 0.5\ns4, 1.4, 1.2, 0.9\ns5, 1.6, 1.8, 1.4\ns6, 1.7, 2.4, 2.0\ns7, 1.5, 2.9, 2.6\ns8, 1.1, 3.2, 3.1' },
+  slice_3d: { title: '3D Volume Slice', columns: 'label, x, y, z', data: 'c1, -2, -2, 0.1\nc2, -1, -2, 0.3\nc3, 0, -2, 0.8\nc4, 1, -2, 0.4\nc5, 2, -2, 0.2\nc6, -2, 0, 0.5\nc7, 0, 0, 2.1\nc8, 2, 0, 0.6\nc9, -2, 2, 0.2\nc10, 0, 2, 0.7' },
+  stem_3d: { title: '3D Stem Plot', columns: 'label, x, y, z', data: 'pk1, 0, 0, 2.1\npk2, 1, 0.5, 3.8\npk3, 2, 1, 1.5\npk4, 0.5, 1.5, 4.2\npk5, 1.5, 2, 2.9\npk6, 2.5, 2.5, 3.4' },
+  waterfall_3d: { title: '3D Waterfall', columns: 'label, x, y, z', data: 'Q1, 1, 0, 100\nQ2, 2, 0, -15\nQ3, 3, 0, 25\nQ4, 4, 0, -8\nQ1, 1, 1, 80\nQ2, 2, 1, 20\nQ3, 3, 1, -12\nQ4, 4, 1, 18' },
+  ribbon_3d: { title: '3D Ribbon Plot', columns: 'label, x, y, z', data: 'r1, 0, 0, 0.5\nr2, 1, 0, 1.2\nr3, 2, 0, 0.8\nr4, 3, 0, 1.5\nr5, 0, 1, 1.0\nr6, 1, 1, 2.5\nr7, 2, 1, 1.8\nr8, 3, 1, 2.2\nr9, 0, 2, 0.7\nr10, 1, 2, 1.4\nr11, 2, 2, 2.0\nr12, 3, 2, 1.1' },
   pie_3d: { title: '3D Enrollment Distribution', columns: 'label, x, y, z', data: 'Site A, 1, 1, 35\nSite B, 2, 2, 28\nSite C, 3, 3, 22\nSite D, 4, 4, 15' },
 }
 
@@ -312,6 +323,8 @@ const COLUMN_MAPS: Record<string, { required: string[]; optional: string[]; desc
   bubble: { required: ['Label', 'X', 'Y', 'Size'], optional: [], description: 'Scatter with size dimension' },
   histogram: { required: ['Label/Bin', 'Count'], optional: [], description: 'Frequency distribution' },
   box_plot: { required: ['Label', 'Value', 'Category'], optional: [], description: 'Distribution by group' },
+  violin: { required: ['Label', 'Value', 'Category'], optional: [], description: 'Density-aware distribution by group' },
+  density: { required: ['Label/Bin', 'Density'], optional: [], description: 'Smoothed frequency distribution' },
   error_bar: { required: ['Label', 'Value', 'Error+', 'Error-'], optional: [], description: 'Values with error margins' },
   candlestick: { required: ['Label', 'Open', 'High', 'Low', 'Close'], optional: [], description: 'OHLC data' },
   heatmap: { required: ['Label', 'Value', 'Category'], optional: [], description: 'Matrix intensity values' },
@@ -324,18 +337,31 @@ const COLUMN_MAPS: Record<string, { required: string[]; optional: string[]; desc
   surface_3d: { required: ['Label', 'X', 'Y', 'Z'], optional: [], description: '3D surface from grid points' },
   wireframe_3d: { required: ['Label', 'X', 'Y', 'Z'], optional: [], description: '3D wireframe mesh' },
   contour_3d: { required: ['Label', 'X', 'Y', 'Z'], optional: [], description: '3D contour projection' },
+  trisurf_3d: { required: ['Label', 'X', 'Y', 'Z'], optional: [], description: 'Triangulated surface from scattered points' },
+  quiver_3d: { required: ['Label', 'X', 'Y', 'Z'], optional: ['VX', 'VY', 'VZ'], description: '3D vector field (arrows)' },
+  isosurface_3d: { required: ['Label', 'X', 'Y', 'Z'], optional: [], description: 'Volumetric isosurface (density)' },
+  voxel_3d: { required: ['Label', 'X', 'Y', 'Z'], optional: [], description: 'Discrete voxel grid' },
+  streamline_3d: { required: ['Label', 'X', 'Y', 'Z'], optional: [], description: 'Flow streamlines through space' },
+  slice_3d: { required: ['Label', 'X', 'Y', 'Z'], optional: [], description: '2D slice of a 3D volume' },
+  stem_3d: { required: ['Label', 'X', 'Y', 'Z'], optional: [], description: '3D vertical stems from base' },
+  waterfall_3d: { required: ['Label', 'X', 'Y', 'Z'], optional: [], description: '3D waterfall / sequential deltas' },
+  ribbon_3d: { required: ['Label', 'X', 'Y', 'Z'], optional: [], description: 'Ribbon surface along series' },
   pie_3d: { required: ['Label', 'X', 'Y', 'Z'], optional: [], description: '3D pie chart' },
 }
 
 const TOOLTIP_STYLE = {
-  background: 'var(--color-surface-solid)',
-  border: '1px solid var(--color-border)',
-  borderRadius: '8px',
-  fontSize: '12px',
+  background: 'var(--color-surface-solid, rgba(10, 10, 10, 0.95))',
+  border: '1px solid rgba(255,255,255,0.08)',
+  borderRadius: '6px',
+  fontSize: '11px',
   color: 'var(--color-text)',
+  boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
+  padding: '8px 12px',
+  backdropFilter: 'blur(12px)',
+  fontFamily: "'Inter', system-ui, sans-serif",
 }
 
-const AXIS_TICK = { fontSize: 11, fill: 'var(--color-text-muted)' }
+const AXIS_TICK = { fontSize: 10, fill: 'var(--color-text-muted)', fontFamily: "'Inter', system-ui, sans-serif" }
 
 // ─── Helpers ────────────────────────────────────────────────────
 function parseCSV(text: string): DataPoint[] {
@@ -371,7 +397,15 @@ function computeBoxStats(values: number[]): { min: number; q1: number; median: n
 
 function computeHistogram(values: number[], bins = 15): { label: string; count: number }[] {
   if (!values.length) return []
-  const mn = Math.min(...values), mx = Math.max(...values)
+  // Single-pass min/max so datasets with >100k points don't blow the JS
+  // argument-list stack via Math.min(...values).
+  let mn = Infinity, mx = -Infinity
+  for (const v of values) {
+    if (!Number.isFinite(v)) continue
+    if (v < mn) mn = v
+    if (v > mx) mx = v
+  }
+  if (!Number.isFinite(mn) || !Number.isFinite(mx)) return []
   const w = (mx - mn) / bins || 1
   const buckets = Array.from({ length: bins }, (_, i) => ({
     label: `${(mn + i * w).toFixed(1)}`,
@@ -489,7 +523,7 @@ function GlassSelect({ value, options, onChange, placeholder }: {
                   onClick={() => { onChange(opt.value); setOpen(false) }}
                   className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 transition-colors ${
                     opt.value === value
-                      ? 'bg-[var(--color-accent-blue)]/10 text-[var(--color-accent-blue)]'
+                      ? 'bg-white/10 text-[var(--color-text)]'
                       : 'text-[var(--color-text-secondary)] hover:bg-[var(--glass-bg-hover)] hover:text-[var(--color-text)]'
                   }`}
                 >
@@ -516,7 +550,21 @@ export default function DataVisualization() {
       options: c.options ? { ...defaultOptions, ...c.options } : { ...defaultOptions, color: c.color || defaultOptions.color },
     }))
   })
-  const [showAdd, setShowAdd] = useState(false)
+  // Deep-link `?add=1` auto-opens the Add Chart dialog so dashboard
+  // and cross-page links can drop users straight into the creation
+  // flow. The query is consumed on mount and cleaned off the URL.
+  const [searchParams] = useSearchParams()
+  const [showAdd, setShowAdd] = useState(() => searchParams.get('add') === '1')
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search)
+    if (sp.has('add')) {
+      sp.delete('add')
+      const qs = sp.toString()
+      const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash
+      window.history.replaceState(window.history.state, '', newUrl)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [showSettings, setShowSettings] = useState<string | null>(null)
   const [expandedChart, setExpandedChart] = useState<string | null>(null)
   const chartRefs = useRef<Record<string, HTMLDivElement | null>>({})
@@ -573,7 +621,7 @@ export default function DataVisualization() {
     if (!chart) return
     const values = chart.data.map(d => d.value)
     const mean = values.reduce((s, v) => s + v, 0) / values.length
-    const ann: ChartAnnotation = { id: `ann-${Date.now()}`, axis: 'y', value: Math.round(mean * 100) / 100, label: 'Reference', color: '#f59e0b', style: 'dashed' }
+    const ann: ChartAnnotation = { id: `ann-${Date.now()}`, axis: 'y', value: Math.round(mean * 100) / 100, label: 'Reference', color: '#C4956A', style: 'dashed' }
     saveCharts(charts.map(c => c.id === chartId ? { ...c, annotations: [...(c.annotations || []), ann] } : c))
   }
   const updateAnnotation = (chartId: string, annId: string, updates: Partial<ChartAnnotation>) => {
@@ -589,8 +637,8 @@ export default function DataVisualization() {
     const mean = vals.reduce((s, v) => s + v, 0) / vals.length
     const median = vals.length % 2 === 0 ? (vals[vals.length / 2 - 1] + vals[vals.length / 2]) / 2 : vals[Math.floor(vals.length / 2)]
     const anns: ChartAnnotation[] = [
-      { id: `ann-mean-${Date.now()}`, axis: 'y', value: Math.round(mean * 100) / 100, label: `Mean: ${mean.toFixed(2)}`, color: '#3b82f6', style: 'dashed' },
-      { id: `ann-median-${Date.now()}`, axis: 'y', value: Math.round(median * 100) / 100, label: `Median: ${median.toFixed(2)}`, color: '#22c55e', style: 'dotted' },
+      { id: `ann-mean-${Date.now()}`, axis: 'y', value: Math.round(mean * 100) / 100, label: `Mean: ${mean.toFixed(2)}`, color: '#5B8DB8', style: 'dashed' },
+      { id: `ann-median-${Date.now()}`, axis: 'y', value: Math.round(median * 100) / 100, label: `Median: ${median.toFixed(2)}`, color: '#6BA594', style: 'dotted' },
     ]
     saveCharts(charts.map(c => c.id === chartId ? { ...c, annotations: [...(c.annotations || []), ...anns] } : c))
   }
@@ -652,9 +700,29 @@ export default function DataVisualization() {
   const exportPng = useCallback(async (id: string, title: string) => {
     const el = chartRefs.current[id]
     if (!el) return
+    // 3D charts render via Plotly (WebGL + SVG overlay). html2canvas
+    // captures only the overlay — the main scene ends up blank. Route
+    // those through plotExport which calls Plotly.toImage for a complete
+    // raster. Recharts (2D) still uses html2canvas so we keep legend
+    // click-states, custom tooltips, and any DOM decorators.
+    const isPlotly = !!el.querySelector('.js-plotly-plot')
     try {
+      if (isPlotly) {
+        const blob = await getPlotBlob(el, 'png')
+        if (blob) {
+          const url = URL.createObjectURL(blob)
+          const a = document.createElement('a')
+          a.download = `${title.replace(/\s+/g, '-').toLowerCase()}.png`
+          a.href = url
+          a.click()
+          URL.revokeObjectURL(url)
+          return
+        }
+      }
+      // Transparent background so the exported PNG drops cleanly into
+      // slides / papers without the dark app shell bleeding through.
       const canvas = await html2canvas(el, {
-        backgroundColor: '#0f0f14',
+        backgroundColor: null,
         scale: 2,
         useCORS: true,
         logging: false,
@@ -723,13 +791,47 @@ export default function DataVisualization() {
   // ─── Copy chart to clipboard as image ──────────────────────
   const [copiedChart, setCopiedChart] = useState<string | null>(null)
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+  // Per-chart background theme for the chart surface — lets the user
+  // flip a single card from dark to paper-white without affecting the
+  // rest of the platform (publication-grade parity with Plot3D).
+  const [chartBgTheme, setChartBgTheme] = useState<Record<string, 'dark' | 'light'>>({})
 
-  const copyChartToClipboard = useCallback(async (id: string) => {
+  const setChartBg = useCallback((id: string, theme: 'dark' | 'light') => {
+    setChartBgTheme(prev => ({ ...prev, [id]: theme }))
+  }, [])
+
+  const copyChartToClipboard = useCallback(async (id: string, targetTheme?: 'dark' | 'light') => {
     const el = chartRefs.current[id]
     if (!el) return
+    // `targetTheme` used to gate a pre-snapshot bg swap so html2canvas
+    // captured the intended solid color; with transparent exports the
+    // effective theme no longer affects the image, but the surface
+    // toggle itself (light/dark preview) still runs.
+    const needsSwap = targetTheme !== undefined && chartBgTheme[id] !== targetTheme
+    // 3D charts: bypass html2canvas and use Plotly's native rasterizer
+    // so the WebGL scene actually comes through on the clipboard image.
+    const isPlotly = !!el.querySelector('.js-plotly-plot')
+    if (isPlotly) {
+      try {
+        const blob = await getPlotBlob(el, 'png')
+        if (blob) {
+          await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+          setCopiedChart(id)
+          setTimeout(() => setCopiedChart(null), 2000)
+          return
+        }
+      } catch { /* fall through to html2canvas */ }
+    }
     try {
+      if (needsSwap && targetTheme) setChartBg(id, targetTheme)
+      // Give Recharts a frame to repaint against the new bg before snapshotting.
+      await new Promise(r => requestAnimationFrame(() => r(null)))
+      await new Promise(r => requestAnimationFrame(() => r(null)))
+      // Transparent clipboard copy: chart drops onto whatever surface
+      // the user pastes into (paper, slide deck, whiteboard) without
+      // dragging the app's dark chrome with it.
       const canvas = await html2canvas(el, {
-        backgroundColor: '#0f0f14',
+        backgroundColor: null,
         scale: 2,
         useCORS: true,
         logging: false,
@@ -744,7 +846,7 @@ export default function DataVisualization() {
       setCopiedChart(id)
       setTimeout(() => setCopiedChart(null), 2000)
     }
-  }, [])
+  }, [chartBgTheme, setChartBg])
 
   // ─── Render any chart ───────────────────────────────────────
   const renderChart = (chart: ChartConfig, height = 300) => {
@@ -761,7 +863,7 @@ export default function DataVisualization() {
     const hidden = hiddenSeries[chart.id] || new Set<string>()
     const handleLegendClick = (e: any) => { if (e?.dataKey) toggleSeries(chart.id, e.dataKey) }
     const legendEl = o.showLegend ? <Legend wrapperStyle={{ fontSize: 11, cursor: 'pointer' }} onClick={handleLegendClick} formatter={(value: string) => <span style={{ opacity: hidden.has(value) ? 0.3 : 1, textDecoration: hidden.has(value) ? 'line-through' : 'none' }}>{value}</span>} /> : null
-    const brushEl = o.showBrush && data.length > 5 ? <Brush dataKey="label" height={20} stroke="var(--color-accent-blue)" fill="var(--glass-bg)" travellerWidth={8} /> : null
+    const brushEl = o.showBrush && data.length > 5 ? <Brush dataKey="label" height={20} stroke="var(--color-text)" fill="var(--glass-bg)" travellerWidth={8} /> : null
     const xAxisEl = <XAxis dataKey="label" tick={AXIS_TICK} label={o.xLabel ? { value: o.xLabel, position: 'insideBottom', offset: -5, style: { fontSize: 11, fill: 'var(--color-text-muted)' } } : undefined} scale={o.logScaleX ? 'log' : 'auto'} />
     const yAxisEl = <YAxis tick={AXIS_TICK} label={o.yLabel ? { value: o.yLabel, angle: -90, position: 'insideLeft', style: { fontSize: 11, fill: 'var(--color-text-muted)' } } : undefined} scale={o.logScaleY ? 'log' : 'auto'} domain={o.logScaleY ? ['auto', 'auto'] : undefined} />
     const annotationEls = (chart.annotations || []).map(ann => (
@@ -781,7 +883,7 @@ export default function DataVisualization() {
                 <Bar dataKey="value" fill={colors[0]} radius={[4, 4, 0, 0]} animationDuration={o.animate ? 400 : 0} hide={hidden.has('value')}>
                   {o.showValues && <LabelList dataKey="value" position="top" style={{ fontSize: 10, fill: 'var(--color-text-muted)' }} />}
                 </Bar>
-                <Line type="monotone" dataKey="trend" name={o.trendLine === 'linear' ? 'Linear Trend' : 'Moving Avg'} stroke="#f59e0b" strokeWidth={2} strokeDasharray="6 3" dot={false} />
+                <Line type="monotone" dataKey="trend" name={o.trendLine === 'linear' ? 'Linear Trend' : 'Moving Avg'} stroke="#C4956A" strokeWidth={2} strokeDasharray="6 3" dot={false} />
               </ComposedChart>
             ) : (
               <BarChart data={data} barGap={o.barGap}>
@@ -881,7 +983,7 @@ export default function DataVisualization() {
         const waterfallData = data.map((d, i) => {
           const start = cumulative
           cumulative += d.value
-          return { ...d, start, end: cumulative, fill: i === data.length - 1 ? colors[2] : d.value >= 0 ? colors[0] : colors[3] || '#ef4444' }
+          return { ...d, start, end: cumulative, fill: i === data.length - 1 ? colors[2] : d.value >= 0 ? colors[0] : colors[3] || '#B07E8B' }
         })
         return (
           <ResponsiveContainer width="100%" height={height}>
@@ -906,7 +1008,7 @@ export default function DataVisualization() {
             <LineChart data={data}>
               {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{annotationEls}
               <Line type={o.smooth ? 'monotone' : 'linear'} dataKey="value" stroke={colors[0]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize, fill: colors[0] }} animationDuration={o.animate ? 400 : 0} hide={hidden.has('value')} />
-              {hasTrend && <Line type="monotone" dataKey="trend" name={o.trendLine === 'linear' ? 'Linear Trend' : 'Moving Avg'} stroke="#f59e0b" strokeWidth={2} strokeDasharray="6 3" dot={false} />}
+              {hasTrend && <Line type="monotone" dataKey="trend" name={o.trendLine === 'linear' ? 'Linear Trend' : 'Moving Avg'} stroke="#C4956A" strokeWidth={2} strokeDasharray="6 3" dot={false} />}
             </LineChart>
           </ResponsiveContainer>
         )
@@ -963,7 +1065,7 @@ export default function DataVisualization() {
               <ComposedChart data={data}>
                 {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{annotationEls}
                 <Area type="monotone" dataKey="value" stroke={colors[0]} fill={colors[0]} fillOpacity={o.fillOpacity} strokeWidth={o.lineWidth} hide={hidden.has('value')} />
-                <Line type="monotone" dataKey="trend" name={o.trendLine === 'linear' ? 'Linear Trend' : 'Moving Avg'} stroke="#f59e0b" strokeWidth={2} strokeDasharray="6 3" dot={false} />
+                <Line type="monotone" dataKey="trend" name={o.trendLine === 'linear' ? 'Linear Trend' : 'Moving Avg'} stroke="#C4956A" strokeWidth={2} strokeDasharray="6 3" dot={false} />
               </ComposedChart>
             ) : (
               <AreaChart data={data}>
@@ -1207,8 +1309,15 @@ export default function DataVisualization() {
           vGroups[grp].push(d.value)
         })
         const vEntries = Object.entries(vGroups)
-        const allVals = data.map(d => d.value)
-        const vMin = Math.min(...allVals), vMax = Math.max(...allVals)
+        // Single-pass — spread can overflow the argument list for large series.
+        let vMin = Infinity, vMax = -Infinity
+        for (const d of data) {
+          const v = d.value
+          if (!Number.isFinite(v)) continue
+          if (v < vMin) vMin = v
+          if (v > vMax) vMax = v
+        }
+        if (!Number.isFinite(vMin)) { vMin = 0; vMax = 1 }
         const vRange = vMax - vMin || 1
         const vPad = vRange * 0.1
         const ySteps = 40
@@ -1226,7 +1335,22 @@ export default function DataVisualization() {
               {vEntries.map(([name, vals], gi) => {
                 const sorted = [...vals].sort((a, b) => a - b)
                 const cx = 65 + gi * groupW + groupW / 2
-                const bw = (vals.length > 1 ? Math.sqrt(vals.length) : 1) * 0.4
+                // Silverman's rule of thumb: h = 1.06 * sigma * n^(-1/5).
+                // The previous bw grew with sample size, which over-smooths
+                // the violin until it looks like a blob. Silverman narrows
+                // bandwidth as data accumulates, preserving modes.
+                const nV = vals.length
+                let mean = 0
+                for (const v of sorted) mean += v
+                mean /= nV || 1
+                let variance = 0
+                for (const v of sorted) variance += (v - mean) ** 2
+                const sigma = Math.sqrt(variance / Math.max(nV - 1, 1))
+                const fallbackScale = (vMax - vMin) || 1
+                const bw = Math.max(
+                  (sigma > 0 ? 1.06 * sigma * Math.pow(nV, -1 / 5) : fallbackScale * 0.08),
+                  fallbackScale * 0.02,
+                )
                 // KDE estimation
                 const kde: { y: number; density: number }[] = []
                 let maxD = 0
@@ -1243,13 +1367,17 @@ export default function DataVisualization() {
                 const pathR = kde.map(k => `${cx + (k.density / maxD) * halfW},${toY(k.y)}`).join(' ')
                 const pathL = kde.map(k => `${cx - (k.density / maxD) * halfW},${toY(k.y)}`).reverse().join(' ')
                 const stats = computeBoxStats(vals)
+                const col = colors[gi % colors.length]
                 return (
                   <g key={name}>
-                    <polygon points={`${pathR} ${pathL}`} fill={colors[gi % colors.length]} opacity={0.3} stroke={colors[gi % colors.length]} strokeWidth={1.5} />
-                    {/* Median + quartile lines */}
-                    <line x1={cx - halfW * 0.5} x2={cx + halfW * 0.5} y1={toY(stats.median)} y2={toY(stats.median)} stroke={colors[gi % colors.length]} strokeWidth={2} />
-                    <line x1={cx - halfW * 0.3} x2={cx + halfW * 0.3} y1={toY(stats.q1)} y2={toY(stats.q1)} stroke={colors[gi % colors.length]} strokeWidth={1} opacity={0.6} />
-                    <line x1={cx - halfW * 0.3} x2={cx + halfW * 0.3} y1={toY(stats.q3)} y2={toY(stats.q3)} stroke={colors[gi % colors.length]} strokeWidth={1} opacity={0.6} />
+                    <polygon points={`${pathR} ${pathL}`} fill={col} opacity={0.28} stroke={col} strokeWidth={1.5} />
+                    {/* IQR mini-box spanning q1..q3 */}
+                    <rect x={cx - 3} y={toY(stats.q3)} width={6} height={toY(stats.q1) - toY(stats.q3)}
+                      fill={col} opacity={0.55} rx={1.5} />
+                    {/* Whisker line min..max */}
+                    <line x1={cx} x2={cx} y1={toY(stats.max)} y2={toY(stats.min)} stroke={col} strokeWidth={1} opacity={0.7} />
+                    {/* Median dot */}
+                    <circle cx={cx} cy={toY(stats.median)} r={3} fill="#fff" stroke={col} strokeWidth={1.5} />
                     <text x={cx} y={height - 10} textAnchor="middle" fill="var(--color-text-muted)" fontSize={11}>{name}</text>
                   </g>
                 )
@@ -1260,12 +1388,26 @@ export default function DataVisualization() {
       }
 
       case 'density': {
-        // Kernel Density Estimation rendered as smooth AreaChart
+        // Kernel Density Estimation rendered as smooth AreaChart.
+        // Silverman's rule: h = 1.06 * sigma * n^(-1/5). Previous rule
+        // scaled bandwidth with sqrt(n) which oversmoothed for large
+        // samples. This version preserves modes while still being
+        // robust on small samples by clamping to 2 % of range.
         const vals = data.map(d => d.value).sort((a, b) => a - b)
         const dMin = vals[0], dMax = vals[vals.length - 1]
         const dRange = dMax - dMin || 1
-        const bw = dRange / Math.max(Math.sqrt(vals.length), 2)
-        const steps = 60
+        const nD = vals.length
+        let meanD = 0
+        for (const v of vals) meanD += v
+        meanD /= nD || 1
+        let varD = 0
+        for (const v of vals) varD += (v - meanD) ** 2
+        const sigmaD = Math.sqrt(varD / Math.max(nD - 1, 1))
+        const bw = Math.max(
+          sigmaD > 0 ? 1.06 * sigmaD * Math.pow(nD, -1 / 5) : dRange * 0.08,
+          dRange * 0.02,
+        )
+        const steps = 80
         const kdeData: { x: number; density: number }[] = []
         for (let i = 0; i <= steps; i++) {
           const x = dMin - dRange * 0.1 + (dRange * 1.2) * (i / steps)
@@ -1294,7 +1436,7 @@ export default function DataVisualization() {
             <BarChart data={data}>
               {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}
               <Bar dataKey="value" fill={colors[0]} radius={[4, 4, 0, 0]}>
-                <ErrorBar dataKey="errorPlus" width={4} strokeWidth={2} stroke={colors[1] || '#ef4444'} />
+                <ErrorBar dataKey="errorPlus" width={4} strokeWidth={2} stroke={colors[1] || '#B07E8B'} />
               </Bar>
             </BarChart>
           </ResponsiveContainer>
@@ -1309,13 +1451,13 @@ export default function DataVisualization() {
               <Bar dataKey="value" fill="transparent" />
               {data.map((d, i) => {
                 const open = d.value, close = d.value2 ?? d.value
-                const color = close >= open ? '#22c55e' : '#ef4444'
+                const color = close >= open ? '#6BA594' : '#B07E8B'
                 return <ReferenceLine key={i} y={close} stroke={color} strokeWidth={0} />
               })}
               <Bar dataKey="value2" barSize={12}>
                 {data.map((d, i) => {
                   const open = d.value, close = d.value2 ?? d.value
-                  return <Cell key={i} fill={close >= open ? '#22c55e' : '#ef4444'} />
+                  return <Cell key={i} fill={close >= open ? '#6BA594' : '#B07E8B'} />
                 })}
               </Bar>
               <Line type="linear" dataKey="value3" stroke="var(--color-text-muted)" strokeWidth={1} dot={{ r: 0 }} />
@@ -1328,7 +1470,12 @@ export default function DataVisualization() {
       case 'heatmap': {
         const cats = [...new Set(data.map(d => d.category).filter(Boolean))]
         const labels = [...new Set(data.map(d => d.label))]
-        const maxVal = Math.max(...data.map(d => Math.abs(d.value)), 1)
+        // Single-pass max (spread blows arg-list stack on >10k datapoints)
+        let maxVal = 1
+        for (let i = 0; i < data.length; i++) {
+          const av = Math.abs(data[i].value)
+          if (av > maxVal) maxVal = av
+        }
         const cellH = Math.max(20, Math.min(40, (height - 40) / Math.max(labels.length, 1)))
         const cellW = Math.max(40, 500 / Math.max(cats.length || 1, 1))
         return (
@@ -1361,6 +1508,28 @@ export default function DataVisualization() {
                 <text key={ci} x={90 + ci * cellW + cellW / 2} y={12} textAnchor="middle"
                   fill="var(--color-text-muted)" fontSize={10}>{cat}</text>
               ))}
+              {/* Intensity legend (vertical gradient bar on the right) */}
+              {(() => {
+                const gx = 90 + (cats.length || 1) * cellW + 12
+                const gy = 20
+                const gh = Math.min(120, labels.length * cellH)
+                const gw = 10
+                return (
+                  <g>
+                    <defs>
+                      <linearGradient id="heatmap-legend" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="rgba(59,130,246,0.9)" />
+                        <stop offset="50%" stopColor="rgba(180,180,180,0.15)" />
+                        <stop offset="100%" stopColor="rgba(239,68,68,0.9)" />
+                      </linearGradient>
+                    </defs>
+                    <rect x={gx} y={gy} width={gw} height={gh} fill="url(#heatmap-legend)" rx={2} />
+                    <text x={gx + gw + 4} y={gy + 4} fill="var(--color-text-muted)" fontSize={9}>+{maxVal.toFixed(1)}</text>
+                    <text x={gx + gw + 4} y={gy + gh / 2 + 3} fill="var(--color-text-muted)" fontSize={9}>0</text>
+                    <text x={gx + gw + 4} y={gy + gh} fill="var(--color-text-muted)" fontSize={9}>−{maxVal.toFixed(1)}</text>
+                  </g>
+                )
+              })()}
             </svg>
           </div>
         )
@@ -1540,8 +1709,8 @@ export default function DataVisualization() {
         <div className="flex items-center justify-between mb-1">
           <span className="text-xxs text-[var(--color-text-muted)] font-medium">Annotations</span>
           <div className="flex gap-1">
-            <button onClick={() => addStatsAnnotations(chart.id)} className="text-xxs px-1.5 py-0.5 rounded hover:bg-white/10" style={{ color: 'var(--color-accent-green)' }}>+ Mean/Median</button>
-            <button onClick={() => addAnnotation(chart.id)} className="text-xxs px-1.5 py-0.5 rounded hover:bg-white/10" style={{ color: 'var(--color-accent-blue)' }}>+ Line</button>
+            <button onClick={() => addStatsAnnotations(chart.id)} className="text-xxs px-1.5 py-0.5 rounded hover:bg-white/10" style={{ color: 'var(--color-text)' }}>+ Mean/Median</button>
+            <button onClick={() => addAnnotation(chart.id)} className="text-xxs px-1.5 py-0.5 rounded hover:bg-white/10" style={{ color: 'var(--color-text)' }}>+ Line</button>
           </div>
         </div>
         {(chart.annotations || []).map(ann => (
@@ -1557,7 +1726,7 @@ export default function DataVisualization() {
               className="text-xxs rounded px-1 py-0.5" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)', color: 'var(--color-text)' }}>
               <option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option>
             </select>
-            <button onClick={() => removeAnnotation(chart.id, ann.id)} className="text-xxs p-0.5 rounded hover:bg-white/10" style={{ color: '#ef4444' }}><FiX className="w-3 h-3" /></button>
+            <button onClick={() => removeAnnotation(chart.id, ann.id)} className="text-xxs p-0.5 rounded hover:bg-white/10" style={{ color: '#B07E8B' }}><FiX className="w-3 h-3" /></button>
           </div>
         ))}
       </div>
@@ -1621,7 +1790,26 @@ export default function DataVisualization() {
                   <label className="block text-xs font-medium mb-1.5 text-[var(--color-text-secondary)]">Chart Type</label>
                   <GlassSelect
                     value={form.type}
-                    onChange={val => setForm(f => ({ ...f, type: val as ChartType }))}
+                    onChange={val => setForm(f => {
+                      const newType = val as ChartType
+                      // Auto-swap sample data when the user changes chart
+                      // type IF the dataText is empty or still matches the
+                      // previous type's sample (i.e. they haven't edited it).
+                      // This gives an immediate preview without asking them
+                      // to click Load Sample again for every type.
+                      const prevSample = SAMPLE_DATA[f.type]?.data
+                      const nextSample = SAMPLE_DATA[newType]
+                      const untouched = !f.dataText.trim() || (prevSample && f.dataText.trim() === prevSample.trim())
+                      if (untouched && nextSample) {
+                        return {
+                          ...f,
+                          type: newType,
+                          title: f.title || nextSample.title,
+                          dataText: nextSample.data,
+                        }
+                      }
+                      return { ...f, type: newType }
+                    })}
                     options={CHART_TYPES.map(ct => ({ value: ct.value, label: ct.label, group: ct.group }))}
                   />
                 </div>
@@ -1758,7 +1946,7 @@ export default function DataVisualization() {
                 Cancel
               </button>
               <button onClick={addChart} disabled={!form.title.trim() || !form.dataText.trim()}
-                className="btn-primary px-4 py-2 text-sm disabled:opacity-30 flex items-center gap-1.5" style={{ color: !form.title.trim() || !form.dataText.trim() ? undefined : 'var(--color-accent-blue)' }}>
+                className="btn-primary px-4 py-2 text-sm disabled:opacity-30 flex items-center gap-1.5" style={{ color: !form.title.trim() || !form.dataText.trim() ? undefined : 'var(--color-text)' }}>
                 <FiBarChart2 className="w-3.5 h-3.5" /> Create Visualization
               </button>
             </div>
@@ -1795,41 +1983,50 @@ export default function DataVisualization() {
                   </div>
                   <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button onClick={() => updateChartOptions(chart.id, { showBrush: !chart.options.showBrush })}
-                      className={`p-1.5 rounded hover:bg-[var(--glass-bg)] transition-colors ${chart.options.showBrush ? 'text-[var(--color-accent-blue)]' : 'text-[var(--color-text-muted)]'}`} title="Toggle brush zoom">
+                      className={`p-1.5 rounded hover:bg-[var(--glass-bg)] transition-colors ${chart.options.showBrush ? 'text-[var(--color-text)]' : 'text-[var(--color-text-muted)]'}`} title="Toggle brush zoom">
                       <FiZoomIn className="w-3.5 h-3.5" />
                     </button>
                     <button onClick={() => updateChartOptions(chart.id, { showCrosshair: !chart.options.showCrosshair })}
-                      className={`p-1.5 rounded hover:bg-[var(--glass-bg)] transition-colors ${chart.options.showCrosshair ? 'text-[var(--color-accent-cyan)]' : 'text-[var(--color-text-muted)]'}`} title="Toggle crosshair">
+                      className={`p-1.5 rounded hover:bg-[var(--glass-bg)] transition-colors ${chart.options.showCrosshair ? 'text-[var(--color-text)]' : 'text-[var(--color-text-muted)]'}`} title="Toggle crosshair">
                       <FiCrosshair className="w-3.5 h-3.5" />
                     </button>
                     <button onClick={() => setShowSettings(showSettings === chart.id ? null : chart.id)}
-                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-accent-purple)]" title="Settings">
+                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="Settings">
                       <FiSettings className="w-3.5 h-3.5" />
                     </button>
                     <button onClick={() => setExpandedChart(expandedChart === chart.id ? null : chart.id)}
-                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-accent-cyan)]"
+                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
                       title={expandedChart ? 'Collapse' : 'Expand'}>
                       {expandedChart === chart.id ? <FiMinimize2 className="w-3.5 h-3.5" /> : <FiMaximize2 className="w-3.5 h-3.5" />}
                     </button>
                     <button onClick={() => exportPng(chart.id, chart.title)}
-                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-accent-blue)]" title="PNG">
+                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="PNG">
                       <FiDownload className="w-3.5 h-3.5" />
                     </button>
                     <button onClick={() => exportSvg(chart.id, chart.title)}
-                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-accent-green)]" title="SVG">
+                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="SVG">
                       <FiDroplet className="w-3.5 h-3.5" />
                     </button>
                     <button onClick={() => exportCsv(chart)}
-                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-accent-orange)]" title="CSV">
+                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="CSV">
                       <FiCopy className="w-3.5 h-3.5" />
                     </button>
                     <button onClick={() => exportXlsx(chart)}
-                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-accent-purple)]" title="XLSX">
+                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="XLSX">
                       <FiUpload className="w-3.5 h-3.5" />
                     </button>
+                    <button onClick={() => setChartBg(chart.id, (chartBgTheme[chart.id] ?? 'dark') === 'dark' ? 'light' : 'dark')}
+                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                      title={`Chart bg: ${chartBgTheme[chart.id] ?? 'dark'} — click to flip`}>
+                      <span className="text-xxs font-mono">{(chartBgTheme[chart.id] ?? 'dark') === 'dark' ? '◐' : '◑'}</span>
+                    </button>
                     <button onClick={() => copyChartToClipboard(chart.id)}
-                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-accent-cyan)]" title="Copy to clipboard">
+                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="Copy to clipboard (current bg)">
                       {copiedChart === chart.id ? <FiCheck className="w-3.5 h-3.5 text-[var(--color-success)]" /> : <FiClipboard className="w-3.5 h-3.5" />}
+                    </button>
+                    <button onClick={() => copyChartToClipboard(chart.id, (chartBgTheme[chart.id] ?? 'dark') === 'dark' ? 'light' : 'dark')}
+                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="Copy with inverted bg">
+                      <FiClipboard className="w-3.5 h-3.5 opacity-60" />
                     </button>
                     <button onClick={() => duplicateChart(chart)}
                       className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="Duplicate">
@@ -1843,7 +2040,15 @@ export default function DataVisualization() {
                 </div>
 
                 {/* Chart body */}
-                <div className="p-4" ref={el => { chartRefs.current[chart.id] = el }}>
+                <div
+                  className="p-4 transition-colors"
+                  ref={el => { chartRefs.current[chart.id] = el }}
+                  style={{
+                    background: (chartBgTheme[chart.id] ?? 'dark') === 'light' ? '#ffffff' : 'transparent',
+                    color: (chartBgTheme[chart.id] ?? 'dark') === 'light' ? '#0a0a0f' : undefined,
+                    borderRadius: 10,
+                  }}
+                >
                   {renderChart(chart, expandedChart === chart.id ? 500 : 280)}
                 </div>
 
@@ -1854,14 +2059,14 @@ export default function DataVisualization() {
                   <span>{formatDate(chart.createdAt)}</span>
                   {chart.options.trendLine === 'linear' && chart.data.length >= 2 && (() => {
                     const { r2 } = computeLinearRegression(chart.data)
-                    return <span style={{ color: '#f59e0b' }}>R²={r2.toFixed(3)}</span>
+                    return <span style={{ color: '#C4956A' }}>R²={r2.toFixed(3)}</span>
                   })()}
                   {(chart.annotations || []).length > 0 && <span>{chart.annotations.length} annotation{chart.annotations.length !== 1 ? 's' : ''}</span>}
                   {chart.options.showStats && chart.data.length >= 2 && (() => {
                     const s = computeStats(chart.data)
                     if (!s) return null
                     return (
-                      <span className="flex items-center gap-2" style={{ color: 'var(--color-accent-cyan)' }}>
+                      <span className="flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
                         μ={s.mean.toFixed(2)} · σ={s.std.toFixed(2)} · med={s.median.toFixed(2)} · [{s.min.toFixed(1)}, {s.max.toFixed(1)}]
                       </span>
                     )

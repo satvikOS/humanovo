@@ -54,7 +54,6 @@ const settingsSections = [
   { id: 'privacy', label: 'Privacy & Security', icon: FiShield },
   { id: 'data', label: 'Data & Storage', icon: FiDatabase },
   { id: 'integrations', label: 'Integrations', icon: FiGlobe },
-  { id: 'billing', label: 'Usage & Billing', icon: FiDatabase, link: '/settings/billing' },
 ]
 
 function Toggle({ enabled, onChange }: { enabled: boolean; onChange: (v: boolean) => void }) {
@@ -63,7 +62,7 @@ function Toggle({ enabled, onChange }: { enabled: boolean; onChange: (v: boolean
       onClick={() => onChange(!enabled)}
       className={clsx(
         'relative w-9 h-5 rounded-full transition-colors',
-        enabled ? 'bg-accent-blue' : 'bg-white/10'
+        enabled ? 'bg-[var(--color-text)]' : 'bg-white/10'
       )}
     >
       <span
@@ -124,7 +123,7 @@ function AppearanceSettings() {
             className={clsx(
               'relative p-4 rounded-lg border-2 transition-colors text-left',
               theme === 'dark'
-                ? 'border-accent-blue bg-accent-blue/5'
+                ? 'border-[var(--color-text)] bg-[var(--color-surface-raised)]'
                 : 'border-[var(--color-border)] hover:border-white/10'
             )}
           >
@@ -145,8 +144,8 @@ function AppearanceSettings() {
               </div>
             </div>
             {theme === 'dark' && (
-              <div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-accent-blue flex items-center justify-center">
-                <FiCheck className="w-3 h-3 text-white" />
+              <div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-[var(--color-text)] flex items-center justify-center">
+                <FiCheck className="w-3 h-3" style={{ color: 'var(--color-bg)' }} />
               </div>
             )}
           </button>
@@ -156,7 +155,7 @@ function AppearanceSettings() {
             className={clsx(
               'relative p-4 rounded-lg border-2 transition-colors text-left',
               theme === 'light'
-                ? 'border-accent-blue bg-accent-blue/5'
+                ? 'border-[var(--color-text)] bg-[var(--color-surface-raised)]'
                 : 'border-[var(--color-border)] hover:border-white/10'
             )}
           >
@@ -177,8 +176,8 @@ function AppearanceSettings() {
               </div>
             </div>
             {theme === 'light' && (
-              <div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-accent-blue flex items-center justify-center">
-                <FiCheck className="w-3 h-3 text-white" />
+              <div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-[var(--color-text)] flex items-center justify-center">
+                <FiCheck className="w-3 h-3" style={{ color: 'var(--color-bg)' }} />
               </div>
             )}
           </button>
@@ -310,7 +309,7 @@ function DataSettings() {
               <span className="text-[var(--color-text-muted)]">{formatSize(storageInfo.total)} / 10 MB</span>
             </div>
             <div className="h-2 bg-white/5 rounded-full overflow-hidden">
-              <div className="h-full bg-accent-blue rounded-full" style={{ width: `${Math.min(100, (storageInfo.total / (10 * 1024 * 1024)) * 100)}%` }} />
+              <div className="h-full bg-[var(--color-text)] rounded-full" style={{ width: `${Math.min(100, (storageInfo.total / (10 * 1024 * 1024)) * 100)}%` }} />
             </div>
           </div>
 
@@ -534,11 +533,22 @@ export default function Settings() {
     tabParam && settingsSections.some(s => s.id === tabParam) ? tabParam : 'appearance'
   )
 
+  // Consume-and-clean the `?tab=` query so a soft reload after the user
+  // clicks a different tab doesn't snap them back to the URL-seeded one.
+  // Bogus values (e.g. /settings?tab=totally-bogus) silently fall back
+  // to the 'appearance' default — the guard in `useState` above keeps
+  // the render safe, we only need to strip the stray param from the
+  // URL here.
   useEffect(() => {
-    if (tabParam && settingsSections.some(s => s.id === tabParam)) {
-      setActiveSection(tabParam)
+    const sp = new URLSearchParams(window.location.search)
+    if (sp.has('tab')) {
+      sp.delete('tab')
+      const qs = sp.toString()
+      const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash
+      window.history.replaceState(window.history.state, '', newUrl)
     }
-  }, [tabParam])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const renderContent = () => {
     switch (activeSection) {

@@ -32,13 +32,18 @@ import {
   FiSend,
   FiImage,
   FiShield,
-  FiPackage,
   FiHeart,
   FiGrid,
   FiUpload,
   FiPaperclip,
   FiCpu,
   FiBookOpen,
+  FiLayers,
+  FiUsers,
+  FiEdit3,
+  FiAperture,
+  FiTerminal,
+  FiArchive,
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import { useTheme } from '../contexts/ThemeContext'
@@ -47,14 +52,38 @@ import { useWorkspace, WorkspaceTab } from '../contexts/WorkspaceContext'
 const mainNavItems = [
   { to: '/dashboard', icon: FiHome, label: 'Dashboard', shortcut: '1' },
   { to: '/projects', icon: FiFolder, label: 'Projects', shortcut: '2' },
-  { to: '/evidence', icon: FiDatabase, label: 'Evidence', shortcut: '3' },
-  { to: '/agents', icon: FiActivity, label: 'Discovery', shortcut: '4' },
-  { to: '/workbench', icon: FiBox, label: 'Workbench', shortcut: '5' },
-  { to: '/anatomy', icon: FiUser, label: '3D Anatomy', shortcut: '6' },
+  { to: '/evidence', icon: FiLayers, label: 'Evidence', shortcut: '3' },
+  { to: '/agents', icon: FiZap, label: 'Discovery', shortcut: '4' },
+  { to: '/workbench', icon: FiTerminal, label: 'Workbench', shortcut: '5' },
+  { to: '/anatomy', icon: FiAperture, label: '3D Anatomy', shortcut: '6' },
 ]
 
+// Map activity-log entry `type` to a destination route. Keep aligned with
+// Dashboard.ActivityFeed's ACTIVITY_ROUTES so a notification in the bell
+// dropdown and a row in the dashboard feed land on the same index page.
+const NOTIFICATION_ROUTES: Record<string, string> = {
+  project: '/projects',
+  hypothesis: '/agents',
+  evidence: '/evidence',
+  simulation: '/compute-lab?tab=montecarlo',
+  notebook: '/notebook',
+  discovery: '/agents',
+  experiment: '/experiment-tracker',
+  manuscript: '/manuscripts',
+  citation: '/citation-manager',
+  literature: '/literature-review',
+  trial: '/clinical-trials',
+  imaging: '/imaging',
+  biobank: '/biobank',
+  genomics: '/genomics',
+  collaboration: '/collaboration',
+  regulatory: '/regulatory',
+  data: '/data-manager',
+  visualization: '/data-visualization',
+}
+
 const secondaryNavItems = [
-  { to: '/notebook', icon: FiBook, label: 'Notebook' },
+  { to: '/notebook', icon: FiEdit3, label: 'Notebook' },
   { to: '/timeline', icon: FiClock, label: 'Timeline' },
   { to: '/search', icon: FiSearch, label: 'Search' },
 ]
@@ -62,22 +91,22 @@ const secondaryNavItems = [
 const researchNavItems = [
   { to: '/literature-review', icon: FiBookOpen, label: 'Literature' },
   { to: '/citation-manager', icon: FiList, label: 'Citations' },
-  { to: '/experiment-tracker', icon: FiClipboard, label: 'Experiments' },
+  { to: '/experiment-tracker', icon: FiTrendingUp, label: 'Experiments' },
   { to: '/data-visualization', icon: FiBarChart2, label: 'Visualization' },
 ]
 
 const analysisNavItems = [
   { to: '/compute-lab', icon: FiCpu, label: 'Compute Lab' },
-  { to: '/genomics', icon: FiHeart, label: 'Genomics' },
+  { to: '/genomics', icon: FiGrid, label: 'Genomics' },
 ]
 
 const managementNavItems = [
   { to: '/data-manager', icon: FiDatabase, label: 'Data Manager' },
   { to: '/imaging', icon: FiImage, label: 'Imaging' },
-  { to: '/clinical-trials', icon: FiClipboard, label: 'Clinical Trials' },
+  { to: '/clinical-trials', icon: FiActivity, label: 'Clinical Trials' },
   { to: '/manuscripts', icon: FiFileText, label: 'Manuscripts' },
-  { to: '/biobank', icon: FiPackage, label: 'Biobank' },
-  { to: '/collaboration', icon: FiGrid, label: 'Collaboration' },
+  { to: '/biobank', icon: FiArchive, label: 'Biobank' },
+  { to: '/collaboration', icon: FiUsers, label: 'Collaboration' },
   { to: '/regulatory', icon: FiShield, label: 'Regulatory' },
 ]
 
@@ -152,6 +181,8 @@ interface CommandAction {
 
 function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
   const [query, setQuery] = useState('')
+  const [activeIndex, setActiveIndex] = useState(0)
+  const listRef = useRef<HTMLDivElement>(null)
   const navigate = useNavigate()
 
   const actions: CommandAction[] = [
@@ -267,14 +298,56 @@ function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
   // If query is long enough and no data results, offer to do a full search
   const showFullSearchOption = query.length >= 2
 
+  // Flat list used for arrow-key navigation: full-search row first (if shown)
+  // then every command in the order the categories render them.
+  const triggerFullSearch = useCallback(() => {
+    navigate(`/search?q=${encodeURIComponent(query.trim())}`)
+    onClose()
+  }, [navigate, query, onClose])
+
+  const flatItems = useMemo(() => {
+    const items: Array<{ run: () => void }> = []
+    if (showFullSearchOption) items.push({ run: triggerFullSearch })
+    for (const cat of categories) {
+      for (const it of allItems.filter(a => a.category === cat)) {
+        items.push({ run: it.action })
+      }
+    }
+    return items
+  }, [showFullSearchOption, triggerFullSearch, categories, allItems])
+
   useEffect(() => {
-    if (isOpen) setQuery('')
+    if (isOpen) {
+      setQuery('')
+      setActiveIndex(0)
+    }
   }, [isOpen])
 
+  // Reset selection when the result set changes so the highlight never
+  // points past the end of the list.
+  useEffect(() => {
+    setActiveIndex(0)
+  }, [query])
+
+  // Keep the highlighted row in view while the user arrows through results.
+  useEffect(() => {
+    if (!listRef.current) return
+    const el = listRef.current.querySelector<HTMLElement>(`[data-cp-idx="${activeIndex}"]`)
+    el?.scrollIntoView({ block: 'nearest' })
+  }, [activeIndex])
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && query.trim().length >= 2) {
-      navigate(`/search?q=${encodeURIComponent(query.trim())}`)
-      onClose()
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      if (flatItems.length) setActiveIndex(i => (i + 1) % flatItems.length)
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      if (flatItems.length) setActiveIndex(i => (i - 1 + flatItems.length) % flatItems.length)
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      const item = flatItems[activeIndex]
+      if (item) item.run()
+      else if (query.trim().length >= 2) triggerFullSearch()
     }
   }
 
@@ -297,41 +370,61 @@ function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
           />
           <kbd className="px-1.5 py-0.5 text-xxs text-[var(--color-text-muted)] bg-[var(--glass-bg)] rounded border border-[var(--color-border)]">ESC</kbd>
         </div>
-        <div className="max-h-[60vh] overflow-y-auto p-3">
-          {showFullSearchOption && (
-            <button
-              onClick={() => { navigate(`/search?q=${encodeURIComponent(query.trim())}`); onClose() }}
-              className="flex items-center gap-3 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--glass-bg-hover)] transition-all group mb-1"
-            >
-              <FiSearch className="w-4 h-4 text-[var(--color-accent-purple)] group-hover:text-[var(--color-text)]" />
-              <div className="flex-1 text-left">
-                <span className="text-[var(--color-text-secondary)] group-hover:text-[var(--color-text)]">Search for "{query}"</span>
-                <span className="block text-xs text-[var(--color-text-muted)]">Full search across all platform data</span>
-              </div>
-              <span className="text-xxs text-[var(--color-text-muted)]">Enter</span>
-            </button>
-          )}
-          {categories.map(cat => (
-            <div key={cat}>
-              <div className="text-xxs text-[var(--color-text-muted)] px-2 py-1.5 uppercase tracking-wider font-medium">{cat}</div>
-              {allItems.filter(a => a.category === cat).map((item, idx) => (
+        <div className="max-h-[60vh] overflow-y-auto p-3" ref={listRef}>
+          {(() => {
+            // Index-aware renderer: we walk flatItems once so the
+            // highlighted row lines up with the arrow-key position.
+            let cursor = 0
+            const rows: React.ReactNode[] = []
+            if (showFullSearchOption) {
+              const myIdx = cursor++
+              const active = activeIndex === myIdx
+              rows.push(
                 <button
-                  key={`${item.label}-${idx}`}
-                  onClick={item.action}
-                  className="flex items-center gap-3 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--glass-bg-hover)] transition-all group"
+                  key="full-search"
+                  data-cp-idx={myIdx}
+                  onClick={triggerFullSearch}
+                  onMouseEnter={() => setActiveIndex(myIdx)}
+                  className={`flex items-center gap-3 w-full px-3 py-2 text-sm rounded-lg transition-all group mb-1 ${active ? 'bg-[var(--glass-bg-hover)]' : ''}`}
                 >
-                  <item.icon className="w-4 h-4 text-[var(--color-text-muted)] group-hover:text-[var(--color-text)]" />
+                  <FiSearch className={`w-4 h-4 ${active ? 'text-[var(--color-text)]' : 'text-[var(--color-text-muted)]'}`} />
                   <div className="flex-1 text-left">
-                    <span className="text-[var(--color-text-secondary)] group-hover:text-[var(--color-text)]">{item.label}</span>
-                    {item.description && (
-                      <span className="block text-xs text-[var(--color-text-muted)]">{item.description}</span>
-                    )}
+                    <span className={active ? 'text-[var(--color-text)]' : 'text-[var(--color-text-secondary)]'}>Search for "{query}"</span>
+                    <span className="block text-xs text-[var(--color-text-muted)]">Full search across all platform data</span>
                   </div>
-                  <FiArrowRight className="w-3 h-3 text-[var(--color-text-muted)] opacity-0 group-hover:opacity-100 transition-opacity" />
+                  <span className="text-xxs text-[var(--color-text-muted)]">Enter</span>
                 </button>
-              ))}
-            </div>
-          ))}
+              )
+            }
+            for (const cat of categories) {
+              rows.push(
+                <div key={`cat-${cat}`} className="text-xxs text-[var(--color-text-muted)] px-2 py-1.5 uppercase tracking-wider font-medium">{cat}</div>
+              )
+              for (const item of allItems.filter(a => a.category === cat)) {
+                const myIdx = cursor++
+                const active = activeIndex === myIdx
+                rows.push(
+                  <button
+                    key={`${item.label}-${myIdx}`}
+                    data-cp-idx={myIdx}
+                    onClick={item.action}
+                    onMouseEnter={() => setActiveIndex(myIdx)}
+                    className={`flex items-center gap-3 w-full px-3 py-2 text-sm rounded-lg transition-all group ${active ? 'bg-[var(--glass-bg-hover)]' : ''}`}
+                  >
+                    <item.icon className={`w-4 h-4 ${active ? 'text-[var(--color-text)]' : 'text-[var(--color-text-muted)]'}`} />
+                    <div className="flex-1 text-left">
+                      <span className={active ? 'text-[var(--color-text)]' : 'text-[var(--color-text-secondary)]'}>{item.label}</span>
+                      {item.description && (
+                        <span className="block text-xs text-[var(--color-text-muted)]">{item.description}</span>
+                      )}
+                    </div>
+                    <FiArrowRight className={`w-3 h-3 text-[var(--color-text-muted)] transition-opacity ${active ? 'opacity-100' : 'opacity-0'}`} />
+                  </button>
+                )
+              }
+            }
+            return rows
+          })()}
           {allItems.length === 0 && !showFullSearchOption && (
             <div className="text-center py-8 text-sm text-[var(--color-text-muted)]">No results found</div>
           )}
@@ -827,7 +920,7 @@ function ConstantChat() {
     } else if (isOutOfScope(userMsg.toLowerCase().trim())) {
       fullResponse = generateSmartFallbackResponse(userMsg)
     } else {
-      // Call the backend AI endpoint (routes to API Gateway → Lambda → Bedrock Claude)
+      // Call the backend AI endpoint (powered by Constant AI)
       try {
         const platformContext = getLocalContext()
         const _apiBase = import.meta.env.VITE_API_BASE_URL || ''
@@ -938,7 +1031,7 @@ function ConstantChat() {
             ref={fileInputRef}
             type="file"
             multiple
-            accept=".pdf,.txt,.csv,.json,.docx,.xlsx,.md,.tsv"
+            accept=".pdf,.txt,.csv,.tsv,.md,.markdown,.mdx,.json,.jsonl,.ndjson,.xml,.html,.htm,.rtf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.odp,.log,.bib"
             onChange={handleFileSelect}
             className="hidden"
           />
@@ -1020,9 +1113,10 @@ function ConstantChat() {
 export default function Layout() {
   const { theme, toggleTheme } = useTheme()
   const [isCommandOpen, setIsCommandOpen] = useState(false)
+  const [isShortcutsOpen, setIsShortcutsOpen] = useState(false)
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false)
-  const [notifications, setNotifications] = useState<Array<{ id: string; title: string; description: string; time: string; timestamp: string }>>([])
+  const [notifications, setNotifications] = useState<Array<{ id: string; title: string; description: string; time: string; timestamp: string; type?: string }>>([])
   const [hasUnread, setHasUnread] = useState(false)
   const location = useLocation()
   const navigate = useNavigate()
@@ -1040,6 +1134,7 @@ export default function Layout() {
           description: a.project || '',
           time: formatDateTime(a.timestamp),
           timestamp: a.timestamp || '',
+          type: a.type,
         })))
         const newestTime = recent[0]?.timestamp || ''
         setHasUnread(newestTime > lastRead)
@@ -1064,12 +1159,25 @@ export default function Layout() {
     }
     if (e.key === 'Escape') {
       setIsCommandOpen(false)
+      setIsShortcutsOpen(false)
       setIsUserMenuOpen(false)
       setIsNotificationsOpen(false)
     }
-    // Number shortcuts 1-6 for main nav (only when no input focused)
+    // "?" (Shift+/) opens the keyboard-shortcuts cheatsheet, but only
+    // when the user isn't typing into a field. Accept both e.key === '?'
+    // (produced on US keyboards) and the literal '/' + shiftKey combo
+    // that some test-runners / layouts send.
     const tag = (e.target as HTMLElement)?.tagName
-    if (!e.metaKey && !e.ctrlKey && !e.altKey && tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') {
+    const typingIn = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' ||
+      (e.target as HTMLElement)?.isContentEditable
+    const wantsShortcutHelp = !typingIn && !e.metaKey && !e.ctrlKey && !e.altKey &&
+      (e.key === '?' || (e.key === '/' && e.shiftKey))
+    if (wantsShortcutHelp) {
+      e.preventDefault()
+      setIsShortcutsOpen(prev => !prev)
+    }
+    // Number shortcuts 1-6 for main nav (only when no input focused)
+    if (!e.metaKey && !e.ctrlKey && !e.altKey && !typingIn) {
       const idx = parseInt(e.key) - 1
       if (idx >= 0 && idx < mainNavItems.length) {
         navigate(mainNavItems[idx].to)
@@ -1289,11 +1397,13 @@ if (path === '/clinical-trials') return 'Clinical Trials'
             <div className="relative">
               <button
                 onClick={() => { setIsNotificationsOpen(!isNotificationsOpen); setIsUserMenuOpen(false) }}
+                aria-label="Notifications"
+                title="Notifications"
                 className="p-2 text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)] rounded-lg transition-all relative"
               >
                 <FiBell className="w-4 h-4" />
                 {hasUnread && (
-                  <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-[var(--color-accent-blue)] rounded-full" />
+                  <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-[var(--color-text)] rounded-full" />
                 )}
               </button>
 
@@ -1306,7 +1416,7 @@ if (path === '/clinical-trials') return 'Clinical Trials'
                       {hasUnread && (
                         <button
                           onClick={markAllRead}
-                          className="text-xxs text-[var(--color-accent-blue)] hover:underline"
+                          className="text-xxs text-[var(--color-text-secondary)] hover:text-[var(--color-text)] hover:underline"
                         >
                           Mark all read
                         </button>
@@ -1314,22 +1424,42 @@ if (path === '/clinical-trials') return 'Clinical Trials'
                     </div>
                     {notifications.length > 0 ? (
                       <div className="max-h-64 overflow-y-auto">
-                        {notifications.map(n => (
-                          <div key={n.id} className="px-3 py-2 hover:bg-[var(--glass-bg)] transition-all flex gap-2">
-                            <div className="flex-shrink-0 mt-1.5">
-                              {n.timestamp > (localStorage.getItem('humanovo-notifs-read') || '0') ? (
-                                <span className="block w-2 h-2 rounded-full bg-[var(--color-accent-blue)]" />
-                              ) : (
-                                <span className="block w-2 h-2" />
+                        {notifications.map(n => {
+                          const dest = n.type ? NOTIFICATION_ROUTES[n.type] : undefined
+                          return (
+                            <button
+                              key={n.id}
+                              type="button"
+                              onClick={() => {
+                                if (dest) {
+                                  navigate(dest)
+                                  setIsNotificationsOpen(false)
+                                }
+                              }}
+                              disabled={!dest}
+                              className={clsx(
+                                'w-full text-left px-3 py-2 transition-all flex gap-2',
+                                dest
+                                  ? 'hover:bg-[var(--glass-bg)] cursor-pointer'
+                                  : 'cursor-default opacity-90'
                               )}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="text-xs font-medium text-[var(--color-text-secondary)] capitalize">{n.title}</div>
-                              <div className="text-xxs text-[var(--color-text-muted)] mt-0.5 truncate">{n.description}</div>
-                              <div className="text-xxs text-[var(--color-text-muted)] mt-0.5">{n.time}</div>
-                            </div>
-                          </div>
-                        ))}
+                              title={dest ? `Open ${dest}` : undefined}
+                            >
+                              <div className="flex-shrink-0 mt-1.5">
+                                {n.timestamp > (localStorage.getItem('humanovo-notifs-read') || '0') ? (
+                                  <span className="block w-2 h-2 rounded-full bg-[var(--color-text)]" />
+                                ) : (
+                                  <span className="block w-2 h-2" />
+                                )}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="text-xs font-medium text-[var(--color-text-secondary)] capitalize">{n.title}</div>
+                                <div className="text-xxs text-[var(--color-text-muted)] mt-0.5 truncate">{n.description}</div>
+                                <div className="text-xxs text-[var(--color-text-muted)] mt-0.5">{n.time}</div>
+                              </div>
+                            </button>
+                          )
+                        })}
                       </div>
                     ) : (
                       <div className="px-3 py-6 text-center text-xs text-[var(--color-text-muted)]">
@@ -1339,7 +1469,7 @@ if (path === '/clinical-trials') return 'Clinical Trials'
                     <div className="border-t border-[var(--color-border)] px-3 py-2">
                       <button
                         onClick={() => { navigate('/timeline'); setIsNotificationsOpen(false) }}
-                        className="text-xs text-[var(--color-accent-blue)] hover:underline w-full text-center"
+                        className="text-xs text-[var(--color-text-secondary)] hover:text-[var(--color-text)] hover:underline w-full text-center"
                       >
                         View all activity
                       </button>
@@ -1414,6 +1544,137 @@ if (path === '/clinical-trials') return 'Clinical Trials'
 
       {/* Command palette */}
       <CommandPalette isOpen={isCommandOpen} onClose={() => setIsCommandOpen(false)} />
+
+      {/* Keyboard shortcuts cheatsheet */}
+      <KeyboardShortcutsHelp isOpen={isShortcutsOpen} onClose={() => setIsShortcutsOpen(false)} />
+    </div>
+  )
+}
+
+function KeyboardShortcutsHelp({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+  if (!isOpen) return null
+  const groups: { title: string; rows: { keys: string[]; label: string }[] }[] = [
+    {
+      title: 'Global',
+      rows: [
+        { keys: ['⌘', 'K'], label: 'Open command palette / global search' },
+        { keys: ['?'], label: 'Show this keyboard cheatsheet' },
+        { keys: ['Esc'], label: 'Close dialogs & menus' },
+      ],
+    },
+    {
+      title: 'Command palette',
+      rows: [
+        { keys: ['↑', '↓'], label: 'Move highlight between results' },
+        { keys: ['Enter'], label: 'Run highlighted action' },
+        { keys: ['Esc'], label: 'Dismiss palette' },
+      ],
+    },
+    {
+      title: 'Navigation',
+      rows: [
+        { keys: ['1'], label: 'Go to Dashboard' },
+        { keys: ['2'], label: 'Go to Projects' },
+        { keys: ['3'], label: 'Go to Evidence' },
+        { keys: ['4'], label: 'Go to Compute Lab' },
+        { keys: ['5'], label: 'Go to Notebook' },
+        { keys: ['6'], label: 'Go to Agents' },
+      ],
+    },
+    {
+      title: 'Compute Lab',
+      rows: [
+        { keys: ['⌘', 'Enter'], label: 'Run current expression / script' },
+        { keys: ['⌘', 'S'], label: 'Save to history' },
+        { keys: ['↑', '↓'], label: 'Navigate history in the REPL' },
+      ],
+    },
+    {
+      title: 'Research Imaging',
+      rows: [
+        { keys: ['P'], label: 'Pan' },
+        { keys: ['R'], label: 'Rectangle' },
+        { keys: ['C'], label: 'Circle' },
+        { keys: ['L'], label: 'Line' },
+        { keys: ['M'], label: 'Measure' },
+        { keys: ['U'], label: 'Ruler' },
+        { keys: ['B'], label: 'Brush (segmentation)' },
+        { keys: ['X'], label: 'Eraser' },
+        { keys: ['+', '-'], label: 'Zoom in / out' },
+        { keys: ['0'], label: 'Reset zoom & pan' },
+        { keys: ['F'], label: 'Toggle multi-planar view' },
+        { keys: ['[', ']'], label: 'Previous / next study' },
+      ],
+    },
+  ]
+  return (
+    <div
+      className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="glass-card max-w-xl w-full mx-4 p-6"
+        onClick={e => e.stopPropagation()}
+        style={{ background: 'var(--color-surface-solid)', border: '1px solid var(--glass-border)' }}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
+            Keyboard shortcuts
+          </h2>
+          <button
+            onClick={onClose}
+            className="p-1 rounded hover:bg-[var(--glass-bg-hover)]"
+            style={{ color: 'var(--color-text-muted)' }}
+            aria-label="Close"
+          >
+            <FiX className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="space-y-5">
+          {groups.map(g => (
+            <div key={g.title}>
+              <div
+                className="text-xxs uppercase tracking-wider mb-2"
+                style={{ color: 'var(--color-text-muted)' }}
+              >
+                {g.title}
+              </div>
+              <div className="space-y-1.5">
+                {g.rows.map(r => (
+                  <div key={r.label} className="flex items-center justify-between text-xs">
+                    <span style={{ color: 'var(--color-text-secondary)' }}>{r.label}</span>
+                    <span className="flex items-center gap-1">
+                      {r.keys.map((k, i) => (
+                        <kbd
+                          key={i}
+                          className="px-1.5 py-0.5 rounded text-xxs font-mono"
+                          style={{
+                            background: 'rgba(255,255,255,0.08)',
+                            border: '1px solid var(--glass-border)',
+                            color: 'var(--color-text)',
+                            minWidth: '1.5rem',
+                            textAlign: 'center',
+                          }}
+                        >
+                          {k}
+                        </kbd>
+                      ))}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div
+          className="mt-5 pt-4 text-xxs"
+          style={{ color: 'var(--color-text-muted)', borderTop: '1px solid var(--glass-border)' }}
+        >
+          Shortcuts are disabled while typing in inputs or the editor.
+        </div>
+      </div>
     </div>
   )
 }

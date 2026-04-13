@@ -7,6 +7,21 @@
 export const sum = (a: number[]): number => a.reduce((s, v) => s + v, 0)
 export const mean = (a: number[]): number => a.length === 0 ? 0 : sum(a) / a.length
 
+// Single-pass min/max. Required instead of Math.min(...arr) / Math.max(...arr)
+// because spread-as-arguments overflows the engine's call-stack around ~10k
+// elements (Chromium threshold varies by platform). Every preset that reduces
+// user-provided data should route through these.
+export const arrMin = (a: ArrayLike<number>): number => {
+  let m = Infinity
+  for (let i = 0; i < a.length; i++) { const v = a[i]; if (v < m) m = v }
+  return Number.isFinite(m) ? m : 0
+}
+export const arrMax = (a: ArrayLike<number>): number => {
+  let m = -Infinity
+  for (let i = 0; i < a.length; i++) { const v = a[i]; if (v > m) m = v }
+  return Number.isFinite(m) ? m : 0
+}
+
 export function variance(a: number[], ddof = 1): number {
   if (a.length <= ddof) return 0
   const m = mean(a)
@@ -715,10 +730,19 @@ export function randExponential(rate: number): number {
 /* ── Utilities ───────────────────────────────────────────────────────── */
 export function buildHistogram(values: number[], bins: number = 20): { bin: string; count: number }[] {
   if (!values.length) return []
-  const min = Math.min(...values), max = Math.max(...values)
+  // Single-pass min/max — spreading a large array blows the JS argument
+  // stack and is the single most common large-dataset crash path.
+  let min = Infinity, max = -Infinity
+  for (const v of values) {
+    if (!Number.isFinite(v)) continue
+    if (v < min) min = v
+    if (v > max) max = v
+  }
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return []
   const width = (max - min) / bins || 1
   const counts = new Array(bins).fill(0)
   for (const v of values) {
+    if (!Number.isFinite(v)) continue
     const idx = Math.min(bins - 1, Math.floor((v - min) / width))
     counts[idx]++
   }

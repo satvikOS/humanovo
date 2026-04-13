@@ -1,4 +1,4 @@
-import { defineConfig } from '/opt/node22/lib/node_modules/playwright/node_modules/@playwright/test';
+import { defineConfig } from '/opt/node22/lib/node_modules/playwright/test.mjs';
 
 export default defineConfig({
   testDir: './e2e',

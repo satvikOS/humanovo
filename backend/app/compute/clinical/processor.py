@@ -224,7 +224,9 @@ class ClinicalProcessor:
     async def _clinical_scales(self, req: ComputeRequest, params: dict) -> ComputeResult:
         """Validated clinical rating scale scoring with subscales and severity."""
         scale = params["scale"].upper()
-        items = params["items"]  # list of item scores
+        # Some scales accept discrete components (e.g. GCS eye/verbal/motor)
+        # instead of a flat item list — tolerate either shape.
+        items = params.get("items", [])
 
         if scale in ("HAMD", "HAM-D", "HDRS"):
             items = np.array(items[:17], dtype=float)
@@ -256,16 +258,22 @@ class ClinicalProcessor:
             negative = float(np.sum(items[7:14]))  # N1-N7
             general = float(np.sum(items[14:30]))  # G1-G16
             total = positive + negative + general
-            # Marder factor model (5 factors)
+            # Marder (1997) 5-factor model — canonical indices
+            # P1-P7 = 0-6, N1-N7 = 7-13, G1-G16 = 14-29
             marder = {
-                "positive": float(np.sum(items[[0, 2, 4, 5, 14]])),  # P1,P3,P5,P6,G1 (approx)
-                "negative": float(np.sum(items[[7, 8, 9, 10, 11, 12, 20]])),  # N1-N6,G7
-                "disorganized": float(np.sum(items[[1, 3, 6, 13, 19]])),  # P2,P4,P7,N7,G5 (approx)
-                "excited": float(np.sum(items[[16, 17, 21]])),  # G4,G8,G14 (approx)
-                "depressed": float(np.sum(items[[15, 18, 19]])),  # G2,G3,G6 (approx)
+                # Positive: P1,P3,P5,P6,G9
+                "positive": float(np.sum(items[[0, 2, 4, 5, 22]])),
+                # Negative: N1,N2,N3,N4,N6,G7,G16
+                "negative": float(np.sum(items[[7, 8, 9, 10, 12, 20, 29]])),
+                # Disorganized: P2,N5,N7,G5,G10,G11,G13,G15
+                "disorganized": float(np.sum(items[[1, 11, 13, 18, 23, 24, 26, 28]])),
+                # Excited/hostility: P4,P7,G4,G8,G14
+                "excited": float(np.sum(items[[3, 6, 17, 21, 27]])),
+                # Anxiety/depression: G1,G2,G3,G6
+                "depressed": float(np.sum(items[[14, 15, 16, 19]])),
             }
-            # Andreasen remission criteria (PANSS-8 items all <= 3)
-            panss8_items = [items[i] for i in [0, 2, 6, 7, 8, 9, 14, 21]]  # P1,P3,P7,N1,N2,N3,G5,G9 (approx)
+            # Andreasen et al. (2005) 8-item remission: P1,P2,P3,N1,N4,N6,G5,G9 all <= 3
+            panss8_items = [items[i] for i in [0, 1, 2, 7, 10, 12, 18, 22]]
             remission = all(item <= 3 for item in panss8_items)
             
             result = {
@@ -333,10 +341,87 @@ class ClinicalProcessor:
                 "cgi_i": {"score": cgi_i, "label": improvement_map.get(int(cgi_i), "Unknown")} if cgi_i else None,
                 "responder": int(cgi_i) <= 2 if cgi_i else None,
             }
+
+        elif scale in ("GCS",):
+            # Glasgow Coma Scale — eye/verbal/motor with canonical severity bands.
+            # Accepts either components in params or items = [eye, verbal, motor].
+            eye = int(params.get("eye", items[0] if len(items) > 0 else 0))
+            verbal = int(params.get("verbal", items[1] if len(items) > 1 else 0))
+            motor = int(params.get("motor", items[2] if len(items) > 2 else 0))
+            # Clamp to valid ranges (E:1-4, V:1-5, M:1-6). If a component is
+            # untestable (intubated, orbital swelling) the convention is to
+            # use the minimum and annotate, but here we just floor to 1.
+            eye = max(1, min(4, eye))
+            verbal = max(1, min(5, verbal))
+            motor = max(1, min(6, motor))
+            total = eye + verbal + motor
+            if total <= 8: severity = "Severe"
+            elif total <= 12: severity = "Moderate"
+            else: severity = "Mild"
+            # Coma threshold (Teasdale & Jennett, 1974): GCS ≤ 8 is coma and
+            # is the classic trigger for considering definitive airway.
+            result = {
+                "scale": "GCS",
+                "total": float(total),
+                "eye": eye, "verbal": verbal, "motor": motor,
+                "severity": severity,
+                "coma": total <= 8,
+                "airway_consider_intubation": total <= 8,
+            }
+
+        elif scale in ("NIHSS",):
+            # NIH Stroke Scale — 15 items, total 0-42. Bands per AHA/ASA
+            # and the trial literature (NINDS, ECASS).
+            items = np.array(items[:15], dtype=float)
+            total = float(np.sum(items))
+            if total == 0: severity = "No stroke symptoms"
+            elif total <= 4: severity = "Minor stroke"
+            elif total <= 15: severity = "Moderate stroke"
+            elif total <= 20: severity = "Moderate to severe stroke"
+            else: severity = "Severe stroke"
+            # tPA/thrombectomy screening heuristics — not a substitute for
+            # neuroimaging or clinical judgement, just flags worth surfacing.
+            result = {
+                "scale": "NIHSS",
+                "total": total,
+                "severity": severity,
+                "tpa_candidate_score": total >= 4,  # typical trial inclusion floor
+                "large_vessel_likely": total >= 10,  # screening cutoff for LVO referral
+            }
+            if "baseline_total" in params and params["baseline_total"] > 0:
+                pct = (params["baseline_total"] - total) / params["baseline_total"] * 100
+                # Early neurological improvement: ≥8-point or ≥4-point drop
+                # is common post-thrombolysis.
+                result["pct_change"] = round(pct, 1)
+                result["improvement_8pt"] = (params["baseline_total"] - total) >= 8
+                result["improvement_4pt"] = (params["baseline_total"] - total) >= 4
+
+        elif scale in ("MOCA", "MoCA"):
+            # Montreal Cognitive Assessment — 30-point screen, cutoff <26
+            # (Nasreddine 2005). +1 bonus if ≤12 years of education and
+            # total < 30.
+            items = np.array(items[:30], dtype=float)
+            raw_total = float(np.sum(items))
+            education_years = params.get("education_years")
+            bonus = 0
+            if education_years is not None and education_years <= 12 and raw_total < 30:
+                bonus = 1
+            adjusted = raw_total + bonus
+            if adjusted >= 26: severity = "Normal"
+            elif adjusted >= 18: severity = "Mild cognitive impairment"
+            elif adjusted >= 10: severity = "Moderate cognitive impairment"
+            else: severity = "Severe cognitive impairment"
+            result = {
+                "scale": "MoCA",
+                "total": adjusted, "raw_total": raw_total, "education_bonus": bonus,
+                "severity": severity,
+                "cognitive_impairment": adjusted < 26,
+            }
+
         else:
             return ComputeResult(
                 request_id=req.id, domain=ComputeDomain.CLINICAL, operation="clinical_scales",
-                status=ComputeStatus.FAILED, error=f"Unknown scale: {scale}. Supported: HAM-D, PANSS, PHQ-9, GAD-7, MADRS, YMRS, CGI",
+                status=ComputeStatus.FAILED, error=f"Unknown scale: {scale}. Supported: HAM-D, PANSS, PHQ-9, GAD-7, MADRS, YMRS, CGI, GCS, NIHSS, MoCA",
             )
 
         return ComputeResult(

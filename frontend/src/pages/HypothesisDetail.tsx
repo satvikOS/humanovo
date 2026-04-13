@@ -558,7 +558,7 @@ export default function HypothesisDetail() {
                 </p>
                 <div className="h-2 bg-secondary-700 rounded-full overflow-hidden mb-2">
                   <div
-                    className="h-full bg-purple-500 rounded-full transition-all duration-200 ease-linear"
+                    className="h-full bg-[var(--color-text)] rounded-full transition-all duration-200 ease-linear"
                     style={{ width: `${((currentPhase + phaseProgress / 100) / PAPER_PHASES.length) * 100}%` }}
                   />
                 </div>
@@ -568,8 +568,8 @@ export default function HypothesisDetail() {
                       key={idx}
                       className={clsx(
                         'w-2 h-2 rounded-full transition-colors',
-                        idx < currentPhase ? 'bg-purple-500' :
-                        idx === currentPhase ? 'bg-purple-400 animate-pulse' : 'bg-secondary-600'
+                        idx < currentPhase ? 'bg-[var(--color-text)]' :
+                        idx === currentPhase ? 'bg-[var(--color-text-muted)] animate-pulse' : 'bg-secondary-600'
                       )}
                     />
                   ))}
@@ -584,7 +584,7 @@ export default function HypothesisDetail() {
               <FiX className="w-12 h-12 text-[var(--color-text-muted)] mb-4" />
               <h3 className="text-lg font-semibold text-white mb-2">Generation Failed</h3>
               <p className="text-[var(--color-text-muted)] text-sm mb-4 max-w-md text-center">{paperError}</p>
-              <button onClick={generatePaper} className="btn bg-purple-500 text-white hover:bg-purple-600">
+              <button onClick={generatePaper} className="btn bg-[var(--color-surface-raised)] text-[var(--color-text)] border border-[var(--color-border)] hover:bg-[var(--glass-bg-hover)]">
                 <FiRefreshCw className="w-4 h-4" /> Retry
               </button>
             </div>

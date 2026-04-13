@@ -171,7 +171,7 @@ export default function ProjectWorkspace() {
         <div className="flex gap-2">
           <button onClick={() => navigate(`/projects/${projectId}/discover`)}
             className="px-4 py-2 rounded-lg text-sm font-medium text-white"
-            style={{ background: 'var(--color-accent-blue)' }}>
+            style={{ background: 'rgba(255,255,255,0.15)', color: 'var(--color-text)' }}>
             Run Discovery
           </button>
         </div>
@@ -282,7 +282,7 @@ export default function ProjectWorkspace() {
                           if (win) { win.document.write(p.paper_html!); win.document.close() }
                         }}
                         className="px-3 py-1 text-xs rounded"
-                        style={{ background: 'var(--color-accent-blue)', color: '#fff' }}>
+                        style={{ background: 'rgba(255,255,255,0.15)', color: 'var(--color-text)' }}>
                         View
                       </button>
                     )}
@@ -360,7 +360,7 @@ export default function ProjectWorkspace() {
                     <button key={m} onClick={() => setLabModalities(prev => prev.includes(m) ? prev.filter(x => x !== m) : [...prev, m])}
                       className="px-2 py-0.5 rounded text-xs"
                       style={{
-                        background: labModalities.includes(m) ? 'var(--color-accent-blue)' : 'var(--color-bg)',
+                        background: labModalities.includes(m) ? 'rgba(255,255,255,0.15)' : 'var(--color-bg)',
                         color: labModalities.includes(m) ? '#fff' : 'var(--color-text-muted)',
                         border: '1px solid var(--color-border)',
                       }}>
@@ -410,7 +410,7 @@ export default function ProjectWorkspace() {
 
               <button onClick={saveLabProfile} disabled={saving}
                 className="px-4 py-2 rounded-lg text-sm font-medium text-white"
-                style={{ background: 'var(--color-accent-blue)', opacity: saving ? 0.5 : 1 }}>
+                style={{ background: 'rgba(255,255,255,0.15)', color: 'var(--color-text)', opacity: saving ? 0.5 : 1 }}>
                 {saving ? 'Saving...' : 'Save Lab Profile'}
               </button>
             </div>

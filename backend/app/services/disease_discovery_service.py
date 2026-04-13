@@ -6,7 +6,7 @@ by connecting billions of data points across the knowledge graph.
 
 Supports three LLM providers:
 - Azure AI Foundry (Mistral-Large-3) — critic
-- AWS Bedrock (Claude Opus 4.6) — explorer + synthesizer
+- Constant AI — explorer + synthesizer
 - Azure OpenAI (legacy)
 """
 
@@ -373,7 +373,7 @@ class BedrockLLMClient(BaseLLMClient):
 class BedrockMultiModelClient(BaseLLMClient):
     """Multi-model Bedrock client for parallel discovery.
 
-    Uses Claude Opus (explorer+synthesizer+reasoner)
+    Uses the Constant AI explorer+synthesizer+reasoner models
     via the Converse API, then synthesizes outputs.
     """
 
@@ -471,7 +471,7 @@ class BedrockMultiModelClient(BaseLLMClient):
         if len(successful) == 1:
             return list(successful.values())[0]
 
-        # Synthesize via Claude Opus (200K context)
+        # Synthesize via Constant AI (200K context)
         joined_outputs = "\n".join(
             f"=== {role.upper()} OUTPUT ===\n{text}" for role, text in successful.items()
         )

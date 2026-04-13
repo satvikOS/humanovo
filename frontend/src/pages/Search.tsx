@@ -58,12 +58,18 @@ const FILTER_TYPES = [
   { value: 'entity', label: 'Entities', icon: FiGlobe },
 ]
 
+const VALID_SEARCH_FILTERS = new Set(['', 'evidence', 'hypothesis', 'project', 'entity'])
+
 export default function Search() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const initialQuery = searchParams.get('q') || ''
+  // `?type=` deep-link: pre-select a Type filter (evidence / hypothesis /
+  // project / entity). Invalid values silently fall back to "All Types".
+  const qTypeRaw = (searchParams.get('type') || '').trim().toLowerCase()
+  const initialFilter = VALID_SEARCH_FILTERS.has(qTypeRaw) ? qTypeRaw : ''
   const [query, setQuery] = useState(initialQuery)
-  const [filterType, setFilterType] = useState('')
+  const [filterType, setFilterType] = useState(initialFilter)
   const [dateRange, setDateRange] = useState({ from: '', to: '' })
   const [minRelevance, setMinRelevance] = useState(0)
   const [sortBy, setSortBy] = useState<SortBy>('relevance')
@@ -291,7 +297,7 @@ export default function Search() {
     const regex = new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi')
     const parts = text.split(regex)
     return parts.map((part, i) =>
-      regex.test(part) ? <mark key={i} className="bg-[var(--color-accent-yellow)] bg-opacity-20 text-[var(--color-text)] rounded px-0.5">{part}</mark> : part
+      regex.test(part) ? <mark key={i} className="bg-white/20 text-[var(--color-text)] rounded px-0.5">{part}</mark> : part
     )
   }
 
@@ -339,7 +345,7 @@ export default function Search() {
 
           {/* Smart Search indicator */}
           <div className="flex items-center gap-2 mt-3">
-            <FiZap className="w-3.5 h-3.5 text-[var(--color-accent-purple)]" />
+            <FiZap className="w-3.5 h-3.5 text-[var(--color-text-muted)]" />
             <span className="text-xs text-[var(--color-text-muted)]">Smart search — combines semantic + keyword matching across all platform data</span>
           </div>
         </div>
