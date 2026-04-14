@@ -367,11 +367,9 @@ function RecentNotebooksWidget() {
 
 // ── Activity Feed ──────────────────────────────────────────────
 
-// Map an activity entry's type onto the sidebar page that lists
-// that kind of entity, so a row click from Dashboard lands on a
-// sensible follow-up surface. Activities don't carry entity ids
-// yet (see utils/persistence.ts ActivityEntry), so we route to the
-// index rather than a specific record — still beats a dead row.
+// Default routes by activity type (index/list pages).
+// When metadata.project_id is present we upgrade hypothesis and discovery
+// entries to route to the dedicated project folder instead.
 const ACTIVITY_ROUTES: Record<string, string> = {
   project: '/projects',
   hypothesis: '/agents',
@@ -379,6 +377,18 @@ const ACTIVITY_ROUTES: Record<string, string> = {
   simulation: '/compute-lab?tab=montecarlo',
   notebook: '/notebook',
   discovery: '/agents',
+}
+
+/** Resolve the best navigation destination for an activity entry.
+ *  If the entry carries a project_id in its metadata (discovery and
+ *  hypothesis events always should), we navigate straight to that
+ *  project folder so the user doesn't have to hunt for it. */
+function activityDest(activity: ActivityEntry): string | undefined {
+  const pid = (activity.metadata as any)?.project_id
+  if (pid && (activity.type === 'hypothesis' || activity.type === 'discovery')) {
+    return `/projects/${pid}`
+  }
+  return ACTIVITY_ROUTES[activity.type]
 }
 
 function ActivityFeed() {
@@ -396,6 +406,9 @@ function ActivityFeed() {
           title: a.title || a.description || 'Activity',
           project: a.project_name,
           timestamp: a.created_at || new Date().toISOString(),
+          // Preserve project_id so activityDest() can route discovery /
+          // hypothesis rows to the dedicated project folder.
+          metadata: a.metadata || (a.project_id ? { project_id: a.project_id } : undefined),
         }))
         if (items.length > 0) {
           setActivities(items)
@@ -472,7 +485,7 @@ function ActivityFeed() {
           {activities.map((activity) => {
             const Icon = typeIcons[activity.type] || FiActivity
             const color = typeColors[activity.type] || 'var(--color-text-muted)'
-            const dest = ACTIVITY_ROUTES[activity.type]
+            const dest = activityDest(activity)
             return (
               <button
                 key={activity.id}

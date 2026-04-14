@@ -58,9 +58,10 @@ const mainNavItems = [
   { to: '/anatomy', icon: FiAperture, label: '3D Anatomy', shortcut: '6' },
 ]
 
-// Map activity-log entry `type` to a destination route. Keep aligned with
-// Dashboard.ActivityFeed's ACTIVITY_ROUTES so a notification in the bell
-// dropdown and a row in the dashboard feed land on the same index page.
+// Default routes by activity type. When a notification has
+// metadata.project_id (set for hypothesis and discovery events in
+// Agents.tsx), we upgrade the destination to the specific project
+// folder via notifDest() below.
 const NOTIFICATION_ROUTES: Record<string, string> = {
   project: '/projects',
   hypothesis: '/agents',
@@ -80,6 +81,17 @@ const NOTIFICATION_ROUTES: Record<string, string> = {
   regulatory: '/regulatory',
   data: '/data-manager',
   visualization: '/data-visualization',
+}
+
+/** Resolve the best navigation destination for a notification entry.
+ *  discovery and hypothesis notifications that carry a project_id in
+ *  their metadata route directly to the project folder. */
+function notifDest(n: { type?: string; metadata?: any }): string | undefined {
+  const pid = n.metadata?.project_id
+  if (pid && (n.type === 'hypothesis' || n.type === 'discovery')) {
+    return `/projects/${pid}`
+  }
+  return n.type ? NOTIFICATION_ROUTES[n.type] : undefined
 }
 
 const secondaryNavItems = [
@@ -1116,7 +1128,7 @@ export default function Layout() {
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false)
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false)
-  const [notifications, setNotifications] = useState<Array<{ id: string; title: string; description: string; time: string; timestamp: string; type?: string }>>([])
+  const [notifications, setNotifications] = useState<Array<{ id: string; title: string; description: string; time: string; timestamp: string; type?: string; metadata?: any }>>([])
   const [hasUnread, setHasUnread] = useState(false)
   const location = useLocation()
   const navigate = useNavigate()
@@ -1135,6 +1147,9 @@ export default function Layout() {
           time: formatDateTime(a.timestamp),
           timestamp: a.timestamp || '',
           type: a.type,
+          // Preserve metadata so notifDest() can route hypothesis/discovery
+          // notifications to the dedicated project folder.
+          metadata: a.metadata,
         })))
         const newestTime = recent[0]?.timestamp || ''
         setHasUnread(newestTime > lastRead)
@@ -1425,7 +1440,7 @@ if (path === '/clinical-trials') return 'Clinical Trials'
                     {notifications.length > 0 ? (
                       <div className="max-h-64 overflow-y-auto">
                         {notifications.map(n => {
-                          const dest = n.type ? NOTIFICATION_ROUTES[n.type] : undefined
+                          const dest = notifDest(n)
                           return (
                             <button
                               key={n.id}
