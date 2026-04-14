@@ -282,7 +282,12 @@ export default function Agents() {
           type: 'discovery', action: 'completed',
           title: `Discovery ${newState}: ${(res as any).disease || config.disease} — ${(res as any).top_hypotheses?.length || 0} hypotheses`,
           project: (res as any).project_name || config.disease,
-          metadata: { hypotheses_count: (res as any).top_hypotheses?.length || 0 },
+          // project_id lets the ActivityFeed / notification rows route
+          // directly to the dedicated project folder instead of /agents.
+          metadata: {
+            hypotheses_count: (res as any).top_hypotheses?.length || 0,
+            project_id: (res as any).project_id || '',
+          },
         })
       }
       prevStateRef.current = newState
@@ -316,7 +321,13 @@ export default function Agents() {
                 type: 'hypothesis', action: 'created',
                 title: `Hypothesis discovered: ${h.title?.slice(0, 80) || 'Untitled'}`,
                 project: (res as any).project_name || config.disease,
-                metadata: { confidence: h.confidence },
+                // project_id lets the ActivityFeed / notification rows route
+                // directly to the dedicated project folder instead of /agents.
+                metadata: {
+                  confidence: h.confidence,
+                  project_id: (res as any).project_id || '',
+                  hypothesis_id: h.id,
+                },
               })
             }
           }
@@ -423,14 +434,23 @@ export default function Agents() {
       setShowConfig(false)
       setHypotheses([])
       // Capture auto-created project from start response
-      if (startRes?.project_id && startRes.project_id !== 'discovery') {
-        setProjectId(startRes.project_id)
+      const newProjectId = startRes?.project_id && startRes.project_id !== 'discovery'
+        ? startRes.project_id : ''
+      if (newProjectId) {
+        setProjectId(newProjectId)
         setProjectName(startRes.project_name || '')
       }
       logActivity({
         type: 'discovery', action: 'started',
         title: `Discovery started: ${config.disease} (${config.discovery_type || 'treatment'})`,
-        metadata: { disease: config.disease, discovery_type: config.discovery_type },
+        // project_id available synchronously from startRes — use it so
+        // ActivityFeed / notification rows can route to the project folder
+        // immediately after discovery begins.
+        metadata: {
+          disease: config.disease,
+          discovery_type: config.discovery_type,
+          project_id: newProjectId,
+        },
       })
 
       // Save to history (ephemeral in-memory only)
