@@ -122,6 +122,15 @@ const managementNavItems = [
   { to: '/regulatory', icon: FiShield, label: 'Regulatory' },
 ]
 
+// Dedicated hypothesis + ML-models + knowledge-graph nav — previously
+// orphaned pages with no entry in the sidebar. Lives in its own nav
+// section so the first three (hypothesis workflow) group together.
+const knowledgeNavItems = [
+  { to: '/hypotheses', icon: FiZap, label: 'Hypotheses' },
+  { to: '/knowledge-graph', icon: FiLayers, label: 'Knowledge Graph' },
+  { to: '/ml-models', icon: FiCpu, label: 'ML Models' },
+]
+
 function TabIcon({ type }: { type: WorkspaceTab['type'] }) {
   const icons: Record<WorkspaceTab['type'], typeof FiFolder> = {
     project: FiFolder,
@@ -1335,6 +1344,25 @@ if (path === '/clinical-trials') return 'Clinical Trials'
 
           <div className="text-xxs text-[var(--color-text-muted)] px-2 py-1.5 mt-4 uppercase tracking-widest font-medium">Management</div>
           {managementNavItems.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              className={({ isActive }) =>
+                clsx(
+                  'flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm transition-all duration-200',
+                  isActive
+                    ? 'bg-[var(--glass-bg-hover)] text-[var(--color-text)]'
+                    : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)]'
+                )
+              }
+            >
+              <item.icon className="w-4 h-4" />
+              <span className="font-medium">{item.label}</span>
+            </NavLink>
+          ))}
+
+          <div className="text-xxs text-[var(--color-text-muted)] px-2 py-1.5 mt-4 uppercase tracking-widest font-medium">Knowledge</div>
+          {knowledgeNavItems.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}

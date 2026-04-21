@@ -27,6 +27,10 @@ const PAGES: Array<{ name: string; path: string }> = [
   { name: 'regulatory',           path: '/regulatory' },
   { name: 'imaging',              path: '/imaging' },
   { name: 'biobank',              path: '/biobank' },
+  { name: 'hypotheses',           path: '/hypotheses' },
+  { name: 'knowledge-graph',      path: '/knowledge-graph' },
+  { name: 'knowledge-graph-viewer', path: '/knowledge-graph/viewer' },
+  { name: 'ml-models',            path: '/ml-models' },
   { name: 'pgvector',             path: '/dev/pgvector' },
 ]
 
