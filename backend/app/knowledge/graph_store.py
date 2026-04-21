@@ -120,6 +120,10 @@ class GraphStore(LoggerMixin):
             self.logger.warning("neo4j driver not installed")
             raise
         except Exception as e:
+            # Don't leave a live driver pointing at an unreachable Neo4j
+            # — the hundreds of `if self._driver:` guards scattered through
+            # this module rely on the driver being None when the DB is down.
+            self._driver = None
             self.logger.error("Neo4j connection failed", error=str(e))
             raise
 
@@ -523,40 +527,51 @@ class GraphStore(LoggerMixin):
             return records
 
     async def get_stats(self) -> dict[str, Any]:
-        """Get knowledge graph statistics."""
+        """Get knowledge graph statistics.
+
+        Falls back to in-memory entity counts if the Neo4j driver exists
+        but can't reach the DB (e.g. the service is down). Previously
+        this propagated ServiceUnavailable and returned 500 to the
+        frontend knowledge-graph stats widget on the Evidence page.
+        """
         if self._driver:
-            async with self._driver.session() as session:
-                # Count entities
-                result = await session.run("MATCH (e:Entity) RETURN count(e) as count")
-                entity_count = (await result.single())["count"]
+            try:
+                async with self._driver.session() as session:
+                    # Count entities
+                    result = await session.run("MATCH (e:Entity) RETURN count(e) as count")
+                    entity_count = (await result.single())["count"]
 
-                # Count relations
-                result = await session.run("MATCH ()-[r]->() RETURN count(r) as count")
-                relation_count = (await result.single())["count"]
+                    # Count relations
+                    result = await session.run("MATCH ()-[r]->() RETURN count(r) as count")
+                    relation_count = (await result.single())["count"]
 
-                # Entity type counts
-                result = await session.run(
-                    "MATCH (e:Entity) RETURN e.entity_type as type, count(*) as count"
+                    # Entity type counts
+                    result = await session.run(
+                        "MATCH (e:Entity) RETURN e.entity_type as type, count(*) as count"
+                    )
+                    entity_counts = {}
+                    async for record in result:
+                        entity_counts[record["type"]] = record["count"]
+
+                    return {
+                        "total_entities": entity_count,
+                        "total_relations": relation_count,
+                        "entity_counts": entity_counts,
+                        "relation_counts": {},
+                        "last_updated": datetime.utcnow(),
+                    }
+            except Exception as e:
+                logger.warning(
+                    "Neo4j get_stats failed — falling back to in-memory counts",
+                    error=str(e)[:120],
                 )
-                entity_counts = {}
-                async for record in result:
-                    entity_counts[record["type"]] = record["count"]
-
-                return {
-                    "total_entities": entity_count,
-                    "total_relations": relation_count,
-                    "entity_counts": entity_counts,
-                    "relation_counts": {},
-                    "last_updated": datetime.utcnow(),
-                }
-        else:
-            return {
-                "total_entities": len(self._entities),
-                "total_relations": len(self._relations),
-                "entity_counts": {},
-                "relation_counts": {},
-                "last_updated": datetime.utcnow(),
-            }
+        return {
+            "total_entities": len(self._entities),
+            "total_relations": len(self._relations),
+            "entity_counts": {},
+            "relation_counts": {},
+            "last_updated": datetime.utcnow(),
+        }
 
 
 async def init_graph_store() -> None:
