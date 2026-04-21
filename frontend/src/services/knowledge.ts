@@ -14,6 +14,7 @@
  */
 
 import axios from 'axios'
+import { useMutation, useQuery, type UseQueryResult } from '@tanstack/react-query'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
 const apiClient = axios.create({
@@ -192,8 +193,6 @@ export async function getEntitiesBulk(ids: string[]): Promise<Entity[]> {
 }
 
 // ─── React Query Hooks ──────────────────────────────────────────
-
-import { useQuery, useMutation, UseQueryResult } from '@tanstack/react-query'
 
 export function useEntitySearch(
   params: EntitySearchParams,
