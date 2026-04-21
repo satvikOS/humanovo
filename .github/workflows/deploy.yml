@@ -1,11 +1,13 @@
 name: Deploy humanovo
 
+# Deploy to dev S3 + CloudFront on push to main/humanovo only.
+# Feature branches (claude/*) are intentionally excluded — open a PR
+# and trigger Run Workflow manually when you want a preview.
 on:
   push:
     branches:
       - main
       - humanovo
-      - 'claude/*'
   workflow_dispatch:
 
 env:

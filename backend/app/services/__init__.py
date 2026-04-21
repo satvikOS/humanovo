@@ -4,10 +4,10 @@ humanovo Services Module
 Contains business logic services for the platform.
 """
 
+from app.models.audit import AuditRecord
 from app.services.audit_service import (
     AuditContext,
     AuditEventType,
-    AuditRecord,
     AuditService,
     AuditSeverity,
     get_audit_service,

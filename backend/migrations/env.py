@@ -12,16 +12,19 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-# Import all models so Alembic can detect them
+# Import all models so Alembic can detect them via Base.metadata.
+# Importing `app.models` triggers app/models/__init__.py which pulls in every
+# ORM class (including AuditRecord and the full platform-entities set).
 from app.models import (
-    Base,
-    User,
-    Project,
-    Hypothesis,
-    Evidence,
-    Simulation,
     AgentTask,
+    AuditRecord,
+    Base,
+    Evidence,
+    Hypothesis,
     IngestionJob,
+    Project,
+    Simulation,
+    User,
 )
 from app.core.config import settings
 

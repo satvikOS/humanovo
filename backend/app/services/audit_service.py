@@ -20,20 +20,16 @@ import json
 import time
 import uuid
 from contextlib import asynccontextmanager
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, AsyncIterator, Optional
 
-from sqlalchemy import (
-    Column, DateTime, Float, Integer, String, Text, Index,
-)
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.logging import get_logger
-from app.models.base import Base
+from app.models.audit import AuditRecord
 
 logger = get_logger(__name__)
 
@@ -79,57 +75,6 @@ class AuditSeverity(str, Enum):
     WARNING = "warning"
     ERROR = "error"
     CRITICAL = "critical"
-
-
-# ─── Database Model ─────────────────────────────────────────────
-
-class AuditRecord(Base):
-    """Immutable audit log entry with hash chain."""
-    __tablename__ = "audit_records"
-
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    sequence = Column(Integer, nullable=False, autoincrement=True, unique=True)
-    timestamp = Column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=lambda: datetime.now(timezone.utc),
-    )
-    event_type = Column(String(64), nullable=False)
-    severity = Column(String(16), nullable=False, default="info")
-
-    # Actors
-    user_id = Column(String, nullable=True)
-    project_id = Column(String, nullable=True)
-    execution_id = Column(String, nullable=True)
-    session_id = Column(String, nullable=True)
-
-    # Action context
-    action = Column(String(128), nullable=False)
-    resource_type = Column(String(64), nullable=True)
-    resource_id = Column(String, nullable=True)
-
-    # Payload
-    details = Column(JSONB, nullable=True)
-    ip_address = Column(String(64), nullable=True)
-    user_agent = Column(String(512), nullable=True)
-
-    # Cost/performance metrics
-    duration_ms = Column(Integer, nullable=True)
-    cost_usd = Column(Float, nullable=True)
-    tokens_input = Column(Integer, nullable=True)
-    tokens_output = Column(Integer, nullable=True)
-
-    # Tamper-evidence
-    record_hash = Column(String(64), nullable=False)
-    previous_hash = Column(String(64), nullable=True)
-
-    __table_args__ = (
-        Index("idx_audit_timestamp", "timestamp"),
-        Index("idx_audit_user", "user_id", "timestamp"),
-        Index("idx_audit_project", "project_id", "timestamp"),
-        Index("idx_audit_execution", "execution_id"),
-        Index("idx_audit_event_type", "event_type", "timestamp"),
-    )
 
 
 # ─── Hashing ────────────────────────────────────────────────────

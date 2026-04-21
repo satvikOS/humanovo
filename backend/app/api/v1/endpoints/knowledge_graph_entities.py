@@ -46,7 +46,7 @@ class Entity(BaseModel):
     def from_node(cls, node: KnowledgeGraphNode) -> "Entity":
         props = node.properties or {}
         return cls(
-            id=node.id,
+            id=str(node.id),
             name=node.name,
             synonyms=props.get("synonyms", []),
             category=node.type or "unknown",
@@ -75,9 +75,9 @@ class EntityRelationship(BaseModel):
     def from_edge(cls, edge: KnowledgeGraphEdge) -> "EntityRelationship":
         props = (edge.properties or {}) if hasattr(edge, "properties") else {}
         return cls(
-            id=edge.id,
-            source_id=edge.source_id,
-            target_id=edge.target_id,
+            id=str(edge.id),
+            source_id=str(edge.source_id),
+            target_id=str(edge.target_id),
             relation_type=edge.relationship,
             confidence=edge.strength or 0.5,
             evidence_pmids=props.get("evidence_pmids", []),

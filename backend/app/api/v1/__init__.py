@@ -29,6 +29,7 @@ from app.api.v1.endpoints import (
     jamison_api,
     knowledge,
     knowledge_graph,
+    knowledge_graph_entities,
     manuscripts,
     ml_models,
     monitoring,
@@ -85,6 +86,11 @@ router.include_router(statistics.router, prefix="/statistics", tags=["statistics
 router.include_router(datasets.router, prefix="/datasets", tags=["datasets"])
 router.include_router(collaboration.router, prefix="/collaboration", tags=["collaboration"])
 router.include_router(knowledge_graph.router, prefix="/knowledge-graph", tags=["knowledge-graph"])
+# Entity-centric API surface (what frontend/src/services/knowledge.ts calls).
+# Mounted at the same /knowledge-graph prefix so URLs stay consistent.
+router.include_router(
+    knowledge_graph_entities.router, prefix="/knowledge-graph", tags=["knowledge-graph"],
+)
 router.include_router(clinical_trials.router, prefix="/clinical-trials", tags=["clinical-trials"])
 router.include_router(genomics.router, prefix="/genomics", tags=["genomics"])
 router.include_router(manuscripts.router, prefix="/manuscripts", tags=["manuscripts"])
