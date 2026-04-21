@@ -630,18 +630,18 @@ export default function DataManager() {
                     onClick={saveTransformed}
                     className="px-2 py-1 rounded text-xs"
                     style={{ background: '#8b5cf6', color: '#fff' }}
-                    title="Save transformed dataset as new"
+                    title="Save transformed dataset as new" aria-label="Save transformed dataset as new"
                   >
                     Save Result
                   </button>
                 )}
-                <button onClick={exportCSV} className="p-1.5 rounded hover:bg-white/5" title="Export CSV">
+                <button onClick={exportCSV} className="p-1.5 rounded hover:bg-white/5" title="Export CSV" aria-label="Export CSV">
                   <FiDownload className="text-xs" />
                 </button>
-                <button onClick={exportXLSX} className="p-1.5 rounded hover:bg-white/5" title="Export XLSX" style={{ color: 'var(--color-text)' }}>
+                <button onClick={exportXLSX} className="p-1.5 rounded hover:bg-white/5" title="Export XLSX" aria-label="Export XLSX" style={{ color: 'var(--color-text)' }}>
                   <FiGrid className="text-xs" />
                 </button>
-                <button onClick={exportJSON} className="p-1.5 rounded hover:bg-white/5" title="Export JSON">
+                <button onClick={exportJSON} className="p-1.5 rounded hover:bg-white/5" title="Export JSON" aria-label="Export JSON">
                   <FiCopy className="text-xs" />
                 </button>
                 <button onClick={() => deleteDataset(selected.id)} className="p-1.5 rounded hover:bg-white/5" style={{ color: '#ef4444' }}>

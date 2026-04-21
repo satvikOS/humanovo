@@ -1135,7 +1135,7 @@ function HypothesisDetail({ hypothesis: h, onClose, onExport }: { hypothesis: Hy
           <span className="text-sm font-semibold" style={{ color: confidenceColor(h.confidence) }}>{Math.round(h.confidence * 100)}% confidence</span>
         </div>
         <div className="flex items-center gap-1">
-          <button onClick={onExport} className="btn btn-sm" title="Export PDF"><FiDownload className="w-3.5 h-3.5" /></button>
+          <button onClick={onExport} className="btn btn-sm" title="Export PDF" aria-label="Export PDF"><FiDownload className="w-3.5 h-3.5" /></button>
           <button onClick={onClose} className="btn btn-sm"><FiX className="w-3.5 h-3.5" /></button>
         </div>
       </div>

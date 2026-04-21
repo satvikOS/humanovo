@@ -524,28 +524,28 @@ export default function ProjectKnowledgeGraph() {
             <button
               onClick={handleZoomIn}
               className="p-2 bg-[var(--glass-bg)] border border-[var(--color-border)] rounded-lg hover:bg-[var(--glass-bg-hover)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
-              title="Zoom in"
+              title="Zoom in" aria-label="Zoom in"
             >
               <FiZoomIn className="w-5 h-5" />
             </button>
             <button
               onClick={handleZoomOut}
               className="p-2 bg-[var(--glass-bg)] border border-[var(--color-border)] rounded-lg hover:bg-[var(--glass-bg-hover)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
-              title="Zoom out"
+              title="Zoom out" aria-label="Zoom out"
             >
               <FiZoomOut className="w-5 h-5" />
             </button>
             <button
               onClick={handleFit}
               className="p-2 bg-[var(--glass-bg)] border border-[var(--color-border)] rounded-lg hover:bg-[var(--glass-bg-hover)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
-              title="Fit to view"
+              title="Fit to view" aria-label="Fit to view"
             >
               <FiMaximize2 className="w-5 h-5" />
             </button>
             <button
               onClick={handleExportPng}
               className="p-2 bg-[var(--glass-bg)] border border-[var(--color-border)] rounded-lg hover:bg-[var(--glass-bg-hover)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
-              title="Export as PNG"
+              title="Export as PNG" aria-label="Export as PNG"
             >
               <FiDownload className="w-5 h-5" />
             </button>

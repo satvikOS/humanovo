@@ -1020,7 +1020,7 @@ export default function Notebook() {
                     <button
                       type="button"
                       className="p-1 ml-1 rounded hover:bg-red-500/20 text-[var(--color-text-muted)] hover:text-red-400 cursor-pointer shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                      title="Delete page"
+                      title="Delete page" aria-label="Delete page"
                       onPointerDown={(e) => {
                         e.preventDefault()
                         e.stopPropagation()

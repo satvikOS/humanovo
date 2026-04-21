@@ -869,7 +869,7 @@ export default function HypothesisDocViewer({
           <button
             onClick={onClose}
             className="p-1.5 rounded hover:bg-secondary-700 text-secondary-400 hover:text-white transition-colors shrink-0"
-            title="Back"
+            title="Back" aria-label="Back"
           >
             <FiArrowLeft className="w-4 h-4" />
           </button>
@@ -900,7 +900,7 @@ export default function HypothesisDocViewer({
             onClick={zoomOut}
             disabled={zoom <= ZOOM_MIN}
             className="p-1 rounded hover:bg-secondary-700 text-secondary-400 hover:text-white disabled:opacity-30 transition-colors"
-            title="Zoom out"
+            title="Zoom out" aria-label="Zoom out"
           >
             <FiZoomOut className="w-4 h-4" />
           </button>
@@ -930,7 +930,7 @@ export default function HypothesisDocViewer({
             <button
               onClick={onGenerateResearchPaper}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-white/10 text-[var(--color-text-secondary)] hover:bg-white/15 text-xs font-medium transition-colors"
-              title="Generate Research Paper"
+              title="Generate Research Paper" aria-label="Generate Research Paper"
             >
               <FiFileText className="w-3.5 h-3.5" />
               Generate Paper
@@ -939,7 +939,7 @@ export default function HypothesisDocViewer({
           <button
             onClick={handleExportPdf}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-white/10 text-[var(--color-text-secondary)] hover:bg-white/15 text-xs font-medium transition-colors"
-            title="Export PDF"
+            title="Export PDF" aria-label="Export PDF"
           >
             <FiDownload className="w-3.5 h-3.5" />
             Export PDF
@@ -947,7 +947,7 @@ export default function HypothesisDocViewer({
           <button
             onClick={handlePrint}
             className="p-1.5 rounded hover:bg-secondary-700 text-secondary-400 hover:text-white transition-colors"
-            title="Print"
+            title="Print" aria-label="Print"
           >
             <FiPrinter className="w-4 h-4" />
           </button>

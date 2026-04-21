@@ -115,7 +115,7 @@ function HypothesisCard({ hypothesis }: { hypothesis: Hypothesis }) {
             onClick={handleExportPdf}
             disabled={exporting}
             className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-white/5 text-[var(--color-text-secondary)] hover:bg-white/10 disabled:opacity-50 transition-colors"
-            title="Export as PDF"
+            title="Export as PDF" aria-label="Export as PDF"
           >
             {exporting ? (
               <FiRefreshCw className="w-3.5 h-3.5 animate-spin" />

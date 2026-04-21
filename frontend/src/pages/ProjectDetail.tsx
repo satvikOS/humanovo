@@ -1015,7 +1015,7 @@ export default function ProjectDetail() {
               <button
                 onClick={startEditing}
                 className="p-2 rounded-lg hover:bg-white/5 text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
-                title="Edit project info"
+                title="Edit project info" aria-label="Edit project info"
               >
                 <FiEdit2 className="w-4 h-4" />
               </button>

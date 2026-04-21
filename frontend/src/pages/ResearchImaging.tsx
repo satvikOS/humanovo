@@ -1483,8 +1483,8 @@ export default function ResearchImaging() {
                 >
                   <FiMaximize2 className="text-xs" />
                 </button>
-                <button onClick={exportImage} className="btn-icon btn-ghost p-1.5 transition-all active:scale-95" title="Export PNG" style={{ borderRadius: 8 }}><FiDownload className="text-xs" /></button>
-                <button onClick={exportStudy} className="btn-icon btn-ghost p-1.5 transition-all active:scale-95" title="Export study JSON" style={{ borderRadius: 8 }}><FiSave className="text-xs" /></button>
+                <button onClick={exportImage} className="btn-icon btn-ghost p-1.5 transition-all active:scale-95" title="Export PNG" aria-label="Export PNG" style={{ borderRadius: 8 }}><FiDownload className="text-xs" /></button>
+                <button onClick={exportStudy} className="btn-icon btn-ghost p-1.5 transition-all active:scale-95" title="Export study JSON" aria-label="Export study JSON" style={{ borderRadius: 8 }}><FiSave className="text-xs" /></button>
                 <button onClick={() => deleteStudy(selected.id)} className="transition-all active:scale-95" style={{ padding: '5px 7px', borderRadius: 12, background: 'rgba(176, 126, 139, 0.1)', border: '1px solid rgba(176, 126, 139, 0.15)', color: '#B07E8B' }} title="Delete"><FiTrash2 className="text-xs" /></button>
               </div>
             </>

@@ -660,7 +660,7 @@ export default function Projects() {
           </div>
 
           {/* Refresh */}
-          <button onClick={loadProjects} className="btn text-[var(--color-text-muted)] hover:text-white p-2" title="Refresh">
+          <button onClick={loadProjects} className="btn text-[var(--color-text-muted)] hover:text-white p-2" title="Refresh" aria-label="Refresh">
             <FiRefreshCw className={clsx('w-4 h-4', loading && 'animate-spin')} />
           </button>
         </div>

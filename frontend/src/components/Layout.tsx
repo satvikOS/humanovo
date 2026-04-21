@@ -175,7 +175,7 @@ function WorkspaceTabs() {
       <button
         onClick={handleAddTab}
         className="ml-1 p-1.5 text-[var(--color-text-muted)] hover:text-[var(--color-text)] rounded-lg transition-all hover:bg-[var(--glass-bg)]"
-        title="New Tab"
+        title="New Tab" aria-label="New Tab"
       >
         <FiPlus className="w-3 h-3" />
       </button>
@@ -566,7 +566,7 @@ function CopyButton({ text }: { text: string }) {
     <button
       onClick={handleCopy}
       className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-      title="Copy message"
+      title="Copy message" aria-label="Copy message"
     >
       {copied ? (
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>

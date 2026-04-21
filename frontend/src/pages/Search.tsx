@@ -330,7 +330,7 @@ export default function Search() {
             <button
               onClick={saveSearch}
               className="btn p-3.5 rounded-xl border border-[var(--color-border)]"
-              title="Save search"
+              title="Save search" aria-label="Save search"
             >
               <FiBookmark className="w-4 h-4" />
             </button>

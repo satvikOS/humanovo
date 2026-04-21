@@ -2197,7 +2197,7 @@ function WorkbenchCopyButton({ text }: { text: string }) {
     })
   }
   return (
-    <button onClick={handleCopy} className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-[var(--color-surface)] text-[var(--color-text-muted)]" title="Copy">
+    <button onClick={handleCopy} className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-[var(--color-surface)] text-[var(--color-text-muted)]" title="Copy" aria-label="Copy">
       {copied ? <FiCheck className="w-3 h-3 text-[var(--color-text-secondary)]" /> : <FiClipboard className="w-3 h-3" />}
     </button>
   )
@@ -2289,7 +2289,7 @@ function ConstantPanel({
             placeholder="Ask Constant..."
             className="flex-1 bg-transparent text-xs outline-none px-2"
           />
-          <button onClick={onSend} disabled={loading || !input.trim()} className="p-1.5 rounded hover:bg-[var(--color-surface)] transition-colors disabled:opacity-30">
+          <button aria-label="Send" onClick={onSend} disabled={loading || !input.trim()} className="p-1.5 rounded hover:bg-[var(--color-surface)] transition-colors disabled:opacity-30">
             <FiSend className="w-3.5 h-3.5 text-[var(--color-text-secondary)]" />
           </button>
         </div>
@@ -3349,7 +3349,7 @@ IMPORTANT: If the user asks you to connect nodes, suggest connections, or explai
               <button onClick={() => setZoom(z => Math.max(0.2, z - 0.15))} className="btn btn-sm btn-secondary" title="Zoom Out">
                 <FiZoomOut className="w-3 h-3" />
               </button>
-              <button onClick={resetView} className="btn btn-sm btn-secondary" title="Reset View">
+              <button onClick={resetView} className="btn btn-sm btn-secondary" title="Reset View" aria-label="Reset View">
                 <FiCrosshair className="w-3 h-3" />
               </button>
               <div className="w-px h-5 bg-[var(--color-border)] mx-1" />
@@ -3361,27 +3361,27 @@ IMPORTANT: If the user asks you to connect nodes, suggest connections, or explai
                   >
                     <FiEdit3 className="w-3 h-3" />
                   </button>
-                  <button onClick={deleteSelectedNode} className="btn btn-sm btn-secondary text-[var(--color-text-muted)] hover:text-[var(--color-text-muted)]" title="Delete Node">
+                  <button onClick={deleteSelectedNode} className="btn btn-sm btn-secondary text-[var(--color-text-muted)] hover:text-[var(--color-text-muted)]" title="Delete Node" aria-label="Delete Node">
                     <FiTrash2 className="w-3 h-3" />
                   </button>
                   <div className="w-px h-5 bg-[var(--color-border)] mx-1" />
                 </>
               )}
-              <button onClick={clearGraph} className="btn btn-sm btn-secondary" title="Clear Canvas">
+              <button onClick={clearGraph} className="btn btn-sm btn-secondary" title="Clear Canvas" aria-label="Clear Canvas">
                 <FiTrash2 className="w-3 h-3" />
                 Clear
               </button>
             </div>
             <div className="flex items-center gap-1">
-              <button onClick={importGraphJSON} className="btn btn-sm btn-secondary" title="Import JSON">
+              <button onClick={importGraphJSON} className="btn btn-sm btn-secondary" title="Import JSON" aria-label="Import JSON">
                 <FiUpload className="w-3 h-3" />
                 Import
               </button>
-              <button onClick={exportGraphJSON} className="btn btn-sm btn-secondary" title="Export JSON">
+              <button onClick={exportGraphJSON} className="btn btn-sm btn-secondary" title="Export JSON" aria-label="Export JSON">
                 <FiDownload className="w-3 h-3" />
                 JSON
               </button>
-              <button onClick={exportGraphPNG} className="btn btn-sm btn-secondary" title="Export PNG">
+              <button onClick={exportGraphPNG} className="btn btn-sm btn-secondary" title="Export PNG" aria-label="Export PNG">
                 <FiImage className="w-3 h-3" />
                 PNG
               </button>

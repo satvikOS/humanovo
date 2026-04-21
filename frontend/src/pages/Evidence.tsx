@@ -550,7 +550,7 @@ export default function Evidence() {
               <option value="patent">Patent</option>
               <option value="user_upload">User Upload</option>
             </select>
-            <button onClick={fetchEvidence} className="btn p-2" title="Refresh">
+            <button onClick={fetchEvidence} className="btn p-2" title="Refresh" aria-label="Refresh">
               <FiRefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             </button>
           </div>
