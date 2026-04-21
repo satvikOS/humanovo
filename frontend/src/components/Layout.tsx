@@ -153,19 +153,34 @@ function CollapsibleNavSection({ title, items }: { title: string; items: NavSect
     try { localStorage.setItem(storageKey, collapsed ? '1' : '0') } catch { /* quota */ }
   }, [collapsed, storageKey])
   return (
-    <div className="mt-4">
+    <div className="mt-3">
       <button
         type="button"
         onClick={() => setCollapsed((v) => !v)}
-        className="w-full flex items-center justify-between px-2 py-1.5 text-xxs text-[var(--color-text-muted)] uppercase tracking-widest font-medium hover:text-[var(--color-text)] transition-colors"
+        className={clsx(
+          'w-full flex items-center gap-1.5 px-2 py-1 rounded-md text-xxs uppercase tracking-widest font-medium transition-colors',
+          'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)]',
+          containsActive && 'text-[var(--color-text)]',
+        )}
         aria-expanded={!collapsed}
         aria-controls={`nav-section-${title.toLowerCase()}`}
       >
-        <span>{title}</span>
-        <span className="text-[10px] opacity-60">{collapsed ? '▸' : '▾'}</span>
+        <span
+          className={clsx(
+            'text-[10px] w-3 text-center transition-transform duration-150 opacity-70',
+            !collapsed && 'rotate-90',
+          )}
+          aria-hidden="true"
+        >
+          ▸
+        </span>
+        <span className="flex-1 text-left">{title}</span>
+        {collapsed && items.length > 0 && (
+          <span className="text-[10px] opacity-50 tabular-nums normal-case tracking-normal">{items.length}</span>
+        )}
       </button>
       {!collapsed && (
-        <div id={`nav-section-${title.toLowerCase()}`} className="space-y-0.5">
+        <div id={`nav-section-${title.toLowerCase()}`} className="space-y-0.5 mt-0.5">
           {items.map((item) => (
             <NavLink
               key={item.to}
