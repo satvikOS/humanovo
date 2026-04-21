@@ -39,7 +39,7 @@ class User(BaseModel):
 
     # Role and permissions
     role = Column(
-        Enum(UserRole, name="user_role"),
+        Enum(UserRole, name="user_role", values_callable=lambda x: [e.value for e in x]),
         default=UserRole.RESEARCHER,
         nullable=False,
     )

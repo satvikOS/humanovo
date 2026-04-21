@@ -61,7 +61,7 @@ class AgentTask(BaseModel):
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     task_type = Column(
-        Enum(AgentTaskType, name="agent_task_type"),
+        Enum(AgentTaskType, name="agent_task_type", values_callable=lambda x: [e.value for e in x]),
         default=AgentTaskType.CUSTOM,
         nullable=False,
         index=True,
@@ -69,7 +69,7 @@ class AgentTask(BaseModel):
 
     # Status tracking
     status = Column(
-        Enum(AgentTaskStatus, name="agent_task_status"),
+        Enum(AgentTaskStatus, name="agent_task_status", values_callable=lambda x: [e.value for e in x]),
         default=AgentTaskStatus.PENDING,
         nullable=False,
         index=True,

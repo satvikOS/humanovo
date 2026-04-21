@@ -74,14 +74,14 @@ class Simulation(BaseModel):
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     simulation_type = Column(
-        Enum(SimulationType, name="simulation_type"),
+        Enum(SimulationType, name="simulation_type", values_callable=lambda x: [e.value for e in x]),
         default=SimulationType.CUSTOM,
         nullable=False,
     )
 
     # Status tracking
     status = Column(
-        Enum(SimulationStatus, name="simulation_status"),
+        Enum(SimulationStatus, name="simulation_status", values_callable=lambda x: [e.value for e in x]),
         default=SimulationStatus.PENDING,
         nullable=False,
         index=True,

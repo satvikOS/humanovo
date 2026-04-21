@@ -63,7 +63,7 @@ class IngestionJob(BaseModel):
 
     # Source configuration
     source = Column(
-        Enum(IngestionSource, name="ingestion_source"),
+        Enum(IngestionSource, name="ingestion_source", values_callable=lambda x: [e.value for e in x]),
         nullable=False,
         index=True,
     )
@@ -77,7 +77,7 @@ class IngestionJob(BaseModel):
 
     # Status tracking
     status = Column(
-        Enum(IngestionJobStatus, name="ingestion_job_status"),
+        Enum(IngestionJobStatus, name="ingestion_job_status", values_callable=lambda x: [e.value for e in x]),
         default=IngestionJobStatus.PENDING,
         nullable=False,
         index=True,

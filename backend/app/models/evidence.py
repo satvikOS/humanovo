@@ -49,7 +49,7 @@ class Evidence(BaseModel):
 
     # Source information
     source_type = Column(
-        Enum(EvidenceSource, name="evidence_source"),
+        Enum(EvidenceSource, name="evidence_source", values_callable=lambda x: [e.value for e in x]),
         nullable=False,
         index=True,
     )

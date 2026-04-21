@@ -37,7 +37,14 @@ class Project(BaseModel):
     # Classification
     tags = Column(ARRAY(String), default=list, nullable=False)
     status = Column(
-        Enum(ProjectStatus, name="project_status"),
+        Enum(
+            ProjectStatus,
+            name="project_status",
+            # Use the enum VALUE (lowercase "active") to match the Postgres
+            # enum type, not the Python NAME (uppercase "ACTIVE") —
+            # otherwise asyncpg raises InvalidTextRepresentationError.
+            values_callable=lambda x: [e.value for e in x],
+        ),
         default=ProjectStatus.ACTIVE,
         nullable=False,
     )

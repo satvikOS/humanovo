@@ -51,7 +51,7 @@ class EvidenceReference(BaseModel):
         index=True,
     )
     evidence_type = Column(
-        Enum(EvidenceType, name="evidence_type"),
+        Enum(EvidenceType, name="evidence_type", values_callable=lambda x: [e.value for e in x]),
         default=EvidenceType.NEUTRAL,
         nullable=False,
     )
@@ -83,7 +83,7 @@ class Hypothesis(BaseModel):
 
     # Status and scores
     status = Column(
-        Enum(HypothesisStatus, name="hypothesis_status"),
+        Enum(HypothesisStatus, name="hypothesis_status", values_callable=lambda x: [e.value for e in x]),
         default=HypothesisStatus.DRAFT,
         nullable=False,
         index=True,
