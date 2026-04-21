@@ -2079,20 +2079,39 @@ function MasterLibraryDetails({ element, onAddToCanvas }: { element: MasterLibra
                 )}
               </div>
               <div className="space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-[var(--color-text-muted)]">Baseline:</span>
-                  <span>{element.simulationParams.baselineValue} {element.simulationParams.unit}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-[var(--color-text-muted)]">Range:</span>
-                  <span>{element.simulationParams.minValue} - {element.simulationParams.maxValue}</span>
-                </div>
-                {element.simulationParams.halfLife && (
-                  <div className="flex justify-between">
-                    <span className="text-[var(--color-text-muted)]">Half-life:</span>
-                    <span>{element.simulationParams.halfLife}</span>
-                  </div>
-                )}
+                {(() => {
+                  const sp = element.simulationParams
+                  // Guard against live entities that carry the neutral
+                  // { 0, 0, 1 } default from libraryAdapter — hide the
+                  // "simulation parameters unknown" panel for them instead
+                  // of rendering a misleading 0–1 range slider.
+                  const hasRealParams = sp.unit !== '' || sp.baselineValue !== 0 || sp.maxValue > 1
+                  if (!hasRealParams) {
+                    return (
+                      <div className="text-xxs text-[var(--color-text-muted)] italic">
+                        Simulation parameters not available for this entity.
+                      </div>
+                    )
+                  }
+                  return (
+                    <>
+                      <div className="flex justify-between">
+                        <span className="text-[var(--color-text-muted)]">Baseline:</span>
+                        <span>{sp.baselineValue} {sp.unit}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-[var(--color-text-muted)]">Range:</span>
+                        <span>{sp.minValue} - {sp.maxValue}</span>
+                      </div>
+                      {sp.halfLife && (
+                        <div className="flex justify-between">
+                          <span className="text-[var(--color-text-muted)]">Half-life:</span>
+                          <span>{sp.halfLife}</span>
+                        </div>
+                      )}
+                    </>
+                  )
+                })()}
               </div>
             </div>
 
@@ -2103,8 +2122,10 @@ function MasterLibraryDetails({ element, onAddToCanvas }: { element: MasterLibra
                   <label className="text-xxs text-[var(--color-text-muted)]">Target Value</label>
                   <input
                     type="range"
+                    // Clamp to a non-zero span so the range slider never
+                    // degenerates to min===max and the thumb stays usable.
                     min={element.simulationParams.minValue}
-                    max={element.simulationParams.maxValue}
+                    max={Math.max(element.simulationParams.maxValue, element.simulationParams.minValue + 1)}
                     defaultValue={element.simulationParams.baselineValue}
                     className="w-full"
                   />
