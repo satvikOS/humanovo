@@ -115,7 +115,7 @@ function CreateProjectModal({ onClose, onCreate }: { onClose: () => void; onCrea
             </div>
             <h2 className="text-lg font-semibold">New Research Project</h2>
           </div>
-          <button onClick={onClose} className="text-[var(--color-text-muted)] hover:text-white p-1 rounded hover:bg-white/5 transition-colors">
+          <button aria-label="Close" onClick={onClose} className="text-[var(--color-text-muted)] hover:text-white p-1 rounded hover:bg-white/5 transition-colors">
             <FiX className="w-5 h-5" />
           </button>
         </div>

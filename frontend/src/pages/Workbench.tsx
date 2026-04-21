@@ -2114,7 +2114,7 @@ function MasterLibraryDetails({ element, onAddToCanvas }: { element: MasterLibra
                     <FiPlay className="w-3 h-3" />
                     Run Simulation
                   </button>
-                  <button className="btn btn-sm btn-secondary">
+                  <button aria-label="Pause" className="btn btn-sm btn-secondary">
                     <FiPause className="w-3 h-3" />
                   </button>
                 </div>
@@ -2230,7 +2230,7 @@ function ConstantPanel({
           <div className="w-2 h-2 rounded-full bg-white/40 animate-pulse" />
           <h3 className="text-sm font-medium">Constant AI</h3>
         </div>
-        <button onClick={onToggle} className="p-1 hover:bg-[var(--color-surface)] rounded transition-colors">
+        <button aria-label="Close" onClick={onToggle} className="p-1 hover:bg-[var(--color-surface)] rounded transition-colors">
           <FiX className="w-3.5 h-3.5" />
         </button>
       </div>
@@ -2323,7 +2323,7 @@ function NodeEditModal({
             <FiEdit3 className="w-4 h-4 text-primary-400" />
             Edit Node
           </h3>
-          <button onClick={onClose} className="p-1 hover:bg-[var(--color-surface)] rounded transition-colors">
+          <button aria-label="Close" onClick={onClose} className="p-1 hover:bg-[var(--color-surface)] rounded transition-colors">
             <FiX className="w-4 h-4" />
           </button>
         </div>
@@ -3672,7 +3672,7 @@ IMPORTANT: If the user asks you to connect nodes, suggest connections, or explai
                       {selectedLibraryElement.aiSimulationReady ? 'AI Ready' : 'Manual'}
                     </span>
                   )}
-                  <button className="p-1 hover:bg-[var(--color-surface)] rounded transition-colors">
+                  <button aria-label="Settings" className="p-1 hover:bg-[var(--color-surface)] rounded transition-colors">
                     <FiSettings className="w-3.5 h-3.5" />
                   </button>
                 </div>

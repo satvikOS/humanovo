@@ -1091,7 +1091,7 @@ function ConstantChat() {
               className="flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--color-text-muted)] resize-none leading-relaxed py-2"
               style={{ maxHeight: '120px' }}
             />
-            <button
+            <button aria-label="Send"
               onClick={sendMessage}
               disabled={(!input.trim() && attachedFiles.length === 0) || loading || isStreaming}
               className="p-2 rounded-lg text-white disabled:opacity-30 transition-all shrink-0 mb-0.5"

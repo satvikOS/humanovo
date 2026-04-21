@@ -898,7 +898,7 @@ export default function Evidence() {
                       </a>
                     </>
                   )}
-                  <button onClick={closeDocViewer} className="p-1.5 rounded-lg hover:bg-white/5 text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
+                  <button aria-label="Close" onClick={closeDocViewer} className="p-1.5 rounded-lg hover:bg-white/5 text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
                     <FiX className="w-4 h-4" />
                   </button>
                 </div>
@@ -969,7 +969,7 @@ function AddEvidenceModal({ onClose, onAdd }: { onClose: () => void; onAdd: (for
       <div className="glass-card-static w-full max-w-lg mx-4 animate-scale-in" style={{ background: 'var(--color-surface-solid)' }}>
         <div className="flex items-center justify-between p-5 border-b border-[var(--color-border)]">
           <h2 className="text-lg font-semibold">Add Evidence</h2>
-          <button onClick={onClose} className="text-[var(--color-text-muted)] hover:text-[var(--color-text)]"><FiX className="w-5 h-5" /></button>
+          <button aria-label="Close" onClick={onClose} className="text-[var(--color-text-muted)] hover:text-[var(--color-text)]"><FiX className="w-5 h-5" /></button>
         </div>
         <form onSubmit={e => { e.preventDefault(); onAdd(form) }} className="p-5 space-y-4">
           <div>

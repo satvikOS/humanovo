@@ -516,7 +516,7 @@ export default function KnowledgeGraph() {
             >
               <FiFilter className="w-5 h-5" />
             </button>
-            <button className="p-2 bg-[var(--glass-bg)] rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
+            <button aria-label="Download" className="p-2 bg-[var(--glass-bg)] rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
               <FiDownload className="w-5 h-5" />
             </button>
             <button className="p-2 bg-[var(--glass-bg)] rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)]">

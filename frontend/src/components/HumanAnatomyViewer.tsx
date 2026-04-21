@@ -762,7 +762,7 @@ export default function HumanAnatomyViewer({ className, onElementSelect }: Human
                   placeholder="Ask a question..."
                   className="input flex-1 text-xs"
                 />
-                <button className="btn btn-primary btn-sm">
+                <button aria-label="Send" className="btn btn-primary btn-sm">
                   <FiSend className="w-3.5 h-3.5" />
                 </button>
               </div>

@@ -285,7 +285,7 @@ export function HypothesisViewer({
             <div>
               <div className="flex items-start justify-between mb-2">
                 <h2 className="text-lg font-semibold text-white leading-tight pr-2">{hypothesis.title}</h2>
-                <button onClick={onClose} className="p-1 rounded hover:bg-secondary-700 text-secondary-400 shrink-0">
+                <button aria-label="Close" onClick={onClose} className="p-1 rounded hover:bg-secondary-700 text-secondary-400 shrink-0">
                   <FiX className="w-4 h-4" />
                 </button>
               </div>

@@ -1136,7 +1136,7 @@ function HypothesisDetail({ hypothesis: h, onClose, onExport }: { hypothesis: Hy
         </div>
         <div className="flex items-center gap-1">
           <button onClick={onExport} className="btn btn-sm" title="Export PDF" aria-label="Export PDF"><FiDownload className="w-3.5 h-3.5" /></button>
-          <button onClick={onClose} className="btn btn-sm"><FiX className="w-3.5 h-3.5" /></button>
+          <button aria-label="Close" onClick={onClose} className="btn btn-sm"><FiX className="w-3.5 h-3.5" /></button>
         </div>
       </div>
 
@@ -1412,7 +1412,7 @@ function ComparisonView({ a, b, onClose }: { a: Hypothesis; b: Hypothesis; onClo
     <div className="animate-slide-up">
       <div className="p-5 border-b border-[var(--color-border)] flex items-center justify-between">
         <h3 className="text-sm font-medium flex items-center gap-2"><FiColumns className="w-4 h-4" /> Comparison</h3>
-        <button onClick={onClose} className="btn btn-sm"><FiX className="w-3.5 h-3.5" /></button>
+        <button aria-label="Close" onClick={onClose} className="btn btn-sm"><FiX className="w-3.5 h-3.5" /></button>
       </div>
       <div className="divide-y divide-[var(--color-border)]">
         {/* Confidence comparison */}
