@@ -72,7 +72,18 @@ apiClient.interceptors.response.use(
       console.error(`[API] ${message}`)
     }
     if (!silent && error.response?.status !== 401 && error.response?.status !== 404) {
-      toast('error', message, { title: error.response ? 'Request failed' : 'Network error' })
+      // Collapse all 5xx + network errors under a single title/message so
+      // the ToastContext dedup (3s window) merges a backend-down storm
+      // into one toast instead of one-per-endpoint.
+      const status = error.response?.status
+      const isServerDown = !error.response || (status !== undefined && status >= 500)
+      if (isServerDown) {
+        toast('error', 'Backend unreachable — check the API server, retrying on next request.', {
+          title: 'API offline',
+        })
+      } else {
+        toast('error', message, { title: 'Request failed' })
+      }
     }
     return Promise.reject(error)
   }

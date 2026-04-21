@@ -31,9 +31,17 @@ const DEFAULT_DURATION: Record<ToastLevel, number> = {
   error: 8000,
 }
 
+// Cap visible toasts — avoids the dev-mode "backend down, 18 API calls
+// queued, 18 stacked toasts covering the whole page" failure mode.
+const MAX_VISIBLE = 5
+// Dedup identical (level + message) toasts within this window so a loop
+// of 10 API retries doesn't repeat itself on-screen.
+const DEDUP_WINDOW_MS = 3000
+
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([])
   const timers = useRef(new Map<string, number>())
+  const recentKeys = useRef(new Map<string, number>())
 
   const dismiss = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id))
@@ -45,10 +53,37 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const push = useCallback<ToastContextType['push']>((t) => {
-    const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+    const key = `${t.level}::${t.title ?? ''}::${t.message}`
+    const now = Date.now()
+    const lastSeen = recentKeys.current.get(key)
+    if (lastSeen && now - lastSeen < DEDUP_WINDOW_MS) {
+      return ''
+    }
+    recentKeys.current.set(key, now)
+    // Age out the dedup map so it doesn't grow forever.
+    if (recentKeys.current.size > 200) {
+      const cutoff = now - DEDUP_WINDOW_MS * 10
+      for (const [k, v] of recentKeys.current) {
+        if (v < cutoff) recentKeys.current.delete(k)
+      }
+    }
+
+    const id = `toast-${now}-${Math.random().toString(36).slice(2, 7)}`
     const duration_ms = t.duration_ms ?? DEFAULT_DURATION[t.level]
     const toast: Toast = { id, duration_ms, ...t }
-    setToasts((prev) => [...prev, toast])
+    setToasts((prev) => {
+      // When we exceed MAX_VISIBLE, drop the oldest entry so the newest
+      // is always readable.
+      const next = [...prev, toast]
+      if (next.length > MAX_VISIBLE) {
+        const dropped = next.shift()
+        if (dropped) {
+          const t2 = timers.current.get(dropped.id)
+          if (t2) { window.clearTimeout(t2); timers.current.delete(dropped.id) }
+        }
+      }
+      return next
+    })
     if (duration_ms > 0) {
       const timer = window.setTimeout(() => dismiss(id), duration_ms)
       timers.current.set(id, timer)

@@ -31,16 +31,18 @@ import {
 } from 'react-icons/fi'
 import clsx from 'clsx'
 
-// Import Master Human Library
+// Biology library — routed through the single-seam adapter so the
+// MasterHumanLibrary*.ts static imports can be swapped for live
+// /api/v1/knowledge-graph/entities calls in a later migration batch
+// without touching this file.
 import {
-  masterLibraryTree,
-  libraryStats,
-  searchElements,
-  findElementById,
   allBiologicalElements,
-  LibraryTreeNode,
-  BiologicalElement as MasterLibraryElement
-} from '../data/MasterHumanLibraryIndex'
+  findElementById,
+  libraryStats,
+  masterLibraryTree,
+  searchElements,
+} from '../data/libraryAdapter'
+import type { BiologicalElement as MasterLibraryElement, LibraryTreeNode } from '../data/libraryAdapter'
 
 // ==================== COMPREHENSIVE BIOLOGICAL DATA MODEL ====================
 

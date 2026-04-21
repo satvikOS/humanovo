@@ -34,6 +34,25 @@ export function Toaster() {
         pointerEvents: 'none',
       }}
     >
+      {toastCtx.toasts.length >= 3 && (
+        <button
+          type="button"
+          onClick={toastCtx.clear}
+          style={{
+            pointerEvents: 'auto',
+            alignSelf: 'flex-end',
+            background: 'var(--color-surface-raised, #1a1a1a)',
+            border: '1px solid var(--color-border, rgba(255,255,255,0.1))',
+            color: 'var(--color-text-muted, #9ca3af)',
+            padding: '4px 10px',
+            borderRadius: 4,
+            fontSize: 11,
+            cursor: 'pointer',
+          }}
+        >
+          Dismiss all ({toastCtx.toasts.length})
+        </button>
+      )}
       {toastCtx.toasts.map((t) => {
         const s = LEVEL_STYLE[t.level]
         return (
