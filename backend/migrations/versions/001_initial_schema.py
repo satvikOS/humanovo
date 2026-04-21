@@ -20,17 +20,10 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Create enum types
-    op.execute("CREATE TYPE user_role AS ENUM ('admin', 'researcher', 'viewer')")
-    op.execute("CREATE TYPE project_status AS ENUM ('active', 'paused', 'completed', 'archived')")
-    op.execute("CREATE TYPE hypothesis_status AS ENUM ('draft', 'testing', 'validated', 'rejected', 'archived')")
-    op.execute("CREATE TYPE evidence_source AS ENUM ('pubmed', 'clinical_trial', 'preprint', 'patent', 'web', 'manual', 'brave_search')")
-    op.execute("CREATE TYPE simulation_status AS ENUM ('pending', 'running', 'completed', 'failed', 'cancelled')")
-    op.execute("CREATE TYPE simulation_type AS ENUM ('monte_carlo', 'pathway', 'drug_response', 'epidemiological', 'custom')")
-    op.execute("CREATE TYPE agent_task_status AS ENUM ('pending', 'running', 'completed', 'failed', 'cancelled')")
-    op.execute("CREATE TYPE agent_task_type AS ENUM ('search', 'extraction', 'reasoning', 'verification', 'simulation', 'ingestion', 'discovery')")
-    op.execute("CREATE TYPE ingestion_job_status AS ENUM ('pending', 'running', 'completed', 'failed', 'cancelled')")
-    op.execute("CREATE TYPE ingestion_source AS ENUM ('pubmed', 'clinical_trials', 'preprints', 'patents', 'custom', 'brave_search')")
+    # Enum types are auto-created by sa.Enum(...) instances below
+    # (create_type defaults to True on first table reference). Manual
+    # CREATE TYPE calls removed to avoid DuplicateObjectError on fresh
+    # databases.
 
     # Users table
     op.create_table(

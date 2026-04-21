@@ -72,6 +72,11 @@ def create_app() -> FastAPI:
         redoc_url="/api/redoc",
         openapi_url="/api/openapi.json",
         lifespan=lifespan,
+        # Disable the 307 trailing-slash redirect: we'd rather accept
+        # both `/clinical-trials` and `/clinical-trials/` inline than
+        # force the browser to follow a cross-origin redirect through
+        # the Vite / CloudFront proxy (which strips CORS headers).
+        redirect_slashes=False,
     )
 
     # Configure CORS

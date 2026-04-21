@@ -14,7 +14,7 @@ import sqlalchemy as sa
 
 
 revision = "006_pgvector_management"
-down_revision = "005"
+down_revision = "005_billing_and_usage"
 branch_labels = None
 depends_on = None
 

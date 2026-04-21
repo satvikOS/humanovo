@@ -432,6 +432,8 @@ async def get_hypotheses(
     }
 
 
+# Frontend (api.ts) hits /paper/generate — keep both shapes alive.
+@router.post("/paper/generate")
 @router.post("/generate-paper")
 async def generate_research_paper():
     """
@@ -569,6 +571,8 @@ async def generate_research_paper_markdown():
     return {"status": "generating", "message": "Paper generation started. Poll /paper-status for updates."}
 
 
+# Frontend (api.ts) hits /paper/status — keep both shapes alive.
+@router.get("/paper/status")
 @router.get("/paper-status")
 async def get_paper_status():
     """Check the status of async paper generation."""

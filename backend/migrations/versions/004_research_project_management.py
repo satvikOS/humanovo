@@ -34,10 +34,13 @@ def upgrade() -> None:
     op.execute("ALTER TABLE projects ADD COLUMN IF NOT EXISTS last_discovery_at TIMESTAMPTZ")
 
     # ── discovery_runs table ─────────────────────────────────────────
+    # Migration 002 already created discovery_runs (pipeline-intelligence
+    # schema, no project_id). Extend it here with the Jamison-v2 columns
+    # so both surface areas can coexist on one table.
     op.execute("""
         CREATE TABLE IF NOT EXISTS discovery_runs (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
             status VARCHAR(20) NOT NULL DEFAULT 'pending',
             disease VARCHAR(255) NOT NULL,
             discovery_type VARCHAR(50) NOT NULL,
@@ -55,6 +58,17 @@ def upgrade() -> None:
             completed_at TIMESTAMPTZ
         )
     """)
+    # Guard the Jamison-v2 column additions with IF NOT EXISTS so this
+    # migration is idempotent after 002 pre-created the table.
+    op.execute("ALTER TABLE discovery_runs ADD COLUMN IF NOT EXISTS project_id UUID REFERENCES projects(id) ON DELETE CASCADE")
+    op.execute("ALTER TABLE discovery_runs ADD COLUMN IF NOT EXISTS config JSONB NOT NULL DEFAULT '{}'::jsonb")
+    op.execute("ALTER TABLE discovery_runs ADD COLUMN IF NOT EXISTS num_rounds INTEGER NOT NULL DEFAULT 3")
+    op.execute("ALTER TABLE discovery_runs ADD COLUMN IF NOT EXISTS best_hypothesis_id UUID")
+    op.execute("ALTER TABLE discovery_runs ADD COLUMN IF NOT EXISTS total_cost_cents INTEGER DEFAULT 0")
+    op.execute("ALTER TABLE discovery_runs ADD COLUMN IF NOT EXISTS pipeline_trace JSONB")
+    op.execute("ALTER TABLE discovery_runs ADD COLUMN IF NOT EXISTS error_message TEXT")
+    op.execute("ALTER TABLE discovery_runs ADD COLUMN IF NOT EXISTS visualization_data JSONB")
+    op.execute("ALTER TABLE discovery_runs ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ")
     op.execute("CREATE INDEX IF NOT EXISTS idx_discovery_runs_project ON discovery_runs(project_id)")
     op.execute("CREATE INDEX IF NOT EXISTS idx_discovery_runs_status ON discovery_runs(status)")
 

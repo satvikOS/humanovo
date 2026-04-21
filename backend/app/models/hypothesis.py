@@ -115,7 +115,10 @@ class Hypothesis(BaseModel):
     evidence_refs = relationship(
         "EvidenceReference",
         back_populates="hypothesis",
-        lazy="dynamic",
+        # lazy="select" allows `selectinload(Hypothesis.evidence_refs)` in the
+        # /hypotheses endpoints; `lazy="dynamic"` was incompatible with eager
+        # loading and surfaced as a 500 on GET /api/v1/hypotheses.
+        lazy="select",
         cascade="all, delete-orphan",
     )
 

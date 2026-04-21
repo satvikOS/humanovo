@@ -8,7 +8,7 @@ Create Date: 2026-03-19
 from alembic import op
 
 revision = "005_billing_and_usage"
-down_revision = "004_research_project_management"
+down_revision = "005_data_source_registry"
 branch_labels = None
 depends_on = None
 

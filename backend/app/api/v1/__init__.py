@@ -66,8 +66,8 @@ router.include_router(monitoring.router, prefix="/monitoring", tags=["monitoring
 # Disease Discovery endpoint
 router.include_router(discovery.router)
 
-# Simulation endpoints
-router.include_router(simulation.router, prefix="/simulation", tags=["simulation"])
+# Simulation endpoints — frontend uses /simulations (plural).
+router.include_router(simulation.router, prefix="/simulations", tags=["simulation"])
 
 # Parallel Discovery Orchestrator
 router.include_router(orchestrator.router)

@@ -322,6 +322,25 @@ async def get_simulation(
     return _simulations[simulation_id]
 
 
+@router.get("/{simulation_id}/results")
+async def get_simulation_results(
+    simulation_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Get results payload for a completed simulation. Frontend expects
+    a `{results: ...}` object even when the run is still in progress
+    (returns an empty results dict with the current status)."""
+    if simulation_id not in _simulations:
+        raise HTTPException(status_code=404, detail="Simulation not found")
+    sim = _simulations[simulation_id]
+    return {
+        "simulation_id": str(simulation_id),
+        "status": sim.status,
+        "results": sim.results or {},
+        "completed_at": sim.completed_at.isoformat() if sim.completed_at else None,
+    }
+
+
 @router.post("/{simulation_id}/cancel", response_model=SimulationResponse)
 async def cancel_simulation(
     simulation_id: UUID,
