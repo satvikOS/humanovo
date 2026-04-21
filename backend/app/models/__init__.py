@@ -1,11 +1,14 @@
 """
-GenUp SQLAlchemy ORM Models
+humanovo SQLAlchemy ORM Models
 
 Complete database models for persistent storage.
 """
 
 from app.models.agent_task import AgentTask, AgentTaskStatus, AgentTaskType
 from app.models.base import Base, TimestampMixin
+# AuditRecord (hash-chained compliance log) is defined in the service module
+# — import it here so Alembic env.py sees it via Base.metadata.
+from app.services.audit_service import AuditRecord
 from app.models.evidence import Evidence, EvidenceSource
 from app.models.hypothesis import EvidenceReference, Hypothesis, HypothesisStatus
 from app.models.ingestion_job import IngestionJob, IngestionJobStatus, IngestionSource
@@ -53,6 +56,7 @@ from app.models.platform_entities import (
 __all__ = [
     "Base",
     "TimestampMixin",
+    "AuditRecord",
     "User",
     "UserRole",
     "Project",
