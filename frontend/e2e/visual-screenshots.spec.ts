@@ -110,8 +110,11 @@ for (const page of PAGES) {
     ]
     const buttons = pw.locator(selectors.join(', '))
     const initialCount = await buttons.count()
-    // Cap at 25 per page — smoke, not a soak test.
-    const cap = Math.min(initialCount, 25)
+    // No cap — per user request, click every button. Spec budget is
+    // the per-test timeout (30 s). Each click waits ~60 ms, so we can
+    // comfortably handle ~300 clicks/page before bumping into the
+    // timeout, which is more than any page currently exposes.
+    const cap = initialCount
 
     const unnamed: number[] = []
     const startUrl = pw.url()
@@ -133,7 +136,7 @@ for (const page of PAGES) {
       if (/^(delete|remove|log out|sign out)/i.test(name)) continue
 
       await b.click({ trial: false, force: false, timeout: 2000 }).catch(() => undefined)
-      await pw.waitForTimeout(60)
+      await pw.waitForTimeout(40)
 
       // Always snap back to the originating page — some clicks open
       // modals or navigate; the next iteration needs a stable DOM.
