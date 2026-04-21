@@ -4,7 +4,7 @@
  * deep-links plus the Start button's disabled-until-valid behaviour
  * and the left-rail collapse/restore controls.
  */
-import { test, expect, Page } from '/opt/node22/lib/node_modules/playwright/test.mjs'
+import { test, expect, Page } from '@playwright/test'
 
 function attachErrorCapture(page: Page, bag: string[]) {
   page.on('pageerror', e => bag.push('PAGEERROR: ' + e.message))

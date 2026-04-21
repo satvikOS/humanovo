@@ -3,7 +3,7 @@
  * page, and the Recent Simulations widget should route each row to
  * the correct Compute Lab tab (not always Monte Carlo).
  */
-import { test, expect, Page } from '/opt/node22/lib/node_modules/playwright/test.mjs'
+import { test, expect, Page } from '@playwright/test'
 
 async function seedActivity(page: Page, entries: Array<{ type: string; action: string; title: string }>) {
   await page.goto('/dashboard')

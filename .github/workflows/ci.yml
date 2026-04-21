@@ -174,3 +174,47 @@ jobs:
         run: npm run build
         env:
           VITE_API_BASE_URL: ''
+
+  frontend-e2e:
+    name: Frontend — Playwright screenshots
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install npm deps
+        run: npm ci
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Run visual-screenshots spec
+        # Playwright's webServer config boots `vite --port 3001` itself.
+        run: npm run e2e:screenshots
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: visual-screenshots-${{ github.sha }}
+          path: frontend/test-results/visual-screenshots/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload Playwright HTML report
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: playwright-report-${{ github.sha }}
+          path: frontend/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 14

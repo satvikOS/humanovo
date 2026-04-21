@@ -109,3 +109,9 @@ chroma/
 *.tfplan
 tfplan
 test-results/
+
+# Playwright
+frontend/test-results/
+frontend/playwright-report/
+playwright-report/
+/.playwright/

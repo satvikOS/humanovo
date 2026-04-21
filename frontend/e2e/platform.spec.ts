@@ -1,4 +1,4 @@
-import { test, expect } from '/opt/node22/lib/node_modules/playwright/test.mjs';
+import { test, expect } from '@playwright/test';
 
 /**
  * Comprehensive platform e2e tests for Humanovo.

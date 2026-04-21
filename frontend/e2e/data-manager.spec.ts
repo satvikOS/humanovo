@@ -1,4 +1,4 @@
-import { test, expect } from '/opt/node22/lib/node_modules/playwright/test.mjs';
+import { test, expect } from '@playwright/test';
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('genup-theme', 'dark'));

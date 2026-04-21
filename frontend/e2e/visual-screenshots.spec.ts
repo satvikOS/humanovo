@@ -1,4 +1,4 @@
-import { expect, test } from '/opt/node22/lib/node_modules/playwright/test.mjs'
+import { expect, test } from '@playwright/test'
 
 // Every major page + key modals / tabs. Screenshots land in
 // frontend/test-results/visual-screenshots/ — upload as a CI artifact

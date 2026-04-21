@@ -5,7 +5,7 @@
  * equation, create and delete a chart, toggle filters, etc.) not just
  * "does the page mount".
  */
-import { test, expect, Page } from '/opt/node22/lib/node_modules/playwright/test.mjs'
+import { test, expect, Page } from '@playwright/test'
 
 // Capture "real" page errors, ignoring known backend/proxy noise that
 // we don't run a server for in the e2e environment.

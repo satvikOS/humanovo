@@ -8,7 +8,7 @@
  * type silently renders an empty scene — which is exactly what
  * happened with our first cut of the advanced 3D types.
  */
-import { test, expect, Page } from '/opt/node22/lib/node_modules/playwright/test.mjs'
+import { test, expect, Page } from '@playwright/test'
 
 // All chart type labels as they appear in the GlassSelect dropdown.
 // Keep this in sync with CHART_TYPES in DataVisualization.tsx — the

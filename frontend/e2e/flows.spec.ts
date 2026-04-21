@@ -1,4 +1,4 @@
-import { test, expect } from '/opt/node22/lib/node_modules/playwright/test.mjs';
+import { test, expect } from '@playwright/test';
 
 /**
  * Broader e2e flows — exercise real user journeys end-to-end rather than
