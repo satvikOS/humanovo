@@ -19,7 +19,8 @@ import {
 } from 'react-icons/fi'
 import clsx from 'clsx'
 
-// Import Master Library for integration
+// Routed through libraryAdapter so the 3.2 MB static data can be swapped
+// for live /api/v1/knowledge-graph/entities calls in one place.
 import {
   completeSkeleton,
   completeMuscularSystem,
@@ -28,7 +29,7 @@ import {
   allHistologicalTissues,
   findElementById,
   BiologicalElement
-} from '../data/MasterHumanLibraryIndex'
+} from '../data/libraryAdapter'
 
 // ==================== TYPES ====================
 

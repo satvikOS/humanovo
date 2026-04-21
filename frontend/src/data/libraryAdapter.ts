@@ -29,6 +29,19 @@ export {
   searchElements,
 } from './MasterHumanLibraryIndex'
 
+// Sub-library re-exports so components like HumanAnatomyViewer that
+// slice the library by anatomical system (skeleton / muscles / nerves
+// / tissues) keep working through the single adapter seam. A future
+// migration batch will swap these for live filtered API calls like
+// `useEntitySearch({ category: 'bone' })`.
+export {
+  allHistologicalTissues,
+  completeMuscularSystem,
+  completeSkeleton,
+  cranialNerves,
+  spinalPlexuses,
+} from './MasterHumanLibraryIndex'
+
 import {
   allBiologicalElements as _all,
   findElementById as _find,
