@@ -6,6 +6,7 @@ import {
 } from 'react-icons/fi'
 import { formatDate, logActivity } from '../utils/persistence'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
+import { toast } from '../contexts/ToastContext'
 
 interface Manuscript {
   id: string; title: string; status: string; journal_target: string
@@ -38,7 +39,15 @@ export default function ManuscriptManager() {
   const [newAuthor, setNewAuthor] = useState({ name: '', affiliation: '', email: '', role: 'Co-Author' })
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
-  const load = async () => { try { const r = await fetch(API); if (r.ok) setManuscripts((await r.json()).items || []) } catch { /* network error */ } }
+  const load = async () => {
+    try {
+      const r = await fetch(API)
+      if (!r.ok) throw new Error(`manuscripts ${r.status}`)
+      setManuscripts((await r.json()).items || [])
+    } catch (err) {
+      toast('error', `Could not load manuscripts — ${err instanceof Error ? err.message : 'network error'}`, { title: 'Manuscripts' })
+    }
+  }
   useEffect(() => { load() }, [])
 
   // Consume & strip `add` + `id` from the URL on mount and kick off
