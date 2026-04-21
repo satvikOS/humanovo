@@ -1,160 +1,119 @@
-# GenUp - Biomedical Discovery Platform
+# humanovo — Adversarial Biomedical Hypothesis Engine
 
-An AI-centric platform for biomedical hypothesis generation, integrating continuous data ingestion, knowledge management, AI reasoning, Monte Carlo simulation, and interactive visualization.
+An AI-native platform for biomedical hypothesis generation using a 12-stage adversarial multi-model pipeline with dual-embedding grounding. Every hypothesis is generated, attacked, revised, mechanistically validated, and scored before delivery — with full citation provenance and audit trails.
 
-## Architecture Overview
+## Architecture
 
 ```
-genup/
-├── backend/                 # Python FastAPI backend
+humanovo/
+├── backend/                  # Python FastAPI backend
 │   ├── app/
-│   │   ├── api/            # REST API endpoints
-│   │   ├── agents/         # Multi-agent AI framework
-│   │   ├── ingestion/      # Data ingestion pipeline
-│   │   ├── knowledge/      # Knowledge storage (Vector DB + Graph DB)
-│   │   ├── hypothesis/     # Hypothesis generation engine
-│   │   ├── simulation/     # Monte Carlo simulation module
-│   │   └── core/           # Core utilities and config
+│   │   ├── agents/           # 12-stage discovery orchestrator + supporting agents
+│   │   ├── api/v1/           # REST API + WebSocket endpoints
+│   │   ├── compute/          # Domain compute (genomics, pharma, imaging, signals)
+│   │   ├── entity_resolution/# Canonical ID resolution + synonym management
+│   │   ├── etl/              # Bulk data loading + dataset parsers
+│   │   ├── ingestion/        # Data ingestion pipeline (PubMed, trials, omics)
+│   │   ├── integration/      # Neo4j graph + pgvector + provenance connectors
+│   │   ├── knowledge/        # Knowledge engine (graph + vector hybrid)
+│   │   ├── literature/       # Literature pipeline (criteria, snapshots, updates)
+│   │   ├── models/           # SQLAlchemy data models
+│   │   ├── nlp/              # NLP pipeline (NER, relation extraction, assertion)
+│   │   ├── rag/              # RAG pipeline (chunker, embeddings, retriever, reranker)
+│   │   ├── scoring/          # Citation analysis + claim classification + confidence
+│   │   ├── services/         # Business logic services
+│   │   └── simulation/       # Monte Carlo simulation engine
 │   └── tests/
-├── frontend/               # React TypeScript frontend
-│   ├── src/
-│   │   ├── components/     # UI components
-│   │   ├── features/       # Feature modules
-│   │   ├── hooks/          # Custom React hooks
-│   │   ├── services/       # API services
-│   │   └── store/          # State management
-│   └── public/
-├── docker/                 # Docker configurations
-└── docs/                   # Documentation
+├── frontend/                 # React TypeScript frontend (Vite + Tailwind)
+├── infrastructure/           # Terraform (AWS)
+├── docker/                   # Docker configurations
+└── scripts/                  # Deployment + data loading utilities
 ```
 
-## Core Components
+## 12-Stage Discovery Pipeline
 
-### 1. Data Ingestion Pipeline
-- Continuous ingestion from PubMed, clinical trials, omics databases
-- NLP-based entity extraction (genes, diseases, drugs, pathways)
-- Ontology harmonization (UMLS, MeSH)
-- Evidence versioning and timestamping
+Each hypothesis passes through 12 specialized LLM stages sequentially. Between EVERY stage, dual-embedding grounding verifies claims against evidence.
 
-### 2. Knowledge Storage (RAG Memory)
-- **Graph Database**: Neo4j for structured biomedical knowledge
-- **Vector Database**: ChromaDB/FAISS for semantic search
-- Hybrid retrieval-augmented generation
+| Stage | Role | Model | Provider |
+|-------|------|-------|----------|
+| 1. SEED | Generate initial hypothesis | Claude Opus 4.6 | AWS Bedrock |
+| 2. EXPAND | Broaden hypothesis scope | Claude Sonnet 4.6 | AWS Bedrock |
+| 3. EVIDENCE | Literature evidence review | Cohere Command A | Azure OpenAI |
+| 4. COUNTER | Adversarial counter-arguments | Mistral-Large-3 | Azure AI |
+| 5. REVISE | Revise based on counter-arguments | o3-mini | Azure OpenAI |
+| 6. MECHANISM | Mechanistic deep dive | GPT-4.1 | Azure OpenAI |
+| 7. VALIDATE | Cross-validation | Claude Sonnet 4.6 | AWS Bedrock |
+| 8. GROUND | 3-layer scientific grounding | Grok-4-1-fast | Azure AI |
+| 9. SCORE | Multi-dimensional confidence | GPT-4.1 | Azure OpenAI |
+| 10. REFINE | Fast refinement | GPT-4o | Azure OpenAI |
+| 11. TRANSLATE | Translational roadmap T0-T5 | Claude Sonnet 4.6 | AWS Bedrock |
+| 12. FINALIZE | Final synthesis | Claude Sonnet 4.6 | AWS Bedrock |
 
-### 3. AI Orchestration & Agents
-- Controller/Planner agent for task decomposition
-- Search agents (Google/Brave API integration)
-- Information extraction agent
-- Reasoning (LLM) agent
-- Verification agent
-- Simulation agent
-- Reporting agent
+### Dual-Embedding Grounding (between every stage)
 
-### 4. Hypothesis Generation Engine
-- RAG-based hypothesis synthesis
-- Graph-based reasoning for multi-hop connections
-- Scoring and ranking by plausibility/novelty
-- Provenance tracking and contradiction detection
+Two embedding models run in parallel on every stage output:
+1. **Bedrock Cohere Embed English v3** (1024d) — biomedical-optimized
+2. **Azure text-embedding-3-large** (1536d) — general-purpose
 
-### 5. Monte Carlo Simulation Module
-- Probabilistic outcome simulations
-- Clinical trial modeling
-- Epidemiological projections
-- Pathway dynamics simulation
+Grounding mechanisms:
+- **RAG Retrieval:** Embed output → retrieve matching evidence → inject into next stage
+- **Semantic Gating:** Compare each claim against evidence pool → flag ungrounded claims
 
-### 6. User Interface
-- Interactive dashboard with hypothesis cards
-- Knowledge graph explorer (Cytoscape.js)
-- 3D molecular viewer (NGL/3Dmol.js)
-- Timeline/version control
-- Collaborative note-taking
+## Data Sources (60+ APIs)
+
+Core: PubMed, ClinicalTrials.gov, openFDA, UniProt, Reactome, KEGG, Ensembl, HMDB
+Extended: Elsevier/Scopus, Springer Nature, ChEBI, HCA, NCBI Gene, ClinVar, Semantic Scholar, OpenAlex, ChEMBL, DrugBank, DisGeNET, STRING, PDB, AlphaFold, WikiPathways, and more.
 
 ## Tech Stack
 
-### Backend
-- Python 3.11+
-- FastAPI (REST API + WebSockets)
-- LangChain/LangGraph (AI orchestration)
-- Neo4j (Graph database)
-- ChromaDB (Vector database)
-- Celery + Redis (Task queue)
-- NumPy/SciPy (Simulation)
-
-### Frontend
-- React 18 with TypeScript
-- Vite (Build tool)
-- TanStack Query (Data fetching)
-- Zustand (State management)
-- Cytoscape.js (Graph visualization)
-- NGL Viewer (3D molecular graphics)
-- Plotly (Charts)
-
-### Infrastructure
-- Docker + Docker Compose
-- PostgreSQL (Metadata)
-- Redis (Caching + Message broker)
+**Backend:** Python 3.11+ · FastAPI · SQLAlchemy + asyncpg · Neo4j · pgvector · Celery + Redis
+**Frontend:** React 18 + TypeScript · Vite · TanStack Query · Zustand · Cytoscape.js
+**Infrastructure:** AWS (Terraform) · Docker · PostgreSQL · Redis
+**LLM Providers:** AWS Bedrock · Azure OpenAI · Azure AI Foundry
 
 ## Quick Start
 
 ### Prerequisites
 - Docker and Docker Compose
-- Node.js 18+
+- Node.js 22+
 - Python 3.11+
+- API keys for at least one LLM provider (AWS Bedrock or Azure OpenAI)
 
-### Development Setup
+### Setup
 
 ```bash
-# Clone and setup
+# Clone
 git clone <repository-url>
-cd GenUp
+cd humanovo
 
-# Start infrastructure services
+# Copy and configure environment
+cp backend/.env.example backend/.env
+# Edit .env with your API keys
+
+# Start infrastructure
 docker-compose up -d postgres redis neo4j
 
-# Backend setup
+# Backend
 cd backend
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+alembic upgrade head
 uvicorn app.main:app --reload
 
-# Frontend setup (new terminal)
+# Frontend (new terminal)
 cd frontend
 npm install
 npm run dev
 ```
 
-### Environment Variables
+### Run Pipeline Integration Test
 
-Copy `.env.example` to `.env` and configure:
-- `DATABASE_URL`: PostgreSQL connection
-- `NEO4J_URI`: Neo4j connection
-- `OPENAI_API_KEY`: For LLM integration
-- `GOOGLE_API_KEY`: For search agents
-- `BRAVE_API_KEY`: For search agents
-
-## Development Phases
-
-### Phase 1: MVP (Months 2-4)
-- Basic data ingestion (PubMed)
-- RAG pipeline with vector search
-- Simple Q&A interface
-
-### Phase 2: Multi-Agent (Months 5-8)
-- Hypothesis generation engine
-- Multi-agent orchestration
-- Knowledge graph explorer
-
-### Phase 3: Simulation (Months 9-12)
-- Monte Carlo engine integration
-- Full dashboard UI
-- 3D visualization
-
-### Phase 4: Beta (Months 13-18)
-- Enterprise features
-- Performance optimization
-- Beta release
+```bash
+cd backend
+pytest tests/integration/test_pipeline_e2e.py -v --timeout=600
+```
 
 ## License
 
-Proprietary - All rights reserved
+Proprietary — All rights reserved. © 2025-2026 Adyanthaya Ventures.
