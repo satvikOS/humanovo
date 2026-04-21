@@ -49,6 +49,10 @@ coverage.xml
 *.cover
 *.py,cover
 
+# Benchmark and integration-test output (large, reproducible from source)
+backend/benchmark/results/
+backend/tests/integration/reports/
+
 # Node.js
 node_modules/
 npm-debug.log*
