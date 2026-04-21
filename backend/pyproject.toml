@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "genup-backend"
-version = "0.1.0"
-description = "GenUp Biomedical Discovery Platform - Backend"
+name = "humanovo-backend"
+version = "0.2.0"
+description = "humanovo — Adversarial Biomedical Hypothesis Engine (backend)"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "Proprietary"}

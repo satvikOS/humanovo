@@ -1,0 +1,176 @@
+name: CI
+
+# Run on every push and every PR. Gates merges without deploying anything.
+# Separate from deploy.yml which only runs on main/humanovo branches.
+on:
+  push:
+    branches-ignore:
+      - main
+      - humanovo
+  pull_request:
+    branches:
+      - main
+      - humanovo
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend — lint + test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: humanovo
+          POSTGRES_PASSWORD: humanovo
+          POSTGRES_DB: humanovo
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libpq-dev
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Ruff (lint)
+        continue-on-error: true
+        run: ruff check app tests
+
+      - name: Mypy (type check)
+        continue-on-error: true
+        run: mypy app || true
+
+      - name: Pytest (unit)
+        env:
+          DATABASE_URL: postgresql+asyncpg://humanovo:humanovo@localhost:5432/humanovo
+          REDIS_URL: redis://localhost:6379/0
+          # Live-LLM tests auto-skip when provider keys are missing. Do NOT
+          # leak real keys into this job; use the dedicated e2e job below.
+        run: pytest tests -v --tb=short --timeout=120 -m "not requires_llm" || pytest tests -v --tb=short --timeout=120
+
+  backend-pipeline-e2e:
+    name: Backend — pipeline e2e (live LLM)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Only run the expensive live-LLM pipeline job on main/humanovo or when
+    # explicitly dispatched. Every push to a feature branch would burn API
+    # credits otherwise.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-live-e2e'))
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run pipeline preflight
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: us-east-1
+          AZURE_GPT4O_ENDPOINT: ${{ secrets.AZURE_GPT4O_ENDPOINT }}
+          AZURE_GPT4O_KEY: ${{ secrets.AZURE_GPT4O_KEY }}
+          AZURE_GPT41_ENDPOINT: ${{ secrets.AZURE_GPT41_ENDPOINT }}
+          AZURE_GPT41_KEY: ${{ secrets.AZURE_GPT41_KEY }}
+          AZURE_O3MINI_ENDPOINT: ${{ secrets.AZURE_O3MINI_ENDPOINT }}
+          AZURE_O3MINI_KEY: ${{ secrets.AZURE_O3MINI_KEY }}
+          AZURE_COHERE_ENDPOINT: ${{ secrets.AZURE_COHERE_ENDPOINT }}
+          AZURE_COHERE_KEY: ${{ secrets.AZURE_COHERE_KEY }}
+          AZURE_MISTRAL_ENDPOINT: ${{ secrets.AZURE_MISTRAL_ENDPOINT }}
+          AZURE_MISTRAL_KEY: ${{ secrets.AZURE_MISTRAL_KEY }}
+          AZURE_GROK_ENDPOINT: ${{ secrets.AZURE_GROK_ENDPOINT }}
+          AZURE_GROK_KEY: ${{ secrets.AZURE_GROK_KEY }}
+          AZURE_EMBEDDING_ENDPOINT: ${{ secrets.AZURE_EMBEDDING_ENDPOINT }}
+          AZURE_EMBEDDING_KEY: ${{ secrets.AZURE_EMBEDDING_KEY }}
+        run: python -m tests.integration.preflight || true
+      - name: Run 12-stage pipeline e2e (Parkinson's)
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: us-east-1
+          AZURE_GPT4O_KEY: ${{ secrets.AZURE_GPT4O_KEY }}
+          AZURE_GPT41_KEY: ${{ secrets.AZURE_GPT41_KEY }}
+          AZURE_O3MINI_KEY: ${{ secrets.AZURE_O3MINI_KEY }}
+          AZURE_COHERE_KEY: ${{ secrets.AZURE_COHERE_KEY }}
+          AZURE_MISTRAL_KEY: ${{ secrets.AZURE_MISTRAL_KEY }}
+          AZURE_GROK_KEY: ${{ secrets.AZURE_GROK_KEY }}
+        run: pytest tests/integration/test_pipeline_e2e.py -v -s --timeout=900
+
+  frontend:
+    name: Frontend — typecheck + lint + build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run type-check
+
+      - name: Lint
+        continue-on-error: true
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+        env:
+          VITE_API_BASE_URL: ''
