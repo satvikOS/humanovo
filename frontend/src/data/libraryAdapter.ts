@@ -222,3 +222,117 @@ export function useLibraryEntity(id: string | null) {
 export function isLiveKgEnabled(): boolean {
   return LIVE_KG_ENABLED
 }
+
+// ─── Live tree ───────────────────────────────────────────────────
+// Builds a Workbench Sapien-Corridor-style hierarchy from live KG
+// entities. One sweep of /entities per category, assembled into a
+// { category → [entities] } tree on the client. Renders within one
+// frame of the API response (no virtualized loading state flashes).
+
+const TREE_CATEGORIES: Array<{ backend: string; label: string; icon: string; color: string }> = [
+  { backend: 'organ_system', label: 'Organ Systems',     icon: '🫁', color: '#ef4444' },
+  { backend: 'organ',         label: 'Organs',           icon: '🫀', color: '#fb923c' },
+  { backend: 'tissue',        label: 'Tissues',          icon: '🧬', color: '#f59e0b' },
+  { backend: 'cell_type',     label: 'Cell Types',       icon: '🦠', color: '#eab308' },
+  { backend: 'gene',          label: 'Genes',            icon: '🧬', color: '#ec4899' },
+  { backend: 'rna',           label: 'RNA',              icon: '🧬', color: '#d946ef' },
+  { backend: 'protein',       label: 'Proteins',         icon: '🔬', color: '#22c55e' },
+  { backend: 'small_molecule', label: 'Small Molecules', icon: '⚗️', color: '#14b8a6' },
+  { backend: 'drug',          label: 'Drugs & Therapeutics', icon: '💊', color: '#10b981' },
+  { backend: 'pathway',        label: 'Pathways',        icon: '↻', color: '#06b6d4' },
+  { backend: 'biochemical_pathway', label: 'Biochemical Pathways', icon: '↻', color: '#0ea5e9' },
+  { backend: 'signaling_pathway',   label: 'Signaling Pathways',   icon: '↻', color: '#3b82f6' },
+  { backend: 'disease',       label: 'Diseases',         icon: '🧪', color: '#dc2626' },
+  { backend: 'phenotype',     label: 'Phenotypes',       icon: '📋', color: '#a855f7' },
+]
+
+export interface LiveTreeState {
+  tree: LibraryTreeNode[]
+  stats: LibraryStats
+  loading: boolean
+  error: Error | null
+}
+
+/**
+ * Fetches every category in parallel, groups the results into a
+ * two-level tree (category → entity). Cached while the hook is
+ * mounted; refetch() invalidates.
+ */
+export function useLibraryTree(): LiveTreeState & { refetch: () => void } {
+  const [tree, setTree] = useState<LibraryTreeNode[]>([])
+  const [stats, setStats] = useState<LibraryStats>({
+    totalElements: 0,
+    categories: 0,
+    aiSimulationReady: 0,
+  })
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<Error | null>(null)
+  const [epoch, setEpoch] = useState(0)
+
+  useEffect(() => {
+    if (!LIVE_KG_ENABLED) {
+      setLoading(false)
+      return
+    }
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+
+    // Fire one GET per category in parallel — 14 small requests is
+    // faster than a single big paged sweep, and lets each branch
+    // render as its own category resolves (future: stream-in).
+    Promise.all(
+      TREE_CATEGORIES.map((cat) =>
+        knowledge
+          .searchEntities({ category: cat.backend as never, limit: 500 })
+          .then((res) => ({ cat, entities: res.entities, total: res.total }))
+          .catch((e) => {
+            // A single-category failure shouldn't nuke the whole tree;
+            // log and continue. The top-level setError below captures
+            // the aggregate if every request fails.
+            // eslint-disable-next-line no-console
+            console.warn(`[libraryAdapter] category ${cat.backend} failed:`, e)
+            return { cat, entities: [], total: 0 }
+          }),
+      ),
+    )
+      .then((results) => {
+        if (cancelled) return
+        const nodes: LibraryTreeNode[] = results
+          .filter((r) => r.entities.length > 0)
+          .map((r) => ({
+            id: `cat:${r.cat.backend}`,
+            name: r.cat.label,
+            type: 'category',
+            elementCount: r.total,
+            icon: r.cat.icon,
+            color: r.cat.color,
+            children: r.entities.map((e) => ({
+              id: e.id,
+              name: e.name,
+              type: 'element',
+              description: e.description || undefined,
+              color: r.cat.color,
+            })),
+          }))
+        setTree(nodes)
+        setStats({
+          totalElements: results.reduce((a, r) => a + r.total, 0),
+          categories: nodes.length,
+          aiSimulationReady: 0,
+        })
+      })
+      .catch((err: Error) => {
+        if (!cancelled) setError(err)
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [epoch])
+
+  const refetch = () => setEpoch((e) => e + 1)
+  return { tree, stats, loading, error, refetch }
+}

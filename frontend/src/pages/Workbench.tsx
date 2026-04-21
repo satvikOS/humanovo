@@ -41,6 +41,7 @@ import {
   libraryStats,
   masterLibraryTree,
   searchElements,
+  useLibraryTree,
 } from '../data/libraryAdapter'
 import type { BiologicalElement as MasterLibraryElement, LibraryTreeNode } from '../data/libraryAdapter'
 
@@ -1942,7 +1943,18 @@ function MasterLibraryTree({
   )
 }
 
-function MasterLibraryDetails({ element, onAddToCanvas }: { element: MasterLibraryElement | null; onAddToCanvas?: (id: string) => void }) {
+function MasterLibraryDetails({
+  element,
+  onAddToCanvas,
+  stats,
+}: {
+  element: MasterLibraryElement | null
+  onAddToCanvas?: (id: string) => void
+  // Live stats from useLibraryTree(); falls back to the static
+  // libraryStats export when the caller hasn't wired the hook yet.
+  stats?: { totalElements: number; categories: number; aiSimulationReady: number }
+}) {
+  const displayStats = stats || libraryStats
   const [activeTab, setActiveTab] = useState<'info' | 'simulation' | 'interactions'>('info')
 
   if (!element) {
@@ -1954,11 +1966,11 @@ function MasterLibraryDetails({ element, onAddToCanvas }: { element: MasterLibra
           <div className="text-center mb-2">Library Statistics:</div>
           <div className="grid grid-cols-2 gap-x-4 gap-y-1">
             <span>Total Elements:</span>
-            <span className="text-primary-400">{libraryStats.totalElements}</span>
+            <span className="text-primary-400">{displayStats.totalElements}</span>
             <span>Categories:</span>
-            <span className="text-primary-400">{libraryStats.categories}</span>
+            <span className="text-primary-400">{displayStats.categories}</span>
             <span>AI-Ready:</span>
-            <span className="text-[var(--color-text-secondary)]">{libraryStats.aiSimulationReady}</span>
+            <span className="text-[var(--color-text-secondary)]">{displayStats.aiSimulationReady}</span>
           </div>
         </div>
       </div>
@@ -2446,6 +2458,18 @@ function EdgeLabelModal({
 // ==================== MAIN WORKBENCH COMPONENT ====================
 
 export default function Workbench() {
+  // Live Sapien Corridor tree from the backend KG. Shadows the
+  // adapter's empty placeholder once the first /entities batch
+  // resolves. `liveTreeLoading` feeds a small spinner in the header.
+  const {
+    tree: liveTree,
+    stats: liveStats,
+    loading: liveTreeLoading,
+  } = useLibraryTree()
+  const activeLibraryTree: LibraryTreeNode[] =
+    liveTree.length > 0 ? liveTree : masterLibraryTree
+  const activeLibraryStats =
+    liveStats.totalElements > 0 ? liveStats : libraryStats
   // Merge hardcoded structures with all library elements (deduplicated by ID)
   const [components] = useState<BiologicalComponent[]>(() => {
     const libraryComponents = getAllLibraryComponents()
@@ -3290,8 +3314,20 @@ IMPORTANT: If the user asks you to connect nodes, suggest connections, or explai
         <div className="w-72 border-r border-[var(--color-border)] bg-[var(--color-bg-elevated)] flex flex-col">
           <div className="px-3 pt-3 pb-2 border-b border-[var(--color-border)]">
             <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-medium">Sapien Corridor</h3>
-              <span className="text-xxs text-[var(--color-text-secondary)]">{components.length} entities</span>
+              <h3 className="text-sm font-medium flex items-center gap-1.5">
+                Sapien Corridor
+                {liveTreeLoading && (
+                  <span
+                    aria-label="Loading live knowledge graph"
+                    className="inline-block w-1.5 h-1.5 rounded-full bg-primary-400 animate-pulse"
+                  />
+                )}
+              </h3>
+              <span className="text-xxs text-[var(--color-text-secondary)]">
+                {activeLibraryStats.totalElements > 0
+                  ? `${activeLibraryStats.totalElements} live · ${components.length} total`
+                  : `${components.length} entities`}
+              </span>
             </div>
             <div className="relative">
               <FiSearch className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--color-text-muted)]" />
@@ -3339,7 +3375,7 @@ IMPORTANT: If the user asks you to connect nodes, suggest connections, or explai
               </div>
             ) : (
               <MasterLibraryTree
-                nodes={masterLibraryTree}
+                nodes={activeLibraryTree}
                 onSelect={(id) => { setSelectedLibraryId(id); setSelectedId(id) }}
                 selectedId={selectedLibraryId}
                 expandedNodes={expandedLibraryNodes}
@@ -3701,7 +3737,7 @@ IMPORTANT: If the user asks you to connect nodes, suggest connections, or explai
             </div>
             <div className="flex-1 overflow-y-auto">
               {selectedLibraryId ? (
-                <MasterLibraryDetails element={selectedLibraryElement} onAddToCanvas={addLibraryElementToCanvas} />
+                <MasterLibraryDetails element={selectedLibraryElement} onAddToCanvas={addLibraryElementToCanvas} stats={activeLibraryStats} />
               ) : (
                 <div className="p-3">
                   <PropertiesPanel component={selectedComponent} />
