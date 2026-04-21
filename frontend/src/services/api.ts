@@ -1,4 +1,5 @@
 import axios, { AxiosInstance } from 'axios'
+import { toast } from '../contexts/ToastContext'
 
 // In production (CloudFront), set VITE_API_BASE_URL to the backend URL
 // (e.g. https://api.humanovo.com or API Gateway URL).
@@ -12,25 +13,66 @@ const apiClient: AxiosInstance = axios.create({
   },
 })
 
+// Opt-out header: set `X-Silent-Error: '1'` on a request to suppress the
+// global toast (useful for background polls where failure is expected
+// and the caller already handles the error).
+const SILENT_HEADER = 'X-Silent-Error'
+
+function describeError(error: {
+  response?: { status?: number; data?: unknown; config?: unknown }
+  config?: { method?: string; url?: string; headers?: Record<string, unknown> }
+  request?: unknown
+  message?: string
+}): { message: string; silent: boolean } {
+  const silent = Boolean(error.config?.headers?.[SILENT_HEADER])
+  const method = (error.config?.method || 'GET').toUpperCase()
+  const url = error.config?.url || ''
+  if (error.response) {
+    const status = error.response.status ?? 0
+    const data = error.response.data as { detail?: unknown; message?: unknown } | string | undefined
+    const detail =
+      typeof data === 'string' ? data :
+      typeof data?.detail === 'string' ? data.detail :
+      typeof data?.message === 'string' ? data.message :
+      ''
+    return {
+      message: `${status} ${method} ${url}${detail ? ` — ${detail}` : ''}`,
+      silent,
+    }
+  }
+  if (error.request) {
+    return {
+      message: `Network error — ${method} ${url} did not respond`,
+      silent,
+    }
+  }
+  return { message: error.message || 'Unknown error', silent }
+}
+
 // Response interceptor: detect non-JSON responses (e.g. CloudFront returning HTML)
 apiClient.interceptors.response.use(
   (response) => {
     const ct = response.headers['content-type'] || ''
     if (ct.includes('text/html') && typeof response.data === 'string' && response.data.includes('<!doctype')) {
       console.error('[API] Received HTML instead of JSON — API Gateway may not be connected. URL:', response.config?.url)
-      return Promise.reject(new Error(
+      const msg =
         `API returned HTML instead of JSON for ${response.config?.url}. ` +
         'This usually means CloudFront is not routing /api/* to API Gateway. ' +
         'Check your infrastructure deployment.'
-      ))
+      toast('error', msg, { title: 'API misrouted' })
+      return Promise.reject(new Error(msg))
     }
     return response
   },
   (error) => {
+    const { message, silent } = describeError(error)
     if (error.response) {
-      console.error(`[API] ${error.response.status} ${error.config?.method?.toUpperCase()} ${error.config?.url}:`, error.response.data)
+      console.error(`[API] ${message}:`, error.response.data)
     } else if (error.request) {
-      console.error('[API] No response received:', error.config?.url, error.message)
+      console.error(`[API] ${message}`)
+    }
+    if (!silent && error.response?.status !== 401 && error.response?.status !== 404) {
+      toast('error', message, { title: error.response ? 'Request failed' : 'Network error' })
     }
     return Promise.reject(error)
   }
