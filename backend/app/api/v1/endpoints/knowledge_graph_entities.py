@@ -436,3 +436,75 @@ async def get_entities_by_disease(
     nodes = node_result.scalars().all()
 
     return [Entity.from_node(n) for n in nodes]
+
+
+# ─── Vector similarity search ─────────────────────────────────
+# Backed by pgvector cosine distance over vector_embeddings.
+# Returns the top-N KG entities ranked by semantic similarity to the
+# query embedding. Until Cohere Embed v3 credentials are wired in,
+# uses the same deterministic fixture embedding as seed_kg.
+
+class VectorSearchRequest(BaseModel):
+    query: str = Field(..., min_length=1, max_length=500)
+    limit: int = Field(default=10, ge=1, le=100)
+    min_similarity: float = Field(default=0.0, ge=-1.0, le=1.0)
+
+
+class VectorSearchResult(BaseModel):
+    entity: Entity
+    similarity: float  # cosine similarity [-1, 1]
+
+
+@router.post("/search/similar", response_model=list[VectorSearchResult])
+async def search_similar_entities(
+    request: VectorSearchRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Vector-similarity entity search.
+
+    Embeds the query text, runs pgvector cosine similarity against the
+    `vector_embeddings.embedding_biomedical` column scoped to
+    source_type='kg_entity', and returns the top-N entities.
+
+    Query embedding: same deterministic hash fixture used by seed_kg
+    (`SEED_EMBED_MODE=fixture`) while real Bedrock Cohere Embed v3
+    credentials aren't available. Swap at call-site by setting
+    SEED_EMBED_MODE=real once keys + network are wired in.
+    """
+    from scripts.seed_kg import _fixture_embedding
+
+    vec = _fixture_embedding(request.query, dim=1024)
+    vec_literal = "[" + ",".join(f"{v:.7f}" for v in vec) + "]"
+
+    # cosine_distance = 1 - cosine_similarity (pgvector <=> operator)
+    sql = """
+        SELECT ve.source_id::text, ve.content, n.id, n.name, n.type,
+               n.description, n.properties, n.created_at, n.updated_at,
+               1 - (ve.embedding_biomedical <=> CAST(:vec AS vector)) AS sim
+        FROM vector_embeddings ve
+        JOIN knowledge_graph_nodes n ON n.id::text = ve.source_id
+        WHERE ve.source_type = 'kg_entity'
+          AND ve.embedding_biomedical IS NOT NULL
+        ORDER BY ve.embedding_biomedical <=> CAST(:vec AS vector)
+        LIMIT :lim
+    """
+    result = await db.execute(
+        __import__("sqlalchemy").text(sql),
+        {"vec": vec_literal, "lim": request.limit},
+    )
+    out: list[VectorSearchResult] = []
+    for row in result.fetchall():
+        sim = float(row[9])
+        if sim < request.min_similarity:
+            continue
+        # Reconstruct a Node-like record for Entity.from_node.
+        class _NodeRow:
+            id = row[2]; name = row[3]; type = row[4]
+            description = row[5]; properties = row[6] or {}
+            created_at = row[7]; updated_at = row[8]
+        out.append(VectorSearchResult(
+            entity=Entity.from_node(_NodeRow()),
+            similarity=sim,
+        ))
+    return out

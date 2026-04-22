@@ -523,6 +523,98 @@ function ActivityFeed() {
 
 // ── Main Dashboard ──────────────────────────────────────────────
 
+// ── Discovery Pipeline Status ───────────────────────────────────
+// Small live widget that polls /orchestrator/status every 5 s so the
+// user sees whether any 12-stage Discovery run is in flight. Clicks
+// straight into the Agents page for detail. Silently tolerates the
+// orchestrator being idle (most common state).
+
+function DiscoveryStatusWidget() {
+  const [state, setState] = useState<string>('idle')
+  const [stage, setStage] = useState<number | null>(null)
+  const [disease, setDisease] = useState<string>('')
+
+  useEffect(() => {
+    let cancelled = false
+    const tick = async () => {
+      try {
+        const s = await api.getOrchestratorStatus()
+        if (cancelled) return
+        const st = (s as unknown as { state?: string }).state ?? 'idle'
+        setState(st)
+        const cur = (s as unknown as { current_stage?: number }).current_stage
+        setStage(typeof cur === 'number' ? cur : null)
+        const d = (s as unknown as { disease?: string }).disease
+        setDisease(typeof d === 'string' ? d : '')
+      } catch {
+        /* orchestrator not reachable — treat as idle, no toast spam */
+      }
+    }
+    tick()
+    const id = window.setInterval(tick, 5000)
+    return () => { cancelled = true; window.clearInterval(id) }
+  }, [])
+
+  const isActive = state === 'running' || state === 'paused'
+  const pct = stage != null ? Math.min(100, Math.round((stage / 12) * 100)) : 0
+
+  return (
+    <Link
+      to="/agents"
+      className="glass-card p-4 block hover:bg-[var(--glass-bg-hover)] transition-all"
+      aria-label={`Discovery pipeline ${state}`}
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <FiZap
+            className="w-4 h-4"
+            style={{
+              color: isActive ? '#4ade80' : 'var(--color-text-muted)',
+            }}
+          />
+          <span className="text-sm font-medium">Discovery</span>
+          <span
+            className="text-xxs px-1.5 py-0.5 rounded"
+            style={{
+              background: isActive
+                ? 'rgba(34, 197, 94, 0.12)'
+                : 'var(--glass-bg)',
+              color: isActive ? '#4ade80' : 'var(--color-text-muted)',
+              border: '1px solid ' + (isActive ? 'rgba(34, 197, 94, 0.4)' : 'var(--color-border)'),
+            }}
+          >
+            {state}
+          </span>
+        </div>
+        <FiChevronRight className="w-3 h-3 text-[var(--color-text-muted)]" />
+      </div>
+      {isActive ? (
+        <div className="mt-3">
+          {disease && (
+            <div className="text-xxs text-[var(--color-text-muted)] mb-1 truncate">
+              {disease} · stage {stage ?? '—'}/12
+            </div>
+          )}
+          <div className="h-1 rounded bg-[var(--glass-bg)] overflow-hidden">
+            <div
+              className="h-1 rounded"
+              style={{
+                width: `${pct}%`,
+                background: 'linear-gradient(90deg, #4ade80, #22c55e)',
+                transition: 'width 0.5s ease',
+              }}
+            />
+          </div>
+        </div>
+      ) : (
+        <div className="mt-2 text-xxs text-[var(--color-text-muted)]">
+          No run in flight. Tap to start the 12-stage adversarial pipeline.
+        </div>
+      )}
+    </Link>
+  )
+}
+
 export default function Dashboard() {
   const navigate = useNavigate()
   const [projects, setProjects] = useState<Project[]>([])
@@ -596,6 +688,7 @@ export default function Dashboard() {
   ]
 
   const quickActions = [
+    { label: 'Start Discovery', icon: FiZap, action: () => navigate('/agents?start=1'), color: 'var(--color-text)', primary: true },
     { label: 'New Project', icon: FiFolder, action: () => navigate('/projects?new=1'), color: 'var(--color-text)' },
     { label: 'Compute Lab', icon: FiCpu, action: () => navigate('/compute-lab'), color: 'var(--color-text-secondary)' },
     { label: 'Visualize', icon: FiTrendingUp, action: () => navigate('/data-visualization'), color: 'var(--color-text-secondary)' },
@@ -646,8 +739,9 @@ export default function Dashboard() {
           <div className="flex-1"><ActivityFeed /></div>
         </div>
 
-        {/* Recent Simulations + Notebooks — fill height equally */}
+        {/* Discovery pipeline status + Recent Simulations + Notebooks */}
         <div className="flex flex-col gap-4 h-full">
+          <DiscoveryStatusWidget />
           <div className="flex-1 min-h-0">
             <RecentSimulationsWidget />
           </div>
