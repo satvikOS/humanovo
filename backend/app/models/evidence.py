@@ -46,10 +46,12 @@ class Evidence(BaseModel):
     abstract = Column(Text, nullable=True)
     full_text = Column(Text, nullable=True)
     snippet = Column(Text, nullable=True)
+    # Review status — added in migration 011_model_drift_reconcile.
+    status = Column(String(50), nullable=True, default="pending")
 
     # Source information
     source_type = Column(
-        Enum(EvidenceSource, name="evidence_source"),
+        Enum(EvidenceSource, name="evidence_source", values_callable=lambda x: [e.value for e in x]),
         nullable=False,
         index=True,
     )

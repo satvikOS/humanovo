@@ -4,6 +4,7 @@ import { FiSearch, FiPlus, FiTrash2, FiAlertTriangle, FiLogOut, FiLogIn } from '
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 import { logActivity } from '../utils/persistence'
+import { toast } from '../contexts/ToastContext'
 
 interface Sample {
   id: string; barcode: string; sample_type: string; status: string; project: string
@@ -61,8 +62,24 @@ export default function BiobankManager() {
   })
 
   const load = async () => {
-    try { const r = await fetch(`${API}/samples`); if (r.ok) setSamples((await r.json()).items || []) } catch { /* network error — keep stale state */ }
-    try { const r = await fetch(`${API}/inventory`); if (r.ok) setInventory(await r.json()) } catch { /* network error — keep stale state */ }
+    try {
+      const r = await fetch(`${API}/samples`)
+      if (!r.ok) throw new Error(`samples ${r.status}`)
+      setSamples((await r.json()).items || [])
+    } catch (err) {
+      toast('error', `Could not load samples — ${err instanceof Error ? err.message : 'unknown error'}`, {
+        title: 'Biobank',
+      })
+    }
+    try {
+      const r = await fetch(`${API}/inventory`)
+      if (!r.ok) throw new Error(`inventory ${r.status}`)
+      setInventory(await r.json())
+    } catch (err) {
+      toast('error', `Could not load inventory — ${err instanceof Error ? err.message : 'unknown error'}`, {
+        title: 'Biobank',
+      })
+    }
   }
   useEffect(() => { load() }, [])
 

@@ -47,6 +47,7 @@ class EvaluateRequest(BaseModel):
     y_pred: list[float]
 
 
+@router.get("", include_in_schema=False)
 @router.get("/")
 async def list_models(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(MLModel).order_by(MLModel.updated_at.desc()))
@@ -54,6 +55,7 @@ async def list_models(db: AsyncSession = Depends(get_db)):
     return {"items": [m.to_dict() for m in items], "total": len(items)}
 
 
+@router.post("", include_in_schema=False)
 @router.post("/")
 async def create_model(data: ModelCreate, db: AsyncSession = Depends(get_db)):
     model = MLModel(

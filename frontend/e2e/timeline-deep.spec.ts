@@ -2,7 +2,7 @@
  * Timeline — deep-link `?type=` / `?range=` filters. Lets Dashboard
  * cards and external cross-links jump into a pre-filtered view.
  */
-import { test, expect, Page } from '/opt/node22/lib/node_modules/playwright/test.mjs'
+import { test, expect, Page } from '@playwright/test'
 
 function attachErrorCapture(page: Page, bag: string[]) {
   page.on('pageerror', e => bag.push('PAGEERROR: ' + e.message))

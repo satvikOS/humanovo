@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { FiShield, FiFileText, FiCheckSquare, FiInbox } from 'react-icons/fi'
+import { toast } from '../contexts/ToastContext'
 
 type TabId = 'irb' | 'agreements' | 'consent' | 'checklists'
 
@@ -42,11 +43,26 @@ export default function RegulatoryCompliance() {
 
   const loadTab = async (t: TabId) => {
     try {
-      if (t === 'irb') { const r = await fetch(`${API}/irb-submissions`); if (r.ok) setIrbs((await r.json()).items || []) }
-      else if (t === 'agreements') { const r = await fetch(`${API}/agreements`); if (r.ok) setAgreements((await r.json()).items || []) }
-      else if (t === 'consent') { const r = await fetch(`${API}/consent-forms`); if (r.ok) setConsents((await r.json()).items || []) }
-      else if (t === 'checklists') { const r = await fetch(`${API}/checklists`); if (r.ok) setChecklists((await r.json()).items || []) }
-    } catch { /* network error — keep stale state */ }
+      if (t === 'irb') {
+        const r = await fetch(`${API}/irb-submissions`)
+        if (!r.ok) throw new Error(`irb ${r.status}`)
+        setIrbs((await r.json()).items || [])
+      } else if (t === 'agreements') {
+        const r = await fetch(`${API}/agreements`)
+        if (!r.ok) throw new Error(`agreements ${r.status}`)
+        setAgreements((await r.json()).items || [])
+      } else if (t === 'consent') {
+        const r = await fetch(`${API}/consent-forms`)
+        if (!r.ok) throw new Error(`consent ${r.status}`)
+        setConsents((await r.json()).items || [])
+      } else if (t === 'checklists') {
+        const r = await fetch(`${API}/checklists`)
+        if (!r.ok) throw new Error(`checklists ${r.status}`)
+        setChecklists((await r.json()).items || [])
+      }
+    } catch (err) {
+      toast('error', `Could not load ${t} — ${err instanceof Error ? err.message : 'network error'}`, { title: 'Regulatory' })
+    }
   }
   useEffect(() => { loadTab(tab) }, [tab])
 

@@ -99,6 +99,7 @@ async def _get_dataset_or_404(db: AsyncSession, dataset_id: str) -> ResearchData
 
 # ── Endpoints ────────────────────────────────────────────────────
 
+@router.get("", include_in_schema=False)
 @router.get("/")
 async def list_datasets(
     page: int = Query(1, ge=1),
@@ -125,6 +126,7 @@ async def list_datasets(
     }
 
 
+@router.post("", include_in_schema=False)
 @router.post("/")
 async def create_dataset(data: DatasetCreate, db: AsyncSession = Depends(get_db)):
     ds = ResearchDataset(

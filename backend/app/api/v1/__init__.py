@@ -8,8 +8,10 @@ from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
     activities,
+    admin,
     agents,
     auth,
+    citation_verify,
     biobank,
     clinical_trials,
     collaboration,
@@ -29,6 +31,7 @@ from app.api.v1.endpoints import (
     jamison_api,
     knowledge,
     knowledge_graph,
+    knowledge_graph_entities,
     manuscripts,
     ml_models,
     monitoring,
@@ -65,8 +68,8 @@ router.include_router(monitoring.router, prefix="/monitoring", tags=["monitoring
 # Disease Discovery endpoint
 router.include_router(discovery.router)
 
-# Simulation endpoints
-router.include_router(simulation.router, prefix="/simulation", tags=["simulation"])
+# Simulation endpoints — frontend uses /simulations (plural).
+router.include_router(simulation.router, prefix="/simulations", tags=["simulation"])
 
 # Parallel Discovery Orchestrator
 router.include_router(orchestrator.router)
@@ -85,6 +88,11 @@ router.include_router(statistics.router, prefix="/statistics", tags=["statistics
 router.include_router(datasets.router, prefix="/datasets", tags=["datasets"])
 router.include_router(collaboration.router, prefix="/collaboration", tags=["collaboration"])
 router.include_router(knowledge_graph.router, prefix="/knowledge-graph", tags=["knowledge-graph"])
+# Entity-centric API surface (what frontend/src/services/knowledge.ts calls).
+# Mounted at the same /knowledge-graph prefix so URLs stay consistent.
+router.include_router(
+    knowledge_graph_entities.router, prefix="/knowledge-graph", tags=["knowledge-graph"],
+)
 router.include_router(clinical_trials.router, prefix="/clinical-trials", tags=["clinical-trials"])
 router.include_router(genomics.router, prefix="/genomics", tags=["genomics"])
 router.include_router(manuscripts.router, prefix="/manuscripts", tags=["manuscripts"])
@@ -116,3 +124,9 @@ router.include_router(compute_engine.router)
 
 # User State (localStorage sync across devices)
 router.include_router(user_state.router, prefix="/user-state", tags=["user-state"])
+
+# Admin (non-prod): kg-stats, seed-kg. Disabled in production via guard.
+router.include_router(admin.router, prefix="/admin", tags=["admin"])
+
+# Citation verification — CrossRef + NCBI round-trip for single citations.
+router.include_router(citation_verify.router, prefix="/citation", tags=["citation"])

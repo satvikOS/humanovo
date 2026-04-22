@@ -3,7 +3,7 @@
  * flow that auto-opens the Add Evidence dialog, and basic search + list
  * plumbing. These match the pattern established for Projects `?new=1`.
  */
-import { test, expect, Page } from '/opt/node22/lib/node_modules/playwright/test.mjs'
+import { test, expect, Page } from '@playwright/test'
 
 function attachErrorCapture(page: Page, bag: string[]) {
   page.on('pageerror', e => bag.push('PAGEERROR: ' + e.message))

@@ -179,7 +179,7 @@ class StageExecution(BaseModel):
 
     # Execution metrics
     outcome = Column(
-        Enum(StageOutcome, name="stage_outcome"),
+        Enum(StageOutcome, name="stage_outcome", values_callable=lambda x: [e.value for e in x]),
         default=StageOutcome.SUCCESS,
         nullable=False,
         index=True,
@@ -255,7 +255,7 @@ class APICostRecord(BaseModel):
 
     # Cost category
     category = Column(
-        Enum(CostCategory, name="cost_category"),
+        Enum(CostCategory, name="cost_category", values_callable=lambda x: [e.value for e in x]),
         nullable=False,
         index=True,
     )
@@ -361,7 +361,7 @@ class HypothesisFeedback(BaseModel):
 
     # Feedback type and source
     feedback_type = Column(
-        Enum(FeedbackType, name="feedback_type"),
+        Enum(FeedbackType, name="feedback_type", values_callable=lambda x: [e.value for e in x]),
         nullable=False,
         index=True,
     )
@@ -550,7 +550,7 @@ class BenchmarkTestCase(BaseModel):
     difficulty = Column(String(50), default="medium", nullable=False)
     tags = Column(ARRAY(String), default=list, nullable=False)
     status = Column(
-        Enum(BenchmarkStatus, name="benchmark_status"),
+        Enum(BenchmarkStatus, name="benchmark_status", values_callable=lambda x: [e.value for e in x]),
         default=BenchmarkStatus.ACTIVE,
         nullable=False,
         index=True,
@@ -596,7 +596,7 @@ class BenchmarkRun(BaseModel):
 
     # Status
     status = Column(
-        Enum(BenchmarkRunStatus, name="benchmark_run_status"),
+        Enum(BenchmarkRunStatus, name="benchmark_run_status", values_callable=lambda x: [e.value for e in x]),
         default=BenchmarkRunStatus.PENDING,
         nullable=False,
         index=True,
@@ -698,7 +698,7 @@ class PipelineOptimization(BaseModel):
 
     # What was changed
     action = Column(
-        Enum(OptimizationAction, name="optimization_action"),
+        Enum(OptimizationAction, name="optimization_action", values_callable=lambda x: [e.value for e in x]),
         nullable=False,
         index=True,
     )

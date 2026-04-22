@@ -3,7 +3,7 @@
  * rows: clicking a notification navigates to the matching index page
  * (projects, evidence, notebook, etc.) and closes the dropdown.
  */
-import { test, expect, Page } from '/opt/node22/lib/node_modules/playwright/test.mjs'
+import { test, expect, Page } from '@playwright/test'
 
 async function seedActivity(page: Page, entries: Array<{ type: string; action: string; title: string }>) {
   await page.goto('/dashboard')

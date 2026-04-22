@@ -122,6 +122,88 @@ const managementNavItems = [
   { to: '/regulatory', icon: FiShield, label: 'Regulatory' },
 ]
 
+// Dedicated hypothesis + ML-models + knowledge-graph nav — previously
+// orphaned pages with no entry in the sidebar. Lives in its own nav
+// section so the first three (hypothesis workflow) group together.
+const knowledgeNavItems = [
+  { to: '/hypotheses', icon: FiZap, label: 'Hypotheses' },
+  { to: '/knowledge-graph', icon: FiLayers, label: 'Knowledge Graph' },
+  { to: '/ml-models', icon: FiCpu, label: 'ML Models' },
+]
+
+/**
+ * Sidebar section with a clickable header that toggles visibility of
+ * its child links. Collapsed state persists per-section in localStorage
+ * so the user's preferred layout survives page reloads. Any section
+ * that contains the currently-active route auto-expands (so the user
+ * can always see where they are, even if they had collapsed it).
+ */
+type NavSectionItem = { to: string; icon: React.ComponentType<{ className?: string }>; label: string }
+function CollapsibleNavSection({ title, items }: { title: string; items: NavSectionItem[] }) {
+  const storageKey = `sidebar-collapsed-${title.toLowerCase()}`
+  const { pathname } = useLocation()
+  const containsActive = items.some(
+    (i) => pathname === i.to || pathname.startsWith(i.to + '/'),
+  )
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    if (containsActive) return false
+    try { return localStorage.getItem(storageKey) === '1' } catch { return false }
+  })
+  useEffect(() => {
+    try { localStorage.setItem(storageKey, collapsed ? '1' : '0') } catch { /* quota */ }
+  }, [collapsed, storageKey])
+  return (
+    <div className="mt-3">
+      <button
+        type="button"
+        onClick={() => setCollapsed((v) => !v)}
+        className={clsx(
+          'w-full flex items-center gap-1.5 px-2 py-1 rounded-md text-xxs uppercase tracking-widest font-medium transition-colors',
+          'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)]',
+          containsActive && 'text-[var(--color-text)]',
+        )}
+        aria-expanded={!collapsed}
+        aria-controls={`nav-section-${title.toLowerCase()}`}
+      >
+        <span
+          className={clsx(
+            'text-[10px] w-3 text-center transition-transform duration-150 opacity-70',
+            !collapsed && 'rotate-90',
+          )}
+          aria-hidden="true"
+        >
+          ▸
+        </span>
+        <span className="flex-1 text-left">{title}</span>
+        {collapsed && items.length > 0 && (
+          <span className="text-[10px] opacity-50 tabular-nums normal-case tracking-normal">{items.length}</span>
+        )}
+      </button>
+      {!collapsed && (
+        <div id={`nav-section-${title.toLowerCase()}`} className="space-y-0.5 mt-0.5">
+          {items.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              className={({ isActive }) =>
+                clsx(
+                  'flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm transition-all duration-200',
+                  isActive
+                    ? 'bg-[var(--glass-bg-hover)] text-[var(--color-text)]'
+                    : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)]'
+                )
+              }
+            >
+              <item.icon className="w-4 h-4" />
+              <span className="font-medium">{item.label}</span>
+            </NavLink>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function TabIcon({ type }: { type: WorkspaceTab['type'] }) {
   const icons: Record<WorkspaceTab['type'], typeof FiFolder> = {
     project: FiFolder,
@@ -175,7 +257,7 @@ function WorkspaceTabs() {
       <button
         onClick={handleAddTab}
         className="ml-1 p-1.5 text-[var(--color-text-muted)] hover:text-[var(--color-text)] rounded-lg transition-all hover:bg-[var(--glass-bg)]"
-        title="New Tab"
+        title="New Tab" aria-label="New Tab"
       >
         <FiPlus className="w-3 h-3" />
       </button>
@@ -566,7 +648,7 @@ function CopyButton({ text }: { text: string }) {
     <button
       onClick={handleCopy}
       className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-      title="Copy message"
+      title="Copy message" aria-label="Copy message"
     >
       {copied ? (
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
@@ -1091,7 +1173,7 @@ function ConstantChat() {
               className="flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--color-text-muted)] resize-none leading-relaxed py-2"
               style={{ maxHeight: '120px' }}
             />
-            <button
+            <button aria-label="Send"
               onClick={sendMessage}
               disabled={(!input.trim() && attachedFiles.length === 0) || loading || isStreaming}
               className="p-2 rounded-lg text-white disabled:opacity-30 transition-all shrink-0 mb-0.5"
@@ -1256,6 +1338,7 @@ if (path === '/clinical-trials') return 'Clinical Trials'
 
         {/* Main Navigation */}
         <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
+          {/* Main section — always expanded + shows keyboard shortcuts */}
           <div className="text-xxs text-[var(--color-text-muted)] px-2 py-1.5 uppercase tracking-widest font-medium">Main</div>
           {mainNavItems.map((item) => (
             <NavLink
@@ -1276,81 +1359,11 @@ if (path === '/clinical-trials') return 'Clinical Trials'
             </NavLink>
           ))}
 
-          <div className="text-xxs text-[var(--color-text-muted)] px-2 py-1.5 mt-4 uppercase tracking-widest font-medium">Tools</div>
-          {secondaryNavItems.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={({ isActive }) =>
-                clsx(
-                  'flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm transition-all duration-200',
-                  isActive
-                    ? 'bg-[var(--glass-bg-hover)] text-[var(--color-text)]'
-                    : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)]'
-                )
-              }
-            >
-              <item.icon className="w-4 h-4" />
-              <span className="font-medium">{item.label}</span>
-            </NavLink>
-          ))}
-
-          <div className="text-xxs text-[var(--color-text-muted)] px-2 py-1.5 mt-4 uppercase tracking-widest font-medium">Research</div>
-          {researchNavItems.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={({ isActive }) =>
-                clsx(
-                  'flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm transition-all duration-200',
-                  isActive
-                    ? 'bg-[var(--glass-bg-hover)] text-[var(--color-text)]'
-                    : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)]'
-                )
-              }
-            >
-              <item.icon className="w-4 h-4" />
-              <span className="font-medium">{item.label}</span>
-            </NavLink>
-          ))}
-
-          <div className="text-xxs text-[var(--color-text-muted)] px-2 py-1.5 mt-4 uppercase tracking-widest font-medium">Analysis</div>
-          {analysisNavItems.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={({ isActive }) =>
-                clsx(
-                  'flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm transition-all duration-200',
-                  isActive
-                    ? 'bg-[var(--glass-bg-hover)] text-[var(--color-text)]'
-                    : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)]'
-                )
-              }
-            >
-              <item.icon className="w-4 h-4" />
-              <span className="font-medium">{item.label}</span>
-            </NavLink>
-          ))}
-
-          <div className="text-xxs text-[var(--color-text-muted)] px-2 py-1.5 mt-4 uppercase tracking-widest font-medium">Management</div>
-          {managementNavItems.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={({ isActive }) =>
-                clsx(
-                  'flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm transition-all duration-200',
-                  isActive
-                    ? 'bg-[var(--glass-bg-hover)] text-[var(--color-text)]'
-                    : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)]'
-                )
-              }
-            >
-              <item.icon className="w-4 h-4" />
-              <span className="font-medium">{item.label}</span>
-            </NavLink>
-          ))}
+          <CollapsibleNavSection title="Tools" items={secondaryNavItems} />
+          <CollapsibleNavSection title="Research" items={researchNavItems} />
+          <CollapsibleNavSection title="Analysis" items={analysisNavItems} />
+          <CollapsibleNavSection title="Management" items={managementNavItems} />
+          <CollapsibleNavSection title="Knowledge" items={knowledgeNavItems} />
         </nav>
 
         {/* Bottom section */}

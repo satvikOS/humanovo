@@ -5,6 +5,7 @@ import {
   FiSend, FiCheckCircle,
 } from 'react-icons/fi'
 import { formatDate, formatDateTime } from '../utils/persistence'
+import { toast } from '../contexts/ToastContext'
 
 type TabId = 'team' | 'comments' | 'shares' | 'notifications' | 'audit'
 
@@ -52,18 +53,33 @@ export default function Collaboration() {
   const loadTab = async (t: TabId) => {
     try {
       if (t === 'team') {
-        const res = await fetch(`${API}/team`); if (res.ok) setTeam((await res.json()).members || [])
+        const res = await fetch(`${API}/team`)
+        if (!res.ok) throw new Error(`team ${res.status}`)
+        setTeam((await res.json()).members || [])
       } else if (t === 'comments') {
-        const res = await fetch(`${API}/comments`); if (res.ok) setComments((await res.json()).items || [])
+        const res = await fetch(`${API}/comments`)
+        if (!res.ok) throw new Error(`comments ${res.status}`)
+        setComments((await res.json()).items || [])
       } else if (t === 'shares') {
-        const res = await fetch(`${API}/shares`); if (res.ok) setShares((await res.json()).items || [])
+        const res = await fetch(`${API}/shares`)
+        if (!res.ok) throw new Error(`shares ${res.status}`)
+        setShares((await res.json()).items || [])
       } else if (t === 'notifications') {
         const res = await fetch(`${API}/notifications?user_id=user-1`)
-        if (res.ok) { const d = await res.json(); setNotifications(d.items || []); setUnread(d.unread || 0) }
+        if (!res.ok) throw new Error(`notifications ${res.status}`)
+        const d = await res.json()
+        setNotifications(d.items || [])
+        setUnread(d.unread || 0)
       } else if (t === 'audit') {
-        const res = await fetch(`${API}/audit-log`); if (res.ok) setAudit((await res.json()).items || [])
+        const res = await fetch(`${API}/audit-log`)
+        if (!res.ok) throw new Error(`audit-log ${res.status}`)
+        setAudit((await res.json()).items || [])
       }
-    } catch { /* ignore */ }
+    } catch (err) {
+      toast('error', `Could not load ${t} — ${err instanceof Error ? err.message : 'unknown error'}`, {
+        title: 'Collaboration',
+      })
+    }
   }
 
   useEffect(() => { loadTab(tab) }, [tab])
@@ -152,7 +168,7 @@ export default function Collaboration() {
                   </select>
                   <input value={newComment} onChange={e => setNewComment(e.target.value)} onKeyDown={e => e.key === 'Enter' && addComment()}
                     placeholder="Write a comment..." className="input flex-1 text-xs" />
-                  <button onClick={addComment} disabled={!newComment.trim()} className="btn text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                  <button aria-label="Send" onClick={addComment} disabled={!newComment.trim()} className="btn text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                     <FiSend className="w-3.5 h-3.5" />
                   </button>
                 </div>

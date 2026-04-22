@@ -4,9 +4,11 @@ import {
   FiBook, FiPlus, FiCopy, FiDownload, FiTrash2, FiSearch,
   FiCheck, FiUpload, FiFolder, FiEdit3, FiExternalLink,
   FiFile, FiX, FiRefreshCw, FiStar, FiBookOpen, FiHash,
+  FiShield,
 } from 'react-icons/fi'
 import { usePersistentState, logActivity } from '../utils/persistence'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
+import api from '../services/api'
 
 interface Citation {
   id: string
@@ -284,6 +286,41 @@ export default function CitationManager() {
   }, [])
   const [citationStyle, setCitationStyle] = useState<CitationStyle>('apa')
   const [copied, setCopied] = useState<string | null>(null)
+  // Citation-verify state: per-id verdict/loading from the backend
+  // round-trip (CrossRef + NCBI). Keyed by citation.id so the list row
+  // can render a verdict badge next to each entry.
+  type VerifyVerdict = 'verified' | 'fabricated' | 'network_error'
+  interface VerifyResult { verdict: VerifyVerdict; message: string }
+  const [verifyResults, setVerifyResults] = useState<Record<string, VerifyResult>>({})
+  const [verifyLoading, setVerifyLoading] = useState<Record<string, boolean>>({})
+
+  const verifyCitation = async (citation: Citation) => {
+    setVerifyLoading(prev => ({ ...prev, [citation.id]: true }))
+    try {
+      const data = await api.verifyCitation(
+        citation.doi ? { doi: citation.doi } : { pmid: citation.pmid }
+      )
+      const verdict: VerifyVerdict = !data.network_ok
+        ? 'network_error'
+        : data.is_fabricated
+        ? 'fabricated'
+        : 'verified'
+      setVerifyResults(prev => ({
+        ...prev,
+        [citation.id]: { verdict, message: data.message || '' },
+      }))
+    } catch (err: unknown) {
+      setVerifyResults(prev => ({
+        ...prev,
+        [citation.id]: {
+          verdict: 'network_error',
+          message: err instanceof Error ? err.message : String(err),
+        },
+      }))
+    } finally {
+      setVerifyLoading(prev => ({ ...prev, [citation.id]: false }))
+    }
+  }
   const [filterType, setFilterType] = useState<string>('')
   const [filterCollection, setFilterCollection] = useState<string>('')
   const [selectedCitation, setSelectedCitation] = useState<Citation | null>(null)
@@ -676,6 +713,30 @@ export default function CitationManager() {
                         ))}
                         {citation.doi && <span className="text-xxs text-[var(--color-text)]">DOI</span>}
                         {citation.pmid && <span className="text-xxs text-[var(--color-text)]">PubMed</span>}
+                        {verifyResults[citation.id] && (
+                          <span
+                            aria-label={`Verification: ${verifyResults[citation.id].verdict}`}
+                            className="text-xxs px-1.5 py-0.5 rounded"
+                            style={{
+                              background:
+                                verifyResults[citation.id].verdict === 'verified'
+                                  ? 'rgba(34, 197, 94, 0.14)'
+                                  : verifyResults[citation.id].verdict === 'fabricated'
+                                  ? 'rgba(239, 68, 68, 0.14)'
+                                  : 'rgba(234, 179, 8, 0.14)',
+                              color:
+                                verifyResults[citation.id].verdict === 'verified'
+                                  ? '#4ade80'
+                                  : verifyResults[citation.id].verdict === 'fabricated'
+                                  ? '#f87171'
+                                  : '#fbbf24',
+                              border: '1px solid currentColor',
+                            }}
+                            title={verifyResults[citation.id].message}
+                          >
+                            {verifyResults[citation.id].verdict}
+                          </span>
+                        )}
                       </div>
                     </div>
                     <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
@@ -685,6 +746,17 @@ export default function CitationManager() {
                       <button onClick={(e) => { e.stopPropagation(); copyFormatted(citation) }} className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)]" title="Copy formatted">
                         {copied === citation.id ? <FiCheck className="w-3.5 h-3.5" style={{ color: 'var(--color-success)' }} /> : <FiCopy className="w-3.5 h-3.5" />}
                       </button>
+                      {(citation.doi || citation.pmid) && (
+                        <button
+                          aria-label="Verify citation"
+                          onClick={(e) => { e.stopPropagation(); verifyCitation(citation) }}
+                          disabled={verifyLoading[citation.id]}
+                          className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] disabled:opacity-40"
+                          title="Verify via CrossRef / NCBI round-trip"
+                        >
+                          <FiShield className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                       <button onClick={(e) => { e.stopPropagation(); deleteCitation(citation.id) }} className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-error)]" title="Delete">
                         <FiTrash2 className="w-3.5 h-3.5" />
                       </button>

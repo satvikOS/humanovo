@@ -453,6 +453,43 @@ export default function ResearchImaging() {
   // URL after mount so shared links stay canonical.
   const [searchParams] = useSearchParams()
   const [studies, setStudies] = useState<Study[]>(() => loadStudies())
+  // Merge backend-seeded imaging_studies with any local uploads on mount.
+  // localStorage is still source-of-truth for uploaded images; backend
+  // studies ship metadata-only ("findings" + "modality") which is enough
+  // for the list/detail panel to render.
+  useEffect(() => {
+    fetch('/api/v1/imaging/studies')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        const items = (data && (data.items || data)) as Array<Record<string, unknown>> | null
+        if (!Array.isArray(items)) return
+        setStudies(prev => {
+          const byId = new Map(prev.map(s => [s.id, s] as const))
+          for (const it of items) {
+            const id = String(it.id || '')
+            if (!id || byId.has(id)) continue
+            byId.set(id, {
+              id,
+              title: String(it.title || 'Untitled study'),
+              modality: (it.modality as Modality) || 'CT',
+              bodyPart: (it.body_part as string) || '',
+              patientId: (it.patient_id as string) || '',
+              acquiredAt: String(it.created_at || new Date().toISOString()),
+              imageData: '',
+              width: Number(it.width || 512),
+              height: Number(it.height || 512),
+              windowCenter: 128,
+              windowWidth: 256,
+              filter: 'none',
+              annotations: [],
+              notes: (it.findings as string) || '',
+            } as Study)
+          }
+          return Array.from(byId.values())
+        })
+      })
+      .catch(() => { /* silent — local fallback is the primary source */ })
+  }, [])
   const [selectedId, setSelectedId] = useState<string | null>(() => {
     const qId = searchParams.get('id')
     if (!qId) return null
@@ -1321,7 +1358,7 @@ export default function ResearchImaging() {
           <div className="flex items-center gap-2 mb-3">
             <FiImage className="text-lg" style={{ color: 'var(--color-text)' }} />
             <h2 className="text-sm font-semibold" title="Use [ and ] to step between studies">Studies</h2>
-            <button
+            <button aria-label="Click"
               onClick={() => fileInputRef.current?.click()}
               className="ml-auto p-1.5 rounded hover:bg-white/5 transition-all"
               style={{ border: '1px solid var(--glass-border)', color: 'var(--color-text-muted)' }}
@@ -1393,7 +1430,11 @@ export default function ResearchImaging() {
             </div>
           )}
           {filteredStudies.map(s => {
-            const mod = MODALITIES.find(m => m.id === s.modality)!
+            // Null-guard: backend-seeded studies might carry modalities
+            // (e.g. "PET-CT") that aren't in the static MODALITIES
+            // registry yet. Fall back to the CT row so we never crash
+            // on `.color` / `.icon` access below.
+            const mod = MODALITIES.find(m => m.id === s.modality) || MODALITIES[0]
             const active = selectedId === s.id
             return (
               <button
@@ -1468,7 +1509,7 @@ export default function ResearchImaging() {
                 <button onClick={() => setZoom(z => Math.max(0.2, z - 0.2))} className="btn-icon btn-ghost p-1.5 transition-all active:scale-95" title="Zoom out (-)" style={{ borderRadius: 8 }}><FiZoomOut className="text-xs" /></button>
                 <span className="text-[10px] px-1.5 font-mono" style={{ color: 'var(--color-text-muted)' }}>{(zoom * 100).toFixed(0)}%</span>
                 <button onClick={() => setZoom(z => Math.min(8, z + 0.2))} className="btn-icon btn-ghost p-1.5 transition-all active:scale-95" title="Zoom in (+)" style={{ borderRadius: 8 }}><FiZoomIn className="text-xs" /></button>
-                <button onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }} className="btn-icon btn-ghost p-1.5 transition-all active:scale-95" title="Reset view (0)" style={{ borderRadius: 8 }}><FiRotateCw className="text-xs" /></button>
+                <button aria-label="0" onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }} className="btn-icon btn-ghost p-1.5 transition-all active:scale-95" title="Reset view (0)" style={{ borderRadius: 8 }}><FiRotateCw className="text-xs" /></button>
                 <div style={{ width: 1, height: 16, background: 'var(--glass-border)', margin: '0 2px' }} />
                 <button
                   onClick={() => setViewLayout(v => v === 'single' ? 'quad' : 'single')}
@@ -1483,8 +1524,8 @@ export default function ResearchImaging() {
                 >
                   <FiMaximize2 className="text-xs" />
                 </button>
-                <button onClick={exportImage} className="btn-icon btn-ghost p-1.5 transition-all active:scale-95" title="Export PNG" style={{ borderRadius: 8 }}><FiDownload className="text-xs" /></button>
-                <button onClick={exportStudy} className="btn-icon btn-ghost p-1.5 transition-all active:scale-95" title="Export study JSON" style={{ borderRadius: 8 }}><FiSave className="text-xs" /></button>
+                <button onClick={exportImage} className="btn-icon btn-ghost p-1.5 transition-all active:scale-95" title="Export PNG" aria-label="Export PNG" style={{ borderRadius: 8 }}><FiDownload className="text-xs" /></button>
+                <button onClick={exportStudy} className="btn-icon btn-ghost p-1.5 transition-all active:scale-95" title="Export study JSON" aria-label="Export study JSON" style={{ borderRadius: 8 }}><FiSave className="text-xs" /></button>
                 <button onClick={() => deleteStudy(selected.id)} className="transition-all active:scale-95" style={{ padding: '5px 7px', borderRadius: 12, background: 'rgba(176, 126, 139, 0.1)', border: '1px solid rgba(176, 126, 139, 0.15)', color: '#B07E8B' }} title="Delete"><FiTrash2 className="text-xs" /></button>
               </div>
             </>
@@ -2026,7 +2067,7 @@ export default function ResearchImaging() {
                     <div key={label.id} className="flex items-center gap-2 p-1.5 rounded" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }}>
                       <div className="w-3 h-3 rounded-sm flex-shrink-0" style={{ background: label.color }} />
                       <span className="text-[11px] flex-1 truncate">{label.name}</span>
-                      <button
+                      <button aria-label="Visible"
                         onClick={() => {
                           const labels = (selected.labels || []).map(l => l.id === label.id ? { ...l, visible: !l.visible } : l)
                           updateStudy({ ...selected, labels })
@@ -2049,7 +2090,7 @@ export default function ResearchImaging() {
                       >
                         <FiCrosshair className="text-[10px]" />
                       </button>
-                      <button
+                      <button aria-label="Labels"
                         onClick={() => {
                           const labels = (selected.labels || []).filter(l => l.id !== label.id)
                           updateStudy({ ...selected, labels })

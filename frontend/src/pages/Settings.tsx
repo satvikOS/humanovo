@@ -15,6 +15,7 @@ import {
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import { useTheme } from '../contexts/ThemeContext'
+import api from '../services/api'
 
 const SETTINGS_KEY = 'humanovo-appearance-settings'
 
@@ -47,7 +48,10 @@ function applyAppearancePrefs(prefs: AppearancePrefs) {
 // Apply on initial load
 applyAppearancePrefs(loadAppearancePrefs())
 
-const settingsSections = [
+// Admin section is surfaced at render-time only when the backend
+// reports environment=development. Done in the component below via
+// live /admin/kg-stats check.
+const BASE_SETTINGS_SECTIONS = [
   { id: 'appearance', label: 'Appearance', icon: FiMonitor },
   { id: 'account', label: 'Account', icon: FiUser },
   { id: 'notifications', label: 'Notifications', icon: FiBell },
@@ -55,6 +59,7 @@ const settingsSections = [
   { id: 'data', label: 'Data & Storage', icon: FiDatabase },
   { id: 'integrations', label: 'Integrations', icon: FiGlobe },
 ]
+const ADMIN_SECTION = { id: 'admin', label: 'Admin · Seed demo data', icon: FiDatabase }
 
 function Toggle({ enabled, onChange }: { enabled: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -480,6 +485,152 @@ function PrivacySettings() {
   )
 }
 
+// ─── Admin · Seed demo data ────────────────────────────────────
+// Exposes the backend /admin/seed-kg + /admin/seed-corpus endpoints as
+// one-click buttons so fresh installs can populate the KG + evidence
+// corpus without SSH-ing and running the python scripts directly.
+// Non-production only (backend refuses when ENVIRONMENT=production).
+
+function AdminSeedSettings() {
+  const [stats, setStats] = useState<
+    | null
+    | {
+        environment: string
+        node_count: number
+        edge_count: number
+        embedding_count: number
+        evidence_count?: number
+        evidence_embedding_count?: number
+        hypothesis_count?: number
+        project_count?: number
+      }
+  >(null)
+  const [busy, setBusy] = useState<'kg' | 'corpus' | null>(null)
+  const [lastMessage, setLastMessage] = useState<string>('')
+
+  const refresh = useCallback(async () => {
+    try {
+      const s = await api.getKgStats()
+      setStats(s)
+    } catch {
+      setStats(null)
+    }
+  }, [])
+  useEffect(() => {
+    refresh()
+  }, [refresh])
+
+  const runKgSeed = async () => {
+    setBusy('kg')
+    try {
+      const r = await api.seedKg(true)
+      setLastMessage(r.message)
+    } catch (e) {
+      setLastMessage(`seed-kg failed: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setBusy(null)
+      refresh()
+    }
+  }
+  const runCorpusSeed = async () => {
+    setBusy('corpus')
+    try {
+      const r = await api.seedCorpus(true)
+      setLastMessage(r.message)
+    } catch (e) {
+      setLastMessage(`seed-corpus failed: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setBusy(null)
+      refresh()
+    }
+  }
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <h2 className="text-lg font-semibold mb-1">Admin · Seed demo data</h2>
+        <p className="text-sm text-[var(--color-text-muted)]">
+          Populate the backend KG + evidence corpus without opening a terminal.
+          Non-production environments only.
+        </p>
+        {stats && stats.environment !== 'development' && (
+          <div className="mt-2 p-2 rounded bg-[var(--glass-bg)] border border-[var(--color-warning)] text-xs" style={{ color: 'var(--color-warning)' }}>
+            Current environment is <code>{stats.environment}</code> — seed buttons may be refused by the backend.
+          </div>
+        )}
+      </div>
+
+      <div className="glass-card p-4">
+        <h3 className="text-sm font-medium mb-2">Current corpus</h3>
+        {stats ? (
+          <div className="grid grid-cols-2 gap-2 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+            <div>Environment</div><div style={{ color: 'var(--color-text)' }}>{stats.environment}</div>
+            <div>KG nodes</div><div style={{ color: 'var(--color-text)' }}>{stats.node_count}</div>
+            <div>KG edges</div><div style={{ color: 'var(--color-text)' }}>{stats.edge_count}</div>
+            <div>KG embeddings (pgvector 1024d)</div><div style={{ color: 'var(--color-text)' }}>{stats.embedding_count}</div>
+            <div>Evidence rows</div><div style={{ color: 'var(--color-text)' }}>{stats.evidence_count ?? '—'}</div>
+            <div>Evidence embeddings</div><div style={{ color: 'var(--color-text)' }}>{stats.evidence_embedding_count ?? '—'}</div>
+            <div>Hypotheses</div><div style={{ color: 'var(--color-text)' }}>{stats.hypothesis_count ?? '—'}</div>
+            <div>Projects</div><div style={{ color: 'var(--color-text)' }}>{stats.project_count ?? '—'}</div>
+          </div>
+        ) : (
+          <p className="text-xs text-[var(--color-text-muted)]">Stats unavailable — backend unreachable.</p>
+        )}
+      </div>
+
+      <div className="glass-card p-4">
+        <h3 className="text-sm font-medium mb-2">Seed actions</h3>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={runKgSeed}
+            disabled={busy !== null}
+            aria-label="Re-seed knowledge graph"
+            className="btn btn-sm btn-primary disabled:opacity-50"
+          >
+            {busy === 'kg' ? 'Seeding KG…' : 'Re-seed KG (91 entities, 50 relations)'}
+          </button>
+          <button
+            type="button"
+            onClick={runCorpusSeed}
+            disabled={busy !== null}
+            aria-label="Re-seed evidence corpus"
+            className="btn btn-sm btn-secondary disabled:opacity-50"
+          >
+            {busy === 'corpus' ? 'Seeding corpus…' : 'Re-seed Evidence + Hypotheses (12/3)'}
+          </button>
+          <button
+            type="button"
+            onClick={refresh}
+            aria-label="Refresh stats"
+            className="btn btn-sm btn-secondary"
+          >
+            Refresh stats
+          </button>
+        </div>
+        {lastMessage && (
+          <p
+            className="mt-3 text-xs"
+            style={{ color: 'var(--color-text-muted)' }}
+            aria-live="polite"
+          >
+            {lastMessage}
+          </p>
+        )}
+      </div>
+
+      <div
+        className="text-xxs"
+        style={{ color: 'var(--color-text-muted)' }}
+      >
+        Backend endpoints: <code>POST /api/v1/admin/seed-kg?force=true</code>,{' '}
+        <code>POST /api/v1/admin/seed-corpus?force=true</code>. Both refuse to
+        run in production.
+      </div>
+    </div>
+  )
+}
+
 function IntegrationSettings() {
   const [integrations, setIntegrations] = useState(() => {
     try {
@@ -529,6 +680,15 @@ function IntegrationSettings() {
 export default function Settings() {
   const [searchParams] = useSearchParams()
   const tabParam = searchParams.get('tab')
+  const [isDevEnv, setIsDevEnv] = useState(false)
+  useEffect(() => {
+    api.getKgStats()
+      .then(s => setIsDevEnv(s.environment === 'development'))
+      .catch(() => setIsDevEnv(false))
+  }, [])
+  const settingsSections = isDevEnv
+    ? [...BASE_SETTINGS_SECTIONS, ADMIN_SECTION]
+    : BASE_SETTINGS_SECTIONS
   const [activeSection, setActiveSection] = useState(
     tabParam && settingsSections.some(s => s.id === tabParam) ? tabParam : 'appearance'
   )
@@ -564,6 +724,8 @@ export default function Settings() {
         return <DataSettings />
       case 'integrations':
         return <IntegrationSettings />
+      case 'admin':
+        return <AdminSeedSettings />
       default:
         return <AppearanceSettings />
     }

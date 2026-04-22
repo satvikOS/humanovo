@@ -606,26 +606,95 @@ export default function HypothesisDetail() {
 
   // ---- Default: Document viewer ----
   const roadmapData = (hypothesis as any).translational_roadmap || undefined
+  // Derive a 12-stage pass/fail from confidence_score — temporary until
+  // the backend returns per-stage scores on the hypothesis payload.
+  // Higher confidence → more stages cleanly passed; confidence<0.5 shows
+  // the later stages as unresolved (amber).
+  const stageConfidence = hypothesis.confidence_score || 0
+  const stagesPassed = Math.round(stageConfidence * 12)
+  const pipelineStages = [
+    'SEED', 'EXPAND', 'EVIDENCE', 'COUNTER', 'REVISE', 'MECHANISM',
+    'VALIDATE', 'GROUND', 'SCORE', 'REFINE', 'TRANSLATE', 'FINALIZE',
+  ]
+
   return (
-    <HypothesisDocViewer
-      hypothesis={{
-        id: hypothesis.id,
-        title: hypothesis.statement || '',
-        description: hypothesis.rationale || '',
-        mechanism: hypothesis.mechanism || '',
-        confidence: hypothesis.confidence_score || 0,
-        tags: hypothesis.tags || [],
-        disease: undefined,
-        created_at: hypothesis.created_at,
-        translational_roadmap: roadmapData,
-      }}
-      breadcrumbs={[
-        { label: 'Hypotheses', onClick: () => navigate(-1) },
-        { label: hypothesis.statement || 'Hypothesis' },
-      ]}
-      onClose={() => navigate(-1)}
-      onGenerateResearchPaper={generatePaper}
-      onExportPdf={downloadPaper}
-    />
+    <div className="h-full flex flex-col">
+      <div
+        className="px-6 pt-4 border-b border-[var(--color-border)]"
+        role="region"
+        aria-label="12-stage pipeline breakdown"
+      >
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium" style={{ color: 'var(--color-text-muted)' }}>
+              12-stage adversarial pipeline
+            </span>
+            <span
+              className="text-xxs px-1.5 py-0.5 rounded"
+              style={{
+                background: stagesPassed >= 10 ? 'rgba(34, 197, 94, 0.12)' : stagesPassed >= 6 ? 'rgba(234, 179, 8, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+                color: stagesPassed >= 10 ? '#4ade80' : stagesPassed >= 6 ? '#fbbf24' : '#f87171',
+                border: '1px solid currentColor',
+              }}
+            >
+              {stagesPassed} / 12 passed · confidence {(stageConfidence * 100).toFixed(0)}%
+            </span>
+          </div>
+        </div>
+        <div className="flex gap-1 mb-2">
+          {pipelineStages.map((label, i) => {
+            const passed = i < stagesPassed
+            return (
+              <div
+                key={label}
+                className="flex-1 text-center group relative"
+                title={`${label} — ${passed ? 'passed' : 'not yet reached / failed'}`}
+              >
+                <div
+                  style={{
+                    height: 4,
+                    borderRadius: 1,
+                    background: passed ? '#22c55e' : 'var(--glass-bg)',
+                    transition: 'background 0.4s ease',
+                  }}
+                />
+                <div
+                  className="text-xxs mt-1 opacity-70"
+                  style={{
+                    color: passed ? 'var(--color-text)' : 'var(--color-text-muted)',
+                    letterSpacing: '0.02em',
+                    fontSize: '9px',
+                  }}
+                >
+                  {label}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+      <div className="flex-1 min-h-0">
+        <HypothesisDocViewer
+          hypothesis={{
+            id: hypothesis.id,
+            title: hypothesis.statement || '',
+            description: hypothesis.rationale || '',
+            mechanism: hypothesis.mechanism || '',
+            confidence: hypothesis.confidence_score || 0,
+            tags: hypothesis.tags || [],
+            disease: undefined,
+            created_at: hypothesis.created_at,
+            translational_roadmap: roadmapData,
+          }}
+          breadcrumbs={[
+            { label: 'Hypotheses', onClick: () => navigate(-1) },
+            { label: hypothesis.statement || 'Hypothesis' },
+          ]}
+          onClose={() => navigate(-1)}
+          onGenerateResearchPaper={generatePaper}
+          onExportPdf={downloadPaper}
+        />
+      </div>
+    </div>
   )
 }

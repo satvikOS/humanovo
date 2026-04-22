@@ -1,8 +1,17 @@
 """
-GenUp Services Module
+humanovo Services Module
 
 Contains business logic services for the platform.
 """
+
+from app.services.audit_service import (
+    AuditContext,
+    AuditEventType,
+    AuditRecord,
+    AuditService,
+    AuditSeverity,
+    get_audit_service,
+)
 
 from app.services.brave_search_service import (
     BraveSearchService,
@@ -24,6 +33,13 @@ from app.services.disease_discovery_service import (
 )
 
 __all__ = [
+    # Audit
+    "AuditContext",
+    "AuditEventType",
+    "AuditRecord",
+    "AuditService",
+    "AuditSeverity",
+    "get_audit_service",
     # Brave Search
     "BraveSearchService",
     "HealthcareDataIngestionService",

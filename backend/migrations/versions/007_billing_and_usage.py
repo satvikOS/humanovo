@@ -16,7 +16,7 @@ import sqlalchemy as sa
 
 
 revision = "007_billing_and_usage"
-down_revision = "006"
+down_revision = "006_pgvector_management"
 branch_labels = None
 depends_on = None
 
@@ -41,6 +41,19 @@ def upgrade() -> None:
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
     """)
+    # 005_billing_and_usage pre-creates usage_events with a different
+    # column set (model_name vs model, no run_id/run_type). Fill in the
+    # missing columns idempotently so indexes here succeed regardless
+    # of which migration ran first.
+    op.execute("ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS run_id UUID")
+    op.execute("ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS run_type VARCHAR(20) DEFAULT 'discovery'")
+    op.execute("ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS model VARCHAR(100)")
+    op.execute("UPDATE usage_events SET model = model_name WHERE model IS NULL AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='usage_events' AND column_name='model_name')")
+    op.execute("ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS stage VARCHAR(30)")
+    op.execute("ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS tokens_input INTEGER NOT NULL DEFAULT 0")
+    op.execute("ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS tokens_output INTEGER NOT NULL DEFAULT 0")
+    op.execute("ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS success BOOLEAN NOT NULL DEFAULT TRUE")
+    op.execute("ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS error_type VARCHAR(100)")
     op.execute("CREATE INDEX IF NOT EXISTS idx_usage_project ON usage_events(project_id)")
     op.execute("CREATE INDEX IF NOT EXISTS idx_usage_created ON usage_events(created_at DESC)")
     op.execute("CREATE INDEX IF NOT EXISTS idx_usage_model ON usage_events(model)")
@@ -64,6 +77,7 @@ def upgrade() -> None:
             UNIQUE(date, project_id, model, provider)
         )
     """)
+    op.execute("ALTER TABLE usage_daily_summary ADD COLUMN IF NOT EXISTS model VARCHAR(100)")
     op.execute("CREATE INDEX IF NOT EXISTS idx_daily_summary_date ON usage_daily_summary(date DESC)")
     op.execute("CREATE INDEX IF NOT EXISTS idx_daily_summary_project ON usage_daily_summary(project_id)")
 
@@ -99,6 +113,7 @@ def upgrade() -> None:
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
     """)
+    op.execute("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS user_id UUID")
     op.execute("CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, read, created_at DESC)")
 
 

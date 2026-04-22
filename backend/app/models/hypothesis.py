@@ -51,7 +51,7 @@ class EvidenceReference(BaseModel):
         index=True,
     )
     evidence_type = Column(
-        Enum(EvidenceType, name="evidence_type"),
+        Enum(EvidenceType, name="evidence_type", values_callable=lambda x: [e.value for e in x]),
         default=EvidenceType.NEUTRAL,
         nullable=False,
     )
@@ -83,7 +83,7 @@ class Hypothesis(BaseModel):
 
     # Status and scores
     status = Column(
-        Enum(HypothesisStatus, name="hypothesis_status"),
+        Enum(HypothesisStatus, name="hypothesis_status", values_callable=lambda x: [e.value for e in x]),
         default=HypothesisStatus.DRAFT,
         nullable=False,
         index=True,
@@ -115,7 +115,10 @@ class Hypothesis(BaseModel):
     evidence_refs = relationship(
         "EvidenceReference",
         back_populates="hypothesis",
-        lazy="dynamic",
+        # lazy="select" allows `selectinload(Hypothesis.evidence_refs)` in the
+        # /hypotheses endpoints; `lazy="dynamic"` was incompatible with eager
+        # loading and surfaced as a 500 on GET /api/v1/hypotheses.
+        lazy="select",
         cascade="all, delete-orphan",
     )
 

@@ -18,6 +18,9 @@ import {
 import api from '../services/api'
 import type { Project } from '../services/api'
 import { persistGet, getActivityLog, type ActivityEntry } from '../utils/persistence'
+import { EmptyState } from '../components/EmptyState'
+import { DifferentiatorStrip } from '../components/DifferentiatorStrip'
+import { toast } from '../contexts/ToastContext'
 
 // ── Stat Card (expandable) ──────────────────────────────────────
 
@@ -521,6 +524,115 @@ function ActivityFeed() {
 
 // ── Main Dashboard ──────────────────────────────────────────────
 
+// ── Discovery Pipeline Status ───────────────────────────────────
+// Small live widget that polls /orchestrator/status every 5 s so the
+// user sees whether any 12-stage Discovery run is in flight. Clicks
+// straight into the Agents page for detail. Silently tolerates the
+// orchestrator being idle (most common state).
+
+function DiscoveryStatusWidget() {
+  const [state, setState] = useState<string>('idle')
+  const [stage, setStage] = useState<number | null>(null)
+  const [disease, setDisease] = useState<string>('')
+
+  useEffect(() => {
+    let cancelled = false
+    const tick = async () => {
+      try {
+        const s = await api.getOrchestratorStatus()
+        if (cancelled) return
+        const st = (s as unknown as { state?: string }).state ?? 'idle'
+        setState(st)
+        const cur = (s as unknown as { current_stage?: number }).current_stage
+        setStage(typeof cur === 'number' ? cur : null)
+        const d = (s as unknown as { disease?: string }).disease
+        setDisease(typeof d === 'string' ? d : '')
+      } catch {
+        /* orchestrator not reachable — treat as idle, no toast spam */
+      }
+    }
+    tick()
+    const id = window.setInterval(tick, 5000)
+    return () => { cancelled = true; window.clearInterval(id) }
+  }, [])
+
+  const isActive = state === 'running' || state === 'paused'
+  const pct = stage != null ? Math.min(100, Math.round((stage / 12) * 100)) : 0
+
+  return (
+    <Link
+      to="/agents"
+      className="glass-card p-4 block hover:bg-[var(--glass-bg-hover)] transition-all"
+      aria-label={`Discovery pipeline ${state}`}
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <FiZap
+            className="w-4 h-4"
+            style={{
+              color: isActive ? '#4ade80' : 'var(--color-text-muted)',
+            }}
+          />
+          <span className="text-sm font-medium">Discovery</span>
+          <span
+            className="text-xxs px-1.5 py-0.5 rounded"
+            style={{
+              background: isActive
+                ? 'rgba(34, 197, 94, 0.12)'
+                : 'var(--glass-bg)',
+              color: isActive ? '#4ade80' : 'var(--color-text-muted)',
+              border: '1px solid ' + (isActive ? 'rgba(34, 197, 94, 0.4)' : 'var(--color-border)'),
+            }}
+          >
+            {state}
+          </span>
+        </div>
+        <FiChevronRight className="w-3 h-3 text-[var(--color-text-muted)]" />
+      </div>
+      {isActive ? (
+        <div className="mt-3">
+          {disease && (
+            <div className="text-xxs text-[var(--color-text-muted)] mb-1 truncate">
+              {disease} · stage {stage ?? '—'}/12
+            </div>
+          )}
+          {/* 12 stage ticks — cheapest way to visualise pipeline progress */}
+          <div className="flex gap-0.5 mb-1" aria-hidden>
+            {Array.from({ length: 12 }).map((_, i) => {
+              const done = stage !== null && i < stage
+              const current = stage !== null && i === stage
+              return (
+                <span
+                  key={i}
+                  style={{
+                    flex: 1,
+                    height: 4,
+                    borderRadius: 1,
+                    background: done
+                      ? '#22c55e'
+                      : current
+                      ? 'linear-gradient(90deg, #4ade80, transparent)'
+                      : 'var(--glass-bg)',
+                    transition: 'background 0.4s ease',
+                  }}
+                />
+              )
+            })}
+          </div>
+          <div className="text-xxs text-[var(--color-text-muted)]">
+            {pct}% · SEED → EXPAND → EVIDENCE → COUNTER → REVISE → MECHANISM →
+            VALIDATE → GROUND → SCORE → REFINE → TRANSLATE → FINALIZE
+          </div>
+        </div>
+      ) : (
+        <div className="mt-2 text-xxs text-[var(--color-text-muted)]">
+          No run in flight. Tap to start the 12-stage adversarial pipeline.
+        </div>
+      )}
+    </Link>
+  )
+}
+
 export default function Dashboard() {
   const navigate = useNavigate()
   const [projects, setProjects] = useState<Project[]>([])
@@ -594,6 +706,7 @@ export default function Dashboard() {
   ]
 
   const quickActions = [
+    { label: 'Start Discovery', icon: FiZap, action: () => navigate('/agents?start=1'), color: 'var(--color-text)', primary: true },
     { label: 'New Project', icon: FiFolder, action: () => navigate('/projects?new=1'), color: 'var(--color-text)' },
     { label: 'Compute Lab', icon: FiCpu, action: () => navigate('/compute-lab'), color: 'var(--color-text-secondary)' },
     { label: 'Visualize', icon: FiTrendingUp, action: () => navigate('/data-visualization'), color: 'var(--color-text-secondary)' },
@@ -630,6 +743,11 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* Differentiator badges — live-metric surface of the 5 moats from
+          COMPETITIVE_POSITIONING.md. Each badge is clickable + carries
+          a tooltip with the positioning language for investor demos. */}
+      <DifferentiatorStrip />
+
       {/* Stats Grid */}
       <div className="grid grid-cols-6 gap-3">
         {stats.map((stat) => (
@@ -644,8 +762,9 @@ export default function Dashboard() {
           <div className="flex-1"><ActivityFeed /></div>
         </div>
 
-        {/* Recent Simulations + Notebooks — fill height equally */}
+        {/* Discovery pipeline status + Recent Simulations + Notebooks */}
         <div className="flex flex-col gap-4 h-full">
+          <DiscoveryStatusWidget />
           <div className="flex-1 min-h-0">
             <RecentSimulationsWidget />
           </div>
@@ -664,24 +783,29 @@ export default function Dashboard() {
           </Link>
         </div>
         {projects.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 text-[var(--color-text-muted)]">
-            <FiFolder className="w-8 h-8 mb-3 opacity-30" />
-            <p className="text-sm">No projects yet</p>
-            <button
-              onClick={() => navigate('/projects?new=1')}
-              className="text-sm mt-2 rounded-lg active:scale-95"
-              style={{
-                background: 'rgba(91, 141, 184, 0.25)',
-                border: '1px solid rgba(91, 141, 184, 0.35)',
-                color: '#fff',
-                borderRadius: 10,
-                padding: '6px 14px',
-                transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
-              }}
-            >
-              Create your first project
-            </button>
-          </div>
+          <EmptyState
+            icon={<FiFolder />}
+            title="No projects yet"
+            description="Projects group hypotheses, evidence, and simulations into a single research context. Start one to kick off a 12-stage discovery run."
+            action={{
+              label: 'Create your first project',
+              onClick: () => navigate('/projects?new=1'),
+              ariaLabel: 'Create your first project',
+            }}
+            secondary={{
+              label: 'Seed demo KG',
+              onClick: async () => {
+                try {
+                  const r = await api.seedKg()
+                  toast('success', r.message, { title: 'Demo data seeded' })
+                } catch (e) {
+                  toast('error', String(e), { title: 'Seed failed' })
+                }
+              },
+              ariaLabel: 'Seed demo knowledge graph',
+            }}
+            fullPanel={false}
+          />
         ) : (
           <div className="grid grid-cols-3 gap-3">
             {projects.slice(0, 6).map(project => (

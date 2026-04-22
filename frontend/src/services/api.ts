@@ -1,4 +1,5 @@
 import axios, { AxiosInstance } from 'axios'
+import { toast } from '../contexts/ToastContext'
 
 // In production (CloudFront), set VITE_API_BASE_URL to the backend URL
 // (e.g. https://api.humanovo.com or API Gateway URL).
@@ -12,25 +13,77 @@ const apiClient: AxiosInstance = axios.create({
   },
 })
 
+// Opt-out header: set `X-Silent-Error: '1'` on a request to suppress the
+// global toast (useful for background polls where failure is expected
+// and the caller already handles the error).
+const SILENT_HEADER = 'X-Silent-Error'
+
+function describeError(error: {
+  response?: { status?: number; data?: unknown; config?: unknown }
+  config?: { method?: string; url?: string; headers?: Record<string, unknown> }
+  request?: unknown
+  message?: string
+}): { message: string; silent: boolean } {
+  const silent = Boolean(error.config?.headers?.[SILENT_HEADER])
+  const method = (error.config?.method || 'GET').toUpperCase()
+  const url = error.config?.url || ''
+  if (error.response) {
+    const status = error.response.status ?? 0
+    const data = error.response.data as { detail?: unknown; message?: unknown } | string | undefined
+    const detail =
+      typeof data === 'string' ? data :
+      typeof data?.detail === 'string' ? data.detail :
+      typeof data?.message === 'string' ? data.message :
+      ''
+    return {
+      message: `${status} ${method} ${url}${detail ? ` — ${detail}` : ''}`,
+      silent,
+    }
+  }
+  if (error.request) {
+    return {
+      message: `Network error — ${method} ${url} did not respond`,
+      silent,
+    }
+  }
+  return { message: error.message || 'Unknown error', silent }
+}
+
 // Response interceptor: detect non-JSON responses (e.g. CloudFront returning HTML)
 apiClient.interceptors.response.use(
   (response) => {
     const ct = response.headers['content-type'] || ''
     if (ct.includes('text/html') && typeof response.data === 'string' && response.data.includes('<!doctype')) {
       console.error('[API] Received HTML instead of JSON — API Gateway may not be connected. URL:', response.config?.url)
-      return Promise.reject(new Error(
+      const msg =
         `API returned HTML instead of JSON for ${response.config?.url}. ` +
         'This usually means CloudFront is not routing /api/* to API Gateway. ' +
         'Check your infrastructure deployment.'
-      ))
+      toast('error', msg, { title: 'API misrouted' })
+      return Promise.reject(new Error(msg))
     }
     return response
   },
   (error) => {
+    const { message, silent } = describeError(error)
     if (error.response) {
-      console.error(`[API] ${error.response.status} ${error.config?.method?.toUpperCase()} ${error.config?.url}:`, error.response.data)
+      console.error(`[API] ${message}:`, error.response.data)
     } else if (error.request) {
-      console.error('[API] No response received:', error.config?.url, error.message)
+      console.error(`[API] ${message}`)
+    }
+    if (!silent && error.response?.status !== 401 && error.response?.status !== 404) {
+      // Collapse all 5xx + network errors under a single title/message so
+      // the ToastContext dedup (3s window) merges a backend-down storm
+      // into one toast instead of one-per-endpoint.
+      const status = error.response?.status
+      const isServerDown = !error.response || (status !== undefined && status >= 500)
+      if (isServerDown) {
+        toast('error', 'Backend unreachable — check the API server, retrying on next request.', {
+          title: 'API offline',
+        })
+      } else {
+        toast('error', message, { title: 'Request failed' })
+      }
     }
     return Promise.reject(error)
   }
@@ -1028,21 +1081,65 @@ export const api = {
         })
       }),
 
-      // Search knowledge graph entities
-      apiClient.get('/knowledge/entities/search', { params: { query, limit: params?.limit || 10 } }).then(r => {
-        (r.data || []).forEach((item: any) => {
-          results.push({
-            id: item.id,
-            type: 'entity',
-            title: item.name,
-            snippet: item.description || `${item.entity_type} with ${item.source_count} sources`,
-            source: item.entity_type,
-            source_type: item.entity_type,
-            relevance_score: 0.7,
-            metadata: { entity_type: item.entity_type, aliases: item.aliases, external_ids: item.external_ids },
-            tags: item.aliases || [],
+      // Search knowledge graph entities — merge exact-match + vector.
+      // Legacy /knowledge/entities/search handles alias matches; the
+      // new /knowledge-graph/search/similar adds pgvector cosine
+      // ranking. We merge the two here so the downstream dedup sees a
+      // single entity-id space (no `vec:` prefix kludge). If the same
+      // entity appears in both streams, vector-similarity wins because
+      // it carries an actually-useful score; otherwise we keep alias
+      // match's static 0.7 relevance.
+      Promise.allSettled([
+        apiClient.get('/knowledge/entities/search', {
+          params: { query, limit: params?.limit || 10 },
+        }),
+        apiClient.post('/knowledge-graph/search/similar', {
+          query, limit: params?.limit || 10,
+        }),
+      ]).then(([aliasRes, vectorRes]) => {
+        const byId: Record<string, SearchResult> = {}
+        if (aliasRes.status === 'fulfilled') {
+          (aliasRes.value.data || []).forEach((item: any) => {
+            byId[item.id] = {
+              id: item.id,
+              type: 'entity',
+              title: item.name,
+              snippet: item.description || `${item.entity_type} with ${item.source_count} sources`,
+              source: item.entity_type,
+              source_type: item.entity_type,
+              relevance_score: 0.7,
+              metadata: { entity_type: item.entity_type, aliases: item.aliases, external_ids: item.external_ids, alias_match: true },
+              tags: item.aliases || [],
+            }
           })
-        })
+        }
+        if (vectorRes.status === 'fulfilled') {
+          ((vectorRes.value.data as Array<{ entity: any; similarity: number }>) || []).forEach(row => {
+            const existing = byId[row.entity.id]
+            const relevance = Math.max(0, row.similarity)
+            const merged: SearchResult = {
+              id: row.entity.id,
+              type: 'entity',
+              title: row.entity.name,
+              snippet: row.entity.description ||
+                `${row.entity.category} · vector match (cos=${row.similarity.toFixed(3)})`,
+              source: row.entity.category,
+              source_type: row.entity.category,
+              relevance_score: existing
+                ? Math.max(existing.relevance_score, relevance)
+                : relevance,
+              metadata: {
+                ...(existing?.metadata || {}),
+                entity_type: row.entity.category,
+                similarity: row.similarity,
+                vector_match: true,
+              },
+              tags: existing?.tags || row.entity.synonyms || [],
+            }
+            byId[row.entity.id] = merged
+          })
+        }
+        Object.values(byId).forEach(r => results.push(r))
       }),
 
       // Search projects
@@ -1269,6 +1366,61 @@ export const api = {
 
   async getConstitutionalConstraints(): Promise<string> {
     const { data } = await apiClient.get('/config/constitutional-constraints')
+    return data
+  },
+
+  // ─── Admin ──────────────────────────────────────────────────────
+  async getKgStats(): Promise<{
+    environment: string
+    node_count: number
+    edge_count: number
+    embedding_count: number
+    evidence_count?: number
+    evidence_embedding_count?: number
+    hypothesis_count?: number
+    project_count?: number
+    seed_available: boolean
+    corpus_seeded?: boolean
+  }> {
+    const { data } = await apiClient.get('/admin/kg-stats')
+    return data
+  },
+  async seedKg(force = false): Promise<{ ok: boolean; message: string; nodes_after: number; edges_after: number; embeddings_written: number }> {
+    const { data } = await apiClient.post('/admin/seed-kg', null, { params: { force } })
+    return data
+  },
+  async seedCorpus(force = false): Promise<{ ok: boolean; message: string; evidence_count_after?: number }> {
+    const { data } = await apiClient.post('/admin/seed-corpus', null, { params: { force } })
+    return data
+  },
+
+  // ─── Citation verification (CrossRef + NCBI round-trip) ───────
+  async verifyCitation(params: { doi?: string; pmid?: string; claim_text?: string }): Promise<{
+    exists: boolean
+    source: 'crossref' | 'ncbi' | 'none'
+    doi?: string
+    pmid?: string
+    title?: string
+    authors: string[]
+    year?: string
+    is_fabricated: boolean
+    network_ok: boolean
+    message: string
+  }> {
+    const { data } = await apiClient.post('/citation/verify', params)
+    return data
+  },
+
+  // ─── Vector-similarity search (pgvector over KG entities) ──────
+  async searchSimilarEntities(
+    query: string,
+    opts?: { limit?: number; min_similarity?: number },
+  ): Promise<Array<{ entity: { id: string; name: string; category: string; description?: string; synonyms?: string[] }; similarity: number }>> {
+    const { data } = await apiClient.post('/knowledge-graph/search/similar', {
+      query,
+      limit: opts?.limit ?? 10,
+      min_similarity: opts?.min_similarity ?? 0.0,
+    })
     return data
   },
 }

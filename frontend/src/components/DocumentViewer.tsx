@@ -117,7 +117,7 @@ export default function DocumentViewer({
               onClick={onGenerateResearchPaper}
               disabled={isGenerating}
               className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-white/10 text-[var(--color-text-secondary)] hover:bg-white/15 disabled:opacity-50 text-xs font-medium transition-colors"
-              title="Generate Research Paper"
+              title="Generate Research Paper" aria-label="Generate Research Paper"
             >
               {isGenerating ? (
                 <FiRefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -131,7 +131,7 @@ export default function DocumentViewer({
             <button
               onClick={handleDownload}
               className="p-1.5 rounded hover:bg-secondary-700 text-secondary-400 hover:text-white transition-colors"
-              title="Download"
+              title="Download" aria-label="Download"
             >
               <FiDownload className="w-4 h-4" />
             </button>
@@ -146,7 +146,7 @@ export default function DocumentViewer({
           <button
             onClick={onClose}
             className="p-1.5 rounded hover:bg-secondary-700 text-secondary-400 hover:text-white transition-colors"
-            title="Close"
+            title="Close" aria-label="Close"
           >
             <FiX className="w-4 h-4" />
           </button>
@@ -285,7 +285,7 @@ export function HypothesisViewer({
             <div>
               <div className="flex items-start justify-between mb-2">
                 <h2 className="text-lg font-semibold text-white leading-tight pr-2">{hypothesis.title}</h2>
-                <button onClick={onClose} className="p-1 rounded hover:bg-secondary-700 text-secondary-400 shrink-0">
+                <button aria-label="Close" onClick={onClose} className="p-1 rounded hover:bg-secondary-700 text-secondary-400 shrink-0">
                   <FiX className="w-4 h-4" />
                 </button>
               </div>

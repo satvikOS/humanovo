@@ -3,6 +3,7 @@ import { FiCpu, FiPlus, FiTrash2, FiPlay } from 'react-icons/fi'
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 import { logActivity } from '../utils/persistence'
+import { toast } from '../contexts/ToastContext'
 
 interface MLModel {
   id: string; name: string; model_type: string; status: string; description: string; version: string
@@ -27,7 +28,15 @@ export default function MLModelManager() {
   const [prediction, setPrediction] = useState<any>(null)
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
-  const load = async () => { try { const r = await fetch(API); if (r.ok) setModels((await r.json()).items || []) } catch { /* network error */ } }
+  const load = async () => {
+    try {
+      const r = await fetch(API)
+      if (!r.ok) throw new Error(`models ${r.status}`)
+      setModels((await r.json()).items || [])
+    } catch (err) {
+      toast('error', `Could not load ML models — ${err instanceof Error ? err.message : 'network error'}`, { title: 'ML Models' })
+    }
+  }
   useEffect(() => { load() }, [])
 
   const selectModel = async (m: MLModel) => {

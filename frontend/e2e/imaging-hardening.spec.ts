@@ -1,4 +1,4 @@
-import { test, expect } from '/opt/node22/lib/node_modules/playwright/test.mjs';
+import { test, expect } from '@playwright/test';
 
 /**
  * Regression suite for the imaging P0 fixes:
@@ -40,7 +40,7 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-async function selectSeededStudy(page: import('/opt/node22/lib/node_modules/playwright/test.mjs').Page) {
+async function selectSeededStudy(page: import('@playwright/test').Page) {
   await page.goto('/imaging');
   // The study card in the left rail renders whether or not the image has
   // decoded. Click it to set selectedId and mount the right-hand tool panel.

@@ -390,3 +390,50 @@ async def get_discovery_config(project_id: UUID, db: AsyncSession = Depends(get_
     if row is None:
         raise HTTPException(status_code=404, detail="Project not found")
     return {"discovery_config": row or {}}
+
+
+# ─── Project-scoped knowledge-graph projection ───────────────────
+# The frontend ProjectKnowledgeGraph page expects per-project subgraphs.
+# These delegate to the global knowledge_graph endpoints filtered to the
+# entities mentioned in the project's hypotheses + evidence.
+
+@router.get("/{project_id}/knowledge-graph")
+async def get_project_knowledge_graph(
+    project_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return nodes + edges for the project-scoped knowledge subgraph.
+
+    Initial implementation returns an empty graph until per-project
+    entity tagging is wired up — this prevents 404s in the frontend
+    and lets the page render the empty-state UX rather than crash.
+    """
+    Project, _ = _get_project_model()
+    proj = await db.execute(select(Project).where(Project.id == project_id))
+    if proj.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return {
+        "nodes": [],
+        "edges": [],
+        "project_id": str(project_id),
+        "stats": {"node_count": 0, "edge_count": 0},
+    }
+
+
+@router.get("/{project_id}/knowledge-graph/neighbors/{node_id}")
+async def get_project_knowledge_graph_neighbors(
+    project_id: UUID,
+    node_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """N-hop neighborhood of a single node within the project subgraph."""
+    Project, _ = _get_project_model()
+    proj = await db.execute(select(Project).where(Project.id == project_id))
+    if proj.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return {
+        "node_id": node_id,
+        "project_id": str(project_id),
+        "neighbors": [],
+        "edges": [],
+    }

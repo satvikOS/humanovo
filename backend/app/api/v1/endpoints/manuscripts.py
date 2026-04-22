@@ -60,6 +60,7 @@ class SubmissionCreate(BaseModel):
     notes: str = ""
 
 
+@router.get("", include_in_schema=False)
 @router.get("/")
 async def list_manuscripts(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Manuscript).order_by(Manuscript.updated_at.desc()))
@@ -67,6 +68,7 @@ async def list_manuscripts(db: AsyncSession = Depends(get_db)):
     return {"items": [m.to_dict() for m in items], "total": len(items)}
 
 
+@router.post("", include_in_schema=False)
 @router.post("/")
 async def create_manuscript(data: ManuscriptCreate, db: AsyncSession = Depends(get_db)):
     ms = Manuscript(

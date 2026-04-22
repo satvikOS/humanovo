@@ -7,6 +7,7 @@ import {
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 import { logActivity } from '../utils/persistence'
+import { toast } from '../contexts/ToastContext'
 
 interface Trial {
   id: string; protocol_number: string; title: string; phase: string; status: string
@@ -47,7 +48,15 @@ export default function ClinicalTrials() {
   const [form, setForm] = useState({ protocol_number: '', title: '', phase: 'Phase I', pi: '', target_enrollment: 0 })
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
-  const load = async () => { try { const r = await fetch(API); if (r.ok) setTrials((await r.json()).items || []) } catch { /* network error */ } }
+  const load = async () => {
+    try {
+      const r = await fetch(API)
+      if (!r.ok) throw new Error(`trials ${r.status}`)
+      setTrials((await r.json()).items || [])
+    } catch (err) {
+      toast('error', `Could not load trials — ${err instanceof Error ? err.message : 'network error'}`, { title: 'Clinical Trials' })
+    }
+  }
   useEffect(() => { load() }, [])
 
   // Consume & strip known deep-link params after first mount; defer

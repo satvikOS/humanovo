@@ -40,6 +40,15 @@ const DiscoveryRunner = lazy(() => import('./pages/DiscoveryRunner'))
 const HypothesisReview = lazy(() => import('./pages/HypothesisReview'))
 const ProjectKnowledgeGraph = lazy(() => import('./pages/ProjectKnowledgeGraph'))
 const PgvectorManager = lazy(() => import('./pages/PgvectorManager'))
+const Landing = lazy(() => import('./pages/Landing'))
+
+// Previously-orphaned pages: code existed on disk but no route pointed
+// to them. Now reachable from the sidebar.
+const Hypotheses = lazy(() => import('./pages/Hypotheses'))
+const HypothesisDetail = lazy(() => import('./pages/HypothesisDetail'))
+const KnowledgeGraph = lazy(() => import('./pages/KnowledgeGraph'))
+const KnowledgeGraphViewer = lazy(() => import('./pages/KnowledgeGraphViewer'))
+const MLModelManager = lazy(() => import('./pages/MLModelManager'))
 
 // Error boundary to prevent blank pages on runtime errors
 class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; error: string }> {
@@ -126,8 +135,22 @@ function LazyPageWrapper({ children }: { children: ReactNode }) {
 function App() {
   return (
     <Routes>
+      {/* Marketing landing page — outside the Layout shell. Served at
+          both /welcome (explicit) and / (for first-time visitors who
+          haven't set the "humanovo.seen" localStorage flag). */}
+      <Route path="/welcome" element={<LazyPageWrapper><Landing /></LazyPageWrapper>} />
       <Route path="/" element={<Layout />}>
-        <Route index element={<Navigate to="/dashboard" replace />} />
+        <Route
+          index
+          element={
+            // Returning users jump straight to the dashboard; newcomers
+            // get the landing page once. Setting the flag is the
+            // landing page CTA's responsibility.
+            typeof window !== 'undefined' && window.localStorage.getItem('humanovo.seen') === '1'
+              ? <Navigate to="/dashboard" replace />
+              : <Navigate to="/welcome" replace />
+          }
+        />
         <Route path="dashboard" element={<PageWrapper><Dashboard /></PageWrapper>} />
         <Route path="projects" element={<PageWrapper><Projects /></PageWrapper>} />
         <Route path="projects/:projectId" element={<PageWrapper><ProjectDetail /></PageWrapper>} />
@@ -162,8 +185,13 @@ function App() {
         <Route path="regulatory" element={<LazyPageWrapper><RegulatoryCompliance /></LazyPageWrapper>} />
         <Route path="imaging" element={<LazyPageWrapper><ResearchImaging /></LazyPageWrapper>} />
         <Route path="biobank" element={<LazyPageWrapper><BiobankManager /></LazyPageWrapper>} />
+        {/* Previously-orphaned pages — now routed + in sidebar nav */}
+        <Route path="hypotheses" element={<LazyPageWrapper><Hypotheses /></LazyPageWrapper>} />
+        <Route path="hypotheses/:hypothesisId" element={<LazyPageWrapper><HypothesisDetail /></LazyPageWrapper>} />
+        <Route path="knowledge-graph" element={<LazyPageWrapper><KnowledgeGraph /></LazyPageWrapper>} />
+        <Route path="knowledge-graph/viewer" element={<LazyPageWrapper><KnowledgeGraphViewer /></LazyPageWrapper>} />
+        <Route path="ml-models" element={<LazyPageWrapper><MLModelManager /></LazyPageWrapper>} />
         {/* Project Jamison — platform-level pages */}
-        {/* Pipeline Intelligence and Billing removed */}
         <Route path="dev/pgvector" element={<LazyPageWrapper><PgvectorManager /></LazyPageWrapper>} />
       </Route>
     </Routes>

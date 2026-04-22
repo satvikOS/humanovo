@@ -76,6 +76,7 @@ class BudgetUpdate(BaseModel):
 # ── Trial CRUD ──────────────────────────────────────────────────
 
 
+@router.get("", include_in_schema=False)
 @router.get("/")
 async def list_trials(db: AsyncSession = Depends(get_db)):
     result = await db.execute(
@@ -85,6 +86,7 @@ async def list_trials(db: AsyncSession = Depends(get_db)):
     return {"items": [t.to_dict() for t in items], "total": len(items)}
 
 
+@router.post("", include_in_schema=False)
 @router.post("/")
 async def create_trial(data: TrialCreate, db: AsyncSession = Depends(get_db)):
     trial = ClinicalTrial(

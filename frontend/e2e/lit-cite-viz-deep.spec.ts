@@ -4,7 +4,7 @@
  * and-clean `?add=1` / `?q=` pattern shipped across the earlier
  * deep-link batches.
  */
-import { test, expect, Page } from '/opt/node22/lib/node_modules/playwright/test.mjs'
+import { test, expect, Page } from '@playwright/test'
 
 function attachErrorCapture(page: Page, bag: string[]) {
   page.on('pageerror', e => bag.push('PAGEERROR: ' + e.message))

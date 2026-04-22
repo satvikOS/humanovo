@@ -1,7 +1,7 @@
 """add audit_records table
 
-Revision ID: 0004_audit_records
-Revises: (auto-detect)
+Revision ID: 009_audit_records
+Revises: 008_platform_entities
 Create Date: 2026-04-14
 
 Adds the append-only, hash-chained audit log table used by

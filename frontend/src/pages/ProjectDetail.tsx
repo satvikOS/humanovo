@@ -127,7 +127,7 @@ function DocumentViewer({ doc, onClose }: { doc: ProjectDocument; onClose: () =>
               <FiFile className="w-3.5 h-3.5" />
             </a>
           )}
-          <button onClick={onClose} className="p-1.5 rounded hover:bg-white/5 text-[var(--color-text-muted)]">
+          <button aria-label="Close" onClick={onClose} className="p-1.5 rounded hover:bg-white/5 text-[var(--color-text-muted)]">
             <FiX className="w-4 h-4" />
           </button>
         </div>
@@ -790,7 +790,7 @@ export default function ProjectDetail() {
                 Print
               </button>
             )}
-            <button onClick={closeViewer} className="p-1.5 rounded hover:bg-white/5 text-[var(--color-text-muted)]">
+            <button aria-label="Close" onClick={closeViewer} className="p-1.5 rounded hover:bg-white/5 text-[var(--color-text-muted)]">
               <FiX className="w-4 h-4" />
             </button>
           </div>
@@ -1015,7 +1015,7 @@ export default function ProjectDetail() {
               <button
                 onClick={startEditing}
                 className="p-2 rounded-lg hover:bg-white/5 text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
-                title="Edit project info"
+                title="Edit project info" aria-label="Edit project info"
               >
                 <FiEdit2 className="w-4 h-4" />
               </button>

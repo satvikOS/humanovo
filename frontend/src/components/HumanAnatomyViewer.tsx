@@ -19,7 +19,8 @@ import {
 } from 'react-icons/fi'
 import clsx from 'clsx'
 
-// Import Master Library for integration
+// Routed through libraryAdapter so the 3.2 MB static data can be swapped
+// for live /api/v1/knowledge-graph/entities calls in one place.
 import {
   completeSkeleton,
   completeMuscularSystem,
@@ -28,7 +29,7 @@ import {
   allHistologicalTissues,
   findElementById,
   BiologicalElement
-} from '../data/MasterHumanLibraryIndex'
+} from '../data/libraryAdapter'
 
 // ==================== TYPES ====================
 
@@ -683,13 +684,13 @@ export default function HumanAnatomyViewer({ className, onElementSelect }: Human
             <button
               onClick={resetView}
               className="p-1.5 hover:bg-[var(--color-border)] rounded transition-colors"
-              title="Reset View"
+              title="Reset View" aria-label="Reset View"
             >
               <FiRotateCw className="w-3.5 h-3.5" />
             </button>
             <button
               className="p-1.5 hover:bg-[var(--color-border)] rounded transition-colors"
-              title="Center"
+              title="Center" aria-label="Center"
             >
               <FiCrosshair className="w-3.5 h-3.5" />
             </button>
@@ -762,7 +763,7 @@ export default function HumanAnatomyViewer({ className, onElementSelect }: Human
                   placeholder="Ask a question..."
                   className="input flex-1 text-xs"
                 />
-                <button className="btn btn-primary btn-sm">
+                <button aria-label="Send" className="btn btn-primary btn-sm">
                   <FiSend className="w-3.5 h-3.5" />
                 </button>
               </div>

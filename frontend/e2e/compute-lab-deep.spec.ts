@@ -12,7 +12,7 @@
  *   - Clicking a tab button updates the URL so the selection is
  *     shareable and reload-safe.
  */
-import { test, expect, Page } from '/opt/node22/lib/node_modules/playwright/test.mjs'
+import { test, expect, Page } from '@playwright/test'
 
 function attachErrorCapture(page: Page, bag: string[]) {
   page.on('pageerror', e => bag.push('PAGEERROR: ' + e.message))

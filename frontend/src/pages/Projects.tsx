@@ -9,6 +9,7 @@ import {
 import clsx from 'clsx'
 import api, { Project, ProjectCreate } from '../services/api'
 import { persistGet, formatDateTime, logActivity } from '../utils/persistence'
+import { Skeleton } from '../components/Skeleton'
 
 interface SavedResearchPaper {
   id: string
@@ -115,7 +116,7 @@ function CreateProjectModal({ onClose, onCreate }: { onClose: () => void; onCrea
             </div>
             <h2 className="text-lg font-semibold">New Research Project</h2>
           </div>
-          <button onClick={onClose} className="text-[var(--color-text-muted)] hover:text-white p-1 rounded hover:bg-white/5 transition-colors">
+          <button aria-label="Close" onClick={onClose} className="text-[var(--color-text-muted)] hover:text-white p-1 rounded hover:bg-white/5 transition-colors">
             <FiX className="w-5 h-5" />
           </button>
         </div>
@@ -660,7 +661,7 @@ export default function Projects() {
           </div>
 
           {/* Refresh */}
-          <button onClick={loadProjects} className="btn text-[var(--color-text-muted)] hover:text-white p-2" title="Refresh">
+          <button onClick={loadProjects} className="btn text-[var(--color-text-muted)] hover:text-white p-2" title="Refresh" aria-label="Refresh">
             <FiRefreshCw className={clsx('w-4 h-4', loading && 'animate-spin')} />
           </button>
         </div>
@@ -752,11 +753,20 @@ export default function Projects() {
 
       {/* Content */}
       {loading ? (
-        <div className="flex items-center justify-center py-20">
-          <div className="flex flex-col items-center gap-3">
-            <div className="w-8 h-8 border-2 border-white/20 border-t-white/80 rounded-full animate-spin" />
-            <span className="text-sm text-[var(--color-text-muted)]">Loading projects...</span>
-          </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4" aria-busy="true" aria-label="Loading projects">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="p-4 rounded-xl bg-[var(--glass-bg)] border border-[var(--color-border)]">
+              <Skeleton variant="rect" height={16} width="60%" />
+              <div style={{ marginTop: 10 }}>
+                <Skeleton lines={3} />
+              </div>
+              <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+                <Skeleton variant="rect" width={60} height={18} />
+                <Skeleton variant="rect" width={80} height={18} />
+                <Skeleton variant="rect" width={50} height={18} />
+              </div>
+            </div>
+          ))}
         </div>
       ) : displayProjects.length > 0 ? (
         viewMode === 'grid' ? (

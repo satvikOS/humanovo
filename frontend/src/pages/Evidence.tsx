@@ -49,6 +49,20 @@ const sourceTypeColors: Record<string, string> = {
   dataset: 'var(--color-text-secondary)',
 }
 
+/** Format an ISO publication date into "Jan 2019" style. Falls back
+ * to the raw string when parsing fails (defensive — some evidence
+ * sources store free-text dates). */
+function formatPublicationDate(raw: string): string {
+  if (!raw) return ''
+  // Already a 4-digit year only?
+  if (/^\d{4}$/.test(raw)) return raw
+  const d = new Date(raw)
+  if (isNaN(d.getTime())) return raw
+  // "Jan 2019" compact form — leaves single-character display in
+  // dense rows but avoids the "2019-01-01T00:00:00" ugliness.
+  return d.toLocaleString('en-US', { month: 'short', year: 'numeric' })
+}
+
 const statusConfig: Record<string, { icon: typeof FiCheckCircle; color: string; label: string }> = {
   verified: { icon: FiCheckCircle, color: 'var(--color-success)', label: 'Verified' },
   pending: { icon: FiClock, color: 'var(--color-warning)', label: 'Pending' },
@@ -316,32 +330,69 @@ export default function Evidence() {
     })
   }, [])
 
-  // Fetch linked entities when an evidence item is selected
+  // Fetch linked entities when an evidence item is selected.
+  // Uses pgvector semantic search (abstract + title as the query) so
+  // the entities in the sidebar are the ones most biologically similar
+  // to the evidence content — not just alias hits.
   useEffect(() => {
     if (!selectedId) { setLinkedEntities([]); return }
     const item = evidence.find(e => e.id === selectedId)
     if (!item) return
-    // Search for entities mentioned in the evidence title/entities field
-    const searchTerms = [...(item.entities || []), ...(item.tags || [])].filter(Boolean)
-    if (searchTerms.length === 0 && item.title) {
-      // Fallback: search by title keywords
-      api.searchEntities(item.title, { limit: 5 }).then(setLinkedEntities).catch(() => setLinkedEntities([]))
-    } else if (searchTerms.length > 0) {
-      Promise.allSettled(
-        searchTerms.slice(0, 5).map(term => api.searchEntities(term, { limit: 2 }))
-      ).then(results => {
-        const entities: Entity[] = []
-        const seen = new Set<string>()
-        results.forEach(r => {
-          if (r.status === 'fulfilled') {
-            r.value.forEach((e: Entity) => {
-              if (!seen.has(e.id)) { seen.add(e.id); entities.push(e) }
-            })
-          }
-        })
-        setLinkedEntities(entities.slice(0, 10))
-      })
+    // Build the vector-search query from title + key-bearing sentences
+    // of the abstract. Simple naive truncation (.slice(0,500)) dropped
+    // sentences containing biomedical terms that were late in a long
+    // abstract — specifically anything discussing methods/results at
+    // the tail. Bias: keep the title, then keep sentences that contain
+    // biomedical-style tokens (uppercase genes like TP53, known disease
+    // suffixes, numeric doses), falling back to the first sentences.
+    const ranker = (sentence: string): number => {
+      let score = 0
+      // ALL-CAPS tokens 2-5 chars → likely gene/protein names (TP53, BRCA1)
+      if (/\b[A-Z][A-Z0-9]{1,5}\b/.test(sentence)) score += 3
+      // Disease suffixes
+      if (/(oma\b|pathy\b|osis\b|itis\b|emia\b|disease|syndrome|cancer)/i.test(sentence)) score += 2
+      // Dose/numeric signal
+      if (/\d+\s?(mg|ml|nM|µM|µg|mcg|mmol|iu|cells|x10)/i.test(sentence)) score += 1
+      // Pathway/mechanism signal
+      if (/(pathway|receptor|inhibit|activ|express|mutat|signal)/i.test(sentence)) score += 1
+      return score
     }
+    const title = item.title || ''
+    const abstract = item.abstract || ''
+    const sentences = abstract.split(/(?<=[.!?])\s+/).filter(s => s.length > 10)
+    sentences.sort((a, b) => ranker(b) - ranker(a))
+    // Title always included; greedily add top-ranked sentences up to 500 chars.
+    const parts: string[] = [title]
+    let remaining = 500 - title.length - 1
+    for (const s of sentences) {
+      if (remaining <= 20) break
+      if (s.length <= remaining) { parts.push(s); remaining -= s.length + 1 }
+    }
+    const queryText = parts.join(' ').slice(0, 500)
+    if (!queryText) { setLinkedEntities([]); return }
+    let cancelled = false
+    api.searchSimilarEntities(queryText, { limit: 10, min_similarity: 0.05 })
+      .then(hits => {
+        if (cancelled) return
+        // Map vector hits back to the legacy Entity shape this panel
+        // already knows how to render. Carry similarity through via
+        // source_count (repurposed as a sort key) + aliases.
+        const mapped: Entity[] = hits.map(h => ({
+          id: h.entity.id,
+          name: h.entity.name,
+          entity_type: h.entity.category,
+          aliases: h.entity.synonyms || [],
+          description: h.entity.description || `cosine=${h.similarity.toFixed(3)}`,
+          external_ids: {},
+          properties: { similarity: h.similarity },
+          source_count: Math.round(h.similarity * 100),
+        }))
+        setLinkedEntities(mapped)
+      })
+      .catch(() => {
+        if (!cancelled) setLinkedEntities([])
+      })
+    return () => { cancelled = true }
   }, [selectedId, evidence])
 
   const selectedItem = evidence.find(e => e.id === selectedId) || null
@@ -550,7 +601,7 @@ export default function Evidence() {
               <option value="patent">Patent</option>
               <option value="user_upload">User Upload</option>
             </select>
-            <button onClick={fetchEvidence} className="btn p-2" title="Refresh">
+            <button onClick={fetchEvidence} className="btn p-2" title="Refresh" aria-label="Refresh">
               <FiRefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             </button>
           </div>
@@ -595,7 +646,7 @@ export default function Evidence() {
                         <h4 className="text-sm font-medium line-clamp-1">{item.title}</h4>
                         <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)] mt-1">
                           <span style={{ color }}>{item.source_type}</span>
-                          {item.publication_date && <span>{item.publication_date}</span>}
+                          {item.publication_date && <span>{formatPublicationDate(item.publication_date)}</span>}
                           {item.citation_count !== undefined && <span>{item.citation_count} citations</span>}
                           {item.id.startsWith('doc-ev-') ? (
                             <div className="ml-auto flex items-center gap-1 flex-shrink-0">
@@ -675,7 +726,7 @@ export default function Evidence() {
               </div>
 
               <div className="flex items-center gap-3 text-xs text-[var(--color-text-muted)]">
-                {selectedItem.publication_date && <span className="flex items-center gap-1"><FiCalendar className="w-3 h-3" />{selectedItem.publication_date}</span>}
+                {selectedItem.publication_date && <span className="flex items-center gap-1"><FiCalendar className="w-3 h-3" />{formatPublicationDate(selectedItem.publication_date)}</span>}
                 <span className="flex items-center gap-1"><FiDatabase className="w-3 h-3" />{selectedItem.source_type}</span>
                 {selectedItem.citation_count !== undefined && <span>{selectedItem.citation_count} citations</span>}
               </div>
@@ -750,7 +801,7 @@ export default function Evidence() {
                       placeholder="Add tag..."
                       className="text-xs bg-transparent outline-none w-16 text-[var(--color-text-muted)]"
                     />
-                    {newTag && <button onClick={handleAddTag} className="text-[var(--color-text-muted)]"><FiTag className="w-3 h-3" /></button>}
+                    {newTag && <button onClick={handleAddTag} className="text-[var(--color-text-muted)]" aria-label="Tag"><FiTag className="w-3 h-3" /></button>}
                   </div>
                 </div>
               </div>
@@ -898,7 +949,7 @@ export default function Evidence() {
                       </a>
                     </>
                   )}
-                  <button onClick={closeDocViewer} className="p-1.5 rounded-lg hover:bg-white/5 text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
+                  <button aria-label="Close" onClick={closeDocViewer} className="p-1.5 rounded-lg hover:bg-white/5 text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
                     <FiX className="w-4 h-4" />
                   </button>
                 </div>
@@ -969,7 +1020,7 @@ function AddEvidenceModal({ onClose, onAdd }: { onClose: () => void; onAdd: (for
       <div className="glass-card-static w-full max-w-lg mx-4 animate-scale-in" style={{ background: 'var(--color-surface-solid)' }}>
         <div className="flex items-center justify-between p-5 border-b border-[var(--color-border)]">
           <h2 className="text-lg font-semibold">Add Evidence</h2>
-          <button onClick={onClose} className="text-[var(--color-text-muted)] hover:text-[var(--color-text)]"><FiX className="w-5 h-5" /></button>
+          <button aria-label="Close" onClick={onClose} className="text-[var(--color-text-muted)] hover:text-[var(--color-text)]"><FiX className="w-5 h-5" /></button>
         </div>
         <form onSubmit={e => { e.preventDefault(); onAdd(form) }} className="p-5 space-y-4">
           <div>

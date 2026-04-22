@@ -122,31 +122,64 @@ export default function KnowledgeGraph() {
   })
   const [, setGraphLoading] = useState(true)
 
-  // Fetch graph data from API on mount
+  // Fetch graph data from the live /api/v1/knowledge-graph/entities
+  // endpoint (introduced in Batch 4). Legacy /knowledge-graph/full was
+  // never implemented server-side and returned 404 on every page load.
   useEffect(() => {
     const fetchGraph = async () => {
       setGraphLoading(true)
       try {
-        const res = await fetch('/api/v1/knowledge-graph/full')
-        if (res.ok) {
-          const data = await res.json()
-          const nodes: GraphNode[] = (data.nodes || []).map((n: any) => ({
-            id: n.id,
-            label: n.name || n.label || n.id,
-            type: n.entity_type || n.type || 'gene',
-            confidence: n.confidence || 0.5,
-            sources: n.source_count || 0,
-          }))
-          const edges: GraphEdge[] = (data.edges || data.relations || []).map((e: any) => ({
-            id: e.id,
-            source: e.source_id || e.source,
-            target: e.target_id || e.target,
-            relation: e.relation_type || e.relation || 'associates',
-            confidence: e.confidence || 0.5,
-            evidenceCount: e.evidence_count || 0,
-          }))
-          setGraphData({ nodes, edges })
+        // Pull an initial page of entities as graph nodes.
+        const res = await fetch('/api/v1/knowledge-graph/entities?limit=200')
+        if (!res.ok) throw new Error(`entities ${res.status}`)
+        const data = await res.json()
+        const nodes: GraphNode[] = (data.entities || data.items || []).map((n: {
+          id: string
+          name?: string
+          category?: string
+          source?: string
+          evidence_count?: number
+        }) => ({
+          id: n.id,
+          label: n.name || n.id,
+          type: n.category || 'gene',
+          confidence: 0.75,
+          sources: n.evidence_count || 0,
+        }))
+        // Expand the first ~10 nodes' relationships into edges so the
+        // graph has visible structure; expansion continues on click.
+        const edges: GraphEdge[] = []
+        const seedIds = nodes.slice(0, 10).map((n) => n.id)
+        for (const nid of seedIds) {
+          try {
+            const er = await fetch(
+              `/api/v1/knowledge-graph/entities/${encodeURIComponent(nid)}/relationships?limit=10`,
+            )
+            if (!er.ok) continue
+            const rels = (await er.json()) as Array<{
+              id: string
+              source_id: string
+              target_id: string
+              relation_type?: string
+              confidence?: number
+              evidence_count?: number
+            }>
+            for (const r of rels) {
+              edges.push({
+                id: r.id,
+                source: r.source_id,
+                target: r.target_id,
+                relation: r.relation_type || 'associates',
+                confidence: r.confidence ?? 0.5,
+                evidenceCount: r.evidence_count ?? 0,
+              })
+            }
+          } catch {
+            // per-entity relationship fetch failures are non-fatal —
+            // the graph renders whatever we collected.
+          }
         }
+        setGraphData({ nodes, edges })
       } catch (err) {
         console.warn('Failed to fetch knowledge graph data:', err)
       }
@@ -516,12 +549,10 @@ export default function KnowledgeGraph() {
             >
               <FiFilter className="w-5 h-5" />
             </button>
-            <button className="p-2 bg-[var(--glass-bg)] rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
+            <button aria-label="Download" className="p-2 bg-[var(--glass-bg)] rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
               <FiDownload className="w-5 h-5" />
             </button>
-            <button className="p-2 bg-[var(--glass-bg)] rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
-              <FiShare2 className="w-5 h-5" />
-            </button>
+            <button className="p-2 bg-[var(--glass-bg)] rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)]" aria-label="Share"><FiShare2 className="w-5 h-5" /></button>
           </div>
         </div>
 
@@ -744,7 +775,7 @@ export default function KnowledgeGraph() {
             >
               <FiZoomOut className="w-5 h-5" />
             </button>
-            <button
+            <button aria-label="0"
               onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }}
               className="p-2 bg-[var(--glass-bg)] rounded-lg hover:bg-[var(--glass-bg-hover)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
             >

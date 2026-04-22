@@ -30,17 +30,21 @@ import {
   FiCheck,
 } from 'react-icons/fi'
 import clsx from 'clsx'
+import api from '../services/api'
 
-// Import Master Human Library
+// Biology library — routed through the single-seam adapter so the
+// MasterHumanLibrary*.ts static imports can be swapped for live
+// /api/v1/knowledge-graph/entities calls in a later migration batch
+// without touching this file.
 import {
-  masterLibraryTree,
-  libraryStats,
-  searchElements,
-  findElementById,
   allBiologicalElements,
-  LibraryTreeNode,
-  BiologicalElement as MasterLibraryElement
-} from '../data/MasterHumanLibraryIndex'
+  findElementById,
+  libraryStats,
+  masterLibraryTree,
+  searchElements,
+  useLibraryTree,
+} from '../data/libraryAdapter'
+import type { BiologicalElement as MasterLibraryElement, LibraryTreeNode } from '../data/libraryAdapter'
 
 // ==================== COMPREHENSIVE BIOLOGICAL DATA MODEL ====================
 
@@ -1940,7 +1944,18 @@ function MasterLibraryTree({
   )
 }
 
-function MasterLibraryDetails({ element, onAddToCanvas }: { element: MasterLibraryElement | null; onAddToCanvas?: (id: string) => void }) {
+function MasterLibraryDetails({
+  element,
+  onAddToCanvas,
+  stats,
+}: {
+  element: MasterLibraryElement | null
+  onAddToCanvas?: (id: string) => void
+  // Live stats from useLibraryTree(); falls back to the static
+  // libraryStats export when the caller hasn't wired the hook yet.
+  stats?: { totalElements: number; categories: number; aiSimulationReady: number }
+}) {
+  const displayStats = stats || libraryStats
   const [activeTab, setActiveTab] = useState<'info' | 'simulation' | 'interactions'>('info')
 
   if (!element) {
@@ -1952,11 +1967,11 @@ function MasterLibraryDetails({ element, onAddToCanvas }: { element: MasterLibra
           <div className="text-center mb-2">Library Statistics:</div>
           <div className="grid grid-cols-2 gap-x-4 gap-y-1">
             <span>Total Elements:</span>
-            <span className="text-primary-400">{libraryStats.totalElements}</span>
+            <span className="text-primary-400">{displayStats.totalElements}</span>
             <span>Categories:</span>
-            <span className="text-primary-400">{libraryStats.categories}</span>
+            <span className="text-primary-400">{displayStats.categories}</span>
             <span>AI-Ready:</span>
-            <span className="text-[var(--color-text-secondary)]">{libraryStats.aiSimulationReady}</span>
+            <span className="text-[var(--color-text-secondary)]">{displayStats.aiSimulationReady}</span>
           </div>
         </div>
       </div>
@@ -2077,20 +2092,39 @@ function MasterLibraryDetails({ element, onAddToCanvas }: { element: MasterLibra
                 )}
               </div>
               <div className="space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-[var(--color-text-muted)]">Baseline:</span>
-                  <span>{element.simulationParams.baselineValue} {element.simulationParams.unit}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-[var(--color-text-muted)]">Range:</span>
-                  <span>{element.simulationParams.minValue} - {element.simulationParams.maxValue}</span>
-                </div>
-                {element.simulationParams.halfLife && (
-                  <div className="flex justify-between">
-                    <span className="text-[var(--color-text-muted)]">Half-life:</span>
-                    <span>{element.simulationParams.halfLife}</span>
-                  </div>
-                )}
+                {(() => {
+                  const sp = element.simulationParams
+                  // Guard against live entities that carry the neutral
+                  // { 0, 0, 1 } default from libraryAdapter — hide the
+                  // "simulation parameters unknown" panel for them instead
+                  // of rendering a misleading 0–1 range slider.
+                  const hasRealParams = sp.unit !== '' || sp.baselineValue !== 0 || sp.maxValue > 1
+                  if (!hasRealParams) {
+                    return (
+                      <div className="text-xxs text-[var(--color-text-muted)] italic">
+                        Simulation parameters not available for this entity.
+                      </div>
+                    )
+                  }
+                  return (
+                    <>
+                      <div className="flex justify-between">
+                        <span className="text-[var(--color-text-muted)]">Baseline:</span>
+                        <span>{sp.baselineValue} {sp.unit}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-[var(--color-text-muted)]">Range:</span>
+                        <span>{sp.minValue} - {sp.maxValue}</span>
+                      </div>
+                      {sp.halfLife && (
+                        <div className="flex justify-between">
+                          <span className="text-[var(--color-text-muted)]">Half-life:</span>
+                          <span>{sp.halfLife}</span>
+                        </div>
+                      )}
+                    </>
+                  )
+                })()}
               </div>
             </div>
 
@@ -2101,8 +2135,10 @@ function MasterLibraryDetails({ element, onAddToCanvas }: { element: MasterLibra
                   <label className="text-xxs text-[var(--color-text-muted)]">Target Value</label>
                   <input
                     type="range"
+                    // Clamp to a non-zero span so the range slider never
+                    // degenerates to min===max and the thumb stays usable.
                     min={element.simulationParams.minValue}
-                    max={element.simulationParams.maxValue}
+                    max={Math.max(element.simulationParams.maxValue, element.simulationParams.minValue + 1)}
                     defaultValue={element.simulationParams.baselineValue}
                     className="w-full"
                   />
@@ -2112,7 +2148,7 @@ function MasterLibraryDetails({ element, onAddToCanvas }: { element: MasterLibra
                     <FiPlay className="w-3 h-3" />
                     Run Simulation
                   </button>
-                  <button className="btn btn-sm btn-secondary">
+                  <button aria-label="Pause" className="btn btn-sm btn-secondary">
                     <FiPause className="w-3 h-3" />
                   </button>
                 </div>
@@ -2195,7 +2231,7 @@ function WorkbenchCopyButton({ text }: { text: string }) {
     })
   }
   return (
-    <button onClick={handleCopy} className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-[var(--color-surface)] text-[var(--color-text-muted)]" title="Copy">
+    <button onClick={handleCopy} className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-[var(--color-surface)] text-[var(--color-text-muted)]" title="Copy" aria-label="Copy">
       {copied ? <FiCheck className="w-3 h-3 text-[var(--color-text-secondary)]" /> : <FiClipboard className="w-3 h-3" />}
     </button>
   )
@@ -2228,7 +2264,7 @@ function ConstantPanel({
           <div className="w-2 h-2 rounded-full bg-white/40 animate-pulse" />
           <h3 className="text-sm font-medium">Constant AI</h3>
         </div>
-        <button onClick={onToggle} className="p-1 hover:bg-[var(--color-surface)] rounded transition-colors">
+        <button aria-label="Close" onClick={onToggle} className="p-1 hover:bg-[var(--color-surface)] rounded transition-colors">
           <FiX className="w-3.5 h-3.5" />
         </button>
       </div>
@@ -2287,7 +2323,7 @@ function ConstantPanel({
             placeholder="Ask Constant..."
             className="flex-1 bg-transparent text-xs outline-none px-2"
           />
-          <button onClick={onSend} disabled={loading || !input.trim()} className="p-1.5 rounded hover:bg-[var(--color-surface)] transition-colors disabled:opacity-30">
+          <button aria-label="Send" onClick={onSend} disabled={loading || !input.trim()} className="p-1.5 rounded hover:bg-[var(--color-surface)] transition-colors disabled:opacity-30">
             <FiSend className="w-3.5 h-3.5 text-[var(--color-text-secondary)]" />
           </button>
         </div>
@@ -2321,7 +2357,7 @@ function NodeEditModal({
             <FiEdit3 className="w-4 h-4 text-primary-400" />
             Edit Node
           </h3>
-          <button onClick={onClose} className="p-1 hover:bg-[var(--color-surface)] rounded transition-colors">
+          <button aria-label="Close" onClick={onClose} className="p-1 hover:bg-[var(--color-surface)] rounded transition-colors">
             <FiX className="w-4 h-4" />
           </button>
         </div>
@@ -2423,6 +2459,18 @@ function EdgeLabelModal({
 // ==================== MAIN WORKBENCH COMPONENT ====================
 
 export default function Workbench() {
+  // Live Sapien Corridor tree from the backend KG. Shadows the
+  // adapter's empty placeholder once the first /entities batch
+  // resolves. `liveTreeLoading` feeds a small spinner in the header.
+  const {
+    tree: liveTree,
+    stats: liveStats,
+    loading: liveTreeLoading,
+  } = useLibraryTree()
+  const activeLibraryTree: LibraryTreeNode[] =
+    liveTree.length > 0 ? liveTree : masterLibraryTree
+  const activeLibraryStats =
+    liveStats.totalElements > 0 ? liveStats : libraryStats
   // Merge hardcoded structures with all library elements (deduplicated by ID)
   const [components] = useState<BiologicalComponent[]>(() => {
     const libraryComponents = getAllLibraryComponents()
@@ -2473,7 +2521,56 @@ export default function Workbench() {
 
   const selectedComponent = components.find(c => c.id === selectedId) || null
   const selectedLibraryElement = selectedLibraryId ? findElementById(selectedLibraryId) ?? null : null
-  const librarySearchResults = searchTerm.length > 2 ? searchElements(searchTerm) : []
+  // Local search over the hardcoded biological structures (fast).
+  const localSearchResults = searchTerm.length > 2 ? searchElements(searchTerm) : []
+
+  // Live vector search over the backend KG — surfaces semantically
+  // similar entities (not just alias matches). Debounced by React
+  // already via searchTerm change. Runs in parallel with `localSearch`.
+  const [vectorSearchResults, setVectorSearchResults] = useState<
+    Array<{ entity: { id: string; name: string; category: string; description?: string }; similarity: number }>
+  >([])
+  useEffect(() => {
+    if (searchTerm.length < 3) { setVectorSearchResults([]); return }
+    let cancelled = false
+    const t = window.setTimeout(async () => {
+      try {
+        const res = await api.searchSimilarEntities(searchTerm, { limit: 10 })
+        if (!cancelled) setVectorSearchResults(res)
+      } catch { /* silently skip; local path already populated */ }
+    }, 250)
+    return () => { cancelled = true; window.clearTimeout(t) }
+  }, [searchTerm])
+
+  // Merge: vector results come first (ranked by cosine), then local.
+  // Dedup by name since vector has backend UUIDs but local uses
+  // library IDs; name is the one stable join key across both paths.
+  const librarySearchResults = (() => {
+    const seen = new Set<string>()
+    const out: typeof localSearchResults = []
+    for (const vs of vectorSearchResults) {
+      if (seen.has(vs.entity.name.toLowerCase())) continue
+      seen.add(vs.entity.name.toLowerCase())
+      // Shape-compat: vector entity → minimal MasterLibraryElement.
+      out.push({
+        id: vs.entity.id,
+        name: vs.entity.name,
+        category: vs.entity.category,
+        subcategory: '',
+        description: vs.entity.description || `vector match · cos=${vs.similarity.toFixed(2)}`,
+        location: [], functions: [], interactions: [],
+        diseaseLinks: [], drugTargets: [],
+        simulationParams: { baselineValue: 0, minValue: 0, maxValue: 1, unit: '' },
+        aiSimulationReady: false,
+      })
+    }
+    for (const le of localSearchResults) {
+      if (seen.has(le.name.toLowerCase())) continue
+      seen.add(le.name.toLowerCase())
+      out.push(le)
+    }
+    return out
+  })()
   const selectedGraphNode = nodes.find(n => n.id === selectedNode) || null
   const selectedGraphEntity = selectedGraphNode ? components.find(c => c.id === selectedGraphNode.entityId) || null : null
 
@@ -3267,8 +3364,20 @@ IMPORTANT: If the user asks you to connect nodes, suggest connections, or explai
         <div className="w-72 border-r border-[var(--color-border)] bg-[var(--color-bg-elevated)] flex flex-col">
           <div className="px-3 pt-3 pb-2 border-b border-[var(--color-border)]">
             <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-medium">Sapien Corridor</h3>
-              <span className="text-xxs text-[var(--color-text-secondary)]">{components.length} entities</span>
+              <h3 className="text-sm font-medium flex items-center gap-1.5">
+                Sapien Corridor
+                {liveTreeLoading && (
+                  <span
+                    aria-label="Loading live knowledge graph"
+                    className="inline-block w-1.5 h-1.5 rounded-full bg-primary-400 animate-pulse"
+                  />
+                )}
+              </h3>
+              <span className="text-xxs text-[var(--color-text-secondary)]">
+                {activeLibraryStats.totalElements > 0
+                  ? `${activeLibraryStats.totalElements} live · ${components.length} total`
+                  : `${components.length} entities`}
+              </span>
             </div>
             <div className="relative">
               <FiSearch className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--color-text-muted)]" />
@@ -3316,7 +3425,7 @@ IMPORTANT: If the user asks you to connect nodes, suggest connections, or explai
               </div>
             ) : (
               <MasterLibraryTree
-                nodes={masterLibraryTree}
+                nodes={activeLibraryTree}
                 onSelect={(id) => { setSelectedLibraryId(id); setSelectedId(id) }}
                 selectedId={selectedLibraryId}
                 expandedNodes={expandedLibraryNodes}
@@ -3347,7 +3456,7 @@ IMPORTANT: If the user asks you to connect nodes, suggest connections, or explai
               <button onClick={() => setZoom(z => Math.max(0.2, z - 0.15))} className="btn btn-sm btn-secondary" title="Zoom Out">
                 <FiZoomOut className="w-3 h-3" />
               </button>
-              <button onClick={resetView} className="btn btn-sm btn-secondary" title="Reset View">
+              <button onClick={resetView} className="btn btn-sm btn-secondary" title="Reset View" aria-label="Reset View">
                 <FiCrosshair className="w-3 h-3" />
               </button>
               <div className="w-px h-5 bg-[var(--color-border)] mx-1" />
@@ -3359,27 +3468,27 @@ IMPORTANT: If the user asks you to connect nodes, suggest connections, or explai
                   >
                     <FiEdit3 className="w-3 h-3" />
                   </button>
-                  <button onClick={deleteSelectedNode} className="btn btn-sm btn-secondary text-[var(--color-text-muted)] hover:text-[var(--color-text-muted)]" title="Delete Node">
+                  <button onClick={deleteSelectedNode} className="btn btn-sm btn-secondary text-[var(--color-text-muted)] hover:text-[var(--color-text-muted)]" title="Delete Node" aria-label="Delete Node">
                     <FiTrash2 className="w-3 h-3" />
                   </button>
                   <div className="w-px h-5 bg-[var(--color-border)] mx-1" />
                 </>
               )}
-              <button onClick={clearGraph} className="btn btn-sm btn-secondary" title="Clear Canvas">
+              <button onClick={clearGraph} className="btn btn-sm btn-secondary" title="Clear Canvas" aria-label="Clear Canvas">
                 <FiTrash2 className="w-3 h-3" />
                 Clear
               </button>
             </div>
             <div className="flex items-center gap-1">
-              <button onClick={importGraphJSON} className="btn btn-sm btn-secondary" title="Import JSON">
+              <button onClick={importGraphJSON} className="btn btn-sm btn-secondary" title="Import JSON" aria-label="Import JSON">
                 <FiUpload className="w-3 h-3" />
                 Import
               </button>
-              <button onClick={exportGraphJSON} className="btn btn-sm btn-secondary" title="Export JSON">
+              <button onClick={exportGraphJSON} className="btn btn-sm btn-secondary" title="Export JSON" aria-label="Export JSON">
                 <FiDownload className="w-3 h-3" />
                 JSON
               </button>
-              <button onClick={exportGraphPNG} className="btn btn-sm btn-secondary" title="Export PNG">
+              <button onClick={exportGraphPNG} className="btn btn-sm btn-secondary" title="Export PNG" aria-label="Export PNG">
                 <FiImage className="w-3 h-3" />
                 PNG
               </button>
@@ -3670,7 +3779,7 @@ IMPORTANT: If the user asks you to connect nodes, suggest connections, or explai
                       {selectedLibraryElement.aiSimulationReady ? 'AI Ready' : 'Manual'}
                     </span>
                   )}
-                  <button className="p-1 hover:bg-[var(--color-surface)] rounded transition-colors">
+                  <button aria-label="Settings" className="p-1 hover:bg-[var(--color-surface)] rounded transition-colors">
                     <FiSettings className="w-3.5 h-3.5" />
                   </button>
                 </div>
@@ -3678,7 +3787,7 @@ IMPORTANT: If the user asks you to connect nodes, suggest connections, or explai
             </div>
             <div className="flex-1 overflow-y-auto">
               {selectedLibraryId ? (
-                <MasterLibraryDetails element={selectedLibraryElement} onAddToCanvas={addLibraryElementToCanvas} />
+                <MasterLibraryDetails element={selectedLibraryElement} onAddToCanvas={addLibraryElementToCanvas} stats={activeLibraryStats} />
               ) : (
                 <div className="p-3">
                   <PropertiesPanel component={selectedComponent} />

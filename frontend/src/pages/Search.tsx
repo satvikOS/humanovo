@@ -263,7 +263,36 @@ export default function Search() {
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') handleSearch()
+    // Keyboard result navigation — j/k/ArrowDown/ArrowUp cycles results
+    // when the input doesn't have characters the user might be typing.
+    if (results.length > 0 && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+      e.preventDefault()
+      setFocusedResult(i => {
+        const max = results.length - 1
+        if (e.key === 'ArrowDown') return i === null ? 0 : Math.min(max, i + 1)
+        return i === null ? max : Math.max(0, i - 1)
+      })
+    }
   }
+  // Focused result index for keyboard nav. `null` means no result is
+  // keyboard-focused; the visual ring lives below in the result map.
+  const [focusedResult, setFocusedResult] = useState<number | null>(null)
+  // Reset focus ring whenever the result set changes so arrow keys
+  // don't point at a stale index after a new search.
+  useEffect(() => { setFocusedResult(null) }, [results])
+  // Enter on a focused result navigates — mirrors the mouse click
+  // behavior without forcing the user to leave the keyboard.
+  useEffect(() => {
+    if (focusedResult === null) return
+    const onEnter = (ev: KeyboardEvent) => {
+      if (ev.key === 'Enter' && focusedResult !== null && results[focusedResult]) {
+        navigateToResult(results[focusedResult])
+      }
+    }
+    window.addEventListener('keydown', onEnter)
+    return () => window.removeEventListener('keydown', onEnter)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusedResult, results])
 
   const saveSearch = () => {
     if (!query.trim()) return
@@ -330,7 +359,7 @@ export default function Search() {
             <button
               onClick={saveSearch}
               className="btn p-3.5 rounded-xl border border-[var(--color-border)]"
-              title="Save search"
+              title="Save search" aria-label="Save search"
             >
               <FiBookmark className="w-4 h-4" />
             </button>
@@ -484,16 +513,20 @@ export default function Search() {
 
             {/* Results List */}
             <div className="space-y-2">
-              {results.map(result => {
+              {results.map((result, idx) => {
                 const Icon = typeIcons[result.type] || FiFileText
                 const sourceStyle = getSourceStyle(result.source_type || result.source || result.type)
                 const typeStyle = getSourceStyle(result.type)
+                const isFocused = focusedResult === idx
 
                 return (
                   <button
                     key={result.id}
                     onClick={() => navigateToResult(result)}
-                    className="w-full text-left glass-card p-4 transition-all hover:bg-[var(--glass-bg-hover)] group"
+                    className={`w-full text-left glass-card p-4 transition-all group ${isFocused ? 'bg-[var(--glass-bg-hover)]' : 'hover:bg-[var(--glass-bg-hover)]'}`}
+                    style={isFocused ? { outline: '2px solid #60a5fa', outlineOffset: 2, borderColor: '#60a5fa' } : undefined}
+                    aria-current={isFocused ? 'true' : undefined}
+                    ref={el => { if (isFocused && el) el.scrollIntoView({ block: 'nearest' }) }}
                   >
                     <div className="flex items-start gap-3">
                       {/* Type indicator with color */}

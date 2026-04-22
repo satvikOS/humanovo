@@ -671,19 +671,19 @@ export default function Anatomy3DViewer({
             <button
               onClick={handleResetView}
               className="p-1.5 hover:bg-[var(--color-border)] rounded transition-colors"
-              title="Reset View"
+              title="Reset View" aria-label="Reset View"
             >
               <FiRotateCw className="w-3.5 h-3.5" />
             </button>
             <button
               className="p-1.5 hover:bg-[var(--color-border)] rounded transition-colors"
-              title="Screenshot"
+              title="Screenshot" aria-label="Screenshot"
             >
               <FiCamera className="w-3.5 h-3.5" />
             </button>
             <button
               className="p-1.5 hover:bg-[var(--color-border)] rounded transition-colors"
-              title="Export"
+              title="Export" aria-label="Export"
             >
               <FiDownload className="w-3.5 h-3.5" />
             </button>

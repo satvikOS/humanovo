@@ -7,7 +7,7 @@
  * those assertions are soft so the spec still passes in a backend-less
  * environment and only hard-asserts on "no JS crash".
  */
-import { test, expect, Page } from '/opt/node22/lib/node_modules/playwright/test.mjs'
+import { test, expect, Page } from '@playwright/test'
 
 function attachErrorCapture(page: Page, bag: string[]) {
   page.on('pageerror', e => bag.push('PAGEERROR: ' + e.message))

@@ -30,13 +30,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Create enum types
-    op.execute("CREATE TYPE stage_outcome AS ENUM ('success', 'partial', 'failure', 'skipped', 'timeout', 'content_filtered')")
-    op.execute("CREATE TYPE cost_category AS ENUM ('llm_input', 'llm_output', 'embedding', 'biomedical_api', 'search_api', 'storage')")
-    op.execute("CREATE TYPE feedback_type AS ENUM ('expert_review', 'automated_score', 'benchmark_comparison', 'literature_validation', 'experimental_result', 'user_rating')")
-    op.execute("CREATE TYPE benchmark_status AS ENUM ('active', 'deprecated', 'draft')")
-    op.execute("CREATE TYPE benchmark_run_status AS ENUM ('pending', 'running', 'completed', 'failed', 'cancelled')")
-    op.execute("CREATE TYPE optimization_action AS ENUM ('prompt_adjustment', 'temperature_change', 'token_allocation', 'model_swap', 'stage_reorder', 'grounding_threshold', 'evidence_weight')")
+    # Enum types are auto-created by sa.Enum(...) when the tables below
+    # first reference them; manual CREATE TYPE calls would double-up
+    # and fail on asyncpg with DuplicateObjectError.
 
     # Discovery Runs
     op.create_table(
