@@ -1081,42 +1081,66 @@ export const api = {
         })
       }),
 
-      // Search knowledge graph entities — legacy endpoint (exact/alias match)
-      apiClient.get('/knowledge/entities/search', { params: { query, limit: params?.limit || 10 } }).then(r => {
-        (r.data || []).forEach((item: any) => {
-          results.push({
-            id: item.id,
-            type: 'entity',
-            title: item.name,
-            snippet: item.description || `${item.entity_type} with ${item.source_count} sources`,
-            source: item.entity_type,
-            source_type: item.entity_type,
-            relevance_score: 0.7,
-            metadata: { entity_type: item.entity_type, aliases: item.aliases, external_ids: item.external_ids },
-            tags: item.aliases || [],
+      // Search knowledge graph entities — merge exact-match + vector.
+      // Legacy /knowledge/entities/search handles alias matches; the
+      // new /knowledge-graph/search/similar adds pgvector cosine
+      // ranking. We merge the two here so the downstream dedup sees a
+      // single entity-id space (no `vec:` prefix kludge). If the same
+      // entity appears in both streams, vector-similarity wins because
+      // it carries an actually-useful score; otherwise we keep alias
+      // match's static 0.7 relevance.
+      Promise.allSettled([
+        apiClient.get('/knowledge/entities/search', {
+          params: { query, limit: params?.limit || 10 },
+        }),
+        apiClient.post('/knowledge-graph/search/similar', {
+          query, limit: params?.limit || 10,
+        }),
+      ]).then(([aliasRes, vectorRes]) => {
+        const byId: Record<string, SearchResult> = {}
+        if (aliasRes.status === 'fulfilled') {
+          (aliasRes.value.data || []).forEach((item: any) => {
+            byId[item.id] = {
+              id: item.id,
+              type: 'entity',
+              title: item.name,
+              snippet: item.description || `${item.entity_type} with ${item.source_count} sources`,
+              source: item.entity_type,
+              source_type: item.entity_type,
+              relevance_score: 0.7,
+              metadata: { entity_type: item.entity_type, aliases: item.aliases, external_ids: item.external_ids, alias_match: true },
+              tags: item.aliases || [],
+            }
           })
-        })
+        }
+        if (vectorRes.status === 'fulfilled') {
+          ((vectorRes.value.data as Array<{ entity: any; similarity: number }>) || []).forEach(row => {
+            const existing = byId[row.entity.id]
+            const relevance = Math.max(0, row.similarity)
+            const merged: SearchResult = {
+              id: row.entity.id,
+              type: 'entity',
+              title: row.entity.name,
+              snippet: row.entity.description ||
+                `${row.entity.category} · vector match (cos=${row.similarity.toFixed(3)})`,
+              source: row.entity.category,
+              source_type: row.entity.category,
+              relevance_score: existing
+                ? Math.max(existing.relevance_score, relevance)
+                : relevance,
+              metadata: {
+                ...(existing?.metadata || {}),
+                entity_type: row.entity.category,
+                similarity: row.similarity,
+                vector_match: true,
+              },
+              tags: existing?.tags || row.entity.synonyms || [],
+            }
+            byId[row.entity.id] = merged
+          })
+        }
+        Object.values(byId).forEach(r => results.push(r))
       }),
-
-      // Vector-similarity search over KG entities (pgvector cosine).
-      // Runs in parallel with the exact-match entity search above.
-      // Dedup by entity id happens downstream in `filtered` aggregation;
-      // a match from both paths just stacks the relevance score.
-      apiClient.post('/knowledge-graph/search/similar', { query, limit: params?.limit || 10 }).then(r => {
-        ((r.data as Array<{ entity: any; similarity: number }>) || []).forEach(row => {
-          results.push({
-            id: `vec:${row.entity.id}`,
-            type: 'entity',
-            title: row.entity.name,
-            snippet: row.entity.description || `${row.entity.category} · vector match (cos=${row.similarity.toFixed(3)})`,
-            source: row.entity.category,
-            source_type: row.entity.category,
-            relevance_score: Math.max(0, row.similarity),
-            metadata: { entity_type: row.entity.category, similarity: row.similarity, vector_search: true },
-            tags: row.entity.synonyms || [],
-          })
-        })
-      }).catch(() => undefined),
 
       // Search projects
       apiClient.get('/projects', { params: { search: query, page_size: 10 } }).then(r => {
