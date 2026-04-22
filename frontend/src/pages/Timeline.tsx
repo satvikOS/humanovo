@@ -14,6 +14,7 @@ import {
 } from 'react-icons/fi'
 import api from '../services/api'
 import { formatDate, formatDateTime, type ActivityEntry } from '../utils/persistence'
+import { EmptyState } from '../components/EmptyState'
 
 type FilterType = '' | 'project' | 'hypothesis' | 'evidence' | 'simulation' | 'notebook' | 'discovery'
 type TimeRange = 'today' | 'week' | 'month' | 'all'
@@ -213,25 +214,25 @@ export default function Timeline() {
       <div className="flex-1 overflow-y-auto p-6">
         <div className="max-w-3xl mx-auto">
           {Object.entries(grouped).length === 0 ? (
-            <div className="text-center py-16">
-              <FiClock className="w-10 h-10 mx-auto mb-3 text-[var(--color-text-muted)] opacity-30" />
-              {loadState === 'loading' ? (
-                <>
-                  <p className="text-sm text-[var(--color-text-muted)]">Loading activity…</p>
-                  <p className="text-xs text-[var(--color-text-muted)] mt-1">Fetching from the activity log</p>
-                </>
-              ) : loadState === 'error' ? (
-                <>
-                  <p className="text-sm text-[var(--color-error)]">Couldn't reach the activity service</p>
-                  <p className="text-xs text-[var(--color-text-muted)] mt-1">Check your connection or the API and try Refresh above.</p>
-                </>
-              ) : (
-                <>
-                  <p className="text-sm text-[var(--color-text-muted)]">No activity found</p>
-                  <p className="text-xs text-[var(--color-text-muted)] mt-1">Start a discovery or create a project to see activity here</p>
-                </>
-              )}
-            </div>
+            loadState === 'loading' ? (
+              <div className="text-center py-16">
+                <FiClock className="w-10 h-10 mx-auto mb-3 text-[var(--color-text-muted)] opacity-30" />
+                <p className="text-sm text-[var(--color-text-muted)]">Loading activity…</p>
+                <p className="text-xs text-[var(--color-text-muted)] mt-1">Fetching from the activity log</p>
+              </div>
+            ) : loadState === 'error' ? (
+              <div className="text-center py-16">
+                <FiClock className="w-10 h-10 mx-auto mb-3 text-[var(--color-text-muted)] opacity-30" />
+                <p className="text-sm text-[var(--color-error)]">Couldn't reach the activity service</p>
+                <p className="text-xs text-[var(--color-text-muted)] mt-1">Check your connection or the API and try Refresh above.</p>
+              </div>
+            ) : (
+              <EmptyState
+                icon={<FiActivity />}
+                title="No activity yet"
+                description="Start a discovery or create a project to see activity here."
+              />
+            )
           ) : (
             Object.entries(grouped).map(([dateKey, dayActivities]) => (
               <div key={dateKey} className="mb-8">

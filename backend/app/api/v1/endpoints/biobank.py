@@ -47,6 +47,31 @@ class CheckoutRequest(BaseModel):
     expected_return: Optional[str] = None
 
 
+# ── Root listing ───────────────────────────────────────────────
+# Frontend BiobankManager calls /biobank (no suffix) as the canonical
+# "list everything" action. We keep this as a thin alias on top of
+# list_samples so the UI doesn't 404 and the two paths can never
+# drift — this ONE handler owns the shape.
+
+
+@router.get("")
+@router.get("/")
+async def list_biobank_root(
+    sample_type: Optional[str] = None,
+    status: Optional[str] = None,
+    project: Optional[str] = None,
+    search: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    return await list_samples(
+        sample_type=sample_type,
+        status=status,
+        project=project,
+        search=search,
+        db=db,
+    )
+
+
 # ── Samples ─────────────────────────────────────────────────────
 
 

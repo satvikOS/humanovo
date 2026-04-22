@@ -7,6 +7,7 @@ import {
 import { formatDate, formatDateTime } from '../utils/persistence'
 import { toast } from '../contexts/ToastContext'
 import { apiClient } from '../services'
+import { EmptyState } from '../components/EmptyState'
 
 type TabId = 'team' | 'comments' | 'shares' | 'notifications' | 'audit'
 
@@ -147,9 +148,13 @@ export default function Collaboration() {
           {tab === 'team' && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {team.length === 0 && (
-                <div className="col-span-full glass-card p-8 text-center">
-                  <p className="text-sm font-medium mb-1">No teammates yet</p>
-                  <p className="text-xxs text-[var(--color-text-muted)]">Invite collaborators from project settings — they'll appear here with their role and share controls.</p>
+                <div className="col-span-full">
+                  <EmptyState
+                    icon={<FiUsers />}
+                    title="No teammates yet"
+                    description="Invite collaborators from project settings — they'll appear here with their role and share controls."
+                    fullPanel={false}
+                  />
                 </div>
               )}
               {team.map(m => (
@@ -186,7 +191,12 @@ export default function Collaboration() {
                 </div>
               </div>
               {comments.length === 0 ? (
-                <p className="text-xs text-[var(--color-text-muted)] text-center py-8">No comments yet</p>
+                <EmptyState
+                  icon={<FiMessageSquare />}
+                  title="No comments yet"
+                  description="Start a discussion by posting the first comment above."
+                  fullPanel={false}
+                />
               ) : comments.map(c => (
                 <div key={c.id} className="glass-card p-4">
                   <div className="flex items-center gap-2 mb-2">

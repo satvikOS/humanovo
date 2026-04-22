@@ -32,6 +32,7 @@ import api from '../services/api'
 import type { Evidence as EvidenceType, Hypothesis, Entity } from '../services/api'
 import { logActivity, persistGet, persistSet } from '../utils/persistence'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
+import { EmptyState } from '../components/EmptyState'
 
 // Monochrome: source type is indicated by the label text itself; no colored badges.
 const sourceTypeColors: Record<string, string> = {
@@ -623,10 +624,12 @@ export default function Evidence() {
               <FiLoader className="w-8 h-8 animate-spin mx-auto mb-3 text-[var(--color-text-muted)]" />
             </div>
           ) : mergedEvidence.length === 0 ? (
-            <div className="text-center py-16">
-              <FiDatabase className="w-10 h-10 mx-auto mb-3 text-[var(--color-text-muted)] opacity-30" />
-              <p className="text-sm text-[var(--color-text-muted)]">No evidence found</p>
-            </div>
+            <EmptyState
+              icon={<FiDatabase />}
+              title="No evidence yet"
+              description="Gather supporting references to build your case."
+              action={{ label: 'Add Evidence', onClick: () => setShowAddModal(true) }}
+            />
           ) : (
             <div className="space-y-2">
               {mergedEvidence.map(item => {

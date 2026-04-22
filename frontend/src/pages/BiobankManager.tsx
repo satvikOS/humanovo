@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { FiSearch, FiPlus, FiTrash2, FiAlertTriangle, FiLogOut, FiLogIn } from 'react-icons/fi'
+import { FiSearch, FiPlus, FiTrash2, FiAlertTriangle, FiLogOut, FiLogIn, FiDatabase } from 'react-icons/fi'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
+import { EmptyState } from '../components/EmptyState'
 import { logActivity } from '../utils/persistence'
 import { toast } from '../contexts/ToastContext'
 import { apiClient } from '../services'
@@ -278,10 +279,27 @@ export default function BiobankManager() {
                   <tbody>
                     {filtered.length === 0 && (
                       <tr>
-                        <td colSpan={6} className="p-8 text-center text-xs text-[var(--color-text-muted)]">
-                          {samples.length === 0
-                            ? 'No samples registered yet — use "New Sample" to add your first biospecimen.'
-                            : 'No samples match the current filters.'}
+                        <td colSpan={6} className="p-0">
+                          {samples.length === 0 ? (
+                            <EmptyState
+                              icon={<FiDatabase />}
+                              title="No samples registered yet"
+                              description="Register your first biospecimen to track storage, quality, and chain of custody."
+                              action={{ label: 'New Sample', onClick: () => setShowAdd(true) }}
+                              fullPanel={false}
+                            />
+                          ) : (
+                            <EmptyState
+                              icon={<FiDatabase />}
+                              title="No samples match the current filters"
+                              description="Clear the search or adjust the type / status filters."
+                              action={{
+                                label: 'Clear filters',
+                                onClick: () => { setSearch(''); setTypeFilter(''); setStatusFilter('') },
+                              }}
+                              fullPanel={false}
+                            />
+                          )}
                         </td>
                       </tr>
                     )}

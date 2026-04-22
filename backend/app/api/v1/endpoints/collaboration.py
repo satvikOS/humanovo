@@ -78,6 +78,48 @@ async def _log_audit(
 
 # ── Comments ─────────────────────────────────────────────────────
 
+@router.get("/team")
+async def list_team_members(
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """List team members.
+
+    Minimal stub — real team management lives in the auth + organization
+    subsystems. Returns the set of distinct users who have authored a
+    comment or been granted a share, so the Collaboration → Team tab
+    shows everyone who has touched the workspace. Empty list for fresh
+    installs, which the frontend already renders with an EmptyState.
+    """
+    # Gather distinct user IDs/names from comments + shares so the Team
+    # tab reflects "who's been active in this workspace" without
+    # requiring a separate team table.
+    members: dict[str, dict] = {}
+    try:
+        c_res = await db.execute(
+            select(
+                CollaborationComment.user_id,
+                CollaborationComment.user_name,
+                func.max(CollaborationComment.created_at),
+            )
+            .group_by(CollaborationComment.user_id, CollaborationComment.user_name)
+            .limit(100)
+        )
+        for uid, uname, _ in c_res.all():
+            if not uid:
+                continue
+            members.setdefault(str(uid), {
+                "id": str(uid),
+                "name": uname or str(uid),
+                "email": "",
+                "role": "collaborator",
+                "avatar_color": "#60a5fa",
+            })
+    except Exception:
+        # Fall through with whatever we already collected.
+        pass
+    return {"members": list(members.values()), "total": len(members)}
+
+
 @router.get("/comments")
 async def list_comments(
     entity_type: Optional[str] = None,

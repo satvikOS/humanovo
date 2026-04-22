@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   FiSearch, FiPlus, FiTrash2, FiZoomIn, FiZoomOut, FiMaximize2,
-  FiLink,
+  FiLink, FiShare2,
 } from 'react-icons/fi'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
+import { EmptyState } from '../components/EmptyState'
 import { logActivity } from '../utils/persistence'
 import { apiClient } from '../services'
 
@@ -227,6 +228,19 @@ export default function KnowledgeGraphViewer() {
         <div className="flex-1 relative">
           <canvas ref={canvasRef} className="w-full h-full cursor-grab active:cursor-grabbing"
             onClick={handleClick} onMouseDown={handleDown} onMouseMove={handleMove} onMouseUp={handleUp} onMouseLeave={handleUp} onWheel={handleWheel} />
+          {nodes.length === 0 && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="pointer-events-auto">
+                <EmptyState
+                  icon={<FiShare2 />}
+                  title="No nodes in graph"
+                  description="Add biomedical entities (genes, proteins, pathways) to start visualizing relationships."
+                  action={{ label: 'Add Node', onClick: () => setShowAdd(true) }}
+                  fullPanel={false}
+                />
+              </div>
+            </div>
+          )}
           <div className="absolute bottom-4 left-4 glass-card p-3 flex gap-3">
             {Object.entries(TYPE_COLORS).map(([type, color]) => (
               <div key={type} className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-full" style={{ background: color }} /><span className="text-xxs capitalize">{type}</span></div>

@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
-import { FiCpu, FiPlus, FiTrash2, FiPlay } from 'react-icons/fi'
+import { FiCpu, FiPlus, FiTrash2, FiPlay, FiLayers } from 'react-icons/fi'
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
+import { EmptyState } from '../components/EmptyState'
 import { logActivity } from '../utils/persistence'
 import { toast } from '../contexts/ToastContext'
 import { apiClient } from '../services'
@@ -112,7 +113,15 @@ export default function MLModelManager() {
 
       <div className="flex-1 flex overflow-hidden">
         <div className="w-72 border-r border-[var(--color-border)] overflow-y-auto p-3 space-y-1">
-          {models.map(m => (
+          {models.length === 0 ? (
+            <EmptyState
+              icon={<FiLayers />}
+              title="No ML models yet"
+              description="Register your first model to start tracking training runs, metrics, and predictions."
+              action={{ label: 'New Model', onClick: () => setShowAdd(true) }}
+              fullPanel={false}
+            />
+          ) : models.map(m => (
             <div key={m.id} onClick={() => selectModel(m)}
               className={`p-3 rounded-lg cursor-pointer group transition-colors ${selected?.id === m.id ? 'bg-[var(--glass-bg)] border border-[var(--color-border)]' : 'hover:bg-[var(--glass-bg)]'}`}>
               <div className="flex items-center justify-between">

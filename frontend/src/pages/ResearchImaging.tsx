@@ -16,6 +16,7 @@ import clsx from 'clsx'
 import { parseMedicalFile, parsedToDataURL } from '../utils/medicalImaging'
 import VolumeViewer3D from '../components/VolumeViewer3D'
 import { useAlertDialog } from '../components/AlertDialog'
+import { EmptyState } from '../components/EmptyState'
 import { apiClient } from '../services'
 
 type Modality = 'CT' | 'MRI' | 'X-Ray' | 'Ultrasound' | 'PET' | 'Microscopy' | 'Fundus' | 'OCT' | 'Mammography' | 'Endoscopy'
@@ -1438,9 +1439,13 @@ export default function ResearchImaging() {
 
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
           {filteredStudies.length === 0 && (
-            <div className="text-center py-12 text-xs" style={{ color: 'var(--color-text-muted)' }}>
-              No studies. Click + to upload.
-            </div>
+            <EmptyState
+              icon={<FiImage />}
+              title="No studies"
+              description="Upload a DICOM, NIfTI, or standard image to start reviewing."
+              action={{ label: 'Upload study', onClick: () => fileInputRef.current?.click() }}
+              fullPanel={false}
+            />
           )}
           {filteredStudies.map(s => {
             // Null-guard: backend-seeded studies might carry modalities
@@ -2312,9 +2317,12 @@ export default function ResearchImaging() {
                   Annotations ({selected.annotations.length})
                 </div>
                 {selected.annotations.length === 0 && (
-                  <div className="text-xs text-center py-8" style={{ color: 'var(--color-text-muted)' }}>
-                    No annotations. Pick a tool from the toolbar.
-                  </div>
+                  <EmptyState
+                    icon={<FiTarget />}
+                    title="No annotations"
+                    description="Pick a drawing tool from the toolbar to mark regions of interest."
+                    fullPanel={false}
+                  />
                 )}
                 <div className="space-y-1">
                   {selected.annotations.map((a) => (

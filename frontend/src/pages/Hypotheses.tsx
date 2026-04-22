@@ -1,8 +1,9 @@
 import { useState, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { FiZap, FiCheck, FiAlertTriangle, FiClock, FiDownload, FiRefreshCw } from 'react-icons/fi'
 import { api, apiClient, Hypothesis } from '../services/api'
+import { EmptyState } from '../components/EmptyState'
 import clsx from 'clsx'
 
 // Download hypothesis PDF from backend (ReportLab) with client-side fallback.
@@ -151,6 +152,7 @@ type SortKey = 'confidence' | 'novelty' | 'recent' | 'title'
 type StatusFilter = 'all' | 'draft' | 'validated' | 'active' | 'rejected'
 
 export default function Hypotheses() {
+  const navigate = useNavigate()
   const { data, isLoading, isError } = useQuery({
     queryKey: ['hypotheses'],
     queryFn: () => api.getHypotheses({ page: 1, page_size: 50 }),
@@ -267,20 +269,25 @@ export default function Hypotheses() {
           ))}
         </div>
       ) : apiHypotheses.length > 0 ? (
-        <div className="text-center py-16">
-          <FiZap className="w-12 h-12 text-secondary-600 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-white mb-2">No hypotheses match your filters</h3>
-          <p className="text-secondary-400 mb-6">Clear the search or change the status filter.</p>
-        </div>
+        <EmptyState
+          icon={<FiZap />}
+          title="No hypotheses match your filters"
+          description="Clear the search or change the status filter."
+          action={{
+            label: 'Clear filters',
+            onClick: () => { setSearch(''); setStatusFilter('all') },
+          }}
+        />
       ) : (
-        <div className="text-center py-16">
-          <FiZap className="w-12 h-12 text-secondary-600 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-white mb-2">No hypotheses yet</h3>
-          <p className="text-secondary-400 mb-6">
-            Generate your first AI-powered hypothesis from the Discovery page
-          </p>
-          <Link to="/agents" className="btn btn-primary">Start Discovery</Link>
-        </div>
+        <EmptyState
+          icon={<FiZap />}
+          title="No hypotheses yet"
+          description="Generate your first AI-powered hypothesis from the Discovery page."
+          action={{
+            label: 'Start Discovery',
+            onClick: () => navigate('/agents'),
+          }}
+        />
       )}
     </div>
   )
