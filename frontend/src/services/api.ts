@@ -1379,6 +1379,23 @@ export const api = {
     return data
   },
 
+  // ─── Citation verification (CrossRef + NCBI round-trip) ───────
+  async verifyCitation(params: { doi?: string; pmid?: string; claim_text?: string }): Promise<{
+    exists: boolean
+    source: 'crossref' | 'ncbi' | 'none'
+    doi?: string
+    pmid?: string
+    title?: string
+    authors: string[]
+    year?: string
+    is_fabricated: boolean
+    network_ok: boolean
+    message: string
+  }> {
+    const { data } = await apiClient.post('/citation/verify', params)
+    return data
+  },
+
   // ─── Vector-similarity search (pgvector over KG entities) ──────
   async searchSimilarEntities(
     query: string,

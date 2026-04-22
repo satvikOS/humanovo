@@ -11,6 +11,7 @@ from app.api.v1.endpoints import (
     admin,
     agents,
     auth,
+    citation_verify,
     biobank,
     clinical_trials,
     collaboration,
@@ -126,3 +127,6 @@ router.include_router(user_state.router, prefix="/user-state", tags=["user-state
 
 # Admin (non-prod): kg-stats, seed-kg. Disabled in production via guard.
 router.include_router(admin.router, prefix="/admin", tags=["admin"])
+
+# Citation verification — CrossRef + NCBI round-trip for single citations.
+router.include_router(citation_verify.router, prefix="/citation", tags=["citation"])
