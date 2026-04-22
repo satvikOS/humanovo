@@ -32,12 +32,19 @@ export function DifferentiatorStrip() {
     hypothesis_count?: number
   } | null>(null)
   const [completedRuns, setCompletedRuns] = useState<number | null>(null)
+  // /admin/health drives a compact service-health pill so users can
+  // see at a glance whether the backend is alive from the Dashboard
+  // without opening Settings → Admin.
+  const [healthStatus, setHealthStatus] = useState<'healthy' | 'degraded' | 'unreachable' | null>(null)
 
   useEffect(() => {
     api.getKgStats().then(setKgStats).catch(() => setKgStats(null))
     api.listAllDiscoveryRuns({ status: 'completed', limit: 200 })
       .then(res => setCompletedRuns(res.total))
       .catch(() => setCompletedRuns(null))
+    api.getAdminHealth()
+      .then(h => setHealthStatus(h.status))
+      .catch(() => setHealthStatus('unreachable'))
   }, [])
 
   const badges: Badge[] = [
@@ -142,6 +149,46 @@ export function DifferentiatorStrip() {
           </span>
         </a>
       ))}
+      {healthStatus && (
+        <a
+          href="/settings?tab=admin"
+          title={
+            healthStatus === 'healthy'
+              ? 'Backend healthy — postgres + pgvector + redis + neo4j all reachable.'
+              : healthStatus === 'degraded'
+                ? 'Backend degraded — one or more services offline. Click for details.'
+                : 'Backend unreachable from the browser. Check the API server is running.'
+          }
+          aria-label={`Backend status: ${healthStatus}`}
+          className="ml-auto inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-xxs transition-colors"
+          style={{
+            borderColor:
+              healthStatus === 'healthy'
+                ? 'var(--color-success)'
+                : healthStatus === 'degraded'
+                  ? 'var(--color-warning)'
+                  : 'var(--color-error)',
+            color:
+              healthStatus === 'healthy'
+                ? 'var(--color-success)'
+                : healthStatus === 'degraded'
+                  ? 'var(--color-warning)'
+                  : 'var(--color-error)',
+          }}
+        >
+          <span
+            aria-hidden
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: '50%',
+              background: 'currentColor',
+              display: 'inline-block',
+            }}
+          />
+          {healthStatus === 'unreachable' ? 'offline' : healthStatus}
+        </a>
+      )}
     </div>
   )
 }
