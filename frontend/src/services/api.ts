@@ -986,21 +986,46 @@ export const api = {
   // ── Activity / Timeline ───────────────────────────────────────
 
   async getActivities(params?: PaginationParams & { type?: string; action?: string; date_from?: string; date_to?: string }): Promise<PaginatedResponse<Activity>> {
-    // Activities are stored locally — no backend endpoint exists
+    // Try backend /activities first (Mega-P wired this up); fall back
+    // to localStorage so the dev loop and offline sessions still work.
+    // The localStorage path remains authoritative for user-generated
+    // activity until the writer paths also move backend-side.
+    let backendItems: Activity[] = []
+    try {
+      const { data } = await apiClient.get('/activities', {
+        params: {
+          page: params?.page ?? 1,
+          page_size: params?.page_size ?? 200,
+          type: params?.type,
+          action: params?.action,
+          date_from: params?.date_from,
+          date_to: params?.date_to,
+        },
+        // This path is non-fatal; hide the error toast.
+        headers: { 'X-Silent-Error': '1' },
+      })
+      backendItems = (data?.items ?? []) as Activity[]
+    } catch {
+      /* backend unreachable — pure localStorage path below */
+    }
+
     const raw = JSON.parse(localStorage.getItem('humanovo-activity-log') || '[]') as any[]
     // Normalize: ensure created_at is set (legacy items may only have timestamp)
-    let all: Activity[] = raw.map(a => ({
+    const localItems: Activity[] = raw.map(a => ({
       ...a,
       created_at: a.created_at || a.timestamp || new Date().toISOString(),
     }))
 
-    // Apply filters
-    if (params?.type) {
-      all = all.filter(a => a.type === params.type)
-    }
-    if (params?.action) {
-      all = all.filter(a => a.action === params.action)
-    }
+    // Merge + dedup by id (backend wins on conflict).
+    const byId = new Map<string, Activity>()
+    for (const a of localItems) if (a.id) byId.set(a.id, a)
+    for (const a of backendItems) if (a.id) byId.set(a.id, a)
+    let all = Array.from(byId.values()).sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+    )
+
+    if (params?.type)      all = all.filter(a => a.type === params.type)
+    if (params?.action)    all = all.filter(a => a.action === params.action)
     if (params?.date_from) {
       const from = new Date(params.date_from).getTime()
       all = all.filter(a => new Date(a.created_at).getTime() >= from)

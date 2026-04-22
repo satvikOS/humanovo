@@ -89,7 +89,15 @@ async def list_activities(
     date_to: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
 ):
-    """List activities with optional filters."""
+    """List activities with optional filters.
+
+    Returns JSONResponse directly — FastAPI's jsonable_encoder path
+    trips a RecursionError under some warnings-filter + deprecation
+    combinations observed in production logs. Bypassing it here keeps
+    the endpoint live while the root encoder bug is triaged upstream.
+    """
+    import json
+    from fastapi.responses import JSONResponse
     query = select(Activity)
     count_query = select(func.count(Activity.id))
 
@@ -118,12 +126,16 @@ async def list_activities(
     result = await db.execute(query)
     items = result.scalars().all()
 
-    return {
+    # Serialise manually — every value is a primitive or UUID/datetime
+    # that json.dumps(default=str) can handle, so we skip FastAPI's
+    # generic encoder and side-step the known RecursionError.
+    payload = {
         "items": [a.to_dict() for a in items],
         "total": total,
         "page": page,
         "page_size": page_size,
     }
+    return JSONResponse(content=json.loads(json.dumps(payload, default=str)))
 
 
 @router.get("/{activity_id}")

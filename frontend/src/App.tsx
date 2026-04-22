@@ -40,9 +40,6 @@ const DiscoveryRunner = lazy(() => import('./pages/DiscoveryRunner'))
 const HypothesisReview = lazy(() => import('./pages/HypothesisReview'))
 const ProjectKnowledgeGraph = lazy(() => import('./pages/ProjectKnowledgeGraph'))
 const PgvectorManager = lazy(() => import('./pages/PgvectorManager'))
-const Landing = lazy(() => import('./pages/Landing'))
-const Pricing = lazy(() => import('./pages/Pricing'))
-const Docs = lazy(() => import('./pages/Docs'))
 
 // Previously-orphaned pages: code existed on disk but no route pointed
 // to them. Now reachable from the sidebar.
@@ -137,12 +134,9 @@ function LazyPageWrapper({ children }: { children: ReactNode }) {
 function App() {
   return (
     <Routes>
-      {/* Marketing landing page — outside the Layout shell. Served at
-          both /welcome (explicit) and / (for first-time visitors who
-          haven't set the "humanovo.seen" localStorage flag). */}
-      <Route path="/welcome" element={<LazyPageWrapper><Landing /></LazyPageWrapper>} />
-      <Route path="/pricing" element={<LazyPageWrapper><Pricing /></LazyPageWrapper>} />
-      <Route path="/docs" element={<LazyPageWrapper><Docs /></LazyPageWrapper>} />
+      {/* Marketing lives at https://www.humanovo.net/ — the in-app /welcome,
+          /pricing, /docs routes were removed (commit following this one)
+          to keep the bundle lean. External site is the canonical surface. */}
       <Route path="/" element={<Layout />}>
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<PageWrapper><Dashboard /></PageWrapper>} />

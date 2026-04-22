@@ -70,11 +70,17 @@ export function DifferentiatorStrip() {
     {
       icon: <FiDatabase className="w-3.5 h-3.5" />,
       label: 'Live knowledge graph',
-      value: kgStats ? `${kgStats.node_count} / ${kgStats.edge_count}` : '…',
-      detail: kgStats
+      value: !kgStats
+        ? '…'
+        : kgStats.node_count > 0
+        ? `${kgStats.node_count} / ${kgStats.edge_count}`
+        : 'Seed to populate',
+      detail: !kgStats
+        ? 'Loading live KG stats…'
+        : kgStats.node_count > 0
         ? `${kgStats.node_count} nodes · ${kgStats.edge_count} edges · ${kgStats.embedding_count} pgvector embeddings. Live Neo4j + pgvector — not a static bundle.`
-        : 'Loading live KG stats…',
-      href: '/workbench',
+        : 'KG is empty. Head to Settings → Admin → Re-seed KG for the 91-entity demo corpus, or run scripts/seed_kg.py in dev.',
+      href: kgStats && kgStats.node_count > 0 ? '/workbench' : '/settings?tab=admin',
       color: '#fbbf24',
     },
     {
