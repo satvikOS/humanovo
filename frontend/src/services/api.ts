@@ -1259,6 +1259,11 @@ export const api = {
     return data
   },
 
+  async listAllDiscoveryRuns(params?: { status?: string; limit?: number; offset?: number }): Promise<{ items: any[]; total: number }> {
+    const { data } = await apiClient.get('/discovery-runs', { params })
+    return data
+  },
+
   async listDiscoveryRuns(projectId: string, params?: { status?: string; limit?: number; offset?: number }): Promise<{ items: any[]; total: number }> {
     const { data } = await apiClient.get(`/projects/${projectId}/discovery-runs`, { params })
     return data

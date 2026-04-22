@@ -5,6 +5,14 @@ This module initializes the FastAPI application with all routes,
 middleware, and event handlers for the Humanovo platform.
 """
 
+# Silence pydantic-v1-check warnings globally BEFORE fastapi imports so
+# fastapi._compat.shared.is_pydantic_v1_model_instance doesn't hit a
+# RecursionError in warnings.simplefilter (observed on pydantic 2.13 +
+# fastapi 0.136 with certain response shapes). Filter is set once at
+# process start rather than per-request.
+import warnings as _warnings
+_warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
+
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
