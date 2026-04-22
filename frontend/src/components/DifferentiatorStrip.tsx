@@ -49,10 +49,10 @@ export function DifferentiatorStrip() {
           ? `${completedRuns} runs · 7 models`
           : '7 models',
       detail:
+        'Claude Opus + Sonnet, GPT-4.1 + 4o + o3-mini, Cohere, Mistral, Grok run sequentially with dual-embedding grounding between every stage — heterogeneous so one vendor cannot collapse consensus.' +
         (completedRuns != null && completedRuns > 0
-          ? `${completedRuns} completed discovery runs on record. `
-          : '') +
-        'Claude Opus + Sonnet, GPT-4.1 + 4o + o3-mini, Cohere, Mistral, Grok — heterogeneous so one vendor cannot collapse consensus.',
+          ? ` ${completedRuns} completed ${completedRuns === 1 ? 'run' : 'runs'} on record.`
+          : ''),
       href: '/agents',
       color: '#60a5fa',
     },

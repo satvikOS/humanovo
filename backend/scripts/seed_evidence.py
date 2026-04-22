@@ -400,45 +400,93 @@ async def seed() -> dict:
             pid = await upsert_project(session, name, desc)
             project_ids[name] = pid
             proj_count += 1
+        try:
+            await session.commit()
+        except Exception as _e:
+            section_errors["projects"] = str(_e)[:240]
+            await session.rollback()
 
         for row in EVIDENCE:
             disease = row[0]
             pid = project_ids.get(disease)
             if not pid:
                 continue
-            eid = await upsert_evidence(session, pid, row)
-            ev_count += 1
-            # Embedding
-            if await write_evidence_embedding(session, eid, row[1], row[2]):
-                emb_count += 1
+            try:
+                eid = await upsert_evidence(session, pid, row)
+                ev_count += 1
+                if await write_evidence_embedding(session, eid, row[1], row[2]):
+                    emb_count += 1
+            except Exception as _e:
+                section_errors.setdefault("evidence", str(_e)[:240])
+                await session.rollback()
+        try:
+            await session.commit()
+        except Exception as _e:
+            section_errors.setdefault("evidence_commit", str(_e)[:240])
+            await session.rollback()
 
         for row in HYPOTHESES:
             disease = row[0]
             pid = project_ids.get(disease)
             if not pid:
                 continue
-            await upsert_hypothesis(session, pid, row)
-            hyp_count += 1
+            try:
+                await upsert_hypothesis(session, pid, row)
+                hyp_count += 1
+            except Exception as _e:
+                section_errors.setdefault("hypotheses", str(_e)[:240])
+                await session.rollback()
+        try:
+            await session.commit()
+        except Exception as _e:
+            section_errors.setdefault("hypotheses_commit", str(_e)[:240])
+            await session.rollback()
 
         imaging_count = 0
         for row in IMAGING_STUDIES:
-            if await upsert_imaging(session, row):
-                imaging_count += 1
+            try:
+                if await upsert_imaging(session, row):
+                    imaging_count += 1
+            except Exception as _e:
+                section_errors.setdefault("imaging", str(_e)[:240])
+                await session.rollback()
+        try:
+            await session.commit()
+        except Exception as _e:
+            section_errors.setdefault("imaging_commit", str(_e)[:240])
+            await session.rollback()
 
         # Notebook pages — research notes tied to the seeded hypotheses.
-        notebook_count = await _seed_notebook_pages(session)
+        try:
+            notebook_count = await _seed_notebook_pages(session)
+            await session.commit()
+        except Exception as _e:
+            section_errors["notebook_pages"] = str(_e)[:240]
+            await session.rollback()
+            notebook_count = 0
 
         # Activity feed — populate the Dashboard "Recent Activity" so it
         # doesn't render the empty state on first visit.
-        activity_count = await _seed_activities(session, project_ids)
+        try:
+            activity_count = await _seed_activities(session, project_ids)
+            await session.commit()
+        except Exception as _e:
+            section_errors["activities"] = str(_e)[:240]
+            await session.rollback()
+            activity_count = 0
 
         # Discovery runs — populate the Agents page history so it
         # doesn't just show an empty "No runs yet" pane.
-        discovery_runs_count = await _seed_discovery_runs(
-            session, project_ids,
-        )
+        try:
+            discovery_runs_count = await _seed_discovery_runs(
+                session, project_ids,
+            )
+            await session.commit()
+        except Exception as _e:
+            section_errors["discovery_runs"] = str(_e)[:240]
+            await session.rollback()
+            discovery_runs_count = 0
 
-        await session.commit()
     await engine.dispose()
     return {
         "projects_upserted": proj_count,
