@@ -1081,7 +1081,7 @@ export const api = {
         })
       }),
 
-      // Search knowledge graph entities
+      // Search knowledge graph entities — legacy endpoint (exact/alias match)
       apiClient.get('/knowledge/entities/search', { params: { query, limit: params?.limit || 10 } }).then(r => {
         (r.data || []).forEach((item: any) => {
           results.push({
@@ -1097,6 +1097,26 @@ export const api = {
           })
         })
       }),
+
+      // Vector-similarity search over KG entities (pgvector cosine).
+      // Runs in parallel with the exact-match entity search above.
+      // Dedup by entity id happens downstream in `filtered` aggregation;
+      // a match from both paths just stacks the relevance score.
+      apiClient.post('/knowledge-graph/search/similar', { query, limit: params?.limit || 10 }).then(r => {
+        ((r.data as Array<{ entity: any; similarity: number }>) || []).forEach(row => {
+          results.push({
+            id: `vec:${row.entity.id}`,
+            type: 'entity',
+            title: row.entity.name,
+            snippet: row.entity.description || `${row.entity.category} · vector match (cos=${row.similarity.toFixed(3)})`,
+            source: row.entity.category,
+            source_type: row.entity.category,
+            relevance_score: Math.max(0, row.similarity),
+            metadata: { entity_type: row.entity.category, similarity: row.similarity, vector_search: true },
+            tags: row.entity.synonyms || [],
+          })
+        })
+      }).catch(() => undefined),
 
       // Search projects
       apiClient.get('/projects', { params: { search: query, page_size: 10 } }).then(r => {
@@ -1332,6 +1352,19 @@ export const api = {
   },
   async seedKg(force = false): Promise<{ ok: boolean; message: string; nodes_after: number; edges_after: number; embeddings_written: number }> {
     const { data } = await apiClient.post('/admin/seed-kg', null, { params: { force } })
+    return data
+  },
+
+  // ─── Vector-similarity search (pgvector over KG entities) ──────
+  async searchSimilarEntities(
+    query: string,
+    opts?: { limit?: number; min_similarity?: number },
+  ): Promise<Array<{ entity: Entity; similarity: number }>> {
+    const { data } = await apiClient.post('/knowledge-graph/search/similar', {
+      query,
+      limit: opts?.limit ?? 10,
+      min_similarity: opts?.min_similarity ?? 0.0,
+    })
     return data
   },
 }
