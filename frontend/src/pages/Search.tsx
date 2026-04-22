@@ -523,7 +523,8 @@ export default function Search() {
                   <button
                     key={result.id}
                     onClick={() => navigateToResult(result)}
-                    className={`w-full text-left glass-card p-4 transition-all group ${isFocused ? 'bg-[var(--glass-bg-hover)] ring-1 ring-primary-400' : 'hover:bg-[var(--glass-bg-hover)]'}`}
+                    className={`w-full text-left glass-card p-4 transition-all group ${isFocused ? 'bg-[var(--glass-bg-hover)]' : 'hover:bg-[var(--glass-bg-hover)]'}`}
+                    style={isFocused ? { outline: '2px solid #60a5fa', outlineOffset: 2, borderColor: '#60a5fa' } : undefined}
                     aria-current={isFocused ? 'true' : undefined}
                     ref={el => { if (isFocused && el) el.scrollIntoView({ block: 'nearest' }) }}
                   >

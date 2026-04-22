@@ -78,65 +78,59 @@ function HypothesisCard({ hypothesis }: { hypothesis: Hypothesis }) {
   return (
     <Link
       to={`/hypotheses/${hypothesis.id}`}
-      className="card hover:border-primary-600/50 transition-colors"
+      className="glass-card p-4 block hover:bg-[var(--glass-bg-hover)] hover:border-[var(--color-border-strong)] transition-all"
     >
-      <div className="flex items-start space-x-4">
-        <div className={clsx('p-2 rounded-lg', status.bg)}>
-          <StatusIcon className={clsx('w-5 h-5', status.color)} />
+      <div className="flex items-start gap-3">
+        <div className={clsx('p-2 rounded-lg flex-shrink-0', status.bg)}>
+          <StatusIcon className={clsx('w-4 h-4', status.color)} />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-white font-medium line-clamp-2">{hypothesis.statement}</p>
+          <p className="text-sm font-medium leading-snug line-clamp-2" style={{ color: 'var(--color-text)' }}>
+            {hypothesis.statement}
+          </p>
           {hypothesis.mechanism && (
-            <p className="text-secondary-400 text-sm mt-1 line-clamp-1">
+            <p className="text-xs mt-1 line-clamp-2" style={{ color: 'var(--color-text-muted)' }}>
               {hypothesis.mechanism}
             </p>
           )}
         </div>
       </div>
 
-      <div className="mt-4 flex items-center justify-between">
-        <div className="flex items-center space-x-4">
-          <span className={clsx('badge', {
-            'badge-success': hypothesis.status === 'validated',
-            'badge-warning': hypothesis.status === 'generating',
-            'badge-error': hypothesis.status === 'rejected',
-            'badge-info': hypothesis.status === 'active',
-          })}>
+      <div className="mt-3 flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xxs px-1.5 py-0.5 rounded bg-[var(--glass-bg)]" style={{ color: 'var(--color-text-muted)' }}>
             {hypothesis.status}
           </span>
-          <span className="text-secondary-400 text-sm">
+          <span className="text-xxs" style={{ color: 'var(--color-text-muted)' }}>
             {Number.isFinite(hypothesis.confidence_score) && hypothesis.confidence_score != null
               ? `${Math.round(hypothesis.confidence_score * 100)}% confidence`
               : '-- confidence'}
           </span>
+          {Number.isFinite(hypothesis.novelty_score) && hypothesis.novelty_score != null && (
+            <span className="text-xxs" style={{ color: 'var(--color-text-muted)' }}>
+              {Math.round(hypothesis.novelty_score * 100)}% novelty
+            </span>
+          )}
+          <span className="text-xxs" style={{ color: 'var(--color-text-muted)' }}>
+            {hypothesis.supporting_count} ↑ · {hypothesis.contradiction_count} ↓
+          </span>
         </div>
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center gap-1">
           <button
             onClick={handleExportPdf}
             disabled={exporting}
-            className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-white/5 text-[var(--color-text-secondary)] hover:bg-white/10 disabled:opacity-50 transition-colors"
-            title="Export as PDF" aria-label="Export as PDF"
+            className="flex items-center gap-1 px-2 py-1 rounded text-xxs hover:bg-[var(--glass-bg-hover)] disabled:opacity-40 transition-colors"
+            style={{ color: 'var(--color-text-muted)' }}
+            title="Export as PDF"
+            aria-label="Export as PDF"
           >
-            {exporting ? (
-              <FiRefreshCw className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <FiDownload className="w-3.5 h-3.5" />
-            )}
-            {exporting ? 'Exporting...' : 'Export PDF'}
+            {exporting ? <FiRefreshCw className="w-3 h-3 animate-spin" /> : <FiDownload className="w-3 h-3" />}
+            {exporting ? 'Exporting…' : 'PDF'}
           </button>
-          <span className="text-secondary-500 text-xs">
+          <span className="text-xxs ml-1" style={{ color: 'var(--color-text-muted)' }}>
             v{hypothesis.version}
           </span>
         </div>
-      </div>
-
-      <div className="mt-3 flex items-center space-x-4 text-sm">
-        <span className="text-[var(--color-text-secondary)]">
-          {hypothesis.supporting_count} supporting
-        </span>
-        <span className="text-[var(--color-text-muted)]">
-          {hypothesis.contradiction_count} contradicting
-        </span>
       </div>
     </Link>
   )
@@ -178,20 +172,29 @@ export default function Hypotheses() {
     })
 
   return (
-    <div className="p-8">
-      <div className="flex items-center justify-between mb-6">
+    <div className="p-6 max-w-[1400px] mx-auto">
+      <div className="flex items-center justify-between mb-5">
         <div>
-          <h1 className="text-3xl font-bold text-white">Hypotheses</h1>
-          <p className="text-secondary-400 mt-1">
+          <h1 className="text-2xl font-semibold tracking-tight">Hypotheses</h1>
+          <p className="text-sm mt-1" style={{ color: 'var(--color-text-muted)' }}>
             AI-generated biomedical hypotheses
             {apiHypotheses.length > 0 && (
-              <span className="ml-2 text-xs text-[var(--color-text-muted)]">
+              <span className="ml-2 text-xs">
                 {filtered.length}/{apiHypotheses.length}
               </span>
             )}
           </p>
         </div>
-        <Link to="/agents" className="btn btn-primary flex items-center space-x-2">
+        <Link
+          to="/agents"
+          className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm"
+          style={{
+            background: 'rgba(91, 141, 184, 0.25)',
+            border: '1px solid rgba(91, 141, 184, 0.35)',
+            color: '#fff',
+            borderRadius: 10,
+          }}
+        >
           <FiZap className="w-4 h-4" />
           <span>Generate New</span>
         </Link>

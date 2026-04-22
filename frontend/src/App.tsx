@@ -40,6 +40,7 @@ const DiscoveryRunner = lazy(() => import('./pages/DiscoveryRunner'))
 const HypothesisReview = lazy(() => import('./pages/HypothesisReview'))
 const ProjectKnowledgeGraph = lazy(() => import('./pages/ProjectKnowledgeGraph'))
 const PgvectorManager = lazy(() => import('./pages/PgvectorManager'))
+const Landing = lazy(() => import('./pages/Landing'))
 
 // Previously-orphaned pages: code existed on disk but no route pointed
 // to them. Now reachable from the sidebar.
@@ -134,6 +135,8 @@ function LazyPageWrapper({ children }: { children: ReactNode }) {
 function App() {
   return (
     <Routes>
+      {/* Unauthenticated / marketing — sits outside the Layout shell */}
+      <Route path="/welcome" element={<LazyPageWrapper><Landing /></LazyPageWrapper>} />
       <Route path="/" element={<Layout />}>
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<PageWrapper><Dashboard /></PageWrapper>} />
