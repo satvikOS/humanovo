@@ -453,6 +453,43 @@ export default function ResearchImaging() {
   // URL after mount so shared links stay canonical.
   const [searchParams] = useSearchParams()
   const [studies, setStudies] = useState<Study[]>(() => loadStudies())
+  // Merge backend-seeded imaging_studies with any local uploads on mount.
+  // localStorage is still source-of-truth for uploaded images; backend
+  // studies ship metadata-only ("findings" + "modality") which is enough
+  // for the list/detail panel to render.
+  useEffect(() => {
+    fetch('/api/v1/imaging/studies')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        const items = (data && (data.items || data)) as Array<Record<string, unknown>> | null
+        if (!Array.isArray(items)) return
+        setStudies(prev => {
+          const byId = new Map(prev.map(s => [s.id, s] as const))
+          for (const it of items) {
+            const id = String(it.id || '')
+            if (!id || byId.has(id)) continue
+            byId.set(id, {
+              id,
+              title: String(it.title || 'Untitled study'),
+              modality: (it.modality as Modality) || 'CT',
+              bodyPart: (it.body_part as string) || '',
+              patientId: (it.patient_id as string) || '',
+              acquiredAt: String(it.created_at || new Date().toISOString()),
+              imageData: '',
+              width: Number(it.width || 512),
+              height: Number(it.height || 512),
+              windowCenter: 128,
+              windowWidth: 256,
+              filter: 'none',
+              annotations: [],
+              notes: (it.findings as string) || '',
+            } as Study)
+          }
+          return Array.from(byId.values())
+        })
+      })
+      .catch(() => { /* silent — local fallback is the primary source */ })
+  }, [])
   const [selectedId, setSelectedId] = useState<string | null>(() => {
     const qId = searchParams.get('id')
     if (!qId) return null
@@ -1393,7 +1430,11 @@ export default function ResearchImaging() {
             </div>
           )}
           {filteredStudies.map(s => {
-            const mod = MODALITIES.find(m => m.id === s.modality)!
+            // Null-guard: backend-seeded studies might carry modalities
+            // (e.g. "PET-CT") that aren't in the static MODALITIES
+            // registry yet. Fall back to the CT row so we never crash
+            // on `.color` / `.icon` access below.
+            const mod = MODALITIES.find(m => m.id === s.modality) || MODALITIES[0]
             const active = selectedId === s.id
             return (
               <button

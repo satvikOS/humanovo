@@ -329,6 +329,60 @@ async def write_evidence_embedding(
     return True
 
 
+# ─── Imaging corpus ───────────────────────────────────────────────
+# Metadata-only fixtures so the Research Imaging page has live studies
+# to render. Image data itself is deferred (PACS integration is Phase 2).
+
+IMAGING_STUDIES: list[tuple[str, str, str, str, str, str, int, int]] = [
+    ("Brain MRI — T1 post-contrast (glioblastoma baseline)",
+     "MRI", "Brain",
+     "Right temporal lobe lesion, 3.2cm, ring-enhancing. Midline shift 4mm. Consistent with GBM.",
+     "reviewed", "PT-001", 512, 512),
+    ("Chest CT — pulmonary fibrosis screening",
+     "CT", "Chest",
+     "Subpleural reticulation, honeycombing in lower lobes. UIP pattern — consistent with IPF.",
+     "reviewed", "PT-002", 512, 512),
+    ("Cardiac MRI — LGE for amyloidosis",
+     "MRI", "Heart",
+     "Diffuse subendocardial late gadolinium enhancement. LV mass 164g/m². Cardiac amyloidosis likely.",
+     "pending_review", "PT-003", 384, 384),
+    ("Whole-body PET-CT — metastatic PDAC staging",
+     "PET", "Whole body",
+     "Pancreatic head mass SUVmax 9.2. Hepatic segment 6 SUVmax 7.1. Stage IV PDAC.",
+     "reviewed", "PT-004", 512, 512),
+    ("Retinal fundus — diabetic retinopathy grading",
+     "Fundus", "Eye",
+     "Multiple microaneurysms and cotton wool spots in superior arcade. Moderate NPDR.",
+     "reviewed", "PT-005", 1024, 1024),
+]
+
+
+async def upsert_imaging(session: AsyncSession, row: tuple) -> bool:
+    title, modality, body_part, findings, status, patient_id, w, h = row
+    existing = (
+        await session.execute(
+            text("SELECT id FROM imaging_studies WHERE title = :t LIMIT 1"),
+            {"t": title},
+        )
+    ).first()
+    if existing:
+        return False
+    await session.execute(
+        text(
+            "INSERT INTO imaging_studies "
+            "  (id, title, modality, body_part, findings, status, patient_id, "
+            "   annotations, width, height, created_at, updated_at) "
+            "VALUES (gen_random_uuid(), :t, :mod, :bp, :f, :s, :pid, "
+            "   '[]'::jsonb, :w, :h, NOW(), NOW())"
+        ),
+        {
+            "t": title, "mod": modality, "bp": body_part, "f": findings,
+            "s": status, "pid": patient_id, "w": w, "h": h,
+        },
+    )
+    return True
+
+
 async def seed() -> dict:
     engine = create_async_engine(DB_URL, echo=False)
     SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
@@ -360,6 +414,11 @@ async def seed() -> dict:
             await upsert_hypothesis(session, pid, row)
             hyp_count += 1
 
+        imaging_count = 0
+        for row in IMAGING_STUDIES:
+            if await upsert_imaging(session, row):
+                imaging_count += 1
+
         await session.commit()
     await engine.dispose()
     return {
@@ -367,6 +426,7 @@ async def seed() -> dict:
         "evidence_upserted": ev_count,
         "hypotheses_upserted": hyp_count,
         "evidence_embeddings_written": emb_count,
+        "imaging_upserted": imaging_count,
     }
 
 

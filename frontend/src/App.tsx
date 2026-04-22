@@ -135,10 +135,22 @@ function LazyPageWrapper({ children }: { children: ReactNode }) {
 function App() {
   return (
     <Routes>
-      {/* Unauthenticated / marketing — sits outside the Layout shell */}
+      {/* Marketing landing page — outside the Layout shell. Served at
+          both /welcome (explicit) and / (for first-time visitors who
+          haven't set the "humanovo.seen" localStorage flag). */}
       <Route path="/welcome" element={<LazyPageWrapper><Landing /></LazyPageWrapper>} />
       <Route path="/" element={<Layout />}>
-        <Route index element={<Navigate to="/dashboard" replace />} />
+        <Route
+          index
+          element={
+            // Returning users jump straight to the dashboard; newcomers
+            // get the landing page once. Setting the flag is the
+            // landing page CTA's responsibility.
+            typeof window !== 'undefined' && window.localStorage.getItem('humanovo.seen') === '1'
+              ? <Navigate to="/dashboard" replace />
+              : <Navigate to="/welcome" replace />
+          }
+        />
         <Route path="dashboard" element={<PageWrapper><Dashboard /></PageWrapper>} />
         <Route path="projects" element={<PageWrapper><Projects /></PageWrapper>} />
         <Route path="projects/:projectId" element={<PageWrapper><ProjectDetail /></PageWrapper>} />

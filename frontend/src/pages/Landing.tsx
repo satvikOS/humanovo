@@ -89,6 +89,7 @@ export default function Landing() {
         <div className="mt-6 flex items-center gap-3">
           <Link
             to="/agents?start=1"
+            onClick={() => { try { window.localStorage.setItem('humanovo.seen', '1') } catch { /* noop */ } }}
             className="btn btn-primary flex items-center gap-2"
             aria-label="Start a 12-stage discovery run"
           >
@@ -97,6 +98,7 @@ export default function Landing() {
           </Link>
           <Link
             to="/dashboard"
+            onClick={() => { try { window.localStorage.setItem('humanovo.seen', '1') } catch { /* noop */ } }}
             className="btn btn-secondary flex items-center gap-2"
             aria-label="Open the main app"
           >
