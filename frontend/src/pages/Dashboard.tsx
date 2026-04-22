@@ -19,6 +19,7 @@ import api from '../services/api'
 import type { Project } from '../services/api'
 import { persistGet, getActivityLog, type ActivityEntry } from '../utils/persistence'
 import { EmptyState } from '../components/EmptyState'
+import { DifferentiatorStrip } from '../components/DifferentiatorStrip'
 import { toast } from '../contexts/ToastContext'
 
 // ── Stat Card (expandable) ──────────────────────────────────────
@@ -741,6 +742,11 @@ export default function Dashboard() {
           ))}
         </div>
       </div>
+
+      {/* Differentiator badges — live-metric surface of the 5 moats from
+          COMPETITIVE_POSITIONING.md. Each badge is clickable + carries
+          a tooltip with the positioning language for investor demos. */}
+      <DifferentiatorStrip />
 
       {/* Stats Grid */}
       <div className="grid grid-cols-6 gap-3">
