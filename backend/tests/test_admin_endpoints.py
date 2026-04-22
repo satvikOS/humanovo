@@ -13,17 +13,25 @@ covers the functional surface.
 """
 from __future__ import annotations
 
-import pytest
-
 
 def test_admin_router_exposes_expected_routes() -> None:
+    from fastapi.routing import APIRoute
+
     from app.api.v1.endpoints.admin import router
+
+    # Only count actual APIRoute entries — guards against WebSocketRoute
+    # or Mount entries showing up later and throwing AttributeError
+    # when we touch `.methods`.
+    routes: set[tuple[str, str]] = set()
+    for r in router.routes:
+        if not isinstance(r, APIRoute):
+            continue
+        for method in r.methods or ():
+            routes.add((method, r.path))
 
     # Each (method, path) pair the frontend + Playwright spec relies on.
     # When this list drifts from the real router, the Admin panel / seed
     # CTAs start 404'ing — catch it at import time instead.
-    routes = {(m, r.path) for r in router.routes for m in r.methods or {"GET"}}
-
     assert ("GET", "/health") in routes
     assert ("GET", "/kg-stats") in routes
     assert ("POST", "/seed-kg") in routes
@@ -52,15 +60,14 @@ def test_seed_response_model_has_required_fields() -> None:
     )
 
 
-def test_admin_module_imports_cleanly() -> None:
-    """Covers the `from scripts.seed_kg import seed` lazy-import path
-    + the graph_store accessor swap we landed earlier. If either
-    regresses, this import will raise."""
-    import importlib
+def test_admin_module_exports_endpoint_callables() -> None:
+    """The four endpoint function names are referenced by frontend
+    typed wrappers (api.getAdminHealth, api.getKgStats, api.seedKg,
+    api.seedCorpus). If these rename, the frontend silently 404s."""
+    from app.api.v1.endpoints import admin
 
-    admin = importlib.import_module("app.api.v1.endpoints.admin")
     assert hasattr(admin, "router")
-    assert hasattr(admin, "admin_health")
-    assert hasattr(admin, "get_kg_stats")
-    assert hasattr(admin, "seed_knowledge_graph")
-    assert hasattr(admin, "seed_evidence_corpus")
+    assert callable(getattr(admin, "admin_health", None))
+    assert callable(getattr(admin, "get_kg_stats", None))
+    assert callable(getattr(admin, "seed_knowledge_graph", None))
+    assert callable(getattr(admin, "seed_evidence_corpus", None))
