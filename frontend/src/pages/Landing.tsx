@@ -1,10 +1,13 @@
 /**
- * Landing — unauthenticated marketing surface.
+ * Landing — internal dev marketing surface.
  *
- * Minimal hero + 5 moat bullets lifted from COMPETITIVE_POSITIONING.md.
- * Navigates straight into the app on CTA. Served at `/` when we flip
- * the index route; today's deployment auto-redirects to /dashboard so
- * this component is reachable via /welcome until the routing cutover.
+ * The CANONICAL public landing page lives at https://www.humanovo.net/.
+ * This component is kept in-app at /welcome so developers, staff, and
+ * self-hosters can preview the moat / positioning without leaving the
+ * app. It is NOT served at / — index.html redirects to /dashboard.
+ *
+ * Any changes to copy or design that need to reach real visitors must
+ * also ship to the external humanovo.net repository.
  */
 
 import { Link } from 'react-router-dom'
@@ -63,11 +66,36 @@ const MOAT = [
 export default function Landing() {
   return (
     <div className="min-h-screen p-8 max-w-[1100px] mx-auto">
+      <div
+        className="text-xxs mb-6 px-3 py-2 rounded"
+        style={{
+          background: 'var(--glass-bg)',
+          border: '1px solid var(--color-border)',
+          color: 'var(--color-text-muted)',
+        }}
+      >
+        This is the in-app preview. The public landing page is{' '}
+        <a
+          href="https://www.humanovo.net/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline"
+          style={{ color: 'var(--color-text)' }}
+        >
+          humanovo.net
+        </a>{' '}— edit copy there for real visitors.
+      </div>
       <header className="flex items-center justify-between mb-16">
-        <div className="flex items-center gap-2">
+        <a
+          href="https://www.humanovo.net/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-2"
+          aria-label="humanovo.net"
+        >
           <span className="w-8 h-8 rounded-md bg-[var(--color-text)] text-[var(--color-bg)] flex items-center justify-center font-bold">h</span>
           <span className="font-semibold italic">humanovo</span>
-        </div>
+        </a>
         <Link
           to="/dashboard"
           className="text-sm flex items-center gap-1"
@@ -142,8 +170,13 @@ export default function Landing() {
         </p>
       </section>
 
-      <footer className="text-xxs py-6" style={{ color: 'var(--color-text-muted)' }}>
-        © 2026 humanovo · Adyanthaya Ventures · Proprietary
+      <footer className="text-xxs py-6 flex items-center justify-between flex-wrap gap-3" style={{ color: 'var(--color-text-muted)' }}>
+        <span>© 2026 humanovo · Adyanthaya Ventures · Proprietary</span>
+        <div className="flex items-center gap-4">
+          <Link to="/pricing" className="underline hover:text-[var(--color-text)]">Pricing</Link>
+          <Link to="/docs" className="underline hover:text-[var(--color-text)]">Docs</Link>
+          <a href="mailto:satvik@humanovo.com" className="underline hover:text-[var(--color-text)]">Contact</a>
+        </div>
       </footer>
     </div>
   )

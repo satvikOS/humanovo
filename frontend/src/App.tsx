@@ -41,6 +41,8 @@ const HypothesisReview = lazy(() => import('./pages/HypothesisReview'))
 const ProjectKnowledgeGraph = lazy(() => import('./pages/ProjectKnowledgeGraph'))
 const PgvectorManager = lazy(() => import('./pages/PgvectorManager'))
 const Landing = lazy(() => import('./pages/Landing'))
+const Pricing = lazy(() => import('./pages/Pricing'))
+const Docs = lazy(() => import('./pages/Docs'))
 
 // Previously-orphaned pages: code existed on disk but no route pointed
 // to them. Now reachable from the sidebar.
@@ -139,18 +141,10 @@ function App() {
           both /welcome (explicit) and / (for first-time visitors who
           haven't set the "humanovo.seen" localStorage flag). */}
       <Route path="/welcome" element={<LazyPageWrapper><Landing /></LazyPageWrapper>} />
+      <Route path="/pricing" element={<LazyPageWrapper><Pricing /></LazyPageWrapper>} />
+      <Route path="/docs" element={<LazyPageWrapper><Docs /></LazyPageWrapper>} />
       <Route path="/" element={<Layout />}>
-        <Route
-          index
-          element={
-            // Returning users jump straight to the dashboard; newcomers
-            // get the landing page once. Setting the flag is the
-            // landing page CTA's responsibility.
-            typeof window !== 'undefined' && window.localStorage.getItem('humanovo.seen') === '1'
-              ? <Navigate to="/dashboard" replace />
-              : <Navigate to="/welcome" replace />
-          }
-        />
+        <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<PageWrapper><Dashboard /></PageWrapper>} />
         <Route path="projects" element={<PageWrapper><Projects /></PageWrapper>} />
         <Route path="projects/:projectId" element={<PageWrapper><ProjectDetail /></PageWrapper>} />

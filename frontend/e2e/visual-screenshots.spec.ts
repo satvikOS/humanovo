@@ -33,6 +33,8 @@ const PAGES: Array<{ name: string; path: string }> = [
   { name: 'ml-models',            path: '/ml-models' },
   { name: 'pgvector',             path: '/dev/pgvector' },
   { name: 'landing',              path: '/welcome' },
+  { name: 'pricing',              path: '/pricing' },
+  { name: 'docs',                 path: '/docs' },
 ]
 
 /**
