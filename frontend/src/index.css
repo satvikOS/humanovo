@@ -196,17 +196,28 @@ select option:checked {
   color: var(--color-text);
 }
 
-/* Focus — only show on keyboard-navigated inputs, not on click */
+/* Focus rings — only visible on keyboard navigation (:focus-visible),
+ * invisible on click. Consistent 2px accent ring across buttons,
+ * anchors, and form fields so tab-navigation is always discoverable
+ * (previously buttons had outline:none which broke keyboard a11y).
+ */
 input:focus-visible,
 textarea:focus-visible,
-select:focus-visible {
-  outline: 1px solid var(--color-border-strong);
-  outline-offset: 2px;
-}
+select:focus-visible,
 button:focus-visible,
 a:focus-visible,
-[role="button"]:focus-visible {
-  outline: none;
+[role="button"]:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--color-accent-blue, #3b82f6);
+  outline-offset: 2px;
+  border-radius: var(--radius-focus, 10px);
+}
+
+/* Reduced-motion users get the ring without any transition flicker. */
+@media (prefers-reduced-motion: reduce) {
+  *:focus-visible {
+    transition: none !important;
+  }
 }
 
 @layer components {
