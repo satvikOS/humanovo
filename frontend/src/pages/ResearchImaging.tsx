@@ -16,6 +16,7 @@ import clsx from 'clsx'
 import { parseMedicalFile, parsedToDataURL } from '../utils/medicalImaging'
 import VolumeViewer3D from '../components/VolumeViewer3D'
 import { useAlertDialog } from '../components/AlertDialog'
+import { apiClient } from '../services'
 
 type Modality = 'CT' | 'MRI' | 'X-Ray' | 'Ultrasound' | 'PET' | 'Microscopy' | 'Fundus' | 'OCT' | 'Mammography' | 'Endoscopy'
 type Tool = 'pan' | 'window' | 'rect' | 'circle' | 'line' | 'point' | 'polygon' | 'measure' | 'ruler' | 'brush' | 'eraser'
@@ -466,9 +467,10 @@ export default function ResearchImaging() {
     const loadStudies = async () => {
       if (document.hidden) return
       try {
-        const r = await fetch('/api/v1/imaging/studies')
-        if (!r.ok) return
-        const data = await r.json()
+        const { data } = await apiClient.get('/imaging/studies', {
+          // Background poll — don't toast every transient failure.
+          headers: { 'X-Silent-Error': '1' },
+        })
         const items = (data && (data.items || data)) as Array<Record<string, unknown>> | null
         if (!Array.isArray(items) || abortCtrl.cancelled) return
         setStudies(prev => {
@@ -1324,32 +1326,24 @@ export default function ResearchImaging() {
       const dataUrl = canvas.toDataURL('image/png')
       const base64 = dataUrl.split(',')[1]
 
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || ''}/api/v1/imaging/analyze`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          image_base64: base64,
-          modality: selected.modality,
-          body_part: selected.bodyPart,
-          width: selected.width,
-          height: selected.height,
-          window_center: selected.windowCenter,
-          window_width: selected.windowWidth,
-          filter_applied: selected.filter,
-        }),
+      const { data } = await apiClient.post('/imaging/analyze', {
+        image_base64: base64,
+        modality: selected.modality,
+        body_part: selected.bodyPart,
+        width: selected.width,
+        height: selected.height,
+        window_center: selected.windowCenter,
+        window_width: selected.windowWidth,
+        filter_applied: selected.filter,
       })
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({ detail: response.statusText }))
-        throw new Error(errData.detail || `Server error ${response.status}`)
-      }
-      const data = await response.json()
       if (data.analysis) {
         setAiAnalysis(data.analysis)
       } else {
         setAiAnalysis('No analysis returned. Please try again.')
       }
     } catch (err: any) {
-      setAiAnalysis(`Analysis failed: ${err?.message || 'Unknown error'}`)
+      const detail = err?.response?.data?.detail
+      setAiAnalysis(`Analysis failed: ${detail || err?.message || 'Unknown error'}`)
     }
     setAiLoading(false)
   }

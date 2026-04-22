@@ -7,6 +7,7 @@ import {
 import { formatDate, logActivity } from '../utils/persistence'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 import { toast } from '../contexts/ToastContext'
+import { apiClient } from '../services'
 
 interface Manuscript {
   id: string; title: string; status: string; journal_target: string
@@ -15,7 +16,8 @@ interface Manuscript {
 }
 interface Author { id: string; name: string; affiliation: string; email: string; role: string; order: number }
 
-const API = '/api/v1/manuscripts'
+// apiClient's baseURL already includes /api/v1
+const BASE = '/manuscripts'
 // accepted/published stay green (terminal success states) and rejected
 // stays red so reviewers can spot final outcomes instantly; in-progress
 // states (draft/review/submitted) are monochrome to match the shell.
@@ -41,9 +43,8 @@ export default function ManuscriptManager() {
 
   const load = async () => {
     try {
-      const r = await fetch(API)
-      if (!r.ok) throw new Error(`manuscripts ${r.status}`)
-      setManuscripts((await r.json()).items || [])
+      const { data } = await apiClient.get(BASE, { headers: { 'X-Silent-Error': '1' } })
+      setManuscripts(data?.items || [])
     } catch (err) {
       toast('error', `Could not load manuscripts — ${err instanceof Error ? err.message : 'network error'}`, { title: 'Manuscripts' })
     }
@@ -73,22 +74,31 @@ export default function ManuscriptManager() {
       // sections) from the detail endpoint.
       ;(async () => {
         try {
-          const r = await fetch(`${API}/${pendingId}`)
-          if (r.ok) { const ms = await r.json(); setSelected(ms) }
+          const { data: ms } = await apiClient.get(`${BASE}/${pendingId}`)
+          setSelected(ms)
         } catch { /* ignore */ }
       })()
     }
   }, [manuscripts, pendingId, selected])
 
   const selectMs = async (id: string) => {
-    const r = await fetch(`${API}/${id}`)
-    if (r.ok) { const ms = await r.json(); setSelected(ms); setEditSection(null) }
+    try {
+      const { data: ms } = await apiClient.get(`${BASE}/${id}`)
+      setSelected(ms)
+      setEditSection(null)
+    } catch { /* interceptor surfaces the toast */ }
   }
 
   const createMs = async () => {
     if (!newTitle.trim()) return
-    const r = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: newTitle, journal_target: newJournal }) })
-    if (r.ok) { load(); setShowAdd(false); logActivity({ type: 'notebook', action: 'created', title: `Created manuscript: ${newTitle}` }); setNewTitle(''); setNewJournal('') }
+    try {
+      await apiClient.post(BASE, { title: newTitle, journal_target: newJournal })
+      load()
+      setShowAdd(false)
+      logActivity({ type: 'notebook', action: 'created', title: `Created manuscript: ${newTitle}` })
+      setNewTitle('')
+      setNewJournal('')
+    } catch { /* interceptor surfaces the toast */ }
   }
 
   const deleteMs = (id: string) => {
@@ -98,7 +108,9 @@ export default function ManuscriptManager() {
   const confirmDelete = async () => {
     if (!deleteConfirmId) return
     const deletedMs = manuscripts.find(m => m.id === deleteConfirmId)
-    await fetch(`${API}/${deleteConfirmId}`, { method: 'DELETE' })
+    try {
+      await apiClient.delete(`${BASE}/${deleteConfirmId}`)
+    } catch { /* interceptor surfaces the toast */ }
     if (selected?.id === deleteConfirmId) setSelected(null); load()
     setDeleteConfirmId(null)
     logActivity({ type: 'notebook', action: 'deleted', title: `Deleted manuscript: ${deletedMs?.title || deleteConfirmId}` })
@@ -107,34 +119,58 @@ export default function ManuscriptManager() {
   const saveSection = async () => {
     if (!selected || !editSection) return
     const sections = { ...selected.sections, [editSection]: editText }
-    const r = await fetch(`${API}/${selected.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sections }) })
-    if (r.ok) { const ms = await r.json(); setSelected(ms); setEditSection(null); logActivity({ type: 'notebook', action: 'updated', title: `Updated section ${editSection}: ${selected.title}` }) }
+    try {
+      const { data: ms } = await apiClient.patch(`${BASE}/${selected.id}`, { sections })
+      setSelected(ms)
+      setEditSection(null)
+      logActivity({ type: 'notebook', action: 'updated', title: `Updated section ${editSection}: ${selected.title}` })
+    } catch { /* interceptor surfaces the toast */ }
   }
 
   const addAuthor = async () => {
     if (!selected || !newAuthor.name.trim()) return
-    const r = await fetch(`${API}/${selected.id}/authors`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newAuthor) })
-    if (r.ok) { selectMs(selected.id); setShowAuthorAdd(false); setNewAuthor({ name: '', affiliation: '', email: '', role: 'Co-Author' }); logActivity({ type: 'notebook', action: 'updated', title: `Added author ${newAuthor.name} to: ${selected.title}` }) }
+    try {
+      await apiClient.post(`${BASE}/${selected.id}/authors`, newAuthor)
+      selectMs(selected.id)
+      setShowAuthorAdd(false)
+      setNewAuthor({ name: '', affiliation: '', email: '', role: 'Co-Author' })
+      logActivity({ type: 'notebook', action: 'updated', title: `Added author ${newAuthor.name} to: ${selected.title}` })
+    } catch { /* interceptor surfaces the toast */ }
   }
 
   const removeAuthor = async (authorId: string) => {
     if (!selected) return
     const removedAuthor = selected.authors.find(a => a.id === authorId)
-    await fetch(`${API}/${selected.id}/authors/${authorId}`, { method: 'DELETE' })
+    try {
+      await apiClient.delete(`${BASE}/${selected.id}/authors/${authorId}`)
+    } catch { /* interceptor surfaces the toast */ }
     selectMs(selected.id)
     logActivity({ type: 'notebook', action: 'updated', title: `Removed author ${removedAuthor?.name || authorId} from: ${selected.title}` })
   }
 
   const exportMs = async () => {
     if (!selected) return
-    const r = await fetch(`${API}/${selected.id}/export?format=markdown`)
-    if (r.ok) { const blob = await r.blob(); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${selected.title}.md`; a.click() }
+    try {
+      const { data: blob } = await apiClient.get(`${BASE}/${selected.id}/export`, {
+        params: { format: 'markdown' },
+        responseType: 'blob',
+      })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${selected.title}.md`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch { /* interceptor surfaces the toast */ }
   }
 
   const submitMs = async () => {
     if (!selected || !selected.journal_target) return
-    const r = await fetch(`${API}/${selected.id}/submit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ journal: selected.journal_target }) })
-    if (r.ok) { selectMs(selected.id); logActivity({ type: 'notebook', action: 'updated', title: `Submitted manuscript: ${selected.title}` }) }
+    try {
+      await apiClient.post(`${BASE}/${selected.id}/submit`, { journal: selected.journal_target })
+      selectMs(selected.id)
+      logActivity({ type: 'notebook', action: 'updated', title: `Submitted manuscript: ${selected.title}` })
+    } catch { /* interceptor surfaces the toast */ }
   }
 
   return (

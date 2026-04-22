@@ -5,6 +5,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 import { logActivity } from '../utils/persistence'
 import { toast } from '../contexts/ToastContext'
+import { apiClient } from '../services'
 
 interface Sample {
   id: string; barcode: string; sample_type: string; status: string; project: string
@@ -13,7 +14,8 @@ interface Sample {
 }
 interface Inventory { total_samples: number; by_type: Record<string, number>; by_status: Record<string, number>; by_project: Record<string, number>; alerts: any[]; storage_utilization: any[] }
 
-const API = '/api/v1/biobank'
+// apiClient's baseURL already includes /api/v1
+const BASE = '/biobank'
 const PIE_COLORS = ['#5B8DB8', '#8B7EAF', '#6BA594', '#C4956A', '#7BA7B8', '#B07E8B']
 const STATUS_COLORS: Record<string, string> = { available: 'text-[var(--color-text-secondary)] bg-[var(--glass-bg)]', checked_out: 'text-[var(--color-text-muted)] bg-[var(--glass-bg)]', depleted: 'text-[var(--color-text-muted)] bg-[var(--glass-bg)]', reserved: 'text-[var(--color-text-secondary)] bg-[var(--glass-bg)]' }
 
@@ -63,18 +65,20 @@ export default function BiobankManager() {
 
   const load = async () => {
     try {
-      const r = await fetch(`${API}/samples`)
-      if (!r.ok) throw new Error(`samples ${r.status}`)
-      setSamples((await r.json()).items || [])
+      const { data } = await apiClient.get(`${BASE}/samples`, {
+        headers: { 'X-Silent-Error': '1' },
+      })
+      setSamples(data?.items || [])
     } catch (err) {
       toast('error', `Could not load samples — ${err instanceof Error ? err.message : 'unknown error'}`, {
         title: 'Biobank',
       })
     }
     try {
-      const r = await fetch(`${API}/inventory`)
-      if (!r.ok) throw new Error(`inventory ${r.status}`)
-      setInventory(await r.json())
+      const { data } = await apiClient.get(`${BASE}/inventory`, {
+        headers: { 'X-Silent-Error': '1' },
+      })
+      setInventory(data)
     } catch (err) {
       toast('error', `Could not load inventory — ${err instanceof Error ? err.message : 'unknown error'}`, {
         title: 'Biobank',
@@ -107,8 +111,13 @@ export default function BiobankManager() {
   }, [samples, pendingId, selected])
 
   const createSample = async () => {
-    const r = await fetch(`${API}/samples`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) })
-    if (r.ok) { load(); setShowAdd(false); logActivity({ type: 'discovery', action: 'created', title: `Added biobank sample: ${form.barcode || form.sample_type}` }); setForm({ barcode: '', sample_type: 'tissue', tissue_type: '', project: '', patient_id: '', quantity: '' }) }
+    try {
+      await apiClient.post(`${BASE}/samples`, form)
+      load()
+      setShowAdd(false)
+      logActivity({ type: 'discovery', action: 'created', title: `Added biobank sample: ${form.barcode || form.sample_type}` })
+      setForm({ barcode: '', sample_type: 'tissue', tissue_type: '', project: '', patient_id: '', quantity: '' })
+    } catch { /* interceptor surfaces the toast */ }
   }
 
   const deleteSample = (id: string) => {
@@ -118,7 +127,9 @@ export default function BiobankManager() {
   const confirmDelete = async () => {
     if (!deleteConfirmId) return
     const deletedSample = samples.find(s => s.id === deleteConfirmId)
-    await fetch(`${API}/samples/${deleteConfirmId}`, { method: 'DELETE' })
+    try {
+      await apiClient.delete(`${BASE}/samples/${deleteConfirmId}`)
+    } catch { /* interceptor surfaces the toast */ }
     if (selected?.id === deleteConfirmId) setSelected(null); load()
     setDeleteConfirmId(null)
     logActivity({ type: 'discovery', action: 'deleted', title: `Deleted biobank sample: ${deletedSample?.barcode || deleteConfirmId}` })
@@ -132,19 +143,21 @@ export default function BiobankManager() {
     if (!checkoutSampleId) return
     const researcher = checkoutForm.researcher.trim() || 'Unassigned'
     const purpose = checkoutForm.purpose.trim() || 'Analysis'
-    const r = await fetch(`${API}/samples/${checkoutSampleId}/checkout`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ researcher, purpose }) })
-    if (r.ok) {
-      const s = await r.json()
+    try {
+      const { data: s } = await apiClient.post(`${BASE}/samples/${checkoutSampleId}/checkout`, { researcher, purpose })
       setSelected(s); load()
       try { localStorage.setItem('biobank.lastResearcher', researcher) } catch {}
       logActivity({ type: 'discovery', action: 'updated', title: `Checked out sample: ${s.barcode || checkoutSampleId}` })
-    }
+    } catch { /* interceptor surfaces the toast */ }
     setCheckoutSampleId(null)
   }
 
   const checkin = async (id: string) => {
-    const r = await fetch(`${API}/samples/${id}/checkin?condition=good`, { method: 'POST' })
-    if (r.ok) { const s = await r.json(); setSelected(s); load(); logActivity({ type: 'discovery', action: 'updated', title: `Returned sample: ${s.barcode || id}` }) }
+    try {
+      const { data: s } = await apiClient.post(`${BASE}/samples/${id}/checkin`, null, { params: { condition: 'good' } })
+      setSelected(s); load()
+      logActivity({ type: 'discovery', action: 'updated', title: `Returned sample: ${s.barcode || id}` })
+    } catch { /* interceptor surfaces the toast */ }
   }
 
   const filtered = samples.filter(s => {

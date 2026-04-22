@@ -2,12 +2,12 @@ import { useState, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { FiZap, FiCheck, FiAlertTriangle, FiClock, FiDownload, FiRefreshCw } from 'react-icons/fi'
-import { api, Hypothesis } from '../services/api'
+import { api, apiClient, Hypothesis } from '../services/api'
 import clsx from 'clsx'
 
-const API_BASE = '/api/v1'
-
-// Download hypothesis PDF from backend (ReportLab) with client-side fallback
+// Download hypothesis PDF from backend (ReportLab) with client-side fallback.
+// Binary endpoint — uses responseType 'blob' + validateStatus to silently
+// handle both direct-PDF and JSON-wrapped-base64 response shapes.
 async function downloadHypothesisPdf(hypothesisId: string, hypothesisData: {
   title: string
   description?: string
@@ -16,31 +16,42 @@ async function downloadHypothesisPdf(hypothesisId: string, hypothesisData: {
   disease?: string
   tags?: string[]
 }) {
-  const response = await fetch(`${API_BASE}/documents/hypothesis/${hypothesisId}/pdf`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+  const response = await apiClient.post(
+    `/documents/hypothesis/${hypothesisId}/pdf`,
+    {
       title: hypothesisData.title,
       description: hypothesisData.description || '',
       mechanism: hypothesisData.mechanism || '',
       confidence: hypothesisData.confidence,
       disease: hypothesisData.disease || 'Research',
       tags: hypothesisData.tags || [],
-    }),
-  })
-  if (response.ok) {
-    const data = await response.json()
+    },
+    { responseType: 'blob', validateStatus: () => true },
+  )
+  if (response.status >= 400) return
+  const rawBlob = response.data as Blob
+  const contentType = rawBlob.type || String(response.headers['content-type'] || '')
+  let blob: Blob
+  let filename = `humanovo-${hypothesisData.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase().slice(0, 50)}.pdf`
+  if (contentType.includes('application/json')) {
+    const text = await rawBlob.text()
+    const data = JSON.parse(text)
+    if (!data.pdf_base64) return
     const byteChars = atob(data.pdf_base64)
     const byteArray = new Uint8Array(byteChars.length)
     for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i)
-    const blob = new Blob([byteArray], { type: 'application/pdf' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = data.filename || `humanovo-${hypothesisData.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase().slice(0, 50)}.pdf`
-    a.click()
-    URL.revokeObjectURL(url)
+    blob = new Blob([byteArray], { type: 'application/pdf' })
+    filename = data.filename || filename
+  } else {
+    blob = rawBlob
   }
+  if (blob.size === 0) return
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
 }
 
 function HypothesisCard({ hypothesis }: { hypothesis: Hypothesis }) {

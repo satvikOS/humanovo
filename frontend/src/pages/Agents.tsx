@@ -28,7 +28,7 @@ import {
 } from 'react-icons/fi'
 import { Link, useSearchParams } from 'react-router-dom'
 import { BarChart, Bar, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import api from '../services/api'
+import api, { apiClient } from '../services/api'
 import type { OrchestratorStatus, DiscoveryConfig } from '../services/api'
 import { logActivity, formatDate } from '../utils/persistence'
 
@@ -494,34 +494,39 @@ export default function Agents() {
 
   const exportPdf = async (h: Hypothesis) => {
     try {
-      const res = await fetch(`/api/v1/documents/hypothesis/${h.id}/pdf`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      // Binary endpoint — responseType 'blob' + validateStatus handles both
+      // the direct-PDF response and the JSON-wrapped-base64 shape.
+      const res = await apiClient.post(
+        `/documents/hypothesis/${h.id}/pdf`,
+        {
           title: h.title, description: h.description, mechanism: h.mechanism,
           confidence: h.confidence, evidence_summary: h.evidence_summary,
           risks: h.risks, validation_steps: h.validation_steps,
           key_citations: h.key_citations, disease: config.disease,
           discovery_type: config.discovery_type,
-        }),
-      })
-      if (res.ok) {
-        const contentType = res.headers.get('content-type') || ''
-        let blob: Blob
-        if (contentType.includes('application/json')) {
-          const data = await res.json()
-          const byteChars = atob(data.pdf_base64)
-          const byteArray = new Uint8Array(byteChars.length)
-          for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i)
-          blob = new Blob([byteArray], { type: 'application/pdf' })
-        } else {
-          blob = await res.blob()
-        }
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url; a.download = `${h.title.slice(0, 50)}.pdf`; a.click()
-        URL.revokeObjectURL(url)
+        },
+        { responseType: 'blob', validateStatus: () => true },
+      )
+      if (res.status >= 400) return
+      const rawBlob = res.data as Blob
+      const contentType = rawBlob.type || String(res.headers['content-type'] || '')
+      let blob: Blob
+      if (contentType.includes('application/json')) {
+        const text = await rawBlob.text()
+        const data = JSON.parse(text)
+        if (!data.pdf_base64) return
+        const byteChars = atob(data.pdf_base64)
+        const byteArray = new Uint8Array(byteChars.length)
+        for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i)
+        blob = new Blob([byteArray], { type: 'application/pdf' })
+      } else {
+        blob = rawBlob
       }
+      if (blob.size === 0) return
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url; a.download = `${h.title.slice(0, 50)}.pdf`; a.click()
+      URL.revokeObjectURL(url)
     } catch (e) { console.error(e) }
   }
 

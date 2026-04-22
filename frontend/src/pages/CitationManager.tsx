@@ -8,7 +8,7 @@ import {
 } from 'react-icons/fi'
 import { usePersistentState, logActivity } from '../utils/persistence'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
-import api from '../services/api'
+import api, { apiClient } from '../services/api'
 
 interface Citation {
   id: string
@@ -339,30 +339,29 @@ export default function CitationManager() {
   useEffect(() => {
     const load = async () => {
       try {
-        const apiBase = import.meta.env.VITE_API_BASE_URL || ''
-        const res = await fetch(`${apiBase}/api/v1/evidence?page_size=100`)
-        if (res.ok) {
-          const data = await res.json()
-          if (data.items?.length > 0) {
-            const loaded = data.items.map((e: any) => ({
-              id: e.id,
-              type: e.source_type === 'pubmed' ? 'journal' : e.source_type === 'preprint' ? 'preprint' : 'journal',
-              title: e.title || '',
-              authors: e.authors || [],
-              journal: e.journal || '',
-              year: e.publication_date ? new Date(e.publication_date).getFullYear() : 0,
-              doi: e.doi || '',
-              tags: e.tags || [],
-              abstract: e.abstract || e.snippet || '',
-              url: e.source_url || '',
-              notes: e.notes || '',
-              createdAt: e.created_at || new Date().toISOString(),
-            }))
-            setCitations(prev => {
-              const existingIds = new Set(prev.map(p => p.id))
-              return [...prev, ...loaded.filter((l: any) => !existingIds.has(l.id))]
-            })
-          }
+        const { data } = await apiClient.get('/evidence', {
+          params: { page_size: 100 },
+          headers: { 'X-Silent-Error': '1' },
+        })
+        if (data.items?.length > 0) {
+          const loaded = data.items.map((e: any) => ({
+            id: e.id,
+            type: e.source_type === 'pubmed' ? 'journal' : e.source_type === 'preprint' ? 'preprint' : 'journal',
+            title: e.title || '',
+            authors: e.authors || [],
+            journal: e.journal || '',
+            year: e.publication_date ? new Date(e.publication_date).getFullYear() : 0,
+            doi: e.doi || '',
+            tags: e.tags || [],
+            abstract: e.abstract || e.snippet || '',
+            url: e.source_url || '',
+            notes: e.notes || '',
+            createdAt: e.created_at || new Date().toISOString(),
+          }))
+          setCitations(prev => {
+            const existingIds = new Set(prev.map(p => p.id))
+            return [...prev, ...loaded.filter((l: any) => !existingIds.has(l.id))]
+          })
         }
       } catch { /* API unavailable */ }
     }
@@ -402,20 +401,15 @@ export default function CitationManager() {
     // Persist to backend
     ;(async () => {
       try {
-        const apiBase = import.meta.env.VITE_API_BASE_URL || ''
-        await fetch(`${apiBase}/api/v1/evidence`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            title: citation.title,
-            source_type: citation.type === 'journal' ? 'pubmed' : citation.type,
-            abstract: citation.abstract,
-            authors: citation.authors,
-            publication_date: `${citation.year}-01-01`,
-            tags: citation.tags,
-            source_url: citation.url || (citation.doi ? `https://doi.org/${citation.doi}` : undefined),
-          })
-        })
+        await apiClient.post('/evidence', {
+          title: citation.title,
+          source_type: citation.type === 'journal' ? 'pubmed' : citation.type,
+          abstract: citation.abstract,
+          authors: citation.authors,
+          publication_date: `${citation.year}-01-01`,
+          tags: citation.tags,
+          source_url: citation.url || (citation.doi ? `https://doi.org/${citation.doi}` : undefined),
+        }, { headers: { 'X-Silent-Error': '1' } })
       } catch { /* non-fatal */ }
     })()
   }
@@ -481,10 +475,11 @@ export default function CitationManager() {
 
     // Upload to backend
     try {
-      const apiBase = import.meta.env.VITE_API_BASE_URL || ''
       const formData = new FormData()
       formData.append('file', file)
-      await fetch(`${apiBase}/api/v1/ingestion/upload`, { method: 'POST', body: formData })
+      await apiClient.post('/ingestion/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data', 'X-Silent-Error': '1' },
+      })
     } catch { /* non-fatal */ }
 
     if (fileInputRef.current) fileInputRef.current.value = ''

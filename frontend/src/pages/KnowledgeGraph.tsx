@@ -6,7 +6,7 @@ import {
   FiChevronRight, FiChevronDown, FiExternalLink, FiX,
   FiInfo, FiBook, FiLink, FiCheck
 } from 'react-icons/fi'
-import { api, Entity } from '../services/api'
+import { api, apiClient, Entity } from '../services/api'
 
 // Entity type colors and configurations
 const ENTITY_COLORS = {
@@ -130,9 +130,7 @@ export default function KnowledgeGraph() {
       setGraphLoading(true)
       try {
         // Pull an initial page of entities as graph nodes.
-        const res = await fetch('/api/v1/knowledge-graph/entities?limit=200')
-        if (!res.ok) throw new Error(`entities ${res.status}`)
-        const data = await res.json()
+        const { data } = await apiClient.get('/knowledge-graph/entities', { params: { limit: 200 } })
         const nodes: GraphNode[] = (data.entities || data.items || []).map((n: {
           id: string
           name?: string
@@ -152,18 +150,17 @@ export default function KnowledgeGraph() {
         const seedIds = nodes.slice(0, 10).map((n) => n.id)
         for (const nid of seedIds) {
           try {
-            const er = await fetch(
-              `/api/v1/knowledge-graph/entities/${encodeURIComponent(nid)}/relationships?limit=10`,
-            )
-            if (!er.ok) continue
-            const rels = (await er.json()) as Array<{
+            const { data: rels } = await apiClient.get<Array<{
               id: string
               source_id: string
               target_id: string
               relation_type?: string
               confidence?: number
               evidence_count?: number
-            }>
+            }>>(
+              `/knowledge-graph/entities/${encodeURIComponent(nid)}/relationships`,
+              { params: { limit: 10 } },
+            )
             for (const r of rels) {
               edges.push({
                 id: r.id,

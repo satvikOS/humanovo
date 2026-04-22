@@ -2,6 +2,7 @@ import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { formatDateTime, persistGet, getActivityLog } from '../utils/persistence'
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
+import { apiClient } from '../services'
 import {
   FiHome,
   FiFolder,
@@ -1014,27 +1015,19 @@ function ConstantChat() {
     } else if (isOutOfScope(userMsg.toLowerCase().trim())) {
       fullResponse = generateSmartFallbackResponse(userMsg)
     } else {
-      // Call the backend AI endpoint (powered by Constant AI)
+      // Call the backend AI endpoint (powered by Constant AI).
+      // Non-streaming — server returns the full message, then we
+      // simulate character-by-character client-side below.
       try {
         const platformContext = getLocalContext()
-        const _apiBase = import.meta.env.VITE_API_BASE_URL || ''
-        const res = await fetch(`${_apiBase}/api/v1/orchestrator/chat`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            message: userMsg,
-            context: 'general',
-            platform_context: platformContext,
-            knowledge_base: { include_documents: true, retrieval_mode: 'hybrid' },
-            attached_files: filesToSend.map(f => ({ name: f.name, size: f.size, type: f.type })),
-          }),
+        const { data } = await apiClient.post('/orchestrator/chat', {
+          message: userMsg,
+          context: 'general',
+          platform_context: platformContext,
+          knowledge_base: { include_documents: true, retrieval_mode: 'hybrid' },
+          attached_files: filesToSend.map(f => ({ name: f.name, size: f.size, type: f.type })),
         })
-        if (res.ok) {
-          const data = await res.json()
-          fullResponse = data.response || 'I\'m not sure about that. Could you rephrase?'
-        } else {
-          fullResponse = generateSmartFallbackResponse(userMsg)
-        }
+        fullResponse = data.response || 'I\'m not sure about that. Could you rephrase?'
       } catch { /* API unavailable — use local fallback */
         fullResponse = generateSmartFallbackResponse(userMsg)
       }
