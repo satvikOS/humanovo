@@ -514,6 +514,8 @@ function AdminSeedSettings() {
         checks: Record<string, string>
         counts: Record<string, number | null>
         last_seen: Record<string, string | null>
+        embeddings?: { kg_entity?: number | null; evidence?: number | null }
+        flags?: { seed_available?: boolean; corpus_seeded?: boolean }
       }
   >(null)
   const [busy, setBusy] = useState<'kg' | 'corpus' | null>(null)
@@ -709,16 +711,43 @@ function AdminSeedSettings() {
 
       <div className="glass-card p-4">
         <h3 className="text-sm font-medium mb-2">Current corpus</h3>
-        {stats ? (
+        {/* Prefer /admin/health when available (newer, includes embedding
+            split + flags). Fall back to /admin/kg-stats fields for older
+            backends that predate the health enrichment. */}
+        {stats || health ? (
           <div className="grid grid-cols-2 gap-2 text-xs" style={{ color: 'var(--color-text-muted)' }}>
-            <div>Environment</div><div style={{ color: 'var(--color-text)' }}>{stats.environment}</div>
-            <div>KG nodes</div><div style={{ color: 'var(--color-text)' }}>{stats.node_count}</div>
-            <div>KG edges</div><div style={{ color: 'var(--color-text)' }}>{stats.edge_count}</div>
-            <div>KG embeddings (pgvector 1024d)</div><div style={{ color: 'var(--color-text)' }}>{stats.embedding_count}</div>
-            <div>Evidence rows</div><div style={{ color: 'var(--color-text)' }}>{stats.evidence_count ?? '—'}</div>
-            <div>Evidence embeddings</div><div style={{ color: 'var(--color-text)' }}>{stats.evidence_embedding_count ?? '—'}</div>
-            <div>Hypotheses</div><div style={{ color: 'var(--color-text)' }}>{stats.hypothesis_count ?? '—'}</div>
-            <div>Projects</div><div style={{ color: 'var(--color-text)' }}>{stats.project_count ?? '—'}</div>
+            <div>Environment</div>
+            <div style={{ color: 'var(--color-text)' }}>
+              {stats?.environment ?? health?.environment ?? '—'}
+            </div>
+            <div>KG nodes</div>
+            <div style={{ color: 'var(--color-text)' }}>
+              {health?.counts?.kg_nodes ?? stats?.node_count ?? '—'}
+            </div>
+            <div>KG edges</div>
+            <div style={{ color: 'var(--color-text)' }}>
+              {health?.counts?.kg_edges ?? stats?.edge_count ?? '—'}
+            </div>
+            <div>KG embeddings (pgvector 1024d)</div>
+            <div style={{ color: 'var(--color-text)' }}>
+              {health?.embeddings?.kg_entity ?? stats?.embedding_count ?? '—'}
+            </div>
+            <div>Evidence rows</div>
+            <div style={{ color: 'var(--color-text)' }}>
+              {health?.counts?.evidence ?? stats?.evidence_count ?? '—'}
+            </div>
+            <div>Evidence embeddings</div>
+            <div style={{ color: 'var(--color-text)' }}>
+              {health?.embeddings?.evidence ?? stats?.evidence_embedding_count ?? '—'}
+            </div>
+            <div>Hypotheses</div>
+            <div style={{ color: 'var(--color-text)' }}>
+              {health?.counts?.hypotheses ?? stats?.hypothesis_count ?? '—'}
+            </div>
+            <div>Projects</div>
+            <div style={{ color: 'var(--color-text)' }}>
+              {health?.counts?.projects ?? stats?.project_count ?? '—'}
+            </div>
           </div>
         ) : (
           <p className="text-xs text-[var(--color-text-muted)]">Stats unavailable — backend unreachable.</p>

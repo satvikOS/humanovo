@@ -1456,6 +1456,8 @@ export const api = {
     checks: Record<string, string>
     counts: Record<string, number | null>
     last_seen: Record<string, string | null>
+    embeddings?: { kg_entity?: number | null; evidence?: number | null }
+    flags?: { seed_available?: boolean; corpus_seeded?: boolean }
   }> {
     const { data } = await apiClient.get('/admin/health')
     return data

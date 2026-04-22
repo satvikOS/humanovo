@@ -97,6 +97,31 @@ async def admin_health(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
             counts[label] = None
             last_seen[label] = f"error: {str(e)[:80]}"
 
+    # Embedding split + seed-state flags — lets the Admin panel drop the
+    # parallel /admin/kg-stats fetch and derive everything from one call.
+    embeddings: dict[str, int | None] = {}
+    for label, sql in [
+        ("kg_entity",
+         "SELECT COUNT(*) FROM vector_embeddings WHERE source_type = 'kg_entity'"),
+        ("evidence",
+         "SELECT COUNT(*) FROM vector_embeddings WHERE source_type = 'evidence'"),
+    ]:
+        try:
+            r = (await db.execute(text(sql))).scalar()
+            embeddings[label] = int(r or 0)
+        except Exception:
+            embeddings[label] = None
+
+    flags = {
+        # Consistent with /admin/kg-stats so the two endpoints can't
+        # disagree on whether the seed CTA should be offered.
+        "seed_available": (counts.get("kg_nodes") or 0) < 200,
+        "corpus_seeded": (
+            (counts.get("evidence") or 0) >= 10
+            and (counts.get("hypotheses") or 0) >= 2
+        ),
+    }
+
     overall = (
         "healthy"
         if checks.get("postgres") == "ok" and checks.get("pgvector") == "ok"
@@ -110,6 +135,8 @@ async def admin_health(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         "checks": checks,
         "counts": counts,
         "last_seen": last_seen,
+        "embeddings": embeddings,
+        "flags": flags,
     }
 
 
