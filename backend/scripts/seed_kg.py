@@ -71,28 +71,53 @@ _TOKEN_RE = _re.compile(r"[a-zA-Z][a-zA-Z0-9]*")
 def _fixture_embedding(text_value: str, dim: int = 1024) -> list[float]:
     """Token-frequency pseudo-embedding. Deterministic, L2-norm=1.
 
-    Previously this was random-hash-derived — biologically meaningless.
-    Now it hashes each ≥3-char token into `dim` bins and L2-normalises,
-    which gives cosine similarity that actually rewards shared vocabulary.
-    For the 91-entity KG, this clusters dopaminergic/α-synuclein/PD
-    entities together, makes PDAC/KRAS/pancreas cluster, etc.
+    Count-min-sketch-style: hash each ≥3-char token with 4 independent
+    hashes and accumulate weighted contributions. Reduces collision
+    pressure vs the original 2-hash version — at 10K+ entities the
+    1024-bin space would saturate under Birthday-paradox collisions.
+    Using 4 independent hash lanes spreads the mass and keeps cosine
+    discriminative even as vocabulary grows.
+
+    Stopword filter strips common English so "the", "of", "and" don't
+    dominate. Real production path: Bedrock Cohere Embed v3 (swap at
+    `SEED_EMBED_MODE=real`).
     """
     vec = [0.0] * dim
-    tokens = [t.lower() for t in _TOKEN_RE.findall(text_value) if len(t) >= 3]
+    tokens = [
+        t.lower() for t in _TOKEN_RE.findall(text_value)
+        if len(t) >= 3 and t.lower() not in _STOPWORDS
+    ]
     if not tokens:
         return vec
+    # 4 independent hash lanes via different SHA-256 offsets.
     for tok in tokens:
-        # Stable per-token hash → bin index.
-        h = int(hashlib.sha256(tok.encode("utf-8")).hexdigest()[:16], 16)
-        idx = h % dim
-        # Add 1 for each occurrence (term frequency).
-        vec[idx] += 1.0
-        # Add half-weight to a second bin for a bit more expressive power
-        # — still deterministic.
-        idx2 = (h >> 16) % dim
-        vec[idx2] += 0.5
+        raw = hashlib.sha256(tok.encode("utf-8")).hexdigest()
+        # Lane 1: bits 0-15 (weight 1.0)
+        vec[int(raw[0:8], 16) % dim] += 1.0
+        # Lane 2: bits 16-31 (weight 0.7)
+        vec[int(raw[8:16], 16) % dim] += 0.7
+        # Lane 3: bits 32-47 (weight 0.5)
+        vec[int(raw[16:24], 16) % dim] += 0.5
+        # Lane 4: bits 48-63 (weight 0.3)
+        vec[int(raw[24:32], 16) % dim] += 0.3
     norm = sum(v * v for v in vec) ** 0.5
     return [v / norm for v in vec] if norm > 0 else vec
+
+
+# Minimal English stopword set — enough to prevent "of/the/and" from
+# dominating cosine similarity. Real tokenisers use ~300 stopwords;
+# this list is the 30 most common monosyllables that would otherwise
+# be the top-frequency tokens.
+_STOPWORDS = frozenset({
+    "the", "and", "for", "are", "but", "not", "you", "all", "can", "had",
+    "her", "was", "one", "our", "out", "day", "get", "has", "him", "his",
+    "how", "man", "new", "now", "old", "see", "two", "way", "who", "boy",
+    "its", "let", "put", "say", "she", "too", "use", "with", "from", "this",
+    "that", "these", "those", "have", "been", "were", "they", "them", "than",
+    "into", "also", "may", "via", "due", "such", "both", "each", "used", "use",
+    "within", "across", "during", "after", "before", "while", "where", "which",
+    "when",
+})
 
 
 # ─── Curated biomedical slice ──────────────────────────────────────

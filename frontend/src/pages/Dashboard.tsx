@@ -595,15 +595,32 @@ function DiscoveryStatusWidget() {
               {disease} · stage {stage ?? '—'}/12
             </div>
           )}
-          <div className="h-1 rounded bg-[var(--glass-bg)] overflow-hidden">
-            <div
-              className="h-1 rounded"
-              style={{
-                width: `${pct}%`,
-                background: 'linear-gradient(90deg, #4ade80, #22c55e)',
-                transition: 'width 0.5s ease',
-              }}
-            />
+          {/* 12 stage ticks — cheapest way to visualise pipeline progress */}
+          <div className="flex gap-0.5 mb-1" aria-hidden>
+            {Array.from({ length: 12 }).map((_, i) => {
+              const done = stage !== null && i < stage
+              const current = stage !== null && i === stage
+              return (
+                <span
+                  key={i}
+                  style={{
+                    flex: 1,
+                    height: 4,
+                    borderRadius: 1,
+                    background: done
+                      ? '#22c55e'
+                      : current
+                      ? 'linear-gradient(90deg, #4ade80, transparent)'
+                      : 'var(--glass-bg)',
+                    transition: 'background 0.4s ease',
+                  }}
+                />
+              )
+            })}
+          </div>
+          <div className="text-xxs text-[var(--color-text-muted)]">
+            {pct}% · SEED → EXPAND → EVIDENCE → COUNTER → REVISE → MECHANISM →
+            VALIDATE → GROUND → SCORE → REFINE → TRANSLATE → FINALIZE
           </div>
         </div>
       ) : (

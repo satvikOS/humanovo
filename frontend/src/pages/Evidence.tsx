@@ -324,8 +324,37 @@ export default function Evidence() {
     if (!selectedId) { setLinkedEntities([]); return }
     const item = evidence.find(e => e.id === selectedId)
     if (!item) return
-    const queryText = [item.title, item.abstract ?? '']
-      .filter(Boolean).join(' ').slice(0, 500)
+    // Build the vector-search query from title + key-bearing sentences
+    // of the abstract. Simple naive truncation (.slice(0,500)) dropped
+    // sentences containing biomedical terms that were late in a long
+    // abstract — specifically anything discussing methods/results at
+    // the tail. Bias: keep the title, then keep sentences that contain
+    // biomedical-style tokens (uppercase genes like TP53, known disease
+    // suffixes, numeric doses), falling back to the first sentences.
+    const ranker = (sentence: string): number => {
+      let score = 0
+      // ALL-CAPS tokens 2-5 chars → likely gene/protein names (TP53, BRCA1)
+      if (/\b[A-Z][A-Z0-9]{1,5}\b/.test(sentence)) score += 3
+      // Disease suffixes
+      if (/(oma\b|pathy\b|osis\b|itis\b|emia\b|disease|syndrome|cancer)/i.test(sentence)) score += 2
+      // Dose/numeric signal
+      if (/\d+\s?(mg|ml|nM|µM|µg|mcg|mmol|iu|cells|x10)/i.test(sentence)) score += 1
+      // Pathway/mechanism signal
+      if (/(pathway|receptor|inhibit|activ|express|mutat|signal)/i.test(sentence)) score += 1
+      return score
+    }
+    const title = item.title || ''
+    const abstract = item.abstract || ''
+    const sentences = abstract.split(/(?<=[.!?])\s+/).filter(s => s.length > 10)
+    sentences.sort((a, b) => ranker(b) - ranker(a))
+    // Title always included; greedily add top-ranked sentences up to 500 chars.
+    const parts: string[] = [title]
+    let remaining = 500 - title.length - 1
+    for (const s of sentences) {
+      if (remaining <= 20) break
+      if (s.length <= remaining) { parts.push(s); remaining -= s.length + 1 }
+    }
+    const queryText = parts.join(' ').slice(0, 500)
     if (!queryText) { setLinkedEntities([]); return }
     let cancelled = false
     api.searchSimilarEntities(queryText, { limit: 10, min_similarity: 0.05 })
