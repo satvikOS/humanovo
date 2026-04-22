@@ -7,13 +7,11 @@ import {
   FiUpload, FiFile, FiEye, FiEdit2, FiCheck,
 } from 'react-icons/fi'
 import clsx from 'clsx'
-import api, { Project } from '../services/api'
+import api, { Project, apiClient } from '../services/api'
 import { logActivity, formatDate, usePersistentState, blobPut, blobGet, blobDelete } from '../utils/persistence'
 import HypothesisDocViewer from '../components/HypothesisDocViewer'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 
-const _BACKEND = import.meta.env.VITE_API_BASE_URL || ''
-const API_BASE = `${_BACKEND}/api/v1`
 
 interface SavedResearchPaper {
   id: string
@@ -372,7 +370,7 @@ export default function ProjectDetail() {
     setGeneratingPaper(false)
     stopPhaseAnimation()
     try {
-      await fetch(`${API_BASE}/orchestrator/cancel-paper`, { method: 'POST' })
+      await apiClient.post('/orchestrator/cancel-paper')
     } catch { /* best-effort */ }
     setPaperError(null)
   }, [stopPhaseAnimation])
@@ -404,14 +402,12 @@ export default function ProjectDetail() {
       // Step 1: Check if paper for THIS hypothesis already exists in Lambda DynamoDB
       let cachedHtml = ''
       try {
-        const statusRes = await fetch(`${API_BASE}/orchestrator/paper-status`)
-        if (statusRes.ok) {
-          const statusData = await statusRes.json()
-          // Only use cached paper if it matches this specific hypothesis
-          if (statusData.status === 'done' && statusData.paper_html && statusData.paper_html.length > 100
-              && statusData.hypothesis_id === hypothesis.id) {
-            cachedHtml = statusData.paper_html
-          }
+        const statusRes = await apiClient.get('/orchestrator/paper-status')
+        const statusData = statusRes.data
+        // Only use cached paper if it matches this specific hypothesis
+        if (statusData.status === 'done' && statusData.paper_html && statusData.paper_html.length > 100
+            && statusData.hypothesis_id === hypothesis.id) {
+          cachedHtml = statusData.paper_html
         }
       } catch { /* ignore — will generate fresh */ }
 
@@ -424,10 +420,10 @@ export default function ProjectDetail() {
       }
 
       // Step 2: Trigger Lambda paper generation (the pipeline that actually works)
-      const triggerRes = await fetch(`${API_BASE}/orchestrator/generate-paper/markdown`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      let triggerData: any = null
+      let triggerOk = false
+      try {
+        const triggerRes = await apiClient.post('/orchestrator/generate-paper/markdown', {
           hypothesis_id: hypothesis.id,
           hypothesis_data: {
             id: hypothesis.id,
@@ -439,17 +435,19 @@ export default function ProjectDetail() {
             discovery_type: hypothesis.discovery_type || 'treatment',
             tags: hypothesis.tags || [],
           },
-        }),
-      })
+        })
+        triggerData = triggerRes.data
+        triggerOk = true
+      } catch {
+        triggerOk = false
+      }
 
-      if (triggerRes.ok) {
-        const triggerData = await triggerRes.json()
-
+      if (triggerOk && triggerData) {
         // If backend says paper already exists, fetch it immediately
         if (triggerData.status === 'already_done') {
-          const doneRes = await fetch(`${API_BASE}/orchestrator/paper-status`)
-          if (doneRes.ok) {
-            const doneData = await doneRes.json()
+          try {
+            const doneRes = await apiClient.get('/orchestrator/paper-status')
+            const doneData = doneRes.data
             if (doneData.paper_html && doneData.paper_html.length > 100) {
               stopPhaseAnimation()
               setPaperHtml(doneData.paper_html)
@@ -457,7 +455,7 @@ export default function ProjectDetail() {
               _saveResearchPaper(hypothesis, doneData.paper_html)
               return
             }
-          }
+          } catch { /* fall through to polling */ }
         }
 
         // Poll for completion (Lambda generates async, stores HTML in DynamoDB)
@@ -474,24 +472,22 @@ export default function ProjectDetail() {
               return true
             }
             try {
-              const pollRes = await fetch(`${API_BASE}/orchestrator/paper-status`)
-              if (pollRes.ok) {
-                const pollData = await pollRes.json()
-                if (pollData.status === 'done' && pollData.paper_html && pollData.paper_html.length > 100) {
-                  stopPhaseAnimation()
-                  setPaperHtml(pollData.paper_html)
-                  setGeneratingPaper(false)
-                  _saveResearchPaper(hypothesis, pollData.paper_html)
-                  return true
-                }
-                if (pollData.status === 'failed' || pollData.status === 'idle') {
-                  stopPhaseAnimation()
-                  setPaperError(`Paper generation failed: ${pollData.error || 'Unknown error'}`)
-                  setGeneratingPaper(false)
-                  return true
-                }
-                // Still generating — continue polling
+              const pollRes = await apiClient.get('/orchestrator/paper-status')
+              const pollData = pollRes.data
+              if (pollData.status === 'done' && pollData.paper_html && pollData.paper_html.length > 100) {
+                stopPhaseAnimation()
+                setPaperHtml(pollData.paper_html)
+                setGeneratingPaper(false)
+                _saveResearchPaper(hypothesis, pollData.paper_html)
+                return true
               }
+              if (pollData.status === 'failed' || pollData.status === 'idle') {
+                stopPhaseAnimation()
+                setPaperError(`Paper generation failed: ${pollData.error || 'Unknown error'}`)
+                setGeneratingPaper(false)
+                return true
+              }
+              // Still generating — continue polling
             } catch { /* network hiccup, keep polling */ }
           }
           return false
@@ -501,40 +497,51 @@ export default function ProjectDetail() {
         if (completed) return
       }
 
-      // Step 3: Fallback — try FastAPI HTML endpoint
+      // Step 3: Fallback — try FastAPI HTML endpoint.
+      // validateStatus=()=>true so we can inspect content-type on failure
+      // and still emit a sensible fallback rather than throw through the
+      // global error interceptor for a known-soft endpoint.
       stopPhaseAnimation()
-      const htmlRes = await fetch(`${API_BASE}/documents/hypothesis/${hypothesis.id}/html`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: bodyPayload,
-      })
-
-      if (htmlRes.ok) {
-        const contentType = htmlRes.headers.get('content-type') || ''
-        if (contentType.includes('text/html')) {
-          const html = await htmlRes.text()
-          if (html && html.length > 100) {
+      const bodyObj = JSON.parse(bodyPayload)
+      try {
+        const htmlRes = await apiClient.post(
+          `/documents/hypothesis/${hypothesis.id}/html`,
+          bodyObj,
+          { responseType: 'text', validateStatus: () => true },
+        )
+        const contentType = String(htmlRes.headers['content-type'] || '')
+        if (htmlRes.status < 400 && contentType.includes('text/html')) {
+          const html = String(htmlRes.data || '')
+          if (html.length > 100) {
             setPaperHtml(html)
             setGeneratingPaper(false)
             _saveResearchPaper(hypothesis, html)
             return
           }
         }
-      }
+      } catch { /* fall through to pdf endpoint */ }
 
-      // Step 4: Last resort — try PDF endpoint
-      const pdfRes = await fetch(`${API_BASE}/documents/hypothesis/${hypothesis.id}/pdf?use_ai=true`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: bodyPayload,
-      })
-
-      if (pdfRes.ok) {
-        const contentType = pdfRes.headers.get('content-type') || ''
+      // Step 4: Last resort — try PDF endpoint (JSON-wrapped base64 or
+      // direct PDF blob). Axios blob responseType works for both; a
+      // JSON response is returned as a Blob of type application/json
+      // which we detect and parse.
+      try {
+        const pdfRes = await apiClient.post(
+          `/documents/hypothesis/${hypothesis.id}/pdf`,
+          bodyObj,
+          { params: { use_ai: true }, responseType: 'blob', validateStatus: () => true },
+        )
+        if (pdfRes.status >= 400) {
+          setPaperError('Paper generation failed. Check backend logs.')
+          setGeneratingPaper(false)
+          return
+        }
+        const rawBlob = pdfRes.data as Blob
+        const contentType = rawBlob.type || String(pdfRes.headers['content-type'] || '')
         let blob: Blob
-
         if (contentType.includes('application/json')) {
-          const data = await pdfRes.json()
+          const text = await rawBlob.text()
+          const data = JSON.parse(text)
           if (!data.pdf_base64) {
             setPaperError('Server returned empty paper. Check backend logs for errors.')
             setGeneratingPaper(false)
@@ -545,9 +552,8 @@ export default function ProjectDetail() {
           for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i)
           blob = new Blob([byteArray], { type: 'application/pdf' })
         } else {
-          blob = await pdfRes.blob()
+          blob = rawBlob
         }
-
         if (blob.size === 0) {
           setPaperError('Server returned empty paper. Check backend logs for errors.')
           setGeneratingPaper(false)
@@ -558,7 +564,7 @@ export default function ProjectDetail() {
         setGeneratingPaper(false)
         _saveResearchPaper(hypothesis)
         return
-      }
+      } catch { /* fall through to error */ }
 
       setPaperError('Paper generation failed. Check backend logs.')
       setGeneratingPaper(false)
@@ -734,31 +740,25 @@ export default function ProjectDetail() {
         onGenerateResearchPaper={() => generateHypothesisPaper(activeHypothesis)}
         onExportPdf={async () => {
           try {
-            const res = await fetch(`${API_BASE}/documents/hypothesis/${activeHypothesis.id}/pdf`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                title: activeHypothesis.title,
-                description: activeHypothesis.description,
-                mechanism: activeHypothesis.mechanism,
-                confidence: activeHypothesis.confidence,
-                disease: activeHypothesis.disease || project?.disease_focus || 'Research',
-                discovery_type: activeHypothesis.discovery_type || 'treatment',
-              }),
+            const res = await apiClient.post(`/documents/hypothesis/${activeHypothesis.id}/pdf`, {
+              title: activeHypothesis.title,
+              description: activeHypothesis.description,
+              mechanism: activeHypothesis.mechanism,
+              confidence: activeHypothesis.confidence,
+              disease: activeHypothesis.disease || project?.disease_focus || 'Research',
+              discovery_type: activeHypothesis.discovery_type || 'treatment',
             })
-            if (res.ok) {
-              const data = await res.json()
-              const byteChars = atob(data.pdf_base64)
-              const byteArray = new Uint8Array(byteChars.length)
-              for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i)
-              const blob = new Blob([byteArray], { type: 'application/pdf' })
-              const url = URL.createObjectURL(blob)
-              const a = document.createElement('a')
-              a.href = url
-              a.download = data.filename || `humanovo-${activeHypothesis.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase().slice(0, 50)}.pdf`
-              a.click()
-              URL.revokeObjectURL(url)
-            }
+            const data = res.data
+            const byteChars = atob(data.pdf_base64)
+            const byteArray = new Uint8Array(byteChars.length)
+            for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i)
+            const blob = new Blob([byteArray], { type: 'application/pdf' })
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            a.href = url
+            a.download = data.filename || `humanovo-${activeHypothesis.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase().slice(0, 50)}.pdf`
+            a.click()
+            URL.revokeObjectURL(url)
           } catch (e) {
             console.error('PDF export failed:', e)
           }
@@ -1194,16 +1194,14 @@ export default function ProjectDetail() {
                         }
 
                         try {
-                          const statusRes = await fetch(`${API_BASE}/orchestrator/paper-status`)
-                          if (statusRes.ok) {
-                            const data = await statusRes.json()
-                            if (data?.status === 'done' && data.paper_html?.length > 100
-                                && data.hypothesis_id === paper.hypothesis_id) {
-                              setPaperHtml(data.paper_html)
-                              _saveResearchPaper(h, data.paper_html)
-                              setViewMode('hypothesis_paper')
-                              return
-                            }
+                          const statusRes = await apiClient.get('/orchestrator/paper-status')
+                          const data = statusRes.data
+                          if (data?.status === 'done' && data.paper_html?.length > 100
+                              && data.hypothesis_id === paper.hypothesis_id) {
+                            setPaperHtml(data.paper_html)
+                            _saveResearchPaper(h, data.paper_html)
+                            setViewMode('hypothesis_paper')
+                            return
                           }
                         } catch { /* Lambda unavailable */ }
 

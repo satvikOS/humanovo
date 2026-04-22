@@ -1449,6 +1449,17 @@ export const api = {
     const { data } = await apiClient.post('/admin/seed-corpus', null, { params: { force } })
     return data
   },
+  async getAdminHealth(): Promise<{
+    status: 'healthy' | 'degraded'
+    environment: string
+    version: string
+    checks: Record<string, string>
+    counts: Record<string, number | null>
+    last_seen: Record<string, string | null>
+  }> {
+    const { data } = await apiClient.get('/admin/health')
+    return data
+  },
 
   // ─── Citation verification (CrossRef + NCBI round-trip) ───────
   async verifyCitation(params: { doi?: string; pmid?: string; claim_text?: string }): Promise<{

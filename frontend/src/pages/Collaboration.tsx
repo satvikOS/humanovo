@@ -6,6 +6,7 @@ import {
 } from 'react-icons/fi'
 import { formatDate, formatDateTime } from '../utils/persistence'
 import { toast } from '../contexts/ToastContext'
+import { apiClient } from '../services'
 
 type TabId = 'team' | 'comments' | 'shares' | 'notifications' | 'audit'
 
@@ -15,7 +16,9 @@ interface Share { id: string; entity_type: string; entity_name: string; shared_w
 interface Notification { id: string; title: string; message: string; notification_type: string; read: boolean; created_at: string }
 interface AuditEntry { id: string; action: string; entity_type: string; user_name: string; details: string; timestamp: string }
 
-const API = '/api/v1/collaboration'
+// Collaboration endpoints are all nested under /collaboration/* — the
+// shared apiClient already prefixes /api/v1, so we only need the suffix.
+const COLLAB = '/collaboration'
 
 // Enum-guard so `?tab=bogus` quietly falls back to "team" instead of
 // pushing invalid state into the TabId-typed selector.
@@ -53,27 +56,23 @@ export default function Collaboration() {
   const loadTab = async (t: TabId) => {
     try {
       if (t === 'team') {
-        const res = await fetch(`${API}/team`)
-        if (!res.ok) throw new Error(`team ${res.status}`)
-        setTeam((await res.json()).members || [])
+        const { data } = await apiClient.get(`${COLLAB}/team`)
+        setTeam(data.members || [])
       } else if (t === 'comments') {
-        const res = await fetch(`${API}/comments`)
-        if (!res.ok) throw new Error(`comments ${res.status}`)
-        setComments((await res.json()).items || [])
+        const { data } = await apiClient.get(`${COLLAB}/comments`)
+        setComments(data.items || [])
       } else if (t === 'shares') {
-        const res = await fetch(`${API}/shares`)
-        if (!res.ok) throw new Error(`shares ${res.status}`)
-        setShares((await res.json()).items || [])
+        const { data } = await apiClient.get(`${COLLAB}/shares`)
+        setShares(data.items || [])
       } else if (t === 'notifications') {
-        const res = await fetch(`${API}/notifications?user_id=user-1`)
-        if (!res.ok) throw new Error(`notifications ${res.status}`)
-        const d = await res.json()
-        setNotifications(d.items || [])
-        setUnread(d.unread || 0)
+        const { data } = await apiClient.get(`${COLLAB}/notifications`, {
+          params: { user_id: 'user-1' },
+        })
+        setNotifications(data.items || [])
+        setUnread(data.unread || 0)
       } else if (t === 'audit') {
-        const res = await fetch(`${API}/audit-log`)
-        if (!res.ok) throw new Error(`audit-log ${res.status}`)
-        setAudit((await res.json()).items || [])
+        const { data } = await apiClient.get(`${COLLAB}/audit-log`)
+        setAudit(data.items || [])
       }
     } catch (err) {
       toast('error', `Could not load ${t} — ${err instanceof Error ? err.message : 'unknown error'}`, {
@@ -86,22 +85,35 @@ export default function Collaboration() {
 
   const addComment = async () => {
     if (!newComment.trim()) return
-    const res = await fetch(`${API}/comments`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ entity_type: commentEntity, entity_id: 'general', content: newComment, user_id: 'user-1' }),
-    })
-    if (res.ok) { setNewComment(''); loadTab('comments') }
+    try {
+      await apiClient.post(`${COLLAB}/comments`, {
+        entity_type: commentEntity,
+        entity_id: 'general',
+        content: newComment,
+        user_id: 'user-1',
+      })
+      setNewComment('')
+      loadTab('comments')
+    } catch {
+      // interceptor already surfaces the toast
+    }
   }
 
   const markAllRead = async () => {
-    await fetch(`${API}/notifications/mark-all-read?user_id=user-1`, { method: 'POST' })
+    await apiClient.post(`${COLLAB}/notifications/mark-all-read`, null, {
+      params: { user_id: 'user-1' },
+    })
     loadTab('notifications')
   }
 
   const shareProject = async (userId: string) => {
-    await fetch(`${API}/shares`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ entity_type: 'project', entity_id: 'demo', entity_name: 'Current Project', shared_with: userId, permission: 'edit', shared_by: 'user-1' }),
+    await apiClient.post(`${COLLAB}/shares`, {
+      entity_type: 'project',
+      entity_id: 'demo',
+      entity_name: 'Current Project',
+      shared_with: userId,
+      permission: 'edit',
+      shared_by: 'user-1',
     })
     loadTab('shares')
   }

@@ -4,10 +4,9 @@
  */
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
-import api from '../services/api'
+import api, { apiClient } from '../services/api'
 
 const _BACKEND = import.meta.env.VITE_API_BASE_URL || ''
-const API = `${_BACKEND}/api`
 const WS_BASE = _BACKEND
   ? _BACKEND.replace(/^http/, 'ws')
   : (window.location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + window.location.host
@@ -115,12 +114,8 @@ export default function DiscoveryRunner() {
     }
 
     try {
-      const res = await fetch(`${API}/v1/projects/${projectId}/discover`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      const data = await res.json()
+      const res = await apiClient.post(`/projects/${projectId}/discover`, body)
+      const data = res.data
       setRunId(data.run_id)
       setPhase('running')
       addLog('started', `Discovery run ${data.run_id} started`)

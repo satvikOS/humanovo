@@ -505,19 +505,40 @@ function AdminSeedSettings() {
         project_count?: number
       }
   >(null)
+  const [health, setHealth] = useState<
+    | null
+    | {
+        status: 'healthy' | 'degraded'
+        environment: string
+        version: string
+        checks: Record<string, string>
+        counts: Record<string, number | null>
+        last_seen: Record<string, string | null>
+      }
+  >(null)
   const [busy, setBusy] = useState<'kg' | 'corpus' | null>(null)
   const [lastMessage, setLastMessage] = useState<string>('')
+  const [lastPolled, setLastPolled] = useState<Date | null>(null)
 
   const refresh = useCallback(async () => {
     try {
-      const s = await api.getKgStats()
+      const [s, h] = await Promise.all([
+        api.getKgStats().catch(() => null),
+        api.getAdminHealth().catch(() => null),
+      ])
       setStats(s)
+      setHealth(h)
+      setLastPolled(new Date())
     } catch {
-      setStats(null)
+      // already handled per-promise
     }
   }, [])
   useEffect(() => {
     refresh()
+    // 10s poll — Admin panel is the "is the backend alive?" surface so
+    // freshness matters more than bandwidth. Unsubscribe on unmount.
+    const id = window.setInterval(refresh, 10_000)
+    return () => window.clearInterval(id)
   }, [refresh])
 
   const runKgSeed = async () => {
@@ -559,6 +580,132 @@ function AdminSeedSettings() {
           </div>
         )}
       </div>
+
+      <div className="glass-card p-4">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-medium">Service health</h3>
+          <span className="text-xxs" style={{ color: 'var(--color-text-muted)' }}>
+            {lastPolled
+              ? `Polled ${lastPolled.toLocaleTimeString()} · auto-refreshes every 10s`
+              : 'Polling…'}
+          </span>
+        </div>
+        {health ? (
+          <div className="flex flex-wrap gap-2">
+            {Object.entries(health.checks).map(([name, state]) => {
+              const isOk = state === 'ok' || state === 'connected'
+              const isSoft = state === 'not_configured' || state === 'missing'
+              const color = isOk
+                ? 'var(--color-success)'
+                : isSoft
+                  ? 'var(--color-text-muted)'
+                  : 'var(--color-error)'
+              return (
+                <span
+                  key={name}
+                  title={state}
+                  className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-xs"
+                  style={{ borderColor: color, color }}
+                >
+                  <span
+                    aria-hidden
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: '50%',
+                      background: color,
+                      display: 'inline-block',
+                    }}
+                  />
+                  <span style={{ color: 'var(--color-text)' }}>{name}</span>
+                  <span className="tabular-nums">{state.length > 24 ? `${state.slice(0, 24)}…` : state}</span>
+                </span>
+              )
+            })}
+            <span
+              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-xs ml-auto"
+              style={{
+                borderColor:
+                  health.status === 'healthy'
+                    ? 'var(--color-success)'
+                    : 'var(--color-warning)',
+                color:
+                  health.status === 'healthy'
+                    ? 'var(--color-success)'
+                    : 'var(--color-warning)',
+              }}
+            >
+              overall: {health.status} · v{health.version}
+            </span>
+          </div>
+        ) : (
+          <p className="text-xs text-[var(--color-text-muted)]">
+            Health unavailable — /admin/health unreachable.
+          </p>
+        )}
+      </div>
+
+      {health && (
+        <div className="glass-card p-4">
+          <h3 className="text-sm font-medium mb-2">Table freshness</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-xs">
+            {Object.entries(health.counts).map(([table, count]) => {
+              const iso = health.last_seen[table]
+              const isError = typeof iso === 'string' && iso.startsWith('error:')
+              const ts = iso && !isError ? new Date(iso) : null
+              const ageMs = ts ? Date.now() - ts.getTime() : null
+              const ageDays = ageMs != null ? ageMs / 86_400_000 : null
+              const stale = ageDays != null && ageDays > 7
+              const empty = count === 0
+              return (
+                <div key={table} className="flex items-center justify-between gap-2 py-1">
+                  <span style={{ color: 'var(--color-text-muted)' }}>{table}</span>
+                  <span className="flex items-center gap-2">
+                    <span
+                      className="tabular-nums"
+                      style={{
+                        color: empty ? 'var(--color-warning)' : 'var(--color-text)',
+                      }}
+                    >
+                      {count ?? '—'}
+                    </span>
+                    <span
+                      className="text-xxs tabular-nums"
+                      style={{
+                        color: stale
+                          ? 'var(--color-warning)'
+                          : isError
+                            ? 'var(--color-error)'
+                            : 'var(--color-text-muted)',
+                      }}
+                      title={iso ?? 'never'}
+                    >
+                      {isError
+                        ? 'error'
+                        : ts
+                          ? ageDays! < 1
+                            ? 'today'
+                            : `${Math.floor(ageDays!)}d ago`
+                          : 'never'}
+                    </span>
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+          {Object.entries(health.last_seen).some(([, iso]) => {
+            if (!iso || iso.startsWith('error:')) return false
+            return Date.now() - new Date(iso).getTime() > 7 * 86_400_000
+          }) && (
+            <p
+              className="mt-2 text-xxs"
+              style={{ color: 'var(--color-warning)' }}
+            >
+              Some tables have not been updated in &gt; 7 days. Consider re-seeding or running an ingestion job.
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="glass-card p-4">
         <h3 className="text-sm font-medium mb-2">Current corpus</h3>
