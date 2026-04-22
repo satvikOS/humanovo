@@ -316,32 +316,40 @@ export default function Evidence() {
     })
   }, [])
 
-  // Fetch linked entities when an evidence item is selected
+  // Fetch linked entities when an evidence item is selected.
+  // Uses pgvector semantic search (abstract + title as the query) so
+  // the entities in the sidebar are the ones most biologically similar
+  // to the evidence content — not just alias hits.
   useEffect(() => {
     if (!selectedId) { setLinkedEntities([]); return }
     const item = evidence.find(e => e.id === selectedId)
     if (!item) return
-    // Search for entities mentioned in the evidence title/entities field
-    const searchTerms = [...(item.entities || []), ...(item.tags || [])].filter(Boolean)
-    if (searchTerms.length === 0 && item.title) {
-      // Fallback: search by title keywords
-      api.searchEntities(item.title, { limit: 5 }).then(setLinkedEntities).catch(() => setLinkedEntities([]))
-    } else if (searchTerms.length > 0) {
-      Promise.allSettled(
-        searchTerms.slice(0, 5).map(term => api.searchEntities(term, { limit: 2 }))
-      ).then(results => {
-        const entities: Entity[] = []
-        const seen = new Set<string>()
-        results.forEach(r => {
-          if (r.status === 'fulfilled') {
-            r.value.forEach((e: Entity) => {
-              if (!seen.has(e.id)) { seen.add(e.id); entities.push(e) }
-            })
-          }
-        })
-        setLinkedEntities(entities.slice(0, 10))
+    const queryText = [item.title, item.abstract ?? '']
+      .filter(Boolean).join(' ').slice(0, 500)
+    if (!queryText) { setLinkedEntities([]); return }
+    let cancelled = false
+    api.searchSimilarEntities(queryText, { limit: 10, min_similarity: 0.05 })
+      .then(hits => {
+        if (cancelled) return
+        // Map vector hits back to the legacy Entity shape this panel
+        // already knows how to render. Carry similarity through via
+        // source_count (repurposed as a sort key) + aliases.
+        const mapped: Entity[] = hits.map(h => ({
+          id: h.entity.id,
+          name: h.entity.name,
+          entity_type: h.entity.category,
+          aliases: h.entity.synonyms || [],
+          description: h.entity.description || `cosine=${h.similarity.toFixed(3)}`,
+          external_ids: {},
+          properties: { similarity: h.similarity },
+          source_count: Math.round(h.similarity * 100),
+        }))
+        setLinkedEntities(mapped)
       })
-    }
+      .catch(() => {
+        if (!cancelled) setLinkedEntities([])
+      })
+    return () => { cancelled = true }
   }, [selectedId, evidence])
 
   const selectedItem = evidence.find(e => e.id === selectedId) || null

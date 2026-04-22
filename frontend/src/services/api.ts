@@ -1383,7 +1383,7 @@ export const api = {
   async searchSimilarEntities(
     query: string,
     opts?: { limit?: number; min_similarity?: number },
-  ): Promise<Array<{ entity: Entity; similarity: number }>> {
+  ): Promise<Array<{ entity: { id: string; name: string; category: string; description?: string; synonyms?: string[] }; similarity: number }>> {
     const { data } = await apiClient.post('/knowledge-graph/search/similar', {
       query,
       limit: opts?.limit ?? 10,

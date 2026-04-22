@@ -30,6 +30,7 @@ import {
   FiCheck,
 } from 'react-icons/fi'
 import clsx from 'clsx'
+import api from '../services/api'
 
 // Biology library — routed through the single-seam adapter so the
 // MasterHumanLibrary*.ts static imports can be swapped for live
@@ -2520,7 +2521,56 @@ export default function Workbench() {
 
   const selectedComponent = components.find(c => c.id === selectedId) || null
   const selectedLibraryElement = selectedLibraryId ? findElementById(selectedLibraryId) ?? null : null
-  const librarySearchResults = searchTerm.length > 2 ? searchElements(searchTerm) : []
+  // Local search over the hardcoded biological structures (fast).
+  const localSearchResults = searchTerm.length > 2 ? searchElements(searchTerm) : []
+
+  // Live vector search over the backend KG — surfaces semantically
+  // similar entities (not just alias matches). Debounced by React
+  // already via searchTerm change. Runs in parallel with `localSearch`.
+  const [vectorSearchResults, setVectorSearchResults] = useState<
+    Array<{ entity: { id: string; name: string; category: string; description?: string }; similarity: number }>
+  >([])
+  useEffect(() => {
+    if (searchTerm.length < 3) { setVectorSearchResults([]); return }
+    let cancelled = false
+    const t = window.setTimeout(async () => {
+      try {
+        const res = await api.searchSimilarEntities(searchTerm, { limit: 10 })
+        if (!cancelled) setVectorSearchResults(res)
+      } catch { /* silently skip; local path already populated */ }
+    }, 250)
+    return () => { cancelled = true; window.clearTimeout(t) }
+  }, [searchTerm])
+
+  // Merge: vector results come first (ranked by cosine), then local.
+  // Dedup by name since vector has backend UUIDs but local uses
+  // library IDs; name is the one stable join key across both paths.
+  const librarySearchResults = (() => {
+    const seen = new Set<string>()
+    const out: typeof localSearchResults = []
+    for (const vs of vectorSearchResults) {
+      if (seen.has(vs.entity.name.toLowerCase())) continue
+      seen.add(vs.entity.name.toLowerCase())
+      // Shape-compat: vector entity → minimal MasterLibraryElement.
+      out.push({
+        id: vs.entity.id,
+        name: vs.entity.name,
+        category: vs.entity.category,
+        subcategory: '',
+        description: vs.entity.description || `vector match · cos=${vs.similarity.toFixed(2)}`,
+        location: [], functions: [], interactions: [],
+        diseaseLinks: [], drugTargets: [],
+        simulationParams: { baselineValue: 0, minValue: 0, maxValue: 1, unit: '' },
+        aiSimulationReady: false,
+      })
+    }
+    for (const le of localSearchResults) {
+      if (seen.has(le.name.toLowerCase())) continue
+      seen.add(le.name.toLowerCase())
+      out.push(le)
+    }
+    return out
+  })()
   const selectedGraphNode = nodes.find(n => n.id === selectedNode) || null
   const selectedGraphEntity = selectedGraphNode ? components.find(c => c.id === selectedGraphNode.entityId) || null : null
 
