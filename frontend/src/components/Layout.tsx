@@ -1241,7 +1241,18 @@ export default function Layout() {
     localStorage.setItem('humanovo-notifs-read', new Date().toISOString())
   }
 
-  // Keyboard shortcut for command palette + number shortcuts
+  // `g` prefix state for vim-style navigation: press `g` then one of
+  // the letters below within 1.5 s to jump to that page. A stale prefix
+  // is cleared after the timeout so a stray `g` keypress doesn't stick.
+  const gPrefixRef = useRef<{ active: boolean; timer: number | null }>({ active: false, timer: null })
+  const clearGPrefix = useCallback(() => {
+    const s = gPrefixRef.current
+    if (s.timer != null) window.clearTimeout(s.timer)
+    s.active = false
+    s.timer = null
+  }, [])
+
+  // Keyboard shortcut for command palette + number shortcuts + g-prefix
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
       e.preventDefault()
@@ -1252,6 +1263,7 @@ export default function Layout() {
       setIsShortcutsOpen(false)
       setIsUserMenuOpen(false)
       setIsNotificationsOpen(false)
+      clearGPrefix()
     }
     // "?" (Shift+/) opens the keyboard-shortcuts cheatsheet, but only
     // when the user isn't typing into a field. Accept both e.key === '?'
@@ -1266,6 +1278,40 @@ export default function Layout() {
       e.preventDefault()
       setIsShortcutsOpen(prev => !prev)
     }
+    // g-prefix navigation: `g d` → Dashboard, `g p` → Projects, etc.
+    // Takes precedence over the number-navigation below while a prefix
+    // is active.
+    if (!typingIn && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      const prefixMap: Record<string, string> = {
+        d: '/dashboard',
+        p: '/projects',
+        e: '/evidence',
+        h: '/hypotheses',
+        c: '/compute-lab',
+        n: '/notebook',
+        a: '/agents',
+        t: '/timeline',
+        s: '/search',
+        k: '/knowledge-graph',
+        w: '/workbench',
+        i: '/imaging',
+        g: '/collaboration', // "g g" → collaboration (second g)
+      }
+      if (gPrefixRef.current.active) {
+        const dest = prefixMap[e.key.toLowerCase()]
+        if (dest) {
+          e.preventDefault()
+          navigate(dest)
+        }
+        clearGPrefix()
+        return
+      }
+      if (e.key === 'g' && !e.shiftKey) {
+        gPrefixRef.current.active = true
+        gPrefixRef.current.timer = window.setTimeout(clearGPrefix, 1500)
+        return
+      }
+    }
     // Number shortcuts 1-6 for main nav (only when no input focused)
     if (!e.metaKey && !e.ctrlKey && !e.altKey && !typingIn) {
       const idx = parseInt(e.key) - 1
@@ -1273,7 +1319,7 @@ export default function Layout() {
         navigate(mainNavItems[idx].to)
       }
     }
-  }, [navigate])
+  }, [navigate, clearGPrefix])
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown)
@@ -1592,7 +1638,7 @@ function KeyboardShortcutsHelp({ isOpen, onClose }: { isOpen: boolean; onClose: 
       ],
     },
     {
-      title: 'Navigation',
+      title: 'Navigation — number',
       rows: [
         { keys: ['1'], label: 'Go to Dashboard' },
         { keys: ['2'], label: 'Go to Projects' },
@@ -1600,6 +1646,23 @@ function KeyboardShortcutsHelp({ isOpen, onClose }: { isOpen: boolean; onClose: 
         { keys: ['4'], label: 'Go to Compute Lab' },
         { keys: ['5'], label: 'Go to Notebook' },
         { keys: ['6'], label: 'Go to Agents' },
+      ],
+    },
+    {
+      title: 'Navigation — vim-style (g then letter)',
+      rows: [
+        { keys: ['g', 'd'], label: 'Go to Dashboard' },
+        { keys: ['g', 'p'], label: 'Go to Projects' },
+        { keys: ['g', 'e'], label: 'Go to Evidence' },
+        { keys: ['g', 'h'], label: 'Go to Hypotheses' },
+        { keys: ['g', 'c'], label: 'Go to Compute Lab' },
+        { keys: ['g', 'n'], label: 'Go to Notebook' },
+        { keys: ['g', 'a'], label: 'Go to Agents' },
+        { keys: ['g', 'k'], label: 'Go to Knowledge Graph' },
+        { keys: ['g', 't'], label: 'Go to Timeline' },
+        { keys: ['g', 's'], label: 'Go to Search' },
+        { keys: ['g', 'w'], label: 'Go to Workbench' },
+        { keys: ['g', 'i'], label: 'Go to Imaging' },
       ],
     },
     {
