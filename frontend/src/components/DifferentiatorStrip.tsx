@@ -98,11 +98,17 @@ export function DifferentiatorStrip() {
         <a
           key={b.label}
           href={b.href}
-          className="group flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--glass-bg)] hover:bg-[var(--glass-bg-hover)] hover:border-[var(--color-border-strong)] transition-all"
+          className="group flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--glass-bg)] hover:bg-[var(--glass-bg-hover)] hover:border-[var(--color-border-strong)] transition-all hover:-translate-y-0.5"
+          style={{ transitionDuration: '150ms' }}
           title={b.detail}
         >
-          <span style={{ color: b.color }}>{b.icon}</span>
-          <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+          <span
+            style={{ color: b.color, transition: 'transform 150ms' }}
+            className="group-hover:scale-110"
+          >
+            {b.icon}
+          </span>
+          <span className="text-xs group-hover:text-[var(--color-text)]" style={{ color: 'var(--color-text-muted)' }}>
             {b.label}
           </span>
           <span
@@ -110,6 +116,13 @@ export function DifferentiatorStrip() {
             style={{ color: b.color }}
           >
             {b.value}
+          </span>
+          <span
+            className="text-xxs opacity-0 group-hover:opacity-100 transition-opacity"
+            style={{ color: 'var(--color-text-muted)' }}
+            aria-hidden
+          >
+            →
           </span>
         </a>
       ))}

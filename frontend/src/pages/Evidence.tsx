@@ -49,6 +49,20 @@ const sourceTypeColors: Record<string, string> = {
   dataset: 'var(--color-text-secondary)',
 }
 
+/** Format an ISO publication date into "Jan 2019" style. Falls back
+ * to the raw string when parsing fails (defensive — some evidence
+ * sources store free-text dates). */
+function formatPublicationDate(raw: string): string {
+  if (!raw) return ''
+  // Already a 4-digit year only?
+  if (/^\d{4}$/.test(raw)) return raw
+  const d = new Date(raw)
+  if (isNaN(d.getTime())) return raw
+  // "Jan 2019" compact form — leaves single-character display in
+  // dense rows but avoids the "2019-01-01T00:00:00" ugliness.
+  return d.toLocaleString('en-US', { month: 'short', year: 'numeric' })
+}
+
 const statusConfig: Record<string, { icon: typeof FiCheckCircle; color: string; label: string }> = {
   verified: { icon: FiCheckCircle, color: 'var(--color-success)', label: 'Verified' },
   pending: { icon: FiClock, color: 'var(--color-warning)', label: 'Pending' },
@@ -632,7 +646,7 @@ export default function Evidence() {
                         <h4 className="text-sm font-medium line-clamp-1">{item.title}</h4>
                         <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)] mt-1">
                           <span style={{ color }}>{item.source_type}</span>
-                          {item.publication_date && <span>{item.publication_date}</span>}
+                          {item.publication_date && <span>{formatPublicationDate(item.publication_date)}</span>}
                           {item.citation_count !== undefined && <span>{item.citation_count} citations</span>}
                           {item.id.startsWith('doc-ev-') ? (
                             <div className="ml-auto flex items-center gap-1 flex-shrink-0">
@@ -712,7 +726,7 @@ export default function Evidence() {
               </div>
 
               <div className="flex items-center gap-3 text-xs text-[var(--color-text-muted)]">
-                {selectedItem.publication_date && <span className="flex items-center gap-1"><FiCalendar className="w-3 h-3" />{selectedItem.publication_date}</span>}
+                {selectedItem.publication_date && <span className="flex items-center gap-1"><FiCalendar className="w-3 h-3" />{formatPublicationDate(selectedItem.publication_date)}</span>}
                 <span className="flex items-center gap-1"><FiDatabase className="w-3 h-3" />{selectedItem.source_type}</span>
                 {selectedItem.citation_count !== undefined && <span>{selectedItem.citation_count} citations</span>}
               </div>

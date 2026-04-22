@@ -241,12 +241,12 @@ async def upsert_evidence(
             "   source, source_type, source_id, source_url, "
             "   authors, publication_date, journal, "
             "   quality_score, relevance_score, citation_count, doi, entities, "
-            "   tags, created_at, updated_at) "
+            "   tags, status, created_at, updated_at) "
             "VALUES (:id, :pid, :t, :ab, :ab, :ab, "
             "  'pubmed', 'pubmed', :pmid, :url, "
             "  ARRAY[]::varchar[], :pub_date, :journal, "
             "  0.85, 0.9, 0, :doi, ARRAY[]::varchar[], "
-            "  ARRAY[:disease]::varchar[], NOW(), NOW())"
+            "  ARRAY[:disease]::varchar[], 'verified', NOW(), NOW())"
         ),
         {
             "id": eid, "pid": project_id, "t": title, "ab": abstract,

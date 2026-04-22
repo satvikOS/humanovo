@@ -80,6 +80,13 @@ class EvidenceResponse(BaseModel):
     tags: list[str]
     relevance_score: float | None
     embedding_id: str | None
+    # Review status — seeded rows are 'verified' so the UI badge shows
+    # green instead of the pending fallback.
+    status: str | None = None
+    # Publication metadata the UI likes to surface in the row.
+    journal: str | None = None
+    doi: str | None = None
+    citation_count: int | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -122,6 +129,10 @@ def evidence_to_response(e: Evidence) -> EvidenceResponse:
         tags=e.tags or [],
         relevance_score=e.relevance_score,
         embedding_id=e.embedding_id,
+        status=getattr(e, "status", None),
+        journal=getattr(e, "journal", None),
+        doi=getattr(e, "doi", None),
+        citation_count=getattr(e, "citation_count", None),
         created_at=e.created_at,
         updated_at=e.updated_at,
     )
