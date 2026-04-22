@@ -6,7 +6,13 @@ import { toast } from '../contexts/ToastContext'
 // In development, Vite proxy handles /api → localhost:8000.
 const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
 
-const apiClient: AxiosInstance = axios.create({
+/**
+ * Shared axios instance. Exported so callers with non-standard
+ * request shapes (form-data uploads, WebSocket auth, raw POST bodies)
+ * can use the configured interceptor + baseURL directly instead of
+ * hand-rolling fetch().
+ */
+export const apiClient: AxiosInstance = axios.create({
   baseURL: `${API_BASE}/api/v1`,
   headers: {
     'Content-Type': 'application/json',
@@ -1259,7 +1265,27 @@ export const api = {
     return data
   },
 
-  async listAllDiscoveryRuns(params?: { status?: string; limit?: number; offset?: number }): Promise<{ items: any[]; total: number }> {
+  async listAllDiscoveryRuns(params?: { status?: string; limit?: number; offset?: number }): Promise<{
+    items: Array<{
+      run_id: string
+      project_id: string | null
+      disease: string
+      discovery_type: string
+      status: string
+      total_hypotheses: number
+      best_confidence: number
+      total_cost_usd?: number
+      total_duration_seconds?: number
+      stages_total?: number
+      stages_succeeded?: number
+      focus_entities?: string[]
+      created_at: string
+      completed_at: string | null
+    }>
+    total: number
+    limit: number
+    offset: number
+  }> {
     const { data } = await apiClient.get('/discovery-runs', { params })
     return data
   },

@@ -91,10 +91,11 @@ async def list_activities(
 ):
     """List activities with optional filters.
 
-    Returns JSONResponse directly — FastAPI's jsonable_encoder path
-    trips a RecursionError under some warnings-filter + deprecation
-    combinations observed in production logs. Bypassing it here keeps
-    the endpoint live while the root encoder bug is triaged upstream.
+    Returns JSONResponse directly — FastAPI's jsonable_encoder hits a
+    RecursionError on this response shape under fastapi 0.136 +
+    pydantic 2.13 even with the process-wide warnings.filterwarnings
+    fix in app.main. Bypassing the encoder keeps the endpoint live
+    while the root bug is triaged upstream.
     """
     import json
     from fastapi.responses import JSONResponse
@@ -126,9 +127,6 @@ async def list_activities(
     result = await db.execute(query)
     items = result.scalars().all()
 
-    # Serialise manually — every value is a primitive or UUID/datetime
-    # that json.dumps(default=str) can handle, so we skip FastAPI's
-    # generic encoder and side-step the known RecursionError.
     payload = {
         "items": [a.to_dict() for a in items],
         "total": total,

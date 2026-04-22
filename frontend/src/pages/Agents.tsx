@@ -392,10 +392,15 @@ export default function Agents() {
 
   // Load discovery history from API when projectId is available
   useEffect(() => {
-    if (!projectId || projectId === 'discovery') return
+    // When no project is selected, fall back to the project-less
+    // /discovery-runs endpoint (added in Mega-R) so the Agents root
+    // page surfaces every run across the platform. Filters & render
+    // logic below are already shape-compatible.
     const loadHistory = async () => {
       try {
-        const res = await api.listDiscoveryRuns(projectId, { limit: 50 })
+        const res = (!projectId || projectId === 'discovery')
+          ? await api.listAllDiscoveryRuns({ limit: 50 })
+          : await api.listDiscoveryRuns(projectId, { limit: 50 })
         if (res.items?.length > 0) {
           setDiscoveryHistory(res.items.map((r: any) => ({
             id: r.id || r.run_id,

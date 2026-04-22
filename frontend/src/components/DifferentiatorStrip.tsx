@@ -31,17 +31,27 @@ export function DifferentiatorStrip() {
     evidence_embedding_count?: number
     hypothesis_count?: number
   } | null>(null)
+  const [completedRuns, setCompletedRuns] = useState<number | null>(null)
 
   useEffect(() => {
     api.getKgStats().then(setKgStats).catch(() => setKgStats(null))
+    api.listAllDiscoveryRuns({ status: 'completed', limit: 200 })
+      .then(res => setCompletedRuns(res.total))
+      .catch(() => setCompletedRuns(null))
   }, [])
 
   const badges: Badge[] = [
     {
       icon: <FiCpu className="w-3.5 h-3.5" />,
       label: '12-stage adversarial',
-      value: '7 models',
+      value:
+        completedRuns != null && completedRuns > 0
+          ? `${completedRuns} runs · 7 models`
+          : '7 models',
       detail:
+        (completedRuns != null && completedRuns > 0
+          ? `${completedRuns} completed discovery runs on record. `
+          : '') +
         'Claude Opus + Sonnet, GPT-4.1 + 4o + o3-mini, Cohere, Mistral, Grok — heterogeneous so one vendor cannot collapse consensus.',
       href: '/agents',
       color: '#60a5fa',

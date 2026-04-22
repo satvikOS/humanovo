@@ -457,12 +457,20 @@ export default function ResearchImaging() {
   // localStorage is still source-of-truth for uploaded images; backend
   // studies ship metadata-only ("findings" + "modality") which is enough
   // for the list/detail panel to render.
+  // Refetch strategy: poll /api/v1/imaging/studies every 30 s AND when
+  // the tab regains focus. Poll interval is conservative — imaging
+  // studies change slowly. Page-Visibility gate saves cycles when the
+  // tab is backgrounded. Also cleans up on unmount.
   useEffect(() => {
-    fetch('/api/v1/imaging/studies')
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
+    const abortCtrl = { cancelled: false }
+    const loadStudies = async () => {
+      if (document.hidden) return
+      try {
+        const r = await fetch('/api/v1/imaging/studies')
+        if (!r.ok) return
+        const data = await r.json()
         const items = (data && (data.items || data)) as Array<Record<string, unknown>> | null
-        if (!Array.isArray(items)) return
+        if (!Array.isArray(items) || abortCtrl.cancelled) return
         setStudies(prev => {
           const byId = new Map(prev.map(s => [s.id, s] as const))
           for (const it of items) {
@@ -487,8 +495,19 @@ export default function ResearchImaging() {
           }
           return Array.from(byId.values())
         })
-      })
-      .catch(() => { /* silent — local fallback is the primary source */ })
+      } catch {
+        /* silent — local is authoritative for user-uploaded pixel data */
+      }
+    }
+    void loadStudies()
+    const onVisible = () => { if (!document.hidden) void loadStudies() }
+    document.addEventListener('visibilitychange', onVisible)
+    const poll = window.setInterval(loadStudies, 30_000)
+    return () => {
+      abortCtrl.cancelled = true
+      document.removeEventListener('visibilitychange', onVisible)
+      window.clearInterval(poll)
+    }
   }, [])
   const [selectedId, setSelectedId] = useState<string | null>(() => {
     const qId = searchParams.get('id')

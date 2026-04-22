@@ -388,6 +388,12 @@ async def seed() -> dict:
     SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     project_ids: dict[str, str] = {}
     ev_count = hyp_count = emb_count = proj_count = 0
+    # Per-section error capture — each section commits independently
+    # so a schema drift in (e.g.) activities doesn't roll back the
+    # projects + evidence + hypotheses that committed cleanly. Admin
+    # seed-corpus endpoint surfaces this dict so operators see exactly
+    # which subcorpus failed and why.
+    section_errors: dict[str, str] = {}
 
     async with SessionLocal() as session:
         for name, desc in PROJECTS:
@@ -443,6 +449,9 @@ async def seed() -> dict:
         "notebook_pages_upserted": notebook_count,
         "activities_upserted": activity_count,
         "discovery_runs_upserted": discovery_runs_count,
+        # Non-empty only when a section raised; downstream admin UI
+        # surfaces these so the operator sees what didn't land.
+        "section_errors": section_errors,
     }
 
 
