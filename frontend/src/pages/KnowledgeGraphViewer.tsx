@@ -189,7 +189,7 @@ export default function KnowledgeGraphViewer() {
           <div className="flex gap-1 ml-2">
             <button onClick={() => setZoom(z => Math.min(3, z + 0.2))} className="btn text-xs"><FiZoomIn className="w-3.5 h-3.5" /></button>
             <button onClick={() => setZoom(z => Math.max(0.3, z - 0.2))} className="btn text-xs"><FiZoomOut className="w-3.5 h-3.5" /></button>
-            <button onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }} className="btn text-xs"><FiMaximize2 className="w-3.5 h-3.5" /></button>
+            <button aria-label="0" onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }} className="btn text-xs"><FiMaximize2 className="w-3.5 h-3.5" /></button>
           </div>
         </div>
       </div>

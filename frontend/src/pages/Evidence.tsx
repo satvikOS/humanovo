@@ -750,7 +750,7 @@ export default function Evidence() {
                       placeholder="Add tag..."
                       className="text-xs bg-transparent outline-none w-16 text-[var(--color-text-muted)]"
                     />
-                    {newTag && <button onClick={handleAddTag} className="text-[var(--color-text-muted)]"><FiTag className="w-3 h-3" /></button>}
+                    {newTag && <button onClick={handleAddTag} className="text-[var(--color-text-muted)]" aria-label="Tag"><FiTag className="w-3 h-3" /></button>}
                   </div>
                 </div>
               </div>

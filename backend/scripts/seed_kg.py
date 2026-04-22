@@ -22,10 +22,11 @@ Idempotent: re-running updates existing rows by (name, type).
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
 from uuid import uuid4
 
-from sqlalchemy import select, text
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 
@@ -33,6 +34,32 @@ DB_URL = os.environ.get(
     "DATABASE_URL",
     "postgresql+asyncpg://humanovo:humanovo@localhost:5432/humanovo",
 )
+NEO4J_URI = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
+NEO4J_USER = os.environ.get("NEO4J_USER", "neo4j")
+NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD", "neo4jpassword")
+# Embedding fixture mode — the real ingestion uses Bedrock Cohere Embed
+# v3 (1024d) + Azure text-embedding-3-large (1536d). In the sandbox,
+# substitute a deterministic 1024d hash-derived vector so shape + search
+# semantics work. Swap SEED_EMBED_MODE=real once credentials + network
+# are available.
+SEED_EMBED_MODE = os.environ.get("SEED_EMBED_MODE", "fixture")
+
+
+def _fixture_embedding(text_value: str, dim: int = 1024) -> list[float]:
+    """Hash-derived pseudo-embedding. Deterministic, norm ≈ 1.0.
+
+    Swap this for bedrock.invoke_model(modelId="cohere.embed-english-v3")
+    once real keys + network are available.
+    """
+    seed = hashlib.sha256(text_value.encode("utf-8")).digest()
+    # Use the 32-byte hash as a RNG seed; map into dim floats in [-1, 1].
+    import random
+
+    rng = random.Random(int.from_bytes(seed, "big") % (2**63))
+    vec = [rng.uniform(-1.0, 1.0) for _ in range(dim)]
+    # L2-normalize so cosine = dot product downstream.
+    norm = sum(v * v for v in vec) ** 0.5
+    return [v / norm for v in vec] if norm > 0 else vec
 
 
 # ─── Curated biomedical slice ──────────────────────────────────────
@@ -282,10 +309,116 @@ async def upsert_edge(
     )
 
 
+async def _write_embeddings(
+    session: AsyncSession, items: list[tuple[str, str, str]],
+) -> int:
+    """Embed + upsert every (entity_id, name, description) into
+    vector_embeddings. Returns count written."""
+    if not items:
+        return 0
+    # Target the real vector_embeddings table shape (from migration 003).
+    written = 0
+    for entity_id, name, description in items:
+        blob = f"{name}. {description}".strip()
+        vec = _fixture_embedding(blob, dim=1024)
+        vec_literal = "[" + ",".join(f"{v:.7f}" for v in vec) + "]"
+        content_hash = hashlib.sha256(blob.encode("utf-8")).hexdigest()
+        model_name = f"humanovo.seed.fixture-{SEED_EMBED_MODE}.v1"
+        # Skip if an embedding with the same (source_type, source_id,
+        # embedding_model_biomedical) already exists — idempotent.
+        existing = (
+            await session.execute(
+                text(
+                    "SELECT id FROM vector_embeddings "
+                    "WHERE source_type = 'kg_entity' AND source_id = :sid "
+                    "AND embedding_model_biomedical = :model LIMIT 1"
+                ),
+                {"sid": str(entity_id), "model": model_name},
+            )
+        ).first()
+        if existing:
+            await session.execute(
+                text(
+                    "UPDATE vector_embeddings "
+                    "SET content = :txt, content_hash = :hash, "
+                    "embedding_biomedical = CAST(:vec AS vector), "
+                    "updated_at = NOW() "
+                    "WHERE id = :id"
+                ),
+                {"txt": blob, "hash": content_hash, "vec": vec_literal, "id": existing[0]},
+            )
+        else:
+            await session.execute(
+                text(
+                    "INSERT INTO vector_embeddings "
+                    "  (content, content_hash, source_type, source_id, "
+                    "   embedding_biomedical, embedding_model_biomedical) "
+                    "VALUES (:txt, :hash, 'kg_entity', :sid, "
+                    "   CAST(:vec AS vector), :model)"
+                ),
+                {
+                    "txt": blob, "hash": content_hash,
+                    "sid": str(entity_id), "vec": vec_literal, "model": model_name,
+                },
+            )
+        written += 1
+    return written
+
+
+async def _write_neo4j(
+    name_to_id: dict[str, str],
+    node_types: dict[str, str],
+    relations: list[tuple[str, str, str, float, str]],
+) -> tuple[int, int]:
+    """Mirror the seeded KG into Neo4j (if reachable)."""
+    try:
+        from neo4j import AsyncGraphDatabase  # type: ignore
+    except ImportError:
+        return (0, 0)
+    try:
+        driver = AsyncGraphDatabase.driver(
+            NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD)
+        )
+        async with driver.session() as sess:
+            await sess.run("RETURN 1")  # probe
+    except Exception:
+        # Swallow — Neo4j absence isn't fatal for the Postgres-side seed.
+        return (0, 0)
+
+    nodes_written = 0
+    edges_written = 0
+    async with driver.session() as sess:
+        # MERGE each entity by id so re-running the seed is idempotent.
+        for name, entity_id in name_to_id.items():
+            await sess.run(
+                "MERGE (e:Entity {id: $id}) "
+                "SET e.name = $name, e.type = $type, e.updated = timestamp()",
+                id=entity_id, name=name, type=node_types.get(name, "unknown"),
+            )
+            nodes_written += 1
+        for src, rel, tgt, strength, evidence in relations:
+            if src not in name_to_id or tgt not in name_to_id:
+                continue
+            # Cypher doesn't allow parameterised relationship types;
+            # sanitise rel → safe label.
+            rel_label = rel.upper().replace("-", "_").replace(" ", "_")
+            await sess.run(
+                "MATCH (a:Entity {id: $src}), (b:Entity {id: $tgt}) "
+                f"MERGE (a)-[r:{rel_label}]->(b) "
+                "SET r.strength = $strength, r.evidence = $evidence",
+                src=name_to_id[src], tgt=name_to_id[tgt],
+                strength=strength, evidence=evidence,
+            )
+            edges_written += 1
+    await driver.close()
+    return (nodes_written, edges_written)
+
+
 async def seed() -> dict[str, int]:
     engine = create_async_engine(DB_URL, echo=False)
     SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     name_to_id: dict[str, str] = {}
+    name_to_type: dict[str, str] = {}
 
     async with SessionLocal() as session:
         # 1. Insert every node kind.
@@ -298,10 +431,13 @@ async def seed() -> dict[str, int]:
             "organ_system":   [(n, desc, "") for n, desc in ORGAN_SYSTEMS],
             "cell_type":      [(n, desc, "") for n, desc in CELL_TYPES],
         }
+        embed_items: list[tuple[str, str, str]] = []
         for node_type, rows in groups.items():
             for name, desc, _cond in rows:
                 nid = await upsert_node(session, name, node_type, desc)
                 name_to_id[name] = nid
+                name_to_type[name] = node_type
+                embed_items.append((nid, name, desc))
 
         # 2. Insert relations.
         edges_added = 0
@@ -318,10 +454,22 @@ async def seed() -> dict[str, int]:
             )
             edges_added += 1
 
+        # 3. Write pgvector embeddings (enables RAG retrieval over the KG).
+        embeddings_written = await _write_embeddings(session, embed_items)
+
         await session.commit()
 
     await engine.dispose()
+
+    # 4. Mirror into Neo4j for multi-hop path queries (best-effort).
+    neo4j_nodes, neo4j_edges = await _write_neo4j(
+        name_to_id, name_to_type, RELATIONS,
+    )
+
     return {
+        "neo4j_nodes_mirrored": neo4j_nodes,
+        "neo4j_edges_mirrored": neo4j_edges,
+        "embeddings_written": embeddings_written,
         "nodes_upserted": len(name_to_id),
         "edges_upserted": edges_added,
     }

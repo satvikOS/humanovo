@@ -729,7 +729,7 @@ export default function Agents() {
                       placeholder="e.g., KRAS, TP53"
                       className="input flex-1 text-xs disabled:opacity-50"
                     />
-                    <button
+                    <button aria-label="Add focus entity"
                       type="button"
                       onClick={(e) => { e.preventDefault(); e.stopPropagation(); addFocusEntity() }}
                       disabled={!isIdle || !focusInput.trim()}
@@ -786,7 +786,7 @@ export default function Agents() {
                         <select value={factorCategory} onChange={e => setFactorCategory(e.target.value as any)} disabled={!isIdle} className="input flex-1 text-xs disabled:opacity-50">
                           {factorCategories.map(c => <option key={c} value={c}>{c}</option>)}
                         </select>
-                        <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); addFactor() }} disabled={!isIdle || !factorName.trim()} className="px-2 py-1 text-xs rounded-lg border border-[var(--color-border)] hover:bg-[var(--glass-bg)] text-[var(--color-text)] disabled:opacity-30 transition-colors"><FiPlus className="w-3 h-3" /></button>
+                        <button aria-label="Add factor" type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); addFactor() }} disabled={!isIdle || !factorName.trim()} className="px-2 py-1 text-xs rounded-lg border border-[var(--color-border)] hover:bg-[var(--glass-bg)] text-[var(--color-text)] disabled:opacity-30 transition-colors"><FiPlus className="w-3 h-3" /></button>
                       </div>
                       <input type="text" value={factorInteraction} onChange={e => setFactorInteraction(e.target.value)} placeholder="Known interactions (optional)" disabled={!isIdle} className="input w-full text-xs disabled:opacity-50" />
                       {factors.map((f, i) => (

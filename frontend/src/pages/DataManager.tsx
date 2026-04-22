@@ -513,7 +513,7 @@ export default function DataManager() {
           <div className="flex items-center gap-2 mb-3">
             <FiDatabase className="text-lg" style={{ color: 'var(--color-text)' }} />
             <h2 className="text-sm font-semibold">Datasets</h2>
-            <button
+            <button aria-label="Click"
               onClick={() => fileInputRef.current?.click()}
               className="ml-auto p-1.5 rounded hover:bg-white/5"
               style={{ border: '1px solid var(--glass-border)', color: 'var(--color-text-muted)' }}

@@ -1982,11 +1982,11 @@ export default function DataVisualization() {
                     </span>
                   </div>
                   <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button onClick={() => updateChartOptions(chart.id, { showBrush: !chart.options.showBrush })}
+                    <button aria-label="Show brush" onClick={() => updateChartOptions(chart.id, { showBrush: !chart.options.showBrush })}
                       className={`p-1.5 rounded hover:bg-[var(--glass-bg)] transition-colors ${chart.options.showBrush ? 'text-[var(--color-text)]' : 'text-[var(--color-text-muted)]'}`} title="Toggle brush zoom">
                       <FiZoomIn className="w-3.5 h-3.5" />
                     </button>
-                    <button onClick={() => updateChartOptions(chart.id, { showCrosshair: !chart.options.showCrosshair })}
+                    <button aria-label="Show crosshair" onClick={() => updateChartOptions(chart.id, { showCrosshair: !chart.options.showCrosshair })}
                       className={`p-1.5 rounded hover:bg-[var(--glass-bg)] transition-colors ${chart.options.showCrosshair ? 'text-[var(--color-text)]' : 'text-[var(--color-text-muted)]'}`} title="Toggle crosshair">
                       <FiCrosshair className="w-3.5 h-3.5" />
                     </button>

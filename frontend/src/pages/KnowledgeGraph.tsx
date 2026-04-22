@@ -552,9 +552,7 @@ export default function KnowledgeGraph() {
             <button aria-label="Download" className="p-2 bg-[var(--glass-bg)] rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
               <FiDownload className="w-5 h-5" />
             </button>
-            <button className="p-2 bg-[var(--glass-bg)] rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
-              <FiShare2 className="w-5 h-5" />
-            </button>
+            <button className="p-2 bg-[var(--glass-bg)] rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)]" aria-label="Share"><FiShare2 className="w-5 h-5" /></button>
           </div>
         </div>
 
@@ -777,7 +775,7 @@ export default function KnowledgeGraph() {
             >
               <FiZoomOut className="w-5 h-5" />
             </button>
-            <button
+            <button aria-label="0"
               onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }}
               className="p-2 bg-[var(--glass-bg)] rounded-lg hover:bg-[var(--glass-bg-hover)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
             >
