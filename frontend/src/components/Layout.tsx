@@ -45,6 +45,8 @@ import {
   FiAperture,
   FiTerminal,
   FiArchive,
+  FiShare2,
+  FiHelpCircle,
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import { useTheme } from '../contexts/ThemeContext'
@@ -272,6 +274,9 @@ interface CommandAction {
   description?: string
   action: () => void
   category: string
+  /** Optional keyboard shortcut to render on the right side — hint-only,
+   *  the actual binding lives in Layout.handleKeyDown. */
+  shortcut?: string[]
 }
 
 function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
@@ -281,25 +286,29 @@ function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
   const navigate = useNavigate()
 
   const actions: CommandAction[] = [
-    { label: 'Go to Dashboard', icon: FiHome, category: 'Navigation', action: () => { navigate('/dashboard'); onClose() } },
-    { label: 'Go to Projects', icon: FiFolder, category: 'Navigation', action: () => { navigate('/projects'); onClose() } },
-    { label: 'Go to Evidence', icon: FiDatabase, category: 'Navigation', action: () => { navigate('/evidence'); onClose() } },
-    { label: 'Go to Discovery', icon: FiActivity, category: 'Navigation', action: () => { navigate('/agents'); onClose() } },
-    { label: 'Go to Compute Lab', icon: FiTrendingUp, category: 'Navigation', action: () => { navigate('/compute-lab'); onClose() } },
-    { label: 'Go to Notebook', icon: FiBook, category: 'Navigation', action: () => { navigate('/notebook'); onClose() } },
-    { label: 'Go to Search', icon: FiSearch, category: 'Navigation', action: () => { navigate('/search'); onClose() } },
-    { label: 'Go to Timeline', icon: FiClock, category: 'Navigation', action: () => { navigate('/timeline'); onClose() } },
+    { label: 'Go to Dashboard', icon: FiHome, category: 'Navigation', shortcut: ['g', 'd'], action: () => { navigate('/dashboard'); onClose() } },
+    { label: 'Go to Projects', icon: FiFolder, category: 'Navigation', shortcut: ['g', 'p'], action: () => { navigate('/projects'); onClose() } },
+    { label: 'Go to Evidence', icon: FiDatabase, category: 'Navigation', shortcut: ['g', 'e'], action: () => { navigate('/evidence'); onClose() } },
+    { label: 'Go to Discovery', icon: FiActivity, category: 'Navigation', shortcut: ['g', 'a'], action: () => { navigate('/agents'); onClose() } },
+    { label: 'Go to Compute Lab', icon: FiTrendingUp, category: 'Navigation', shortcut: ['g', 'c'], action: () => { navigate('/compute-lab'); onClose() } },
+    { label: 'Go to Notebook', icon: FiBook, category: 'Navigation', shortcut: ['g', 'n'], action: () => { navigate('/notebook'); onClose() } },
+    { label: 'Go to Search', icon: FiSearch, category: 'Navigation', shortcut: ['g', 's'], action: () => { navigate('/search'); onClose() } },
+    { label: 'Go to Timeline', icon: FiClock, category: 'Navigation', shortcut: ['g', 't'], action: () => { navigate('/timeline'); onClose() } },
     { label: 'Go to Data Manager', icon: FiDatabase, category: 'Navigation', action: () => { navigate('/data-manager'); onClose() } },
     { label: 'Go to Visualization', icon: FiBarChart2, category: 'Navigation', action: () => { navigate('/data-visualization'); onClose() } },
-    { label: 'Go to Imaging', icon: FiImage, category: 'Navigation', action: () => { navigate('/imaging'); onClose() } },
+    { label: 'Go to Imaging', icon: FiImage, category: 'Navigation', shortcut: ['g', 'i'], action: () => { navigate('/imaging'); onClose() } },
     { label: 'Go to Literature', icon: FiBookOpen, category: 'Navigation', action: () => { navigate('/literature-review'); onClose() } },
     { label: 'Go to Citations', icon: FiList, category: 'Navigation', action: () => { navigate('/citation-manager'); onClose() } },
     { label: 'Go to Experiments', icon: FiClipboard, category: 'Navigation', action: () => { navigate('/experiment-tracker'); onClose() } },
     { label: 'Go to Genomics', icon: FiHeart, category: 'Navigation', action: () => { navigate('/genomics'); onClose() } },
+    { label: 'Go to Knowledge Graph', icon: FiShare2, category: 'Navigation', shortcut: ['g', 'k'], action: () => { navigate('/knowledge-graph'); onClose() } },
+    { label: 'Go to Hypotheses', icon: FiZap, category: 'Navigation', shortcut: ['g', 'h'], action: () => { navigate('/hypotheses'); onClose() } },
+    { label: 'Go to Workbench', icon: FiGrid, category: 'Navigation', shortcut: ['g', 'w'], action: () => { navigate('/workbench'); onClose() } },
     { label: 'New Project', icon: FiPlus, description: 'Create a new research project', category: 'Actions', action: () => { navigate('/projects?new=1'); onClose() } },
     { label: 'Start Discovery', icon: FiZap, description: 'Launch AI discovery pipeline', category: 'Actions', action: () => { navigate('/agents?start=1'); onClose() } },
     { label: 'Global Search', icon: FiGlobe, description: 'Search across all data', category: 'Actions', action: () => { navigate('/search'); onClose() } },
     { label: 'Open Settings', icon: FiSettings, category: 'Actions', action: () => { navigate('/settings'); onClose() } },
+    { label: 'Show keyboard shortcuts', icon: FiHelpCircle, description: 'Full cheatsheet (press ?)', category: 'Actions', shortcut: ['?'], action: () => { onClose(); window.dispatchEvent(new KeyboardEvent('keydown', { key: '?' })) } },
   ]
 
   // Build data search results from local storage when user types a query
@@ -513,6 +522,24 @@ function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
                         <span className="block text-xs text-[var(--color-text-muted)]">{item.description}</span>
                       )}
                     </div>
+                    {item.shortcut && item.shortcut.length > 0 && (
+                      <span className="flex items-center gap-1 mr-1" aria-hidden>
+                        {item.shortcut.map((k, ki) => (
+                          <kbd
+                            key={ki}
+                            className="px-1.5 py-0.5 text-xxs rounded border tabular-nums"
+                            style={{
+                              color: 'var(--color-text-muted)',
+                              borderColor: 'var(--color-border)',
+                              background: 'var(--glass-bg)',
+                              fontFamily: 'var(--font-mono, ui-monospace, monospace)',
+                            }}
+                          >
+                            {k}
+                          </kbd>
+                        ))}
+                      </span>
+                    )}
                     <FiArrowRight className={`w-3 h-3 text-[var(--color-text-muted)] transition-opacity ${active ? 'opacity-100' : 'opacity-0'}`} />
                   </button>
                 )
