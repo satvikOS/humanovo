@@ -3207,21 +3207,16 @@ export default function Workbench() {
 IMPORTANT: If the user asks you to connect nodes, suggest connections, or explain relationships, provide specific biological relationship details. If they ask to add/edit/remove nodes, describe what should be done. Always be specific about mechanisms and pathways.`
 
     try {
-      const resp = await fetch('/api/v1/orchestrator/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: contextPrompt, context: 'workbench', platform_context: { section: 'workbench', graph_nodes: nodeNames, graph_edges: edgeDescs } }),
+      const { data } = await apiClient.post('/orchestrator/chat', {
+        message: contextPrompt,
+        context: 'workbench',
+        platform_context: { section: 'workbench', graph_nodes: nodeNames, graph_edges: edgeDescs },
       })
-      if (resp.ok) {
-        const data = await resp.json()
-        const responseText = data.response || data.message
-        if (responseText && responseText !== 'I can help you explore biological relationships. Try adding more nodes and asking about their connections.') {
-          setConstantMessages(prev => [...prev, { role: 'assistant', text: responseText }])
-        } else {
-          // Backend returned generic fallback — use smart fallback
-          setConstantMessages(prev => [...prev, { role: 'assistant', text: generateWorkbenchFallback(userMsg) }])
-        }
+      const responseText = data.response || data.message
+      if (responseText && responseText !== 'I can help you explore biological relationships. Try adding more nodes and asking about their connections.') {
+        setConstantMessages(prev => [...prev, { role: 'assistant', text: responseText }])
       } else {
+        // Backend returned generic fallback — use smart fallback
         setConstantMessages(prev => [...prev, { role: 'assistant', text: generateWorkbenchFallback(userMsg) }])
       }
     } catch { /* API unavailable — use local fallback */
