@@ -426,6 +426,12 @@ async def seed() -> dict:
         # doesn't render the empty state on first visit.
         activity_count = await _seed_activities(session, project_ids)
 
+        # Discovery runs — populate the Agents page history so it
+        # doesn't just show an empty "No runs yet" pane.
+        discovery_runs_count = await _seed_discovery_runs(
+            session, project_ids,
+        )
+
         await session.commit()
     await engine.dispose()
     return {
@@ -436,7 +442,80 @@ async def seed() -> dict:
         "imaging_upserted": imaging_count,
         "notebook_pages_upserted": notebook_count,
         "activities_upserted": activity_count,
+        "discovery_runs_upserted": discovery_runs_count,
     }
+
+
+async def _seed_discovery_runs(
+    session: AsyncSession, project_ids: dict[str, str],
+) -> int:
+    """Seed three terminal-state discovery_runs so the Agents page
+    history pane has rows to render. Each run carries realistic cost,
+    duration, and per-round hypothesis counts.
+    """
+    runs = [
+        ("Parkinson's Disease", "treatment",
+         0.78, 5, 12, 12, 0, 4.82,
+         ["alpha-synuclein", "vagus nerve", "GBA", "dopaminergic neurons"],
+         "completed", 847.3, 28400, 41200),
+        ("Pancreatic Ductal Adenocarcinoma", "treatment",
+         0.72, 6, 12, 12, 0, 5.61,
+         ["KRAS G12D", "TP53", "tumor microenvironment", "FAK"],
+         "completed", 921.5, 31800, 45100),
+        ("Alzheimer's Disease", "prevention",
+         0.64, 3, 12, 11, 1, 3.94,
+         ["amyloid-beta", "tau", "ApoE4", "GLP-1R"],
+         "completed", 612.8, 22100, 33400),
+    ]
+    count = 0
+    for (disease, disc_type, best_conf, total_hyps, stages_total,
+         stages_succ, stages_failed, cost_usd, focus, status,
+         duration_s, in_tokens, out_tokens) in runs:
+        existing = (
+            await session.execute(
+                text(
+                    "SELECT id FROM discovery_runs "
+                    "WHERE disease = :d AND status = :s LIMIT 1"
+                ),
+                {"d": disease, "s": status},
+            )
+        ).first()
+        if existing:
+            continue
+        pid = project_ids.get(disease)
+        await session.execute(
+            text(
+                "INSERT INTO discovery_runs "
+                "  (id, project_id, disease, discovery_type, total_rounds, "
+                "   total_hypotheses, hypotheses_per_round, max_agents, "
+                "   target_confidence, best_confidence, avg_confidence, "
+                "   total_duration_seconds, stages_total, stages_succeeded, "
+                "   stages_failed, total_cost_usd, total_input_tokens, "
+                "   total_output_tokens, total_embedding_tokens, total_api_calls, "
+                "   config_snapshot, external_factors, focus_entities, "
+                "   status, num_rounds, total_cost_cents, "
+                "   created_at, updated_at, completed_at, started_at) "
+                "VALUES (gen_random_uuid(), :pid, :d, :dt, :tr, "
+                "   :th, :hpr, 1000, 0.95, :bc, :bc, "
+                "   :dur, :st, :ss, :sf, :cost, :itok, :otok, 0, 12, "
+                "   '{}'::jsonb, '[]'::jsonb, CAST(:focus AS varchar[]), "
+                "   :s, :tr, :cents, "
+                "   NOW() - (random() * interval '10 days'), NOW(), "
+                "   NOW() - (random() * interval '1 day'), "
+                "   NOW() - (random() * interval '10 days') - interval '20 minutes')"
+            ),
+            {
+                "pid": pid, "d": disease, "dt": disc_type,
+                "tr": 2, "th": total_hyps, "hpr": 6, "bc": best_conf,
+                "dur": duration_s,
+                "st": stages_total, "ss": stages_succ, "sf": stages_failed,
+                "cost": cost_usd, "cents": int(cost_usd * 100),
+                "itok": in_tokens, "otok": out_tokens,
+                "focus": focus, "s": status,
+            },
+        )
+        count += 1
+    return count
 
 
 # ─── Notebook + activity corpora ────────────────────────────────
