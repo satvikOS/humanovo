@@ -142,27 +142,97 @@ function HypothesisCard({ hypothesis }: { hypothesis: Hypothesis }) {
   )
 }
 
+type SortKey = 'confidence' | 'novelty' | 'recent' | 'title'
+type StatusFilter = 'all' | 'draft' | 'validated' | 'active' | 'rejected'
+
 export default function Hypotheses() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ['hypotheses'],
     queryFn: () => api.getHypotheses({ page: 1, page_size: 50 }),
     retry: 1,
   })
+  const [sortKey, setSortKey] = useState<SortKey>('confidence')
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  const [search, setSearch] = useState('')
 
   const apiHypotheses = data?.items || []
+  const filtered = apiHypotheses
+    .filter(h => statusFilter === 'all' || h.status === statusFilter)
+    .filter(h => {
+      if (!search.trim()) return true
+      const q = search.toLowerCase()
+      return (
+        (h.statement || '').toLowerCase().includes(q)
+        || (h.mechanism || '').toLowerCase().includes(q)
+        || (h.tags || []).some(t => t.toLowerCase().includes(q))
+      )
+    })
+    .sort((a, b) => {
+      switch (sortKey) {
+        case 'confidence': return (b.confidence_score ?? 0) - (a.confidence_score ?? 0)
+        case 'novelty':    return (b.novelty_score ?? 0)   - (a.novelty_score ?? 0)
+        case 'recent':     return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+        case 'title':      return (a.statement || '').localeCompare(b.statement || '')
+        default:           return 0
+      }
+    })
 
   return (
     <div className="p-8">
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-3xl font-bold text-white">Hypotheses</h1>
-          <p className="text-secondary-400 mt-1">AI-generated biomedical hypotheses</p>
+          <p className="text-secondary-400 mt-1">
+            AI-generated biomedical hypotheses
+            {apiHypotheses.length > 0 && (
+              <span className="ml-2 text-xs text-[var(--color-text-muted)]">
+                {filtered.length}/{apiHypotheses.length}
+              </span>
+            )}
+          </p>
         </div>
         <Link to="/agents" className="btn btn-primary flex items-center space-x-2">
           <FiZap className="w-4 h-4" />
           <span>Generate New</span>
         </Link>
       </div>
+
+      {/* Filter row */}
+      {apiHypotheses.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          <input
+            type="search"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search statements, mechanisms, tags…"
+            aria-label="Search hypotheses"
+            className="bg-[var(--glass-bg)] border border-[var(--color-border)] rounded px-3 py-1.5 text-sm flex-1 min-w-[200px]"
+          />
+          <select
+            value={statusFilter}
+            onChange={e => setStatusFilter(e.target.value as StatusFilter)}
+            aria-label="Filter by status"
+            className="bg-[var(--glass-bg)] border border-[var(--color-border)] rounded px-2 py-1.5 text-sm"
+          >
+            <option value="all">All status</option>
+            <option value="draft">Draft</option>
+            <option value="active">Active</option>
+            <option value="validated">Validated</option>
+            <option value="rejected">Rejected</option>
+          </select>
+          <select
+            value={sortKey}
+            onChange={e => setSortKey(e.target.value as SortKey)}
+            aria-label="Sort hypotheses"
+            className="bg-[var(--glass-bg)] border border-[var(--color-border)] rounded px-2 py-1.5 text-sm"
+          >
+            <option value="confidence">Confidence ↓</option>
+            <option value="novelty">Novelty ↓</option>
+            <option value="recent">Most recent</option>
+            <option value="title">Title (A–Z)</option>
+          </select>
+        </div>
+      )}
 
       {isError && (
         <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-[var(--color-text-muted)]">
@@ -176,11 +246,17 @@ export default function Hypotheses() {
             <div key={i} className="animate-pulse bg-secondary-800 h-32 rounded-lg" />
           ))}
         </div>
-      ) : apiHypotheses.length > 0 ? (
+      ) : filtered.length > 0 ? (
         <div className="space-y-4">
-          {apiHypotheses.map((hypothesis) => (
+          {filtered.map((hypothesis) => (
             <HypothesisCard key={hypothesis.id} hypothesis={hypothesis} />
           ))}
+        </div>
+      ) : apiHypotheses.length > 0 ? (
+        <div className="text-center py-16">
+          <FiZap className="w-12 h-12 text-secondary-600 mx-auto mb-4" />
+          <h3 className="text-lg font-medium text-white mb-2">No hypotheses match your filters</h3>
+          <p className="text-secondary-400 mb-6">Clear the search or change the status filter.</p>
         </div>
       ) : (
         <div className="text-center py-16">

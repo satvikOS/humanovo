@@ -68,6 +68,11 @@ def upgrade() -> None:
     op.execute("ALTER TABLE hypotheses ADD COLUMN IF NOT EXISTS translational_roadmap JSONB")
     op.execute("UPDATE hypotheses SET statement = description WHERE statement IS NULL AND description IS NOT NULL")
 
+    # ── evidence_references table (ORM has evidence_type + snippet + updated_at not in 001)
+    op.execute("ALTER TABLE evidence_references ADD COLUMN IF NOT EXISTS evidence_type VARCHAR(50) DEFAULT 'supports'")
+    op.execute("ALTER TABLE evidence_references ADD COLUMN IF NOT EXISTS snippet TEXT")
+    op.execute("ALTER TABLE evidence_references ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()")
+
     # ── Projects table: columns the REST response helpers return ─────
     op.execute("ALTER TABLE projects ADD COLUMN IF NOT EXISTS tags VARCHAR[] DEFAULT '{}'")
 

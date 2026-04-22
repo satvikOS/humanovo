@@ -48,15 +48,18 @@ function applyAppearancePrefs(prefs: AppearancePrefs) {
 // Apply on initial load
 applyAppearancePrefs(loadAppearancePrefs())
 
-const settingsSections = [
+// Admin section is surfaced at render-time only when the backend
+// reports environment=development. Done in the component below via
+// live /admin/kg-stats check.
+const BASE_SETTINGS_SECTIONS = [
   { id: 'appearance', label: 'Appearance', icon: FiMonitor },
   { id: 'account', label: 'Account', icon: FiUser },
   { id: 'notifications', label: 'Notifications', icon: FiBell },
   { id: 'privacy', label: 'Privacy & Security', icon: FiShield },
   { id: 'data', label: 'Data & Storage', icon: FiDatabase },
   { id: 'integrations', label: 'Integrations', icon: FiGlobe },
-  { id: 'admin', label: 'Admin · Seed demo data', icon: FiDatabase },
 ]
+const ADMIN_SECTION = { id: 'admin', label: 'Admin · Seed demo data', icon: FiDatabase }
 
 function Toggle({ enabled, onChange }: { enabled: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -677,6 +680,15 @@ function IntegrationSettings() {
 export default function Settings() {
   const [searchParams] = useSearchParams()
   const tabParam = searchParams.get('tab')
+  const [isDevEnv, setIsDevEnv] = useState(false)
+  useEffect(() => {
+    api.getKgStats()
+      .then(s => setIsDevEnv(s.environment === 'development'))
+      .catch(() => setIsDevEnv(false))
+  }, [])
+  const settingsSections = isDevEnv
+    ? [...BASE_SETTINGS_SECTIONS, ADMIN_SECTION]
+    : BASE_SETTINGS_SECTIONS
   const [activeSection, setActiveSection] = useState(
     tabParam && settingsSections.some(s => s.id === tabParam) ? tabParam : 'appearance'
   )
