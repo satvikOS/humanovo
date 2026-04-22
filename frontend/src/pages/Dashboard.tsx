@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   FiFolder,
@@ -640,19 +640,17 @@ export default function Dashboard() {
   const [simulationCount, setSimulationCount] = useState(0)
 
   // Fetch API projects (no localStorage fallback)
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const res = await api.getProjects({ page_size: 50 })
-        const apiProjects = res?.items || []
-        apiProjects.sort((a, b) => new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime())
-        setProjects(apiProjects)
-      } catch (err) {
-        console.warn('Dashboard: projects API unavailable', err)
-      }
+  const fetchProjects = useCallback(async () => {
+    try {
+      const res = await api.getProjects({ page_size: 50 })
+      const apiProjects = res?.items || []
+      apiProjects.sort((a, b) => new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime())
+      setProjects(apiProjects)
+    } catch (err) {
+      console.warn('Dashboard: projects API unavailable', err)
     }
-    fetchData()
   }, [])
+  useEffect(() => { fetchProjects() }, [fetchProjects])
 
   // Fetch simulation count from localStorage + API
   useEffect(() => {
@@ -793,16 +791,24 @@ export default function Dashboard() {
               ariaLabel: 'Create your first project',
             }}
             secondary={{
-              label: 'Seed demo KG',
+              label: 'Seed demo data',
+              // Seed KG → corpus in one click so the empty dashboard
+              // goes straight to a full demo state. seedKg is a no-op
+              // when the KG already has > 50 nodes, and seedCorpus
+              // bails out similarly, so calling both unconditionally
+              // is safe and idempotent.
               onClick: async () => {
                 try {
-                  const r = await api.seedKg()
-                  toast('success', r.message, { title: 'Demo data seeded' })
+                  const kg = await api.seedKg()
+                  toast('success', kg.message, { title: 'Knowledge graph' })
+                  const corp = await api.seedCorpus()
+                  toast('success', corp.message, { title: 'Evidence corpus' })
+                  await fetchProjects()
                 } catch (e) {
                   toast('error', String(e), { title: 'Seed failed' })
                 }
               },
-              ariaLabel: 'Seed demo knowledge graph',
+              ariaLabel: 'Seed demo data (KG + evidence + projects)',
             }}
             fullPanel={false}
           />
