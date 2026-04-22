@@ -1,7 +1,8 @@
 import { lazy, Suspense } from 'react'
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
-import { Component, type ReactNode } from 'react'
+import { type ReactNode } from 'react'
 import Layout from './components/Layout'
+import ErrorBoundary from './components/ErrorBoundary'
 import Dashboard from './pages/Dashboard'
 import Projects from './pages/Projects'
 import ProjectDetail from './pages/ProjectDetail'
@@ -49,64 +50,12 @@ const KnowledgeGraph = lazy(() => import('./pages/KnowledgeGraph'))
 const KnowledgeGraphViewer = lazy(() => import('./pages/KnowledgeGraphViewer'))
 const MLModelManager = lazy(() => import('./pages/MLModelManager'))
 
-// Error boundary to prevent blank pages on runtime errors
-class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; error: string }> {
-  constructor(props: { children: ReactNode }) {
-    super(props)
-    this.state = { hasError: false, error: '' }
-  }
-
-  static getDerivedStateFromError(error: Error) {
-    return { hasError: true, error: error.message }
-  }
-
-  componentDidCatch(error: Error, info: { componentStack?: string | null }) {
-    console.error('Page error:', error, info.componentStack)
-  }
-
-  render() {
-    if (this.state.hasError) {
-      // Soft retry: re-render this subtree only. Falls back to a full
-      // reload if the user hits the secondary action.
-      const softReset = () => this.setState({ hasError: false, error: '' })
-      const hardReload = () => { softReset(); window.location.reload() }
-      const copyError = () => {
-        try { navigator.clipboard?.writeText(this.state.error) } catch { /* noop */ }
-      }
-      return (
-        <div className="flex items-center justify-center h-full p-8">
-          <div className="text-center max-w-md">
-            <div className="text-4xl mb-4 opacity-20">⚠</div>
-            <h2 className="text-lg font-semibold mb-2" style={{ color: 'var(--color-text)' }}>Something went wrong</h2>
-            <pre
-              className="text-xs mb-4 px-3 py-2 text-left overflow-auto max-h-32 rounded"
-              style={{
-                color: 'var(--color-text-muted)',
-                background: 'var(--color-surface-raised)',
-                fontFamily: 'var(--font-mono, ui-monospace, monospace)',
-              }}
-            >{this.state.error || 'Unknown error'}</pre>
-            <div className="flex items-center justify-center gap-2">
-              <button onClick={softReset} className="btn text-sm" style={{ color: 'var(--color-text)' }}>
-                Try again
-              </button>
-              <button onClick={copyError} className="btn text-sm" style={{ color: 'var(--color-text-muted)' }}>
-                Copy details
-              </button>
-              <button onClick={hardReload} className="btn text-sm" style={{ color: 'var(--color-text-muted)' }}>
-                Reload page
-              </button>
-            </div>
-          </div>
-        </div>
-      )
-    }
-    return this.props.children
-  }
-}
-
 function PageWrapper({ children }: { children: ReactNode }) {
-  return <ErrorBoundary>{children}</ErrorBoundary>
+  // Pass the current pathname as resetKey so a user who crashes on
+  // /projects and navigates to /dashboard doesn't stay stuck on the
+  // error screen — the boundary auto-resets when the route changes.
+  const { pathname } = useLocation()
+  return <ErrorBoundary resetKey={pathname}>{children}</ErrorBoundary>
 }
 
 // Legacy /simulations etc. redirects. We want to preserve the ?tab=…
@@ -118,8 +67,9 @@ function LegacyComputeRedirect() {
 }
 
 function LazyPageWrapper({ children }: { children: ReactNode }) {
+  const { pathname } = useLocation()
   return (
-    <ErrorBoundary>
+    <ErrorBoundary resetKey={pathname}>
       <Suspense fallback={
         <div className="flex items-center justify-center h-full p-8">
           <div className="animate-pulse text-sm" style={{ color: 'var(--color-text-muted)' }}>Loading...</div>
