@@ -9,6 +9,53 @@ import {
 import { usePersistentState, logActivity } from '../utils/persistence'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 import api, { apiClient } from '../services/api'
+import { toast } from '../contexts/ToastContext'
+
+/**
+ * Fetch wrapper for external third-party APIs (CrossRef / NCBI) that
+ * can't route through our apiClient interceptor (different origin, no
+ * /api/v1 prefix, no auth header). Adds:
+ *   - 10s timeout via AbortController
+ *   - One retry with 500ms backoff on network / 5xx errors
+ *   - Toast on final failure so citation lookups never fail silently
+ *
+ * Returns the Response for success, null on failure (caller decides
+ * how to degrade).
+ */
+async function externalFetch(url: string, label: string): Promise<Response | null> {
+  const attempt = async (): Promise<Response> => {
+    const ac = new AbortController()
+    const timer = window.setTimeout(() => ac.abort(), 10_000)
+    try {
+      return await fetch(url, { signal: ac.signal })
+    } finally {
+      window.clearTimeout(timer)
+    }
+  }
+  for (let i = 0; i < 2; i++) {
+    try {
+      const res = await attempt()
+      if (res.ok) return res
+      if (res.status >= 500 && i === 0) {
+        await new Promise(r => setTimeout(r, 500))
+        continue
+      }
+      // 4xx (not-found etc.) — no retry, caller treats as "no metadata".
+      return null
+    } catch (e) {
+      if (i === 0) {
+        await new Promise(r => setTimeout(r, 500))
+        continue
+      }
+      const msg = e instanceof Error && e.name === 'AbortError'
+        ? `${label} timed out after 10s`
+        : `${label} unreachable — check your connection`
+      toast('error', msg, { title: 'Citation lookup' })
+      return null
+    }
+  }
+  return null
+}
 
 interface Citation {
   id: string
@@ -219,8 +266,11 @@ const CITATION_TYPES: Citation['type'][] = ['journal', 'book', 'conference', 'pr
 async function fetchFromDOI(doi: string): Promise<Partial<Citation> | null> {
   try {
     const cleanDoi = doi.replace(/^https?:\/\/doi\.org\//, '').trim()
-    const res = await fetch(`https://api.crossref.org/works/${encodeURIComponent(cleanDoi)}`)
-    if (!res.ok) return null
+    const res = await externalFetch(
+      `https://api.crossref.org/works/${encodeURIComponent(cleanDoi)}`,
+      'CrossRef',
+    )
+    if (!res) return null
     const data = await res.json()
     const item = data.message
     return {
@@ -243,8 +293,11 @@ async function fetchFromDOI(doi: string): Promise<Partial<Citation> | null> {
 async function fetchFromPMID(pmid: string): Promise<Partial<Citation> | null> {
   try {
     const cleanPmid = pmid.replace(/\D/g, '')
-    const res = await fetch(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id=${cleanPmid}&retmode=json`)
-    if (!res.ok) return null
+    const res = await externalFetch(
+      `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id=${cleanPmid}&retmode=json`,
+      'NCBI PubMed',
+    )
+    if (!res) return null
     const data = await res.json()
     const item = data.result?.[cleanPmid]
     if (!item) return null
