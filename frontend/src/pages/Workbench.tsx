@@ -30,7 +30,7 @@ import {
   FiCheck,
 } from 'react-icons/fi'
 import clsx from 'clsx'
-import api from '../services/api'
+import api, { apiClient } from '../services/api'
 
 // Biology library — routed through the single-seam adapter so the
 // MasterHumanLibrary*.ts static imports can be swapped for live
@@ -3296,8 +3296,6 @@ IMPORTANT: If the user asks you to connect nodes, suggest connections, or explai
   }, [])
 
   // --- Launch discovery from canvas context ---
-  const API = '/api'
-
   const launchDiscovery = useCallback(async () => {
     if (discoveryLoading) return
     // Derive disease/topic from text input or canvas nodes
@@ -3329,16 +3327,7 @@ IMPORTANT: If the user asks you to connect nodes, suggest connections, or explai
     try {
       // Use project ID from URL or default
       const projectId = new URLSearchParams(window.location.search).get('project') || 'default'
-      const res = await fetch(`${API}/v1/projects/${projectId}/discover`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      if (!res.ok) {
-        const errText = await res.text()
-        throw new Error(`Discovery failed (${res.status}): ${errText}`)
-      }
-      const data = await res.json()
+      const { data } = await apiClient.post(`/projects/${projectId}/discover`, body)
       setDiscoveryRunId(data.run_id)
       // Open DiscoveryRunner in new tab with the run_id
       const wsUrl = data.websocket_url || `/ws/discovery/${data.run_id}`

@@ -10,10 +10,10 @@ import {
 } from 'recharts'
 
 import { logActivity } from '../utils/persistence'
+import { apiClient } from '../services'
 
 type TabId = 'pathway' | 'gsea' | 'variants' | 'biomarkers'
-const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
-const API = `${API_BASE}/api/v1/genomics`
+const BASE = '/genomics'
 
 // ── Deterministic hash for consistent results from same inputs ──
 function hashStr(s: string): number {
@@ -335,18 +335,8 @@ export default function GenomicsAnalysis() {
         body = { expression_data: biomarkerData.split('\n').filter(l => l.trim()).map(l => { const [gene, rest] = l.split(',', 2).map(s => s.trim()); const groups = (rest || '').split(';'); return { gene, group1_values: groups[0]?.split(',').map(Number) || [], group2_values: groups[1]?.split(',').map(Number) || [] } }) }
       }
       // Call backend API for all genomics computations
-      const res = await fetch(`${API}${endpoint}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-      const contentType = res.headers.get('content-type') || ''
-      if (!res.ok) {
-        const errBody = contentType.includes('application/json')
-          ? JSON.stringify(await res.json())
-          : await res.text()
-        throw new Error(`Backend error ${res.status}: ${errBody.slice(0, 200)}`)
-      }
-      if (!contentType.includes('application/json')) {
-        throw new Error(`Expected JSON but received ${contentType}. Ensure the backend server is running at ${location.origin}.`)
-      }
-      setResult(await res.json())
+      const { data } = await apiClient.post(`${BASE}${endpoint}`, body)
+      setResult(data)
       logActivity({ type: 'discovery', action: 'started', title: `Ran genomics analysis: ${tab}` })
     } catch (e: any) { setError(e.message) } finally { setLoading(false) }
   }

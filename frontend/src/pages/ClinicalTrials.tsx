@@ -8,6 +8,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 import { logActivity } from '../utils/persistence'
 import { toast } from '../contexts/ToastContext'
+import { apiClient } from '../services'
 
 interface Trial {
   id: string; protocol_number: string; title: string; phase: string; status: string
@@ -18,7 +19,7 @@ interface Subject { id: string; subject_number: string; display_name: string; ag
 interface Document { id: string; document_type: string; name: string; status: string; version: string; uploaded_by: string }
 
 type ViewTab = 'overview' | 'subjects' | 'visits' | 'documents' | 'budget'
-const API = '/api/v1/clinical-trials'
+const BASE = '/clinical-trials'
 // active/suspended keep semantic colour (green = live trial, red = stopped)
 // so PIs see operational state at a glance; completed also stays green
 // because it's a positive terminal state; recruiting/planning are
@@ -50,9 +51,8 @@ export default function ClinicalTrials() {
 
   const load = async () => {
     try {
-      const r = await fetch(API)
-      if (!r.ok) throw new Error(`trials ${r.status}`)
-      setTrials((await r.json()).items || [])
+      const { data } = await apiClient.get(BASE)
+      setTrials(data.items || [])
     } catch (err) {
       toast('error', `Could not load trials — ${err instanceof Error ? err.message : 'network error'}`, { title: 'Clinical Trials' })
     }
@@ -85,11 +85,11 @@ export default function ClinicalTrials() {
       ;(async () => {
         try {
           const [sR, dR] = await Promise.all([
-            fetch(`${API}/${match.id}/subjects`),
-            fetch(`${API}/${match.id}/documents`),
+            apiClient.get(`${BASE}/${match.id}/subjects`),
+            apiClient.get(`${BASE}/${match.id}/documents`),
           ])
-          if (sR.ok) setSubjects((await sR.json()).items || [])
-          if (dR.ok) setDocuments((await dR.json()).items || [])
+          setSubjects(sR.data.items || [])
+          setDocuments(dR.data.items || [])
         } catch { /* ignore */ }
       })()
     }
@@ -97,15 +97,19 @@ export default function ClinicalTrials() {
 
   const selectTrial = async (t: Trial) => {
     setSelected(t); setViewTab('overview')
-    const [sR, dR] = await Promise.all([fetch(`${API}/${t.id}/subjects`), fetch(`${API}/${t.id}/documents`)])
-    if (sR.ok) setSubjects((await sR.json()).items || [])
-    if (dR.ok) setDocuments((await dR.json()).items || [])
+    try {
+      const [sR, dR] = await Promise.all([apiClient.get(`${BASE}/${t.id}/subjects`), apiClient.get(`${BASE}/${t.id}/documents`)])
+      setSubjects(sR.data.items || [])
+      setDocuments(dR.data.items || [])
+    } catch { /* ignore */ }
   }
 
   const createTrial = async () => {
     if (!form.title.trim()) return
-    const r = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) })
-    if (r.ok) { load(); setShowAdd(false); logActivity({ type: 'discovery', action: 'created', title: `Created trial: ${form.title}` }); setForm({ protocol_number: '', title: '', phase: 'Phase I', pi: '', target_enrollment: 0 }) }
+    try {
+      await apiClient.post(BASE, form)
+      load(); setShowAdd(false); logActivity({ type: 'discovery', action: 'created', title: `Created trial: ${form.title}` }); setForm({ protocol_number: '', title: '', phase: 'Phase I', pi: '', target_enrollment: 0 })
+    } catch { /* error surfaced by interceptor */ }
   }
 
   const deleteTrial = (id: string) => {
@@ -115,7 +119,9 @@ export default function ClinicalTrials() {
   const confirmDelete = async () => {
     if (!deleteConfirmId) return
     const deletedTrial = trials.find(t => t.id === deleteConfirmId)
-    await fetch(`${API}/${deleteConfirmId}`, { method: 'DELETE' })
+    try {
+      await apiClient.delete(`${BASE}/${deleteConfirmId}`)
+    } catch { /* error surfaced by interceptor */ }
     if (selected?.id === deleteConfirmId) setSelected(null)
     load()
     setDeleteConfirmId(null)

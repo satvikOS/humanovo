@@ -4,6 +4,7 @@ import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, R
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 import { logActivity } from '../utils/persistence'
 import { toast } from '../contexts/ToastContext'
+import { apiClient } from '../services'
 
 interface MLModel {
   id: string; name: string; model_type: string; status: string; description: string; version: string
@@ -12,7 +13,7 @@ interface MLModel {
   created_at: string; updated_at: string
 }
 
-const API = '/api/v1/ml-models'
+const BASE = '/ml-models'
 // deployed/retired keep semantic colour (green = live, red = decommissioned)
 // so they're instantly identifiable in a long list; the other three
 // states stay monochrome to match the platform shell.
@@ -30,9 +31,8 @@ export default function MLModelManager() {
 
   const load = async () => {
     try {
-      const r = await fetch(API)
-      if (!r.ok) throw new Error(`models ${r.status}`)
-      setModels((await r.json()).items || [])
+      const { data } = await apiClient.get(BASE)
+      setModels(data.items || [])
     } catch (err) {
       toast('error', `Could not load ML models — ${err instanceof Error ? err.message : 'network error'}`, { title: 'ML Models' })
     }
@@ -41,14 +41,18 @@ export default function MLModelManager() {
 
   const selectModel = async (m: MLModel) => {
     setSelected(m); setPrediction(null)
-    const r = await fetch(`${API}/${m.id}/metrics`)
-    if (r.ok) setMetrics(await r.json())
+    try {
+      const { data } = await apiClient.get(`${BASE}/${m.id}/metrics`)
+      setMetrics(data)
+    } catch { /* error surfaced by interceptor */ }
   }
 
   const createModel = async () => {
     if (!form.name.trim()) return
-    const r = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) })
-    if (r.ok) { load(); setShowAdd(false); logActivity({ type: 'discovery', action: 'created', title: `Created ML model: ${form.name}` }); setForm({ name: '', model_type: 'classification', description: '', framework: 'scikit-learn' }) }
+    try {
+      await apiClient.post(BASE, form)
+      load(); setShowAdd(false); logActivity({ type: 'discovery', action: 'created', title: `Created ML model: ${form.name}` }); setForm({ name: '', model_type: 'classification', description: '', framework: 'scikit-learn' })
+    } catch { /* error surfaced by interceptor */ }
   }
 
   const deleteModel = (id: string) => {
@@ -58,7 +62,9 @@ export default function MLModelManager() {
   const confirmDelete = async () => {
     if (!deleteConfirmId) return
     const deletedModel = models.find(m => m.id === deleteConfirmId)
-    await fetch(`${API}/${deleteConfirmId}`, { method: 'DELETE' })
+    try {
+      await apiClient.delete(`${BASE}/${deleteConfirmId}`)
+    } catch { /* error surfaced by interceptor */ }
     if (selected?.id === deleteConfirmId) { setSelected(null); setMetrics(null) }; load()
     setDeleteConfirmId(null)
     logActivity({ type: 'discovery', action: 'deleted', title: `Deleted ML model: ${deletedModel?.name || deleteConfirmId}` })
@@ -68,8 +74,10 @@ export default function MLModelManager() {
     if (!selected) return
     const features: Record<string, any> = {}
     predInput.split(',').forEach(pair => { const [k, v] = pair.split(':').map(s => s.trim()); if (k) features[k] = isNaN(Number(v)) ? v : Number(v) })
-    const r = await fetch(`${API}/${selected.id}/predict`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model_id: selected.id, features }) })
-    if (r.ok) setPrediction(await r.json())
+    try {
+      const { data } = await apiClient.post(`${BASE}/${selected.id}/predict`, { model_id: selected.id, features })
+      setPrediction(data)
+    } catch { /* error surfaced by interceptor */ }
   }
 
   return (

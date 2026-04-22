@@ -4,8 +4,7 @@
  */
 import { useState, useEffect } from 'react'
 import { useAlertDialog } from '../components/AlertDialog'
-
-const API = '/api'
+import { apiClient } from '../services'
 
 interface CacheStats {
   total_entries: number
@@ -69,8 +68,8 @@ export default function PgvectorManager() {
   useEffect(() => {
     setLoading(true)
     Promise.all([
-      fetch(`${API}/v1/dev/pgvector/stats`).then(r => r.json()).catch(() => null),
-      fetch(`${API}/v1/dev/pgvector/maintenance/status`).then(r => r.json()).catch(() => null),
+      apiClient.get('/dev/pgvector/stats').then(r => r.data).catch(() => null),
+      apiClient.get('/dev/pgvector/maintenance/status').then(r => r.data).catch(() => null),
     ]).then(([s, m]) => {
       setStats(s)
       setMaintStatus(m)
@@ -81,12 +80,10 @@ export default function PgvectorManager() {
   const doSearch = async () => {
     setSearching(true)
     try {
-      const res = await fetch(`${API}/v1/dev/pgvector/search`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: searchQuery, source: searchSource || null, threshold: searchThreshold, limit: 20 }),
+      const { data } = await apiClient.post('/dev/pgvector/search', {
+        query: searchQuery, source: searchSource || null, threshold: searchThreshold, limit: 20,
       })
-      setSearchResults(await res.json())
+      setSearchResults(data)
     } finally {
       setSearching(false)
     }
@@ -95,12 +92,8 @@ export default function PgvectorManager() {
   const doSimilarityTest = async () => {
     setSimTesting(true)
     try {
-      const res = await fetch(`${API}/v1/dev/pgvector/similarity-test`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: simQuery }),
-      })
-      setSimResult(await res.json())
+      const { data } = await apiClient.post('/dev/pgvector/similarity-test', { query: simQuery })
+      setSimResult(data)
     } finally {
       setSimTesting(false)
     }
@@ -109,9 +102,9 @@ export default function PgvectorManager() {
   const runMaintenance = async (task: string) => {
     setRunningTask(task)
     try {
-      await fetch(`${API}/v1/dev/pgvector/maintenance/${task}`, { method: 'POST' })
+      await apiClient.post(`/dev/pgvector/maintenance/${task}`)
       // Refresh stats
-      const s = await fetch(`${API}/v1/dev/pgvector/stats`).then(r => r.json()).catch(() => null)
+      const s = await apiClient.get('/dev/pgvector/stats').then(r => r.data).catch(() => null)
       setStats(s)
     } finally {
       setRunningTask(null)
