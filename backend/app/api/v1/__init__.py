@@ -8,6 +8,7 @@ from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
     activities,
+    admin,
     agents,
     auth,
     biobank,
@@ -122,3 +123,6 @@ router.include_router(compute_engine.router)
 
 # User State (localStorage sync across devices)
 router.include_router(user_state.router, prefix="/user-state", tags=["user-state"])
+
+# Admin (non-prod): kg-stats, seed-kg. Disabled in production via guard.
+router.include_router(admin.router, prefix="/admin", tags=["admin"])

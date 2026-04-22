@@ -6,6 +6,7 @@ import { ThemeProvider } from './contexts/ThemeContext'
 import { ToastProvider } from './contexts/ToastContext'
 import { WorkspaceProvider } from './contexts/WorkspaceContext'
 import { Toaster } from './components/Toaster'
+import { SkeletonStyles } from './components/Skeleton'
 import App from './App'
 import './index.css'
 
@@ -29,6 +30,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             </BrowserRouter>
           </WorkspaceProvider>
           <Toaster />
+          <SkeletonStyles />
         </ToastProvider>
       </ThemeProvider>
     </QueryClientProvider>

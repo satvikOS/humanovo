@@ -1324,6 +1324,16 @@ export const api = {
     const { data } = await apiClient.get('/config/constitutional-constraints')
     return data
   },
+
+  // ─── Admin ──────────────────────────────────────────────────────
+  async getKgStats(): Promise<{ environment: string; node_count: number; edge_count: number; embedding_count: number; seed_available: boolean }> {
+    const { data } = await apiClient.get('/admin/kg-stats')
+    return data
+  },
+  async seedKg(force = false): Promise<{ ok: boolean; message: string; nodes_after: number; edges_after: number; embeddings_written: number }> {
+    const { data } = await apiClient.post('/admin/seed-kg', null, { params: { force } })
+    return data
+  },
 }
 
 export default api

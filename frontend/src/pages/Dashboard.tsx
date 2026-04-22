@@ -18,6 +18,8 @@ import {
 import api from '../services/api'
 import type { Project } from '../services/api'
 import { persistGet, getActivityLog, type ActivityEntry } from '../utils/persistence'
+import { EmptyState } from '../components/EmptyState'
+import { toast } from '../contexts/ToastContext'
 
 // ── Stat Card (expandable) ──────────────────────────────────────
 
@@ -664,24 +666,29 @@ export default function Dashboard() {
           </Link>
         </div>
         {projects.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 text-[var(--color-text-muted)]">
-            <FiFolder className="w-8 h-8 mb-3 opacity-30" />
-            <p className="text-sm">No projects yet</p>
-            <button
-              onClick={() => navigate('/projects?new=1')}
-              className="text-sm mt-2 rounded-lg active:scale-95"
-              style={{
-                background: 'rgba(91, 141, 184, 0.25)',
-                border: '1px solid rgba(91, 141, 184, 0.35)',
-                color: '#fff',
-                borderRadius: 10,
-                padding: '6px 14px',
-                transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
-              }}
-            >
-              Create your first project
-            </button>
-          </div>
+          <EmptyState
+            icon={<FiFolder />}
+            title="No projects yet"
+            description="Projects group hypotheses, evidence, and simulations into a single research context. Start one to kick off a 12-stage discovery run."
+            action={{
+              label: 'Create your first project',
+              onClick: () => navigate('/projects?new=1'),
+              ariaLabel: 'Create your first project',
+            }}
+            secondary={{
+              label: 'Seed demo KG',
+              onClick: async () => {
+                try {
+                  const r = await api.seedKg()
+                  toast('success', r.message, { title: 'Demo data seeded' })
+                } catch (e) {
+                  toast('error', String(e), { title: 'Seed failed' })
+                }
+              },
+              ariaLabel: 'Seed demo knowledge graph',
+            }}
+            fullPanel={false}
+          />
         ) : (
           <div className="grid grid-cols-3 gap-3">
             {projects.slice(0, 6).map(project => (
