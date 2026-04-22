@@ -27,6 +27,9 @@ export function DifferentiatorStrip() {
     node_count: number
     edge_count: number
     embedding_count: number
+    evidence_count?: number
+    evidence_embedding_count?: number
+    hypothesis_count?: number
   } | null>(null)
 
   useEffect(() => {
@@ -55,9 +58,12 @@ export function DifferentiatorStrip() {
     {
       icon: <FiCheckCircle className="w-3.5 h-3.5" />,
       label: 'Citation round-trip',
-      value: 'CrossRef + NCBI',
-      detail:
-        'Every DOI/PMID verified via live round-trip. No hallucinated references — verify single citations or whole batches.',
+      value: kgStats?.evidence_count
+        ? `${kgStats.evidence_count} evidence`
+        : 'CrossRef + NCBI',
+      detail: kgStats?.evidence_count
+        ? `${kgStats.evidence_count} evidence records with ${kgStats.evidence_embedding_count || 0} pgvector embeddings. Every DOI/PMID verifiable via live CrossRef + NCBI round-trip.`
+        : 'Every DOI/PMID verified via live round-trip. No hallucinated references — verify single citations or whole batches.',
       href: '/citation-manager',
       color: '#a78bfa',
     },

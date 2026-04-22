@@ -1370,12 +1370,27 @@ export const api = {
   },
 
   // ─── Admin ──────────────────────────────────────────────────────
-  async getKgStats(): Promise<{ environment: string; node_count: number; edge_count: number; embedding_count: number; seed_available: boolean }> {
+  async getKgStats(): Promise<{
+    environment: string
+    node_count: number
+    edge_count: number
+    embedding_count: number
+    evidence_count?: number
+    evidence_embedding_count?: number
+    hypothesis_count?: number
+    project_count?: number
+    seed_available: boolean
+    corpus_seeded?: boolean
+  }> {
     const { data } = await apiClient.get('/admin/kg-stats')
     return data
   },
   async seedKg(force = false): Promise<{ ok: boolean; message: string; nodes_after: number; edges_after: number; embeddings_written: number }> {
     const { data } = await apiClient.post('/admin/seed-kg', null, { params: { force } })
+    return data
+  },
+  async seedCorpus(force = false): Promise<{ ok: boolean; message: string; evidence_count_after?: number }> {
+    const { data } = await apiClient.post('/admin/seed-corpus', null, { params: { force } })
     return data
   },
 

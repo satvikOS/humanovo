@@ -43,24 +43,76 @@ class SeedResponse(BaseModel):
 async def get_kg_stats(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Live KG stats — used by the frontend admin panel to decide whether
-    to offer the 'Seed demo KG' CTA."""
+    """Live KG + corpus stats — used by the frontend admin panel + the
+    Dashboard differentiator strip to decide whether to offer the
+    'Seed demo' CTA and to show live counts without per-page joins."""
     node_count = (await db.execute(select(func.count(KnowledgeGraphNode.id)))).scalar() or 0
     edge_count = (await db.execute(select(func.count(KnowledgeGraphEdge.id)))).scalar() or 0
-    emb = (
+    emb_kg = (
         await db.execute(
-            text(
-                "SELECT COUNT(*) FROM vector_embeddings "
-                "WHERE source_type = 'kg_entity'"
-            )
+            text("SELECT COUNT(*) FROM vector_embeddings WHERE source_type = 'kg_entity'")
         )
+    ).scalar() or 0
+    emb_ev = (
+        await db.execute(
+            text("SELECT COUNT(*) FROM vector_embeddings WHERE source_type = 'evidence'")
+        )
+    ).scalar() or 0
+    # Also include the downstream corpus counts so the Dashboard knows
+    # whether to offer the full-seed CTA.
+    ev_count = (
+        await db.execute(text("SELECT COUNT(*) FROM evidence"))
+    ).scalar() or 0
+    hyp_count = (
+        await db.execute(text("SELECT COUNT(*) FROM hypotheses"))
+    ).scalar() or 0
+    project_count = (
+        await db.execute(text("SELECT COUNT(*) FROM projects"))
     ).scalar() or 0
     return {
         "environment": settings.ENVIRONMENT,
         "node_count": node_count,
         "edge_count": edge_count,
-        "embedding_count": emb,
+        "embedding_count": emb_kg,
+        "evidence_count": ev_count,
+        "evidence_embedding_count": emb_ev,
+        "hypothesis_count": hyp_count,
+        "project_count": project_count,
         "seed_available": node_count < 200,
+        "corpus_seeded": ev_count >= 10 and hyp_count >= 2,
+    }
+
+
+@router.post("/seed-corpus", response_model=dict)
+async def seed_evidence_corpus(
+    force: bool = Query(False),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Run the evidence/hypothesis seed — fills the Evidence page +
+    Hypothesis list with KG-linked demo data. Idempotent."""
+    if settings.ENVIRONMENT.lower() == "production":
+        raise HTTPException(
+            status_code=403,
+            detail="Seed refuses to run in production. Use the ingestion pipeline.",
+        )
+    before_ev = (await db.execute(text("SELECT COUNT(*) FROM evidence"))).scalar() or 0
+    if before_ev >= 10 and not force:
+        return {
+            "ok": True,
+            "message": f"Evidence corpus already has {before_ev} rows; pass ?force=true to reseed.",
+            "evidence_count": before_ev,
+        }
+    from scripts.seed_evidence import seed as seed_corpus
+    result = await seed_corpus()
+    after_ev = (await db.execute(text("SELECT COUNT(*) FROM evidence"))).scalar() or 0
+    return {
+        "ok": True,
+        "environment": settings.ENVIRONMENT,
+        **result,
+        "evidence_count_after": after_ev,
+        "message": f"Seeded {result.get('evidence_upserted', 0)} evidence + "
+                   f"{result.get('hypotheses_upserted', 0)} hypotheses + "
+                   f"{result.get('projects_upserted', 0)} projects.",
     }
 
 
