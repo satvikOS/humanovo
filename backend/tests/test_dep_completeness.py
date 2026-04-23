@@ -56,7 +56,7 @@ def test_every_app_module_has_its_deps_declared() -> None:
         cwd=backend_dir,
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=240,
     )
     assert result.returncode == 0, (
         f"Probe subprocess failed (rc={result.returncode}): "

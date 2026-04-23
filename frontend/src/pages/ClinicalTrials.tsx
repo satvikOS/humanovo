@@ -2,13 +2,15 @@ import { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   FiClipboard, FiUsers, FiFileText, FiDollarSign,
-  FiPlus, FiTrash2,
+  FiPlus, FiTrash2, FiCheckSquare, FiSquare,
 } from 'react-icons/fi'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
+import { BulkActionBar } from '../components/BulkActionBar'
 import { logActivity } from '../utils/persistence'
 import { toast } from '../contexts/ToastContext'
 import { apiClient } from '../services'
+import api from '../services/api'
 
 interface Trial {
   id: string; protocol_number: string; title: string; phase: string; status: string
@@ -48,6 +50,11 @@ export default function ClinicalTrials() {
   const [showAdd, setShowAdd] = useState(() => searchParams.get('add') === '1')
   const [form, setForm] = useState({ protocol_number: '', title: '', phase: 'Phase I', pi: '', target_enrollment: 0 })
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+  // Bulk-select state shared with BulkActionBar pattern (see
+  // components/BulkActionBar.tsx). Uniform UX across all list pages.
+  const [selectMode, setSelectMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false)
 
   const load = async () => {
     try {
@@ -136,7 +143,16 @@ export default function ClinicalTrials() {
         <div className="flex items-center justify-between mb-2">
           <div><h1 className="text-2xl font-semibold tracking-tight">Clinical Trial Management</h1>
             <p className="text-sm text-[var(--color-text-muted)] mt-1">Protocol registry, enrollment, visits, and budgets</p></div>
-          <button onClick={() => setShowAdd(!showAdd)} className="btn text-sm" style={{ color: 'var(--color-text-secondary)' }}><FiPlus className="w-4 h-4" /> New Trial</button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => { if (selectMode) { setSelectMode(false); setSelectedIds(new Set()) } else setSelectMode(true) }}
+              className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${selectMode ? 'border-[var(--color-border-strong)] text-[var(--color-text)]' : 'border-[var(--glass-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:border-[var(--color-border-strong)]'}`}
+              aria-pressed={selectMode}
+            >
+              {selectMode ? 'Done' : 'Select'}
+            </button>
+            <button onClick={() => setShowAdd(!showAdd)} className="btn text-sm" style={{ color: 'var(--color-text-secondary)' }}><FiPlus className="w-4 h-4" /> New Trial</button>
+          </div>
         </div>
       </div>
 
@@ -162,22 +178,77 @@ export default function ClinicalTrials() {
         </div>
       )}
 
+      {selectMode && selectedIds.size > 0 && (
+        <div className="px-6 pt-4">
+          <BulkActionBar
+            count={selectedIds.size}
+            allSelected={trials.length > 0 && trials.every(t => selectedIds.has(t.id))}
+            onSelectAll={() => {
+              const allSel = trials.every(t => selectedIds.has(t.id))
+              setSelectedIds(allSel ? new Set() : new Set(trials.map(t => t.id)))
+            }}
+            onArchive={async () => {
+              try {
+                const res = await api.bulkArchiveClinicalTrials([...selectedIds])
+                toast('success', `Archived ${res.updated_count} trial${res.updated_count === 1 ? '' : 's'}`)
+                load()
+                setSelectMode(false); setSelectedIds(new Set())
+              } catch (err: any) {
+                toast('error', err?.message || 'Bulk archive failed', { title: 'Could not archive' })
+              }
+            }}
+            onRestore={async () => {
+              try {
+                const res = await api.bulkArchiveClinicalTrials([...selectedIds], true)
+                toast('success', `Restored ${res.updated_count} trial${res.updated_count === 1 ? '' : 's'}`)
+                load()
+                setSelectMode(false); setSelectedIds(new Set())
+              } catch (err: any) {
+                toast('error', err?.message || 'Bulk restore failed', { title: 'Could not restore' })
+              }
+            }}
+            onDelete={() => setBulkDeleteConfirm(true)}
+          />
+        </div>
+      )}
+
       <div className="flex-1 flex overflow-hidden">
         <div className="w-72 border-r border-[var(--color-border)] overflow-y-auto p-3 space-y-1">
-          {trials.length === 0 ? <p className="text-xs text-[var(--color-text-muted)] text-center py-8">No trials</p> : trials.map(t => (
-            <div key={t.id} onClick={() => selectTrial(t)}
-              className={`p-3 rounded-lg cursor-pointer group transition-colors ${selected?.id === t.id ? 'bg-[var(--glass-bg)] border border-[var(--color-border)]' : 'hover:bg-[var(--glass-bg)]'}`}>
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-medium truncate">{t.protocol_number}</span>
-                <button onClick={e => { e.stopPropagation(); deleteTrial(t.id) }} className="opacity-0 group-hover:opacity-100 p-1 rounded hover:text-[var(--color-error)]"><FiTrash2 className="w-3 h-3" /></button>
+          {trials.length === 0 ? <p className="text-xs text-[var(--color-text-muted)] text-center py-8">No trials</p> : trials.map(t => {
+            const sel = selectedIds.has(t.id)
+            return (
+              <div
+                key={t.id}
+                onClick={() => {
+                  if (selectMode) {
+                    setSelectedIds(prev => {
+                      const next = new Set(prev)
+                      if (next.has(t.id)) next.delete(t.id); else next.add(t.id)
+                      return next
+                    })
+                  } else {
+                    selectTrial(t)
+                  }
+                }}
+                className={`p-3 rounded-lg cursor-pointer group transition-colors ${(!selectMode && selected?.id === t.id) || (selectMode && sel) ? 'bg-[var(--glass-bg)] border border-[var(--color-border)]' : 'hover:bg-[var(--glass-bg)]'}`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    {selectMode && (sel ? <FiCheckSquare className="w-4 h-4 text-[var(--color-text)] flex-shrink-0" /> : <FiSquare className="w-4 h-4 text-[var(--color-text-muted)] flex-shrink-0" />)}
+                    <span className="text-xs font-medium truncate">{t.protocol_number}</span>
+                  </div>
+                  {!selectMode && (
+                    <button onClick={e => { e.stopPropagation(); deleteTrial(t.id) }} className="opacity-0 group-hover:opacity-100 p-1 rounded hover:text-[var(--color-error)] flex-shrink-0"><FiTrash2 className="w-3 h-3" /></button>
+                  )}
+                </div>
+                <div className="text-xxs text-[var(--color-text-muted)] truncate mt-0.5">{t.title}</div>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-xxs px-1.5 py-0.5 rounded-full" style={{ color: STATUS_COLORS[t.status] || 'var(--color-text-muted)', background: 'var(--glass-bg)' }}>{t.status}</span>
+                  <span className="text-xxs text-[var(--color-text-muted)]">{t.phase}</span>
+                </div>
               </div>
-              <div className="text-xxs text-[var(--color-text-muted)] truncate mt-0.5">{t.title}</div>
-              <div className="flex items-center gap-2 mt-1">
-                <span className="text-xxs px-1.5 py-0.5 rounded-full" style={{ color: STATUS_COLORS[t.status] || 'var(--color-text-muted)', background: 'var(--glass-bg)' }}>{t.status}</span>
-                <span className="text-xxs text-[var(--color-text-muted)]">{t.phase}</span>
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
 
         <div className="flex-1 overflow-y-auto p-6">
@@ -295,6 +366,23 @@ export default function ClinicalTrials() {
         message="This will permanently delete this clinical trial record. This action cannot be undone."
         onConfirm={confirmDelete}
         onCancel={() => setDeleteConfirmId(null)}
+      />
+      <ConfirmDeleteDialog
+        open={bulkDeleteConfirm}
+        entityName={`${selectedIds.size} Clinical Trial${selectedIds.size === 1 ? '' : 's'}`}
+        message="This will permanently delete the selected clinical trial records. This action cannot be undone."
+        onConfirm={async () => {
+          setBulkDeleteConfirm(false)
+          try {
+            const res = await api.bulkDeleteClinicalTrials([...selectedIds])
+            toast('success', `Deleted ${res.deleted_count} trial${res.deleted_count === 1 ? '' : 's'}`)
+            load()
+            setSelectMode(false); setSelectedIds(new Set())
+          } catch (err: any) {
+            toast('error', err?.message || 'Bulk delete failed', { title: 'Could not delete' })
+          }
+        }}
+        onCancel={() => setBulkDeleteConfirm(false)}
       />
     </div>
   )

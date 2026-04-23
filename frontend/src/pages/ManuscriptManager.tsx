@@ -2,12 +2,14 @@ import { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   FiFileText, FiPlus, FiTrash2, FiEdit3, FiUsers, FiSend,
-  FiDownload, FiSave,
+  FiDownload, FiSave, FiCheckSquare, FiSquare,
 } from 'react-icons/fi'
 import { formatDate, logActivity } from '../utils/persistence'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
+import { BulkActionBar } from '../components/BulkActionBar'
 import { toast } from '../contexts/ToastContext'
 import { apiClient } from '../services'
+import api from '../services/api'
 
 interface Manuscript {
   id: string; title: string; status: string; journal_target: string
@@ -40,6 +42,9 @@ export default function ManuscriptManager() {
   const [showAuthorAdd, setShowAuthorAdd] = useState(false)
   const [newAuthor, setNewAuthor] = useState({ name: '', affiliation: '', email: '', role: 'Co-Author' })
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+  const [selectMode, setSelectMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false)
 
   const load = async () => {
     try {
@@ -178,7 +183,16 @@ export default function ManuscriptManager() {
       <div className="p-6 border-b border-[var(--color-border)]">
         <div className="flex items-center justify-between mb-2">
           <div><h1 className="text-2xl font-semibold tracking-tight">Manuscript Manager</h1><p className="text-sm text-[var(--color-text-muted)] mt-1">Draft, format, and track manuscript submissions</p></div>
-          <button onClick={() => setShowAdd(!showAdd)} className="btn text-sm" style={{ color: 'var(--color-text-secondary)' }}><FiPlus className="w-4 h-4" /> New Manuscript</button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => { if (selectMode) { setSelectMode(false); setSelectedIds(new Set()) } else setSelectMode(true) }}
+              className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${selectMode ? 'border-[var(--color-border-strong)] text-[var(--color-text)]' : 'border-[var(--glass-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:border-[var(--color-border-strong)]'}`}
+              aria-pressed={selectMode}
+            >
+              {selectMode ? 'Done' : 'Select'}
+            </button>
+            <button onClick={() => setShowAdd(!showAdd)} className="btn text-sm" style={{ color: 'var(--color-text-secondary)' }}><FiPlus className="w-4 h-4" /> New Manuscript</button>
+          </div>
         </div>
       </div>
 
@@ -193,6 +207,40 @@ export default function ManuscriptManager() {
         </div>
       )}
 
+      {selectMode && selectedIds.size > 0 && (
+        <div className="px-6 pt-4">
+          <BulkActionBar
+            count={selectedIds.size}
+            allSelected={manuscripts.length > 0 && manuscripts.every(m => selectedIds.has(m.id))}
+            onSelectAll={() => {
+              const allSel = manuscripts.every(m => selectedIds.has(m.id))
+              setSelectedIds(allSel ? new Set() : new Set(manuscripts.map(m => m.id)))
+            }}
+            onArchive={async () => {
+              try {
+                const res = await api.bulkArchiveManuscripts([...selectedIds])
+                toast('success', `Archived ${res.updated_count} manuscript${res.updated_count === 1 ? '' : 's'}`)
+                load()
+                setSelectMode(false); setSelectedIds(new Set())
+              } catch (err: any) {
+                toast('error', err?.message || 'Bulk archive failed', { title: 'Could not archive' })
+              }
+            }}
+            onRestore={async () => {
+              try {
+                const res = await api.bulkArchiveManuscripts([...selectedIds], true)
+                toast('success', `Restored ${res.updated_count} manuscript${res.updated_count === 1 ? '' : 's'}`)
+                load()
+                setSelectMode(false); setSelectedIds(new Set())
+              } catch (err: any) {
+                toast('error', err?.message || 'Bulk restore failed', { title: 'Could not restore' })
+              }
+            }}
+            onDelete={() => setBulkDeleteConfirm(true)}
+          />
+        </div>
+      )}
+
       <div className="flex-1 flex overflow-hidden">
         <div className="w-72 border-r border-[var(--color-border)] overflow-y-auto p-3 space-y-1">
           {manuscripts.length === 0 && (
@@ -202,19 +250,40 @@ export default function ManuscriptManager() {
               <p className="text-xxs text-[var(--color-text-muted)] mt-1">Use "New" above to draft one.</p>
             </div>
           )}
-          {manuscripts.map(m => (
-            <div key={m.id} onClick={() => selectMs(m.id)}
-              className={`p-3 rounded-lg cursor-pointer group transition-colors ${selected?.id === m.id ? 'bg-[var(--glass-bg)] border border-[var(--color-border)]' : 'hover:bg-[var(--glass-bg)]'}`}>
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-medium truncate">{m.title}</span>
-                <button onClick={e => { e.stopPropagation(); deleteMs(m.id) }} className="opacity-0 group-hover:opacity-100 p-1"><FiTrash2 className="w-3 h-3" /></button>
+          {manuscripts.map(m => {
+            const sel = selectedIds.has(m.id)
+            return (
+            <div
+              key={m.id}
+              onClick={() => {
+                if (selectMode) {
+                  setSelectedIds(prev => {
+                    const next = new Set(prev)
+                    if (next.has(m.id)) next.delete(m.id); else next.add(m.id)
+                    return next
+                  })
+                } else {
+                  selectMs(m.id)
+                }
+              }}
+              className={`p-3 rounded-lg cursor-pointer group transition-colors ${(!selectMode && selected?.id === m.id) || (selectMode && sel) ? 'bg-[var(--glass-bg)] border border-[var(--color-border)]' : 'hover:bg-[var(--glass-bg)]'}`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  {selectMode && (sel ? <FiCheckSquare className="w-4 h-4 text-[var(--color-text)] flex-shrink-0" /> : <FiSquare className="w-4 h-4 text-[var(--color-text-muted)] flex-shrink-0" />)}
+                  <span className="text-xs font-medium truncate">{m.title}</span>
+                </div>
+                {!selectMode && (
+                  <button onClick={e => { e.stopPropagation(); deleteMs(m.id) }} className="opacity-0 group-hover:opacity-100 p-1 flex-shrink-0"><FiTrash2 className="w-3 h-3" /></button>
+                )}
               </div>
               <div className="flex items-center gap-2 mt-1">
                 <span className="text-xxs px-1.5 py-0.5 rounded-full" style={{ color: STATUS_COLORS[m.status], background: 'var(--glass-bg)' }}>{m.status}</span>
                 {m.journal_target && <span className="text-xxs text-[var(--color-text-muted)]">{m.journal_target}</span>}
               </div>
             </div>
-          ))}
+            )
+          })}
         </div>
 
         <div className="flex-1 overflow-y-auto p-6">
@@ -301,6 +370,23 @@ export default function ManuscriptManager() {
         message="This will permanently delete this manuscript. This action cannot be undone."
         onConfirm={confirmDelete}
         onCancel={() => setDeleteConfirmId(null)}
+      />
+      <ConfirmDeleteDialog
+        open={bulkDeleteConfirm}
+        entityName={`${selectedIds.size} Manuscript${selectedIds.size === 1 ? '' : 's'}`}
+        message="This will permanently delete the selected manuscripts. This action cannot be undone."
+        onConfirm={async () => {
+          setBulkDeleteConfirm(false)
+          try {
+            const res = await api.bulkDeleteManuscripts([...selectedIds])
+            toast('success', `Deleted ${res.deleted_count} manuscript${res.deleted_count === 1 ? '' : 's'}`)
+            load()
+            setSelectMode(false); setSelectedIds(new Set())
+          } catch (err: any) {
+            toast('error', err?.message || 'Bulk delete failed', { title: 'Could not delete' })
+          }
+        }}
+        onCancel={() => setBulkDeleteConfirm(false)}
       />
     </div>
   )
