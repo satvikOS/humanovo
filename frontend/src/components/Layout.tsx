@@ -1383,8 +1383,24 @@ if (path === '/clinical-trials') return 'Clinical Trials'
     if (path === '/regulatory') return 'Regulatory & Compliance'
     if (path === '/imaging') return 'Research Imaging'
     if (path === '/biobank') return 'Biobank'
+    if (path === '/knowledge-graph') return 'Knowledge Graph'
+    if (path.startsWith('/knowledge-graph/')) return 'Knowledge Graph'
+    if (path === '/ml-models') return 'ML Models'
+    if (path.startsWith('/dev/pgvector')) return 'pgvector'
     return ''
   }
+
+  // Keep document.title in sync with the current route so multi-tab
+  // users can tell pages apart from the browser tab strip alone.
+  // Single source of truth — the per-page components don't need to
+  // each set their own title.
+  useEffect(() => {
+    const pageName = getPageTitle()
+    document.title = pageName
+      ? `${pageName} · humanovo`
+      : 'humanovo — Biomedical Discovery Platform'
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname])
 
   return (
     <div className="flex h-screen bg-[var(--color-bg)]">
