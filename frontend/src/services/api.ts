@@ -1129,6 +1129,49 @@ export const api = {
     await apiClient.delete(`/imaging/studies/${id}`)
   },
 
+  // ── Management lists (bulk-delete where available) ────────────
+
+  async getClinicalTrials(): Promise<any> {
+    const { data } = await apiClient.get('/clinical-trials')
+    return data
+  },
+  async bulkDeleteClinicalTrials(ids: string[]): Promise<any> {
+    const { data } = await apiClient.post('/clinical-trials/bulk-delete', { ids })
+    return data
+  },
+  async bulkArchiveClinicalTrials(ids: string[], restore = false): Promise<any> {
+    const { data } = await apiClient.post('/clinical-trials/bulk-archive', { ids }, { params: restore ? { restore: true } : {} })
+    return data
+  },
+  async getManuscripts(): Promise<any> {
+    const { data } = await apiClient.get('/manuscripts')
+    return data
+  },
+  async bulkDeleteManuscripts(ids: string[]): Promise<any> {
+    const { data } = await apiClient.post('/manuscripts/bulk-delete', { ids })
+    return data
+  },
+  async bulkArchiveManuscripts(ids: string[], restore = false): Promise<any> {
+    const { data } = await apiClient.post('/manuscripts/bulk-archive', { ids }, { params: restore ? { restore: true } : {} })
+    return data
+  },
+  async getBiobankSamples(params?: Record<string, any>): Promise<any> {
+    const { data } = await apiClient.get('/biobank/samples', { params })
+    return data
+  },
+  async bulkDeleteBiobankSamples(ids: string[]): Promise<any> {
+    const { data } = await apiClient.post('/biobank/samples/bulk-delete', { ids })
+    return data
+  },
+  async bulkArchiveBiobankSamples(ids: string[], restore = false): Promise<any> {
+    const { data } = await apiClient.post('/biobank/samples/bulk-archive', { ids }, { params: restore ? { restore: true } : {} })
+    return data
+  },
+  async getMLModels(): Promise<any> {
+    const { data } = await apiClient.get('/ml-models')
+    return data
+  },
+
   // ── Monitoring ────────────────────────────────────────────────
 
   async getHealthCheck(): Promise<any> {

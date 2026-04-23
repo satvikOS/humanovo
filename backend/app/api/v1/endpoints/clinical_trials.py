@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.models.platform_entities import ClinicalTrial, TrialSubject, TrialDocument
+from app.api.v1.endpoints._bulk import attach_bulk_delete, attach_bulk_archive
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -282,3 +283,8 @@ async def update_budget(trial_id: str, data: BudgetUpdate, db: AsyncSession = De
     trial.budget = budget
     await db.flush()
     return budget
+
+
+# Bulk operations
+attach_bulk_delete(router, ClinicalTrial)
+attach_bulk_archive(router, ClinicalTrial)

@@ -58,13 +58,16 @@ async function downloadHypothesisPdf(hypothesisId: string, hypothesisData: {
 function HypothesisCard({ hypothesis }: { hypothesis: Hypothesis }) {
   const [exporting, setExporting] = useState(false)
 
+  // Muted-only status: icon + label carry the meaning, no decorative
+  // tints. Rejection keeps no red accent because this is an
+  // informational filter chip, not a destructive action.
   const statusConfig = {
-    draft: { icon: FiClock, color: 'text-secondary-400', bg: 'bg-secondary-600/20' },
-    generating: { icon: FiClock, color: 'text-[var(--color-text-muted)]', bg: 'bg-yellow-600/20' },
+    draft: { icon: FiClock, color: 'text-[var(--color-text-muted)]', bg: 'bg-[var(--glass-bg)]' },
+    generating: { icon: FiClock, color: 'text-[var(--color-text-muted)]', bg: 'bg-[var(--glass-bg)]' },
     active: { icon: FiZap, color: 'text-[var(--color-text)]', bg: 'bg-[var(--color-surface-raised)]' },
-    validated: { icon: FiCheck, color: 'text-[var(--color-text-secondary)]', bg: 'bg-green-600/20' },
-    rejected: { icon: FiAlertTriangle, color: 'text-[var(--color-text-muted)]', bg: 'bg-red-600/20' },
-    archived: { icon: FiClock, color: 'text-secondary-400', bg: 'bg-secondary-600/20' },
+    validated: { icon: FiCheck, color: 'text-[var(--color-text-secondary)]', bg: 'bg-[var(--glass-bg)]' },
+    rejected: { icon: FiAlertTriangle, color: 'text-[var(--color-text-muted)]', bg: 'bg-[var(--glass-bg)]' },
+    archived: { icon: FiClock, color: 'text-[var(--color-text-muted)]', bg: 'bg-[var(--glass-bg)]' },
   }
 
   const status = statusConfig[hypothesis.status] || statusConfig.draft

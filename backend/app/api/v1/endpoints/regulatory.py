@@ -21,6 +21,7 @@ from app.models.platform_entities import (
     DataUseAgreement,
     IRBSubmission,
 )
+from app.api.v1.endpoints._bulk import attach_bulk_delete
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -215,3 +216,13 @@ async def update_checklist(
     checklist.last_reviewed = datetime.utcnow().isoformat()
     await db.flush()
     return checklist.to_dict()
+
+
+# Bulk-delete hooks for each regulatory sub-resource. Archive isn't
+# provided here because the status fields for these resources carry
+# domain-specific meaning (e.g. "approved" for IRB submissions) that
+# shouldn't be overwritten with "archived".
+attach_bulk_delete(router, IRBSubmission, path="/irb-submissions/bulk-delete")
+attach_bulk_delete(router, DataUseAgreement, path="/agreements/bulk-delete")
+attach_bulk_delete(router, ConsentForm, path="/consent-forms/bulk-delete")
+attach_bulk_delete(router, ComplianceChecklist, path="/checklists/bulk-delete")

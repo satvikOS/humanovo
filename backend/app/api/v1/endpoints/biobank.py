@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.models.platform_entities import BiobankSample, StorageLocation
+from app.api.v1.endpoints._bulk import attach_bulk_delete, attach_bulk_archive
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -278,3 +279,8 @@ async def get_inventory(db: AsyncSession = Depends(get_db)):
             for loc in locations
         ],
     }
+
+
+# Bulk operations
+attach_bulk_delete(router, BiobankSample, path="/samples/bulk-delete")
+attach_bulk_archive(router, BiobankSample, path="/samples/bulk-archive")
