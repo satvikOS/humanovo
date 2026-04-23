@@ -7,6 +7,7 @@ import {
   FiInfo, FiBook, FiLink, FiCheck
 } from 'react-icons/fi'
 import { api, apiClient, Entity } from '../services/api'
+import { toast } from '../contexts/ToastContext'
 
 // Entity type colors and configurations
 const ENTITY_COLORS = {
@@ -885,11 +886,60 @@ export default function KnowledgeGraph() {
 
                     {neighborhood && neighborhood.relations && neighborhood.relations.length > 0 && (
                       <div>
-                        <label className="text-[var(--color-text-muted)] text-xs font-medium mb-2 block">
-                          Relationships ({neighborhood.relations.length})
-                        </label>
-                        <div className="space-y-2 max-h-48 overflow-auto">
-                          {neighborhood.relations.slice(0, 10).map((rel, i) => (
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="text-[var(--color-text-muted)] text-xs font-medium">
+                            Relationships ({neighborhood.relations.length})
+                          </label>
+                          <button
+                            onClick={() => {
+                              // Expand neighbours into the main canvas:
+                              // top-25 relations by confidence (proxy for
+                              // edge weight), with the connected nodes
+                              // added to graphData and de-duped by id.
+                              const top = [...neighborhood.relations]
+                                .sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))
+                                .slice(0, 25)
+                              const existingNodeIds = new Set(graphData.nodes.map(n => n.id))
+                              const newNodes: typeof graphData.nodes = []
+                              for (const rel of top) {
+                                const addNode = (id: string, name: string, type?: string) => {
+                                  if (!id || existingNodeIds.has(id)) return
+                                  existingNodeIds.add(id)
+                                  newNodes.push({
+                                    id,
+                                    label: name || id,
+                                    type: (type || 'entity') as any,
+                                    confidence: 0.7,
+                                  } as any)
+                                }
+                                addNode(rel.source_id, rel.source_name, (rel as any).source_type)
+                                addNode(rel.target_id, rel.target_name, (rel as any).target_type)
+                              }
+                              const newEdges = top.map((rel, i) => ({
+                                id: `${rel.source_id}-${rel.target_id}-${i}`,
+                                source: rel.source_id,
+                                target: rel.target_id,
+                                relation: rel.relation_type as any,
+                                confidence: rel.confidence ?? 0.7,
+                                evidenceCount: 0,
+                              }))
+                              setGraphData(prev => ({
+                                nodes: [...prev.nodes, ...newNodes],
+                                edges: [...prev.edges, ...newEdges],
+                              }))
+                              toast('success', `Expanded ${newNodes.length} new nodes · ${newEdges.length} edges (top 25 by confidence)`)
+                            }}
+                            className="text-xxs px-2 py-1 rounded border border-[var(--glass-border)] hover:border-[var(--color-border-strong)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+                            title="Add 1-hop neighbours (top 25 by edge weight) to the canvas"
+                          >
+                            Expand in graph
+                          </button>
+                        </div>
+                        <div className="space-y-2 max-h-64 overflow-auto">
+                          {[...neighborhood.relations]
+                            .sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))
+                            .slice(0, 25)
+                            .map((rel, i) => (
                             <div key={i} className="p-2 bg-[var(--glass-bg)] rounded text-xs">
                               <div className="flex items-center justify-between">
                                 <span className="text-[var(--color-text)]">{rel.source_name}</span>
