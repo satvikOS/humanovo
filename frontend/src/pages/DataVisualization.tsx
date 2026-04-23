@@ -876,14 +876,30 @@ export default function DataVisualization() {
 
   const addChart = () => {
     if (!form.title.trim() || !form.dataText.trim()) return
+    const parsed = parseCSV(form.dataText)
+    const typeMeta = CHART_TYPES.find(t => t.value === form.type)
+    // Publication-ready out of the box: every newly created chart
+    // gets an auto-derived subtitle (chart-type · sample-count),
+    // caption (figure-style descriptive sentence), and source line
+    // (Humanovo Compute Lab + creation timestamp). Authors edit
+    // these via the gear-icon panel; the defaults are good enough
+    // for paper / poster export without further fiddling.
+    const today = new Date()
+    const stamp = today.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+    const subtitle = `${typeMeta?.label || form.type} · n=${parsed.length}`
+    const caption = `${typeMeta?.label || form.type} of ${form.title.toLowerCase()}. ${parsed.length} observation${parsed.length === 1 ? '' : 's'} plotted; export at 4× PNG, vector SVG, or letter-size PDF via the toolbar above.`
+    const source = `Humanovo Compute Lab · generated ${stamp}`
     const chart: ChartConfig = {
       id: `chart-${Date.now()}`,
       title: form.title,
+      subtitle,
+      caption,
+      source,
       type: form.type,
-      data: parseCSV(form.dataText),
+      data: parsed,
       options: { ...form.options },
       annotations: [],
-      createdAt: new Date().toISOString(),
+      createdAt: today.toISOString(),
     }
     saveCharts([chart, ...charts])
     logActivity({ type: 'discovery', action: 'created', title: `Created chart: ${chart.title} (${chart.type})` })
@@ -2570,7 +2586,10 @@ export default function DataVisualization() {
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Data Visualization</h1>
             <p className="text-sm text-[var(--color-text-muted)] mt-1">
-              {charts.length} chart{charts.length !== 1 ? 's' : ''} — {CHART_TYPES.length} types (2D + 3D), CSV/XLSX import &amp; export, annotations, trend lines, statistics
+              {charts.length} chart{charts.length !== 1 ? 's' : ''} — {CHART_TYPES.length} types (2D + 3D + Sankey), publication-ready exports (PDF · 4× PNG · SVG), 5 themes (Screen / Paper / Nature / Science / IEEE), CB-safe palettes
+            </p>
+            <p className="text-xxs text-[var(--color-text-muted)] mt-1 opacity-80">
+              Per-chart settings: gear icon → Publication panel for theme · subtitle · caption · source · CI bands · reference bands · custom colors · color-blind preview · watermark.
             </p>
           </div>
           <input ref={fileInputRef} type="file" accept=".csv,.tsv,.txt,.xlsx,.xls" onChange={handleFileUpload} className="hidden" />

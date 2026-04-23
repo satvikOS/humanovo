@@ -526,11 +526,41 @@ export interface SearchResult {
 // API Functions
 // ═══════════════════════════════════════════════════════════════════
 
+// ── Compute Lab — server-side regression with diagnostics ────────
+export interface RegressionResult {
+  n: number
+  slope: number
+  intercept: number
+  r2: number
+  rmse: number
+  se_slope: number
+  se_intercept: number
+  t_stat: number
+  p_value: number
+  ci_slope: [number, number]
+  ci_intercept: [number, number]
+  fitted: number[]
+  residuals: number[]
+  leverages: number[]
+  cooks_d: number[]
+  cook_threshold: number
+}
+
 export const api = {
   // ── Projects ──────────────────────────────────────────────────
 
   async getProjects(params?: PaginationParams & { search?: string; status?: string }): Promise<PaginatedResponse<Project>> {
     const { data } = await apiClient.get('/projects', { params })
+    return data
+  },
+
+  /**
+   * Server-side OLS regression with full diagnostic output. Used by
+   * the Compute Lab statistics panel to render Q-Q, residual, and
+   * leverage plots without round-tripping the sandboxed code path.
+   */
+  async runRegression(x: number[], y: number[]): Promise<RegressionResult> {
+    const { data } = await apiClient.post('/compute/regression', { x, y })
     return data
   },
 
