@@ -588,6 +588,25 @@ async def get_paper_status():
     return response
 
 
+@router.post("/cancel-paper")
+async def cancel_paper_generation():
+    """Cancel the in-flight async paper generation task, if any.
+
+    The frontend calls this when the user navigates away or hits Cancel
+    during a long-running paper render. Safe to call even when no task
+    is running (idempotent no-op).
+    """
+    global _paper_task, _paper_status, _paper_error
+
+    task = _paper_task
+    if task is not None and not task.done():
+        task.cancel()
+        _paper_status = "idle"
+        _paper_error = None
+        return {"status": "cancelled"}
+    return {"status": "idle"}
+
+
 @router.post("/generate-paper/pdf")
 async def generate_research_paper_pdf():
     """

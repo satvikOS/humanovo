@@ -44,29 +44,63 @@ def _collect_mounted() -> set[tuple[str, str]]:
 
 
 def _collect_frontend_calls() -> set[tuple[str, str]]:
-    """Parse services/api.ts + services/knowledge.ts and extract every
-    apiClient.{method}('/path') call the frontend makes. Paths are
-    normalized to {X} placeholders so they line up with the backend
-    router's parameter shape.
+    """Parse frontend sources and extract every backend path the UI hits.
+
+    Two call shapes:
+    1. apiClient.{method}('/path')   in services/api.ts + knowledge.ts
+       (baseURL is /api/v1, so '/path' resolves to /api/v1/path).
+    2. fetch(`${API_BASE}/api/v1/path`, { method: 'PUT' })
+       Raw fetches in utils/persistence.ts bypass apiClient but still
+       depend on the backend's /api/v1 surface — include them.
+
+    Paths are normalized to {X} placeholders so they line up with the
+    backend router's parameter shape regardless of parameter name.
     """
     repo_root = Path(__file__).resolve().parents[2]
-    sources = [
-        repo_root / "frontend" / "src" / "services" / "api.ts",
-        repo_root / "frontend" / "src" / "services" / "knowledge.ts",
-    ]
-    call_pattern = re.compile(
-        r"apiClient\.(get|post|patch|put|delete)\(['\"`]([^'\"`?]+)"
+    frontend_src = repo_root / "frontend" / "src"
+
+    # Only match calls whose literal path starts with '/'. Calls that
+    # start with a template variable (e.g. apiClient.get(`${base}/samples`))
+    # reference a base URL that can't be statically resolved here — skip
+    # those rather than treat them as gaps.
+    api_client_pattern = re.compile(
+        r"apiClient\.(get|post|patch|put|delete)\(['\"`](/[^'\"`?]+)"
+    )
+    # fetch(`${...}/api/v1/<path>`, { ..., method: 'PUT' })  — method optional.
+    raw_fetch_pattern = re.compile(
+        r"fetch\(\s*`[^`]*?/api/v1(/[^`?]+)`"
+        r"(?:\s*,\s*\{[^}]*?method\s*:\s*['\"]([A-Z]+)['\"])?",
+        re.DOTALL,
     )
     template_var = re.compile(r"\$\{[^}]+\}")
 
     calls: set[tuple[str, str]] = set()
-    for src in sources:
-        if not src.exists():
-            continue
+    for src in frontend_src.rglob("*.ts*"):
         text = src.read_text()
-        for method, path in call_pattern.findall(text):
+        for method, path in api_client_pattern.findall(text):
             calls.add((method.upper(), template_var.sub("{X}", path)))
+        for path, method in raw_fetch_pattern.findall(text):
+            calls.add(
+                ((method or "GET").upper(), template_var.sub("{X}", path))
+            )
     return calls
+
+
+def _segments_match(fe: str, be: str) -> bool:
+    """Treat frontend {X} placeholders as wildcards that match any
+    single backend segment, whether literal ('/ttl-cleanup') or
+    parameterized ('/{job_id}'). Lengths must be equal.
+    """
+    fe_parts = fe.split("/")
+    be_parts = be.split("/")
+    if len(fe_parts) != len(be_parts):
+        return False
+    for f, b in zip(fe_parts, be_parts):
+        if f == "{X}":
+            continue
+        if f != b:
+            return False
+    return True
 
 
 def test_v1_router_mounts_every_frontend_call() -> None:
@@ -74,17 +108,28 @@ def test_v1_router_mounts_every_frontend_call() -> None:
     FastAPI route. When this drifts the UI 404's silently.
 
     This is the full coverage guard — parses services/api.ts +
-    services/knowledge.ts at test time so adding a new frontend call
-    without a matching backend handler fails this test immediately.
+    services/knowledge.ts + any raw fetch() to /api/v1/... at test time,
+    so adding a new frontend call without a matching backend handler
+    fails this test immediately.
     """
     mounted = _collect_mounted()
     calls = _collect_frontend_calls()
     assert calls, "Could not parse any apiClient calls — frontend sources missing?"
 
-    missing = sorted(c for c in calls if c not in mounted)
+    # Group mounted routes by method so the wildcard check is O(n) per call.
+    by_method: dict[str, list[str]] = {}
+    for m, p in mounted:
+        by_method.setdefault(m, []).append(p)
+
+    missing: list[tuple[str, str]] = []
+    for method, path in calls:
+        candidates = by_method.get(method, [])
+        if not any(_segments_match(path, c) for c in candidates):
+            missing.append((method, path))
+
     assert not missing, (
         "Frontend calls these routes but backend does not mount them "
-        f"(UI will 404): {missing}"
+        f"(UI will 404): {sorted(missing)}"
     )
 
 

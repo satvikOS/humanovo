@@ -530,7 +530,7 @@ export default function CitationManager() {
     try {
       const formData = new FormData()
       formData.append('file', file)
-      await apiClient.post('/ingestion/upload', formData, {
+      await apiClient.post('/ingestion/documents/upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data', 'X-Silent-Error': '1' },
       })
     } catch { /* non-fatal */ }
