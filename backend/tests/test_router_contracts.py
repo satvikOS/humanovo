@@ -16,77 +16,75 @@ postgres / redis / neo4j.
 """
 from __future__ import annotations
 
+import re
+from pathlib import Path
 
-def _collect_routes() -> set[tuple[str, str]]:
+
+# Frontend placeholder names (${id}) don't match backend param names
+# ({project_id}), so we normalize both sides to {X} before comparison.
+_PLACEHOLDER = re.compile(r"\{[^}]+\}")
+
+
+def _generic(path: str) -> str:
+    return _PLACEHOLDER.sub("{X}", path)
+
+
+def _collect_mounted() -> set[tuple[str, str]]:
     from fastapi.routing import APIRoute
 
     from app.api.v1 import router
 
-    seen: set[tuple[str, str]] = set()
+    mounted: set[tuple[str, str]] = set()
     for r in router.routes:
         if not isinstance(r, APIRoute):
             continue
         for method in r.methods or ():
-            seen.add((method, r.path))
-    return seen
+            mounted.add((method, _generic(r.path)))
+    return mounted
 
 
-def test_v1_router_mounts_core_frontend_routes() -> None:
-    routes = _collect_routes()
-    required: set[tuple[str, str]] = {
-        # Admin — dashboard service-health pill + settings admin tab.
-        ("GET", "/admin/health"),
-        ("GET", "/admin/kg-stats"),
-        ("POST", "/admin/seed-kg"),
-        ("POST", "/admin/seed-corpus"),
-        # Projects — core resource.
-        ("GET", "/projects"),
-        ("POST", "/projects"),
-        ("GET", "/projects/{project_id}"),
-        ("DELETE", "/projects/{project_id}"),
-        # Project hypotheses (lives in jamison_api.py — richer payload).
-        ("GET", "/projects/{project_id}/hypotheses"),
-        # Hypotheses.
-        ("GET", "/hypotheses"),
-        ("GET", "/hypotheses/{hypothesis_id}"),
-        # Evidence.
-        ("GET", "/evidence"),
-        # Activities (Timeline / Dashboard Recent Activity).
-        ("GET", "/activities"),
-        # Collaboration tab surfaces.
-        ("GET", "/collaboration/team"),
-        ("GET", "/collaboration/comments"),
-        ("GET", "/collaboration/shares"),
-        ("GET", "/collaboration/notifications"),
-        ("GET", "/collaboration/audit-log"),
-        # Clinical trials.
-        ("GET", "/clinical-trials"),
-        ("POST", "/clinical-trials"),
-        # ML Models.
-        ("GET", "/ml-models"),
-        # Biobank — frontend calls /biobank (root) as canonical listing.
-        ("GET", "/biobank"),
-        ("GET", "/biobank/samples"),
-        # Regulatory.
-        ("GET", "/regulatory/irb-submissions"),
-        ("GET", "/regulatory/agreements"),
-        ("GET", "/regulatory/consent-forms"),
-        ("GET", "/regulatory/checklists"),
-        # Manuscripts.
-        ("GET", "/manuscripts"),
-        # Ingestion.
-        ("GET", "/ingestion/jobs"),
-        ("GET", "/ingestion/queue/stats"),
-        # Knowledge graph — entity-centric API surface consumed by
-        # services/knowledge.ts.
-        ("GET", "/knowledge-graph/entities"),
-        # Notebook (Dashboard widget + Notebook page).
-        ("GET", "/notebook/pages"),
-    }
-    missing = required - routes
+def _collect_frontend_calls() -> set[tuple[str, str]]:
+    """Parse services/api.ts + services/knowledge.ts and extract every
+    apiClient.{method}('/path') call the frontend makes. Paths are
+    normalized to {X} placeholders so they line up with the backend
+    router's parameter shape.
+    """
+    repo_root = Path(__file__).resolve().parents[2]
+    sources = [
+        repo_root / "frontend" / "src" / "services" / "api.ts",
+        repo_root / "frontend" / "src" / "services" / "knowledge.ts",
+    ]
+    call_pattern = re.compile(
+        r"apiClient\.(get|post|patch|put|delete)\(['\"`]([^'\"`?]+)"
+    )
+    template_var = re.compile(r"\$\{[^}]+\}")
+
+    calls: set[tuple[str, str]] = set()
+    for src in sources:
+        if not src.exists():
+            continue
+        text = src.read_text()
+        for method, path in call_pattern.findall(text):
+            calls.add((method.upper(), template_var.sub("{X}", path)))
+    return calls
+
+
+def test_v1_router_mounts_every_frontend_call() -> None:
+    """Every (method, path) the frontend calls MUST resolve to a mounted
+    FastAPI route. When this drifts the UI 404's silently.
+
+    This is the full coverage guard — parses services/api.ts +
+    services/knowledge.ts at test time so adding a new frontend call
+    without a matching backend handler fails this test immediately.
+    """
+    mounted = _collect_mounted()
+    calls = _collect_frontend_calls()
+    assert calls, "Could not parse any apiClient calls — frontend sources missing?"
+
+    missing = sorted(c for c in calls if c not in mounted)
     assert not missing, (
-        "Frontend-used routes missing from v1 router — the UI will 404 "
-        f"silently. Missing: {sorted(missing)}"
+        "Frontend calls these routes but backend does not mount them "
+        f"(UI will 404): {missing}"
     )
 
 

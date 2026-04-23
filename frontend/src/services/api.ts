@@ -527,12 +527,6 @@ export interface SearchResult {
 // ═══════════════════════════════════════════════════════════════════
 
 export const api = {
-  // ── Health Check ──────────────────────────────────────────────
-  async checkHealth(): Promise<{ status: string; environment: string }> {
-    const { data } = await apiClient.get('/health')
-    return data
-  },
-
   // ── Projects ──────────────────────────────────────────────────
 
   async getProjects(params?: PaginationParams & { search?: string; status?: string }): Promise<PaginatedResponse<Project>> {
@@ -807,11 +801,6 @@ export const api = {
     return data
   },
 
-  async runSimulation(id: string): Promise<any> {
-    const { data } = await apiClient.post(`/simulations/${id}/run`)
-    return data
-  },
-
   async getSimulationResults(id: string): Promise<any> {
     const { data } = await apiClient.get(`/simulations/${id}/results`)
     return data
@@ -841,11 +830,6 @@ export const api = {
 
   async cancelAgentTask(id: string): Promise<any> {
     const { data } = await apiClient.post(`/agents/tasks/${id}/cancel`)
-    return data
-  },
-
-  async getAgentTaskLogs(id: string): Promise<any> {
-    const { data } = await apiClient.get(`/agents/tasks/${id}/logs`)
     return data
   },
 
