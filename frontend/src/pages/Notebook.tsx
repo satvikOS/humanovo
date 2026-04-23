@@ -1353,7 +1353,7 @@ export default function Notebook() {
         .notebook-editor-area .ProseMirror ul[data-type="taskList"] li label { display: flex; align-items: center; }
         .notebook-editor-area .ProseMirror ul[data-type="taskList"] li label input[type="checkbox"] { margin-right: 0.4em; }
         .notebook-editor-area .ProseMirror .is-empty::before { content: attr(data-placeholder); color: var(--color-text-muted); pointer-events: none; float: left; height: 0; }
-        .notebook-editor-area .ProseMirror .selectedCell { background: rgba(59, 130, 246, 0.1); }
+        .notebook-editor-area .ProseMirror .selectedCell { background: rgba(255, 255, 255, 0.1); }
       `}</style>
     </>
   )

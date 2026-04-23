@@ -249,7 +249,7 @@ function Anatomy3DViewer({
     ctx.fillRect(0, 0, width, height)
 
     // Draw grid
-    ctx.strokeStyle = 'rgba(100, 150, 200, 0.1)'
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)'
     ctx.lineWidth = 1
     const gridSize = 40 * zoom
     for (let x = 0; x < width; x += gridSize) {
@@ -332,10 +332,12 @@ function Anatomy3DViewer({
       ctx.restore()
     })
 
-    // Draw highlighted element
+    // Draw highlighted element (muted white highlight, consistent with
+    // the rest of the app's palette — selection carries meaning via
+    // position and label, not colour)
     if (selectedElement) {
-      ctx.fillStyle = 'rgba(255, 200, 50, 0.3)'
-      ctx.strokeStyle = 'rgba(255, 200, 50, 0.8)'
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.18)'
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)'
       ctx.lineWidth = 2
       // Draw indicator for selected element
       const elementY = getElementPosition(selectedElement, centerY, bodyHeight)

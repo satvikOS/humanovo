@@ -1,15 +1,17 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
   FiPlus, FiFolder, FiX, FiTrash2, FiSearch, FiRefreshCw,
   FiGrid, FiList, FiFilter, FiChevronDown,
-  FiTarget, FiFileText, FiClock, FiZap,
-  FiDatabase, FiTag, FiCalendar,
+  FiTarget, FiClock,
+  FiTag, FiCalendar, FiArchive, FiCheckSquare, FiSquare,
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import api, { Project, ProjectCreate } from '../services/api'
-import { persistGet, formatDateTime, logActivity } from '../utils/persistence'
+import { persistGet, logActivity } from '../utils/persistence'
+import { formatTimeAgo } from '../utils/time'
 import { Skeleton } from '../components/Skeleton'
+import { toast } from '../contexts/ToastContext'
 
 interface SavedResearchPaper {
   id: string
@@ -33,27 +35,24 @@ function StatsBar({ projects }: { projects: Project[] }) {
   const allDocs = persistGet<{ id: string; project_id: string }[]>('project-documents', [])
   const totalEvidence = projects.reduce((sum, p) => sum + (p.evidence_count || 0), 0) + allDocs.length
   const activeCount = projects.filter(p => (p.status || 'active') === 'active').length
+  const archivedCount = projects.filter(p => (p.status || 'active') === 'archived').length
   const allPapers = persistGet<SavedResearchPaper[]>('research-papers', [])
 
   const stats = [
-    { label: 'Total Projects', value: projects.length, icon: FiFolder, color: 'var(--color-text-secondary)' },
-    { label: 'Active', value: activeCount, icon: FiZap, color: 'var(--color-text-secondary)' },
-    { label: 'Hypotheses', value: totalHypotheses, icon: FiTarget, color: 'var(--color-text-secondary)' },
-    { label: 'Evidence Items', value: totalEvidence, icon: FiDatabase, color: 'var(--color-text-secondary)' },
-    { label: 'Research Papers', value: allPapers.length, icon: FiFileText, color: 'var(--color-text-secondary)' },
+    { label: 'Total', value: projects.length },
+    { label: 'Active', value: activeCount },
+    { label: 'Archived', value: archivedCount },
+    { label: 'Hypotheses', value: totalHypotheses },
+    { label: 'Evidence', value: totalEvidence },
+    { label: 'Papers', value: allPapers.length },
   ]
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-8">
+    <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 mb-6">
       {stats.map(stat => (
-        <div key={stat.label} className="glass-card p-4 flex items-center gap-3 group hover:border-white/10 transition-all">
-          <div className="p-2.5 rounded-lg" style={{ backgroundColor: `${stat.color}15` }}>
-            <stat.icon className="w-4 h-4" style={{ color: stat.color }} />
-          </div>
-          <div>
-            <div className="text-xl font-bold text-white">{stat.value}</div>
-            <div className="text-xs text-[var(--color-text-muted)]">{stat.label}</div>
-          </div>
+        <div key={stat.label} className="glass-card p-3">
+          <div className="text-xl font-semibold tracking-tight">{stat.value}</div>
+          <div className="text-xs text-[var(--color-text-muted)] mt-0.5">{stat.label}</div>
         </div>
       ))}
     </div>
@@ -124,7 +123,7 @@ function CreateProjectModal({ onClose, onCreate }: { onClose: () => void; onCrea
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
           <div>
             <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1.5">
-              Project Name <span className="text-red-400">*</span>
+              Project Name <span className="text-[var(--color-text-muted)]" aria-label="required">*</span>
             </label>
             <input
               type="text"
@@ -232,29 +231,71 @@ function CreateProjectModal({ onClose, onCreate }: { onClose: () => void; onCrea
 
 /* ─── Project Card (Grid) ──────────────────────────────────────────── */
 
-function ProjectCardGrid({ project, onDelete }: { project: Project; onDelete: (id: string) => void }) {
+const NOISE_TAGS = new Set([
+  'AI generated', 'ai-generated', '12-stage-pipeline', '10-stage-pipeline',
+  'well-grounded', 'partially-grounded', 'needs-grounding',
+])
+
+interface CardProps {
+  project: Project
+  onDelete: (id: string) => void
+  onArchive: (id: string, restore: boolean) => void
+  selectMode: boolean
+  selected: boolean
+  onToggleSelect: (id: string) => void
+}
+
+function SelectBox({ selected, onClick }: { selected: boolean; onClick: (e: React.MouseEvent) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="p-1 rounded text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+      aria-label={selected ? 'Deselect project' : 'Select project'}
+    >
+      {selected ? <FiCheckSquare className="w-4 h-4" /> : <FiSquare className="w-4 h-4" />}
+    </button>
+  )
+}
+
+function ProjectCardGrid({ project, onDelete, onArchive, selectMode, selected, onToggleSelect }: CardProps) {
   const allPapers = persistGet<SavedResearchPaper[]>('research-papers', [])
   const paperCount = allPapers.filter(p => p.project_id === project.id).length
   const allDocs = persistGet<{ id: string; project_id: string }[]>('project-documents', [])
   const docCount = allDocs.filter(d => d.project_id === project.id).length
+  const isArchived = (project.status || 'active') === 'archived'
+  const visibleTags = (project.tags || []).filter(t => !NOISE_TAGS.has(t))
 
   return (
-    <div className="glass-card hover:border-white/10 transition-all duration-200 group relative overflow-hidden">
+    <div
+      className={clsx(
+        'glass-card transition-all duration-200 group relative overflow-hidden',
+        selected && 'ring-1 ring-[var(--color-border-strong)]',
+        isArchived && 'opacity-60',
+      )}
+    >
       <Link to={`/projects/${project.id}`} className="block p-5">
         <div className="flex items-start justify-between mb-3">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="p-2.5 bg-white/5 rounded-lg flex-shrink-0 group-hover:bg-white/10 transition-colors">
-              <FiFolder className="w-5 h-5 text-[var(--color-text-muted)] group-hover:text-[var(--color-text)] transition-colors" />
-            </div>
+            {selectMode && (
+              <SelectBox
+                selected={selected}
+                onClick={e => { e.preventDefault(); e.stopPropagation(); onToggleSelect(project.id) }}
+              />
+            )}
+            <FiFolder className="w-5 h-5 text-[var(--color-text-muted)] flex-shrink-0" />
             <div className="min-w-0">
-              <h3 className="font-semibold text-white group-hover:text-white/90 transition-colors truncate">
-                {project.name}
-              </h3>
+              <h3 className="font-semibold text-[var(--color-text)] truncate">{project.name}</h3>
               {project.disease_focus && (
                 <p className="text-[var(--color-text-muted)] text-sm truncate">{project.disease_focus}</p>
               )}
             </div>
           </div>
+          {isArchived && (
+            <span className="text-xxs px-1.5 py-0.5 rounded border border-[var(--glass-border)] text-[var(--color-text-muted)]">
+              archived
+            </span>
+          )}
         </div>
 
         {project.description && (
@@ -263,77 +304,102 @@ function ProjectCardGrid({ project, onDelete }: { project: Project; onDelete: (i
           </p>
         )}
 
-        {/* Stats row */}
         <div className="grid grid-cols-3 gap-2 mb-4">
-          <div className="text-center p-2 rounded-lg bg-white/[0.02]">
-            <div className="text-sm font-bold text-white">{project.hypothesis_count || 0}</div>
+          <div className="text-center p-2 rounded-lg border border-[var(--glass-border)]">
+            <div className="text-sm font-semibold">{project.hypothesis_count || 0}</div>
             <div className="text-[10px] text-[var(--color-text-muted)] uppercase tracking-wider">Hypotheses</div>
           </div>
-          <div className="text-center p-2 rounded-lg bg-white/[0.02]">
-            <div className="text-sm font-bold text-white">{(project.evidence_count || 0) + docCount}</div>
+          <div className="text-center p-2 rounded-lg border border-[var(--glass-border)]">
+            <div className="text-sm font-semibold">{(project.evidence_count || 0) + docCount}</div>
             <div className="text-[10px] text-[var(--color-text-muted)] uppercase tracking-wider">Evidence</div>
           </div>
-          <div className="text-center p-2 rounded-lg bg-white/[0.02]">
-            <div className="text-sm font-bold text-white">{paperCount}</div>
+          <div className="text-center p-2 rounded-lg border border-[var(--glass-border)]">
+            <div className="text-sm font-semibold">{paperCount}</div>
             <div className="text-[10px] text-[var(--color-text-muted)] uppercase tracking-wider">Papers</div>
           </div>
         </div>
 
-        {/* Tags */}
-        {project.tags && project.tags.length > 0 && (
+        {visibleTags.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mb-3">
-            {project.tags.filter(t => !['AI generated', 'ai-generated', '12-stage-pipeline', '10-stage-pipeline', 'well-grounded', 'partially-grounded', 'needs-grounding'].includes(t)).slice(0, 5).map(tag => (
-              <span key={tag} className="text-[11px] px-2 py-0.5 rounded-full bg-white/5 text-[var(--color-text-muted)]">
+            {visibleTags.slice(0, 5).map(tag => (
+              <span key={tag} className="text-[11px] px-2 py-0.5 rounded-full border border-[var(--glass-border)] text-[var(--color-text-muted)]">
                 {tag}
               </span>
             ))}
-            {project.tags.filter(t => !['AI generated', 'ai-generated', '12-stage-pipeline', '10-stage-pipeline', 'well-grounded', 'partially-grounded', 'needs-grounding'].includes(t)).length > 5 && (
-              <span className="text-[var(--color-text-muted)] text-xs self-center">+{project.tags.filter(t => !['AI generated', 'ai-generated', '12-stage-pipeline', '10-stage-pipeline', 'well-grounded', 'partially-grounded', 'needs-grounding'].includes(t)).length - 5}</span>
+            {visibleTags.length > 5 && (
+              <span className="text-[var(--color-text-muted)] text-xs self-center">+{visibleTags.length - 5}</span>
             )}
           </div>
         )}
 
-        {/* Footer */}
         <div className="flex items-center justify-between pt-3 border-t border-[var(--color-border)]">
           <span className="text-[var(--color-text-muted)] text-xs flex items-center gap-1">
             <FiClock className="w-3 h-3" />
-            {formatDateTime(project.updated_at)}
+            {formatTimeAgo(project.updated_at)}
           </span>
           <FiChevronDown className="w-3.5 h-3.5 text-[var(--color-text-muted)] -rotate-90" />
         </div>
       </Link>
 
-      {/* Delete button */}
-      <button
-        onClick={e => { e.preventDefault(); e.stopPropagation(); onDelete(project.id) }}
-        className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-red-500/10 text-[var(--color-text-muted)] hover:text-red-400 transition-all"
-        title="Delete project"
-      >
-        <FiTrash2 className="w-3.5 h-3.5" />
-      </button>
+      {/* Row actions: Archive + Delete. Shown on hover or always in select mode. */}
+      {!selectMode && (
+        <div className="absolute top-3 right-3 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button
+            onClick={e => { e.preventDefault(); e.stopPropagation(); onArchive(project.id, isArchived) }}
+            className="p-1.5 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg-hover)] transition-colors"
+            title={isArchived ? 'Restore project' : 'Archive project'}
+            aria-label={isArchived ? 'Restore project' : 'Archive project'}
+          >
+            <FiArchive className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={e => { e.preventDefault(); e.stopPropagation(); onDelete(project.id) }}
+            className="p-1.5 rounded-lg text-[var(--color-text-muted)] hover:text-red-400 hover:bg-red-500/10 transition-colors"
+            title="Delete project"
+            aria-label="Delete project"
+          >
+            <FiTrash2 className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
     </div>
   )
 }
 
 /* ─── Project Row (List) ───────────────────────────────────────────── */
 
-function ProjectCardList({ project, onDelete }: { project: Project; onDelete: (id: string) => void }) {
+function ProjectCardList({ project, onDelete, onArchive, selectMode, selected, onToggleSelect }: CardProps) {
   const allPapers = persistGet<SavedResearchPaper[]>('research-papers', [])
   const paperCount = allPapers.filter(p => p.project_id === project.id).length
   const allDocs = persistGet<{ id: string; project_id: string }[]>('project-documents', [])
   const docCount = allDocs.filter(d => d.project_id === project.id).length
+  const isArchived = (project.status || 'active') === 'archived'
+
   return (
-    <div className="glass-card hover:border-white/10 transition-all group">
+    <div
+      className={clsx(
+        'glass-card transition-all group',
+        selected && 'ring-1 ring-[var(--color-border-strong)]',
+        isArchived && 'opacity-60',
+      )}
+    >
       <Link to={`/projects/${project.id}`} className="flex items-center gap-4 p-4">
-        <div className="p-2.5 bg-white/5 rounded-lg flex-shrink-0 group-hover:bg-white/10 transition-colors">
-          <FiFolder className="w-5 h-5 text-[var(--color-text-muted)] group-hover:text-[var(--color-text)] transition-colors" />
-        </div>
+        {selectMode && (
+          <SelectBox
+            selected={selected}
+            onClick={e => { e.preventDefault(); e.stopPropagation(); onToggleSelect(project.id) }}
+          />
+        )}
+        <FiFolder className="w-5 h-5 text-[var(--color-text-muted)] flex-shrink-0" />
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-3 mb-0.5">
-            <h3 className="font-semibold text-white group-hover:text-white/90 transition-colors truncate">
-              {project.name}
-            </h3>
+            <h3 className="font-semibold text-[var(--color-text)] truncate">{project.name}</h3>
+            {isArchived && (
+              <span className="text-xxs px-1.5 py-0.5 rounded border border-[var(--glass-border)] text-[var(--color-text-muted)]">
+                archived
+              </span>
+            )}
           </div>
           {project.disease_focus && (
             <p className="text-[var(--color-text-muted)] text-sm truncate">{project.disease_focus}</p>
@@ -342,29 +408,42 @@ function ProjectCardList({ project, onDelete }: { project: Project; onDelete: (i
 
         <div className="flex items-center gap-6 flex-shrink-0 text-sm">
           <div className="text-center w-16">
-            <div className="font-bold text-white">{project.hypothesis_count || 0}</div>
+            <div className="font-semibold">{project.hypothesis_count || 0}</div>
             <div className="text-[10px] text-[var(--color-text-muted)]">Hyp.</div>
           </div>
           <div className="text-center w-16">
-            <div className="font-bold text-white">{(project.evidence_count || 0) + docCount}</div>
+            <div className="font-semibold">{(project.evidence_count || 0) + docCount}</div>
             <div className="text-[10px] text-[var(--color-text-muted)]">Evidence</div>
           </div>
           <div className="text-center w-16">
-            <div className="font-bold text-white">{paperCount}</div>
+            <div className="font-semibold">{paperCount}</div>
             <div className="text-[10px] text-[var(--color-text-muted)]">Papers</div>
           </div>
           <span className="text-[var(--color-text-muted)] text-xs w-24 text-right">
-            {formatDateTime(project.updated_at)}
+            {formatTimeAgo(project.updated_at)}
           </span>
         </div>
 
-        <button
-          onClick={e => { e.preventDefault(); e.stopPropagation(); onDelete(project.id) }}
-          className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-red-500/10 text-[var(--color-text-muted)] hover:text-red-400 transition-all flex-shrink-0"
-          title="Delete project"
-        >
-          <FiTrash2 className="w-3.5 h-3.5" />
-        </button>
+        {!selectMode && (
+          <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button
+              onClick={e => { e.preventDefault(); e.stopPropagation(); onArchive(project.id, isArchived) }}
+              className="p-1.5 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg-hover)] transition-colors"
+              title={isArchived ? 'Restore' : 'Archive'}
+              aria-label={isArchived ? 'Restore project' : 'Archive project'}
+            >
+              <FiArchive className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={e => { e.preventDefault(); e.stopPropagation(); onDelete(project.id) }}
+              className="p-1.5 rounded-lg text-[var(--color-text-muted)] hover:text-red-400 hover:bg-red-500/10 transition-colors"
+              title="Delete"
+              aria-label="Delete project"
+            >
+              <FiTrash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
       </Link>
     </div>
   )
@@ -472,6 +551,9 @@ export default function Projects() {
   }
 
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+  const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false)
+  const [selectMode, setSelectMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
   const handleDeleteRequest = (id: string) => setDeleteConfirmId(id)
 
@@ -484,10 +566,72 @@ export default function Projects() {
       await api.deleteProject(id)
       setProjects(prev => prev.filter(p => p.id !== id))
       logActivity({ type: 'project', action: 'deleted', title: `Deleted project: ${deletedProject?.name || 'Unknown'}`, project: deletedProject?.name })
-    } catch (err) {
+      toast('success', `Deleted ${deletedProject?.name || 'project'}`)
+    } catch (err: any) {
       console.error('Failed to delete project:', err)
+      toast('error', err?.message || 'Delete failed', { title: 'Could not delete' })
     }
   }
+
+  const handleArchive = useCallback(async (id: string, restore: boolean) => {
+    const previous = projects.find(p => p.id === id)
+    try {
+      const updated = await api.archiveProject(id, restore)
+      setProjects(prev => prev.map(p => p.id === id ? { ...p, status: updated.status } : p))
+      logActivity({
+        type: 'project',
+        action: restore ? 'updated' : 'updated',
+        title: `${restore ? 'Restored' : 'Archived'}: ${previous?.name || 'project'}`,
+        project: previous?.name,
+      })
+      toast('success', `${restore ? 'Restored' : 'Archived'} ${previous?.name || 'project'}`)
+    } catch (err: any) {
+      console.error('Failed to archive project:', err)
+      toast('error', err?.message || 'Archive failed', { title: 'Could not archive' })
+    }
+  }, [projects])
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }, [])
+
+  const exitSelectMode = useCallback(() => {
+    setSelectMode(false)
+    setSelectedIds(new Set())
+  }, [])
+
+  const handleBulkArchive = useCallback(async (restore: boolean) => {
+    const ids = [...selectedIds]
+    if (!ids.length) return
+    try {
+      const res = await api.bulkArchiveProjects(ids, restore)
+      const updatedSet = new Set(res.updated)
+      setProjects(prev => prev.map(p => updatedSet.has(p.id) ? { ...p, status: res.status } : p))
+      toast('success', `${restore ? 'Restored' : 'Archived'} ${res.updated_count} project${res.updated_count === 1 ? '' : 's'}`)
+      exitSelectMode()
+    } catch (err: any) {
+      toast('error', err?.message || 'Bulk archive failed', { title: 'Could not archive' })
+    }
+  }, [selectedIds, exitSelectMode])
+
+  const handleBulkDeleteConfirm = useCallback(async () => {
+    const ids = [...selectedIds]
+    if (!ids.length) return
+    setBulkDeleteConfirm(false)
+    try {
+      const res = await api.bulkDeleteProjects(ids)
+      const deletedSet = new Set(res.deleted)
+      setProjects(prev => prev.filter(p => !deletedSet.has(p.id)))
+      toast('success', `Deleted ${res.deleted_count} project${res.deleted_count === 1 ? '' : 's'}`)
+      exitSelectMode()
+    } catch (err: any) {
+      toast('error', err?.message || 'Bulk delete failed', { title: 'Could not delete' })
+    }
+  }, [selectedIds, exitSelectMode])
 
   // Collect unique disease focuses and tags for filter dropdowns
   const uniqueDiseaseFocuses = useMemo(() => {
@@ -575,27 +719,78 @@ export default function Projects() {
     return counts
   }, [projects])
 
+  const allSelected = selectMode && selectedIds.size > 0 && displayProjects.every(p => selectedIds.has(p.id))
+
   return (
     <div className="p-6 lg:p-8 max-w-[1600px] mx-auto">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl lg:text-3xl font-bold text-white">Projects</h1>
+          <h1 className="text-2xl lg:text-3xl font-semibold tracking-tight">Projects</h1>
           <p className="text-[var(--color-text-muted)] mt-1 text-sm">Manage your research projects and discoveries</p>
         </div>
-        <button
-          onClick={() => setShowCreateModal(true)}
-          className="btn text-[var(--color-text)] hover:bg-white/5 flex items-center gap-2 font-medium"
-        >
-          <FiPlus className="w-4 h-4" />
-          <span>New Project</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => { if (selectMode) exitSelectMode(); else setSelectMode(true) }}
+            className={clsx(
+              'text-sm px-3 py-1.5 rounded-lg border transition-colors active:scale-95 flex items-center gap-2',
+              selectMode
+                ? 'border-[var(--color-border-strong)] text-[var(--color-text)]'
+                : 'border-[var(--glass-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:border-[var(--color-border-strong)]',
+            )}
+            aria-pressed={selectMode}
+          >
+            {selectMode ? 'Done' : 'Select'}
+          </button>
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="text-sm px-3 py-1.5 rounded-lg border border-[var(--glass-border)] hover:border-[var(--color-border-strong)] text-[var(--color-text)] transition-colors flex items-center gap-2 active:scale-95"
+          >
+            <FiPlus className="w-4 h-4 text-[var(--color-text-muted)]" />
+            <span>New Project</span>
+          </button>
+        </div>
       </div>
 
       {/* API Status Banner */}
       {apiStatus === 'error' && (
-        <div className="mb-4 p-3 rounded-lg border text-sm" style={{ background: 'rgba(239,68,68,0.1)', borderColor: 'rgba(239,68,68,0.3)', color: '#fca5a5' }}>
-          <strong>API Error:</strong> {apiError}
+        <div className="mb-4 p-3 rounded-lg border border-[var(--glass-border)] text-sm text-[var(--color-text-muted)]">
+          <strong className="text-[var(--color-text)]">API error:</strong> {apiError}
+        </div>
+      )}
+
+      {/* Bulk action bar */}
+      {selectMode && selectedIds.size > 0 && (
+        <div className="mb-4 p-3 rounded-lg border border-[var(--color-border-strong)] flex items-center justify-between gap-3 flex-wrap bg-[var(--glass-bg)]">
+          <div className="text-sm text-[var(--color-text)]">
+            {selectedIds.size} project{selectedIds.size === 1 ? '' : 's'} selected
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSelectedIds(allSelected ? new Set() : new Set(displayProjects.map(p => p.id)))}
+              className="text-xs px-2.5 py-1 rounded-lg border border-[var(--glass-border)] hover:border-[var(--color-border-strong)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+            >
+              {allSelected ? 'Clear selection' : 'Select all visible'}
+            </button>
+            <button
+              onClick={() => handleBulkArchive(false)}
+              className="text-xs px-2.5 py-1 rounded-lg border border-[var(--glass-border)] hover:border-[var(--color-border-strong)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors flex items-center gap-1.5"
+            >
+              <FiArchive className="w-3 h-3" /> Archive
+            </button>
+            <button
+              onClick={() => handleBulkArchive(true)}
+              className="text-xs px-2.5 py-1 rounded-lg border border-[var(--glass-border)] hover:border-[var(--color-border-strong)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+            >
+              Restore
+            </button>
+            <button
+              onClick={() => setBulkDeleteConfirm(true)}
+              className="text-xs px-2.5 py-1 rounded-lg border border-red-500/30 text-red-400/90 hover:text-red-400 hover:bg-red-500/10 transition-colors flex items-center gap-1.5"
+            >
+              <FiTrash2 className="w-3 h-3" /> Delete
+            </button>
+          </div>
         </div>
       )}
 
@@ -772,13 +967,29 @@ export default function Projects() {
         viewMode === 'grid' ? (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {displayProjects.map(project => (
-              <ProjectCardGrid key={project.id} project={project} onDelete={handleDeleteRequest} />
+              <ProjectCardGrid
+                key={project.id}
+                project={project}
+                onDelete={handleDeleteRequest}
+                onArchive={handleArchive}
+                selectMode={selectMode}
+                selected={selectedIds.has(project.id)}
+                onToggleSelect={toggleSelect}
+              />
             ))}
           </div>
         ) : (
           <div className="space-y-2">
             {displayProjects.map(project => (
-              <ProjectCardList key={project.id} project={project} onDelete={handleDeleteRequest} />
+              <ProjectCardList
+                key={project.id}
+                project={project}
+                onDelete={handleDeleteRequest}
+                onArchive={handleArchive}
+                selectMode={selectMode}
+                selected={selectedIds.has(project.id)}
+                onToggleSelect={toggleSelect}
+              />
             ))}
           </div>
         )
@@ -809,9 +1020,9 @@ export default function Projects() {
           </p>
           <button
             onClick={() => setShowCreateModal(true)}
-            className="btn text-[var(--color-text)] hover:bg-white/5 flex items-center gap-2 mx-auto font-medium"
+            className="text-sm px-4 py-2 rounded-lg border border-[var(--glass-border)] hover:border-[var(--color-border-strong)] text-[var(--color-text)] transition-colors flex items-center gap-2 mx-auto active:scale-95"
           >
-            <FiPlus className="w-4 h-4" />
+            <FiPlus className="w-4 h-4 text-[var(--color-text-muted)]" />
             Create Your First Project
           </button>
         </div>
@@ -829,28 +1040,56 @@ export default function Projects() {
         <CreateProjectModal onClose={() => setShowCreateModal(false)} onCreate={handleCreate} />
       )}
 
-      {/* Delete Confirmation */}
+      {/* Single delete confirmation */}
       {deleteConfirmId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setDeleteConfirmId(null)}>
-          <div className="glass-card p-6 max-w-sm mx-4 text-center" onClick={e => e.stopPropagation()}>
-            <div className="inline-flex p-3 rounded-xl bg-red-500/10 mb-4">
-              <FiTrash2 className="w-6 h-6 text-[var(--color-text-muted)]" />
-            </div>
-            <h3 className="text-lg font-semibold mb-2">Delete Project?</h3>
-            <p className="text-sm text-[var(--color-text-muted)] mb-6 leading-relaxed">
-              This will permanently delete this project, its hypotheses, and research papers. This action cannot be undone.
-            </p>
-            <div className="flex gap-3 justify-center">
-              <button onClick={() => setDeleteConfirmId(null)} className="btn px-4 py-2 text-sm text-[var(--color-text-muted)]">
-                Cancel
-              </button>
-              <button onClick={handleDeleteConfirm} className="btn px-4 py-2 text-sm bg-red-500/10 text-[var(--color-text-muted)] hover:text-red-400 hover:bg-red-500/20 font-medium">
-                Delete Permanently
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDeleteModal
+          onCancel={() => setDeleteConfirmId(null)}
+          onConfirm={handleDeleteConfirm}
+          title="Delete Project?"
+          description="This will permanently delete this project, its hypotheses, and research papers. This action cannot be undone."
+        />
       )}
+
+      {/* Bulk delete confirmation */}
+      {bulkDeleteConfirm && (
+        <ConfirmDeleteModal
+          onCancel={() => setBulkDeleteConfirm(false)}
+          onConfirm={handleBulkDeleteConfirm}
+          title={`Delete ${selectedIds.size} project${selectedIds.size === 1 ? '' : 's'}?`}
+          description="This will permanently delete the selected projects, including their hypotheses and research papers. This action cannot be undone."
+        />
+      )}
+    </div>
+  )
+}
+
+/* ─── Shared confirm-delete modal ──────────────────────────────────── */
+
+function ConfirmDeleteModal({
+  onCancel, onConfirm, title, description,
+}: {
+  onCancel: () => void
+  onConfirm: () => void
+  title: string
+  description: string
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onCancel}>
+      <div className="glass-card p-6 max-w-sm mx-4 text-center" onClick={e => e.stopPropagation()}>
+        <div className="inline-flex p-3 rounded-xl bg-red-500/10 mb-4">
+          <FiTrash2 className="w-6 h-6 text-red-400" />
+        </div>
+        <h3 className="text-lg font-semibold mb-2">{title}</h3>
+        <p className="text-sm text-[var(--color-text-muted)] mb-6 leading-relaxed">{description}</p>
+        <div className="flex gap-3 justify-center">
+          <button onClick={onCancel} className="px-4 py-2 text-sm rounded-lg border border-[var(--glass-border)] hover:border-[var(--color-border-strong)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors">
+            Cancel
+          </button>
+          <button onClick={onConfirm} className="px-4 py-2 text-sm rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors font-medium">
+            Delete Permanently
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

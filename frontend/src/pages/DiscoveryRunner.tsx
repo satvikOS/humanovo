@@ -214,8 +214,8 @@ export default function DiscoveryRunner() {
       <div className="h-full overflow-y-auto">
         <div className="p-6 max-w-3xl mx-auto">
           <div className="flex items-center gap-3 mb-6">
-            <div className="p-2 rounded-lg" style={{ background: 'rgba(91, 141, 184, 0.1)' }}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#5B8DB8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <div className="p-2 rounded-lg border border-[var(--glass-border)]">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--color-text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><path d="M11 8v6"/><path d="M8 11h6"/>
               </svg>
             </div>

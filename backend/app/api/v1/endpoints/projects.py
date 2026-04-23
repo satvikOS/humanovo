@@ -248,6 +248,71 @@ async def delete_project(project_id: UUID, db: AsyncSession = Depends(get_db)) -
     await db.flush()
 
 
+# ── Bulk operations ──────────────────────────────────────────────
+# These let the UI hit one round-trip for multi-select actions instead
+# of N sequential DELETE/PATCH calls. Safe-by-default: unknown IDs are
+# skipped rather than 404'ing the whole batch.
+
+
+class BulkIds(BaseModel):
+    """Body for bulk operations. Accepts up to 200 project IDs per call."""
+    ids: list[UUID] = Field(..., min_length=1, max_length=200)
+
+
+@router.post("/bulk-delete")
+async def bulk_delete_projects(
+    body: BulkIds,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Delete multiple projects in a single round-trip.
+
+    Returns the list of IDs that were actually found + deleted. IDs not
+    present in the database are silently skipped (idempotent — calling
+    twice with the same IDs on the second call returns an empty
+    `deleted` list rather than 404).
+    """
+    Project, _ = _get_project_model()
+    result = await db.execute(select(Project).where(Project.id.in_(body.ids)))
+    projects = result.scalars().all()
+    found_ids = [str(p.id) for p in projects]
+    for p in projects:
+        await db.delete(p)
+    await db.flush()
+    return {"deleted": found_ids, "requested": len(body.ids), "deleted_count": len(found_ids)}
+
+
+@router.post("/bulk-archive")
+async def bulk_archive_projects(
+    body: BulkIds,
+    restore: bool = Query(False, description="If true, restore archived projects back to 'active'"),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Archive (or restore) multiple projects in a single round-trip.
+
+    Defaults to archiving. Pass `?restore=true` to flip archived
+    projects back to active — pairs nicely with an `archived` filter in
+    the UI list to give a soft-delete / undo experience.
+    """
+    Project, ProjectStatus = _get_project_model()
+    if not ProjectStatus:
+        raise HTTPException(status_code=500, detail="ProjectStatus enum unavailable")
+
+    result = await db.execute(select(Project).where(Project.id.in_(body.ids)))
+    projects = result.scalars().all()
+    target = ProjectStatus.ACTIVE if restore else ProjectStatus.ARCHIVED
+    updated_ids: list[str] = []
+    for p in projects:
+        p.status = target
+        updated_ids.append(str(p.id))
+    await db.flush()
+    return {
+        "updated": updated_ids,
+        "requested": len(body.ids),
+        "updated_count": len(updated_ids),
+        "status": target.value if hasattr(target, "value") else str(target),
+    }
+
+
 @router.get("/{project_id}/stats")
 async def get_project_stats(project_id: UUID, db: AsyncSession = Depends(get_db)) -> dict:
     """Get statistics for a project."""

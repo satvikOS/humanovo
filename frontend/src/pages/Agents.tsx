@@ -972,8 +972,8 @@ export default function Agents() {
                 <FiExternalLink className="w-3 h-3" />
               </Link>
               {isRunning && (
-                <span className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg" style={{ color: 'var(--color-success)', background: 'rgba(34, 197, 94, 0.08)' }}>
-                  <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-success)] animate-pulse" /> Running
+                <span className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-[var(--glass-border)] text-[var(--color-text-muted)]">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-text)] animate-pulse" /> Running
                 </span>
               )}
             </div>
@@ -1170,10 +1170,10 @@ function HypothesisDetail({ hypothesis: h, onClose, onExport }: { hypothesis: Hy
 
             {/* Phase category labels */}
             <div className="flex items-center gap-3 mb-2 text-xxs">
-              <span className="px-2 py-0.5 rounded" style={{ background: 'rgba(139,92,246,0.12)', color: '#8b5cf6' }}>Bench</span>
-              <span className="px-2 py-0.5 rounded" style={{ background: 'rgba(99,102,241,0.12)', color: '#6366f1' }}>Translational</span>
-              <span className="px-2 py-0.5 rounded" style={{ background: 'rgba(59,130,246,0.12)', color: '#3b82f6' }}>Clinical</span>
-              <span className="px-2 py-0.5 rounded" style={{ background: 'rgba(20,184,166,0.12)', color: '#14b8a6' }}>Implementation</span>
+              <span className="px-2 py-0.5 rounded border border-[var(--glass-border)] text-[var(--color-text-muted)]">Bench</span>
+              <span className="px-2 py-0.5 rounded border border-[var(--glass-border)] text-[var(--color-text-muted)]">Translational</span>
+              <span className="px-2 py-0.5 rounded border border-[var(--glass-border)] text-[var(--color-text-muted)]">Clinical</span>
+              <span className="px-2 py-0.5 rounded border border-[var(--glass-border)] text-[var(--color-text-muted)]">Implementation</span>
             </div>
 
             {/* Pipeline stepper */}

@@ -553,6 +553,21 @@ export const api = {
     await apiClient.delete(`/projects/${id}`)
   },
 
+  async bulkDeleteProjects(ids: string[]): Promise<{ deleted: string[]; requested: number; deleted_count: number }> {
+    const { data } = await apiClient.post('/projects/bulk-delete', { ids })
+    return data
+  },
+
+  async bulkArchiveProjects(ids: string[], restore = false): Promise<{ updated: string[]; status: string; updated_count: number }> {
+    const { data } = await apiClient.post('/projects/bulk-archive', { ids }, { params: restore ? { restore: true } : {} })
+    return data
+  },
+
+  async archiveProject(id: string, restore = false): Promise<Project> {
+    const { data } = await apiClient.patch(`/projects/${id}`, { status: restore ? 'active' : 'archived' })
+    return data
+  },
+
   async getProjectStats(id: string): Promise<any> {
     const { data } = await apiClient.get(`/projects/${id}/stats`)
     return data

@@ -64,10 +64,11 @@ function formatPublicationDate(raw: string): string {
   return d.toLocaleString('en-US', { month: 'short', year: 'numeric' })
 }
 
+// Muted-only status: icon + label carry the meaning, not colour.
 const statusConfig: Record<string, { icon: typeof FiCheckCircle; color: string; label: string }> = {
-  verified: { icon: FiCheckCircle, color: 'var(--color-success)', label: 'Verified' },
-  pending: { icon: FiClock, color: 'var(--color-warning)', label: 'Pending' },
-  disputed: { icon: FiAlertCircle, color: 'var(--color-error)', label: 'Disputed' },
+  verified: { icon: FiCheckCircle, color: 'var(--color-text-muted)', label: 'Verified' },
+  pending: { icon: FiClock, color: 'var(--color-text-muted)', label: 'Pending' },
+  disputed: { icon: FiAlertCircle, color: 'var(--color-text-muted)', label: 'Disputed' },
 }
 
 // Knowledge Base status panel — shows dataset counts from the graph
@@ -78,10 +79,9 @@ function KnowledgeBaseStatus({ stats }: { stats: { total_entities: number; total
   const entityTypes = Object.entries(stats.entity_counts || {}).sort((a, b) => (b[1] || 0) - (a[1] || 0))
   const relationTypes = Object.entries(stats.relation_counts || {}).sort((a, b) => (b[1] || 0) - (a[1] || 0))
 
-  const entityColors: Record<string, string> = {
-    gene: '#3B82F6', protein: '#8B5CF6', disease: '#EF4444', drug: '#10B981',
-    pathway: '#F59E0B', biomarker: '#EC4899', cell_type: '#6366F1', mutation: '#F97316',
-  }
+  // Muted-only palette: type differentiation comes from the label text,
+  // not colour. Keeps this page consistent with the rest of the app.
+  const entityColors: Record<string, string> = {}
 
   return (
     <div className="mx-6 mt-4 glass-card p-4">
@@ -138,10 +138,9 @@ function KnowledgeBaseStatus({ stats }: { stats: { total_entities: number; total
 function LinkedEntities({ entities, onEntityClick }: { entities: Entity[]; onEntityClick?: (e: Entity) => void }) {
   if (!entities || entities.length === 0) return null
 
-  const entityColors: Record<string, string> = {
-    gene: '#3B82F6', protein: '#8B5CF6', disease: '#EF4444', drug: '#10B981',
-    pathway: '#F59E0B', biomarker: '#EC4899', cell_type: '#6366F1', mutation: '#F97316',
-  }
+  // Muted-only palette: type differentiation comes from the label text,
+  // not colour. Keeps this page consistent with the rest of the app.
+  const entityColors: Record<string, string> = {}
 
   return (
     <div>
@@ -717,7 +716,7 @@ export default function Evidence() {
                 {editField === 'title' ? (
                   <div className="flex-1 flex items-center gap-2">
                     <input value={editValue} onChange={e => setEditValue(e.target.value)} className="input flex-1 text-sm" autoFocus />
-                    <button onClick={() => handleUpdateField('title', editValue)} className="btn btn-sm" style={{ color: 'var(--color-success)' }}><FiSave className="w-3 h-3" /></button>
+                    <button onClick={() => handleUpdateField('title', editValue)} className="btn btn-sm" style={{ color: 'var(--color-text)' }}><FiSave className="w-3 h-3" /></button>
                     <button onClick={() => setEditField(null)} className="btn btn-sm"><FiX className="w-3 h-3" /></button>
                   </div>
                 ) : (
@@ -741,7 +740,7 @@ export default function Evidence() {
                 <button onClick={openLinkDialog} className="btn btn-sm" style={{ color: 'var(--color-text-secondary)' }}>
                   <FiLink className="w-3 h-3" /> Link to Hypothesis
                 </button>
-                <button onClick={() => handleDelete(selectedItem.id)} className="btn btn-sm ml-auto" style={{ color: 'var(--color-error)' }}>
+                <button onClick={() => handleDelete(selectedItem.id)} className="btn btn-sm ml-auto text-red-400/90 hover:text-red-400">
                   <FiTrash2 className="w-3 h-3" />
                 </button>
               </div>
@@ -774,7 +773,7 @@ export default function Evidence() {
                   <div>
                     <textarea value={editValue} onChange={e => setEditValue(e.target.value)} className="input w-full h-32 resize-none text-xs" />
                     <div className="flex gap-2 mt-2">
-                      <button onClick={() => handleUpdateField('abstract', editValue)} className="btn btn-sm" style={{ color: 'var(--color-success)' }}>Save</button>
+                      <button onClick={() => handleUpdateField('abstract', editValue)} className="btn btn-sm" style={{ color: 'var(--color-text)' }}>Save</button>
                       <button onClick={() => setEditField(null)} className="btn btn-sm text-[var(--color-text-muted)]">Cancel</button>
                     </div>
                   </div>
@@ -822,8 +821,7 @@ export default function Evidence() {
                       <button
                         key={key}
                         onClick={() => handleStatusChange(key)}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs transition-all border ${active ? 'border-[var(--color-border-strong)]' : 'border-transparent hover:bg-[var(--glass-bg)]'}`}
-                        style={{ color: config.color, background: active ? `${config.color}12` : undefined }}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs transition-all border ${active ? 'border-[var(--color-border-strong)] text-[var(--color-text)] bg-[var(--glass-bg)]' : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)]'}`}
                       >
                         <config.icon className="w-3 h-3" />
                         {config.label}
@@ -845,7 +843,7 @@ export default function Evidence() {
                   <div>
                     <textarea value={noteText} onChange={e => setNoteText(e.target.value)} placeholder="Add notes..." className="input w-full h-20 resize-none text-xs" autoFocus />
                     <div className="flex gap-2 mt-2">
-                      <button onClick={handleSaveNote} className="btn btn-sm" style={{ color: 'var(--color-success)' }}>Save</button>
+                      <button onClick={handleSaveNote} className="btn btn-sm" style={{ color: 'var(--color-text)' }}>Save</button>
                       <button onClick={() => setShowNoteInput(false)} className="btn btn-sm text-[var(--color-text-muted)]">Cancel</button>
                     </div>
                   </div>
@@ -886,8 +884,8 @@ export default function Evidence() {
                   <div key={h.id} className="p-3 rounded-lg bg-[var(--glass-bg)] border border-[var(--color-border)]">
                     <p className="text-xs font-medium mb-2 line-clamp-2">{h.statement}</p>
                     <div className="flex gap-1">
-                      <button onClick={() => handleLinkToHypothesis(h.id, 'supporting')} className="btn btn-sm" style={{ color: 'var(--color-success)' }}>Supporting</button>
-                      <button onClick={() => handleLinkToHypothesis(h.id, 'contradicting')} className="btn btn-sm" style={{ color: 'var(--color-error)' }}>Contradicting</button>
+                      <button onClick={() => handleLinkToHypothesis(h.id, 'supporting')} className="btn btn-sm" style={{ color: 'var(--color-text)' }}>Supporting</button>
+                      <button onClick={() => handleLinkToHypothesis(h.id, 'contradicting')} className="btn btn-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)]">Contradicting</button>
                       <button onClick={() => handleLinkToHypothesis(h.id, 'neutral')} className="btn btn-sm text-[var(--color-text-muted)]">Neutral</button>
                     </div>
                   </div>
@@ -900,17 +898,17 @@ export default function Evidence() {
 
       {/* Delete Confirmation Dialog */}
       {deleteConfirmId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="glass-card p-6 max-w-sm mx-4 text-center" style={{ background: 'var(--color-surface-solid)' }}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setDeleteConfirmId(null)}>
+          <div className="glass-card p-6 max-w-sm mx-4 text-center" style={{ background: 'var(--color-surface-solid)' }} onClick={e => e.stopPropagation()}>
             <h3 className="text-lg font-semibold mb-2">Delete Evidence?</h3>
-            <p className="text-sm text-[var(--color-text-muted)] mb-4">
+            <p className="text-sm text-[var(--color-text-muted)] mb-6">
               This will permanently delete this evidence item. This action cannot be undone.
             </p>
             <div className="flex gap-3 justify-center">
-              <button onClick={() => setDeleteConfirmId(null)} className="btn px-4 py-2 text-sm text-[var(--color-text-muted)]">
+              <button onClick={() => setDeleteConfirmId(null)} className="px-4 py-2 text-sm rounded-lg border border-[var(--glass-border)] hover:border-[var(--color-border-strong)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors">
                 Cancel
               </button>
-              <button onClick={confirmDelete} className="btn px-4 py-2 text-sm bg-red-500/10 text-[var(--color-text-muted)] hover:text-red-400 hover:bg-red-500/20">
+              <button onClick={confirmDelete} className="px-4 py-2 text-sm rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors font-medium">
                 Delete Permanently
               </button>
             </div>

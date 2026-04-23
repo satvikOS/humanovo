@@ -1555,7 +1555,7 @@ function NodeGraphCanvas({
             <path
               d={edgePath(x1, y1, mx, my)}
               fill="none"
-              stroke="rgba(6, 182, 212, 0.6)"
+              stroke="rgba(255,255,255,0.6)"
               strokeWidth={2}
               strokeDasharray="6,4"
               pointerEvents="none"
@@ -2199,7 +2199,7 @@ function renderWorkbenchMarkdown(text: string): React.ReactNode {
       if (match.index > lastIndex) parts.push(line.slice(lastIndex, match.index))
       if (match[2]) parts.push(<strong key={key++}>{match[2]}</strong>)
       else if (match[3]) parts.push(<em key={key++}>{match[3]}</em>)
-      else if (match[4]) parts.push(<code key={key++} className="px-1 py-0.5 rounded" style={{ background: 'rgba(6,182,212,0.15)', fontSize: '10px' }}>{match[4]}</code>)
+      else if (match[4]) parts.push(<code key={key++} className="px-1 py-0.5 rounded border border-[var(--glass-border)] text-[var(--color-text-muted)]" style={{ fontSize: '10px' }}>{match[4]}</code>)
       lastIndex = regex.lastIndex
     }
     if (lastIndex < line.length) parts.push(line.slice(lastIndex))
