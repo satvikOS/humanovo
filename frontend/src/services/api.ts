@@ -526,6 +526,51 @@ export interface SearchResult {
 // API Functions
 // ═══════════════════════════════════════════════════════════════════
 
+// ── Discovery Sessions (conversational Discovery persistence) ──
+export interface DiscoveryMessageCard {
+  kind: 'hypothesis' | 'evidence' | 'entity' | 'kg_subgraph' | 'citation' | string
+  payload: Record<string, any>
+}
+
+export interface DiscoveryMessage {
+  id: string
+  role: 'user' | 'assistant' | 'system' | 'tool'
+  content: string
+  cards?: DiscoveryMessageCard[]
+  timestamp?: string
+  finish_reason?: string | null
+  tokens?: { prompt: number; completion: number } | null
+  tool_name?: string | null
+  tool_args?: Record<string, any> | null
+}
+
+export interface DiscoverySessionSummary {
+  id: string
+  title: string
+  pinned: boolean
+  project_id: string | null
+  message_count: number
+  last_run_id: string | null
+  updated_at: string
+  created_at: string
+  preview: string | null
+}
+
+export interface DiscoveryAgentConfig {
+  model: string
+  temperature: number
+  system_prompt: string
+  max_hypotheses: number
+  tools: { rag: boolean; kg: boolean; evidence: boolean; simulation: boolean; web: boolean }
+  verbosity: 'terse' | 'normal' | 'verbose'
+}
+
+export interface DiscoverySessionDetail extends DiscoverySessionSummary {
+  agent_config: DiscoveryAgentConfig
+  messages: DiscoveryMessage[]
+  notes: string | null
+}
+
 // ── Compute Lab — server-side regression with diagnostics ────────
 export interface RegressionResult {
   n: number
@@ -561,6 +606,42 @@ export const api = {
    */
   async runRegression(x: number[], y: number[]): Promise<RegressionResult> {
     const { data } = await apiClient.post('/compute/regression', { x, y })
+    return data
+  },
+
+  // ── Discovery Sessions (chatbot persistence) ──────────────────
+
+  async listDiscoverySessions(params?: { project_id?: string; q?: string; pinned_only?: boolean; limit?: number }): Promise<DiscoverySessionSummary[]> {
+    const { data } = await apiClient.get('/discovery-sessions', { params })
+    return data
+  },
+
+  async createDiscoverySession(body?: { title?: string; project_id?: string; agent_config?: Partial<DiscoveryAgentConfig>; notes?: string }): Promise<DiscoverySessionDetail> {
+    const { data } = await apiClient.post('/discovery-sessions', body || {})
+    return data
+  },
+
+  async getDiscoverySession(sessionId: string): Promise<DiscoverySessionDetail> {
+    const { data } = await apiClient.get(`/discovery-sessions/${sessionId}`)
+    return data
+  },
+
+  async updateDiscoverySession(sessionId: string, body: { title?: string; pinned?: boolean; agent_config?: Partial<DiscoveryAgentConfig>; notes?: string; project_id?: string; last_run_id?: string }): Promise<DiscoverySessionDetail> {
+    const { data } = await apiClient.patch(`/discovery-sessions/${sessionId}`, body)
+    return data
+  },
+
+  async deleteDiscoverySession(sessionId: string): Promise<void> {
+    await apiClient.delete(`/discovery-sessions/${sessionId}`)
+  },
+
+  async appendDiscoveryMessage(sessionId: string, message: DiscoveryMessage): Promise<DiscoverySessionDetail> {
+    const { data } = await apiClient.post(`/discovery-sessions/${sessionId}/append`, { message })
+    return data
+  },
+
+  async forkDiscoverySession(sessionId: string): Promise<DiscoverySessionDetail> {
+    const { data } = await apiClient.post(`/discovery-sessions/${sessionId}/fork`)
     return data
   },
 
