@@ -1361,7 +1361,7 @@ function HypothesisDetail({ hypothesis: h, onClose, onExport }: { hypothesis: Hy
         {/* Feedback Section */}
         <div className="border-t border-[var(--color-border)] pt-4">
           {feedbackSent ? (
-            <div className="flex items-center gap-2 text-xs text-[var(--color-success)] p-3 rounded-lg bg-[rgba(34,197,94,0.08)]">
+            <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)] p-3 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)]">
               <FiCheck className="w-4 h-4" /> Feedback submitted
             </div>
           ) : feedbackOpen ? (
