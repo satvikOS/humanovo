@@ -16,9 +16,6 @@
 // Persistence: DiscoverySession CRUD at /api/v1/discovery-sessions
 // keeps every conversation durable across tabs/devices. Streaming:
 // /api/v1/agents/chat/stream emits SSE frames for token/card/status.
-//
-// The old form-driven Agents UI lives on as AgentsLegacy.tsx —
-// preserved for reference but no longer mounted on any route.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
