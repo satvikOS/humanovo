@@ -75,12 +75,15 @@ export function covariance(a: number[], b: number[]): number {
 
 /* ── Distribution Functions ──────────────────────────────────────────── */
 export function lnGamma(x: number): number {
+  // Lanczos approximation coefficients. Literal forms with 16+ sig figs
+  // round to the nearest double — fine for the ~1e-15 precision we need.
+  // eslint-disable-next-line no-loss-of-precision
   const c = [76.18009172947146, -86.50532032941677, 24.01409824083091, -1.231739572450155, 1.208650973866179e-3, -5.395239384953e-6]
   let a = x, t = x + 5.5
   t -= (x + 0.5) * Math.log(t)
   let s = 1.000000000190015
   for (let i = 0; i < 6; i++) s += c[i] / ++a
-  return -t + Math.log((2.5066282746310005 * s) / x)
+  return -t + Math.log((Math.sqrt(2 * Math.PI) * s) / x)
 }
 
 export function normCDF(x: number): number {

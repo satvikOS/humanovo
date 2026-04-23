@@ -5,10 +5,8 @@ import {
   FiFileText, FiRefreshCw, FiX,
 } from 'react-icons/fi'
 import clsx from 'clsx'
-import { api } from '../services/api'
+import { api, apiClient } from '../services/api'
 import HypothesisDocViewer from '../components/HypothesisDocViewer'
-
-const API_BASE = '/api/v1'
 
 const PAPER_PHASES = [
   { label: 'Initializing 8-model pipeline...', duration: 2000 },
@@ -434,12 +432,13 @@ export default function HypothesisDetail() {
       }, totalDuration)
     }
 
-    // Try backend first
+    // Try backend first. responseType: 'text' + validateStatus: () => true
+    // keeps the axios interceptor from surfacing a toast for this path —
+    // we handle fallback to client-side generation ourselves.
     try {
-      const res = await fetch(`${API_BASE}/documents/hypothesis/${hypothesisId}/html`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const res = await apiClient.post(
+        `/documents/hypothesis/${hypothesisId}/html`,
+        {
           title: hypothesis.statement || '',
           description: hypothesis.rationale || hypothesis.mechanism || '',
           mechanism: hypothesis.mechanism || '',
@@ -449,11 +448,12 @@ export default function HypothesisDetail() {
           model_used: 'unknown',
           tags: hypothesis.tags || [],
           external_factors: [],
-        }),
-      })
+        },
+        { responseType: 'text', validateStatus: () => true },
+      )
 
-      if (res.ok) {
-        const htmlContent = await res.text()
+      if (res.status < 400) {
+        const htmlContent = typeof res.data === 'string' ? res.data : String(res.data ?? '')
         if (htmlContent && htmlContent.length > 100) {
           stopPhaseAnimation()
           setPaperHtml(htmlContent)
@@ -473,31 +473,45 @@ export default function HypothesisDetail() {
   const downloadPaper = useCallback(async () => {
     if (!hypothesis) return
     try {
-      const res = await fetch(`${API_BASE}/documents/hypothesis/${hypothesisId}/pdf`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      // Binary endpoint — responseType 'blob' + validateStatus handles the
+      // JSON-wrapped-base64 and direct-PDF response shapes. validateStatus
+      // suppresses the global error toast for the caller's silent failure.
+      const res = await apiClient.post(
+        `/documents/hypothesis/${hypothesisId}/pdf`,
+        {
           title: hypothesis.statement || '',
           description: hypothesis.rationale || hypothesis.mechanism || '',
           mechanism: hypothesis.mechanism || '',
           confidence: hypothesis.confidence_score || 0,
           disease: 'Unknown',
           tags: hypothesis.tags || [],
-        }),
-      })
-      if (res.ok) {
-        const data = await res.json()
+        },
+        { responseType: 'blob', validateStatus: () => true },
+      )
+      if (res.status >= 400) return
+      const rawBlob = res.data as Blob
+      const contentType = rawBlob.type || String(res.headers['content-type'] || '')
+      let blob: Blob
+      let filename = `humanovo-hypothesis-${hypothesisId}.pdf`
+      if (contentType.includes('application/json')) {
+        const text = await rawBlob.text()
+        const data = JSON.parse(text)
+        if (!data.pdf_base64) return
         const byteChars = atob(data.pdf_base64)
         const byteArray = new Uint8Array(byteChars.length)
         for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i)
-        const blob = new Blob([byteArray], { type: 'application/pdf' })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = data.filename || `humanovo-hypothesis-${hypothesisId}.pdf`
-        a.click()
-        URL.revokeObjectURL(url)
+        blob = new Blob([byteArray], { type: 'application/pdf' })
+        filename = data.filename || filename
+      } else {
+        blob = rawBlob
       }
+      if (blob.size === 0) return
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename
+      a.click()
+      URL.revokeObjectURL(url)
     } catch (e) {
       console.error('PDF export failed:', e)
     }

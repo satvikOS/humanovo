@@ -13,14 +13,12 @@
  * Without this, "knowledge graph" is a UI demo, not a product.
  */
 
-import axios from 'axios'
 import { useMutation, useQuery, type UseQueryResult } from '@tanstack/react-query'
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
-const apiClient = axios.create({
-  baseURL: `${API_BASE}/api/v1`,
-  headers: { 'Content-Type': 'application/json' },
-})
+import { apiClient } from './api'
+// Share the single axios instance from services/api.ts so the global
+// error-toast interceptor + baseURL handling applies to every KG call.
+// The local `axios.create(...)` that used to live here was a second
+// bundled instance that bypassed toast + auth headers.
 
 // ─── Types (mirror backend Pydantic schemas) ────────────────────
 

@@ -10,10 +10,10 @@ import {
 } from 'recharts'
 
 import { logActivity } from '../utils/persistence'
+import { apiClient } from '../services'
 
 type TabId = 'pathway' | 'gsea' | 'variants' | 'biomarkers'
-const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
-const API = `${API_BASE}/api/v1/genomics`
+const BASE = '/genomics'
 
 // ── Deterministic hash for consistent results from same inputs ──
 function hashStr(s: string): number {
@@ -230,7 +230,7 @@ export default function GenomicsAnalysis() {
       const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash
       window.history.replaceState(window.history.state, '', newUrl)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [])
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<any>(null)
@@ -335,18 +335,8 @@ export default function GenomicsAnalysis() {
         body = { expression_data: biomarkerData.split('\n').filter(l => l.trim()).map(l => { const [gene, rest] = l.split(',', 2).map(s => s.trim()); const groups = (rest || '').split(';'); return { gene, group1_values: groups[0]?.split(',').map(Number) || [], group2_values: groups[1]?.split(',').map(Number) || [] } }) }
       }
       // Call backend API for all genomics computations
-      const res = await fetch(`${API}${endpoint}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-      const contentType = res.headers.get('content-type') || ''
-      if (!res.ok) {
-        const errBody = contentType.includes('application/json')
-          ? JSON.stringify(await res.json())
-          : await res.text()
-        throw new Error(`Backend error ${res.status}: ${errBody.slice(0, 200)}`)
-      }
-      if (!contentType.includes('application/json')) {
-        throw new Error(`Expected JSON but received ${contentType}. Ensure the backend server is running at ${location.origin}.`)
-      }
-      setResult(await res.json())
+      const { data } = await apiClient.post(`${BASE}${endpoint}`, body)
+      setResult(data)
       logActivity({ type: 'discovery', action: 'started', title: `Ran genomics analysis: ${tab}` })
     } catch (e: any) { setError(e.message) } finally { setLoading(false) }
   }
@@ -425,7 +415,7 @@ export default function GenomicsAnalysis() {
                     <>
                       <div className="text-xs text-[var(--color-text-muted)]">{sigCount} significant pathways from {totalTested} tested</div>
                       {pathways.map((r: any) => (
-                        <div key={r.pathway_id} className={`p-3 rounded-lg ${(r.significant || r.p_value < 0.05) ? 'bg-green-500/5 border border-green-500/20' : 'bg-[var(--glass-bg)]'}`}>
+                        <div key={r.pathway_id} className={`p-3 rounded-lg bg-[var(--glass-bg)] border ${(r.significant || r.p_value < 0.05) ? 'border-[var(--color-border-strong)]' : 'border-[var(--glass-border)]'}`}>
                           <div className="flex items-center justify-between"><span className="text-xs font-medium">{r.pathway_name}</span><span className="text-xxs font-mono">p={typeof r.p_value === 'number' ? r.p_value.toFixed(4) : r.p_value}</span></div>
                           <div className="text-xxs text-[var(--color-text-muted)] mt-1">
                             Overlap: {r.overlap_count || r.overlap || 0}/{r.pathway_size || r.gene_count || 0}
@@ -499,7 +489,7 @@ export default function GenomicsAnalysis() {
                     <>
                       <div className="text-xs text-[var(--color-text-muted)]">{nVariants} annotated | {highImpact} high impact | {pathogenic} pathogenic</div>
                       {annotations.map((a: any, i: number) => (
-                        <div key={i} className={`p-3 rounded-lg ${a.impact === 'HIGH' ? 'bg-red-500/5 border border-red-500/20' : a.impact === 'MODERATE' ? 'bg-yellow-500/5 border border-yellow-500/20' : 'bg-[var(--glass-bg)]'}`}>
+                        <div key={i} className={`p-3 rounded-lg bg-[var(--glass-bg)] border ${a.impact === 'HIGH' ? 'border-red-500/30' : 'border-[var(--glass-border)]'}`}>
                           <div className="flex items-center justify-between">
                             <span className="text-xs font-medium font-mono">{a.change || `${a.gene}:${a.position} ${a.ref}>${a.alt}`}</span>
                             <span className={`text-xxs px-1.5 py-0.5 rounded ${a.impact === 'HIGH' ? 'bg-[var(--glass-bg)] text-[var(--color-text-muted)]' : a.impact === 'MODERATE' ? 'bg-[var(--glass-bg)] text-[var(--color-text-muted)]' : 'bg-[var(--glass-bg)]'}`}>{a.impact}</span>

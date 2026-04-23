@@ -4,8 +4,7 @@
  */
 import { useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
-
-const API = '/api'
+import { apiClient } from '../services'
 
 interface HypothesisDetail {
   id: string
@@ -114,9 +113,9 @@ export default function HypothesisReview() {
   useEffect(() => {
     if (!projectId || !hypothesisId) return
     setLoading(true)
-    fetch(`${API}/v1/projects/${projectId}/hypotheses/${hypothesisId}`)
-      .then(r => r.json())
-      .then(data => { setHyp(data); setLoading(false) })
+    apiClient
+      .get(`/projects/${projectId}/hypotheses/${hypothesisId}`)
+      .then(r => { setHyp(r.data); setLoading(false) })
       .catch(() => setLoading(false))
   }, [projectId, hypothesisId])
 
@@ -124,14 +123,10 @@ export default function HypothesisReview() {
     if (!hypothesisId) return
     setSubmittingFeedback(true)
     try {
-      await fetch(`${API}/v1/hypotheses/${hypothesisId}/feedback`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          overall_quality: overallQuality,
-          dimension_scores: dimensions,
-          free_text: freeText || null,
-        }),
+      await apiClient.post(`/hypotheses/${hypothesisId}/feedback`, {
+        overall_quality: overallQuality,
+        dimension_scores: dimensions,
+        free_text: freeText || null,
       })
       setFeedbackSent(true)
     } finally {
@@ -142,16 +137,17 @@ export default function HypothesisReview() {
   const generatePaper = async () => {
     if (!hypothesisId) return
     try {
-      const res = await fetch(`${API}/v1/hypotheses/${hypothesisId}/generate-paper`, { method: 'POST' })
-      if (res.ok) {
-        const blob = await res.blob()
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `hypothesis-${hypothesisId}.docx`
-        a.click()
-        URL.revokeObjectURL(url)
-      }
+      // Binary response → axios responseType: 'blob'. Shares interceptor
+      // so auth + error toasts still apply, same as every other call.
+      const res = await apiClient.post(`/hypotheses/${hypothesisId}/generate-paper`, null, {
+        responseType: 'blob',
+      })
+      const url = URL.createObjectURL(res.data as Blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `hypothesis-${hypothesisId}.docx`
+      a.click()
+      URL.revokeObjectURL(url)
     } catch { /* silent */ }
   }
 

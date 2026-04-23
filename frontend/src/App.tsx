@@ -1,7 +1,8 @@
 import { lazy, Suspense } from 'react'
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
-import { Component, type ReactNode } from 'react'
+import { type ReactNode } from 'react'
 import Layout from './components/Layout'
+import ErrorBoundary from './components/ErrorBoundary'
 import Dashboard from './pages/Dashboard'
 import Projects from './pages/Projects'
 import ProjectDetail from './pages/ProjectDetail'
@@ -40,7 +41,6 @@ const DiscoveryRunner = lazy(() => import('./pages/DiscoveryRunner'))
 const HypothesisReview = lazy(() => import('./pages/HypothesisReview'))
 const ProjectKnowledgeGraph = lazy(() => import('./pages/ProjectKnowledgeGraph'))
 const PgvectorManager = lazy(() => import('./pages/PgvectorManager'))
-const Landing = lazy(() => import('./pages/Landing'))
 
 // Previously-orphaned pages: code existed on disk but no route pointed
 // to them. Now reachable from the sidebar.
@@ -50,64 +50,12 @@ const KnowledgeGraph = lazy(() => import('./pages/KnowledgeGraph'))
 const KnowledgeGraphViewer = lazy(() => import('./pages/KnowledgeGraphViewer'))
 const MLModelManager = lazy(() => import('./pages/MLModelManager'))
 
-// Error boundary to prevent blank pages on runtime errors
-class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; error: string }> {
-  constructor(props: { children: ReactNode }) {
-    super(props)
-    this.state = { hasError: false, error: '' }
-  }
-
-  static getDerivedStateFromError(error: Error) {
-    return { hasError: true, error: error.message }
-  }
-
-  componentDidCatch(error: Error, info: { componentStack?: string | null }) {
-    console.error('Page error:', error, info.componentStack)
-  }
-
-  render() {
-    if (this.state.hasError) {
-      // Soft retry: re-render this subtree only. Falls back to a full
-      // reload if the user hits the secondary action.
-      const softReset = () => this.setState({ hasError: false, error: '' })
-      const hardReload = () => { softReset(); window.location.reload() }
-      const copyError = () => {
-        try { navigator.clipboard?.writeText(this.state.error) } catch { /* noop */ }
-      }
-      return (
-        <div className="flex items-center justify-center h-full p-8">
-          <div className="text-center max-w-md">
-            <div className="text-4xl mb-4 opacity-20">⚠</div>
-            <h2 className="text-lg font-semibold mb-2" style={{ color: 'var(--color-text)' }}>Something went wrong</h2>
-            <pre
-              className="text-xs mb-4 px-3 py-2 text-left overflow-auto max-h-32 rounded"
-              style={{
-                color: 'var(--color-text-muted)',
-                background: 'var(--color-surface-raised)',
-                fontFamily: 'var(--font-mono, ui-monospace, monospace)',
-              }}
-            >{this.state.error || 'Unknown error'}</pre>
-            <div className="flex items-center justify-center gap-2">
-              <button onClick={softReset} className="btn text-sm" style={{ color: 'var(--color-text)' }}>
-                Try again
-              </button>
-              <button onClick={copyError} className="btn text-sm" style={{ color: 'var(--color-text-muted)' }}>
-                Copy details
-              </button>
-              <button onClick={hardReload} className="btn text-sm" style={{ color: 'var(--color-text-muted)' }}>
-                Reload page
-              </button>
-            </div>
-          </div>
-        </div>
-      )
-    }
-    return this.props.children
-  }
-}
-
 function PageWrapper({ children }: { children: ReactNode }) {
-  return <ErrorBoundary>{children}</ErrorBoundary>
+  // Pass the current pathname as resetKey so a user who crashes on
+  // /projects and navigates to /dashboard doesn't stay stuck on the
+  // error screen — the boundary auto-resets when the route changes.
+  const { pathname } = useLocation()
+  return <ErrorBoundary resetKey={pathname}>{children}</ErrorBoundary>
 }
 
 // Legacy /simulations etc. redirects. We want to preserve the ?tab=…
@@ -119,8 +67,9 @@ function LegacyComputeRedirect() {
 }
 
 function LazyPageWrapper({ children }: { children: ReactNode }) {
+  const { pathname } = useLocation()
   return (
-    <ErrorBoundary>
+    <ErrorBoundary resetKey={pathname}>
       <Suspense fallback={
         <div className="flex items-center justify-center h-full p-8">
           <div className="animate-pulse text-sm" style={{ color: 'var(--color-text-muted)' }}>Loading...</div>
@@ -135,22 +84,11 @@ function LazyPageWrapper({ children }: { children: ReactNode }) {
 function App() {
   return (
     <Routes>
-      {/* Marketing landing page — outside the Layout shell. Served at
-          both /welcome (explicit) and / (for first-time visitors who
-          haven't set the "humanovo.seen" localStorage flag). */}
-      <Route path="/welcome" element={<LazyPageWrapper><Landing /></LazyPageWrapper>} />
+      {/* Marketing lives at https://www.humanovo.net/ — the in-app /welcome,
+          /pricing, /docs routes were removed (commit following this one)
+          to keep the bundle lean. External site is the canonical surface. */}
       <Route path="/" element={<Layout />}>
-        <Route
-          index
-          element={
-            // Returning users jump straight to the dashboard; newcomers
-            // get the landing page once. Setting the flag is the
-            // landing page CTA's responsibility.
-            typeof window !== 'undefined' && window.localStorage.getItem('humanovo.seen') === '1'
-              ? <Navigate to="/dashboard" replace />
-              : <Navigate to="/welcome" replace />
-          }
-        />
+        <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<PageWrapper><Dashboard /></PageWrapper>} />
         <Route path="projects" element={<PageWrapper><Projects /></PageWrapper>} />
         <Route path="projects/:projectId" element={<PageWrapper><ProjectDetail /></PageWrapper>} />

@@ -5,8 +5,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { persistGet, safeNum, safePct, safeDollars } from '../utils/persistence'
-
-const API = '/api'
+import { apiClient } from '../services'
 
 interface SavedResearchPaper {
   id: string
@@ -105,12 +104,15 @@ export default function ProjectWorkspace() {
   useEffect(() => {
     if (!projectId) return
     setLoading(true)
+    // apiClient uses baseURL=/api/v1 and shares axios interceptors (auth +
+    // global error-toast). Raw fetch() bypassed both; keep the same
+    // null/[] fallbacks so any one 404 cannot blank the whole workspace.
     Promise.all([
-      fetch(`${API}/v1/projects/${projectId}`).then(r => r.json()).catch(() => null),
-      fetch(`${API}/v1/projects/${projectId}/discovery-runs`).then(r => r.json()).catch(() => []),
-      fetch(`${API}/v1/projects/${projectId}/hypotheses`).then(r => r.json()).catch(() => []),
-      fetch(`${API}/v1/projects/${projectId}/synthesis-runs`).then(r => r.json()).catch(() => []),
-      fetch(`${API}/v1/config/methods-taxonomy`).then(r => r.json()).catch(() => ({ categories: [] })),
+      apiClient.get(`/projects/${projectId}`).then(r => r.data).catch(() => null),
+      apiClient.get(`/projects/${projectId}/discovery-runs`).then(r => r.data).catch(() => []),
+      apiClient.get(`/projects/${projectId}/hypotheses`).then(r => r.data).catch(() => []),
+      apiClient.get(`/projects/${projectId}/synthesis-runs`).then(r => r.data).catch(() => []),
+      apiClient.get(`/config/methods-taxonomy`).then(r => r.data).catch(() => ({ categories: [] })),
     ]).then(([proj, dRuns, hyps, sRuns, tax]) => {
       setProject(proj)
       setRuns(Array.isArray(dRuns) ? dRuns : dRuns?.items || [])
@@ -144,11 +146,7 @@ export default function ProjectWorkspace() {
         excluded_methods: labExcluded,
         filter_mode: labFilterMode,
       }
-      await fetch(`${API}/v1/projects/${projectId}/lab-profile`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
+      await apiClient.patch(`/projects/${projectId}/lab-profile`, body)
     } finally {
       setSaving(false)
     }

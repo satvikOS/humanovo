@@ -353,6 +353,86 @@ async def _run_synthesis_pipeline(
 # ===================================================================
 
 
+async def _load_discovery_runs_from_db(
+    project_id: str | None,
+    status: str | None,
+    limit: int,
+    offset: int,
+):
+    """Merge the in-memory in-flight runs with completed runs from the
+    `discovery_runs` Postgres table. Returns a (items, total) tuple."""
+    import json as _json
+    from sqlalchemy import text
+    from app.core.database import engine
+
+    # In-memory (currently running) rows.
+    items: list[dict] = []
+    for run_id, run in _active_discovery_runs.items():
+        if project_id and run.get("project_id") != project_id:
+            continue
+        if status and run.get("status") != status:
+            continue
+        items.append({
+            "run_id": run_id,
+            "project_id": run.get("project_id"),
+            "disease": run.get("disease", ""),
+            "discovery_type": run.get("discovery_type", ""),
+            "status": run.get("status", "unknown"),
+            "total_hypotheses": run.get("total_hypotheses", 0),
+            "best_confidence": run.get("best_confidence", 0),
+            "created_at": run.get("created_at", ""),
+            "completed_at": run.get("completed_at"),
+        })
+
+    # Database-backed (completed / queued / failed) rows.
+    sql = """
+        SELECT id::text, project_id::text, disease, discovery_type,
+               status, total_hypotheses, best_confidence,
+               total_cost_usd, total_duration_seconds,
+               stages_total, stages_succeeded,
+               focus_entities,
+               created_at, completed_at
+        FROM discovery_runs
+        WHERE (CAST(:pid AS text) IS NULL OR project_id::text = CAST(:pid AS text))
+          AND (CAST(:st AS text) IS NULL OR status = CAST(:st AS text))
+        ORDER BY created_at DESC
+        LIMIT :lim OFFSET :off
+    """
+    try:
+        async with engine.connect() as conn:
+            rows = (await conn.execute(
+                text(sql),
+                {"pid": project_id, "st": status, "lim": limit, "off": offset},
+            )).fetchall()
+        in_mem_ids = {i["run_id"] for i in items}
+        for r in rows:
+            run_id = r[0]
+            if run_id in in_mem_ids:
+                continue
+            items.append({
+                "run_id": run_id,
+                "project_id": r[1],
+                "disease": r[2] or "",
+                "discovery_type": r[3] or "",
+                "status": r[4] or "completed",
+                "total_hypotheses": r[5] or 0,
+                "best_confidence": float(r[6] or 0),
+                "total_cost_usd": float(r[7] or 0),
+                "total_duration_seconds": float(r[8] or 0),
+                "stages_total": r[9] or 12,
+                "stages_succeeded": r[10] or 0,
+                "focus_entities": list(r[11] or []),
+                "created_at": r[12].isoformat() if r[12] else "",
+                "completed_at": r[13].isoformat() if r[13] else None,
+            })
+    except Exception as _e:
+        # Non-fatal — frontend still sees the in-memory slice.
+        logger.warning(f"discovery_runs DB read failed: {_e!s}")
+
+    items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    return items[offset:offset + limit], len(items)
+
+
 @router.get("/projects/{project_id}/discovery-runs")
 async def list_discovery_runs(
     project_id: str,
@@ -360,29 +440,29 @@ async def list_discovery_runs(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ) -> dict:
-    """List discovery runs for a project."""
-    items = []
-    for run_id, run in _active_discovery_runs.items():
-        if run.get("project_id") == project_id:
-            if status and run.get("status") != status:
-                continue
-            items.append({
-                "run_id": run_id,
-                "project_id": project_id,
-                "disease": run.get("disease", ""),
-                "discovery_type": run.get("discovery_type", ""),
-                "status": run.get("status", "unknown"),
-                "total_hypotheses": run.get("total_hypotheses", 0),
-                "best_confidence": run.get("best_confidence", 0),
-                "created_at": run.get("created_at", ""),
-                "completed_at": run.get("completed_at"),
-            })
-    # Sort by created_at descending
-    items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    """List discovery runs for a project (in-memory + DB)."""
+    items, total = await _load_discovery_runs_from_db(project_id, status, limit, offset)
     return {
         "project_id": project_id,
-        "items": items[offset:offset + limit],
-        "total": len(items),
+        "items": items,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.get("/discovery-runs")
+async def list_all_discovery_runs(
+    status: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+) -> dict:
+    """List discovery runs across every project — powers the Agents
+    root page 'History' pane when no specific project is selected."""
+    items, total = await _load_discovery_runs_from_db(None, status, limit, offset)
+    return {
+        "items": items,
+        "total": total,
         "limit": limit,
         "offset": offset,
     }

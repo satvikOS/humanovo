@@ -6,9 +6,57 @@ import {
   FiFile, FiX, FiRefreshCw, FiStar, FiBookOpen, FiHash,
   FiShield,
 } from 'react-icons/fi'
+import clsx from 'clsx'
 import { usePersistentState, logActivity } from '../utils/persistence'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
-import api from '../services/api'
+import api, { apiClient } from '../services/api'
+import { toast } from '../contexts/ToastContext'
+
+/**
+ * Fetch wrapper for external third-party APIs (CrossRef / NCBI) that
+ * can't route through our apiClient interceptor (different origin, no
+ * /api/v1 prefix, no auth header). Adds:
+ *   - 10s timeout via AbortController
+ *   - One retry with 500ms backoff on network / 5xx errors
+ *   - Toast on final failure so citation lookups never fail silently
+ *
+ * Returns the Response for success, null on failure (caller decides
+ * how to degrade).
+ */
+async function externalFetch(url: string, label: string): Promise<Response | null> {
+  const attempt = async (): Promise<Response> => {
+    const ac = new AbortController()
+    const timer = window.setTimeout(() => ac.abort(), 10_000)
+    try {
+      return await fetch(url, { signal: ac.signal })
+    } finally {
+      window.clearTimeout(timer)
+    }
+  }
+  for (let i = 0; i < 2; i++) {
+    try {
+      const res = await attempt()
+      if (res.ok) return res
+      if (res.status >= 500 && i === 0) {
+        await new Promise(r => setTimeout(r, 500))
+        continue
+      }
+      // 4xx (not-found etc.) — no retry, caller treats as "no metadata".
+      return null
+    } catch (e) {
+      if (i === 0) {
+        await new Promise(r => setTimeout(r, 500))
+        continue
+      }
+      const msg = e instanceof Error && e.name === 'AbortError'
+        ? `${label} timed out after 10s`
+        : `${label} unreachable — check your connection`
+      toast('error', msg, { title: 'Citation lookup' })
+      return null
+    }
+  }
+  return null
+}
 
 interface Citation {
   id: string
@@ -219,8 +267,11 @@ const CITATION_TYPES: Citation['type'][] = ['journal', 'book', 'conference', 'pr
 async function fetchFromDOI(doi: string): Promise<Partial<Citation> | null> {
   try {
     const cleanDoi = doi.replace(/^https?:\/\/doi\.org\//, '').trim()
-    const res = await fetch(`https://api.crossref.org/works/${encodeURIComponent(cleanDoi)}`)
-    if (!res.ok) return null
+    const res = await externalFetch(
+      `https://api.crossref.org/works/${encodeURIComponent(cleanDoi)}`,
+      'CrossRef',
+    )
+    if (!res) return null
     const data = await res.json()
     const item = data.message
     return {
@@ -243,8 +294,11 @@ async function fetchFromDOI(doi: string): Promise<Partial<Citation> | null> {
 async function fetchFromPMID(pmid: string): Promise<Partial<Citation> | null> {
   try {
     const cleanPmid = pmid.replace(/\D/g, '')
-    const res = await fetch(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id=${cleanPmid}&retmode=json`)
-    if (!res.ok) return null
+    const res = await externalFetch(
+      `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id=${cleanPmid}&retmode=json`,
+      'NCBI PubMed',
+    )
+    if (!res) return null
     const data = await res.json()
     const item = data.result?.[cleanPmid]
     if (!item) return null
@@ -339,30 +393,29 @@ export default function CitationManager() {
   useEffect(() => {
     const load = async () => {
       try {
-        const apiBase = import.meta.env.VITE_API_BASE_URL || ''
-        const res = await fetch(`${apiBase}/api/v1/evidence?page_size=100`)
-        if (res.ok) {
-          const data = await res.json()
-          if (data.items?.length > 0) {
-            const loaded = data.items.map((e: any) => ({
-              id: e.id,
-              type: e.source_type === 'pubmed' ? 'journal' : e.source_type === 'preprint' ? 'preprint' : 'journal',
-              title: e.title || '',
-              authors: e.authors || [],
-              journal: e.journal || '',
-              year: e.publication_date ? new Date(e.publication_date).getFullYear() : 0,
-              doi: e.doi || '',
-              tags: e.tags || [],
-              abstract: e.abstract || e.snippet || '',
-              url: e.source_url || '',
-              notes: e.notes || '',
-              createdAt: e.created_at || new Date().toISOString(),
-            }))
-            setCitations(prev => {
-              const existingIds = new Set(prev.map(p => p.id))
-              return [...prev, ...loaded.filter((l: any) => !existingIds.has(l.id))]
-            })
-          }
+        const { data } = await apiClient.get('/evidence', {
+          params: { page_size: 100 },
+          headers: { 'X-Silent-Error': '1' },
+        })
+        if (data.items?.length > 0) {
+          const loaded = data.items.map((e: any) => ({
+            id: e.id,
+            type: e.source_type === 'pubmed' ? 'journal' : e.source_type === 'preprint' ? 'preprint' : 'journal',
+            title: e.title || '',
+            authors: e.authors || [],
+            journal: e.journal || '',
+            year: e.publication_date ? new Date(e.publication_date).getFullYear() : 0,
+            doi: e.doi || '',
+            tags: e.tags || [],
+            abstract: e.abstract || e.snippet || '',
+            url: e.source_url || '',
+            notes: e.notes || '',
+            createdAt: e.created_at || new Date().toISOString(),
+          }))
+          setCitations(prev => {
+            const existingIds = new Set(prev.map(p => p.id))
+            return [...prev, ...loaded.filter((l: any) => !existingIds.has(l.id))]
+          })
         }
       } catch { /* API unavailable */ }
     }
@@ -402,20 +455,15 @@ export default function CitationManager() {
     // Persist to backend
     ;(async () => {
       try {
-        const apiBase = import.meta.env.VITE_API_BASE_URL || ''
-        await fetch(`${apiBase}/api/v1/evidence`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            title: citation.title,
-            source_type: citation.type === 'journal' ? 'pubmed' : citation.type,
-            abstract: citation.abstract,
-            authors: citation.authors,
-            publication_date: `${citation.year}-01-01`,
-            tags: citation.tags,
-            source_url: citation.url || (citation.doi ? `https://doi.org/${citation.doi}` : undefined),
-          })
-        })
+        await apiClient.post('/evidence', {
+          title: citation.title,
+          source_type: citation.type === 'journal' ? 'pubmed' : citation.type,
+          abstract: citation.abstract,
+          authors: citation.authors,
+          publication_date: `${citation.year}-01-01`,
+          tags: citation.tags,
+          source_url: citation.url || (citation.doi ? `https://doi.org/${citation.doi}` : undefined),
+        }, { headers: { 'X-Silent-Error': '1' } })
       } catch { /* non-fatal */ }
     })()
   }
@@ -481,10 +529,11 @@ export default function CitationManager() {
 
     // Upload to backend
     try {
-      const apiBase = import.meta.env.VITE_API_BASE_URL || ''
       const formData = new FormData()
       formData.append('file', file)
-      await fetch(`${apiBase}/api/v1/ingestion/upload`, { method: 'POST', body: formData })
+      await apiClient.post('/ingestion/documents/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data', 'X-Silent-Error': '1' },
+      })
     } catch { /* non-fatal */ }
 
     if (fileInputRef.current) fileInputRef.current.value = ''
@@ -716,22 +765,15 @@ export default function CitationManager() {
                         {verifyResults[citation.id] && (
                           <span
                             aria-label={`Verification: ${verifyResults[citation.id].verdict}`}
-                            className="text-xxs px-1.5 py-0.5 rounded"
-                            style={{
-                              background:
-                                verifyResults[citation.id].verdict === 'verified'
-                                  ? 'rgba(34, 197, 94, 0.14)'
-                                  : verifyResults[citation.id].verdict === 'fabricated'
-                                  ? 'rgba(239, 68, 68, 0.14)'
-                                  : 'rgba(234, 179, 8, 0.14)',
-                              color:
-                                verifyResults[citation.id].verdict === 'verified'
-                                  ? '#4ade80'
-                                  : verifyResults[citation.id].verdict === 'fabricated'
-                                  ? '#f87171'
-                                  : '#fbbf24',
-                              border: '1px solid currentColor',
-                            }}
+                            className={clsx(
+                              'text-xxs px-1.5 py-0.5 rounded border',
+                              // "fabricated" keeps a red accent — it's a
+                              // critical warning that the citation is
+                              // likely made up. Everything else is muted.
+                              verifyResults[citation.id].verdict === 'fabricated'
+                                ? 'border-red-500/40 text-red-400 bg-red-500/5'
+                                : 'border-[var(--glass-border)] text-[var(--color-text-muted)]',
+                            )}
                             title={verifyResults[citation.id].message}
                           >
                             {verifyResults[citation.id].verdict}

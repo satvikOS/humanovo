@@ -1,10 +1,14 @@
 import { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { FiSearch, FiPlus, FiTrash2, FiAlertTriangle, FiLogOut, FiLogIn } from 'react-icons/fi'
+import { FiSearch, FiPlus, FiTrash2, FiAlertTriangle, FiLogOut, FiLogIn, FiDatabase, FiCheckSquare, FiSquare } from 'react-icons/fi'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
+import { EmptyState } from '../components/EmptyState'
+import { BulkActionBar } from '../components/BulkActionBar'
 import { logActivity } from '../utils/persistence'
 import { toast } from '../contexts/ToastContext'
+import { apiClient } from '../services'
+import api from '../services/api'
 
 interface Sample {
   id: string; barcode: string; sample_type: string; status: string; project: string
@@ -13,7 +17,8 @@ interface Sample {
 }
 interface Inventory { total_samples: number; by_type: Record<string, number>; by_status: Record<string, number>; by_project: Record<string, number>; alerts: any[]; storage_utilization: any[] }
 
-const API = '/api/v1/biobank'
+// apiClient's baseURL already includes /api/v1
+const BASE = '/biobank'
 const PIE_COLORS = ['#5B8DB8', '#8B7EAF', '#6BA594', '#C4956A', '#7BA7B8', '#B07E8B']
 const STATUS_COLORS: Record<string, string> = { available: 'text-[var(--color-text-secondary)] bg-[var(--glass-bg)]', checked_out: 'text-[var(--color-text-muted)] bg-[var(--glass-bg)]', depleted: 'text-[var(--color-text-muted)] bg-[var(--glass-bg)]', reserved: 'text-[var(--color-text-secondary)] bg-[var(--glass-bg)]' }
 
@@ -50,6 +55,10 @@ export default function BiobankManager() {
   const [showAdd, setShowAdd] = useState(() => searchParams.get('add') === '1')
   const [form, setForm] = useState({ barcode: '', sample_type: 'tissue', tissue_type: '', project: '', patient_id: '', quantity: '' })
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+  // Bulk selection state (see components/BulkActionBar for the UX)
+  const [selectMode, setSelectMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false)
   // Checkout dialog — replaces the old hard-coded {researcher: 'Current
   // Researcher', purpose: 'Analysis'} payload. Remembers the last
   // researcher name in localStorage so repeated checkouts stay quick.
@@ -63,18 +72,20 @@ export default function BiobankManager() {
 
   const load = async () => {
     try {
-      const r = await fetch(`${API}/samples`)
-      if (!r.ok) throw new Error(`samples ${r.status}`)
-      setSamples((await r.json()).items || [])
+      const { data } = await apiClient.get(`${BASE}/samples`, {
+        headers: { 'X-Silent-Error': '1' },
+      })
+      setSamples(data?.items || [])
     } catch (err) {
       toast('error', `Could not load samples — ${err instanceof Error ? err.message : 'unknown error'}`, {
         title: 'Biobank',
       })
     }
     try {
-      const r = await fetch(`${API}/inventory`)
-      if (!r.ok) throw new Error(`inventory ${r.status}`)
-      setInventory(await r.json())
+      const { data } = await apiClient.get(`${BASE}/inventory`, {
+        headers: { 'X-Silent-Error': '1' },
+      })
+      setInventory(data)
     } catch (err) {
       toast('error', `Could not load inventory — ${err instanceof Error ? err.message : 'unknown error'}`, {
         title: 'Biobank',
@@ -98,7 +109,7 @@ export default function BiobankManager() {
       const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash
       window.history.replaceState(window.history.state, '', newUrl)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [])
   useEffect(() => {
     if (!pendingId || selected) return
@@ -107,8 +118,13 @@ export default function BiobankManager() {
   }, [samples, pendingId, selected])
 
   const createSample = async () => {
-    const r = await fetch(`${API}/samples`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) })
-    if (r.ok) { load(); setShowAdd(false); logActivity({ type: 'discovery', action: 'created', title: `Added biobank sample: ${form.barcode || form.sample_type}` }); setForm({ barcode: '', sample_type: 'tissue', tissue_type: '', project: '', patient_id: '', quantity: '' }) }
+    try {
+      await apiClient.post(`${BASE}/samples`, form)
+      load()
+      setShowAdd(false)
+      logActivity({ type: 'discovery', action: 'created', title: `Added biobank sample: ${form.barcode || form.sample_type}` })
+      setForm({ barcode: '', sample_type: 'tissue', tissue_type: '', project: '', patient_id: '', quantity: '' })
+    } catch { /* interceptor surfaces the toast */ }
   }
 
   const deleteSample = (id: string) => {
@@ -118,7 +134,9 @@ export default function BiobankManager() {
   const confirmDelete = async () => {
     if (!deleteConfirmId) return
     const deletedSample = samples.find(s => s.id === deleteConfirmId)
-    await fetch(`${API}/samples/${deleteConfirmId}`, { method: 'DELETE' })
+    try {
+      await apiClient.delete(`${BASE}/samples/${deleteConfirmId}`)
+    } catch { /* interceptor surfaces the toast */ }
     if (selected?.id === deleteConfirmId) setSelected(null); load()
     setDeleteConfirmId(null)
     logActivity({ type: 'discovery', action: 'deleted', title: `Deleted biobank sample: ${deletedSample?.barcode || deleteConfirmId}` })
@@ -132,19 +150,21 @@ export default function BiobankManager() {
     if (!checkoutSampleId) return
     const researcher = checkoutForm.researcher.trim() || 'Unassigned'
     const purpose = checkoutForm.purpose.trim() || 'Analysis'
-    const r = await fetch(`${API}/samples/${checkoutSampleId}/checkout`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ researcher, purpose }) })
-    if (r.ok) {
-      const s = await r.json()
+    try {
+      const { data: s } = await apiClient.post(`${BASE}/samples/${checkoutSampleId}/checkout`, { researcher, purpose })
       setSelected(s); load()
-      try { localStorage.setItem('biobank.lastResearcher', researcher) } catch {}
+      try { localStorage.setItem('biobank.lastResearcher', researcher) } catch { /* quota */ }
       logActivity({ type: 'discovery', action: 'updated', title: `Checked out sample: ${s.barcode || checkoutSampleId}` })
-    }
+    } catch { /* interceptor surfaces the toast */ }
     setCheckoutSampleId(null)
   }
 
   const checkin = async (id: string) => {
-    const r = await fetch(`${API}/samples/${id}/checkin?condition=good`, { method: 'POST' })
-    if (r.ok) { const s = await r.json(); setSelected(s); load(); logActivity({ type: 'discovery', action: 'updated', title: `Returned sample: ${s.barcode || id}` }) }
+    try {
+      const { data: s } = await apiClient.post(`${BASE}/samples/${id}/checkin`, null, { params: { condition: 'good' } })
+      setSelected(s); load()
+      logActivity({ type: 'discovery', action: 'updated', title: `Returned sample: ${s.barcode || id}` })
+    } catch { /* interceptor surfaces the toast */ }
   }
 
   const filtered = samples.filter(s => {
@@ -162,6 +182,13 @@ export default function BiobankManager() {
         <div className="flex items-center justify-between mb-2">
           <div><h1 className="text-2xl font-semibold tracking-tight">Biobank Manager</h1><p className="text-sm text-[var(--color-text-muted)] mt-1">Sample registry, storage, and chain of custody</p></div>
           <div className="flex gap-2">
+            <button
+              onClick={() => { if (selectMode) { setSelectMode(false); setSelectedIds(new Set()) } else setSelectMode(true) }}
+              className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${selectMode ? 'border-[var(--color-border-strong)] text-[var(--color-text)]' : 'border-[var(--glass-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:border-[var(--color-border-strong)]'}`}
+              aria-pressed={selectMode}
+            >
+              {selectMode ? 'Done' : 'Select'}
+            </button>
             <button onClick={() => setView(view === 'list' ? 'inventory' : 'list')} className="btn text-xs text-[var(--color-text-muted)]">{view === 'list' ? 'Inventory' : 'Sample List'}</button>
             <button onClick={() => setShowAdd(!showAdd)} className="btn text-sm" style={{ color: 'var(--color-text-secondary)' }}><FiPlus className="w-4 h-4" /> New Sample</button>
           </div>
@@ -250,11 +277,47 @@ export default function BiobankManager() {
               </select>
             </div>
 
+            {selectMode && selectedIds.size > 0 && (
+              <BulkActionBar
+                count={selectedIds.size}
+                allSelected={filtered.length > 0 && filtered.every(s => selectedIds.has(s.id))}
+                onSelectAll={() => {
+                  const visible = new Set(filtered.map(s => s.id))
+                  const allSel = filtered.every(s => selectedIds.has(s.id))
+                  setSelectedIds(allSel ? new Set() : visible)
+                }}
+                onArchive={async () => {
+                  const ids = [...selectedIds]
+                  try {
+                    const res = await api.bulkArchiveBiobankSamples(ids)
+                    toast('success', `Archived ${res.updated_count} sample${res.updated_count === 1 ? '' : 's'}`)
+                    load()
+                    setSelectMode(false); setSelectedIds(new Set())
+                  } catch (err: any) {
+                    toast('error', err?.message || 'Bulk archive failed', { title: 'Could not archive' })
+                  }
+                }}
+                onRestore={async () => {
+                  const ids = [...selectedIds]
+                  try {
+                    const res = await api.bulkArchiveBiobankSamples(ids, true)
+                    toast('success', `Restored ${res.updated_count} sample${res.updated_count === 1 ? '' : 's'}`)
+                    load()
+                    setSelectMode(false); setSelectedIds(new Set())
+                  } catch (err: any) {
+                    toast('error', err?.message || 'Bulk restore failed', { title: 'Could not restore' })
+                  }
+                }}
+                onDelete={() => setBulkDeleteConfirm(true)}
+              />
+            )}
+
             <div className="flex gap-4">
               {/* Sample table */}
               <div className="flex-1 glass-card overflow-hidden">
                 <table className="w-full text-xs">
                   <thead><tr className="border-b border-[var(--color-border)]">
+                    {selectMode && <th className="p-3 w-8"></th>}
                     <th className="text-left p-3 text-[var(--color-text-muted)]">Barcode</th>
                     <th className="text-left p-3 text-[var(--color-text-muted)]">Type</th>
                     <th className="text-left p-3 text-[var(--color-text-muted)]">Status</th>
@@ -265,15 +328,53 @@ export default function BiobankManager() {
                   <tbody>
                     {filtered.length === 0 && (
                       <tr>
-                        <td colSpan={6} className="p-8 text-center text-xs text-[var(--color-text-muted)]">
-                          {samples.length === 0
-                            ? 'No samples registered yet — use "New Sample" to add your first biospecimen.'
-                            : 'No samples match the current filters.'}
+                        <td colSpan={6} className="p-0">
+                          {samples.length === 0 ? (
+                            <EmptyState
+                              icon={<FiDatabase />}
+                              title="No samples registered yet"
+                              description="Register your first biospecimen to track storage, quality, and chain of custody."
+                              action={{ label: 'New Sample', onClick: () => setShowAdd(true) }}
+                              fullPanel={false}
+                            />
+                          ) : (
+                            <EmptyState
+                              icon={<FiDatabase />}
+                              title="No samples match the current filters"
+                              description="Clear the search or adjust the type / status filters."
+                              action={{
+                                label: 'Clear filters',
+                                onClick: () => { setSearch(''); setTypeFilter(''); setStatusFilter('') },
+                              }}
+                              fullPanel={false}
+                            />
+                          )}
                         </td>
                       </tr>
                     )}
                     {filtered.map(s => (
-                      <tr key={s.id} onClick={() => setSelected(s)} className={`border-b border-[var(--color-border)]/30 cursor-pointer hover:bg-[var(--glass-bg)] ${selected?.id === s.id ? 'bg-[var(--glass-bg)]' : ''}`}>
+                      <tr
+                        key={s.id}
+                        onClick={() => {
+                          if (selectMode) {
+                            setSelectedIds(prev => {
+                              const next = new Set(prev)
+                              if (next.has(s.id)) next.delete(s.id); else next.add(s.id)
+                              return next
+                            })
+                          } else {
+                            setSelected(s)
+                          }
+                        }}
+                        className={`border-b border-[var(--color-border)]/30 cursor-pointer hover:bg-[var(--glass-bg)] ${(!selectMode && selected?.id === s.id) || (selectMode && selectedIds.has(s.id)) ? 'bg-[var(--glass-bg)]' : ''}`}
+                      >
+                        {selectMode && (
+                          <td className="p-3 w-8">
+                            {selectedIds.has(s.id)
+                              ? <FiCheckSquare className="w-4 h-4 text-[var(--color-text)]" />
+                              : <FiSquare className="w-4 h-4 text-[var(--color-text-muted)]" />}
+                          </td>
+                        )}
                         <td className="p-3 font-mono font-medium">{s.barcode}</td>
                         <td className="p-3">{s.sample_type}</td>
                         <td className="p-3"><span className={`text-xxs px-1.5 py-0.5 rounded-full ${STATUS_COLORS[s.status] || ''}`}>{s.status}</span></td>
@@ -332,6 +433,24 @@ export default function BiobankManager() {
         message="This will permanently delete this biobank sample record. This action cannot be undone."
         onConfirm={confirmDelete}
         onCancel={() => setDeleteConfirmId(null)}
+      />
+      <ConfirmDeleteDialog
+        open={bulkDeleteConfirm}
+        entityName={`${selectedIds.size} Biobank Sample${selectedIds.size === 1 ? '' : 's'}`}
+        message="This will permanently delete the selected biobank sample records. This action cannot be undone."
+        onConfirm={async () => {
+          const ids = [...selectedIds]
+          setBulkDeleteConfirm(false)
+          try {
+            const res = await api.bulkDeleteBiobankSamples(ids)
+            toast('success', `Deleted ${res.deleted_count} sample${res.deleted_count === 1 ? '' : 's'}`)
+            load()
+            setSelectMode(false); setSelectedIds(new Set())
+          } catch (err: any) {
+            toast('error', err?.message || 'Bulk delete failed', { title: 'Could not delete' })
+          }
+        }}
+        onCancel={() => setBulkDeleteConfirm(false)}
       />
 
       {checkoutSampleId !== null && (

@@ -9,6 +9,7 @@ import clsx from 'clsx'
 import cytoscape, { Core, EventObject, NodeSingular } from 'cytoscape'
 // @ts-expect-error no type declarations for cytoscape-cola
 import cola from 'cytoscape-cola'
+import { apiClient } from '../services'
 
 // Register cola layout
 cytoscape.use(cola)
@@ -140,10 +141,8 @@ export default function ProjectKnowledgeGraph() {
     async function fetchGraph() {
       setLoading(true)
       try {
-        const res = await fetch(`/api/v1/projects/${projectId}/knowledge-graph`)
-        if (!res.ok) throw new Error('API unavailable')
-        const payload: GraphPayload = await res.json()
-        if (!cancelled) setGraphData(payload)
+        const { data } = await apiClient.get<GraphPayload>(`/projects/${projectId}/knowledge-graph`)
+        if (!cancelled) setGraphData(data)
       } catch {
         // API unavailable — show empty graph
         if (!cancelled) setGraphData({ nodes: [], edges: [] })
@@ -348,9 +347,9 @@ export default function ProjectKnowledgeGraph() {
 
   const expandNeighborhood = useCallback(async (nodeId: string) => {
     try {
-      const res = await fetch(`/api/v1/projects/${projectId}/knowledge-graph/neighbors/${nodeId}`)
-      if (!res.ok) throw new Error('Expand failed')
-      const payload: GraphPayload = await res.json()
+      const { data: payload } = await apiClient.get<GraphPayload>(
+        `/projects/${projectId}/knowledge-graph/neighbors/${nodeId}`,
+      )
       setGraphData(prev => {
         const existingNodeIds = new Set(prev.nodes.map(n => n.id))
         const existingEdgeIds = new Set(prev.edges.map(e => e.id))

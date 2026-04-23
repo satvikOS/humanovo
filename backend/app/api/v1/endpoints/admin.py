@@ -26,6 +26,123 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+@router.get("/health")
+async def admin_health(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+    """Detailed service-liveness for the Settings → Admin panel.
+
+    Surfaces what `/health` does plus the last-seed timestamps +
+    pg/redis/neo4j connectivity + row counts grouped by domain.
+    Read-only; safe to poll from the UI on open.
+    """
+    checks: dict[str, str] = {}
+    counts: dict[str, int | None] = {}
+    last_seen: dict[str, str | None] = {}
+
+    # Postgres — lightweight SELECT on the active pool.
+    try:
+        await db.execute(text("SELECT 1"))
+        checks["postgres"] = "ok"
+    except Exception as e:
+        checks["postgres"] = f"error: {str(e)[:80]}"
+
+    # pgvector extension
+    try:
+        r = await db.execute(
+            text("SELECT 1 FROM pg_extension WHERE extname = 'vector'")
+        )
+        checks["pgvector"] = "ok" if r.scalar() else "missing"
+    except Exception as e:
+        checks["pgvector"] = f"error: {str(e)[:80]}"
+
+    # Redis
+    try:
+        import redis.asyncio as _redis  # type: ignore
+        r = _redis.from_url(settings.REDIS_URL)
+        pong = await r.ping()
+        checks["redis"] = "ok" if pong else "no-pong"
+        await r.close()
+    except Exception as e:
+        checks["redis"] = f"error: {str(e)[:80]}"
+
+    # Neo4j (same fallback-aware check we log at init)
+    try:
+        from app.knowledge.graph_store import get_graph_store
+        gs = get_graph_store()
+        if gs is not None and getattr(gs, "_driver", None):
+            checks["neo4j"] = "connected"
+        else:
+            checks["neo4j"] = "not_configured"
+    except Exception as e:
+        checks["neo4j"] = f"error: {str(e)[:80]}"
+
+    # Domain counts + last-seen — same source-of-truth as kg-stats.
+    for label, sql in [
+        ("projects", "SELECT COUNT(*), MAX(updated_at) FROM projects"),
+        ("evidence", "SELECT COUNT(*), MAX(updated_at) FROM evidence"),
+        ("hypotheses", "SELECT COUNT(*), MAX(updated_at) FROM hypotheses"),
+        ("notebook_pages", "SELECT COUNT(*), MAX(updated_at) FROM notebook_pages"),
+        ("activities", "SELECT COUNT(*), MAX(created_at) FROM activities"),
+        ("discovery_runs", "SELECT COUNT(*), MAX(updated_at) FROM discovery_runs"),
+        ("imaging_studies", "SELECT COUNT(*), MAX(updated_at) FROM imaging_studies"),
+        ("kg_nodes", "SELECT COUNT(*), MAX(updated_at) FROM knowledge_graph_nodes"),
+        ("kg_edges", "SELECT COUNT(*), MAX(updated_at) FROM knowledge_graph_edges"),
+        ("vector_embeddings",
+         "SELECT COUNT(*), MAX(created_at) FROM vector_embeddings"),
+    ]:
+        try:
+            row = (await db.execute(text(sql))).first()
+            counts[label] = int(row[0] or 0) if row else 0
+            last_seen[label] = row[1].isoformat() if row and row[1] else None
+        except Exception as e:
+            counts[label] = None
+            last_seen[label] = f"error: {str(e)[:80]}"
+
+    # Embedding split + seed-state flags — lets the Admin panel drop the
+    # parallel /admin/kg-stats fetch and derive everything from one call.
+    embeddings: dict[str, int | None] = {}
+    for label, sql in [
+        ("kg_entity",
+         "SELECT COUNT(*) FROM vector_embeddings WHERE source_type = 'kg_entity'"),
+        ("evidence",
+         "SELECT COUNT(*) FROM vector_embeddings WHERE source_type = 'evidence'"),
+    ]:
+        try:
+            r = (await db.execute(text(sql))).scalar()
+            embeddings[label] = int(r or 0)
+        except Exception:
+            embeddings[label] = None
+
+    flags = {
+        # Consistent with /admin/kg-stats so the two endpoints can't
+        # disagree on whether the seed CTA should be offered.
+        "seed_available": (counts.get("kg_nodes") or 0) < 200,
+        "corpus_seeded": (
+            (counts.get("evidence") or 0) >= 10
+            and (counts.get("hypotheses") or 0) >= 2
+        ),
+    }
+
+    overall = (
+        "healthy"
+        if checks.get("postgres") == "ok" and checks.get("pgvector") == "ok"
+        else "degraded"
+    )
+
+    return {
+        "status": overall,
+        "environment": settings.ENVIRONMENT,
+        "version": settings.VERSION,
+        "checks": checks,
+        "counts": counts,
+        "last_seen": last_seen,
+        "embeddings": embeddings,
+        "flags": flags,
+    }
+
+
+
+
+
 class SeedResponse(BaseModel):
     ok: bool
     environment: str

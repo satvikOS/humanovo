@@ -27,6 +27,7 @@ import HorizontalRule from '@tiptap/extension-horizontal-rule'
 import { logActivity } from '../utils/persistence'
 import { useAlertDialog } from '../components/AlertDialog'
 import api from '../services/api'
+import { EmptyState } from '../components/EmptyState'
 
 // ═══════════════════════════════════════════════════════════════
 // Types
@@ -1049,15 +1050,13 @@ export default function Notebook() {
               ))}
 
               {filteredPages.length === 0 && (
-                <div className="text-center py-8 text-[var(--color-text-muted)]">
-                  <FiFileText className="w-6 h-6 mx-auto mb-2 opacity-50" />
-                  <p className="text-xs">{searchQuery ? 'No pages found' : 'No pages yet'}</p>
-                  {!searchQuery && (
-                    <button onClick={() => setShowTemplates(true)} className="text-xs text-[var(--color-text-secondary)] hover:underline mt-1">
-                      Create one
-                    </button>
-                  )}
-                </div>
+                <EmptyState
+                  icon={<FiFileText />}
+                  title={searchQuery ? 'No pages found' : 'No pages yet'}
+                  description={searchQuery ? 'Try a different search term.' : 'Create your first notebook page to get started.'}
+                  action={!searchQuery ? { label: 'Create page', onClick: () => setShowTemplates(true) } : undefined}
+                  fullPanel={false}
+                />
               )}
             </div>
           </div>
@@ -1354,7 +1353,7 @@ export default function Notebook() {
         .notebook-editor-area .ProseMirror ul[data-type="taskList"] li label { display: flex; align-items: center; }
         .notebook-editor-area .ProseMirror ul[data-type="taskList"] li label input[type="checkbox"] { margin-right: 0.4em; }
         .notebook-editor-area .ProseMirror .is-empty::before { content: attr(data-placeholder); color: var(--color-text-muted); pointer-events: none; float: left; height: 0; }
-        .notebook-editor-area .ProseMirror .selectedCell { background: rgba(59, 130, 246, 0.1); }
+        .notebook-editor-area .ProseMirror .selectedCell { background: rgba(255, 255, 255, 0.1); }
       `}</style>
     </>
   )

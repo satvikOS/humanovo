@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.models.platform_entities import Manuscript
+from app.api.v1.endpoints._bulk import attach_bulk_delete, attach_bulk_archive
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -213,3 +214,8 @@ async def submit_manuscript(manuscript_id: str, data: SubmissionCreate, db: Asyn
     ms.status = "submitted"
     await db.flush()
     return submission
+
+
+# Bulk operations
+attach_bulk_delete(router, Manuscript)
+attach_bulk_archive(router, Manuscript)

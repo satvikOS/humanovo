@@ -2,6 +2,7 @@ import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { formatDateTime, persistGet, getActivityLog } from '../utils/persistence'
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
+import { apiClient } from '../services'
 import {
   FiHome,
   FiFolder,
@@ -44,6 +45,8 @@ import {
   FiAperture,
   FiTerminal,
   FiArchive,
+  FiShare2,
+  FiHelpCircle,
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import { useTheme } from '../contexts/ThemeContext'
@@ -271,6 +274,9 @@ interface CommandAction {
   description?: string
   action: () => void
   category: string
+  /** Optional keyboard shortcut to render on the right side — hint-only,
+   *  the actual binding lives in Layout.handleKeyDown. */
+  shortcut?: string[]
 }
 
 function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
@@ -280,25 +286,29 @@ function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
   const navigate = useNavigate()
 
   const actions: CommandAction[] = [
-    { label: 'Go to Dashboard', icon: FiHome, category: 'Navigation', action: () => { navigate('/dashboard'); onClose() } },
-    { label: 'Go to Projects', icon: FiFolder, category: 'Navigation', action: () => { navigate('/projects'); onClose() } },
-    { label: 'Go to Evidence', icon: FiDatabase, category: 'Navigation', action: () => { navigate('/evidence'); onClose() } },
-    { label: 'Go to Discovery', icon: FiActivity, category: 'Navigation', action: () => { navigate('/agents'); onClose() } },
-    { label: 'Go to Compute Lab', icon: FiTrendingUp, category: 'Navigation', action: () => { navigate('/compute-lab'); onClose() } },
-    { label: 'Go to Notebook', icon: FiBook, category: 'Navigation', action: () => { navigate('/notebook'); onClose() } },
-    { label: 'Go to Search', icon: FiSearch, category: 'Navigation', action: () => { navigate('/search'); onClose() } },
-    { label: 'Go to Timeline', icon: FiClock, category: 'Navigation', action: () => { navigate('/timeline'); onClose() } },
+    { label: 'Go to Dashboard', icon: FiHome, category: 'Navigation', shortcut: ['g', 'd'], action: () => { navigate('/dashboard'); onClose() } },
+    { label: 'Go to Projects', icon: FiFolder, category: 'Navigation', shortcut: ['g', 'p'], action: () => { navigate('/projects'); onClose() } },
+    { label: 'Go to Evidence', icon: FiDatabase, category: 'Navigation', shortcut: ['g', 'e'], action: () => { navigate('/evidence'); onClose() } },
+    { label: 'Go to Discovery', icon: FiActivity, category: 'Navigation', shortcut: ['g', 'a'], action: () => { navigate('/agents'); onClose() } },
+    { label: 'Go to Compute Lab', icon: FiTrendingUp, category: 'Navigation', shortcut: ['g', 'c'], action: () => { navigate('/compute-lab'); onClose() } },
+    { label: 'Go to Notebook', icon: FiBook, category: 'Navigation', shortcut: ['g', 'n'], action: () => { navigate('/notebook'); onClose() } },
+    { label: 'Go to Search', icon: FiSearch, category: 'Navigation', shortcut: ['g', 's'], action: () => { navigate('/search'); onClose() } },
+    { label: 'Go to Timeline', icon: FiClock, category: 'Navigation', shortcut: ['g', 't'], action: () => { navigate('/timeline'); onClose() } },
     { label: 'Go to Data Manager', icon: FiDatabase, category: 'Navigation', action: () => { navigate('/data-manager'); onClose() } },
     { label: 'Go to Visualization', icon: FiBarChart2, category: 'Navigation', action: () => { navigate('/data-visualization'); onClose() } },
-    { label: 'Go to Imaging', icon: FiImage, category: 'Navigation', action: () => { navigate('/imaging'); onClose() } },
+    { label: 'Go to Imaging', icon: FiImage, category: 'Navigation', shortcut: ['g', 'i'], action: () => { navigate('/imaging'); onClose() } },
     { label: 'Go to Literature', icon: FiBookOpen, category: 'Navigation', action: () => { navigate('/literature-review'); onClose() } },
     { label: 'Go to Citations', icon: FiList, category: 'Navigation', action: () => { navigate('/citation-manager'); onClose() } },
     { label: 'Go to Experiments', icon: FiClipboard, category: 'Navigation', action: () => { navigate('/experiment-tracker'); onClose() } },
     { label: 'Go to Genomics', icon: FiHeart, category: 'Navigation', action: () => { navigate('/genomics'); onClose() } },
+    { label: 'Go to Knowledge Graph', icon: FiShare2, category: 'Navigation', shortcut: ['g', 'k'], action: () => { navigate('/knowledge-graph'); onClose() } },
+    { label: 'Go to Hypotheses', icon: FiZap, category: 'Navigation', shortcut: ['g', 'h'], action: () => { navigate('/hypotheses'); onClose() } },
+    { label: 'Go to Workbench', icon: FiGrid, category: 'Navigation', shortcut: ['g', 'w'], action: () => { navigate('/workbench'); onClose() } },
     { label: 'New Project', icon: FiPlus, description: 'Create a new research project', category: 'Actions', action: () => { navigate('/projects?new=1'); onClose() } },
     { label: 'Start Discovery', icon: FiZap, description: 'Launch AI discovery pipeline', category: 'Actions', action: () => { navigate('/agents?start=1'); onClose() } },
     { label: 'Global Search', icon: FiGlobe, description: 'Search across all data', category: 'Actions', action: () => { navigate('/search'); onClose() } },
     { label: 'Open Settings', icon: FiSettings, category: 'Actions', action: () => { navigate('/settings'); onClose() } },
+    { label: 'Show keyboard shortcuts', icon: FiHelpCircle, description: 'Full cheatsheet (press ?)', category: 'Actions', shortcut: ['?'], action: () => { onClose(); window.dispatchEvent(new KeyboardEvent('keydown', { key: '?' })) } },
   ]
 
   // Build data search results from local storage when user types a query
@@ -512,6 +522,24 @@ function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
                         <span className="block text-xs text-[var(--color-text-muted)]">{item.description}</span>
                       )}
                     </div>
+                    {item.shortcut && item.shortcut.length > 0 && (
+                      <span className="flex items-center gap-1 mr-1" aria-hidden>
+                        {item.shortcut.map((k, ki) => (
+                          <kbd
+                            key={ki}
+                            className="px-1.5 py-0.5 text-xxs rounded border tabular-nums"
+                            style={{
+                              color: 'var(--color-text-muted)',
+                              borderColor: 'var(--color-border)',
+                              background: 'var(--glass-bg)',
+                              fontFamily: 'var(--font-mono, ui-monospace, monospace)',
+                            }}
+                          >
+                            {k}
+                          </kbd>
+                        ))}
+                      </span>
+                    )}
                     <FiArrowRight className={`w-3 h-3 text-[var(--color-text-muted)] transition-opacity ${active ? 'opacity-100' : 'opacity-0'}`} />
                   </button>
                 )
@@ -1014,27 +1042,19 @@ function ConstantChat() {
     } else if (isOutOfScope(userMsg.toLowerCase().trim())) {
       fullResponse = generateSmartFallbackResponse(userMsg)
     } else {
-      // Call the backend AI endpoint (powered by Constant AI)
+      // Call the backend AI endpoint (powered by Constant AI).
+      // Non-streaming — server returns the full message, then we
+      // simulate character-by-character client-side below.
       try {
         const platformContext = getLocalContext()
-        const _apiBase = import.meta.env.VITE_API_BASE_URL || ''
-        const res = await fetch(`${_apiBase}/api/v1/orchestrator/chat`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            message: userMsg,
-            context: 'general',
-            platform_context: platformContext,
-            knowledge_base: { include_documents: true, retrieval_mode: 'hybrid' },
-            attached_files: filesToSend.map(f => ({ name: f.name, size: f.size, type: f.type })),
-          }),
+        const { data } = await apiClient.post('/orchestrator/chat', {
+          message: userMsg,
+          context: 'general',
+          platform_context: platformContext,
+          knowledge_base: { include_documents: true, retrieval_mode: 'hybrid' },
+          attached_files: filesToSend.map(f => ({ name: f.name, size: f.size, type: f.type })),
         })
-        if (res.ok) {
-          const data = await res.json()
-          fullResponse = data.response || 'I\'m not sure about that. Could you rephrase?'
-        } else {
-          fullResponse = generateSmartFallbackResponse(userMsg)
-        }
+        fullResponse = data.response || 'I\'m not sure about that. Could you rephrase?'
       } catch { /* API unavailable — use local fallback */
         fullResponse = generateSmartFallbackResponse(userMsg)
       }
@@ -1248,7 +1268,18 @@ export default function Layout() {
     localStorage.setItem('humanovo-notifs-read', new Date().toISOString())
   }
 
-  // Keyboard shortcut for command palette + number shortcuts
+  // `g` prefix state for vim-style navigation: press `g` then one of
+  // the letters below within 1.5 s to jump to that page. A stale prefix
+  // is cleared after the timeout so a stray `g` keypress doesn't stick.
+  const gPrefixRef = useRef<{ active: boolean; timer: number | null }>({ active: false, timer: null })
+  const clearGPrefix = useCallback(() => {
+    const s = gPrefixRef.current
+    if (s.timer != null) window.clearTimeout(s.timer)
+    s.active = false
+    s.timer = null
+  }, [])
+
+  // Keyboard shortcut for command palette + number shortcuts + g-prefix
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
       e.preventDefault()
@@ -1259,6 +1290,7 @@ export default function Layout() {
       setIsShortcutsOpen(false)
       setIsUserMenuOpen(false)
       setIsNotificationsOpen(false)
+      clearGPrefix()
     }
     // "?" (Shift+/) opens the keyboard-shortcuts cheatsheet, but only
     // when the user isn't typing into a field. Accept both e.key === '?'
@@ -1273,6 +1305,40 @@ export default function Layout() {
       e.preventDefault()
       setIsShortcutsOpen(prev => !prev)
     }
+    // g-prefix navigation: `g d` → Dashboard, `g p` → Projects, etc.
+    // Takes precedence over the number-navigation below while a prefix
+    // is active.
+    if (!typingIn && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      const prefixMap: Record<string, string> = {
+        d: '/dashboard',
+        p: '/projects',
+        e: '/evidence',
+        h: '/hypotheses',
+        c: '/compute-lab',
+        n: '/notebook',
+        a: '/agents',
+        t: '/timeline',
+        s: '/search',
+        k: '/knowledge-graph',
+        w: '/workbench',
+        i: '/imaging',
+        g: '/collaboration', // "g g" → collaboration (second g)
+      }
+      if (gPrefixRef.current.active) {
+        const dest = prefixMap[e.key.toLowerCase()]
+        if (dest) {
+          e.preventDefault()
+          navigate(dest)
+        }
+        clearGPrefix()
+        return
+      }
+      if (e.key === 'g' && !e.shiftKey) {
+        gPrefixRef.current.active = true
+        gPrefixRef.current.timer = window.setTimeout(clearGPrefix, 1500)
+        return
+      }
+    }
     // Number shortcuts 1-6 for main nav (only when no input focused)
     if (!e.metaKey && !e.ctrlKey && !e.altKey && !typingIn) {
       const idx = parseInt(e.key) - 1
@@ -1280,7 +1346,7 @@ export default function Layout() {
         navigate(mainNavItems[idx].to)
       }
     }
-  }, [navigate])
+  }, [navigate, clearGPrefix])
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown)
@@ -1317,13 +1383,45 @@ if (path === '/clinical-trials') return 'Clinical Trials'
     if (path === '/regulatory') return 'Regulatory & Compliance'
     if (path === '/imaging') return 'Research Imaging'
     if (path === '/biobank') return 'Biobank'
+    if (path === '/knowledge-graph') return 'Knowledge Graph'
+    if (path.startsWith('/knowledge-graph/')) return 'Knowledge Graph'
+    if (path === '/ml-models') return 'ML Models'
+    if (path.startsWith('/dev/pgvector')) return 'pgvector'
     return ''
   }
 
+  // Keep document.title in sync with the current route so multi-tab
+  // users can tell pages apart from the browser tab strip alone.
+  // Single source of truth — the per-page components don't need to
+  // each set their own title.
+  useEffect(() => {
+    const pageName = getPageTitle()
+    document.title = pageName
+      ? `${pageName} · humanovo`
+      : 'humanovo — Biomedical Discovery Platform'
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname])
+
   return (
     <div className="flex h-screen bg-[var(--color-bg)]">
+      {/* Skip-to-content link — visually hidden until a keyboard user
+          tabs to it, then becomes a high-contrast button that jumps
+          past the sidebar + header straight into <main>. Standard
+          WCAG 2.4.1 "Bypass Blocks" implementation. */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[99999] focus:px-4 focus:py-2 focus:rounded-lg focus:shadow-lg"
+        style={{
+          background: 'var(--color-accent-blue, #3b82f6)',
+          color: '#fff',
+          fontSize: '0.875rem',
+          fontWeight: 600,
+        }}
+      >
+        Skip to main content
+      </a>
       {/* Sidebar */}
-      <aside className="w-52 flex flex-col glass-sidebar">
+      <aside className="w-52 flex flex-col glass-sidebar" aria-label="Primary navigation">
         {/* Logo */}
         <div className="h-14 flex items-center px-4 border-b border-[var(--color-border)]">
           <a href="/dashboard" onClick={(e) => { e.preventDefault(); window.location.href = '/dashboard' }} className="flex items-center gap-2.5 no-underline hover:opacity-80 transition-opacity cursor-pointer">
@@ -1565,7 +1663,11 @@ if (path === '/clinical-trials') return 'Clinical Trials'
         <WorkspaceTabs />
 
         {/* Main content */}
-        <main className="flex-1 min-h-0 overflow-auto bg-[var(--color-bg)]">
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className="flex-1 min-h-0 overflow-auto bg-[var(--color-bg)]"
+        >
           <Outlet />
         </main>
       </div>
@@ -1599,7 +1701,7 @@ function KeyboardShortcutsHelp({ isOpen, onClose }: { isOpen: boolean; onClose: 
       ],
     },
     {
-      title: 'Navigation',
+      title: 'Navigation — number',
       rows: [
         { keys: ['1'], label: 'Go to Dashboard' },
         { keys: ['2'], label: 'Go to Projects' },
@@ -1607,6 +1709,23 @@ function KeyboardShortcutsHelp({ isOpen, onClose }: { isOpen: boolean; onClose: 
         { keys: ['4'], label: 'Go to Compute Lab' },
         { keys: ['5'], label: 'Go to Notebook' },
         { keys: ['6'], label: 'Go to Agents' },
+      ],
+    },
+    {
+      title: 'Navigation — vim-style (g then letter)',
+      rows: [
+        { keys: ['g', 'd'], label: 'Go to Dashboard' },
+        { keys: ['g', 'p'], label: 'Go to Projects' },
+        { keys: ['g', 'e'], label: 'Go to Evidence' },
+        { keys: ['g', 'h'], label: 'Go to Hypotheses' },
+        { keys: ['g', 'c'], label: 'Go to Compute Lab' },
+        { keys: ['g', 'n'], label: 'Go to Notebook' },
+        { keys: ['g', 'a'], label: 'Go to Agents' },
+        { keys: ['g', 'k'], label: 'Go to Knowledge Graph' },
+        { keys: ['g', 't'], label: 'Go to Timeline' },
+        { keys: ['g', 's'], label: 'Go to Search' },
+        { keys: ['g', 'w'], label: 'Go to Workbench' },
+        { keys: ['g', 'i'], label: 'Go to Imaging' },
       ],
     },
     {

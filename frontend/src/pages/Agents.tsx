@@ -28,7 +28,7 @@ import {
 } from 'react-icons/fi'
 import { Link, useSearchParams } from 'react-router-dom'
 import { BarChart, Bar, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import api from '../services/api'
+import api, { apiClient } from '../services/api'
 import type { OrchestratorStatus, DiscoveryConfig } from '../services/api'
 import { logActivity, formatDate } from '../utils/persistence'
 
@@ -392,10 +392,15 @@ export default function Agents() {
 
   // Load discovery history from API when projectId is available
   useEffect(() => {
-    if (!projectId || projectId === 'discovery') return
+    // When no project is selected, fall back to the project-less
+    // /discovery-runs endpoint (added in Mega-R) so the Agents root
+    // page surfaces every run across the platform. Filters & render
+    // logic below are already shape-compatible.
     const loadHistory = async () => {
       try {
-        const res = await api.listDiscoveryRuns(projectId, { limit: 50 })
+        const res = (!projectId || projectId === 'discovery')
+          ? await api.listAllDiscoveryRuns({ limit: 50 })
+          : await api.listDiscoveryRuns(projectId, { limit: 50 })
         if (res.items?.length > 0) {
           setDiscoveryHistory(res.items.map((r: any) => ({
             id: r.id || r.run_id,
@@ -489,34 +494,39 @@ export default function Agents() {
 
   const exportPdf = async (h: Hypothesis) => {
     try {
-      const res = await fetch(`/api/v1/documents/hypothesis/${h.id}/pdf`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      // Binary endpoint — responseType 'blob' + validateStatus handles both
+      // the direct-PDF response and the JSON-wrapped-base64 shape.
+      const res = await apiClient.post(
+        `/documents/hypothesis/${h.id}/pdf`,
+        {
           title: h.title, description: h.description, mechanism: h.mechanism,
           confidence: h.confidence, evidence_summary: h.evidence_summary,
           risks: h.risks, validation_steps: h.validation_steps,
           key_citations: h.key_citations, disease: config.disease,
           discovery_type: config.discovery_type,
-        }),
-      })
-      if (res.ok) {
-        const contentType = res.headers.get('content-type') || ''
-        let blob: Blob
-        if (contentType.includes('application/json')) {
-          const data = await res.json()
-          const byteChars = atob(data.pdf_base64)
-          const byteArray = new Uint8Array(byteChars.length)
-          for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i)
-          blob = new Blob([byteArray], { type: 'application/pdf' })
-        } else {
-          blob = await res.blob()
-        }
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url; a.download = `${h.title.slice(0, 50)}.pdf`; a.click()
-        URL.revokeObjectURL(url)
+        },
+        { responseType: 'blob', validateStatus: () => true },
+      )
+      if (res.status >= 400) return
+      const rawBlob = res.data as Blob
+      const contentType = rawBlob.type || String(res.headers['content-type'] || '')
+      let blob: Blob
+      if (contentType.includes('application/json')) {
+        const text = await rawBlob.text()
+        const data = JSON.parse(text)
+        if (!data.pdf_base64) return
+        const byteChars = atob(data.pdf_base64)
+        const byteArray = new Uint8Array(byteChars.length)
+        for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i)
+        blob = new Blob([byteArray], { type: 'application/pdf' })
+      } else {
+        blob = rawBlob
       }
+      if (blob.size === 0) return
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url; a.download = `${h.title.slice(0, 50)}.pdf`; a.click()
+      URL.revokeObjectURL(url)
     } catch (e) { console.error(e) }
   }
 
@@ -962,8 +972,8 @@ export default function Agents() {
                 <FiExternalLink className="w-3 h-3" />
               </Link>
               {isRunning && (
-                <span className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg" style={{ color: 'var(--color-success)', background: 'rgba(34, 197, 94, 0.08)' }}>
-                  <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-success)] animate-pulse" /> Running
+                <span className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-[var(--glass-border)] text-[var(--color-text-muted)]">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-text)] animate-pulse" /> Running
                 </span>
               )}
             </div>
@@ -1160,10 +1170,10 @@ function HypothesisDetail({ hypothesis: h, onClose, onExport }: { hypothesis: Hy
 
             {/* Phase category labels */}
             <div className="flex items-center gap-3 mb-2 text-xxs">
-              <span className="px-2 py-0.5 rounded" style={{ background: 'rgba(139,92,246,0.12)', color: '#8b5cf6' }}>Bench</span>
-              <span className="px-2 py-0.5 rounded" style={{ background: 'rgba(99,102,241,0.12)', color: '#6366f1' }}>Translational</span>
-              <span className="px-2 py-0.5 rounded" style={{ background: 'rgba(59,130,246,0.12)', color: '#3b82f6' }}>Clinical</span>
-              <span className="px-2 py-0.5 rounded" style={{ background: 'rgba(20,184,166,0.12)', color: '#14b8a6' }}>Implementation</span>
+              <span className="px-2 py-0.5 rounded border border-[var(--glass-border)] text-[var(--color-text-muted)]">Bench</span>
+              <span className="px-2 py-0.5 rounded border border-[var(--glass-border)] text-[var(--color-text-muted)]">Translational</span>
+              <span className="px-2 py-0.5 rounded border border-[var(--glass-border)] text-[var(--color-text-muted)]">Clinical</span>
+              <span className="px-2 py-0.5 rounded border border-[var(--glass-border)] text-[var(--color-text-muted)]">Implementation</span>
             </div>
 
             {/* Pipeline stepper */}
@@ -1351,7 +1361,7 @@ function HypothesisDetail({ hypothesis: h, onClose, onExport }: { hypothesis: Hy
         {/* Feedback Section */}
         <div className="border-t border-[var(--color-border)] pt-4">
           {feedbackSent ? (
-            <div className="flex items-center gap-2 text-xs text-[var(--color-success)] p-3 rounded-lg bg-[rgba(34,197,94,0.08)]">
+            <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)] p-3 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)]">
               <FiCheck className="w-4 h-4" /> Feedback submitted
             </div>
           ) : feedbackOpen ? (

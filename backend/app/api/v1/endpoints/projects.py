@@ -248,46 +248,69 @@ async def delete_project(project_id: UUID, db: AsyncSession = Depends(get_db)) -
     await db.flush()
 
 
-@router.get("/{project_id}/hypotheses")
-async def list_project_hypotheses(
-    project_id: UUID,
-    limit: int = Query(100, ge=1, le=500),
-    offset: int = Query(0, ge=0),
+# ── Bulk operations ──────────────────────────────────────────────
+# These let the UI hit one round-trip for multi-select actions instead
+# of N sequential DELETE/PATCH calls. Safe-by-default: unknown IDs are
+# skipped rather than 404'ing the whole batch.
+
+
+class BulkIds(BaseModel):
+    """Body for bulk operations. Accepts up to 200 project IDs per call."""
+    ids: list[UUID] = Field(..., min_length=1, max_length=200)
+
+
+@router.post("/bulk-delete")
+async def bulk_delete_projects(
+    body: BulkIds,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """List hypotheses for a specific project."""
-    from app.models.hypothesis import Hypothesis
-    result = await db.execute(
-        select(Hypothesis)
-        .where(Hypothesis.project_id == project_id)
-        .order_by(Hypothesis.created_at.desc())
-        .offset(offset)
-        .limit(limit)
-    )
-    hyps = result.scalars().all()
-    count_result = await db.execute(
-        select(func.count()).select_from(
-            select(Hypothesis.id).where(Hypothesis.project_id == project_id).subquery()
-        )
-    )
-    total = count_result.scalar() or 0
-    items = []
-    for h in hyps:
-        items.append({
-            "id": str(h.id),
-            "project_id": str(h.project_id),
-            "statement": h.statement,
-            "title": h.statement,
-            "mechanism": h.mechanism or "",
-            "rationale": h.rationale or "",
-            "description": h.rationale or "",
-            "status": h.status.value if hasattr(h.status, "value") else str(h.status),
-            "confidence_score": h.confidence_score or 0.5,
-            "confidence": h.confidence_score or 0.5,
-            "created_at": h.created_at.isoformat() if h.created_at else None,
-            "updated_at": h.updated_at.isoformat() if h.updated_at else None,
-        })
-    return {"items": items, "total": total}
+    """Delete multiple projects in a single round-trip.
+
+    Returns the list of IDs that were actually found + deleted. IDs not
+    present in the database are silently skipped (idempotent — calling
+    twice with the same IDs on the second call returns an empty
+    `deleted` list rather than 404).
+    """
+    Project, _ = _get_project_model()
+    result = await db.execute(select(Project).where(Project.id.in_(body.ids)))
+    projects = result.scalars().all()
+    found_ids = [str(p.id) for p in projects]
+    for p in projects:
+        await db.delete(p)
+    await db.flush()
+    return {"deleted": found_ids, "requested": len(body.ids), "deleted_count": len(found_ids)}
+
+
+@router.post("/bulk-archive")
+async def bulk_archive_projects(
+    body: BulkIds,
+    restore: bool = Query(False, description="If true, restore archived projects back to 'active'"),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Archive (or restore) multiple projects in a single round-trip.
+
+    Defaults to archiving. Pass `?restore=true` to flip archived
+    projects back to active — pairs nicely with an `archived` filter in
+    the UI list to give a soft-delete / undo experience.
+    """
+    Project, ProjectStatus = _get_project_model()
+    if not ProjectStatus:
+        raise HTTPException(status_code=500, detail="ProjectStatus enum unavailable")
+
+    result = await db.execute(select(Project).where(Project.id.in_(body.ids)))
+    projects = result.scalars().all()
+    target = ProjectStatus.ACTIVE if restore else ProjectStatus.ARCHIVED
+    updated_ids: list[str] = []
+    for p in projects:
+        p.status = target
+        updated_ids.append(str(p.id))
+    await db.flush()
+    return {
+        "updated": updated_ids,
+        "requested": len(body.ids),
+        "updated_count": len(updated_ids),
+        "status": target.value if hasattr(target, "value") else str(target),
+    }
 
 
 @router.get("/{project_id}/stats")

@@ -388,38 +388,105 @@ async def seed() -> dict:
     SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     project_ids: dict[str, str] = {}
     ev_count = hyp_count = emb_count = proj_count = 0
+    # Per-section error capture — each section commits independently
+    # so a schema drift in (e.g.) activities doesn't roll back the
+    # projects + evidence + hypotheses that committed cleanly. Admin
+    # seed-corpus endpoint surfaces this dict so operators see exactly
+    # which subcorpus failed and why.
+    section_errors: dict[str, str] = {}
 
     async with SessionLocal() as session:
         for name, desc in PROJECTS:
             pid = await upsert_project(session, name, desc)
             project_ids[name] = pid
             proj_count += 1
+        try:
+            await session.commit()
+        except Exception as _e:
+            section_errors["projects"] = str(_e)[:240]
+            await session.rollback()
 
         for row in EVIDENCE:
             disease = row[0]
             pid = project_ids.get(disease)
             if not pid:
                 continue
-            eid = await upsert_evidence(session, pid, row)
-            ev_count += 1
-            # Embedding
-            if await write_evidence_embedding(session, eid, row[1], row[2]):
-                emb_count += 1
+            try:
+                eid = await upsert_evidence(session, pid, row)
+                ev_count += 1
+                if await write_evidence_embedding(session, eid, row[1], row[2]):
+                    emb_count += 1
+            except Exception as _e:
+                section_errors.setdefault("evidence", str(_e)[:240])
+                await session.rollback()
+        try:
+            await session.commit()
+        except Exception as _e:
+            section_errors.setdefault("evidence_commit", str(_e)[:240])
+            await session.rollback()
 
         for row in HYPOTHESES:
             disease = row[0]
             pid = project_ids.get(disease)
             if not pid:
                 continue
-            await upsert_hypothesis(session, pid, row)
-            hyp_count += 1
+            try:
+                await upsert_hypothesis(session, pid, row)
+                hyp_count += 1
+            except Exception as _e:
+                section_errors.setdefault("hypotheses", str(_e)[:240])
+                await session.rollback()
+        try:
+            await session.commit()
+        except Exception as _e:
+            section_errors.setdefault("hypotheses_commit", str(_e)[:240])
+            await session.rollback()
 
         imaging_count = 0
         for row in IMAGING_STUDIES:
-            if await upsert_imaging(session, row):
-                imaging_count += 1
+            try:
+                if await upsert_imaging(session, row):
+                    imaging_count += 1
+            except Exception as _e:
+                section_errors.setdefault("imaging", str(_e)[:240])
+                await session.rollback()
+        try:
+            await session.commit()
+        except Exception as _e:
+            section_errors.setdefault("imaging_commit", str(_e)[:240])
+            await session.rollback()
 
-        await session.commit()
+        # Notebook pages — research notes tied to the seeded hypotheses.
+        try:
+            notebook_count = await _seed_notebook_pages(session)
+            await session.commit()
+        except Exception as _e:
+            section_errors["notebook_pages"] = str(_e)[:240]
+            await session.rollback()
+            notebook_count = 0
+
+        # Activity feed — populate the Dashboard "Recent Activity" so it
+        # doesn't render the empty state on first visit.
+        try:
+            activity_count = await _seed_activities(session, project_ids)
+            await session.commit()
+        except Exception as _e:
+            section_errors["activities"] = str(_e)[:240]
+            await session.rollback()
+            activity_count = 0
+
+        # Discovery runs — populate the Agents page history so it
+        # doesn't just show an empty "No runs yet" pane.
+        try:
+            discovery_runs_count = await _seed_discovery_runs(
+                session, project_ids,
+            )
+            await session.commit()
+        except Exception as _e:
+            section_errors["discovery_runs"] = str(_e)[:240]
+            await session.rollback()
+            discovery_runs_count = 0
+
     await engine.dispose()
     return {
         "projects_upserted": proj_count,
@@ -427,7 +494,226 @@ async def seed() -> dict:
         "hypotheses_upserted": hyp_count,
         "evidence_embeddings_written": emb_count,
         "imaging_upserted": imaging_count,
+        "notebook_pages_upserted": notebook_count,
+        "activities_upserted": activity_count,
+        "discovery_runs_upserted": discovery_runs_count,
+        # Non-empty only when a section raised; downstream admin UI
+        # surfaces these so the operator sees what didn't land.
+        "section_errors": section_errors,
     }
+
+
+async def _seed_discovery_runs(
+    session: AsyncSession, project_ids: dict[str, str],
+) -> int:
+    """Seed three terminal-state discovery_runs so the Agents page
+    history pane has rows to render. Each run carries realistic cost,
+    duration, and per-round hypothesis counts.
+    """
+    runs = [
+        ("Parkinson's Disease", "treatment",
+         0.78, 5, 12, 12, 0, 4.82,
+         ["alpha-synuclein", "vagus nerve", "GBA", "dopaminergic neurons"],
+         "completed", 847.3, 28400, 41200),
+        ("Pancreatic Ductal Adenocarcinoma", "treatment",
+         0.72, 6, 12, 12, 0, 5.61,
+         ["KRAS G12D", "TP53", "tumor microenvironment", "FAK"],
+         "completed", 921.5, 31800, 45100),
+        ("Alzheimer's Disease", "prevention",
+         0.64, 3, 12, 11, 1, 3.94,
+         ["amyloid-beta", "tau", "ApoE4", "GLP-1R"],
+         "completed", 612.8, 22100, 33400),
+    ]
+    count = 0
+    for (disease, disc_type, best_conf, total_hyps, stages_total,
+         stages_succ, stages_failed, cost_usd, focus, status,
+         duration_s, in_tokens, out_tokens) in runs:
+        existing = (
+            await session.execute(
+                text(
+                    "SELECT id FROM discovery_runs "
+                    "WHERE disease = :d AND status = :s LIMIT 1"
+                ),
+                {"d": disease, "s": status},
+            )
+        ).first()
+        if existing:
+            continue
+        pid = project_ids.get(disease)
+        await session.execute(
+            text(
+                "INSERT INTO discovery_runs "
+                "  (id, project_id, disease, discovery_type, total_rounds, "
+                "   total_hypotheses, hypotheses_per_round, max_agents, "
+                "   target_confidence, best_confidence, avg_confidence, "
+                "   total_duration_seconds, stages_total, stages_succeeded, "
+                "   stages_failed, total_cost_usd, total_input_tokens, "
+                "   total_output_tokens, total_embedding_tokens, total_api_calls, "
+                "   config_snapshot, external_factors, focus_entities, "
+                "   status, num_rounds, total_cost_cents, "
+                "   created_at, updated_at, completed_at, started_at) "
+                "VALUES (gen_random_uuid(), :pid, :d, :dt, :tr, "
+                "   :th, :hpr, 1000, 0.95, :bc, :bc, "
+                "   :dur, :st, :ss, :sf, :cost, :itok, :otok, 0, 12, "
+                "   '{}'::jsonb, '[]'::jsonb, CAST(:focus AS varchar[]), "
+                "   :s, :tr, :cents, "
+                "   NOW() - (random() * interval '10 days'), NOW(), "
+                "   NOW() - (random() * interval '1 day'), "
+                "   NOW() - (random() * interval '10 days') - interval '20 minutes')"
+            ),
+            {
+                "pid": pid, "d": disease, "dt": disc_type,
+                "tr": 2, "th": total_hyps, "hpr": 6, "bc": best_conf,
+                "dur": duration_s,
+                "st": stages_total, "ss": stages_succ, "sf": stages_failed,
+                "cost": cost_usd, "cents": int(cost_usd * 100),
+                "itok": in_tokens, "otok": out_tokens,
+                "focus": focus, "s": status,
+            },
+        )
+        count += 1
+    return count
+
+
+# ─── Notebook + activity corpora ────────────────────────────────
+
+NOTEBOOK_PAGES: list[tuple[str, str, list[str]]] = [
+    (
+        "Lab notes: Alpha-synuclein vagotomy pilot (week 1)",
+        "## Aims\n\nTest whether subdiaphragmatic vagotomy in Thy1-SNCA mice attenuates "
+        "striatal phospho-α-synuclein accumulation at 12 weeks.\n\n## Arms\n\n"
+        "- Sham vagotomy (n=10)\n- Bilateral truncal vagotomy (n=10)\n- Ambroxol chow "
+        "(150 mg/kg/day) + vagotomy (n=10)\n\n## Endpoints\n\nPrimary: pS129-α-syn IHC "
+        "density in dorsal striatum.\nSecondary: rotarod latency @ week 8.\n",
+        ["parkinsons", "alpha-synuclein", "vagotomy", "ambroxol"],
+    ),
+    (
+        "Analysis notes: PDAC KRAS+FAK combo (mouse cohort)",
+        "## Summary\n\nKPC mice (Kras^{G12D}; Trp53^{R172H/+}; Pdx1-Cre), n=8/arm, "
+        "treated with adagrasib + VS-6063 (FAK inhibitor). Observed 2.7× tumor "
+        "volume reduction vs monotherapy at day 28. Stromal α-SMA staining "
+        "collapsed in combo arm.\n\n## Next\n\nRun RNA-seq on enriched CAFs; "
+        "submit abstract to AACR 2026.\n",
+        ["pdac", "kras", "fak", "stromal"],
+    ),
+    (
+        "Literature review: Semaglutide in AD — EVOKE readout prep",
+        "## EVOKE / EVOKE+ (ApoE4 homozygote subgroup)\n\nEVOKE enrolled 1,840 pts "
+        "with early symptomatic AD, 2.4 mg weekly semaglutide vs placebo. "
+        "Readouts expected 2025 Q4. Key secondary: CDR-SB change @ 104 weeks.\n\n"
+        "## Mechanistic plausibility\n\n- GLP-1R crosses BBB (radiolabel studies, "
+        "Hunter 2015)\n- Microglial IBA-1 staining reduced 41% in APP/PS1 + "
+        "semaglutide (Aviles-Olmos 2023)\n- Insulin signalling improved hippocampal "
+        "LTP (McGovern 2022)\n\n## Open questions\n\nGI AEs in elderly AD cohort; "
+        "discontinuation rate?\n",
+        ["alzheimers", "semaglutide", "glp-1", "evoke"],
+    ),
+    (
+        "Benchmarking: citation-accuracy on BM-001 through BM-010",
+        "Run of `benchmark.citation_accuracy` over the 10-hypothesis retrospective "
+        "set. N=512 citations verified via CrossRef + NCBI round-trip + 0.42 "
+        "cosine threshold. Cohen's κ against two MD adjudicators = 0.81.\n\n"
+        "| Disease | N cites | Valid | Invalid | Fabricated | Accuracy |\n"
+        "|---|---|---|---|---|---|\n"
+        "| Parkinson's | 52 | 49 | 3 | 0 | 94.2% |\n"
+        "| PDAC | 48 | 45 | 2 | 1 | 93.8% |\n"
+        "| Alzheimer's | 54 | 51 | 2 | 1 | 94.4% |\n"
+        "| (mean across 10) | — | — | — | — | **94.2%** |\n\n"
+        "Baseline GPT-4o on same prompts: 47.6%.\n",
+        ["benchmark", "citation-accuracy", "94.2"],
+    ),
+    (
+        "Workspace: TODO — grounding threshold sweep for Stage 8 (GROUND)",
+        "Sweeping GROUNDING_SIMILARITY_THRESHOLD from 0.30 → 0.55 in 0.05 steps. "
+        "Goal: pick the value that maximises F1 on the 10-hypothesis retrospective "
+        "set. Current 0.40 gives 89% precision / 78% recall.\n\nRunning overnight.\n",
+        ["grounding", "threshold", "sweep", "stage-8"],
+    ),
+]
+
+
+async def _seed_notebook_pages(session: AsyncSession) -> int:
+    count = 0
+    for title, content, tags in NOTEBOOK_PAGES:
+        existing = (
+            await session.execute(
+                text("SELECT id FROM notebook_pages WHERE title = :t LIMIT 1"),
+                {"t": title},
+            )
+        ).first()
+        if existing:
+            continue
+        await session.execute(
+            text(
+                "INSERT INTO notebook_pages (id, title, content, content_type, tags, version, versions) "
+                "VALUES (gen_random_uuid(), :t, :c, 'markdown', :tags, 1, '[]'::jsonb)"
+            ),
+            {
+                "t": title,
+                "c": content,
+                "tags": list(tags),
+            },
+        )
+        count += 1
+    return count
+
+
+async def _seed_activities(session: AsyncSession, project_ids: dict[str, str]) -> int:
+    """Back-date a handful of activity entries across the seeded projects
+    so Dashboard's Recent Activity feed renders populated state."""
+    activities = [
+        ("discovery", "started",
+         "Started 12-stage discovery run on Parkinson's Disease",
+         "Pipeline: SEED→EXPAND→...→FINALIZE. 7 models engaged.",
+         "Parkinson's Disease"),
+        ("hypothesis", "created",
+         "Hypothesis: Vagotomy-GBA synergy for early PD intervention",
+         "Confidence 72%. Generated via 12-stage pipeline.",
+         "Parkinson's Disease"),
+        ("evidence", "imported",
+         "Imported 3 Parkinson's Disease evidence records",
+         "Sources: Cell 2019, NEJM 2009, NEJM 2022.",
+         "Parkinson's Disease"),
+        ("discovery", "completed",
+         "Completed PDAC discovery run (12/12 stages)",
+         "Best confidence 68% — KRAS+FAK combination therapy.",
+         "Pancreatic Ductal Adenocarcinoma"),
+        ("hypothesis", "validated",
+         "Hypothesis: Semaglutide-ApoE4 Alzheimer's prevention",
+         "Cross-validated against EVOKE Phase 3 trial design.",
+         "Alzheimer's Disease"),
+        ("notebook", "created",
+         "New notebook page: Citation accuracy benchmark BM-001—010",
+         "94.2% across 512 citations; Cohen's κ = 0.81.",
+         None),
+    ]
+    count = 0
+    for type_, action, title, description, disease in activities:
+        existing = (
+            await session.execute(
+                text("SELECT id FROM activities WHERE title = :t LIMIT 1"),
+                {"t": title},
+            )
+        ).first()
+        if existing:
+            continue
+        pid = project_ids.get(disease) if disease else None
+        await session.execute(
+            text(
+                "INSERT INTO activities "
+                "  (id, type, action, title, description, project_name, "
+                "   project_id, entity_type, created_at, updated_at) "
+                "VALUES (gen_random_uuid(), :type, :action, :title, :desc, "
+                "   :pname, :pid, :etype, NOW() - (random() * interval '7 days'), NOW())"
+            ),
+            {
+                "type": type_, "action": action, "title": title,
+                "desc": description, "pname": disease,
+                "pid": pid, "etype": type_,
+            },
+        )
+        count += 1
+    return count
 
 
 if __name__ == "__main__":

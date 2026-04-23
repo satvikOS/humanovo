@@ -2,11 +2,14 @@ import { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   FiFileText, FiPlus, FiTrash2, FiEdit3, FiUsers, FiSend,
-  FiDownload, FiSave,
+  FiDownload, FiSave, FiCheckSquare, FiSquare,
 } from 'react-icons/fi'
 import { formatDate, logActivity } from '../utils/persistence'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
+import { BulkActionBar } from '../components/BulkActionBar'
 import { toast } from '../contexts/ToastContext'
+import { apiClient } from '../services'
+import api from '../services/api'
 
 interface Manuscript {
   id: string; title: string; status: string; journal_target: string
@@ -15,7 +18,8 @@ interface Manuscript {
 }
 interface Author { id: string; name: string; affiliation: string; email: string; role: string; order: number }
 
-const API = '/api/v1/manuscripts'
+// apiClient's baseURL already includes /api/v1
+const BASE = '/manuscripts'
 // accepted/published stay green (terminal success states) and rejected
 // stays red so reviewers can spot final outcomes instantly; in-progress
 // states (draft/review/submitted) are monochrome to match the shell.
@@ -38,12 +42,14 @@ export default function ManuscriptManager() {
   const [showAuthorAdd, setShowAuthorAdd] = useState(false)
   const [newAuthor, setNewAuthor] = useState({ name: '', affiliation: '', email: '', role: 'Co-Author' })
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+  const [selectMode, setSelectMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false)
 
   const load = async () => {
     try {
-      const r = await fetch(API)
-      if (!r.ok) throw new Error(`manuscripts ${r.status}`)
-      setManuscripts((await r.json()).items || [])
+      const { data } = await apiClient.get(BASE, { headers: { 'X-Silent-Error': '1' } })
+      setManuscripts(data?.items || [])
     } catch (err) {
       toast('error', `Could not load manuscripts — ${err instanceof Error ? err.message : 'network error'}`, { title: 'Manuscripts' })
     }
@@ -63,7 +69,7 @@ export default function ManuscriptManager() {
       const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash
       window.history.replaceState(window.history.state, '', newUrl)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [])
   useEffect(() => {
     if (!pendingId || selected) return
@@ -73,22 +79,31 @@ export default function ManuscriptManager() {
       // sections) from the detail endpoint.
       ;(async () => {
         try {
-          const r = await fetch(`${API}/${pendingId}`)
-          if (r.ok) { const ms = await r.json(); setSelected(ms) }
+          const { data: ms } = await apiClient.get(`${BASE}/${pendingId}`)
+          setSelected(ms)
         } catch { /* ignore */ }
       })()
     }
   }, [manuscripts, pendingId, selected])
 
   const selectMs = async (id: string) => {
-    const r = await fetch(`${API}/${id}`)
-    if (r.ok) { const ms = await r.json(); setSelected(ms); setEditSection(null) }
+    try {
+      const { data: ms } = await apiClient.get(`${BASE}/${id}`)
+      setSelected(ms)
+      setEditSection(null)
+    } catch { /* interceptor surfaces the toast */ }
   }
 
   const createMs = async () => {
     if (!newTitle.trim()) return
-    const r = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: newTitle, journal_target: newJournal }) })
-    if (r.ok) { load(); setShowAdd(false); logActivity({ type: 'notebook', action: 'created', title: `Created manuscript: ${newTitle}` }); setNewTitle(''); setNewJournal('') }
+    try {
+      await apiClient.post(BASE, { title: newTitle, journal_target: newJournal })
+      load()
+      setShowAdd(false)
+      logActivity({ type: 'notebook', action: 'created', title: `Created manuscript: ${newTitle}` })
+      setNewTitle('')
+      setNewJournal('')
+    } catch { /* interceptor surfaces the toast */ }
   }
 
   const deleteMs = (id: string) => {
@@ -98,7 +113,9 @@ export default function ManuscriptManager() {
   const confirmDelete = async () => {
     if (!deleteConfirmId) return
     const deletedMs = manuscripts.find(m => m.id === deleteConfirmId)
-    await fetch(`${API}/${deleteConfirmId}`, { method: 'DELETE' })
+    try {
+      await apiClient.delete(`${BASE}/${deleteConfirmId}`)
+    } catch { /* interceptor surfaces the toast */ }
     if (selected?.id === deleteConfirmId) setSelected(null); load()
     setDeleteConfirmId(null)
     logActivity({ type: 'notebook', action: 'deleted', title: `Deleted manuscript: ${deletedMs?.title || deleteConfirmId}` })
@@ -107,34 +124,58 @@ export default function ManuscriptManager() {
   const saveSection = async () => {
     if (!selected || !editSection) return
     const sections = { ...selected.sections, [editSection]: editText }
-    const r = await fetch(`${API}/${selected.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sections }) })
-    if (r.ok) { const ms = await r.json(); setSelected(ms); setEditSection(null); logActivity({ type: 'notebook', action: 'updated', title: `Updated section ${editSection}: ${selected.title}` }) }
+    try {
+      const { data: ms } = await apiClient.patch(`${BASE}/${selected.id}`, { sections })
+      setSelected(ms)
+      setEditSection(null)
+      logActivity({ type: 'notebook', action: 'updated', title: `Updated section ${editSection}: ${selected.title}` })
+    } catch { /* interceptor surfaces the toast */ }
   }
 
   const addAuthor = async () => {
     if (!selected || !newAuthor.name.trim()) return
-    const r = await fetch(`${API}/${selected.id}/authors`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newAuthor) })
-    if (r.ok) { selectMs(selected.id); setShowAuthorAdd(false); setNewAuthor({ name: '', affiliation: '', email: '', role: 'Co-Author' }); logActivity({ type: 'notebook', action: 'updated', title: `Added author ${newAuthor.name} to: ${selected.title}` }) }
+    try {
+      await apiClient.post(`${BASE}/${selected.id}/authors`, newAuthor)
+      selectMs(selected.id)
+      setShowAuthorAdd(false)
+      setNewAuthor({ name: '', affiliation: '', email: '', role: 'Co-Author' })
+      logActivity({ type: 'notebook', action: 'updated', title: `Added author ${newAuthor.name} to: ${selected.title}` })
+    } catch { /* interceptor surfaces the toast */ }
   }
 
   const removeAuthor = async (authorId: string) => {
     if (!selected) return
     const removedAuthor = selected.authors.find(a => a.id === authorId)
-    await fetch(`${API}/${selected.id}/authors/${authorId}`, { method: 'DELETE' })
+    try {
+      await apiClient.delete(`${BASE}/${selected.id}/authors/${authorId}`)
+    } catch { /* interceptor surfaces the toast */ }
     selectMs(selected.id)
     logActivity({ type: 'notebook', action: 'updated', title: `Removed author ${removedAuthor?.name || authorId} from: ${selected.title}` })
   }
 
   const exportMs = async () => {
     if (!selected) return
-    const r = await fetch(`${API}/${selected.id}/export?format=markdown`)
-    if (r.ok) { const blob = await r.blob(); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${selected.title}.md`; a.click() }
+    try {
+      const { data: blob } = await apiClient.get(`${BASE}/${selected.id}/export`, {
+        params: { format: 'markdown' },
+        responseType: 'blob',
+      })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${selected.title}.md`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch { /* interceptor surfaces the toast */ }
   }
 
   const submitMs = async () => {
     if (!selected || !selected.journal_target) return
-    const r = await fetch(`${API}/${selected.id}/submit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ journal: selected.journal_target }) })
-    if (r.ok) { selectMs(selected.id); logActivity({ type: 'notebook', action: 'updated', title: `Submitted manuscript: ${selected.title}` }) }
+    try {
+      await apiClient.post(`${BASE}/${selected.id}/submit`, { journal: selected.journal_target })
+      selectMs(selected.id)
+      logActivity({ type: 'notebook', action: 'updated', title: `Submitted manuscript: ${selected.title}` })
+    } catch { /* interceptor surfaces the toast */ }
   }
 
   return (
@@ -142,7 +183,16 @@ export default function ManuscriptManager() {
       <div className="p-6 border-b border-[var(--color-border)]">
         <div className="flex items-center justify-between mb-2">
           <div><h1 className="text-2xl font-semibold tracking-tight">Manuscript Manager</h1><p className="text-sm text-[var(--color-text-muted)] mt-1">Draft, format, and track manuscript submissions</p></div>
-          <button onClick={() => setShowAdd(!showAdd)} className="btn text-sm" style={{ color: 'var(--color-text-secondary)' }}><FiPlus className="w-4 h-4" /> New Manuscript</button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => { if (selectMode) { setSelectMode(false); setSelectedIds(new Set()) } else setSelectMode(true) }}
+              className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${selectMode ? 'border-[var(--color-border-strong)] text-[var(--color-text)]' : 'border-[var(--glass-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:border-[var(--color-border-strong)]'}`}
+              aria-pressed={selectMode}
+            >
+              {selectMode ? 'Done' : 'Select'}
+            </button>
+            <button onClick={() => setShowAdd(!showAdd)} className="btn text-sm" style={{ color: 'var(--color-text-secondary)' }}><FiPlus className="w-4 h-4" /> New Manuscript</button>
+          </div>
         </div>
       </div>
 
@@ -157,6 +207,40 @@ export default function ManuscriptManager() {
         </div>
       )}
 
+      {selectMode && selectedIds.size > 0 && (
+        <div className="px-6 pt-4">
+          <BulkActionBar
+            count={selectedIds.size}
+            allSelected={manuscripts.length > 0 && manuscripts.every(m => selectedIds.has(m.id))}
+            onSelectAll={() => {
+              const allSel = manuscripts.every(m => selectedIds.has(m.id))
+              setSelectedIds(allSel ? new Set() : new Set(manuscripts.map(m => m.id)))
+            }}
+            onArchive={async () => {
+              try {
+                const res = await api.bulkArchiveManuscripts([...selectedIds])
+                toast('success', `Archived ${res.updated_count} manuscript${res.updated_count === 1 ? '' : 's'}`)
+                load()
+                setSelectMode(false); setSelectedIds(new Set())
+              } catch (err: any) {
+                toast('error', err?.message || 'Bulk archive failed', { title: 'Could not archive' })
+              }
+            }}
+            onRestore={async () => {
+              try {
+                const res = await api.bulkArchiveManuscripts([...selectedIds], true)
+                toast('success', `Restored ${res.updated_count} manuscript${res.updated_count === 1 ? '' : 's'}`)
+                load()
+                setSelectMode(false); setSelectedIds(new Set())
+              } catch (err: any) {
+                toast('error', err?.message || 'Bulk restore failed', { title: 'Could not restore' })
+              }
+            }}
+            onDelete={() => setBulkDeleteConfirm(true)}
+          />
+        </div>
+      )}
+
       <div className="flex-1 flex overflow-hidden">
         <div className="w-72 border-r border-[var(--color-border)] overflow-y-auto p-3 space-y-1">
           {manuscripts.length === 0 && (
@@ -166,19 +250,40 @@ export default function ManuscriptManager() {
               <p className="text-xxs text-[var(--color-text-muted)] mt-1">Use "New" above to draft one.</p>
             </div>
           )}
-          {manuscripts.map(m => (
-            <div key={m.id} onClick={() => selectMs(m.id)}
-              className={`p-3 rounded-lg cursor-pointer group transition-colors ${selected?.id === m.id ? 'bg-[var(--glass-bg)] border border-[var(--color-border)]' : 'hover:bg-[var(--glass-bg)]'}`}>
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-medium truncate">{m.title}</span>
-                <button onClick={e => { e.stopPropagation(); deleteMs(m.id) }} className="opacity-0 group-hover:opacity-100 p-1"><FiTrash2 className="w-3 h-3" /></button>
+          {manuscripts.map(m => {
+            const sel = selectedIds.has(m.id)
+            return (
+            <div
+              key={m.id}
+              onClick={() => {
+                if (selectMode) {
+                  setSelectedIds(prev => {
+                    const next = new Set(prev)
+                    if (next.has(m.id)) next.delete(m.id); else next.add(m.id)
+                    return next
+                  })
+                } else {
+                  selectMs(m.id)
+                }
+              }}
+              className={`p-3 rounded-lg cursor-pointer group transition-colors ${(!selectMode && selected?.id === m.id) || (selectMode && sel) ? 'bg-[var(--glass-bg)] border border-[var(--color-border)]' : 'hover:bg-[var(--glass-bg)]'}`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  {selectMode && (sel ? <FiCheckSquare className="w-4 h-4 text-[var(--color-text)] flex-shrink-0" /> : <FiSquare className="w-4 h-4 text-[var(--color-text-muted)] flex-shrink-0" />)}
+                  <span className="text-xs font-medium truncate">{m.title}</span>
+                </div>
+                {!selectMode && (
+                  <button onClick={e => { e.stopPropagation(); deleteMs(m.id) }} className="opacity-0 group-hover:opacity-100 p-1 flex-shrink-0"><FiTrash2 className="w-3 h-3" /></button>
+                )}
               </div>
               <div className="flex items-center gap-2 mt-1">
                 <span className="text-xxs px-1.5 py-0.5 rounded-full" style={{ color: STATUS_COLORS[m.status], background: 'var(--glass-bg)' }}>{m.status}</span>
                 {m.journal_target && <span className="text-xxs text-[var(--color-text-muted)]">{m.journal_target}</span>}
               </div>
             </div>
-          ))}
+            )
+          })}
         </div>
 
         <div className="flex-1 overflow-y-auto p-6">
@@ -265,6 +370,23 @@ export default function ManuscriptManager() {
         message="This will permanently delete this manuscript. This action cannot be undone."
         onConfirm={confirmDelete}
         onCancel={() => setDeleteConfirmId(null)}
+      />
+      <ConfirmDeleteDialog
+        open={bulkDeleteConfirm}
+        entityName={`${selectedIds.size} Manuscript${selectedIds.size === 1 ? '' : 's'}`}
+        message="This will permanently delete the selected manuscripts. This action cannot be undone."
+        onConfirm={async () => {
+          setBulkDeleteConfirm(false)
+          try {
+            const res = await api.bulkDeleteManuscripts([...selectedIds])
+            toast('success', `Deleted ${res.deleted_count} manuscript${res.deleted_count === 1 ? '' : 's'}`)
+            load()
+            setSelectMode(false); setSelectedIds(new Set())
+          } catch (err: any) {
+            toast('error', err?.message || 'Bulk delete failed', { title: 'Could not delete' })
+          }
+        }}
+        onCancel={() => setBulkDeleteConfirm(false)}
       />
     </div>
   )

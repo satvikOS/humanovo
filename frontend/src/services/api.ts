@@ -6,7 +6,13 @@ import { toast } from '../contexts/ToastContext'
 // In development, Vite proxy handles /api → localhost:8000.
 const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
 
-const apiClient: AxiosInstance = axios.create({
+/**
+ * Shared axios instance. Exported so callers with non-standard
+ * request shapes (form-data uploads, WebSocket auth, raw POST bodies)
+ * can use the configured interceptor + baseURL directly instead of
+ * hand-rolling fetch().
+ */
+export const apiClient: AxiosInstance = axios.create({
   baseURL: `${API_BASE}/api/v1`,
   headers: {
     'Content-Type': 'application/json',
@@ -521,12 +527,6 @@ export interface SearchResult {
 // ═══════════════════════════════════════════════════════════════════
 
 export const api = {
-  // ── Health Check ──────────────────────────────────────────────
-  async checkHealth(): Promise<{ status: string; environment: string }> {
-    const { data } = await apiClient.get('/health')
-    return data
-  },
-
   // ── Projects ──────────────────────────────────────────────────
 
   async getProjects(params?: PaginationParams & { search?: string; status?: string }): Promise<PaginatedResponse<Project>> {
@@ -551,6 +551,21 @@ export const api = {
 
   async deleteProject(id: string): Promise<void> {
     await apiClient.delete(`/projects/${id}`)
+  },
+
+  async bulkDeleteProjects(ids: string[]): Promise<{ deleted: string[]; requested: number; deleted_count: number }> {
+    const { data } = await apiClient.post('/projects/bulk-delete', { ids })
+    return data
+  },
+
+  async bulkArchiveProjects(ids: string[], restore = false): Promise<{ updated: string[]; status: string; updated_count: number }> {
+    const { data } = await apiClient.post('/projects/bulk-archive', { ids }, { params: restore ? { restore: true } : {} })
+    return data
+  },
+
+  async archiveProject(id: string, restore = false): Promise<Project> {
+    const { data } = await apiClient.patch(`/projects/${id}`, { status: restore ? 'active' : 'archived' })
+    return data
   },
 
   async getProjectStats(id: string): Promise<any> {
@@ -801,11 +816,6 @@ export const api = {
     return data
   },
 
-  async runSimulation(id: string): Promise<any> {
-    const { data } = await apiClient.post(`/simulations/${id}/run`)
-    return data
-  },
-
   async getSimulationResults(id: string): Promise<any> {
     const { data } = await apiClient.get(`/simulations/${id}/results`)
     return data
@@ -835,11 +845,6 @@ export const api = {
 
   async cancelAgentTask(id: string): Promise<any> {
     const { data } = await apiClient.post(`/agents/tasks/${id}/cancel`)
-    return data
-  },
-
-  async getAgentTaskLogs(id: string): Promise<any> {
-    const { data } = await apiClient.get(`/agents/tasks/${id}/logs`)
     return data
   },
 
@@ -986,21 +991,46 @@ export const api = {
   // ── Activity / Timeline ───────────────────────────────────────
 
   async getActivities(params?: PaginationParams & { type?: string; action?: string; date_from?: string; date_to?: string }): Promise<PaginatedResponse<Activity>> {
-    // Activities are stored locally — no backend endpoint exists
+    // Try backend /activities first (Mega-P wired this up); fall back
+    // to localStorage so the dev loop and offline sessions still work.
+    // The localStorage path remains authoritative for user-generated
+    // activity until the writer paths also move backend-side.
+    let backendItems: Activity[] = []
+    try {
+      const { data } = await apiClient.get('/activities', {
+        params: {
+          page: params?.page ?? 1,
+          page_size: params?.page_size ?? 200,
+          type: params?.type,
+          action: params?.action,
+          date_from: params?.date_from,
+          date_to: params?.date_to,
+        },
+        // This path is non-fatal; hide the error toast.
+        headers: { 'X-Silent-Error': '1' },
+      })
+      backendItems = (data?.items ?? []) as Activity[]
+    } catch {
+      /* backend unreachable — pure localStorage path below */
+    }
+
     const raw = JSON.parse(localStorage.getItem('humanovo-activity-log') || '[]') as any[]
     // Normalize: ensure created_at is set (legacy items may only have timestamp)
-    let all: Activity[] = raw.map(a => ({
+    const localItems: Activity[] = raw.map(a => ({
       ...a,
       created_at: a.created_at || a.timestamp || new Date().toISOString(),
     }))
 
-    // Apply filters
-    if (params?.type) {
-      all = all.filter(a => a.type === params.type)
-    }
-    if (params?.action) {
-      all = all.filter(a => a.action === params.action)
-    }
+    // Merge + dedup by id (backend wins on conflict).
+    const byId = new Map<string, Activity>()
+    for (const a of localItems) if (a.id) byId.set(a.id, a)
+    for (const a of backendItems) if (a.id) byId.set(a.id, a)
+    let all = Array.from(byId.values()).sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+    )
+
+    if (params?.type)      all = all.filter(a => a.type === params.type)
+    if (params?.action)    all = all.filter(a => a.action === params.action)
     if (params?.date_from) {
       const from = new Date(params.date_from).getTime()
       all = all.filter(a => new Date(a.created_at).getTime() >= from)
@@ -1035,6 +1065,111 @@ export const api = {
   async deleteActivity(id: string): Promise<void> {
     const all = JSON.parse(localStorage.getItem('humanovo-activity-log') || '[]') as Activity[]
     localStorage.setItem('humanovo-activity-log', JSON.stringify(all.filter((a: any) => a.id !== id)))
+  },
+
+  // ── Experiments ───────────────────────────────────────────────
+
+  async getExperiments(params?: PaginationParams & { status?: string; project_id?: string }): Promise<PaginatedResponse<any>> {
+    const { data } = await apiClient.get('/experiments', { params })
+    return data
+  },
+  async getExperiment(id: string): Promise<any> {
+    const { data } = await apiClient.get(`/experiments/${id}`)
+    return data
+  },
+  async createExperiment(body: Record<string, any>): Promise<any> {
+    const { data } = await apiClient.post('/experiments', body)
+    return data
+  },
+  async updateExperiment(id: string, body: Record<string, any>): Promise<any> {
+    const { data } = await apiClient.patch(`/experiments/${id}`, body)
+    return data
+  },
+  async deleteExperiment(id: string): Promise<void> {
+    await apiClient.delete(`/experiments/${id}`)
+  },
+
+  // ── Datasets ──────────────────────────────────────────────────
+
+  async getDatasets(params?: PaginationParams): Promise<PaginatedResponse<any>> {
+    const { data } = await apiClient.get('/datasets', { params })
+    return data
+  },
+  async getDataset(id: string): Promise<any> {
+    const { data } = await apiClient.get(`/datasets/${id}`)
+    return data
+  },
+  async createDataset(body: Record<string, any>): Promise<any> {
+    const { data } = await apiClient.post('/datasets', body)
+    return data
+  },
+  async updateDataset(id: string, body: Record<string, any>): Promise<any> {
+    const { data } = await apiClient.patch(`/datasets/${id}`, body)
+    return data
+  },
+  async deleteDataset(id: string): Promise<void> {
+    await apiClient.delete(`/datasets/${id}`)
+  },
+
+  // ── Imaging ───────────────────────────────────────────────────
+
+  async getImagingStudies(params?: PaginationParams): Promise<PaginatedResponse<any>> {
+    const { data } = await apiClient.get('/imaging/studies', { params })
+    return data
+  },
+  async getImagingStudy(id: string): Promise<any> {
+    const { data } = await apiClient.get(`/imaging/studies/${id}`)
+    return data
+  },
+  async createImagingStudy(body: Record<string, any>): Promise<any> {
+    const { data } = await apiClient.post('/imaging/studies', body)
+    return data
+  },
+  async deleteImagingStudy(id: string): Promise<void> {
+    await apiClient.delete(`/imaging/studies/${id}`)
+  },
+
+  // ── Management lists (bulk-delete where available) ────────────
+
+  async getClinicalTrials(): Promise<any> {
+    const { data } = await apiClient.get('/clinical-trials')
+    return data
+  },
+  async bulkDeleteClinicalTrials(ids: string[]): Promise<any> {
+    const { data } = await apiClient.post('/clinical-trials/bulk-delete', { ids })
+    return data
+  },
+  async bulkArchiveClinicalTrials(ids: string[], restore = false): Promise<any> {
+    const { data } = await apiClient.post('/clinical-trials/bulk-archive', { ids }, { params: restore ? { restore: true } : {} })
+    return data
+  },
+  async getManuscripts(): Promise<any> {
+    const { data } = await apiClient.get('/manuscripts')
+    return data
+  },
+  async bulkDeleteManuscripts(ids: string[]): Promise<any> {
+    const { data } = await apiClient.post('/manuscripts/bulk-delete', { ids })
+    return data
+  },
+  async bulkArchiveManuscripts(ids: string[], restore = false): Promise<any> {
+    const { data } = await apiClient.post('/manuscripts/bulk-archive', { ids }, { params: restore ? { restore: true } : {} })
+    return data
+  },
+  async getBiobankSamples(params?: Record<string, any>): Promise<any> {
+    const { data } = await apiClient.get('/biobank/samples', { params })
+    return data
+  },
+  async bulkDeleteBiobankSamples(ids: string[]): Promise<any> {
+    const { data } = await apiClient.post('/biobank/samples/bulk-delete', { ids })
+    return data
+  },
+  async bulkArchiveBiobankSamples(ids: string[], restore = false): Promise<any> {
+    const { data } = await apiClient.post('/biobank/samples/bulk-archive', { ids }, { params: restore ? { restore: true } : {} })
+    return data
+  },
+  async getMLModels(): Promise<any> {
+    const { data } = await apiClient.get('/ml-models')
+    return data
   },
 
   // ── Monitoring ────────────────────────────────────────────────
@@ -1234,6 +1369,31 @@ export const api = {
     return data
   },
 
+  async listAllDiscoveryRuns(params?: { status?: string; limit?: number; offset?: number }): Promise<{
+    items: Array<{
+      run_id: string
+      project_id: string | null
+      disease: string
+      discovery_type: string
+      status: string
+      total_hypotheses: number
+      best_confidence: number
+      total_cost_usd?: number
+      total_duration_seconds?: number
+      stages_total?: number
+      stages_succeeded?: number
+      focus_entities?: string[]
+      created_at: string
+      completed_at: string | null
+    }>
+    total: number
+    limit: number
+    offset: number
+  }> {
+    const { data } = await apiClient.get('/discovery-runs', { params })
+    return data
+  },
+
   async listDiscoveryRuns(projectId: string, params?: { status?: string; limit?: number; offset?: number }): Promise<{ items: any[]; total: number }> {
     const { data } = await apiClient.get(`/projects/${projectId}/discovery-runs`, { params })
     return data
@@ -1391,6 +1551,19 @@ export const api = {
   },
   async seedCorpus(force = false): Promise<{ ok: boolean; message: string; evidence_count_after?: number }> {
     const { data } = await apiClient.post('/admin/seed-corpus', null, { params: { force } })
+    return data
+  },
+  async getAdminHealth(): Promise<{
+    status: 'healthy' | 'degraded'
+    environment: string
+    version: string
+    checks: Record<string, string>
+    counts: Record<string, number | null>
+    last_seen: Record<string, string | null>
+    embeddings?: { kg_entity?: number | null; evidence?: number | null }
+    flags?: { seed_available?: boolean; corpus_seeded?: boolean }
+  }> {
+    const { data } = await apiClient.get('/admin/health')
     return data
   },
 

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { FiShield, FiFileText, FiCheckSquare, FiInbox } from 'react-icons/fi'
 import { toast } from '../contexts/ToastContext'
+import { apiClient } from '../services'
 
 type TabId = 'irb' | 'agreements' | 'consent' | 'checklists'
 
@@ -10,7 +11,7 @@ interface Agreement { id: string; title: string; agreement_type: string; status:
 interface ConsentForm { id: string; title: string; version: string; status: string; language: string; irb_approved: boolean; versions: any[] }
 interface Checklist { id: string; framework: string; items: { name: string; completed: boolean; notes: string }[]; completion_pct: number; last_reviewed: string }
 
-const API = '/api/v1/regulatory'
+const BASE = '/regulatory'
 
 // Enum-guard so `?tab=bogus` silently falls back to "irb" instead of
 // contaminating TabId-typed state.
@@ -33,7 +34,7 @@ export default function RegulatoryCompliance() {
       const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash
       window.history.replaceState(window.history.state, '', newUrl)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [])
   const [irbs, setIrbs] = useState<IRBSubmission[]>([])
   const [agreements, setAgreements] = useState<Agreement[]>([])
@@ -44,21 +45,17 @@ export default function RegulatoryCompliance() {
   const loadTab = async (t: TabId) => {
     try {
       if (t === 'irb') {
-        const r = await fetch(`${API}/irb-submissions`)
-        if (!r.ok) throw new Error(`irb ${r.status}`)
-        setIrbs((await r.json()).items || [])
+        const { data } = await apiClient.get(`${BASE}/irb-submissions`)
+        setIrbs(data.items || [])
       } else if (t === 'agreements') {
-        const r = await fetch(`${API}/agreements`)
-        if (!r.ok) throw new Error(`agreements ${r.status}`)
-        setAgreements((await r.json()).items || [])
+        const { data } = await apiClient.get(`${BASE}/agreements`)
+        setAgreements(data.items || [])
       } else if (t === 'consent') {
-        const r = await fetch(`${API}/consent-forms`)
-        if (!r.ok) throw new Error(`consent ${r.status}`)
-        setConsents((await r.json()).items || [])
+        const { data } = await apiClient.get(`${BASE}/consent-forms`)
+        setConsents(data.items || [])
       } else if (t === 'checklists') {
-        const r = await fetch(`${API}/checklists`)
-        if (!r.ok) throw new Error(`checklists ${r.status}`)
-        setChecklists((await r.json()).items || [])
+        const { data } = await apiClient.get(`${BASE}/checklists`)
+        setChecklists(data.items || [])
       }
     } catch (err) {
       toast('error', `Could not load ${t} — ${err instanceof Error ? err.message : 'network error'}`, { title: 'Regulatory' })
@@ -68,8 +65,12 @@ export default function RegulatoryCompliance() {
 
   const toggleCheckItem = async (cl: Checklist, idx: number) => {
     const items = cl.items.map((item, i) => i === idx ? { ...item, completed: !item.completed } : item)
-    const r = await fetch(`${API}/checklists/${cl.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }) })
-    if (r.ok) loadTab('checklists')
+    try {
+      await apiClient.patch(`${BASE}/checklists/${cl.id}`, { items })
+      loadTab('checklists')
+    } catch {
+      // interceptor surfaces the toast
+    }
   }
 
   const tabs = [

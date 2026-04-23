@@ -505,19 +505,53 @@ function AdminSeedSettings() {
         project_count?: number
       }
   >(null)
+  const [health, setHealth] = useState<
+    | null
+    | {
+        status: 'healthy' | 'degraded'
+        environment: string
+        version: string
+        checks: Record<string, string>
+        counts: Record<string, number | null>
+        last_seen: Record<string, string | null>
+        embeddings?: { kg_entity?: number | null; evidence?: number | null }
+        flags?: { seed_available?: boolean; corpus_seeded?: boolean }
+      }
+  >(null)
   const [busy, setBusy] = useState<'kg' | 'corpus' | null>(null)
   const [lastMessage, setLastMessage] = useState<string>('')
+  const [lastPolled, setLastPolled] = useState<Date | null>(null)
+  const [ingestionJobs, setIngestionJobs] = useState<Array<{
+    id: string; name: string; status: string; source: string; created_at: string
+  }> | null>(null)
+  const [queueStats, setQueueStats] = useState<Record<string, any> | null>(null)
 
   const refresh = useCallback(async () => {
     try {
-      const s = await api.getKgStats()
+      const [s, h, jobs, qs] = await Promise.all([
+        api.getKgStats().catch(() => null),
+        api.getAdminHealth().catch(() => null),
+        // Show the last 5 jobs — the full list lives on a dedicated
+        // page; the admin panel is a "heartbeat" surface, not a
+        // replacement for job management.
+        api.getIngestionJobs({ page: 1, page_size: 5 }).catch(() => null),
+        api.getIngestionQueueStats().catch(() => null),
+      ])
       setStats(s)
+      setHealth(h)
+      setIngestionJobs(jobs ? (jobs.items as any) : null)
+      setQueueStats(qs || null)
+      setLastPolled(new Date())
     } catch {
-      setStats(null)
+      // already handled per-promise
     }
   }, [])
   useEffect(() => {
     refresh()
+    // 10s poll — Admin panel is the "is the backend alive?" surface so
+    // freshness matters more than bandwidth. Unsubscribe on unmount.
+    const id = window.setInterval(refresh, 10_000)
+    return () => window.clearInterval(id)
   }, [refresh])
 
   const runKgSeed = async () => {
@@ -561,17 +595,170 @@ function AdminSeedSettings() {
       </div>
 
       <div className="glass-card p-4">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-medium">Service health</h3>
+          <span className="text-xxs" style={{ color: 'var(--color-text-muted)' }}>
+            {lastPolled
+              ? `Polled ${lastPolled.toLocaleTimeString()} · auto-refreshes every 10s`
+              : 'Polling…'}
+          </span>
+        </div>
+        {health ? (
+          <div className="flex flex-wrap gap-2">
+            {Object.entries(health.checks).map(([name, state]) => {
+              const isOk = state === 'ok' || state === 'connected'
+              const isSoft = state === 'not_configured' || state === 'missing'
+              const color = isOk
+                ? 'var(--color-success)'
+                : isSoft
+                  ? 'var(--color-text-muted)'
+                  : 'var(--color-error)'
+              return (
+                <span
+                  key={name}
+                  title={state}
+                  className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-xs"
+                  style={{ borderColor: color, color }}
+                >
+                  <span
+                    aria-hidden
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: '50%',
+                      background: color,
+                      display: 'inline-block',
+                    }}
+                  />
+                  <span style={{ color: 'var(--color-text)' }}>{name}</span>
+                  <span className="tabular-nums">{state.length > 24 ? `${state.slice(0, 24)}…` : state}</span>
+                </span>
+              )
+            })}
+            <span
+              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-xs ml-auto"
+              style={{
+                borderColor:
+                  health.status === 'healthy'
+                    ? 'var(--color-success)'
+                    : 'var(--color-warning)',
+                color:
+                  health.status === 'healthy'
+                    ? 'var(--color-success)'
+                    : 'var(--color-warning)',
+              }}
+            >
+              overall: {health.status} · v{health.version}
+            </span>
+          </div>
+        ) : (
+          <p className="text-xs text-[var(--color-text-muted)]">
+            Health unavailable — /admin/health unreachable.
+          </p>
+        )}
+      </div>
+
+      {health && (
+        <div className="glass-card p-4">
+          <h3 className="text-sm font-medium mb-2">Table freshness</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-xs">
+            {Object.entries(health.counts).map(([table, count]) => {
+              const iso = health.last_seen[table]
+              const isError = typeof iso === 'string' && iso.startsWith('error:')
+              const ts = iso && !isError ? new Date(iso) : null
+              const ageMs = ts ? Date.now() - ts.getTime() : null
+              const ageDays = ageMs != null ? ageMs / 86_400_000 : null
+              const stale = ageDays != null && ageDays > 7
+              const empty = count === 0
+              return (
+                <div key={table} className="flex items-center justify-between gap-2 py-1">
+                  <span style={{ color: 'var(--color-text-muted)' }}>{table}</span>
+                  <span className="flex items-center gap-2">
+                    <span
+                      className="tabular-nums"
+                      style={{
+                        color: empty ? 'var(--color-warning)' : 'var(--color-text)',
+                      }}
+                    >
+                      {count ?? '—'}
+                    </span>
+                    <span
+                      className="text-xxs tabular-nums"
+                      style={{
+                        color: stale
+                          ? 'var(--color-warning)'
+                          : isError
+                            ? 'var(--color-error)'
+                            : 'var(--color-text-muted)',
+                      }}
+                      title={iso ?? 'never'}
+                    >
+                      {isError
+                        ? 'error'
+                        : ts
+                          ? ageDays! < 1
+                            ? 'today'
+                            : `${Math.floor(ageDays!)}d ago`
+                          : 'never'}
+                    </span>
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+          {Object.entries(health.last_seen).some(([, iso]) => {
+            if (!iso || iso.startsWith('error:')) return false
+            return Date.now() - new Date(iso).getTime() > 7 * 86_400_000
+          }) && (
+            <p
+              className="mt-2 text-xxs"
+              style={{ color: 'var(--color-warning)' }}
+            >
+              Some tables have not been updated in &gt; 7 days. Consider re-seeding or running an ingestion job.
+            </p>
+          )}
+        </div>
+      )}
+
+      <div className="glass-card p-4">
         <h3 className="text-sm font-medium mb-2">Current corpus</h3>
-        {stats ? (
+        {/* Prefer /admin/health when available (newer, includes embedding
+            split + flags). Fall back to /admin/kg-stats fields for older
+            backends that predate the health enrichment. */}
+        {stats || health ? (
           <div className="grid grid-cols-2 gap-2 text-xs" style={{ color: 'var(--color-text-muted)' }}>
-            <div>Environment</div><div style={{ color: 'var(--color-text)' }}>{stats.environment}</div>
-            <div>KG nodes</div><div style={{ color: 'var(--color-text)' }}>{stats.node_count}</div>
-            <div>KG edges</div><div style={{ color: 'var(--color-text)' }}>{stats.edge_count}</div>
-            <div>KG embeddings (pgvector 1024d)</div><div style={{ color: 'var(--color-text)' }}>{stats.embedding_count}</div>
-            <div>Evidence rows</div><div style={{ color: 'var(--color-text)' }}>{stats.evidence_count ?? '—'}</div>
-            <div>Evidence embeddings</div><div style={{ color: 'var(--color-text)' }}>{stats.evidence_embedding_count ?? '—'}</div>
-            <div>Hypotheses</div><div style={{ color: 'var(--color-text)' }}>{stats.hypothesis_count ?? '—'}</div>
-            <div>Projects</div><div style={{ color: 'var(--color-text)' }}>{stats.project_count ?? '—'}</div>
+            <div>Environment</div>
+            <div style={{ color: 'var(--color-text)' }}>
+              {stats?.environment ?? health?.environment ?? '—'}
+            </div>
+            <div>KG nodes</div>
+            <div style={{ color: 'var(--color-text)' }}>
+              {health?.counts?.kg_nodes ?? stats?.node_count ?? '—'}
+            </div>
+            <div>KG edges</div>
+            <div style={{ color: 'var(--color-text)' }}>
+              {health?.counts?.kg_edges ?? stats?.edge_count ?? '—'}
+            </div>
+            <div>KG embeddings (pgvector 1024d)</div>
+            <div style={{ color: 'var(--color-text)' }}>
+              {health?.embeddings?.kg_entity ?? stats?.embedding_count ?? '—'}
+            </div>
+            <div>Evidence rows</div>
+            <div style={{ color: 'var(--color-text)' }}>
+              {health?.counts?.evidence ?? stats?.evidence_count ?? '—'}
+            </div>
+            <div>Evidence embeddings</div>
+            <div style={{ color: 'var(--color-text)' }}>
+              {health?.embeddings?.evidence ?? stats?.evidence_embedding_count ?? '—'}
+            </div>
+            <div>Hypotheses</div>
+            <div style={{ color: 'var(--color-text)' }}>
+              {health?.counts?.hypotheses ?? stats?.hypothesis_count ?? '—'}
+            </div>
+            <div>Projects</div>
+            <div style={{ color: 'var(--color-text)' }}>
+              {health?.counts?.projects ?? stats?.project_count ?? '—'}
+            </div>
           </div>
         ) : (
           <p className="text-xs text-[var(--color-text-muted)]">Stats unavailable — backend unreachable.</p>
@@ -615,6 +802,91 @@ function AdminSeedSettings() {
             aria-live="polite"
           >
             {lastMessage}
+          </p>
+        )}
+      </div>
+
+      {/* Ingestion activity — read-only view of the queue + last 5 jobs.
+          Link out to the dedicated Data Manager → Ingestion page for
+          actions like create / cancel / retry. */}
+      <div className="glass-card p-4">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-medium">Ingestion activity</h3>
+          <a
+            href="/data-manager?tab=ingestion"
+            className="text-xxs hover:underline"
+            style={{ color: 'var(--color-accent, #60a5fa)' }}
+          >
+            Open Data Manager →
+          </a>
+        </div>
+        {queueStats ? (
+          <div className="grid grid-cols-4 gap-2 text-xxs mb-3" style={{ color: 'var(--color-text-muted)' }}>
+            {(['pending', 'running', 'completed', 'failed'] as const).map(k => (
+              <div key={k} className="flex flex-col">
+                <span>{k}</span>
+                <span
+                  className="tabular-nums text-sm"
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  {queueStats[k] ?? queueStats[`${k}_count`] ?? 0}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-[var(--color-text-muted)] mb-3">
+            Queue stats unavailable — ingestion scheduler may be offline.
+          </p>
+        )}
+        {ingestionJobs && ingestionJobs.length > 0 ? (
+          <table className="w-full text-xxs">
+            <thead>
+              <tr style={{ color: 'var(--color-text-muted)' }}>
+                <th className="text-left font-normal pb-1">Name</th>
+                <th className="text-left font-normal pb-1">Source</th>
+                <th className="text-left font-normal pb-1">Status</th>
+                <th className="text-right font-normal pb-1">Created</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ingestionJobs.map(j => (
+                <tr key={j.id}>
+                  <td className="py-0.5 pr-2 truncate max-w-[180px]" title={j.name}>
+                    {j.name}
+                  </td>
+                  <td className="py-0.5 pr-2" style={{ color: 'var(--color-text-muted)' }}>
+                    {j.source}
+                  </td>
+                  <td
+                    className="py-0.5 pr-2"
+                    style={{
+                      color:
+                        j.status === 'completed'
+                          ? 'var(--color-success)'
+                          : j.status === 'failed'
+                            ? 'var(--color-error)'
+                            : j.status === 'running'
+                              ? 'var(--color-warning)'
+                              : 'var(--color-text-muted)',
+                    }}
+                  >
+                    {j.status}
+                  </td>
+                  <td
+                    className="py-0.5 text-right tabular-nums"
+                    style={{ color: 'var(--color-text-muted)' }}
+                    title={j.created_at}
+                  >
+                    {new Date(j.created_at).toLocaleTimeString()}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <p className="text-xs text-[var(--color-text-muted)]">
+            No ingestion jobs yet. Run one from Data Manager → Ingestion or upload a document from a project.
           </p>
         )}
       </div>
@@ -707,7 +979,7 @@ export default function Settings() {
       const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash
       window.history.replaceState(window.history.state, '', newUrl)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [])
 
   const renderContent = () => {

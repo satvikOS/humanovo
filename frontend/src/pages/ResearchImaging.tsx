@@ -16,6 +16,8 @@ import clsx from 'clsx'
 import { parseMedicalFile, parsedToDataURL } from '../utils/medicalImaging'
 import VolumeViewer3D from '../components/VolumeViewer3D'
 import { useAlertDialog } from '../components/AlertDialog'
+import { EmptyState } from '../components/EmptyState'
+import { apiClient } from '../services'
 
 type Modality = 'CT' | 'MRI' | 'X-Ray' | 'Ultrasound' | 'PET' | 'Microscopy' | 'Fundus' | 'OCT' | 'Mammography' | 'Endoscopy'
 type Tool = 'pan' | 'window' | 'rect' | 'circle' | 'line' | 'point' | 'polygon' | 'measure' | 'ruler' | 'brush' | 'eraser'
@@ -457,12 +459,21 @@ export default function ResearchImaging() {
   // localStorage is still source-of-truth for uploaded images; backend
   // studies ship metadata-only ("findings" + "modality") which is enough
   // for the list/detail panel to render.
+  // Refetch strategy: poll /api/v1/imaging/studies every 30 s AND when
+  // the tab regains focus. Poll interval is conservative — imaging
+  // studies change slowly. Page-Visibility gate saves cycles when the
+  // tab is backgrounded. Also cleans up on unmount.
   useEffect(() => {
-    fetch('/api/v1/imaging/studies')
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
+    const abortCtrl = { cancelled: false }
+    const loadStudies = async () => {
+      if (document.hidden) return
+      try {
+        const { data } = await apiClient.get('/imaging/studies', {
+          // Background poll — don't toast every transient failure.
+          headers: { 'X-Silent-Error': '1' },
+        })
         const items = (data && (data.items || data)) as Array<Record<string, unknown>> | null
-        if (!Array.isArray(items)) return
+        if (!Array.isArray(items) || abortCtrl.cancelled) return
         setStudies(prev => {
           const byId = new Map(prev.map(s => [s.id, s] as const))
           for (const it of items) {
@@ -487,8 +498,19 @@ export default function ResearchImaging() {
           }
           return Array.from(byId.values())
         })
-      })
-      .catch(() => { /* silent — local fallback is the primary source */ })
+      } catch {
+        /* silent — local is authoritative for user-uploaded pixel data */
+      }
+    }
+    void loadStudies()
+    const onVisible = () => { if (!document.hidden) void loadStudies() }
+    document.addEventListener('visibilitychange', onVisible)
+    const poll = window.setInterval(loadStudies, 30_000)
+    return () => {
+      abortCtrl.cancelled = true
+      document.removeEventListener('visibilitychange', onVisible)
+      window.clearInterval(poll)
+    }
   }, [])
   const [selectedId, setSelectedId] = useState<string | null>(() => {
     const qId = searchParams.get('id')
@@ -513,7 +535,7 @@ export default function ResearchImaging() {
       const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash
       window.history.replaceState(window.history.state, '', newUrl)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [])
   const [tool, setTool] = useState<Tool>('pan')
   const [zoom, setZoom] = useState(1)
@@ -745,7 +767,7 @@ export default function ResearchImaging() {
       sCtx.fillText(`Slice ${sliceX}/${W}`, 8, 30)
     }
     } catch (err) {
-      // eslint-disable-next-line no-console
+       
       console.warn('[ResearchImaging] orthogonal view render failed:', err)
     }
   }, [viewLayout, selected, slicePos, imgGeneration])
@@ -929,7 +951,7 @@ export default function ResearchImaging() {
       // Swallow canvas render errors (e.g. getImageData OOM on huge images,
       // tainted canvas from external data URLs) so a malformed study does
       // not crash the entire imaging page.
-      // eslint-disable-next-line no-console
+       
       console.warn('[ResearchImaging] renderCanvas failed:', err)
     } finally {
       renderingRef.current = false
@@ -957,7 +979,7 @@ export default function ResearchImaging() {
   // Also re-render on segMask generation so brush strokes paint live. The
   // segMask itself is read via ref inside renderCanvas to keep the callback
   // identity stable.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   useEffect(() => { renderCanvas() }, [renderCanvas, imgGeneration, segMask])
 
   const screenToImage = useCallback((e: React.MouseEvent): { x: number; y: number } | null => {
@@ -1305,32 +1327,24 @@ export default function ResearchImaging() {
       const dataUrl = canvas.toDataURL('image/png')
       const base64 = dataUrl.split(',')[1]
 
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || ''}/api/v1/imaging/analyze`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          image_base64: base64,
-          modality: selected.modality,
-          body_part: selected.bodyPart,
-          width: selected.width,
-          height: selected.height,
-          window_center: selected.windowCenter,
-          window_width: selected.windowWidth,
-          filter_applied: selected.filter,
-        }),
+      const { data } = await apiClient.post('/imaging/analyze', {
+        image_base64: base64,
+        modality: selected.modality,
+        body_part: selected.bodyPart,
+        width: selected.width,
+        height: selected.height,
+        window_center: selected.windowCenter,
+        window_width: selected.windowWidth,
+        filter_applied: selected.filter,
       })
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({ detail: response.statusText }))
-        throw new Error(errData.detail || `Server error ${response.status}`)
-      }
-      const data = await response.json()
       if (data.analysis) {
         setAiAnalysis(data.analysis)
       } else {
         setAiAnalysis('No analysis returned. Please try again.')
       }
     } catch (err: any) {
-      setAiAnalysis(`Analysis failed: ${err?.message || 'Unknown error'}`)
+      const detail = err?.response?.data?.detail
+      setAiAnalysis(`Analysis failed: ${detail || err?.message || 'Unknown error'}`)
     }
     setAiLoading(false)
   }
@@ -1425,9 +1439,13 @@ export default function ResearchImaging() {
 
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
           {filteredStudies.length === 0 && (
-            <div className="text-center py-12 text-xs" style={{ color: 'var(--color-text-muted)' }}>
-              No studies. Click + to upload.
-            </div>
+            <EmptyState
+              icon={<FiImage />}
+              title="No studies"
+              description="Upload a DICOM, NIfTI, or standard image to start reviewing."
+              action={{ label: 'Upload study', onClick: () => fileInputRef.current?.click() }}
+              fullPanel={false}
+            />
           )}
           {filteredStudies.map(s => {
             // Null-guard: backend-seeded studies might carry modalities
@@ -2299,9 +2317,12 @@ export default function ResearchImaging() {
                   Annotations ({selected.annotations.length})
                 </div>
                 {selected.annotations.length === 0 && (
-                  <div className="text-xs text-center py-8" style={{ color: 'var(--color-text-muted)' }}>
-                    No annotations. Pick a tool from the toolbar.
-                  </div>
+                  <EmptyState
+                    icon={<FiTarget />}
+                    title="No annotations"
+                    description="Pick a drawing tool from the toolbar to mark regions of interest."
+                    fullPanel={false}
+                  />
                 )}
                 <div className="space-y-1">
                   {selected.annotations.map((a) => (

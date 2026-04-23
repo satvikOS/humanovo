@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   FiSearch, FiPlus, FiTrash2, FiZoomIn, FiZoomOut, FiMaximize2,
-  FiLink,
+  FiLink, FiShare2,
 } from 'react-icons/fi'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
+import { EmptyState } from '../components/EmptyState'
 import { logActivity } from '../utils/persistence'
+import { apiClient } from '../services'
 
 interface GNode { id: string; name: string; type: string; description: string; created_at: string }
 interface GEdge { id: string; source: string; target: string; source_name: string; target_name: string; relationship: string; strength: number; evidence: string }
@@ -14,7 +16,8 @@ const TYPE_COLORS: Record<string, string> = {
   disease: '#B07E8B', drug: '#C4956A',
 }
 
-const API = '/api/v1/knowledge-graph'
+// apiClient's baseURL already includes /api/v1
+const BASE = '/knowledge-graph'
 
 export default function KnowledgeGraphViewer() {
   const [nodes, setNodes] = useState<GNode[]>([])
@@ -35,10 +38,14 @@ export default function KnowledgeGraphViewer() {
 
   const load = async () => {
     try {
-      const [nR, eR, sR] = await Promise.all([fetch(`${API}/nodes`), fetch(`${API}/edges`), fetch(`${API}/stats`)])
-      if (nR.ok) setNodes((await nR.json()).items || [])
-      if (eR.ok) setEdges((await eR.json()).items || [])
-      if (sR.ok) setStats(await sR.json())
+      const [nR, eR, sR] = await Promise.allSettled([
+        apiClient.get(`${BASE}/nodes`),
+        apiClient.get(`${BASE}/edges`),
+        apiClient.get(`${BASE}/stats`),
+      ])
+      if (nR.status === 'fulfilled') setNodes(nR.value.data?.items || [])
+      if (eR.status === 'fulfilled') setEdges(eR.value.data?.items || [])
+      if (sR.status === 'fulfilled') setStats(sR.value.data)
     } catch { /* ignore */ }
   }
   useEffect(() => { load() }, [])
@@ -138,8 +145,13 @@ export default function KnowledgeGraphViewer() {
 
   const addNode = async () => {
     if (!newNode.name.trim()) return
-    const res = await fetch(`${API}/nodes`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newNode) })
-    if (res.ok) { logActivity({ type: 'discovery', action: 'created', title: `Added node: ${newNode.name} (${newNode.type})` }); setNewNode({ name: '', type: 'gene', description: '' }); setShowAdd(false); load() }
+    try {
+      await apiClient.post(`${BASE}/nodes`, newNode)
+      logActivity({ type: 'discovery', action: 'created', title: `Added node: ${newNode.name} (${newNode.type})` })
+      setNewNode({ name: '', type: 'gene', description: '' })
+      setShowAdd(false)
+      load()
+    } catch { /* interceptor surfaces the toast */ }
   }
 
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
@@ -149,7 +161,9 @@ export default function KnowledgeGraphViewer() {
   const confirmDeleteNode = async () => {
     if (!deleteConfirmId) return
     const deletedNode = nodes.find(n => n.id === deleteConfirmId)
-    await fetch(`${API}/nodes/${deleteConfirmId}`, { method: 'DELETE' })
+    try {
+      await apiClient.delete(`${BASE}/nodes/${deleteConfirmId}`)
+    } catch { /* interceptor surfaces the toast */ }
     if (selected?.id === deleteConfirmId) setSelected(null)
     logActivity({ type: 'discovery', action: 'deleted', title: `Deleted node: ${deletedNode?.name || deleteConfirmId}` })
     setDeleteConfirmId(null)
@@ -158,8 +172,10 @@ export default function KnowledgeGraphViewer() {
 
   const searchNodes = async () => {
     if (!search.trim()) { load(); return }
-    const res = await fetch(`${API}/nodes?search=${encodeURIComponent(search)}`)
-    if (res.ok) setNodes((await res.json()).items || [])
+    try {
+      const { data } = await apiClient.get(`${BASE}/nodes`, { params: { search } })
+      setNodes(data?.items || [])
+    } catch { /* interceptor surfaces the toast */ }
   }
 
   const connEdges = selected ? edges.filter(e => e.source === selected.id || e.target === selected.id) : []
@@ -212,6 +228,19 @@ export default function KnowledgeGraphViewer() {
         <div className="flex-1 relative">
           <canvas ref={canvasRef} className="w-full h-full cursor-grab active:cursor-grabbing"
             onClick={handleClick} onMouseDown={handleDown} onMouseMove={handleMove} onMouseUp={handleUp} onMouseLeave={handleUp} onWheel={handleWheel} />
+          {nodes.length === 0 && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="pointer-events-auto">
+                <EmptyState
+                  icon={<FiShare2 />}
+                  title="No nodes in graph"
+                  description="Add biomedical entities (genes, proteins, pathways) to start visualizing relationships."
+                  action={{ label: 'Add Node', onClick: () => setShowAdd(true) }}
+                  fullPanel={false}
+                />
+              </div>
+            </div>
+          )}
           <div className="absolute bottom-4 left-4 glass-card p-3 flex gap-3">
             {Object.entries(TYPE_COLORS).map(([type, color]) => (
               <div key={type} className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-full" style={{ background: color }} /><span className="text-xxs capitalize">{type}</span></div>

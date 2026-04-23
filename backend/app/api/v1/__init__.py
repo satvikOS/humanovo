@@ -23,6 +23,7 @@ from app.api.v1.endpoints import (
     discovery,
     document_pipeline,
     evidence,
+    experiments,
     genomics,
     hypotheses,
     imaging,
@@ -86,6 +87,7 @@ router.include_router(activities.router, prefix="/activities", tags=["activities
 # New feature modules
 router.include_router(statistics.router, prefix="/statistics", tags=["statistics"])
 router.include_router(datasets.router, prefix="/datasets", tags=["datasets"])
+router.include_router(experiments.router, prefix="/experiments", tags=["experiments"])
 router.include_router(collaboration.router, prefix="/collaboration", tags=["collaboration"])
 router.include_router(knowledge_graph.router, prefix="/knowledge-graph", tags=["knowledge-graph"])
 # Entity-centric API surface (what frontend/src/services/knowledge.ts calls).
