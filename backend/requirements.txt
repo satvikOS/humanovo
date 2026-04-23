@@ -93,6 +93,15 @@ python-dotenv>=1.0.1
 tenacity>=9.0.0
 structlog>=24.4.0
 
+# ─── Auth ────────────────────────────────────────────────────────
+# Imported at app.core.auth; loading the v1 router transitively imports
+# this module, so a fresh-install CI box needs these or every test that
+# touches the router (including test_router_contracts.py) fails with
+# ModuleNotFoundError: No module named 'jose'.
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+email-validator>=2.2.0
+
 # ─── Testing ────────────────────────────────────────────────────
 pytest>=8.3.0
 pytest-asyncio>=0.24.0
