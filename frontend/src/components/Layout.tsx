@@ -1315,7 +1315,8 @@ export default function Layout() {
         d: '/dashboard',
         p: '/projects',
         e: '/evidence',
-        h: '/hypotheses',
+        // `g h` now opens /projects since hypotheses live inside projects.
+        h: '/projects',
         c: '/compute-lab',
         n: '/notebook',
         a: '/agents',
@@ -1363,7 +1364,9 @@ export default function Layout() {
     if (path.startsWith('/projects/')) return 'Project'
     if (path === '/evidence') return 'Evidence'
     if (path === '/agents') return 'Discovery'
-    if (path === '/hypotheses') return 'Hypotheses'
+    // /hypotheses itself redirects to /projects so the title label
+    // for it would only ever show mid-redirect. The per-id detail
+    // route still has a page.
     if (path.startsWith('/hypotheses/')) return 'Hypothesis Detail'
     if (path === '/compute-lab') return 'Compute Lab'
     if (path === '/simulations' || path === '/statistical-analysis' || path === '/numeric-compute' || path === '/matlab-compute') return 'Compute Lab'

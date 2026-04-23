@@ -526,6 +526,63 @@ export interface SearchResult {
 // API Functions
 // ═══════════════════════════════════════════════════════════════════
 
+// ── Citation Library (Mendeley-equivalent reference manager) ──
+export interface LibraryCitation {
+  id: string
+  type: 'journal' | 'book' | 'conference' | 'preprint' | 'website' | 'thesis' | string
+  title: string
+  authors: string[]
+  year?: number | null
+  abstract?: string | null
+  journal?: string | null
+  volume?: string | null
+  issue?: string | null
+  pages?: string | null
+  publisher?: string | null
+  doi?: string | null
+  pmid?: string | null
+  pmcid?: string | null
+  arxiv_id?: string | null
+  isbn?: string | null
+  url?: string | null
+  tags: string[]
+  folders: string[]
+  starred: boolean
+  read: boolean
+  notes?: string | null
+  cite_key?: string | null
+  pdf_url?: string | null
+  pdf_file_id?: string | null
+  csl_json: Record<string, any>
+  project_id?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface LibraryFolder {
+  id: string
+  name: string
+  parent_id: string | null
+  color: string | null
+  icon: string | null
+  order_index: number
+  project_id: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface LibraryHighlight {
+  id: string
+  citation_id: string
+  page: number
+  rect: { x: number; y: number; w: number; h: number } | Record<string, number>
+  text: string | null
+  color: string
+  note: string | null
+  created_at: string
+  updated_at: string
+}
+
 // ── Discovery Sessions (conversational Discovery persistence) ──
 export interface DiscoveryMessageCard {
   kind: 'hypothesis' | 'evidence' | 'entity' | 'kg_subgraph' | 'citation' | string
@@ -643,6 +700,78 @@ export const api = {
   async forkDiscoverySession(sessionId: string): Promise<DiscoverySessionDetail> {
     const { data } = await apiClient.post(`/discovery-sessions/${sessionId}/fork`)
     return data
+  },
+
+  // ── Citation Library (Mendeley-equivalent reference manager) ──
+
+  async listLibraryCitations(params?: {
+    q?: string; starred_only?: boolean; unread_only?: boolean;
+    tag?: string; folder?: string; year?: number; author?: string;
+    project_id?: string; limit?: number; offset?: number;
+  }): Promise<LibraryCitation[]> {
+    const { data } = await apiClient.get('/citations', { params })
+    return data
+  },
+  async createLibraryCitation(body: Partial<LibraryCitation>): Promise<LibraryCitation> {
+    const { data } = await apiClient.post('/citations', body)
+    return data
+  },
+  async getLibraryCitation(id: string): Promise<LibraryCitation> {
+    const { data } = await apiClient.get(`/citations/${id}`)
+    return data
+  },
+  async updateLibraryCitation(id: string, body: Partial<LibraryCitation>): Promise<LibraryCitation> {
+    const { data } = await apiClient.patch(`/citations/${id}`, body)
+    return data
+  },
+  async deleteLibraryCitation(id: string): Promise<void> {
+    await apiClient.delete(`/citations/${id}`)
+  },
+  async bulkDeleteLibraryCitations(ids: string[]): Promise<{ deleted_count: number }> {
+    const { data } = await apiClient.post('/citations/bulk-delete', { ids })
+    return data
+  },
+  async listLibraryFolders(params?: { project_id?: string }): Promise<LibraryFolder[]> {
+    const { data } = await apiClient.get('/citation-folders', { params })
+    return data
+  },
+  async createLibraryFolder(body: { name: string; parent_id?: string; color?: string; icon?: string; order_index?: number; project_id?: string }): Promise<LibraryFolder> {
+    const { data } = await apiClient.post('/citation-folders', body)
+    return data
+  },
+  async updateLibraryFolder(id: string, body: Partial<LibraryFolder>): Promise<LibraryFolder> {
+    const { data } = await apiClient.patch(`/citation-folders/${id}`, body)
+    return data
+  },
+  async deleteLibraryFolder(id: string): Promise<void> {
+    await apiClient.delete(`/citation-folders/${id}`)
+  },
+  async listLibraryHighlights(citationId: string): Promise<LibraryHighlight[]> {
+    const { data } = await apiClient.get(`/citations/${citationId}/highlights`)
+    return data
+  },
+  async createLibraryHighlight(citationId: string, body: Omit<LibraryHighlight, 'id' | 'created_at' | 'updated_at'>): Promise<LibraryHighlight> {
+    const { data } = await apiClient.post(`/citations/${citationId}/highlights`, body)
+    return data
+  },
+  async updateLibraryHighlight(id: string, body: Partial<LibraryHighlight>): Promise<LibraryHighlight> {
+    const { data } = await apiClient.patch(`/citation-highlights/${id}`, body)
+    return data
+  },
+  async deleteLibraryHighlight(id: string): Promise<void> {
+    await apiClient.delete(`/citation-highlights/${id}`)
+  },
+  async importLibraryCitations(body: { format: 'bibtex' | 'ris' | 'csl' | 'endnote'; text: string; project_id?: string }): Promise<{ imported: number; skipped_duplicates: number; citations: LibraryCitation[] }> {
+    const { data } = await apiClient.post('/citations/import', body)
+    return data
+  },
+  async exportLibraryCitations(body: { format: 'bibtex' | 'ris' | 'csl'; ids?: string[]; project_id?: string }): Promise<Blob | { items: any[]; count: number }> {
+    if (body.format === 'csl') {
+      const { data } = await apiClient.post('/citations/export', body)
+      return data
+    }
+    const resp = await apiClient.post('/citations/export', body, { responseType: 'blob' })
+    return resp.data
   },
 
   async getProject(id: string): Promise<Project> {

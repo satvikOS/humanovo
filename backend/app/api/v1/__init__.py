@@ -13,6 +13,7 @@ from app.api.v1.endpoints import (
     agents,
     auth,
     citation_verify,
+    citations,
     biobank,
     clinical_trials,
     collaboration,
@@ -140,3 +141,6 @@ router.include_router(admin.router, prefix="/admin", tags=["admin"])
 
 # Citation verification — CrossRef + NCBI round-trip for single citations.
 router.include_router(citation_verify.router, prefix="/citation", tags=["citation"])
+
+# Citation Library — full Mendeley-equivalent reference manager.
+router.include_router(citations.router)
