@@ -2,58 +2,70 @@
 Dependency completeness guard.
 
 Scans every module under app/ and asserts each can be imported without
-a ModuleNotFoundError. This catches the class of bug where a developer
-adds `from some_lib import X` in application code but forgets to add
-`some-lib` to requirements.txt — the local venv has it leftover from a
-prior install so tests pass, but a fresh-install CI runner fails.
+a ModuleNotFoundError on a fresh Python interpreter. This catches the
+class of bug where a developer adds `from some_lib import X` in
+application code but forgets to add `some-lib` to requirements.txt —
+local dev venvs have it leftover from a prior install so tests pass,
+but a fresh-install CI runner fails.
 
-This is exactly the failure mode that silently shipped
-app.core.auth depending on python-jose + passlib + email-validator
-without them in requirements.txt — every test that transitively
-imported the v1 router (including test_router_contracts.py) blew up
-on CI with ModuleNotFoundError: No module named 'jose'.
+This is exactly the failure mode that silently shipped app.core.auth
+depending on python-jose + passlib + email-validator without them in
+requirements.txt — every test that transitively imported the v1 router
+blew up on CI with ModuleNotFoundError: No module named 'jose'.
 
-Kept hermetic: no DB, no TestClient, no services. Pure import discipline.
+Runs the import sweep in a subprocess so prior tests' monkeypatches /
+sys.modules pollution / asyncio loop state can't poison the check.
+Hermetic: no DB, no TestClient, no services.
 """
 from __future__ import annotations
 
-import importlib
+import subprocess
+import sys
 from pathlib import Path
 
 
-def _app_modules() -> list[str]:
-    backend_dir = Path(__file__).resolve().parents[1]
-    app_dir = backend_dir / "app"
-    modules: list[str] = []
-    for f in sorted(app_dir.rglob("*.py")):
-        if "__pycache__" in f.parts:
-            continue
-        if f.name == "__init__.py":
-            # Parent package gets imported via its children anyway.
-            continue
-        rel = f.relative_to(backend_dir).with_suffix("")
-        modules.append(".".join(rel.parts))
-    return modules
+_PROBE = r"""
+import importlib, json, sys
+from pathlib import Path
+
+backend = Path(r'{backend}')
+sys.path.insert(0, str(backend))
+
+missing = []
+for f in sorted((backend / 'app').rglob('*.py')):
+    if '__pycache__' in f.parts or f.name == '__init__.py':
+        continue
+    rel = f.relative_to(backend).with_suffix('')
+    mod = '.'.join(rel.parts)
+    try:
+        importlib.import_module(mod)
+    except ModuleNotFoundError as exc:
+        missing.append((mod, str(exc)))
+    except Exception:
+        pass
+
+print(json.dumps(missing))
+"""
 
 
 def test_every_app_module_has_its_deps_declared() -> None:
-    """Every app/ module must import without a ModuleNotFoundError.
+    backend_dir = Path(__file__).resolve().parents[1]
+    probe = _PROBE.format(backend=str(backend_dir))
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=backend_dir,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, (
+        f"Probe subprocess failed (rc={result.returncode}): "
+        f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+    import json
 
-    Non-dep failures (e.g. env-var lookups at import time) are NOT
-    caught here on purpose — they'd be false positives for a dep check.
-    """
-    missing: list[tuple[str, str]] = []
-    for mod in _app_modules():
-        try:
-            importlib.import_module(mod)
-        except ModuleNotFoundError as exc:
-            missing.append((mod, str(exc)))
-        except Exception:
-            # Non-dep import errors (env-var missing, DB config, etc.)
-            # are outside this test's scope.
-            pass
-
+    missing = json.loads(result.stdout.strip().splitlines()[-1])
     assert not missing, (
-        "Modules fail to import on a fresh install (missing entries in "
+        "Modules fail to import on a fresh Python (missing entries in "
         f"requirements.txt?): {missing}"
     )
