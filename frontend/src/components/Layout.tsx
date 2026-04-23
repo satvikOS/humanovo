@@ -1404,8 +1404,24 @@ if (path === '/clinical-trials') return 'Clinical Trials'
 
   return (
     <div className="flex h-screen bg-[var(--color-bg)]">
+      {/* Skip-to-content link — visually hidden until a keyboard user
+          tabs to it, then becomes a high-contrast button that jumps
+          past the sidebar + header straight into <main>. Standard
+          WCAG 2.4.1 "Bypass Blocks" implementation. */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[99999] focus:px-4 focus:py-2 focus:rounded-lg focus:shadow-lg"
+        style={{
+          background: 'var(--color-accent-blue, #3b82f6)',
+          color: '#fff',
+          fontSize: '0.875rem',
+          fontWeight: 600,
+        }}
+      >
+        Skip to main content
+      </a>
       {/* Sidebar */}
-      <aside className="w-52 flex flex-col glass-sidebar">
+      <aside className="w-52 flex flex-col glass-sidebar" aria-label="Primary navigation">
         {/* Logo */}
         <div className="h-14 flex items-center px-4 border-b border-[var(--color-border)]">
           <a href="/dashboard" onClick={(e) => { e.preventDefault(); window.location.href = '/dashboard' }} className="flex items-center gap-2.5 no-underline hover:opacity-80 transition-opacity cursor-pointer">
@@ -1647,7 +1663,11 @@ if (path === '/clinical-trials') return 'Clinical Trials'
         <WorkspaceTabs />
 
         {/* Main content */}
-        <main className="flex-1 min-h-0 overflow-auto bg-[var(--color-bg)]">
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className="flex-1 min-h-0 overflow-auto bg-[var(--color-bg)]"
+        >
           <Outlet />
         </main>
       </div>
