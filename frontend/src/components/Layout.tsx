@@ -125,11 +125,11 @@ const managementNavItems = [
   { to: '/regulatory', icon: FiShield, label: 'Regulatory' },
 ]
 
-// Dedicated hypothesis + ML-models + knowledge-graph nav — previously
-// orphaned pages with no entry in the sidebar. Lives in its own nav
-// section so the first three (hypothesis workflow) group together.
+// Knowledge section. The standalone Hypotheses entry was removed —
+// hypotheses now live inside their parent project and surface from
+// the Discovery chat or the project detail view. Old /hypotheses
+// links redirect to /projects so external bookmarks don't 404.
 const knowledgeNavItems = [
-  { to: '/hypotheses', icon: FiZap, label: 'Hypotheses' },
   { to: '/knowledge-graph', icon: FiLayers, label: 'Knowledge Graph' },
   { to: '/ml-models', icon: FiCpu, label: 'ML Models' },
 ]
@@ -302,7 +302,9 @@ function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
     { label: 'Go to Experiments', icon: FiClipboard, category: 'Navigation', action: () => { navigate('/experiment-tracker'); onClose() } },
     { label: 'Go to Genomics', icon: FiHeart, category: 'Navigation', action: () => { navigate('/genomics'); onClose() } },
     { label: 'Go to Knowledge Graph', icon: FiShare2, category: 'Navigation', shortcut: ['g', 'k'], action: () => { navigate('/knowledge-graph'); onClose() } },
-    { label: 'Go to Hypotheses', icon: FiZap, category: 'Navigation', shortcut: ['g', 'h'], action: () => { navigate('/hypotheses'); onClose() } },
+    // `g h` historically opened /hypotheses; now opens /projects
+    // since that's where hypotheses live.
+    { label: 'Go to Projects (hypotheses)', icon: FiFolder, category: 'Navigation', shortcut: ['g', 'h'], action: () => { navigate('/projects'); onClose() } },
     { label: 'Go to Workbench', icon: FiGrid, category: 'Navigation', shortcut: ['g', 'w'], action: () => { navigate('/workbench'); onClose() } },
     { label: 'New Project', icon: FiPlus, description: 'Create a new research project', category: 'Actions', action: () => { navigate('/projects?new=1'); onClose() } },
     { label: 'Start Discovery', icon: FiZap, description: 'Launch AI discovery pipeline', category: 'Actions', action: () => { navigate('/agents?start=1'); onClose() } },
