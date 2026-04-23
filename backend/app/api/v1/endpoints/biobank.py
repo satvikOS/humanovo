@@ -50,6 +50,8 @@ class CheckoutRequest(BaseModel):
 # ── Samples ─────────────────────────────────────────────────────
 
 
+@router.get("")
+@router.get("/")
 @router.get("/samples")
 async def list_samples(
     sample_type: Optional[str] = None,

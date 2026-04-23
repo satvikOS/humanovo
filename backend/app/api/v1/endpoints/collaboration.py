@@ -314,3 +314,46 @@ async def get_audit_log(
         "total": total,
         "page": page,
     }
+
+
+@router.get("/team")
+async def list_team_members(db: AsyncSession = Depends(get_db)) -> dict:
+    members: dict[str, dict] = {}
+    try:
+        result = await db.execute(
+            select(
+                CollaborationComment.user_id,
+                CollaborationComment.user_name,
+            )
+            .group_by(CollaborationComment.user_id, CollaborationComment.user_name)
+            .limit(100)
+        )
+        for uid, uname in result.all():
+            if not uid:
+                continue
+            members.setdefault(str(uid), {
+                "id": str(uid),
+                "name": uname or str(uid),
+                "email": "",
+                "role": "collaborator",
+                "avatar_color": "#60a5fa",
+            })
+    except Exception:
+        pass
+    try:
+        share_result = await db.execute(
+            select(ProjectShare.shared_with, ProjectShare.permission).limit(100)
+        )
+        for uid, perm in share_result.all():
+            if not uid:
+                continue
+            members.setdefault(str(uid), {
+                "id": str(uid),
+                "name": str(uid),
+                "email": "",
+                "role": perm or "collaborator",
+                "avatar_color": "#a78bfa",
+            })
+    except Exception:
+        pass
+    return {"members": list(members.values()), "total": len(members)}
