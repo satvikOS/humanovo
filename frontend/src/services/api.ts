@@ -1067,6 +1067,68 @@ export const api = {
     localStorage.setItem('humanovo-activity-log', JSON.stringify(all.filter((a: any) => a.id !== id)))
   },
 
+  // ── Experiments ───────────────────────────────────────────────
+
+  async getExperiments(params?: PaginationParams & { status?: string; project_id?: string }): Promise<PaginatedResponse<any>> {
+    const { data } = await apiClient.get('/experiments', { params })
+    return data
+  },
+  async getExperiment(id: string): Promise<any> {
+    const { data } = await apiClient.get(`/experiments/${id}`)
+    return data
+  },
+  async createExperiment(body: Record<string, any>): Promise<any> {
+    const { data } = await apiClient.post('/experiments', body)
+    return data
+  },
+  async updateExperiment(id: string, body: Record<string, any>): Promise<any> {
+    const { data } = await apiClient.patch(`/experiments/${id}`, body)
+    return data
+  },
+  async deleteExperiment(id: string): Promise<void> {
+    await apiClient.delete(`/experiments/${id}`)
+  },
+
+  // ── Datasets ──────────────────────────────────────────────────
+
+  async getDatasets(params?: PaginationParams): Promise<PaginatedResponse<any>> {
+    const { data } = await apiClient.get('/datasets', { params })
+    return data
+  },
+  async getDataset(id: string): Promise<any> {
+    const { data } = await apiClient.get(`/datasets/${id}`)
+    return data
+  },
+  async createDataset(body: Record<string, any>): Promise<any> {
+    const { data } = await apiClient.post('/datasets', body)
+    return data
+  },
+  async updateDataset(id: string, body: Record<string, any>): Promise<any> {
+    const { data } = await apiClient.patch(`/datasets/${id}`, body)
+    return data
+  },
+  async deleteDataset(id: string): Promise<void> {
+    await apiClient.delete(`/datasets/${id}`)
+  },
+
+  // ── Imaging ───────────────────────────────────────────────────
+
+  async getImagingStudies(params?: PaginationParams): Promise<PaginatedResponse<any>> {
+    const { data } = await apiClient.get('/imaging/studies', { params })
+    return data
+  },
+  async getImagingStudy(id: string): Promise<any> {
+    const { data } = await apiClient.get(`/imaging/studies/${id}`)
+    return data
+  },
+  async createImagingStudy(body: Record<string, any>): Promise<any> {
+    const { data } = await apiClient.post('/imaging/studies', body)
+    return data
+  },
+  async deleteImagingStudy(id: string): Promise<void> {
+    await apiClient.delete(`/imaging/studies/${id}`)
+  },
+
   // ── Monitoring ────────────────────────────────────────────────
 
   async getHealthCheck(): Promise<any> {

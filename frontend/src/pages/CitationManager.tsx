@@ -6,6 +6,7 @@ import {
   FiFile, FiX, FiRefreshCw, FiStar, FiBookOpen, FiHash,
   FiShield,
 } from 'react-icons/fi'
+import clsx from 'clsx'
 import { usePersistentState, logActivity } from '../utils/persistence'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 import api, { apiClient } from '../services/api'
@@ -764,22 +765,15 @@ export default function CitationManager() {
                         {verifyResults[citation.id] && (
                           <span
                             aria-label={`Verification: ${verifyResults[citation.id].verdict}`}
-                            className="text-xxs px-1.5 py-0.5 rounded"
-                            style={{
-                              background:
-                                verifyResults[citation.id].verdict === 'verified'
-                                  ? 'rgba(34, 197, 94, 0.14)'
-                                  : verifyResults[citation.id].verdict === 'fabricated'
-                                  ? 'rgba(239, 68, 68, 0.14)'
-                                  : 'rgba(234, 179, 8, 0.14)',
-                              color:
-                                verifyResults[citation.id].verdict === 'verified'
-                                  ? '#4ade80'
-                                  : verifyResults[citation.id].verdict === 'fabricated'
-                                  ? '#f87171'
-                                  : '#fbbf24',
-                              border: '1px solid currentColor',
-                            }}
+                            className={clsx(
+                              'text-xxs px-1.5 py-0.5 rounded border',
+                              // "fabricated" keeps a red accent — it's a
+                              // critical warning that the citation is
+                              // likely made up. Everything else is muted.
+                              verifyResults[citation.id].verdict === 'fabricated'
+                                ? 'border-red-500/40 text-red-400 bg-red-500/5'
+                                : 'border-[var(--glass-border)] text-[var(--color-text-muted)]',
+                            )}
                             title={verifyResults[citation.id].message}
                           >
                             {verifyResults[citation.id].verdict}

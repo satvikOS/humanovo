@@ -1,7 +1,10 @@
 import { useState, useCallback, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
-import { formatDate, formatDateTime, usePersistentState, logActivity } from '../utils/persistence'
+import { formatDate, formatDateTime, logActivity, persistGet, persistSet } from '../utils/persistence'
+import api from '../services/api'
+import { toast } from '../contexts/ToastContext'
+import { Skeleton } from '../components/Skeleton'
 import {
   FiClipboard,
   FiPlus,
@@ -32,20 +35,89 @@ interface Experiment {
   updatedAt: string
 }
 
+// Status — icon + label carry the meaning; colour stays muted to match
+// the rest of the app's palette. "failed" keeps a subtle red since it
+// is destructive/critical semantic information.
 const STATUS_CONFIG = {
   planned: { label: 'Planned', color: 'var(--color-text-muted)', icon: FiClock },
-  in_progress: { label: 'In Progress', color: 'var(--color-text-secondary)', icon: FiPlay },
-  completed: { label: 'Completed', color: 'var(--color-success)', icon: FiCheck },
-  failed: { label: 'Failed', color: 'var(--color-error)', icon: FiAlertTriangle },
-  paused: { label: 'Paused', color: 'var(--color-warning)', icon: FiPause },
+  in_progress: { label: 'In Progress', color: 'var(--color-text-muted)', icon: FiPlay },
+  completed: { label: 'Completed', color: 'var(--color-text-muted)', icon: FiCheck },
+  failed: { label: 'Failed', color: 'var(--color-text-muted)', icon: FiAlertTriangle },
+  paused: { label: 'Paused', color: 'var(--color-text-muted)', icon: FiPause },
 }
 
 // Enum-guarded status filter values so `?status=bogus` falls back to
 // "all" without crashing or polluting the select control.
 const VALID_STATUS_FILTERS = new Set(['', 'planned', 'in_progress', 'completed', 'failed', 'paused'])
 
+// API is source of truth; local cache only for offline-first UX so the
+// page still renders while the fetch is in flight after a reload.
+const CACHE_KEY = 'experiments'
+
+function normalizeFromApi(row: any): Experiment {
+  return {
+    id: String(row.id),
+    title: row.title ?? '',
+    hypothesis: row.hypothesis ?? '',
+    status: (row.status ?? 'planned') as Experiment['status'],
+    protocol: row.protocol ?? [],
+    materials: row.materials ?? [],
+    observations: row.observations ?? '',
+    results: row.results ?? '',
+    conclusion: row.conclusion ?? '',
+    tags: row.tags ?? [],
+    startDate: row.start_date ?? row.startDate ?? undefined,
+    endDate: row.end_date ?? row.endDate ?? undefined,
+    createdAt: row.created_at ?? row.createdAt ?? new Date().toISOString(),
+    updatedAt: row.updated_at ?? row.updatedAt ?? new Date().toISOString(),
+  }
+}
+
+function toApiPayload(exp: Partial<Experiment>): Record<string, any> {
+  const out: Record<string, any> = {}
+  if (exp.title !== undefined) out.title = exp.title
+  if (exp.hypothesis !== undefined) out.hypothesis = exp.hypothesis
+  if (exp.status !== undefined) out.status = exp.status
+  if (exp.protocol !== undefined) out.protocol = exp.protocol
+  if (exp.materials !== undefined) out.materials = exp.materials
+  if (exp.observations !== undefined) out.observations = exp.observations
+  if (exp.results !== undefined) out.results = exp.results
+  if (exp.conclusion !== undefined) out.conclusion = exp.conclusion
+  if (exp.tags !== undefined) out.tags = exp.tags
+  if (exp.startDate !== undefined) out.start_date = exp.startDate
+  if (exp.endDate !== undefined) out.end_date = exp.endDate
+  return out
+}
+
 export default function ExperimentTracker() {
-  const [experiments, setExperiments] = usePersistentState<Experiment[]>('experiments', [])
+  const [experiments, _setExperiments] = useState<Experiment[]>(() => persistGet<Experiment[]>(CACHE_KEY, []))
+  const [loading, setLoading] = useState(true)
+  const [stale, setStale] = useState(false)
+  const setExperiments = useCallback((fn: Experiment[] | ((prev: Experiment[]) => Experiment[])) => {
+    _setExperiments(prev => {
+      const next = typeof fn === 'function' ? fn(prev) : fn
+      persistSet(CACHE_KEY, next)
+      return next
+    })
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await api.getExperiments({ page_size: 200 })
+        if (cancelled) return
+        const items = (res?.items || []).map(normalizeFromApi)
+        setExperiments(items)
+        setStale(false)
+      } catch {
+        if (!cancelled) setStale(true)
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [setExperiments])
   // Deep-link support: `?add=1` auto-opens the new-experiment dialog;
   // `?status=<planned|in_progress|...>` seeds the status filter;
   // `?id=<experimentId>` selects that experiment once it loads.
@@ -87,55 +159,67 @@ export default function ExperimentTracker() {
   const [editData, setEditData] = useState<Partial<Experiment>>({})
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
-  const save = useCallback((updated: Experiment[]) => {
-    setExperiments(updated)
-  }, [setExperiments])
-
   const [form, setForm] = useState({ title: '', hypothesis: '', tags: '' })
 
-  const addExperiment = () => {
+  const addExperiment = async () => {
     if (!form.title.trim()) return
-    const now = new Date().toISOString()
-    const exp: Experiment = {
-      id: `exp-${crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`}`,
+    const payload = {
       title: form.title,
       hypothesis: form.hypothesis,
-      status: 'planned',
-      protocol: [],
-      materials: [],
-      observations: '',
-      results: '',
-      conclusion: '',
       tags: form.tags.split(',').map(t => t.trim()).filter(Boolean),
-      createdAt: now,
-      updatedAt: now,
     }
-    save([exp, ...experiments])
-    logActivity({ type: 'project', action: 'created', title: exp.title })
-    setForm({ title: '', hypothesis: '', tags: '' })
-    setShowAdd(false)
-    setSelected(exp)
+    try {
+      const created = await api.createExperiment(payload)
+      const exp = normalizeFromApi(created)
+      setExperiments(prev => [exp, ...prev])
+      logActivity({ type: 'project', action: 'created', title: exp.title })
+      setForm({ title: '', hypothesis: '', tags: '' })
+      setShowAdd(false)
+      setSelected(exp)
+      toast('success', 'Experiment created')
+    } catch (err: any) {
+      toast('error', err?.message || 'Create failed', { title: 'Could not create experiment' })
+    }
   }
 
-  const updateExperiment = (id: string, updates: Partial<Experiment>) => {
-    const exp = experiments.find(e => e.id === id)
-    const updated = experiments.map(e => e.id === id ? { ...e, ...updates, updatedAt: new Date().toISOString() } : e)
-    save(updated)
-    if (selected?.id === id) setSelected({ ...selected, ...updates, updatedAt: new Date().toISOString() })
-    logActivity({ type: 'evidence', action: 'updated', title: `Updated experiment: ${exp?.title || id}` })
+  const updateExperiment = async (id: string, updates: Partial<Experiment>) => {
+    const previous = experiments.find(e => e.id === id)
+    // Optimistic local update for snappy UX
+    const optimistic = { ...previous!, ...updates, updatedAt: new Date().toISOString() } as Experiment
+    setExperiments(prev => prev.map(e => e.id === id ? optimistic : e))
+    if (selected?.id === id) setSelected(optimistic)
+    try {
+      const updated = normalizeFromApi(await api.updateExperiment(id, toApiPayload(updates)))
+      setExperiments(prev => prev.map(e => e.id === id ? updated : e))
+      if (selected?.id === id) setSelected(updated)
+      logActivity({ type: 'evidence', action: 'updated', title: `Updated experiment: ${previous?.title || id}` })
+    } catch (err: any) {
+      // Roll back to previous state if server rejects
+      if (previous) {
+        setExperiments(prev => prev.map(e => e.id === id ? previous : e))
+        if (selected?.id === id) setSelected(previous)
+      }
+      toast('error', err?.message || 'Update failed', { title: 'Could not save changes' })
+    }
   }
 
   const deleteExperiment = (id: string) => {
     setDeleteConfirmId(id)
   }
 
-  const confirmDelete = () => {
-    if (deleteConfirmId) {
-      const deletedExp = experiments.find(e => e.id === deleteConfirmId)
-      save(experiments.filter(e => e.id !== deleteConfirmId))
-      logActivity({ type: 'project', action: 'deleted', title: `Deleted experiment: ${deletedExp?.title || deleteConfirmId}` })
-      if (selected?.id === deleteConfirmId) setSelected(null)
-      setDeleteConfirmId(null)
+  const confirmDelete = async () => {
+    if (!deleteConfirmId) return
+    const id = deleteConfirmId
+    const deletedExp = experiments.find(e => e.id === id)
+    setDeleteConfirmId(null)
+    try {
+      await api.deleteExperiment(id)
+      setExperiments(prev => prev.filter(e => e.id !== id))
+      logActivity({ type: 'project', action: 'deleted', title: `Deleted experiment: ${deletedExp?.title || id}` })
+      if (selected?.id === id) setSelected(null)
+      toast('success', `Deleted ${deletedExp?.title || 'experiment'}`)
+    } catch (err: any) {
+      toast('error', err?.message || 'Delete failed', { title: 'Could not delete' })
     }
   }
 
@@ -150,6 +234,14 @@ export default function ExperimentTracker() {
             <div className="flex items-center gap-2">
               <FiClipboard className="w-4 h-4 text-[var(--color-text-muted)]" />
               <h2 className="text-sm font-medium">Experiment Tracker</h2>
+              {stale && (
+                <span
+                  className="text-xxs px-1.5 py-0.5 rounded border border-[var(--glass-border)] text-[var(--color-text-muted)]"
+                  title="Backend unreachable — showing locally-cached experiments"
+                >
+                  cached
+                </span>
+              )}
             </div>
             <button onClick={() => setShowAdd(!showAdd)} className="btn btn-sm text-xs" style={{ color: 'var(--color-text-secondary)' }}>
               <FiPlus className="w-3.5 h-3.5" />
@@ -174,7 +266,11 @@ export default function ExperimentTracker() {
         )}
 
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
-          {filtered.length === 0 ? (
+          {loading && filtered.length === 0 ? (
+            <div className="space-y-2 p-1">
+              {[0, 1, 2, 3].map(i => <Skeleton key={i} height={56} style={{ borderRadius: 8 }} />)}
+            </div>
+          ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-[var(--color-text-muted)]">
               <FiClipboard className="w-10 h-10 mb-3 opacity-20" />
               <p className="text-xs">No experiments yet</p>

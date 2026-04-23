@@ -1,12 +1,12 @@
 // ═══════════════════════════════════════════════════════════════════════
 // Data Manager — Enhanced Data Hub + ETL Pipeline + Variable Browser
-// Client-side dataset management for biomedical research:
+// Backend-backed dataset management for biomedical research:
 //   • CSV/TSV/JSON upload with auto-typing
 //   • Variable browser with type detection & summary stats
 //   • ETL operations: filter, sort, derive columns, merge, group-by
 //   • Profile view with histograms & missing-value report
 //   • Export to CSV/JSON
-//   • Persistence via localStorage
+//   • Source of truth: /api/v1/datasets. Local cache for snappy reloads.
 // ═══════════════════════════════════════════════════════════════════════
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
@@ -21,6 +21,7 @@ import {
 import clsx from 'clsx'
 import * as XLSX from 'xlsx'
 import { useAlertDialog } from '../components/AlertDialog'
+import api from '../services/api'
 
 type ColumnType = 'number' | 'string' | 'date' | 'boolean'
 
@@ -325,7 +326,6 @@ export default function DataManager() {
   const [datasets, setDatasets] = useState<Dataset[]>(() => {
     const stored = loadDatasets()
     if (stored.length === 0) {
-      // Seed with samples on first run
       const seeded = SAMPLE_DATASETS.map(s => ({
         ...s,
         id: crypto.randomUUID(),
@@ -337,8 +337,49 @@ export default function DataManager() {
     }
     return stored
   })
+  const [, setBackendStale] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(qDatasetId || null)
   const [view, setView] = useState<ViewMode>(initialView)
+
+  // Hydrate from /api/v1/datasets on mount. Backend is the source of
+  // truth for metadata (name, columns, tags); heavy row data stays in
+  // the local cache because the API doesn't ship row payloads in the
+  // list response. Merge API rows by id — API wins on conflict.
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await api.getDatasets({ page_size: 200 })
+        if (cancelled) return
+        const apiItems: any[] = (res as any)?.items || []
+        if (apiItems.length === 0) { setBackendStale(false); return }
+        setDatasets(prev => {
+          const byId = new Map(prev.map(d => [d.id, d]))
+          for (const row of apiItems) {
+            const id = String(row.id)
+            const existing = byId.get(id)
+            const merged: Dataset = {
+              id,
+              name: row.name ?? existing?.name ?? 'Untitled',
+              description: row.description ?? existing?.description ?? '',
+              source: (row.source ?? existing?.source ?? 'upload') as Dataset['source'],
+              columns: Array.isArray(row.columns) && row.columns.length ? row.columns : (existing?.columns ?? []),
+              rows: existing?.rows ?? [],
+              tags: row.tags ?? existing?.tags ?? [],
+              createdAt: row.created_at ?? existing?.createdAt ?? new Date().toISOString(),
+              updatedAt: row.updated_at ?? existing?.updatedAt ?? new Date().toISOString(),
+            }
+            byId.set(id, merged)
+          }
+          return [...byId.values()]
+        })
+        setBackendStale(false)
+      } catch {
+        if (!cancelled) setBackendStale(true)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
 
   // Strip deep-link query params after the initial mount.
   useEffect(() => {
