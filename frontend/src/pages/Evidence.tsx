@@ -279,7 +279,7 @@ export default function Evidence() {
       const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash
       window.history.replaceState(window.history.state, '', newUrl)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [])
 
   // Merge project documents into evidence list. Both intermediate lists

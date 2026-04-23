@@ -217,7 +217,7 @@ function applyOps(ds: Dataset, ops: Op[]): Dataset {
       cols.push({ name, type: 'number' })
       rows = rows.map(r => {
         try {
-          // eslint-disable-next-line no-new-func
+           
           const fn = new Function(...Object.keys(r), `return ${expression}`)
           return { ...r, [name]: fn(...Object.values(r)) }
         } catch {

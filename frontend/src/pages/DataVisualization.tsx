@@ -133,7 +133,7 @@ function suggestChartType(data: DataPoint[]): ChartType {
 
   const n = data.length
   const hasCategories = data.some(d => d.category)
-  const isTimeSeries = data.every(d => !isNaN(Number(d.label))) || data.every(d => /^\d{4}[-\/]/.test(d.label))
+  const isTimeSeries = data.every(d => !isNaN(Number(d.label))) || data.every(d => /^\d{4}[-/]/.test(d.label))
   const allPositive = data.every(d => d.value >= 0)
   const sumClose100 = Math.abs(data.reduce((s, d) => s + d.value, 0) - 100) < 5
 
@@ -563,7 +563,7 @@ export default function DataVisualization() {
       const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash
       window.history.replaceState(window.history.state, '', newUrl)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [])
   const [showSettings, setShowSettings] = useState<string | null>(null)
   const [expandedChart, setExpandedChart] = useState<string | null>(null)

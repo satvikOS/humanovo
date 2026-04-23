@@ -290,7 +290,7 @@ export function useLibraryTree(): LiveTreeState & { refetch: () => void } {
             // A single-category failure shouldn't nuke the whole tree;
             // log and continue. The top-level setError below captures
             // the aggregate if every request fails.
-            // eslint-disable-next-line no-console
+             
             console.warn(`[libraryAdapter] category ${cat.backend} failed:`, e)
             return { cat, entities: [], total: 0 }
           }),

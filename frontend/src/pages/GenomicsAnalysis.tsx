@@ -230,7 +230,7 @@ export default function GenomicsAnalysis() {
       const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash
       window.history.replaceState(window.history.state, '', newUrl)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [])
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<any>(null)

@@ -754,6 +754,13 @@ export default function Plot3D({
     URL.revokeObjectURL(url)
   }, [data])
 
+  const zRange = useMemo(() => {
+    if (!data.length) return { min: 0, max: 1 }
+    let mn = Infinity, mx = -Infinity
+    for (const d of data) { if (d.z < mn) mn = d.z; if (d.z > mx) mx = d.z }
+    return { min: mn, max: mx }
+  }, [data])
+
   if (data.length === 0) {
     return (
       <div style={{ height, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-muted)' }}>
@@ -763,12 +770,6 @@ export default function Plot3D({
   }
 
   const ChartRenderer = getChartRenderer(chartType)
-  const zRange = useMemo(() => {
-    if (!data.length) return { min: 0, max: 1 }
-    let mn = Infinity, mx = -Infinity
-    for (const d of data) { if (d.z < mn) mn = d.z; if (d.z > mx) mx = d.z }
-    return { min: mn, max: mx }
-  }, [data])
 
   const titleColor = bgTheme === 'light' ? '#0f172a' : '#f8fafc'
   const mutedColor = bgTheme === 'light' ? '#475569' : '#94a3b8'

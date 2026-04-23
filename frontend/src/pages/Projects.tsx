@@ -405,7 +405,7 @@ export default function Projects() {
       const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash
       window.history.replaceState(window.history.state, '', newUrl)
     }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [])  
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState(initialQuery)

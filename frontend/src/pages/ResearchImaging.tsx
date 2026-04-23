@@ -535,7 +535,7 @@ export default function ResearchImaging() {
       const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash
       window.history.replaceState(window.history.state, '', newUrl)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [])
   const [tool, setTool] = useState<Tool>('pan')
   const [zoom, setZoom] = useState(1)
@@ -767,7 +767,7 @@ export default function ResearchImaging() {
       sCtx.fillText(`Slice ${sliceX}/${W}`, 8, 30)
     }
     } catch (err) {
-      // eslint-disable-next-line no-console
+       
       console.warn('[ResearchImaging] orthogonal view render failed:', err)
     }
   }, [viewLayout, selected, slicePos, imgGeneration])
@@ -951,7 +951,7 @@ export default function ResearchImaging() {
       // Swallow canvas render errors (e.g. getImageData OOM on huge images,
       // tainted canvas from external data URLs) so a malformed study does
       // not crash the entire imaging page.
-      // eslint-disable-next-line no-console
+       
       console.warn('[ResearchImaging] renderCanvas failed:', err)
     } finally {
       renderingRef.current = false
@@ -979,7 +979,7 @@ export default function ResearchImaging() {
   // Also re-render on segMask generation so brush strokes paint live. The
   // segMask itself is read via ref inside renderCanvas to keep the callback
   // identity stable.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   useEffect(() => { renderCanvas() }, [renderCanvas, imgGeneration, segMask])
 
   const screenToImage = useCallback((e: React.MouseEvent): { x: number; y: number } | null => {

@@ -391,7 +391,7 @@ function highlightSyntax(src: string, varNames?: Set<string>): HToken[] {
     // previous significant char is an identifier/number/close-paren, it's
     // a transpose and must be emitted as plain text.
     if (c === "'") {
-      if (/[A-Za-z0-9_\)\]\.]/.test(prevSig)) {
+      if (/[A-Za-z0-9_)\].]/.test(prevSig)) {
         buf += c
         i++
         prevSig = "'"
@@ -1010,7 +1010,7 @@ export default function Workstation() {
   // mount (the workspaceRef itself was loaded synchronously above).
   useEffect(() => {
     setVars(snapshotWorkspace(workspaceRef.current))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [])
 
   // Persist script store as the user edits (debounced).
@@ -2447,7 +2447,7 @@ export default function Workstation() {
         continue
       }
       // Accept both `function name(` and `function [out] = name(` forms.
-      const fnM = /^\s*function\s+(?:[\[\]\w,\s]+=\s*)?([A-Za-z_]\w*)\s*\(/.exec(ln)
+      const fnM = /^\s*function\s+(?:[[\]\w,\s]+=\s*)?([A-Za-z_]\w*)\s*\(/.exec(ln)
       if (fnM) {
         out.push({ kind: 'fn', name: fnM[1], line: i + 1 })
       }
@@ -3054,7 +3054,7 @@ export default function Workstation() {
 
     if (QUOTE_PAIRS[e.key]) {
       // Don't auto-pair single-quote after an identifier (transpose operator)
-      if (e.key === "'" && /[A-Za-z0-9_\)\]\.]/.test(value[s - 1] ?? '')) {
+      if (e.key === "'" && /[A-Za-z0-9_)\].]/.test(value[s - 1] ?? '')) {
         return // let default handle it
       }
       if (s === ePos && value[s] === e.key) {

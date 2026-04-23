@@ -43,7 +43,7 @@ export default function Collaboration() {
       const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash
       window.history.replaceState(window.history.state, '', newUrl)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [])
   const [team, setTeam] = useState<TeamMember[]>([])
   const [comments, setComments] = useState<Comment[]>([])

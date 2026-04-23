@@ -490,7 +490,7 @@ class Parser {
   private parseFunction(): Stmt {
     this.expect('function')
     // Grammar: function [out1,out2] = name(p1, p2) | function out = name(...) | function name(...)
-    let outputs: string[] = []
+    const outputs: string[] = []
     let name = ''
     const save = this.i
     // Try to parse an output list
@@ -3239,7 +3239,7 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
       return m.rows === 1 ? mmat(1, cur.length, cur) : mmat(cur.length, 1, cur)
     }
     // Matrix case: diff along first dimension (rows).
-    let rows = m.rows, cols = m.cols
+    let rows = m.rows; const cols = m.cols
     let cur = Float64Array.from(m.data)
     for (let it = 0; it < k; it++) {
       if (rows < 2) { cur = new Float64Array(0); rows = 0; break }

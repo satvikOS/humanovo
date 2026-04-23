@@ -148,7 +148,7 @@ export function _setImperativeToast(handle: ToastContextType) {
 export function toast(level: ToastLevel, message: string, opts?: Partial<Toast>) {
   if (!imperativeHandle) {
     // Fallback: at least log so the error isn't silent.
-    // eslint-disable-next-line no-console
+     
     console[level === 'error' ? 'error' : level === 'warning' ? 'warn' : 'log'](`[toast:${level}]`, message)
     return ''
   }

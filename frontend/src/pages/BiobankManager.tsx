@@ -103,7 +103,7 @@ export default function BiobankManager() {
       const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash
       window.history.replaceState(window.history.state, '', newUrl)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [])
   useEffect(() => {
     if (!pendingId || selected) return
@@ -147,7 +147,7 @@ export default function BiobankManager() {
     try {
       const { data: s } = await apiClient.post(`${BASE}/samples/${checkoutSampleId}/checkout`, { researcher, purpose })
       setSelected(s); load()
-      try { localStorage.setItem('biobank.lastResearcher', researcher) } catch {}
+      try { localStorage.setItem('biobank.lastResearcher', researcher) } catch { /* quota */ }
       logActivity({ type: 'discovery', action: 'updated', title: `Checked out sample: ${s.barcode || checkoutSampleId}` })
     } catch { /* interceptor surfaces the toast */ }
     setCheckoutSampleId(null)

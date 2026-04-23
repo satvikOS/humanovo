@@ -74,7 +74,7 @@ export default function ClinicalTrials() {
       const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash
       window.history.replaceState(window.history.state, '', newUrl)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [])
   useEffect(() => {
     if (!pendingTrialId || selected) return
