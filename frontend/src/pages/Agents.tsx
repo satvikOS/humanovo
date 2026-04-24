@@ -1,565 +1,1481 @@
-// Agents (Discovery) — conversational research co-pilot.
-//
-// Claude/ChatGPT/Gemini-level chat experience that replaces the old
-// form-driven orchestrator on /agents. Features:
-//   * Left rail with persistent session list (search, pin, rename,
-//     delete, fork).
-//   * Center chat pane with streaming token-by-token assistant
-//     output via SSE, rich-card rendering for hypotheses / evidence
-//     / KG snippets, markdown-lite formatting.
-//   * Right-side slide-over for agent configuration (model,
-//     temperature, system prompt, tool toggles).
-//   * Hypothesis-save routing: when the agent emits a hypothesis
-//     card, clicking the save icon attaches it to the currently
-//     selected project (or prompts the user to pick one).
-//
-// Persistence: DiscoverySession CRUD at /api/v1/discovery-sessions
-// keeps every conversation durable across tabs/devices. Streaming:
-// /api/v1/agents/chat/stream emits SSE frames for token/card/status.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
-  FiSend, FiSettings, FiStopCircle, FiZap, FiFolder, FiX,
-  FiChevronDown, FiGitBranch,
+  FiPlay,
+  FiPause,
+  FiSquare,
+  FiTarget,
+  FiSettings,
+  FiChevronDown,
+  FiChevronUp,
+  FiChevronLeft,
+  FiChevronRight,
+  FiAward,
+  FiPlus,
+  FiX,
+  FiDownload,
+  FiCpu,
+  FiZap,
+  FiClock,
+  FiCheck,
+  FiAlertTriangle,
+  FiColumns,
+  FiExternalLink,
+  FiFolder,
+  FiUpload,
+  FiFile,
+  FiThumbsUp,
+  FiMessageSquare,
 } from 'react-icons/fi'
-import api, { type DiscoverySessionSummary, type DiscoverySessionDetail, type DiscoveryMessage, type DiscoveryAgentConfig } from '../services/api'
-import ChatMessage from '../components/discovery/ChatMessage'
-import SessionSidebar from '../components/discovery/SessionSidebar'
-import AgentConfigPanel from '../components/discovery/AgentConfigPanel'
-import { useSSEChat } from '../components/discovery/useSSEChat'
-import { toast } from '../contexts/ToastContext'
-import { EmptyState } from '../components/EmptyState'
+import { Link, useSearchParams } from 'react-router-dom'
+import { BarChart, Bar, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import api, { apiClient } from '../services/api'
+import type { OrchestratorStatus, DiscoveryConfig } from '../services/api'
+import { logActivity, formatDate } from '../utils/persistence'
 
-const LS_SIDEBAR_KEY = 'agents-sidebar-collapsed'
+// Types
+interface TranslationalPhaseDetail {
+  phase: string
+  phase_name: string
+  formal_name: string
+  description: string
+  objectives?: string[]
+  key_activities?: string[]
+  milestones?: string[]
+  deliverables?: string[]
+  evidence_requirements?: string[]
+  data_sources?: string[]
+  regulatory_considerations?: string[]
+  regulatory_milestones?: string[]
+  key_stakeholders?: string[]
+  collaborators?: string[]
+  success_criteria?: string[]
+  go_no_go_gates?: string[]
+  phase_risks?: string[]
+  mitigation_strategies?: string[]
+  estimated_duration?: string
+  resource_requirements?: string[]
+  estimated_cost_range?: string
+  prerequisites?: string[]
+  blockers?: string[]
+}
 
-// Starter prompts shown on the empty-state pane to help authors kick
-// off a meaningful conversation. Worded like real research questions.
-const STARTERS: string[] = [
-  'What are the leading hypotheses for amyloid-independent pathways in Alzheimer\'s?',
-  'Which targets in IL-6 / JAK-STAT signalling have the strongest evidence for repurposing?',
-  'Suggest three testable mechanisms connecting gut-microbiome composition to PD onset.',
-  'Summarize recent evidence on mitochondrial dysfunction in ALS motor neurons.',
+interface TranslationalRoadmap {
+  current_phase: string
+  phases: TranslationalPhaseDetail[]
+  overall_feasibility_score: number
+  estimated_total_timeline: string
+  critical_path_summary: string
+  key_decision_points?: string[]
+  cross_phase_risks?: string[]
+  regulatory_pathway_summary?: string
+  commercialization_potential?: string
+}
+
+interface Hypothesis {
+  id: string
+  title: string
+  description: string
+  mechanism: string
+  confidence: number
+  validated: boolean
+  external_factors?: Array<Record<string, string>>
+  evidence_summary?: string[]
+  risks?: string[]
+  validation_steps?: string[]
+  novelty_score?: number
+  key_citations?: string[]
+  fda_references?: string[]
+  clinical_trial_references?: string[]
+  grounding_sources?: {
+    pubmed_count?: number
+    clinical_trials_count?: number
+    fda_count?: number
+    uniprot_count?: number
+    reactome_count?: number
+  }
+  stages_completed?: number
+  round_number?: number
+  created_at?: string
+  translational_roadmap?: TranslationalRoadmap
+}
+
+interface ExternalFactor {
+  name: string
+  category: 'nutrient' | 'chemical' | 'drug' | 'compound' | 'element'
+  interaction: string
+}
+
+interface DiscoveryRun {
+  id: string
+  disease: string
+  discoveryType: string
+  hypothesesCount: number
+  timestamp: string
+  status: string
+}
+
+function isValidHypothesis(h: Hypothesis): boolean {
+  if (!h.title || h.title.length < 10) return false
+  if (h.title.startsWith('<reasoning>') || h.title.startsWith('<think>')) return false
+  if (h.title.startsWith('```') || h.title.startsWith('{')) return false
+  if (h.description?.startsWith('<reasoning>') || h.description?.startsWith('<think>')) return false
+  if (!h.description || h.description.length < 50) return false
+  return true
+}
+
+const discoveryTypes = [
+  { value: 'treatment', label: 'Treatment Discovery', description: 'Find therapeutic strategies' },
+  { value: 'prevention', label: 'Prevention Strategy', description: 'Prevent disease onset' },
+  { value: 'biomarker', label: 'Biomarker Discovery', description: 'Early detection markers' },
+  { value: 'drug_repurposing', label: 'Drug Repurposing', description: 'Existing drugs for new uses' },
+  { value: 'combination_therapy', label: 'Combination Therapy', description: 'Synergistic drug combinations' },
 ]
 
+const factorCategories = ['nutrient', 'chemical', 'drug', 'compound', 'element'] as const
+
+const PHASE_META: Record<string, { label: string; color: string; icon: string; category: string }> = {
+  T0: { label: 'Basic Research', color: '#8b5cf6', icon: '\u{1F9EA}', category: 'Bench' },
+  T1: { label: 'Translation to Humans', color: '#6366f1', icon: '\u{1F9EC}', category: 'Translational' },
+  T2: { label: 'Translation to Patients', color: '#3b82f6', icon: '\u{1F3E5}', category: 'Clinical' },
+  T3: { label: 'Translation to Practice', color: '#0ea5e9', icon: '\u{1FA7A}', category: 'Implementation' },
+  T4: { label: 'Translation to Community', color: '#14b8a6', icon: '\u{1F30D}', category: 'Implementation' },
+  T5: { label: 'Global Impact', color: '#22c55e', icon: '\u{1F30F}', category: 'Implementation' },
+}
+
+function confidenceColor(c: number) {
+  if (c >= 0.8) return '#2d6a4f'
+  if (c >= 0.6) return '#0096c7'
+  if (c >= 0.4) return '#0077b6'
+  return '#991b1b'
+}
+
+// Valid discovery_type values — kept in sync with the `discoveryTypes` list
+// above. Used to filter the `?type=` query param so only real enum values
+// make it into config state.
+const VALID_DISCOVERY_TYPES = new Set(['treatment', 'prevention', 'biomarker', 'drug_repurposing', 'combination_therapy'])
+
 export default function Agents() {
-  const navigate = useNavigate()
+  // Deep-link support: the Discovery Engine accepts `?disease=…`,
+  // `?type=…`, `?guidance=…`, and `?hypothesis=…` query params so
+  // dashboard quick-links and external handoffs can drop users into a
+  // pre-configured run or directly onto a specific hypothesis card. The
+  // query is consumed once on mount and then cleaned off the URL so a
+  // soft reload doesn't keep overwriting edits.
   const [searchParams, setSearchParams] = useSearchParams()
+  const qDisease = (searchParams.get('disease') || '').trim()
+  const qTypeRaw = (searchParams.get('type') || '').trim().toLowerCase()
+  const qType = VALID_DISCOVERY_TYPES.has(qTypeRaw) ? qTypeRaw : ''
+  const qGuidance = (searchParams.get('guidance') || '').trim()
+  const qHypothesisId = (searchParams.get('hypothesis') || '').trim()
 
-  // ── Sessions list ──
-  const [sessions, setSessions] = useState<DiscoverySessionSummary[]>([])
-  const [currentId, setCurrentId] = useState<string | null>(null)
-  const [current, setCurrent] = useState<DiscoverySessionDetail | null>(null)
-  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
-    try { return localStorage.getItem(LS_SIDEBAR_KEY) === '1' } catch { return false }
+  // State
+  const [state, setState] = useState<string>('idle')
+  const [stats, setStats] = useState<OrchestratorStatus | null>(null)
+  const [hypotheses, setHypotheses] = useState<Hypothesis[]>([])
+  const [selectedHypothesis, setSelectedHypothesis] = useState<Hypothesis | null>(null)
+  const [compareHypothesis, setCompareHypothesis] = useState<Hypothesis | null>(null)
+  const [showCompare, setShowCompare] = useState(false)
+  const [connected, setConnected] = useState<boolean | null>(null)
+  const [showConfig, setShowConfig] = useState(true)
+  const [showFactors, setShowFactors] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
+  const [sortBy, setSortBy] = useState<'confidence' | 'novelty' | 'date'>('confidence')
+  const [filterConfidence, setFilterConfidence] = useState(0)
+
+  // Config — seeded from query params (see `qDisease`/`qType`/`qGuidance`
+  // above). Invalid / missing params fall back to the defaults.
+  const [config, setConfig] = useState<DiscoveryConfig>({
+    disease: qDisease,
+    discovery_type: (qType || 'treatment') as DiscoveryConfig['discovery_type'],
+    focus_entities: [],
+    max_results: 50,
+    min_confidence: 0.3,
+    research_guidance: qGuidance,
   })
-  const [searchQuery, setSearchQuery] = useState('')
+  const [focusInput, setFocusInput] = useState('')
+  const [factors, setFactors] = useState<ExternalFactor[]>([])
+  const [factorName, setFactorName] = useState('')
+  const [factorCategory, setFactorCategory] = useState<ExternalFactor['category']>('nutrient')
+  const [factorInteraction, setFactorInteraction] = useState('')
 
-  // ── Chat state ──
-  const [input, setInput] = useState('')
-  const [streamingText, setStreamingText] = useState('')
-  const [streamingCards, setStreamingCards] = useState<DiscoveryMessage['cards']>([])
-  const [status, setStatus] = useState<string | null>(null)
-  const [inflight, setInflight] = useState(false)
-  const [configOpen, setConfigOpen] = useState(false)
+  // History (ephemeral — loaded from API when projectId is available)
+  const [discoveryHistory, setDiscoveryHistory] = useState<DiscoveryRun[]>([])
 
-  // ── Project context (for hypothesis save routing) ──
-  const [projects, setProjects] = useState<{ id: string; name: string }[]>([])
-  const [activeProjectId, setActiveProjectId] = useState<string | null>(() => {
-    try { return localStorage.getItem('discovery-active-project-id') } catch { return null }
+  // Project tracking (auto-created by backend)
+  const [projectId, setProjectId] = useState<string>('')
+  const [, setProjectName] = useState<string>('')
+
+  // Document upload
+  const [uploadedDocs, setUploadedDocs] = useState<Array<{ name: string; id: string; status: string; error?: string }>>([])
+  const [uploading, setUploading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Discovery start: a user without a responsive API would otherwise
+  // see the Start button briefly glitch then do nothing. Track both
+  // the in-flight state (to show a spinner) and the surfaced error
+  // message (so a failed start gives the user something to act on,
+  // rather than a silent console.error).
+  const [starting, setStarting] = useState(false)
+  const [startError, setStartError] = useState<string | null>(null)
+
+  // Split-panel layout: lets the user collapse the config rail to
+  // reclaim horizontal space for the hypothesis list. Persisted so a
+  // once-set preference survives a reload — nothing worse than
+  // watching the panel snap back every time you come back to Discovery.
+  const [leftCollapsed, setLeftCollapsed] = useState<boolean>(() => {
+    try { return localStorage.getItem('agents-left-collapsed') === '1' } catch { return false }
   })
-  const [projectPickerOpen, setProjectPickerOpen] = useState(false)
+  useEffect(() => {
+    try { localStorage.setItem('agents-left-collapsed', leftCollapsed ? '1' : '0') } catch { /* noop */ }
+  }, [leftCollapsed])
 
-  const messagesEndRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLTextAreaElement>(null)
-  const { send, cancel } = useSSEChat()
-
-  // ── Effects ──
-
-  // Load sessions on mount.
-  const reloadSessions = useCallback(async (q?: string) => {
-    try {
-      const list = await api.listDiscoverySessions({ q: q || undefined, limit: 200 })
-      setSessions(list)
-    } catch (err) {
-      console.warn('Failed to load sessions:', err)
+  // Strip the deep-link params after the initial mount so a soft reload
+  // doesn't stomp on user edits to the Discovery config.
+  useEffect(() => {
+    const hasDeepLink = searchParams.has('disease')
+      || searchParams.has('type')
+      || searchParams.has('guidance')
+      || searchParams.has('hypothesis')
+    if (hasDeepLink) {
+      const next = new URLSearchParams(searchParams)
+      next.delete('disease')
+      next.delete('type')
+      next.delete('guidance')
+      next.delete('hypothesis')
+      setSearchParams(next, { replace: true })
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  useEffect(() => { reloadSessions() }, [reloadSessions])
-
-  // Load projects for the save-to-project picker.
+  // When the hypothesis list fills in (from API poll), honour the
+  // `?hypothesis=…` deep-link by selecting the matching card once. We
+  // key off a ref so the effect doesn't re-fire after the user clicks
+  // around to a different hypothesis.
+  const hypothesisDeepLinkApplied = useRef(false)
   useEffect(() => {
-    (async () => {
-      try {
-        const res = await api.getProjects({ page: 1, page_size: 100 })
-        setProjects((res.items || []).map(p => ({ id: p.id, name: p.name })))
-      } catch { /* non-fatal */ }
-    })()
-  }, [])
-
-  // Open the session indicated by ?session= URL param, or auto-open
-  // the most recent one, or create a fresh session if none exist.
-  useEffect(() => {
-    const requested = searchParams.get('session')
-    if (requested && requested !== currentId) {
-      void openSession(requested)
-      return
+    if (hypothesisDeepLinkApplied.current || !qHypothesisId) return
+    const match = hypotheses.find(h => h.id === qHypothesisId)
+    if (match) {
+      setSelectedHypothesis(match)
+      hypothesisDeepLinkApplied.current = true
     }
-    if (!currentId && sessions.length > 0) {
-      void openSession(sessions[0].id)
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessions, searchParams.get('session')])
+  }, [hypotheses, qHypothesisId])
 
-  // Scroll to bottom when messages change.
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [current?.messages.length, streamingText])
+  const pollRef = useRef<number | null>(null)
+  const failRef = useRef(0)
+  const prevStateRef = useRef<string>('idle')
+  const loggedHypIdsRef = useRef<Set<string>>(new Set())
 
-  // Persist sidebar-collapsed + active-project to localStorage.
-  useEffect(() => {
-    try { localStorage.setItem(LS_SIDEBAR_KEY, sidebarCollapsed ? '1' : '0') } catch { /* ignore */ }
-  }, [sidebarCollapsed])
-  useEffect(() => {
-    try { if (activeProjectId) localStorage.setItem('discovery-active-project-id', activeProjectId) } catch { /* ignore */ }
-  }, [activeProjectId])
-
-  // ── Session ops ──
-
-  const openSession = useCallback(async (id: string) => {
+  // Polling
+  const fetchStatus = useCallback(async () => {
     try {
-      const detail = await api.getDiscoverySession(id)
-      setCurrent(detail)
-      setCurrentId(id)
-      setStreamingText('')
-      setStreamingCards([])
-      setStatus(null)
-      setSearchParams(prev => {
-        const sp = new URLSearchParams(prev)
-        sp.set('session', id)
-        return sp
-      }, { replace: true })
-    } catch (err) {
-      toast('error', 'Could not load session', { title: 'Discovery' })
-    }
-  }, [setSearchParams])
+      const res = await api.getOrchestratorStatus()
+      failRef.current = 0
+      setConnected(true)
+      const newState = res.state || 'idle'
+      setState(newState)
+      setStats(res)
 
-  const newSession = useCallback(async () => {
-    try {
-      const detail = await api.createDiscoverySession({ project_id: activeProjectId || undefined })
-      setSessions(s => [
-        { id: detail.id, title: detail.title, pinned: detail.pinned, project_id: detail.project_id, message_count: 0, last_run_id: null, updated_at: detail.updated_at, created_at: detail.created_at, preview: null },
-        ...s,
-      ])
-      setCurrent(detail)
-      setCurrentId(detail.id)
-      setStreamingText('')
-      setStreamingCards([])
-      setStatus(null)
-      setSearchParams(prev => {
-        const sp = new URLSearchParams(prev)
-        sp.set('session', detail.id)
-        return sp
-      }, { replace: true })
-      setTimeout(() => inputRef.current?.focus(), 50)
-    } catch {
-      toast('error', 'Could not create session')
-    }
-  }, [activeProjectId, setSearchParams])
+      // Log discovery completion
+      if ((newState === 'completed' || newState === 'stopping') && prevStateRef.current === 'running') {
+        logActivity({
+          type: 'discovery', action: 'completed',
+          title: `Discovery ${newState}: ${(res as any).disease || config.disease} — ${(res as any).top_hypotheses?.length || 0} hypotheses`,
+          project: (res as any).project_name || config.disease,
+          // project_id lets the ActivityFeed / notification rows route
+          // directly to the dedicated project folder instead of /agents.
+          metadata: {
+            hypotheses_count: (res as any).top_hypotheses?.length || 0,
+            project_id: (res as any).project_id || '',
+          },
+        })
+      }
+      prevStateRef.current = newState
 
-  const deleteSession = useCallback(async (id: string) => {
-    try {
-      await api.deleteDiscoverySession(id)
-      setSessions(prev => prev.filter(s => s.id !== id))
-      if (id === currentId) {
-        const next = sessions.find(s => s.id !== id)
-        if (next) void openSession(next.id); else { setCurrent(null); setCurrentId(null) }
+      // Restore config from backend only if discovery is actively running
+      if (!config.disease && (res as any).disease && newState === 'running') {
+        setConfig(prev => ({ ...prev, disease: (res as any).disease, discovery_type: (res as any).discovery_type || prev.discovery_type }))
+      }
+
+      // Track auto-created project (backend handles persistence)
+      if ((res as any).project_id && (res as any).project_id !== 'discovery') {
+        const pid = (res as any).project_id
+        const pname = (res as any).project_name || ''
+        setProjectId(pid)
+        setProjectName(pname)
+      }
+
+      // Merge hypotheses only during active discovery, not from stale completed state
+      if ((res as any).top_hypotheses?.length > 0 && (newState === 'running' || newState === 'stopping')) {
+        setHypotheses(prev => {
+          const ids = new Set(prev.map(h => h.id))
+          const incoming = (res as any).top_hypotheses.filter((h: Hypothesis) => !ids.has(h.id)).filter(isValidHypothesis)
+          if (!incoming.length) return prev
+          const merged = [...incoming, ...prev].sort((a: Hypothesis, b: Hypothesis) => b.confidence - a.confidence).slice(0, 100)
+
+          // Log activity only once per hypothesis using a tracked set
+          for (const h of incoming) {
+            if (!loggedHypIdsRef.current.has(h.id)) {
+              loggedHypIdsRef.current.add(h.id)
+              logActivity({
+                type: 'hypothesis', action: 'created',
+                title: `Hypothesis discovered: ${h.title?.slice(0, 80) || 'Untitled'}`,
+                project: (res as any).project_name || config.disease,
+                // project_id lets the ActivityFeed / notification rows route
+                // directly to the dedicated project folder instead of /agents.
+                metadata: {
+                  confidence: h.confidence,
+                  project_id: (res as any).project_id || '',
+                  hypothesis_id: h.id,
+                },
+              })
+            }
+          }
+
+          return merged
+        })
+      }
+
+      // Adapt polling speed
+      if (pollRef.current) {
+        clearInterval(pollRef.current)
+        pollRef.current = window.setInterval(fetchStatus, res.state === 'running' ? 3000 : 10000)
       }
     } catch {
-      toast('error', 'Could not delete session')
+      failRef.current++
+      if (failRef.current >= 2) {
+        setConnected(false)
+        if (pollRef.current) {
+          clearInterval(pollRef.current)
+          pollRef.current = window.setInterval(fetchStatus, 30000)
+        }
+      }
     }
-  }, [currentId, sessions, openSession])
+  }, [config.disease])
 
-  const renameSession = useCallback(async (id: string, title: string) => {
+  useEffect(() => {
+    fetchStatus()
+    pollRef.current = window.setInterval(fetchStatus, 5000)
+    return () => { if (pollRef.current) clearInterval(pollRef.current) }
+  }, [fetchStatus])
+
+  // Load saved hypotheses from project when available and discovery is not running
+  useEffect(() => {
+    if (!projectId || projectId === 'discovery' || state === 'running') return
+    if (hypotheses.length > 0) return // already have hypotheses from polling
+    const loadProjectHypotheses = async () => {
+      try {
+        const res = await api.listProjectHypotheses(projectId, { limit: 100 })
+        if (res.items?.length > 0) {
+          const mapped: Hypothesis[] = res.items.map((h: any) => ({
+            id: h.id,
+            title: h.title || h.statement || '',
+            description: h.description || h.mechanism || '',
+            mechanism: h.mechanism || '',
+            confidence: Number.isFinite(h.confidence) ? h.confidence : Number.isFinite(h.confidence_score) ? h.confidence_score : 0.5,
+            validated: h.validated || h.status === 'validated',
+            novelty_score: h.novelty_score,
+            evidence_summary: h.evidence_summary || [],
+            risks: h.risks || [],
+            validation_steps: h.validation_steps || [],
+            translational_roadmap: h.translational_roadmap,
+            created_at: h.created_at,
+          }))
+          setHypotheses(mapped.filter(isValidHypothesis))
+        }
+      } catch {
+        // Project hypotheses endpoint may not be available
+      }
+    }
+    loadProjectHypotheses()
+  }, [projectId, state])
+
+  // Load discovery history from API when projectId is available
+  useEffect(() => {
+    // When no project is selected, fall back to the project-less
+    // /discovery-runs endpoint (added in Mega-R) so the Agents root
+    // page surfaces every run across the platform. Filters & render
+    // logic below are already shape-compatible.
+    const loadHistory = async () => {
+      try {
+        const res = (!projectId || projectId === 'discovery')
+          ? await api.listAllDiscoveryRuns({ limit: 50 })
+          : await api.listDiscoveryRuns(projectId, { limit: 50 })
+        if (res.items?.length > 0) {
+          setDiscoveryHistory(res.items.map((r: any) => ({
+            id: r.id || r.run_id,
+            disease: r.disease || r.config?.disease || '',
+            discoveryType: r.discovery_type || r.config?.discovery_type || 'treatment',
+            hypothesesCount: r.hypotheses_count || 0,
+            timestamp: r.created_at || r.started_at || '',
+            status: r.status || 'completed',
+          })))
+        }
+      } catch {
+        // History endpoint may not exist yet - keep ephemeral history
+      }
+    }
+    loadHistory()
+  }, [projectId])
+
+  // Actions
+  const startDiscovery = async () => {
+    if (!config.disease.trim()) return
+    if (starting) return
+    setStarting(true)
+    setStartError(null)
     try {
-      const updated = await api.updateDiscoverySession(id, { title })
-      setSessions(prev => prev.map(s => s.id === id ? { ...s, title: updated.title } : s))
-      if (id === currentId) setCurrent(c => c ? { ...c, title: updated.title } : c)
-    } catch {
-      toast('error', 'Could not rename session')
-    }
-  }, [currentId])
-
-  const togglePin = useCallback(async (id: string, pinned: boolean) => {
-    try {
-      await api.updateDiscoverySession(id, { pinned })
-      setSessions(prev => prev.map(s => s.id === id ? { ...s, pinned } : s))
-    } catch {
-      toast('error', 'Could not update pin state')
-    }
-  }, [])
-
-  const forkSession = useCallback(async () => {
-    if (!currentId) return
-    try {
-      const forked = await api.forkDiscoverySession(currentId)
-      setSessions(prev => [{ id: forked.id, title: forked.title, pinned: forked.pinned, project_id: forked.project_id, message_count: forked.messages.length, last_run_id: forked.last_run_id, updated_at: forked.updated_at, created_at: forked.created_at, preview: null }, ...prev])
-      void openSession(forked.id)
-      toast('success', 'Session forked')
-    } catch {
-      toast('error', 'Could not fork session')
-    }
-  }, [currentId, openSession])
-
-  // ── Config updates ──
-  const updateConfig = useCallback(async (patch: Partial<DiscoveryAgentConfig>) => {
-    if (!current) return
-    try {
-      const updated = await api.updateDiscoverySession(current.id, { agent_config: patch })
-      setCurrent(updated)
-    } catch {
-      toast('error', 'Could not update agent config')
-    }
-  }, [current])
-
-  // ── Send a turn ──
-
-  const sendMessage = useCallback(async (text: string) => {
-    if (!text.trim() || inflight) return
-    // Ensure we have a session — create one if the user jumped
-    // straight to the composer on an empty page.
-    let sessionId = currentId
-    let sessionDetail = current
-    if (!sessionId) {
-      const detail = await api.createDiscoverySession({ project_id: activeProjectId || undefined })
-      sessionId = detail.id
-      sessionDetail = detail
-      setCurrent(detail)
-      setCurrentId(sessionId)
-      setSessions(s => [
-        { id: detail.id, title: detail.title, pinned: detail.pinned, project_id: detail.project_id, message_count: 0, last_run_id: null, updated_at: detail.updated_at, created_at: detail.created_at, preview: null },
-        ...s,
-      ])
-    }
-
-    // Optimistically append the user turn locally so the bubble shows
-    // immediately. The SSE server appends the persisted version on
-    // its side; on stream completion we reload the session to reconcile.
-    const optimisticUser: DiscoveryMessage = {
-      id: `local-${Date.now()}`,
-      role: 'user',
-      content: text,
-      timestamp: new Date().toISOString(),
-      cards: [],
-    }
-    setCurrent(c => c ? { ...c, messages: [...c.messages, optimisticUser] } : c)
-    setInput('')
-    setInflight(true)
-    setStreamingText('')
-    setStreamingCards([])
-    setStatus('Sending…')
-
-    let runId = ''
-    await send(
-      sessionId!,
-      text,
-      undefined,
-      {
-        onStart: meta => { runId = meta.run_id; setStatus(`Streaming from ${meta.model}…`) },
-        onStatus: msg => setStatus(msg),
-        onToken: delta => setStreamingText(prev => prev + delta),
-        onCard: card => setStreamingCards(prev => [...(prev || []), card]),
-        onDone: async () => {
-          setInflight(false)
-          setStatus(null)
-          setStreamingText('')
-          setStreamingCards([])
-          // Reload the full session to pick up the persisted
-          // assistant message with its server-assigned id and any
-          // tools-call traces.
-          try {
-            const detail = await api.getDiscoverySession(sessionId!)
-            setCurrent(detail)
-            // Refresh the sessions list so the sidebar preview updates.
-            void reloadSessions(searchQuery)
-          } catch { /* ignore */ }
+      // Include uploaded documents for AI context
+      const allDocs = JSON.parse(localStorage.getItem('humanovo-project-documents') || '[]')
+      const docIds = allDocs.map((d: any) => d.id)
+      const discoveryConfig = {
+        ...config,
+        external_factors: factors.length > 0 ? factors.map(f => `${f.name} (${f.category}): ${f.interaction}`) : undefined,
+        knowledge_base_ids: docIds.length > 0 ? docIds : undefined,
+        document_context: docIds.length > 0 ? true : undefined,
+      }
+      const startRes = await api.startDiscovery(discoveryConfig as any)
+      setState('running')
+      setShowConfig(false)
+      setHypotheses([])
+      // Capture auto-created project from start response
+      const newProjectId = startRes?.project_id && startRes.project_id !== 'discovery'
+        ? startRes.project_id : ''
+      if (newProjectId) {
+        setProjectId(newProjectId)
+        setProjectName(startRes.project_name || '')
+      }
+      logActivity({
+        type: 'discovery', action: 'started',
+        title: `Discovery started: ${config.disease} (${config.discovery_type || 'treatment'})`,
+        // project_id available synchronously from startRes — use it so
+        // ActivityFeed / notification rows can route to the project folder
+        // immediately after discovery begins.
+        metadata: {
+          disease: config.disease,
+          discovery_type: config.discovery_type,
+          project_id: newProjectId,
         },
-        onError: msg => {
-          setInflight(false)
-          setStatus(null)
-          toast('error', msg, { title: 'Stream error' })
-        },
-      },
-    )
-    // Reference runId to silence TS unused; parent uses it from onStart.
-    void runId
-    void sessionDetail
-  }, [currentId, current, activeProjectId, inflight, send, reloadSessions, searchQuery])
-
-  // ── Hypothesis save routing ──
-
-  const handleCardAction = useCallback(async (kind: string, payload: Record<string, any>) => {
-    if (kind !== 'save-hypothesis') return
-    if (!activeProjectId) {
-      // Prompt the user to pick a project.
-      setProjectPickerOpen(true)
-      // Stash the pending hypothesis; the picker's confirm handler
-      // will re-run the save.
-      ;(window as any).__pendingHypothesisCard = payload
-      return
-    }
-    await saveHypothesisToProject(payload, activeProjectId)
-  }, [activeProjectId])
-
-  const saveHypothesisToProject = async (payload: Record<string, any>, projectId: string) => {
-    try {
-      // api.ts exposes `createHypothesis` via POST /hypotheses; we
-      // stitch the card payload into the backend schema.
-      const created = await apiCreateHypothesis({
-        project_id: projectId,
-        statement: payload.title || payload.statement || 'Untitled hypothesis',
-        mechanism: payload.body || payload.mechanism || '',
-        rationale: payload.rationale || '',
-        tags: payload.tags || [],
       })
-      toast('success', `Saved to project`, { title: 'Hypothesis saved' })
-      return created
-    } catch (err: any) {
-      toast('error', err?.message || 'Save failed')
+
+      // Save to history (ephemeral in-memory only)
+      const run: DiscoveryRun = {
+        id: `run-${Date.now()}`,
+        disease: config.disease,
+        discoveryType: config.discovery_type || 'treatment',
+        hypothesesCount: 0,
+        timestamp: new Date().toISOString(),
+        status: 'running',
+      }
+      setDiscoveryHistory(prev => [run, ...prev].slice(0, 50))
+    } catch (err) {
+      console.error('Failed to start discovery:', err)
+      const msg = err instanceof Error ? err.message : 'Unable to start discovery — check your connection and try again.'
+      setStartError(msg)
+    } finally {
+      setStarting(false)
     }
   }
 
-  // Minimal inline wrapper — api.ts already has createHypothesis but
-  // threads it through a different path; we keep the call shape tight.
-  const apiCreateHypothesis = async (body: { project_id: string; statement: string; mechanism: string; rationale: string; tags: string[] }) => {
-    const { data } = await (await import('../services/api')).apiClient.post('/hypotheses', body)
-    return data
+  const pauseDiscovery = async () => {
+    try { await api.pauseDiscovery(); setState('paused') } catch (e) { console.error(e) }
   }
 
-  // ── Render ──
+  const resumeDiscovery = async () => {
+    try {
+      await api.resumeDiscovery()
+      setState('running')
+    } catch (e) { console.error(e) }
+  }
 
-  const activeProject = useMemo(() => projects.find(p => p.id === activeProjectId) || null, [projects, activeProjectId])
+  const stopDiscovery = async () => {
+    try { await api.stopDiscovery(); setState('stopping') } catch (e) { console.error(e) }
+  }
+
+  const exportPdf = async (h: Hypothesis) => {
+    try {
+      // Binary endpoint — responseType 'blob' + validateStatus handles both
+      // the direct-PDF response and the JSON-wrapped-base64 shape.
+      const res = await apiClient.post(
+        `/documents/hypothesis/${h.id}/pdf`,
+        {
+          title: h.title, description: h.description, mechanism: h.mechanism,
+          confidence: h.confidence, evidence_summary: h.evidence_summary,
+          risks: h.risks, validation_steps: h.validation_steps,
+          key_citations: h.key_citations, disease: config.disease,
+          discovery_type: config.discovery_type,
+        },
+        { responseType: 'blob', validateStatus: () => true },
+      )
+      if (res.status >= 400) return
+      const rawBlob = res.data as Blob
+      const contentType = rawBlob.type || String(res.headers['content-type'] || '')
+      let blob: Blob
+      if (contentType.includes('application/json')) {
+        const text = await rawBlob.text()
+        const data = JSON.parse(text)
+        if (!data.pdf_base64) return
+        const byteChars = atob(data.pdf_base64)
+        const byteArray = new Uint8Array(byteChars.length)
+        for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i)
+        blob = new Blob([byteArray], { type: 'application/pdf' })
+      } else {
+        blob = rawBlob
+      }
+      if (blob.size === 0) return
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url; a.download = `${h.title.slice(0, 50)}.pdf`; a.click()
+      URL.revokeObjectURL(url)
+    } catch (e) { console.error(e) }
+  }
+
+  const addFocusEntity = () => {
+    if (!focusInput.trim()) return
+    setConfig(prev => ({ ...prev, focus_entities: [...(prev.focus_entities || []), focusInput.trim()] }))
+    setFocusInput('')
+  }
+
+  const removeFocusEntity = (entity: string) => {
+    setConfig(prev => ({ ...prev, focus_entities: (prev.focus_entities || []).filter(e => e !== entity) }))
+  }
+
+  const addFactor = () => {
+    if (!factorName.trim()) return
+    setFactors(prev => [...prev, { name: factorName, category: factorCategory, interaction: factorInteraction }])
+    setFactorName(''); setFactorInteraction('')
+  }
+
+  const handleDocUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files || files.length === 0) return
+    setUploading(true)
+    // Hard caps + type check up front so users get a clear reason before
+    // the request hits the network.
+    const MAX_BYTES = 25 * 1024 * 1024 // 25 MB
+    const VALID_EXT = /\.(pdf|txt|csv|json|docx?|xlsx?|md)$/i
+    for (const file of Array.from(files)) {
+      const tooBig = file.size > MAX_BYTES
+      const badType = !VALID_EXT.test(file.name)
+      if (tooBig || badType) {
+        const reason = tooBig ? `File is ${(file.size / 1024 / 1024).toFixed(1)} MB (max 25)` : 'Unsupported file type'
+        setUploadedDocs(prev => [...prev, { name: file.name, id: '', status: 'failed', error: reason }])
+        continue
+      }
+      // Optimistic row so the user sees progress immediately.
+      setUploadedDocs(prev => [...prev, { name: file.name, id: '', status: 'uploading' }])
+      try {
+        const result = await api.uploadDocument(file, projectId ? { project_id: projectId } : undefined)
+        const id = result?.id || result?.document_id || ''
+        if (!id) throw new Error('Upload succeeded but server did not return a document id')
+        setUploadedDocs(prev => prev.map(d =>
+          d.name === file.name && d.status === 'uploading' ? { ...d, id, status: 'uploaded' } : d,
+        ))
+        logActivity({ type: 'evidence', action: 'imported', title: `Document uploaded: ${file.name}`, project: config.disease || 'Discovery' })
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Upload failed (check backend)'
+        console.error('Upload failed:', err)
+        setUploadedDocs(prev => prev.map(d =>
+          d.name === file.name && d.status === 'uploading' ? { ...d, status: 'failed', error: msg } : d,
+        ))
+      }
+    }
+    setUploading(false)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  // Sort & filter hypotheses
+  const sortedHypotheses = [...hypotheses]
+    .filter(h => h.confidence >= filterConfidence)
+    .sort((a, b) => {
+      if (sortBy === 'novelty') return (b.novelty_score || 0) - (a.novelty_score || 0)
+      if (sortBy === 'date') return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+      return b.confidence - a.confidence
+    })
+
+  const isRunning = state === 'running'
+  const isPaused = state === 'paused'
+  const isIdle = state === 'idle' || state === 'completed'
 
   return (
-    <div className="flex h-full overflow-hidden" style={{ background: 'var(--color-bg)' }}>
-      <SessionSidebar
-        sessions={sessions}
-        currentId={currentId}
-        onSelect={openSession}
-        onNew={newSession}
-        onDelete={deleteSession}
-        onRename={renameSession}
-        onTogglePin={togglePin}
-        onSearch={(q) => { setSearchQuery(q); void reloadSessions(q) }}
-        collapsed={sidebarCollapsed}
-        onToggleCollapsed={setSidebarCollapsed}
-      />
-
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Header */}
-        <div className="px-5 py-3 border-b border-[var(--color-border)] flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-xxs uppercase tracking-wider text-[var(--color-text-muted)]">Discovery</div>
-            <div className="text-sm font-semibold truncate" style={{ color: 'var(--color-text)' }}>
-              {current?.title || 'New conversation'}
-            </div>
-          </div>
-          <div className="flex items-center gap-1.5">
-            {/* Active project pill */}
-            <button
-              onClick={() => setProjectPickerOpen(true)}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-[var(--glass-border)] text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:border-[var(--color-border-strong)]"
-              title="Active project (for hypothesis routing)"
-            >
-              <FiFolder className="w-3 h-3" />
-              <span className="max-w-[180px] truncate">{activeProject?.name || 'No project selected'}</span>
-              <FiChevronDown className="w-3 h-3" />
-            </button>
-            <button
-              onClick={forkSession}
-              disabled={!current}
-              className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] disabled:opacity-40"
-              title="Fork conversation (copy + tweak config)"
-              aria-label="Fork conversation"
-            >
-              <FiGitBranch className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={() => setConfigOpen(true)}
-              className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-              title="Agent configuration"
-              aria-label="Agent configuration"
-            >
-              <FiSettings className="w-3.5 h-3.5" />
-            </button>
-          </div>
+    <div className="flex h-full overflow-hidden">
+      {/* Collapsed left rail — a thin icon column keeps the engine and
+          connection state visible without eating horizontal space. */}
+      {leftCollapsed && (
+        <div className="w-12 flex flex-col items-center border-r border-[var(--color-border)] py-4 gap-3">
+          <button
+            onClick={() => setLeftCollapsed(false)}
+            className="p-2 rounded-lg hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)]"
+            title="Expand configuration panel"
+            aria-label="Expand configuration panel"
+          >
+            <FiChevronRight className="w-4 h-4" />
+          </button>
+          <FiCpu className="w-4 h-4 text-[var(--color-text-muted)]" title="Discovery Engine" />
+          <span className="w-2 h-2 rounded-full" style={{ background: connected ? 'var(--color-success)' : connected === false ? 'var(--color-error)' : 'var(--color-warning)' }} title={connected ? 'Live' : connected === false ? 'Offline' : 'Connecting'} />
         </div>
-
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-5 py-6 space-y-4">
-          {!current || current.messages.length === 0 ? (
-            <div className="max-w-3xl mx-auto">
-              <EmptyState
-                icon={<FiZap />}
-                title="Ask anything biomedical"
-                description="Humanovo reasons over the evidence corpus and knowledge graph, then surfaces hypotheses with explicit citations. Try one of the starters below or type your own question."
-              />
-              <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {STARTERS.map((s, i) => (
-                  <button
-                    key={i}
-                    onClick={() => { setInput(s); setTimeout(() => inputRef.current?.focus(), 10) }}
-                    className="text-left text-sm px-3 py-2 rounded-lg border border-[var(--glass-border)] hover:border-[var(--color-border-strong)] hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
+      )}
+      {/* Left Panel - Config & Stats */}
+      <div className={`${leftCollapsed ? 'hidden' : 'w-80'} flex flex-col border-r border-[var(--color-border)] overflow-hidden`}>
+        <div className="p-5 border-b border-[var(--color-border)]">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <FiCpu className="w-4 h-4 text-[var(--color-text-muted)]" />
+              <h2 className="text-sm font-medium">Discovery Engine</h2>
             </div>
-          ) : (
-            <div className="max-w-3xl mx-auto space-y-4">
-              {current.messages.map(msg => (
-                <ChatMessage key={msg.id} message={msg} onCardAction={handleCardAction} />
-              ))}
-              {/* Streaming in-progress assistant message */}
-              {inflight && (
-                <ChatMessage
-                  key="streaming"
-                  message={{
-                    id: 'streaming',
-                    role: 'assistant',
-                    content: streamingText || (status || 'Thinking…'),
-                    cards: streamingCards,
-                    timestamp: new Date().toISOString(),
-                  } as DiscoveryMessage}
-                  streaming
-                  onCardAction={handleCardAction}
-                />
-              )}
-              <div ref={messagesEndRef} />
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full" style={{ background: connected ? 'var(--color-success)' : connected === false ? 'var(--color-error)' : 'var(--color-warning)' }} />
+              <span className="text-xs text-[var(--color-text-muted)]">{connected ? 'Live' : connected === false ? 'Offline' : '...'}</span>
+              <button
+                onClick={() => setLeftCollapsed(true)}
+                className="ml-1 p-1 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)]"
+                title="Collapse configuration panel"
+                aria-label="Collapse configuration panel"
+              >
+                <FiChevronLeft className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+
+          {/* Controls */}
+          <div className="flex items-center gap-2">
+            {isIdle && (
+              <button
+                onClick={startDiscovery}
+                disabled={!config.disease.trim() || starting}
+                className="btn flex-1 text-sm border border-[var(--color-border)] disabled:opacity-30"
+                style={{ color: starting ? 'var(--color-text-muted)' : 'var(--color-success)' }}
+                title={!config.disease.trim() ? 'Enter a disease or target above to enable' : undefined}
+              >
+                {starting ? (
+                  <>
+                    <FiClock className="w-4 h-4 animate-spin" /> Starting…
+                  </>
+                ) : (
+                  <>
+                    <FiPlay className="w-4 h-4" /> Start
+                  </>
+                )}
+              </button>
+            )}
+            {isRunning && (
+              <>
+                <button onClick={pauseDiscovery} className="btn flex-1 text-sm" style={{ color: 'var(--color-warning)' }}>
+                  <FiPause className="w-4 h-4" /> Pause
+                </button>
+                <button onClick={stopDiscovery} className="btn text-sm" style={{ color: 'var(--color-error)' }}>
+                  <FiSquare className="w-4 h-4" /> Stop
+                </button>
+              </>
+            )}
+            {isPaused && (
+              <>
+                <button onClick={resumeDiscovery} className="btn flex-1 text-sm" style={{ color: 'var(--color-success)' }}>
+                  <FiPlay className="w-4 h-4" /> Resume
+                </button>
+                <button onClick={stopDiscovery} className="btn text-sm" style={{ color: 'var(--color-error)' }}>
+                  <FiSquare className="w-4 h-4" /> Stop
+                </button>
+              </>
+            )}
+          </div>
+          {startError && (
+            <div className="mt-2 px-3 py-2 rounded text-xxs flex items-start gap-2"
+                 style={{ background: 'rgba(239,68,68,0.08)', color: 'var(--color-error)', border: '1px solid rgba(239,68,68,0.25)' }}>
+              <FiAlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+              <div className="flex-1">{startError}</div>
+              <button onClick={() => setStartError(null)} className="opacity-60 hover:opacity-100"><FiX className="w-3 h-3" /></button>
             </div>
           )}
         </div>
 
-        {/* Composer */}
-        <div className="border-t border-[var(--color-border)] p-4">
-          <div className="max-w-3xl mx-auto">
-            {status && !inflight && (
-              <div className="mb-2 text-xxs text-[var(--color-text-muted)]">{status}</div>
+        <div className="flex-1 overflow-y-auto">
+          {/* Configuration */}
+          <div className="border-b border-[var(--color-border)]">
+            <button onClick={() => setShowConfig(!showConfig)} className="w-full flex items-center justify-between p-4 text-sm font-medium hover:bg-[var(--glass-bg)] transition-all">
+              <span className="flex items-center gap-2"><FiSettings className="w-4 h-4 text-[var(--color-text-muted)]" /> Configuration</span>
+              {showConfig ? <FiChevronUp className="w-4 h-4" /> : <FiChevronDown className="w-4 h-4" />}
+            </button>
+            {showConfig && (
+              <div className="px-4 pb-4 space-y-4 animate-slide-down">
+                <div>
+                  <label className="text-xs text-[var(--color-text-muted)] mb-1.5 block font-medium">Disease / Target *</label>
+                  <input
+                    type="text"
+                    value={config.disease}
+                    onChange={e => setConfig(prev => ({ ...prev, disease: e.target.value }))}
+                    disabled={!isIdle}
+                    placeholder="e.g., Pancreatic Cancer"
+                    className="input w-full disabled:opacity-50"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs text-[var(--color-text-muted)] mb-1.5 block font-medium">Discovery Type</label>
+                  <select
+                    value={config.discovery_type}
+                    onChange={e => setConfig(prev => ({ ...prev, discovery_type: e.target.value as any }))}
+                    disabled={!isIdle}
+                    className="input w-full disabled:opacity-50"
+                  >
+                    {discoveryTypes.map(dt => (
+                      <option key={dt.value} value={dt.value}>{dt.label}</option>
+                    ))}
+                  </select>
+                  <p className="text-xxs text-[var(--color-text-muted)] mt-1">
+                    {discoveryTypes.find(d => d.value === config.discovery_type)?.description}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="text-xs text-[var(--color-text-muted)] mb-1.5 block font-medium">Focus Entities</label>
+                  <div className="flex gap-1">
+                    <input
+                      type="text"
+                      value={focusInput}
+                      onChange={e => setFocusInput(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addFocusEntity() } }}
+                      disabled={!isIdle}
+                      placeholder="e.g., KRAS, TP53"
+                      className="input flex-1 text-xs disabled:opacity-50"
+                    />
+                    <button aria-label="Add focus entity"
+                      type="button"
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); addFocusEntity() }}
+                      disabled={!isIdle || !focusInput.trim()}
+                      className="px-2 py-1 text-xs rounded-lg border border-[var(--color-border)] hover:bg-[var(--glass-bg)] text-[var(--color-text)] disabled:opacity-30 transition-colors"
+                    >
+                      <FiPlus className="w-3 h-3" />
+                    </button>
+                  </div>
+                  {(config.focus_entities || []).length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-2">
+                      {config.focus_entities!.map(e => (
+                        <span key={e} className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-md bg-[var(--glass-bg)] text-[var(--color-text-secondary)]">
+                          {e}
+                          {isIdle && <button onClick={() => removeFocusEntity(e)} className="text-[var(--color-text-muted)] hover:text-[var(--color-error)]"><FiX className="w-2.5 h-2.5" /></button>}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <label className="text-xs text-[var(--color-text-muted)] mb-1.5 flex justify-between font-medium">
+                    <span>Min Confidence</span><span>{Math.round((config.min_confidence || 0.3) * 100)}%</span>
+                  </label>
+                  <input type="range" min="0.1" max="0.95" step="0.05" value={config.min_confidence} onChange={e => setConfig(prev => ({ ...prev, min_confidence: parseFloat(e.target.value) }))} disabled={!isIdle} className="w-full" />
+                </div>
+
+                {/* Research Guidance */}
+                <div>
+                  <label className="text-xs text-[var(--color-text-muted)] mb-1.5 block font-medium">Research Guidance</label>
+                  <textarea
+                    value={config.research_guidance || ''}
+                    onChange={e => setConfig(prev => ({ ...prev, research_guidance: e.target.value }))}
+                    disabled={!isIdle}
+                    placeholder="Add detailed guidance for the AI pipeline... e.g., focus on epigenetic mechanisms, prioritize FDA-approved compounds, explore immunotherapy combinations..."
+                    rows={4}
+                    className="input w-full text-xs disabled:opacity-50 resize-none"
+                  />
+                  <p className="text-xxs text-[var(--color-text-muted)] mt-1">
+                    Provide specific instructions to guide hypothesis generation
+                  </p>
+                </div>
+
+                {/* External Factors */}
+                <div>
+                  <button onClick={() => setShowFactors(!showFactors)} className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
+                    {showFactors ? <FiChevronUp className="w-3 h-3" /> : <FiChevronDown className="w-3 h-3" />}
+                    External Factors ({factors.length})
+                  </button>
+                  {showFactors && (
+                    <div className="mt-2 space-y-2 animate-slide-down">
+                      <input type="text" value={factorName} onChange={e => setFactorName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addFactor() } }} placeholder="Factor name" disabled={!isIdle} className="input w-full text-xs disabled:opacity-50" />
+                      <div className="flex gap-1">
+                        <select value={factorCategory} onChange={e => setFactorCategory(e.target.value as any)} disabled={!isIdle} className="input flex-1 text-xs disabled:opacity-50">
+                          {factorCategories.map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                        <button aria-label="Add factor" type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); addFactor() }} disabled={!isIdle || !factorName.trim()} className="px-2 py-1 text-xs rounded-lg border border-[var(--color-border)] hover:bg-[var(--glass-bg)] text-[var(--color-text)] disabled:opacity-30 transition-colors"><FiPlus className="w-3 h-3" /></button>
+                      </div>
+                      <input type="text" value={factorInteraction} onChange={e => setFactorInteraction(e.target.value)} placeholder="Known interactions (optional)" disabled={!isIdle} className="input w-full text-xs disabled:opacity-50" />
+                      {factors.map((f, i) => (
+                        <div key={i} className="flex items-center justify-between text-xs p-2 rounded-lg bg-[var(--glass-bg)]">
+                          <span><span className="font-medium">{f.name}</span> <span className="text-[var(--color-text-muted)]">({f.category})</span></span>
+                          {isIdle && <button onClick={() => setFactors(prev => prev.filter((_, j) => j !== i))} className="text-[var(--color-text-muted)] hover:text-[var(--color-error)]"><FiX className="w-3 h-3" /></button>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Document Upload */}
+                <div>
+                  <label className="text-xs text-[var(--color-text-muted)] mb-1.5 block font-medium">Supporting Documents</label>
+                  <p className="text-xxs text-[var(--color-text-muted)] mb-2">Upload research papers, datasets, or notes to guide discovery</p>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    accept=".pdf,.txt,.csv,.tsv,.md,.markdown,.mdx,.json,.jsonl,.ndjson,.xml,.html,.htm,.rtf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.odp,.log,.bib"
+                    onChange={handleDocUpload}
+                    className="hidden"
+                  />
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading}
+                    className="w-full flex items-center justify-center gap-2 p-3 rounded-lg border-2 border-dashed border-[var(--color-border)] hover:border-[var(--color-border-strong)] hover:bg-[var(--glass-bg)] transition-all text-xs disabled:opacity-50"
+                  >
+                    <FiUpload className="w-4 h-4 text-[var(--color-text-muted)]" />
+                    <span className="text-[var(--color-text-muted)]">{uploading ? 'Uploading...' : 'Click to upload documents'}</span>
+                  </button>
+                  {uploadedDocs.length > 0 && (
+                    <div className="mt-2 space-y-1">
+                      {uploadedDocs.map((doc, i) => {
+                        const statusColor = doc.status === 'uploaded'
+                          ? 'var(--color-success)'
+                          : doc.status === 'uploading'
+                            ? 'var(--color-text-muted)'
+                            : 'var(--color-error)'
+                        return (
+                          <div key={i} className="flex flex-col gap-1 text-xs p-2 rounded-lg bg-[var(--glass-bg)]">
+                            <div className="flex items-center gap-2">
+                              <FiFile className="w-3 h-3 flex-shrink-0" style={{ color: statusColor }} />
+                              <span className="flex-1 truncate" title={doc.name}>{doc.name}</span>
+                              <span className="text-xxs text-[var(--color-text-muted)]">
+                                {doc.status === 'uploading' ? 'uploading…' : doc.status}
+                              </span>
+                              <button
+                                onClick={() => setUploadedDocs(prev => prev.filter((_, j) => j !== i))}
+                                className="text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                                aria-label={`Remove ${doc.name}`}
+                              >
+                                <FiX className="w-3 h-3" />
+                              </button>
+                            </div>
+                            {doc.status === 'failed' && doc.error && (
+                              <div className="text-xxs pl-5" style={{ color: 'var(--color-error)' }}>
+                                {doc.error}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
             )}
-            <div className="relative rounded-xl border border-[var(--glass-border)] focus-within:border-[var(--color-border-strong)] bg-[var(--glass-bg)] transition-colors">
-              <textarea
-                ref={inputRef}
-                value={input}
-                onChange={e => setInput(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault()
-                    sendMessage(input)
-                  }
-                }}
-                placeholder="Ask about a mechanism, propose a study design, request citations…"
-                rows={Math.min(6, Math.max(1, input.split('\n').length))}
-                className="w-full bg-transparent resize-none px-4 py-3 pr-14 text-sm leading-relaxed focus:outline-none text-[var(--color-text)] placeholder:text-[var(--color-text-muted)]"
-                aria-label="Message composer"
-              />
-              {inflight ? (
-                <button
-                  onClick={cancel}
-                  className="absolute right-2 bottom-2 p-2 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-raised)] border border-[var(--glass-border)]"
-                  aria-label="Stop generation"
-                  title="Stop generation"
-                >
-                  <FiStopCircle className="w-4 h-4" />
-                </button>
-              ) : (
-                <button
-                  onClick={() => sendMessage(input)}
-                  disabled={!input.trim()}
-                  className="absolute right-2 bottom-2 p-2 rounded-lg disabled:opacity-40 text-[var(--color-text)] hover:bg-[var(--color-surface-raised)] border border-[var(--glass-border)]"
-                  aria-label="Send message"
-                  title="Send message (⏎)"
-                >
-                  <FiSend className="w-4 h-4" />
-                </button>
+          </div>
+
+          {/* Live Stats */}
+          {stats && (isRunning || isPaused) && (
+            <div className="p-4 border-b border-[var(--color-border)] space-y-3">
+              <h3 className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider font-medium">Live Statistics</h3>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { label: 'Agents', value: stats.total_agents, color: 'var(--color-text)' },
+                  { label: 'Active', value: stats.active_agents, color: 'var(--color-success)' },
+                  { label: 'Paths', value: stats.paths_explored, color: 'var(--color-text)' },
+                  { label: 'Found', value: stats.hypotheses_found, color: 'var(--color-text-secondary)' },
+                ].map(s => (
+                  <div key={s.label} className="p-2.5 rounded-lg bg-[var(--glass-bg)]">
+                    <div className="text-xxs text-[var(--color-text-muted)]">{s.label}</div>
+                    <div className="text-lg font-semibold" style={{ color: s.color }}>{s.value}</div>
+                  </div>
+                ))}
+              </div>
+
+              {stats.current_round !== undefined && (
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-[var(--color-text-muted)]">Round {stats.current_round}/{stats.total_rounds}</span>
+                  <span className="text-[var(--color-text-muted)]">{stats.high_confidence_discoveries} high conf.</span>
+                </div>
+              )}
+
+              {/* Model distribution */}
+              {stats.agents_by_model && Object.keys(stats.agents_by_model).length > 0 && (
+                <div>
+                  <div className="text-xxs text-[var(--color-text-muted)] mb-2">Agents by Model</div>
+                  <div className="h-24">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={Object.entries(stats.agents_by_model).map(([name, count]) => ({ name: name.split('-')[0], count }))}>
+                        <XAxis dataKey="name" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
+                        <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} />
+                        <Tooltip contentStyle={{ background: 'var(--color-surface-solid)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '11px', color: 'var(--color-text)' }} />
+                        <Bar dataKey="count" fill="var(--color-text)" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              )}
+
+              {stats.learning_stats && (
+                <div>
+                  <div className="text-xxs text-[var(--color-text-muted)] mb-1">Learning</div>
+                  <div className="flex gap-2 text-xs">
+                    <span>{stats.learning_stats.total_explored} explored</span>
+                    <span style={{ color: 'var(--color-success)' }}>{stats.learning_stats.high_value_paths} high</span>
+                    <span style={{ color: 'var(--color-error)' }}>{stats.learning_stats.low_value_paths} low</span>
+                  </div>
+                </div>
               )}
             </div>
-            <div className="mt-1.5 flex justify-between items-center text-xxs text-[var(--color-text-muted)]">
-              <span>Enter to send · Shift+Enter for newline</span>
-              {current?.agent_config && (
-                <span>
-                  {current.agent_config.model} · T={current.agent_config.temperature}
-                </span>
-              )}
-            </div>
+          )}
+
+          {/* Discovery History */}
+          <div className="border-b border-[var(--color-border)]">
+            <button onClick={() => setShowHistory(!showHistory)} className="w-full flex items-center justify-between p-4 text-sm font-medium hover:bg-[var(--glass-bg)] transition-all">
+              <span className="flex items-center gap-2"><FiClock className="w-4 h-4 text-[var(--color-text-muted)]" /> History ({discoveryHistory.length})</span>
+              {showHistory ? <FiChevronUp className="w-4 h-4" /> : <FiChevronDown className="w-4 h-4" />}
+            </button>
+            {showHistory && (
+              <div className="px-4 pb-4 space-y-2 animate-slide-down max-h-64 overflow-y-auto">
+                {discoveryHistory.length === 0 ? (
+                  <p className="text-xs text-[var(--color-text-muted)] py-2">No discovery runs yet</p>
+                ) : discoveryHistory.map(run => (
+                  <div key={run.id} className="p-3 rounded-lg bg-[var(--glass-bg)] border border-[var(--color-border)]">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-medium">{run.disease}</span>
+                      <span className="text-[var(--color-text-muted)]">{run.discoveryType}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-xxs text-[var(--color-text-muted)] mt-1">
+                      <span>{formatDate(run.timestamp)}</span>
+                      <span>{run.hypothesesCount} hypotheses</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>
 
-      {/* Agent config panel */}
-      {current && (
-        <AgentConfigPanel
-          open={configOpen}
-          onClose={() => setConfigOpen(false)}
-          config={current.agent_config}
-          onChange={updateConfig}
-        />
-      )}
-
-      {/* Project picker modal */}
-      {projectPickerOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setProjectPickerOpen(false)}>
-          <div className="absolute inset-0 bg-black/40" />
-          <div onClick={e => e.stopPropagation()} className="relative w-full max-w-md rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-solid)] p-5">
-            <div className="flex items-start justify-between mb-3">
-              <div>
-                <div className="text-xxs uppercase tracking-wider text-[var(--color-text-muted)] mb-0.5">Select active project</div>
-                <div className="text-sm" style={{ color: 'var(--color-text)' }}>
-                  Hypotheses saved from this conversation will attach to the selected project.
-                </div>
-              </div>
-              <button onClick={() => setProjectPickerOpen(false)} aria-label="Close" className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
-                <FiX className="w-4 h-4" />
-              </button>
+      {/* Center - Hypotheses */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="p-5 border-b border-[var(--color-border)]">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight">Discovery</h1>
+              <p className="text-sm text-[var(--color-text-muted)] mt-0.5">
+                {isRunning ? 'Discovery in progress...' : isPaused ? 'Discovery paused' : state === 'completed' ? 'Discovery complete' : `${hypotheses.length} hypotheses discovered`}
+              </p>
             </div>
-            <div className="max-h-64 overflow-y-auto space-y-1">
-              {projects.length === 0 ? (
-                <div className="text-xs text-[var(--color-text-muted)] py-4 text-center">
-                  No projects yet. <button onClick={() => { setProjectPickerOpen(false); navigate('/projects?new=1') }} className="underline">Create one →</button>
-                </div>
-              ) : projects.map(p => (
-                <button
-                  key={p.id}
-                  onClick={async () => {
-                    setActiveProjectId(p.id)
-                    setProjectPickerOpen(false)
-                    // Persist to current session too.
-                    if (current) {
-                      try { await api.updateDiscoverySession(current.id, { project_id: p.id }) } catch { /* ignore */ }
-                    }
-                    // If there's a pending hypothesis save, complete it.
-                    const pending = (window as any).__pendingHypothesisCard
-                    if (pending) {
-                      await saveHypothesisToProject(pending, p.id)
-                      ;(window as any).__pendingHypothesisCard = undefined
-                    }
-                  }}
-                  className={`w-full text-left px-3 py-2 rounded-lg border text-sm transition-colors ${
-                    activeProjectId === p.id
-                      ? 'border-[var(--color-border-strong)] bg-[var(--glass-bg)] text-[var(--color-text)]'
-                      : 'border-[var(--glass-border)] hover:border-[var(--color-border-strong)] hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2">
+              <Link
+                to="/projects"
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-[var(--color-border)] hover:bg-[var(--glass-bg-hover)] transition-all"
+                style={{ color: 'var(--color-text-secondary)' }}
+              >
+                <FiFolder className="w-3.5 h-3.5" />
+                All Projects
+                <FiExternalLink className="w-3 h-3" />
+              </Link>
+              {isRunning && (
+                <span className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-[var(--glass-border)] text-[var(--color-text-muted)]">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-text)] animate-pulse" /> Running
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Sort & Filter */}
+          {hypotheses.length > 0 && (
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-0.5 bg-[var(--glass-bg)] rounded-lg p-0.5">
+                {[
+                  { value: 'confidence', label: 'Confidence' },
+                  { value: 'novelty', label: 'Novelty' },
+                  { value: 'date', label: 'Recent' },
+                ].map(s => (
+                  <button
+                    key={s.value}
+                    onClick={() => setSortBy(s.value as any)}
+                    className={`px-3 py-1.5 text-xs rounded-md transition-all ${sortBy === s.value ? 'bg-[var(--glass-bg-hover)] text-[var(--color-text)]' : 'text-[var(--color-text-muted)]'}`}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
+                <span>Min: {Math.round(filterConfidence * 100)}%</span>
+                <input type="range" min="0" max="0.9" step="0.1" value={filterConfidence} onChange={e => setFilterConfidence(parseFloat(e.target.value))} className="w-20" />
+              </div>
+              <span className="text-xs text-[var(--color-text-muted)] ml-auto">{sortedHypotheses.length} results</span>
+            </div>
+          )}
+        </div>
+
+        {/* Hypothesis List */}
+        <div className="flex-1 overflow-y-auto p-4">
+          {hypotheses.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-[var(--color-text-muted)]">
+              <FiTarget className="w-12 h-12 mb-4 opacity-20" />
+              <p className="text-sm">No hypotheses yet</p>
+              <p className="text-xs mt-1">Configure a disease target and start discovery</p>
+            </div>
+          ) : !isRunning && !isPaused && projectId && projectId !== 'discovery' ? (
+            <div className="flex flex-col items-center justify-center h-full text-[var(--color-text-muted)]">
+              <FiCheck className="w-12 h-12 mb-4" style={{ color: 'var(--color-success)', opacity: 0.6 }} />
+              <p className="text-sm font-medium text-[var(--color-text)]">{hypotheses.length} hypotheses saved to project</p>
+              <p className="text-xs mt-1 mb-4">Discovery complete. All hypotheses have been saved.</p>
+              <Link
+                to={`/projects/${projectId}`}
+                className="flex items-center gap-2 text-sm px-4 py-2 rounded-lg border border-[var(--color-border)] hover:bg-[var(--glass-bg-hover)] transition-all"
+                style={{ color: 'var(--color-text-secondary)' }}
+              >
+                <FiFolder className="w-4 h-4" />
+                View in Project
+                <FiExternalLink className="w-3.5 h-3.5" />
+              </Link>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {(isRunning || isPaused) && projectId && projectId !== 'discovery' && (
+                <div className="flex items-center justify-center py-2">
+                  <Link
+                    to={`/projects/${projectId}`}
+                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-[var(--color-border)] hover:bg-[var(--glass-bg-hover)] transition-all"
+                    style={{ color: 'var(--color-text-secondary)' }}
+                  >
                     <FiFolder className="w-3.5 h-3.5" />
-                    <span className="truncate">{p.name}</span>
+                    View This Project
+                    <FiExternalLink className="w-3 h-3" />
+                  </Link>
+                </div>
+              )}
+              {sortedHypotheses.map(h => (
+                <button
+                  key={h.id}
+                  onClick={() => { setSelectedHypothesis(h); setShowCompare(false) }}
+                  className={`w-full text-left glass-card p-4 transition-all group ${selectedHypothesis?.id === h.id ? 'border-[var(--color-border-strong)] bg-[var(--glass-bg-hover)]' : ''}`}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="p-2 rounded-lg flex-shrink-0" style={{ background: `${confidenceColor(h.confidence)}12` }}>
+                      <FiZap className="w-4 h-4" style={{ color: confidenceColor(h.confidence) }} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start justify-between gap-2">
+                        <h3 className="text-sm font-medium line-clamp-2">{h.title}</h3>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <span className="text-xs font-medium" style={{ color: confidenceColor(h.confidence) }}>
+                            {Math.round(h.confidence * 100)}%
+                          </span>
+                          {h.novelty_score !== undefined && (
+                            <span className="text-xxs text-[var(--color-text-muted)]">N:{Math.round(h.novelty_score * 100)}%</span>
+                          )}
+                        </div>
+                      </div>
+                      <p className="text-xs text-[var(--color-text-muted)] mt-1 line-clamp-2">{h.description}</p>
+                      <div className="flex items-center gap-3 mt-2 text-xxs text-[var(--color-text-muted)]">
+                        {h.translational_roadmap && (
+                          <span className="flex items-center gap-1 px-1.5 py-0.5 rounded" style={{ background: `${PHASE_META[h.translational_roadmap.current_phase]?.color || '#666'}12`, color: PHASE_META[h.translational_roadmap.current_phase]?.color || '#666' }}>
+                            {h.translational_roadmap.current_phase} {PHASE_META[h.translational_roadmap.current_phase]?.category || ''}
+                          </span>
+                        )}
+                        {h.evidence_summary && <span>{h.evidence_summary.length} evidence</span>}
+                        {h.risks && <span>{h.risks.length} risks</span>}
+                        {h.round_number && <span>Round {h.round_number}</span>}
+                        <button
+                          onClick={e => { e.stopPropagation(); setCompareHypothesis(h); setShowCompare(true) }}
+                          className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 text-[var(--color-text)] transition-opacity"
+                          title="Compare"
+                        >
+                          <FiColumns className="w-3 h-3" /> Compare
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </button>
               ))}
             </div>
-          </div>
+          )}
+        </div>
+      </div>
+
+      {/* Right Panel - Detail/Compare */}
+      {(selectedHypothesis || showCompare) && (
+        <div className="w-96 border-l border-[var(--color-border)] overflow-y-auto">
+          {showCompare && selectedHypothesis && compareHypothesis ? (
+            <ComparisonView a={selectedHypothesis} b={compareHypothesis} onClose={() => setShowCompare(false)} />
+          ) : selectedHypothesis ? (
+            <HypothesisDetail hypothesis={selectedHypothesis} onClose={() => setSelectedHypothesis(null)} onExport={() => exportPdf(selectedHypothesis)} />
+          ) : null}
         </div>
       )}
+    </div>
+  )
+}
+
+// ── Hypothesis Detail ───────────────────────────────────────────
+
+function HypothesisDetail({ hypothesis: h, onClose, onExport }: { hypothesis: Hypothesis; onClose: () => void; onExport: () => void }) {
+  const [expandedPhase, setExpandedPhase] = useState<string | null>(null)
+  const [feedbackOpen, setFeedbackOpen] = useState(false)
+  const [feedbackScore, setFeedbackScore] = useState(3)
+  const [feedbackText, setFeedbackText] = useState('')
+  const [feedbackSent, setFeedbackSent] = useState(false)
+
+  const submitFeedback = async () => {
+    try {
+      await api.submitHypothesisFeedback(h.id, {
+        overall_quality: feedbackScore,
+        dimension_scores: {
+          novelty: feedbackScore,
+          feasibility: feedbackScore,
+          clinical_relevance: feedbackScore,
+        },
+        free_text: feedbackText || undefined,
+      })
+      setFeedbackSent(true)
+      setFeedbackOpen(false)
+    } catch (err) {
+      console.error('Failed to submit feedback:', err)
+    }
+  }
+
+  const roadmap = h.translational_roadmap
+  const currentPhaseIdx = roadmap ? ['T0','T1','T2','T3','T4','T5'].indexOf(roadmap.current_phase) : 0
+
+  return (
+    <div className="animate-slide-up">
+      <div className="p-5 border-b border-[var(--color-border)] flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <FiAward className="w-4 h-4" style={{ color: confidenceColor(h.confidence) }} />
+          <span className="text-sm font-semibold" style={{ color: confidenceColor(h.confidence) }}>{Math.round(h.confidence * 100)}% confidence</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <button onClick={onExport} className="btn btn-sm" title="Export PDF" aria-label="Export PDF"><FiDownload className="w-3.5 h-3.5" /></button>
+          <button aria-label="Close" onClick={onClose} className="btn btn-sm"><FiX className="w-3.5 h-3.5" /></button>
+        </div>
+      </div>
+
+      <div className="p-5 space-y-5">
+        <h2 className="text-lg font-semibold leading-tight">{h.title}</h2>
+        <p className="text-sm text-[var(--color-text-secondary)] leading-relaxed">{h.description}</p>
+
+        {h.mechanism && (
+          <div>
+            <h4 className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-2 font-medium">Mechanism</h4>
+            <p className="text-xs text-[var(--color-text-secondary)] leading-relaxed p-3 rounded-lg bg-[var(--glass-bg)] border border-[var(--color-border)]">{h.mechanism}</p>
+          </div>
+        )}
+
+        {/* ── Translational Roadmap Pipeline ── */}
+        {roadmap && roadmap.phases && roadmap.phases.length > 0 && (
+          <div>
+            <h4 className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-3 font-medium">
+              Bench-to-Bedside Translational Roadmap
+            </h4>
+
+            {/* Phase category labels */}
+            <div className="flex items-center gap-3 mb-2 text-xxs">
+              <span className="px-2 py-0.5 rounded border border-[var(--glass-border)] text-[var(--color-text-muted)]">Bench</span>
+              <span className="px-2 py-0.5 rounded border border-[var(--glass-border)] text-[var(--color-text-muted)]">Translational</span>
+              <span className="px-2 py-0.5 rounded border border-[var(--glass-border)] text-[var(--color-text-muted)]">Clinical</span>
+              <span className="px-2 py-0.5 rounded border border-[var(--glass-border)] text-[var(--color-text-muted)]">Implementation</span>
+            </div>
+
+            {/* Pipeline stepper */}
+            <div className="flex items-center mb-3">
+              {['T0','T1','T2','T3','T4','T5'].map((phaseId, idx) => {
+                const meta = PHASE_META[phaseId]
+                const isActive = idx <= currentPhaseIdx
+                const isCurrent = phaseId === roadmap.current_phase
+                return (
+                  <div key={phaseId} className="flex items-center flex-1">
+                    <div
+                      className="flex flex-col items-center cursor-pointer group"
+                      onClick={() => setExpandedPhase(expandedPhase === phaseId ? null : phaseId)}
+                      title={meta.label}
+                    >
+                      <div
+                        className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all"
+                        style={{
+                          background: isActive ? meta.color : 'var(--glass-bg)',
+                          color: isActive ? '#fff' : 'var(--color-text-muted)',
+                          border: isCurrent ? `2px solid ${meta.color}` : '2px solid transparent',
+                          boxShadow: isCurrent ? `0 0 8px ${meta.color}40` : 'none',
+                        }}
+                      >
+                        {phaseId}
+                      </div>
+                      <span className="text-xxs mt-1 text-center leading-tight" style={{ color: isActive ? meta.color : 'var(--color-text-muted)', maxWidth: '52px' }}>
+                        {meta.label.split(' ').slice(0, 2).join(' ')}
+                      </span>
+                    </div>
+                    {idx < 5 && (
+                      <div className="flex-1 h-0.5 mx-1" style={{ background: idx < currentPhaseIdx ? PHASE_META[['T0','T1','T2','T3','T4','T5'][idx+1]].color : 'var(--glass-bg)' }} />
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Roadmap summary */}
+            <div className="grid grid-cols-2 gap-2 mb-3">
+              {roadmap.estimated_total_timeline && (
+                <div className="p-2 rounded-lg bg-[var(--glass-bg)] text-xxs">
+                  <span className="text-[var(--color-text-muted)]">Timeline:</span>
+                  <span className="ml-1 font-medium">{roadmap.estimated_total_timeline}</span>
+                </div>
+              )}
+              <div className="p-2 rounded-lg bg-[var(--glass-bg)] text-xxs">
+                <span className="text-[var(--color-text-muted)]">Feasibility:</span>
+                <span className="ml-1 font-medium">{Math.round(roadmap.overall_feasibility_score * 100)}%</span>
+              </div>
+            </div>
+            {roadmap.regulatory_pathway_summary && (
+              <div className="p-2 rounded-lg bg-[var(--glass-bg)] text-xxs mb-3">
+                <span className="text-[var(--color-text-muted)]">Regulatory:</span>
+                <span className="ml-1">{roadmap.regulatory_pathway_summary}</span>
+              </div>
+            )}
+
+            {/* Expanded phase detail */}
+            {expandedPhase && (() => {
+              const phase = roadmap.phases.find(p => p.phase === expandedPhase)
+              if (!phase) return null
+              const meta = PHASE_META[expandedPhase] || { label: expandedPhase, color: '#666' }
+              return (
+                <div className="rounded-lg border border-[var(--color-border)] overflow-hidden mb-2 animate-slide-down" style={{ borderColor: `${meta.color}30` }}>
+                  <div className="p-3 flex items-center justify-between" style={{ background: `${meta.color}10` }}>
+                    <div>
+                      <span className="text-xs font-bold" style={{ color: meta.color }}>{expandedPhase}</span>
+                      <span className="text-xs font-medium ml-2">{phase.phase_name}</span>
+                      {phase.formal_name && <span className="text-xxs text-[var(--color-text-muted)] ml-1">({phase.formal_name})</span>}
+                    </div>
+                    {phase.estimated_duration && <span className="text-xxs px-2 py-0.5 rounded" style={{ background: `${meta.color}15`, color: meta.color }}>{phase.estimated_duration}</span>}
+                  </div>
+                  <div className="p-3 space-y-3 text-xs">
+                    {phase.description && <p className="text-[var(--color-text-secondary)] leading-relaxed">{phase.description}</p>}
+
+                    {phase.objectives && phase.objectives.length > 0 && (
+                      <div>
+                        <span className="text-xxs text-[var(--color-text-muted)] uppercase font-medium">Objectives</span>
+                        <ul className="mt-1 space-y-1">{phase.objectives.map((o, i) => <li key={i} className="text-[var(--color-text-secondary)] flex gap-1.5"><span style={{ color: meta.color }}>&#x25B8;</span>{o}</li>)}</ul>
+                      </div>
+                    )}
+                    {phase.key_activities && phase.key_activities.length > 0 && (
+                      <div>
+                        <span className="text-xxs text-[var(--color-text-muted)] uppercase font-medium">Key Activities</span>
+                        <ul className="mt-1 space-y-1">{phase.key_activities.map((a, i) => <li key={i} className="text-[var(--color-text-secondary)] flex gap-1.5"><span style={{ color: meta.color }}>&#x25B8;</span>{a}</li>)}</ul>
+                      </div>
+                    )}
+                    {phase.milestones && phase.milestones.length > 0 && (
+                      <div>
+                        <span className="text-xxs text-[var(--color-text-muted)] uppercase font-medium">Milestones</span>
+                        <ul className="mt-1 space-y-1">{phase.milestones.map((m, i) => <li key={i} className="text-[var(--color-text-secondary)] flex gap-1.5"><FiCheck className="w-3 h-3 flex-shrink-0 mt-0.5" style={{ color: meta.color }} />{m}</li>)}</ul>
+                      </div>
+                    )}
+                    {phase.regulatory_considerations && phase.regulatory_considerations.length > 0 && (
+                      <div>
+                        <span className="text-xxs text-[var(--color-text-muted)] uppercase font-medium">Regulatory</span>
+                        <ul className="mt-1 space-y-1">{phase.regulatory_considerations.map((r, i) => <li key={i} className="text-[var(--color-text-secondary)] flex gap-1.5"><span style={{ color: meta.color }}>&#x25B8;</span>{r}</li>)}</ul>
+                      </div>
+                    )}
+                    {phase.key_stakeholders && phase.key_stakeholders.length > 0 && (
+                      <div>
+                        <span className="text-xxs text-[var(--color-text-muted)] uppercase font-medium">Key Stakeholders</span>
+                        <div className="flex flex-wrap gap-1 mt-1">{phase.key_stakeholders.map((s, i) => <span key={i} className="text-xxs px-2 py-0.5 rounded" style={{ background: `${meta.color}10`, color: meta.color }}>{s}</span>)}</div>
+                      </div>
+                    )}
+                    {phase.success_criteria && phase.success_criteria.length > 0 && (
+                      <div>
+                        <span className="text-xxs text-[var(--color-text-muted)] uppercase font-medium">Go/No-Go Criteria</span>
+                        <ul className="mt-1 space-y-1">{phase.success_criteria.map((c, i) => <li key={i} className="text-[var(--color-text-secondary)] flex gap-1.5"><span style={{ color: meta.color }}>&#x25B8;</span>{c}</li>)}</ul>
+                      </div>
+                    )}
+                    {phase.phase_risks && phase.phase_risks.length > 0 && (
+                      <div>
+                        <span className="text-xxs text-[var(--color-text-muted)] uppercase font-medium">Risks</span>
+                        <ul className="mt-1 space-y-1">{phase.phase_risks.map((r, i) => <li key={i} className="text-[var(--color-text-secondary)] flex gap-1.5"><FiAlertTriangle className="w-3 h-3 flex-shrink-0 mt-0.5" style={{ color: 'var(--color-error)' }} />{r}</li>)}</ul>
+                      </div>
+                    )}
+                    {phase.estimated_cost_range && (
+                      <div className="text-xxs text-[var(--color-text-muted)]">
+                        Est. Cost: <span className="font-medium text-[var(--color-text-secondary)]">{phase.estimated_cost_range}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )
+            })()}
+          </div>
+        )}
+
+        {h.evidence_summary && h.evidence_summary.length > 0 && (
+          <div>
+            <h4 className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-2 font-medium">Evidence ({h.evidence_summary.length})</h4>
+            <div className="space-y-1.5">
+              {h.evidence_summary.map((ev, i) => (
+                <div key={i} className="text-xs text-[var(--color-text-secondary)] p-2.5 rounded-lg bg-[var(--glass-bg)] border border-[var(--color-border)] flex items-start gap-2">
+                  <FiCheck className="w-3 h-3 flex-shrink-0 mt-0.5" style={{ color: 'var(--color-text-secondary)' }} />
+                  <span>{ev}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {h.grounding_sources && (
+          <div>
+            <h4 className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-2 font-medium">Grounding Sources</h4>
+            <div className="flex flex-wrap gap-1.5">
+              {h.grounding_sources.pubmed_count ? <span className="text-xxs px-2 py-1 rounded-md" style={{ color: 'var(--color-text-secondary)', background: 'var(--glass-bg)' }}>PubMed: {h.grounding_sources.pubmed_count}</span> : null}
+              {h.grounding_sources.clinical_trials_count ? <span className="text-xxs px-2 py-1 rounded-md" style={{ color: 'var(--color-text-secondary)', background: 'var(--glass-bg)' }}>ClinicalTrials: {h.grounding_sources.clinical_trials_count}</span> : null}
+              {h.grounding_sources.fda_count ? <span className="text-xxs px-2 py-1 rounded-md" style={{ color: 'var(--color-text-secondary)', background: 'var(--glass-bg)' }}>FDA: {h.grounding_sources.fda_count}</span> : null}
+              {h.grounding_sources.uniprot_count ? <span className="text-xxs px-2 py-1 rounded-md" style={{ color: 'var(--color-text-secondary)', background: 'var(--glass-bg)' }}>UniProt: {h.grounding_sources.uniprot_count}</span> : null}
+            </div>
+          </div>
+        )}
+
+        {h.risks && h.risks.length > 0 && (
+          <div>
+            <h4 className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-2 font-medium">Risks ({h.risks.length})</h4>
+            <div className="space-y-1.5">
+              {h.risks.map((risk, i) => (
+                <div key={i} className="text-xs text-[var(--color-text-secondary)] p-2.5 rounded-lg border border-[var(--color-border)] flex items-start gap-2" style={{ borderColor: 'rgba(239,68,68,0.2)' }}>
+                  <FiAlertTriangle className="w-3 h-3 flex-shrink-0 mt-0.5" style={{ color: 'var(--color-error)' }} />
+                  <span>{risk}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {h.validation_steps && h.validation_steps.length > 0 && (
+          <div>
+            <h4 className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-2 font-medium">Validation Steps</h4>
+            <div className="space-y-1.5">
+              {h.validation_steps.map((step, i) => (
+                <div key={i} className="text-xs text-[var(--color-text-secondary)] p-2.5 rounded-lg bg-[var(--glass-bg)] flex items-start gap-2">
+                  <span className="text-xxs font-semibold text-[var(--color-text-muted)] mt-0.5">{i + 1}.</span>
+                  <span>{step}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Feedback Section */}
+        <div className="border-t border-[var(--color-border)] pt-4">
+          {feedbackSent ? (
+            <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)] p-3 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)]">
+              <FiCheck className="w-4 h-4" /> Feedback submitted
+            </div>
+          ) : feedbackOpen ? (
+            <div className="space-y-3">
+              <h4 className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider font-medium">Rate this Hypothesis</h4>
+              <div>
+                <label className="text-xxs text-[var(--color-text-muted)] mb-1 block">Quality (1-5)</label>
+                <div className="flex gap-1">
+                  {[1, 2, 3, 4, 5].map(n => (
+                    <button
+                      key={n}
+                      onClick={() => setFeedbackScore(n)}
+                      className="w-8 h-8 rounded-lg text-xs font-medium transition-all"
+                      style={{
+                        background: n <= feedbackScore ? 'rgba(255,255,255,0.18)' : 'var(--glass-bg)',
+                        color: n <= feedbackScore ? 'var(--color-text)' : 'var(--color-text-muted)',
+                      }}
+                    >
+                      {n}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <textarea
+                value={feedbackText}
+                onChange={e => setFeedbackText(e.target.value)}
+                placeholder="Optional feedback notes..."
+                rows={2}
+                className="input w-full text-xs resize-none"
+              />
+              <div className="flex gap-2">
+                <button onClick={submitFeedback} className="btn text-xs flex-1" style={{ color: 'var(--color-success)' }}>
+                  <FiThumbsUp className="w-3 h-3" /> Submit
+                </button>
+                <button onClick={() => setFeedbackOpen(false)} className="btn text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={() => setFeedbackOpen(true)}
+              className="flex items-center gap-2 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+            >
+              <FiMessageSquare className="w-3.5 h-3.5" /> Rate this hypothesis
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Comparison View ─────────────────────────────────────────────
+
+function ComparisonView({ a, b, onClose }: { a: Hypothesis; b: Hypothesis; onClose: () => void }) {
+  return (
+    <div className="animate-slide-up">
+      <div className="p-5 border-b border-[var(--color-border)] flex items-center justify-between">
+        <h3 className="text-sm font-medium flex items-center gap-2"><FiColumns className="w-4 h-4" /> Comparison</h3>
+        <button aria-label="Close" onClick={onClose} className="btn btn-sm"><FiX className="w-3.5 h-3.5" /></button>
+      </div>
+      <div className="divide-y divide-[var(--color-border)]">
+        {/* Confidence comparison */}
+        <div className="p-4">
+          <div className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-3 font-medium">Confidence</div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="text-center p-3 rounded-lg bg-[var(--glass-bg)]">
+              <div className="text-2xl font-bold" style={{ color: confidenceColor(a.confidence) }}>{Math.round(a.confidence * 100)}%</div>
+              <div className="text-xxs text-[var(--color-text-muted)] mt-1">Hypothesis A</div>
+            </div>
+            <div className="text-center p-3 rounded-lg bg-[var(--glass-bg)]">
+              <div className="text-2xl font-bold" style={{ color: confidenceColor(b.confidence) }}>{Math.round(b.confidence * 100)}%</div>
+              <div className="text-xxs text-[var(--color-text-muted)] mt-1">Hypothesis B</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Titles */}
+        <div className="p-4">
+          <div className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-2 font-medium">Hypotheses</div>
+          <div className="space-y-2">
+            <div className="p-3 rounded-lg bg-[var(--glass-bg)] border-l-2" style={{ borderColor: confidenceColor(a.confidence) }}>
+              <div className="text-xxs text-[var(--color-text-muted)] mb-1">A</div>
+              <p className="text-xs font-medium">{a.title}</p>
+            </div>
+            <div className="p-3 rounded-lg bg-[var(--glass-bg)] border-l-2" style={{ borderColor: confidenceColor(b.confidence) }}>
+              <div className="text-xxs text-[var(--color-text-muted)] mb-1">B</div>
+              <p className="text-xs font-medium">{b.title}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Metrics comparison */}
+        <div className="p-4">
+          <div className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-2 font-medium">Metrics</div>
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-[var(--color-text-muted)]">
+                <th className="text-left py-1">Metric</th>
+                <th className="text-right py-1">A</th>
+                <th className="text-right py-1">B</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td className="py-1">Confidence</td><td className="text-right">{Math.round(a.confidence * 100)}%</td><td className="text-right">{Math.round(b.confidence * 100)}%</td></tr>
+              <tr><td className="py-1">Novelty</td><td className="text-right">{a.novelty_score ? Math.round(a.novelty_score * 100) + '%' : '-'}</td><td className="text-right">{b.novelty_score ? Math.round(b.novelty_score * 100) + '%' : '-'}</td></tr>
+              <tr><td className="py-1">Evidence</td><td className="text-right">{a.evidence_summary?.length || 0}</td><td className="text-right">{b.evidence_summary?.length || 0}</td></tr>
+              <tr><td className="py-1">Risks</td><td className="text-right">{a.risks?.length || 0}</td><td className="text-right">{b.risks?.length || 0}</td></tr>
+              <tr><td className="py-1">Validation Steps</td><td className="text-right">{a.validation_steps?.length || 0}</td><td className="text-right">{b.validation_steps?.length || 0}</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   )
 }
