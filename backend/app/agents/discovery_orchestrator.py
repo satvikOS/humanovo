@@ -2597,6 +2597,68 @@ Your goal is to STRENGTHEN this hypothesis — address its weaknesses, find stro
             round_number=round_number,
         )
 
+        # PROTOCOL stage: generate a concrete experimental protocol from
+        # the final hypothesis. Sample sizes come from the clinical
+        # power_analysis compute domain (real, not LLM-guessed). The
+        # result is attached to the hypothesis for downstream display +
+        # paper-gen. Non-fatal: if it fails the hypothesis still ships.
+        try:
+            from app.agents.protocol_generator import generate_protocol
+            proto = await generate_protocol({
+                "id": hypothesis_id,
+                "title": final_hypothesis.title,
+                "description": final_hypothesis.description,
+                "mechanism": final_hypothesis.mechanism,
+                "target_entities":
+                    [str(e) for e in (final_hypothesis.external_factors or [])]
+                    + list(accumulated_context.get("target_entities") or []),
+                "target_pathways":
+                    list(accumulated_context.get("target_pathways") or []),
+                "required_methods": final_hypothesis.required_methods or [],
+                "translational_roadmap":
+                    final_hypothesis.translational_roadmap or {},
+                "feasibility_score": final_hypothesis.feasibility_score,
+                "dimension_scores": accumulated_context.get("dimension_scores", {}),
+            })
+            final_hypothesis.pipeline_trace["protocol"] = proto.to_dict()
+            logger.info(
+                f"[protocol] generated for R{round_number}H{hypothesis_index} "
+                f"modality={proto.modality} n/arm={proto.sample_size_per_arm} "
+                f"duration={proto.duration_weeks_estimate}w"
+            )
+        except Exception as pe:
+            logger.debug(f"[protocol] generation skipped (non-fatal): {pe}")
+
+        # EVOE ranking signal: annotate the hypothesis with its EVOE
+        # breakdown so downstream ranking (per-project dashboard) can
+        # order hypotheses by expected value of experiment instead of
+        # raw confidence.
+        try:
+            from app.scoring.evoe import score_hypothesis
+            hyp_dict = {
+                "id": hypothesis_id,
+                "title": final_hypothesis.title,
+                "description": final_hypothesis.description,
+                "mechanism": final_hypothesis.mechanism,
+                "confidence": final_hypothesis.confidence,
+                "dimension_scores":
+                    accumulated_context.get("dimension_scores", {}),
+                "novelty_score": final_hypothesis.novelty_score,
+                "feasibility_score": final_hypothesis.feasibility_score,
+                "translational_roadmap":
+                    final_hypothesis.translational_roadmap or {},
+                "required_methods": final_hypothesis.required_methods or [],
+                "validated": final_hypothesis.validated,
+                "grounding_ratio":
+                    accumulated_context.get(
+                        f"stage_{len(stages)}_grounding_ratio", 0
+                    ),
+            }
+            br = score_hypothesis(hyp_dict)
+            final_hypothesis.pipeline_trace["evoe"] = br.to_dict()
+        except Exception as ee:
+            logger.debug(f"[evoe] scoring skipped: {ee}")
+
         logger.info(
             f"Pipeline complete for R{round_number}H{hypothesis_index}: "
             f"{stages_completed}/{len(stages)} stages, "
