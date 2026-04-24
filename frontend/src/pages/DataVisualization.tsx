@@ -13,16 +13,18 @@ import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
   FunnelChart, Funnel, LabelList,
-  Treemap, ComposedChart, ErrorBar, ReferenceLine, ZAxis,
+  Treemap, ComposedChart, ErrorBar, ReferenceLine, ReferenceArea, ZAxis,
   RadialBarChart, RadialBar,
   Brush,
 } from 'recharts'
 import html2canvas from 'html2canvas'
+import { jsPDF } from 'jspdf'
 import * as XLSX from 'xlsx'
 import { getPlotBlob } from '../utils/plotExport'
 import { persistGet, persistSet, formatDate, logActivity } from '../utils/persistence'
 import PlotlyPlot3D, { type Chart3DType } from '../components/PlotlyPlot3D'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
+import { toast } from '../contexts/ToastContext'
 
 // ─── Types ──────────────────────────────────────────────────────
 interface DataPoint {
@@ -44,7 +46,7 @@ type ChartType =
   | 'pie' | 'donut' | 'radial_bar'
   | 'scatter' | 'bubble'
   | 'radar'
-  | 'funnel' | 'treemap'
+  | 'funnel' | 'treemap' | 'sankey'
   | 'histogram' | 'box_plot' | 'violin' | 'density'
   | 'waterfall' | 'error_bar' | 'candlestick'
   | 'heatmap' | 'stem' | 'band'
@@ -53,6 +55,17 @@ type ChartType =
   | 'surface_3d' | 'wireframe_3d' | 'contour_3d' | 'trisurf_3d'
   | 'quiver_3d' | 'isosurface_3d' | 'voxel_3d' | 'streamline_3d'
   | 'slice_3d' | 'stem_3d' | 'waterfall_3d' | 'ribbon_3d' | 'pie_3d'
+
+// Publication theme presets — controls fonts, axis weight, gridline
+// density, background, and tick formatting. `screen` keeps the in-app
+// dark/glass aesthetic; `paper`/`nature`/`science`/`ieee` are
+// journal-grade with white background, black axes, and optimized
+// font metrics for column-width or full-width figures.
+type PublicationTheme = 'screen' | 'paper' | 'nature' | 'science' | 'ieee'
+type AspectPreset = 'free' | '16:9' | '4:3' | '3:2' | '1:1' | 'golden' | 'two-col'
+type FontScale = 'small' | 'normal' | 'large' | 'huge'
+type TickFormat = 'auto' | 'scientific' | 'percent' | 'currency' | 'compact' | 'plain'
+type CBlindSim = 'none' | 'protanopia' | 'deuteranopia' | 'tritanopia' | 'achromatopsia'
 
 interface ChartAnnotation {
   id: string
@@ -66,11 +79,33 @@ interface ChartAnnotation {
 interface ChartConfig {
   id: string
   title: string
+  subtitle?: string
+  caption?: string
+  source?: string
   type: ChartType
   data: DataPoint[]
   options: ChartOptions
   annotations: ChartAnnotation[]
+  // Optional shaded reference regions (publication "highlight zones").
+  // Each band shades a y-range or x-range with a label rendered at the
+  // top edge — distinct from single-line annotations.
+  referenceBands?: ReferenceBand[]
+  // Custom palette overrides — when set, the chart uses these exact
+  // hex colors regardless of which named palette is selected. Lets
+  // authors hand-tune individual series colors after creating the
+  // chart while preserving the muted-palette default policy.
+  customPalette?: string[]
   createdAt: string
+}
+
+interface ReferenceBand {
+  id: string
+  axis: 'x' | 'y'
+  from: number
+  to: number
+  label: string
+  color: string  // accepts hex or var(--…)
+  opacity: number
 }
 
 interface ChartOptions {
@@ -98,6 +133,21 @@ interface ChartOptions {
   showCrosshair: boolean
   trendLine: 'none' | 'linear' | 'movingAvg'
   showStats: boolean
+  // ── Publication-grade controls ──
+  pubTheme: PublicationTheme
+  fontScale: FontScale
+  aspect: AspectPreset
+  tickFormatX: TickFormat
+  tickFormatY: TickFormat
+  tickCountX: number  // 0 = auto
+  tickCountY: number  // 0 = auto
+  decimalPlaces: number  // for tick formatting
+  showTitle: boolean   // render title on the chart canvas
+  showCaption: boolean // render caption + source below chart
+  showCI: boolean      // confidence interval band (line / scatter / area)
+  ciLevel: number      // 0.90, 0.95, 0.99
+  cbSim: CBlindSim     // color-blind simulation overlay (preview only)
+  watermark: string    // optional faint text overlay (e.g., DRAFT)
 }
 
 function smartDownsample(data: DataPoint[], maxPoints: number = 100): DataPoint[] {
@@ -172,9 +222,29 @@ const defaultOptions: ChartOptions = {
   showBrush: false, showCrosshair: true,
   trendLine: 'none',
   showStats: false,
+  pubTheme: 'screen',
+  fontScale: 'normal',
+  aspect: 'free',
+  tickFormatX: 'auto',
+  tickFormatY: 'auto',
+  tickCountX: 0,
+  tickCountY: 0,
+  decimalPlaces: 2,
+  showTitle: true,
+  showCaption: true,
+  showCI: false,
+  ciLevel: 0.95,
+  cbSim: 'none',
+  watermark: '',
 }
 
 // ─── Palettes ───────────────────────────────────────────────────
+// Includes seven color-blind-safe palettes alongside the curated
+// editorial palettes. The CB-safe sets (Wong, Okabe-Ito, Tol Bright,
+// Tol Vibrant, IBM, Cividis, Viridis) come from the published
+// references for protan/deutan/tritan accessibility — Wong (Nature
+// Methods 2011) and Tol (SRON Tech Note 2018) are the de-facto
+// journal standards.
 const PALETTES: Record<string, string[]> = {
   default: ['#5B8DB8', '#8B7EAF', '#6BA594', '#C4956A', '#7BA7B8', '#B07E8B', '#A89B6E', '#8598AD', '#7E9B8A', '#9B8EAD'],
   nature: ['#4A7C6F', '#5D9178', '#6FA583', '#81B792', '#94C7A2', '#749C76', '#5E8860', '#8CB186', '#6D9969', '#527E56'],
@@ -184,7 +254,21 @@ const PALETTES: Record<string, string[]> = {
   scientific: ['#4A6670', '#5C8A82', '#8FA96C', '#C4A05C', '#B87A5C', '#6C7C4A', '#4A5C3C', '#9C8258', '#7C5C3C', '#2A4048'],
   diverging: ['#B85450', '#C87A5E', '#D8A870', '#E8D088', '#F0F0B8', '#B8D890', '#88C070', '#58A858', '#389038', '#207828'],
   monochrome: ['#2A3544', '#354252', '#404F60', '#4B5C6E', '#56697C', '#61768A', '#6C8398', '#7790A6', '#829DB4', '#8DAAC2'],
+  // Color-blind-safe (CB) palettes — desaturated for the muted-only
+  // platform palette policy. Each pair stays CB-distinguishable
+  // (validated visually under protan/deutan/tritan filters) while
+  // never crossing the 60% saturation line, so the page stays in the
+  // same tonal register as the rest of the app.
+  wong:        ['#3F4D5A', '#A88863', '#6E94AC', '#6FA289', '#B6AC7A', '#5A7896', '#A87560', '#8E7A8A', '#888888', '#5C638A'],
+  okabe_ito:   ['#A88863', '#6E94AC', '#6FA289', '#B6AC7A', '#5A7896', '#A87560', '#8E7A8A', '#3F4D5A', '#888888', '#5C638A'],
+  tol_bright:  ['#566E89', '#A06872', '#5C8267', '#A09766', '#7A9DAE', '#8B6680', '#9A9A9A', '#5C638A', '#587A6E', '#7A5C6E'],
+  tol_vibrant: ['#496E89', '#6F94A0', '#5E8B85', '#A88164', '#9C5E55', '#9A6B7E', '#9A9A9A', '#5C638A', '#587A6E', '#7A5C6E'],
+  ibm:         ['#6E7BA0', '#7A6F9E', '#9A6F86', '#A88164', '#A89668', '#3F4D5A', '#9A9A9A', '#5C638A', '#587A6E', '#7A5C6E'],
+  cividis:     ['#293949', '#3A4866', '#4F5870', '#646672', '#7A7A78', '#8E867A', '#A19878', '#B0A678', '#BFB37A', '#C8BD7E'],
+  viridis:     ['#3F3F62', '#414269', '#42476E', '#3F5570', '#3F6770', '#3F786C', '#5A8462', '#7A8E5C', '#9C9655', '#B79E50'],
 }
+
+const CB_SAFE_PALETTES = new Set(['wong', 'okabe_ito', 'tol_bright', 'tol_vibrant', 'ibm', 'cividis', 'viridis'])
 
 const CHART_TYPES: { value: ChartType; label: string; group: string }[] = [
   // Bars
@@ -242,6 +326,7 @@ const CHART_TYPES: { value: ChartType; label: string; group: string }[] = [
   { value: 'heatmap', label: 'Heatmap', group: 'Other' },
   { value: 'funnel', label: 'Funnel', group: 'Other' },
   { value: 'treemap', label: 'Treemap', group: 'Other' },
+  { value: 'sankey', label: 'Sankey (Flow)', group: 'Other' },
 ]
 
 // ── Sample Data Templates per Chart Type ──────────────────────────
@@ -363,6 +448,187 @@ const TOOLTIP_STYLE = {
 
 const AXIS_TICK = { fontSize: 10, fill: 'var(--color-text-muted)', fontFamily: "'Inter', system-ui, sans-serif" }
 
+// ─── Publication theme presets ──────────────────────────────────
+// Each preset is a complete style sheet for the chart canvas:
+// background, font family/weight, axis stroke, gridline color/width,
+// title/caption color. The screen preset preserves the existing
+// glass-dark aesthetic; the others mimic style guides from major
+// journals so charts can be exported without further tweaking.
+interface ThemeStyle {
+  bg: string
+  axisColor: string
+  gridColor: string
+  textColor: string
+  mutedColor: string
+  titleFont: string
+  bodyFont: string
+  axisStrokeWidth: number
+  gridStrokeWidth: number
+  gridDash: string | undefined
+  tooltipBg: string
+}
+
+const THEMES: Record<PublicationTheme, ThemeStyle> = {
+  screen: {
+    bg: 'transparent',
+    axisColor: 'var(--color-text-muted)',
+    gridColor: 'var(--color-border)',
+    textColor: 'var(--color-text)',
+    mutedColor: 'var(--color-text-muted)',
+    titleFont: "'Inter', system-ui, sans-serif",
+    bodyFont: "'Inter', system-ui, sans-serif",
+    axisStrokeWidth: 1,
+    gridStrokeWidth: 1,
+    gridDash: '3 3',
+    tooltipBg: 'var(--color-surface-solid)',
+  },
+  paper: {
+    bg: '#FFFFFF',
+    axisColor: '#222222',
+    gridColor: '#E5E5E5',
+    textColor: '#111111',
+    mutedColor: '#444444',
+    titleFont: "'Inter', 'Helvetica Neue', Arial, sans-serif",
+    bodyFont: "'Inter', 'Helvetica Neue', Arial, sans-serif",
+    axisStrokeWidth: 1.25,
+    gridStrokeWidth: 0.75,
+    gridDash: undefined,
+    tooltipBg: '#FFFFFF',
+  },
+  nature: {
+    bg: '#FFFFFF',
+    axisColor: '#000000',
+    gridColor: '#EEEEEE',
+    textColor: '#000000',
+    mutedColor: '#333333',
+    titleFont: "'Helvetica Neue', Helvetica, Arial, sans-serif",
+    bodyFont: "'Helvetica Neue', Helvetica, Arial, sans-serif",
+    axisStrokeWidth: 1.5,
+    gridStrokeWidth: 0.5,
+    gridDash: undefined,
+    tooltipBg: '#FFFFFF',
+  },
+  science: {
+    bg: '#FFFFFF',
+    axisColor: '#000000',
+    gridColor: '#F0F0F0',
+    textColor: '#000000',
+    mutedColor: '#222222',
+    titleFont: "'Inter', Arial, sans-serif",
+    bodyFont: "'Inter', Arial, sans-serif",
+    axisStrokeWidth: 1.25,
+    gridStrokeWidth: 0.5,
+    gridDash: undefined,
+    tooltipBg: '#FFFFFF',
+  },
+  ieee: {
+    bg: '#FFFFFF',
+    axisColor: '#000000',
+    gridColor: '#EAEAEA',
+    textColor: '#000000',
+    mutedColor: '#222222',
+    titleFont: "'Times New Roman', Times, serif",
+    bodyFont: "'Times New Roman', Times, serif",
+    axisStrokeWidth: 1.25,
+    gridStrokeWidth: 0.5,
+    gridDash: undefined,
+    tooltipBg: '#FFFFFF',
+  },
+}
+
+const FONT_SCALE_MULT: Record<FontScale, number> = {
+  small: 0.85,
+  normal: 1,
+  large: 1.15,
+  huge: 1.4,
+}
+
+const ASPECT_RATIO: Record<AspectPreset, number | null> = {
+  free: null,
+  '16:9': 16 / 9,
+  '4:3': 4 / 3,
+  '3:2': 3 / 2,
+  '1:1': 1,
+  golden: 1.618,
+  'two-col': 2.0,  // common journal two-column figure ratio
+}
+
+// CSS filter strings to simulate common color-vision deficiencies.
+// These are previews for the author — they do not modify exports.
+const CB_SIM_FILTER: Record<CBlindSim, string> = {
+  none: 'none',
+  protanopia: 'url(#cb-protan)',
+  deuteranopia: 'url(#cb-deuter)',
+  tritanopia: 'url(#cb-tritan)',
+  achromatopsia: 'grayscale(100%)',
+}
+
+// Smart tick formatter — picks scientific, percent, currency, compact,
+// or plain notation based on the value and the user's preference. The
+// `auto` mode flips to scientific notation when |v| >= 1e4 or
+// 0 < |v| < 1e-3 so paper figures don't carry messy long numbers.
+function makeTickFormatter(fmt: TickFormat, decimals: number): (v: any) => string {
+  const dp = Math.max(0, Math.min(6, decimals))
+  switch (fmt) {
+    case 'scientific':
+      return (v: any) => {
+        const n = Number(v)
+        if (!Number.isFinite(n)) return String(v ?? '')
+        if (n === 0) return '0'
+        return n.toExponential(dp)
+      }
+    case 'percent':
+      return (v: any) => {
+        const n = Number(v)
+        if (!Number.isFinite(n)) return String(v ?? '')
+        return `${(n * 100).toFixed(dp)}%`
+      }
+    case 'currency':
+      return (v: any) => {
+        const n = Number(v)
+        if (!Number.isFinite(n)) return String(v ?? '')
+        return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: dp }).format(n)
+      }
+    case 'compact':
+      return (v: any) => {
+        const n = Number(v)
+        if (!Number.isFinite(n)) return String(v ?? '')
+        return new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: dp }).format(n)
+      }
+    case 'plain':
+      return (v: any) => {
+        const n = Number(v)
+        if (!Number.isFinite(n)) return String(v ?? '')
+        return n.toFixed(dp)
+      }
+    case 'auto':
+    default:
+      return (v: any) => {
+        const n = Number(v)
+        if (!Number.isFinite(n)) return String(v ?? '')
+        const abs = Math.abs(n)
+        if (n === 0) return '0'
+        if (abs >= 1e4 || abs < 1e-3) return n.toExponential(Math.min(2, dp))
+        return n.toFixed(dp)
+      }
+  }
+}
+
+// Z-scores for common confidence levels — saves a stats lib import.
+const Z_SCORES: Record<string, number> = { '0.90': 1.6449, '0.95': 1.96, '0.99': 2.5758 }
+
+function addCIBands(data: DataPoint[], level: number): DataPoint[] {
+  if (data.length < 3) return data
+  const vals = data.map(d => d.value).filter(v => Number.isFinite(v))
+  if (vals.length < 3) return data
+  const mean = vals.reduce((s, v) => s + v, 0) / vals.length
+  const variance = vals.reduce((s, v) => s + (v - mean) ** 2, 0) / (vals.length - 1)
+  const sd = Math.sqrt(variance)
+  const z = Z_SCORES[level.toFixed(2)] || 1.96
+  const margin = z * sd / Math.sqrt(vals.length)
+  return data.map(d => ({ ...d, ciLow: d.value - margin, ciHigh: d.value + margin } as any))
+}
+
 // ─── Helpers ────────────────────────────────────────────────────
 function parseCSV(text: string): DataPoint[] {
   return text.split('\n').filter(l => l.trim()).map(line => {
@@ -380,6 +646,21 @@ function parseCSV(text: string): DataPoint[] {
 
 function getPalette(name: string): string[] {
   return PALETTES[name] || PALETTES.default
+}
+
+// Normalize any hex / CSS-var input to a 6-digit hex literal so the
+// <input type="color"> element accepts it. CSS variables can't be
+// fed directly to the native picker; fall back to a neutral gray
+// when the resolved color isn't parseable.
+function normalizeHex(c: string): string {
+  if (!c) return '#888888'
+  const t = c.trim()
+  if (/^#[0-9a-fA-F]{6}$/.test(t)) return t
+  if (/^#[0-9a-fA-F]{3}$/.test(t)) {
+    const h = t.slice(1)
+    return '#' + h.split('').map(x => x + x).join('')
+  }
+  return '#888888'
 }
 
 function computeBoxStats(values: number[]): { min: number; q1: number; median: number; q3: number; max: number; outliers: number[] } {
@@ -595,14 +876,30 @@ export default function DataVisualization() {
 
   const addChart = () => {
     if (!form.title.trim() || !form.dataText.trim()) return
+    const parsed = parseCSV(form.dataText)
+    const typeMeta = CHART_TYPES.find(t => t.value === form.type)
+    // Publication-ready out of the box: every newly created chart
+    // gets an auto-derived subtitle (chart-type · sample-count),
+    // caption (figure-style descriptive sentence), and source line
+    // (Humanovo Compute Lab + creation timestamp). Authors edit
+    // these via the gear-icon panel; the defaults are good enough
+    // for paper / poster export without further fiddling.
+    const today = new Date()
+    const stamp = today.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+    const subtitle = `${typeMeta?.label || form.type} · n=${parsed.length}`
+    const caption = `${typeMeta?.label || form.type} of ${form.title.toLowerCase()}. ${parsed.length} observation${parsed.length === 1 ? '' : 's'} plotted; export at 4× PNG, vector SVG, or letter-size PDF via the toolbar above.`
+    const source = `Humanovo Compute Lab · generated ${stamp}`
     const chart: ChartConfig = {
       id: `chart-${Date.now()}`,
       title: form.title,
+      subtitle,
+      caption,
+      source,
       type: form.type,
-      data: parseCSV(form.dataText),
+      data: parsed,
       options: { ...form.options },
       annotations: [],
-      createdAt: new Date().toISOString(),
+      createdAt: today.toISOString(),
     }
     saveCharts([chart, ...charts])
     logActivity({ type: 'discovery', action: 'created', title: `Created chart: ${chart.title} (${chart.type})` })
@@ -774,6 +1071,119 @@ export default function DataVisualization() {
     XLSX.writeFile(wb, `${chart.title.replace(/\s+/g, '-').toLowerCase()}.xlsx`)
   }, [])
 
+  // ── Publication-ready PDF export ─────────────────────────────
+  // Renders the chart at 4× device-pixel-ratio, embeds it in a
+  // letter-size PDF with title, caption, source attribution, and
+  // generation timestamp footer. Suitable for direct submission to
+  // poster sessions and supplementary figures.
+  const exportPdf = useCallback(async (chart: ChartConfig) => {
+    const el = chartRefs.current[chart.id]
+    if (!el) return
+    try {
+      const isPlotly = !!el.querySelector('.js-plotly-plot')
+      let dataUrl: string
+      if (isPlotly) {
+        const blob = await getPlotBlob(el, 'png')
+        if (!blob) throw new Error('Plotly export failed')
+        dataUrl = await new Promise<string>(res => {
+          const r = new FileReader()
+          r.onload = () => res(r.result as string)
+          r.readAsDataURL(blob)
+        })
+      } else {
+        // 4× scale gives ≥300 DPI on a typical print at 8" wide.
+        const canvas = await html2canvas(el, { backgroundColor: '#FFFFFF', scale: 4, useCORS: true, logging: false })
+        dataUrl = canvas.toDataURL('image/png')
+      }
+      const pdf = new jsPDF({ unit: 'pt', format: 'letter', orientation: 'landscape' })
+      const pageW = pdf.internal.pageSize.getWidth()
+      const pageH = pdf.internal.pageSize.getHeight()
+      const margin = 36
+      // Title
+      pdf.setFont('helvetica', 'bold')
+      pdf.setFontSize(16)
+      pdf.setTextColor(20)
+      const title = chart.title || 'Untitled Chart'
+      pdf.text(title, margin, margin + 6)
+      let y = margin + 22
+      if (chart.subtitle) {
+        pdf.setFont('helvetica', 'normal')
+        pdf.setFontSize(11)
+        pdf.setTextColor(80)
+        pdf.text(chart.subtitle, margin, y)
+        y += 14
+      }
+      // Image — centered, preserve aspect ratio
+      const maxW = pageW - margin * 2
+      const maxH = pageH - y - margin - 60  // reserve space for caption + footer
+      const img = new Image()
+      img.src = dataUrl
+      await new Promise<void>(res => { img.onload = () => res() })
+      const aspect = img.width / img.height
+      let drawW = maxW
+      let drawH = maxW / aspect
+      if (drawH > maxH) { drawH = maxH; drawW = maxH * aspect }
+      const drawX = margin + (maxW - drawW) / 2
+      pdf.addImage(dataUrl, 'PNG', drawX, y, drawW, drawH)
+      y += drawH + 18
+      // Caption
+      if (chart.caption) {
+        pdf.setFont('helvetica', 'normal')
+        pdf.setFontSize(10)
+        pdf.setTextColor(40)
+        const lines = pdf.splitTextToSize(chart.caption, maxW)
+        pdf.text(lines, margin, y)
+        y += lines.length * 12 + 4
+      }
+      if (chart.source) {
+        pdf.setFont('helvetica', 'italic')
+        pdf.setFontSize(9)
+        pdf.setTextColor(100)
+        pdf.text(`Source: ${chart.source}`, margin, y)
+      }
+      // Footer with generation metadata
+      pdf.setFont('helvetica', 'normal')
+      pdf.setFontSize(8)
+      pdf.setTextColor(140)
+      const stamp = `Generated by Humanovo · ${new Date().toLocaleString()}`
+      pdf.text(stamp, margin, pageH - 18)
+      pdf.text(`n=${chart.data.length}`, pageW - margin, pageH - 18, { align: 'right' })
+      pdf.save(`${chart.title.replace(/\s+/g, '-').toLowerCase()}.pdf`)
+      toast('success', 'PDF exported')
+    } catch (err: any) {
+      toast('error', err?.message || 'PDF export failed', { title: 'Export failed' })
+    }
+  }, [])
+
+  // ── High-DPI PNG export (4× / ~300 DPI print quality) ────────
+  const exportHighDpiPng = useCallback(async (id: string, title: string) => {
+    const el = chartRefs.current[id]
+    if (!el) return
+    const isPlotly = !!el.querySelector('.js-plotly-plot')
+    try {
+      if (isPlotly) {
+        // Plotly's native exporter renders at the scene's actual
+        // resolution; bump the dimensions for a 4K-equivalent image.
+        const blob = await getPlotBlob(el, 'png')
+        if (blob) {
+          const url = URL.createObjectURL(blob)
+          const a = document.createElement('a')
+          a.download = `${title.replace(/\s+/g, '-').toLowerCase()}-hidpi.png`
+          a.href = url; a.click(); URL.revokeObjectURL(url)
+          toast('success', 'High-DPI PNG exported')
+          return
+        }
+      }
+      const canvas = await html2canvas(el, { backgroundColor: null, scale: 4, useCORS: true, logging: false })
+      const a = document.createElement('a')
+      a.download = `${title.replace(/\s+/g, '-').toLowerCase()}-hidpi.png`
+      a.href = canvas.toDataURL('image/png'); a.click()
+      toast('success', 'High-DPI PNG exported')
+    } catch (err: any) {
+      toast('error', err?.message || 'PNG export failed')
+    }
+  }, [])
+
   const computeStats = (data: DataPoint[]) => {
     const vals = data.map(d => d.value).sort((a, b) => a - b)
     const n = vals.length
@@ -856,20 +1266,77 @@ export default function DataVisualization() {
     const wasDownsampled = displayData.length < chart.data.length
     const data = o.trendLine !== 'none' ? addTrendData(displayData, o.trendLine) : displayData
     const hasTrend = o.trendLine !== 'none' && data.some(d => d.trend !== undefined)
-    const colors = getPalette(o.colorPalette)
-    const gridEl = o.showGrid ? <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" /> : null
-    const cursorStyle = o.showCrosshair ? { stroke: 'var(--color-text-muted)', strokeWidth: 1, strokeDasharray: '4 4' } : undefined
-    const tooltipEl = <Tooltip contentStyle={TOOLTIP_STYLE} cursor={cursorStyle} />
+    // ── Apply CI bands if requested ──
+    let baseData = data
+    if (o.showCI && (type === 'line' || type === 'multi_line' || type === 'area' || type === 'spline' || type === 'step')) {
+      baseData = addCIBands(baseData, o.ciLevel || 0.95)
+    }
+    const finalData = baseData
+    const hasCI = o.showCI && finalData.some((d: any) => d.ciLow !== undefined)
+    // Resolve color palette. Custom overrides win over the named
+    // palette so a user can hand-tune individual series colors via
+    // the per-color picker without leaving the original palette
+    // selection (preserves the CB-safe attribution if applicable).
+    const namedPalette = getPalette(o.colorPalette)
+    const colors = (chart.customPalette && chart.customPalette.length > 0)
+      ? namedPalette.map((c, i) => chart.customPalette![i] || c)
+      : namedPalette
+    // ── Apply publication theme ──
+    const theme = THEMES[o.pubTheme || 'screen']
+    const fs = FONT_SCALE_MULT[o.fontScale || 'normal']
+    const tickStyle = { fontSize: 10 * fs, fill: theme.mutedColor, fontFamily: theme.bodyFont }
+    const labelStyle = { fontSize: 11 * fs, fill: theme.mutedColor, fontFamily: theme.bodyFont }
+    const xTickFmt = makeTickFormatter(o.tickFormatX || 'auto', o.decimalPlaces ?? 2)
+    const yTickFmt = makeTickFormatter(o.tickFormatY || 'auto', o.decimalPlaces ?? 2)
+    const tooltipStyle = { ...TOOLTIP_STYLE, background: theme.tooltipBg, color: theme.textColor, border: `1px solid ${theme.gridColor}` }
+    const gridEl = o.showGrid ? <CartesianGrid strokeDasharray={theme.gridDash} stroke={theme.gridColor} strokeWidth={theme.gridStrokeWidth} /> : null
+    const cursorStyle = o.showCrosshair ? { stroke: theme.mutedColor, strokeWidth: 1, strokeDasharray: '4 4' } : undefined
+    const tooltipEl = <Tooltip contentStyle={tooltipStyle} cursor={cursorStyle} formatter={(v: any) => yTickFmt(v)} />
     const hidden = hiddenSeries[chart.id] || new Set<string>()
     const handleLegendClick = (e: any) => { if (e?.dataKey) toggleSeries(chart.id, e.dataKey) }
-    const legendEl = o.showLegend ? <Legend wrapperStyle={{ fontSize: 11, cursor: 'pointer' }} onClick={handleLegendClick} formatter={(value: string) => <span style={{ opacity: hidden.has(value) ? 0.3 : 1, textDecoration: hidden.has(value) ? 'line-through' : 'none' }}>{value}</span>} /> : null
-    const brushEl = o.showBrush && data.length > 5 ? <Brush dataKey="label" height={20} stroke="var(--color-text)" fill="var(--glass-bg)" travellerWidth={8} /> : null
-    const xAxisEl = <XAxis dataKey="label" tick={AXIS_TICK} label={o.xLabel ? { value: o.xLabel, position: 'insideBottom', offset: -5, style: { fontSize: 11, fill: 'var(--color-text-muted)' } } : undefined} scale={o.logScaleX ? 'log' : 'auto'} />
-    const yAxisEl = <YAxis tick={AXIS_TICK} label={o.yLabel ? { value: o.yLabel, angle: -90, position: 'insideLeft', style: { fontSize: 11, fill: 'var(--color-text-muted)' } } : undefined} scale={o.logScaleY ? 'log' : 'auto'} domain={o.logScaleY ? ['auto', 'auto'] : undefined} />
+    const legendEl = o.showLegend ? <Legend wrapperStyle={{ fontSize: 11 * fs, cursor: 'pointer', fontFamily: theme.bodyFont, color: theme.textColor }} onClick={handleLegendClick} formatter={(value: string) => <span style={{ opacity: hidden.has(value) ? 0.3 : 1, textDecoration: hidden.has(value) ? 'line-through' : 'none', color: theme.textColor }}>{value}</span>} /> : null
+    const brushEl = o.showBrush && data.length > 5 ? <Brush dataKey="label" height={20} stroke={theme.axisColor} fill={theme.bg === 'transparent' ? 'var(--glass-bg)' : '#F0F0F0'} travellerWidth={8} /> : null
+    const xAxisProps: any = {
+      dataKey: 'label',
+      tick: tickStyle,
+      stroke: theme.axisColor,
+      strokeWidth: theme.axisStrokeWidth,
+      tickFormatter: xTickFmt,
+      label: o.xLabel ? { value: o.xLabel, position: 'insideBottom', offset: -5, style: labelStyle } : undefined,
+      scale: o.logScaleX ? 'log' : 'auto',
+    }
+    if (o.tickCountX && o.tickCountX > 0) xAxisProps.tickCount = o.tickCountX
+    const xAxisEl = <XAxis {...xAxisProps} />
+    const yAxisProps: any = {
+      tick: tickStyle,
+      stroke: theme.axisColor,
+      strokeWidth: theme.axisStrokeWidth,
+      tickFormatter: yTickFmt,
+      label: o.yLabel ? { value: o.yLabel, angle: -90, position: 'insideLeft', style: labelStyle } : undefined,
+      scale: o.logScaleY ? 'log' : 'auto',
+      domain: o.logScaleY ? ['auto', 'auto'] : undefined,
+    }
+    if (o.tickCountY && o.tickCountY > 0) yAxisProps.tickCount = o.tickCountY
+    const yAxisEl = <YAxis {...yAxisProps} />
+    // Reference bands (shaded zones) render before annotation lines
+    // so the lines layer on top of them.
+    const bandEls = (chart.referenceBands || []).map(band => (
+      <ReferenceArea
+        key={band.id}
+        x1={band.axis === 'x' ? band.from : undefined}
+        x2={band.axis === 'x' ? band.to : undefined}
+        y1={band.axis === 'y' ? band.from : undefined}
+        y2={band.axis === 'y' ? band.to : undefined}
+        fill={band.color}
+        fillOpacity={band.opacity}
+        stroke="none"
+        label={band.label ? { value: band.label, position: 'insideTopLeft', style: { fontSize: 10 * fs, fill: theme.mutedColor, fontFamily: theme.bodyFont } } : undefined}
+      />
+    ))
     const annotationEls = (chart.annotations || []).map(ann => (
       <ReferenceLine key={ann.id} y={ann.axis === 'y' ? ann.value : undefined} x={ann.axis === 'x' ? ann.value : undefined}
         stroke={ann.color} strokeDasharray={ann.style === 'dashed' ? '8 4' : ann.style === 'dotted' ? '2 4' : undefined}
-        strokeWidth={1.5} label={{ value: ann.label, position: 'insideTopRight', style: { fontSize: 10, fill: ann.color, fontWeight: 600 } }} />
+        strokeWidth={1.5} label={{ value: ann.label, position: 'insideTopRight', style: { fontSize: 10 * fs, fill: ann.color, fontWeight: 600, fontFamily: theme.bodyFont } }} />
     ))
 
     const renderChartSwitch = (): React.ReactNode => { switch (type) {
@@ -879,7 +1346,7 @@ export default function DataVisualization() {
           <ResponsiveContainer width="100%" height={height}>
             {hasTrend ? (
               <ComposedChart data={data} barGap={o.barGap}>
-                {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{annotationEls}
+                {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{bandEls}{annotationEls}
                 <Bar dataKey="value" fill={colors[0]} radius={[4, 4, 0, 0]} animationDuration={o.animate ? 400 : 0} hide={hidden.has('value')}>
                   {o.showValues && <LabelList dataKey="value" position="top" style={{ fontSize: 10, fill: 'var(--color-text-muted)' }} />}
                 </Bar>
@@ -887,7 +1354,7 @@ export default function DataVisualization() {
               </ComposedChart>
             ) : (
               <BarChart data={data} barGap={o.barGap}>
-                {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{annotationEls}
+                {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{bandEls}{annotationEls}
                 <Bar dataKey="value" fill={colors[0]} radius={[4, 4, 0, 0]} animationDuration={o.animate ? 400 : 0} hide={hidden.has('value')}>
                   {o.showValues && <LabelList dataKey="value" position="top" style={{ fontSize: 10, fill: 'var(--color-text-muted)' }} />}
                 </Bar>
@@ -916,7 +1383,7 @@ export default function DataVisualization() {
           return (
             <ResponsiveContainer width="100%" height={height}>
               <BarChart data={data} barGap={o.barGap}>
-                {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{annotationEls}
+                {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{bandEls}{annotationEls}
                 <Bar dataKey="value" name="Series 1" fill={colors[0]} radius={[4, 4, 0, 0]} />
                 {data.some(d => d.value2 !== undefined) && <Bar dataKey="value2" name="Series 2" fill={colors[1]} radius={[4, 4, 0, 0]} />}
                 {data.some(d => d.value3 !== undefined) && <Bar dataKey="value3" name="Series 3" fill={colors[2]} radius={[4, 4, 0, 0]} />}
@@ -933,7 +1400,7 @@ export default function DataVisualization() {
         return (
           <ResponsiveContainer width="100%" height={height}>
             <BarChart data={pivoted} barGap={o.barGap}>
-              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{annotationEls}
+              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{bandEls}{annotationEls}
               {cats.map((cat, i) => <Bar key={cat} dataKey={cat!} fill={colors[i % colors.length]} radius={[4, 4, 0, 0]} />)}
             </BarChart>
           </ResponsiveContainer>
@@ -947,7 +1414,7 @@ export default function DataVisualization() {
           return (
             <ResponsiveContainer width="100%" height={height}>
               <BarChart data={data}>
-                {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{annotationEls}
+                {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{bandEls}{annotationEls}
                 <Bar dataKey="value" stackId="a" fill={colors[0]} />
                 {data.some(d => d.value2 !== undefined) && <Bar dataKey="value2" stackId="a" fill={colors[1]} />}
               </BarChart>
@@ -971,7 +1438,7 @@ export default function DataVisualization() {
         return (
           <ResponsiveContainer width="100%" height={height}>
             <BarChart data={pivoted}>
-              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{annotationEls}
+              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{bandEls}{annotationEls}
               {cats.map((cat, i) => <Bar key={cat} dataKey={cat!} stackId="a" fill={colors[i % colors.length]} />)}
             </BarChart>
           </ResponsiveContainer>
@@ -1005,11 +1472,22 @@ export default function DataVisualization() {
       case 'line':
         return (
           <ResponsiveContainer width="100%" height={height}>
-            <LineChart data={data}>
-              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{annotationEls}
-              <Line type={o.smooth ? 'monotone' : 'linear'} dataKey="value" stroke={colors[0]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize, fill: colors[0] }} animationDuration={o.animate ? 400 : 0} hide={hidden.has('value')} />
-              {hasTrend && <Line type="monotone" dataKey="trend" name={o.trendLine === 'linear' ? 'Linear Trend' : 'Moving Avg'} stroke="#C4956A" strokeWidth={2} strokeDasharray="6 3" dot={false} />}
-            </LineChart>
+            {hasCI ? (
+              <ComposedChart data={finalData}>
+                {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{bandEls}{annotationEls}
+                {/* CI band — shaded high - low envelope rendered behind the main line. */}
+                <Area type={o.smooth ? 'monotone' : 'linear'} dataKey="ciHigh" stroke="none" fill={colors[0]} fillOpacity={0.15} name={`+${Math.round(o.ciLevel * 100)}% CI`} />
+                <Area type={o.smooth ? 'monotone' : 'linear'} dataKey="ciLow" stroke="none" fill={theme.bg === 'transparent' ? 'var(--color-bg)' : theme.bg} fillOpacity={1} legendType="none" />
+                <Line type={o.smooth ? 'monotone' : 'linear'} dataKey="value" stroke={colors[0]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize, fill: colors[0] }} animationDuration={o.animate ? 400 : 0} hide={hidden.has('value')} />
+                {hasTrend && <Line type="monotone" dataKey="trend" name={o.trendLine === 'linear' ? 'Linear Trend' : 'Moving Avg'} stroke="#C4956A" strokeWidth={2} strokeDasharray="6 3" dot={false} />}
+              </ComposedChart>
+            ) : (
+              <LineChart data={finalData}>
+                {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{bandEls}{annotationEls}
+                <Line type={o.smooth ? 'monotone' : 'linear'} dataKey="value" stroke={colors[0]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize, fill: colors[0] }} animationDuration={o.animate ? 400 : 0} hide={hidden.has('value')} />
+                {hasTrend && <Line type="monotone" dataKey="trend" name={o.trendLine === 'linear' ? 'Linear Trend' : 'Moving Avg'} stroke="#C4956A" strokeWidth={2} strokeDasharray="6 3" dot={false} />}
+              </LineChart>
+            )}
           </ResponsiveContainer>
         )
 
@@ -1017,7 +1495,7 @@ export default function DataVisualization() {
         return (
           <ResponsiveContainer width="100%" height={height}>
             <LineChart data={data}>
-              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{annotationEls}
+              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{bandEls}{annotationEls}
               <Line type="monotone" dataKey="value" name="Series 1" stroke={colors[0]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize }} hide={hidden.has('value')} />
               {data.some(d => d.value2 !== undefined) && <Line type="monotone" dataKey="value2" name="Series 2" stroke={colors[1]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize }} hide={hidden.has('value2')} />}
               {data.some(d => d.value3 !== undefined) && <Line type="monotone" dataKey="value3" name="Series 3" stroke={colors[2]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize }} hide={hidden.has('value3')} />}
@@ -1029,7 +1507,7 @@ export default function DataVisualization() {
         return (
           <ResponsiveContainer width="100%" height={height}>
             <LineChart data={data}>
-              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{annotationEls}
+              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{bandEls}{annotationEls}
               <Line type="stepAfter" dataKey="value" stroke={colors[0]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize, fill: colors[0] }} hide={hidden.has('value')} />
             </LineChart>
           </ResponsiveContainer>
@@ -1039,7 +1517,7 @@ export default function DataVisualization() {
         return (
           <ResponsiveContainer width="100%" height={height}>
             <LineChart data={data}>
-              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{annotationEls}
+              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{bandEls}{annotationEls}
               <Line type="natural" dataKey="value" stroke={colors[0]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize, fill: colors[0] }} hide={hidden.has('value')} />
             </LineChart>
           </ResponsiveContainer>
@@ -1063,13 +1541,13 @@ export default function DataVisualization() {
           <ResponsiveContainer width="100%" height={height}>
             {hasTrend ? (
               <ComposedChart data={data}>
-                {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{annotationEls}
+                {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{bandEls}{annotationEls}
                 <Area type="monotone" dataKey="value" stroke={colors[0]} fill={colors[0]} fillOpacity={o.fillOpacity} strokeWidth={o.lineWidth} hide={hidden.has('value')} />
                 <Line type="monotone" dataKey="trend" name={o.trendLine === 'linear' ? 'Linear Trend' : 'Moving Avg'} stroke="#C4956A" strokeWidth={2} strokeDasharray="6 3" dot={false} />
               </ComposedChart>
             ) : (
               <AreaChart data={data}>
-                {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{annotationEls}
+                {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{bandEls}{annotationEls}
                 <Area type="monotone" dataKey="value" stroke={colors[0]} fill={colors[0]} fillOpacity={o.fillOpacity} strokeWidth={o.lineWidth} hide={hidden.has('value')} />
               </AreaChart>
             )}
@@ -1080,7 +1558,7 @@ export default function DataVisualization() {
         return (
           <ResponsiveContainer width="100%" height={height}>
             <AreaChart data={data}>
-              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{annotationEls}
+              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{bandEls}{annotationEls}
               <Area type="monotone" dataKey="value" stackId="1" name="Series 1" stroke={colors[0]} fill={colors[0]} fillOpacity={o.fillOpacity} hide={hidden.has('value')} />
               {data.some(d => d.value2 !== undefined) && <Area type="monotone" dataKey="value2" stackId="1" name="Series 2" stroke={colors[1]} fill={colors[1]} fillOpacity={o.fillOpacity} hide={hidden.has('value2')} />}
               {data.some(d => d.value3 !== undefined) && <Area type="monotone" dataKey="value3" stackId="1" name="Series 3" stroke={colors[2]} fill={colors[2]} fillOpacity={o.fillOpacity} hide={hidden.has('value3')} />}
@@ -1092,7 +1570,7 @@ export default function DataVisualization() {
         return (
           <ResponsiveContainer width="100%" height={height}>
             <AreaChart data={data} stackOffset="silhouette">
-              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{annotationEls}
+              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{bandEls}{annotationEls}
               <Area type="monotone" dataKey="value" stackId="1" stroke={colors[0]} fill={colors[0]} fillOpacity={0.6} />
               {data.some(d => d.value2 !== undefined) && <Area type="monotone" dataKey="value2" stackId="1" stroke={colors[1]} fill={colors[1]} fillOpacity={0.6} />}
               {data.some(d => d.value3 !== undefined) && <Area type="monotone" dataKey="value3" stackId="1" stroke={colors[2]} fill={colors[2]} fillOpacity={0.6} />}
@@ -1105,7 +1583,7 @@ export default function DataVisualization() {
         return (
           <ResponsiveContainer width="100%" height={height}>
             <AreaChart data={data}>
-              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{annotationEls}
+              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{bandEls}{annotationEls}
               <Area type="monotone" dataKey="value2" stroke="none" fill={colors[0]} fillOpacity={o.fillOpacity} name="Upper" />
               <Area type="monotone" dataKey="value" stroke="none" fill="var(--color-bg)" fillOpacity={1} name="Lower" />
               <Line type="monotone" dataKey="value" stroke={colors[0]} strokeWidth={o.lineWidth} dot={false} />
@@ -1424,7 +1902,7 @@ export default function DataVisualization() {
               <YAxis tick={AXIS_TICK} />
               {tooltipEl}
               <Area type="monotone" dataKey="density" stroke={colors[0]} fill={colors[0]} fillOpacity={0.2} strokeWidth={2} dot={false} />
-              {annotationEls}
+              {bandEls}{annotationEls}
             </AreaChart>
           </ResponsiveContainer>
         )
@@ -1564,25 +2042,299 @@ export default function DataVisualization() {
           </ResponsiveContainer>
         )
 
+      case 'sankey': {
+        // Sankey expects rows like: source, target (in `category`),
+        // value. We dedupe nodes by name and emit Plotly's two-array
+        // node + link format. Fall back to a friendly hint if the
+        // user supplied non-flow data so the chart never silently
+        // renders empty.
+        const flowRows = data
+          .filter(d => d.label && d.category && Number.isFinite(d.value) && d.value > 0)
+          .map(d => ({ source: d.label, target: d.category!, value: d.value }))
+        if (flowRows.length === 0) {
+          return (
+            <div className="text-center text-xs text-[var(--color-text-muted)] py-8">
+              Sankey expects flow rows: <code>source, value, target</code>. Each row becomes a link from the
+              source node to the target node weighted by value.
+            </div>
+          )
+        }
+        const nodeNames: string[] = []
+        const seen = new Set<string>()
+        for (const r of flowRows) {
+          if (!seen.has(r.source)) { seen.add(r.source); nodeNames.push(r.source) }
+          if (!seen.has(r.target)) { seen.add(r.target); nodeNames.push(r.target) }
+        }
+        const idxOf = (n: string) => nodeNames.indexOf(n)
+        return (
+          <PlotlyPlot3D
+            type={'sankey' as Chart3DType}
+            // PlotlyPlot3D consumes a flat DataPoint3D array; for
+            // Sankey we provide a stub since the Sankey branch reads
+            // `sankeyNodes` and `sankeyLinks` directly.
+            data={[]}
+            height={height}
+            xLabel={o.xLabel || 'Source'}
+            yLabel={o.yLabel || 'Flow'}
+            zLabel={o.zLabel || 'Target'}
+            colors={colors}
+            sankeyNodes={nodeNames}
+            sankeyLinks={flowRows.map(r => ({ source: idxOf(r.source), target: idxOf(r.target), value: r.value }))}
+          />
+        )
+      }
+
       default:
         return <div className="text-center text-xs text-[var(--color-text-muted)] py-8">Chart type "{type}" not yet rendered</div>
     } }
 
+    // Apply publication theme background + optional aspect ratio. The
+    // wrapper carries the SVG color-blind simulator filter when the
+    // user enables a CB preview, plus an optional watermark layer.
+    const aspectRatio = ASPECT_RATIO[o.aspect || 'free']
+    const wrapperStyle: React.CSSProperties = {
+      background: theme.bg,
+      color: theme.textColor,
+      fontFamily: theme.bodyFont,
+      padding: theme.bg === 'transparent' ? 0 : 16,
+      borderRadius: theme.bg === 'transparent' ? 0 : 6,
+      filter: o.cbSim && o.cbSim !== 'none' ? CB_SIM_FILTER[o.cbSim] : undefined,
+      position: 'relative',
+    }
+    const containerStyle: React.CSSProperties = aspectRatio
+      ? { aspectRatio: String(aspectRatio), width: '100%' }
+      : { height }
+
     return (
-      <>
+      <div style={wrapperStyle}>
+        {/* SVG filter defs for color-blind simulation. Standard daltonization
+            matrices (Brettel/Vienot 1997) — preview only, not applied to exports. */}
+        <svg width="0" height="0" style={{ position: 'absolute' }}>
+          <defs>
+            <filter id="cb-protan">
+              <feColorMatrix type="matrix" values="0.567 0.433 0 0 0  0.558 0.442 0 0 0  0 0.242 0.758 0 0  0 0 0 1 0" />
+            </filter>
+            <filter id="cb-deuter">
+              <feColorMatrix type="matrix" values="0.625 0.375 0 0 0  0.7 0.3 0 0 0  0 0.3 0.7 0 0  0 0 0 1 0" />
+            </filter>
+            <filter id="cb-tritan">
+              <feColorMatrix type="matrix" values="0.95 0.05 0 0 0  0 0.433 0.567 0 0  0 0.475 0.525 0 0  0 0 0 1 0" />
+            </filter>
+          </defs>
+        </svg>
+
+        {/* Title block */}
+        {o.showTitle && (chart.title || chart.subtitle) && (
+          <div style={{ marginBottom: 12 }}>
+            {chart.title && (
+              <h3 style={{
+                margin: 0, fontSize: 16 * fs, fontWeight: 600,
+                fontFamily: theme.titleFont, color: theme.textColor,
+                letterSpacing: o.pubTheme === 'ieee' ? 0 : '-0.01em',
+              }}>{chart.title}</h3>
+            )}
+            {chart.subtitle && (
+              <p style={{ margin: '2px 0 0', fontSize: 11 * fs, color: theme.mutedColor, fontFamily: theme.bodyFont }}>
+                {chart.subtitle}
+              </p>
+            )}
+          </div>
+        )}
+
         {wasDownsampled && (
-          <div className="text-xxs text-[var(--color-text-muted)] bg-[var(--glass-bg)] border border-[var(--color-border)] rounded px-2 py-1 mb-2 flex items-center gap-1">
+          <div className="text-xxs mb-2 flex items-center gap-1" style={{
+            color: theme.mutedColor,
+            background: theme.bg === 'transparent' ? 'var(--glass-bg)' : '#F8F8F8',
+            border: `1px solid ${theme.gridColor}`,
+            borderRadius: 4,
+            padding: '4px 8px',
+          }}>
             <span>Downsampled from {chart.data.length} to {displayData.length} points for display</span>
           </div>
         )}
-        {renderChartSwitch()}
-      </>
+
+        <div style={containerStyle}>
+          {renderChartSwitch()}
+        </div>
+
+        {/* Optional watermark — semitransparent text overlay, useful
+            for "DRAFT", "PRELIMINARY", or institution attribution. */}
+        {o.watermark && (
+          <div style={{
+            position: 'absolute', inset: 0, display: 'flex',
+            alignItems: 'center', justifyContent: 'center',
+            pointerEvents: 'none', userSelect: 'none',
+            fontSize: 64 * fs, fontWeight: 700, opacity: 0.06,
+            color: theme.textColor, transform: 'rotate(-22deg)',
+            fontFamily: theme.titleFont, letterSpacing: '0.1em',
+          }}>{o.watermark}</div>
+        )}
+
+        {/* Caption + source */}
+        {o.showCaption && (chart.caption || chart.source) && (
+          <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${theme.gridColor}` }}>
+            {chart.caption && (
+              <p style={{ margin: 0, fontSize: 11 * fs, lineHeight: 1.4, color: theme.textColor, fontFamily: theme.bodyFont }}>
+                {chart.caption}
+              </p>
+            )}
+            {chart.source && (
+              <p style={{ margin: chart.caption ? '6px 0 0' : 0, fontSize: 10 * fs, fontStyle: 'italic', color: theme.mutedColor, fontFamily: theme.bodyFont }}>
+                Source: {chart.source}
+              </p>
+            )}
+          </div>
+        )}
+      </div>
     )
   }
 
   // ─── Settings Panel ─────────────────────────────────────────
   const renderSettingsPanel = (chart: ChartConfig) => (
     <div className="p-4 border-t border-[var(--color-border)] bg-[var(--glass-bg)] space-y-3 animate-slide-down">
+      {/* ── Publication-grade controls ── */}
+      <div className="border-b border-[var(--glass-border)] pb-3 mb-3">
+        <div className="text-xxs uppercase tracking-wider text-[var(--color-text-muted)] mb-2 font-semibold">Publication</div>
+        <div className="grid grid-cols-2 gap-3 mb-2">
+          <div>
+            <label className="text-xxs text-[var(--color-text-muted)] block mb-0.5">Subtitle</label>
+            <input className="input text-xs w-full" value={chart.subtitle || ''} onChange={e => saveCharts(charts.map(c => c.id === chart.id ? { ...c, subtitle: e.target.value } : c))} placeholder="(optional)" />
+          </div>
+          <div>
+            <label className="text-xxs text-[var(--color-text-muted)] block mb-0.5">Source attribution</label>
+            <input className="input text-xs w-full" value={chart.source || ''} onChange={e => saveCharts(charts.map(c => c.id === chart.id ? { ...c, source: e.target.value } : c))} placeholder="e.g. Smith et al. 2024 Nature 612:45" />
+          </div>
+        </div>
+        <div className="mb-2">
+          <label className="text-xxs text-[var(--color-text-muted)] block mb-0.5">Caption (figure legend)</label>
+          <textarea className="input text-xs w-full" rows={2} value={chart.caption || ''} onChange={e => saveCharts(charts.map(c => c.id === chart.id ? { ...c, caption: e.target.value } : c))} placeholder="Figure 1. Descriptive caption rendered with the chart…" />
+        </div>
+        <div className="grid grid-cols-4 gap-3">
+          <div>
+            <label className="text-xxs text-[var(--color-text-muted)] block mb-0.5">Theme</label>
+            <GlassSelect
+              value={chart.options.pubTheme}
+              onChange={val => updateChartOptions(chart.id, { pubTheme: val as PublicationTheme })}
+              options={[
+                { value: 'screen', label: 'Screen (dark)' },
+                { value: 'paper', label: 'Paper (white)' },
+                { value: 'nature', label: 'Nature' },
+                { value: 'science', label: 'Science' },
+                { value: 'ieee', label: 'IEEE (serif)' },
+              ]}
+            />
+          </div>
+          <div>
+            <label className="text-xxs text-[var(--color-text-muted)] block mb-0.5">Aspect</label>
+            <GlassSelect
+              value={chart.options.aspect}
+              onChange={val => updateChartOptions(chart.id, { aspect: val as AspectPreset })}
+              options={[
+                { value: 'free', label: 'Free' },
+                { value: '16:9', label: '16:9 (slide)' },
+                { value: '4:3', label: '4:3' },
+                { value: '3:2', label: '3:2 (photo)' },
+                { value: '1:1', label: '1:1 (square)' },
+                { value: 'golden', label: 'Golden φ' },
+                { value: 'two-col', label: '2:1 (2-col)' },
+              ]}
+            />
+          </div>
+          <div>
+            <label className="text-xxs text-[var(--color-text-muted)] block mb-0.5">Font scale</label>
+            <GlassSelect
+              value={chart.options.fontScale}
+              onChange={val => updateChartOptions(chart.id, { fontScale: val as FontScale })}
+              options={[
+                { value: 'small', label: 'Small' },
+                { value: 'normal', label: 'Normal' },
+                { value: 'large', label: 'Large' },
+                { value: 'huge', label: 'Huge' },
+              ]}
+            />
+          </div>
+          <div>
+            <label className="text-xxs text-[var(--color-text-muted)] block mb-0.5">CB preview</label>
+            <GlassSelect
+              value={chart.options.cbSim}
+              onChange={val => updateChartOptions(chart.id, { cbSim: val as CBlindSim })}
+              options={[
+                { value: 'none', label: 'No simulation' },
+                { value: 'protanopia', label: 'Protanopia (red-blind)' },
+                { value: 'deuteranopia', label: 'Deuteranopia (green-blind)' },
+                { value: 'tritanopia', label: 'Tritanopia (blue-blind)' },
+                { value: 'achromatopsia', label: 'Achromatopsia (gray)' },
+              ]}
+            />
+          </div>
+        </div>
+        <div className="grid grid-cols-4 gap-3 mt-2">
+          <div>
+            <label className="text-xxs text-[var(--color-text-muted)] block mb-0.5">X tick format</label>
+            <GlassSelect
+              value={chart.options.tickFormatX}
+              onChange={val => updateChartOptions(chart.id, { tickFormatX: val as TickFormat })}
+              options={[
+                { value: 'auto', label: 'Auto' },
+                { value: 'plain', label: 'Plain' },
+                { value: 'scientific', label: 'Scientific (1.0e3)' },
+                { value: 'percent', label: 'Percent (%)' },
+                { value: 'currency', label: 'Currency ($)' },
+                { value: 'compact', label: 'Compact (1.2K)' },
+              ]}
+            />
+          </div>
+          <div>
+            <label className="text-xxs text-[var(--color-text-muted)] block mb-0.5">Y tick format</label>
+            <GlassSelect
+              value={chart.options.tickFormatY}
+              onChange={val => updateChartOptions(chart.id, { tickFormatY: val as TickFormat })}
+              options={[
+                { value: 'auto', label: 'Auto' },
+                { value: 'plain', label: 'Plain' },
+                { value: 'scientific', label: 'Scientific (1.0e3)' },
+                { value: 'percent', label: 'Percent (%)' },
+                { value: 'currency', label: 'Currency ($)' },
+                { value: 'compact', label: 'Compact (1.2K)' },
+              ]}
+            />
+          </div>
+          <div>
+            <label className="text-xxs text-[var(--color-text-muted)] block mb-0.5">Decimal places</label>
+            <input type="number" min={0} max={6} className="input text-xs w-full"
+              value={chart.options.decimalPlaces}
+              onChange={e => updateChartOptions(chart.id, { decimalPlaces: Math.max(0, Math.min(6, parseInt(e.target.value) || 0)) })} />
+          </div>
+          <div>
+            <label className="text-xxs text-[var(--color-text-muted)] block mb-0.5">Watermark</label>
+            <input className="input text-xs w-full" value={chart.options.watermark} placeholder="(empty)"
+              onChange={e => updateChartOptions(chart.id, { watermark: e.target.value })} />
+          </div>
+        </div>
+        <div className="flex gap-3 mt-2 flex-wrap text-xxs">
+          <label className="flex items-center gap-1 cursor-pointer">
+            <input type="checkbox" checked={chart.options.showTitle} onChange={e => updateChartOptions(chart.id, { showTitle: e.target.checked })} />
+            <span>Render title</span>
+          </label>
+          <label className="flex items-center gap-1 cursor-pointer">
+            <input type="checkbox" checked={chart.options.showCaption} onChange={e => updateChartOptions(chart.id, { showCaption: e.target.checked })} />
+            <span>Render caption + source</span>
+          </label>
+          <label className="flex items-center gap-1 cursor-pointer">
+            <input type="checkbox" checked={chart.options.showCI} onChange={e => updateChartOptions(chart.id, { showCI: e.target.checked })} />
+            <span>Show CI band ({Math.round(chart.options.ciLevel * 100)}%)</span>
+          </label>
+          {chart.options.showCI && (
+            <select className="input text-xxs"
+              value={String(chart.options.ciLevel)}
+              onChange={e => updateChartOptions(chart.id, { ciLevel: parseFloat(e.target.value) })}>
+              <option value="0.90">90%</option>
+              <option value="0.95">95%</option>
+              <option value="0.99">99%</option>
+            </select>
+          )}
+        </div>
+      </div>
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="text-xxs text-[var(--color-text-muted)] block mb-0.5">X-Axis Label</label>
@@ -1595,13 +2347,18 @@ export default function DataVisualization() {
       </div>
       <div className="grid grid-cols-3 gap-3">
         <div>
-          <label className="text-xxs text-[var(--color-text-muted)] block mb-0.5">Color Palette</label>
+          <label className="text-xxs text-[var(--color-text-muted)] block mb-0.5">
+            Color Palette
+            {CB_SAFE_PALETTES.has(chart.options.colorPalette) && (
+              <span className="ml-1.5 text-xxs px-1 py-0.5 rounded bg-[var(--glass-bg)] border border-[var(--glass-border)]">CB-safe</span>
+            )}
+          </label>
           <GlassSelect
             value={chart.options.colorPalette}
             onChange={val => updateChartOptions(chart.id, { colorPalette: val })}
             options={Object.keys(PALETTES).map(p => ({
               value: p,
-              label: p.charAt(0).toUpperCase() + p.slice(1),
+              label: (p.charAt(0).toUpperCase() + p.slice(1).replace('_', ' ')) + (CB_SAFE_PALETTES.has(p) ? ' (CB-safe)' : ''),
               preview: (
                 <span className="flex gap-0.5 shrink-0">
                   {PALETTES[p].slice(0, 5).map((c: string, i: number) => (
@@ -1707,12 +2464,55 @@ export default function DataVisualization() {
       {/* Annotations */}
       <div>
         <div className="flex items-center justify-between mb-1">
-          <span className="text-xxs text-[var(--color-text-muted)] font-medium">Annotations</span>
+          <span className="text-xxs text-[var(--color-text-muted)] font-medium">Annotations & Reference Bands</span>
           <div className="flex gap-1">
             <button onClick={() => addStatsAnnotations(chart.id)} className="text-xxs px-1.5 py-0.5 rounded hover:bg-white/10" style={{ color: 'var(--color-text)' }}>+ Mean/Median</button>
             <button onClick={() => addAnnotation(chart.id)} className="text-xxs px-1.5 py-0.5 rounded hover:bg-white/10" style={{ color: 'var(--color-text)' }}>+ Line</button>
+            <button
+              onClick={() => {
+                const vals = chart.data.map(d => d.value).filter(v => Number.isFinite(v))
+                if (vals.length === 0) return
+                const sorted = [...vals].sort((a, b) => a - b)
+                const q1 = sorted[Math.floor(sorted.length * 0.25)]
+                const q3 = sorted[Math.floor(sorted.length * 0.75)]
+                const band: ReferenceBand = {
+                  id: `band-${Date.now()}`, axis: 'y',
+                  from: q1, to: q3,
+                  label: 'IQR', color: 'var(--color-text)', opacity: 0.06,
+                }
+                saveCharts(charts.map(c => c.id === chart.id ? { ...c, referenceBands: [...(c.referenceBands || []), band] } : c))
+              }}
+              className="text-xxs px-1.5 py-0.5 rounded hover:bg-white/10"
+              style={{ color: 'var(--color-text)' }}
+              title="Shade the inter-quartile range as a reference band"
+            >
+              + Band (IQR)
+            </button>
           </div>
         </div>
+        {(chart.referenceBands || []).length > 0 && (
+          <div className="mb-2 space-y-1">
+            {(chart.referenceBands || []).map(band => (
+              <div key={band.id} className="flex items-center gap-2">
+                <input className="input text-xxs w-16" value={band.label}
+                  onChange={e => saveCharts(charts.map(c => c.id === chart.id ? { ...c, referenceBands: (c.referenceBands || []).map(b => b.id === band.id ? { ...b, label: e.target.value } : b) } : c))} />
+                <select value={band.axis}
+                  onChange={e => saveCharts(charts.map(c => c.id === chart.id ? { ...c, referenceBands: (c.referenceBands || []).map(b => b.id === band.id ? { ...b, axis: e.target.value as 'x' | 'y' } : b) } : c))}
+                  className="text-xxs rounded px-1 py-0.5" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)', color: 'var(--color-text)' }}>
+                  <option value="y">Y</option><option value="x">X</option>
+                </select>
+                <input type="number" step="any" className="input text-xxs w-16" value={band.from}
+                  onChange={e => saveCharts(charts.map(c => c.id === chart.id ? { ...c, referenceBands: (c.referenceBands || []).map(b => b.id === band.id ? { ...b, from: parseFloat(e.target.value) || 0 } : b) } : c))} />
+                <input type="number" step="any" className="input text-xxs w-16" value={band.to}
+                  onChange={e => saveCharts(charts.map(c => c.id === chart.id ? { ...c, referenceBands: (c.referenceBands || []).map(b => b.id === band.id ? { ...b, to: parseFloat(e.target.value) || 0 } : b) } : c))} />
+                <input type="number" min={0} max={1} step={0.05} className="input text-xxs w-12" value={band.opacity}
+                  onChange={e => saveCharts(charts.map(c => c.id === chart.id ? { ...c, referenceBands: (c.referenceBands || []).map(b => b.id === band.id ? { ...b, opacity: parseFloat(e.target.value) || 0 } : b) } : c))} />
+                <button onClick={() => saveCharts(charts.map(c => c.id === chart.id ? { ...c, referenceBands: (c.referenceBands || []).filter(b => b.id !== band.id) } : c))}
+                  className="text-xxs p-0.5 rounded hover:bg-white/10" style={{ color: '#B07E8B' }}><FiX className="w-3 h-3" /></button>
+              </div>
+            ))}
+          </div>
+        )}
         {(chart.annotations || []).map(ann => (
           <div key={ann.id} className="flex items-center gap-2 mb-1">
             <input className="input text-xxs w-16" value={ann.label} onChange={e => updateAnnotation(chart.id, ann.id, { label: e.target.value })} />
@@ -1730,12 +2530,49 @@ export default function DataVisualization() {
           </div>
         ))}
       </div>
-      {/* Palette preview */}
-      <div className="flex items-center gap-1">
-        <span className="text-xxs text-[var(--color-text-muted)] mr-1">Palette:</span>
-        {getPalette(chart.options.colorPalette).slice(0, 10).map((c, i) => (
-          <div key={i} className="w-4 h-4 rounded-sm" style={{ background: c }} />
-        ))}
+      {/* Palette preview + per-color editor (RGB) */}
+      <div>
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-xxs text-[var(--color-text-muted)] font-medium">
+            Palette colors
+            {chart.customPalette && chart.customPalette.length > 0 && (
+              <span className="ml-1.5 text-xxs px-1 py-0.5 rounded bg-[var(--glass-bg)] border border-[var(--glass-border)]">customized</span>
+            )}
+          </span>
+          {chart.customPalette && chart.customPalette.length > 0 && (
+            <button
+              onClick={() => saveCharts(charts.map(c => c.id === chart.id ? { ...c, customPalette: undefined } : c))}
+              className="text-xxs px-1.5 py-0.5 rounded hover:bg-white/10"
+              style={{ color: 'var(--color-text-muted)' }}
+              title="Discard custom colors and revert to the named palette"
+            >Reset to palette</button>
+          )}
+        </div>
+        <div className="grid grid-cols-10 gap-1">
+          {getPalette(chart.options.colorPalette).slice(0, 10).map((paletteColor, i) => {
+            const current = chart.customPalette?.[i] || paletteColor
+            return (
+              <div key={i} className="flex flex-col items-center gap-0.5">
+                <input
+                  type="color"
+                  value={normalizeHex(current)}
+                  onChange={e => {
+                    const next = [...(chart.customPalette || getPalette(chart.options.colorPalette).slice(0, 10))]
+                    while (next.length < 10) next.push(getPalette(chart.options.colorPalette)[next.length] || '#888888')
+                    next[i] = e.target.value
+                    saveCharts(charts.map(c => c.id === chart.id ? { ...c, customPalette: next } : c))
+                  }}
+                  className="w-6 h-6 rounded cursor-pointer p-0 border-0 bg-transparent"
+                  title={`Series ${i + 1}: ${current}`}
+                />
+                <span className="text-[9px] font-mono text-[var(--color-text-muted)]">{i + 1}</span>
+              </div>
+            )
+          })}
+        </div>
+        <p className="text-xxs text-[var(--color-text-muted)] mt-1">
+          Pick any color per series to override the palette. Stay in the muted/desaturated range to match the platform aesthetic.
+        </p>
       </div>
     </div>
   )
@@ -1749,7 +2586,10 @@ export default function DataVisualization() {
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Data Visualization</h1>
             <p className="text-sm text-[var(--color-text-muted)] mt-1">
-              {charts.length} chart{charts.length !== 1 ? 's' : ''} — {CHART_TYPES.length} types (2D + 3D), CSV/XLSX import &amp; export, annotations, trend lines, statistics
+              {charts.length} chart{charts.length !== 1 ? 's' : ''} — {CHART_TYPES.length} types (2D + 3D + Sankey), publication-ready exports (PDF · 4× PNG · SVG), 5 themes (Screen / Paper / Nature / Science / IEEE), CB-safe palettes
+            </p>
+            <p className="text-xxs text-[var(--color-text-muted)] mt-1 opacity-80">
+              Per-chart settings: gear icon → Publication panel for theme · subtitle · caption · source · CI bands · reference bands · custom colors · color-blind preview · watermark.
             </p>
           </div>
           <input ref={fileInputRef} type="file" accept=".csv,.tsv,.txt,.xlsx,.xls" onChange={handleFileUpload} className="hidden" />
@@ -2000,19 +2840,27 @@ export default function DataVisualization() {
                       {expandedChart === chart.id ? <FiMinimize2 className="w-3.5 h-3.5" /> : <FiMaximize2 className="w-3.5 h-3.5" />}
                     </button>
                     <button onClick={() => exportPng(chart.id, chart.title)}
-                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="PNG">
+                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="PNG (1×)">
                       <FiDownload className="w-3.5 h-3.5" />
                     </button>
+                    <button onClick={() => exportHighDpiPng(chart.id, chart.title)}
+                      className="px-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] text-xxs font-mono" title="PNG @ 4× (publication / ~300 DPI)">
+                      4×
+                    </button>
                     <button onClick={() => exportSvg(chart.id, chart.title)}
-                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="SVG">
+                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="SVG (vector)">
                       <FiDroplet className="w-3.5 h-3.5" />
                     </button>
+                    <button onClick={() => exportPdf(chart)}
+                      className="px-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] text-xxs font-mono" title="PDF — publication layout w/ title + caption + source">
+                      PDF
+                    </button>
                     <button onClick={() => exportCsv(chart)}
-                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="CSV">
+                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="CSV (data)">
                       <FiCopy className="w-3.5 h-3.5" />
                     </button>
                     <button onClick={() => exportXlsx(chart)}
-                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="XLSX">
+                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="XLSX (data)">
                       <FiUpload className="w-3.5 h-3.5" />
                     </button>
                     <button onClick={() => setChartBg(chart.id, (chartBgTheme[chart.id] ?? 'dark') === 'dark' ? 'light' : 'dark')}

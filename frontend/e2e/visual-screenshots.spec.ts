@@ -27,7 +27,10 @@ const PAGES: Array<{ name: string; path: string }> = [
   { name: 'regulatory',           path: '/regulatory' },
   { name: 'imaging',              path: '/imaging' },
   { name: 'biobank',              path: '/biobank' },
-  { name: 'hypotheses',           path: '/hypotheses' },
+  // /hypotheses was retired — hypotheses live inside projects now.
+  // Keeping the screenshot slot but pointed at /projects so the visual
+  // diff archive stays continuous.
+  { name: 'hypotheses',           path: '/projects' },
   { name: 'knowledge-graph',      path: '/knowledge-graph' },
   { name: 'knowledge-graph-viewer', path: '/knowledge-graph/viewer' },
   { name: 'ml-models',            path: '/ml-models' },

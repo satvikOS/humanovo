@@ -28,6 +28,8 @@ from app.models.learning_memory import (
     StagePerformanceAggregate,
 )
 from app.models.user import User, UserRole
+from app.models.discovery_session import DiscoverySession
+from app.models.citation import Citation, CitationFolder, CitationHighlight
 from app.models.platform_entities import (
     AuditLogEntry,
     BillingBudget,
@@ -109,4 +111,8 @@ __all__ = [
     "BillingBudget",
     "BillingNotification",
     "SavedAnalysis",
+    "DiscoverySession",
+    "Citation",
+    "CitationFolder",
+    "CitationHighlight",
 ]

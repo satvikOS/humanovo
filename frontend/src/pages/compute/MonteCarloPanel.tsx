@@ -11,6 +11,7 @@ import {
   FiRefreshCw, FiTrendingUp, FiPercent, FiSliders, FiImage,
 } from 'react-icons/fi';
 import { copyPlotToClipboard as copyPlotBlob, downloadPlotPng } from '../../utils/plotExport';
+import PublicationFigure from '../../components/PublicationFigure';
 
 
 /* ------------------------------------------------------------------ */
@@ -1114,7 +1115,12 @@ export default function MonteCarloPanel() {
                     const ciLoBin = snap(stats.ci95Low)
                     const ciHiBin = snap(stats.ci95High)
                     return (
-                      <ResponsiveContainer width="100%" height="100%">
+                      <PublicationFigure
+                        title={`Distribution: ${activeSim?.name || 'Monte Carlo'}`}
+                        subtitle={`μ=${stats.mean.toFixed(3)} · 95% CI [${stats.ci95Low.toFixed(3)}, ${stats.ci95High.toFixed(3)}]`}
+                        exportName={`mc-${activeSim?.id || 'distribution'}`}
+                      >
+                      <ResponsiveContainer width="100%" height={420}>
                         {/* Generous margins so ReferenceLine labels
                             ("Mean", "Median", "2.5%", "97.5%") and the
                             axis labels don't get clipped by the chart
@@ -1133,11 +1139,18 @@ export default function MonteCarloPanel() {
                           {histogramEnriched.length > 8 && <Brush dataKey="bin" height={16} stroke="#5B8DB8" fill="var(--glass-bg)" travellerWidth={6} />}
                         </BarChart>
                       </ResponsiveContainer>
+                      </PublicationFigure>
                     )
                   })()}
 
                   {activeChart === 'convergence' && (
-                    <ResponsiveContainer width="100%" height="100%">
+                    <PublicationFigure
+                      title="Running mean convergence"
+                      subtitle={`After ${results.convergence.length.toLocaleString()} iterations · ±1.96·SEM band`}
+                      caption="The shaded band shows the standard error of the running mean tapering as n grows — a flat envelope at large n indicates the simulation has stabilized."
+                      exportName={`mc-convergence-${activeSim?.id || 'sim'}`}
+                    >
+                    <ResponsiveContainer width="100%" height={420}>
                       {/* ComposedChart so the ±1.96·SEM band renders
                           behind the running-mean line. The band tapers
                           as n grows, which is the "convergence" story
@@ -1163,6 +1176,7 @@ export default function MonteCarloPanel() {
                         {results.convergence.length > 10 && <Brush dataKey="iteration" height={16} stroke="#8B7EAF" fill="var(--glass-bg)" travellerWidth={6} />}
                       </ComposedChart>
                     </ResponsiveContainer>
+                    </PublicationFigure>
                   )}
 
                   {activeChart === 'cdf' && (

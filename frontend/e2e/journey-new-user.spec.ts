@@ -65,13 +65,15 @@ test.describe('Customer journey — new user onboarding', () => {
     await page.screenshot({ path: 'test-results/journey-3-palette.png', fullPage: true })
   })
 
-  test('hypotheses page renders (empty-state or list)', async ({ page }) => {
+  test('/hypotheses redirects to /projects (list lives inside projects now)', async ({ page }) => {
     const errs: string[] = []; attachErrorCapture(page, errs)
+    // The standalone /hypotheses page was retired; visiting the old
+    // URL should land on /projects without a 404, crash, or
+    // ErrorBoundary trip.
     await page.goto('/hypotheses')
     await page.waitForLoadState('domcontentloaded')
+    await page.waitForURL(/\/projects$/, { timeout: 5_000 }).catch(() => {})
     await page.locator('h1, h2, h3').first().waitFor({ timeout: 10_000 })
-    // Either the list renders OR an EmptyState with "No … yet" does.
-    // Both are acceptable proofs the page didn't crash.
     const boundary = await page.locator('text=/Something went wrong/i').count()
     expect(boundary).toBe(0)
     await page.screenshot({ path: 'test-results/journey-4-hypotheses.png', fullPage: true })

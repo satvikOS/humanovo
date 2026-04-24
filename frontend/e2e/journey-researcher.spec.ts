@@ -2,9 +2,13 @@
  * Customer journey — researcher deep-workflow.
  *
  * Exercises the research-flow a power user hits once a project is
- * seeded: evidence → citations → hypotheses → knowledge graph. Every
- * step screenshots for visual review and asserts no runtime crash /
- * ErrorBoundary trip.
+ * seeded: evidence → citations → projects (where hypotheses live now)
+ * → knowledge graph. Every step screenshots for visual review and
+ * asserts no runtime crash / ErrorBoundary trip.
+ *
+ * /hypotheses was retired — the standalone list redirects to
+ * /projects. The g-prefix navigation chain asserts the redirect
+ * completes to /projects rather than the old /hypotheses target.
  */
 import { test, expect, type Page } from '@playwright/test'
 
@@ -22,7 +26,9 @@ const pages: { label: string; path: string; screenshot: string }[] = [
   { label: 'Evidence', path: '/evidence', screenshot: 'researcher-1-evidence.png' },
   { label: 'Literature Review', path: '/literature-review', screenshot: 'researcher-2-literature.png' },
   { label: 'Citation Manager', path: '/citation-manager', screenshot: 'researcher-3-citations.png' },
-  { label: 'Hypotheses', path: '/hypotheses', screenshot: 'researcher-4-hypotheses.png' },
+  // Hypotheses moved inside projects — /hypotheses redirects to /projects.
+  // Keep the filename for backwards-compat with diff tooling.
+  { label: 'Projects (hypotheses live here)', path: '/projects', screenshot: 'researcher-4-hypotheses.png' },
   { label: 'Knowledge Graph', path: '/knowledge-graph', screenshot: 'researcher-5-kg.png' },
   { label: 'Workbench', path: '/workbench', screenshot: 'researcher-6-workbench.png' },
   { label: 'Notebook', path: '/notebook', screenshot: 'researcher-7-notebook.png' },
@@ -42,13 +48,16 @@ test.describe('Customer journey — researcher deep-workflow', () => {
     })
   }
 
-  test('g-prefix navigation chain dashboard → hypotheses → knowledge graph', async ({ page }) => {
+  test('g-prefix navigation chain dashboard → projects → knowledge graph', async ({ page }) => {
     await page.goto('/dashboard')
     await page.waitForLoadState('domcontentloaded')
 
+    // `g h` now opens /projects (where hypotheses live). The old
+    // /hypotheses page redirects there anyway, so either URL is
+    // acceptable as the post-navigation target.
     await page.keyboard.press('g')
     await page.keyboard.press('h')
-    await page.waitForURL(/\/hypotheses$/, { timeout: 3_000 }).catch(() => {})
+    await page.waitForURL(/\/projects$/, { timeout: 3_000 }).catch(() => {})
 
     await page.keyboard.press('g')
     await page.keyboard.press('k')

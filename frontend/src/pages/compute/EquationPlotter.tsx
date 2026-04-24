@@ -8,6 +8,7 @@ import {
   FiTrash2, FiRefreshCw, FiImage, FiCheck,
 } from 'react-icons/fi'
 import { copyPlotToClipboard as copyPlotBlob, downloadPlotPng } from '../../utils/plotExport'
+import PublicationFigure from '../../components/PublicationFigure'
 
 // ═══════════════════════════════════════════════════════════════════
 //  Expression Evaluator — self-contained, no external math library
@@ -802,10 +803,17 @@ export default function EquationPlotter() {
         </div>
       )}
 
-      {/* ── Chart ────────────────────────────────────────────────── */}
+      {/* ── Chart ──────────────────────────────────────────────────
+          Wrapped in PublicationFigure so the user gets the same
+          theme/CB/PDF/SVG/4×PNG controls as DataVisualization. */}
       <div ref={chartHostRef} style={{ flex: 1, minHeight: 0, border: '1px solid var(--glass-border)', borderRadius: 8, padding: 10, background: 'var(--glass-bg)' }}>
         {chartData.length > 0 ? (
-          <ResponsiveContainer width="100%" height="100%">
+        <PublicationFigure
+          title={`f(x) = ${expr}`}
+          subtitle={overlays.filter(o => o.enabled).length > 0 ? `with ${overlays.filter(o => o.enabled).length} overlay(s)` : undefined}
+          exportName={`equation-${(expr || 'plot').replace(/[^\w-]+/g, '_')}`}
+        >
+          <ResponsiveContainer width="100%" height={Math.max(280, (chartHostRef.current?.clientHeight || 320) - 80)}>
             <LineChart data={chartDataWithDerivative} margin={{ top: 8, right: 16, bottom: 24, left: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" strokeOpacity={0.5} />
               <XAxis dataKey="x" tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} tickFormatter={v => typeof v === 'number' ? (Math.abs(v) >= 1000 ? v.toExponential(0) : String(Math.round(v * 100) / 100)) : v} stroke="var(--glass-border)" />
@@ -822,6 +830,7 @@ export default function EquationPlotter() {
               <Brush dataKey="x" height={14} stroke="var(--color-text-muted)" fill="var(--glass-bg)" travellerWidth={6} />
             </LineChart>
           </ResponsiveContainer>
+        </PublicationFigure>
         ) : (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 12, color: 'var(--color-text-muted)' }}>
             Enter an expression above to plot, or browse the Library
@@ -948,22 +957,29 @@ export default function EquationPlotter() {
         </div>
       </div>
 
-      {/* ODE Chart */}
+      {/* ODE Chart — wrapped in PublicationFigure */}
       <div ref={chartHostRef} style={{ flex: 1, minHeight: 0, border: '1px solid var(--glass-border)', borderRadius: 8, padding: 10, background: 'var(--glass-bg)' }}>
         {odeChartData.length > 0 ? (
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={odeChartData} margin={{ top: 8, right: 16, bottom: 24, left: 8 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" strokeOpacity={0.5} />
-              <XAxis dataKey="t" tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" label={{ value: 'Time', position: 'insideBottom', offset: -2, fontSize: 10, fill: 'var(--color-text-muted)' }} />
-              <YAxis tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" width={56} />
-              <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} cursor={{ stroke: 'var(--color-text-muted)', strokeDasharray: '4 4' }} />
-              <Legend wrapperStyle={{ fontSize: 10 }} />
-              {activeODE.vars.map((v, i) => (
-                <Line key={v} type="monotone" dataKey={v} stroke={ODE_COLORS[i % ODE_COLORS.length]} strokeWidth={1.5} strokeOpacity={0.7} dot={false} name={v} isAnimationActive={false} />
-              ))}
-              <Brush dataKey="t" height={14} stroke="var(--color-text-muted)" fill="var(--glass-bg)" travellerWidth={6} />
-            </LineChart>
-          </ResponsiveContainer>
+          <PublicationFigure
+            title={`ODE: ${activeODE.name}`}
+            subtitle={`State variables: ${activeODE.vars.join(', ')} · t ∈ [${activeODE.tSpan[0]}, ${activeODE.tSpan[1]}]`}
+            caption={`Solved via Runge-Kutta-Fehlberg (RKF45). State trajectories for ${activeODE.vars.join(', ')}.`}
+            exportName={`ode-${activeODE.id}`}
+          >
+            <ResponsiveContainer width="100%" height={Math.max(280, (chartHostRef.current?.clientHeight || 320) - 80)}>
+              <LineChart data={odeChartData} margin={{ top: 8, right: 16, bottom: 24, left: 8 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" strokeOpacity={0.5} />
+                <XAxis dataKey="t" tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" label={{ value: 'Time', position: 'insideBottom', offset: -2, fontSize: 10, fill: 'var(--color-text-muted)' }} />
+                <YAxis tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" width={56} />
+                <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} cursor={{ stroke: 'var(--color-text-muted)', strokeDasharray: '4 4' }} />
+                <Legend wrapperStyle={{ fontSize: 10 }} />
+                {activeODE.vars.map((v, i) => (
+                  <Line key={v} type="monotone" dataKey={v} stroke={ODE_COLORS[i % ODE_COLORS.length]} strokeWidth={1.5} strokeOpacity={0.7} dot={false} name={v} isAnimationActive={false} />
+                ))}
+                <Brush dataKey="t" height={14} stroke="var(--color-text-muted)" fill="var(--glass-bg)" travellerWidth={6} />
+              </LineChart>
+            </ResponsiveContainer>
+          </PublicationFigure>
         ) : (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 12, color: 'var(--color-text-muted)' }}>
             Select an ODE template from the Library and click Solve

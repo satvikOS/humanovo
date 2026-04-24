@@ -1,929 +1,699 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
-import { useSearchParams } from 'react-router-dom'
+// CitationManager — Mendeley-equivalent reference library.
+//
+// Three-pane research-library UX replacing the form-heavy legacy
+// citation manager (the localStorage + /evidence reuse approach).
+//
+//   [ Folders ]  [ Library table ]  [ Detail / PDF reader ]
+//
+// Features in this rewrite:
+//   * Persistent, backend-backed library (Postgres `citations` table)
+//   * Hierarchical folders + smart filters (starred / unread / tag / year / author)
+//   * Drag-drop import for PDF + BibTeX + RIS + CSL-JSON + EndNote
+//   * Export the selected (or filtered) subset as BibTeX / RIS / CSL-JSON
+//   * Inline PDF reader with persistent, cross-device highlights
+//   * Full-text search across title / authors / abstract / DOI / notes
+//
+// The legacy localStorage layer is gone — citations live in Postgres
+// so the same library follows the user across devices and can be
+// queried by the agents. DOI-based dedupe runs on every create so
+// re-importing a paper never creates a twin.
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  FiBook, FiPlus, FiCopy, FiDownload, FiTrash2, FiSearch,
-  FiCheck, FiUpload, FiFolder, FiEdit3, FiExternalLink,
-  FiFile, FiX, FiRefreshCw, FiStar, FiBookOpen, FiHash,
-  FiShield,
+  FiStar, FiSearch, FiDownload, FiX, FiFolder, FiFilter,
+  FiExternalLink, FiLink, FiTrash2, FiBookOpen, FiEdit3, FiCheck,
 } from 'react-icons/fi'
-import clsx from 'clsx'
-import { usePersistentState, logActivity } from '../utils/persistence'
-import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
-import api, { apiClient } from '../services/api'
+import api, { type LibraryCitation, type LibraryFolder, type LibraryHighlight } from '../services/api'
+import FolderTree from '../components/citation/FolderTree'
+import LibraryTable, { type SortKey } from '../components/citation/LibraryTable'
+import ImportDropZone from '../components/citation/ImportDropZone'
+import PdfReader from '../components/citation/PdfReader'
 import { toast } from '../contexts/ToastContext'
+import { EmptyState } from '../components/EmptyState'
 
-/**
- * Fetch wrapper for external third-party APIs (CrossRef / NCBI) that
- * can't route through our apiClient interceptor (different origin, no
- * /api/v1 prefix, no auth header). Adds:
- *   - 10s timeout via AbortController
- *   - One retry with 500ms backoff on network / 5xx errors
- *   - Toast on final failure so citation lookups never fail silently
- *
- * Returns the Response for success, null on failure (caller decides
- * how to degrade).
- */
-async function externalFetch(url: string, label: string): Promise<Response | null> {
-  const attempt = async (): Promise<Response> => {
-    const ac = new AbortController()
-    const timer = window.setTimeout(() => ac.abort(), 10_000)
-    try {
-      return await fetch(url, { signal: ac.signal })
-    } finally {
-      window.clearTimeout(timer)
-    }
-  }
-  for (let i = 0; i < 2; i++) {
-    try {
-      const res = await attempt()
-      if (res.ok) return res
-      if (res.status >= 500 && i === 0) {
-        await new Promise(r => setTimeout(r, 500))
-        continue
-      }
-      // 4xx (not-found etc.) — no retry, caller treats as "no metadata".
-      return null
-    } catch (e) {
-      if (i === 0) {
-        await new Promise(r => setTimeout(r, 500))
-        continue
-      }
-      const msg = e instanceof Error && e.name === 'AbortError'
-        ? `${label} timed out after 10s`
-        : `${label} unreachable — check your connection`
-      toast('error', msg, { title: 'Citation lookup' })
-      return null
-    }
-  }
-  return null
-}
-
-interface Citation {
-  id: string
-  type: 'journal' | 'book' | 'conference' | 'preprint' | 'website' | 'thesis'
-  authors: string[]
-  title: string
-  abstract?: string
-  journal?: string
-  volume?: string
-  issue?: string
-  pages?: string
-  year: number
-  doi?: string
-  pmid?: string
-  url?: string
-  publisher?: string
-  tags: string[]
-  collection?: string
-  notes?: string
-  starred?: boolean
-  pdfUrl?: string
-  createdAt: string
-}
-
-type CitationStyle = 'apa' | 'mla' | 'chicago' | 'vancouver'
-
-/**
- * Format author names for different citation styles.
- */
-function formatAuthorsAPA(authors: string[]): string {
-  if (authors.length === 0) return 'Unknown'
-  if (authors.length === 1) return authors[0]
-  if (authors.length === 2) return `${authors[0]} & ${authors[1]}`
-  if (authors.length <= 20) return `${authors.slice(0, -1).join(', ')}, & ${authors[authors.length - 1]}`
-  return `${authors.slice(0, 19).join(', ')}, ... ${authors[authors.length - 1]}`
-}
-
-function formatAuthorsMLA(authors: string[]): string {
-  if (authors.length === 0) return 'Unknown'
-  if (authors.length === 1) return authors[0]
-  if (authors.length === 2) return `${authors[0]}, and ${authors[1]}`
-  return `${authors[0]}, et al.`
-}
-
-function formatAuthorsVancouver(authors: string[]): string {
-  if (authors.length === 0) return 'Unknown'
-  if (authors.length <= 6) return authors.join(', ')
-  return `${authors.slice(0, 6).join(', ')}, et al.`
-}
-
-/** Convert title to APA sentence case: capitalize first word, first word after colon, and preserve acronyms */
-function toSentenceCase(title: string): string {
-  return title.replace(/[^:]+/g, (segment, offset) => {
-    return segment.replace(/\S+/g, (word, wordOffset) => {
-      // Keep the very first word of the title or first word after a colon capitalized
-      if ((offset === 0 && wordOffset === 0) || (offset > 0 && wordOffset <= 1)) {
-        return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
-      }
-      // Preserve all-uppercase acronyms (DNA, RNA, BRCA1, etc.)
-      if (word === word.toUpperCase() && word.length >= 2 && /[A-Z]/.test(word)) return word
-      return word.toLowerCase()
-    })
-  })
-}
-
-/** Ensure author string ends with a period for APA */
-function apaAuthorBlock(authors: string[]): string {
-  const formatted = formatAuthorsAPA(authors)
-  // Add trailing period if not already present
-  return formatted.endsWith('.') ? formatted : `${formatted}.`
-}
-
-function formatCitation(c: Citation, style: CitationStyle): string {
-  const isBook = c.type === 'book'
-  const isWebsite = c.type === 'website'
-  const isThesis = c.type === 'thesis'
-  const isConference = c.type === 'conference'
-
-  switch (style) {
-    case 'apa': {
-      const authors = apaAuthorBlock(c.authors)
-      const title = toSentenceCase(c.title)
-      if (isBook) {
-        let ref = `${authors} (${c.year}). <em>${title}</em>.`
-        if (c.publisher) ref += ` ${c.publisher}.`
-        if (c.doi) ref += ` https://doi.org/${c.doi}`
-        return ref
-      }
-      if (isWebsite) {
-        let ref = `${authors} (${c.year}). ${title}.`
-        if (c.publisher) ref += ` ${c.publisher}.`
-        if (c.url) ref += ` ${c.url}`
-        return ref
-      }
-      if (isThesis) {
-        let ref = `${authors} (${c.year}). <em>${title}</em> [Doctoral dissertation].`
-        if (c.publisher) ref += ` ${c.publisher}.`
-        if (c.doi) ref += ` https://doi.org/${c.doi}`
-        return ref
-      }
-      if (isConference) {
-        let ref = `${authors} (${c.year}). ${title}.`
-        if (c.journal) ref += ` In <em>${c.journal}</em>`
-        if (c.pages) ref += ` (pp. ${c.pages})`
-        ref += '.'
-        if (c.publisher) ref += ` ${c.publisher}.`
-        if (c.doi) ref += ` https://doi.org/${c.doi}`
-        return ref
-      }
-      // journal / preprint
-      let ref = `${authors} (${c.year}). ${title}.`
-      if (c.journal) {
-        ref += ` <em>${c.journal}</em>`
-        if (c.volume) {
-          ref += `, <em>${c.volume}</em>`
-          if (c.issue) ref += `(${c.issue})`
-        }
-        if (c.pages) ref += `, ${c.pages}`
-        ref += '.'
-      }
-      if (c.doi) ref += ` https://doi.org/${c.doi}`
-      return ref
-    }
-    case 'mla': {
-      const authors = formatAuthorsMLA(c.authors)
-      if (isBook) {
-        let ref = `${authors}. <em>${c.title}</em>.`
-        if (c.publisher) ref += ` ${c.publisher},`
-        ref += ` ${c.year}.`
-        if (c.doi) ref += ` https://doi.org/${c.doi}`
-        return ref
-      }
-      if (isWebsite) {
-        let ref = `${authors}. "${c.title}."`
-        if (c.publisher) ref += ` <em>${c.publisher}</em>,`
-        ref += ` ${c.year}.`
-        if (c.url) ref += ` ${c.url}`
-        return ref
-      }
-      // journal / conference / preprint / thesis
-      let ref = `${authors}. "${c.title}."`
-      if (c.journal) {
-        ref += ` <em>${c.journal}</em>`
-        if (c.volume) {
-          ref += `, vol. ${c.volume}`
-          if (c.issue) ref += `, no. ${c.issue}`
-        }
-        ref += `, ${c.year}`
-        if (c.pages) ref += `, pp. ${c.pages}`
-        ref += '.'
-      }
-      if (c.doi) ref += ` https://doi.org/${c.doi}`
-      return ref
-    }
-    case 'chicago': {
-      const authors = c.authors.length > 0 ? c.authors.join(', ') : 'Unknown'
-      if (isBook) {
-        let ref = `${authors}. <em>${c.title}</em>.`
-        if (c.publisher) ref += ` ${c.publisher},`
-        ref += ` ${c.year}.`
-        if (c.doi) ref += ` https://doi.org/${c.doi}`
-        return ref
-      }
-      // journal / conference / preprint / website / thesis
-      let ref = `${authors}. "${c.title}."`
-      if (c.journal) {
-        ref += ` <em>${c.journal}</em>`
-        if (c.volume) ref += ` ${c.volume}`
-        if (c.issue) ref += `, no. ${c.issue}`
-        ref += ` (${c.year})`
-        if (c.pages) ref += `: ${c.pages}`
-        ref += '.'
-      }
-      if (c.doi) ref += ` https://doi.org/${c.doi}`
-      return ref
-    }
-    case 'vancouver': {
-      const authors = formatAuthorsVancouver(c.authors)
-      if (isBook) {
-        let ref = `${authors}. ${c.title}.`
-        if (c.publisher) ref += ` ${c.publisher};`
-        ref += ` ${c.year}.`
-        if (c.doi) ref += ` doi:${c.doi}`
-        return ref
-      }
-      // journal / conference / preprint / website / thesis
-      let ref = `${authors}. ${c.title}.`
-      if (c.journal) {
-        ref += ` ${c.journal}. ${c.year}`
-        if (c.volume) {
-          ref += `;${c.volume}`
-          if (c.issue) ref += `(${c.issue})`
-        }
-        if (c.pages) ref += `:${c.pages}`
-        ref += '.'
-      }
-      if (c.doi) ref += ` doi:${c.doi}`
-      return ref
-    }
-    default:
-      return `${c.authors.length > 0 ? c.authors.join(', ') : 'Unknown'} (${c.year}). ${c.title}.`
-  }
-}
-
-const CITATION_TYPES: Citation['type'][] = ['journal', 'book', 'conference', 'preprint', 'website', 'thesis']
-
-// Fetch citation metadata from DOI via CrossRef API
-async function fetchFromDOI(doi: string): Promise<Partial<Citation> | null> {
-  try {
-    const cleanDoi = doi.replace(/^https?:\/\/doi\.org\//, '').trim()
-    const res = await externalFetch(
-      `https://api.crossref.org/works/${encodeURIComponent(cleanDoi)}`,
-      'CrossRef',
-    )
-    if (!res) return null
-    const data = await res.json()
-    const item = data.message
-    return {
-      title: (item.title || [])[0] || '',
-      authors: (item.author || []).map((a: any) => `${a.given || ''} ${a.family || ''}`.trim()),
-      journal: (item['container-title'] || [])[0] || item.publisher || '',
-      volume: item.volume || '',
-      issue: item.issue || '',
-      pages: item.page || '',
-      year: item.published?.['date-parts']?.[0]?.[0] || new Date().getFullYear(),
-      doi: cleanDoi,
-      type: item.type === 'book-chapter' ? 'book' : item.type === 'proceedings-article' ? 'conference' : 'journal',
-      url: item.URL || '',
-      abstract: item.abstract?.replace(/<[^>]*>/g, '') || '',
-    }
-  } catch { return null }
-}
-
-// Fetch citation metadata from PMID via NCBI E-utilities
-async function fetchFromPMID(pmid: string): Promise<Partial<Citation> | null> {
-  try {
-    const cleanPmid = pmid.replace(/\D/g, '')
-    const res = await externalFetch(
-      `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id=${cleanPmid}&retmode=json`,
-      'NCBI PubMed',
-    )
-    if (!res) return null
-    const data = await res.json()
-    const item = data.result?.[cleanPmid]
-    if (!item) return null
-    return {
-      title: item.title || '',
-      authors: (item.authors || []).map((a: any) => a.name),
-      journal: item.fulljournalname || item.source || '',
-      volume: item.volume || '',
-      issue: item.issue || '',
-      pages: item.pages || '',
-      year: parseInt(item.pubdate?.split(' ')?.[0]) || new Date().getFullYear(),
-      pmid: cleanPmid,
-      doi: (item.elocationid || '').replace('doi: ', ''),
-      type: 'journal',
-      url: `https://pubmed.ncbi.nlm.nih.gov/${cleanPmid}`,
-      abstract: '',
-    }
-  } catch { return null }
-}
+type SmartFilter = 'all' | 'starred' | 'unread' | 'recent'
 
 export default function CitationManager() {
-  const [citations, setCitations] = usePersistentState<Citation[]>('citations', [])
-  // Deep-link support: `?q=` seeds the search filter, `?add=1` opens the
-  // Add citation form, `?import=1` opens the import-by-DOI/PMID flow.
-  // Consumed-and-cleaned pattern matches Evidence/Projects/Agents.
-  const [searchParams, setSearchParams] = useSearchParams()
-  const [searchQuery, setSearchQuery] = useState(() => searchParams.get('q') || '')
-  const [showAddForm, setShowAddForm] = useState(() => searchParams.get('add') === '1')
-  const [showImport, setShowImport] = useState(() => searchParams.get('import') === '1')
-  useEffect(() => {
-    if (searchParams.has('q') || searchParams.has('add') || searchParams.has('import')) {
-      const next = new URLSearchParams(searchParams)
-      next.delete('q')
-      next.delete('add')
-      next.delete('import')
-      setSearchParams(next, { replace: true })
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-  const [citationStyle, setCitationStyle] = useState<CitationStyle>('apa')
-  const [copied, setCopied] = useState<string | null>(null)
-  // Citation-verify state: per-id verdict/loading from the backend
-  // round-trip (CrossRef + NCBI). Keyed by citation.id so the list row
-  // can render a verdict badge next to each entry.
-  type VerifyVerdict = 'verified' | 'fabricated' | 'network_error'
-  interface VerifyResult { verdict: VerifyVerdict; message: string }
-  const [verifyResults, setVerifyResults] = useState<Record<string, VerifyResult>>({})
-  const [verifyLoading, setVerifyLoading] = useState<Record<string, boolean>>({})
+  // ── Data ──
+  const [citations, setCitations] = useState<LibraryCitation[]>([])
+  const [folders, setFolders] = useState<LibraryFolder[]>([])
+  const [focusedId, setFocusedId] = useState<string | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [highlights, setHighlights] = useState<LibraryHighlight[]>([])
 
-  const verifyCitation = async (citation: Citation) => {
-    setVerifyLoading(prev => ({ ...prev, [citation.id]: true }))
+  // ── Filters ──
+  const [query, setQuery] = useState('')
+  const [smart, setSmart] = useState<SmartFilter>('all')
+  const [folderId, setFolderId] = useState<string | null>(null)
+  const [tagFilter, setTagFilter] = useState<string | null>(null)
+  const [yearFilter, setYearFilter] = useState<number | null>(null)
+
+  // ── Sort ──
+  const [sortKey, setSortKey] = useState<SortKey>('updated')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+
+  // ── UI mode ──
+  const [rightPane, setRightPane] = useState<'detail' | 'pdf'>('detail')
+  const [loading, setLoading] = useState(false)
+  const [showImport, setShowImport] = useState(false)
+
+  const focused = useMemo(() => citations.find(c => c.id === focusedId) || null, [citations, focusedId])
+
+  // ── Load library + folders ──
+  const reload = useCallback(async () => {
+    setLoading(true)
     try {
-      const data = await api.verifyCitation(
-        citation.doi ? { doi: citation.doi } : { pmid: citation.pmid }
-      )
-      const verdict: VerifyVerdict = !data.network_ok
-        ? 'network_error'
-        : data.is_fabricated
-        ? 'fabricated'
-        : 'verified'
-      setVerifyResults(prev => ({
-        ...prev,
-        [citation.id]: { verdict, message: data.message || '' },
-      }))
-    } catch (err: unknown) {
-      setVerifyResults(prev => ({
-        ...prev,
-        [citation.id]: {
-          verdict: 'network_error',
-          message: err instanceof Error ? err.message : String(err),
-        },
-      }))
+      const [cs, fs] = await Promise.all([
+        api.listLibraryCitations({
+          q: query || undefined,
+          starred_only: smart === 'starred' || undefined,
+          unread_only: smart === 'unread' || undefined,
+          tag: tagFilter || undefined,
+          folder: folderId || undefined,
+          year: yearFilter || undefined,
+          limit: 500,
+        }),
+        api.listLibraryFolders(),
+      ])
+      setCitations(cs)
+      setFolders(fs)
+    } catch (err) {
+      toast('error', 'Failed to load citation library')
     } finally {
-      setVerifyLoading(prev => ({ ...prev, [citation.id]: false }))
+      setLoading(false)
     }
-  }
-  const [filterType, setFilterType] = useState<string>('')
-  const [filterCollection, setFilterCollection] = useState<string>('')
-  const [selectedCitation, setSelectedCitation] = useState<Citation | null>(null)
-  const [importId, setImportId] = useState('')
-  const [importing, setImporting] = useState(false)
-  const [activeTab, setActiveTab] = useState<'all' | 'starred' | 'collections'>('all')
-  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  }, [query, smart, tagFilter, folderId, yearFilter])
 
-  const [form, setForm] = useState({
-    type: 'journal' as Citation['type'], title: '', authors: '', journal: '', volume: '',
-    issue: '', pages: '', year: new Date().getFullYear(), doi: '', pmid: '', url: '', publisher: '', tags: '', collection: '', abstract: '',
-  })
+  useEffect(() => { void reload() }, [reload])
 
-  // Load citations from backend API on mount
+  // Load highlights for the focused citation on change.
   useEffect(() => {
-    const load = async () => {
-      try {
-        const { data } = await apiClient.get('/evidence', {
-          params: { page_size: 100 },
-          headers: { 'X-Silent-Error': '1' },
-        })
-        if (data.items?.length > 0) {
-          const loaded = data.items.map((e: any) => ({
-            id: e.id,
-            type: e.source_type === 'pubmed' ? 'journal' : e.source_type === 'preprint' ? 'preprint' : 'journal',
-            title: e.title || '',
-            authors: e.authors || [],
-            journal: e.journal || '',
-            year: e.publication_date ? new Date(e.publication_date).getFullYear() : 0,
-            doi: e.doi || '',
-            tags: e.tags || [],
-            abstract: e.abstract || e.snippet || '',
-            url: e.source_url || '',
-            notes: e.notes || '',
-            createdAt: e.created_at || new Date().toISOString(),
-          }))
-          setCitations(prev => {
-            const existingIds = new Set(prev.map(p => p.id))
-            return [...prev, ...loaded.filter((l: any) => !existingIds.has(l.id))]
-          })
-        }
-      } catch { /* API unavailable */ }
+    if (!focusedId) { setHighlights([]); return }
+    void api.listLibraryHighlights(focusedId).then(setHighlights).catch(() => setHighlights([]))
+  }, [focusedId])
+
+  // ── Derived ──
+  const folderCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    citations.forEach(c => (c.folders || []).forEach(fid => { counts[fid] = (counts[fid] || 0) + 1 }))
+    return counts
+  }, [citations])
+
+  // Recent = added in last 14 days. Implemented client-side since
+  // the backend endpoint doesn't have a dedicated flag for it.
+  const filteredRows = useMemo(() => {
+    let rows = citations
+    if (smart === 'recent') {
+      const cutoff = Date.now() - 14 * 24 * 3600 * 1000
+      rows = rows.filter(c => new Date(c.created_at).getTime() >= cutoff)
     }
-    load()
-  }, [])
+    // Sort in-memory — the backend already returns pinned-first,
+    // updated-desc, and we only sort on the current page worth of
+    // rows (max 500) so cost is trivial.
+    const dir = sortDir === 'asc' ? 1 : -1
+    const key = sortKey
+    rows = [...rows].sort((a, b) => {
+      const av = key === 'authors' ? (a.authors?.[0] || '') : key === 'updated' ? a.updated_at : (a as any)[key] ?? ''
+      const bv = key === 'authors' ? (b.authors?.[0] || '') : key === 'updated' ? b.updated_at : (b as any)[key] ?? ''
+      return av > bv ? dir : av < bv ? -dir : 0
+    })
+    return rows
+  }, [citations, smart, sortKey, sortDir])
 
-  const saveCitation = useCallback((updated: Citation[]) => {
-    setCitations(updated)
-  }, [])
+  const allYears = useMemo(() => {
+    const s = new Set<number>()
+    citations.forEach(c => { if (c.year) s.add(c.year) })
+    return Array.from(s).sort((a, b) => b - a)
+  }, [citations])
 
-  const addCitation = () => {
-    if (!form.title.trim()) return
-    const citation: Citation = {
-      id: `cite-${Date.now()}`,
-      type: form.type,
-      title: form.title,
-      authors: form.authors.split(',').map(a => a.trim()).filter(Boolean),
-      abstract: form.abstract || undefined,
-      journal: form.journal || undefined,
-      volume: form.volume || undefined,
-      issue: form.issue || undefined,
-      pages: form.pages || undefined,
-      year: form.year,
-      doi: form.doi || undefined,
-      pmid: form.pmid || undefined,
-      url: form.url || undefined,
-      publisher: form.publisher || undefined,
-      tags: form.tags.split(',').map(t => t.trim()).filter(Boolean),
-      collection: form.collection || undefined,
-      createdAt: new Date().toISOString(),
-    }
-    saveCitation([citation, ...citations])
-    setForm({ type: 'journal', title: '', authors: '', journal: '', volume: '', issue: '', pages: '', year: new Date().getFullYear(), doi: '', pmid: '', url: '', publisher: '', tags: '', collection: '', abstract: '' })
-    setShowAddForm(false)
-    logActivity({ type: 'notebook', action: 'created', title: `Added citation: ${citation.title}` })
+  const allTags = useMemo(() => {
+    const s = new Set<string>()
+    citations.forEach(c => (c.tags || []).forEach(t => s.add(t)))
+    return Array.from(s).sort()
+  }, [citations])
 
-    // Persist to backend
-    ;(async () => {
-      try {
-        await apiClient.post('/evidence', {
-          title: citation.title,
-          source_type: citation.type === 'journal' ? 'pubmed' : citation.type,
-          abstract: citation.abstract,
-          authors: citation.authors,
-          publication_date: `${citation.year}-01-01`,
-          tags: citation.tags,
-          source_url: citation.url || (citation.doi ? `https://doi.org/${citation.doi}` : undefined),
-        }, { headers: { 'X-Silent-Error': '1' } })
-      } catch { /* non-fatal */ }
-    })()
+  // ── Actions ──
+  const toggleStar = async (id: string, starred: boolean) => {
+    try {
+      const updated = await api.updateLibraryCitation(id, { starred })
+      setCitations(cs => cs.map(c => c.id === id ? updated : c))
+    } catch { toast('error', 'Could not update star') }
+  }
+  const toggleRead = async (id: string, read: boolean) => {
+    try {
+      const updated = await api.updateLibraryCitation(id, { read })
+      setCitations(cs => cs.map(c => c.id === id ? updated : c))
+    } catch { toast('error', 'Could not update read state') }
+  }
+  const updateCitation = async (id: string, patch: Partial<LibraryCitation>) => {
+    try {
+      const updated = await api.updateLibraryCitation(id, patch)
+      setCitations(cs => cs.map(c => c.id === id ? updated : c))
+    } catch { toast('error', 'Could not save changes') }
+  }
+  const bulkDelete = async () => {
+    if (selectedIds.size === 0) return
+    if (!confirm(`Delete ${selectedIds.size} citation${selectedIds.size === 1 ? '' : 's'}?`)) return
+    try {
+      const res = await api.bulkDeleteLibraryCitations(Array.from(selectedIds))
+      toast('success', `Deleted ${res.deleted_count}`)
+      setSelectedIds(new Set())
+      if (focusedId && selectedIds.has(focusedId)) setFocusedId(null)
+      await reload()
+    } catch { toast('error', 'Bulk delete failed') }
   }
 
-  const importFromId = async () => {
-    if (!importId.trim()) return
-    setImporting(true)
+  const importText = async (format: 'bibtex' | 'ris' | 'csl' | 'endnote', text: string) => {
     try {
-      let result: Partial<Citation> | null = null
-      const id = importId.trim()
-      if (id.match(/^10\.\d+\//) || id.includes('doi.org')) {
-        result = await fetchFromDOI(id)
-      } else if (id.match(/^\d+$/)) {
-        result = await fetchFromPMID(id)
-      } else if (id.startsWith('10.')) {
-        result = await fetchFromDOI(id)
-      }
-
-      if (result && result.title) {
-        const citation: Citation = {
-          id: `cite-${Date.now()}`,
-          type: result.type || 'journal',
-          title: result.title || '',
-          authors: result.authors || [],
-          abstract: result.abstract || '',
-          journal: result.journal || '',
-          volume: result.volume || '',
-          issue: result.issue || '',
-          pages: result.pages || '',
-          year: result.year || new Date().getFullYear(),
-          doi: result.doi || '',
-          pmid: result.pmid || '',
-          url: result.url || '',
-          tags: [],
-          createdAt: new Date().toISOString(),
-        }
-        saveCitation([citation, ...citations])
-        setImportId('')
-        setShowImport(false)
-        logActivity({ type: 'notebook', action: 'imported', title: `Imported citation: ${citation.title}` })
-      }
-    } catch { /* import failed */ }
-    setImporting(false)
+      const res = await api.importLibraryCitations({ format, text })
+      toast('success', `Imported ${res.imported}${res.skipped_duplicates ? ` · ${res.skipped_duplicates} duplicates skipped` : ''}`)
+      await reload()
+    } catch (err: any) {
+      toast('error', err?.response?.data?.detail || 'Import failed')
+    }
   }
 
-  const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    // Create citation from PDF filename
-    const name = file.name.replace(/\.pdf$/i, '')
-    const citation: Citation = {
-      id: `cite-${Date.now()}`,
-      type: 'journal',
-      title: name,
-      authors: [],
-      year: new Date().getFullYear(),
-      tags: ['uploaded'],
-      pdfUrl: URL.createObjectURL(file),
-      createdAt: new Date().toISOString(),
-    }
-    saveCitation([citation, ...citations])
-    logActivity({ type: 'notebook', action: 'imported', title: `Uploaded PDF citation: ${name}` })
-
-    // Upload to backend
+  const importPdf = async (file: File) => {
+    // Create a citation pre-populated with the filename as title and
+    // a blob: URL so the user can immediately read the PDF. The file
+    // is also uploaded to /ingestion/documents/upload so the corpus
+    // has a permanent copy.
+    const blobUrl = URL.createObjectURL(file)
+    let pdf_file_id: string | undefined
     try {
-      const formData = new FormData()
-      formData.append('file', file)
-      await apiClient.post('/ingestion/documents/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data', 'X-Silent-Error': '1' },
+      const resp = await api.uploadDocument(file)
+      pdf_file_id = resp?.job_id
+    } catch { /* non-fatal — citation still created with blob URL */ }
+    try {
+      const title = file.name.replace(/\.pdf$/i, '').replace(/[_-]+/g, ' ').trim()
+      const created = await api.createLibraryCitation({
+        title: title || '(untitled PDF)',
+        type: 'journal',
+        authors: [],
+        pdf_url: blobUrl,
+        pdf_file_id,
       })
-    } catch { /* non-fatal */ }
-
-    if (fileInputRef.current) fileInputRef.current.value = ''
-  }
-
-  const deleteCitation = (id: string) => {
-    setDeleteConfirmId(id)
-  }
-
-  const confirmDelete = () => {
-    if (deleteConfirmId) {
-      const deletedCitation = citations.find(c => c.id === deleteConfirmId)
-      saveCitation(citations.filter(c => c.id !== deleteConfirmId))
-      setDeleteConfirmId(null)
-      logActivity({ type: 'notebook', action: 'deleted', title: `Deleted citation: ${deletedCitation?.title || deleteConfirmId}` })
+      setCitations(cs => [created, ...cs])
+      setFocusedId(created.id)
+      setRightPane('pdf')
+      toast('success', 'PDF imported — edit the metadata or verify via DOI in the detail panel')
+    } catch {
+      toast('error', 'Could not create citation for the PDF')
     }
   }
 
-  const toggleStar = (id: string) => {
-    saveCitation(citations.map(c => c.id === id ? { ...c, starred: !c.starred } : c))
+  const exportFormat = async (format: 'bibtex' | 'ris' | 'csl') => {
+    const ids = selectedIds.size > 0 ? Array.from(selectedIds) : undefined
+    try {
+      const body = { format, ids } as { format: 'bibtex' | 'ris' | 'csl'; ids?: string[] }
+      const data = await api.exportLibraryCitations(body)
+      let blob: Blob
+      let filename: string
+      if (format === 'csl') {
+        blob = new Blob([JSON.stringify((data as any).items, null, 2)], { type: 'application/json' })
+        filename = 'library.csl.json'
+      } else {
+        blob = data as Blob
+        filename = `library.${format === 'bibtex' ? 'bib' : 'ris'}`
+      }
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url; a.download = filename; a.click()
+      URL.revokeObjectURL(url)
+      toast('success', `Exported ${ids?.length ?? citations.length} citations as ${format.toUpperCase()}`)
+    } catch {
+      toast('error', 'Export failed')
+    }
   }
 
-  const updateNotes = (id: string, notes: string) => {
-    saveCitation(citations.map(c => c.id === id ? { ...c, notes } : c))
+  // Folder ops.
+  const createFolder = async (parentId: string | null, name: string) => {
+    try {
+      const f = await api.createLibraryFolder({ name, parent_id: parentId || undefined })
+      setFolders(xs => [...xs, f])
+    } catch { toast('error', 'Could not create folder') }
+  }
+  const renameFolder = async (id: string, name: string) => {
+    try {
+      const f = await api.updateLibraryFolder(id, { name })
+      setFolders(xs => xs.map(x => x.id === id ? f : x))
+    } catch { toast('error', 'Could not rename folder') }
+  }
+  const deleteFolder = async (id: string) => {
+    try {
+      await api.deleteLibraryFolder(id)
+      setFolders(xs => xs.filter(x => x.id !== id))
+      if (folderId === id) setFolderId(null)
+      await reload()
+    } catch { toast('error', 'Could not delete folder') }
+  }
+  const reparentFolder = async (id: string, newParentId: string | null) => {
+    try {
+      const f = await api.updateLibraryFolder(id, { parent_id: newParentId })
+      setFolders(xs => xs.map(x => x.id === id ? f : x))
+    } catch { toast('error', 'Could not move folder') }
   }
 
-  const copyFormatted = (citation: Citation) => {
-    const text = formatCitation(citation, citationStyle).replace(/<[^>]*>/g, '')
-    navigator.clipboard.writeText(text)
-    setCopied(citation.id)
-    setTimeout(() => setCopied(null), 2000)
+  // Highlight ops.
+  const addHighlight = async (payload: { page: number; text: string; note: string; color: string }) => {
+    if (!focusedId) return
+    try {
+      const h = await api.createLibraryHighlight(focusedId, {
+        citation_id: focusedId,
+        page: payload.page,
+        rect: { x: 0, y: 0, w: 1, h: 0.05 },  // placeholder until pdfjs lands
+        text: payload.text || null,
+        note: payload.note || null,
+        color: payload.color,
+      } as any)
+      setHighlights(hs => [...hs, h])
+    } catch { toast('error', 'Could not save highlight') }
+  }
+  const deleteHighlight = async (id: string) => {
+    try {
+      await api.deleteLibraryHighlight(id)
+      setHighlights(hs => hs.filter(x => x.id !== id))
+    } catch { toast('error', 'Could not delete highlight') }
+  }
+  const updateHighlight = async (id: string, patch: Partial<LibraryHighlight>) => {
+    try {
+      const h = await api.updateLibraryHighlight(id, patch)
+      setHighlights(hs => hs.map(x => x.id === id ? h : x))
+    } catch { toast('error', 'Could not update highlight') }
   }
 
-  const exportBibliography = () => {
-    const text = filtered.map((c, i) => `[${i + 1}] ${formatCitation(c, citationStyle).replace(/<[^>]*>/g, '')}`).join('\n\n')
-    const blob = new Blob([text], { type: 'text/plain' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url; a.download = `bibliography-${citationStyle}.txt`; a.click()
-    URL.revokeObjectURL(url)
+  const onSort = (k: SortKey) => {
+    if (k === sortKey) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortKey(k); setSortDir(k === 'updated' || k === 'year' ? 'desc' : 'asc') }
   }
-
-  const collections = [...new Set(citations.filter(c => c.collection).map(c => c.collection!))]
-
-  const filtered = citations
-    .filter(c => activeTab !== 'starred' || c.starred)
-    .filter(c => !searchQuery || c.title.toLowerCase().includes(searchQuery.toLowerCase()) || c.authors.some(a => a.toLowerCase().includes(searchQuery.toLowerCase())) || (c.abstract || '').toLowerCase().includes(searchQuery.toLowerCase()))
-    .filter(c => !filterType || c.type === filterType)
-    .filter(c => !filterCollection || c.collection === filterCollection)
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
-      <div className="p-6 border-b border-[var(--color-border)]">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Citation Manager</h1>
-            <p className="text-sm text-[var(--color-text-muted)] mt-1">Organize, annotate, and cite academic papers</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <select value={citationStyle} onChange={e => setCitationStyle(e.target.value as CitationStyle)} className="input text-xs py-1.5">
-              <option value="apa">APA 7th</option>
-              <option value="mla">MLA 9th</option>
-              <option value="chicago">Chicago 17th</option>
-              <option value="vancouver">Vancouver</option>
-            </select>
-            <button onClick={exportBibliography} disabled={filtered.length === 0} className="btn text-sm disabled:opacity-30" style={{ color: 'var(--color-text-secondary)' }}>
-              <FiDownload className="w-4 h-4" /> Export
-            </button>
-            <input ref={fileInputRef} type="file" accept=".pdf" onChange={handlePdfUpload} className="hidden" />
-            <button onClick={() => fileInputRef.current?.click()} className="btn text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-              <FiUpload className="w-4 h-4" /> Upload PDF
-            </button>
-            <button onClick={() => { setShowImport(!showImport); setShowAddForm(false) }} className="btn text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-              <FiHash className="w-4 h-4" /> Import DOI/PMID
-            </button>
-            <button onClick={() => { setShowAddForm(!showAddForm); setShowImport(false) }} className="btn text-sm" style={{ color: 'var(--color-success)' }}>
-              <FiPlus className="w-4 h-4" /> Manual Add
-            </button>
-          </div>
-        </div>
-
-        {/* Tabs */}
-        <div className="flex items-center gap-4 mb-3">
-          {(['all', 'starred', 'collections'] as const).map(tab => (
-            <button key={tab} onClick={() => setActiveTab(tab)}
-              className={`text-xs pb-1 border-b-2 transition-colors ${activeTab === tab ? 'border-[var(--color-text)] text-[var(--color-text)]' : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)]'}`}>
-              {tab === 'all' ? `All (${citations.length})` : tab === 'starred' ? `Starred (${citations.filter(c => c.starred).length})` : `Collections (${collections.length})`}
+    <div className="flex h-full overflow-hidden" style={{ background: 'var(--color-bg)' }}>
+      {/* ── Left rail: folders + smart filters ── */}
+      <aside className="w-64 flex-shrink-0 border-r border-[var(--color-border)] bg-[var(--color-surface-solid)] flex flex-col overflow-hidden">
+        <div className="p-3 border-b border-[var(--color-border)]">
+          <div className="text-xxs uppercase tracking-wider font-semibold text-[var(--color-text-muted)] mb-2">Library</div>
+          {([
+            { key: 'all' as const,     label: 'All citations', icon: FiBookOpen },
+            { key: 'starred' as const, label: 'Starred',       icon: FiStar },
+            { key: 'unread' as const,  label: 'Unread',        icon: FiFilter },
+            { key: 'recent' as const,  label: 'Recently added', icon: FiFilter },
+          ]).map(f => (
+            <button
+              key={f.key}
+              onClick={() => { setSmart(f.key); setFolderId(null); setTagFilter(null); setYearFilter(null) }}
+              className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-colors ${
+                smart === f.key && folderId === null ? 'bg-[var(--glass-bg)] text-[var(--color-text)]' : 'text-[var(--color-text-muted)] hover:bg-[var(--glass-bg)] hover:text-[var(--color-text)]'
+              }`}
+            >
+              <f.icon className="w-3.5 h-3.5" />
+              <span className="flex-1 text-left">{f.label}</span>
             </button>
           ))}
         </div>
-
-        <div className="flex items-center gap-3">
-          <div className="relative flex-1">
-            <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-text-muted)]" />
-            <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search by title, authors, abstract..." className="input w-full pl-9" />
-          </div>
-          <select value={filterType} onChange={e => setFilterType(e.target.value)} className="input text-xs py-2">
-            <option value="">All Types</option>
-            {CITATION_TYPES.map(t => <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>)}
-          </select>
-          {activeTab === 'collections' && collections.length > 0 && (
-            <select value={filterCollection} onChange={e => setFilterCollection(e.target.value)} className="input text-xs py-2">
-              <option value="">All Collections</option>
-              {collections.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
+        <div className="flex-1 overflow-y-auto p-3">
+          <div className="text-xxs uppercase tracking-wider font-semibold text-[var(--color-text-muted)] mb-2">Folders</div>
+          <FolderTree
+            folders={folders}
+            selected={folderId}
+            onSelect={id => { setFolderId(id); setSmart('all') }}
+            onCreate={createFolder}
+            onRename={renameFolder}
+            onDelete={deleteFolder}
+            onReparent={reparentFolder}
+            counts={folderCounts}
+          />
+          {allTags.length > 0 && (
+            <>
+              <div className="text-xxs uppercase tracking-wider font-semibold text-[var(--color-text-muted)] mt-5 mb-2">Tags</div>
+              <div className="flex flex-wrap gap-1">
+                {allTags.slice(0, 50).map(t => (
+                  <button
+                    key={t}
+                    onClick={() => { setTagFilter(tagFilter === t ? null : t); setSmart('all') }}
+                    className={`text-xxs px-1.5 py-0.5 rounded border ${
+                      tagFilter === t
+                        ? 'border-[var(--color-border-strong)] bg-[var(--glass-bg)] text-[var(--color-text)]'
+                        : 'border-[var(--glass-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:border-[var(--color-border-strong)]'
+                    }`}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+            </>
           )}
-          <span className="text-xs text-[var(--color-text-muted)]">{filtered.length} results</span>
+          {allYears.length > 0 && (
+            <>
+              <div className="text-xxs uppercase tracking-wider font-semibold text-[var(--color-text-muted)] mt-5 mb-2">Years</div>
+              <div className="flex flex-wrap gap-1">
+                {allYears.slice(0, 20).map(y => (
+                  <button
+                    key={y}
+                    onClick={() => { setYearFilter(yearFilter === y ? null : y); setSmart('all') }}
+                    className={`text-xxs px-1.5 py-0.5 rounded border tabular-nums ${
+                      yearFilter === y
+                        ? 'border-[var(--color-border-strong)] bg-[var(--glass-bg)] text-[var(--color-text)]'
+                        : 'border-[var(--glass-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:border-[var(--color-border-strong)]'
+                    }`}
+                  >
+                    {y}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
         </div>
-      </div>
+      </aside>
 
-      {/* DOI/PMID Import */}
-      {showImport && (
-        <div className="p-4 border-b border-[var(--color-border)] bg-[var(--glass-bg)] animate-slide-down">
-          <div className="max-w-xl mx-auto">
-            <label className="text-xs text-[var(--color-text-muted)] mb-2 block">Enter a DOI or PMID to auto-import citation metadata</label>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={importId}
-                onChange={e => setImportId(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && importFromId()}
-                placeholder="e.g., 10.1038/nature12373 or 25123456"
-                className="input flex-1 text-sm"
-              />
-              <button onClick={importFromId} disabled={importing || !importId.trim()} className="btn text-xs disabled:opacity-30" style={{ color: 'var(--color-text-secondary)' }}>
-                {importing ? <FiRefreshCw className="w-3.5 h-3.5 animate-spin" /> : <FiDownload className="w-3.5 h-3.5" />}
-                {importing ? 'Fetching...' : 'Import'}
+      {/* ── Center: library table + search bar ── */}
+      <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+        <div className="px-4 py-3 border-b border-[var(--color-border)] flex items-center gap-3">
+          <div className="min-w-0">
+            <div className="text-xxs uppercase tracking-wider text-[var(--color-text-muted)]">Citation Library</div>
+            <div className="text-sm font-semibold truncate" style={{ color: 'var(--color-text)' }}>
+              {folderId ? folders.find(f => f.id === folderId)?.name : smart === 'starred' ? 'Starred' : smart === 'unread' ? 'Unread' : smart === 'recent' ? 'Recently added' : 'All citations'}
+              <span className="ml-2 text-xxs font-normal text-[var(--color-text-muted)]">{filteredRows.length} items</span>
+            </div>
+          </div>
+          <div className="flex-1" />
+          <div className="relative">
+            <FiSearch className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--color-text-muted)]" />
+            <input
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              placeholder="Search title, authors, DOI, notes…"
+              className="pl-8 pr-2 py-1.5 text-xs rounded-md bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] w-64"
+              aria-label="Search library"
+            />
+          </div>
+          <button
+            onClick={() => setShowImport(s => !s)}
+            className="px-2.5 py-1.5 text-xs rounded-md border border-[var(--glass-border)] text-[var(--color-text)] hover:border-[var(--color-border-strong)] hover:bg-[var(--glass-bg)]"
+            aria-expanded={showImport}
+          >
+            Import
+          </button>
+          <div className="flex items-center gap-0.5 rounded-md border border-[var(--glass-border)] overflow-hidden">
+            {(['bibtex', 'ris', 'csl'] as const).map(f => (
+              <button
+                key={f}
+                onClick={() => exportFormat(f)}
+                className="px-2 py-1.5 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)] border-r border-[var(--glass-border)] last:border-r-0"
+                title={`Export ${selectedIds.size > 0 ? `${selectedIds.size} selected` : 'library'} as ${f.toUpperCase()}`}
+              >
+                <FiDownload className="w-3 h-3 inline mr-1" />{f.toUpperCase()}
               </button>
-              <button onClick={() => setShowImport(false)} className="btn text-xs text-[var(--color-text-muted)]">Cancel</button>
-            </div>
-            <p className="text-xxs text-[var(--color-text-muted)] mt-2">Supported: DOI (e.g., 10.1038/nature12373), PMID (e.g., 25123456)</p>
+            ))}
           </div>
+          {selectedIds.size > 0 && (
+            <button
+              onClick={bulkDelete}
+              className="px-2.5 py-1.5 text-xs rounded-md border border-[var(--glass-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:border-[var(--color-border-strong)] flex items-center gap-1"
+            >
+              <FiTrash2 className="w-3 h-3" /> Delete {selectedIds.size}
+            </button>
+          )}
         </div>
-      )}
-
-      {/* Manual Add form */}
-      {showAddForm && (
-        <div className="p-4 border-b border-[var(--color-border)] bg-[var(--glass-bg)] animate-slide-down">
-          <div className="max-w-3xl mx-auto grid grid-cols-2 gap-3">
-            <div className="col-span-2">
-              <input type="text" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} placeholder="Title *" className="input w-full text-sm" />
-            </div>
-            <input type="text" value={form.authors} onChange={e => setForm(f => ({ ...f, authors: e.target.value }))} placeholder="Authors (comma-separated)" className="input text-xs" />
-            <div className="flex gap-2">
-              <select value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value as Citation['type'] }))} className="input text-xs flex-1">
-                {CITATION_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
-              <input type="number" value={form.year} onChange={e => setForm(f => ({ ...f, year: parseInt(e.target.value) }))} className="input text-xs w-24" />
-            </div>
-            {(form.type === 'journal' || form.type === 'preprint' || form.type === 'conference') && (
-              <>
-                <input type="text" value={form.journal} onChange={e => setForm(f => ({ ...f, journal: e.target.value }))} placeholder={form.type === 'conference' ? 'Conference / Proceedings' : 'Journal / Source'} className="input text-xs" />
-                <div className="flex gap-2">
-                  <input type="text" value={form.volume} onChange={e => setForm(f => ({ ...f, volume: e.target.value }))} placeholder="Vol" className="input text-xs flex-1" />
-                  <input type="text" value={form.issue} onChange={e => setForm(f => ({ ...f, issue: e.target.value }))} placeholder="Issue" className="input text-xs flex-1" />
-                  <input type="text" value={form.pages} onChange={e => setForm(f => ({ ...f, pages: e.target.value }))} placeholder="Pages" className="input text-xs flex-1" />
-                </div>
-              </>
-            )}
-            {form.type === 'book' && (
-              <input type="text" value={form.publisher} onChange={e => setForm(f => ({ ...f, publisher: e.target.value }))} placeholder="Publisher" className="input text-xs col-span-2" />
-            )}
-            {form.type === 'thesis' && (
-              <>
-                <input type="text" value={form.publisher} onChange={e => setForm(f => ({ ...f, publisher: e.target.value }))} placeholder="University / Institution" className="input text-xs" />
-                <input type="text" value={form.url} onChange={e => setForm(f => ({ ...f, url: e.target.value }))} placeholder="URL" className="input text-xs" />
-              </>
-            )}
-            {form.type === 'website' && (
-              <>
-                <input type="text" value={form.publisher} onChange={e => setForm(f => ({ ...f, publisher: e.target.value }))} placeholder="Website / Publisher Name" className="input text-xs" />
-                <input type="text" value={form.url} onChange={e => setForm(f => ({ ...f, url: e.target.value }))} placeholder="URL *" className="input text-xs" />
-              </>
-            )}
-            <input type="text" value={form.doi} onChange={e => setForm(f => ({ ...f, doi: e.target.value }))} placeholder="DOI" className="input text-xs" />
-            <input type="text" value={form.pmid} onChange={e => setForm(f => ({ ...f, pmid: e.target.value }))} placeholder="PMID" className="input text-xs" />
-            <input type="text" value={form.collection} onChange={e => setForm(f => ({ ...f, collection: e.target.value }))} placeholder="Collection (e.g., Literature Review)" className="input text-xs" />
-            <input type="text" value={form.tags} onChange={e => setForm(f => ({ ...f, tags: e.target.value }))} placeholder="Tags (comma-separated)" className="input text-xs" />
-            <div className="col-span-2">
-              <textarea value={form.abstract} onChange={e => setForm(f => ({ ...f, abstract: e.target.value }))} placeholder="Abstract (optional)" className="input w-full text-xs h-20 resize-none" />
-            </div>
-            <div className="col-span-2 flex gap-2">
-              <button onClick={addCitation} disabled={!form.title.trim()} className="btn text-xs disabled:opacity-30" style={{ color: 'var(--color-success)' }}>Add Citation</button>
-              <button onClick={() => setShowAddForm(false)} className="btn text-xs text-[var(--color-text-muted)]">Cancel</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Main content: list + detail panel */}
-      <div className="flex-1 flex min-h-0">
-        {/* Citation list */}
-        <div className={`${selectedCitation ? 'w-1/2' : 'w-full'} overflow-y-auto p-6 border-r border-[var(--color-border)]`}>
-          <div className="max-w-3xl mx-auto space-y-2">
-            {filtered.length === 0 ? (
-              <div className="text-center py-16 text-[var(--color-text-muted)]">
-                <FiBook className="w-12 h-12 mx-auto mb-4 opacity-20" />
-                <p className="text-sm">{citations.length === 0 ? 'No citations yet' : 'No matching citations'}</p>
-                <p className="text-xs mt-1">Import via DOI/PMID, upload a PDF, or add manually</p>
-              </div>
-            ) : (
-              filtered.map((citation, idx) => (
-                <div
-                  key={citation.id}
-                  onClick={() => setSelectedCitation(citation)}
-                  className={`glass-card p-4 group cursor-pointer transition-all ${selectedCitation?.id === citation.id ? 'border-white/30' : ''}`}
-                >
-                  <div className="flex items-start gap-3">
-                    <span className="text-xs text-[var(--color-text-muted)] font-mono mt-0.5 w-6 text-right flex-shrink-0">[{idx + 1}]</span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-[var(--color-text)] leading-snug">{citation.title}</p>
-                      <p className="text-xs text-[var(--color-text-muted)] mt-1">
-                        {citation.authors.slice(0, 3).join(', ')}{citation.authors.length > 3 ? ' et al.' : ''}
-                        {citation.journal ? ` \u00B7 ${citation.journal}` : ''}
-                        {citation.year ? ` (${citation.year})` : ''}
-                      </p>
-                      <div className="flex items-center gap-2 mt-2 flex-wrap">
-                        <span className="text-xxs px-1.5 py-0.5 rounded bg-[var(--glass-bg)] text-[var(--color-text-muted)]">{citation.type}</span>
-                        {citation.collection && (
-                          <span className="text-xxs px-1.5 py-0.5 rounded bg-white/5 text-[var(--color-text)]">
-                            <FiFolder className="w-2.5 h-2.5 inline mr-0.5" />{citation.collection}
-                          </span>
-                        )}
-                        {citation.tags.slice(0, 3).map(t => (
-                          <span key={t} className="text-xxs px-1.5 py-0.5 rounded bg-[var(--glass-bg)] text-[var(--color-text-muted)]">{t}</span>
-                        ))}
-                        {citation.doi && <span className="text-xxs text-[var(--color-text)]">DOI</span>}
-                        {citation.pmid && <span className="text-xxs text-[var(--color-text)]">PubMed</span>}
-                        {verifyResults[citation.id] && (
-                          <span
-                            aria-label={`Verification: ${verifyResults[citation.id].verdict}`}
-                            className={clsx(
-                              'text-xxs px-1.5 py-0.5 rounded border',
-                              // "fabricated" keeps a red accent — it's a
-                              // critical warning that the citation is
-                              // likely made up. Everything else is muted.
-                              verifyResults[citation.id].verdict === 'fabricated'
-                                ? 'border-red-500/40 text-red-400 bg-red-500/5'
-                                : 'border-[var(--glass-border)] text-[var(--color-text-muted)]',
-                            )}
-                            title={verifyResults[citation.id].message}
-                          >
-                            {verifyResults[citation.id].verdict}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-                      <button onClick={(e) => { e.stopPropagation(); toggleStar(citation.id) }} className="p-1.5 rounded hover:bg-[var(--glass-bg)]" title="Star">
-                        <FiStar className={`w-3.5 h-3.5 ${citation.starred ? 'text-[var(--color-text-secondary)] fill-[var(--color-text-secondary)]' : 'text-[var(--color-text-muted)]'}`} />
-                      </button>
-                      <button onClick={(e) => { e.stopPropagation(); copyFormatted(citation) }} className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)]" title="Copy formatted">
-                        {copied === citation.id ? <FiCheck className="w-3.5 h-3.5" style={{ color: 'var(--color-success)' }} /> : <FiCopy className="w-3.5 h-3.5" />}
-                      </button>
-                      {(citation.doi || citation.pmid) && (
-                        <button
-                          aria-label="Verify citation"
-                          onClick={(e) => { e.stopPropagation(); verifyCitation(citation) }}
-                          disabled={verifyLoading[citation.id]}
-                          className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] disabled:opacity-40"
-                          title="Verify via CrossRef / NCBI round-trip"
-                        >
-                          <FiShield className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                      <button onClick={(e) => { e.stopPropagation(); deleteCitation(citation.id) }} className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-error)]" title="Delete">
-                        <FiTrash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* Detail / annotation panel */}
-        {selectedCitation && (
-          <div className="w-1/2 overflow-y-auto p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-semibold">Citation Details</h3>
-              <button onClick={() => setSelectedCitation(null)} className="p-1 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)]">
-                <FiX className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              {/* Formatted citation */}
-              <div className="p-3 rounded-lg bg-[var(--glass-bg)] border border-[var(--color-border)]">
-                <p className="text-xs text-[var(--color-text-muted)] mb-1 font-medium">Formatted ({citationStyle.toUpperCase()})</p>
-                <p className="text-sm text-[var(--color-text-secondary)] leading-relaxed" dangerouslySetInnerHTML={{ __html: formatCitation(selectedCitation, citationStyle) }} />
-              </div>
-
-              {/* Title */}
-              <div>
-                <p className="text-xs text-[var(--color-text-muted)] mb-1 font-medium">Title</p>
-                <p className="text-sm text-[var(--color-text)]">{selectedCitation.title}</p>
-              </div>
-
-              {/* Authors */}
-              {selectedCitation.authors.length > 0 && (
-                <div>
-                  <p className="text-xs text-[var(--color-text-muted)] mb-1 font-medium">Authors</p>
-                  <p className="text-sm text-[var(--color-text-secondary)]">{selectedCitation.authors.join(', ')}</p>
-                </div>
-              )}
-
-              {/* Abstract */}
-              {selectedCitation.abstract && (
-                <div>
-                  <p className="text-xs text-[var(--color-text-muted)] mb-1 font-medium">Abstract</p>
-                  <p className="text-xs text-[var(--color-text-secondary)] leading-relaxed">{selectedCitation.abstract}</p>
-                </div>
-              )}
-
-              {/* Links */}
-              <div className="flex items-center gap-3">
-                {selectedCitation.doi && (
-                  <a href={`https://doi.org/${selectedCitation.doi}`} target="_blank" rel="noreferrer"
-                    className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-white/5 text-[var(--color-text)] hover:bg-white/10 transition-colors">
-                    <FiExternalLink className="w-3 h-3" /> DOI
-                  </a>
-                )}
-                {selectedCitation.pmid && (
-                  <a href={`https://pubmed.ncbi.nlm.nih.gov/${selectedCitation.pmid}`} target="_blank" rel="noreferrer"
-                    className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-white/5 text-[var(--color-text)] hover:bg-white/10 transition-colors">
-                    <FiBookOpen className="w-3 h-3" /> PubMed
-                  </a>
-                )}
-                {selectedCitation.pdfUrl && (
-                  <a href={selectedCitation.pdfUrl} target="_blank" rel="noreferrer"
-                    className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-white/5 text-[var(--color-text)] hover:bg-white/10 transition-colors">
-                    <FiFile className="w-3 h-3" /> View PDF
-                  </a>
-                )}
-              </div>
-
-              {/* Metadata — type-aware: only show fields relevant to this citation type */}
-              <div className="grid grid-cols-2 gap-3 text-xs">
-                <div><span className="text-[var(--color-text-muted)]">Type:</span> <span className="text-[var(--color-text-secondary)] capitalize">{selectedCitation.type}</span></div>
-                <div><span className="text-[var(--color-text-muted)]">Year:</span> <span className="text-[var(--color-text-secondary)]">{selectedCitation.year}</span></div>
-                {/* Journal/conference/preprint fields */}
-                {(selectedCitation.type === 'journal' || selectedCitation.type === 'preprint' || selectedCitation.type === 'conference') && selectedCitation.journal && (
-                  <div><span className="text-[var(--color-text-muted)]">{selectedCitation.type === 'conference' ? 'Conference:' : 'Journal:'}</span> <span className="text-[var(--color-text-secondary)]">{selectedCitation.journal}</span></div>
-                )}
-                {(selectedCitation.type === 'journal' || selectedCitation.type === 'preprint' || selectedCitation.type === 'conference') && selectedCitation.volume && (
-                  <div><span className="text-[var(--color-text-muted)]">Volume:</span> <span className="text-[var(--color-text-secondary)]">{selectedCitation.volume}</span></div>
-                )}
-                {(selectedCitation.type === 'journal' || selectedCitation.type === 'preprint' || selectedCitation.type === 'conference') && selectedCitation.issue && (
-                  <div><span className="text-[var(--color-text-muted)]">Issue:</span> <span className="text-[var(--color-text-secondary)]">{selectedCitation.issue}</span></div>
-                )}
-                {(selectedCitation.type === 'journal' || selectedCitation.type === 'preprint' || selectedCitation.type === 'conference') && selectedCitation.pages && (
-                  <div><span className="text-[var(--color-text-muted)]">Pages:</span> <span className="text-[var(--color-text-secondary)]">{selectedCitation.pages}</span></div>
-                )}
-                {/* Book/thesis/website fields */}
-                {(selectedCitation.type === 'book' || selectedCitation.type === 'thesis') && selectedCitation.publisher && (
-                  <div><span className="text-[var(--color-text-muted)]">{selectedCitation.type === 'thesis' ? 'Institution:' : 'Publisher:'}</span> <span className="text-[var(--color-text-secondary)]">{selectedCitation.publisher}</span></div>
-                )}
-                {(selectedCitation.type === 'website') && selectedCitation.publisher && (
-                  <div><span className="text-[var(--color-text-muted)]">Website:</span> <span className="text-[var(--color-text-secondary)]">{selectedCitation.publisher}</span></div>
-                )}
-                {(selectedCitation.type === 'website' || selectedCitation.type === 'thesis') && selectedCitation.url && (
-                  <div className="col-span-2"><span className="text-[var(--color-text-muted)]">URL:</span> <span className="text-[var(--color-text-secondary)] break-all">{selectedCitation.url}</span></div>
-                )}
-              </div>
-
-              {/* Notes / Annotations */}
-              <div>
-                <p className="text-xs text-[var(--color-text-muted)] mb-1 font-medium flex items-center gap-1">
-                  <FiEdit3 className="w-3 h-3" /> Notes & Annotations
-                </p>
-                <textarea
-                  value={selectedCitation.notes || ''}
-                  onChange={e => updateNotes(selectedCitation.id, e.target.value)}
-                  placeholder="Add your notes, key findings, relevant quotes..."
-                  className="input w-full text-xs h-32 resize-none"
-                />
-              </div>
-            </div>
+        {showImport && (
+          <div className="px-4 py-3 border-b border-[var(--color-border)] bg-[var(--color-surface-solid)]">
+            <ImportDropZone onImportText={importText} onImportPdf={importPdf} />
           </div>
         )}
+        <div className="flex-1 overflow-auto min-h-0">
+          {loading && citations.length === 0 ? (
+            <div className="py-12 text-center text-sm text-[var(--color-text-muted)]">Loading library…</div>
+          ) : citations.length === 0 ? (
+            <EmptyState
+              icon={<FiBookOpen />}
+              title="Your library is empty"
+              description="Drop a PDF or a BibTeX / RIS / CSL / EndNote file into the Import panel above to get started. Every citation you save here is searchable from Discovery and attaches inline when you draft a manuscript."
+            />
+          ) : (
+            <LibraryTable
+              citations={filteredRows}
+              selectedIds={selectedIds}
+              focusedId={focusedId}
+              onFocus={id => { setFocusedId(id); setRightPane('detail') }}
+              onSelectionChange={setSelectedIds}
+              onToggleStar={toggleStar}
+              onToggleRead={toggleRead}
+              sortKey={sortKey}
+              sortDir={sortDir}
+              onSort={onSort}
+            />
+          )}
+        </div>
       </div>
-      {deleteConfirmId && (
-        <ConfirmDeleteDialog
-          title="Delete Citation?"
-          message="This will permanently remove this citation from your library. This action cannot be undone."
-          onConfirm={confirmDelete}
-          onCancel={() => setDeleteConfirmId(null)}
-        />
+
+      {/* ── Right: detail panel / PDF reader ── */}
+      {focused && (
+        <aside className="w-[520px] flex-shrink-0 border-l border-[var(--color-border)] bg-[var(--color-surface-solid)] flex flex-col overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-2 border-b border-[var(--color-border)]">
+            <div className="flex gap-1">
+              <button
+                onClick={() => setRightPane('detail')}
+                className={`text-xs px-2 py-1 rounded ${rightPane === 'detail' ? 'bg-[var(--glass-bg)] text-[var(--color-text)]' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'}`}
+              >
+                Detail
+              </button>
+              <button
+                onClick={() => setRightPane('pdf')}
+                className={`text-xs px-2 py-1 rounded ${rightPane === 'pdf' ? 'bg-[var(--glass-bg)] text-[var(--color-text)]' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'}`}
+              >
+                PDF {focused.pdf_url ? '' : '(no file)'}
+              </button>
+            </div>
+            <button
+              onClick={() => setFocusedId(null)}
+              className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+              aria-label="Close detail panel"
+            >
+              <FiX className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="flex-1 overflow-auto min-h-0">
+            {rightPane === 'pdf' ? (
+              <PdfReader
+                pdfUrl={focused.pdf_url || null}
+                highlights={highlights}
+                onAddHighlight={addHighlight}
+                onDeleteHighlight={deleteHighlight}
+                onUpdateHighlight={updateHighlight}
+              />
+            ) : (
+              <DetailPanel
+                citation={focused}
+                folders={folders}
+                onUpdate={patch => updateCitation(focused.id, patch)}
+              />
+            )}
+          </div>
+        </aside>
       )}
+    </div>
+  )
+}
+
+// ─── DetailPanel ────────────────────────────────────────────────
+// Editable metadata view. Text fields commit on blur; the author
+// list uses a chip-style multi-value input.
+
+function DetailPanel({ citation, folders, onUpdate }: {
+  citation: LibraryCitation
+  folders: LibraryFolder[]
+  onUpdate: (patch: Partial<LibraryCitation>) => void | Promise<void>
+}) {
+  const [authorsDraft, setAuthorsDraft] = useState((citation.authors || []).join('; '))
+  const [tagsDraft, setTagsDraft] = useState((citation.tags || []).join(', '))
+
+  // Reset drafts when a different citation is focused.
+  useEffect(() => {
+    setAuthorsDraft((citation.authors || []).join('; '))
+    setTagsDraft((citation.tags || []).join(', '))
+  }, [citation.id])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  const Field = ({ label, value, onCommit, placeholder, type = 'text' }:
+    { label: string; value: string; onCommit: (v: string) => void; placeholder?: string; type?: string }
+  ) => {
+    const [draft, setDraft] = useState(value)
+    useEffect(() => setDraft(value), [value])
+    return (
+      <label className="block">
+        <span className="block text-xxs font-medium text-[var(--color-text-muted)] mb-1">{label}</span>
+        <input
+          type={type}
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onBlur={() => { if (draft !== value) onCommit(draft) }}
+          onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+          placeholder={placeholder}
+          className="w-full px-2 py-1 text-xs rounded bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--color-text)]"
+        />
+      </label>
+    )
+  }
+
+  return (
+    <div className="p-4 space-y-3">
+      {/* Title row */}
+      <div>
+        <span className="block text-xxs font-medium text-[var(--color-text-muted)] mb-1 flex items-center gap-1">
+          <FiEdit3 className="w-3 h-3" /> Title
+        </span>
+        <textarea
+          defaultValue={citation.title}
+          onBlur={e => { if (e.target.value !== citation.title) onUpdate({ title: e.target.value }) }}
+          rows={2}
+          className="w-full px-2 py-1.5 text-sm font-medium rounded bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--color-text)] resize-none"
+          aria-label="Title"
+        />
+      </div>
+
+      <label className="block">
+        <span className="block text-xxs font-medium text-[var(--color-text-muted)] mb-1">Authors (semicolon-separated)</span>
+        <input
+          value={authorsDraft}
+          onChange={e => setAuthorsDraft(e.target.value)}
+          onBlur={() => {
+            const list = authorsDraft.split(';').map(a => a.trim()).filter(Boolean)
+            if (JSON.stringify(list) !== JSON.stringify(citation.authors || [])) onUpdate({ authors: list })
+          }}
+          className="w-full px-2 py-1 text-xs rounded bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--color-text)]"
+          aria-label="Authors"
+        />
+      </label>
+
+      <div className="grid grid-cols-2 gap-3">
+        <label className="block">
+          <span className="block text-xxs font-medium text-[var(--color-text-muted)] mb-1">Type</span>
+          <select
+            value={citation.type}
+            onChange={e => onUpdate({ type: e.target.value })}
+            className="w-full px-2 py-1 text-xs rounded bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--color-text)]"
+            aria-label="Type"
+          >
+            {['journal', 'conference', 'book', 'preprint', 'thesis', 'website'].map(t =>
+              <option key={t} value={t}>{t}</option>
+            )}
+          </select>
+        </label>
+        <Field label="Year" value={citation.year?.toString() || ''}
+          onCommit={v => onUpdate({ year: v ? parseInt(v) : null })}
+          placeholder="2024" type="number"
+        />
+      </div>
+
+      <Field label="Journal / container" value={citation.journal || ''} onCommit={v => onUpdate({ journal: v || null })} />
+      <div className="grid grid-cols-3 gap-3">
+        <Field label="Volume" value={citation.volume || ''} onCommit={v => onUpdate({ volume: v || null })} />
+        <Field label="Issue" value={citation.issue || ''} onCommit={v => onUpdate({ issue: v || null })} />
+        <Field label="Pages" value={citation.pages || ''} onCommit={v => onUpdate({ pages: v || null })} />
+      </div>
+
+      <Field label="DOI" value={citation.doi || ''} onCommit={v => onUpdate({ doi: v || null })} placeholder="10.1038/..." />
+      <Field label="PMID" value={citation.pmid || ''} onCommit={v => onUpdate({ pmid: v || null })} />
+      <Field label="URL" value={citation.url || ''} onCommit={v => onUpdate({ url: v || null })} placeholder="https://..." />
+
+      <label className="block">
+        <span className="block text-xxs font-medium text-[var(--color-text-muted)] mb-1">Tags (comma-separated)</span>
+        <input
+          value={tagsDraft}
+          onChange={e => setTagsDraft(e.target.value)}
+          onBlur={() => {
+            const list = tagsDraft.split(',').map(t => t.trim()).filter(Boolean)
+            if (JSON.stringify(list) !== JSON.stringify(citation.tags || [])) onUpdate({ tags: list })
+          }}
+          className="w-full px-2 py-1 text-xs rounded bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--color-text)]"
+          aria-label="Tags"
+        />
+      </label>
+
+      {/* Folders assignment */}
+      {folders.length > 0 && (
+        <div>
+          <span className="block text-xxs font-medium text-[var(--color-text-muted)] mb-1 flex items-center gap-1">
+            <FiFolder className="w-3 h-3" /> Folders
+          </span>
+          <div className="flex flex-wrap gap-1">
+            {folders.map(f => {
+              const inFolder = (citation.folders || []).includes(f.id)
+              return (
+                <button
+                  key={f.id}
+                  onClick={() => {
+                    const next = inFolder
+                      ? (citation.folders || []).filter(x => x !== f.id)
+                      : [...(citation.folders || []), f.id]
+                    onUpdate({ folders: next })
+                  }}
+                  className={`text-xxs px-1.5 py-0.5 rounded border flex items-center gap-1 ${
+                    inFolder
+                      ? 'border-[var(--color-border-strong)] bg-[var(--glass-bg)] text-[var(--color-text)]'
+                      : 'border-[var(--glass-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
+                  }`}
+                >
+                  {inFolder && <FiCheck className="w-2.5 h-2.5" />}
+                  {f.name}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      <label className="block">
+        <span className="block text-xxs font-medium text-[var(--color-text-muted)] mb-1">Abstract</span>
+        <textarea
+          defaultValue={citation.abstract || ''}
+          onBlur={e => { if (e.target.value !== (citation.abstract || '')) onUpdate({ abstract: e.target.value || null }) }}
+          rows={5}
+          className="w-full px-2 py-1.5 text-xs rounded bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--color-text)] resize-y leading-relaxed"
+          placeholder="Paste abstract…"
+          aria-label="Abstract"
+        />
+      </label>
+
+      <label className="block">
+        <span className="block text-xxs font-medium text-[var(--color-text-muted)] mb-1">Notes</span>
+        <textarea
+          defaultValue={citation.notes || ''}
+          onBlur={e => { if (e.target.value !== (citation.notes || '')) onUpdate({ notes: e.target.value || null }) }}
+          rows={4}
+          className="w-full px-2 py-1.5 text-xs rounded bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--color-text)] resize-y"
+          placeholder="Your private notes…"
+          aria-label="Notes"
+        />
+      </label>
+
+      <div className="flex gap-2 pt-2 border-t border-[var(--color-border)]">
+        {citation.doi && (
+          <a href={`https://doi.org/${citation.doi}`} target="_blank" rel="noopener noreferrer"
+             className="flex items-center gap-1 text-xxs text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
+            <FiLink className="w-3 h-3" /> DOI
+          </a>
+        )}
+        {citation.pmid && (
+          <a href={`https://pubmed.ncbi.nlm.nih.gov/${citation.pmid}`} target="_blank" rel="noopener noreferrer"
+             className="flex items-center gap-1 text-xxs text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
+            <FiExternalLink className="w-3 h-3" /> PubMed
+          </a>
+        )}
+        {citation.url && (
+          <a href={citation.url} target="_blank" rel="noopener noreferrer"
+             className="flex items-center gap-1 text-xxs text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
+            <FiExternalLink className="w-3 h-3" /> Open URL
+          </a>
+        )}
+        <span className="flex-1" />
+        <button
+          onClick={() => onUpdate({ starred: !citation.starred })}
+          className="flex items-center gap-1 text-xxs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+          aria-label={citation.starred ? 'Unstar' : 'Star'}
+        >
+          <FiStar className={`w-3 h-3 ${citation.starred ? 'fill-current text-[var(--color-accent,#C4956A)]' : ''}`} />
+          {citation.starred ? 'Starred' : 'Star'}
+        </button>
+      </div>
     </div>
   )
 }

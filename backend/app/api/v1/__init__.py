@@ -9,9 +9,11 @@ from fastapi import APIRouter
 from app.api.v1.endpoints import (
     activities,
     admin,
+    agent_chat_stream,
     agents,
     auth,
     citation_verify,
+    citations,
     biobank,
     clinical_trials,
     collaboration,
@@ -21,6 +23,7 @@ from app.api.v1.endpoints import (
     data_sources,
     datasets,
     discovery,
+    discovery_sessions,
     document_pipeline,
     evidence,
     experiments,
@@ -68,6 +71,12 @@ router.include_router(monitoring.router, prefix="/monitoring", tags=["monitoring
 
 # Disease Discovery endpoint
 router.include_router(discovery.router)
+
+# Discovery Sessions (conversational Discovery persistence)
+router.include_router(discovery_sessions.router)
+
+# Conversational Discovery SSE streaming
+router.include_router(agent_chat_stream.router)
 
 # Simulation endpoints — frontend uses /simulations (plural).
 router.include_router(simulation.router, prefix="/simulations", tags=["simulation"])
@@ -132,3 +141,6 @@ router.include_router(admin.router, prefix="/admin", tags=["admin"])
 
 # Citation verification — CrossRef + NCBI round-trip for single citations.
 router.include_router(citation_verify.router, prefix="/citation", tags=["citation"])
+
+# Citation Library — full Mendeley-equivalent reference manager.
+router.include_router(citations.router)

@@ -35,6 +35,7 @@ import type { Preset } from './types'
 import ImagingPanel, { IMAGING_EVENT } from './ImagingPanel'
 import { getPlotBlob } from '../../utils/plotExport'
 import { plotlyConfig } from '../../utils/plotlyConfig'
+import PublicationFigure from '../../components/PublicationFigure'
 
 /* ── Persistence keys ────────────────────────────────────────────────── */
 const SCRIPT_KEY = 'compute-workstation-script'          // legacy single-script key
@@ -8431,7 +8432,15 @@ function PlotView({ plot, opts = DEFAULT_PLOT_OPTS }: { plot: PlotSpec | null; o
     }
     return (
       <div style={{ width: '100%', height: '100%', minHeight: 180 }}>
-        <PlotlyChart data={traces} layout={layout} config={plotlyConfig()} style={{ width: '100%', height: '100%' }} useResizeHandler />
+        <PublicationFigure
+          title={plot.title || `Figure (${mode})`}
+          subtitle={plot.xLabel && plot.yLabel ? `${plot.xLabel} vs ${plot.yLabel}${plot.zLabel ? ` vs ${plot.zLabel}` : ''}` : undefined}
+          exportName={(plot.title || `figure-${mode}`).replace(/[^\w-]+/g, '_')}
+        >
+          <div style={{ width: '100%', height: 480 }}>
+            <PlotlyChart data={traces} layout={layout} config={plotlyConfig()} style={{ width: '100%', height: '100%' }} useResizeHandler />
+          </div>
+        </PublicationFigure>
       </div>
     )
   }
@@ -8582,56 +8591,52 @@ function PlotView({ plot, opts = DEFAULT_PLOT_OPTS }: { plot: PlotSpec | null; o
 
   return (
     <div style={{ width: '100%', height: '100%', minHeight: 180 }}>
-      {plot.title && (
-        <div style={{
-          fontSize: 12,
-          fontWeight: 500,
-          color: 'var(--color-text-secondary)',
-          marginBottom: 6,
-          textAlign: 'center',
-          fontFamily: "'Inter', system-ui, sans-serif",
-        }}>
-          {plot.title}
+      <PublicationFigure
+        title={plot.title || 'Figure'}
+        subtitle={plot.series.length > 1 ? `${plot.series.length} series` : undefined}
+        exportName={(plot.title || `figure-${kind}`).replace(/[^\w-]+/g, '_')}
+      >
+        <div style={{ width: '100%', height: Math.max(280, 420) }}>
+          <ResponsiveContainer width="100%" height="100%">
+            {kind === 'bar' ? (
+              <BarChart data={data}>
+                {common}
+                {plot.series.map((s, i) => (
+                  <Bar key={s.name} dataKey={s.name} fill={SERIES_COLORS[i % SERIES_COLORS.length]} />
+                ))}
+              </BarChart>
+            ) : kind === 'scatter' ? (
+              <ScatterChart>
+                {common}
+                {plot.series.map((s, i) => (
+                  <Scatter
+                    key={s.name}
+                    name={s.name}
+                    data={s.x.map((x, j) => ({ x, [s.name]: s.y[j] }))}
+                    fill={SERIES_COLORS[i % SERIES_COLORS.length]}
+                    dataKey={s.name}
+                  />
+                ))}
+              </ScatterChart>
+            ) : (
+              <LineChart data={data}>
+                {common}
+                {plot.series.map((s, i) => (
+                  <Line
+                    key={s.name}
+                    type="monotone"
+                    dataKey={s.name}
+                    stroke={SERIES_COLORS[i % SERIES_COLORS.length]}
+                    strokeWidth={1.8}
+                    dot={false}
+                    isAnimationActive={false}
+                  />
+                ))}
+              </LineChart>
+            )}
+          </ResponsiveContainer>
         </div>
-      )}
-      <ResponsiveContainer width="100%" height="100%">
-        {kind === 'bar' ? (
-          <BarChart data={data}>
-            {common}
-            {plot.series.map((s, i) => (
-              <Bar key={s.name} dataKey={s.name} fill={SERIES_COLORS[i % SERIES_COLORS.length]} />
-            ))}
-          </BarChart>
-        ) : kind === 'scatter' ? (
-          <ScatterChart>
-            {common}
-            {plot.series.map((s, i) => (
-              <Scatter
-                key={s.name}
-                name={s.name}
-                data={s.x.map((x, j) => ({ x, [s.name]: s.y[j] }))}
-                fill={SERIES_COLORS[i % SERIES_COLORS.length]}
-                dataKey={s.name}
-              />
-            ))}
-          </ScatterChart>
-        ) : (
-          <LineChart data={data}>
-            {common}
-            {plot.series.map((s, i) => (
-              <Line
-                key={s.name}
-                type="monotone"
-                dataKey={s.name}
-                stroke={SERIES_COLORS[i % SERIES_COLORS.length]}
-                strokeWidth={1.8}
-                dot={false}
-                isAnimationActive={false}
-              />
-            ))}
-          </LineChart>
-        )}
-      </ResponsiveContainer>
+      </PublicationFigure>
     </div>
   )
 }
