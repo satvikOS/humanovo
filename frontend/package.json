@@ -47,6 +47,7 @@
     "framer-motion": "^12.35.2",
     "fuse.js": "^7.1.0",
     "html2canvas": "^1.4.1",
+    "jspdf": "^4.2.1",
     "katex": "^0.16.38",
     "marked": "^17.0.4",
     "ngl": "^2.0.0-dev.39",

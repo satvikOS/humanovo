@@ -44,7 +44,8 @@ const PgvectorManager = lazy(() => import('./pages/PgvectorManager'))
 
 // Previously-orphaned pages: code existed on disk but no route pointed
 // to them. Now reachable from the sidebar.
-const Hypotheses = lazy(() => import('./pages/Hypotheses'))
+// The standalone Hypotheses route was retired; hypotheses live inside
+// projects now. Import dropped to avoid shipping the bundle.
 const HypothesisDetail = lazy(() => import('./pages/HypothesisDetail'))
 const KnowledgeGraph = lazy(() => import('./pages/KnowledgeGraph'))
 const KnowledgeGraphViewer = lazy(() => import('./pages/KnowledgeGraphViewer'))
@@ -123,8 +124,12 @@ function App() {
         <Route path="regulatory" element={<LazyPageWrapper><RegulatoryCompliance /></LazyPageWrapper>} />
         <Route path="imaging" element={<LazyPageWrapper><ResearchImaging /></LazyPageWrapper>} />
         <Route path="biobank" element={<LazyPageWrapper><BiobankManager /></LazyPageWrapper>} />
-        {/* Previously-orphaned pages — now routed + in sidebar nav */}
-        <Route path="hypotheses" element={<LazyPageWrapper><Hypotheses /></LazyPageWrapper>} />
+        {/* Standalone Hypotheses list removed per redesign — hypotheses
+            live within projects. Old /hypotheses links redirect to
+            /projects so external bookmarks still land somewhere useful;
+            per-id hypothesis links still open the detail pane since
+            hypotheses do have a canonical URL. */}
+        <Route path="hypotheses" element={<Navigate to="/projects" replace />} />
         <Route path="hypotheses/:hypothesisId" element={<LazyPageWrapper><HypothesisDetail /></LazyPageWrapper>} />
         <Route path="knowledge-graph" element={<LazyPageWrapper><KnowledgeGraph /></LazyPageWrapper>} />
         <Route path="knowledge-graph/viewer" element={<LazyPageWrapper><KnowledgeGraphViewer /></LazyPageWrapper>} />

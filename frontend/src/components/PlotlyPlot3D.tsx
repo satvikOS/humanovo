@@ -22,16 +22,30 @@ export type Chart3DType =
   | 'surface_3d' | 'wireframe_3d' | 'contour_3d' | 'trisurf_3d'
   | 'quiver_3d' | 'isosurface_3d' | 'voxel_3d' | 'streamline_3d'
   | 'slice_3d' | 'stem_3d' | 'waterfall_3d' | 'ribbon_3d' | 'pie_3d'
+  | 'sankey'
+
+export interface SankeyLink { source: number; target: number; value: number }
 
 export interface PlotlyPlot3DProps {
   data: DataPoint3D[]
   chartType?: Chart3DType
+  // `type` is an accepted alias for `chartType` so DataVisualization
+  // can interchangeably pass either prop name without conditional
+  // wiring.
+  type?: Chart3DType
   title?: string
   xLabel?: string; yLabel?: string; zLabel?: string
   pointSize?: number
   colorScheme?: 'viridis' | 'plasma' | 'categorical' | 'gradient'
   height?: number
   surfaceFunction?: (x: number, y: number) => number
+  // Sankey-specific payload — flat node-name list and link list. Only
+  // read when chartType === 'sankey'.
+  sankeyNodes?: string[]
+  sankeyLinks?: SankeyLink[]
+  // Optional explicit categorical color array (used by Sankey nodes,
+  // ignored by other chart types).
+  colors?: string[]
 }
 
 const CATEGORY_COLORS = [
@@ -44,6 +58,20 @@ const PLOTLY_COLORSCALE: Record<string, string> = {
   plasma: 'Plasma',
   categorical: 'Viridis',
   gradient: 'YlGnBu',
+}
+
+function hexToRgba(hex: string, alpha: number): string {
+  // Tolerant parser — accepts #RGB, #RRGGBB, or already-rgba strings
+  // (returned as-is). Falls back to a neutral gray if the input can't
+  // be parsed.
+  if (hex.startsWith('rgba') || hex.startsWith('rgb')) return hex
+  const h = hex.replace(/^#/, '')
+  const full = h.length === 3 ? h.split('').map(c => c + c).join('') : h
+  if (full.length !== 6) return `rgba(120,120,120,${alpha})`
+  const r = parseInt(full.slice(0, 2), 16)
+  const g = parseInt(full.slice(2, 4), 16)
+  const b = parseInt(full.slice(4, 6), 16)
+  return `rgba(${r},${g},${b},${alpha})`
 }
 
 function generateSurfaceData(
@@ -72,7 +100,8 @@ function generateSurfaceData(
 
 export default function PlotlyPlot3D({
   data,
-  chartType = 'scatter_3d',
+  chartType,
+  type,
   title,
   xLabel = 'X',
   yLabel = 'Y',
@@ -81,7 +110,12 @@ export default function PlotlyPlot3D({
   colorScheme = 'viridis',
   height = 500,
   surfaceFunction,
+  sankeyNodes,
+  sankeyLinks,
+  colors,
 }: PlotlyPlot3DProps) {
+  // Resolve the chart type from either prop alias.
+  const resolvedType: Chart3DType = chartType || type || 'scatter_3d'
   const { traces, layout } = useMemo(() => {
     const xs = data.map(d => d.x)
     const ys = data.map(d => d.y)
@@ -96,7 +130,7 @@ export default function PlotlyPlot3D({
     const hasCats = uniqueCats.length > 1
 
     const buildTraces = (): any[] => {
-      switch (chartType) {
+      switch (resolvedType) {
         case 'scatter_3d': {
           if (hasCats) {
             return uniqueCats.map((cat, i) => {
@@ -563,6 +597,49 @@ export default function PlotlyPlot3D({
           return traces
         }
 
+        case 'sankey': {
+          // Sankey is a 2D flow diagram. Plotly renders it as SVG, so
+          // exports cleanly to PDF/PNG/SVG. We pull node + link arrays
+          // from props (set by DataVisualization's sankey case) and
+          // fall back to a synthesized identity mapping when only the
+          // raw `data` array is present.
+          const nodes = sankeyNodes && sankeyNodes.length > 0
+            ? sankeyNodes
+            : Array.from(new Set(data.flatMap(d => [String(d.x ?? ''), String(d.z ?? '')]).filter(Boolean)))
+          const links = sankeyLinks && sankeyLinks.length > 0
+            ? sankeyLinks
+            : data.map(d => ({
+                source: nodes.indexOf(String(d.x ?? '')),
+                target: nodes.indexOf(String(d.z ?? '')),
+                value: Number(d.y ?? 0),
+              })).filter(l => l.source >= 0 && l.target >= 0 && l.value > 0)
+          const palette = colors && colors.length > 0 ? colors : CATEGORY_COLORS
+          return [{
+            type: 'sankey' as const,
+            orientation: 'h' as const,
+            arrangement: 'snap' as const,
+            node: {
+              label: nodes,
+              pad: 18,
+              thickness: 18,
+              line: { color: 'rgba(0,0,0,0.2)', width: 0.5 },
+              color: nodes.map((_, i) => palette[i % palette.length]),
+            },
+            link: {
+              source: links.map(l => l.source),
+              target: links.map(l => l.target),
+              value: links.map(l => l.value),
+              color: links.map(l => {
+                // Soft-tint each link by its source-node color at 35%
+                // alpha so the diagram reads as a connected ribbon
+                // without overpowering the node columns.
+                const c = palette[l.source % palette.length]
+                return hexToRgba(c, 0.35)
+              }),
+            },
+          } as any]
+        }
+
         // Default: scatter3d for remaining types
         default: {
           return [{
@@ -576,7 +653,7 @@ export default function PlotlyPlot3D({
       }
     }
 
-    const is2D = chartType === 'pie_3d'
+    const is2D = resolvedType === 'pie_3d' || resolvedType === 'sankey'
     const baseLayout: Record<string, any> = {
       title: title ? { text: title, font: { color: '#c8c8cc', size: 13, family: "'Inter', system-ui, sans-serif" } } : undefined,
       paper_bgcolor: 'rgba(0,0,0,0)',
@@ -587,7 +664,7 @@ export default function PlotlyPlot3D({
       // in the corner.
       margin: { l: 20, r: 30, t: title ? 36 : 12, b: 20 },
       height,
-      showlegend: hasCats || chartType === 'pie_3d',
+      showlegend: hasCats || resolvedType === 'pie_3d',
       legend: { font: { color: '#8a8a92', size: 10 }, bgcolor: 'rgba(0,0,0,0)', orientation: 'h' as const, y: -0.05 },
     }
 
@@ -622,7 +699,7 @@ export default function PlotlyPlot3D({
     const styledTraces = buildTraces().map(applyColorbarStyle)
 
     return { traces: styledTraces, layout: baseLayout }
-  }, [data, chartType, title, xLabel, yLabel, zLabel, pointSize, colorScheme, height, surfaceFunction])
+  }, [data, resolvedType, title, xLabel, yLabel, zLabel, pointSize, colorScheme, height, surfaceFunction, sankeyNodes, sankeyLinks, colors])
 
   return (
     <div style={{ width: '100%', height }}>
