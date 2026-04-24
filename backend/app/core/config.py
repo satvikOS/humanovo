@@ -167,6 +167,14 @@ class Settings(BaseSettings):
     GROUNDING_SIMILARITY_THRESHOLD: float = 0.4  # Min cosine similarity for claim grounding
     GROUNDING_RAG_TOP_K: int = 8  # Top-K chunks retrieved per stage
     GROUNDING_GATE_ENABLED: bool = True  # Enable semantic similarity gating between stages
+    # Per product directive ("every stage should be grounded 100% so that
+    # relations are not hallucinated"), we run grounding on EVERY stage
+    # (generative + analytical). STRICT mode rejects a stage output when
+    # its grounding ratio falls below the threshold and forces the
+    # pipeline to retry with a stricter "ground every claim" instruction.
+    GROUNDING_STRICT_MODE: bool = True
+    GROUNDING_STRICT_RATIO_MIN: float = 0.60  # stage fails if <60% claims grounded
+    GROUNDING_STRICT_MAX_RETRIES: int = 2
 
     # Azure OpenAI Embedding — dedicated endpoint on cognitiveservices resource
     # Deployment: text-embedding-3-large (150K TPM, 900 RPM)

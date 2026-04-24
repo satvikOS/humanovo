@@ -1449,6 +1449,13 @@ Integrate all findings, resolve contradictions, identify cross-model connections
         return shard_results
 
 
+class _GroundingRetry(Exception):
+    """Raised inside a stage when GROUNDING_STRICT_MODE gate fails and we
+    want the outer while-loop to re-enter the same stage index rather
+    than propagate the error. Caught at the stage boundary."""
+    pass
+
+
 @dataclass
 class PipelineStageResult:
     """Result from a single pipeline stage."""
@@ -1761,7 +1768,23 @@ Your goal is to STRENGTHEN this hypothesis — address its weaknesses, find stro
         if embedding_grounder:
             embedding_grounder.clear_evidence_pool()
 
-        for stage_num, stage_name, model_type, max_tokens, temperature in stages:
+        # Diversity-aware seed regeneration budget: if the SEED stage
+        # emits a non-diverse seed, we retry up to N times with the
+        # rejection reason injected as anti-similarity prompt text.
+        # Using an index-based while-loop so 'retry_current_stage'
+        # means we don't advance the index, re-entering the same stage.
+        max_seed_retries = 3
+        seed_retries_used = 0
+        pending_diversity_instruction: str = ""
+        retry_current_stage = False
+        stage_index = 0
+
+        while stage_index < len(stages):
+            stage_num, stage_name, model_type, max_tokens, temperature = stages[stage_index]
+            # Ensure the loop still appears unchanged below; falls through
+            # to the retry check at the end which decides whether to
+            # advance stage_index or re-run the same stage.
+            retry_current_stage = False
             stage_start = time.time()
 
             try:
@@ -1783,6 +1806,14 @@ Your goal is to STRENGTHEN this hypothesis — address its weaknesses, find stro
                     hypothesis_index=hypothesis_index,
                     lab_profile=lab_profile,
                 )
+
+                # Inject diversity anti-similarity instruction if a prior
+                # seed attempt was rejected (only applies to SEED stage).
+                if stage_name == "seed" and pending_diversity_instruction:
+                    user_prompt += pending_diversity_instruction
+                    # Consume the instruction — next retry will produce a
+                    # fresh one only if the new seed is also rejected.
+                    pending_diversity_instruction = ""
 
                 # === KG-FIRST SWEEP ===
                 # Query user's private KG and the common KG BEFORE hitting the
@@ -1950,6 +1981,59 @@ Your goal is to STRENGTHEN this hypothesis — address its weaknesses, find stro
                         accumulated_context[f"stage_{stage_num}_grounded_claims"] = grounding_report.grounded_claims
                         accumulated_context[f"stage_{stage_num}_ungrounded_claims"] = grounding_report.ungrounded_claims
 
+                        # STRICT GROUNDING: reject a stage output whose
+                        # grounding ratio is below the configured minimum.
+                        # This enforces the product directive: "every stage
+                        # should be grounded 100% so that relations are not
+                        # hallucinated". Stage is retried up to
+                        # GROUNDING_STRICT_MAX_RETRIES times with an
+                        # explicit "ground every claim" instruction.
+                        if getattr(settings, "GROUNDING_STRICT_MODE", False):
+                            min_ratio = getattr(settings, "GROUNDING_STRICT_RATIO_MIN", 0.6)
+                            if grounding_report.grounding_ratio < min_ratio:
+                                retries_used_key = f"_grounding_retries_{stage_num}"
+                                retries_used = accumulated_context.get(retries_used_key, 0)
+                                max_retries = getattr(settings, "GROUNDING_STRICT_MAX_RETRIES", 2)
+                                if retries_used < max_retries:
+                                    accumulated_context[retries_used_key] = retries_used + 1
+                                    logger.warning(
+                                        f"[grounding_strict] stage {stage_num} "
+                                        f"ratio={grounding_report.grounding_ratio:.2f} "
+                                        f"< {min_ratio}; retry "
+                                        f"{retries_used+1}/{max_retries}"
+                                    )
+                                    # Inject a retry instruction into the
+                                    # next-stage grounding context so the
+                                    # retry sees the ungrounded claims.
+                                    accumulated_context["_grounding_context_for_next"] = (
+                                        (accumulated_context.get(
+                                            "_grounding_context_for_next", "") or "")
+                                        + "\n\n## STRICT GROUNDING RETRY\n"
+                                        "The previous attempt produced an "
+                                        "insufficient grounding ratio. "
+                                        "Every claim in your output MUST be "
+                                        "supported by an entry in the evidence "
+                                        "pool OR be explicitly marked as a "
+                                        "hypothesis/conjecture. Do NOT emit "
+                                        "bare assertions."
+                                    )
+                                    # Pop the just-added stage_result, do
+                                    # not advance stage_index.
+                                    if stage_results and stage_results[-1].stage == stage_num:
+                                        stage_results.pop()
+                                    retry_current_stage = True
+                                    # Skip the rest of the stage body and
+                                    # head to the bottom-of-loop advance
+                                    # check which will see retry_current_stage.
+                                    raise _GroundingRetry()
+                                else:
+                                    logger.warning(
+                                        f"[grounding_strict] stage {stage_num} "
+                                        "retries exhausted; proceeding with "
+                                        "degraded grounding"
+                                    )
+                    except _GroundingRetry:
+                        raise
                     except Exception as ge:
                         logger.warning(f"Stage {stage_num} embedding grounding failed (non-fatal): {ge}")
 
@@ -2003,6 +2087,36 @@ Your goal is to STRENGTHEN this hypothesis — address its weaknesses, find stro
                                 accumulated_context["diversity_rejection_reason"] = (
                                     rep.rejection_reason
                                 )
+                                # Trigger in-place seed regeneration: add
+                                # the rejection reason to the next SEED
+                                # prompt and re-run the stage until we
+                                # accept or exhaust retries.
+                                if seed_retries_used < max_seed_retries:
+                                    seed_retries_used += 1
+                                    pending_diversity_instruction = (
+                                        "\n\n## DIVERSITY CONSTRAINT\n"
+                                        "A prior seed generation attempt was "
+                                        "REJECTED by the diversity enforcer "
+                                        "for the following reason:\n\n"
+                                        f"  {rep.rejection_reason}\n\n"
+                                        "Generate a DIFFERENT hypothesis that "
+                                        "explores a distinct modality, "
+                                        "mechanism, organ, paradigm, pathway "
+                                        "class, or entity set. Share only the "
+                                        "common scientific philosophy with "
+                                        "prior hypotheses."
+                                    )
+                                    # Drop the rejected stage_result so the
+                                    # next iteration of the same SEED stage
+                                    # starts from a clean slate.
+                                    if stage_results and stage_results[-1].stage == stage_num:
+                                        stage_results.pop()
+                                    retry_current_stage = True
+                                else:
+                                    logger.warning(
+                                        "[diversity] seed retries exhausted; "
+                                        "accepting degraded-diversity seed"
+                                    )
                     except Exception as de:
                         logger.debug(f"diversity check skipped: {de}")
 
@@ -2151,6 +2265,10 @@ Your goal is to STRENGTHEN this hypothesis — address its weaknesses, find stro
                     except Exception:
                         pass
 
+            except _GroundingRetry:
+                # Strict grounding gate requested a retry of the same
+                # stage — retry_current_stage is already True.
+                pass
             except Exception as e:
                 duration = time.time() - stage_start
                 logger.error(f"  Stage {stage_num} ({stage_name}) FAILED: {e}")
@@ -2164,6 +2282,12 @@ Your goal is to STRENGTHEN this hypothesis — address its weaknesses, find stro
                     error=str(e),
                 ))
                 # Continue to next stage — pipeline is resilient
+
+            # Advance stage index unless the stage handler requested a retry
+            # (e.g. diversity enforcer rejected a non-diverse SEED, or
+            # strict grounding gate requested re-run).
+            if not retry_current_stage:
+                stage_index += 1
 
         # Build final hypothesis from accumulated context
         total_duration = time.time() - pipeline_start
