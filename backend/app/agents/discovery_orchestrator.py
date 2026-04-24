@@ -1513,13 +1513,31 @@ class SequentialHypothesisPipeline:
         (12, "finalize",  ModelType.CLAUDE_SONNET,     32_768, 0.3),
     ]
 
-    def __init__(self, llm: MultiModelLLM, discovery_run_id: str = None):
+    def __init__(
+        self,
+        llm: MultiModelLLM,
+        discovery_run_id: str = None,
+        *,
+        user_id: str | None = None,
+        budget_enforcer=None,
+    ):
         self._llm = llm
         self._grounding_service = None
         self._embedding_grounder = None
         self._rag_service = None
         self._discovery_run_id = discovery_run_id
         self._learning_memory = None
+        # User identity for KG scoping, royalties, PHI/PII context
+        self._user_id = user_id
+        # Per-run budget enforcer (RunBudgetEnforcer or None)
+        self._budget = budget_enforcer
+        # Multi-round citation verifier + rewind coordinator (lazy)
+        self._citation_verifier = None
+        self._rewind_coordinator = None
+        # Diversity enforcer (lazy, per discovery run)
+        self._diversity_enforcer = None
+        # KG-first service (lazy)
+        self._kg_first = None
 
     async def _get_grounding(self):
         """Lazy-load grounding service (all APIs: PubMed, FDA, Elsevier, Springer, etc.)."""
@@ -1535,6 +1553,75 @@ class SequentialHypothesisPipeline:
             self._embedding_grounder = get_grounding_engine()
             await self._embedding_grounder.initialize()
         return self._embedding_grounder
+
+    async def _get_citation_verifier(self):
+        """Lazy-load the multi-round citation verifier."""
+        if self._citation_verifier is None:
+            from app.agents.verification import get_citation_verifier
+            self._citation_verifier = get_citation_verifier()
+        return self._citation_verifier
+
+    def _get_rewind_coordinator(self, hypothesis_id: str):
+        """Return (creating if needed) the RewindCoordinator for this run."""
+        if self._rewind_coordinator is None or \
+                getattr(self._rewind_coordinator, "hypothesis_id", None) != hypothesis_id:
+            from app.agents.verification import RewindCoordinator
+            self._rewind_coordinator = RewindCoordinator(hypothesis_id=hypothesis_id)
+        return self._rewind_coordinator
+
+    def _get_diversity_enforcer(self):
+        """Return the diversity enforcer for this discovery run."""
+        if self._diversity_enforcer is None and self._discovery_run_id:
+            from app.agents.diversity import get_diversity_enforcer
+            self._diversity_enforcer = get_diversity_enforcer(self._discovery_run_id)
+        return self._diversity_enforcer
+
+    async def _get_kg_first(self):
+        """Lazy-load KG-first service (scans private + common KG before ext APIs)."""
+        if self._kg_first is None:
+            from app.services.kg_first_service import get_kg_first_service
+            self._kg_first = get_kg_first_service()
+        return self._kg_first
+
+    async def _kg_first_sweep(self, query_text: str) -> tuple[str, int]:
+        """Query the KG FIRST. Returns (evidence_block_or_empty, tokens_saved).
+
+        When the KG has sufficient coverage, the orchestrator can skip the
+        external 18+ API sweep and feed the agent only KG-derived evidence.
+        This is the KG-first directive: agents go through KGs first so AI
+        cost goes down every time."""
+        try:
+            kg = await self._get_kg_first()
+            result = await kg.query(
+                query_text=query_text,
+                user_id=self._user_id,
+                top_k=8,
+            )
+            if not result.total_hits:
+                return "", 0
+            header = (
+                f"\n\n## KNOWLEDGE GRAPH — PRIOR CONTEXT "
+                f"(private_hits={len(result.private_hits)}, "
+                f"common_hits={len(result.common_hits)}, "
+                f"sufficient={result.sufficient})"
+            )
+            body_lines: list[str] = []
+            for h in result.private_hits[:5]:
+                pay = h.payload or {}
+                body_lines.append(
+                    f"  [private · sim={h.similarity:.2f} · {h.kind}] "
+                    f"{pay.get('title') or pay.get('text') or h.canonical_id or ''}"
+                )
+            for h in result.common_hits[:5]:
+                pay = h.payload or {}
+                body_lines.append(
+                    f"  [common · sim={h.similarity:.2f} · {h.kind}] "
+                    f"{pay.get('title') or pay.get('text') or h.canonical_id or ''}"
+                )
+            return header + "\n" + "\n".join(body_lines), result.tokens_saved_vs_external
+        except Exception as e:
+            logger.debug(f"kg_first_sweep skipped (non-fatal): {e}")
+            return "", 0
 
     async def _get_rag_service(self):
         """Lazy-load RAG service for vector store retrieval."""
@@ -1697,6 +1784,22 @@ Your goal is to STRENGTHEN this hypothesis — address its weaknesses, find stro
                     lab_profile=lab_profile,
                 )
 
+                # === KG-FIRST SWEEP ===
+                # Query user's private KG and the common KG BEFORE hitting the
+                # 60+ external data sources. Every prior query made the KG
+                # larger; over time this brings AI cost down.
+                try:
+                    kg_query_seed = accumulated_context.get("title") or f"{disease} {stage_name}"
+                    kg_block, kg_tokens_saved = await self._kg_first_sweep(kg_query_seed)
+                    if kg_block:
+                        user_prompt += kg_block
+                        accumulated_context.setdefault("kg_hits", []).append({
+                            "stage": stage_num,
+                            "tokens_saved": kg_tokens_saved,
+                        })
+                except Exception as kg_err:
+                    logger.debug(f"KG-first sweep failed (non-fatal): {kg_err}")
+
                 # === FULL DATABASE SWEEP BEFORE EVERY STAGE ===
                 # Query ALL 18+ scientific databases before each model runs.
                 # Evidence accumulates across stages — each stage gets progressively
@@ -1757,8 +1860,58 @@ Your goal is to STRENGTHEN this hypothesis — address its weaknesses, find stro
                     "hypothesis_id": hypothesis_id,
                     "round_number": round_number,
                 }
+
+                # PHI/PII guardrail: scrub user prompt + system prompt before
+                # they leave this process for Bedrock / Azure OpenAI. This is
+                # the only active content guardrail per product directive
+                # ("no guardrails apart from HIPAA data").
+                try:
+                    from app.agents.guardrails import scrub_for_external_provider
+                    scrubbed_user = scrub_for_external_provider(user_prompt)
+                    scrubbed_system = scrub_for_external_provider(system_prompt)
+                    if scrubbed_user.redacted or scrubbed_system.redacted:
+                        logger.info(
+                            f"[phi_pii] stage={stage_num} redactions: "
+                            f"user={len(scrubbed_user.findings)}, "
+                            f"system={len(scrubbed_system.findings)}"
+                        )
+                    user_prompt = scrubbed_user.text
+                    system_prompt = scrubbed_system.text
+                except Exception as phi_err:
+                    logger.debug(f"PHI/PII scrub skipped (non-fatal): {phi_err}")
+
+                # Budget enforcer: pre-flight (if configured)
+                actual_model_type = model_type
+                if self._budget is not None:
+                    try:
+                        self._budget.assert_allowed(stage_name=stage_name)
+                        # select_model returns a model_id string; we map back to
+                        # ModelType when a direct match exists, else keep original.
+                        selected = self._budget.select_model(
+                            default=model_type.value, stage_name=stage_name,
+                        )
+                        # Graceful no-op if budget chose an unmodeled string
+                        if selected != model_type.value:
+                            try:
+                                actual_model_type = ModelType(selected)
+                            except ValueError:
+                                actual_model_type = model_type
+                    except Exception as budget_err:
+                        logger.warning(
+                            f"Budget enforcer hit stage {stage_num}: {budget_err}"
+                        )
+                        # Re-raise BudgetExceeded to bubble up to run_hypothesis
+                        raise
+
+                # Rewind coordinator: prepend blacklist clause so rewinds take
+                # effect on the immediate next call after a verdict failure.
+                rc = self._get_rewind_coordinator(hypothesis_id)
+                blacklist = rc.blacklist_clause()
+                if blacklist:
+                    user_prompt = f"{blacklist}\n\n{user_prompt}"
+
                 response = await self._llm.generate(
-                    model_type=model_type,
+                    model_type=actual_model_type,
                     prompt=user_prompt,
                     system_prompt=system_prompt,
                     max_tokens=max_tokens,
@@ -1810,11 +1963,161 @@ Your goal is to STRENGTHEN this hypothesis — address its weaknesses, find stro
                     success=True,
                 ))
 
+                # Diversity enforcement: at the SEED stage, check that the
+                # new hypothesis differs in direction/approach/idea from all
+                # previously accepted hypotheses in this run. Rejected seeds
+                # become an annotation in the context; the upstream runner
+                # decides whether to regenerate or accept degraded diversity.
+                if stage_name == "seed":
+                    try:
+                        enf = self._get_diversity_enforcer()
+                        if enf is not None:
+                            # Best-effort embed the seed for diversity comparison
+                            emb_large: list[float] = []
+                            emb_small: list[float] = []
+                            try:
+                                grounder = await self._get_embedding_grounder()
+                                if grounder:
+                                    emb_large = await grounder.embed(
+                                        parsed.get("title", "") + " " +
+                                        parsed.get("mechanism", "")[:1000]
+                                    )
+                            except Exception:
+                                pass
+                            rep = enf.check_seed(
+                                hypothesis_id=hypothesis_id,
+                                title=parsed.get("title", ""),
+                                description=parsed.get("description", ""),
+                                mechanism=parsed.get("mechanism", ""),
+                                pathways=parsed.get("target_pathways") or [],
+                                entities=parsed.get("target_entities") or [],
+                                embedding_large=emb_large,
+                                embedding_small=emb_small,
+                                discovery_type=discovery_type,
+                            )
+                            accumulated_context["diversity_report"] = rep.to_dict()
+                            if not rep.accepted:
+                                logger.warning(
+                                    f"[diversity] seed rejected: {rep.rejection_reason}"
+                                )
+                                accumulated_context["diversity_rejection_reason"] = (
+                                    rep.rejection_reason
+                                )
+                    except Exception as de:
+                        logger.debug(f"diversity check skipped: {de}")
+
+                # Citation verification checkpoint: after any stage that emits
+                # citations (EVIDENCE, MECHANISM, VALIDATE, GROUND, SCORE,
+                # FINALIZE), multi-round verify each citation. On failure,
+                # RewindCoordinator trims checkpoints and the outer retry
+                # loop replays from the last good state.
+                if stage_name in ("evidence", "mechanism", "validate",
+                                  "ground", "score", "finalize"):
+                    try:
+                        await self._verify_stage_citations(
+                            stage_num=stage_num,
+                            stage_name=stage_name,
+                            parsed=parsed,
+                            accumulated_context=accumulated_context,
+                            hypothesis_id=hypothesis_id,
+                        )
+                    except Exception as cve:
+                        # Non-fatal for now; the rewind path is a future hook.
+                        # Still log and carry forward degraded confidence.
+                        logger.warning(
+                            f"[citation_verify] stage={stage_num} failed: {cve}"
+                        )
+                        accumulated_context.setdefault(
+                            "citation_verification_failures", []
+                        ).append({
+                            "stage": stage_num,
+                            "reason": str(cve)[:200],
+                        })
+
+                # Register a stage checkpoint for rewind coordinator after the
+                # citations on this stage have been verified (if applicable).
+                try:
+                    from app.agents.verification import StageCheckpoint
+                    claims = parsed.get("claims") or parsed.get("grounded_claims") or []
+                    cites = (parsed.get("citations") or
+                             parsed.get("supporting_evidence") or [])
+                    rc = self._get_rewind_coordinator(hypothesis_id)
+                    rc.checkpoint(StageCheckpoint(
+                        stage_number=stage_num,
+                        stage_name=stage_name,
+                        model_used=model_type.value,
+                        accumulated_context=dict(accumulated_context),
+                        emitted_claims=[
+                            c.get("claim") if isinstance(c, dict) else str(c)
+                            for c in claims
+                        ],
+                        emitted_citations=cites if isinstance(cites, list) else [],
+                    ))
+                except Exception as ck_err:
+                    logger.debug(f"checkpoint register skipped: {ck_err}")
+
                 grounding_info = ""
                 if f"stage_{stage_num}_grounding_ratio" in accumulated_context:
                     ratio = accumulated_context[f"stage_{stage_num}_grounding_ratio"]
                     grounding_info = f" | grounding: {ratio:.0%}"
                 logger.info(f"  Stage {stage_num}/{len(stages)} ({stage_name}) completed in {duration:.1f}s via {model_type.value}{grounding_info}")
+
+                # KG write-back: deposit key stage facts into the user's
+                # private KG (and, for supporting_evidence, into the common KG
+                # if the origin doc permits). Every AI operation thus grows
+                # the graph, making subsequent queries cheaper (KG-first
+                # directive).
+                try:
+                    kg = await self._get_kg_first()
+                    facts_private: list[dict[str, Any]] = []
+                    # Claim-level facts — always private
+                    for label, key in (("hypothesis_mechanism", "mechanism"),
+                                       ("hypothesis_title", "title"),
+                                       ("hypothesis_description", "description")):
+                        val = parsed.get(key)
+                        if val:
+                            facts_private.append({
+                                "kind": label,
+                                "canonical_id": f"{hypothesis_id}:{label}",
+                                "payload": {
+                                    "hypothesis_id": hypothesis_id,
+                                    "stage": stage_num,
+                                    "text": str(val)[:1200],
+                                    "disease": disease,
+                                },
+                            })
+                    # Entities/pathways — add to private KG
+                    for ent in (parsed.get("target_entities") or [])[:20]:
+                        if ent:
+                            facts_private.append({
+                                "kind": "entity",
+                                "canonical_id": str(ent)[:80],
+                                "payload": {
+                                    "name": str(ent),
+                                    "context_hypothesis": hypothesis_id,
+                                    "disease": disease,
+                                },
+                            })
+                    for pw in (parsed.get("target_pathways") or [])[:10]:
+                        if pw:
+                            facts_private.append({
+                                "kind": "pathway",
+                                "canonical_id": str(pw)[:80],
+                                "payload": {
+                                    "name": str(pw),
+                                    "context_hypothesis": hypothesis_id,
+                                    "disease": disease,
+                                },
+                            })
+                    if facts_private:
+                        from app.services.kg_first_service import KGScope
+                        await kg.ingest_facts(
+                            user_id=self._user_id,
+                            scope=KGScope.PRIVATE,
+                            facts=facts_private,
+                        )
+                except Exception as kg_err:
+                    logger.debug(f"KG write-back skipped (non-fatal): {kg_err}")
 
                 # Record stage execution in learning memory
                 if self._discovery_run_id:
@@ -2120,6 +2423,95 @@ Include the translational roadmap from Stage 11."""
                 parts.append(f"\n--- Stage {i} Raw Output (truncated) ---\n{raw[:500]}")
 
         return "\n".join(parts) if parts else "No accumulated context yet."
+
+    async def _verify_stage_citations(
+        self,
+        *,
+        stage_num: int,
+        stage_name: str,
+        parsed: dict[str, Any],
+        accumulated_context: dict[str, Any],
+        hypothesis_id: str,
+    ) -> None:
+        """Verify every citation emitted by this stage through the 3-round
+        verifier (DOI resolution + title corroboration + semantic relevance).
+
+        Each failure is recorded with the rewind coordinator. The caller
+        decides whether to rewind (full pipeline replay) or degrade
+        (drop the bad claim) based on run policy and budget state.
+        """
+        citations = (parsed.get("citations")
+                     or parsed.get("supporting_evidence")
+                     or parsed.get("references")
+                     or [])
+        if not citations or not isinstance(citations, list):
+            return
+
+        # Normalize citation entries to {doi, pmid, title, claim}
+        normalized: list[dict[str, Any]] = []
+        for c in citations:
+            if not isinstance(c, dict):
+                continue
+            normalized.append({
+                "doi": c.get("doi") or c.get("DOI"),
+                "pmid": str(c.get("pmid") or c.get("PMID") or "") or None,
+                "title": c.get("title") or c.get("paper_title"),
+                "claim": c.get("claim") or c.get("finding") or c.get("summary"),
+            })
+
+        if not normalized:
+            return
+
+        verifier = await self._get_citation_verifier()
+        verdicts = await verifier.verify_batch(normalized)
+
+        # Summarize verdicts into the accumulated context for downstream stages
+        summary = {"verified": 0, "no_doi": 0, "fabricated": 0,
+                   "misattributed": 0, "irrelevant": 0, "unreachable": 0}
+        failures: list[dict[str, Any]] = []
+
+        for raw, v in zip(normalized, verdicts):
+            key = v.verdict.value
+            if key == "no_doi_declared":
+                summary["no_doi"] += 1
+            else:
+                summary[key] = summary.get(key, 0) + 1
+
+            if v.requires_rewind:
+                failures.append({
+                    "doi": v.raw_doi, "pmid": v.raw_pmid,
+                    "title": v.raw_title,
+                    "verdict": v.verdict.value,
+                    "reason": v.failure_reason,
+                    "claim": raw.get("claim"),
+                })
+
+        accumulated_context.setdefault("citation_verdicts", []).append({
+            "stage": stage_num,
+            "summary": summary,
+            "n_citations": len(normalized),
+            "failures": failures,
+        })
+
+        if failures:
+            rc = self._get_rewind_coordinator(hypothesis_id)
+            all_claims = [
+                (c.get("claim") if isinstance(c, dict) else str(c))
+                for c in citations if isinstance(c, dict)
+            ]
+            for f in failures:
+                rc.plan_rewind(
+                    stage_that_emitted=stage_num,
+                    stage_name=stage_name,
+                    failed_citation=next(v for raw, v in zip(normalized, verdicts)
+                                         if raw.get("claim") == f.get("claim")),
+                    invalidated_claim=f.get("claim") or "",
+                    all_claims_in_stage=all_claims,
+                )
+            logger.warning(
+                f"[citation_verify] stage={stage_num} verdicts={summary} "
+                f"failures={len(failures)}"
+            )
 
     def _parse_stage_output(self, response: str, stage_num: int) -> dict[str, Any]:
         """Parse the JSON output from a pipeline stage."""
