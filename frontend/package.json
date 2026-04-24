@@ -41,6 +41,7 @@
     "@types/turndown": "^5.0.6",
     "axios": "^1.6.7",
     "clsx": "^2.1.0",
+    "cmdk": "^1.1.1",
     "cytoscape": "^3.28.1",
     "cytoscape-cola": "^2.5.1",
     "date-fns": "^3.3.1",

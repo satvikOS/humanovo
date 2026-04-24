@@ -217,8 +217,7 @@ class DiscoveryResult(BaseModel):
     model_used: str = ""
     processing_time_ms: float = 0.0
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = {"arbitrary_types_allowed": True}
 
 
 class BaseLLMClient(ABC):

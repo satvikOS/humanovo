@@ -310,6 +310,8 @@ function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
     { label: 'Start Discovery', icon: FiZap, description: 'Launch AI discovery pipeline', category: 'Actions', action: () => { navigate('/agents?start=1'); onClose() } },
     { label: 'Global Search', icon: FiGlobe, description: 'Search across all data', category: 'Actions', action: () => { navigate('/search'); onClose() } },
     { label: 'Open Settings', icon: FiSettings, category: 'Actions', action: () => { navigate('/settings'); onClose() } },
+    { label: 'Settings · Usage & Billing', icon: FiSettings, category: 'Actions', description: 'Spend, cap, alerts', action: () => { navigate('/settings?tab=billing'); onClose() } },
+    { label: 'Settings · KG & Contributions', icon: FiSettings, category: 'Actions', description: 'Royalty accrual, upload scope', action: () => { navigate('/settings?tab=kg-contributions'); onClose() } },
     { label: 'Show keyboard shortcuts', icon: FiHelpCircle, description: 'Full cheatsheet (press ?)', category: 'Actions', shortcut: ['?'], action: () => { onClose(); window.dispatchEvent(new KeyboardEvent('keydown', { key: '?' })) } },
   ]
 
