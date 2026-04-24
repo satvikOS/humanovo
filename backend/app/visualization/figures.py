@@ -172,10 +172,23 @@ def generate_figure(spec: FigureSpec) -> RenderedFigure:
     try:
         ax = fig.add_subplot(111)
         renderer(ax, spec)
+
+        # Renderers may swap the axes (e.g. radar replaces the rectangular
+        # axes with a polar one). After the renderer runs, re-fetch whatever
+        # axes is currently attached to the figure so title/labels/annotations
+        # go on the correct (possibly new) axes object.
+        if fig.axes:
+            ax = fig.axes[-1]
+
+        # Polar axes reject set_xlabel/set_ylabel in matplotlib; detect and
+        # skip those calls gracefully. A polar axis has a _rlabel_position
+        # attribute whereas rectangular axes do not.
+        is_polar = getattr(ax, "name", None) == "polar"
+
         ax.set_title(spec.title, loc="left", fontweight="bold", pad=10)
-        if spec.x_label:
+        if spec.x_label and not is_polar:
             ax.set_xlabel(spec.x_label)
-        if spec.y_label:
+        if spec.y_label and not is_polar:
             ax.set_ylabel(spec.y_label)
         for annot in spec.annotations:
             x = annot.get("x")
@@ -477,7 +490,12 @@ def _render_roc(ax, spec: FigureSpec) -> None:
 
 
 def _render_radar(ax, spec: FigureSpec) -> None:
-    """data = {'axes': [...], 'series': {'name': [values], ...}}"""
+    """data = {'axes': [...], 'series': {'name': [values], ...}}
+
+    The default rectangular axes passed in is replaced by a polar one on the
+    same figure. We capture the figure reference BEFORE removing the old axes
+    because ax.remove() detaches ax from fig and nulls ax.figure.
+    """
     import numpy as np
     axes_lbl = spec.data.get("axes", [])
     series = spec.data.get("series", {})
@@ -486,9 +504,9 @@ def _render_radar(ax, spec: FigureSpec) -> None:
     n = len(axes_lbl)
     angles = np.linspace(0, 2 * np.pi, n, endpoint=False).tolist()
     angles += angles[:1]
-    # Remove the default rectangular axes and add polar
-    ax.remove()
+    # Capture the figure BEFORE removing — ax.remove() clears ax.figure.
     fig = ax.figure
+    ax.remove()
     ax = fig.add_subplot(111, polar=True)
     colors = humanovo_colors(len(series))
     for (name, values), color in zip(series.items(), colors):
