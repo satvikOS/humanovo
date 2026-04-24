@@ -1636,6 +1636,191 @@ class SequentialHypothesisPipeline:
             logger.debug(f"kg_first_sweep skipped (non-fatal): {e}")
             return "", 0
 
+    async def _integration_enrichment(
+        self,
+        *,
+        stage_name: str,
+        disease: str,
+        accumulated_context: dict[str, Any],
+    ) -> str:
+        """Inject structured biomedical data for the current stage.
+
+        Routing by stage:
+          seed       → disease dossier (OpenTargets + OpenAlex)
+          mechanism  → target dossier per entity (UniProt + AlphaFold +
+                       Reactome + OpenTargets + HPA)
+          ground     → variant effect prediction for any HGVS claims
+          evidence   → literature for the current claim set
+
+        All dossiers come from integrations.tool_dispatch which
+        parallel-fans-out to the 9 no-auth upstream APIs. All calls are
+        cached in integration_cache so re-runs and related stages reuse
+        the same evidence.
+        """
+        try:
+            from app.integrations.tool_dispatch import (
+                enrich_disease, enrich_target, enrich_variant,
+                literature_for_claim,
+            )
+        except Exception as e:
+            logger.debug(f"integrations package unavailable: {e}")
+            return ""
+
+        # Entities picked up by prior stages (e.g. Stage 2 expands these)
+        entities = list(accumulated_context.get("target_entities") or [])[:6]
+
+        if stage_name == "seed":
+            dossier = await enrich_disease(disease)
+            if not dossier or dossier.get("error"):
+                return ""
+            ot = dossier.get("opentargets_disease") or {}
+            top = dossier.get("top_associations") or []
+            recent = dossier.get("recent_high_cited_works") or []
+            lines = [
+                "\n\n## STRUCTURED DISEASE DOSSIER",
+                f"OpenTargets EFO: {ot.get('id')} — {ot.get('name')}",
+                f"Therapeutic areas: "
+                f"{', '.join(a.get('name','') for a in (ot.get('therapeutic_areas') or [])[:3])}",
+                "",
+                "Top associated targets (OpenTargets):",
+            ]
+            for a in top[:10]:
+                t = a.get("target") or {}
+                lines.append(
+                    f"  - {t.get('approvedSymbol', '?')} "
+                    f"({t.get('id', '?')}) score={a.get('score'):.2f}"
+                    if isinstance(a.get("score"), (int, float))
+                    else f"  - {t.get('approvedSymbol', '?')} ({t.get('id', '?')})"
+                )
+            if recent:
+                lines.append("")
+                lines.append("Recent high-cited literature (OpenAlex, 2023+):")
+                for r in recent[:5]:
+                    lines.append(
+                        f"  - [{r.get('cited_by_count',0)}] "
+                        f"{(r.get('title') or '')[:140]}"
+                        f" ({r.get('doi') or r.get('id','')})"
+                    )
+            return "\n".join(lines)
+
+        if stage_name == "mechanism" and entities:
+            import asyncio as _asyncio
+            results = await _asyncio.gather(
+                *[enrich_target(e) for e in entities[:4]],
+                return_exceptions=True,
+            )
+            parts = ["\n\n## STRUCTURED TARGET DOSSIERS"]
+            for r in results:
+                if isinstance(r, Exception) or not r:
+                    continue
+                sym = r.get("symbol")
+                up = r.get("uniprot") or {}
+                af = r.get("alphafold") or {}
+                pws = r.get("reactome_pathways") or []
+                ot_target = r.get("opentargets_target") or {}
+                known_drugs = r.get("opentargets_known_drugs") or []
+                hpa = r.get("human_protein_atlas") or {}
+                parts.append(f"\n### Target: {sym}")
+                if up.get("accession"):
+                    parts.append(
+                        f"UniProt {up.get('accession')} — {up.get('name', '')} "
+                        f"| length {up.get('sequence_length', '?')} aa"
+                    )
+                if up.get("function_summary"):
+                    parts.append(
+                        f"Function: {(up.get('function_summary') or '')[:400]}"
+                    )
+                if af.get("entry_id"):
+                    parts.append(
+                        f"AlphaFold: {af.get('entry_id')} "
+                        f"(pLDDT mean≈{af.get('global_metric_value','?')})"
+                    )
+                if pws:
+                    parts.append(
+                        "Reactome pathways: "
+                        + ", ".join(p.get("name", "")[:50] for p in pws[:5])
+                    )
+                if ot_target.get("tractability"):
+                    tracts = [
+                        f"{t.get('modality','?')}:{t.get('label','?')}"
+                        for t in (ot_target.get("tractability") or [])[:6]
+                    ]
+                    parts.append("Tractability: " + "; ".join(tracts))
+                if known_drugs:
+                    parts.append("Known drugs (top 5):")
+                    for d in known_drugs[:5]:
+                        drug = d.get("drug") or {}
+                        parts.append(
+                            f"  - {drug.get('name','?')} "
+                            f"({drug.get('maximumClinicalTrialPhase','?')}) "
+                            f"via {(d.get('mechanism_of_action') or '')[:80]}"
+                        )
+                if hpa.get("subcellular_main_location"):
+                    parts.append(
+                        f"HPA subcellular: {hpa.get('subcellular_main_location')}"
+                    )
+                if hpa.get("rna_tissue_specificity"):
+                    parts.append(
+                        f"HPA tissue specificity: {hpa.get('rna_tissue_specificity')}"
+                    )
+            return "\n".join(parts) if len(parts) > 1 else ""
+
+        if stage_name == "ground":
+            # Scan accumulated text for HGVS-like patterns and enrich.
+            import re as _re
+            hay = " ".join(str(v) for v in accumulated_context.values())
+            hgvs_pat = _re.compile(
+                r"[A-Z0-9._:]+:(?:c|g|p|n|m|r)\.[0-9A-Za-z*>_+-]+"
+            )
+            hgvs = list({m.group(0) for m in hgvs_pat.finditer(hay)})[:3]
+            if not hgvs:
+                return ""
+            import asyncio as _asyncio
+            results = await _asyncio.gather(
+                *[enrich_variant(v) for v in hgvs],
+                return_exceptions=True,
+            )
+            parts = ["\n\n## STRUCTURED VARIANT EFFECT PREDICTIONS (Ensembl VEP)"]
+            for v, r in zip(hgvs, results):
+                if isinstance(r, Exception) or not r:
+                    continue
+                for entry in (r.get("vep") or [])[:1]:
+                    parts.append(
+                        f"\n{v}: {entry.get('most_severe_consequence', '?')}"
+                    )
+                    for tc in (entry.get("transcript_consequences") or [])[:3]:
+                        parts.append(
+                            f"  - {tc.get('gene_symbol','?')} "
+                            f"{tc.get('consequence_terms',[])} "
+                            f"impact={tc.get('impact','?')} "
+                            f"SIFT={tc.get('sift_prediction','?')} "
+                            f"PolyPhen={tc.get('polyphen_prediction','?')} "
+                            f"CADD={tc.get('cadd_phred','?')}"
+                        )
+            return "\n".join(parts) if len(parts) > 1 else ""
+
+        if stage_name == "evidence":
+            title = accumulated_context.get("title") or f"{disease} {stage_name}"
+            dossier = await literature_for_claim(str(title)[:200], max_hits=6)
+            if not dossier:
+                return ""
+            parts = ["\n\n## STRUCTURED LITERATURE (Europe PMC + OpenAlex)"]
+            for hit in (dossier.get("europepmc") or [])[:4]:
+                parts.append(
+                    f"  - [EPMC pmid={hit.get('pmid','?')}] "
+                    f"{(hit.get('title') or '')[:140]} "
+                    f"({hit.get('journal','?')} {hit.get('pub_year','')})"
+                )
+            for hit in (dossier.get("openalex") or [])[:4]:
+                parts.append(
+                    f"  - [OA {hit.get('cited_by_count',0)} cites] "
+                    f"{(hit.get('title') or '')[:140]} "
+                    f"({hit.get('doi') or ''})"
+                )
+            return "\n".join(parts) if len(parts) > 1 else ""
+
+        return ""
+
     async def _get_rag_service(self):
         """Lazy-load RAG service for vector store retrieval."""
         if self._rag_service is None:
@@ -1820,6 +2005,28 @@ Your goal is to STRENGTHEN this hypothesis — address its weaknesses, find stro
                     # Consume the instruction — next retry will produce a
                     # fresh one only if the new seed is also rejected.
                     pending_diversity_instruction = ""
+
+                # === EXTERNAL-INTEGRATION ENRICHMENT ===
+                # Inject structured biomedical data (UniProt, AlphaFold,
+                # Reactome, OpenTargets, Ensembl, HPA, ChEMBL, Europe PMC,
+                # OpenAlex) into stages that benefit from it:
+                #   seed      → disease dossier (EFO + top targets)
+                #   mechanism → target dossier per entity
+                #   ground    → variant dossier for any HGVS claim
+                # Integration data is cached and degrades gracefully when
+                # the upstream is unreachable — see integrations/base.py.
+                try:
+                    enrich_block = await self._integration_enrichment(
+                        stage_name=stage_name,
+                        disease=disease,
+                        accumulated_context=accumulated_context,
+                    )
+                    if enrich_block:
+                        user_prompt += enrich_block
+                except Exception as ie:
+                    logger.debug(
+                        f"integration enrichment skipped stage={stage_num}: {ie}"
+                    )
 
                 # === KG-FIRST SWEEP ===
                 # Query user's private KG and the common KG BEFORE hitting the

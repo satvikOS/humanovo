@@ -296,3 +296,77 @@ async def seed_knowledge_graph(
             f"{result.get('neo4j_edges_mirrored', 0)} edges."
         ),
     )
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Common KG seeder (new) — from the 9 no-auth biomedical integrations.
+#
+# This seeds kg_nodes (scope=public_domain) rather than the legacy
+# knowledge_graph_nodes table. The KG-first sweep in the discovery
+# orchestrator queries kg_nodes first; seeding kg_nodes is what lifts
+# the hit rate on day one.
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class SeedCommonKGRequest(BaseModel):
+    uniprot: bool = Field(default=True, description="Seed UniProt canonical human targets")
+    reactome: bool = Field(default=True, description="Seed Reactome top-level human pathways")
+    opentargets: bool = Field(default=True, description="Seed OpenTargets disease-target associations")
+    uniprot_limit: int = Field(default=150, ge=1, le=500)
+    reactome_max: int = Field(default=120, ge=1, le=500)
+    opentargets_max_diseases: int = Field(default=30, ge=1, le=100)
+    opentargets_targets_per_disease: int = Field(default=15, ge=1, le=50)
+
+
+class SeedCommonKGResponse(BaseModel):
+    ok: bool
+    environment: str
+    inserted_uniprot: int
+    inserted_reactome: int
+    inserted_opentargets: int
+    total_inserted: int
+    message: str
+
+
+@router.post("/seed-common-kg", response_model=SeedCommonKGResponse)
+async def seed_common_kg(
+    payload: SeedCommonKGRequest,
+) -> SeedCommonKGResponse:
+    """Seed the common Knowledge Graph (kg_nodes / kg_edges) from the
+    9 no-auth biomedical integrations: UniProt, Reactome, OpenTargets.
+
+    This is what makes the KG-first sweep useful from query 1. Safe to
+    re-run — the underlying KGFirstService.ingest_facts dedupes by
+    content_hash. Gated out of production (use a scheduled job there).
+    """
+    if settings.ENVIRONMENT.lower() == "production":
+        raise HTTPException(
+            status_code=403,
+            detail="seed-common-kg refuses to run in production. Use a scheduled job.",
+        )
+
+    from app.integrations.seed_kg import run_seed
+
+    counts = await run_seed(
+        reactome=payload.reactome,
+        uniprot=payload.uniprot,
+        opentargets=payload.opentargets,
+        uniprot_limit=payload.uniprot_limit,
+        reactome_max=payload.reactome_max,
+        opentargets_max_diseases=payload.opentargets_max_diseases,
+        opentargets_targets_per_disease=payload.opentargets_targets_per_disease,
+    )
+    total = sum(counts.values())
+    return SeedCommonKGResponse(
+        ok=True,
+        environment=settings.ENVIRONMENT,
+        inserted_uniprot=counts["uniprot"],
+        inserted_reactome=counts["reactome"],
+        inserted_opentargets=counts["opentargets"],
+        total_inserted=total,
+        message=(
+            f"Seeded {total} new kg_nodes — UniProt {counts['uniprot']}, "
+            f"Reactome {counts['reactome']}, "
+            f"OpenTargets {counts['opentargets']}"
+        ),
+    )
