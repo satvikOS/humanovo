@@ -774,6 +774,133 @@ export const api = {
     return resp.data
   },
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // User budget + KG permissions + royalties
+  //   /v1/user/{uid}/budget              — monthly cap + status
+  //   /v1/user/{uid}/budget/usage        — last N days usage breakdown
+  //   /v1/kg/documents/{did}/permission  — private | common toggle
+  //   /v1/kg/user/{uid}/royalties        — royalty summary
+  //   /v1/kg/user/{uid}/kg/overview      — node counts + coverage
+  // ═══════════════════════════════════════════════════════════════════════
+
+  async getUserBudget(userId: string): Promise<{
+    user_id: string
+    monthly_budget_usd: number
+    current_spend_usd: number
+    remaining_usd: number
+    percent_used: number
+    status: 'ok' | 'warning' | 'blocked'
+    hard_limit: boolean
+    alert_threshold_pct: number
+    current_month_starts: string
+    notification_email: string | null
+    message: string | null
+  }> {
+    const { data } = await apiClient.get(`/user/${encodeURIComponent(userId)}/budget`)
+    return data
+  },
+
+  async updateUserBudget(
+    userId: string,
+    body: {
+      monthly_budget_cents: number
+      alert_threshold_pct?: number
+      hard_limit?: boolean
+      notification_email?: string | null
+    },
+  ): Promise<{
+    user_id: string
+    monthly_budget_usd: number
+    current_spend_usd: number
+    remaining_usd: number
+    percent_used: number
+    status: 'ok' | 'warning' | 'blocked'
+    hard_limit: boolean
+    alert_threshold_pct: number
+    message: string | null
+  }> {
+    const { data } = await apiClient.put(
+      `/user/${encodeURIComponent(userId)}/budget`,
+      body,
+    )
+    return data
+  },
+
+  async getUserBudgetUsage(userId: string, days = 30): Promise<{
+    period_start: string
+    period_end: string
+    total_spend_usd: number
+    by_run_kind: Array<{ run_kind: string; runs: number }>
+    by_model: Array<{ model: string; cost_usd: number; input_tokens: number; output_tokens: number; n_calls: number }>
+    by_day: Array<{ day: string; cost_cents: number; n_calls: number }>
+    total_runs: number
+    total_hypotheses_generated: number
+    total_papers_generated: number
+  }> {
+    const { data } = await apiClient.get(
+      `/user/${encodeURIComponent(userId)}/budget/usage`,
+      { params: { days } },
+    )
+    return data
+  },
+
+  async getDocumentPermission(userId: string, documentId: string): Promise<{
+    document_id: string
+    user_id: string
+    permission: 'private' | 'common'
+    note: string | null
+  }> {
+    const { data } = await apiClient.get(
+      `/kg/documents/${encodeURIComponent(documentId)}/permission`,
+      { params: { user_id: userId } },
+    )
+    return data
+  },
+
+  async setDocumentPermission(
+    userId: string,
+    documentId: string,
+    permission: 'private' | 'common',
+  ): Promise<{
+    document_id: string
+    user_id: string
+    permission: 'private' | 'common'
+    note: string | null
+  }> {
+    const { data } = await apiClient.put(
+      `/kg/documents/${encodeURIComponent(documentId)}/permission`,
+      { user_id: userId, permission },
+    )
+    return data
+  },
+
+  async getUserRoyalties(userId: string, days = 30): Promise<{
+    user_id: string
+    window_days: number
+    by_kind: Array<{ event_kind: string; n: number; weight: number }>
+    total_weight: number
+    note: string | null
+  }> {
+    const { data } = await apiClient.get(
+      `/kg/user/${encodeURIComponent(userId)}/royalties`,
+      { params: { days } },
+    )
+    return data
+  },
+
+  async getUserKGOverview(userId: string): Promise<{
+    user_id: string
+    private_nodes: number
+    private_edges: number
+    common_contributions: number
+    royalty_weight_all_time: number
+  }> {
+    const { data } = await apiClient.get(
+      `/kg/user/${encodeURIComponent(userId)}/kg/overview`,
+    )
+    return data
+  },
+
   async getProject(id: string): Promise<Project> {
     const { data } = await apiClient.get(`/projects/${id}`)
     return data
