@@ -798,8 +798,11 @@ class DiseaseDiscoveryService(LoggerMixin):
             except Exception as e:
                 self.logger.warning("RAG query failed", error=str(e))
 
-        # Query Brave Search for recent healthcare data
+        # Query Brave Search for recent healthcare data.
+        # Gated by settings.BRAVE_SEARCH_ENABLED (off by default per directive).
         try:
+            if not getattr(settings, "BRAVE_SEARCH_ENABLED", False):
+                raise RuntimeError("Brave Search disabled via feature flag")
             from app.services.brave_search_service import search_healthcare_data
 
             brave_results = await search_healthcare_data(

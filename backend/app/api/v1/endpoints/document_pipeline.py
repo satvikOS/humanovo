@@ -322,6 +322,84 @@ async def generate_hypothesis_paper_html(
 # ============================================================================
 
 
+class StrictPaperRequest(BaseModel):
+    """Request body for strict journal-grade paper generation.
+
+    Returns a StructuredPaper JSON with:
+      - strict section numbering per chosen journal style,
+      - matplotlib/seaborn scientific figures (NOT plotly) per section,
+      - Mermaid diagrams (flowchart, sequence, gantt) per section,
+      - re-verified citations via 3-round verifier,
+      - per-section validation (word count, required figures, etc.).
+    """
+    disease: str = Field(..., description="Disease or condition name")
+    discovery_type: str = Field(default="treatment")
+    journal_style: str = Field(
+        default="humanovo",
+        description=(
+            "Target journal style: humanovo (default, most rigorous), nature, "
+            "nejm, lancet, jama, cell, plos_one, science"
+        ),
+    )
+    # If hypotheses are supplied inline, use them; otherwise pull from the
+    # most recent orchestrator run (consistent with /discovery/pdf).
+    hypotheses: list[dict[str, Any]] | None = Field(default=None)
+    external_factors: list[dict[str, Any]] | None = Field(default=None)
+
+
+@router.post("/discovery/strict-paper")
+async def generate_discovery_strict_paper(request: StrictPaperRequest):
+    """Generate a journal-grade research paper with strict formatting,
+    scientific figures (matplotlib/seaborn), Mermaid diagrams, and
+    re-verified citations.
+
+    Returns the StructuredPaper as JSON for the doc-viewer-first workflow.
+    The caller can export to PDF via the existing /export endpoint.
+    """
+    try:
+        from app.services.paper_generation_service import get_paper_service
+        svc = get_paper_service()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Service unavailable: {e}")
+
+    hypotheses = request.hypotheses
+    if hypotheses is None:
+        # Pull from orchestrator current-run state when not provided inline
+        try:
+            from app.agents.discovery_orchestrator import get_orchestrator
+            orch = get_orchestrator()
+            state = orch.get_state() if hasattr(orch, "get_state") else None
+            if state:
+                hypotheses = [h.to_dict() if hasattr(h, "to_dict") else h
+                              for h in getattr(state, "hypotheses", [])]
+        except Exception as e:
+            logger.warning(f"Failed to pull hypotheses from orchestrator: {e}")
+            hypotheses = []
+    if not hypotheses:
+        raise HTTPException(
+            status_code=400,
+            detail="No hypotheses available. Run discovery first or supply "
+                   "hypotheses in the request body.",
+        )
+
+    stats = {"total_agents": 12, "models_active": ["claude", "gpt", "cohere"]}
+
+    try:
+        structured = await svc.generate_paper_strict(
+            disease=request.disease,
+            discovery_type=request.discovery_type,
+            hypotheses=hypotheses,
+            stats=stats,
+            external_factors=request.external_factors or [],
+            journal_style=request.journal_style,
+        )
+    except Exception as e:
+        logger.exception("strict paper generation failed")
+        raise HTTPException(status_code=500, detail=f"Generation failed: {e}")
+
+    return structured
+
+
 @router.post("/discovery/pdf")
 async def generate_discovery_paper(request: GeneratePaperRequest):
     """

@@ -136,6 +136,11 @@ class Settings(BaseSettings):
     GOOGLE_API_KEY: SecretStr | None = None
     GOOGLE_CSE_ID: str | None = None
     BRAVE_API_KEY: SecretStr | None = None
+    # Per product directive ("remove for now"), Brave Search is gated behind
+    # a feature flag, OFF by default. Its 2000 req/mo limit makes it
+    # expensive compared to free alternatives (OpenAlex, Europe PMC,
+    # Semantic Scholar). Set BRAVE_SEARCH_ENABLED=true to re-enable.
+    BRAVE_SEARCH_ENABLED: bool = False
 
     # PubMed / Data Sources
     PUBMED_EMAIL: str = "humanovo@example.com"
