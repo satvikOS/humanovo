@@ -6,6 +6,7 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { persistGet, safeNum, safePct, safeDollars } from '../utils/persistence'
 import { apiClient } from '../services'
+import ProjectKG3D from '../components/ProjectKG3D'
 
 interface SavedResearchPaper {
   id: string
@@ -78,7 +79,8 @@ interface MethodCategory {
   methods: string[]
 }
 
-const TABS = ['Overview', 'Discovery Runs', 'Hypotheses', 'Evidence', 'Costs', 'Settings'] as const
+const TABS = ['Overview', 'Discovery Runs', 'Hypotheses', 'Evidence',
+              'Knowledge Graph', 'Costs', 'Settings'] as const
 type Tab = typeof TABS[number]
 
 export default function ProjectWorkspace() {
@@ -315,6 +317,24 @@ export default function ProjectWorkspace() {
               {synthRuns.length === 0 && papers.length === 0 && <p className="p-4 text-sm text-center" style={{ color: 'var(--color-text-muted)' }}>No evidence or papers yet</p>}
             </div>
           </div>
+        </div>
+      )}
+
+      {tab === 'Knowledge Graph' && projectId && (
+        <div className="space-y-3">
+          <div className="glass-card p-4">
+            <h2 className="text-sm font-medium mb-1" style={{ color: 'var(--color-text)' }}>
+              Project Knowledge Graph
+            </h2>
+            <p className="text-xs text-[var(--color-text-muted)]">
+              Interactive 3D view of every node and relation touched by this
+              project's discovery runs — hypothesis titles, mechanisms, target
+              entities, pathways, and the public-domain ancestors they connect
+              to. Click any node to inspect its payload; drag to re-position;
+              scroll to zoom.
+            </p>
+          </div>
+          <ProjectKG3D projectId={projectId} height={640} />
         </div>
       )}
 

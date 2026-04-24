@@ -1526,6 +1526,7 @@ class SequentialHypothesisPipeline:
         discovery_run_id: str = None,
         *,
         user_id: str | None = None,
+        project_id: str | None = None,
         budget_enforcer=None,
         share_to_common_kg: bool = False,
     ):
@@ -1537,6 +1538,9 @@ class SequentialHypothesisPipeline:
         self._learning_memory = None
         # User identity for KG scoping, royalties, PHI/PII context
         self._user_id = user_id
+        # Project identity — facts emitted by this run are tagged so the
+        # 3D project-KG viewer can render a focused subgraph.
+        self._project_id = project_id
         # Per-run budget enforcer (RunBudgetEnforcer or None)
         self._budget = budget_enforcer
         # Opt-in common KG publishing at FINALIZE stage. When True and
@@ -2436,12 +2440,37 @@ Your goal is to STRENGTHEN this hypothesis — address its weaknesses, find stro
                                     "disease": disease,
                                 },
                             })
+                    # Build edges connecting hypothesis-level facts to
+                    # their entity / pathway facts so the 3D project-KG
+                    # viewer renders an actual graph, not an isolated
+                    # node cloud.
+                    edges_private: list[dict[str, Any]] = []
+                    hyp_title_id = f"{hypothesis_id}:hypothesis_title"
+                    for ent in (parsed.get("target_entities") or [])[:20]:
+                        if ent:
+                            edges_private.append({
+                                "from_canonical_id": hyp_title_id,
+                                "to_canonical_id": str(ent)[:80],
+                                "relation": "targets",
+                                "confidence": float(parsed.get("confidence") or 0.5),
+                            })
+                    for pw in (parsed.get("target_pathways") or [])[:10]:
+                        if pw:
+                            edges_private.append({
+                                "from_canonical_id": hyp_title_id,
+                                "to_canonical_id": str(pw)[:80],
+                                "relation": "acts_via",
+                                "confidence": float(parsed.get("confidence") or 0.5),
+                            })
+
                     if facts_private:
                         from app.services.kg_first_service import KGScope
                         await kg.ingest_facts(
                             user_id=self._user_id,
                             scope=KGScope.PRIVATE,
                             facts=facts_private,
+                            project_id=self._project_id,
+                            edges=edges_private or None,
                         )
 
                     # Common KG write-back — only at FINALIZE stage and only
@@ -2487,6 +2516,7 @@ Your goal is to STRENGTHEN this hypothesis — address its weaknesses, find stro
                                     user_id=self._user_id,
                                     scope=KGScope.COMMON,
                                     facts=facts_common,
+                                    project_id=self._project_id,
                                 )
                                 logger.info(
                                     f"[kg] published {len(facts_common)} "
