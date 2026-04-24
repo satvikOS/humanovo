@@ -74,8 +74,7 @@ class GroundingResult(BaseModel):
     sources: list[dict[str, Any]] = []
     verdict: str = "ungrounded"               # grounded | weakly_grounded | ungrounded
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = {"arbitrary_types_allowed": True}
 
 
 class GroundingBatchResult(BaseModel):

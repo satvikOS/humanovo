@@ -901,6 +901,37 @@ export const api = {
     return data
   },
 
+  async getProjectKG(
+    projectId: string,
+    opts?: { userId?: string; maxNodes?: number; includeAncestors?: boolean },
+  ): Promise<{
+    project_id: string
+    nodes: Array<{
+      id: string; name: string; kind: string; scope: string;
+      group: string; color: string; shape: string; size: number;
+      canonical_id?: string; payload?: Record<string, any>;
+    }>
+    links: Array<{
+      source: string; target: string; relation: string;
+      confidence: number; color: string; scope: string;
+    }>
+    stats: {
+      nodes: number; edges: number;
+      project_private: number; project_common: number; public_domain: number;
+    }
+  }> {
+    const params: Record<string, any> = {}
+    if (opts?.userId) params.user_id = opts.userId
+    if (opts?.maxNodes) params.max_nodes = opts.maxNodes
+    if (opts?.includeAncestors !== undefined)
+      params.include_ancestors = opts.includeAncestors
+    const { data } = await apiClient.get(
+      `/projects/${encodeURIComponent(projectId)}/kg`,
+      { params },
+    )
+    return data
+  },
+
   async getProject(id: string): Promise<Project> {
     const { data } = await apiClient.get(`/projects/${id}`)
     return data

@@ -81,13 +81,12 @@ class AgentResult(BaseModel):
 class Tool(BaseModel):
     """Definition of a tool available to an agent."""
 
+    model_config = {"arbitrary_types_allowed": True}
+
     name: str
     description: str
     parameters: dict[str, Any] = Field(default_factory=dict)
     handler: Callable | None = Field(default=None, exclude=True)
-
-    class Config:
-        arbitrary_types_allowed = True
 
 
 class BaseAgent(ABC, LoggerMixin):

@@ -55,6 +55,40 @@ export interface HypothesisDocData {
   model_used?: string
   created_at?: string
   translational_roadmap?: TranslationalRoadmapDoc
+  // Extended pipeline signals — rendered in the short-communication layout
+  dimension_scores?: Record<string, number | { score?: number; label?: string }>
+  grounding_ratio?: number
+  novelty_score?: number
+  feasibility_score?: number
+  target_entities?: string[]
+  target_pathways?: string[]
+  causal_chain?: Array<string | { event?: string; level?: string; kind?: string; intervention?: any }>
+  counter_arguments?: Array<{ argument?: string; severity?: string; rebuttal?: string }>
+  evidence_summary?: Array<string | { finding?: string; pmid?: string; doi?: string; journal?: string }>
+  key_citations?: Array<string | { pmid?: string; doi?: string; title?: string; authors?: string; year?: string | number }>
+  risks?: string[]
+  validation_steps?: string[]
+  // Output of new Phase A additions
+  evoe?: {
+    evoe_usd?: number
+    p_true?: number
+    impact_if_true_usd?: number
+    cost_to_test_usd?: number
+    modality?: string
+    verified_citation_ratio?: number
+  }
+  protocol?: {
+    modality?: string
+    sample_size_per_arm?: number
+    duration_weeks_estimate?: number
+    reagents_estimated_cost_usd?: number
+    primary_endpoint?: { name?: string; metric?: string; effect_target?: number; timepoint?: string }
+    go_no_go_criteria?: Array<{ criterion?: string; decision_if_met?: string; decision_if_not?: string }>
+  }
+  // Optional visual data URLs from the strict paper renderer
+  figures?: Array<{ figure_type?: string; title?: string; caption?: string; png_b64?: string; svg?: string; section?: string }>
+  mermaid_diagrams?: Array<{ title?: string; source?: string; png_b64?: string; section?: string }>
+  citation_verdicts?: Array<{ stage: number; summary: Record<string, number>; n_citations: number }>
 }
 
 interface HypothesisDocViewerProps {
@@ -116,688 +150,466 @@ function textToHtml(text: string): string {
 /* ------------------------------------------------------------------ */
 
 function buildDocumentHtml(h: HypothesisDocData): string {
+  /* =================================================================
+   * SHORT-COMMUNICATION LAYOUT — matches Nature Communications /
+   * Cell Reports / eLife short-communication style.
+   *
+   * Layout budget: 3–5 printed pages. Tight serif body, clear sans-
+   * serif headers, single-column, inline figures, reference list
+   * rendered in the journal-standard numbered-Vancouver style.
+   * ================================================================= */
+
   const date = formatDocDate(h.created_at)
   const tier = confidenceTier(h.confidence)
-  const confPct = (h.confidence * 100).toFixed(1)
+  const confPct = (h.confidence * 100).toFixed(0)
+  const disease = h.disease || '—'
+  const dtype = (h.discovery_type || '').replace(/_/g, ' ') || 'Discovery'
+  const tags = h.tags || []
 
+  // Dimension-score extraction (accepts {score} or number)
+  const dimVal = (k: string): number | undefined => {
+    const v = h.dimension_scores?.[k as any]
+    if (typeof v === 'number') return v
+    if (v && typeof v === 'object' && typeof (v as any).score === 'number')
+      return (v as any).score
+    return undefined
+  }
+  const dims: Array<[string, number]> = [
+    ['Plausibility',  dimVal('biological_plausibility') ?? 0],
+    ['Evidence',      dimVal('evidence_strength')       ?? 0],
+    ['Novelty',       dimVal('novelty')                 ?? h.novelty_score ?? 0],
+    ['Feasibility',   dimVal('feasibility')             ?? h.feasibility_score ?? 0],
+    ['Safety',        dimVal('safety')                  ?? 0],
+    ['Clinical',      dimVal('clinical_relevance')      ?? 0],
+    ['Reproducible',  dimVal('reproducibility')         ?? 0],
+  ]
+  const dimsFilled = dims.filter(([, v]) => v > 0)
+
+  // Citations (numbered, ordered by first-appearance)
+  const citations: Array<{ n: number; html: string }> = []
+  const refMap = new Map<string, number>()
+  const citeKey = (c: any) => {
+    return (c?.doi || c?.pmid || c?.title || JSON.stringify(c || {})).toString()
+      .slice(0, 160)
+  }
+  const refBracket = (c: any): string => {
+    const k = citeKey(c)
+    if (refMap.has(k)) return `[${refMap.get(k)}]`
+    const n = refMap.size + 1
+    refMap.set(k, n)
+    const fallback = typeof c === 'string' ? c : (c?.title || c?.finding || 'Reference')
+    const author = c?.authors || c?.author || ''
+    const year = c?.year || c?.pub_year || ''
+    const journal = c?.journal || c?.source || ''
+    const doi = c?.doi ? ` https://doi.org/${c.doi}` : ''
+    const pmid = c?.pmid ? ` PMID: ${c.pmid}` : ''
+    citations.push({
+      n,
+      html: `${esc(String(author))}${author ? ', ' : ''}${esc(String(year))}. ${esc(String(fallback))}. <em>${esc(String(journal))}</em>.${esc(doi)}${esc(pmid)}`,
+    })
+    return `[${n}]`
+  }
+
+  // Register citations upfront so bracketed refs appear in-text too
+  for (const e of (h.evidence_summary || [])) {
+    if (typeof e !== 'string') refBracket(e)
+  }
+  for (const c of (h.key_citations || [])) refBracket(c)
+
+  // Structured abstract — 120-180 words across 4 labelled sentences
+  const summaryLines: string[] = []
+  summaryLines.push(`<strong>Background.</strong> We hypothesise a mechanism for <em>${esc(dtype)}</em> of <strong>${esc(disease)}</strong>.`)
+  if (h.description) summaryLines.push(`<strong>Hypothesis.</strong> ${esc(h.description.slice(0, 260))}.`)
+  if (h.mechanism)   summaryLines.push(`<strong>Mechanism.</strong> ${esc(h.mechanism.slice(0, 260))}.`)
+  const protoModality = h.protocol?.modality || h.evoe?.modality
+  if (protoModality) summaryLines.push(`<strong>Validation.</strong> We propose a ${esc(protoModality.replace(/_/g, ' '))} protocol with n=${h.protocol?.sample_size_per_arm || '—'}/arm over ${h.protocol?.duration_weeks_estimate || '—'} weeks.`)
+
+  // EVOE / confidence badges
+  const evoeUsd = h.evoe?.evoe_usd
+  const pTrue = h.evoe?.p_true
+  const verifiedRatio = h.evoe?.verified_citation_ratio
+
+  // Radar SVG (7-axis; polygon over the dimension scores)
+  const radarSvg = (() => {
+    if (dimsFilled.length < 3) return ''
+    const cx = 130, cy = 120, r = 90
+    const n = dimsFilled.length
+    const angles = dimsFilled.map((_, i) => (Math.PI * 2 * i) / n - Math.PI / 2)
+    const rings = [0.25, 0.5, 0.75, 1.0]
+    const ringsSvg = rings.map(rr => {
+      const pts = angles.map(a =>
+        `${(cx + r * rr * Math.cos(a)).toFixed(1)},${(cy + r * rr * Math.sin(a)).toFixed(1)}`
+      ).join(' ')
+      return `<polygon points="${pts}" fill="none" stroke="#d1d5db" stroke-width="0.6"/>`
+    }).join('')
+    const spokes = angles.map(a => {
+      const x = (cx + r * Math.cos(a)).toFixed(1)
+      const y = (cy + r * Math.sin(a)).toFixed(1)
+      return `<line x1="${cx}" y1="${cy}" x2="${x}" y2="${y}" stroke="#e5e7eb" stroke-width="0.5"/>`
+    }).join('')
+    const shape = dimsFilled.map(([, v], i) => {
+      const a = angles[i]
+      return `${(cx + r * Math.min(1, v) * Math.cos(a)).toFixed(1)},${(cy + r * Math.min(1, v) * Math.sin(a)).toFixed(1)}`
+    }).join(' ')
+    const labels = dimsFilled.map(([lab], i) => {
+      const a = angles[i]
+      const lr = r + 14
+      const x = (cx + lr * Math.cos(a)).toFixed(1)
+      const y = (cy + lr * Math.sin(a) + 3).toFixed(1)
+      return `<text x="${x}" y="${y}" text-anchor="middle" font-size="8" fill="#4b5563">${esc(lab)}</text>`
+    }).join('')
+    return `<svg viewBox="0 0 260 240" width="260" height="240" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Multi-dimensional confidence radar">
+      ${ringsSvg}${spokes}
+      <polygon points="${shape}" fill="#0369a144" stroke="#0369a1" stroke-width="1.4"/>
+      ${labels}
+    </svg>`
+  })()
+
+  // Mechanism flow diagram (SVG) — built from causal_chain or mechanism sentences
+  const mechanismFlow = (() => {
+    const chain: string[] = []
+    if (Array.isArray(h.causal_chain) && h.causal_chain.length) {
+      for (const c of h.causal_chain.slice(0, 6)) {
+        if (typeof c === 'string') chain.push(c)
+        else chain.push((c as any)?.event || (c as any)?.description || '')
+      }
+    } else if (h.mechanism) {
+      // Split the mechanism prose on strong separators
+      const parts = h.mechanism
+        .split(/→|->|\s*\b(?:then|leading to|resulting in)\b\s*|\.\s+/gi)
+        .map(s => s.trim())
+        .filter(Boolean)
+      for (const p of parts.slice(0, 6)) chain.push(p)
+    }
+    if (chain.length === 0) return ''
+
+    const nodeW = 150, nodeH = 52, gap = 16
+    const rows = chain.length
+    const height = rows * (nodeH + gap)
+    const width = nodeW + 40
+
+    const nodesSvg = chain.map((txt, i) => {
+      const y = i * (nodeH + gap) + 6
+      const short = esc(txt.slice(0, 64)) + (txt.length > 64 ? '…' : '')
+      return `
+        <rect x="20" y="${y}" width="${nodeW}" height="${nodeH}" rx="8" ry="8"
+              fill="#f1f5f9" stroke="#0f766e" stroke-width="1"/>
+        <text x="${20 + nodeW / 2}" y="${y + nodeH / 2 + 4}" text-anchor="middle"
+              font-size="10" fill="#0f172a">
+          <tspan x="${20 + nodeW / 2}" dy="-2">${short.slice(0, 40)}</tspan>
+          <tspan x="${20 + nodeW / 2}" dy="12">${short.slice(40, 80)}</tspan>
+        </text>
+        ${i < rows - 1 ? `<path d="M${20 + nodeW / 2} ${y + nodeH + 2} L${20 + nodeW / 2} ${y + nodeH + gap - 2}" stroke="#0f766e" stroke-width="1.4" marker-end="url(#arr)"/>` : ''}
+      `
+    }).join('')
+
+    return `<svg viewBox="0 0 ${width} ${height}" width="${width}" height="${height}"
+         xmlns="http://www.w3.org/2000/svg" role="img"
+         aria-label="Mechanism causal flowchart">
+      <defs>
+        <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5"
+                markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 Z" fill="#0f766e"/>
+        </marker>
+      </defs>
+      ${nodesSvg}
+    </svg>`
+  })()
+
+  // Target dossier table
+  const entitiesTable = (() => {
+    const ents = h.target_entities || []
+    const pws = h.target_pathways || []
+    if (ents.length === 0 && pws.length === 0) return ''
+    const rows = [
+      ...ents.slice(0, 6).map(e => `<tr><td>Target</td><td><strong>${esc(String(e))}</strong></td></tr>`),
+      ...pws.slice(0, 4).map(p => `<tr><td>Pathway</td><td>${esc(String(p))}</td></tr>`),
+    ].join('')
+    return `<table class="dossier"><thead><tr><th>Kind</th><th>Name</th></tr></thead><tbody>${rows}</tbody></table>`
+  })()
+
+  // Counter-arguments
+  const counters = (h.counter_arguments || []).slice(0, 4).map(c => `
+    <li><strong>[${esc(c?.severity || 'moderate')}]</strong>
+        ${esc(c?.argument || '')}
+        ${c?.rebuttal ? `<br/><span class="rebut">Response: ${esc(c.rebuttal)}</span>` : ''}
+    </li>`).join('')
+
+  // Evidence bullets with numbered refs
+  const evidenceBullets = (h.evidence_summary || []).slice(0, 6).map(e => {
+    if (typeof e === 'string') return `<li>${esc(e)}</li>`
+    const refNum = refBracket(e)
+    return `<li>${esc(e?.finding || '')} ${refNum}</li>`
+  }).join('')
+
+  // Go/no-go from protocol
+  const gng = (h.protocol?.go_no_go_criteria || []).slice(0, 3).map(c => `
+    <li>${esc(c?.criterion || '')}
+      <br/><span class="mini">✓ ${esc(c?.decision_if_met || 'advance')} / ✗ ${esc(c?.decision_if_not || 'halt')}</span></li>`
+  ).join('')
+
+  // T-phase mini timeline (from roadmap phases)
+  const tphases = h.translational_roadmap?.phases || []
+  const tphasesBar = tphases.length > 0 ? `
+    <div class="tphases">
+      ${tphases.slice(0, 6).map((p, i) => `
+        <div class="tcell" style="flex:1 1 ${100 / Math.min(tphases.length, 6)}%">
+          <div class="thead">T${i} · ${esc(p.phase_name || p.phase || '')}</div>
+          <div class="tbody">${esc((p.estimated_duration || '—'))}</div>
+        </div>`).join('')}
+    </div>` : ''
+
+  // Methods + risks
+  const risksList = (h.risks || []).slice(0, 4).map(r => `<li>${esc(r)}</li>`).join('')
+
+  // References list
+  const refsList = citations.length > 0
+    ? `<ol class="refs">${citations.map(c => `<li>${c.html}</li>`).join('')}</ol>`
+    : '<p class="muted">No formal references collected; this short communication is an internal hypothesis draft.</p>'
+
+  // CSS — journal-grade single-column short communication
+  const css = `
+    @page { size: Letter; margin: 0; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { background: transparent; }
+    body {
+      font-family: Charter, Georgia, 'Liberation Serif', serif;
+      color: #111827; line-height: 1.55;
+      -webkit-print-color-adjust: exact; print-color-adjust: exact;
+    }
+    .wrap {
+      width: 8.5in; padding: 0.55in 0.7in;
+      margin: 0 auto; background: #fff;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.04);
+    }
+    /* Header band */
+    .hdr {
+      display: flex; justify-content: space-between; align-items: baseline;
+      padding-bottom: 8px; border-bottom: 2px solid #111827;
+    }
+    .hdr .brand { font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+      font-size: 10px; letter-spacing: 3px; text-transform: uppercase; color: #4b5563; }
+    .hdr .meta  { font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+      font-size: 9.5px; color: #6b7280; }
+    h1.title {
+      font-family: Charter, Georgia, serif;
+      font-size: 20px; line-height: 1.25; margin: 14px 0 4px 0; color: #0f172a;
+      font-weight: 700;
+    }
+    .byline {
+      font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+      font-size: 10px; color: #4b5563; letter-spacing: 0.2px;
+    }
+    .badges {
+      margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap;
+      font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+      font-size: 9px;
+    }
+    .badge { padding: 2px 8px; border-radius: 10px; background: #f1f5f9; color: #111827; }
+    .badge.primary { background: #0f766e; color: #fff; }
+    .badge.warn { background: #b45309; color: #fff; }
+    .badge.ok { background: #15803d; color: #fff; }
+
+    /* Two-column inner grid */
+    .columns {
+      display: grid; grid-template-columns: 1.6fr 1fr; gap: 18px;
+      margin-top: 16px;
+    }
+    @media print {
+      .columns { break-inside: avoid; }
+    }
+    section h2 {
+      font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+      font-size: 11px; letter-spacing: 1.4px; text-transform: uppercase;
+      color: #0f172a; margin: 14px 0 4px 0; font-weight: 700;
+      border-bottom: 1px solid #111827; padding-bottom: 2px;
+    }
+    section h3 {
+      font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+      font-size: 10px; margin: 6px 0 3px 0; color: #111827; font-weight: 600;
+    }
+    section p, section li {
+      font-size: 10.5px; color: #1f2937; text-align: justify;
+    }
+    .structured-abstract {
+      background: #f8fafc; border-left: 3px solid #0369a1;
+      padding: 10px 14px; margin-top: 12px; font-size: 10.5px;
+    }
+    .structured-abstract p { margin-bottom: 4px; }
+
+    .fig { margin: 6px 0 10px 0; text-align: center; }
+    .fig .legend {
+      font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+      font-size: 9px; color: #4b5563; margin-top: 4px; text-align: left;
+    }
+
+    .dossier { width: 100%; border-collapse: collapse; margin: 6px 0; }
+    .dossier th { font-size: 9px; text-transform: uppercase;
+      letter-spacing: 0.8px; color: #374151; text-align: left;
+      border-bottom: 1.2px solid #111827; padding: 4px 0; }
+    .dossier td { padding: 3px 0; font-size: 10px;
+      border-bottom: 0.5px solid #e5e7eb; }
+
+    ul.ev { list-style: none; padding-left: 0; }
+    ul.ev li { padding: 3px 0 3px 14px; text-indent: -14px; }
+    ul.ev li::before { content: '▸'; color: #0369a1; margin-right: 4px; }
+
+    .rebut { color: #4b5563; font-size: 9.5px; }
+    .mini { color: #6b7280; font-size: 9px; }
+
+    .tphases { display: flex; gap: 2px; margin: 6px 0; }
+    .tcell { background: #f1f5f9; padding: 4px 6px; border-radius: 3px;
+      font-size: 9px; text-align: center; }
+    .thead { font-weight: 700; color: #0369a1; }
+    .tbody { color: #6b7280; font-size: 8px; }
+
+    .statbar { display: flex; gap: 8px; font-size: 9.5px;
+      font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+      color: #111827; margin-top: 4px; flex-wrap: wrap; }
+    .statbar .stat { background: #ecfeff; padding: 4px 8px; border-radius: 3px;
+      border: 1px solid #a5f3fc; }
+    .statbar .stat b { color: #0369a1; }
+
+    ol.refs { padding-left: 20px; }
+    ol.refs li { font-size: 9.5px; color: #1f2937; margin-bottom: 3px;
+      text-align: left; }
+
+    footer.doc-foot {
+      margin-top: 20px; padding-top: 8px; border-top: 0.6px solid #d1d5db;
+      font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+      font-size: 9px; color: #6b7280; display: flex; justify-content: space-between;
+    }
+    .muted { color: #6b7280; font-size: 10px; }
+  `
+
+  // Assemble the document
   return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>${esc(h.title)}</title>
-<style>
-  @page {
-    size: A4;
-    margin: 0;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body {
-    font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
-    color: #1a1a2e;
-    line-height: 1.65;
-    background: #fff;
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-  }
-
-  .page {
-    width: 210mm;
-    min-height: 297mm;
-    padding: 50px 60px;
-    margin: 0 auto;
-    background: #fff;
-    position: relative;
-  }
-
-  /* ---- Cover page ---- */
-  .cover {
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    min-height: 297mm;
-    text-align: center;
-    padding: 80px 60px;
-  }
-  .cover .doc-type {
-    font-size: 13px;
-    letter-spacing: 4px;
-    text-transform: uppercase;
-    color: #6b7280;
-    margin-bottom: 32px;
-    font-weight: 500;
-  }
-  .cover h1 {
-    font-size: 26px;
-    font-weight: 700;
-    line-height: 1.35;
-    color: #111827;
-    max-width: 600px;
-    margin-bottom: 24px;
-  }
-  .cover .divider {
-    width: 80px;
-    height: 3px;
-    background: #2563eb;
-    margin: 0 auto 32px;
-    border-radius: 2px;
-  }
-  .cover .meta-group {
-    margin-bottom: 20px;
-  }
-  .cover .meta-label {
-    font-size: 12px;
-    color: #9ca3af;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    margin-bottom: 4px;
-  }
-  .cover .meta-value {
-    font-size: 16px;
-    font-weight: 600;
-    color: #111827;
-  }
-  .cover .meta-sub {
-    font-size: 14px;
-    color: #6b7280;
-  }
-  .cover .confidence-badge {
-    display: inline-block;
-    padding: 6px 20px;
-    border-radius: 6px;
-    font-size: 14px;
-    font-weight: 700;
-    margin-top: 8px;
-  }
-  .cover .prepared-by {
-    margin-top: 48px;
-  }
-  .cover .prepared-by .meta-value {
-    font-size: 15px;
-  }
-  .cover .date {
-    color: #9ca3af;
-    font-size: 13px;
-    margin-top: 8px;
-  }
-  .cover .classification {
-    display: inline-block;
-    margin-top: 40px;
-    padding: 8px 24px;
-    border: 2px solid #ef4444;
-    border-radius: 4px;
-    color: #ef4444;
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 1px;
-    text-transform: uppercase;
-  }
-  .cover .roadmap-badge {
-    display: inline-block;
-    margin-top: 16px;
-    padding: 6px 20px;
-    border: 2px solid #2563eb;
-    border-radius: 4px;
-    color: #2563eb;
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 1px;
-    text-transform: uppercase;
-  }
-
-  /* ---- Content pages ---- */
-  .content-page {
-    page-break-before: always;
-  }
-  .content-page h2 {
-    font-size: 20px;
-    font-weight: 700;
-    color: #111827;
-    margin-bottom: 6px;
-    padding-bottom: 8px;
-    border-bottom: 2px solid #e5e7eb;
-  }
-  .content-page h2 .section-num {
-    color: #2563eb;
-    margin-right: 8px;
-  }
-  .content-page h3 {
-    font-size: 16px;
-    font-weight: 600;
-    color: #374151;
-    margin-top: 24px;
-    margin-bottom: 8px;
-  }
-  .content-page p {
-    font-size: 14px;
-    color: #374151;
-    text-align: justify;
-    margin-bottom: 12px;
-  }
-  .content-page .section {
-    margin-bottom: 36px;
-  }
-
-  /* Mechanism box */
-  .mechanism-box {
-    background: #f8fafc;
-    border: 1px solid #e2e8f0;
-    border-left: 4px solid #2563eb;
-    border-radius: 6px;
-    padding: 20px 24px;
-    margin: 16px 0;
-  }
-  .mechanism-box p {
-    font-size: 13.5px;
-    color: #334155;
-    line-height: 1.7;
-  }
-
-  /* Confidence meter */
-  .confidence-meter {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin: 16px 0;
-  }
-  .confidence-bar-bg {
-    flex: 1;
-    height: 12px;
-    background: #e5e7eb;
-    border-radius: 6px;
-    overflow: hidden;
-  }
-  .confidence-bar-fill {
-    height: 100%;
-    border-radius: 6px;
-    transition: width 0.3s;
-  }
-  .confidence-label {
-    font-size: 18px;
-    font-weight: 700;
-    min-width: 60px;
-    text-align: right;
-  }
-
-  /* Tags */
-  .tags-container {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 12px;
-  }
-  .tag {
-    display: inline-block;
-    padding: 4px 14px;
-    border-radius: 20px;
-    font-size: 12px;
-    font-weight: 500;
-    background: #eff6ff;
-    color: #1d4ed8;
-    border: 1px solid #bfdbfe;
-  }
-
-  /* Table */
-  .info-table {
-    width: 100%;
-    border-collapse: collapse;
-    margin: 16px 0;
-    font-size: 13px;
-  }
-  .info-table th {
-    text-align: left;
-    padding: 10px 16px;
-    background: #f8fafc;
-    border: 1px solid #e2e8f0;
-    color: #6b7280;
-    font-weight: 600;
-    text-transform: uppercase;
-    font-size: 11px;
-    letter-spacing: 0.5px;
-  }
-  .info-table td {
-    padding: 10px 16px;
-    border: 1px solid #e2e8f0;
-    color: #374151;
-  }
-
-  /* Footer */
-  .page-footer {
-    position: absolute;
-    bottom: 30px;
-    left: 60px;
-    right: 60px;
-    display: flex;
-    justify-content: space-between;
-    font-size: 11px;
-    color: #9ca3af;
-    border-top: 1px solid #e5e7eb;
-    padding-top: 12px;
-  }
-
-  /* Translational roadmap styles */
-  .roadmap-pipeline {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    margin: 24px 0;
-    padding: 20px 0;
-  }
-  .phase-node {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    flex: 1;
-    position: relative;
-  }
-  .phase-circle {
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 11px;
-    font-weight: 700;
-    color: #fff;
-    margin-bottom: 6px;
-    position: relative;
-    z-index: 2;
-  }
-  .phase-circle.inactive {
-    background: #e5e7eb;
-    color: #9ca3af;
-  }
-  .phase-circle.current {
-    box-shadow: 0 0 0 4px rgba(37,99,235,0.2);
-  }
-  .phase-label {
-    font-size: 9px;
-    text-align: center;
-    color: #6b7280;
-    font-weight: 600;
-    line-height: 1.2;
-    max-width: 80px;
-  }
-  .phase-category {
-    font-size: 8px;
-    color: #9ca3af;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-top: 2px;
-  }
-  .phase-connector {
-    flex: 1;
-    height: 3px;
-    margin-top: 19px;
-    position: relative;
-  }
-
-  /* Phase detail sections */
-  .phase-detail {
-    margin-bottom: 28px;
-    page-break-inside: avoid;
-  }
-  .phase-header {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 12px;
-    padding-bottom: 8px;
-    border-bottom: 2px solid #e5e7eb;
-  }
-  .phase-badge {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
-    font-size: 12px;
-    font-weight: 700;
-    color: #fff;
-    flex-shrink: 0;
-  }
-  .phase-title-group h3 {
-    font-size: 16px;
-    font-weight: 700;
-    color: #111827;
-    margin: 0;
-  }
-  .phase-title-group .formal {
-    font-size: 12px;
-    color: #6b7280;
-    margin-top: 2px;
-  }
-  .phase-duration {
-    margin-left: auto;
-    font-size: 11px;
-    padding: 3px 10px;
-    border-radius: 4px;
-    font-weight: 600;
-  }
-  .phase-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-    margin-top: 12px;
-  }
-  .phase-card {
-    background: #f8fafc;
-    border: 1px solid #e2e8f0;
-    border-radius: 6px;
-    padding: 12px;
-  }
-  .phase-card h4 {
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: #6b7280;
-    font-weight: 600;
-    margin-bottom: 6px;
-  }
-  .phase-card ul {
-    margin: 0;
-    padding-left: 14px;
-    font-size: 11px;
-    color: #374151;
-    line-height: 1.5;
-  }
-  .phase-card li {
-    margin-bottom: 3px;
-  }
-  .phase-card.full-width {
-    grid-column: 1 / -1;
-  }
-
-  @media print {
-    .page { box-shadow: none; }
-  }
-</style>
-</head>
+<html lang="en"><head><meta charset="utf-8"><title>${esc(h.title)}</title>
+<style>${css}</style></head>
 <body>
+<div class="wrap">
 
-<!-- ==================== COVER PAGE ==================== -->
-<div class="page cover">
-  <div class="doc-type">Biomedical Hypothesis Report</div>
-  <h1>${esc(h.title)}</h1>
-  <div class="divider"></div>
+  <header class="hdr">
+    <div class="brand">Humanovo · Short Communication</div>
+    <div class="meta">Draft · ${esc(date)}</div>
+  </header>
 
-  ${h.disease ? `
-  <div class="meta-group">
-    <div class="meta-value">${esc(h.disease)}</div>
-    <div class="meta-sub">${h.discovery_type ? esc(h.discovery_type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())) : 'Research'} Strategy</div>
-  </div>` : ''}
+  <h1 class="title">${esc(h.title)}</h1>
+  <div class="byline">
+    Disease: <strong>${esc(disease)}</strong> · Discovery type: ${esc(dtype)} ·
+    Hypothesis ID <code style="font-family:SFMono-Regular,Menlo,monospace">${esc(h.id.slice(0, 8))}</code>
+  </div>
 
-  <div class="meta-group">
-    <div class="confidence-badge" style="background:${tier.bg};color:${tier.color}">
-      ${confPct}% Confidence &mdash; ${tier.label}
+  <div class="badges">
+    <span class="badge primary">${tier.label} · ${confPct}% confidence</span>
+    ${pTrue !== undefined ? `<span class="badge">P(true) ${(pTrue * 100).toFixed(0)}%</span>` : ''}
+    ${evoeUsd !== undefined ? `<span class="badge ${evoeUsd > 0 ? 'ok' : 'warn'}">EVOE $${Math.round(evoeUsd).toLocaleString()}</span>` : ''}
+    ${verifiedRatio !== undefined ? `<span class="badge">Citations verified ${(verifiedRatio * 100).toFixed(0)}%</span>` : ''}
+    ${h.grounding_ratio !== undefined ? `<span class="badge">Grounded ${(h.grounding_ratio * 100).toFixed(0)}%</span>` : ''}
+    ${tags.slice(0, 5).map(t => `<span class="badge">${esc(String(t))}</span>`).join('')}
+  </div>
+
+  <section class="structured-abstract" aria-label="Structured summary">
+    <h2 style="font-size:10px;margin-top:0;border:none;padding:0">Summary</h2>
+    ${summaryLines.map(s => `<p>${s}</p>`).join('')}
+  </section>
+
+  <div class="columns">
+    <div class="main-col">
+
+      <section>
+        <h2>1. Rationale &amp; evidence</h2>
+        <p>${textToHtml(h.description || '—')}</p>
+        ${evidenceBullets ? `<h3>Key supporting evidence</h3><ul class="ev">${evidenceBullets}</ul>` : ''}
+      </section>
+
+      <section>
+        <h2>2. Proposed mechanism</h2>
+        <p>${textToHtml(h.mechanism || 'Mechanism under construction.')}</p>
+        ${mechanismFlow ? `<figure class="fig">${mechanismFlow}<div class="legend"><strong>Figure 1.</strong> Causal chain from upstream trigger to therapeutic outcome. Each node represents one mechanistic step; downstream arrows indicate directed information flow. Pharmacological intervention points would be marked with a rounded node.</div></figure>` : ''}
+      </section>
+
+      <section>
+        <h2>3. Counter-arguments &amp; rebuttal</h2>
+        ${counters ? `<ul class="ev">${counters}</ul>` : '<p class="muted">No counter-arguments have been collected for this hypothesis.</p>'}
+      </section>
+
+      <section>
+        <h2>4. Validation protocol</h2>
+        ${h.protocol ? `
+          <p><strong>Modality.</strong> ${esc((h.protocol.modality || '—').replace(/_/g, ' '))}.
+          <strong> Sample size.</strong> ${h.protocol.sample_size_per_arm || '—'} / arm.
+          <strong> Duration.</strong> ${h.protocol.duration_weeks_estimate || '—'} weeks.
+          <strong> Estimated reagent cost.</strong> $${Math.round(h.protocol.reagents_estimated_cost_usd || 0).toLocaleString()}.</p>
+          ${h.protocol.primary_endpoint ? `<p><strong>Primary endpoint.</strong> ${esc(h.protocol.primary_endpoint.name || '')} (${esc(h.protocol.primary_endpoint.metric || '')}; target effect ${h.protocol.primary_endpoint.effect_target ?? '—'}).</p>` : ''}
+          ${gng ? `<h3>Go / no-go gates</h3><ul class="ev">${gng}</ul>` : ''}
+        ` : '<p class="muted">Protocol pending PROTOCOL stage completion.</p>'}
+      </section>
+
+      <section>
+        <h2>5. Translational roadmap</h2>
+        ${tphasesBar || '<p class="muted">Roadmap pending TRANSLATE stage completion.</p>'}
+        ${h.translational_roadmap?.critical_path_summary ? `<p style="margin-top:6px">${esc(h.translational_roadmap.critical_path_summary)}</p>` : ''}
+      </section>
+
     </div>
+
+    <aside class="side-col">
+
+      <section>
+        <h2>Confidence</h2>
+        ${radarSvg || '<p class="muted">Scoring not yet available.</p>'}
+        <div class="statbar">
+          ${dimsFilled.map(([lab, v]) => `<span class="stat"><b>${esc(lab)}</b> ${(v * 100).toFixed(0)}%</span>`).join('')}
+        </div>
+      </section>
+
+      ${entitiesTable ? `<section><h2>Target dossier</h2>${entitiesTable}</section>` : ''}
+
+      ${h.evoe ? `<section>
+        <h2>Decision value</h2>
+        <div class="statbar">
+          <span class="stat"><b>EVOE</b> $${Math.round(h.evoe.evoe_usd || 0).toLocaleString()}</span>
+          ${h.evoe.p_true !== undefined ? `<span class="stat"><b>P(true)</b> ${(h.evoe.p_true * 100).toFixed(0)}%</span>` : ''}
+          ${h.evoe.impact_if_true_usd !== undefined ? `<span class="stat"><b>Impact</b> $${(h.evoe.impact_if_true_usd / 1e6).toFixed(1)}M</span>` : ''}
+          ${h.evoe.cost_to_test_usd !== undefined ? `<span class="stat"><b>Test cost</b> $${Math.round(h.evoe.cost_to_test_usd / 1000)}k</span>` : ''}
+        </div>
+        <p class="mini" style="margin-top:4px">EVOE = P(true) × Impact − Cost. Ranking signal only; actual economics depend on downstream phases.</p>
+      </section>` : ''}
+
+      ${risksList ? `<section><h2>Risks</h2><ul class="ev">${risksList}</ul></section>` : ''}
+
+      <section>
+        <h2>Provenance</h2>
+        <div class="statbar">
+          ${h.model_used ? `<span class="stat"><b>Model</b> ${esc(h.model_used)}</span>` : ''}
+          ${h.grounding_ratio !== undefined ? `<span class="stat"><b>Grounding</b> ${(h.grounding_ratio * 100).toFixed(0)}%</span>` : ''}
+          ${h.novelty_score !== undefined ? `<span class="stat"><b>Novelty</b> ${(h.novelty_score * 100).toFixed(0)}%</span>` : ''}
+          ${h.feasibility_score !== undefined ? `<span class="stat"><b>Feasibility</b> ${(h.feasibility_score * 100).toFixed(0)}%</span>` : ''}
+        </div>
+      </section>
+
+    </aside>
   </div>
 
-  <div class="date">${date}</div>
+  <section>
+    <h2>6. References</h2>
+    ${refsList}
+  </section>
 
-  <div class="prepared-by">
-    <div class="meta-label">Prepared by</div>
-    <div class="meta-value">Humanovo AI Discovery Platform</div>
-    ${h.model_used ? `<div class="meta-sub">Pipeline model: ${esc(h.model_used)}</div>` : ''}
-  </div>
+  <footer class="doc-foot">
+    <span>Humanovo · short-communication hypothesis draft</span>
+    <span>Page 1 of 1 · Generated ${esc(date)}</span>
+  </footer>
 
-  <div class="classification">Research Use Only</div>
-  ${h.translational_roadmap ? '<div class="roadmap-badge">Bench-to-Bedside Translational Hypothesis (T0&ndash;T5)</div>' : ''}
-
-  <div class="page-footer">
-    <span>Humanovo &mdash; AI-Powered Biomedical Discovery</span>
-    <span>Page 1</span>
-  </div>
 </div>
-
-<!-- ==================== CONTENT PAGES ==================== -->
-<div class="page content-page">
-
-  <!-- Section 1: Executive Summary -->
-  ${h.description ? `
-  <div class="section">
-    <h2><span class="section-num">1</span>Executive Summary</h2>
-    ${textToHtml(h.description)}
-  </div>` : ''}
-
-  <!-- Section 2: Mechanism of Action -->
-  ${h.mechanism ? `
-  <div class="section">
-    <h2><span class="section-num">${h.description ? '2' : '1'}</span>Mechanism of Action</h2>
-    <div class="mechanism-box">
-      ${textToHtml(h.mechanism)}
-    </div>
-  </div>` : ''}
-
-  <!-- Section: Confidence Analysis -->
-  <div class="section">
-    <h2><span class="section-num">${(h.description ? 2 : 1) + (h.mechanism ? 1 : 0) + 1}</span>Confidence Analysis</h2>
-    <p>This hypothesis has been assigned a confidence score of <strong>${confPct}%</strong>,
-    placing it in the <strong>${tier.label.toLowerCase()}</strong> confidence tier.</p>
-
-    <div class="confidence-meter">
-      <div class="confidence-bar-bg">
-        <div class="confidence-bar-fill" style="width:${confPct}%;background:${h.confidence >= 0.7 ? '#2d6a4f' : h.confidence >= 0.5 ? '#0096c7' : '#991b1b'}"></div>
-      </div>
-      <div class="confidence-label" style="color:${h.confidence >= 0.7 ? '#1b4332' : h.confidence >= 0.5 ? '#0077b6' : '#7f1d1d'}">${confPct}%</div>
-    </div>
-
-    <p>${h.confidence >= 0.7
-      ? 'This confidence level indicates strong supporting evidence from the discovery pipeline. The hypothesis has passed multiple validation stages including counter-argument analysis, mechanism verification, and evidence grounding.'
-      : h.confidence >= 0.5
-      ? 'This moderate confidence level suggests promising initial evidence but recommends further experimental validation and literature corroboration before advancing to preclinical stages.'
-      : 'This preliminary confidence level indicates the hypothesis warrants further investigation. Additional evidence gathering and mechanism validation are recommended.'}</p>
-  </div>
-
-  <!-- Section: Metadata -->
-  <div class="section">
-    <h2><span class="section-num">${(h.description ? 2 : 1) + (h.mechanism ? 1 : 0) + 2}</span>Classification & Metadata</h2>
-    <table class="info-table">
-      <tbody>
-        ${h.disease ? `<tr><th>Disease Focus</th><td>${esc(h.disease)}</td></tr>` : ''}
-        ${h.discovery_type ? `<tr><th>Discovery Type</th><td>${esc(h.discovery_type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()))}</td></tr>` : ''}
-        ${h.model_used ? `<tr><th>AI Model</th><td>${esc(h.model_used)}</td></tr>` : ''}
-        <tr><th>Confidence Score</th><td>${confPct}% (${tier.label})</td></tr>
-        <tr><th>Report Date</th><td>${date}</td></tr>
-        <tr><th>Hypothesis ID</th><td style="font-family:monospace;font-size:12px">${esc(h.id)}</td></tr>
-      </tbody>
-    </table>
-
-    ${h.tags && h.tags.length > 0 ? `
-    <h3>Tags</h3>
-    <div class="tags-container">
-      ${h.tags.map(t => `<span class="tag">${esc(t)}</span>`).join('\n      ')}
-    </div>` : ''}
-  </div>
-
-  <div class="page-footer">
-    <span>Humanovo &mdash; AI-Powered Biomedical Discovery</span>
-    <span>Page 2</span>
-  </div>
-</div>
-
-${h.translational_roadmap ? buildTranslationalPages(h.translational_roadmap, 3) : ''}
-
-</body>
-</html>`
+</body></html>`
 }
 
 /* ------------------------------------------------------------------ */
 /*  Build translational roadmap pages                                  */
 /* ------------------------------------------------------------------ */
 
-const PHASE_COLORS: Record<string, string> = {
-  T0: '#8b5cf6', T1: '#6366f1', T2: '#3b82f6',
-  T3: '#0ea5e9', T4: '#14b8a6', T5: '#22c55e',
-}
-const PHASE_CATEGORIES: Record<string, string> = {
-  T0: 'Bench', T1: 'Translational', T2: 'Clinical',
-  T3: 'Implementation', T4: 'Implementation', T5: 'Implementation',
-}
-
-function buildTranslationalPages(roadmap: NonNullable<HypothesisDocData['translational_roadmap']>, startPage: number): string {
-  const phases = roadmap.phases || []
-  const currentIdx = ['T0','T1','T2','T3','T4','T5'].indexOf(roadmap.current_phase)
-  let pageNum = startPage
-
-  // Overview page with pipeline visualization
-  let html = `
-<div class="page content-page">
-  <div class="section">
-    <h2><span class="section-num">${pageNum === startPage ? (startPage) : pageNum}</span>Translational Roadmap: Bench to Bedside (T0&ndash;T5)</h2>
-    <p>This section presents the complete translational roadmap for advancing this hypothesis from basic research through global health impact, following the extended translational spectrum (T0&ndash;T5).</p>
-
-    <!-- Pipeline visualization -->
-    <div class="roadmap-pipeline">
-      ${['T0','T1','T2','T3','T4','T5'].map((pid, idx) => {
-        const phase = phases.find(p => p.phase === pid)
-        const color = PHASE_COLORS[pid]
-        const isActive = idx <= currentIdx
-        const isCurrent = pid === roadmap.current_phase
-        return `
-        <div class="phase-node">
-          <div class="phase-circle ${isActive ? '' : 'inactive'} ${isCurrent ? 'current' : ''}" style="${isActive ? `background:${color}` : ''}">
-            ${pid}
-          </div>
-          <div class="phase-label">${phase?.phase_name || pid}</div>
-          <div class="phase-category">${PHASE_CATEGORIES[pid]}</div>
-        </div>
-        ${idx < 5 ? `<div class="phase-connector" style="background:${idx < currentIdx ? PHASE_COLORS[['T0','T1','T2','T3','T4','T5'][idx+1]] : '#e5e7eb'}"></div>` : ''}`
-      }).join('')}
-    </div>
-
-    <!-- Roadmap summary table -->
-    <table class="info-table">
-      <tbody>
-        <tr><th>Current Phase</th><td><strong>${esc(roadmap.current_phase)}</strong> &mdash; ${esc(phases.find(p => p.phase === roadmap.current_phase)?.phase_name || '')}</td></tr>
-        ${roadmap.estimated_total_timeline ? `<tr><th>Estimated Timeline</th><td>${esc(roadmap.estimated_total_timeline)}</td></tr>` : ''}
-        <tr><th>Overall Feasibility</th><td>${(roadmap.overall_feasibility_score * 100).toFixed(0)}%</td></tr>
-        ${roadmap.regulatory_pathway_summary ? `<tr><th>Regulatory Pathway</th><td>${esc(roadmap.regulatory_pathway_summary)}</td></tr>` : ''}
-        ${roadmap.commercialization_potential ? `<tr><th>Commercialization</th><td>${esc(roadmap.commercialization_potential)}</td></tr>` : ''}
-      </tbody>
-    </table>
-
-    ${roadmap.critical_path_summary ? `<div class="mechanism-box"><p><strong>Critical Path:</strong> ${esc(roadmap.critical_path_summary)}</p></div>` : ''}
-
-    ${roadmap.key_decision_points && roadmap.key_decision_points.length > 0 ? `
-    <h3>Key Decision Points</h3>
-    <ul style="font-size:13px;color:#374151;padding-left:20px;margin-top:8px">
-      ${roadmap.key_decision_points.map(d => `<li>${esc(d)}</li>`).join('')}
-    </ul>` : ''}
-
-    ${roadmap.cross_phase_risks && roadmap.cross_phase_risks.length > 0 ? `
-    <h3>Cross-Phase Risks</h3>
-    <ul style="font-size:13px;color:#374151;padding-left:20px;margin-top:8px">
-      ${roadmap.cross_phase_risks.map(r => `<li>${esc(r)}</li>`).join('')}
-    </ul>` : ''}
-  </div>
-
-  <div class="page-footer">
-    <span>Humanovo &mdash; AI-Powered Biomedical Discovery</span>
-    <span>Page ${pageNum}</span>
-  </div>
-</div>`
-
-  // Individual phase pages (2 phases per page)
-  for (let i = 0; i < phases.length; i += 2) {
-    pageNum++
-    html += `\n<div class="page content-page">`
-
-    for (let j = i; j < Math.min(i + 2, phases.length); j++) {
-      const phase = phases[j]
-      const color = PHASE_COLORS[phase.phase] || '#666'
-      const category = PHASE_CATEGORIES[phase.phase] || ''
-      const isActive = ['T0','T1','T2','T3','T4','T5'].indexOf(phase.phase) <= currentIdx
-
-      html += `
-  <div class="phase-detail">
-    <div class="phase-header">
-      <div class="phase-badge" style="background:${isActive ? color : '#d1d5db'}">${esc(phase.phase)}</div>
-      <div class="phase-title-group">
-        <h3>${esc(phase.phase_name)} <span style="font-size:11px;color:${color};font-weight:600">[${category}]</span></h3>
-        ${phase.formal_name ? `<div class="formal">${esc(phase.formal_name)}</div>` : ''}
-      </div>
-      ${phase.estimated_duration ? `<div class="phase-duration" style="background:${color}10;color:${color}">${esc(phase.estimated_duration)}</div>` : ''}
-    </div>
-
-    ${phase.description ? `<p style="font-size:13px;color:#374151;margin-bottom:12px">${esc(phase.description)}</p>` : ''}
-
-    <div class="phase-grid">
-      ${phase.objectives && phase.objectives.length > 0 ? `
-      <div class="phase-card">
-        <h4>Objectives</h4>
-        <ul>${phase.objectives.map(o => `<li>${esc(o)}</li>`).join('')}</ul>
-      </div>` : ''}
-
-      ${phase.key_activities && phase.key_activities.length > 0 ? `
-      <div class="phase-card">
-        <h4>Key Activities</h4>
-        <ul>${phase.key_activities.map(a => `<li>${esc(a)}</li>`).join('')}</ul>
-      </div>` : ''}
-
-      ${phase.milestones && phase.milestones.length > 0 ? `
-      <div class="phase-card">
-        <h4>Milestones</h4>
-        <ul>${phase.milestones.map(m => `<li>${esc(m)}</li>`).join('')}</ul>
-      </div>` : ''}
-
-      ${phase.regulatory_considerations && phase.regulatory_considerations.length > 0 ? `
-      <div class="phase-card">
-        <h4>Regulatory Considerations</h4>
-        <ul>${phase.regulatory_considerations.map(r => `<li>${esc(r)}</li>`).join('')}</ul>
-      </div>` : ''}
-
-      ${phase.key_stakeholders && phase.key_stakeholders.length > 0 ? `
-      <div class="phase-card">
-        <h4>Key Stakeholders</h4>
-        <ul>${phase.key_stakeholders.map(s => `<li>${esc(s)}</li>`).join('')}</ul>
-      </div>` : ''}
-
-      ${phase.success_criteria && phase.success_criteria.length > 0 ? `
-      <div class="phase-card">
-        <h4>Success Criteria / Go-No-Go Gates</h4>
-        <ul>${phase.success_criteria.map(c => `<li>${esc(c)}</li>`).join('')}</ul>
-      </div>` : ''}
-
-      ${phase.evidence_requirements && phase.evidence_requirements.length > 0 ? `
-      <div class="phase-card">
-        <h4>Evidence Requirements</h4>
-        <ul>${phase.evidence_requirements.map(e => `<li>${esc(e)}</li>`).join('')}</ul>
-      </div>` : ''}
-
-      ${phase.phase_risks && phase.phase_risks.length > 0 ? `
-      <div class="phase-card">
-        <h4>Risks & Mitigation</h4>
-        <ul>
-          ${phase.phase_risks.map((r, ri) => `<li><strong>Risk:</strong> ${esc(r)}${phase.mitigation_strategies && phase.mitigation_strategies[ri] ? ` <br/><em>Mitigation: ${esc(phase.mitigation_strategies[ri])}</em>` : ''}</li>`).join('')}
-        </ul>
-      </div>` : ''}
-
-      ${phase.estimated_cost_range ? `
-      <div class="phase-card">
-        <h4>Resource Estimates</h4>
-        <ul>
-          <li><strong>Cost Range:</strong> ${esc(phase.estimated_cost_range)}</li>
-          ${phase.estimated_duration ? `<li><strong>Duration:</strong> ${esc(phase.estimated_duration)}</li>` : ''}
-          ${(phase.resource_requirements || []).map(r => `<li>${esc(r)}</li>`).join('')}
-        </ul>
-      </div>` : ''}
-    </div>
-  </div>`
-    }
-
-    html += `
-  <div class="page-footer">
-    <span>Humanovo &mdash; AI-Powered Biomedical Discovery</span>
-    <span>Page ${pageNum}</span>
-  </div>
-</div>`
-  }
-
-  return html
-}
 
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
@@ -858,17 +670,17 @@ export default function HypothesisDocViewer({
     <div
       ref={containerRef}
       className={clsx(
-        'flex flex-col bg-secondary-900',
+        'flex flex-col bg-[var(--color-bg)]',
         isFullscreen ? 'fixed inset-0 z-50' : 'h-full'
       )}
     >
-      {/* ---- Toolbar ---- */}
-      <div className="flex items-center justify-between px-4 py-2 bg-secondary-800 border-b border-secondary-700 shrink-0">
+      {/* ---- Toolbar (platform-matched chrome) ---- */}
+      <div className="flex items-center justify-between px-4 py-2 bg-[var(--color-bg-elevated)] border-b border-[var(--color-border)] shrink-0">
         {/* Left: back + breadcrumbs */}
         <div className="flex items-center gap-2 min-w-0">
           <button
             onClick={onClose}
-            className="p-1.5 rounded hover:bg-secondary-700 text-secondary-400 hover:text-white transition-colors shrink-0"
+            className="p-1.5 rounded hover:bg-white/10 text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors shrink-0"
             title="Back" aria-label="Back"
           >
             <FiArrowLeft className="w-4 h-4" />
@@ -877,20 +689,20 @@ export default function HypothesisDocViewer({
             <div className="flex items-center gap-1.5 text-sm min-w-0">
               {breadcrumbs.map((b, i) => (
                 <span key={i} className="flex items-center gap-1.5 min-w-0">
-                  {i > 0 && <span className="text-secondary-600">/</span>}
+                  {i > 0 && <span className="text-[var(--color-text-muted)] opacity-60">/</span>}
                   {b.onClick ? (
-                    <button onClick={b.onClick} className="text-primary-400 hover:text-primary-300 truncate">
+                    <button onClick={b.onClick} className="text-[var(--color-text)] hover:underline truncate">
                       {b.label}
                     </button>
                   ) : (
-                    <span className="text-secondary-400 truncate">{b.label}</span>
+                    <span className="text-[var(--color-text-muted)] truncate">{b.label}</span>
                   )}
                 </span>
               ))}
             </div>
           )}
           {!breadcrumbs && (
-            <span className="text-sm text-white font-medium truncate">{hypothesis.title}</span>
+            <span className="text-sm text-[var(--color-text)] font-medium truncate">{hypothesis.title}</span>
           )}
         </div>
 
@@ -899,7 +711,7 @@ export default function HypothesisDocViewer({
           <button
             onClick={zoomOut}
             disabled={zoom <= ZOOM_MIN}
-            className="p-1 rounded hover:bg-secondary-700 text-secondary-400 hover:text-white disabled:opacity-30 transition-colors"
+            className="p-1 rounded hover:bg-white/10 text-[var(--color-text-muted)] hover:text-[var(--color-text)] disabled:opacity-30 transition-colors"
             title="Zoom out" aria-label="Zoom out"
           >
             <FiZoomOut className="w-4 h-4" />
@@ -911,13 +723,13 @@ export default function HypothesisDocViewer({
             step={ZOOM_STEP}
             value={zoom}
             onChange={e => setZoom(Number(e.target.value))}
-            className="w-24 h-1 accent-primary-500 cursor-pointer"
+            className="w-24 h-1 accent-[var(--color-text)] cursor-pointer"
           />
-          <span className="text-xs text-secondary-300 w-10 text-center font-mono">{zoom}%</span>
+          <span className="text-xs text-[var(--color-text-muted)] w-10 text-center font-mono tabular-nums">{zoom}%</span>
           <button
             onClick={zoomIn}
             disabled={zoom >= ZOOM_MAX}
-            className="p-1 rounded hover:bg-secondary-700 text-secondary-400 hover:text-white disabled:opacity-30 transition-colors"
+            className="p-1 rounded hover:bg-white/10 text-[var(--color-text-muted)] hover:text-[var(--color-text)] disabled:opacity-30 transition-colors"
             title="Zoom in"
           >
             <FiZoomIn className="w-4 h-4" />
@@ -929,7 +741,7 @@ export default function HypothesisDocViewer({
           {onGenerateResearchPaper && (
             <button
               onClick={onGenerateResearchPaper}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-white/10 text-[var(--color-text-secondary)] hover:bg-white/15 text-xs font-medium transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-white/10 text-[var(--color-text)] hover:bg-white/15 text-xs font-medium transition-colors"
               title="Generate Research Paper" aria-label="Generate Research Paper"
             >
               <FiFileText className="w-3.5 h-3.5" />
@@ -938,7 +750,7 @@ export default function HypothesisDocViewer({
           )}
           <button
             onClick={handleExportPdf}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-white/10 text-[var(--color-text-secondary)] hover:bg-white/15 text-xs font-medium transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-white/10 text-[var(--color-text)] hover:bg-white/15 text-xs font-medium transition-colors"
             title="Export PDF" aria-label="Export PDF"
           >
             <FiDownload className="w-3.5 h-3.5" />
@@ -946,14 +758,14 @@ export default function HypothesisDocViewer({
           </button>
           <button
             onClick={handlePrint}
-            className="p-1.5 rounded hover:bg-secondary-700 text-secondary-400 hover:text-white transition-colors"
+            className="p-1.5 rounded hover:bg-white/10 text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
             title="Print" aria-label="Print"
           >
             <FiPrinter className="w-4 h-4" />
           </button>
           <button
             onClick={() => setIsFullscreen(!isFullscreen)}
-            className="p-1.5 rounded hover:bg-secondary-700 text-secondary-400 hover:text-white transition-colors"
+            className="p-1.5 rounded hover:bg-white/10 text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
             title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
           >
             {isFullscreen ? <FiMinimize2 className="w-4 h-4" /> : <FiMaximize2 className="w-4 h-4" />}
@@ -961,11 +773,10 @@ export default function HypothesisDocViewer({
         </div>
       </div>
 
-      {/* ---- Document area ---- */}
+      {/* ---- Document area — platform-matched outer, journal-white inner ---- */}
       <div
         ref={scrollRef}
-        className="flex-1 overflow-auto"
-        style={{ background: '#4b5563' }}
+        className="flex-1 overflow-auto bg-[var(--color-bg)]"
       >
         <div
           className="py-8 px-4 flex justify-center"

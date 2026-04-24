@@ -2305,6 +2305,20 @@ pre.diagram {{
             return []
         FigureSpec = vb["FigureSpec"]
         FigureType = vb["FigureType"]
+
+        # Compute-engine figures: real numerical operations across the
+        # existing CLINICAL / PHARMACOKINETICS / STATISTICS domains.
+        # Each hypothesis contributes any figures its content warrants
+        # (power curve, dose-response, PK curve, survival, forest
+        # plot). Numbers come from compute, not the LLM, so readers can
+        # reproduce them.
+        compute_specs: list[dict[str, Any]] = []
+        try:
+            from app.services.compute_figure_bridge import build_compute_figures
+            for h in (paper.hypotheses or [])[:3]:
+                compute_specs.extend(await build_compute_figures(h))
+        except Exception as e:
+            logger.debug(f"[compute_bridge] figure collection skipped: {e}")
         generate = vb["generate_figure"]
 
         figures: list[dict[str, Any]] = []
@@ -2443,6 +2457,37 @@ pre.diagram {{
                 })
         except Exception as e:
             logger.debug(f"translational timeline build failed: {e}")
+
+        # Render each compute-produced spec through the same pipeline so
+        # it produces real PNG + SVG output and lands in the paper as a
+        # first-class figure alongside the LLM-chosen set.
+        generate = vb["generate_figure"]
+        for spec_dict in compute_specs:
+            try:
+                ftype_str = spec_dict.get("figure_type") or ""
+                try:
+                    ftype = FigureType(ftype_str)
+                except ValueError:
+                    continue
+                spec = FigureSpec(
+                    figure_type=ftype,
+                    title=spec_dict.get("title", ""),
+                    caption=spec_dict.get("caption", ""),
+                    x_label=spec_dict.get("x_label", ""),
+                    y_label=spec_dict.get("y_label", ""),
+                    data=spec_dict.get("data") or {},
+                )
+                rendered = generate(spec)
+                figures.append({
+                    **rendered.to_dict(),
+                    "section": spec_dict.get("section", "results_overview"),
+                    "source": "compute_engine",
+                })
+            except Exception as e:
+                logger.debug(
+                    f"compute-engine figure render failed "
+                    f"({spec_dict.get('figure_type')}): {e}"
+                )
 
         return figures
 

@@ -26,8 +26,10 @@ from app.api.v1.endpoints import (
     discovery_sessions,
     document_pipeline,
     evidence,
+    evoe,
     experiments,
     genomics,
+    paper_qa,
     hypotheses,
     imaging,
     ingestion,
@@ -43,6 +45,7 @@ from app.api.v1.endpoints import (
     notebook,
     orchestrator,
     pipeline_intelligence,
+    project_kg,
     projects,
     rag,
     regulatory,
@@ -139,6 +142,10 @@ router.include_router(compute_engine.router)
 router.include_router(user_state.router, prefix="/user-state", tags=["user-state"])
 router.include_router(user_budget.router)
 router.include_router(kg_permissions.router)
+router.include_router(project_kg.router)
+router.include_router(evoe.router)
+router.include_router(paper_qa.router)
+router.include_router(paper_qa.cost_router)
 
 # Admin (non-prod): kg-stats, seed-kg. Disabled in production via guard.
 router.include_router(admin.router, prefix="/admin", tags=["admin"])

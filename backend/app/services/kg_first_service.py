@@ -117,6 +117,7 @@ CREATE TABLE IF NOT EXISTS kg_nodes (
     canonical_id TEXT,
     scope TEXT NOT NULL DEFAULT 'private',
     owner_user_id TEXT,
+    project_id TEXT,
     payload JSONB NOT NULL,
     content_hash TEXT NOT NULL UNIQUE,
     embedding_large JSONB,
@@ -125,10 +126,13 @@ CREATE TABLE IF NOT EXISTS kg_nodes (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+ALTER TABLE kg_nodes ADD COLUMN IF NOT EXISTS project_id TEXT;
+
 CREATE INDEX IF NOT EXISTS kg_nodes_scope_owner_idx
   ON kg_nodes(scope, owner_user_id);
 CREATE INDEX IF NOT EXISTS kg_nodes_kind_idx ON kg_nodes(kind);
 CREATE INDEX IF NOT EXISTS kg_nodes_canonical_idx ON kg_nodes(canonical_id);
+CREATE INDEX IF NOT EXISTS kg_nodes_project_idx ON kg_nodes(project_id);
 
 CREATE TABLE IF NOT EXISTS kg_edges (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -137,12 +141,17 @@ CREATE TABLE IF NOT EXISTS kg_edges (
     relation TEXT NOT NULL,
     scope TEXT NOT NULL DEFAULT 'private',
     owner_user_id TEXT,
+    project_id TEXT,
     confidence REAL NOT NULL DEFAULT 0.5,
     payload JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE kg_edges ADD COLUMN IF NOT EXISTS project_id TEXT;
+
 CREATE INDEX IF NOT EXISTS kg_edges_from_idx ON kg_edges(from_node);
 CREATE INDEX IF NOT EXISTS kg_edges_to_idx   ON kg_edges(to_node);
+CREATE INDEX IF NOT EXISTS kg_edges_project_idx ON kg_edges(project_id);
 
 CREATE TABLE IF NOT EXISTS kg_document_permissions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -291,14 +300,34 @@ class KGFirstService:
         user_id: str | None,
         scope: KGScope,
         facts: list[dict[str, Any]],
+        project_id: str | None = None,
+        edges: list[dict[str, Any]] | None = None,
     ) -> int:
-        """Ingest a batch of facts. Each fact:
+        """Ingest a batch of facts (optionally with edges) into the KG.
+
+        Each fact:
             {'kind': 'gene'|'pathway'|'claim'|..., 'canonical_id': str,
              'payload': {...}, 'content_hash': optional}
+
+        Each edge (optional):
+            {'from_canonical_id': str, 'to_canonical_id': str,
+             'relation': str, 'confidence': float, 'payload': {...}}
+
+        When `project_id` is provided, nodes and edges are scoped to that
+        project so the project KG view can render a focused subgraph.
+        A node that already exists (same content_hash) is NOT re-scoped —
+        its project_id stays as-first-insert. For that reason, facts
+        emitted during a discovery run get `project_id` written; seed
+        nodes get `project_id=None` so they read as "public domain".
+
         Returns number of new nodes inserted (duplicates skipped via hash).
         """
         await self.ensure_schema()
         inserted = 0
+        # map canonical_id -> kg_node UUID for this batch, so the edges
+        # section below can resolve endpoints without a second query
+        canonical_to_uuid: dict[str, str] = {}
+
         async with self._session_factory() as session:
             async with session.begin():
                 for fact in facts:
@@ -318,28 +347,92 @@ class KGFirstService:
                             text("""
                                 INSERT INTO kg_nodes (
                                     kind, canonical_id, scope, owner_user_id,
-                                    payload, content_hash, embedding_large
+                                    project_id, payload, content_hash,
+                                    embedding_large
                                 ) VALUES (
-                                    :kind, :cid, :scope, :uid,
+                                    :kind, :cid, :scope, :uid, :pid,
                                     :payload::jsonb, :hash, :emb_large::jsonb
                                 )
-                                ON CONFLICT (content_hash) DO NOTHING
-                                RETURNING id
+                                ON CONFLICT (content_hash) DO UPDATE
+                                  SET updated_at = NOW()
+                                RETURNING id, (xmax = 0) AS inserted
                             """),
                             {
                                 "kind": fact.get("kind", "fact"),
                                 "cid": fact.get("canonical_id"),
                                 "scope": scope.value,
                                 "uid": user_id if scope != KGScope.PUBLIC_DOMAIN else None,
+                                "pid": project_id,
                                 "payload": json.dumps(payload, default=str),
                                 "hash": content_hash,
                                 "emb_large": json.dumps(embedding_large),
                             },
                         )
-                        if res.rowcount and res.rowcount > 0:
-                            inserted += 1
+                        row = res.fetchone()
+                        if row is not None:
+                            node_uuid = str(row[0])
+                            cid = fact.get("canonical_id")
+                            if cid:
+                                canonical_to_uuid[cid] = node_uuid
+                            if row[1]:  # xmax=0 → was a fresh insert
+                                inserted += 1
                     except Exception as e:
                         logger.debug(f"kg ingest failed for one fact: {e}")
+
+                # Edges --------------------------------------------------
+                for edge in (edges or []):
+                    from_cid = edge.get("from_canonical_id")
+                    to_cid = edge.get("to_canonical_id")
+                    if not (from_cid and to_cid):
+                        continue
+                    # Resolve endpoints. In-batch lookup first, else DB.
+                    from_uuid = canonical_to_uuid.get(from_cid)
+                    to_uuid = canonical_to_uuid.get(to_cid)
+                    try:
+                        if not from_uuid:
+                            r = await session.execute(
+                                text("SELECT id FROM kg_nodes WHERE canonical_id = :c LIMIT 1"),
+                                {"c": from_cid},
+                            )
+                            row = r.fetchone()
+                            if row:
+                                from_uuid = str(row[0])
+                        if not to_uuid:
+                            r = await session.execute(
+                                text("SELECT id FROM kg_nodes WHERE canonical_id = :c LIMIT 1"),
+                                {"c": to_cid},
+                            )
+                            row = r.fetchone()
+                            if row:
+                                to_uuid = str(row[0])
+                        if not (from_uuid and to_uuid):
+                            continue
+                        await session.execute(
+                            text("""
+                                INSERT INTO kg_edges (
+                                    from_node, to_node, relation, scope,
+                                    owner_user_id, project_id, confidence,
+                                    payload
+                                ) VALUES (
+                                    :f::uuid, :t::uuid, :rel, :scope,
+                                    :uid, :pid, :conf, :payload::jsonb
+                                )
+                            """),
+                            {
+                                "f": from_uuid, "t": to_uuid,
+                                "rel": edge.get("relation", "related_to"),
+                                "scope": scope.value,
+                                "uid": user_id if scope != KGScope.PUBLIC_DOMAIN else None,
+                                "pid": project_id,
+                                "conf": float(edge.get("confidence") or 0.5),
+                                "payload": json.dumps(
+                                    edge.get("payload") or {}, default=str,
+                                ),
+                            },
+                        )
+                    except Exception as e:
+                        logger.debug(f"kg edge ingest failed: {e}")
+
         return inserted
 
     # ------------------------------------------------------------------
@@ -388,6 +481,171 @@ class KGFirstService:
     # ------------------------------------------------------------------
     # Royalty summary (for billing & contributor dashboards)
     # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Project subgraph — feeds the 3D KG viewer on the project page
+    # ------------------------------------------------------------------
+
+    async def project_subgraph(
+        self,
+        *,
+        project_id: str,
+        user_id: str | None = None,
+        include_ancestors: bool = True,
+        max_nodes: int = 500,
+    ) -> dict[str, Any]:
+        """Return the subgraph used during discovery for a specific project.
+
+        Nodes returned:
+          1. Every node with project_id = project_id
+          2. Every node connected by an edge whose project_id = project_id
+             (so public_domain seeded ancestors like Reactome pathways
+              get pulled into the view when a project's private nodes
+              link to them)
+          3. Optionally, when include_ancestors=True, public_domain nodes
+             that the project's private nodes reference via canonical_id
+             patterns (UniProt xrefs, Reactome xrefs, etc.)
+
+        Output shape is 3D-renderable (nodes + links) and shares schema
+        with `react-force-graph-3d`:
+          {
+            nodes: [{id, name, kind, scope, group, color, size, payload}, ...],
+            links: [{source, target, relation, confidence, color}, ...],
+            stats: { nodes, edges, project_private, project_common, public_domain }
+          }
+        """
+        await self.ensure_schema()
+        async with self._session_factory() as session:
+            # 1. Nodes directly scoped to project, plus their linked
+            # endpoints regardless of scope
+            rows = await session.execute(text("""
+                WITH project_nodes AS (
+                    SELECT DISTINCT n.id
+                    FROM kg_nodes n
+                    WHERE n.project_id = :pid
+                       OR n.id IN (
+                         SELECT from_node FROM kg_edges
+                          WHERE project_id = :pid
+                       )
+                       OR n.id IN (
+                         SELECT to_node FROM kg_edges
+                          WHERE project_id = :pid
+                       )
+                )
+                SELECT id, kind, canonical_id, scope, owner_user_id,
+                       project_id, payload, created_at
+                FROM kg_nodes
+                WHERE id IN (SELECT id FROM project_nodes)
+                   OR (project_id = :pid)
+                LIMIT :limit
+            """), {"pid": project_id, "limit": max_nodes})
+            nodes_raw = rows.mappings().fetchall()
+
+            node_ids = [str(r["id"]) for r in nodes_raw]
+            if not node_ids:
+                return {
+                    "nodes": [], "links": [],
+                    "stats": {
+                        "nodes": 0, "edges": 0,
+                        "project_private": 0, "project_common": 0,
+                        "public_domain": 0,
+                    },
+                }
+
+            erows = await session.execute(text("""
+                SELECT id, from_node, to_node, relation, scope,
+                       owner_user_id, project_id, confidence, payload
+                FROM kg_edges
+                WHERE (project_id = :pid)
+                   OR (from_node = ANY(:ids)
+                       AND to_node = ANY(:ids))
+            """), {
+                "pid": project_id,
+                "ids": [str(r["id"]) for r in nodes_raw],
+            })
+            edges_raw = erows.mappings().fetchall()
+
+        # Build viz-ready output
+        kind_colors = {
+            "hypothesis_mechanism":  "#E69F00",
+            "hypothesis_title":      "#E69F00",
+            "hypothesis_description":"#E69F00",
+            "entity":                "#0072B2",
+            "pathway":               "#009E73",
+            "protein":               "#56B4E9",
+            "disease":               "#CC79A7",
+            "disease_target_association": "#8B5CF6",
+            "drug":                  "#F0E442",
+            "variant":               "#D55E00",
+            "fact":                  "#888888",
+        }
+        scope_shape = {
+            "private":       "sphere",
+            "common":        "octahedron",
+            "public_domain": "cube",
+        }
+        stats_counts = {
+            "project_private": 0, "project_common": 0, "public_domain": 0,
+        }
+
+        nodes: list[dict[str, Any]] = []
+        for r in nodes_raw:
+            pl = r["payload"] if isinstance(r["payload"], dict) else {}
+            name = (pl.get("name") or pl.get("symbol") or pl.get("title")
+                    or r.get("canonical_id") or str(r["id"])[:8])
+            kind = r["kind"]
+            scope_val = r["scope"]
+            if scope_val == "public_domain":
+                stats_counts["public_domain"] += 1
+            elif scope_val == "common":
+                stats_counts["project_common"] += 1
+            else:
+                stats_counts["project_private"] += 1
+
+            nodes.append({
+                "id": str(r["id"]),
+                "name": str(name)[:80],
+                "kind": kind,
+                "scope": scope_val,
+                "group": kind,
+                "color": kind_colors.get(kind, "#999999"),
+                "shape": scope_shape.get(scope_val, "sphere"),
+                "size": 6 if scope_val == "private" else 4,
+                "canonical_id": r["canonical_id"],
+                "payload": {
+                    k: v for k, v in pl.items()
+                    if k not in ("embedding_large", "embedding_small")
+                },
+            })
+
+        relation_colors = {
+            "treats":      "#10B981",
+            "inhibits":    "#EF4444",
+            "activates":   "#3B82F6",
+            "related_to":  "#9CA3AF",
+            "participates_in": "#6366F1",
+            "associated_with": "#F59E0B",
+        }
+        links = []
+        for r in edges_raw:
+            links.append({
+                "source": str(r["from_node"]),
+                "target": str(r["to_node"]),
+                "relation": r["relation"],
+                "confidence": float(r["confidence"]) if r["confidence"] is not None else 0.5,
+                "color": relation_colors.get(r["relation"], "#9CA3AF"),
+                "scope": r["scope"],
+            })
+
+        return {
+            "nodes": nodes,
+            "links": links,
+            "stats": {
+                "nodes": len(nodes),
+                "edges": len(links),
+                **stats_counts,
+            },
+        }
 
     async def royalty_summary(self, *, user_id: str, days: int = 30) -> dict[str, Any]:
         await self.ensure_schema()

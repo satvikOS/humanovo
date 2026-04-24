@@ -60,8 +60,7 @@ class DistributionConfig(BaseModel):
     params: dict[str, float] = Field(default_factory=dict)
     description: str | None = None
 
-    class Config:
-        use_enum_values = True
+    model_config = {"use_enum_values": True}
 
 
 class SimulationConfig(BaseModel):
@@ -80,8 +79,7 @@ class SimulationConfig(BaseModel):
     include_timeseries: bool = False
     use_gpu: bool = False
 
-    class Config:
-        use_enum_values = True
+    model_config = {"use_enum_values": True}
 
 
 class OutcomeMetric(BaseModel):

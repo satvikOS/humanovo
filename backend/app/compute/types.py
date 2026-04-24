@@ -233,5 +233,4 @@ class ComputeResult(BaseModel):
     runtime_seconds: float = 0.0
     metadata: dict[str, Any] = Field(default_factory=dict)
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = {"arbitrary_types_allowed": True}

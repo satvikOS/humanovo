@@ -20,6 +20,9 @@ import {
 import clsx from 'clsx'
 import { useTheme } from '../contexts/ThemeContext'
 import api from '../services/api'
+import {
+  ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
+} from 'recharts'
 
 const SETTINGS_KEY = 'humanovo-appearance-settings'
 
@@ -755,6 +758,52 @@ function UsageBillingSettings() {
               </div>
             </div>
           </div>
+
+          {(usage?.by_day || []).length > 0 && (
+            <div>
+              <div className="text-xs text-[var(--color-text-muted)] mb-2">
+                Daily spend
+              </div>
+              <div style={{ width: '100%', height: 140 }}>
+                <ResponsiveContainer>
+                  <AreaChart
+                    data={usage.by_day.map((d: any) => ({
+                      day: (d.day || '').slice(5),
+                      cost_usd: Number(d.cost_cents || 0) / 100,
+                      n_calls: d.n_calls || 0,
+                    }))}
+                    margin={{ top: 4, right: 6, left: 0, bottom: 0 }}
+                  >
+                    <defs>
+                      <linearGradient id="spendFill" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#0369a1" stopOpacity={0.55} />
+                        <stop offset="100%" stopColor="#0369a1" stopOpacity={0.05} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid stroke="rgba(255,255,255,0.04)" />
+                    <XAxis dataKey="day" tick={{ fill: 'var(--color-text-muted)', fontSize: 9 }} />
+                    <YAxis tick={{ fill: 'var(--color-text-muted)', fontSize: 9 }} width={30} />
+                    <Tooltip
+                      contentStyle={{
+                        background: 'var(--color-bg-elevated)',
+                        border: '1px solid var(--color-border)',
+                        fontSize: 11,
+                      }}
+                      formatter={(v: any) => `$${Number(v).toFixed(3)}`}
+                      labelStyle={{ color: 'var(--color-text-muted)' }}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="cost_usd"
+                      stroke="#0369a1"
+                      strokeWidth={1.5}
+                      fill="url(#spendFill)"
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
 
           {(usage?.by_model || []).length > 0 && (
             <div>
