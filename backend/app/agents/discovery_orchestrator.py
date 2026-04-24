@@ -1527,6 +1527,7 @@ class SequentialHypothesisPipeline:
         *,
         user_id: str | None = None,
         budget_enforcer=None,
+        share_to_common_kg: bool = False,
     ):
         self._llm = llm
         self._grounding_service = None
@@ -1538,6 +1539,11 @@ class SequentialHypothesisPipeline:
         self._user_id = user_id
         # Per-run budget enforcer (RunBudgetEnforcer or None)
         self._budget = budget_enforcer
+        # Opt-in common KG publishing at FINALIZE stage. When True and
+        # user_id is set, the distilled (entity + pathway) fact set is
+        # published to the common KG with this user as contributor
+        # (eligible for royalty credits when other agents hit it).
+        self._share_to_common_kg = share_to_common_kg
         # Multi-round citation verifier + rewind coordinator (lazy)
         self._citation_verifier = None
         self._rewind_coordinator = None
@@ -2230,6 +2236,58 @@ Your goal is to STRENGTHEN this hypothesis — address its weaknesses, find stro
                             scope=KGScope.PRIVATE,
                             facts=facts_private,
                         )
+
+                    # Common KG write-back — only at FINALIZE stage and only
+                    # when the user has opted in via upload-scope=common.
+                    # Publishes a distilled, PII-scrubbed fact set so other
+                    # users' agents can benefit (and the contributor
+                    # accrues royalties). Entities / pathways are eligible;
+                    # hypothesis text stays private by default.
+                    if (stage_name == "finalize"
+                            and self._user_id
+                            and getattr(self, "_share_to_common_kg", False)):
+                        try:
+                            from app.agents.guardrails import scrub_for_kg_ingest
+                            facts_common: list[dict[str, Any]] = []
+                            for ent in (parsed.get("target_entities") or [])[:20]:
+                                if ent:
+                                    scrubbed = scrub_for_kg_ingest(str(ent))
+                                    facts_common.append({
+                                        "kind": "entity",
+                                        "canonical_id": scrubbed.text[:80],
+                                        "payload": {
+                                            "name": scrubbed.text[:160],
+                                            "disease": disease,
+                                            "confidence": (
+                                                parsed.get("confidence") or
+                                                parsed.get("weighted_confidence") or 0.5
+                                            ),
+                                        },
+                                    })
+                            for pw in (parsed.get("target_pathways") or [])[:10]:
+                                if pw:
+                                    scrubbed = scrub_for_kg_ingest(str(pw))
+                                    facts_common.append({
+                                        "kind": "pathway",
+                                        "canonical_id": scrubbed.text[:80],
+                                        "payload": {
+                                            "name": scrubbed.text[:160],
+                                            "disease": disease,
+                                        },
+                                    })
+                            if facts_common:
+                                await kg.ingest_facts(
+                                    user_id=self._user_id,
+                                    scope=KGScope.COMMON,
+                                    facts=facts_common,
+                                )
+                                logger.info(
+                                    f"[kg] published {len(facts_common)} "
+                                    f"common-scope facts to shared KG "
+                                    f"(contributor={self._user_id})"
+                                )
+                        except Exception as e:
+                            logger.debug(f"common KG publish failed (non-fatal): {e}")
                 except Exception as kg_err:
                     logger.debug(f"KG write-back skipped (non-fatal): {kg_err}")
 
